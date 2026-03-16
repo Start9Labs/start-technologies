@@ -63,6 +63,7 @@ pub mod init;
 pub mod install;
 pub mod logs;
 pub mod lxc;
+pub mod mcp;
 pub mod middleware;
 pub mod net;
 pub mod notifications;

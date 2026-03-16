@@ -31,6 +31,7 @@ how `startbox` dispatches to `startd`, `start-cli`, etc. The per-entrypoint logi
 - `src/context/` — Context types (RpcContext, CliContext, InitContext, DiagnosticContext)
 - `src/service/` — Service lifecycle management with actor pattern (`service_actor.rs`)
 - `src/db/model/` — Patch-DB models (`public.rs` synced to frontend, `private.rs` backend-only)
+- `src/mcp/` — MCP server for LLM agents (see [MCP Server](#mcp-server) below)
 - `src/net/` — Networking (DNS, ACME, WiFi, Tor, WireGuard, gateway/NAT)
 - `src/s9pk/` — S9PK package format (merkle archive)
 - `src/lxc/` — LXC container management for packages
@@ -81,6 +82,12 @@ See [i18n-patterns.md](i18n-patterns.md) for internationalization key convention
 
 See [core-rust-patterns.md](core-rust-patterns.md) for common utilities (Invoke trait, Guard pattern, mount guards, Apply trait, etc.).
 
+## MCP Server
+
+The MCP (Model Context Protocol) server at `src/mcp/` exposes the StartOS RPC API to LLM agents via the Streamable HTTP transport at `/mcp`. Tools wrap the existing RPC handlers; resources expose Patch-DB state with debounced SSE subscriptions; auth reuses the UI session cookie.
+
+See [src/mcp/ARCHITECTURE.md](src/mcp/ARCHITECTURE.md) for transport details, session lifecycle, tool dispatch, resource subscriptions, CORS, and body size limits.
+
 ## Cross-layer verification
 
 Rust types marked `#[ts(export)]` are the source of truth for TypeScript consumers (the web UI
@@ -104,4 +111,5 @@ Until both steps run, a changed `#[ts(export)]` type is out of sync with everyth
 - [patchdb.md](patchdb.md) — Patch-DB watch patterns and TypedDbWatch
 - [i18n-patterns.md](i18n-patterns.md) — Internationalization conventions
 - [core-rust-patterns.md](core-rust-patterns.md) — Common Rust utilities
+- [src/mcp/ARCHITECTURE.md](src/mcp/ARCHITECTURE.md) — MCP server (LLM agent interface)
 - [s9pk-structure.md](s9pk-structure.md) — S9PK package format

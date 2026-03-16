@@ -101,6 +101,17 @@ impl UiContext for RpcContext {
                 })
             })
             .nest("/s9pk", s9pk_router(self.clone()))
+            .route("/mcp", crate::mcp::mcp_router(self.clone()))
+            .route(
+                "/.well-known/mcp",
+                get(|| async {
+                    Response::builder()
+                        .status(StatusCode::OK)
+                        .header(CONTENT_TYPE, "application/json")
+                        .body(Body::from(r#"{"mcp_endpoint":"/mcp"}"#))
+                        .unwrap()
+                }),
+            )
             .route("/static/local-root-ca.crt", {
                 let ctx = self.clone();
                 get(move || {
