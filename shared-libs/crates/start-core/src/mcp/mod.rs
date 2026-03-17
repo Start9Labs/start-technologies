@@ -514,10 +514,7 @@ async fn handle_tools_call(
         }
     };
 
-    // Special-case: shell execution (no RPC handler for these)
-    if tool.rpc_method == "__shell__" {
-        return handle_shell_exec(id, call_params.arguments, start).await;
-    }
+    // Special-case: package shell execution (no RPC handler)
     if tool.rpc_method == "__package_shell__" {
         return handle_package_shell_exec(ctx, id, call_params.arguments, start).await;
     }
@@ -575,128 +572,6 @@ async fn handle_tools_call(
                 serde_json::to_value(&ToolsCallResult {
                     content: vec![ContentBlock::Text {
                         text: format!("Error ({}): {}", rpc_err.code, rpc_err.message),
-                    }],
-                    is_error: Some(true),
-                })
-                .unwrap(),
-            )
-        }
-    }
-}
-
-async fn handle_shell_exec(
-    id: Option<JsonValue>,
-    arguments: JsonValue,
-    start: Instant,
-) -> McpResponse {
-    let command = match arguments.get("command").and_then(|v| v.as_str()) {
-        Some(c) => c.to_string(),
-        None => {
-            return McpResponse::error(
-                id,
-                INVALID_PARAMS,
-                "Missing required parameter: command".into(),
-                None,
-            )
-        }
-    };
-
-    let timeout_secs = arguments
-        .get("timeout")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(30)
-        .min(300);
-
-    tracing::info!(
-        target: "mcp_audit",
-        command = %command,
-        timeout_secs = timeout_secs,
-        "MCP shell command executing"
-    );
-
-    let result = tokio::time::timeout(
-        Duration::from_secs(timeout_secs),
-        tokio::process::Command::new("/bin/bash")
-            .arg("-c")
-            .arg(&command)
-            .kill_on_drop(true) // N10: ensure timed-out processes are killed
-            .output(),
-    )
-    .await;
-
-    let duration = start.elapsed();
-
-    match result {
-        Ok(Ok(output)) => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let exit_code = output.status.code().unwrap_or(-1);
-
-            tracing::info!(
-                target: "mcp_audit",
-                command = %command,
-                exit_code = exit_code,
-                stdout_len = output.stdout.len(),
-                stderr_len = output.stderr.len(),
-                duration_ms = duration.as_millis() as u64,
-                "MCP shell command completed"
-            );
-
-            let mut text = String::new();
-            if !stdout.is_empty() {
-                text.push_str(&stdout);
-            }
-            if !stderr.is_empty() {
-                if !text.is_empty() {
-                    text.push('\n');
-                }
-                text.push_str("[stderr]\n");
-                text.push_str(&stderr);
-            }
-            if text.is_empty() {
-                text.push_str("(no output)");
-            }
-            text.push_str(&format!("\n[exit code: {}]", exit_code));
-
-            McpResponse::ok(
-                id,
-                serde_json::to_value(&ToolsCallResult {
-                    content: vec![ContentBlock::Text { text }],
-                    is_error: if exit_code != 0 { Some(true) } else { None },
-                })
-                .unwrap(),
-            )
-        }
-        Ok(Err(e)) => {
-            tracing::warn!(
-                target: "mcp_audit",
-                command = %command,
-                error = %e,
-                "MCP shell command failed to execute"
-            );
-            McpResponse::ok(
-                id,
-                serde_json::to_value(&ToolsCallResult {
-                    content: vec![ContentBlock::Text {
-                        text: format!("Failed to execute command: {e}"),
-                    }],
-                    is_error: Some(true),
-                })
-                .unwrap(),
-            )
-        }
-        Err(_) => {
-            tracing::warn!(
-                target: "mcp_audit",
-                command = %command,
-                timeout_secs = timeout_secs,
-                "MCP shell command timed out"
-            );
-            McpResponse::ok(
-                id,
-                serde_json::to_value(&ToolsCallResult {
-                    content: vec![ContentBlock::Text {
-                        text: format!("Command timed out after {timeout_secs} seconds"),
                     }],
                     is_error: Some(true),
                 })

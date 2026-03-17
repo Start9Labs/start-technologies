@@ -1311,31 +1311,8 @@ pub fn tool_registry() -> HashMap<String, ToolEntry> {
             needs_session: false,
         },
         // =====================================================================
-        // Shell execution
+        // Shell execution (package containers only — no host-level shell access)
         // =====================================================================
-        ToolEntry {
-            definition: ToolDefinition {
-                name: "system.shell".into(),
-                description: "Execute a shell command on the StartOS server as the start9 user \
-                    with passwordless sudo. Returns stdout, stderr, and exit code. Use this for \
-                    diagnostics, inspecting files, checking processes, or any operation not \
-                    covered by other tools. THIS IS POWERFUL: the command runs with full system \
-                    access. Always be careful with destructive commands. Commands have a 30-second \
-                    timeout by default.".into(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "command": { "type": "string", "description": "Shell command to execute (passed to /bin/bash -c)" },
-                        "timeout": { "type": "integer", "description": "Timeout in seconds. Default: 30. Max: 300." }
-                    },
-                    "required": ["command"],
-                    "additionalProperties": false
-                }),
-            },
-            rpc_method: "__shell__",
-            sync_db: false,
-            needs_session: false,
-        },
         ToolEntry {
             definition: ToolDefinition {
                 name: "package.shell".into(),
