@@ -39,7 +39,7 @@ core/src/mcp/
 ├── mod.rs        — HTTP handlers, routing, MCP method dispatch, shell execution, CORS
 ├── protocol.rs   — JSON-RPC 2.0 types, MCP request/response structs, error codes
 ├── session.rs    — Session map, create/remove/sweep, resource subscriptions with debounce
-└── tools.rs      — Tool registry (88 tools), HashMap<String, ToolEntry> mapping names → RPC methods + schemas
+└── tools.rs      — Tool registry (89 tools), HashMap<String, ToolEntry> mapping names → RPC methods + schemas
 ```
 
 ## Tool Dispatch
@@ -89,7 +89,7 @@ Resource URIs are validated to only allow `/public/**` subtrees and the special 
 
 ## Excluded RPC Methods
 
-Of the ~194 RPC methods registered in the StartOS backend, 87 are exposed as MCP tools (plus 1 MCP-only tool: `package.shell`). The remaining 105 are excluded for the following reasons.
+Of the ~195 RPC methods registered in the StartOS backend, 88 are exposed as MCP tools (plus 1 MCP-only tool: `package.shell`). The remaining 105 are excluded for the following reasons.
 
 ### Wrong context — Setup / Init / Diagnostic modes
 
@@ -139,7 +139,7 @@ These configure the Start9 tunnel service, which has its own management interfac
 
 | Method | Reason |
 |--------|--------|
-| `package.sideload` | Requires multipart file upload via middleware, not JSON-RPC params |
+| `package.sideload` | Requires multipart file upload via REST continuation, not JSON-RPC params. Use `package.sideload-by-url` MCP tool (backed by `package.sideload-url` RPC) which accepts a URL instead |
 
 ### Security — host-level shell access excluded
 

@@ -21,6 +21,7 @@ use tracing::instrument;
 use ts_rs::TS;
 
 use crate::context::{CliContext, RpcContext};
+use crate::registry::asset::BufferedHttpSource;
 use crate::db::model::package::{ManifestPreference, PackageStateMatchModelRef};
 use crate::prelude::*;
 use crate::progress::{FullProgress, FullProgressTracker, PhasedProgressBar};
@@ -283,6 +284,57 @@ pub async fn sideload(
         }
     });
     Ok(SideloadResponse { upload, progress })
+}
+
+#[derive(Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SideloadUrlParams {
+    #[ts(type = "string")]
+    url: Url,
+}
+
+#[instrument(skip_all)]
+pub async fn sideload_url(
+    ctx: RpcContext,
+    SideloadUrlParams { url }: SideloadUrlParams,
+) -> Result<(), Error> {
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(Error::new(
+            eyre!("URL scheme must be http or https, got: {}", url.scheme()),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+
+    let progress_tracker = FullProgressTracker::new();
+    let download_progress = progress_tracker.add_phase("Downloading".into(), Some(100));
+    let client = ctx.client.clone();
+    let db = ctx.db.clone();
+    let pt_ref = progress_tracker.clone();
+
+    let download = ctx
+        .services
+        .install(
+            ctx.clone(),
+            || async move {
+                let source = BufferedHttpSource::new(client, url, download_progress).await?;
+                let key = db.peek().await.into_private().into_developer_key();
+                crate::s9pk::load(source, || Ok(key.de()?.0), Some(&pt_ref)).await
+            },
+            None,
+            None::<Never>,
+            Some(progress_tracker),
+        )
+        .await?;
+
+    tokio::spawn(async move {
+        if let Err(e) = async { download.await?.await }.await {
+            tracing::error!("Error sideloading package from URL: {e}");
+            tracing::debug!("{e:?}");
+        }
+    });
+
+    Ok(())
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]

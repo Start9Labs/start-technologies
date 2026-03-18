@@ -443,6 +443,12 @@ pub fn package<C: Context>() -> ParentHandler<C> {
                 .no_cli(),
         )
         .subcommand(
+            "sideload-url",
+            from_fn_async(install::sideload_url)
+                .with_metadata("sync_db", Value::Bool(true))
+                .no_cli(),
+        )
+        .subcommand(
             "install",
             from_fn_async_local(install::cli_install)
                 .no_display()

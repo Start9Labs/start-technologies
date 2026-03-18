@@ -301,6 +301,26 @@ pub fn tool_registry() -> HashMap<String, ToolEntry> {
         },
         ToolEntry {
             definition: ToolDefinition {
+                name: "package.sideload-by-url".into(),
+                description: "Install a package (service) from a direct URL to an .s9pk file. \
+                    Use this to install packages from download links rather than from a registry. \
+                    The download and installation is asynchronous — subscribe to \
+                    startos:///public/packageData to monitor installation progress in real time.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "url": { "type": "string", "description": "Direct URL to an .s9pk package file (http or https)" }
+                    },
+                    "required": ["url"],
+                    "additionalProperties": false
+                }),
+            },
+            rpc_method: "package.sideload-url",
+            sync_db: true,
+            needs_session: false,
+        },
+        ToolEntry {
+            definition: ToolDefinition {
                 name: "package.uninstall".into(),
                 description: "Uninstall a package (service). THIS IS DESTRUCTIVE: the service and its data will be removed unless 'soft' is true. Always confirm with the user.".into(),
                 input_schema: json!({
