@@ -49,7 +49,7 @@ export default class StartOsUiComponent {
   private readonly i18n = inject(i18nPipe)
 
   readonly iface: T.ServiceInterface = {
-    id: 'startos-ui',
+    id: 'admin-ui',
     name: 'StartOS UI',
     description: this.i18n.transform(
       'Your personal StartOS web user interface.',

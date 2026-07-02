@@ -50,7 +50,8 @@ file tracks notable changes since the move to the monorepo.
 
 - **The StartOS admin UI is now addressed like a regular service interface (#3387).**
   At the SDK/effects layer the server's own host is identified by the reserved
-  package id `start-os` and host id `admin` — no more `null`/`STARTOS` sentinels.
+  package id `start-os`, host id `admin`, and interface id `admin-ui` (renamed
+  from `startos-ui`) — no more `null`/`STARTOS` sentinels.
   `host_for`, the host RPC APIs, and the `getHostInfo` / `getServicePortForward` /
   `getServiceInterface` / `listServiceInterfaces` effects all resolve
   `start-os` to the server host, `start-os.startos` resolves like any package
@@ -89,7 +90,7 @@ file tracks notable changes since the move to the monorepo.
 
 - **Dev builds bricked by an empty persisted host id (#3387).** Builds between
   #3366 and #3387 persisted the server host's then-sentinel id (the empty
-  string) in the `startos-ui` interface's `addressInfo.hostId`, which strict
+  string) in the admin UI interface's `addressInfo.hostId`, which strict
   deserialization rejects — every boot failed into the diagnostic UI. The
   server host now has a real id (`admin`) and the beta.10 migration rewrites
   the empty value.

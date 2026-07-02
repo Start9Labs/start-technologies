@@ -252,7 +252,7 @@ impl NetController {
         self.db
             .mutate(|db| {
                 let iface_id = ServiceInterfaceId::from(
-                    Id::try_from("startos-ui".to_owned()).expect("valid id"),
+                    Id::try_from("admin-ui".to_owned()).expect("valid id"),
                 );
                 let iface = ServiceInterface {
                     id: iface_id.clone(),
