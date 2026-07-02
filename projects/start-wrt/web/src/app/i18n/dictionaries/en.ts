@@ -529,4 +529,12 @@ export const ENGLISH: Record<string, number> = {
   'IPv6 cannot be reserved — the rule follows the current IPv6 address of the device': 531,
   'Chosen by the device — IPv6 addresses cannot be reserved': 532,
   'Cannot disable: published port rules use device IPv6 addresses': 533,
+  'Automatic': 534,
+  'Opened by trusted devices themselves via UPnP or PCP. These forwards renew automatically and expire when the device stops using them.': 535,
+  'Public port': 536,
+  'Expires': 537,
+  'Allow automatic port forwarding': 538,
+  'Lets this device open and renew its own port forwards via UPnP/PCP (used by StartOS servers, game consoles, and similar). Off by default; active forwards appear on the Published Ports page.': 539,
+  'Permissions': 540,
+  'min': 541,
 }

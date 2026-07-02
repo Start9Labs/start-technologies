@@ -524,4 +524,12 @@ export default {
   531: 'IPv6 nie może zostać zarezerwowane — reguła podąża za bieżącym adresem IPv6 urządzenia',
   532: 'Wybierany przez urządzenie — adresów IPv6 nie można rezerwować',
   533: 'Nie można wyłączyć: reguły opublikowanych portów używają adresów IPv6 urządzeń',
+  534: 'Automatyczne',
+  535: 'Otwierane przez zaufane urządzenia samodzielnie za pomocą UPnP lub PCP. Te przekierowania odnawiają się automatycznie i wygasają, gdy urządzenie przestaje ich używać.',
+  536: 'Port publiczny',
+  537: 'Wygasa',
+  538: 'Zezwól na automatyczne przekierowanie portów',
+  539: 'Pozwala temu urządzeniu otwierać i odnawiać własne przekierowania portów przez UPnP/PCP (używane przez serwery StartOS, konsole do gier itp.). Domyślnie wyłączone; aktywne przekierowania pojawiają się na stronie Opublikowane porty.',
+  540: 'Uprawnienia',
+  541: 'min',
 } satisfies i18n

@@ -46,3 +46,17 @@ export interface PublishedPortDisplay extends PublishedPort {
   endpointIpv4?: string // e.g., "example.ddns.net:8123"
   endpointIpv6?: string // e.g., "[2001:db8::50]:8123"
 }
+
+/**
+ * A forward a trusted device opened for itself via PCP or UPnP. Read-only in
+ * the UI: the device renews or withdraws it, and unrenewed forwards expire.
+ */
+export interface AutoForwardDisplay {
+  id: string
+  label: string // "PCP" | "UPnP"
+  deviceMac: string
+  deviceName?: string
+  ports: string
+  publicPorts: string
+  expiresSecs?: number
+}

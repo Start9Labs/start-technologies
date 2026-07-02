@@ -223,7 +223,7 @@ pub(crate) fn addr_in_prefix(addr: Ipv6Addr, prefix: Ipv6Addr, prefix_len: u8) -
     (u128::from(addr) & mask) == (u128::from(prefix) & mask)
 }
 
-async fn get_wan_ipv4() -> Result<Option<Ipv4Addr>, Error> {
+pub(crate) async fn get_wan_ipv4() -> Result<Option<Ipv4Addr>, Error> {
     let stdout = match tokio::process::Command::new("ubus")
         .args(["call", "network.interface.wan", "status"])
         .invoke(ErrorKind::Network.into())

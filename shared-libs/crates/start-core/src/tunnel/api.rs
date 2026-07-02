@@ -1583,7 +1583,7 @@ pub async fn set_forward_enabled(
         }
         ForwardToggle::Sni { hostname, target } => {
             if enabled {
-                ctx.sni()
+                ctx.sni
                     .register(*source.ip(), source.port(), &[hostname], target, None)
                     .map_err(|code| {
                         Error::new(
@@ -1592,7 +1592,7 @@ pub async fn set_forward_enabled(
                         )
                     })?;
             } else {
-                ctx.sni()
+                ctx.sni
                     .unregister(*source.ip(), source.port(), &[hostname], target);
             }
         }

@@ -23,6 +23,10 @@ pub fn devices<C: CtrlContext>() -> ParentHandler<C> {
                 .with_call_remote::<CliContext>(),
         )
         .subcommand("update", from_fn_async_local(update::<C>).no_display())
+        .subcommand(
+            "set-auto-forward",
+            from_fn_async_local(crate::port_control::set_auto_forward::<C>).no_display(),
+        )
         .subcommand("forget", from_fn_async_local(forget::<C>).no_display())
         .subcommand(
             "data-usage",
@@ -54,6 +58,9 @@ pub struct Device {
     pub ipv4: Option<String>,
     pub ipv6: Option<String>,
     pub ipv4_static: bool,
+    /// Whether this device may auto-create port forwards via PCP/UPnP
+    /// (default off; set via `devices set-auto-forward`).
+    pub allow_auto_port_forward: bool,
     pub security_profile: Option<String>,
     pub speed: Option<SpeedData>,
     pub data_usage: Option<f64>,
@@ -120,11 +127,11 @@ static MDNS_ATTEMPTED: Mutex<Option<std::collections::HashSet<String>>> = Mutex:
 
 // --- Helpers ---
 
-struct ArpEntry {
-    ip: String,
-    mac: String,
-    interface: String,
-    state: String,
+pub(crate) struct ArpEntry {
+    pub(crate) ip: String,
+    pub(crate) mac: String,
+    pub(crate) interface: String,
+    pub(crate) state: String,
 }
 
 struct DhcpLease {
@@ -154,36 +161,37 @@ fn parse_proc_ipv6_addr(hex: &str) -> Option<String> {
     Some(std::net::Ipv6Addr::from(bytes).to_string())
 }
 
-fn parse_arp_output(output: &str) -> Vec<ArpEntry> {
+/// Parse `ip neigh show` output (`IP dev IFACE lladdr MAC STATE`) into entries,
+/// MAC uppercased, on every interface. Entries without an lladdr
+/// (FAILED/INCOMPLETE) are skipped. The single parser for the whole crate —
+/// callers apply their own interface filter.
+pub(crate) fn parse_neigh_output(output: &str) -> Vec<ArpEntry> {
     let mut entries = Vec::new();
     for line in output.lines() {
-        // Format: IP dev INTERFACE lladdr MAC STATE
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 6 && parts[2] == "lladdr" {
-            // ip neigh: IP dev IFACE lladdr MAC STATE
-            // but sometimes: IP dev IFACE lladdr MAC STATE
-            // Actual format can vary. Let's parse more carefully.
-        }
-        // Try regex-like parsing
         if let Some((ip, rest)) = line.split_once(" dev ") {
             if let Some((iface, rest)) = rest.split_once(" lladdr ") {
                 let mut rest_parts = rest.split_whitespace();
                 if let Some(mac) = rest_parts.next() {
                     let state = rest_parts.next().unwrap_or("UNKNOWN");
-                    // Only LAN interfaces
-                    if iface.starts_with("br-lan") {
-                        entries.push(ArpEntry {
-                            ip: ip.trim().to_string(),
-                            mac: mac.to_uppercase(),
-                            interface: iface.to_string(),
-                            state: state.to_string(),
-                        });
-                    }
+                    entries.push(ArpEntry {
+                        ip: ip.trim().to_string(),
+                        mac: mac.to_uppercase(),
+                        interface: iface.trim().to_string(),
+                        state: state.to_string(),
+                    });
                 }
             }
         }
     }
     entries
+}
+
+/// Neighbor-table entries on the LAN bridges this module manages devices for.
+fn parse_arp_output(output: &str) -> Vec<ArpEntry> {
+    parse_neigh_output(output)
+        .into_iter()
+        .filter(|e| e.interface.starts_with("br-lan"))
+        .collect()
 }
 
 fn parse_dhcp_leases(output: &str) -> Vec<DhcpLease> {
@@ -1350,6 +1358,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             ipv4,
             ipv6,
             ipv4_static: host.map(|h| h.ip.is_some()).unwrap_or(false),
+            allow_auto_port_forward: host.is_some_and(|h| h._allow_pcp.as_deref() == Some("1")),
             security_profile,
             speed,
             data_usage,
@@ -1451,6 +1460,8 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
                 ipv4: peer_cfg.ip.clone(),
                 ipv6: None,
                 ipv4_static: true,
+                // No MAC to authorize, so a VPN peer can never be auto-forward capable.
+                allow_auto_port_forward: false,
                 security_profile: Some(server.profile_fullname.clone()),
                 speed,
                 data_usage,
@@ -1461,31 +1472,34 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
     Ok(devices)
 }
 
-#[instrument(skip_all)]
-pub async fn update<C: CtrlContext>(
-    ctx: C,
-    DeserializeStdin(req): DeserializeStdin<DeviceUpdateReq>,
-) -> Result<(), Error> {
-    let mac_upper = req.mac.to_uppercase();
+/// Find-or-create the DHCP host section for `mac` and apply `mutate` to it,
+/// with the standard UCI conflict retries. `mutate(host, existed)` may return
+/// `false` to abort without writing (nothing to do); a created host starts
+/// from the crate's host-section defaults (`dns '1'`, `host_<mac>` section
+/// name). Returns whether a write happened. The single upsert for DHCP host
+/// entries — device updates and the auto-forward toggle both go through it so
+/// the section-name and default-field conventions can't drift apart.
+pub(crate) async fn upsert_dhcp_host<F>(
+    uci_root: &std::path::Path,
+    mac: &str,
+    mutate: F,
+) -> Result<bool, Error>
+where
+    F: Fn(&mut DhcpHost, bool) -> bool,
+{
+    let mac_upper = mac.to_uppercase();
     let mut retries = 4;
     loop {
         let arena = Arena::new();
-        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["dhcp"]).await?;
+        let mut cfgs = parse_all(uci_root, &arena, &["dhcp"]).await?;
 
         let mut found = false;
         for section in &mut cfgs["dhcp"].sections {
             if let Ok(mut host) = section.get::<DhcpHost>() {
                 if host.mac.to_uppercase() == mac_upper {
-                    host.name = Some(req.name.clone());
-                    if req.ipv4_static && !req.ipv4.is_empty() {
-                        host.ip = Some(req.ipv4.clone());
-                    } else {
-                        host.ip = None;
+                    if !mutate(&mut host, true) {
+                        return Ok(false);
                     }
-                    // `hostid` is deliberately left untouched: IPv6 addresses are
-                    // chosen by the device (SLAAC), so there is no user-facing IPv6
-                    // reservation. The suffix is backend bookkeeping, pinned by
-                    // published-ports for its prefix-rotation fallback.
                     section.set(&host)?;
                     found = true;
                     break;
@@ -1494,54 +1508,72 @@ pub async fn update<C: CtrlContext>(
         }
 
         if !found {
-            // Create new host section
-            let new_host = DhcpHost {
-                mac: req.mac.clone(),
-                name: Some(req.name.clone()),
-                ip: if req.ipv4_static && !req.ipv4.is_empty() {
-                    Some(req.ipv4.clone())
-                } else {
-                    None
-                },
-                hostid: None,
+            let mut host = DhcpHost {
+                mac: mac.to_string(),
                 dns: Some("1".to_string()),
+                ..Default::default()
             };
-            let section_name = format!("host_{}", req.mac.replace(':', "").to_lowercase());
-            cfgs["dhcp"].append(&new_host, Some(&section_name))?;
+            if !mutate(&mut host, false) {
+                return Ok(false);
+            }
+            let section_name = format!("host_{}", mac.replace(':', "").to_lowercase());
+            cfgs["dhcp"].append(&host, Some(&section_name))?;
         }
 
-        match dump_all(ctx.uci_root(), cfgs).await {
+        match dump_all(uci_root, cfgs).await {
             Err(uciedit::Error::Conflict { .. }) if retries > 0 => {
                 retries -= 1;
                 continue;
             }
-            Err(err) => {
-                let summary = if req.ipv4_static && !req.ipv4.is_empty() {
-                    format!(
-                        "Failed to update device '{}' ({}) — static IPv4: {}",
-                        req.name, mac_upper, req.ipv4
-                    )
-                } else {
-                    format!("Failed to update device '{}' ({})", req.name, mac_upper)
-                };
-                crate::activity::log("device", "updated", false, &summary, Some(&err.to_string()));
-                return Err(err.into());
+            Err(err) => return Err(err.into()),
+            Ok(()) => return Ok(true),
+        }
+    }
+}
+
+#[instrument(skip_all)]
+pub async fn update<C: CtrlContext>(
+    ctx: C,
+    DeserializeStdin(req): DeserializeStdin<DeviceUpdateReq>,
+) -> Result<(), Error> {
+    let mac_upper = req.mac.to_uppercase();
+    let suffix = if req.ipv4_static && !req.ipv4.is_empty() {
+        format!(" — static IPv4: {}", req.ipv4)
+    } else {
+        String::new()
+    };
+
+    let req_ref = &req;
+    match upsert_dhcp_host(&ctx.uci_root(), &req.mac, move |host, _existed| {
+        host.name = Some(req_ref.name.clone());
+        host.ip = if req_ref.ipv4_static && !req_ref.ipv4.is_empty() {
+            Some(req_ref.ipv4.clone())
+        } else {
+            None
+        };
+        // `hostid` is deliberately left untouched: IPv6 addresses are chosen by
+        // the device (SLAAC), so there is no user-facing IPv6 reservation. The
+        // suffix is backend bookkeeping, pinned by published-ports for its
+        // prefix-rotation fallback.
+        true
+    })
+    .await
+    {
+        Err(err) => {
+            let summary = format!(
+                "Failed to update device '{}' ({}){}",
+                req.name, mac_upper, suffix
+            );
+            crate::activity::log("device", "updated", false, &summary, Some(&err.to_string()));
+            Err(err)
+        }
+        Ok(_) => {
+            let summary = format!("Updated device '{}' ({}){}", req.name, mac_upper, suffix);
+            crate::activity::log("device", "updated", true, &summary, None);
+            if ctx.effectful() {
+                reload_dnsmasq();
             }
-            Ok(()) => {
-                let summary = if req.ipv4_static && !req.ipv4.is_empty() {
-                    format!(
-                        "Updated device '{}' ({}) — static IPv4: {}",
-                        req.name, mac_upper, req.ipv4
-                    )
-                } else {
-                    format!("Updated device '{}' ({})", req.name, mac_upper)
-                };
-                crate::activity::log("device", "updated", true, &summary, None);
-                if ctx.effectful() {
-                    reload_dnsmasq();
-                }
-                return Ok(());
-            }
+            Ok(())
         }
     }
 }

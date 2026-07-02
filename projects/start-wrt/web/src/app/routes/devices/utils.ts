@@ -23,6 +23,8 @@ export interface DeviceTableItem {
 // Full device data for detail view
 export interface Device extends DeviceTableItem {
   ipv4Static: boolean
+  /** May auto-create port forwards via PCP/UPnP (default off). */
+  allowAutoPortForward: boolean
 }
 
 // Form for editing a device. IPv6 has no controls: the device chooses its own

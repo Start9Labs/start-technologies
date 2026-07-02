@@ -1,6 +1,10 @@
 import { Component, computed, effect, inject } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
-import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms'
+import {
+  FormsModule,
+  NonNullableFormBuilder,
+  ReactiveFormsModule,
+} from '@angular/forms'
 import { ActivatedRoute, Router, RouterLink } from '@angular/router'
 import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
 import {
@@ -113,6 +117,24 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
         <footer appFooter></footer>
       }
     </form>
+    <header tuiHeader="h6">
+      <h2 tuiTitle>{{ 'Permissions' | i18n }}</h2>
+    </header>
+    <label tuiLabel [tuiSkeleton]="!data()">
+      <input
+        tuiSwitch
+        type="checkbox"
+        [ngModel]="data()?.allowAutoPortForward ?? false"
+        (ngModelChange)="onToggleAutoForward($event)"
+      />
+      {{ 'Allow automatic port forwarding' | i18n }}
+      <i
+        [tuiHint]="
+          'Lets this device open and renew its own port forwards via UPnP/PCP (used by StartOS servers, game consoles, and similar). Off by default; active forwards appear on the Published Ports page.'
+            | i18n
+        "
+      ></i>
+    </label>
   `,
   styles: `
     header[tuiHeader='h6'] {
@@ -131,6 +153,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
   imports: [
     RouterLink,
     ReactiveFormsModule,
+    FormsModule,
     TuiHeader,
     TuiTitle,
     TuiLink,
@@ -242,6 +265,12 @@ export default class DeviceDetail {
         },
       )
       .subscribe()
+  }
+
+  async onToggleAutoForward(allow: boolean) {
+    // One-way [ngModel] from data(): on failure the refresh snaps the switch
+    // back to the stored value.
+    await this.service.setAutoForward(this.mac, allow)
   }
 
   onCancel() {

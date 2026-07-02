@@ -7913,7 +7913,7 @@ dependencies = [
 
 [[package]]
 name = "startwrt-core"
-version = "1.0.2"
+version = "1.1.0"
 dependencies = [
  "arc-swap",
  "async_cell",
@@ -7961,6 +7961,7 @@ dependencies = [
  "serde_yaml",
  "sha-crypt",
  "sha2 0.10.9",
+ "socket2",
  "start-core",
  "syslog-tracing",
  "tempfile",

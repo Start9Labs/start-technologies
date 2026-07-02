@@ -1,10 +1,15 @@
-import { inject, Injectable } from '@angular/core'
+import { inject, Injectable, signal } from '@angular/core'
 import { FormService } from 'src/app/services/form.service'
-import { PublishedPort, PublishedPortDisplay } from './types'
+import {
+  AutoForwardDisplay,
+  PublishedPort,
+  PublishedPortDisplay,
+} from './types'
 import { DevicesApiService } from 'src/app/routes/devices/service'
 import { Device, DeviceUpdateData } from 'src/app/routes/devices/utils'
 import {
   ApiService,
+  AutoForwardFromApi,
   PublishedPortFromApi,
 } from 'src/app/services/api/api.service'
 
@@ -15,16 +20,21 @@ export class PublishedPortsService extends FormService<PublishedPortDisplay[]> {
 
   private devices: Device[] = []
 
+  /** Automatic (PCP/UPnP-created) forwards; refreshed alongside the manual list. */
+  readonly autoForwards = signal<AutoForwardDisplay[]>([])
+
   async load(): Promise<PublishedPortDisplay[]> {
-    // Load devices (for reserveDeviceIpv4) and published ports in parallel
-    const [devices, portsFromApi] = await Promise.all([
+    // Load devices (for reserveDeviceIpv4) and both port lists in parallel
+    const [devices, portsFromApi, autoFromApi] = await Promise.all([
       this.devicesApi.get(),
       this.api.publishedPortsList(),
+      this.api.publishedPortsAutoList(),
     ])
 
     this.devices = devices
+    this.autoForwards.set(autoFromApi.map(autoFromApiToDisplay))
 
-    return portsFromApi.map(p => this.fromApi(p))
+    return portsFromApi.map(fromApiToDisplay)
   }
 
   async store(items: PublishedPortDisplay[]): Promise<void> {
@@ -80,25 +90,37 @@ export class PublishedPortsService extends FormService<PublishedPortDisplay[]> {
     if (!data) return false
     return data.some(p => p.deviceMac.toUpperCase() === mac.toUpperCase())
   }
+}
 
-  /** Map backend snake_case response to frontend camelCase types */
-  private fromApi(p: PublishedPortFromApi): PublishedPortDisplay {
-    return {
-      id: p.id,
-      enabled: p.enabled,
-      label: p.label,
-      deviceMac: p.device_mac,
-      ports: p.ports,
-      protocol: p.protocol,
-      ipv4: p.ipv4,
-      ipv6: p.ipv6,
-      ipv4PublicPort: p.ipv4_public_port ?? undefined,
-      source: p.source,
-      status: p.status,
-      statusReason: p.status_reason ?? undefined,
-      deviceName: p.device_name ?? undefined,
-      deviceIpv4: p.device_ipv4 ?? undefined,
-      deviceIpv6: p.device_ipv6 ?? undefined,
-    }
+function autoFromApiToDisplay(a: AutoForwardFromApi): AutoForwardDisplay {
+  return {
+    id: a.id,
+    label: a.label,
+    deviceMac: a.device_mac,
+    deviceName: a.device_name ?? undefined,
+    ports: a.ports,
+    publicPorts: a.public_ports,
+    expiresSecs: a.expires_secs ?? undefined,
+  }
+}
+
+/** Map backend snake_case response to frontend camelCase types */
+function fromApiToDisplay(p: PublishedPortFromApi): PublishedPortDisplay {
+  return {
+    id: p.id,
+    enabled: p.enabled,
+    label: p.label,
+    deviceMac: p.device_mac,
+    ports: p.ports,
+    protocol: p.protocol,
+    ipv4: p.ipv4,
+    ipv6: p.ipv6,
+    ipv4PublicPort: p.ipv4_public_port ?? undefined,
+    source: p.source,
+    status: p.status,
+    statusReason: p.status_reason ?? undefined,
+    deviceName: p.device_name ?? undefined,
+    deviceIpv4: p.device_ipv4 ?? undefined,
+    deviceIpv6: p.device_ipv6 ?? undefined,
   }
 }

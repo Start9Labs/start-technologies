@@ -34,6 +34,10 @@ export class DevicesApiService {
     })
   }
 
+  async setAutoForward(mac: string, allow: boolean): Promise<void> {
+    await this.api.devicesSetAutoForward({ mac, allow })
+  }
+
   async forget(mac: string): Promise<void> {
     await this.api.devicesForget({ mac })
   }
@@ -55,6 +59,7 @@ export class DevicesApiService {
       ipv4: d.ipv4 || undefined,
       ipv6: d.ipv6 || undefined,
       ipv4Static: d.ipv4_static,
+      allowAutoPortForward: d.allow_auto_port_forward,
       securityProfile: d.security_profile || undefined,
       speed: d.speed || undefined,
       dataUsage: d.data_usage ?? undefined,
@@ -80,6 +85,20 @@ export class DevicesService extends FormService<Device[]> {
     return this.actions.run(
       async () => {
         await this.devicesApi.update(mac, data)
+        await this.refreshAndWait()
+      },
+      {
+        loading: this.i18n.transform('Updating device'),
+        success: this.i18n.transform('Device updated'),
+      },
+    )
+  }
+
+  // Allow/deny automatic port forwarding (PCP/UPnP) for a device
+  setAutoForward(mac: string, allow: boolean) {
+    return this.actions.run(
+      async () => {
+        await this.devicesApi.setAutoForward(mac, allow)
         await this.refreshAndWait()
       },
       {

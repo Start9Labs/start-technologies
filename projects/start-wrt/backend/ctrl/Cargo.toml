@@ -2,7 +2,7 @@
 edition = "2021"
 license = "MIT"
 name = "startwrt-core"
-version = "1.0.2"
+version = "1.1.0"
 
 [lib]
 name = "startwrt"
@@ -73,6 +73,7 @@ serde_json = "1.0.140"
 serde_yaml = "0.9.34"
 sha-crypt = "0.5.0"
 sha2 = "0.10.8"
+socket2 = { version = "0.6.0", features = ["all"] }
 startos = { package = "start-core", path = "../../../../shared-libs/crates/start-core" }
 syslog-tracing = "0.3"
 tempfile = "3.14.0"

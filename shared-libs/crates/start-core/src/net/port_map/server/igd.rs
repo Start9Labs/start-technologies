@@ -16,6 +16,9 @@ pub const SSDP_MULTICAST: Ipv4Addr = Ipv4Addr::new(239, 255, 255, 250);
 pub const SSDP_PORT: u16 = 1900;
 /// HTTP port serving the device description, SCPD, and SOAP control endpoint.
 pub const IGD_HTTP_PORT: u16 = 49001;
+/// Longest lease we grant a UPnP mapping; also what `NewLeaseDuration = 0`
+/// ("permanent") means, per WANIPConnection:2's reading of 0 as one week.
+pub const IGD_MAX_LEASE_SECONDS: u32 = 604_800;
 pub const WANIP_SERVICE: &str = "urn:schemas-upnp-org:service:WANIPConnection:1";
 pub const IGD_DEVICE: &str = "urn:schemas-upnp-org:device:InternetGatewayDevice:1";
 pub const SERVER_HEADER: &str = "StartOS UPnP/1.1";
@@ -111,6 +114,15 @@ fn soap_action(headers: &HeaderMap, body: &str) -> Option<String> {
 
 /// Read a `u16` argument by element name from anywhere in the SOAP body.
 fn soap_u16(body: &str, arg: &str) -> Option<u16> {
+    soap_arg(body, arg)
+}
+
+/// Read a `u32` argument by element name from anywhere in the SOAP body.
+fn soap_u32(body: &str, arg: &str) -> Option<u32> {
+    soap_arg(body, arg)
+}
+
+fn soap_arg<T: std::str::FromStr>(body: &str, arg: &str) -> Option<T> {
     let root = xmltree::Element::parse(body.as_bytes()).ok()?;
     let action = root
         .get_child("Body")?
@@ -196,6 +208,12 @@ pub async fn handle_control<B: GatewayBackend + ?Sized>(
 }
 
 async fn get_external_ip<B: GatewayBackend + ?Sized>(backend: &B, peer: Ipv4Addr) -> Response {
+    // Same gate as AddPortMapping: the SSDP layer only reveals the IGD to
+    // authorized clients, so the WAN address must not leak to everyone else
+    // through the well-known control path.
+    if !backend.is_known_client(peer).await {
+        return fault(606, "Action not authorized");
+    }
     match backend.external_ipv4(peer).await {
         Some(ip) => ok(
             "GetExternalIPAddress",
@@ -230,9 +248,17 @@ async fn add_mapping<B: GatewayBackend + ?Sized>(
     // Secure mode: force the target to the requesting peer's own address.
     let target = SocketAddrV4::new(peer, internal_port);
 
-    // UPnP IGD leases are permanent here (StartOS requests lease 0); PCP is the
-    // lease-bearing path.
-    match backend.add_forward(source, target, 1, peer, None).await {
+    // IGD has no way to report a granted duration back on AddPortMapping, so
+    // honor an explicit lease as-is, clamped. A lease of 0 ("as long as
+    // possible") stays permanent rather than becoming WANIPConnection:2's week:
+    // StartOS requests 0 and does not re-announce, so expiring it would drop a
+    // working forward out from under a server that believes it permanent.
+    let lifetime = match soap_u32(body, "NewLeaseDuration") {
+        Some(0) | None => None,
+        Some(secs) => Some(secs.min(IGD_MAX_LEASE_SECONDS)),
+    };
+
+    match backend.add_forward(source, target, 1, peer, lifetime).await {
         Ok(()) if any => ok(
             "AddAnyPortMapping",
             &format!("<NewReservedPort>{external_port}</NewReservedPort>"),

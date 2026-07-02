@@ -524,4 +524,12 @@ export default {
   531: 'IPv6 kann nicht reserviert werden — die Regel folgt der aktuellen IPv6-Adresse des Geräts',
   532: 'Vom Gerät gewählt — IPv6-Adressen können nicht reserviert werden',
   533: 'Deaktivieren nicht möglich: Veröffentlichte Port-Regeln verwenden IPv6-Adressen von Geräten',
+  534: 'Automatisch',
+  535: 'Von vertrauenswürdigen Geräten selbst über UPnP oder PCP geöffnet. Diese Weiterleitungen erneuern sich automatisch und laufen ab, wenn das Gerät sie nicht mehr nutzt.',
+  536: 'Öffentlicher Port',
+  537: 'Läuft ab',
+  538: 'Automatische Portweiterleitung erlauben',
+  539: 'Erlaubt diesem Gerät, eigene Portweiterleitungen über UPnP/PCP zu öffnen und zu erneuern (genutzt von StartOS-Servern, Spielkonsolen und Ähnlichem). Standardmäßig aus; aktive Weiterleitungen erscheinen auf der Seite „Veröffentlichte Ports“.',
+  540: 'Berechtigungen',
+  541: 'Min.',
 } satisfies i18n

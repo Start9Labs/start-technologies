@@ -133,6 +133,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keep being renewed instead of silently lapsing until the tunnel is next
   restarted.
 
+### Fixed
+
+- The UPnP IGD `GetExternalIPAddress` action now requires the requester to be a
+  known tunnel device, matching `AddPortMapping` — previously any host that
+  could reach the control endpoint could read the public IP.
+
 ## [1.1.0]
 
 ### Added

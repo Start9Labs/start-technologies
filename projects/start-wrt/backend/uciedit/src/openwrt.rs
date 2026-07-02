@@ -107,6 +107,14 @@ pub struct FirewallRedirect {
     /// Published-port metadata: device MAC
     #[uci(default)]
     pub _pp_mac: Option<String>,
+    /// Auto port forward (PCP/UPnP) metadata: which protocol created this
+    /// forward ("PCP" or "UPnP"). Presence marks the section as auto-created —
+    /// owned by the port-control server, invisible to manual published-ports.
+    #[uci(default)]
+    pub _apf_label: Option<String>,
+    /// Auto port forward metadata: MAC of the requesting device.
+    #[uci(default)]
+    pub _apf_mac: Option<String>,
 }
 
 #[derive(Debug, TypedSection)]
@@ -478,6 +486,10 @@ pub struct DhcpHost {
     pub hostid: Option<String>,
     #[uci(default)]
     pub dns: Option<String>,
+    /// "1" when this device may create its own port forwards via PCP/UPnP
+    /// (startwrt metadata; dnsmasq ignores unknown options). Absent = denied.
+    #[uci(default)]
+    pub _allow_pcp: Option<String>,
 }
 
 #[derive(Debug, TypedSection, Default)]

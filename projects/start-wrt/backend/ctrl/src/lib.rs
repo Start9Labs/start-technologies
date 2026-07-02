@@ -24,6 +24,7 @@ pub mod lan;
 pub mod logs;
 pub mod luci_proxy;
 pub mod middleware;
+pub mod port_control;
 pub mod profiles;
 pub mod progress;
 pub mod published_ports;

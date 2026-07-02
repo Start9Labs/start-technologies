@@ -53,6 +53,10 @@ export abstract class ApiService {
   abstract systemLogs(): Promise<LogsResponse>
   abstract devicesList(): Promise<DeviceFromApi[]>
   abstract devicesUpdate(params: DeviceUpdateReq): Promise<null>
+  abstract devicesSetAutoForward(params: {
+    mac: string
+    allow: boolean
+  }): Promise<null>
   abstract devicesForget(params: { mac: string }): Promise<null>
   abstract devicesDataUsage(
     params: DeviceDataUsageReq,
@@ -73,6 +77,7 @@ export abstract class ApiService {
   abstract wanDdnsSet(params: WanDdnsSetRequest): Promise<null>
   abstract publishedPortsList(): Promise<PublishedPortFromApi[]>
   abstract publishedPortsSet(params: PublishedPortsSetRequest): Promise<null>
+  abstract publishedPortsAutoList(): Promise<AutoForwardFromApi[]>
   abstract vpnClientList(): Promise<OutboundVpn[]>
   abstract vpnClientCreate(
     params: OutboundVpnCreateRequest,
@@ -472,6 +477,8 @@ export interface DeviceFromApi {
   ipv4: string | null
   ipv6: string | null
   ipv4_static: boolean
+  /** May auto-create port forwards via PCP/UPnP (default off). */
+  allow_auto_port_forward: boolean
   security_profile: string | null
   speed: { up: number; down: number } | null
   data_usage: number | null
@@ -648,6 +655,22 @@ export interface PublishedPortInputForApi {
 
 export type PublishedPortsSetRequest = {
   ports: PublishedPortInputForApi[]
+}
+
+/**
+ * A forward created automatically by an authorized LAN device via PCP or UPnP.
+ * Read-only: the device renews or withdraws it; unrenewed forwards expire.
+ */
+export interface AutoForwardFromApi {
+  id: string
+  /** Which protocol created it: "PCP" or "UPnP". */
+  label: string
+  device_mac: string
+  device_name: string | null
+  internal_ip: string | null
+  ports: string
+  public_ports: string
+  expires_secs: number | null
 }
 
 // Outbound VPN (WireGuard Client) types

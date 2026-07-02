@@ -56,6 +56,7 @@ import {
   WanDdnsSetRequest,
   PublishedPortFromApi,
   PublishedPortsSetRequest,
+  AutoForwardFromApi,
   OutboundVpn,
   OutboundVpnCreateRequest,
   OutboundVpnCreateResponse,
@@ -940,6 +941,7 @@ export class MockApiService extends ApiService {
         ipv4: device.ipv4,
         ipv6: device.ipv6,
         ipv4_static: !!host?.options.ip,
+        allow_auto_port_forward: this.autoForwardAllowed.has(mac),
         security_profile: profile?.fullname ?? null,
         speed: def.status === 'online' ? def.speed : null,
         data_usage: def.dataUsage,
@@ -971,6 +973,28 @@ export class MockApiService extends ApiService {
       })
     }
     this.logActivity('device', 'updated', `Updated device '${params.name}'`)
+    return null
+  }
+
+  /** MACs allowed to auto-create port forwards via PCP/UPnP. */
+  private autoForwardAllowed = new Set<string>(['00:1A:2B:3C:4D:5E'])
+
+  async devicesSetAutoForward(params: {
+    mac: string
+    allow: boolean
+  }): Promise<null> {
+    await pauseFor(250)
+    const macUpper = params.mac.toUpperCase()
+    if (params.allow) {
+      this.autoForwardAllowed.add(macUpper)
+    } else {
+      this.autoForwardAllowed.delete(macUpper)
+    }
+    this.logActivity(
+      'device',
+      'auto-forward',
+      `${params.allow ? 'Enabled' : 'Disabled'} automatic port forwarding for ${macUpper}`,
+    )
     return null
   }
 
@@ -1375,6 +1399,35 @@ export class MockApiService extends ApiService {
       `Updated published ports (${params.ports.length} rule${params.ports.length !== 1 ? 's' : ''})`,
     )
     return null
+  }
+
+  async publishedPortsAutoList(): Promise<AutoForwardFromApi[]> {
+    await pauseFor(250)
+    const mac = '00:1A:2B:3C:4D:5E'
+    if (!this.autoForwardAllowed.has(mac)) return []
+    const device = this.lookupDeviceByMac(mac)
+    return [
+      {
+        id: 'apf_001a2b3c4d5e_5443',
+        label: 'PCP',
+        device_mac: mac,
+        device_name: device.name,
+        internal_ip: device.ipv4,
+        ports: '5443',
+        public_ports: '5443',
+        expires_secs: 3542,
+      },
+      {
+        id: 'apf_001a2b3c4d5e_80',
+        label: 'UPnP',
+        device_mac: mac,
+        device_name: device.name,
+        internal_ip: device.ipv4,
+        ports: '5080',
+        public_ports: '80',
+        expires_secs: 3211,
+      },
+    ]
   }
 
   // --- Outbound VPN (WireGuard Client) smart endpoint mocks ---

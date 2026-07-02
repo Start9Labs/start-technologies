@@ -55,6 +55,20 @@ Each published port rule shows a status indicator in the table:
 
 The status reflects the rule and the device's addresses on your LAN — it does not test whether traffic actually arrives from the Internet.
 
+## Automatic Port Forwarding
+
+Some devices can configure port forwarding for themselves using the standard UPnP and PCP protocols instead of you creating rules by hand — StartOS servers do this automatically, and game consoles and torrent clients commonly support it too.
+
+This is **off by default** for every device. To allow it, open the device's [detail page](devices.md#device-detail-page) and turn on **Allow automatic port forwarding**. From then on, that device — and only that device — can ask the router to forward ports, and only to itself: a device can never open a port that routes traffic to another device.
+
+Forwards created this way appear in the **Automatic** section of the Published Ports page, showing which device opened them, which protocol was used (PCP or UPnP), and when they expire. They are read-only:
+
+- The device itself creates, renews, and removes its forwards.
+- A forward the device stops renewing expires and is removed automatically once the lifetime the device asked for runs out — about an hour for typical clients, and never longer than a week even for a device that asks to keep the port indefinitely.
+- To stop a device from creating forwards, turn its toggle back off on the device page. Its existing forwards are closed immediately, and the device can no longer open new ones.
+
+Automatic forwards survive router reboots, so a self-configured device stays reachable while the router restarts. They can never take over a port that one of your manual rules already uses — the device's request is refused instead. The reverse also holds: if you publish a port manually that an automatic forward is currently using, your manual rule wins and the automatic forward is removed.
+
 ## Endpoints
 
 The **Endpoints** column in the table shows the public addresses where each forwarded port can be reached. IPv4 endpoints display the router's public IP (or DDNS domain) with the external port. IPv6 endpoints display the device's IPv6 address with the port directly. These are useful for configuring external services or sharing access details.

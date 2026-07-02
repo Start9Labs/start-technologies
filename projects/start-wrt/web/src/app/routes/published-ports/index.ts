@@ -9,6 +9,7 @@ import { provideFormService } from 'src/app/services/form.service'
 import { PublishPortDialog } from './dialog'
 import { PublishedPortsService } from './service'
 import { PublishedPortsTable } from './table'
+import { AutoForwardsTable } from './auto-table'
 import { isGua, PublishedPortDialogResult, PublishedPortDisplay } from './types'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { confirmVpnExposedPort } from 'src/app/services/vpn-exposed-port'
@@ -38,6 +39,23 @@ import { confirmVpnExposedPort } from 'src/app/services/vpn-exposed-port'
       [tuiSkeleton]="loading()"
       (edit)="edit($event)"
     ></table>
+    @if (service.autoForwards().length) {
+      <header tuiHeader="h6">
+        <hgroup tuiTitle>
+          <h3>{{ 'Automatic' | i18n }}</h3>
+          <p tuiSubtitle>
+            {{
+              'Opened by trusted devices themselves via UPnP or PCP. These forwards renew automatically and expire when the device stops using them.'
+                | i18n
+            }}
+          </p>
+        </hgroup>
+      </header>
+      <table
+        [style.margin-block.rem]="1"
+        [autoForwards]="service.autoForwards()"
+      ></table>
+    }
   `,
   providers: [provideFormService(PublishedPortsService)],
   imports: [
@@ -45,6 +63,7 @@ import { confirmVpnExposedPort } from 'src/app/services/vpn-exposed-port'
     TuiTitle,
     TuiButton,
     PublishedPortsTable,
+    AutoForwardsTable,
     TuiSkeleton,
     i18nPipe,
   ],

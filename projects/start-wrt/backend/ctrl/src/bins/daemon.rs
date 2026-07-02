@@ -334,6 +334,16 @@ async fn inner_main() -> Result<(), Error> {
     // Initialize SSL: ensure Root CA and server cert exist
     let tls_ready = init_ssl().await;
 
+    if !setup_mode {
+        // Port-control servers (PCP + UPnP IGD): automatic port forwarding for
+        // per-device-authorized LAN clients. After init_ssl so the IGD device
+        // UUID (derived from the root CA) is stable.
+        let pc = crate::port_control::PortControl::new("/etc/config".into());
+        if crate::port_control::PORT_CONTROL.set(pc.clone()).is_ok() {
+            tokio::spawn(crate::port_control::run(pc));
+        }
+    }
+
     let ctx = ServerContext {
         continuations: continuations.clone(),
         open_authed_continuations: open_authed,

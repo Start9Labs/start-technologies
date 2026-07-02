@@ -524,4 +524,12 @@ export default {
   531: 'IPv6 ne peut pas être réservée — la règle suit l’adresse IPv6 actuelle de l’appareil',
   532: 'Choisie par l’appareil — les adresses IPv6 ne peuvent pas être réservées',
   533: 'Désactivation impossible : des règles de ports publiés utilisent des adresses IPv6 d’appareils',
+  534: 'Automatique',
+  535: 'Ouverts par les appareils de confiance eux-mêmes via UPnP ou PCP. Ces redirections se renouvellent automatiquement et expirent lorsque l’appareil cesse de les utiliser.',
+  536: 'Port public',
+  537: 'Expire',
+  538: 'Autoriser la redirection automatique de ports',
+  539: 'Permet à cet appareil d’ouvrir et de renouveler ses propres redirections de ports via UPnP/PCP (utilisé par les serveurs StartOS, les consoles de jeu et autres). Désactivé par défaut ; les redirections actives apparaissent sur la page Ports publiés.',
+  540: 'Autorisations',
+  541: 'min',
 } satisfies i18n

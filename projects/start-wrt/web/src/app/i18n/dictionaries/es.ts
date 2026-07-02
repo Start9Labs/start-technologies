@@ -524,4 +524,12 @@ export default {
   531: 'IPv6 no se puede reservar — la regla sigue la dirección IPv6 actual del dispositivo',
   532: 'Elegida por el dispositivo — las direcciones IPv6 no se pueden reservar',
   533: 'No se puede desactivar: las reglas de puertos publicados usan direcciones IPv6 de dispositivos',
+  534: 'Automático',
+  535: 'Abiertos por los propios dispositivos de confianza mediante UPnP o PCP. Estos reenvíos se renuevan automáticamente y caducan cuando el dispositivo deja de usarlos.',
+  536: 'Puerto público',
+  537: 'Caduca',
+  538: 'Permitir el reenvío automático de puertos',
+  539: 'Permite a este dispositivo abrir y renovar sus propios reenvíos de puertos mediante UPnP/PCP (usado por servidores StartOS, consolas de juegos y similares). Desactivado por defecto; los reenvíos activos aparecen en la página de Puertos Publicados.',
+  540: 'Permisos',
+  541: 'min',
 } satisfies i18n

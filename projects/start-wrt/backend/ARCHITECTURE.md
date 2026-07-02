@@ -178,35 +178,36 @@ Low-level UCI, file, and shell access. These are vestigial — all features now 
 
 ### Other Modules
 
-| Module                            | Purpose                                                                 |
-| --------------------------------- | ----------------------------------------------------------------------- |
-| `system.rs`                       | System settings, remote access rules, schedules, restart, factory reset |
-| `devices.rs`                      | Device enumeration from ARP/DHCP, rename, forget (flush ARP + lease)    |
-| `wan.rs` / `lan.rs`               | WAN/LAN interface configuration                                         |
-| `published_ports.rs`              | Port forwarding rules (firewall redirects)                              |
-| `ssh_keys.rs`                     | SSH public key CRUD (`/etc/dropbear/authorized_keys`)                   |
-| `vpn_client.rs` / `vpn_server.rs` | WireGuard VPN management                                                |
-| `dns.rs`                          | DNS server configuration                                                |
-| `activity.rs`                     | Activity logging via SQLite                                             |
-| `backup.rs` / `diagnostics.rs`    | Backup/restore and diagnostic bundles (via continuations)               |
-| `logs.rs`                         | WebSocket log streaming                                                 |
-| `ssl.rs`                          | TLS cert generation: Root CA → Intermediate CA → Server cert            |
-| `init.rs`                         | Early boot WiFi config, password generation                             |
-| `setup.rs` / `flash.rs`           | Setup wizard, firmware flashing                                         |
-| `captive.rs`                      | Captive portal management                                               |
-| `embedded_web.rs`                 | Serves the Angular SPA from `include_dir`                               |
-| `luci_proxy.rs`                   | Reverse proxy to LuCI on localhost:8080                                 |
-| `continuations.rs`                | Long-running operation handling (GUID-based, timeout, kill signals)     |
-| `update.rs`                       | OTA update engine — download/verify/flash, progress via continuations   |
-| `registry/`                       | Registry client (`device_info`, `asset`, `os`, `signer`)                |
-| `sign/`                           | ed25519 signature + commitment verification                             |
-| `progress.rs`                     | Progress reporting, wire-compatible with start-os                       |
-| `eeprom.rs`                       | EEPROM TLV read (ONIE blob; WiFi PMK in tag 0x2F)                       |
-| `wg.rs`                           | WireGuard key management types                                          |
-| `device_names.rs`                 | Persistent cache of auto-learned device hostnames                       |
-| `verify.rs`                       | Factory QC checks (firmware integrity, EEPROM password, SSID broadcast) |
-| `templates/`                      | `client.conf.template` — WireGuard peer client-config template          |
-| `error.rs`                        | `ErrorKind` enum and `Error` type                                       |
+| Module                            | Purpose                                                                                                                                                                                   |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `system.rs`                       | System settings, remote access rules, schedules, restart, factory reset                                                                                                                   |
+| `devices.rs`                      | Device enumeration from ARP/DHCP, rename, forget (flush ARP + lease)                                                                                                                      |
+| `wan.rs` / `lan.rs`               | WAN/LAN interface configuration                                                                                                                                                           |
+| `published_ports.rs`              | Port forwarding rules (firewall redirects)                                                                                                                                                |
+| `port_control.rs`                 | Automatic port forwarding: PCP + UPnP IGD servers on the shared `start-core` protocol cores, mapping device-requested forwards onto auto-tagged UCI redirects with in-memory lease expiry |
+| `ssh_keys.rs`                     | SSH public key CRUD (`/etc/dropbear/authorized_keys`)                                                                                                                                     |
+| `vpn_client.rs` / `vpn_server.rs` | WireGuard VPN management                                                                                                                                                                  |
+| `dns.rs`                          | DNS server configuration                                                                                                                                                                  |
+| `activity.rs`                     | Activity logging via SQLite                                                                                                                                                               |
+| `backup.rs` / `diagnostics.rs`    | Backup/restore and diagnostic bundles (via continuations)                                                                                                                                 |
+| `logs.rs`                         | WebSocket log streaming                                                                                                                                                                   |
+| `ssl.rs`                          | TLS cert generation: Root CA → Intermediate CA → Server cert                                                                                                                              |
+| `init.rs`                         | Early boot WiFi config, password generation                                                                                                                                               |
+| `setup.rs` / `flash.rs`           | Setup wizard, firmware flashing                                                                                                                                                           |
+| `captive.rs`                      | Captive portal management                                                                                                                                                                 |
+| `embedded_web.rs`                 | Serves the Angular SPA from `include_dir`                                                                                                                                                 |
+| `luci_proxy.rs`                   | Reverse proxy to LuCI on localhost:8080                                                                                                                                                   |
+| `continuations.rs`                | Long-running operation handling (GUID-based, timeout, kill signals)                                                                                                                       |
+| `update.rs`                       | OTA update engine — download/verify/flash, progress via continuations                                                                                                                     |
+| `registry/`                       | Registry client (`device_info`, `asset`, `os`, `signer`)                                                                                                                                  |
+| `sign/`                           | ed25519 signature + commitment verification                                                                                                                                               |
+| `progress.rs`                     | Progress reporting, wire-compatible with start-os                                                                                                                                         |
+| `eeprom.rs`                       | EEPROM TLV read (ONIE blob; WiFi PMK in tag 0x2F)                                                                                                                                         |
+| `wg.rs`                           | WireGuard key management types                                                                                                                                                            |
+| `device_names.rs`                 | Persistent cache of auto-learned device hostnames                                                                                                                                         |
+| `verify.rs`                       | Factory QC checks (firmware integrity, EEPROM password, SSID broadcast)                                                                                                                   |
+| `templates/`                      | `client.conf.template` — WireGuard peer client-config template                                                                                                                            |
+| `error.rs`                        | `ErrorKind` enum and `Error` type                                                                                                                                                         |
 
 ## UCI Library (uciedit)
 

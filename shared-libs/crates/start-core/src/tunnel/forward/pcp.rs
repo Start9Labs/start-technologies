@@ -242,8 +242,8 @@ impl GatewayBackend for TunnelContext {
         );
     }
 
-    fn sni(&self) -> &Arc<SniDemux> {
-        &self.sni
+    fn sni(&self) -> Option<&Arc<SniDemux>> {
+        Some(&self.sni)
     }
 
     async fn add_sni_forward(
@@ -264,7 +264,7 @@ impl GatewayBackend for TunnelContext {
         target: SocketAddrV4,
         hostnames: &[String],
     ) {
-        self.sni()
+        self.sni
             .unregister(*source.ip(), source.port(), hostnames, target);
         for h in hostnames {
             lease::forget(
@@ -410,9 +410,9 @@ impl TunnelContext {
         // takes over the port), and carry its lease to the fallback so a still-
         // renewing bare-IP client isn't reaped before its next MAP.
         if let Some(dnat_target) = converted {
-            if let Err(code) =
-                self.sni()
-                    .register_fallback(*source.ip(), source.port(), dnat_target)
+            if let Err(code) = self
+                .sni
+                .register_fallback(*source.ip(), source.port(), dnat_target)
             {
                 tracing::warn!("failed to register fallback converting DNAT on {source}: {code}");
             }
@@ -430,7 +430,7 @@ impl TunnelContext {
         // Mirror into the dataplane; on the unexpected register failure undo the
         // DB routes we just added.
         if self
-            .sni()
+            .sni
             .register(*source.ip(), source.port(), hostnames, target, None)
             .is_err()
         {
@@ -502,7 +502,7 @@ impl TunnelContext {
             return Err(crate::net::port_map::pcp::hostname::RESULT_HOSTNAME_TAKEN);
         }
         if self
-            .sni()
+            .sni
             .register_fallback(*source.ip(), source.port(), target)
             .is_err()
         {
@@ -518,7 +518,7 @@ impl TunnelContext {
     /// Remove the hostname-less fallback on `source`, only if held by `target`.
     /// Drops the shared port entirely if no SNI routes remain either.
     pub async fn remove_sni_fallback(&self, source: SocketAddrV4, target: SocketAddrV4) {
-        self.sni()
+        self.sni
             .unregister_fallback(*source.ip(), source.port(), target);
         lease::forget(self, &LeaseKey::SniFallback(source));
         self.db

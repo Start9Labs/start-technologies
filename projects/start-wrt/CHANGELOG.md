@@ -5,7 +5,31 @@ All notable changes to StartWRT are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.2]
+## [1.1.0]
+
+### Added
+
+- Automatic port forwarding (PCP + UPnP IGD). A LAN device can now open and
+  renew its own port forwards using the standard PCP and UPnP protocols —
+  StartOS servers use this to configure themselves automatically behind a
+  StartWRT router, and game consoles/torrent clients are covered too.
+  Authorization is per-device and **off by default**: enable it with the new
+  "Allow automatic port forwarding" toggle on the device's detail page. A
+  device can only ever forward ports to itself, and requests that would take
+  over a manually published port are refused (conversely, publishing a port an
+  automatic forward holds removes the automatic forward — manual rules win).
+  Forwards are stored as tagged UCI firewall redirects (so they survive
+  reboots and never collide with manual published-port rules), renew on an
+  in-memory lease (no flash writes on renewal), and expire on the lifetime the
+  device requested when it stops renewing them — at most a week, even for a
+  device that asks to hold the port indefinitely. Turning the toggle back off
+  closes that device's forwards immediately.
+  The Published Ports page gains a read-only "Automatic" section showing each
+  forward's device, protocol, and expiry. Uses the shared `start-core` PCP/IGD
+  server cores; since StartWRT has no SNI demux, the shared PCP server now
+  advertises the Start9 HOSTNAME capability only on gateways that really
+  implement it (StartTunnel), so StartOS clients fall back to plain forwards
+  here instead of recording hostname mappings that would route nothing.
 
 ### Removed
 

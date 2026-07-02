@@ -39,6 +39,12 @@ pub fn published_ports<C: CtrlContext>() -> ParentHandler<C> {
                 .no_display()
                 .with_call_remote::<CliContext>(),
         )
+        .subcommand(
+            "auto-list",
+            from_fn_async_local(crate::port_control::auto_list)
+                .with_display_serializable()
+                .with_call_remote::<CliContext>(),
+        )
 }
 
 /// Uppercase MACs referenced by `pp_*_v6` rules, kept current by [`set`] and
@@ -983,6 +989,45 @@ pub async fn set<C: CtrlContext>(
             true
         });
 
+        // Manual rules win over automatic (PCP/UPnP) forwards: drop any auto
+        // forward whose external range overlaps an enabled manual port, so the
+        // two DNAT redirects never coexist (fw4 first-match would silently
+        // keep routing to the auto target). The device is refused on its next
+        // renewal by the auto path's own conflict check.
+        let manual_ranges: Vec<(u16, u16)> = req
+            .ports
+            .iter()
+            .filter(|p| p.enabled && p.ipv4)
+            .filter_map(|p| {
+                crate::port_control::parse_port_range(
+                    p.ipv4_public_port.as_deref().unwrap_or(&p.ports),
+                )
+            })
+            .collect();
+        let mut displaced_auto: Vec<String> = Vec::new();
+        cfgs["firewall"].sections.retain(|section| {
+            let Ok(r) = section.get::<FirewallRedirect>() else {
+                return true;
+            };
+            if r._apf_label.is_none() || r.target != "DNAT" {
+                return true;
+            }
+            let Some(range) = r
+                .src_dport
+                .as_deref()
+                .and_then(crate::port_control::parse_port_range)
+            else {
+                return true;
+            };
+            let displaced = manual_ranges
+                .iter()
+                .any(|m| crate::port_control::ranges_overlap(*m, range));
+            if displaced {
+                displaced_auto.push(section.name().unwrap_or_default().to_string());
+            }
+            !displaced
+        });
+
         // Add new sections for each published port
         for port in &req.ports {
             let proto = protocol_to_uci(&port.protocol);
@@ -1024,6 +1069,8 @@ pub async fn set<C: CtrlContext>(
                     enabled: Some(if port.enabled { "1" } else { "0" }.into()),
                     _pp_id: Some(port.id.clone()),
                     _pp_mac: Some(port.device_mac.clone()),
+                    _apf_label: None,
+                    _apf_mac: None,
                 };
                 let section_name = format!("pp_{}", safe_id);
                 cfgs["firewall"].append(&redirect, Some(&section_name))?;
@@ -1088,6 +1135,14 @@ pub async fn set<C: CtrlContext>(
                 return Err(err.into());
             }
             Ok(()) => {
+                if !displaced_auto.is_empty() {
+                    tracing::info!(
+                        "published-ports: manual rule(s) displaced auto forward(s): {displaced_auto:?}"
+                    );
+                    if let Some(pc) = crate::port_control::PORT_CONTROL.get() {
+                        pc.forget_leases(&displaced_auto);
+                    }
+                }
                 if ctx.effectful() {
                     restart_firewall();
                     if dhcp_modified {
@@ -1486,6 +1541,30 @@ async fn resolve_device_info_for_macs(macs: HashSet<String>) -> HashMap<String, 
     result
 }
 
+/// Firewall zone for a device's neighbor-table interface: VLAN tag (e.g.
+/// "br-lan.101" → 101, "br-lan" → 1) → profile → zone. The single resolver for
+/// device-zone lookups — manual published ports and automatic (PCP/UPnP)
+/// forwards must place a device in the same zone. `cfgs` must contain
+/// "startwrt" and "firewall".
+pub(crate) fn zone_for_arp_iface(cfgs: &uciedit::Configs, arp_iface: &str) -> Option<String> {
+    let vlan_tag = arp_iface
+        .split('.')
+        .nth(1)
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(1);
+    let lookup = Lookup::parse(ServerContext::default(), cfgs).ok()?;
+    let profile = lookup.from_vlan(vlan_tag)?;
+    let mut zone = None;
+    cfgs["firewall"]
+        .each::<FirewallZone, Error>(|_, z| {
+            if zone.is_none() && z.network.contains(&profile.interface) {
+                zone = Some(z.name.clone());
+            }
+        })
+        .ok();
+    zone
+}
+
 /// Resolve MAC addresses to firewall zone names via ARP interface → VLAN tag → profile → zone.
 async fn resolve_device_zones(
     uci_root: &std::path::Path,
@@ -1498,44 +1577,19 @@ async fn resolve_device_zones(
         return mac_zones;
     };
 
-    // Build VLAN tag → profile interface name
-    let Ok(lookup) = Lookup::parse(ServerContext::default(), &cfgs) else {
-        return mac_zones;
-    };
-
-    // Build interface name → zone name from firewall config
-    let mut iface_to_zone: HashMap<String, String> = HashMap::new();
-    cfgs["firewall"]
-        .each::<FirewallZone, Error>(|_, zone| {
-            for iface in &zone.network {
-                iface_to_zone.insert(iface.clone(), zone.name.clone());
-            }
-        })
-        .ok();
-
-    // For each device, resolve: ARP interface → VLAN tag → profile → zone
     for (mac, info) in device_info {
         let Some(ref arp_iface) = info.arp_interface else {
             continue;
         };
-        // Extract VLAN tag from interface name (e.g. "br-lan.101" → 101, "br-lan" → 1)
-        let vlan_tag = arp_iface
-            .split('.')
-            .nth(1)
-            .and_then(|s| s.parse::<u16>().ok())
-            .unwrap_or(1);
-
-        if let Some(profile) = lookup.from_vlan(vlan_tag) {
-            if let Some(zone) = iface_to_zone.get(&profile.interface) {
-                mac_zones.insert(mac.clone(), zone.clone());
-            }
+        if let Some(zone) = zone_for_arp_iface(&cfgs, arp_iface) {
+            mac_zones.insert(mac.clone(), zone);
         }
     }
 
     mac_zones
 }
 
-fn restart_firewall() {
+pub(crate) fn restart_firewall() {
     tokio::spawn(async {
         if let Err(e) = crate::run_quiet_async(
             tokio::process::Command::new("/etc/init.d/firewall").arg("restart"),
@@ -1848,6 +1902,7 @@ config rule 'pp_a_v6'
             ipv4: ipv4.map(str::to_string),
             ipv6: ipv6.map(str::to_string),
             ipv4_static: false,
+            allow_auto_port_forward: false,
             security_profile: None,
             speed: None,
             data_usage: None,
