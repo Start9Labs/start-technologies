@@ -15,7 +15,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 REPO="Start9Labs/start-technologies"
-REGISTRY="https://alpha-registry-x.start9.com"
+# OS registry promotion chain: CI indexes images into alpha; alpha -> beta is
+# promoted manually, out of band; the full `release` promotes beta -> production.
+# So the manual release pulls/verifies from SOURCE_REGISTRY (beta) and promotes
+# into PROD_REGISTRY. Override either per run.
+SOURCE_REGISTRY="${SOURCE_REGISTRY:-https://beta-registry.start9.com}"
+PROD_REGISTRY="${PROD_REGISTRY:-https://registry.start9.com}"
 S3_BUCKET="s3://startos-images"
 S3_CDN="https://startos-images.nyc3.cdn.digitaloceanspaces.com"
 START9_GPG_KEY="2D63C217"
@@ -299,6 +304,89 @@ cmd_pre_check() {
             ;;
     esac
 
+    # 4. Preconditions for the release steps: everything the pipeline needs must
+    # already be in place, so a release doesn't fail halfway through.
+    case "$KIND" in
+        os)
+            # `release` pulls the images from the source registry and promotes
+            # them into prod, so every expected asset must already be in source.
+            local idx missing platform ext
+            idx=$(start-cli --registry="$SOURCE_REGISTRY" registry os index 2>/dev/null || echo '{}')
+            if ! echo "$idx" | jq -e ".versions[\"$VERSION\"]" >/dev/null 2>&1; then
+                >&2 echo "  ✗ OS ${VERSION} not in source registry ${SOURCE_REGISTRY} — promote alpha→beta first"
+                errors=1
+            else
+                missing=""
+                for platform in $OS_PLATFORMS; do
+                    for ext in $(os_image_exts "$platform"); do
+                        echo "$idx" | jq -e ".versions[\"$VERSION\"].${ext}[\"$platform\"].urls[0]" >/dev/null 2>&1 \
+                            || missing="${missing} ${platform}.${ext}"
+                    done
+                done
+                if [ -n "$missing" ]; then
+                    >&2 echo "  ✗ source registry is missing OS assets:${missing}"
+                    errors=1
+                else
+                    echo "  ✓ source registry has all ${VERSION} images"
+                fi
+            fi
+            # `release` promotes into prod; it shouldn't already be there.
+            if start-cli --registry="$PROD_REGISTRY" registry os index 2>/dev/null \
+                | jq -e ".versions[\"$VERSION\"]" >/dev/null 2>&1; then
+                release_guard "OS ${VERSION} already in production registry ${PROD_REGISTRY}" || errors=1
+            else
+                echo "  ✓ not yet in production registry"
+            fi
+            # promoting re-signs registry commitments with the developer key.
+            if [ -f "$HOME/.startos/developer.key.pem" ]; then
+                echo "  ✓ developer key present"
+            else
+                >&2 echo "  ✗ ~/.startos/developer.key.pem missing (needed to promote to the registry)"
+                errors=1
+            fi
+            ;;
+        npm)
+            if npm whoami >/dev/null 2>&1; then
+                echo "  ✓ npm authenticated ($(npm whoami 2>/dev/null))"
+            else
+                >&2 echo "  ✗ not logged in to npm (run: npm login)"
+                errors=1
+            fi
+            ;;
+    esac
+
+    # gh + the Start9 signing key are needed by every os/cli/deb release
+    # (create-gh-release, upload, sign — and the apt Release signature for debs).
+    if [ "$KIND" != npm ]; then
+        if gh auth status >/dev/null 2>&1; then
+            echo "  ✓ gh authenticated"
+        else
+            >&2 echo "  ✗ gh not authenticated (run: gh auth login)"
+            errors=1
+        fi
+        if gpg --list-secret-keys "$START9_GPG_KEY" >/dev/null 2>&1; then
+            echo "  ✓ Start9 signing key ${START9_GPG_KEY} present"
+        else
+            >&2 echo "  ✗ Start9 GPG secret key ${START9_GPG_KEY} not in keyring (needed to sign)"
+            errors=1
+        fi
+    fi
+
+    # cli/deb also publish debs to the apt repo, which needs s3cmd + credentials.
+    if [ "$KIND" = cli ] || [ "$KIND" = deb ]; then
+        if command -v s3cmd >/dev/null 2>&1; then
+            echo "  ✓ s3cmd available"
+        else
+            >&2 echo "  ✗ s3cmd not installed (needed to publish debs to apt)"
+            errors=1
+        fi
+        if [ -f "$HOME/.s3cfg" ] || { [ -n "${S3_ACCESS_KEY:-}" ] && [ -n "${S3_SECRET_KEY:-}" ]; }; then
+            echo "  ✓ s3 credentials configured"
+        else
+            >&2 echo "  ! no ~/.s3cfg and S3_ACCESS_KEY/S3_SECRET_KEY unset — apt publish may fail"
+        fi
+    fi
+
     if [ "$errors" -ne 0 ]; then
         >&2 echo "Pre-check failed."
         exit 1
@@ -355,7 +443,7 @@ cmd_pull() {
             for platform in $OS_PLATFORMS; do
                 for ext in $(os_image_exts "$platform"); do
                     echo "  ${ext} ${platform}"
-                    start-cli --registry=$REGISTRY registry os asset get "$ext" "$VERSION" "$platform" -d "$(pwd)"
+                    start-cli --registry="$SOURCE_REGISTRY" registry os asset get "$ext" "$VERSION" "$platform" -d "$(pwd)"
                 done
             done
             ;;
@@ -432,21 +520,12 @@ cmd_push() {
 
 cmd_index() {
     require_kind os
-    enter_release_dir
-
-    echo "Registering OS version ${VERSION} in ${REGISTRY}..."
-    start-cli --registry=$REGISTRY registry os version add "$VERSION" "$TAG" '' ">=0.3.5 <=$VERSION"
-
-    echo "Indexing OS assets..."
-    for platform in $OS_PLATFORMS; do
-        for ext in $(os_image_exts "$platform"); do
-            for file in *_"$platform"."$ext"; do
-                [ -f "$file" ] || continue
-                start-cli --registry=$REGISTRY registry os asset add \
-                    --platform="$platform" --version="$VERSION" "$file" "$S3_CDN/v$VERSION/$file"
-            done
-        done
-    done
+    # Promote the version (+ every iso/squashfs/img asset) from the source
+    # registry into production. This copies the index entries and re-signs the
+    # commitments with the developer key — the images stay on the shared S3
+    # bucket, so nothing is re-uploaded.
+    echo "Promoting OS ${VERSION}: ${SOURCE_REGISTRY} -> ${PROD_REGISTRY} ..."
+    start-cli registry os promote --from "$SOURCE_REGISTRY" --to "$PROD_REGISTRY" "$VERSION"
 }
 
 cmd_sign() {
@@ -568,14 +647,15 @@ cmd_notes() {
 cmd_release() {
     case "$KIND" in
         os)
-            # CI's startos-iso deploy already uploaded the images to S3 and
-            # indexed them, so pull the published assets rather than re-pushing
-            # build artifacts (no pull-gha/push/index here). Use those standalone
-            # subcommands directly for a manual re-publish or recovery.
+            # CI already uploaded the images to the shared S3 bucket and indexed
+            # them into alpha (and alpha->beta was promoted manually), so there's
+            # no push here. Pull the promoted images to build the release notes +
+            # sign them, and `index` promotes them from source into production.
             cmd_pre_check
             cmd_pull
             cmd_tag
             cmd_create_gh_release
+            cmd_index
             cmd_sign
             ;;
         cli | deb)
@@ -621,8 +701,9 @@ Subcommands:
   push               Upload artifacts to their destination (S3 for os, GitHub
                      release + apt for cli/deb, npm publish for sdk). For os this
                      normally runs in CI; use it for a manual re-publish.
-  index              Register and index the version in the registry (os only;
-                     normally done in CI — use it for a manual re-index).
+  index              Promote the OS version from the source registry into the
+                     production registry (os only). CI indexes alpha; alpha->beta
+                     is promoted manually; this does source (beta) -> prod.
   sign               Sign artifacts with the Start9 org key (+ personal key if
                      available) and upload signatures.tar.gz. (os/cli/deb.)
   cosign             Add your personal GPG signature to an existing release's
@@ -631,15 +712,17 @@ Subcommands:
   release            Run the full applicable pipeline for the project.
 
 Environment variables:
-  VERSION   Override the version (default: read from the manifest)
-  RUN_ID    GitHub Actions run id/url for pull-gha
-  COMMIT    Commit to tag (default: HEAD)
-  FORCE     Set to 1 to re-release an already-released version: force-move the
-            tag and downgrade pre-check's "already released" failures to warnings
-            (idempotent steps only; npm republish always fails)
-  CLEAN     Set to 1 to wipe and recreate the release directory
-  GH_USER   Override GitHub username (default: autodetected via gh)
-  OTP       npm one-time password (start-sdk publish)
+  VERSION           Override the version (default: read from the manifest)
+  SOURCE_REGISTRY   OS registry to pull/promote from (default: beta)
+  PROD_REGISTRY     OS registry to promote into (default: production)
+  RUN_ID            GitHub Actions run id/url for pull-gha
+  COMMIT            Commit to tag (default: HEAD)
+  FORCE             Set to 1 to re-release an already-released version: force-move
+                    the tag and downgrade pre-check's "already released" failures
+                    to warnings (idempotent steps only; npm republish always fails)
+  CLEAN             Set to 1 to wipe and recreate the release directory
+  GH_USER           Override GitHub username (default: autodetected via gh)
+  OTP               npm one-time password (start-sdk publish)
 EOF
 }
 
