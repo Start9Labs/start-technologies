@@ -25,9 +25,9 @@ APT_BASE_URL="https://start9-debs.nyc3.digitaloceanspaces.com"
 APT_SUITE="stable"
 APT_COMPONENT="main"
 
-# Slim (FOSS-only) + nonfree + nvidia variants; matches the OS build/deploy set.
-# raspberrypi is a .img build and is not S3-hosted/indexed, so it is excluded.
-OS_PLATFORMS="x86_64 x86_64-nonfree x86_64-nvidia aarch64 aarch64-nonfree aarch64-nvidia riscv64 riscv64-nonfree"
+# Every OS image platform. Most ship an iso + squashfs; raspberrypi ships a
+# flashable img + squashfs (no iso). See os_image_exts.
+OS_PLATFORMS="x86_64 x86_64-nonfree x86_64-nvidia aarch64 aarch64-nonfree aarch64-nvidia raspberrypi riscv64 riscv64-nonfree"
 CLI_TRIPLES="x86_64-unknown-linux-musl x86_64-apple-darwin aarch64-unknown-linux-musl aarch64-apple-darwin riscv64gc-unknown-linux-musl"
 DEB_ARCHES="x86_64 aarch64 riscv64"
 
@@ -89,9 +89,19 @@ os_platform_label() {
         aarch64-nonfree) echo "aarch64/ARM64" ;;
         aarch64-nvidia) echo "aarch64/ARM64 + NVIDIA" ;;
         aarch64) echo "aarch64/ARM64-slim (FOSS-only)" ;;
+        raspberrypi) echo "Raspberry Pi (aarch64)" ;;
         riscv64-nonfree) echo "RISCV64 (RVA23)" ;;
         riscv64) echo "RISCV64 (RVA23)-slim (FOSS-only)" ;;
         *) echo "$1" ;;
+    esac
+}
+
+# The image extensions a platform ships: squashfs everywhere, plus iso (most) or
+# a flashable img (raspberrypi).
+os_image_exts() {
+    case "$1" in
+        raspberrypi) echo "squashfs img" ;;
+        *) echo "squashfs iso" ;;
     esac
 }
 
@@ -147,7 +157,7 @@ deb_files() {
 release_files() {
     local f
     case "$KIND" in
-        os) for f in *.iso *.squashfs; do [ -f "$f" ] && echo "$f"; done ;;
+        os) for f in *.iso *.img *.squashfs; do [ -f "$f" ] && echo "$f"; done ;;
         cli) cli_binaries; deb_files ;;
         deb) deb_files ;;
     esac
@@ -228,6 +238,19 @@ publish_debs() {
 
 # --- Subcommands ---
 
+# Report a failed "already released" guard. With FORCE=1 it's tolerated (returns
+# success) so an idempotent step can be re-run — S3 put -P, gh release --clobber,
+# registry re-index, apt re-publish all overwrite in place. Non-idempotent steps
+# (npm publish, which can't republish a version) must NOT use this.
+release_guard() {
+    if [ "${FORCE:-}" = 1 ]; then
+        >&2 echo "  ! ${1} (forced)"
+        return 0
+    fi
+    >&2 echo "  ✗ ${1}"
+    return 1
+}
+
 cmd_pre_check() {
     local errors=0
     echo "Pre-checking ${PROJECT} v${VERSION} (tag ${TAG})..."
@@ -246,10 +269,9 @@ cmd_pre_check() {
         echo "  ✓ changelog documents ${VERSION}"
     fi
 
-    # 2. Git tag must not already exist on the remote.
+    # 2. Git tag must not already exist on the remote (idempotent: FORCE re-tags).
     if git ls-remote --tags origin "refs/tags/${TAG}" 2>/dev/null | grep -q .; then
-        >&2 echo "  ✗ tag ${TAG} already exists on origin"
-        errors=1
+        release_guard "tag ${TAG} already exists on origin" || errors=1
     else
         echo "  ✓ tag ${TAG} is free"
     fi
@@ -259,15 +281,15 @@ cmd_pre_check() {
         os)
             if start-cli --registry=$REGISTRY registry os index 2>/dev/null \
                 | jq -e ".versions[\"$VERSION\"] // empty" >/dev/null 2>&1; then
-                >&2 echo "  ✗ OS version ${VERSION} already in registry ${REGISTRY}"
-                errors=1
+                release_guard "OS version ${VERSION} already in registry ${REGISTRY}" || errors=1
             else
                 echo "  ✓ OS version ${VERSION} not yet in registry"
             fi
             ;;
         npm)
+            # npm can't republish a version, so this is never forceable.
             if [ -n "$(npm view "${SDK_NPM_PACKAGE}@${VERSION}" version 2>/dev/null || true)" ]; then
-                >&2 echo "  ✗ ${SDK_NPM_PACKAGE}@${VERSION} already published to npm"
+                >&2 echo "  ✗ ${SDK_NPM_PACKAGE}@${VERSION} already published to npm (cannot republish)"
                 errors=1
             else
                 echo "  ✓ ${SDK_NPM_PACKAGE}@${VERSION} not yet on npm"
@@ -275,8 +297,7 @@ cmd_pre_check() {
             ;;
         cli | deb)
             if gh release view -R "$REPO" "$TAG" >/dev/null 2>&1; then
-                >&2 echo "  ✗ GitHub release ${TAG} already exists"
-                errors=1
+                release_guard "GitHub release ${TAG} already exists" || errors=1
             else
                 echo "  ✓ GitHub release ${TAG} does not exist"
             fi
@@ -308,7 +329,7 @@ cmd_pull_gha() {
     case "$KIND" in
         os)
             for platform in $OS_PLATFORMS; do
-                for ext in squashfs iso; do
+                for ext in $(os_image_exts "$platform"); do
                     echo "  ${platform}.${ext}"
                     gh run download -R "$REPO" "$RUN_ID" -n "${platform}.${ext}" -D "$(pwd)"
                 done
@@ -337,7 +358,7 @@ cmd_pull() {
     case "$KIND" in
         os)
             for platform in $OS_PLATFORMS; do
-                for ext in squashfs iso; do
+                for ext in $(os_image_exts "$platform"); do
                     echo "  ${ext} ${platform}"
                     start-cli --registry=$REGISTRY registry os asset get "$ext" "$VERSION" "$platform" -d "$(pwd)"
                 done
@@ -384,10 +405,12 @@ cmd_push() {
             enter_release_dir
             echo "Uploading OS images to ${S3_BUCKET}/v${VERSION}/ ..."
             for platform in $OS_PLATFORMS; do
-                for file in *_"$platform".squashfs *_"$platform".iso; do
-                    [ -f "$file" ] || continue
-                    echo "  $file"
-                    s3cmd put -P "$file" "${S3_BUCKET}/v${VERSION}/$file"
+                for ext in $(os_image_exts "$platform"); do
+                    for file in *_"$platform"."$ext"; do
+                        [ -f "$file" ] || continue
+                        echo "  $file"
+                        s3cmd put -P "$file" "${S3_BUCKET}/v${VERSION}/$file"
+                    done
                 done
             done
             ;;
@@ -421,10 +444,12 @@ cmd_index() {
 
     echo "Indexing OS assets..."
     for platform in $OS_PLATFORMS; do
-        for file in *_"$platform".squashfs *_"$platform".iso; do
-            [ -f "$file" ] || continue
-            start-cli --registry=$REGISTRY registry os asset add \
-                --platform="$platform" --version="$VERSION" "$file" "$S3_CDN/v$VERSION/$file"
+        for ext in $(os_image_exts "$platform"); do
+            for file in *_"$platform"."$ext"; do
+                [ -f "$file" ] || continue
+                start-cli --registry=$REGISTRY registry os asset add \
+                    --platform="$platform" --version="$VERSION" "$file" "$S3_CDN/v$VERSION/$file"
+            done
         done
     done
 }
@@ -494,10 +519,10 @@ release_notes() {
     local platform file
     case "$KIND" in
         os)
-            echo "## ISO Downloads"
+            echo "## Image Downloads"
             echo
             for platform in $OS_PLATFORMS; do
-                for file in *_"$platform".iso; do
+                for file in *_"$platform".iso *_"$platform".img; do
                     [ -f "$file" ] || continue
                     echo "- [$(os_platform_label "$platform")]($S3_CDN/v$VERSION/$file)"
                 done
@@ -610,7 +635,9 @@ Environment variables:
   VERSION   Override the version (default: read from the manifest)
   RUN_ID    GitHub Actions run id/url for pull-gha
   COMMIT    Commit to tag (default: HEAD)
-  FORCE     Set to 1 to force-move an existing tag
+  FORCE     Set to 1 to re-release an already-released version: force-move the
+            tag and downgrade pre-check's "already released" failures to warnings
+            (idempotent steps only; npm republish always fails)
   CLEAN     Set to 1 to wipe and recreate the release directory
   GH_USER   Override GitHub username (default: autodetected via gh)
   OTP       npm one-time password (start-sdk publish)
