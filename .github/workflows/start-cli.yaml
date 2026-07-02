@@ -40,6 +40,7 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "build/**"
+      - "debian/**"
       - ".github/workflows/start-cli.yaml"
       - ".github/actions/setup-build/**"
   pull_request:
@@ -52,6 +53,7 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "build/**"
+      - "debian/**"
       - ".github/workflows/start-cli.yaml"
       - ".github/actions/setup-build/**"
 
@@ -65,7 +67,7 @@ env:
 
 jobs:
   compile:
-    name: Build Debian Package
+    name: Build Binary
     if: github.event.pull_request.draft != true
     strategy:
       fail-fast: true
@@ -104,4 +106,44 @@ jobs:
         with:
           name: start-cli_${{ matrix.triple }}
           path: target/${{ matrix.triple }}/release/start-cli
+          retention-days: 14
+
+  deb:
+    name: Build Debian Package
+    if: github.event.pull_request.draft != true
+    strategy:
+      fail-fast: true
+      matrix:
+        arch: >-
+          ${{
+            fromJson('{
+              "x86_64": ["x86_64"],
+              "aarch64": ["aarch64"],
+              "riscv64": ["riscv64"],
+              "ALL": ["x86_64", "aarch64", "riscv64"]
+            }')[github.event.inputs.platform || 'ALL']
+          }}
+    runs-on: ${{ fromJson('["ubuntu-latest", "ubuntu-24.04-32-cores"]')[github.event.inputs.runner == 'fast'] }}
+    steps:
+      - name: Mount tmpfs
+        if: ${{ github.event.inputs.runner == 'fast' }}
+        run: sudo mount -t tmpfs tmpfs .
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/setup-build
+        with:
+          nodejs-version: ${{ env.NODEJS_VERSION }}
+
+      - name: Make
+        run: make cli-deb
+        env:
+          PLATFORM: ${{ matrix.arch }}
+          SCCACHE_GHA_ENABLED: on
+          SCCACHE_GHA_VERSION: 0
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: start-cli_${{ matrix.arch }}.deb
+          path: results/start-cli-*_${{ matrix.arch }}.deb
           retention-days: 14
