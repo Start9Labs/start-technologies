@@ -123,6 +123,16 @@ Enable or disable a port forwarding rule.
 
 Change or clear the label on a port forwarding rule.
 
+## IPv6
+
+### `start-tunnel set-ipv6`
+
+Set (or clear) the routed IPv6 prefix your VPS delegates to the server. Devices
+are assigned globally-routable addresses out of it. See [IPv6](ipv6.md).
+
+- `--prefix <PREFIX>` — The routed prefix (e.g. `2001:db8:abcd::/64`). Omit to
+  disable tunnel IPv6.
+
 ## Updates
 
 ### `start-tunnel update check`

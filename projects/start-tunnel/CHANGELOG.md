@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **IPv6 support.** StartTunnel can now delegate globally-routable IPv6 addresses to connected devices from a prefix your VPS routes to the server. Configure it with `start-tunnel set-ipv6 --prefix <prefix>` (clear it by passing no prefix). A single /64 — the common budget-VPS case — gives every device one global address, with the tunnel answering Neighbor Discovery on the VPS network on their behalf; a shorter prefix (/56, /48) delegates a whole /64 to each device (real prefix delegation); a longer prefix (e.g. a /124) hands out single addresses. Device IPv6 is carried full-tunnel so replies from the delegated address return through the tunnel. See the IPv6 page in the docs.
+
 ## [1.1.0]
 
 ### Added
