@@ -55,6 +55,28 @@ impl<'de> Deserialize<'de> for HostId {
         Ok(HostId(Deserialize::deserialize(deserializer)?))
     }
 }
+impl HostId {
+    /// Like the [`Deserialize`] impl but tolerating the empty string as
+    /// [`HostId::default()`] — the server host's sentinel id, which
+    /// `NetController::os_bindings` persists inside the `startos-ui`
+    /// interface's `AddressInfo`. Strict deserialization rejects that record
+    /// and fails any full-db read (e.g. `validate_db` at init), so
+    /// db-persisted fields that may reference the server host use this;
+    /// manifest and API input keep the strict impl.
+    pub fn deserialize_lenient<'de, D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s: InternedString = Deserialize::deserialize(deserializer)?;
+        if s.is_empty() {
+            Ok(Self::default())
+        } else {
+            Id::try_from(s)
+                .map(HostId)
+                .map_err(serde::de::Error::custom)
+        }
+    }
+}
 impl AsRef<Path> for HostId {
     fn as_ref(&self) -> &Path {
         self.0.as_ref().as_ref()

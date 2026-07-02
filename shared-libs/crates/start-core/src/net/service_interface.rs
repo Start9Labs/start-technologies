@@ -199,6 +199,7 @@ pub enum ServiceInterfaceType {
 #[serde(rename_all = "camelCase")]
 pub struct AddressInfo {
     pub username: Option<String>,
+    #[serde(deserialize_with = "HostId::deserialize_lenient")]
     pub host_id: HostId,
     pub internal_port: u16,
     #[ts(type = "string | null")]
@@ -225,4 +226,30 @@ pub struct RangeServiceInterface {
     pub description: String,
     #[ts(type = "string | null")]
     pub scheme: Option<InternedString>,
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    // The `startos-ui` interface is persisted with the server host's sentinel
+    // id (empty string — see `NetController::os_bindings`); the record must
+    // survive the full de → ser round-trip that `validate_db` performs at
+    // every boot.
+    #[test]
+    fn address_info_tolerates_empty_host_id() {
+        let json = serde_json::json!({
+            "username": null,
+            "hostId": "",
+            "internalPort": 80,
+            "scheme": "http",
+            "sslScheme": "https",
+            "suffix": ""
+        });
+        let info: AddressInfo = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(info.host_id, HostId::default());
+        assert_eq!(serde_json::to_value(&info).unwrap(), json);
+        // only the persisted field is lenient — HostId itself stays strict
+        assert!(serde_json::from_value::<HostId>(serde_json::json!("")).is_err());
+    }
 }
