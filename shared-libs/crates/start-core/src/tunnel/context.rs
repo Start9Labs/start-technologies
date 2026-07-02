@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -10,11 +10,13 @@ use http::HeaderMap;
 use imbl::OrdMap;
 use imbl_value::InternedString;
 use include_dir::Dir;
+use ipnet::{IpNet, Ipv6Net};
 use patch_db::PatchDb;
 use patch_db::json_ptr::ROOT;
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{CallRemote, Context, Empty, ParentHandler};
 use serde::{Deserialize, Serialize};
+use tokio::process::Command;
 use tokio::sync::broadcast::Sender;
 use tracing::instrument;
 use url::Url;
@@ -38,6 +40,7 @@ use crate::tunnel::db::{DnsRecordEntry, DnsRecords, PortForward, PortForwards, T
 use crate::tunnel::dns::DnsProxyController;
 use crate::tunnel::migrations::run_migrations;
 use crate::tunnel::wg::{WIREGUARD_INTERFACE_NAME, WgServer};
+use crate::util::Invoke;
 use crate::util::collections::OrdMapIterMut;
 use crate::util::io::read_file_to_string;
 use crate::util::sync::{SyncMutex, Watch};
@@ -130,6 +133,23 @@ fn dns_entry(r: &InjectedRecord) -> DnsRecordEntry {
     }
 }
 
+/// Add or remove a proxy-NDP entry so the tunnel host answers Neighbor
+/// Discovery for a client's on-link IPv6 on the WAN interface. Best-effort:
+/// failures are logged, not fatal (reconciled on the next resync).
+async fn neigh_proxy(add: bool, addr: Ipv6Addr, iface: &str) {
+    Command::new("ip")
+        .arg("-6")
+        .arg("neigh")
+        .arg(if add { "replace" } else { "del" })
+        .arg("proxy")
+        .arg(addr.to_string())
+        .arg("dev")
+        .arg(iface)
+        .invoke(ErrorKind::Network)
+        .await
+        .log_err();
+}
+
 pub struct TunnelContextSeed {
     pub listen: SocketAddr,
     pub db: TypedPatchDb<TunnelDatabase>,
@@ -151,6 +171,10 @@ pub struct TunnelContextSeed {
     /// Serializes `resync_egress`; its read-DB → install → prune isn't atomic,
     /// so a concurrent reconcile could prune a rule another call just installed.
     pub egress_lock: tokio::sync::Mutex<()>,
+    /// Proxy-NDP entries we've installed (client GUA -> WAN interface), so a
+    /// resync can withdraw the ones that no longer apply. Only populated when a
+    /// client's /128 sits inside an on-link /64 (the shared-prefix case).
+    pub v6_proxy: SyncMutex<BTreeMap<Ipv6Addr, GatewayId>>,
     pub shutdown: Sender<Option<bool>>,
 }
 
@@ -325,10 +349,12 @@ impl TunnelContext {
             dns_keys,
             active_forwards: SyncMutex::new(active_forwards),
             egress_lock: tokio::sync::Mutex::new(()),
+            v6_proxy: SyncMutex::new(BTreeMap::new()),
             shutdown,
         }));
 
         ctx.resync_egress().await?;
+        ctx.resync_v6().await?;
 
         // PCP (preferred) + UPnP IGD (fallback) let connected clients open their
         // public ports automatically.
@@ -364,7 +390,76 @@ impl TunnelContext {
         self.dns_allowed.mutate(|s| *s = allowed_injectors(server));
         self.dns_keys.mutate(|m| *m = injector_keys(server));
         self.dns_proxy.sync(server, self.dns_injector.clone()).await?;
-        self.resync_egress().await
+        self.resync_egress().await?;
+        self.resync_v6().await
+    }
+
+    /// Reconcile proxy-NDP for client IPv6 addresses. When a client's /128 sits
+    /// inside a /64 that a WAN interface holds *on-link* (Hetzner, Vultr), the
+    /// VPS gateway resolves that address via Neighbor Discovery on the WAN link,
+    /// so the tunnel host must answer for it (`proxy_ndp`) and then forward to
+    /// the client over WireGuard. A routed prefix (or a per-client /64) is
+    /// delivered to the host without ND, so it needs no proxy entry.
+    pub async fn resync_v6(&self) -> Result<(), Error> {
+        let server = self.db.peek().await.as_wg().de()?;
+        let mut desired: BTreeMap<Ipv6Addr, GatewayId> = BTreeMap::new();
+        if let Some(prefix) = server.ipv6 {
+            Command::new("sysctl")
+                .arg("-w")
+                .arg("net.ipv6.conf.all.proxy_ndp=1")
+                .invoke(ErrorKind::Network)
+                .await
+                .log_err();
+            let onlink: Vec<(GatewayId, Ipv6Net)> = self.net_iface.peek(|ifaces| {
+                let mut v = Vec::new();
+                for (id, info) in ifaces.iter() {
+                    if id.as_str() == WIREGUARD_INTERFACE_NAME {
+                        continue;
+                    }
+                    let Some(ip) = info.ip_info.as_ref() else {
+                        continue;
+                    };
+                    if ip.device_type == Some(NetworkInterfaceType::Loopback) {
+                        continue;
+                    }
+                    for net in ip.subnets.iter() {
+                        if let IpNet::V6(n) = net {
+                            v.push((id.clone(), n.trunc()));
+                        }
+                    }
+                }
+                v
+            });
+            let mut index = 0u32;
+            for (_, cfg) in &server.subnets.0 {
+                for (client_v4, _) in &cfg.clients.0 {
+                    if let Some(c) = crate::tunnel::wg6::client_v6(prefix, index, *client_v4) {
+                        // Only a single /128 needs proxying; a delegated /64 is routed.
+                        if c.delegated.prefix_len() == 128 {
+                            if let Some((iface, _)) =
+                                onlink.iter().find(|(_, n)| n.contains(&c.addr))
+                            {
+                                desired.insert(c.addr, iface.clone());
+                            }
+                        }
+                    }
+                    index += 1;
+                }
+            }
+        }
+        let current = self.v6_proxy.peek(|m| m.clone());
+        for (addr, iface) in &current {
+            if desired.get(addr) != Some(iface) {
+                neigh_proxy(false, *addr, iface.as_str()).await;
+            }
+        }
+        for (addr, iface) in &desired {
+            if current.get(addr) != Some(iface) {
+                neigh_proxy(true, *addr, iface.as_str()).await;
+            }
+        }
+        self.v6_proxy.mutate(|m| *m = desired);
+        Ok(())
     }
 
     /// Reconcile per-subnet and per-device egress NAT rules in `postrouting`:
