@@ -15,6 +15,7 @@ pub(crate) mod migrations;
 pub mod update;
 pub mod web;
 pub mod wg;
+pub mod wg6;
 
 pub const TUNNEL_DEFAULT_PORT: u16 = 5960;
 pub const TUNNEL_DEFAULT_LISTEN: SocketAddr = SocketAddr::V4(SocketAddrV4::new(

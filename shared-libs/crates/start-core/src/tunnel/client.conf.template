@@ -8,6 +8,6 @@ DNS = {dns}
 [Peer]
 PublicKey = {server_pubkey}
 PresharedKey = {psk}
-AllowedIPs = {subnet}
+AllowedIPs = {allowed}
 Endpoint = {server_addr}
 PersistentKeepalive = 25

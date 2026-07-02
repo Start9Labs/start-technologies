@@ -27,7 +27,7 @@ use crate::db::model::public::{NetworkInterfaceInfo, NetworkInterfaceType};
 use crate::middleware::auth::Auth;
 use crate::middleware::auth::local::LocalAuthContext;
 use crate::middleware::cors::Cors;
-use crate::net::forward::{PortForwardController, nft_comments_with_prefix, nft_rule};
+use crate::net::forward::{PortForwardController, nft_comments_with_prefix, nft_rule, nft_rule_v6};
 use crate::net::static_server::{EMPTY_DIR, UiContext};
 use crate::prelude::*;
 use crate::rpc_continuations::{OpenAuthedContinuations, RpcContinuations};
@@ -196,6 +196,17 @@ impl TunnelContext {
         let net_iface = Watch::new(net_iface);
         let forward = PortForwardController::new();
         nft_rule(
+            "forward",
+            "wg-forward",
+            false,
+            false,
+            &format!("iifname \"{WIREGUARD_INTERFACE_NAME}\" ct state new accept"),
+        )
+        .await?;
+        // Let clients originate IPv6 out through the tunnel (return traffic is
+        // covered by the v6 base-established rule). Inbound IPv6 to a client is a
+        // firewall pinhole, opened per-port via PCP / the manual pinhole API.
+        nft_rule_v6(
             "forward",
             "wg-forward",
             false,

@@ -1,15 +1,15 @@
 use std::collections::BTreeMap;
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 
 use imbl_value::InternedString;
-use ipnet::Ipv4Net;
-use itertools::Itertools;
+use ipnet::{Ipv4Net, Ipv6Net};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use ts_rs::TS;
 use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::prelude::*;
+use crate::tunnel::wg6::{self, ClientV6};
 use crate::util::Invoke;
 use crate::util::io::write_file_atomic;
 use crate::util::serde::Base64;
@@ -33,6 +33,12 @@ pub struct WgServer {
     pub port: u16,
     pub key: Base64<WgKey>,
     pub subnets: WgSubnetMap,
+    /// Operator-configured routed IPv6 prefix delegated to this tunnel host, if
+    /// any. Clients are assigned global addresses out of it — see
+    /// [`crate::tunnel::wg6`].
+    #[serde(default)]
+    #[ts(type = "string | null")]
+    pub ipv6: Option<Ipv6Net>,
 }
 impl Default for WgServer {
     fn default() -> Self {
@@ -40,12 +46,37 @@ impl Default for WgServer {
             port: 51820,
             key: Base64(WgKey::generate()),
             subnets: WgSubnetMap::default(),
+            ipv6: None,
         }
     }
 }
 impl WgServer {
     pub fn server_config<'a>(&'a self) -> ServerConfig<'a> {
         ServerConfig(self)
+    }
+
+    /// The tunnel's own IPv6 address (prefix base `::1`), when a prefix is
+    /// configured. Advertised to clients as their IPv6 gateway and DNS server.
+    pub fn server_v6(&self) -> Option<Ipv6Addr> {
+        self.ipv6.map(wg6::server_addr)
+    }
+
+    /// Enumeration index of a client across all subnets, in the same
+    /// (subnet, client-IP) order the server config renders peers. Drives the
+    /// per-client IPv6 allocation so the server and client configs agree.
+    fn client_index(&self, client_v4: Ipv4Addr) -> Option<u32> {
+        self.subnets
+            .0
+            .values()
+            .flat_map(|s| s.clients.0.keys())
+            .position(|ip| *ip == client_v4)
+            .map(|i| i as u32)
+    }
+
+    /// The IPv6 delegated to `client_v4`, if a prefix is configured and the
+    /// client is known.
+    pub fn client_v6(&self, client_v4: Ipv4Addr) -> Option<ClientV6> {
+        wg6::client_v6(self.ipv6?, self.client_index(client_v4)?, client_v4)
     }
     pub async fn sync(&self) -> Result<(), Error> {
         Command::new("wg-quick")
@@ -238,10 +269,15 @@ impl WgConfig {
             wan_ip: None,
         }
     }
-    pub fn server_peer_config<'a>(&'a self, addr: Ipv4Addr) -> ServerPeerConfig<'a> {
+    pub fn server_peer_config<'a>(
+        &'a self,
+        addr: Ipv4Addr,
+        client_v6: Option<Ipv6Net>,
+    ) -> ServerPeerConfig<'a> {
         ServerPeerConfig {
             client_config: self,
             client_addr: addr,
+            client_v6,
         }
     }
     pub fn client_config(
@@ -250,6 +286,8 @@ impl WgConfig {
         subnet: Ipv4Net,
         server_pubkey: Base64<PublicKey>,
         server_addr: SocketAddr,
+        client_v6: Option<ClientV6>,
+        server_v6: Option<Ipv6Addr>,
     ) -> ClientConfig {
         ClientConfig {
             client_config: self,
@@ -257,6 +295,8 @@ impl WgConfig {
             subnet,
             server_pubkey,
             server_addr,
+            client_v6,
+            server_v6,
         }
     }
 }
@@ -264,15 +304,22 @@ impl WgConfig {
 pub struct ServerPeerConfig<'a> {
     client_config: &'a WgConfig,
     client_addr: Ipv4Addr,
+    /// The IPv6 network delegated to this client (its /64 under prefix
+    /// delegation, else its /128), routed back to it over WireGuard.
+    client_v6: Option<Ipv6Net>,
 }
 impl<'a> std::fmt::Display for ServerPeerConfig<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let allowed = match self.client_v6 {
+            Some(net) => format!("{}/32, {net}", self.client_addr),
+            None => format!("{}/32", self.client_addr),
+        };
         write!(
             f,
             include_str!("./server-peer.conf.template"),
             pubkey = self.client_config.key.verifying_key().to_padded_string(),
             psk = self.client_config.psk.to_padded_string(),
-            addr = self.client_addr,
+            allowed = allowed,
         )
     }
 }
@@ -296,9 +343,32 @@ pub struct ClientConfig {
     #[serde(deserialize_with = "deserialize_verifying_key")]
     server_pubkey: Base64<PublicKey>,
     server_addr: SocketAddr,
+    #[serde(default)]
+    client_v6: Option<ClientV6>,
+    #[serde(default)]
+    server_v6: Option<Ipv6Addr>,
 }
 impl std::fmt::Display for ClientConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let v4_addr = Ipv4Net::new_assert(self.client_addr, self.subnet.prefix_len());
+        // The client's global address is advertised at its delegated prefix
+        // length: /64 when a whole prefix is delegated (so it owns the range),
+        // /128 when it shares the tunnel's /64.
+        let addr = match self.client_v6 {
+            Some(c) => format!("{v4_addr}, {}/{}", c.addr, c.delegated.prefix_len()),
+            None => v4_addr.to_string(),
+        };
+        let dns = match self.server_v6 {
+            Some(v6) => format!("{}, {v6}", self.subnet.addr()),
+            None => self.subnet.addr().to_string(),
+        };
+        // IPv6 is full-tunnel (`::/0`): replies sourced from the VPS-delegated
+        // global address must return through the tunnel, and a plain WireGuard
+        // peer can't source-route otherwise. IPv4 stays split (subnet only).
+        let allowed = match self.client_v6 {
+            Some(_) => format!("{}, ::/0", self.subnet.trunc()),
+            None => self.subnet.trunc().to_string(),
+        };
         write!(
             f,
             include_str!("./client.conf.template"),
@@ -306,12 +376,86 @@ impl std::fmt::Display for ClientConfig {
             name = self.client_config.name,
             privkey = self.client_config.key.to_padded_string(),
             psk = self.client_config.psk.to_padded_string(),
-            addr = Ipv4Net::new_assert(self.client_addr, self.subnet.prefix_len()),
-            dns = self.subnet.addr(),
-            subnet = self.subnet.trunc(),
+            addr = addr,
+            dns = dns,
+            allowed = allowed,
             server_pubkey = self.server_pubkey.to_padded_string(),
             server_addr = self.server_addr,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn client() -> WgConfig {
+        WgConfig::generate("phone".into(), WgClientKind::Client)
+    }
+
+    #[test]
+    fn client_config_without_ipv6_is_v4_only() {
+        // Subnets carry the server's `.1` host in the key; `addr()` is the DNS.
+        let cfg = client()
+            .client_config(
+                "10.59.0.2".parse().unwrap(),
+                "10.59.0.1/24".parse().unwrap(),
+                Base64(WgKey::generate()).verifying_key(),
+                "1.2.3.4:51820".parse().unwrap(),
+                None,
+                None,
+            )
+            .to_string();
+        assert!(cfg.contains("Address = 10.59.0.2/24"));
+        assert!(cfg.contains("DNS = 10.59.0.1"));
+        assert!(cfg.contains("AllowedIPs = 10.59.0.0/24"));
+        assert!(!cfg.contains("::"));
+    }
+
+    #[test]
+    fn client_config_with_shared_64_carries_a_128() {
+        // 10.59.0.2 == 0x0a3b0002, so the /128 host bits are `a3b:2`.
+        let v6 = wg6::client_v6(
+            "2001:db8:abcd::/64".parse().unwrap(),
+            0,
+            "10.59.0.2".parse().unwrap(),
+        );
+        let cfg = client()
+            .client_config(
+                "10.59.0.2".parse().unwrap(),
+                "10.59.0.1/24".parse().unwrap(),
+                Base64(WgKey::generate()).verifying_key(),
+                "1.2.3.4:51820".parse().unwrap(),
+                v6,
+                Some("2001:db8:abcd::1".parse().unwrap()),
+            )
+            .to_string();
+        assert!(cfg.contains("Address = 10.59.0.2/24, 2001:db8:abcd::a3b:2/128"));
+        assert!(cfg.contains("DNS = 10.59.0.1, 2001:db8:abcd::1"));
+        // IPv6 is full-tunnel so replies from the delegated GUA return via wg.
+        assert!(cfg.contains("AllowedIPs = 10.59.0.0/24, ::/0"));
+    }
+
+    #[test]
+    fn server_config_lists_v6_address_and_routes_client_128() {
+        let mut server = WgServer::default();
+        server.subnets = WgSubnetMap::default();
+        server.subnets.0.insert(
+            "10.59.0.1/24".parse().unwrap(),
+            WgSubnetConfig {
+                name: "net".into(),
+                clients: {
+                    let mut c = WgSubnetClients::default();
+                    c.0.insert("10.59.0.2".parse().unwrap(), client());
+                    c
+                },
+                ..Default::default()
+            },
+        );
+        server.ipv6 = Some("2001:db8:abcd::/64".parse().unwrap());
+        let rendered = server.server_config().to_string();
+        assert!(rendered.contains("2001:db8:abcd::1/64"));
+        assert!(rendered.contains("AllowedIPs = 10.59.0.2/32, 2001:db8:abcd::a3b:2/128"));
     }
 }
 
@@ -319,15 +463,34 @@ pub struct ServerConfig<'a>(&'a WgServer);
 impl<'a> std::fmt::Display for ServerConfig<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self(server) = *self;
+        let mut addresses = server
+            .subnets
+            .0
+            .keys()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>();
+        if let (Some(prefix), Some(v6)) = (server.ipv6, server.server_v6()) {
+            addresses.push(format!("{v6}/{}", prefix.prefix_len()));
+        }
         write!(
             f,
             include_str!("./server.conf.template"),
-            subnets = server.subnets.0.keys().join(", "),
+            subnets = addresses.join(", "),
             server_port = server.port,
             server_privkey = server.key.to_padded_string(),
         )?;
-        for (addr, peer) in server.subnets.0.values().flat_map(|s| &s.clients.0) {
-            write!(f, "{}", peer.server_peer_config(*addr))?;
+        for (i, (addr, peer)) in server
+            .subnets
+            .0
+            .values()
+            .flat_map(|s| &s.clients.0)
+            .enumerate()
+        {
+            let client_v6 = server
+                .ipv6
+                .and_then(|p| wg6::client_v6(p, i as u32, *addr))
+                .map(|c| c.delegated);
+            write!(f, "{}", peer.server_peer_config(*addr, client_v6))?;
         }
         Ok(())
     }

@@ -270,6 +270,7 @@ fn export_bindings_tunnel_db() {
     SetDnsInjectionParams::export_all_to("bindings/tunnel").unwrap();
     SetAutoPortForwardParams::export_all_to("bindings/tunnel").unwrap();
     SetSubnetWanParams::export_all_to("bindings/tunnel").unwrap();
+    SetIpv6Params::export_all_to("bindings/tunnel").unwrap();
     SetDeviceWanParams::export_all_to("bindings/tunnel").unwrap();
     SetDeviceKindParams::export_all_to("bindings/tunnel").unwrap();
     AddDnsRecordParams::export_all_to("bindings/tunnel").unwrap();

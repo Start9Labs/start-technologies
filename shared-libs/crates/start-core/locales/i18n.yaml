@@ -6132,6 +6132,13 @@ about.set-subnet-wan:
   fr_FR: "Attribuer l'IP WAN qu'utilise le trafic d'un sous-réseau"
   pl_PL: "Przypisz adres IP WAN używany przez ruch podsieci"
 
+about.set-tunnel-ipv6:
+  en_US: "Set the tunnel's routed IPv6 prefix"
+  de_DE: "Das geroutete IPv6-Präfix des Tunnels festlegen"
+  es_ES: "Establecer el prefijo IPv6 enrutado del túnel"
+  fr_FR: "Définir le préfixe IPv6 routé du tunnel"
+  pl_PL: "Ustaw routowany prefiks IPv6 tunelu"
+
 about.set-user-interface-password:
   en_US: "Set user interface password"
   de_DE: "Passwort der Benutzeroberfläche festlegen"
