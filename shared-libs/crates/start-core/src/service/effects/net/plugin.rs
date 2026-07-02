@@ -94,7 +94,7 @@ pub async fn export_url(
         .ctx
         .db
         .mutate(|db| {
-            let host = host_for(db, Some(&hostname_info.package_id), &hostname_info.host_id)?;
+            let host = host_for(db, &hostname_info.package_id, &hostname_info.host_id)?;
             host.as_bindings_mut()
                 .as_idx_mut(&hostname_info.internal_port)
                 .or_not_found(t!(

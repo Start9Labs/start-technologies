@@ -1179,7 +1179,11 @@ impl NetService {
                     .de()?;
                 let hostname = ServerHostname::load(db.as_public().as_server_info())?;
                 let mut ports = db.as_private().as_available_ports().de()?;
-                let host = host_for(db, pkg_id.as_ref(), &id)?;
+                let host = host_for(
+                    db,
+                    pkg_id.as_ref().unwrap_or(&PackageId::start_os()),
+                    &id,
+                )?;
                 host.add_binding(&mut ports, internal_port, options)?;
                 host.update_addresses(&hostname, &gateways, &ports)?;
                 db.as_private_mut().as_available_ports_mut().ser(&ports)?;
@@ -1210,7 +1214,11 @@ impl NetService {
                     .de()?;
                 let hostname = ServerHostname::load(db.as_public().as_server_info())?;
                 let mut ports = db.as_private().as_available_ports().de()?;
-                let host = host_for(db, pkg_id.as_ref(), &id)?;
+                let host = host_for(
+                    db,
+                    pkg_id.as_ref().unwrap_or(&PackageId::start_os()),
+                    &id,
+                )?;
                 host.add_binding_range(
                     &mut ports,
                     internal_start_port,

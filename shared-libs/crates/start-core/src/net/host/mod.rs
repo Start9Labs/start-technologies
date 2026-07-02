@@ -547,27 +547,24 @@ impl Map for Hosts {
 
 pub fn host_for<'a>(
     db: &'a mut DatabaseModel,
-    package_id: Option<&PackageId>,
+    package_id: &PackageId,
     host_id: &HostId,
 ) -> Result<&'a mut Model<Host>, Error> {
     // `start-os` is the server itself: its single host (the admin UI's) lives
     // in serverInfo, not packageData.
-    let package_id = match package_id {
-        Some(package_id) if !package_id.is_start_os() => package_id,
-        _ => {
-            if *host_id != HostId::admin() {
-                return Err(Error::new(
-                    eyre!("the server has no host {host_id}"),
-                    ErrorKind::NotFound,
-                ));
-            }
-            return Ok(db
-                .as_public_mut()
-                .as_server_info_mut()
-                .as_network_mut()
-                .as_host_mut());
+    if package_id.is_start_os() {
+        if *host_id != HostId::admin() {
+            return Err(Error::new(
+                eyre!("the server has no host {host_id}"),
+                ErrorKind::NotFound,
+            ));
         }
-    };
+        return Ok(db
+            .as_public_mut()
+            .as_server_info_mut()
+            .as_network_mut()
+            .as_host_mut());
+    }
     fn host_info<'a>(
         db: &'a mut DatabaseModel,
         package_id: &PackageId,
@@ -726,7 +723,7 @@ impl HostApiKind for ForPackage {
         (package, host): &Self::Inheritance,
         db: &'a mut DatabaseModel,
     ) -> Result<&'a mut Model<Host>, Error> {
-        host_for(db, Some(package), host)
+        host_for(db, package, host)
     }
 }
 pub struct ForServer;
@@ -741,7 +738,7 @@ impl HostApiKind for ForServer {
         _: &Self::Inheritance,
         db: &'a mut DatabaseModel,
     ) -> Result<&'a mut Model<Host>, Error> {
-        host_for(db, None, &HostId::admin())
+        host_for(db, &PackageId::start_os(), &HostId::admin())
     }
 }
 
