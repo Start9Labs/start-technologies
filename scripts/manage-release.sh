@@ -276,14 +276,16 @@ cmd_pre_check() {
         echo "  ✓ tag ${TAG} is free"
     fi
 
-    # 3. Version must not already be published at its official location.
+    # 3. This release's own output must not already exist. For os/cli/deb that's
+    # the GitHub release (the os images themselves are published to S3 + indexed
+    # by CI, so the registry is expected to already carry them). For npm it's the
+    # published package version.
     case "$KIND" in
-        os)
-            if start-cli --registry=$REGISTRY registry os index 2>/dev/null \
-                | jq -e ".versions[\"$VERSION\"] // empty" >/dev/null 2>&1; then
-                release_guard "OS version ${VERSION} already in registry ${REGISTRY}" || errors=1
+        os | cli | deb)
+            if gh release view -R "$REPO" "$TAG" >/dev/null 2>&1; then
+                release_guard "GitHub release ${TAG} already exists" || errors=1
             else
-                echo "  ✓ OS version ${VERSION} not yet in registry"
+                echo "  ✓ GitHub release ${TAG} does not exist"
             fi
             ;;
         npm)
@@ -293,13 +295,6 @@ cmd_pre_check() {
                 errors=1
             else
                 echo "  ✓ ${SDK_NPM_PACKAGE}@${VERSION} not yet on npm"
-            fi
-            ;;
-        cli | deb)
-            if gh release view -R "$REPO" "$TAG" >/dev/null 2>&1; then
-                release_guard "GitHub release ${TAG} already exists" || errors=1
-            else
-                echo "  ✓ GitHub release ${TAG} does not exist"
             fi
             ;;
     esac
@@ -573,12 +568,14 @@ cmd_notes() {
 cmd_release() {
     case "$KIND" in
         os)
+            # CI's startos-iso deploy already uploaded the images to S3 and
+            # indexed them, so pull the published assets rather than re-pushing
+            # build artifacts (no pull-gha/push/index here). Use those standalone
+            # subcommands directly for a manual re-publish or recovery.
             cmd_pre_check
-            cmd_pull_gha
+            cmd_pull
             cmd_tag
             cmd_create_gh_release
-            cmd_push
-            cmd_index
             cmd_sign
             ;;
         cli | deb)
@@ -622,8 +619,10 @@ Subcommands:
   create-gh-release  Create (or update) the GitHub release with notes.
                      (os/cli/deb.)
   push               Upload artifacts to their destination (S3 for os, GitHub
-                     release + apt for cli/deb, npm publish for sdk).
-  index              Register and index the version in the registry. (os only.)
+                     release + apt for cli/deb, npm publish for sdk). For os this
+                     normally runs in CI; use it for a manual re-publish.
+  index              Register and index the version in the registry (os only;
+                     normally done in CI — use it for a manual re-index).
   sign               Sign artifacts with the Start9 org key (+ personal key if
                      available) and upload signatures.tar.gz. (os/cli/deb.)
   cosign             Add your personal GPG signature to an existing release's

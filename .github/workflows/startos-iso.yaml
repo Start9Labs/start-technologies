@@ -338,7 +338,7 @@ jobs:
         run: |
           INPUT="${{ github.event.inputs.platform }}"
           if [ "$INPUT" = "ALL" ]; then
-            PLATFORMS="x86_64 x86_64-nonfree x86_64-nvidia aarch64 aarch64-nonfree aarch64-nvidia riscv64 riscv64-nonfree"
+            PLATFORMS="x86_64 x86_64-nonfree x86_64-nvidia aarch64 aarch64-nonfree aarch64-nvidia raspberrypi riscv64 riscv64-nonfree"
           else
             PLATFORMS="$INPUT"
           fi
@@ -356,6 +356,13 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           pattern: "*.iso"
+          path: artifacts/
+          merge-multiple: true
+
+      - name: Download IMG artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: "*.img"
           path: artifacts/
           merge-multiple: true
 
@@ -397,7 +404,7 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           cd artifacts
           for PLATFORM in ${{ steps.platforms.outputs.list }}; do
-            for file in *_${PLATFORM}.squashfs *_${PLATFORM}.iso; do
+            for file in *_${PLATFORM}.squashfs *_${PLATFORM}.iso *_${PLATFORM}.img; do
               [ -f "$file" ] || continue
               echo "Uploading $file..."
               s3cmd put -P "$file" "${{ env.S3_BUCKET }}/v${VERSION}/$file"
@@ -415,7 +422,7 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           cd artifacts
           for PLATFORM in ${{ steps.platforms.outputs.list }}; do
-            for file in *_${PLATFORM}.squashfs *_${PLATFORM}.iso; do
+            for file in *_${PLATFORM}.squashfs *_${PLATFORM}.iso *_${PLATFORM}.img; do
               [ -f "$file" ] || continue
               echo "Indexing $file for platform $PLATFORM..."
               start-cli --registry="${{ env.REGISTRY }}" registry os asset add \
