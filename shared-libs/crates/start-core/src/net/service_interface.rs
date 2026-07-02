@@ -199,6 +199,7 @@ pub enum ServiceInterfaceType {
 #[serde(rename_all = "camelCase")]
 pub struct AddressInfo {
     pub username: Option<String>,
+    #[serde(deserialize_with = "HostId::deserialize_lenient")]
     pub host_id: HostId,
     pub internal_port: u16,
     #[ts(type = "string | null")]
@@ -225,4 +226,33 @@ pub struct RangeServiceInterface {
     pub description: String,
     #[ts(type = "string | null")]
     pub scheme: Option<InternedString>,
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    // Dev builds between #3366 and #3387 persisted the server host's id as
+    // the empty string, which strict deserialization rejects — bricking every
+    // boot at `validate_db`. The persisted field reads it as `admin`, and the
+    // de → ser round-trip `validate_db` performs canonicalizes it on disk.
+    #[test]
+    fn address_info_heals_legacy_empty_host_id() {
+        let legacy = serde_json::json!({
+            "username": null,
+            "hostId": "",
+            "internalPort": 80,
+            "scheme": "http",
+            "sslScheme": "https",
+            "suffix": ""
+        });
+        let info: AddressInfo = serde_json::from_value(legacy).unwrap();
+        assert_eq!(info.host_id, HostId::admin());
+        let canonical = serde_json::to_value(&info).unwrap();
+        assert_eq!(canonical["hostId"], "admin");
+        let again: AddressInfo = serde_json::from_value(canonical.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&again).unwrap(), canonical);
+        // only the persisted field is lenient — HostId itself stays strict
+        assert!(serde_json::from_value::<HostId>(serde_json::json!("")).is_err());
+    }
 }

@@ -226,7 +226,7 @@ impl NetController {
         service.clear_bindings(Default::default()).await?;
         service
             .bind(
-                HostId::default(),
+                HostId::admin(),
                 80,
                 BindOptions {
                     preferred_external_port: 80,
@@ -263,7 +263,7 @@ impl NetController {
                     masked: false,
                     address_info: AddressInfo {
                         username: None,
-                        host_id: HostId::default(),
+                        host_id: HostId::admin(),
                         internal_port: 80,
                         scheme: Some(InternedString::intern("http")),
                         ssl_scheme: Some(InternedString::intern("https")),
@@ -1138,7 +1138,7 @@ impl NetService {
                         let host = watch.peek()?.de()?;
                         let mut data = thread_data.lock().await;
                         let ctrl = data.net_controller()?;
-                        data.update(&*ctrl, HostId::default(), host).await?;
+                        data.update(&*ctrl, HostId::admin(), host).await?;
                         Ok::<_, Error>(())
                     }
                     .await
@@ -1286,7 +1286,7 @@ impl NetService {
                     host.as_bindings_mut().mutate(|b| {
                         for (internal_port, info) in b.iter_mut() {
                             if !except.contains(&BindId {
-                                id: HostId::default(),
+                                id: HostId::admin(),
                                 internal_port: *internal_port,
                             }) {
                                 info.disable();
@@ -1297,7 +1297,7 @@ impl NetService {
                     host.as_binding_ranges_mut().mutate(|r| {
                         for (internal_port, info) in r.iter_mut() {
                             if !except.contains(&BindId {
-                                id: HostId::default(),
+                                id: HostId::admin(),
                                 internal_port: *internal_port,
                             }) {
                                 info.disable();

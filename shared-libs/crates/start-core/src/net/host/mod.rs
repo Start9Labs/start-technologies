@@ -730,7 +730,7 @@ impl HostApiKind for ForServer {
         _: &Self::Inheritance,
         db: &'a mut DatabaseModel,
     ) -> Result<&'a mut Model<Host>, Error> {
-        host_for(db, None, &HostId::default())
+        host_for(db, None, &HostId::admin())
     }
 }
 
