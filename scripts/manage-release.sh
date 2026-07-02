@@ -15,12 +15,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 REPO="Start9Labs/start-technologies"
-# OS registry promotion chain: CI indexes images into alpha; alpha -> beta is
-# promoted manually, out of band; the full `release` promotes beta -> production.
-# So the manual release pulls/verifies from SOURCE_REGISTRY (beta) and promotes
-# into PROD_REGISTRY. Override either per run.
-SOURCE_REGISTRY="${SOURCE_REGISTRY:-https://beta-registry.start9.com}"
-PROD_REGISTRY="${PROD_REGISTRY:-https://registry.start9.com}"
+# Registries are scoped per project (<PROJECT>_SOURCE/TARGET_REGISTRY); only the
+# OS promotes between registries. The OS chain: CI indexes images into alpha;
+# alpha -> beta is promoted manually, out of band; the full `release` promotes
+# the source (beta) -> target (production). Override either per run.
+STARTOS_SOURCE_REGISTRY="${STARTOS_SOURCE_REGISTRY:-https://beta-registry.start9.com}"
+STARTOS_TARGET_REGISTRY="${STARTOS_TARGET_REGISTRY:-https://registry.start9.com}"
 S3_BUCKET="s3://startos-images"
 S3_CDN="https://startos-images.nyc3.cdn.digitaloceanspaces.com"
 START9_GPG_KEY="2D63C217"
@@ -311,9 +311,9 @@ cmd_pre_check() {
             # `release` pulls the images from the source registry and promotes
             # them into prod, so every expected asset must already be in source.
             local idx missing platform ext
-            idx=$(start-cli --registry="$SOURCE_REGISTRY" registry os index 2>/dev/null || echo '{}')
+            idx=$(start-cli --registry="$STARTOS_SOURCE_REGISTRY" registry os index 2>/dev/null || echo '{}')
             if ! echo "$idx" | jq -e ".versions[\"$VERSION\"]" >/dev/null 2>&1; then
-                >&2 echo "  ✗ OS ${VERSION} not in source registry ${SOURCE_REGISTRY} — promote alpha→beta first"
+                >&2 echo "  ✗ OS ${VERSION} not in source registry ${STARTOS_SOURCE_REGISTRY} — promote it there first"
                 errors=1
             else
                 missing=""
@@ -331,9 +331,9 @@ cmd_pre_check() {
                 fi
             fi
             # `release` promotes into prod; it shouldn't already be there.
-            if start-cli --registry="$PROD_REGISTRY" registry os index 2>/dev/null \
+            if start-cli --registry="$STARTOS_TARGET_REGISTRY" registry os index 2>/dev/null \
                 | jq -e ".versions[\"$VERSION\"]" >/dev/null 2>&1; then
-                release_guard "OS ${VERSION} already in production registry ${PROD_REGISTRY}" || errors=1
+                release_guard "OS ${VERSION} already in production registry ${STARTOS_TARGET_REGISTRY}" || errors=1
             else
                 echo "  ✓ not yet in production registry"
             fi
@@ -443,7 +443,7 @@ cmd_pull() {
             for platform in $OS_PLATFORMS; do
                 for ext in $(os_image_exts "$platform"); do
                     echo "  ${ext} ${platform}"
-                    start-cli --registry="$SOURCE_REGISTRY" registry os asset get "$ext" "$VERSION" "$platform" -d "$(pwd)"
+                    start-cli --registry="$STARTOS_SOURCE_REGISTRY" registry os asset get "$ext" "$VERSION" "$platform" -d "$(pwd)"
                 done
             done
             ;;
@@ -524,8 +524,8 @@ cmd_index() {
     # registry into production. This copies the index entries and re-signs the
     # commitments with the developer key — the images stay on the shared S3
     # bucket, so nothing is re-uploaded.
-    echo "Promoting OS ${VERSION}: ${SOURCE_REGISTRY} -> ${PROD_REGISTRY} ..."
-    start-cli registry os promote --from "$SOURCE_REGISTRY" --to "$PROD_REGISTRY" "$VERSION"
+    echo "Promoting OS ${VERSION}: ${STARTOS_SOURCE_REGISTRY} -> ${STARTOS_TARGET_REGISTRY} ..."
+    start-cli registry os promote --from "$STARTOS_SOURCE_REGISTRY" --to "$STARTOS_TARGET_REGISTRY" "$VERSION"
 }
 
 cmd_sign() {
@@ -712,17 +712,20 @@ Subcommands:
   release            Run the full applicable pipeline for the project.
 
 Environment variables:
-  VERSION           Override the version (default: read from the manifest)
-  SOURCE_REGISTRY   OS registry to pull/promote from (default: beta)
-  PROD_REGISTRY     OS registry to promote into (default: production)
-  RUN_ID            GitHub Actions run id/url for pull-gha
-  COMMIT            Commit to tag (default: HEAD)
-  FORCE             Set to 1 to re-release an already-released version: force-move
-                    the tag and downgrade pre-check's "already released" failures
-                    to warnings (idempotent steps only; npm republish always fails)
-  CLEAN             Set to 1 to wipe and recreate the release directory
-  GH_USER           Override GitHub username (default: autodetected via gh)
-  OTP               npm one-time password (start-sdk publish)
+  VERSION                  Override the version (default: read from the manifest)
+  RUN_ID                   GitHub Actions run id/url for pull-gha
+  COMMIT                   Commit to tag (default: HEAD)
+  FORCE                    Set to 1 to re-release an already-released version:
+                           force-move the tag and downgrade pre-check's "already
+                           released" failures to warnings (idempotent steps only;
+                           npm republish always fails)
+  CLEAN                    Set to 1 to wipe and recreate the release directory
+  GH_USER                  Override GitHub username (default: autodetected via gh)
+  OTP                      npm one-time password (start-sdk publish)
+
+Registries are scoped per project (only the OS promotes between registries):
+  STARTOS_SOURCE_REGISTRY  registry the OS release pulls/promotes from (default: beta)
+  STARTOS_TARGET_REGISTRY  registry the OS release promotes into (default: production)
 EOF
 }
 
