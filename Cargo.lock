@@ -7260,7 +7260,7 @@ dependencies = [
 
 [[package]]
 name = "start-core"
-version = "0.4.0-beta.11"
+version = "0.4.0-beta.10"
 dependencies = [
  "aes",
  "astral-tokio-tar",

@@ -10,34 +10,6 @@ file tracks notable changes since the move to the monorepo.
 
 ## [Unreleased]
 
-## [0.4.0-beta.11]
-
-### Changed
-
-- **The StartOS admin UI is now addressed like a regular service interface (#3387).**
-  At the SDK/effects layer the server's own host is identified by the reserved
-  package id `start-os` and host id `admin` — no more `null`/`STARTOS` sentinels.
-  `host_for`, the host RPC APIs, and the `getHostInfo` / `getServicePortForward` /
-  `getServiceInterface` / `listServiceInterfaces` effects all resolve
-  `start-os` to the server host, `start-os.startos` resolves like any package
-  hostname, and the UI passes `start-os` wherever a package id is expected.
-  Installing a package with the id `start-os` is rejected.
-- **SDK (breaking):** `PluginHostnameInfo.packageId` is required — url plugins
-  (e.g. tor) must export the StartOS UI's urls as `start-os`/`admin` instead of
-  `packageId: null`.
-
-### Fixed
-
-- **Dev builds bricked by an empty persisted host id (#3387).** Builds between
-  #3366 and #3387 persisted the server host's then-sentinel id (the empty
-  string) in the `startos-ui` interface's `addressInfo.hostId`, which strict
-  deserialization rejects — every boot failed into the diagnostic UI. A db
-  migration rewrites it to `admin`; affected servers self-heal on update.
-- The 0.4.0-beta.11 migration re-points the tor package's persisted
-  hidden-service identity for the admin UI (`STARTOS`/`startos-ui` →
-  `start-os`/`admin`), preserving the server's existing `.onion` address
-  across the identity change.
-
 ## [0.4.0-beta.10]
 
 ### Added
@@ -76,6 +48,20 @@ file tracks notable changes since the move to the monorepo.
 
 ### Changed
 
+- **The StartOS admin UI is now addressed like a regular service interface (#3387).**
+  At the SDK/effects layer the server's own host is identified by the reserved
+  package id `start-os` and host id `admin` — no more `null`/`STARTOS` sentinels.
+  `host_for`, the host RPC APIs, and the `getHostInfo` / `getServicePortForward` /
+  `getServiceInterface` / `listServiceInterfaces` effects all resolve
+  `start-os` to the server host, `start-os.startos` resolves like any package
+  hostname, and the UI passes `start-os` wherever a package id is expected.
+  Installing a package with the id `start-os` is rejected. The migration
+  re-points the tor package's persisted hidden-service identity for the admin
+  UI (`STARTOS`/`startos-ui` → `start-os`/`admin`), preserving the server's
+  existing `.onion` address across the identity change.
+- **SDK (breaking):** `PluginHostnameInfo.packageId` is required — url plugins
+  (e.g. tor) must export the StartOS UI's urls as `start-os`/`admin` instead of
+  `packageId: null`.
 - **OS Logs and Kernel Logs moved into System settings.** The top-level Logs tab
   is removed; OS Logs and Kernel Logs are now entries at the bottom of the System
   menu.
@@ -101,6 +87,12 @@ file tracks notable changes since the move to the monorepo.
 
 ### Fixed
 
+- **Dev builds bricked by an empty persisted host id (#3387).** Builds between
+  #3366 and #3387 persisted the server host's then-sentinel id (the empty
+  string) in the `startos-ui` interface's `addressInfo.hostId`, which strict
+  deserialization rejects — every boot failed into the diagnostic UI. The
+  server host now has a real id (`admin`) and the beta.10 migration rewrites
+  the empty value.
 - **Critical-task start gate is now enforced backend-side.** Starting a service with
   an unresolved critical task was previously blocked only in the web UI; the CLI and
   RPC bypassed it. `package.start` now rejects such a start unless `--force` is passed.
