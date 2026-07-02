@@ -97,7 +97,7 @@ export class PluginAddressesComponent {
       actionInfo: group.tableAction,
       prefill: {
         urlPluginMetadata: {
-          packageId: this.packageId() || null,
+          packageId: this.packageId(),
           hostId: addressInfo.hostId,
           interfaceId: iface.id,
           internalPort: addressInfo.internalPort,

@@ -1676,12 +1676,19 @@ export class MockApiService extends ApiService {
     return null
   }
 
+  // `start-os` is the server: its host lives in serverInfo, not packageData
+  private mockHostPath(pkg: string, host: string): string {
+    return pkg === 'start-os'
+      ? '/serverInfo/network/host'
+      : `/packageData/${pkg}/hosts/${host}`
+  }
+
   async pkgBindingSetAddressEnabled(
     params: PkgBindingSetAddressEnabledReq,
   ): Promise<null> {
     await pauseFor(2000)
 
-    const basePath = `/packageData/${params.package}/hosts/${params.host}/bindings/${params.internalPort}/addresses`
+    const basePath = `${this.mockHostPath(params.package, params.host)}/bindings/${params.internalPort}/addresses`
     this.mockSetAddressEnabled(basePath, params.address, params.enabled)
 
     return null
@@ -1692,7 +1699,7 @@ export class MockApiService extends ApiService {
   ): Promise<null> {
     await pauseFor(2000)
 
-    const basePath = `/packageData/${params.package}/hosts/${params.host}/bindingRanges/${params.internalPort}/addresses`
+    const basePath = `${this.mockHostPath(params.package, params.host)}/bindingRanges/${params.internalPort}/addresses`
     this.mockSetAddressEnabled(basePath, params.address, params.enabled)
 
     return null
@@ -1714,7 +1721,7 @@ export class MockApiService extends ApiService {
   ): Promise<null> {
     await pauseFor(2000)
 
-    const basePath = `/packageData/${params.package}/hosts/${params.host}/bindings/${params.internalPort}/addresses`
+    const basePath = `${this.mockHostPath(params.package, params.host)}/bindings/${params.internalPort}/addresses`
     this.mockSetGuaAccess(basePath, params.address, params.access)
 
     return null
@@ -1728,14 +1735,14 @@ export class MockApiService extends ApiService {
     const patch: Operation<any>[] = [
       {
         op: PatchOp.ADD,
-        path: `/packageData/${params.package}/hosts/${params.host}/publicDomains`,
+        path: `${this.mockHostPath(params.package, params.host)}/publicDomains`,
         value: {
           [params.fqdn]: { gateway: params.gateway, acme: params.acme },
         },
       },
       {
         op: PatchOp.ADD,
-        path: `/packageData/${params.package}/hosts/${params.host}/bindings/80/addresses/available/-`,
+        path: `${this.mockHostPath(params.package, params.host)}/bindings/80/addresses/available/-`,
         value: {
           ssl: true,
           public: true,
@@ -1765,7 +1772,7 @@ export class MockApiService extends ApiService {
     const patch: RemoveOperation[] = [
       {
         op: PatchOp.REMOVE,
-        path: `/packageData/${params.package}/hosts/${params.host}/publicDomains/${params.fqdn}`,
+        path: `${this.mockHostPath(params.package, params.host)}/publicDomains/${params.fqdn}`,
       },
     ]
     this.mockRevision(patch)
@@ -1779,12 +1786,12 @@ export class MockApiService extends ApiService {
     const patch: Operation<any>[] = [
       {
         op: PatchOp.ADD,
-        path: `/packageData/${params.package}/hosts/${params.host}/privateDomains/${params.fqdn}`,
+        path: `${this.mockHostPath(params.package, params.host)}/privateDomains/${params.fqdn}`,
         value: ['eth0'],
       },
       {
         op: PatchOp.ADD,
-        path: `/packageData/${params.package}/hosts/${params.host}/bindings/80/addresses/available/-`,
+        path: `${this.mockHostPath(params.package, params.host)}/bindings/80/addresses/available/-`,
         value: {
           ssl: true,
           public: false,
@@ -1807,7 +1814,7 @@ export class MockApiService extends ApiService {
     const patch: RemoveOperation[] = [
       {
         op: PatchOp.REMOVE,
-        path: `/packageData/${params.package}/hosts/${params.host}/privateDomains/${params.fqdn}`,
+        path: `${this.mockHostPath(params.package, params.host)}/privateDomains/${params.fqdn}`,
       },
     ]
     this.mockRevision(patch)

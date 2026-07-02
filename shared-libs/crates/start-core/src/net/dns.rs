@@ -467,6 +467,9 @@ impl Resolver {
                 else {
                     return None;
                 };
+                // the server's own services are registered under `None`;
+                // `start-os.startos` is the server, same as bare `startos`
+                let pkg = pkg.filter(|p| !p.is_start_os());
                 if let Some(ip) = r.services.get(&pkg) {
                     Some(
                         ip.iter()

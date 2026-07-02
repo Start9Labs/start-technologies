@@ -59,7 +59,7 @@ export const manifest = setupManifest({
 
 | Field               | Description                                            |
 | ------------------- | ------------------------------------------------------ |
-| `id`                | Unique identifier (lowercase, hyphens allowed)         |
+| `id`                | Unique identifier (lowercase, hyphens allowed; `start-os` is reserved for the OS itself) |
 | `title`             | Display name shown in UI                               |
 | `license`           | SPDX identifier (`MIT`, `Apache-2.0`, `GPL-3.0`, etc.) |
 | `packageRepo`       | URL to the StartOS package repository                  |

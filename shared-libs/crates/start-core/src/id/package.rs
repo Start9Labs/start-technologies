@@ -14,6 +14,16 @@ lazy_static::lazy_static! {
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, TS)]
 #[ts(type = "string")]
 pub struct PackageId(Id);
+impl PackageId {
+    /// The reserved package id identifying StartOS itself — the owner of the
+    /// server's own host (the admin UI). Not installable as a package.
+    pub fn start_os() -> Self {
+        PackageId(Id::try_from("start-os").expect("valid id"))
+    }
+    pub fn is_start_os(&self) -> bool {
+        &**self == "start-os"
+    }
+}
 impl FromStr for PackageId {
     type Err = InvalidId;
     fn from_str(s: &str) -> Result<Self, Self::Err> {

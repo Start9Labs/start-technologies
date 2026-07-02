@@ -123,19 +123,26 @@ pub async fn get_service_port_forward(
 
     let package_id = package_id.unwrap_or_else(|| context.seed.id.clone());
 
-    Ok(context
-        .seed
-        .ctx
-        .db
-        .peek()
-        .await
-        .as_public()
-        .as_package_data()
-        .as_idx(&package_id)
-        .or_not_found(&package_id)?
-        .as_hosts()
-        .as_idx(&host_id)
-        .or_not_found(&host_id)?
+    let db = context.seed.ctx.db.peek().await;
+    // `start-os` is the server: its single `admin` host lives in serverInfo.
+    let host = if package_id.is_start_os() {
+        if host_id != HostId::admin() {
+            return Err(Error::new(
+                eyre!("the server has no host {host_id}"),
+                ErrorKind::NotFound,
+            ));
+        }
+        db.as_public().as_server_info().as_network().as_host()
+    } else {
+        db.as_public()
+            .as_package_data()
+            .as_idx(&package_id)
+            .or_not_found(&package_id)?
+            .as_hosts()
+            .as_idx(&host_id)
+            .or_not_found(&host_id)?
+    };
+    Ok(host
         .as_bindings()
         .de()?
         .get(&internal_port)

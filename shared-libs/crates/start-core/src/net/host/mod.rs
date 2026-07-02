@@ -550,12 +550,23 @@ pub fn host_for<'a>(
     package_id: Option<&PackageId>,
     host_id: &HostId,
 ) -> Result<&'a mut Model<Host>, Error> {
-    let Some(package_id) = package_id else {
-        return Ok(db
-            .as_public_mut()
-            .as_server_info_mut()
-            .as_network_mut()
-            .as_host_mut());
+    // `start-os` is the server itself: its single host (the admin UI's) lives
+    // in serverInfo, not packageData.
+    let package_id = match package_id {
+        Some(package_id) if !package_id.is_start_os() => package_id,
+        _ => {
+            if *host_id != HostId::admin() {
+                return Err(Error::new(
+                    eyre!("the server has no host {host_id}"),
+                    ErrorKind::NotFound,
+                ));
+            }
+            return Ok(db
+                .as_public_mut()
+                .as_server_info_mut()
+                .as_network_mut()
+                .as_host_mut());
+        }
     };
     fn host_info<'a>(
         db: &'a mut DatabaseModel,

@@ -25,9 +25,17 @@ pub async fn get_host_info(
     let context = context.deref()?;
     let package_id = package_id.unwrap_or_else(|| context.seed.id.clone());
 
-    let ptr = format!("/public/packageData/{}/hosts/{}", package_id, host_id)
-        .parse()
-        .expect("valid json pointer");
+    // `start-os` is the server: its single `admin` host lives in serverInfo.
+    let ptr = if package_id.is_start_os() {
+        if host_id != HostId::admin() {
+            return Ok(None);
+        }
+        "/public/serverInfo/network/host".to_owned()
+    } else {
+        format!("/public/packageData/{}/hosts/{}", package_id, host_id)
+    }
+    .parse()
+    .expect("valid json pointer");
     let mut watch = context.seed.ctx.db.watch(ptr).await.typed::<Host>();
 
     let res = watch.peek_and_mark_seen()?.de().ok();

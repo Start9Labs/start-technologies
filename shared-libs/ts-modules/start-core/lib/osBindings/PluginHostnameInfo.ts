@@ -3,7 +3,10 @@ import type { HostId } from './HostId'
 import type { PackageId } from './PackageId'
 
 export type PluginHostnameInfo = {
-  packageId: PackageId | null
+  /**
+   * [`PackageId::start_os`] identifies the server's own host (the StartOS UI).
+   */
+  packageId: PackageId
   hostId: HostId
   internalPort: number
   ssl: boolean

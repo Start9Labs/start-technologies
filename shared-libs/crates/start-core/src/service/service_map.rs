@@ -176,6 +176,15 @@ impl ServiceMap {
         }
         let manifest = s9pk.as_manifest().clone();
         let id = manifest.id.clone();
+        if id.is_start_os() {
+            return Err(Error::new(
+                eyre!(
+                    "{}",
+                    t!("service.service-map.reserved-package-id", id = &*id)
+                ),
+                ErrorKind::InvalidRequest,
+            ));
+        }
         let icon = s9pk.icon_data_url().await?;
         let developer_key = s9pk.as_archive().signer();
         let mut service = self.get_mut(&id).await;

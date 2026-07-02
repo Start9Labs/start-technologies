@@ -2339,6 +2339,13 @@ service.service-map.operation-failed:
   fr_FR: "Échec de %{operation}"
   pl_PL: "%{operation} nie powiodło się"
 
+service.service-map.reserved-package-id:
+  en_US: "\"%{id}\" is a reserved package id and cannot be installed"
+  de_DE: "\"%{id}\" ist eine reservierte Paket-ID und kann nicht installiert werden"
+  es_ES: "\"%{id}\" es un id de paquete reservado y no se puede instalar"
+  fr_FR: "\"%{id}\" est un identifiant de paquet réservé et ne peut pas être installé"
+  pl_PL: "\"%{id}\" jest zarezerwowanym identyfikatorem pakietu i nie może zostać zainstalowany"
+
 service.service-map.restoring-failed:
   en_US: "Restoring Failed"
   de_DE: "Wiederherstellung fehlgeschlagen"
