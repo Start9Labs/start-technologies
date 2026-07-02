@@ -7,7 +7,7 @@ use ts_rs::TS;
 
 use crate::{Id, InvalidId};
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, TS)]
 #[ts(type = "string")]
 pub struct HostId(Id);
 impl FromStr for HostId {
@@ -56,20 +56,27 @@ impl<'de> Deserialize<'de> for HostId {
     }
 }
 impl HostId {
-    /// Like the [`Deserialize`] impl but tolerating the empty string as
-    /// [`HostId::default()`] — the server host's sentinel id, which
-    /// `NetController::os_bindings` persists inside the `startos-ui`
-    /// interface's `AddressInfo`. Strict deserialization rejects that record
-    /// and fails any full-db read (e.g. `validate_db` at init), so
-    /// db-persisted fields that may reference the server host use this;
-    /// manifest and API input keep the strict impl.
+    /// The server host's id — the host owning the OS's own bindings (the
+    /// StartOS UI) rather than a package's.
+    pub fn admin() -> Self {
+        Self(Id::try_from("admin").expect("valid id"))
+    }
+
+    /// Like the [`Deserialize`] impl but reading the empty string as
+    /// [`HostId::admin()`]: dev builds between #3366 and #3387 persisted the
+    /// server host's then-sentinel id (empty) in the `startos-ui` interface's
+    /// `AddressInfo`, which strict deserialization rejects — failing every
+    /// full-db read (e.g. `validate_db` at init). Reading it as `admin` lets
+    /// those databases load, and `validate_db`'s de → ser round-trip rewrites
+    /// the record on the next boot. Manifest and API input keep the strict
+    /// impl.
     pub fn deserialize_lenient<'de, D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         let s: InternedString = Deserialize::deserialize(deserializer)?;
         if s.is_empty() {
-            Ok(Self::default())
+            Ok(Self::admin())
         } else {
             Id::try_from(s)
                 .map(HostId)

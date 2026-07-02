@@ -232,13 +232,13 @@ pub struct RangeServiceInterface {
 mod test {
     use super::*;
 
-    // The `startos-ui` interface is persisted with the server host's sentinel
-    // id (empty string — see `NetController::os_bindings`); the record must
-    // survive the full de → ser round-trip that `validate_db` performs at
-    // every boot.
+    // Dev builds between #3366 and #3387 persisted the server host's id as
+    // the empty string, which strict deserialization rejects — bricking every
+    // boot at `validate_db`. The persisted field reads it as `admin`, and the
+    // de → ser round-trip `validate_db` performs canonicalizes it on disk.
     #[test]
-    fn address_info_tolerates_empty_host_id() {
-        let json = serde_json::json!({
+    fn address_info_heals_legacy_empty_host_id() {
+        let legacy = serde_json::json!({
             "username": null,
             "hostId": "",
             "internalPort": 80,
@@ -246,9 +246,12 @@ mod test {
             "sslScheme": "https",
             "suffix": ""
         });
-        let info: AddressInfo = serde_json::from_value(json.clone()).unwrap();
-        assert_eq!(info.host_id, HostId::default());
-        assert_eq!(serde_json::to_value(&info).unwrap(), json);
+        let info: AddressInfo = serde_json::from_value(legacy).unwrap();
+        assert_eq!(info.host_id, HostId::admin());
+        let canonical = serde_json::to_value(&info).unwrap();
+        assert_eq!(canonical["hostId"], "admin");
+        let again: AddressInfo = serde_json::from_value(canonical.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&again).unwrap(), canonical);
         // only the persisted field is lenient — HostId itself stays strict
         assert!(serde_json::from_value::<HostId>(serde_json::json!("")).is_err());
     }
