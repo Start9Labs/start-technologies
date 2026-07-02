@@ -1,8 +1,9 @@
 # AGENTS.md — start-core
 
 The shared Rust backend lib (`start-core`, lib name `start_core`) at `shared-libs/crates/start-core`.
-All five product bins (`startbox`/`startd`, `start-container`, `start-cli`, `registrybox`,
-`tunnelbox`) link against it; the bins themselves are thin wrappers in the product crates.
+All six product bins (`startbox`/`startd`, `start-container`, `start-cli`, `registrybox`,
+`tunnelbox`, `startwrt`) link against it; all but `startwrt` are thin wrappers in the product
+crates (`startwrt` is a full backend of its own that imports this crate aliased as `startos`).
 
 `CLAUDE.md` is a one-line `@AGENTS.md` import. See [ARCHITECTURE.md](ARCHITECTURE.md) and
 [CONTRIBUTING.md](CONTRIBUTING.md).

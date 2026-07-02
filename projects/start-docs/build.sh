@@ -15,6 +15,7 @@ book_dir() {
     start-os) echo "$ROOT/../start-os/docs" ;;
     start-tunnel) echo "$ROOT/../start-tunnel/docs" ;;
     packaging) echo "$ROOT/../start-sdk/docs" ;;
+    start-wrt) echo "$ROOT/../start-wrt/docs" ;;
     *) echo "$ROOT/$1" ;;
   esac
 }

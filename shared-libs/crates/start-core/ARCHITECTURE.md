@@ -17,6 +17,10 @@ to enable via `start_core::bins::MultiExecutable` and call `.execute()`:
 | `registrybox` | `projects/start-registry/src/main.rs` | Package registry server |
 | `tunnelbox` | `projects/start-tunnel/src/main.rs` | StartTunnel VPN/forwarding server |
 
+A sixth bin, `startwrt` (`projects/start-wrt/backend/ctrl/src/bin/startwrt.rs`), also links
+against this crate but is not a `MultiExecutable` wrapper — it is a full backend of its own
+that imports the crate aliased as `startos` for its `net`/`util` primitives.
+
 `MultiExecutable` also supports invoking a chosen entrypoint by argv[0] (busybox-style), which is
 how `startbox` dispatches to `startd`, `start-cli`, etc. The per-entrypoint logic lives in
 `src/bins/{startd.rs, start_cli.rs, container_cli.rs, registry.rs, tunnel.rs, start_init.rs, …}`.

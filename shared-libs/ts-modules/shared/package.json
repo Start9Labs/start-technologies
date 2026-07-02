@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "description": "Internal, source-consumed StartOS library — apps resolve it via tsconfig paths, not the ng-packagr build. Private and unpublished; the ng-packagr target exists only for optional npm extraction.",
   "private": true,
+  "sideEffects": false,
   "peerDependencies": {
     "@angular/cdk": ">=22.0.0",
     "@angular/common": ">=22.0.0",

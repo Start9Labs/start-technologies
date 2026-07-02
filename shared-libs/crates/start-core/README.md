@@ -9,7 +9,7 @@ thin wrappers that select which entrypoints to enable from `start_core::bins`.
 
 ## Place in the monorepo
 
-This crate lives at `shared-libs/crates/start-core` and is the lib that all five product bins depend on:
+This crate lives at `shared-libs/crates/start-core` and is the lib that all six product bins depend on:
 
 | Binary | Defined in | Notes |
 |--------|-----------|-------|
@@ -18,10 +18,13 @@ This crate lives at `shared-libs/crates/start-core` and is the lib that all five
 | `start-cli` | `projects/start-cli/src/main.rs` | CLI over the daemon's JSON-RPC API |
 | `registrybox` | `projects/start-registry/src/main.rs` | Package registry server |
 | `tunnelbox` | `projects/start-tunnel/src/main.rs` | StartTunnel VPN/forwarding server |
+| `startwrt` | `projects/start-wrt/backend/ctrl/src/bin/startwrt.rs` | StartWRT router OS daemon+CLI |
 
 Each wrapper builds a `start_core::bins::MultiExecutable`, enables the entrypoints it wants
 (`enable_startd`, `enable_start_cli`, `enable_start_container`, `enable_start_registry`,
-`enable_start_tunnel`, …), and calls `.execute()`.
+`enable_start_tunnel`, …), and calls `.execute()`. The exception is `startwrt`: a full backend
+of its own that imports this crate aliased as `startos` for its `net`/`util` primitives rather
+than enabling `MultiExecutable` entrypoints.
 
 ## Requirements
 

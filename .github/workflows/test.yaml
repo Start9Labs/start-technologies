@@ -30,7 +30,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          submodules: recursive
+          # The repo's only submodule (projects/start-wrt/openwrt) is multi-GB and only
+          # the start-wrt image build needs it — never clone it here.
+          submodules: false
       - uses: ./.github/actions/setup-build
         with:
           nodejs-version: ${{ env.NODEJS_VERSION }}
@@ -48,7 +50,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          submodules: recursive
+          # The repo's only submodule (projects/start-wrt/openwrt) is multi-GB and only
+          # the start-wrt image build needs it — never clone it here.
+          submodules: false
       - uses: ./.github/actions/setup-build
         with:
           nodejs-version: ${{ env.NODEJS_VERSION }}

@@ -1,0 +1,5 @@
+#!/bin/sh
+# Re-evaluate remote access firewall rules when WAN interface changes.
+[ "$ACTION" = "ifup" -o "$ACTION" = "ifupdate" -o "$ACTION" = "ifdown" ] && [ "$INTERFACE" = "wan" -o "$INTERFACE" = "wan6" ] && {
+    /usr/bin/startwrt-cli system apply-remote-access 2>/dev/null &
+}

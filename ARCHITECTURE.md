@@ -27,6 +27,7 @@ start-technologies/                # repo root (monorepo)
 │   └── start-registryd.service
 ├── projects/start-tunnel/         # tunnelbox bin + web/ (StartTunnel UI)
 │   └── start-tunneld.service
+├── projects/start-wrt/            # StartWRT router OS: startwrt bin + web/ (root Angular workspace) + openwrt submodule
 ├── projects/start-sdk/                     # @start9labs/start-sdk (source in lib/) + Makefile/s9pk.mk + docs/
 ├── projects/brochure-marketplace/ # marketing/landing Angular app
 ├── shared-libs/
@@ -51,8 +52,9 @@ start-technologies/                # repo root (monorepo)
   - `start-cli` → `start-cli`
   - `start-registry` → `registrybox` (package registry)
   - `start-tunnel` → `tunnelbox` (VPN/tunnel server)
+  - `start-wrt` → `startwrt` (OpenWrt router OS daemon+CLI). Unlike the others this is a fuller backend of its own (UCI config, security profiles) that *reuses* `start-core`'s `net`/`util` modules (aliased as `startos`) rather than being a thin feature-toggle wrapper; its UI is an app in the root Angular workspace, and it ships as a flashable OpenWrt image, not a `.deb`/ISO.
 
-- **`shared-libs/ts-modules/`** — shared **TypeScript** modules consumed across products. The common thread is just that they are TS — the directory is not Angular-specific. It holds the two Angular 22 / Taiga UI 5 libraries `shared` (`@start9labs/shared`) and `marketplace` (`@start9labs/marketplace`), plus the non-Angular `start-core` (`@start9labs/start-core`: the SDK's core types/ABI/effects/OS bindings, mirroring the `start-core` Rust crate; consumed directly by web and bundled into the SDK). The single Angular workspace (root `angular.json`/`package.json`) defines six projects whose roots point into product dirs: `ui` and `setup-wizard` (`projects/start-os/web/`), `start-tunnel` (`projects/start-tunnel/web/`), `brochure-marketplace` (`projects/brochure-marketplace/`), plus the two Angular libraries. Apps talk to the backend exclusively via JSON-RPC. See [shared-libs/ts-modules/ARCHITECTURE.md](shared-libs/ts-modules/ARCHITECTURE.md).
+- **`shared-libs/ts-modules/`** — shared **TypeScript** modules consumed across products. The common thread is just that they are TS — the directory is not Angular-specific. It holds the two Angular 22 / Taiga UI 5 libraries `shared` (`@start9labs/shared`) and `marketplace` (`@start9labs/marketplace`), plus the non-Angular `start-core` (`@start9labs/start-core`: the SDK's core types/ABI/effects/OS bindings, mirroring the `start-core` Rust crate; consumed directly by web and bundled into the SDK). The single Angular workspace (root `angular.json`/`package.json`) defines seven projects whose roots point into product dirs: `ui` and `setup-wizard` (`projects/start-os/web/`), `start-tunnel` (`projects/start-tunnel/web/`), `start-wrt` (`projects/start-wrt/web/`), `brochure-marketplace` (`projects/brochure-marketplace/`), plus the two Angular libraries. Apps talk to the backend exclusively via JSON-RPC. See [shared-libs/ts-modules/ARCHITECTURE.md](shared-libs/ts-modules/ARCHITECTURE.md).
 
 - **`projects/start-os/container-runtime/`** — Node.js runtime that runs inside each service's LXC container. Loads the service's JavaScript from its S9PK and manages subcontainers; talks to the host daemon via JSON-RPC over a Unix socket. See [projects/start-os/container-runtime/AGENTS.md](projects/start-os/container-runtime/AGENTS.md).
 

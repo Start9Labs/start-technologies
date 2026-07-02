@@ -54,6 +54,11 @@ const bookInfo: Record<string, { label: string; description: string }> = {
     description:
       "Guides for running Bitcoin, Lightning and related services on StartOS.",
   },
+  "start-wrt": {
+    label: "StartWRT",
+    description:
+      "A router operating system for home-based self-hosting, built on OpenWrt. Runs on the SpaceMiT K1 and provides WiFi, VPN, DDNS, and secure remote access to services on your LAN.",
+  },
 };
 
 /** Discover all books by finding {name}/book.toml at repo root */

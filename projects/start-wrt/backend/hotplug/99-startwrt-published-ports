@@ -1,0 +1,9 @@
+#!/bin/sh
+# Recompute IPv6 published-port forwards when the WAN6 delegated prefix changes.
+# An IPv6 forward's dest_ip is a full GUA (prefix + host suffix); if the ISP
+# rotates the prefix, the stored address goes stale and the forward breaks until
+# rewritten. `ifupdate` is the event netifd raises when the prefix changes
+# without the link bouncing.
+[ "$ACTION" = "ifup" -o "$ACTION" = "ifupdate" ] && [ "$INTERFACE" = "wan6" ] && {
+    /usr/bin/startwrt-cli published-ports reconcile 2>/dev/null &
+}

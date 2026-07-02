@@ -1,0 +1,8 @@
+{
+  "useMocks": true,
+  "api": {
+    "url": "rpc",
+    "version": "v1"
+  },
+  "gitHash": ""
+}

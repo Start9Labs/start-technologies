@@ -1,0 +1,363 @@
+// Only normal (400) and bold (700) are shipped: all Start9 designs use just
+// these two weights, so limiting the bundled faces keeps the UI on-spec —
+// intermediate weights snap to the nearest shipped face instead of loading a
+// distinct glyph.
+@font-face {
+  font-family: 'Proxima Nova';
+  font-style: normal;
+  font-weight: 400; // normal
+  src: url('/assets/fonts/Proxima_Nova/Proxima-Nova-Regular.woff');
+}
+
+@font-face {
+  font-family: 'Proxima Nova';
+  font-style: normal;
+  font-weight: 700; // bold
+  src: url('/assets/fonts/Proxima_Nova/Proxima-Nova-Bold.woff');
+}
+
+[tuiTheme='dark'] {
+  // Backgrounds
+  --tui-background-base: #07080c;
+  --tui-background-base-alt: #0b0c10;
+  --tui-background-elevation-1: #14151c;
+  --tui-background-elevation-2: #1c1d26;
+  --tui-background-elevation-3: #262833;
+  // Statuses
+  --tui-status-negative: rgba(255, 73, 97, 1);
+  --tui-status-negative-pale: rgba(255, 73, 97, 0.12);
+  --tui-status-negative-pale-hover: rgba(255, 73, 97, 0.24);
+  --tui-status-positive: rgba(45, 213, 91, 1);
+  --tui-status-positive-pale: rgba(45, 213, 91, 0.32);
+  --tui-status-positive-pale-hover: rgba(45, 213, 91, 0.4);
+  --tui-status-warning: rgba(255, 196, 9, 1);
+  --tui-status-warning-pale: rgba(255, 196, 9, 0.32);
+  --tui-status-warning-pale-hover: rgba(255, 196, 9, 0.4);
+  // Text
+  --tui-text-primary: #f0f0f0;
+  --tui-text-secondary: #a1a3ad;
+  --tui-text-tertiary: #6b6d78;
+  --tui-text-action: #3880ff;
+  --tui-text-action-hover: #4e8dff;
+  --tui-text-positive: rgba(45, 213, 91, 1);
+  --tui-text-positive-hover: #4ade80;
+  --tui-text-negative: rgba(255, 73, 97, 1);
+  --tui-text-negative-hover: #ff5f74;
+
+  --tui-theme-color: var(--tui-background-elevation-1);
+}
+
+:root,
+[tuiTheme='light'] {
+  --tui-background-accent-1: #3880ff;
+  --tui-background-accent-1-hover: #4e8dff;
+  --tui-background-accent-1-pressed: #1165d9;
+  --tui-background-accent-2: #c4247a;
+  --tui-background-accent-2-hover: #e12a8b;
+  --tui-background-accent-2-pressed: #b31a6c;
+  --tui-background-accent-opposite: #0b0c10;
+  --tui-background-accent-opposite-hover: #14151c;
+  --tui-background-accent-opposite-pressed: #07080c;
+  // Other
+  --tui-service-selection-background: rgba(255, 73, 97, 1);
+  // Statuses
+  --tui-status-negative: rgba(255, 73, 97, 1);
+  --tui-status-negative-pale: rgba(255, 73, 97, 0.12);
+  --tui-status-negative-pale-hover: rgba(255, 73, 97, 0.24);
+  --tui-status-positive: rgba(45, 213, 91, 1);
+  --tui-status-positive-pale: rgba(45, 213, 91, 0.32);
+  --tui-status-positive-pale-hover: rgba(45, 213, 91, 0.4);
+  --tui-status-warning: rgba(255, 196, 9, 1);
+  --tui-status-warning-pale: rgba(255, 196, 9, 0.32);
+  --tui-status-warning-pale-hover: rgba(255, 196, 9, 0.4);
+  // Text
+  --tui-text-primary: rgba(11, 12, 16, 1);
+  --tui-text-secondary: rgba(11, 12, 16, 0.65);
+  --tui-text-tertiary: rgba(11, 12, 16, 0.4);
+  --tui-text-action: #3880ff;
+  --tui-text-action-hover: #4e8dff;
+  --tui-text-positive: rgba(45, 213, 91, 1);
+  --tui-text-positive-hover: #4ade80;
+  --tui-text-negative: rgba(255, 73, 97, 1);
+  --tui-text-negative-hover: #ff5f74;
+
+  --tui-stroke-width: 1.5px;
+  --tui-radius-m: 0.5rem;
+
+  --tui-typography-family-text: 'Proxima Nova', system-ui;
+  --tui-typography-family-display: 'Proxima Nova', system-ui;
+
+  --tui-theme-color: var(--tui-background-base-alt);
+}
+
+::selection {
+  background-color: var(--tui-service-selection-background);
+}
+
+body,
+html {
+  height: 100%;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+ul {
+  padding-inline-start: 1rem;
+}
+
+li {
+  margin-block-end: 0.5rem;
+}
+
+.g-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+
+  > article.g-form {
+    min-height: 6rem;
+    margin-block-end: 1rem;
+  }
+}
+
+.g-primary {
+  color: var(--tui-text-primary) !important;
+}
+
+.g-secondary {
+  color: var(--tui-text-secondary) !important;
+}
+
+.g-action {
+  color: var(--tui-text-action) !important;
+}
+
+.g-negative {
+  color: var(--tui-text-negative) !important;
+}
+
+.g-positive {
+  color: var(--tui-text-positive) !important;
+}
+
+.g-form {
+  max-width: 50rem;
+
+  &:has([appSummary][appSummary]) {
+    background: var(--tui-status-info-pale);
+    box-shadow: none;
+  }
+
+  hr {
+    margin: 0;
+    border: 0;
+  }
+
+  section {
+    display: flex;
+    gap: inherit;
+    flex-wrap: wrap;
+
+    > *:has([tuiInput]) {
+      display: flex;
+      flex: 1;
+      min-width: 12rem;
+      max-width: 20rem;
+
+      &:not(tui-textfield) {
+        flex-direction: column;
+        gap: inherit;
+      }
+    }
+  }
+
+  tui-error {
+    font: var(--tui-typography-body-xs);
+  }
+
+  label:has(input[type='checkbox'], input[type='radio']) {
+    cursor: pointer;
+    align-items: center;
+
+    i {
+      display: none;
+    }
+  }
+
+  label:has(input[type='checkbox']:disabled, input[type='radio']:disabled) {
+    position: relative;
+    opacity: var(--tui-disabled-opacity);
+    cursor: not-allowed;
+
+    i {
+      display: block;
+      position: absolute;
+      inset: 0;
+    }
+  }
+
+  [tuiCardLarge][tuiSurface][tuiAppearance][data-appearance='floating'] {
+    box-shadow: none;
+    padding: 0;
+    border-radius: 0;
+  }
+
+  .g-footer {
+    position: absolute;
+    inset: 100% 0 auto;
+    margin-top: 1rem;
+  }
+
+  [tuiLabel] input[type='checkbox'][data-size='s'],
+  [tuiLabel] input[type='radio'][data-size='s'] {
+    margin-top: 0;
+  }
+}
+
+.g-footer {
+  display: flex;
+  gap: 1rem;
+  justify-content: start;
+
+  &.tui-enter,
+  &.tui-leave {
+    animation-name: tuiFade;
+  }
+
+  .g-delete {
+    margin-inline-start: auto;
+  }
+
+  tui-root._mobile & {
+    justify-content: end;
+
+    .g-delete {
+      margin-inline-start: 0;
+      margin-inline-end: auto;
+      order: -1;
+    }
+  }
+}
+
+.g-aside {
+  padding: 0 1rem 1rem;
+  display: block;
+
+  &:has(tui-accordion) {
+    padding: 0;
+  }
+}
+
+.g-table {
+  width: 100%;
+  border-radius: var(--tui-radius-l);
+  background: var(--tui-background-neutral-1);
+  overflow: hidden;
+
+  [tuiTheme='dark'] & {
+    background: var(--tui-background-elevation-1);
+  }
+
+  &:has(caption) {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+  }
+
+  caption {
+    text-align: start;
+    font: var(--tui-typography-body-l);
+    font-weight: bold;
+    padding: 0.25rem 0.75rem;
+    border-radius: 0.5rem 0.5rem 0 0;
+    box-shadow: inset 0 1px var(--tui-border-normal);
+  }
+
+  thead tr {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--tui-background-neutral-1);
+
+    [tuiTheme='dark'] & {
+      background: var(--tui-background-elevation-2);
+    }
+  }
+
+  th,
+  td {
+    background: transparent;
+    border: none;
+    box-shadow: inset 0 1px var(--tui-background-neutral-1);
+  }
+
+  [tuiIconButton] {
+    margin-block: -0.25rem;
+  }
+}
+
+[tuiTheme='dark'] [data-appearance='textfield'] {
+  outline-color: transparent;
+}
+
+tui-data-list [tuiOption]:disabled {
+  // For tooltips
+  pointer-events: auto;
+}
+
+.g-help {
+  padding: 0 1rem 1rem;
+}
+
+.g-help h2 {
+  display: none;
+}
+
+.g-accordion,
+.g-help details {
+  display: grid;
+  grid-template-rows: var(--tui-height-m) 0fr;
+  transition: grid-template-rows 0.3s ease-in-out;
+
+  summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    font: var(--tui-typography-body-m);
+    font-weight: bold;
+    list-style: none;
+
+    --chevron: url('data:image/svg+xml;charset=UTF-8,%3Csvg%0A%20%20%20%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%0A%20%20%20%20width%3D%2224%22%0A%20%20%20%20height%3D%2224%22%0A%20%20%20%20viewBox%3D%220%200%2024%2024%22%0A%20%20%20%20fill%3D%22none%22%0A%20%20%20%20stroke%3D%22currentColor%22%0A%20%20%20%20stroke-width%3D%22calc((100vw%20-%20100vh)%20%2F%2010)%22%0A%20%20%20%20stroke-linecap%3D%22round%22%0A%20%20%20%20stroke-linejoin%3D%22round%22%0A%3E%0A%20%20%20%20%3Cpath%20vector-effect%3D%22non-scaling-stroke%22%20d%3D%22m6%209%206%206%206-6%22%20%2F%3E%0A%3C%2Fsvg%3E%0A');
+
+    &::after {
+      content: '';
+      background: currentColor;
+      mask: var(--chevron) no-repeat center /
+        calc(min(1em, 100%) + 10 * var(--tui-stroke-width)) min(1em, 100%);
+      transition: transform 0.3s ease-in-out;
+      font-size: 1rem;
+      block-size: 1em;
+      inline-size: 1em;
+    }
+  }
+
+  &::details-content {
+    transition: all 0.3s ease-in-out;
+    transition-behavior: allow-discrete;
+    opacity: 0;
+    overflow: hidden;
+  }
+
+  &[open] {
+    grid-template-rows: var(--tui-height-m) 1fr;
+
+    summary::after {
+      transform: rotate(180deg);
+    }
+
+    &::details-content {
+      padding: 0.5rem 0;
+      opacity: 1;
+    }
+  }
+}

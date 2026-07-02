@@ -1,0 +1,76 @@
+[package]
+name = "startwrt-core"
+version = "0.1.0-beta.3"
+edition = "2021"
+
+[lib]
+name = "startwrt"
+path = "src/lib.rs"
+
+[[bin]]
+name = "startwrt"
+path = "src/bin/startwrt.rs"
+
+[dependencies]
+num_enum = "0.7"
+# `start-core` is the monorepo's shared backend lib (was the embedded start-os
+# submodule's `core/` crate). Aliased to `startos` so the existing `use startos::…`
+# imports resolve unchanged.
+startos = { package = "start-core", path = "../../../../shared-libs/crates/start-core" }
+async_cell = "0.2.2"
+color-eyre = "0.6.3"
+futures = "0.3.31"
+nix = { version="0.29.0", features = ["fs", "signal"] }
+tokio = { version = "1.41.1", features = ["tracing", "process", "socket2", "time", "io-util", "macros", "rt", "sync", "net", "rt-multi-thread", "io-std", "signal"] }
+tracing = "0.1"
+tracing-rfc-5424 = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9.34"
+macaddr = "1.0.0"
+uciedit = { path = "../uciedit" }
+rpc-toolkit = { path = "../../../../shared-libs/crates/rpc-toolkit", default-features = false }
+clap = "4.5.37"
+arc-swap = "1.7"
+visit-rs = "0.1"
+axum = { version = "0.8.6", features = ["ws", "multipart", "http2"] }
+include_dir = "0.7"
+mime_guess = "2"
+thiserror = "2.0.12"
+imbl-value = { path = "../../../../shared-libs/crates/imbl-value" }
+serde_json = "1.0.140"
+rand = "0.9.1"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+base64 = "0.22"
+semver = "1"
+chrono = { version = "0.4.42", features = ["serde", "std"] }
+fd-lock-rs = "0.1.4"
+tempfile = "3.14.0"
+rpassword = "7.3.1"
+itertools = "0.14.0"
+pwhash = "1.0.0"
+sha-crypt = "0.5.0"
+base32 = "0.5.1"
+sha2 = "0.10.8"
+digest = "0.10.7"
+basic-cookies = "0.1.5"
+http = "1.0"
+cookie_store = "0.22"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+reqwest_cookie_store = "0.9"
+openssh-keys = "0.6.2"
+openssl = { version = "0.10", features = ["vendored"] }
+rustls = "0.23"
+rustls-pemfile = "2"
+tokio-rustls = "0.26"
+rusqlite = { version = "0.34", features = ["bundled"] }
+tower-http = { version = "0.6", features = ["cors"] }
+dirs = "6"
+rand_core_06 = { package = "rand_core", version = "0.6", features = ["getrandom"] }
+ed25519-dalek = { version = "2", features = ["rand_core", "pkcs8", "pem", "digest"] }
+blake3 = "1"
+url = { version = "2", features = ["serde"] }
+form_urlencoded = "1"
+der = { version = "0.7", features = ["pem", "derive", "oid"] }
+pkcs8 = { version = "0.10", features = ["pem"] }
+futures-util = "0.3"

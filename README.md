@@ -30,6 +30,7 @@ All products share a single Rust backend library (`start-core`) and a single Ang
 | `projects/start-cli/`            | start-cli        | CLI for managing servers, registries, and packaging                                                       |
 | `projects/start-registry/`       | start-registry   | Package registry server (`registrybox`); serves the marketplace UI                                        |
 | `projects/start-tunnel/`         | StartTunnel      | VPN/forwarding server (`tunnelbox`) + its web UI                                                          |
+| `projects/start-wrt/`            | StartWRT         | OpenWrt-based router OS (`startwrt` bin + embedded web UI), flashable image for the SpaceMiT K1           |
 | `projects/start-sdk/`            | Start SDK        | `@start9labs/start-sdk` for building StartOS service packages                                             |
 | `projects/brochure-marketplace/` | Marketplace site | Public marketplace/landing site (marketplace.start9.com)                                                  |
 | `projects/start-docs/`           | Docs site        | The documentation website (docs.start9.com)                                                               |
@@ -75,6 +76,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the shared toolchain and development 
 StartOS is the flagship, but it shares this repo with the rest of the Start9 stack:
 
 - **[StartTunnel](projects/start-tunnel/)** — a self-hosted VPN / reverse-proxy server that gives a StartOS box a public address and clearnet port forwarding without relying on a third-party tunnel.
+- **[StartWRT](projects/start-wrt/)** — an OpenWrt-based router OS for home self-hosting: per-profile subnets and WiFi, inbound/outbound VPN, DDNS, and secure remote access, shipped as a flashable image for the SpaceMiT K1.
 - **[start-cli](projects/start-cli/)** — the command-line client for StartOS servers and registries, and the tool that builds and signs service packages (`.s9pk`).
 - **[Start SDK](projects/start-sdk/)** — the `@start9labs/start-sdk` TypeScript SDK and packaging toolchain for wrapping any app into an installable StartOS service.
 - **[start-registry](projects/start-registry/)** — the registry server that hosts and serves marketplaces of packaged services.

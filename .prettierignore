@@ -1,0 +1,5 @@
+# Build outputs and generated artifacts — never format these.
+**/dist/
+**/.angular/
+**/out-tsc/
+**/node_modules/

@@ -1,0 +1,16 @@
+# DNAT-return marking for VPN-routed profiles.
+#
+# Reply traffic for port-forwarded inbound connections (conntrack DNAT state)
+# must route via the main table, not a VPN tunnel. We mark such packets here;
+# the matching `ip rule` (network.dnat_return, fwmark 0x80 → main, priority 100)
+# is created by the daemon when a profile is VPN-routed.
+#
+# fw3 expressed this as a mangle rule with `-m conntrack --ctstate DNAT`; fw4
+# has no UCI option for `ct status dnat`, so it lives here. fw4 auto-includes
+# /etc/nftables.d/*.nft into the `inet fw4` table. Marking all DNAT-state
+# packets is harmless when no dnat_return ip-rule is present.
+
+chain startwrt_dnat_mark {
+	type filter hook prerouting priority mangle; policy accept;
+	ct status dnat meta mark set meta mark or 0x80
+}

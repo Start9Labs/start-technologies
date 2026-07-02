@@ -1,0 +1,8 @@
+#!/bin/sh
+# Apply proxy_arp sysctl on interface up for VPN server profiles.
+# netifd does not honor the UCI proxy_arp option on regular interfaces,
+# so we set it via this hotplug script for persistence across reboots.
+[ "$ACTION" = "ifup" ] || exit 0
+[ "$(uci -q get "network.$INTERFACE.proxy_arp")" = "1" ] && {
+    echo 1 > "/proc/sys/net/ipv4/conf/$DEVICE/proxy_arp"
+}

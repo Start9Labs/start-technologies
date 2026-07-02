@@ -1,0 +1,10 @@
+config nlbwmon
+	option database_directory	'/etc/nlbwmon/data'
+	option database_interval	'2017-01-01/1'
+	option database_generations	100
+	option commit_interval		'1h'
+	option refresh_interval		'30s'
+	option protocol_database	'/usr/share/nlbwmon/protocols'
+	list local_network		'192.168.0.0/16'
+	list local_network		'172.16.0.0/12'
+	list local_network		'10.0.0.0/8'

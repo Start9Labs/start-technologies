@@ -14,9 +14,10 @@ The single [Angular](https://angular.dev/) + TypeScript workspace (Angular 22, [
 - **ui** — primary StartOS admin interface — `../../projects/start-os/web/ui`
 - **setup-wizard** — initial-setup UI (`start.local`) — `../../projects/start-os/web/setup-wizard`
 - **start-tunnel** — StartTunnel VPN/forwarding management UI — `../../projects/start-tunnel/web`
+- **start-wrt** — StartWRT router management UI (embedded into the `startwrt` binary) — `../../projects/start-wrt/web`
 - **brochure-marketplace** — public marketplace front (marketplace.start9.com); auto-deploys on merge to `master` — `../../projects/brochure-marketplace`
 
-All four consume the `shared` and `marketplace` libs from this workspace.
+These apps consume the `shared` lib (and, except `start-wrt`, `marketplace`) from this workspace.
 
 ## Quickstart
 

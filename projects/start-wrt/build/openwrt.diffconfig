@@ -1,0 +1,230 @@
+CONFIG_TARGET_spacemit=y
+CONFIG_TARGET_spacemit_k1_sbc=y
+CONFIG_TARGET_spacemit_k1_sbc_DEVICE_bananapi-f3=y
+CONFIG_DEVEL=y
+CONFIG_PER_FEED_REPO=y
+# CONFIG_BPF_TOOLCHAIN_BUILD_LLVM is not set
+CONFIG_BPF_TOOLCHAIN_NONE=y
+CONFIG_BUILD_LOG=y
+CONFIG_BUILD_SUFFIX="$(CONFIG_TARGET_PROFILE)"
+CONFIG_CCACHE=y
+CONFIG_DRIVER_11AC_SUPPORT=y
+CONFIG_DRIVER_11AX_SUPPORT=y
+# CONFIG_GDB is not set
+# CONFIG_KERNEL_BTRFS_FS_POSIX_ACL is not set
+# CONFIG_KERNEL_CIFS_ACL is not set
+# CONFIG_KERNEL_EXT4_FS_POSIX_ACL is not set
+# CONFIG_KERNEL_EXT4_FS_SECURITY is not set
+# CONFIG_KERNEL_F2FS_FS_POSIX_ACL is not set
+# CONFIG_KERNEL_F2FS_FS_SECURITY is not set
+# CONFIG_KERNEL_FS_POSIX_ACL is not set
+# CONFIG_KERNEL_HFSPLUS_FS_POSIX_ACL is not set
+# CONFIG_KERNEL_HFS_FS_POSIX_ACL is not set
+# CONFIG_KERNEL_JFFS2_FS_POSIX_ACL is not set
+# CONFIG_KERNEL_JFFS2_FS_SECURITY is not set
+# CONFIG_KERNEL_WERROR is not set
+# CONFIG_KERNEL_JFS_POSIX_ACL is not set
+# CONFIG_KERNEL_NET_L3_MASTER_DEV is not set
+# CONFIG_KERNEL_NFS_ACL_SUPPORT is not set
+CONFIG_KERNEL_PAGE_POOL=y
+# CONFIG_KERNEL_REISER_FS_POSIX_ACL is not set
+CONFIG_KERNEL_RELAY=y
+# CONFIG_KERNEL_TMPFS_POSIX_ACL is not set
+# CONFIG_KERNEL_UBIFS_FS_SECURITY is not set
+# CONFIG_KERNEL_XFS_POSIX_ACL is not set
+# CONFIG_LUCI_CSSTIDY is not set
+# CONFIG_LUCI_JSMIN is not set
+CONFIG_OPENSSL_ENGINE=y
+CONFIG_OPENSSL_PREFER_CHACHA_OVER_GCM=y
+CONFIG_OPENSSL_WITH_ASM=y
+CONFIG_OPENSSL_WITH_CHACHA_POLY1305=y
+CONFIG_OPENSSL_WITH_CMS=y
+CONFIG_OPENSSL_WITH_DEPRECATED=y
+CONFIG_OPENSSL_WITH_ERROR_MESSAGES=y
+CONFIG_OPENSSL_WITH_IDEA=y
+CONFIG_OPENSSL_WITH_MDC2=y
+CONFIG_OPENSSL_WITH_PSK=y
+CONFIG_OPENSSL_WITH_SEED=y
+CONFIG_OPENSSL_WITH_SRP=y
+CONFIG_OPENSSL_WITH_TLS13=y
+CONFIG_OPENSSL_WITH_WHIRLPOOL=y
+CONFIG_PACKAGE_MAC80211_DEBUGFS=y
+CONFIG_PACKAGE_MAC80211_MESH=y
+# CONFIG_PACKAGE_TAR_POSIX_ACL is not set
+# CONFIG_PACKAGE_TAR_XATTR is not set
+CONFIG_PACKAGE_attr=y
+CONFIG_PACKAGE_avahi-dbus-daemon=y
+CONFIG_PACKAGE_avahi-utils=y
+CONFIG_PACKAGE_block-mount=y
+CONFIG_PACKAGE_bridge=y
+CONFIG_PACKAGE_cgi-io=y
+CONFIG_PACKAGE_dbus=y
+CONFIG_PACKAGE_devlink=y
+CONFIG_PACKAGE_fdisk=y
+# CONFIG_PACKAGE_firewall is not set
+CONFIG_PACKAGE_firewall4=y
+CONFIG_PACKAGE_hostapd-basic-mbedtls=y
+CONFIG_PACKAGE_hostapd-common=y
+CONFIG_PACKAGE_hostapd-utils=y
+CONFIG_PACKAGE_ip-bridge=y
+CONFIG_PACKAGE_ip-full=y
+# CONFIG_PACKAGE_ip-tiny is not set
+# CONFIG_PACKAGE_ip6tables-mod-nat is not set
+CONFIG_PACKAGE_iw=y
+CONFIG_PACKAGE_iwinfo=y
+# CONFIG_PACKAGE_jansson is not set
+CONFIG_PACKAGE_kmod-cfg80211=y
+CONFIG_PACKAGE_kmod-crypto-aead=y
+CONFIG_PACKAGE_kmod-crypto-ccm=y
+CONFIG_PACKAGE_kmod-crypto-cmac=y
+# CONFIG_PACKAGE_kmod-crypto-crc32c is not set
+CONFIG_PACKAGE_kmod-crypto-ctr=y
+CONFIG_PACKAGE_kmod-crypto-gcm=y
+CONFIG_PACKAGE_kmod-crypto-geniv=y
+CONFIG_PACKAGE_kmod-crypto-gf128=y
+CONFIG_PACKAGE_kmod-crypto-ghash=y
+CONFIG_PACKAGE_kmod-crypto-hmac=y
+CONFIG_PACKAGE_kmod-crypto-manager=y
+CONFIG_PACKAGE_kmod-crypto-null=y
+CONFIG_PACKAGE_kmod-crypto-rng=y
+CONFIG_PACKAGE_kmod-crypto-seqiv=y
+CONFIG_PACKAGE_kmod-crypto-sha3=y
+# CONFIG_PACKAGE_kmod-crypto-sha512 is not set
+CONFIG_PACKAGE_kmod-hwmon-core=y
+CONFIG_PACKAGE_kmod-input-core=y
+# CONFIG_PACKAGE_kmod-ip6tables is not set
+# CONFIG_PACKAGE_kmod-ipt-conntrack is not set
+# CONFIG_PACKAGE_kmod-ipt-core is not set
+# CONFIG_PACKAGE_kmod-ipt-nat is not set
+# CONFIG_PACKAGE_kmod-ipt-nat6 is not set
+# CONFIG_PACKAGE_kmod-nf-nat6 is not set
+# CONFIG_PACKAGE_kmod-lib-crc-ccitt is not set
+# CONFIG_PACKAGE_kmod-lib-crc32c is not set
+CONFIG_PACKAGE_kmod-mac80211=y
+CONFIG_PACKAGE_kmod-md-mod=y
+CONFIG_PACKAGE_kmod-md-raid0=y
+CONFIG_PACKAGE_kmod-md-raid1=y
+CONFIG_PACKAGE_kmod-md-raid10=y
+CONFIG_PACKAGE_kmod-mt76-connac=y
+CONFIG_PACKAGE_kmod-mt76-core=y
+CONFIG_PACKAGE_kmod-mt7915e=y
+CONFIG_PACKAGE_kmod-mt7916-firmware=y
+# CONFIG_PACKAGE_kmod-rtl8852bs is not set
+# CONFIG_PACKAGE_kmod-nf-flow is not set
+# CONFIG_PACKAGE_kmod-nf-ipt is not set
+# CONFIG_PACKAGE_kmod-nf-log6 is not set
+CONFIG_PACKAGE_kmod-br-netfilter=y
+CONFIG_PACKAGE_kmod-nf-reject6=y
+CONFIG_PACKAGE_conntrack=y
+CONFIG_PACKAGE_kmod-nft-core=y
+CONFIG_PACKAGE_kmod-nft-fib=y
+CONFIG_PACKAGE_kmod-nft-nat=y
+CONFIG_PACKAGE_kmod-nft-offload=y
+# CONFIG_PACKAGE_kmod-ppp is not set
+CONFIG_PACKAGE_kmod-sched-core=y
+CONFIG_PACKAGE_kmod-thermal=y
+CONFIG_PACKAGE_kmod-wireguard=y
+# CONFIG_PACKAGE_knot-resolver_dnstap is not set
+CONFIG_PACKAGE_libatomic=y
+CONFIG_PACKAGE_libattr=y
+CONFIG_PACKAGE_libavahi-client=y
+CONFIG_PACKAGE_libavahi-dbus-support=y
+CONFIG_PACKAGE_libbpf=y
+CONFIG_PACKAGE_libbz2=y
+CONFIG_PACKAGE_libcap=y
+CONFIG_PACKAGE_libdaemon=y
+CONFIG_PACKAGE_libdbus=y
+CONFIG_PACKAGE_libelf=y
+CONFIG_PACKAGE_libexpat=y
+CONFIG_PACKAGE_libfdisk=y
+# CONFIG_PACKAGE_libffmpeg-full is not set
+# CONFIG_PACKAGE_libip4tc is not set
+# CONFIG_PACKAGE_libip6tc is not set
+# CONFIG_PACKAGE_libiptext is not set
+# CONFIG_PACKAGE_libiptext6 is not set
+CONFIG_PACKAGE_libiwinfo=y
+CONFIG_PACKAGE_libiwinfo-data=y
+CONFIG_PACKAGE_liblucihttp=y
+CONFIG_PACKAGE_liblucihttp-ucode=y
+CONFIG_PACKAGE_libmount=y
+CONFIG_PACKAGE_libncurses=y
+CONFIG_PACKAGE_libnftnl=y
+CONFIG_PACKAGE_libopenssl=y
+CONFIG_PACKAGE_libpopt=y
+CONFIG_PACKAGE_libreadline=y
+CONFIG_PACKAGE_libsmartcols=y
+CONFIG_PACKAGE_libtirpc=y
+# CONFIG_PACKAGE_libxtables is not set
+CONFIG_PACKAGE_lsblk=y
+CONFIG_PACKAGE_luci=y
+CONFIG_PACKAGE_luci-app-firewall=y
+# CONFIG_PACKAGE_luci-app-opkg is not set
+CONFIG_PACKAGE_luci-base=y
+CONFIG_PACKAGE_luci-light=y
+CONFIG_PACKAGE_luci-mod-admin-full=y
+CONFIG_PACKAGE_luci-mod-network=y
+CONFIG_PACKAGE_luci-mod-status=y
+CONFIG_PACKAGE_luci-mod-system=y
+CONFIG_PACKAGE_luci-proto-ipv6=y
+CONFIG_PACKAGE_luci-proto-ppp=y
+CONFIG_PACKAGE_luci-theme-bootstrap=y
+CONFIG_PACKAGE_mdadm=y
+CONFIG_PACKAGE_nftables-json=y
+CONFIG_PACKAGE_nlbwmon=y
+CONFIG_PACKAGE_nstat=y
+CONFIG_PACKAGE_odhcp6c=y
+CONFIG_PACKAGE_odhcpd-ipv6only=y
+CONFIG_PACKAGE_partx-utils=y
+# CONFIG_PACKAGE_ppp is not set
+CONFIG_PACKAGE_resize2fs=y
+CONFIG_PACKAGE_rpcd=y
+CONFIG_PACKAGE_rpcd-mod-file=y
+CONFIG_PACKAGE_rpcd-mod-iwinfo=y
+CONFIG_PACKAGE_rpcd-mod-luci=y
+CONFIG_PACKAGE_rpcd-mod-rrdns=y
+CONFIG_PACKAGE_rpcd-mod-ucode=y
+CONFIG_PACKAGE_sfdisk=y
+CONFIG_PACKAGE_smartdns=y
+# CONFIG_PACKAGE_tc-bpf is not set
+CONFIG_PACKAGE_tc-full=y
+# CONFIG_PACKAGE_tc-tiny is not set
+CONFIG_PACKAGE_terminfo=y
+CONFIG_PACKAGE_ucode-mod-html=y
+CONFIG_PACKAGE_ucode-mod-math=y
+CONFIG_PACKAGE_ucode-mod-nl80211=y
+CONFIG_PACKAGE_ucode-mod-rtnl=y
+CONFIG_PACKAGE_ucode-mod-uloop=y
+CONFIG_PACKAGE_uhttpd=y
+CONFIG_PACKAGE_uhttpd-mod-ubus=y
+CONFIG_PACKAGE_wifi-scripts=y
+CONFIG_PACKAGE_wireguard-tools=y
+CONFIG_PACKAGE_wireless-regdb=y
+CONFIG_PACKAGE_wpa-cli=y
+CONFIG_PACKAGE_wpa-supplicant-mbedtls=y
+CONFIG_PACKAGE_zlib=y
+# CONFIG_TARGET_EXT4_JOURNAL is not set
+# CONFIG_TARGET_IMAGES_GZIP is not set
+CONFIG_TARGET_ROOTFS_SQUASHFS=y
+CONFIG_TARGET_ROOTFS_PARTSIZE=256
+# CONFIG_USE_FS_ACL_ATTR is not set
+CONFIG_WPA_MBO_SUPPORT=y
+CONFIG_WPA_MSG_MIN_PRIORITY=3
+# I2C diagnostics (i2cdetect/i2cdump/i2cget/i2cset, plus coreutils-timeout)
+CONFIG_PACKAGE_i2c-tools=y
+CONFIG_PACKAGE_coreutils=y
+CONFIG_PACKAGE_coreutils-timeout=y
+# Disable SpacemiT K1 target defaults not needed by StartWRT
+# CONFIG_PACKAGE_mpp is not set
+# CONFIG_PACKAGE_kmod-sound-core is not set
+# CONFIG_PACKAGE_alsa-lib is not set
+# CONFIG_PACKAGE_fdk-aac is not set
+# CONFIG_PACKAGE_lame-lib is not set
+# CONFIG_PACKAGE_samba4-server is not set
+# CONFIG_PACKAGE_samba4-libs is not set
+# CONFIG_PACKAGE_luci-app-samba4 is not set
+# CONFIG_PACKAGE_luci-i18n-samba4-zh-cn is not set
+# CONFIG_PACKAGE_wsdd2 is not set
+# CONFIG_PACKAGE_libgnutls is not set
+# CONFIG_PACKAGE_libgmp is not set
+# CONFIG_PACKAGE_libnettle is not set
+# CONFIG_PACKAGE_libtasn1 is not set

@@ -1,0 +1,33 @@
+# IPv6 inbound-connection return marking for VPN-routed profiles.
+#
+# A device whose profile routes ::/0 through an outbound VPN still needs to be
+# reachable on its native (wan6-PD) GUA via an IPv6 published port. But the
+# per-profile v6 policy rule (prr6_<iface>: in <iface> -> per-VLAN table -> VPN)
+# captures the device's REPLY traffic too, so the reply to an externally
+# initiated connection would egress the VPN instead of wan6 — asymmetric,
+# connection fails.
+#
+# IPv6 port-forwards are pure filter ACCEPTs (the device has a routable GUA, no
+# DNAT), so unlike IPv4 there is no `ct status dnat` to key on (that path is
+# handled by 10-startwrt-dnat-mark.nft). Instead we connection-mark IPv6 flows
+# that were INITIATED from WAN — defined by exclusion of the stable LAN bridge
+# and WG tunnel interfaces, so it is immune to which physical port is WAN — and
+# restore that mark onto every packet of those flows. The matching ip6 rule
+# (network.dnat_return6, fwmark 0x80 -> main, priority 100), created by the
+# daemon for VPN-routed profiles, then routes the marked replies via the main
+# table (out wan6) instead of the per-VLAN VPN table.
+#
+# fw4 auto-includes /etc/nftables.d/*.nft into the `inet fw4` table. Marking is
+# harmless when no dnat_return6 ip-rule is present (replies use main anyway).
+
+chain startwrt_inbound6_mark {
+	type filter hook prerouting priority mangle; policy accept;
+
+	# Tag IPv6 connections initiated from WAN (not LAN, not a WG tunnel) at
+	# connection-open time so the tag persists for the life of the connection.
+	meta nfproto ipv6 ct state new iifname != "br-lan*" iifname != "wg_*" ct mark set ct mark or 0x80
+
+	# Restore the connection tag onto each packet, so a LAN device's reply to a
+	# WAN-initiated connection routes via main (wan6) rather than the VPN table.
+	meta nfproto ipv6 ct mark and 0x80 == 0x80 meta mark set meta mark or 0x80
+}

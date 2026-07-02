@@ -54,7 +54,7 @@ make format-check-web                # prettier check across the Angular workspa
   platform-specific code rather than reimplementing it cross-platform.
 - **The repo root is the Angular workspace for ALL front ends.** The product apps
   (`projects/start-os/web/{ui,setup-wizard}`, `projects/start-tunnel/web`,
-  `projects/brochure-marketplace`) build through this root workspace; their
+  `projects/start-wrt/web`, `projects/brochure-marketplace`) build through this root workspace; their
   `angular.json` entries point into the product dirs. Editing
   a shared lib affects every app — run `npm run check` (all projects) after.
 - **`build:deps` is a prerequisite.** `@start9labs/start-core` resolves to

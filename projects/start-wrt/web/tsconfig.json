@@ -1,0 +1,33 @@
+/* To learn more about Typescript configuration file: https://www.typescriptlang.org/docs/handbook/tsconfig-json.html. */
+/* To learn more about Angular compiler options: https://angular.dev/reference/configs/angular-compiler-options. */
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    // start-wrt's code predates the workspace-wide `noUncheckedIndexedAccess`
+    // (its standalone tsconfig never enabled it). Keep it off here to preserve
+    // the app's original strictness during the fold-in; opting into it is a
+    // separate cleanup. `noImplicitReturns`/`isolatedModules` were on in the
+    // standalone config but aren't set at the root — re-assert them (the code
+    // already satisfies both).
+    "noUncheckedIndexedAccess": false,
+    "noImplicitReturns": true,
+    "isolatedModules": true,
+    "paths": {
+      "*": ["./*"],
+      "@taiga-ui/icons/*": ["../../../node_modules/@taiga-ui/icons/*"],
+      "@start9labs/shared": [
+        "../../../shared-libs/ts-modules/shared/src/public-api"
+      ]
+    }
+  },
+  "files": ["src/main.ts"],
+  "include": ["src/**/*.d.ts"],
+  "angularCompilerOptions": {
+    "extendedDiagnostics": {
+      "checks": {
+        "nullishCoalescingNotNullable": "suppress",
+        "optionalChainNotNullable": "suppress"
+      }
+    }
+  }
+}

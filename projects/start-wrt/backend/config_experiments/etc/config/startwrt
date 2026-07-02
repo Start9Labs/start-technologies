@@ -1,0 +1,16 @@
+config profile lan
+	option fullname Admin
+	option interface lan
+	option vlan_tag 99
+	option access_to_new_profiles 1
+
+config profile guest
+	option fullname Guest
+	option interface guest
+	option vlan_tag 101
+
+config profile foo
+	option fullname IoT
+	option interface foo
+	option vlan_tag 102
+	

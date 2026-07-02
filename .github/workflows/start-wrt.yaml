@@ -1,0 +1,213 @@
+name: start-wrt
+
+# UNVALIDATED since the monorepo migration — no job has been run yet. The
+# `compile` job (riscv binary + embedded web) should be validated first; the
+# heavy `image` job (OpenWrt) follows; the `deploy` job (S3 + GitHub Release)
+# validates last. See projects/start-wrt/CONTRIBUTING.md.
+
+on:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      build-image:
+        type: boolean
+        description: Also build the full OpenWrt image (slow)
+        default: false
+      deploy:
+        type: choice
+        description: Deploy (upload images to S3 + cut a GitHub Release)
+        options:
+          - NONE
+          - release
+  # `paths:` below mirror projects/start-wrt/build.mk's build inputs — keep
+  # both in sync (see root AGENTS.md "Coupled changes"). The web is part of the
+  # root Angular workspace, so the workspace inputs (shared-libs/ts-modules/**,
+  # angular.json, package.json, package-lock.json, tsconfig.json) are listed too.
+  push:
+    branches:
+      - master
+      - next/*
+    paths:
+      - "projects/start-wrt/**"
+      - "shared-libs/crates/**"
+      - "shared-libs/ts-modules/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "angular.json"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.json"
+      - "build/**"
+      - ".github/workflows/start-wrt.yaml"
+      - ".github/actions/setup-build/**"
+  pull_request:
+    branches:
+      - master
+      - next/*
+    paths:
+      - "projects/start-wrt/**"
+      - "shared-libs/crates/**"
+      - "shared-libs/ts-modules/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "angular.json"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.json"
+      - "build/**"
+      - ".github/workflows/start-wrt.yaml"
+      - ".github/actions/setup-build/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODEJS_VERSION: "24.17.0"
+
+jobs:
+  # Fast path: cross-compile the riscv64 binary (embeds the web UI). Does NOT
+  # need the multi-GB openwrt submodule.
+  compile:
+    name: Build riscv64 binary
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: false
+      - uses: ./.github/actions/setup-build
+        with:
+          nodejs-version: ${{ env.NODEJS_VERSION }}
+
+      # build/verify-isa.sh disassembles the binary to reject instructions the
+      # SpaceMiT K1 can't run; it needs a riscv64 binutils objdump on the host.
+      - name: Install riscv64 binutils
+        run: sudo apt-get update && sudo apt-get install -y binutils-riscv64-linux-gnu
+
+      - name: Make startwrt
+        run: make startwrt
+        env:
+          SCCACHE_GHA_ENABLED: on
+          SCCACHE_GHA_VERSION: 0
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: startwrt-riscv64
+          path: target/riscv64gc-unknown-linux-musl/release/startwrt
+          retention-days: 14
+
+  # Heavy path: full flashable OpenWrt image. Gated to manual dispatch because it
+  # pulls the openwrt submodule and runs a multi-hour build. Also runs when
+  # deploying, since the `deploy` job needs the freshly built images.
+  image:
+    name: Build OpenWrt image
+    if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.build-image == 'true' || github.event.inputs.deploy == 'release') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/setup-build
+        with:
+          nodejs-version: ${{ env.NODEJS_VERSION }}
+
+      - name: Cache OpenWrt download directory
+        uses: actions/cache@v4
+        with:
+          path: projects/start-wrt/openwrt/dl
+          # Bust the cache when either the feed set or the OpenWrt config
+          # changes; restore-keys lets a partial (older) cache seed a fresh run.
+          key: openwrt-dl-${{ hashFiles('projects/start-wrt/build/feeds.conf', 'projects/start-wrt/build/openwrt.diffconfig') }}
+          restore-keys: openwrt-dl-
+
+      - name: Setup OpenWrt (feeds, config, download)
+        run: make startwrt-openwrt-setup
+
+      - name: Build image
+        run: make startwrt-image
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: startwrt-openwrt-image
+          # Mirrors build.mk's STARTWRT_BASENAME: the image rule renames the raw
+          # OpenWrt outputs to startwrt-<version>-<githash7>_spacemit-k1-*.
+          path: results/startwrt-*
+          retention-days: 14
+
+  # Publish path: upload the built images to shared S3 (the registry CDN serves
+  # them from here) and cut a GitHub Release. This is the ONLY publishing step
+  # done in CI — registering and indexing into the registry stay a deliberate
+  # local gate run from projects/start-wrt/scripts/manage-release.sh with the
+  # developer key. Dispatch-gated (deploy == 'release'), matching startos-iso.
+  deploy:
+    name: Deploy
+    needs: [image]
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'release' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      S3_BUCKET: s3://startwrt-images
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: false
+          sparse-checkout: projects/start-wrt/backend/ctrl/Cargo.toml
+          sparse-checkout-cone-mode: false
+
+      # Canonical StartWRT version lives in the ctrl crate manifest (mirrors the
+      # top CHANGELOG.md entry). The web/package.json the standalone workflow
+      # read was removed when the UI folded into the root Angular workspace.
+      - name: Determine version
+        id: version
+        run: |
+          VERSION=$(sed -n 's/^version = "\([^"]*\)".*/\1/p' \
+            projects/start-wrt/backend/ctrl/Cargo.toml | head -1)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION"
+
+      - name: Download image artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: startwrt-openwrt-image
+          path: artifacts/
+
+      - name: Configure S3
+        run: |
+          sudo apt-get install -y -qq s3cmd > /dev/null
+          cat > ~/.s3cfg <<EOF
+          [default]
+          access_key = ${{ secrets.S3_ACCESS_KEY }}
+          secret_key = ${{ secrets.S3_SECRET_KEY }}
+          host_base = nyc3.digitaloceanspaces.com
+          host_bucket = %(bucket)s.nyc3.digitaloceanspaces.com
+          use_https = True
+          EOF
+
+      - name: Upload images to S3
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          cd artifacts
+          for file in *.img *.img.gz; do
+            [ -f "$file" ] || continue
+            echo "Uploading $file..."
+            s3cmd put -P "$file" "${{ env.S3_BUCKET }}/v${VERSION}/$file"
+          done
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # Product-namespaced tag: the monorepo hosts every product's releases,
+          # each on its own cadence, so bare v* tags would collide across
+          # products (StartOS history already owns v0.x). Keep in sync with
+          # scripts/manage-release.sh.
+          tag_name: startwrt/v${{ steps.version.outputs.version }}
+          name: StartWRT v${{ steps.version.outputs.version }}
+          # Attach both images: the sdcard .img (fresh install) and the
+          # sysupgrade .img.gz (OTA), matching what manage-release.sh publishes.
+          files: |
+            artifacts/*.img
+            artifacts/*.img.gz
+          fail_on_unmatched_files: true
+          generate_release_notes: true

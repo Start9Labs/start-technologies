@@ -1,0 +1,59 @@
+
+config wifi-device 'radio0'
+	option type 'mac80211'
+	option path 'pci0000:00/0000:00:1c.3/0000:02:00.0'
+	option band '5g'
+	option channel '36'
+	option htmode 'HT40'
+	option disabled '0'
+	option cell_density '0'
+
+config wifi-iface 'default_radio0'
+    option device 'radio0'
+    option mode 'ap'
+    option ssid 'OpenWrt'
+    option encryption 'psk2'
+    option network 'lan'  # Network for the primary key below
+    option key 'adminpassword' # Primary password maps to 'lan' network
+    # You might still need dynamic_vlan '1' if mixing with wifi-vlan below
+    option dynamic_vlan '1'
+    # You likely DON'T need vlan_file, wpa_psk_file, vlan_bridge anymore
+
+# --- VLAN/PSK Mapping using UCI ---
+
+# Guest Profile (VLAN 101 -> guest network)
+config wifi-vlan
+    option name 'guest'       # Arbitrary descriptive name
+    option network 'guest'    # Links to the OpenWrt network interface 'guest'
+    option vid '101'          # VLAN ID hostapd should associate
+    option iface 'default_radio0' # Apply only to this wifi-iface (optional, omit to apply to all)
+
+config wifi-station
+    option key 'passwordguest' # The password for this VLAN
+    option vid '101'           # Links to the wifi-vlan section with vid 101
+    option iface 'default_radio0' # Apply only to this wifi-iface (optional)
+
+# IoT Profile (VLAN 102 -> foo network)
+config wifi-vlan
+    option name 'iot'
+    option network 'foo'      # Links to the OpenWrt network interface 'foo'
+    option vid '102'
+    option iface 'default_radio0'
+
+config wifi-station
+    option key 'passwordfoo'
+    option vid '102'
+    option iface 'default_radio0'
+
+# Admin Profile (VLAN 99 -> lan network) - Alternative password
+# If you want an alternative password for the main 'lan' network (VLAN 99)
+config wifi-vlan
+    option name 'admin'
+    option network 'lan'      # Links to the OpenWrt network interface 'lan'
+    option vid '99'
+    option iface 'default_radio0'
+
+config wifi-station
+    option key 'password'
+    option vid '99'
+    option iface 'default_radio0'

@@ -10,11 +10,12 @@ This project owns the **site build infra** (`build.sh`, `serve.sh`, `versions.co
 
 ## Layout
 
-The StartOS, StartTunnel, and Packaging books are NOT here — they moved into their product dirs:
+The StartOS, StartTunnel, Packaging, and StartWRT books are NOT here — they moved into their product dirs:
 
 - StartOS → `../start-os/docs/`
 - StartTunnel → `../start-tunnel/docs/`
 - Packaging (book name `packaging`) → `../start-sdk/docs/`
+- StartWRT → `../start-wrt/docs/`
 
 `build.sh`'s `book_dir()` maps each book name to its source dir. If you're editing content for one of those products, edit it in the product dir, not here — but you can build/preview the whole site from here.
 
@@ -44,4 +45,4 @@ The StartOS, StartTunnel, and Packaging books are NOT here — they moved into t
 
 ## Deployment
 
-GitHub Actions `.github/workflows/docs-deploy.yml` (at the monorepo root) builds and rsyncs to the VPS on push to `master` touching `projects/start-docs/**`, `projects/start-os/docs/**`, `projects/start-tunnel/docs/**`, or `projects/start-sdk/docs/**`. It regenerates nginx routing from `versions.conf`. Don't hardcode book names in nginx — the generated `book_versions.conf` handles that.
+GitHub Actions `.github/workflows/docs-deploy.yml` (at the monorepo root) builds and rsyncs to the VPS on push to `master` touching `projects/start-docs/**`, `projects/start-os/docs/**`, `projects/start-tunnel/docs/**`, `projects/start-sdk/docs/**`, or `projects/start-wrt/docs/**`. It regenerates nginx routing from `versions.conf`. Don't hardcode book names in nginx — the generated `book_versions.conf` handles that.

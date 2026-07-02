@@ -8,6 +8,7 @@ on:
       - "projects/start-os/docs/**"
       - "projects/start-tunnel/docs/**"
       - "projects/start-sdk/docs/**"
+      - "projects/start-wrt/docs/**"
   workflow_dispatch:
 
 permissions:

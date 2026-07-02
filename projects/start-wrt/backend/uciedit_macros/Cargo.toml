@@ -1,0 +1,13 @@
+[package]
+name = "uciedit_macros"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+darling = "0.20.10"
+proc-macro2 = "1.0.94"
+quote = "1.0.40"
+syn = "2.0.100"
+
+[lib]
+proc-macro = true

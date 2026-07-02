@@ -325,6 +325,96 @@
         }
       }
     },
+    "start-wrt": {
+      "projectType": "application",
+      "schematics": {
+        "@schematics/angular:component": {
+          "style": "scss"
+        }
+      },
+      "root": "projects/start-wrt/web",
+      "sourceRoot": "projects/start-wrt/web/src",
+      "prefix": "app",
+      "architect": {
+        "build": {
+          "builder": "@angular/build:application",
+          "options": {
+            "baseHref": "/",
+            "outputPath": "projects/start-wrt/web/dist/startwrt",
+            "index": "projects/start-wrt/web/src/index.html",
+            "browser": "projects/start-wrt/web/src/main.ts",
+            "polyfills": [],
+            "tsConfig": "projects/start-wrt/web/tsconfig.json",
+            "inlineStyleLanguage": "scss",
+            "assets": [
+              {
+                "glob": "**/*",
+                "input": "projects/start-wrt/web/assets",
+                "output": "assets"
+              }
+            ],
+            "styles": [
+              "node_modules/@taiga-ui/styles/taiga-ui-theme.less",
+              "node_modules/@taiga-ui/styles/taiga-ui-fonts.less",
+              "projects/start-wrt/web/src/styles.scss"
+            ],
+            "loader": {
+              ".html": "text",
+              ".svg": "text"
+            },
+            "scripts": []
+          },
+          "configurations": {
+            "production": {
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "1mb",
+                  "maximumError": "1.5mb"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "4kB",
+                  "maximumError": "8kB"
+                }
+              ],
+              "outputHashing": "all"
+            },
+            "development": {
+              "optimization": false,
+              "extractLicenses": false,
+              "sourceMap": true,
+              "namedChunks": true
+            },
+            "ci": {
+              "progress": false
+            }
+          },
+          "defaultConfiguration": "production"
+        },
+        "serve": {
+          "builder": "@angular/build:dev-server",
+          "configurations": {
+            "production": {
+              "buildTarget": "start-wrt:build:production"
+            },
+            "development": {
+              "buildTarget": "start-wrt:build:development"
+            }
+          },
+          "defaultConfiguration": "development",
+          "options": {
+            "port": 8300
+          }
+        },
+        "extract-i18n": {
+          "builder": "@angular/build:extract-i18n",
+          "options": {
+            "buildTarget": "start-wrt:build"
+          }
+        }
+      }
+    },
     "brochure-marketplace": {
       "projectType": "application",
       "schematics": {},

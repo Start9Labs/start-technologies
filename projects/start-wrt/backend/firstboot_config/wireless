@@ -1,0 +1,31 @@
+
+config wifi-device 'radio0'
+	option type 'mac80211'
+	option path 'soc/ca800000.pcie/pci0002:00/0002:00:00.0/0002:01:00.0'
+	option band '2g'
+	option channel '1'
+	option htmode 'HE20'
+	option disabled '1'
+
+config wifi-iface 'default_radio0'
+	option device 'radio0'
+	option network 'lan'
+	option mode 'ap'
+	option ssid 'StartWRT'
+	option encryption 'none'
+
+config wifi-device 'radio1'
+	option type 'mac80211'
+	option path 'soc/ca800000.pcie/pci0002:00/0002:00:00.0/0002:01:00.0+1'
+	option band '5g'
+	option channel 'auto'
+	option htmode 'HE80'
+	option disabled '1'
+
+config wifi-iface 'default_radio1'
+	option device 'radio1'
+	option network 'lan'
+	option mode 'ap'
+	option ssid 'StartWRT'
+	option encryption 'none'
+

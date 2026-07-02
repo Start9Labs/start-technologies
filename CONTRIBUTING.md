@@ -67,7 +67,7 @@ The repo has four integration branches. `master` is for the current release — 
 
 This is a monorepo: one root Cargo workspace and one Angular workspace, both rooted at the repo root. The root `Makefile` is a thin orchestrator (it `include`s each product's `build.mk`) — run `make` with no target to print a help summary; there is no default target. Run build commands from the repo root.
 
-- **A single Rust bin:** `cargo build -p <crate> --bin <bin>` — crates are `start-os` (`startbox` / `start-container`), `start-cli`, `start-registry` (`registrybox`), and `start-tunnel` (`tunnelbox`).
+- **A single Rust bin:** `cargo build -p <crate> --bin <bin>` — crates are `start-os` (`startbox` / `start-container`), `start-cli`, `start-registry` (`registrybox`), `start-tunnel` (`tunnelbox`), and `startwrt-core` (`startwrt`).
 - **A whole product** (bins + UI + packaging) has its own `make` targets and build instructions in its `CONTRIBUTING.md`:
 
 | Product | Primary build target | Build & deploy docs |
@@ -76,6 +76,7 @@ This is a monorepo: one root Cargo workspace and one Angular workspace, both roo
 | start-cli | `make cli` | [`projects/start-cli/CONTRIBUTING.md`](projects/start-cli/CONTRIBUTING.md) |
 | start-registry | `make registry` | [`projects/start-registry/CONTRIBUTING.md`](projects/start-registry/CONTRIBUTING.md) |
 | StartTunnel | `make tunnel` | [`projects/start-tunnel/CONTRIBUTING.md`](projects/start-tunnel/CONTRIBUTING.md) |
+| StartWRT | `make startwrt` (`make startwrt-image` for the full OpenWrt image — hours, needs the submodule) | [`projects/start-wrt/CONTRIBUTING.md`](projects/start-wrt/CONTRIBUTING.md) |
 | Start SDK | `make bundle` (from `projects/start-sdk`) | [`projects/start-sdk/CONTRIBUTING.md`](projects/start-sdk/CONTRIBUTING.md) |
 | Web (shared libs + app UIs) | `npm run build:ui` | [`shared-libs/ts-modules/CONTRIBUTING.md`](shared-libs/ts-modules/CONTRIBUTING.md) |
 
@@ -101,6 +102,7 @@ make test                    # all tests
 make test-core               # Rust (shared-libs/crates/start-core)
 make test-sdk                # SDK
 make test-container-runtime  # container runtime
+make test-startwrt           # StartWRT Rust crates
 
 # Run a specific Rust test
 cd shared-libs/crates/start-core && cargo test <test_name> --features=test
@@ -119,7 +121,7 @@ Or scope it to one project — each has a `format-check-*` read-only variant tha
 
 ```bash
 make format-core         # shared Rust crates
-make format-cli          # start-cli  (also format-registry / format-tunnel / format-startos)
+make format-cli          # start-cli  (also format-registry / format-tunnel / format-startos / format-startwrt)
 make format-web          # the Angular workspace (shared libs + all app UIs, incl. brochure)
 make format-sdk          # the SDK
 ```

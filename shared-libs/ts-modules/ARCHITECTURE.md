@@ -10,13 +10,14 @@ This directory (`shared-libs/ts-modules`) holds the shared **libraries**; the An
 - `marketplace/src/` — `@start9labs/marketplace` (Angular)
 - `start-core/lib/` — `@start9labs/start-core` (non-Angular; the SDK's core types/ABI/effects/OS bindings, consumed by web and bundled into the SDK. Has its own `Makefile`/`package.json`, built separately from the Angular workspace.)
 
-The four **apps** are declared in `angular.json` but rooted in their product dirs, so paths below prefixed `ui/`, `setup-wizard/`, etc. actually live outside this directory:
+The five **apps** are declared in `angular.json` but rooted in their product dirs, so paths below prefixed `ui/`, `setup-wizard/`, etc. actually live outside this directory:
 
-| App            | `angular.json` root               |
-| -------------- | --------------------------------- |
-| `ui`           | `../../projects/start-os/web/ui`           |
-| `setup-wizard` | `../../projects/start-os/web/setup-wizard` |
-| `start-tunnel` | `../../projects/start-tunnel/web`          |
+| App                    | `angular.json` root                        |
+| ---------------------- | ------------------------------------------ |
+| `ui`                   | `../../projects/start-os/web/ui`           |
+| `setup-wizard`         | `../../projects/start-os/web/setup-wizard` |
+| `start-tunnel`         | `../../projects/start-tunnel/web`          |
+| `start-wrt`            | `../../projects/start-wrt/web`             |
 | `brochure-marketplace` | `../../projects/brochure-marketplace`      |
 
 Apps import the libs via the root `tsconfig.json` path aliases `@start9labs/shared` → `./shared-libs/ts-modules/shared/src/public-api` and `@start9labs/marketplace` → `./shared-libs/ts-modules/marketplace/index`.
