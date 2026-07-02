@@ -192,7 +192,6 @@ pub async fn init(
         OS_DEVELOPER_KEY_PATH,
     )
     .await?;
-    crate::system::nvme::check_nvme_quirks().await.log_err();
     Command::new("chown")
         .arg("root:startos")
         .arg(OS_DEVELOPER_KEY_PATH)
