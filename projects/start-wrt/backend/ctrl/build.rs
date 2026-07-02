@@ -1,6 +1,14 @@
 use std::process::Command;
 
 fn main() {
+    // include_dir! in embedded_web.rs panics at macro expansion if the web dist
+    // dir is missing — which it is on a fresh clone or in any build that never
+    // runs the Angular build (cargo check/test, CI's `make test`). Ensure it
+    // exists; empty is fine for those builds, and `make startwrt` always
+    // populates it first via the $(STARTWRT_WEB_DIST) prerequisite.
+    std::fs::create_dir_all("../../web/dist/startwrt/browser")
+        .expect("failed to create web dist placeholder dir");
+
     // Prefer STARTWRT_GIT_HASH from the environment (set by build-rust.sh on
     // the host before entering the Docker container). Fall back to running git
     // directly for local dev builds.

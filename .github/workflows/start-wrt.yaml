@@ -80,6 +80,11 @@ jobs:
         with:
           nodejs-version: ${{ env.NODEJS_VERSION }}
 
+      # build/verify-isa.sh disassembles the binary to reject instructions the
+      # SpaceMiT K1 can't run; it needs a riscv64 binutils objdump on the host.
+      - name: Install riscv64 binutils
+        run: sudo apt-get update && sudo apt-get install -y binutils-riscv64-linux-gnu
+
       - name: Make startwrt
         run: make startwrt
         env:
