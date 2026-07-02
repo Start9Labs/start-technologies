@@ -5,7 +5,7 @@
   "sideEffects": true,
   "scripts": {
     "peggy": "peggy --allowed-start-rules \"*\" --plugin ./node_modules/ts-pegjs/dist/tspegjs -o lib/exver/exver.ts lib/exver/exver.pegjs",
-    "copy": "cpy \"**/*.js\" \"**/*.d.ts\" ../dist --cwd=lib --parents && cpy node_modules/** dist/node_modules --parents && cpy package.json README.md LICENSE dist",
+    "copy": "cpy \"**/*.js\" \"**/*.d.ts\" ../dist --cwd=lib --parents && cp -a node_modules dist/ && cpy package.json README.md LICENSE dist",
     "test": "jest -c ./jest.config.js --coverage",
     "buildOutput": "npx prettier --write \"**/*.ts\"",
     "check": "tsc --noEmit",
