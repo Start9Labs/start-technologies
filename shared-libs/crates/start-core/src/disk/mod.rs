@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
 use crate::context::{CliContext, RpcContext};
-use crate::disk::util::DiskInfo;
+use crate::disk::util::{DiskInfo, get_mount_source};
 use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
@@ -44,15 +44,15 @@ impl OsPartitionInfo {
             || self.extra_boot.values().any(|v| v == p)
     }
 
-    /// Build partition info by parsing /etc/fstab and resolving device specs,
-    /// then discovering the BIOS boot partition (which is never mounted).
+    /// Build partition info by resolving the OS root device, parsing /etc/fstab
+    /// for the boot partition(s), and discovering the BIOS boot partition
+    /// (which is never mounted).
     pub async fn from_fstab() -> Result<Self, Error> {
         let fstab = tokio::fs::read_to_string("/etc/fstab")
             .await
             .with_ctx(|_| (ErrorKind::Filesystem, "/etc/fstab"))?;
 
         let mut boot = None;
-        let mut root = None;
         let mut extra_boot = BTreeMap::new();
 
         for line in fstab.lines() {
@@ -68,6 +68,13 @@ impl OsPartitionInfo {
                 continue;
             };
 
+            // `/` is an overlayfs the initramfs sets up, so its fstab source
+            // (`overlay`) names no block device — root comes from the live OS
+            // mount below. Only /boot* entries are real block-device mounts.
+            if target != "/boot" && !target.starts_with("/boot/") {
+                continue;
+            }
+
             let dev = match resolve_fstab_source(source).await {
                 Ok(d) => d,
                 Err(e) => {
@@ -77,7 +84,6 @@ impl OsPartitionInfo {
             };
 
             match target {
-                "/" => root = Some(dev),
                 "/boot" => boot = Some(dev),
                 t if t.starts_with("/boot/") => {
                     if let Some(name) = t.strip_prefix("/boot/") {
@@ -87,6 +93,8 @@ impl OsPartitionInfo {
                 _ => {}
             }
         }
+
+        let root = os_root_device().await.unwrap_or_default();
 
         let boot = boot.unwrap_or_default();
         let bios = if !boot.as_os_str().is_empty() {
@@ -98,11 +106,28 @@ impl OsPartitionInfo {
         Ok(Self {
             bios,
             boot,
-            root: root.unwrap_or_default(),
+            root,
             extra_boot,
             data: None,
         })
     }
+}
+
+/// The initramfs bind-mounts the installed OS root partition here on every
+/// StartOS boot. It exists only on a running installed system — not in the live
+/// installer — so it names the OS root exactly when there is one.
+const OS_ROOT_MOUNT: &str = "/media/startos/root";
+
+/// Resolve the installed OS root block device from its live mount.
+///
+/// It can't come from the fstab `/` entry (`/` is an overlayfs the initramfs
+/// stacks over the real partition) nor from "whatever the system booted from":
+/// during os_install we're booted off the installer USB, which is not the OS
+/// root this struct describes. The initramfs bind-mounts the real OS partition
+/// at `/media/startos/root`, so that mount is the source of truth — and its
+/// absence in the installer correctly yields no OS root.
+async fn os_root_device() -> Option<PathBuf> {
+    get_mount_source(OS_ROOT_MOUNT).await.ok().flatten()
 }
 
 const BIOS_BOOT_TYPE_GUID: &str = "21686148-6449-6E6F-744E-656564454649";
@@ -156,7 +181,14 @@ async fn resolve_fstab_source(source: &str) -> Result<PathBuf, Error> {
             .await
             .unwrap_or_else(|_| PathBuf::from(source)));
     }
-    // PARTUUID=, UUID=, LABEL= — resolve via blkid
+    // Only TAG=value specs (PARTUUID=, UUID=, LABEL=) are resolvable via blkid;
+    // pseudo sources (overlay, tmpfs, none, ...) are not block devices.
+    if !source.contains('=') {
+        return Err(Error::new(
+            eyre!("not a block device spec"),
+            ErrorKind::DiskManagement,
+        ));
+    }
     let output = Command::new("blkid")
         .args(["-o", "device", "-t", source])
         .invoke(ErrorKind::DiskManagement)
