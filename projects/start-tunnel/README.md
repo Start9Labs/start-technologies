@@ -70,19 +70,19 @@ All builds run from the **repo root**, not this directory.
 
 ```bash
 # Build the daemon binary (musl target, embeds the prebuilt UI)
-make tunnel
+make start-tunnel
 
-# Build just the Angular UI (no make target; make tunnel chains it)
+# Build just the Angular UI (no make target; make start-tunnel chains it)
 npm run build:tunnel
 
 # Build the cargo binary directly (UI must already be built)
 cargo build -p start-tunnel --bin tunnelbox
 
 # Build a .deb package
-make tunnel-deb
+make start-tunnel-deb
 ```
 
-`make tunnel` produces
+`make start-tunnel` produces
 `target/<arch>-unknown-linux-musl/<profile>/tunnelbox`, which `src/main.rs`
 embeds the compiled UI from `web/dist/static/start-tunnel/` into.
 

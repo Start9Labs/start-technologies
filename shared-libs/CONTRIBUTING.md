@@ -23,7 +23,7 @@ Part of the single root Cargo workspace.
 # from the repo root
 cargo build -p start-core
 cargo check -p start-core
-make format-core                        # format the shared Rust crates (rustfmt); make format-check-core in CI
+make start-core-format                        # format the shared Rust crates (rustfmt); make start-core-format-check in CI
 cd shared-libs/crates/start-core && ./run-tests.sh
 ```
 
@@ -46,8 +46,8 @@ through the single Angular workspace rooted at the repo root.
 npm ci
 npm run build:deps                      # build @start9labs/start-core + patch-db client (required first)
 npm run check                           # typecheck i18n, shared, marketplace, ui, setup, brochure
-make format-web                         # prettier --write across the Angular workspace
-make format-check-web                   # prettier check (CI)
+make web-format                         # prettier --write across the Angular workspace
+make web-format-check                   # prettier check (CI)
 ```
 
 - `build:deps` must run before any typecheck/build: `@start9labs/start-core`

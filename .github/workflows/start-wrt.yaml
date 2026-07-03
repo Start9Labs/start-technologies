@@ -87,8 +87,8 @@ jobs:
       - name: Install riscv64 binutils
         run: sudo apt-get update && sudo apt-get install -y binutils-riscv64-linux-gnu
 
-      - name: Make startwrt
-        run: make startwrt
+      - name: Make start-wrt
+        run: make start-wrt
         env:
           SCCACHE_GHA_ENABLED: on
           SCCACHE_GHA_VERSION: 0
@@ -124,10 +124,10 @@ jobs:
           restore-keys: openwrt-dl-
 
       - name: Setup OpenWrt (feeds, config, download)
-        run: make startwrt-openwrt-setup
+        run: make start-wrt-openwrt-setup
 
       - name: Build image
-        run: make startwrt-image
+        run: make start-wrt-image
 
       - uses: actions/upload-artifact@v7
         with:

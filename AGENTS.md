@@ -30,15 +30,15 @@ Each product lives under `projects/` as a thin wrapper; the bulk of the code liv
 
 ## Build & test (run from the repo root)
 
-- **Use `make` recipes when they exist** rather than re-deriving the underlying commands. The root `Makefile` is a thin orchestrator that `include`s `build/common.mk` (shared vars/macros) and one `<project>/build.mk` per product (`projects/<name>/build.mk`, `shared-libs/*/build.mk`) — run everything from the repo root (`make startos`, `make registry`, etc.); a product's targets live in its `build.mk`. There is no default target — bare `make` prints `help`.
+- **Use `make` recipes when they exist** rather than re-deriving the underlying commands. The root `Makefile` is a thin orchestrator that `include`s `build/common.mk` (shared vars/macros) and one `<project>/build.mk` per product (`projects/<name>/build.mk`, `shared-libs/*/build.mk`) — run everything from the repo root (`make start-os`, `make start-registry`, etc.); a product's targets live in its `build.mk`. There is no default target — bare `make` prints `help`.
 - **Build a single product** with `cargo build -p <crate> --bin <bin>` (bins: `startbox`/`start-container` in package `start-os`; `start-cli`; `registrybox` in `start-registry`; `tunnelbox` in `start-tunnel`; `startwrt` in package `startwrt-core` for `start-wrt`).
-- **Tests:** `make test` (all), `make test-core` / `make test-sdk` / `make test-container-runtime` (scoped). A single Rust test: `cd shared-libs/crates/start-core && cargo test <test_name> --features=test`.
+- **Tests:** `make test` (all), `make start-core-test` / `make start-sdk-test` / `make container-runtime-test` (scoped). A single Rust test: `cd shared-libs/crates/start-core && cargo test <test_name> --features=test`.
 - **Format:** `make format` (Rust nightly fmt + web prettier + SDK); CI runs `make format-check`. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full build/test/format workflow.
 
 ## Gotchas
 
 - **Polyglot repo.** Per-component gotchas live in component-level `AGENTS.md` files — read the relevant one before operating on that component (see Sub-scopes).
-- **Verify cross-layer changes in order.** Rust → ts-bindings → SDK rebuild → web/container-runtime type checks. See [ARCHITECTURE.md](ARCHITECTURE.md#cross-layer-verification). Editing `shared-libs/ts-modules/start-core/lib/osBindings/*.ts` alone is NOT sufficient — start-core (and the SDK bundle, for container-runtime) must be rebuilt before web/container-runtime will see the change.
+- **Verify cross-layer changes in order.** Rust → start-core-ts-bindings → SDK rebuild → web/container-runtime type checks. See [ARCHITECTURE.md](ARCHITECTURE.md#cross-layer-verification). Editing `shared-libs/ts-modules/start-core/lib/osBindings/*.ts` alone is NOT sufficient — start-core (and the SDK bundle, for container-runtime) must be rebuilt before web/container-runtime will see the change.
 - **Ask before destructive `make` recipes.** Image flashing, deploy targets (`update*`, `reflash`, `wormhole*`), and `make clean*` consume hours and disk — confirm with the user first.
 - **Git submodule.** `projects/start-wrt/openwrt` is the repo's **only** git submodule (a large external OpenWrt fork; everything else is vendored). Clone with `--recursive` or `git submodule update --init projects/start-wrt/openwrt`. Only start-wrt's full *image* build needs it — every other product, and start-wrt's own binary build, does not.
 - **Stale-path watch.** Old docs referenced `core/`, `web/`, `sdk/`, `container-runtime/`, `patch-db/` at the repo root, and the products + `shared/` directly at the root. Those are gone — products now live under `projects/`, the shared libs under `shared-libs/`; use the locations above.
@@ -53,7 +53,7 @@ Some pairs of files mirror each other by hand — nothing enforces them, so a ch
 
 Already enforced or checked elsewhere (listed here for completeness; documented at their own scope):
 
-- **Exported Rust types → `make ts-bindings` → SDK rebuild → web/container-runtime.** See [ARCHITECTURE.md](ARCHITECTURE.md#cross-layer-verification); editing `osBindings/*.ts` alone is not enough.
+- **Exported Rust types → `make start-core-ts-bindings` → SDK rebuild → web/container-runtime.** See [ARCHITECTURE.md](ARCHITECTURE.md#cross-layer-verification); editing `osBindings/*.ts` alone is not enough.
 - **User-facing strings ↔ all five locale dictionaries** (`en_US`/`de_DE`/`es_ES`/`fr_FR`/`pl_PL`) — compile-checked for `start-core`; `npm run check:i18n` for the web libs.
 - **`patchdb-ui-seed.json` ↔ `patchdb-ui-seed.beta.json`** — keep both seeds in sync (see [`projects/start-os/AGENTS.md`](projects/start-os/AGENTS.md)).
 - **A crate's `version` bump ↔ its `CHANGELOG.md`** — versions are read from each manifest; bump the changelog in the same change.

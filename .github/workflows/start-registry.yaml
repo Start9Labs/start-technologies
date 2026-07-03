@@ -94,7 +94,7 @@ jobs:
           nodejs-version: ${{ env.NODEJS_VERSION }}
 
       - name: Make
-        run: make registry-deb
+        run: make start-registry-deb
         env:
           PLATFORM: ${{ matrix.arch }}
           SCCACHE_GHA_ENABLED: on

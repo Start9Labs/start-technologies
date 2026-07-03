@@ -39,7 +39,7 @@ Run from the monorepo root:
 
 ```bash
 npm --prefix projects/start-os/container-runtime test           # jest
-make test-container-runtime                            # build SDK + run jest via Makefile
+make container-runtime-test                            # build SDK + run jest via Makefile
 ```
 
 Jest with `ts-jest` (`jest.config.js`, `rootDir: ./src`). The `mime` module is mocked via `__mocks__/mime.js`. Place tests next to the code they cover with the `.test.ts` extension. `SystemForEmbassy` uses snapshot tests (`__snapshots__/`) and fixtures (`__fixtures__/`) — update snapshots deliberately, not blindly.
@@ -55,6 +55,6 @@ The runtime uses **double quotes**, unlike `start-sdk` and `shared-libs/ts-modul
 From the monorepo root, the canonical formatter is the top-level make target (container-runtime folds into the start-os product):
 
 ```bash
-make format-startos          # write formatting
-make format-check-startos    # CI read-only check
+make start-os-format          # write formatting
+make start-os-format-check    # CI read-only check
 ```

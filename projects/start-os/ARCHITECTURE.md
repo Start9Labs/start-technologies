@@ -103,7 +103,7 @@ Changes flow in one direction; verify in this order:
 
 ```
 start-core (Rust)
-  → make ts-bindings   # cargo test exports ts-rs types → shared-libs/crates/start-core/bindings/
+  → make start-core-ts-bindings   # cargo test exports ts-rs types → shared-libs/crates/start-core/bindings/
     → @start9labs/start-core build  # shared-libs/ts-modules/start-core/dist
       → web apps consume @start9labs/start-core
     → start-sdk build  # projects/start-sdk/dist, bundling @start9labs/start-core
@@ -113,7 +113,7 @@ start-core (Rust)
 | Step | Command (from repo root) | What it does |
 |---|---|---|
 | 1 | `cargo check -p start-os` | Verify the OS bins compile |
-| 2 | `make ts-bindings` | Export ts-rs types from `start-core` |
+| 2 | `make start-core-ts-bindings` | Export ts-rs types from `start-core` |
 | 3 | `cd projects/start-sdk && make bundle` | Build the SDK `dist` (builds `@start9labs/start-core` first and bundles it) |
 | 4 | `npm run check:ui && npm run check:setup` | Type-check the apps |
 | 5 | `cd projects/start-os/container-runtime && npm run check` | Type-check the runtime |

@@ -15,14 +15,14 @@ include projects/start-os/build.mk
 include projects/start-wrt/build.mk
 include projects/start-docs/build.mk
 
-.PHONY: help startos metadata install-startos clean format format-check install-cli cli cli-deb startos-uis startos-ui startos-emulate-reflash startos-deb startos-$(IMAGE_TYPE) startos-squashfs startos-wormhole startos-wormhole-deb startos-update test test-core test-sdk test-container-runtime test-startwrt registry install-registry tunnel install-tunnel ts-bindings
+.PHONY: help start-os metadata start-os-install clean format format-check start-cli-install start-cli start-cli-deb start-os-uis start-os-ui start-os-emulate-reflash start-os-deb start-os-$(IMAGE_TYPE) start-os-squashfs start-os-wormhole start-os-wormhole-deb start-os-update test start-core-test start-sdk-test container-runtime-test start-wrt-test start-registry start-registry-install start-tunnel start-tunnel-install start-core-ts-bindings
 
 help:
 	@echo "No default target — specify one. Common targets:"
-	@echo "  startos startos-deb startos-squashfs startos-ui startos-uis install-startos   (StartOS)"
-	@echo "  cli cli-deb registry tunnel startwrt startwrt-image                           (other products)"
-	@echo "  test test-core test-sdk test-container-runtime test-startwrt                  (tests)"
-	@echo "  format format-check ts-bindings clean                                         (tooling)"
+	@echo "  start-os start-os-deb start-os-squashfs start-os-ui start-os-uis start-os-install   (StartOS)"
+	@echo "  start-cli start-cli-deb start-registry start-tunnel start-wrt start-wrt-image        (other products)"
+	@echo "  test start-core-test start-sdk-test container-runtime-test start-wrt-test            (tests)"
+	@echo "  format format-check start-core-ts-bindings clean                                     (tooling)"
 	@echo "See CONTRIBUTING.md for the full list."
 
 touch:
@@ -31,13 +31,13 @@ touch:
 metadata: $(VERSION_FILE) $(PLATFORM_FILE) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE)
 
 # Per-project cleans live in each build.mk; this only aggregates them.
-clean: clean-core clean-web clean-sdk clean-cli clean-registry clean-tunnel clean-startos clean-startwrt clean-docs
+clean: start-core-clean web-clean start-sdk-clean start-cli-clean start-registry-clean start-tunnel-clean start-os-clean start-wrt-clean start-docs-clean
 
 # Per-project formats live in each build.mk; this only aggregates them. Run one
-# project with e.g. `make format-cli`, or all of them with `make format`.
-format: format-core format-web format-sdk format-cli format-registry format-tunnel format-startos format-startwrt
+# project with e.g. `make start-cli-format`, or all of them with `make format`.
+format: start-core-format web-format start-sdk-format start-cli-format start-registry-format start-tunnel-format start-os-format start-wrt-format
 
 # Read-only formatting verification (used by CI); mirrors `format` per project.
-format-check: format-check-core format-check-web format-check-sdk format-check-cli format-check-registry format-check-tunnel format-check-startos format-check-startwrt
+format-check: start-core-format-check web-format-check start-sdk-format-check start-cli-format-check start-registry-format-check start-tunnel-format-check start-os-format-check start-wrt-format-check
 
-test: | test-core test-sdk test-container-runtime test-startwrt
+test: | start-core-test start-sdk-test container-runtime-test start-wrt-test

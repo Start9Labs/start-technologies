@@ -22,9 +22,9 @@ CLAUDE.md is a one-line `@AGENTS.md` import. See [ARCHITECTURE.md](./ARCHITECTUR
 | `cargo check -p start-registry` | fast type-check (linux only locally) |
 | `cargo clippy -p start-registry` | lints |
 | `cargo test -p start-core registry` | exercise the registry logic (lives in start-core) |
-| `make format-registry` | format (`make format-check-registry` for the read-only CI check) |
-| `make registry` | release musl build via `shared-libs/crates/start-core/build/build-registrybox.sh` |
-| `make install-registry DESTDIR=…` | stage binary + symlinks + service |
+| `make start-registry-format` | format (`make start-registry-format-check` for the read-only CI check) |
+| `make start-registry` | release musl build via `shared-libs/crates/start-core/build/build-registrybox.sh` |
+| `make start-registry-install DESTDIR=…` | stage binary + symlinks + service |
 
 Because the code lives in `start-core`, most meaningful tests and lints target `-p start-core`, not `-p start-registry`. The thin wrapper mainly verifies that the bin links.
 
@@ -33,7 +33,7 @@ Feature flags are forwarded to `start-core`: `beta`, `console`, `dev`, `test`, `
 ## Gotchas
 
 - **Don't put logic here.** New registry behavior belongs in `shared-libs/crates/start-core/src/registry/`. This crate should stay a wrapper.
-- **`registrybox` (bin) vs `start-registry`/`start-registryd` (install names).** The Cargo bin is `registrybox`; the runtime names are symlinks created at install time. The service file references `/usr/bin/start-registryd`, which only exists after `install-registry` symlinks it.
+- **`registrybox` (bin) vs `start-registry`/`start-registryd` (install names).** The Cargo bin is `registrybox`; the runtime names are symlinks created at install time. The service file references `/usr/bin/start-registryd`, which only exists after `start-registry-install` symlinks it.
 - **Version:** `start-registry` is versioned **independently** in `Cargo.toml` (currently `1.0.0`), no longer tied to the StartOS release line. The `.deb` version and `basename.sh` read it straight from the manifest; bump it on its own cadence.
 - **`registry_api` is shared by server and CLI.** Adding a subcommand in `registry/mod.rs` with `with_call_remote::<CliContext>()` exposes it both over RPC and through the `start-registry` CLI.
 - **Auth:** the RPC route uses local + signature auth; admin-only commands (e.g. metrics) are tagged `with_metadata("admin", true)`.

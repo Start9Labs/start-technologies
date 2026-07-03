@@ -42,8 +42,8 @@ under `proptest-regressions/` — commit those if a new regression case is found
 From the repo root (this crate formats as part of the shared Rust crates):
 
 ```bash
-make format-core
-make format-check-core
+make start-core-format
+make start-core-format-check
 ```
 
 ## Publishing the wasm package

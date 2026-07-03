@@ -35,7 +35,7 @@ cargo build -p start-os --bin startbox             # Build a product binary
 Run from the repo root:
 
 ```bash
-make test-core                                     # Run the full suite (wraps run-tests.sh)
+make start-core-test                                     # Run the full suite (wraps run-tests.sh)
 cargo test -p start-core <test_name> --features=test  # Run a specific test
 ```
 
@@ -44,8 +44,8 @@ cargo test -p start-core <test_name> --features=test  # Run a specific test
 Run from the repo root:
 
 ```bash
-make format-core                                   # Format with nightly rustfmt
-make format-check-core                             # Read-only check (CI)
+make start-core-format                                   # Format with nightly rustfmt
+make start-core-format-check                             # Read-only check (CI)
 ```
 
 ## Adding a New RPC Endpoint
@@ -66,7 +66,7 @@ When a Rust type needs to be available in TypeScript (for the web frontend or SD
 2. Use `#[serde(rename_all = "camelCase")]` for JS-friendly field names
 3. For types that don't implement TS (like `DateTime<Utc>`, `exver::Version`), use `#[ts(type = "string")]` overrides
 4. For `u64` fields that should be JS `number` (not `bigint`), use `#[ts(type = "number")]`
-5. Run `make ts-bindings` to regenerate — files appear in `shared-libs/crates/start-core/bindings/` then sync to `shared-libs/ts-modules/start-core/lib/osBindings/`
+5. Run `make start-core-ts-bindings` to regenerate — files appear in `shared-libs/crates/start-core/bindings/` then sync to `shared-libs/ts-modules/start-core/lib/osBindings/`
 6. Rebuild the affected TS lib(s): `cd shared-libs/ts-modules/start-core && make dist` (web) and/or `cd projects/start-sdk && make bundle` (the SDK bundle for container-runtime)
 
 ## Adding i18n Keys

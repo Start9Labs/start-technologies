@@ -19,7 +19,7 @@ MultiExecutable::default()
     .execute()
 ```
 
-`MultiExecutable::execute` inspects `argv[0]` (and `argv[1]`) to choose which entry point to run, so the single compiled `registrybox` behaves as either binary depending on the name it's launched under. Installation (root `Makefile` `install-registry`) places the binary at `/usr/bin/start-registrybox` and symlinks `start-registryd` and `start-registry` to it.
+`MultiExecutable::execute` inspects `argv[0]` (and `argv[1]`) to choose which entry point to run, so the single compiled `registrybox` behaves as either binary depending on the name it's launched under. Installation (root `Makefile` `start-registry-install`) places the binary at `/usr/bin/start-registrybox` and symlinks `start-registryd` and `start-registry` to it.
 
 The dispatch table also responds to `--contents` (lists the embedded sub-binaries), which the packaging tooling uses.
 

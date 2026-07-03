@@ -13,7 +13,7 @@
 ## Prerequisites
 
 - Rust stable for building and testing.
-- Nightly `rustfmt` for formatting (the `make format-core` target formats with nightly `rustfmt`).
+- Nightly `rustfmt` for formatting (the `make start-core-format` target formats with nightly `rustfmt`).
 - No extra tooling is required; the `arbitrary` (proptest) and `ts-rs` features pull their deps in
   automatically when enabled.
 
@@ -46,8 +46,8 @@ behavior can ripple into all of them — build the affected consumers if in doub
 From the repo root:
 
 ```bash
-make format-core         # format the shared Rust crates (incl. imbl-value)
-make format-check-core   # CI read-only check
+make start-core-format         # format the shared Rust crates (incl. imbl-value)
+make start-core-format-check   # CI read-only check
 ```
 
-Nightly is required — the workspace's rustfmt config relies on nightly-only options, which `make format-core` uses.
+Nightly is required — the workspace's rustfmt config relies on nightly-only options, which `make start-core-format` uses.

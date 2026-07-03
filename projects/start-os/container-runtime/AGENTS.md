@@ -22,7 +22,7 @@ npm --prefix projects/start-os/container-runtime ci           # install deps
 npm --prefix projects/start-os/container-runtime run check     # tsc --noEmit (type-check)
 npm --prefix projects/start-os/container-runtime run build      # prettier + clean + tsc -> dist/
 npm --prefix projects/start-os/container-runtime test           # jest (ts-jest)
-make test-container-runtime                            # SDK + jest via top-level Makefile
+make container-runtime-test                            # SDK + jest via top-level Makefile
 ```
 
 Tests are Jest + `ts-jest` (`jest.config.js`, `rootDir: ./src`). `mime` is mocked via `__mocks__/mime.js`. Place tests next to the code as `*.test.ts`; `SystemForEmbassy` carries snapshot tests (`__snapshots__/`) and fixtures (`__fixtures__/`).

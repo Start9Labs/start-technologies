@@ -43,7 +43,7 @@ npm run check:wrt                     # Type-check without emitting
 `config.json` is **gitignored** — it's generated from `config-sample.json`:
 
 - **Local dev:** `cp config-sample.json config.json`, then edit freely. `npm run start:wrt` runs `build-config.js` first, which stamps the current git hash into `gitHash`.
-- **Production / CI:** `make startwrt` triggers `web/update-config.sh`, which flips `useMocks` to `false` and stamps `gitHash` from `build/env/GIT_HASH.txt`.
+- **Production / CI:** `make start-wrt` triggers `web/update-config.sh`, which flips `useMocks` to `false` and stamps `gitHash` from `build/env/GIT_HASH.txt`.
 
 Schema:
 

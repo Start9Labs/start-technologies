@@ -32,7 +32,7 @@ in `startos-backup-fs`→`fuser` and fails on a bare host without FUSE dev libs)
 cargo build -p startwrt-core --bin startwrt                # Build the daemon+CLI binary
 cargo check -p startwrt-core --bin startwrt                # Type-check without building
 cargo test  -p startwrt-core -p uciedit -p uciedit_macros  # Run all start-wrt unit tests
-make test-startwrt                                         # same tests, containerized (mirrors test-core)
+make start-wrt-test                                         # same tests, containerized (mirrors start-core-test)
 ```
 
 Cross-compilation for the router target (riscv64gc-unknown-linux-musl) is handled by `build/build-rust.sh`.
@@ -147,7 +147,7 @@ Run from the repo root, scoped with `-p` (a bare `cargo test` tests the whole mo
 cargo test -p startwrt-core          # Handler tests — the bulk of coverage (~430 tests)
 cargo test -p uciedit                # UCI parser tests
 cargo test -p startwrt-core -p uciedit -p uciedit_macros   # everything
-make test-startwrt                   # all of the above, containerized (mirrors test-core)
+make start-wrt-test                   # all of the above, containerized (mirrors start-core-test)
 ```
 
 `startwrt-core`'s handler tests write fixtures into per-test tempdirs (see

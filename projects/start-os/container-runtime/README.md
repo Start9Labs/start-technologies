@@ -31,5 +31,5 @@ npm --prefix projects/start-os/container-runtime test        # jest
 From the monorepo root you can also drive it through the top-level Makefile:
 
 ```bash
-make test-container-runtime              # build SDK + run jest
+make container-runtime-test              # build SDK + run jest
 ```

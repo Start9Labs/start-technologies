@@ -60,14 +60,14 @@ workspace). See [CONTRIBUTING.md](CONTRIBUTING.md) for environment setup
 ```sh
 # from the repo root
 cargo check -p start-os                 # verify the OS bins compile
-make startos-ui                          # build the admin UI
-make startos                             # build all OS artifacts (bins + web + runtime image)
-make startos-$(IMAGE_TYPE)               # build the bootable image (iso, or img on Pi)
+make start-os-ui                          # build the admin UI
+make start-os                             # build all OS artifacts (bins + web + runtime image)
+make start-os-$(IMAGE_TYPE)               # build the bootable image (iso, or img on Pi)
 ```
 
-`make` targets relevant to this product: `startos-ui`, `startos-uis`, `startos`, `startos-deb`,
-`install-startos`, `startos-$(IMAGE_TYPE)`, `startos-squashfs`,
-`startos-update`/`startos-emulate-reflash`/`startos-wormhole*` (deploy to a live
+`make` targets relevant to this product: `start-os-ui`, `start-os-uis`, `start-os`, `start-os-deb`,
+`start-os-install`, `start-os-$(IMAGE_TYPE)`, `start-os-squashfs`,
+`start-os-update`/`start-os-emulate-reflash`/`start-os-wormhole*` (deploy to a live
 device — slow and destructive). Run `make test` for the full Rust + SDK + runtime
 test suite.
 

@@ -6,7 +6,7 @@ Pending tasks for AI agents. Remove items when completed.
 
 - [ ] Extract TS-exported types into a lightweight sub-crate for fast binding generation
 
-  **Problem**: `make ts-bindings` compiles the entire `start-os` crate (with all dependencies: tokio,
+  **Problem**: `make start-core-ts-bindings` compiles the entire `start-os` crate (with all dependencies: tokio,
   axum, openssl, etc.) just to run test functions that serialize type definitions to `.ts` files.
   Even in debug mode, this takes minutes. The generated output is pure type info — no runtime code
   is needed.

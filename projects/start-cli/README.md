@@ -14,7 +14,7 @@ Most subcommands are *remote* calls: you point `start-cli` at a running StartOS 
 Build the binary from the monorepo root:
 
 ```sh
-make cli                                            # build the start-cli bin
+make start-cli                                            # build the start-cli bin
 cargo build -p start-cli --bin start-cli            # dev shortcut (debug)
 cargo build -p start-cli --bin start-cli --release  # dev shortcut (release)
 ```

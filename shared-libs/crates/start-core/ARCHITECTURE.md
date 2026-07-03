@@ -84,7 +84,7 @@ Rust types marked `#[ts(export)]` are the source of truth for TypeScript consume
 and the package container-runtime, via the SDK). They do **not** propagate automatically. From
 the repo root:
 
-1. `make ts-bindings` — regenerates `shared-libs/crates/start-core/bindings/` (via `build/build-ts.sh`),
+1. `make start-core-ts-bindings` — regenerates `shared-libs/crates/start-core/bindings/` (via `build/build-ts.sh`),
    then rsyncs it into `shared-libs/ts-modules/start-core/lib/osBindings/`.
 2. `cd shared-libs/ts-modules/start-core && make dist` (what web imports) and
    `cd projects/start-sdk && make bundle` (the SDK bundle container-runtime imports) — rebuilds the

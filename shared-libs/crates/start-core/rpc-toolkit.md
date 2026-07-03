@@ -193,7 +193,7 @@ pub struct MyParams {
 2. Choose handler type based on sync/async and thread-safety
 3. Write handler function taking `(Context, Params) -> Result<Response, Error>` (omit Params if none needed)
 4. Add to parent handler with appropriate extensions (display modifiers before `with_about`)
-5. TypeScript types auto-generated via `make ts-bindings`
+5. TypeScript types auto-generated via `make start-core-ts-bindings`
 
 ### Public (Unauthenticated) Endpoint
 

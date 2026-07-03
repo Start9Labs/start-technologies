@@ -16,7 +16,7 @@ Agent/dev instructions for `shared-libs/ts-modules` — the directory of shared 
 npm ci
 npm run build:deps           # MUST run first after install — builds the file: deps (@start9labs/start-core, patch-db client)
 npm run check                # type-check all projects; or check:shared / check:ui / etc. for one
-make format-web              # prettier; make format-check-web for CI
+make web-format              # prettier; make web-format-check for CI
 npm run start:ui             # mock dev server (needs config.json — cp shared-libs/ts-modules/config-sample.json config.json)
 npm run build:ui             # prod build of a single app
 ```

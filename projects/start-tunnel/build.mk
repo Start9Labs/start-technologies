@@ -3,9 +3,9 @@
 
 TUNNEL_TARGETS := target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/tunnelbox projects/start-tunnel/start-tunneld.service
 
-tunnel: target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/tunnelbox
+start-tunnel: target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/tunnelbox
 
-install-tunnel: target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/tunnelbox projects/start-tunnel/start-tunneld.service
+start-tunnel-install: target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/tunnelbox projects/start-tunnel/start-tunneld.service
 	$(call mkdir,$(DESTDIR)/usr/bin)
 	$(call cp,target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/tunnelbox,$(DESTDIR)/usr/bin/start-tunnelbox)
 	$(call ln,/usr/bin/start-tunnelbox,$(DESTDIR)/usr/bin/start-tunneld)
@@ -25,20 +25,20 @@ install-tunnel: target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/tunnelbox proj
 target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/tunnelbox: $(CORE_SRC) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) projects/start-tunnel/web/dist/static/start-tunnel/index.html
 	ARCH=$(ARCH) PROFILE=$(PROFILE) ./shared-libs/crates/start-core/build/build-tunnelbox.sh
 
-tunnel-deb: results/$(TUNNEL_BASENAME).deb
+start-tunnel-deb: results/$(TUNNEL_BASENAME).deb
 
 results/$(TUNNEL_BASENAME).deb: debian/build.sh $(call ls-files,projects/start-tunnel/debian) $(TUNNEL_TARGETS) build/lib/scripts/forward-port
 	PROJECT=start-tunnel PLATFORM=$(ARCH) REQUIRES=debian DEPENDS=wireguard-tools,iptables,nftables,conntrack ./build/os-compat/run-compat.sh ./debian/build.sh
 
-.PHONY: clean-tunnel
-clean-tunnel:
+.PHONY: start-tunnel-clean
+start-tunnel-clean:
 	rm -f results/start-tunnel-*.deb
 	rm -rf dpkg-workdir/start-tunnel-* projects/start-tunnel/web/dist projects/start-tunnel/docs/book
 
-# The tunnel web app is formatted by `format-web` (whole Angular workspace); this is the Rust crate.
-.PHONY: format-tunnel format-check-tunnel
-format-tunnel:
+# The tunnel web app is formatted by `web-format` (whole Angular workspace); this is the Rust crate.
+.PHONY: start-tunnel-format start-tunnel-format-check
+start-tunnel-format:
 	cargo +nightly fmt -p start-tunnel
 
-format-check-tunnel:
+start-tunnel-format-check:
 	cargo +nightly fmt --check -p start-tunnel

@@ -14,7 +14,7 @@ TUNNEL_BASENAME := $(shell PROJECT=start-tunnel PLATFORM=$(ARCH) ./build/env/bas
 CLI_BASENAME := $(shell PROJECT=start-cli PLATFORM=$(ARCH) ./build/env/basename.sh)
 # start-core path-depends on these first-party sibling crates (start-core/Cargo.toml
 # + their transitive path deps); they must be prereqs of every Rust bin or a
-# shared-crate edit leaves `make startos`/`cli`/`registry`/`tunnel` shipping a
+# shared-crate edit leaves `make start-os`/`start-cli`/`start-registry`/`start-tunnel` shipping a
 # stale binary. patch-db is globbed separately below.
 CORE_SRC := $(call ls-files, shared-libs/crates/start-core) \
 	$(call ls-files, shared-libs/crates/exver) \

@@ -56,7 +56,7 @@ echo '{"count": 42}' | cargo run -p patch-db-util -- from-dump path/to/my.db
 
 ## Code style
 
-Format from the repo root with `make format-core` (these crates are part of the shared Rust workspace); CI runs the read-only `make format-check-core`.
+Format from the repo root with `make start-core-format` (these crates are part of the shared Rust workspace); CI runs the read-only `make start-core-format-check`.
 
 ### Rust
 

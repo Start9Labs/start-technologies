@@ -99,20 +99,20 @@ daemon over the same JSON-RPC API.
 - `web/tsconfig.json` resolves `@start9labs/shared` and
   `@start9labs/marketplace` to `shared-libs/ts-modules/`.
 
-Build output: `npm run build:tunnel` (from the repo root; `make tunnel`
+Build output: `npm run build:tunnel` (from the repo root; `make start-tunnel`
 chains it) → `projects/start-tunnel/web/dist/raw/start-tunnel/` → compressed to
 `projects/start-tunnel/web/dist/static/start-tunnel/`
 (`shared-libs/ts-modules/compress-uis.sh`), which the Rust binary embeds.
 
 ## Build & packaging
 
-- `make tunnel` → `target/<arch>-unknown-linux-musl/<profile>/tunnelbox`
+- `make start-tunnel` → `target/<arch>-unknown-linux-musl/<profile>/tunnelbox`
   (depends on the prebuilt static UI).
-- `make tunnel-deb` → a Debian package declaring `wireguard-tools`, `iptables`,
+- `make start-tunnel-deb` → a Debian package declaring `wireguard-tools`, `iptables`,
   `nftables`, and `conntrack` as dependencies, installing the three symlinks and
   the systemd unit.
 - TS bindings for the tunnel API are generated into
-  `shared-libs/crates/start-core/bindings/tunnel/` (`make ts-bindings`).
+  `shared-libs/crates/start-core/bindings/tunnel/` (`make start-core-ts-bindings`).
 
 ## Further reading
 

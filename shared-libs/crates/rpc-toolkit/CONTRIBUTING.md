@@ -47,8 +47,8 @@ This crate ships a `rustfmt.toml` (`group_imports = "StdExternalCrate"`,
 `imports_granularity = "Module"`). Format with the shared Rust make target from the repo root:
 
 ```bash
-make format-core         # format all shared Rust crates (incl. rpc-toolkit)
-make format-check-core   # CI read-only check
+make start-core-format         # format all shared Rust crates (incl. rpc-toolkit)
+make start-core-format-check   # CI read-only check
 ```
 
 The import-grouping options in `rustfmt.toml` are applied either way.

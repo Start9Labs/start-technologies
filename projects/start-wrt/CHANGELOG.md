@@ -63,8 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `openwrt` is now the monorepo's only git submodule; the embedded `start-os`
   submodule was removed.
 - Build orchestration moved from the standalone product `Makefile` to
-  `projects/start-wrt/build.mk` (included by the root `Makefile`): `make startwrt`,
-  `make startwrt-image`, `make startwrt-update`.
+  `projects/start-wrt/build.mk` (included by the root `Makefile`): `make start-wrt`,
+  `make start-wrt-image`, `make start-wrt-update`.
 - The Angular web UI is now a project (`start-wrt`) in the **root Angular workspace**
   instead of a standalone app. It shares the root `package.json`/`node_modules`/
   `tsconfig.json` and builds via `npm run build:wrt` (serve `npm run start:wrt`,

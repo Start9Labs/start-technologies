@@ -18,31 +18,31 @@ STARTOS_TARGETS := $(STARTD_SRC) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_
 		echo target/$(RUST_ARCH)-unknown-linux-musl/release/tokio-console; \
 	fi')
 
-.PHONY: startos
+.PHONY: start-os
 # Build all StartOS OS-product artifacts (bins + web + container-runtime image).
-startos: $(STARTOS_TARGETS)
+start-os: $(STARTOS_TARGETS)
 
-test-container-runtime: projects/start-os/container-runtime/node_modules/.package-lock.json $(call ls-files, projects/start-os/container-runtime/src) projects/start-os/container-runtime/package.json projects/start-os/container-runtime/tsconfig.json 
+container-runtime-test: projects/start-os/container-runtime/node_modules/.package-lock.json $(call ls-files, projects/start-os/container-runtime/src) projects/start-os/container-runtime/package.json projects/start-os/container-runtime/tsconfig.json
 	cd projects/start-os/container-runtime && npm test
 
 projects/start-os/build/lib/migration-images/.done: projects/start-os/build/save-migration-images.sh
 	ARCH=$(ARCH) ./projects/start-os/build/save-migration-images.sh projects/start-os/build/lib/migration-images
 	touch $@
 
-startos-deb: results/$(BASENAME).deb
+start-os-deb: results/$(BASENAME).deb
 
 results/$(BASENAME).deb: debian/build.sh $(call ls-files,projects/start-os/debian) $(STARTOS_TARGETS)
 	PLATFORM=$(PLATFORM) REQUIRES=debian ./build/os-compat/run-compat.sh ./debian/build.sh
 
-startos-$(IMAGE_TYPE): results/$(BASENAME).$(IMAGE_TYPE)
+start-os-$(IMAGE_TYPE): results/$(BASENAME).$(IMAGE_TYPE)
 
-startos-squashfs: results/$(BASENAME).squashfs
+start-os-squashfs: results/$(BASENAME).squashfs
 
 results/$(BASENAME).$(IMAGE_TYPE) results/$(BASENAME).squashfs: $(IMAGE_RECIPE_SRC) results/$(BASENAME).deb
 	ARCH=$(ARCH) ./projects/start-os/build/image-recipe/run-local-build.sh "results/$(BASENAME).deb"
 
 # For creating os images. DO NOT USE
-install-startos: $(STARTOS_TARGETS)
+start-os-install: $(STARTOS_TARGETS)
 	$(call mkdir,$(DESTDIR)/usr/bin)
 	$(call mkdir,$(DESTDIR)/usr/sbin)
 	$(call cp,target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox,$(DESTDIR)/usr/bin/startbox)
@@ -80,52 +80,52 @@ install-startos: $(STARTOS_TARGETS)
 	$(call cp,build/env/GIT_HASH.txt,$(DESTDIR)/usr/lib/startos/GIT_HASH.txt)
 	$(call cp,build/env/VERSION.txt,$(DESTDIR)/usr/lib/startos/VERSION.txt)
 
-startos-update-overlay: $(STARTOS_TARGETS)
+start-os-update-overlay: $(STARTOS_TARGETS)
 	@echo "\033[33m!!! THIS WILL ONLY REFLASH YOUR DEVICE IN MEMORY !!!\033[0m"
 	@echo "\033[33mALL CHANGES WILL BE REVERTED IF YOU RESTART THE DEVICE\033[0m"
 	@if [ -z "$(REMOTE)" ]; then >&2 echo "Must specify REMOTE" && false; fi
 	@if [ "`ssh $(REMOTE) 'cat /usr/lib/startos/VERSION.txt'`" != "`cat $(VERSION_FILE)`" ]; then >&2 echo "StartOS requires migrations: update-overlay is unavailable." && false; fi
 	$(call ssh,"sudo systemctl stop startd")
-	$(MAKE) install-startos REMOTE=$(REMOTE) SSHPASS=$(SSHPASS) PLATFORM=$(PLATFORM)
+	$(MAKE) start-os-install REMOTE=$(REMOTE) SSHPASS=$(SSHPASS) PLATFORM=$(PLATFORM)
 	$(call ssh,"sudo systemctl start startd")
 
-startos-wormhole: target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox
+start-os-wormhole: target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox
 	@echo "Paste the following command into the shell of your StartOS server:"
 	@echo
 	@wormhole send target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox 2>&1 | awk -Winteractive '/wormhole receive/ { printf "sudo /usr/lib/startos/scripts/chroot-and-upgrade \"cd /usr/bin && rm startbox && wormhole receive --accept-file %s && chmod +x startbox\"\n", $$3 }'
 
-startos-wormhole-deb: results/$(BASENAME).deb
+start-os-wormhole-deb: results/$(BASENAME).deb
 	@echo "Paste the following command into the shell of your StartOS server:"
 	@echo
 	@wormhole send results/$(BASENAME).deb 2>&1 | awk -Winteractive '/wormhole receive/ { printf "sudo /usr/lib/startos/scripts/chroot-and-upgrade '"'"'cd $$(mktemp -d) && wormhole receive --accept-file %s && apt-get install -y --reinstall ./$(BASENAME).deb'"'"'\n", $$3 }'
 
-startos-wormhole-squashfs: results/$(BASENAME).squashfs
+start-os-wormhole-squashfs: results/$(BASENAME).squashfs
 	$(eval SQFS_SUM := $(shell b3sum results/$(BASENAME).squashfs | head -c 32))
 	$(eval SQFS_SIZE := $(shell du -s --bytes results/$(BASENAME).squashfs | awk '{print $$1}'))
 	@echo "Paste the following command into the shell of your StartOS server:"
 	@echo
 	@wormhole send results/$(BASENAME).squashfs 2>&1 | awk -Winteractive '/wormhole receive/ { printf "sudo sh -c '"'"'/usr/lib/startos/scripts/prune-images $(SQFS_SIZE) && /usr/lib/startos/scripts/prune-boot && cd /media/startos/images && wormhole receive --accept-file %s && CHECKSUM=$(SQFS_SUM) /usr/lib/startos/scripts/upgrade ./$(BASENAME).squashfs'"'"'\n", $$3 }'
 
-startos-update: $(STARTOS_TARGETS)
+start-os-update: $(STARTOS_TARGETS)
 	@if [ -z "$(REMOTE)" ]; then >&2 echo "Must specify REMOTE" && false; fi
 	$(call ssh,'sudo /usr/lib/startos/scripts/chroot-and-upgrade --create')
-	$(MAKE) install-startos REMOTE=$(REMOTE) SSHPASS=$(SSHPASS) DESTDIR=/media/startos/next PLATFORM=$(PLATFORM)
+	$(MAKE) start-os-install REMOTE=$(REMOTE) SSHPASS=$(SSHPASS) DESTDIR=/media/startos/next PLATFORM=$(PLATFORM)
 	$(call ssh,'sudo /media/startos/next/usr/lib/startos/scripts/chroot-and-upgrade --no-sync "apt-get install -y $(shell cat ./projects/start-os/build/lib/depends)"')
 
-startos-update-startbox: target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox # only update binary (faster than full update)
+start-os-update-startbox: target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox # only update binary (faster than full update)
 	@if [ -z "$(REMOTE)" ]; then >&2 echo "Must specify REMOTE" && false; fi
 	$(call ssh,'sudo /usr/lib/startos/scripts/chroot-and-upgrade --create')
 	$(call cp,target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox,/media/startos/next/usr/bin/startbox)
 	$(call ssh,'sudo /media/startos/next/usr/lib/startos/scripts/chroot-and-upgrade --no-sync true')
 
-startos-update-deb: results/$(BASENAME).deb # better than update, but only available from debian
+start-os-update-deb: results/$(BASENAME).deb # better than update, but only available from debian
 	@if [ -z "$(REMOTE)" ]; then >&2 echo "Must specify REMOTE" && false; fi
 	$(call ssh,'sudo /usr/lib/startos/scripts/chroot-and-upgrade --create')
 	$(call mkdir,/media/startos/next/var/tmp/startos-deb)
 	$(call cp,results/$(BASENAME).deb,/media/startos/next/var/tmp/startos-deb/$(BASENAME).deb)
 	$(call ssh,'sudo /media/startos/next/usr/lib/startos/scripts/chroot-and-upgrade --no-sync "apt-get install -y --reinstall /var/tmp/startos-deb/$(BASENAME).deb"')
 
-startos-update-squashfs: results/$(BASENAME).squashfs
+start-os-update-squashfs: results/$(BASENAME).squashfs
 	@if [ -z "$(REMOTE)" ]; then >&2 echo "Must specify REMOTE" && false; fi
 	$(eval SQFS_SUM := $(shell b3sum results/$(BASENAME).squashfs | head -c 32))
 	$(eval SQFS_SIZE := $(shell du -s --bytes results/$(BASENAME).squashfs | awk '{print $$1}'))
@@ -134,10 +134,10 @@ startos-update-squashfs: results/$(BASENAME).squashfs
 	$(call cp,results/$(BASENAME).squashfs,/media/startos/images/next.rootfs)
 	$(call ssh,'sudo CHECKSUM=$(SQFS_SUM) /usr/lib/startos/scripts/upgrade /media/startos/images/next.rootfs')
 
-startos-emulate-reflash: $(STARTOS_TARGETS)
+start-os-emulate-reflash: $(STARTOS_TARGETS)
 	@if [ -z "$(REMOTE)" ]; then >&2 echo "Must specify REMOTE" && false; fi
 	$(call ssh,'sudo /usr/lib/startos/scripts/chroot-and-upgrade --create')
-	$(MAKE) install-startos REMOTE=$(REMOTE) SSHPASS=$(SSHPASS) DESTDIR=/media/startos/next PLATFORM=$(PLATFORM)
+	$(MAKE) start-os-install REMOTE=$(REMOTE) SSHPASS=$(SSHPASS) DESTDIR=/media/startos/next PLATFORM=$(PLATFORM)
 	$(call ssh,'sudo rm -f /media/startos/config/disk.guid /media/startos/config/overlay/etc/hostname')
 	$(call ssh,'sudo /media/startos/next/usr/lib/startos/scripts/chroot-and-upgrade --no-sync "apt-get install -y $(shell cat ./projects/start-os/build/lib/depends)"')
 
@@ -202,8 +202,8 @@ target/$(RUST_ARCH)-unknown-linux-musl/release/flamegraph: ./build/build-cargo-d
 	ARCH=$(ARCH) ./build/build-cargo-dep.sh flamegraph
 	touch $@
 
-.PHONY: clean-startos
-clean-startos:
+.PHONY: start-os-clean
+start-os-clean:
 	rm -f results/startos-*
 	rm -rf dpkg-workdir/startos-*
 	rm -rf projects/start-os/web/dist projects/start-os/docs/book
@@ -213,12 +213,12 @@ clean-startos:
 	rm -rf projects/start-os/build/image-recipe/deb
 
 # OS bins + backup-fs (Rust) and the container-runtime (its own prettier config).
-# The ui/setup-wizard web apps are formatted by `format-web` (whole Angular workspace).
-.PHONY: format-startos format-check-startos
-format-startos:
+# The ui/setup-wizard web apps are formatted by `web-format` (whole Angular workspace).
+.PHONY: start-os-format start-os-format-check
+start-os-format:
 	cargo +nightly fmt -p start-os -p startos-backup-fs
 	npm --prefix projects/start-os/container-runtime run format
 
-format-check-startos:
+start-os-format-check:
 	cargo +nightly fmt --check -p start-os -p startos-backup-fs
 	npm --prefix projects/start-os/container-runtime run format:check

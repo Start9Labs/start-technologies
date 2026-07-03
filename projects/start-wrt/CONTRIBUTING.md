@@ -16,21 +16,21 @@ Cargo workspace.
 cargo build -p startwrt-core --bin startwrt                     # host build of the daemon+CLI binary
 cargo check -p startwrt-core --bin startwrt                     # fast type-check
 cargo test  -p startwrt-core -p uciedit -p uciedit_macros       # all start-wrt unit tests
-make test-startwrt                                              # same tests, containerized (mirrors test-core)
+make start-wrt-test                                              # same tests, containerized (mirrors start-core-test)
 ```
 
 > **Always scope `cargo test` with `-p`.** A bare `cargo test` (or `cargo test` run from
 > `backend/`) now tests the *entire* monorepo workspace — including `startos-backup-fs`, whose
 > `fuser` dependency needs FUSE dev libs that exist only in the build container, so it fails on a
 > bare host. start-wrt's own crates are fuser-free, so the `-p`-scoped command above runs cleanly
-> on the host. `make test-startwrt` runs the same scoped set inside `start9/cargo-zigbuild`.
+> on the host. `make start-wrt-test` runs the same scoped set inside `start9/cargo-zigbuild`.
 
 `startwrt-core` depends on the shared `start-core` crate (aliased as `startos`), plus the
 vendored `rpc-toolkit` and `imbl-value`. For dev authentication set `STARTWRT_DEV_PASSWORD` to
 bypass `/etc/shadow`.
 
 > The host build embeds the web UI via `include_dir!`, so it needs `projects/start-wrt/web/dist/`
-> to exist — run the web build first (below), or build the full binary with `make startwrt`.
+> to exist — run the web build first (below), or build the full binary with `make start-wrt`.
 
 ## Frontend (Angular, in the root workspace)
 
@@ -52,19 +52,19 @@ start-wrt's targets live in [`build.mk`](build.mk) (included by the root `Makefi
 
 | Target | Description |
 |--------|-------------|
-| `make startwrt` | web → riscv64 binary (cross-compiled via dockerized cargo-zigbuild) |
-| `make startwrt-openwrt-setup` | one-time: openwrt feeds/config/download (needs the `openwrt` submodule) |
-| `make startwrt-image` | full flashable OpenWrt image → `results/` (**hours**) |
-| `make startwrt-update STARTWRT_REMOTE=root@IP` | deploy binary over SSH (default `root@192.168.0.1`) |
-| `make clean-startwrt` | remove start-wrt build artifacts |
+| `make start-wrt` | web → riscv64 binary (cross-compiled via dockerized cargo-zigbuild) |
+| `make start-wrt-openwrt-setup` | one-time: openwrt feeds/config/download (needs the `openwrt` submodule) |
+| `make start-wrt-image` | full flashable OpenWrt image → `results/` (**hours**) |
+| `make start-wrt-update STARTWRT_REMOTE=root@IP` | deploy binary over SSH (default `root@192.168.0.1`) |
+| `make start-wrt-clean` | remove start-wrt build artifacts |
 
 Deployment is atomic (temp file → sync → rename → daemon restart). The web UI is embedded in
 the binary, so deploying the binary updates everything.
 
 > **⚠ UNVALIDATED since the monorepo migration.** The riscv dockerized cross-build (`make
-> startwrt`) and the OpenWrt image assembly (`make startwrt-image`) have not yet been run on a
-> build host. The backend host `cargo check` passes. Validate `make startwrt` first (it does not
-> need the multi-GB `openwrt` submodule), then `make startwrt-image`. The OpenWrt build needs a
+> start-wrt`) and the OpenWrt image assembly (`make start-wrt-image`) have not yet been run on a
+> build host. The backend host `cargo check` passes. Validate `make start-wrt` first (it does not
+> need the multi-GB `openwrt` submodule), then `make start-wrt-image`. The OpenWrt build needs a
 > consistent environment — Docker is recommended; native builds on some distros fail silently.
 
 ## Coupled changes

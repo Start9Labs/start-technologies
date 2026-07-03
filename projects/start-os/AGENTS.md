@@ -28,14 +28,14 @@ monorepo-wide rules, and [ARCHITECTURE.md](ARCHITECTURE.md) and
   apple-darwin and aarch64/riscv64 musl; platform-specific changes can pass here
   yet break those.
 - Regenerate TS bindings after any change to exported Rust types:
-  `make ts-bindings`. Then rebuild start-core (`cd shared-libs/ts-modules/start-core && make dist`)
+  `make start-core-ts-bindings`. Then rebuild start-core (`cd shared-libs/ts-modules/start-core && make dist`)
   and the SDK (`cd projects/start-sdk && make bundle`) before web/runtime type-checks —
   editing `shared-libs/ts-modules/start-core/lib/osBindings/*.ts` alone is not enough.
 - Type-check web apps: `npm run check:ui && npm run check:setup`.
 - Type-check the runtime: `cd projects/start-os/container-runtime && npm run check`.
-- Build the UI: `make startos-ui` (or `make startos-uis` for ui + setup-wizard).
-- Tests: `make test` (Rust + SDK + container-runtime), or `make test-core`.
-- Format: `make format-startos` / `make format-check-startos`.
+- Build the UI: `make start-os-ui` (or `make start-os-uis` for ui + setup-wizard).
+- Tests: `make test` (Rust + SDK + container-runtime), or `make start-core-test`.
+- Format: `make start-os-format` / `make start-os-format-check`.
 - Regenerate `start-container` man pages (committed under `man/`):
   `cargo test -p start-core export_manpage_start_container`.
 

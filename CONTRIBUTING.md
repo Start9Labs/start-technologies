@@ -72,15 +72,15 @@ This is a monorepo: one root Cargo workspace and one Angular workspace, both roo
 
 | Product | Primary build target | Build & deploy docs |
 | --- | --- | --- |
-| StartOS (OS image, UIs, device deploy) | `make startos` | [`projects/start-os/CONTRIBUTING.md`](projects/start-os/CONTRIBUTING.md) |
-| start-cli | `make cli` | [`projects/start-cli/CONTRIBUTING.md`](projects/start-cli/CONTRIBUTING.md) |
-| start-registry | `make registry` | [`projects/start-registry/CONTRIBUTING.md`](projects/start-registry/CONTRIBUTING.md) |
-| StartTunnel | `make tunnel` | [`projects/start-tunnel/CONTRIBUTING.md`](projects/start-tunnel/CONTRIBUTING.md) |
-| StartWRT | `make startwrt` (`make startwrt-image` for the full OpenWrt image — hours, needs the submodule) | [`projects/start-wrt/CONTRIBUTING.md`](projects/start-wrt/CONTRIBUTING.md) |
+| StartOS (OS image, UIs, device deploy) | `make start-os` | [`projects/start-os/CONTRIBUTING.md`](projects/start-os/CONTRIBUTING.md) |
+| start-cli | `make start-cli` | [`projects/start-cli/CONTRIBUTING.md`](projects/start-cli/CONTRIBUTING.md) |
+| start-registry | `make start-registry` | [`projects/start-registry/CONTRIBUTING.md`](projects/start-registry/CONTRIBUTING.md) |
+| StartTunnel | `make start-tunnel` | [`projects/start-tunnel/CONTRIBUTING.md`](projects/start-tunnel/CONTRIBUTING.md) |
+| StartWRT | `make start-wrt` (`make start-wrt-image` for the full OpenWrt image — hours, needs the submodule) | [`projects/start-wrt/CONTRIBUTING.md`](projects/start-wrt/CONTRIBUTING.md) |
 | Start SDK | `make bundle` (from `projects/start-sdk`) | [`projects/start-sdk/CONTRIBUTING.md`](projects/start-sdk/CONTRIBUTING.md) |
 | Web (shared libs + app UIs) | `npm run build:ui` | [`shared-libs/ts-modules/CONTRIBUTING.md`](shared-libs/ts-modules/CONTRIBUTING.md) |
 
-`make ts-bindings` regenerates the TypeScript bindings from the Rust types, and `make clean` removes all compiled artifacts. Cross-layer changes (Rust → bindings → SDK → web/runtime) are described in [ARCHITECTURE.md](ARCHITECTURE.md#build-pipeline).
+`make start-core-ts-bindings` regenerates the TypeScript bindings from the Rust types, and `make clean` removes all compiled artifacts. Cross-layer changes (Rust → bindings → SDK → web/runtime) are described in [ARCHITECTURE.md](ARCHITECTURE.md#build-pipeline).
 
 ### Build configuration
 
@@ -99,10 +99,10 @@ Each product's `CONTRIBUTING.md` documents the `PLATFORM` values and `ENVIRONMEN
 
 ```bash
 make test                    # all tests
-make test-core               # Rust (shared-libs/crates/start-core)
-make test-sdk                # SDK
-make test-container-runtime  # container runtime
-make test-startwrt           # StartWRT Rust crates
+make start-core-test               # Rust (shared-libs/crates/start-core)
+make start-sdk-test                # SDK
+make container-runtime-test  # container runtime
+make start-wrt-test           # StartWRT Rust crates
 
 # Run a specific Rust test
 cd shared-libs/crates/start-core && cargo test <test_name> --features=test
@@ -120,10 +120,10 @@ make format-check    # read-only check (what CI runs)
 Or scope it to one project — each has a `format-check-*` read-only variant that CI runs:
 
 ```bash
-make format-core         # shared Rust crates
-make format-cli          # start-cli  (also format-registry / format-tunnel / format-startos / format-startwrt)
-make format-web          # the Angular workspace (shared libs + all app UIs, incl. brochure)
-make format-sdk          # the SDK
+make start-core-format         # shared Rust crates
+make start-cli-format          # start-cli  (also start-registry-format / start-tunnel-format / start-os-format / start-wrt-format)
+make web-format          # the Angular workspace (shared libs + all app UIs, incl. brochure)
+make start-sdk-format          # the SDK
 ```
 
 Run the formatters before committing. Configuration is handled by `rustfmt.toml` (Rust) and prettier configs (TypeScript).

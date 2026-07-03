@@ -3,7 +3,7 @@
 #
 # UNVALIDATED: the riscv dockerized zigbuild and the OpenWrt image assembly
 # (stage / image targets) have NOT been run since the monorepo migration. The
-# binary+web build (the `startwrt` target) is the first thing to validate on a
+# binary+web build (the `start-wrt` target) is the first thing to validate on a
 # build host; the image targets follow. See projects/start-wrt/CONTRIBUTING.md.
 
 STARTWRT_DIR := projects/start-wrt
@@ -25,7 +25,7 @@ STARTWRT_RUST_SRC := $(call ls-files, $(STARTWRT_DIR)/backend)
 # Shared crates the backend path-depends on (see backend/ctrl/Cargo.toml):
 # start-core (aliased `startos`, covered with patch-db by CORE_SRC from
 # build/common.mk), plus rpc-toolkit and imbl-value. Without these prereqs a
-# shared-crate edit leaves `make startwrt`/`startwrt-update` with a stale binary.
+# shared-crate edit leaves `make start-wrt`/`start-wrt-update` with a stale binary.
 STARTWRT_SHARED_RUST_SRC := $(CORE_SRC) \
 	$(call ls-files, shared-libs/crates/rpc-toolkit) \
 	$(call ls-files, shared-libs/crates/imbl-value)
@@ -59,10 +59,10 @@ STARTWRT_IMAGES := results/$(STARTWRT_SDCARD_NAME) results/$(STARTWRT_SYSUPGRADE
 # Remote deploy target (binary only — web UI is embedded in the binary).
 STARTWRT_REMOTE ?= root@192.168.0.1
 
-.PHONY: startwrt
+.PHONY: start-wrt
 # Build the startwrt binary (embeds the web UI). Cross-compiled for the K1 via
 # the dockerized cargo-zigbuild toolchain in build/build-rust.sh.
-startwrt: $(STARTWRT_BIN)
+start-wrt: $(STARTWRT_BIN)
 
 $(STARTWRT_BIN): $(STARTWRT_RUST_SRC) $(STARTWRT_SHARED_RUST_SRC) Cargo.toml Cargo.lock $(STARTWRT_WEB_DIST) $(STARTWRT_DIR)/build/build-rust.sh
 	ARCH=$(STARTWRT_ARCH) RUST_ARCH=$(STARTWRT_RUST_ARCH) PROFILE=$(PROFILE) ./$(STARTWRT_DIR)/build/build-rust.sh
@@ -85,21 +85,21 @@ $(STARTWRT_WEB_CONFIG): $(STARTWRT_GIT_HASH_FILE) $(STARTWRT_DIR)/web/config-sam
 	./$(STARTWRT_DIR)/web/update-config.sh
 
 # Run start-wrt's Rust unit tests (startwrt-core + uciedit), package-scoped and
-# containerized — mirrors test-core. See build/run-tests.sh.
-.PHONY: test-startwrt
-test-startwrt: $(STARTWRT_RUST_SRC) $(ENVIRONMENT_FILE)
+# containerized — mirrors start-core-test. See build/run-tests.sh.
+.PHONY: start-wrt-test
+start-wrt-test: $(STARTWRT_RUST_SRC) $(ENVIRONMENT_FILE)
 	./$(STARTWRT_DIR)/build/run-tests.sh
 
 # --- OpenWrt image (HEAVY, UNVALIDATED) ---
 # One-time feeds/config/download.
-.PHONY: startwrt-openwrt-setup
-startwrt-openwrt-setup: $(STARTWRT_OPENWRT)/.config
+.PHONY: start-wrt-openwrt-setup
+start-wrt-openwrt-setup: $(STARTWRT_OPENWRT)/.config
 $(STARTWRT_OPENWRT)/.config: $(STARTWRT_DIR)/build/openwrt.diffconfig $(STARTWRT_DIR)/build/feeds.conf
 	./$(STARTWRT_DIR)/build/openwrt-setup.sh
 
 # Stage the binary + UCI configs + init scripts into openwrt/files/.
-.PHONY: startwrt-stage
-startwrt-stage: $(STARTWRT_OPENWRT)/files/.staged
+.PHONY: start-wrt-stage
+start-wrt-stage: $(STARTWRT_OPENWRT)/files/.staged
 $(STARTWRT_OPENWRT)/files/.staged: $(STARTWRT_BIN) $(call ls-files, $(STARTWRT_DIR)/backend/firstboot_config) $(STARTWRT_DIR)/build/stage-files.sh
 	ARCH=$(STARTWRT_ARCH) RUST_ARCH=$(STARTWRT_RUST_ARCH) PROFILE=$(PROFILE) ./$(STARTWRT_DIR)/build/stage-files.sh
 	touch $(STARTWRT_OPENWRT)/files/.staged
@@ -107,8 +107,8 @@ $(STARTWRT_OPENWRT)/files/.staged: $(STARTWRT_BIN) $(call ls-files, $(STARTWRT_D
 # Full flashable image. Delegates the OpenWrt build to make -C openwrt; this is
 # the multi-hour step. Resource fencing (memory-aware -j, cgroup) from the old
 # standalone Makefile can be ported here if host stability requires it.
-.PHONY: startwrt-image
-startwrt-image: $(STARTWRT_IMAGES)
+.PHONY: start-wrt-image
+start-wrt-image: $(STARTWRT_IMAGES)
 $(STARTWRT_IMAGES) &: $(STARTWRT_OPENWRT)/.config $(STARTWRT_OPENWRT)/files/.staged
 	$(MAKE) -C $(STARTWRT_OPENWRT) V=s -j$(shell nproc)
 	mkdir -p results
@@ -116,8 +116,8 @@ $(STARTWRT_IMAGES) &: $(STARTWRT_OPENWRT)/.config $(STARTWRT_OPENWRT)/files/.sta
 	cp $(STARTWRT_IMAGE_DIR)/$(STARTWRT_SYSUPGRADE_SRC) results/$(STARTWRT_SYSUPGRADE_NAME)
 
 # Deploy binary + restart daemon over SSH (atomic temp -> sync -> rename).
-.PHONY: startwrt-update
-startwrt-update: $(STARTWRT_BIN)
+.PHONY: start-wrt-update
+start-wrt-update: $(STARTWRT_BIN)
 	cat $(STARTWRT_BIN) | \
 	ssh $(STARTWRT_REMOTE) 'set -e; \
 		trap "rm -f /usr/bin/.startwrt.new" EXIT; \
@@ -129,8 +129,8 @@ startwrt-update: $(STARTWRT_BIN)
 		ln -sf startwrt /usr/bin/startwrt-cli; \
 		/etc/init.d/startwrt restart'
 
-.PHONY: clean-startwrt
-clean-startwrt:
+.PHONY: start-wrt-clean
+start-wrt-clean:
 	rm -f results/$(STARTWRT_SDCARD_NAME) results/$(STARTWRT_SYSUPGRADE_NAME)
 	rm -rf $(STARTWRT_DIR)/web/dist
 	rm -rf $(STARTWRT_OPENWRT)/files
@@ -138,10 +138,10 @@ clean-startwrt:
 	rm -f $(STARTWRT_OPENWRT)/.config
 
 # The web app is part of the root Angular workspace; its prettier formatting runs
-# through `format-web`/`format-check-web`. This target is just the Rust crate.
-.PHONY: format-startwrt format-check-startwrt
-format-startwrt:
+# through `web-format`/`web-format-check`. This target is just the Rust crate.
+.PHONY: start-wrt-format start-wrt-format-check
+start-wrt-format:
 	cargo +nightly fmt -p startwrt-core -p uciedit -p uciedit_macros
 
-format-check-startwrt:
+start-wrt-format-check:
 	cargo +nightly fmt --check -p startwrt-core -p uciedit -p uciedit_macros

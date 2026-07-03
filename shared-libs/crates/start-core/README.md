@@ -38,8 +38,8 @@ Run from the repo root (the single Cargo workspace):
 
 ```bash
 cargo check -p start-core          # type-check the library
-make test-core                     # run the test suite (wraps run-tests.sh)
-make format-core                   # nightly rustfmt on this crate
+make start-core-test                     # run the test suite (wraps run-tests.sh)
+make start-core-format                   # nightly rustfmt on this crate
 ```
 
 To build a product binary, build its crate, e.g. `cargo build -p start-os --bin startbox`.

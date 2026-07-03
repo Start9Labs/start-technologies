@@ -3,7 +3,7 @@
 
 CLI_TARGETS := target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/start-cli
 
-cli: $(GIT_HASH_FILE)
+start-cli: $(GIT_HASH_FILE)
 	./shared-libs/crates/start-core/build/build-cli.sh
 
 # Build into a workspace-relative path for packaging (musl release).
@@ -13,23 +13,23 @@ $(CLI_TARGETS): $(CORE_SRC) $(ENVIRONMENT_FILE)
 
 # Stage the binary into DESTDIR (used by debian/build.sh and for a system install).
 # For a local PATH install instead, run build-cli.sh --install.
-install-cli: $(CLI_TARGETS)
+start-cli-install: $(CLI_TARGETS)
 	$(call mkdir,$(DESTDIR)/usr/bin)
 	$(call cp,$(CLI_TARGETS),$(DESTDIR)/usr/bin/start-cli)
 
-cli-deb: results/$(CLI_BASENAME).deb
+start-cli-deb: results/$(CLI_BASENAME).deb
 
 results/$(CLI_BASENAME).deb: debian/build.sh $(CLI_TARGETS)
 	PROJECT=start-cli PLATFORM=$(ARCH) REQUIRES=debian ./build/os-compat/run-compat.sh ./debian/build.sh
 
-.PHONY: clean-cli
-clean-cli:
+.PHONY: start-cli-clean
+start-cli-clean:
 	rm -f results/start-cli-*.deb
 	rm -rf dpkg-workdir/start-cli-*
 
-.PHONY: format-cli format-check-cli
-format-cli:
+.PHONY: start-cli-format start-cli-format-check
+start-cli-format:
 	cargo +nightly fmt -p start-cli
 
-format-check-cli:
+start-cli-format-check:
 	cargo +nightly fmt --check -p start-cli

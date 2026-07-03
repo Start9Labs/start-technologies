@@ -3,9 +3,9 @@
 
 REGISTRY_TARGETS := target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/registrybox projects/start-registry/start-registryd.service
 
-registry: target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/registrybox
+start-registry: target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/registrybox
 
-install-registry: $(REGISTRY_TARGETS)
+start-registry-install: $(REGISTRY_TARGETS)
 	$(call mkdir,$(DESTDIR)/usr/bin)
 	$(call cp,target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/registrybox,$(DESTDIR)/usr/bin/start-registrybox)
 	$(call ln,/usr/bin/start-registrybox,$(DESTDIR)/usr/bin/start-registryd)
@@ -17,19 +17,19 @@ install-registry: $(REGISTRY_TARGETS)
 target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/registrybox: $(CORE_SRC) $(ENVIRONMENT_FILE)
 	ARCH=$(ARCH) PROFILE=$(PROFILE) ./shared-libs/crates/start-core/build/build-registrybox.sh
 
-registry-deb: results/$(REGISTRY_BASENAME).deb
+start-registry-deb: results/$(REGISTRY_BASENAME).deb
 
 results/$(REGISTRY_BASENAME).deb: debian/build.sh $(call ls-files,projects/start-registry/debian) $(REGISTRY_TARGETS)
 	PROJECT=start-registry PLATFORM=$(ARCH) REQUIRES=debian DEPENDS=ca-certificates ./build/os-compat/run-compat.sh ./debian/build.sh
 
-.PHONY: clean-registry
-clean-registry:
+.PHONY: start-registry-clean
+start-registry-clean:
 	rm -f results/start-registry-*.deb
 	rm -rf dpkg-workdir/start-registry-*
 
-.PHONY: format-registry format-check-registry
-format-registry:
+.PHONY: start-registry-format start-registry-format-check
+start-registry-format:
 	cargo +nightly fmt -p start-registry
 
-format-check-registry:
+start-registry-format-check:
 	cargo +nightly fmt --check -p start-registry

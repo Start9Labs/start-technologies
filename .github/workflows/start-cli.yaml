@@ -98,7 +98,7 @@ jobs:
           nodejs-version: ${{ env.NODEJS_VERSION }}
 
       - name: Make
-        run: TARGET=${{ matrix.triple }} make cli
+        run: TARGET=${{ matrix.triple }} make start-cli
         env:
           PLATFORM: ${{ matrix.arch }}
           SCCACHE_GHA_ENABLED: on
@@ -138,7 +138,7 @@ jobs:
           nodejs-version: ${{ env.NODEJS_VERSION }}
 
       - name: Make
-        run: make cli-deb
+        run: make start-cli-deb
         env:
           PLATFORM: ${{ matrix.arch }}
           SCCACHE_GHA_ENABLED: on

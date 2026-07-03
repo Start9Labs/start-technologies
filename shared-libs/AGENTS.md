@@ -28,7 +28,7 @@ Rust (`crates/start-core`) — runs from the root Cargo workspace:
 cargo build -p start-core
 cargo check -p start-core            # linux-only locally; CI also builds darwin + musl targets
 cd shared-libs/crates/start-core && ./run-tests.sh
-make format-core                     # format the shared Rust crates (rustfmt); make format-check-core in CI
+make start-core-format                     # format the shared Rust crates (rustfmt); make start-core-format-check in CI
 ```
 
 Web (`ts-modules/`) — runs from the repo root (the Angular workspace root, where
@@ -38,7 +38,7 @@ Web (`ts-modules/`) — runs from the repo root (the Angular workspace root, whe
 npm ci
 npm run build:deps                   # builds @start9labs/start-core + patch-db client (required before typecheck/build)
 npm run check                        # typechecks i18n, shared, marketplace, ui, setup, brochure
-make format-check-web                # prettier check across the Angular workspace (make format-web to write)
+make web-format-check                # prettier check across the Angular workspace (make web-format to write)
 ```
 
 ## Gotchas

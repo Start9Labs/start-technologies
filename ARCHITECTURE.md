@@ -68,7 +68,7 @@ One root Cargo workspace (members: the product bin crates + every shared crate u
 
 ```
 Rust (shared-libs/crates/start-core)
-  → make ts-bindings: ts-rs export → shared-libs/crates/start-core/bindings/ → rsync to shared-libs/ts-modules/start-core/lib/osBindings/
+  → make start-core-ts-bindings: ts-rs export → shared-libs/crates/start-core/bindings/ → rsync to shared-libs/ts-modules/start-core/lib/osBindings/
     → start-core build (cd shared-libs/ts-modules/start-core && make dist) → dist/
       → shared-libs/ts-modules + web apps consume it (via @start9labs/start-core)
     → SDK build (cd projects/start-sdk && make bundle) → dist/ (bundles @start9labs/start-core)
@@ -80,7 +80,7 @@ Key make targets along the chain:
 | Step | Command | What it does |
 |---|---|---|
 | 1 | `cargo check -p start-core` | Verify the backend lib compiles |
-| 2 | `make ts-bindings` | Export ts-rs types → rsync to `shared-libs/ts-modules/start-core/lib/osBindings/` |
+| 2 | `make start-core-ts-bindings` | Export ts-rs types → rsync to `shared-libs/ts-modules/start-core/lib/osBindings/` |
 | 3 | `cd projects/start-sdk && make bundle` | Build the SDK `dist/` (builds `@start9labs/start-core` first and bundles it) |
 | 4 | `npm run check` | Type-check Angular projects (from the repo root) |
 | 5 | `cd projects/start-os/container-runtime && npm run check` | Type-check the runtime |
@@ -89,7 +89,7 @@ Key make targets along the chain:
 
 ## Cross-layer verification
 
-When a change spans Rust, SDK, web, and container-runtime, verify in the order above (1→5). `make ts-bindings` runs the `start-core` export and rsyncs `shared-libs/crates/start-core/bindings/` → `shared-libs/ts-modules/start-core/lib/osBindings/`; the built `@start9labs/start-core` is what web references, and the SDK bundle (step 3) is what container-runtime references, not the source files.
+When a change spans Rust, SDK, web, and container-runtime, verify in the order above (1→5). `make start-core-ts-bindings` runs the `start-core` export and rsyncs `shared-libs/crates/start-core/bindings/` → `shared-libs/ts-modules/start-core/lib/osBindings/`; the built `@start9labs/start-core` is what web references, and the SDK bundle (step 3) is what container-runtime references, not the source files.
 
 ## Data flow: backend → frontend
 

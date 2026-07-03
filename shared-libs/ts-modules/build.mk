@@ -50,24 +50,24 @@ config.json: $(GIT_HASH_FILE) $(ENVIRONMENT_FILE) shared-libs/ts-modules/config-
 	./shared-libs/ts-modules/update-config.sh	
 
 # convenience steps to build the StartOS web UIs (OS-product targets; not referenced elsewhere)
-startos-uis: $(WEB_UIS)
+start-os-uis: $(WEB_UIS)
 
-startos-ui: projects/start-os/web/dist/raw/ui/index.html
+start-os-ui: projects/start-os/web/dist/raw/ui/index.html
 
-.PHONY: clean-web
+.PHONY: web-clean
 # Owns the Angular workspace, the patch-db TS client it consumes, and brochure (built via this workspace).
-clean-web:
+web-clean:
 	rm -rf node_modules .angular projects/brochure-marketplace/dist
 	rm -rf shared-libs/crates/patch-db/client/node_modules shared-libs/crates/patch-db/client/dist
 	$(MAKE) -C shared-libs/ts-modules/start-core clean
 	rm -f config.json
 
 # Formats the whole Angular workspace (shared/marketplace libs + every app dir incl. brochure).
-.PHONY: format-web format-check-web
-format-web:
+.PHONY: web-format web-format-check
+web-format:
 	npm --prefix . run format
 	$(MAKE) -C shared-libs/ts-modules/start-core fmt
 
-format-check-web:
+web-format-check:
 	npm --prefix . run format:check
 	$(MAKE) -C shared-libs/ts-modules/start-core check-fmt

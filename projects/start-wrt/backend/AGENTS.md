@@ -9,8 +9,8 @@ crates are members of the **root** Cargo workspace (build with `cargo build -p s
 ## Tests
 
 - Run from the repo root, **always `-p`-scoped**:
-  `cargo test -p startwrt-core -p uciedit -p uciedit_macros` (or `make test-startwrt` to run the
-  same set inside the `start9/cargo-zigbuild` container, mirroring `test-core`).
+  `cargo test -p startwrt-core -p uciedit -p uciedit_macros` (or `make start-wrt-test` to run the
+  same set inside the `start9/cargo-zigbuild` container, mirroring `start-core-test`).
 - **Footgun:** a bare `cargo test` — including running it from `backend/` (which no longer has its
   own workspace `Cargo.toml`) — tests the **entire** monorepo and tries to build
   `startos-backup-fs`→`fuser`, whose build script fails on a host lacking FUSE dev libs. start-wrt's

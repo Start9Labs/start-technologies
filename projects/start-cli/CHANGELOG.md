@@ -17,9 +17,9 @@ or the CLI's externally observable behavior.
   even if it has an unresolved critical task (the backend gate lives in `start-core`).
 - **Independent versioning.** `start-cli` now carries its own version (starting at
   `1.0.0`) in its `Cargo.toml`, decoupled from the StartOS release line.
-- **Debian package.** `start-cli` is now packaged as a `.deb` (`make cli-deb`), so it
+- **Debian package.** `start-cli` is now packaged as a `.deb` (`make start-cli-deb`), so it
   can be installed and updated via apt. The build version is read from the crate
-  manifest. `make install-cli` now stages the binary into `DESTDIR` for packaging; for
+  manifest. `make start-cli-install` now stages the binary into `DESTDIR` for packaging; for
   a local PATH install run `build-cli.sh --install`.
 
 ## [0.4.0-beta.10]

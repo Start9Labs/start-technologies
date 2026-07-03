@@ -63,13 +63,13 @@ The web UIs are embedded into `startbox` at compile time (`include_dir!`), so th
 
 ```sh
 cargo check -p start-os        # verify the OS bins compile (startbox, start-container)
-make startos-ui                # build the admin UI (startos-uis for ui + setup-wizard)
-make startos                   # build all OS artifacts (bins + web + container-runtime image)
-make startos-$(IMAGE_TYPE)     # build the bootable image (startos-iso; startos-img on Raspberry Pi)
-make startos-deb               # Debian package (startos-squashfs for the squashfs image)
+make start-os-ui                # build the admin UI (start-os-uis for ui + setup-wizard)
+make start-os                   # build all OS artifacts (bins + web + container-runtime image)
+make start-os-$(IMAGE_TYPE)     # build the bootable image (start-os-iso; start-os-img on Raspberry Pi)
+make start-os-deb               # Debian package (start-os-squashfs for the squashfs image)
 ```
 
-`make ts-bindings` regenerates the TS bindings from the Rust types (see [Cross-layer changes](#cross-layer-changes)).
+`make start-core-ts-bindings` regenerates the TS bindings from the Rust types (see [Cross-layer changes](#cross-layer-changes)).
 
 ### Deploying to a device
 
@@ -77,19 +77,19 @@ These targets push to a **live device** and are slow/destructive — be delibera
 
 | Target                                       | Description                                     |
 | -------------------------------------------- | ----------------------------------------------- |
-| `startos-update-startbox REMOTE=start9@<ip>` | Deploy binary + UI only (fastest)               |
-| `startos-update-deb REMOTE=start9@<ip>`      | Deploy full Debian package                      |
-| `startos-update REMOTE=start9@<ip>`          | OTA-style update                                |
-| `startos-emulate-reflash REMOTE=start9@<ip>` | Reflash as if using a live ISO                  |
-| `startos-update-overlay REMOTE=start9@<ip>`  | Deploy to in-memory overlay (reverts on reboot) |
+| `start-os-update-startbox REMOTE=start9@<ip>` | Deploy binary + UI only (fastest)               |
+| `start-os-update-deb REMOTE=start9@<ip>`      | Deploy full Debian package                      |
+| `start-os-update REMOTE=start9@<ip>`          | OTA-style update                                |
+| `start-os-emulate-reflash REMOTE=start9@<ip>` | Reflash as if using a live ISO                  |
+| `start-os-update-overlay REMOTE=start9@<ip>`  | Deploy to in-memory overlay (reverts on reboot) |
 
 For devices on a different network (uses [magic-wormhole](https://github.com/magic-wormhole/magic-wormhole)):
 
 | Target                      | Description               |
 | --------------------------- | ------------------------- |
-| `startos-wormhole`          | Send the startbox binary  |
-| `startos-wormhole-deb`      | Send the Debian package   |
-| `startos-wormhole-squashfs` | Send the squashfs image   |
+| `start-os-wormhole`          | Send the startbox binary  |
+| `start-os-wormhole-deb`      | Send the Debian package   |
+| `start-os-wormhole-squashfs` | Send the squashfs image   |
 
 ### Creating a VM
 
@@ -105,7 +105,7 @@ virt-manager
 Build an ISO first:
 
 ```sh
-PLATFORM=$(uname -m) ENVIRONMENT=dev make startos-iso
+PLATFORM=$(uname -m) ENVIRONMENT=dev make start-os-iso
 ```
 
 Then follow the screenshot walkthrough in [`assets/create-vm/`](assets/create-vm/) to create a new virtual machine. Key steps:
@@ -120,7 +120,7 @@ Then follow the screenshot walkthrough in [`assets/create-vm/`](assets/create-vm
 
 ```sh
 make test                      # Rust + SDK + container-runtime
-make test-core                 # backend only
+make start-core-test                 # backend only
 ```
 
 The container-runtime has its own test suite and prettier config (double quotes, no semicolons) — see [container-runtime/CONTRIBUTING.md](container-runtime/CONTRIBUTING.md). Note CI builds a multi-platform matrix (apple-darwin + aarch64/x86_64/riscv64 musl); local `cargo check` is linux-only, so consider platform-specific impact.
@@ -128,8 +128,8 @@ The container-runtime has its own test suite and prettier config (double quotes,
 ## Formatting
 
 ```sh
-make format-startos            # format this product (core bins + web + container-runtime)
-make format-check-startos      # CI-style check
+make start-os-format            # format this product (core bins + web + container-runtime)
+make start-os-format-check      # CI-style check
 ```
 
 ## Cross-layer changes
@@ -137,7 +137,7 @@ make format-check-startos      # CI-style check
 When a change crosses Rust → bindings → SDK → web/runtime, verify in order:
 
 1. `cargo check -p start-os`
-2. `make ts-bindings` — regenerate ts-rs types from `start-core`
+2. `make start-core-ts-bindings` — regenerate ts-rs types from `start-core`
 3. `cd projects/start-sdk && make bundle` — rebuild the SDK `dist` (builds `@start9labs/start-core` first and bundles it; required before the web apps / runtime can see new bindings)
 4. `npm run check:ui && npm run check:setup`
 5. `cd projects/start-os/container-runtime && npm run check`
