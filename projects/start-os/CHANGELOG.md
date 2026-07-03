@@ -124,6 +124,14 @@ file tracks notable changes since the move to the monorepo.
   characters". SSIDs are passed to NetworkManager as-is, and SSIDs containing a colon
   are now parsed correctly when listing connections. The WiFi passphrase still
   requires ASCII, as mandated by WPA.
+- **Updates-tab progress circle vanishing during install finalization.** A
+  package update marked the overall install progress complete right after the
+  old version was uninstalled — before the new version's finalization/init
+  progress (added with package init progress reporting, #3323) had run — so the
+  Updates-tab loading circle snapped to full and then disappeared partway
+  through "installing/finalizing". Overall progress now completes only once the
+  package is fully installed, so the circle keeps tracking live finalization
+  progress until the update finishes.
 
 ### Removed
 

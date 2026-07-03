@@ -356,7 +356,6 @@ impl ServiceMap {
                             )
                         };
                         let cleanup = service.uninstall(uninit, false, false).await?;
-                        progress.complete();
                         Some(cleanup)
                     } else {
                         None
