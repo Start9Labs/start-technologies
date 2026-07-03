@@ -70,20 +70,16 @@ Releases stage through a beta registry before promotion to production, mirroring
 
 1. Bump `backend/ctrl/Cargo.toml` and turn the changelog's `## [Unreleased]` into an explicit
    `## [<version>]` heading (`pre-check` requires it), then land that on `master`.
-2. Run the **start-wrt** workflow with `deploy: release` (builds the OpenWrt image and uploads
-   the images to `s3://startwrt-images`).
-3. From the repo root, register the build into the **beta registry** (needs `gh`, `start-cli`,
-   and `~/.startos/developer.key.pem`):
-
-   ```
-   RUN_ID=<the deploy run> ./scripts/manage-release.sh pull-gha start-wrt
-   ./scripts/manage-release.sh register start-wrt
-   ```
-
-   Beta routers — any router whose UCI `startwrt.system.registry` points at the beta registry
-   (`uci set startwrt.system.registry=<beta url>; uci commit startwrt`) — now soak the version
-   as a normal OTA update.
-4. Once the version has soaked, cut the release from the repo root (needs `gh`, `gpg` with the
+2. Run the **start-wrt** workflow with `deploy: release`. It builds the OpenWrt image, uploads
+   the images to `s3://startwrt-images`, and registers + indexes the version into the **beta
+   registry** (signing with the `DEV_KEY` repo secret). Beta routers — any router whose UCI
+   `startwrt.system.registry` points at the beta registry (`uci set
+   startwrt.system.registry=<beta url>; uci commit startwrt`) — now soak the version as a
+   normal OTA update. (If the register step failed or must be redone, the manual fallback is
+   `RUN_ID=<the deploy run> ./scripts/manage-release.sh pull-gha start-wrt` followed by
+   `./scripts/manage-release.sh register start-wrt` — needs `gh`, `start-cli`, and
+   `~/.startos/developer.key.pem`.)
+3. Once the version has soaked, cut the release from the repo root (needs `gh`, `gpg` with the
    Start9 org key, `start-cli`, and `~/.startos/developer.key.pem`):
 
    ```

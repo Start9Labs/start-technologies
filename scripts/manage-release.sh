@@ -32,14 +32,16 @@ APT_SUITE="stable"
 APT_COMPONENT="main"
 
 # StartWRT publishes flashable images to its own registry pair + S3 bucket. The
-# chain mirrors the OS, minus the CI-indexed alpha tier: after CI uploads a
-# build's images to S3, `register` registers + indexes them into the source
+# chain mirrors the OS, minus the alpha tier: the CI deploy job (start-wrt.yaml)
+# uploads a build's images to S3 AND registers + indexes them into the source
 # (beta) registry, where beta routers (UCI `startwrt.system.registry` pointed at
 # it) soak the version; the full `release` promotes source -> target
-# (production). It ships two gzipped images: an sdcard image (fresh install ->
-# the registry `img` slot) and a sysupgrade image (OTA update -> the `squashfs`
-# slot; see cmd_register for the hardlink trick that maps the .img.gz names onto
-# those slots). Override either registry per run.
+# (production). `register` is the manual fallback for CI's register/index steps
+# (same commands; keep them in sync — see root AGENTS.md "Coupled changes"). It
+# ships two gzipped images: an sdcard image (fresh install -> the registry `img`
+# slot) and a sysupgrade image (OTA update -> the `squashfs` slot; see
+# cmd_register for the hardlink trick that maps the .img.gz names onto those
+# slots). Override either registry per run.
 STARTWRT_SOURCE_REGISTRY="${STARTWRT_SOURCE_REGISTRY:-https://beta-startwrt-registry.start9.com}"
 STARTWRT_TARGET_REGISTRY="${STARTWRT_TARGET_REGISTRY:-https://startwrt-registry.start9.com}"
 STARTWRT_S3_BUCKET="s3://startwrt-images"
@@ -49,7 +51,8 @@ STARTWRT_PLATFORM="spacemit,k1-x"
 STARTWRT_BUILD_ARTIFACT="startwrt-openwrt-image"
 # Compat floor for `registry os version add`: the oldest installed version
 # allowed to upgrade to this one. An explicit beta floor (not a `^` caret) keeps
-# beta prerelease tags in range. The upper bound (<=$VERSION) is added in cmd_register.
+# beta prerelease tags in range. The upper bound (<=$VERSION) is added in
+# cmd_register. Mirrored in start-wrt.yaml's register step.
 STARTWRT_COMPAT_FLOOR="${STARTWRT_COMPAT_FLOOR:->=0.1.0-beta.1}"
 
 # Every OS image platform. Most ship an iso + squashfs; raspberrypi ships a
@@ -387,11 +390,12 @@ cmd_pre_check() {
         wrt)
             # `release` pulls the images from the source (beta) registry and
             # promotes them into production, so both assets must already be
-            # registered there (see `register`).
+            # registered there (the CI deploy does that; `register` is the
+            # manual fallback).
             local wrt_idx slot wrt_missing
             wrt_idx=$(start-cli --registry="$STARTWRT_SOURCE_REGISTRY" registry os index 2>/dev/null || echo '{}')
             if ! echo "$wrt_idx" | jq -e ".versions[\"$VERSION\"]" >/dev/null 2>&1; then
-                >&2 echo "  ✗ StartWRT ${VERSION} not in source registry ${STARTWRT_SOURCE_REGISTRY} — run 'register' first"
+                >&2 echo "  ✗ StartWRT ${VERSION} not in source registry ${STARTWRT_SOURCE_REGISTRY} — run the start-wrt deploy workflow (or 'register') first"
                 errors=1
             else
                 wrt_missing=""
@@ -651,7 +655,9 @@ cmd_index() {
 cmd_register() {
     require_kind wrt
     # Register + index a CI build into the source (beta) registry, where beta
-    # routers soak it before `release` promotes it into production. Run
+    # routers soak it before `release` promotes it into production. Normally
+    # the CI deploy job (start-wrt.yaml) does this itself right after the S3
+    # upload — this is the manual fallback (same commands; keep in sync). Run
     # pull-gha first: registering needs the image files locally to compute the
     # signed blake3 commitments. The compat range is the set of installed
     # versions allowed to upgrade to this one.
@@ -842,7 +848,7 @@ cmd_release() {
             ;;
         wrt)
             # CI (start-wrt.yaml `deploy`) uploaded the images to S3 and
-            # `register` indexed them into the source (beta) registry, where
+            # registered + indexed them into the source (beta) registry, where
             # beta routers soaked the version — so there's no push here. Pull
             # the registered images (signature-verified) to build the release
             # notes + sign them, tag, cut the GitHub release, and `index`
@@ -868,7 +874,7 @@ Projects:
   start-registry  per-arch .deb -> apt repo + GitHub release
   start-sdk       npm package -> npm + GitHub release
   start-wrt       flashable images (sdcard + sysupgrade .img.gz) -> S3 +
-                  StartWRT registries (`register` indexes into beta; `release`
+                  StartWRT registries (CI's deploy indexes into beta; `release`
                   promotes beta -> production)
 
 Version is read from the project's manifest (Cargo.toml — for start-wrt the ctrl
@@ -890,10 +896,11 @@ Subcommands:
                      normally runs in CI; use it for a manual re-publish.
   index              Promote the version from the source (beta) registry into
                      the production registry. (os: CI indexes alpha; alpha->beta
-                     is promoted manually. wrt: `register` indexes into beta.)
+                     is promoted manually. wrt: CI indexes into beta.)
   register           wrt only: register + index a CI build's images into the
                      source (beta) registry, pointing at their S3/CDN URLs.
-                     Run pull-gha first; beta routers then soak the version
+                     Manual fallback — the CI deploy normally does this. Run
+                     pull-gha first; beta routers then soak the version
                      until `release` promotes it.
   sign               Sign artifacts with the Start9 org key (+ personal key if
                      available) and upload signatures.tar.gz. (os/cli/deb/wrt.)
@@ -918,8 +925,8 @@ Environment variables:
 Registries are scoped per project (the OS and StartWRT promote source -> target):
   STARTOS_SOURCE_REGISTRY   registry the OS release pulls/promotes from (default: beta)
   STARTOS_TARGET_REGISTRY   registry the OS release promotes into (default: production)
-  STARTWRT_SOURCE_REGISTRY  registry `register` indexes into and the StartWRT
-                            release pulls/promotes from (default: beta)
+  STARTWRT_SOURCE_REGISTRY  registry CI (or `register`) indexes into and the
+                            StartWRT release pulls/promotes from (default: beta)
   STARTWRT_TARGET_REGISTRY  registry the StartWRT release promotes into
                             (default: production)
   STARTWRT_COMPAT_FLOOR     oldest version allowed to upgrade to this StartWRT

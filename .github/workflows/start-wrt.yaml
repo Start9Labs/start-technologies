@@ -2,8 +2,8 @@ name: start-wrt
 
 # UNVALIDATED since the monorepo migration — no job has been run yet. The
 # `compile` job (riscv binary + embedded web) should be validated first; the
-# heavy `image` job (OpenWrt) follows; the `deploy` job (S3 upload) validates
-# last. See projects/start-wrt/CONTRIBUTING.md.
+# heavy `image` job (OpenWrt) follows; the `deploy` job (S3 upload +
+# beta-registry register) validates last. See projects/start-wrt/CONTRIBUTING.md.
 
 on:
   workflow_call:
@@ -15,7 +15,7 @@ on:
         default: false
       deploy:
         type: choice
-        description: Deploy (upload images to S3; release cut locally via manage-release.sh)
+        description: Deploy (upload images to S3 + register into the beta registry; release cut locally via manage-release.sh)
         options:
           - NONE
           - release
@@ -138,20 +138,29 @@ jobs:
           retention-days: 14
 
   # Publish path: upload the built images to shared S3 (the registry CDN serves
-  # them from here). This is the ONLY publishing step done in CI — indexing into
-  # the beta registry (`register start-wrt`), tagging, cutting the GitHub
-  # release, and the beta -> production promotion (`release start-wrt`) all stay
-  # deliberate local gates run from the top-level scripts/manage-release.sh with
-  # the developer key. The `image` job's startwrt-openwrt-image artifact is what
-  # that script's pull-gha downloads for the `register` step.
+  # them from here) and register + index the version into the beta registry,
+  # where beta routers (UCI `startwrt.system.registry` pointed at it) soak it —
+  # the same secrets.DEV_KEY publish CI already does for OS builds in
+  # startos-iso.yaml. Tagging, cutting the GitHub release, and the beta ->
+  # production promotion (`release start-wrt`) stay deliberate local gates run
+  # from the top-level scripts/manage-release.sh — the promote re-signs with the
+  # local developer key, so production never trusts the CI key.
   # Dispatch-gated (deploy == 'release'), matching startos-iso.
   deploy:
     name: Deploy
     needs: [image]
     if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'release' }}
     runs-on: ubuntu-latest
+    # REGISTRY/S3_CDN/PLATFORM (and the compat floor in the register step)
+    # mirror scripts/manage-release.sh's STARTWRT_SOURCE_REGISTRY /
+    # STARTWRT_S3_CDN / STARTWRT_PLATFORM / STARTWRT_COMPAT_FLOOR, whose
+    # cmd_register is the manual fallback for the register/index steps below —
+    # keep them in sync (root AGENTS.md "Coupled changes").
     env:
       S3_BUCKET: s3://startwrt-images
+      S3_CDN: https://startwrt-images.nyc3.cdn.digitaloceanspaces.com
+      REGISTRY: https://beta-startwrt-registry.start9.com
+      PLATFORM: spacemit,k1-x
     steps:
       - uses: actions/checkout@v6
         with:
@@ -176,6 +185,27 @@ jobs:
           name: startwrt-openwrt-image
           path: artifacts/
 
+      - name: Install start-cli
+        run: |
+          ARCH=$(uname -m)
+          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+          ASSET_NAME="start-cli_${ARCH}-${OS}"
+          DOWNLOAD_URL=$(curl -fsS \
+            -H "Authorization: token ${{ github.token }}" \
+            https://api.github.com/repos/Start9Labs/start-technologies/releases \
+            | jq -r '[.[].assets[] | select(.name=="'"$ASSET_NAME"'")] | first | .browser_download_url')
+          curl -fsSL \
+            -H "Authorization: token ${{ github.token }}" \
+            -H "Accept: application/octet-stream" \
+            "$DOWNLOAD_URL" -o /tmp/start-cli
+          sudo install -m 755 /tmp/start-cli /usr/local/bin/start-cli
+          echo "start-cli: $(start-cli --version)"
+
+      - name: Set up developer key
+        run: |
+          mkdir -p ~/.startos
+          printf '%s' "${{ secrets.DEV_KEY }}" > ~/.startos/developer.key.pem
+
       - name: Configure S3
         run: |
           sudo apt-get install -y -qq s3cmd > /dev/null
@@ -197,8 +227,37 @@ jobs:
             echo "Uploading $file..."
             s3cmd put -P "$file" "${{ env.S3_BUCKET }}/v${VERSION}/$file"
           done
-          # The beta-registry register/index (against this run's
-          # startwrt-openwrt-image artifact), the GitHub release + tag
-          # (start-wrt/v<version>), and the beta -> production promotion are
-          # all cut locally from scripts/manage-release.sh — deliberately
-          # gated behind the developer key, not CI.
+
+      # The compat range is the set of installed versions allowed to upgrade to
+      # this one; the floor matches manage-release.sh's STARTWRT_COMPAT_FLOOR.
+      - name: Register StartWRT version in beta registry
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          start-cli --registry="${{ env.REGISTRY }}" registry os version add \
+            "$VERSION" "v${VERSION}" '' ">=0.1.0-beta.1 <=${VERSION}"
+
+      - name: Index assets in beta registry
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          cd artifacts
+          for file in *.img *.img.gz; do
+            [ -f "$file" ] || continue
+            # start-cli infers the asset slot from the file extension and only
+            # accepts iso/img/squashfs. Both images ship gzipped, so present
+            # each under a hardlink whose extension names its slot: the sdcard
+            # image as .img (the fresh-install slot) and the sysupgrade image
+            # as .squashfs (start-os's update-asset slot). The indexed URLs
+            # still point at the honestly-named .img.gz files on S3 (the
+            # registry only requires the URL's bytes to match the signed
+            # blake3 commitment, which the hardlinks share).
+            case "$file" in
+              *-sdcard.img.gz) index_file="${file%.img.gz}.img" ;;
+              *-sysupgrade.img.gz) index_file="${file%.img.gz}.squashfs" ;;
+              *) index_file="$file" ;;
+            esac
+            [ "$index_file" = "$file" ] || ln -f "$file" "$index_file"
+            echo "Indexing $file for platform ${{ env.PLATFORM }}..."
+            start-cli --registry="${{ env.REGISTRY }}" registry os asset add \
+              --platform="${{ env.PLATFORM }}" --version="$VERSION" \
+              "$index_file" "${{ env.S3_CDN }}/v${VERSION}/$file"
+          done
