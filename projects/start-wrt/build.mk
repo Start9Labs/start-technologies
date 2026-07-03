@@ -50,8 +50,9 @@ STARTWRT_BASENAME := startwrt-$(STARTWRT_VERSION)-$(STARTWRT_SHORT_HASH)_spacemi
 STARTWRT_SDCARD_SRC := openwrt-spacemit-k1-sbc-bananapi-f3-squashfs-sdcard.img
 STARTWRT_SYSUPGRADE_SRC := openwrt-spacemit-k1-sbc-bananapi-f3-squashfs-sysupgrade.img.gz
 # …renamed on copy into results/ to the release-asset names. Keep the
-# -sdcard.img / -sysupgrade.img.gz endings: scripts/manage-release.sh and the
-# registry-kind inference match on those suffixes/extensions.
+# -sdcard.img / -sysupgrade.img.gz endings: the top-level scripts/manage-release.sh
+# `wrt` kind (release_files + the img/squashfs slot inference) matches on those
+# suffixes/extensions.
 STARTWRT_SDCARD_NAME := $(STARTWRT_BASENAME)-sdcard.img
 STARTWRT_SYSUPGRADE_NAME := $(STARTWRT_BASENAME)-sysupgrade.img.gz
 STARTWRT_IMAGES := results/$(STARTWRT_SDCARD_NAME) results/$(STARTWRT_SYSUPGRADE_NAME)

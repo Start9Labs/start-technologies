@@ -61,6 +61,28 @@ start-wrt's targets live in [`build.mk`](build.mk) (included by the root `Makefi
 Deployment is atomic (temp file → sync → rename → daemon restart). The web UI is embedded in
 the binary, so deploying the binary updates everything.
 
+## Cutting a release
+
+StartWRT is a first-class project of the monorepo-wide release tool,
+[`scripts/manage-release.sh`](../../scripts/manage-release.sh) (the `wrt` kind). The version is
+read from `backend/ctrl/Cargo.toml`; the git tag / GitHub release is `start-wrt_v<version>`.
+
+1. Bump `backend/ctrl/Cargo.toml` and turn the changelog's `## [Unreleased]` into an explicit
+   `## [<version>]` heading (`pre-check` requires it), then land that on `master`.
+2. Run the **start-wrt** workflow with `deploy: release` (builds the OpenWrt image and uploads
+   the images to `s3://startwrt-images`).
+3. From the repo root, cut the release locally (needs `gh`, `gpg` with the Start9 org key,
+   `start-cli`, and `~/.startos/developer.key.pem`):
+
+   ```
+   RUN_ID=<the deploy run> ./scripts/manage-release.sh release start-wrt
+   ```
+
+   This runs pre-check → pull the images from the CI artifact → tag → create the GitHub release
+   → register + index into the StartWRT registry → sign. See `manage-release.sh --help` for the
+   individual subcommands (`pull-gha`, `index`, `sign`, `cosign`, …) and env vars
+   (`STARTWRT_REGISTRY`, `STARTWRT_COMPAT_FLOOR`, `FORCE=1` to re-run an idempotent release).
+
 > **⚠ UNVALIDATED since the monorepo migration.** The riscv dockerized cross-build (`make
 > startwrt`) and the OpenWrt image assembly (`make startwrt-image`) have not yet been run on a
 > build host. The backend host `cargo check` passes. Validate `make startwrt` first (it does not

@@ -77,17 +77,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `@start9labs/shared` is now marked `sideEffects: false` so importing a few symbols from
   its barrel tree-shakes cleanly (start-wrt's embedded UI bundle would otherwise pull in
   ~875 kB of unused shared code). This also shrinks the other apps' bundles.
-- Restored the release CI that the monorepo migration had dropped: `start-wrt.yaml` again
-  has a `deploy` job that uploads the built images to S3 (`s3://startwrt-images`) and cuts a
-  GitHub Release. To match `startos-iso.yaml`, it is `workflow_dispatch`-gated on a `deploy:
+- Restored the release CI that the monorepo migration had dropped, then folded StartWRT
+  into the monorepo-wide release tool: `start-wrt.yaml` again has a `deploy` job, but it
+  now *only* uploads the built images to S3 (`s3://startwrt-images`) — the CDN the registry
+  serves from. To match `startos-iso.yaml`, it is `workflow_dispatch`-gated on a `deploy:
   release` input (rather than the old standalone workflow's `v*`-tag push) and reads the
   version from `backend/ctrl/Cargo.toml` (the standalone workflow read the now-removed
-  `web/package.json`). Releases are cut on `Start9Labs/start-technologies` with
-  product-namespaced tags (`startwrt/v<version>`), since the monorepo hosts every
-  product's releases on independent cadences. Registry indexing/signing stays a local
-  gate in `scripts/manage-release.sh`, which is re-pointed at the new repo, workflow,
-  artifact name, and tag scheme; the user manual's download/source/issue links point
-  at the monorepo too. Release assets follow the startos naming convention —
+  `web/package.json`). Tagging, cutting the GitHub release, and registering + indexing into
+  the StartWRT registry are now driven by the top-level `scripts/manage-release.sh`
+  (`release start-wrt` — a new `wrt` project kind alongside os/cli/deb/npm), which replaces
+  the standalone `projects/start-wrt/scripts/manage-release.sh`. Registry indexing/signing
+  stays a deliberate local, developer-key-gated step. Releases are cut on
+  `Start9Labs/start-technologies` with the monorepo's `<project>_v<version>` tag convention
+  (`start-wrt_v<version>`), since the monorepo hosts every product's releases on independent
+  cadences. Release assets follow the startos naming convention —
   `startwrt-<version>-<git hash>_spacemit-k1-{sdcard.img,sysupgrade.img.gz}` — instead
   of the raw OpenWrt output names, which carried no product, version, or hash.
 - Restored the OpenWrt download-cache keying the migration had narrowed: the `image` job's

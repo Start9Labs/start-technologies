@@ -2,8 +2,8 @@ name: start-wrt
 
 # UNVALIDATED since the monorepo migration — no job has been run yet. The
 # `compile` job (riscv binary + embedded web) should be validated first; the
-# heavy `image` job (OpenWrt) follows; the `deploy` job (S3 + GitHub Release)
-# validates last. See projects/start-wrt/CONTRIBUTING.md.
+# heavy `image` job (OpenWrt) follows; the `deploy` job (S3 upload) validates
+# last. See projects/start-wrt/CONTRIBUTING.md.
 
 on:
   workflow_call:
@@ -15,7 +15,7 @@ on:
         default: false
       deploy:
         type: choice
-        description: Deploy (upload images to S3 + cut a GitHub Release)
+        description: Deploy (upload images to S3; release cut locally via manage-release.sh)
         options:
           - NONE
           - release
@@ -138,17 +138,17 @@ jobs:
           retention-days: 14
 
   # Publish path: upload the built images to shared S3 (the registry CDN serves
-  # them from here) and cut a GitHub Release. This is the ONLY publishing step
-  # done in CI — registering and indexing into the registry stay a deliberate
-  # local gate run from projects/start-wrt/scripts/manage-release.sh with the
-  # developer key. Dispatch-gated (deploy == 'release'), matching startos-iso.
+  # them from here). This is the ONLY publishing step done in CI — tagging,
+  # cutting the GitHub release, and registering + indexing into the registry all
+  # stay a deliberate local gate run from the top-level scripts/manage-release.sh
+  # (`release start-wrt`) with the developer key. The `image` job's
+  # startwrt-openwrt-image artifact is what that script pulls to sign + checksum.
+  # Dispatch-gated (deploy == 'release'), matching startos-iso.
   deploy:
     name: Deploy
     needs: [image]
     if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'release' }}
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     env:
       S3_BUCKET: s3://startwrt-images
     steps:
@@ -196,20 +196,7 @@ jobs:
             echo "Uploading $file..."
             s3cmd put -P "$file" "${{ env.S3_BUCKET }}/v${VERSION}/$file"
           done
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          # Product-namespaced tag: the monorepo hosts every product's releases,
-          # each on its own cadence, so bare v* tags would collide across
-          # products (StartOS history already owns v0.x). Keep in sync with
-          # scripts/manage-release.sh.
-          tag_name: startwrt/v${{ steps.version.outputs.version }}
-          name: StartWRT v${{ steps.version.outputs.version }}
-          # Attach both images: the sdcard .img (fresh install) and the
-          # sysupgrade .img.gz (OTA), matching what manage-release.sh publishes.
-          files: |
-            artifacts/*.img
-            artifacts/*.img.gz
-          fail_on_unmatched_files: true
-          generate_release_notes: true
+          # The GitHub release + tag (start-wrt_v<version>) and the registry
+          # register/index are cut locally from scripts/manage-release.sh
+          # (`release start-wrt`) against this run's startwrt-openwrt-image
+          # artifact — deliberately gated behind the developer key, not CI.

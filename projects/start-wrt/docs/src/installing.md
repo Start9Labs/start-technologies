@@ -10,7 +10,7 @@ StartWRT comes pre-installed on Start9 routers. If you need to reinstall or flas
 
 ## Download the Image
 
-1. Download the latest StartWRT firmware image from the [Start9 releases page](https://github.com/Start9Labs/start-technologies/releases?q=startwrt&expanded=true) (StartWRT releases are the ones tagged `startwrt/v…`). For a fresh install, download the **sdcard** image — it is named `startwrt-<version>-<git hash>_spacemit-k1-sdcard.img` (the `…-sysupgrade.img.gz` file is the [update](updating.md) payload). The commands below use `startwrt.img` as a placeholder for the downloaded filename.
+1. Download the latest StartWRT firmware image from the [Start9 releases page](https://github.com/Start9Labs/start-technologies/releases?q=start-wrt&expanded=true) (StartWRT releases are the ones tagged `start-wrt_v…`). For a fresh install, download the **sdcard** image — it is named `startwrt-<version>-<git hash>_spacemit-k1-sdcard.img` (the `…-sysupgrade.img.gz` file is the [update](updating.md) payload). The commands below use `startwrt.img` as a placeholder for the downloaded filename.
 
 1. Verify the SHA256 checksum against the one listed on GitHub (optional but recommended).
    - **Mac**. Open a terminal and run:
