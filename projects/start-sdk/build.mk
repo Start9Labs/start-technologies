@@ -2,10 +2,9 @@ test-sdk: $(call ls-files, projects/start-sdk) shared-libs/ts-modules/start-core
 	$(MAKE) -C shared-libs/ts-modules/start-core test
 	cd projects/start-sdk && make test
 
-# Co-target the bundled dist/node_modules stamp (see shared-libs/ts-modules/build.mk).
-projects/start-sdk/dist/package.json projects/start-sdk/dist/node_modules/.package-lock.json &: $(call ls-files, projects/start-sdk) shared-libs/ts-modules/start-core/dist/package.json
+projects/start-sdk/dist/package.json: $(call ls-files, projects/start-sdk) shared-libs/ts-modules/start-core/dist/package.json
 	(cd projects/start-sdk && make bundle)
-	touch projects/start-sdk/dist/package.json projects/start-sdk/dist/node_modules/.package-lock.json
+	touch projects/start-sdk/dist/package.json
 
 .PHONY: clean-sdk
 clean-sdk:

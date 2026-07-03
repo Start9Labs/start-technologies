@@ -7,12 +7,9 @@ COMPRESSED_WEB_UIS := projects/start-os/web/dist/static/ui/index.html projects/s
 
 # start-core (the shared TS lib formerly start-sdk/base): web consumes its built
 # dist via the root file: dep; the SDK and container-runtime consume it too.
-# The bundled dist/node_modules stamp is a co-target so a missing/incomplete
-# vendored node_modules forces a rebuild — otherwise an incremental build ships
-# a dist whose compiled JS requires deps its node_modules lacks.
-shared-libs/ts-modules/start-core/dist/package.json shared-libs/ts-modules/start-core/dist/node_modules/.package-lock.json &: $(call ls-files, shared-libs/ts-modules/start-core) shared-libs/ts-modules/start-core/lib/osBindings/index.ts
+shared-libs/ts-modules/start-core/dist/package.json: $(call ls-files, shared-libs/ts-modules/start-core) shared-libs/ts-modules/start-core/lib/osBindings/index.ts
 	$(MAKE) -C shared-libs/ts-modules/start-core dist
-	touch shared-libs/ts-modules/start-core/dist/package.json shared-libs/ts-modules/start-core/dist/node_modules/.package-lock.json
+	touch shared-libs/ts-modules/start-core/dist/package.json
 
 package-lock.json: package.json shared-libs/ts-modules/start-core/dist/package.json
 	npm --prefix . i
