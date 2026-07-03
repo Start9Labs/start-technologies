@@ -49,11 +49,13 @@ STARTWRT_BASENAME := startwrt-$(STARTWRT_VERSION)-$(STARTWRT_SHORT_HASH)_spacemi
 # OpenWrt's own output names (what `make -C openwrt` produces)…
 STARTWRT_SDCARD_SRC := openwrt-spacemit-k1-sbc-bananapi-f3-squashfs-sdcard.img
 STARTWRT_SYSUPGRADE_SRC := openwrt-spacemit-k1-sbc-bananapi-f3-squashfs-sysupgrade.img.gz
-# …renamed on copy into results/ to the release-asset names. Keep the
-# -sdcard.img / -sysupgrade.img.gz endings: the top-level scripts/manage-release.sh
-# `wrt` kind (release_files + the img/squashfs slot inference) matches on those
-# suffixes/extensions.
-STARTWRT_SDCARD_NAME := $(STARTWRT_BASENAME)-sdcard.img
+# …renamed on copy into results/ to the release-asset names, gzipping the sdcard
+# image on the way (OpenWrt gzips the sysupgrade image itself, but leaves the
+# sdcard image raw — CONFIG_TARGET_IMAGES_GZIP is off). Keep the
+# -sdcard.img.gz / -sysupgrade.img.gz endings: the top-level
+# scripts/manage-release.sh `wrt` kind (release_files + the slot-inference
+# hardlinks in cmd_register) matches on those suffixes.
+STARTWRT_SDCARD_NAME := $(STARTWRT_BASENAME)-sdcard.img.gz
 STARTWRT_SYSUPGRADE_NAME := $(STARTWRT_BASENAME)-sysupgrade.img.gz
 STARTWRT_IMAGES := results/$(STARTWRT_SDCARD_NAME) results/$(STARTWRT_SYSUPGRADE_NAME)
 
@@ -113,7 +115,7 @@ startwrt-image: $(STARTWRT_IMAGES)
 $(STARTWRT_IMAGES) &: $(STARTWRT_OPENWRT)/.config $(STARTWRT_OPENWRT)/files/.staged
 	$(MAKE) -C $(STARTWRT_OPENWRT) V=s -j$(shell nproc)
 	mkdir -p results
-	cp $(STARTWRT_IMAGE_DIR)/$(STARTWRT_SDCARD_SRC) results/$(STARTWRT_SDCARD_NAME)
+	gzip -9nc $(STARTWRT_IMAGE_DIR)/$(STARTWRT_SDCARD_SRC) > results/$(STARTWRT_SDCARD_NAME)
 	cp $(STARTWRT_IMAGE_DIR)/$(STARTWRT_SYSUPGRADE_SRC) results/$(STARTWRT_SYSUPGRADE_NAME)
 
 # Deploy binary + restart daemon over SSH (atomic temp -> sync -> rename).

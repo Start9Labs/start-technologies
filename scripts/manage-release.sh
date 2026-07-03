@@ -33,9 +33,10 @@ APT_COMPONENT="main"
 
 # StartWRT publishes flashable images to its own registry + S3 bucket (no
 # beta->prod promotion; it registers + indexes directly into a single registry).
-# It ships two images: an sdcard .img (fresh install -> the registry `img` slot)
-# and a sysupgrade .img.gz (OTA update -> the `squashfs` slot; see cmd_index for
-# the .img.gz->.squashfs hardlink trick). Override the registry per run.
+# It ships two gzipped images: an sdcard image (fresh install -> the registry
+# `img` slot) and a sysupgrade image (OTA update -> the `squashfs` slot; see
+# cmd_index for the hardlink trick that maps the .img.gz names onto those
+# slots). Override the registry per run.
 STARTWRT_REGISTRY="${STARTWRT_REGISTRY:-https://startwrt-registry.start9.com}"
 STARTWRT_S3_BUCKET="s3://startwrt-images"
 STARTWRT_S3_CDN="https://startwrt-images.nyc3.cdn.digitaloceanspaces.com"
@@ -190,7 +191,7 @@ release_files() {
         os) for f in *.iso *.img *.squashfs; do [ -f "$f" ] && echo "$f"; done ;;
         cli) cli_binaries; deb_files ;;
         deb) deb_files ;;
-        wrt) for f in *-sdcard.img *-sysupgrade.img.gz; do [ -f "$f" ] && echo "$f"; done ;;
+        wrt) for f in *-sdcard.img.gz *-sysupgrade.img.gz; do [ -f "$f" ] && echo "$f"; done ;;
     esac
 }
 
@@ -475,7 +476,7 @@ cmd_pull_gha() {
             pull_gha_debs
             ;;
         wrt)
-            echo "  ${STARTWRT_BUILD_ARTIFACT} (sdcard .img + sysupgrade .img.gz)"
+            echo "  ${STARTWRT_BUILD_ARTIFACT} (sdcard + sysupgrade .img.gz)"
             gh run download -R "$REPO" "$RUN_ID" -n "$STARTWRT_BUILD_ARTIFACT" -D "$(pwd)"
             ;;
     esac
@@ -617,21 +618,21 @@ cmd_index() {
                 "$VERSION" "v$VERSION" '' "${STARTWRT_COMPAT_FLOOR} <=$VERSION"
 
             # start-cli infers the asset slot from the file extension and only
-            # accepts iso/img/squashfs. *-sysupgrade.img.gz is a gzipped raw image
-            # (start-os's update-asset slot), so present it under a .squashfs
-            # hardlink purely so the slot resolves to squashfs. The indexed URL
-            # still points at the honestly-named .img.gz on S3 (the registry only
-            # requires the URL's bytes to match the signed blake3 commitment, which
-            # the hardlink shares).
+            # accepts iso/img/squashfs. Both images ship gzipped, so present each
+            # under a hardlink whose extension names its slot: the sdcard image
+            # as .img (the fresh-install slot) and the sysupgrade image as
+            # .squashfs (start-os's update-asset slot). The indexed URLs still
+            # point at the honestly-named .img.gz files on S3 (the registry only
+            # requires the URL's bytes to match the signed blake3 commitment,
+            # which the hardlinks share).
             local file index_file
             for file in $(release_files); do
-                index_file="$file"
                 case "$file" in
-                    *.img.gz)
-                        index_file="${file%.img.gz}.squashfs"
-                        ln -f "$file" "$index_file"
-                        ;;
+                    *-sdcard.img.gz) index_file="${file%.img.gz}.img" ;;
+                    *-sysupgrade.img.gz) index_file="${file%.img.gz}.squashfs" ;;
+                    *) index_file="$file" ;;
                 esac
+                [ "$index_file" = "$file" ] || ln -f "$file" "$index_file"
                 echo "Indexing $file for platform ${STARTWRT_PLATFORM}..."
                 start-cli --registry="$STARTWRT_REGISTRY" registry os asset add \
                     --platform="$STARTWRT_PLATFORM" --version="$VERSION" \
@@ -735,7 +736,7 @@ release_notes() {
             echo "## Image Downloads"
             echo
             local sdcard sysupgrade imgs
-            sdcard=$(release_files | grep -E -- '-sdcard\.img$' | head -1)
+            sdcard=$(release_files | grep -E -- '-sdcard\.img\.gz$' | head -1)
             sysupgrade=$(release_files | grep -E -- '-sysupgrade\.img\.gz$' | head -1)
             [ -n "$sdcard" ] && echo "- [SD card image (fresh install)]($STARTWRT_S3_CDN/v$VERSION/$sdcard \"Write to microSD/eMMC to flash a new device\")"
             [ -n "$sysupgrade" ] && echo "- [Sysupgrade image (OTA update)]($STARTWRT_S3_CDN/v$VERSION/$sysupgrade \"In-place upgrade via OpenWrt sysupgrade\")"
@@ -821,7 +822,7 @@ Projects:
   start-tunnel    per-arch .deb -> apt repo + GitHub release
   start-registry  per-arch .deb -> apt repo + GitHub release
   start-sdk       npm package -> npm
-  start-wrt       flashable images (sdcard .img + sysupgrade .img.gz) -> S3 +
+  start-wrt       flashable images (sdcard + sysupgrade .img.gz) -> S3 +
                   StartWRT registry (register + index; no beta->prod promotion)
 
 Version is read from the project's manifest (Cargo.toml — for start-wrt the ctrl

@@ -10,20 +10,20 @@ StartWRT comes pre-installed on Start9 routers. If you need to reinstall or flas
 
 ## Download the Image
 
-1. Download the latest StartWRT firmware image from the [Start9 releases page](https://github.com/Start9Labs/start-technologies/releases?q=start-wrt&expanded=true) (StartWRT releases are the ones tagged `start-wrt/v…`). For a fresh install, download the **sdcard** image — it is named `startwrt-<version>-<git hash>_spacemit-k1-sdcard.img` (the `…-sysupgrade.img.gz` file is the [update](updating.md) payload). The commands below use `startwrt.img` as a placeholder for the downloaded filename.
+1. Download the latest StartWRT firmware image from the [Start9 releases page](https://github.com/Start9Labs/start-technologies/releases?q=start-wrt&expanded=true) (StartWRT releases are the ones tagged `start-wrt/v…`). For a fresh install, download the **sdcard** image — it is named `startwrt-<version>-<git hash>_spacemit-k1-sdcard.img.gz` (the `…-sysupgrade.img.gz` file is the [update](updating.md) payload). There is no need to decompress it — balenaEtcher flashes the `.img.gz` directly. The commands below use `startwrt.img.gz` as a placeholder for the downloaded filename.
 
 1. Verify the SHA256 checksum against the one listed on GitHub (optional but recommended).
    - **Mac**. Open a terminal and run:
 
-         openssl dgst -sha256 startwrt.img
+         openssl dgst -sha256 startwrt.img.gz
 
    - **Linux**. Open a terminal and run:
 
-         sha256sum startwrt.img
+         sha256sum startwrt.img.gz
 
    - **Windows**. Open PowerShell and run:
 
-         Get-FileHash startwrt.img
+         Get-FileHash startwrt.img.gz
 
 ## Write the Image to microSD
 
