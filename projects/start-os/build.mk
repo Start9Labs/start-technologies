@@ -141,9 +141,6 @@ startos-emulate-reflash: $(STARTOS_TARGETS)
 	$(call ssh,'sudo rm -f /media/startos/config/disk.guid /media/startos/config/overlay/etc/hostname')
 	$(call ssh,'sudo /media/startos/next/usr/lib/startos/scripts/chroot-and-upgrade --no-sync "apt-get install -y $(shell cat ./projects/start-os/build/lib/depends)"')
 
-startos-upload-ota: results/$(BASENAME).squashfs
-	TARGET=$(TARGET) KEY=$(KEY) ./projects/start-os/build/upload-ota.sh
-
 projects/start-os/container-runtime/debian.$(ARCH).squashfs: ./projects/start-os/container-runtime/download-base-image.sh
 	ARCH=$(ARCH) ./projects/start-os/container-runtime/download-base-image.sh
 
