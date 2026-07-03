@@ -53,29 +53,39 @@ local_mount_root()
 			exit 1
 		fi
 	else
-		if [ -f /startos/config/upgrade ] && [ -d /startos/next ]; then
-			oldroot=/startos/next
-		elif [ -d /startos/current ]; then
-			oldroot=/startos/current
-		elif [ -d /startos/prev ]; then
-			oldroot=/startos/prev
-		else
+		if ! [ -f /startos/next/.startos-migration ]; then
 			>&2 echo no StartOS filesystem found
 			exit 1
 		fi
 
+		# First boot after a 0.3.5.1 -> 0.4.0 update. The 0.3.5.1 updater rsynced a
+		# migration payload into `next` (the 0.4.0 base image under next/images plus
+		# this box's real machine-id/ssh/fstab, which it copied out of the running
+		# system) and pointed the bootloader at this initramfs. The old 0.3.x roots
+		# (current/next/prev) are disposable — only the data partition is preserved.
+		echo 'migrating 0.3.x layout to 0.4.0'
+
 		mkdir -p /startos/config/overlay/etc
-		mv $oldroot/etc/fstab /startos/config/overlay/etc/fstab
-		mv $oldroot/etc/machine-id /startos/config/overlay/etc/machine-id
-		mv $oldroot/etc/ssh /startos/config/overlay/etc/ssh
+		cp -a /startos/next/etc/fstab /startos/config/overlay/etc/fstab
+		cp -a /startos/next/etc/machine-id /startos/config/overlay/etc/machine-id
+		rm -rf /startos/config/overlay/etc/ssh
+		cp -a /startos/next/etc/ssh /startos/config/overlay/etc/ssh
 
-		mkdir -p /startos/images
-		mv $oldroot /startos/images/legacy.rootfs
+		# Publish images/ by an atomic rename so a crash can never leave an empty
+		# images dir (which the branch above would treat as "no bootable image").
+		rm -rf /startos/images.new
+		mkdir -p /startos/images.new
+		mv /startos/next/images/*.rootfs /startos/images.new/
+		mv /startos/images.new /startos/images
 
-		rm -rf /startos/next /startos/current /startos/prev
+		image="$(ls -t1 /startos/images/*.rootfs | head -n1)"
+		if ! [ -f "$image" ]; then
+			>&2 echo 'migration payload missing 0.4.0 base image'
+			exit 1
+		fi
+		ln -rsf "$image" /startos/config/current.rootfs
 
-		ln -rsf /startos/images/old.squashfs /startos/config/current.rootfs
-		image=$(readlink -f /startos/config/current.rootfs)
+		rm -rf /startos/next /startos/current /startos/prev /startos/config/upgrade
 	fi
 
 	mkdir /lower /upper
