@@ -1331,19 +1331,26 @@ async function updateConfig(
           mutConfigValue[key] = ""
           return
         }
-        const filled = await utils
-          .getServiceInterface(effects, {
+        const filled = await (async () => {
+          const serviceInterface = await effects.getServiceInterface({
             packageId: specValue["package-id"],
-            id: serviceInterfaceId,
+            serviceInterfaceId,
           })
-          .once()
-          .catch((x) => {
-            console.error(
-              "Could not get the service interface",
-              utils.asError(x),
-            )
-            return null
+          if (!serviceInterface) return null
+          const host = await effects.getHostInfo({
+            packageId: specValue["package-id"],
+            hostId: serviceInterface.addressInfo.hostId,
           })
+          return {
+            ...serviceInterface,
+            addressInfo: host
+              ? utils.filledAddress(host, serviceInterface.addressInfo)
+              : null,
+          }
+        })().catch((x) => {
+          console.error("Could not get the service interface", utils.asError(x))
+          return null
+        })
         const catchFn = <X>(fn: () => X) => {
           try {
             return fn()
