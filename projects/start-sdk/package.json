@@ -1,6 +1,6 @@
 {
   "name": "@start9labs/start-sdk",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Software development kit to facilitate packaging services for StartOS",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -35,16 +35,20 @@
     "@start9labs/start-core": "file:../../shared-libs/ts-modules/start-core/dist",
     "@types/ini": "^4.1.1",
     "deep-equality-data-structures": "^2.0.0",
+    "eslint": "^9.39.4",
     "fast-xml-parser": "~5.7.0",
     "ini": "^5.0.0",
     "isomorphic-fetch": "^3.0.0",
     "mime": "^4.1.0",
+    "typescript-eslint": "^8.61.0",
     "yaml": "^2.8.3",
     "zod": "4.4.3",
     "zod-deep-partial": "^1.2.0"
   },
   "bundleDependencies": [
-    "@start9labs/start-core"
+    "@start9labs/start-core",
+    "eslint",
+    "typescript-eslint"
   ],
   "prettier": {
     "trailingComma": "all",
@@ -55,7 +59,6 @@
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
-    "eslint": "^9.39.4",
     "jest": "^30.0.0",
     "peggy": "^3.0.2",
     "prettier": "3.8.3",
@@ -63,7 +66,6 @@
     "ts-node": "^10.9.1",
     "ts-pegjs": "^4.2.1",
     "tsx": "^4.21.0",
-    "typescript": "^6.0.3",
-    "typescript-eslint": "^8.61.0"
+    "typescript": "^6.0.3"
   }
 }

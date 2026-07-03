@@ -1,6 +1,12 @@
 # Changelog
 
-## 2.0.0 — StartOS 0.4.0-beta.10 (2026-06-07)
+## 2.0.1 — StartOS 0.4.0-beta.10 (2026-07-03)
+
+### Fixed
+
+- **The bundled lint runner (`lint.mjs`) now works in the published package.** 2.0.0 shipped `lint.mjs` and `eslint.config.base.mjs` but only `@start9labs/start-core` was in `bundleDependencies`, so npm never packed the `eslint` / `typescript-eslint` that `lint.mjs` imports — every consumer's build gate (`node node_modules/@start9labs/start-sdk/lint.mjs`, run by `s9pk.mk`) crashed with `ERR_MODULE_NOT_FOUND`. `eslint` and `typescript-eslint` are moved from `devDependencies` to `dependencies` and added to `bundleDependencies`, so the lint toolchain ships inside the SDK's own `node_modules` (as `lint.mjs` already documented). `typescript` stays a peer resolved from the consumer — guaranteed present because `s9pk.mk` runs `tsc` (`npm run check`) before the lint step. Packages need no change beyond taking 2.0.1
+
+## 2.0.0 — StartOS 0.4.0-beta.10 (2026-07-03)
 
 ### Added
 
