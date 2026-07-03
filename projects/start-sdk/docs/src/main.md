@@ -142,7 +142,7 @@ const secretKey = await storeJson.read((s) => s.secretKey).const(effects);
 
 ## Getting Hostnames
 
-Interfaces are reached through their **host**. `sdk.host.getOwn(effects, hostId)` returns the host (`hostId` is the id you passed to `sdk.MultiHost.of`); the interface you exported lives under one of the host's bindings, and its `addressInfo` comes back **pre-filled** — call `.format(...)` on it for resolvable hostnames/URLs (also `.filter(...)`, `.nonLocal`, `.public`, `.toUrl`):
+Interfaces are reached through their **host**. `sdk.host.getOwn(effects, hostId)` returns the host (`hostId` is the id you passed to `sdk.MultiHost.of`); the interface you exported lives under one of the host's bindings, and its `addressInfo` comes back **pre-filled** — call `.format(...)` on it for resolvable hostnames/URLs (also `.filter(...)`, `.nonLocal`, `.public`, `.bridge`, `.toUrl`):
 
 ```typescript
 const host = await sdk.host.getOwn(effects, "ui").const();

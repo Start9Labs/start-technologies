@@ -130,6 +130,9 @@ const nonLocalFilter = {
 const publicFilter = {
   visibility: 'public',
 } as const
+const bridgeFilter = {
+  kind: 'bridge',
+} as const
 type Formats = 'hostname-info' | 'urlstring' | 'url'
 type FormatReturnTy<
   F extends Filter,
@@ -199,6 +202,8 @@ export type Filled<F extends Filter = {}> = {
   nonLocal: Filled<typeof nonLocalFilter & Filter>
   /** Shorthand filter that keeps only publicly-reachable hostnames (those with `public: true`). */
   public: Filled<typeof publicFilter & Filter>
+  /** Shorthand filter that keeps only LXC bridge addresses (those on the `lxcbr0` gateway). */
+  bridge: Filled<typeof bridgeFilter & Filter>
 }
 export type FilledAddressInfo = AddressInfo & Filled
 
@@ -382,6 +387,11 @@ export const filledAddress = (
         filterRec(hostnames, publicFilter, false),
       ),
     )
+    const getBridge = once(() =>
+      filledAddressFromHostnames<typeof bridgeFilter & F>(
+        filterRec(hostnames, bridgeFilter, false),
+      ),
+    )
     return {
       ...addressInfo,
       hostnames,
@@ -417,6 +427,9 @@ export const filledAddress = (
       },
       get public(): Filled<typeof publicFilter & F> {
         return getPublic()
+      },
+      get bridge(): Filled<typeof bridgeFilter & F> {
+        return getBridge()
       },
     }
   }
