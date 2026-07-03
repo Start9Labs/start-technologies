@@ -24,6 +24,7 @@ bundle: dist
 	touch dist
 
 dist: $(TS_FILES) package.json .npmignore node_modules README.md LICENSE CHANGELOG.md s9pk.mk tsconfig.base.json eslint.config.base.mjs lint.mjs $(START_CORE_DIST)/package.json
+	rm -rf dist
 	npm run tsc
 	rsync -ac node_modules dist/
 	rm -rf dist/node_modules/@start9labs/start-core

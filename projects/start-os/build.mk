@@ -159,7 +159,10 @@ projects/start-os/container-runtime/node_modules/.package-lock.json: projects/st
 projects/start-os/container-runtime/dist/index.js: projects/start-os/container-runtime/node_modules/.package-lock.json $(call ls-files, projects/start-os/container-runtime/src) projects/start-os/container-runtime/package.json projects/start-os/container-runtime/tsconfig.json 
 	npm --prefix projects/start-os/container-runtime run build
 
-projects/start-os/container-runtime/dist/node_modules/.package-lock.json projects/start-os/container-runtime/dist/package.json projects/start-os/container-runtime/dist/package-lock.json: projects/start-os/container-runtime/package.json projects/start-os/container-runtime/package-lock.json projects/start-sdk/dist/package.json shared-libs/ts-modules/start-core/dist/package.json projects/start-os/container-runtime/install-dist-deps.sh
+# Depends on dist/index.js: `run build` above does `rm -rf dist`, which wipes the
+# vendored dist/node_modules, so the vendoring must (re-)run after every JS build —
+# otherwise a src-only incremental rebuild (or a -j race) ships a dist with no deps.
+projects/start-os/container-runtime/dist/node_modules/.package-lock.json projects/start-os/container-runtime/dist/package.json projects/start-os/container-runtime/dist/package-lock.json: projects/start-os/container-runtime/dist/index.js projects/start-os/container-runtime/package.json projects/start-os/container-runtime/package-lock.json projects/start-sdk/dist/package.json shared-libs/ts-modules/start-core/dist/package.json projects/start-os/container-runtime/install-dist-deps.sh
 	./projects/start-os/container-runtime/install-dist-deps.sh
 	touch projects/start-os/container-runtime/dist/node_modules/.package-lock.json
 
