@@ -58,8 +58,14 @@ package-lock.json: package.json $(START_CORE_DIST)/package.json
 node_modules: package-lock.json $(START_CORE_DIST)/package.json
 	npm ci
 
+# Prompt for the npm 2FA OTP here (after the build) so it can't expire; OTP=… skips.
 publish: bundle test check-fmt package.json README.md LICENSE CHANGELOG.md
-	cd dist && npm publish --access=public --tag=latest $(if $(OTP),--otp=$(OTP))
+	@otp='$(OTP)'; \
+	if [ -z "$$otp" ] && [ -t 0 ]; then \
+		printf 'npm one-time password (OTP): ' >&2; \
+		read -r otp; \
+	fi; \
+	cd dist && npm publish --access=public --tag=latest $${otp:+--otp=$$otp}
 
 link: bundle
 	cd dist && npm link

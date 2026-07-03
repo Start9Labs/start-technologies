@@ -8,6 +8,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the layout and [CONTRIBUTING.md](CONT
 
 **A product's user docs and changelog ship with the code.** Any change that alters user-visible behavior **must** update that product's user-facing documentation book (its `docs/` directory — e.g. `projects/start-os/docs/`, `projects/start-tunnel/docs/`, `projects/start-sdk/docs/`) in the **same change**, and **must** add a `CHANGELOG.md` entry for that product (a version bump always pairs with its changelog). Don't land code and defer its docs or changelog to a follow-up.
 
+**Read [CONTRIBUTING.md](CONTRIBUTING.md) before making *any* code changes.** It carries the build/test/format workflow and the commit/PR conventions every change must follow — read it first, before you touch code. This is hierarchical like `AGENTS.md`: if a subdirectory you touch carries its own `CONTRIBUTING.md`, read that one too — and any further nested `CONTRIBUTING.md` on the way down to the files you're editing — before changing anything there.
+
 **Read down into what you touch.** When you work in a subdirectory, first read its `AGENTS.md` — and any further nested `AGENTS.md` on the way down to the files you're editing — before changing anything. Each scope's docs assume you've read the scopes above it, so a subdir's `AGENTS.md` adds only its own rules on top of this root.
 
 ## Layout

@@ -423,15 +423,16 @@ cmd_pre_check() {
             ;;
     esac
 
-    # gh + the Start9 signing key are needed by every os/cli/deb/wrt release
-    # (create-gh-release, upload, sign — and the apt Release signature for debs).
+    # gh is needed by every release to create the GitHub release (plus the asset
+    # upload, sign, and apt Release signature for os/cli/deb/wrt).
+    if gh auth status >/dev/null 2>&1; then
+        echo "  ✓ gh authenticated"
+    else
+        >&2 echo "  ✗ gh not authenticated (run: gh auth login)"
+        errors=1
+    fi
+    # os/cli/deb/wrt also sign their artifacts with the Start9 org key.
     if [ "$KIND" != npm ]; then
-        if gh auth status >/dev/null 2>&1; then
-            echo "  ✓ gh authenticated"
-        else
-            >&2 echo "  ✗ gh not authenticated (run: gh auth login)"
-            errors=1
-        fi
         if gpg --list-secret-keys "$START9_GPG_KEY" >/dev/null 2>&1; then
             echo "  ✓ Start9 signing key ${START9_GPG_KEY} present"
         else
@@ -566,8 +567,10 @@ cmd_tag() {
 }
 
 cmd_create_gh_release() {
-    require_kind os cli deb wrt
-    enter_release_dir
+    require_kind os cli deb npm wrt
+    # os/cli/deb/wrt reference their pulled artifacts in the notes; npm (the SDK)
+    # ships to npm and its notes are just the changelog, so it needs no release dir.
+    [ "$KIND" = npm ] || enter_release_dir
     local notes
     notes=$(release_notes)
     echo "Creating GitHub release ${TAG}..."
@@ -802,8 +805,8 @@ checksum_block() {
 }
 
 cmd_notes() {
-    require_kind os cli deb wrt
-    enter_release_dir
+    require_kind os cli deb npm wrt
+    [ "$KIND" = npm ] || enter_release_dir
     release_notes
 }
 
@@ -830,8 +833,11 @@ cmd_release() {
             cmd_sign
             ;;
         npm)
+            # create-gh-release before push: everything idempotent runs ahead of
+            # the one irreversible step (npm publish can't be re-run for a version).
             cmd_pre_check
             cmd_tag
+            cmd_create_gh_release
             cmd_push
             ;;
         wrt)
@@ -860,7 +866,7 @@ Projects:
   start-cli       per-triple binaries -> GitHub release; per-arch .deb -> apt + GitHub
   start-tunnel    per-arch .deb -> apt repo + GitHub release
   start-registry  per-arch .deb -> apt repo + GitHub release
-  start-sdk       npm package -> npm
+  start-sdk       npm package -> npm + GitHub release
   start-wrt       flashable images (sdcard + sysupgrade .img.gz) -> S3 +
                   StartWRT registries (`register` indexes into beta; `release`
                   promotes beta -> production)
@@ -878,7 +884,7 @@ Subcommands:
                      (registry / apt repo / GitHub release / npm).
   tag                Create and push the <project>/v<version> git tag.
   create-gh-release  Create (or update) the GitHub release with notes.
-                     (os/cli/deb/wrt.)
+                     (all projects.)
   push               Upload artifacts to their destination (S3 for os, GitHub
                      release + apt for cli/deb, npm publish for sdk). For os this
                      normally runs in CI; use it for a manual re-publish.
@@ -893,7 +899,7 @@ Subcommands:
                      available) and upload signatures.tar.gz. (os/cli/deb/wrt.)
   cosign             Add your personal GPG signature to an existing release's
                      signatures.tar.gz. (os/cli/deb/wrt; run 'pull' first.)
-  notes              Print the release notes to stdout. (os/cli/deb/wrt.)
+  notes              Print the release notes to stdout. (all projects.)
   release            Run the full applicable pipeline for the project.
 
 Environment variables:
@@ -906,7 +912,8 @@ Environment variables:
                            npm republish always fails)
   CLEAN                    Set to 1 to wipe and recreate the release directory
   GH_USER                  Override GitHub username (default: autodetected via gh)
-  OTP                      npm one-time password (start-sdk publish)
+  OTP                      npm one-time password for start-sdk publish
+                           (prompted for at publish time if unset)
 
 Registries are scoped per project (the OS and StartWRT promote source -> target):
   STARTOS_SOURCE_REGISTRY   registry the OS release pulls/promotes from (default: beta)
