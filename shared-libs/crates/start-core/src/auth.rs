@@ -505,7 +505,9 @@ pub async fn reset_password_impl(
         account.set_password(&new_password)?;
         Ok(account.clone())
     })?;
-    ctx.db.mutate(|d| account.save(d)).await.result
+    ctx.db.mutate(|d| account.save(d)).await.result?;
+    write_shadow(&new_password).await?;
+    Ok(())
 }
 
 #[instrument(skip_all)]
