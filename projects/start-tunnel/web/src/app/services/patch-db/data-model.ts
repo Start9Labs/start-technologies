@@ -9,6 +9,7 @@ export const mockTunnelData: TunnelData = {
   wg: {
     port: 51820,
     key: '',
+    ipv6: null,
     subnets: {
       '10.59.0.0/24': {
         name: 'Family',

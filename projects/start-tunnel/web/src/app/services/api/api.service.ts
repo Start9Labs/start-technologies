@@ -57,6 +57,8 @@ export abstract class ApiService {
   abstract setForwardEnabled(
     params: T.Tunnel.SetPortForwardEnabledParams,
   ): Promise<null> // port-forward.set-enabled
+  // ipv6
+  abstract setIpv6(params: T.Tunnel.SetIpv6Params): Promise<null> // set-ipv6
   // system
   abstract restart(): Promise<null> // restart
   // update
