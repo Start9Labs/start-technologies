@@ -65,7 +65,7 @@ the binary, so deploying the binary updates everything.
 
 StartWRT is a first-class project of the monorepo-wide release tool,
 [`scripts/manage-release.sh`](../../scripts/manage-release.sh) (the `wrt` kind). The version is
-read from `backend/ctrl/Cargo.toml`; the git tag / GitHub release is `start-wrt_v<version>`.
+read from `backend/ctrl/Cargo.toml`; the git tag / GitHub release is `start-wrt/v<version>`.
 
 1. Bump `backend/ctrl/Cargo.toml` and turn the changelog's `## [Unreleased]` into an explicit
    `## [<version>]` heading (`pre-check` requires it), then land that on `master`.

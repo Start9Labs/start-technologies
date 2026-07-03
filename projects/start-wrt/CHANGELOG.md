@@ -88,8 +88,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`release start-wrt` — a new `wrt` project kind alongside os/cli/deb/npm), which replaces
   the standalone `projects/start-wrt/scripts/manage-release.sh`. Registry indexing/signing
   stays a deliberate local, developer-key-gated step. Releases are cut on
-  `Start9Labs/start-technologies` with the monorepo's `<project>_v<version>` tag convention
-  (`start-wrt_v<version>`), since the monorepo hosts every product's releases on independent
+  `Start9Labs/start-technologies` with the monorepo's `<project>/v<version>` tag convention
+  (`start-wrt/v<version>`), since the monorepo hosts every product's releases on independent
   cadences. Release assets follow the startos naming convention —
   `startwrt-<version>-<git hash>_spacemit-k1-{sdcard.img,sysupgrade.img.gz}` — instead
   of the raw OpenWrt output names, which carried no product, version, or hash.

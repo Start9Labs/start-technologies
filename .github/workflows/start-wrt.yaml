@@ -196,7 +196,7 @@ jobs:
             echo "Uploading $file..."
             s3cmd put -P "$file" "${{ env.S3_BUCKET }}/v${VERSION}/$file"
           done
-          # The GitHub release + tag (start-wrt_v<version>) and the registry
+          # The GitHub release + tag (start-wrt/v<version>) and the registry
           # register/index are cut locally from scripts/manage-release.sh
           # (`release start-wrt`) against this run's startwrt-openwrt-image
           # artifact — deliberately gated behind the developer key, not CI.

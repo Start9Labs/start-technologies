@@ -7,7 +7,8 @@
 # See usage() for the subcommands. The <project> is one of the monorepo's
 # releasable products; its version is read from that product's canonical
 # manifest (Cargo.toml for the Rust products, package.json for the SDK) and its
-# git tag / GitHub release is <project>_v<version>.
+# git tag / GitHub release is <project>/v<version> (the slash namespaces each
+# product's tags; releases before July 2026 used <project>_v<version>).
 
 set -euo pipefail
 
@@ -144,6 +145,7 @@ parse_run_id() {
     fi
 }
 
+# Local staging dir: keeps the flat _v separator (the tag's / would nest dirs).
 release_dir() { echo "$HOME/Downloads/${PROJECT}_v${VERSION}"; }
 
 ensure_release_dir() {
@@ -824,7 +826,7 @@ Projects:
 
 Version is read from the project's manifest (Cargo.toml — for start-wrt the ctrl
 crate's — or package.json for start-sdk); the git tag / GitHub release is
-<project>_v<version>.
+<project>/v<version>.
 
 Subcommands:
   pre-check          Verify the changelog documents this version and that the
@@ -833,7 +835,7 @@ Subcommands:
                      (os/cli/deb/wrt; set RUN_ID or you'll be prompted.)
   pull               Download the released assets from their official location
                      (registry / apt repo / GitHub release / npm).
-  tag                Create and push the <project>_v<version> git tag.
+  tag                Create and push the <project>/v<version> git tag.
   create-gh-release  Create (or update) the GitHub release with notes.
                      (os/cli/deb/wrt.)
   push               Upload artifacts to their destination (S3 for os, GitHub
@@ -893,7 +895,7 @@ if [ -z "$VERSION" ]; then
     >&2 echo "Could not derive version for ${PROJECT}"
     exit 1
 fi
-TAG="${PROJECT}_v${VERSION}"
+TAG="${PROJECT}/v${VERSION}"
 
 case "$SUBCOMMAND" in
     pre-check) cmd_pre_check ;;
