@@ -105,11 +105,9 @@ sdk.action.createTask(
 
 ## Reading Dependency Interfaces
 
-Get the dependency's **host** with `sdk.host.get()` (the `hostId` and interface `id` are part of the dependency's documented contract), then read the interface off its bindings:
+Get the dependency's **host** with `sdk.host.get()` (the `hostId` and interface `id` are part of the dependency's documented contract), then read the interface off its bindings — its `addressInfo` is already filled, so `.format()` yields resolvable URLs:
 
 ```typescript
-import { utils } from '@start9labs/start-sdk'
-
 const host = await sdk.host
   .get(effects, { hostId: 'host-id', packageId: 'dependency-id' })
   .const() // re-runs setupMain if the dependency's host changes
@@ -118,10 +116,7 @@ const iface = Object.values(host?.bindings ?? {})
   .flatMap((b) => Object.values(b.interfaces))
   .find((i) => i.id === 'interface-id')
 
-const url =
-  host && iface
-    ? (utils.filledAddress(host, iface.addressInfo).format()[0] ?? null)
-    : null
+const url = iface?.addressInfo.format()[0] ?? null
 ```
 
 Alternatively, services are reachable directly by hostname at `http://<package-id>.startos:<port>`:

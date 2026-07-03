@@ -1,17 +1,16 @@
-import { PackageId, ServiceInterfaceId, ServiceInterfaceType } from '../types'
+import { PackageId, ServiceInterfaceId } from '../types'
 import { knownProtocols } from '../interfaces/Host'
 import {
   AddressInfo,
+  BindInfo,
   DerivedAddressInfo,
   Host,
   Hostname,
   HostnameInfo,
+  ServiceInterface,
 } from '../types'
-import { Effects } from '../Effects'
 import { IpAddress, IPV6_LINK_LOCAL } from './ip'
-import { deepEqual } from './deepEqual'
 import { once } from './once'
-import { Watchable } from './Watchable'
 
 export type UrlString = string
 export type HostId = string
@@ -202,20 +201,20 @@ export type Filled<F extends Filter = {}> = {
   public: Filled<typeof publicFilter & Filter>
 }
 export type FilledAddressInfo = AddressInfo & Filled
-export type ServiceInterfaceFilled = {
-  id: string
-  /** The title of this field to be displayed */
-  name: string
-  /** Human readable description, used as tooltip usually */
-  description: string
-  /** Whether or not to mask the URIs for this interface. Useful if the URIs contain sensitive information, such as a password, macaroon, or API key */
-  masked: boolean
-  /** Information about the host for this binding */
-  host: Host | null
-  /** URI information */
-  addressInfo: FilledAddressInfo | null
-  /** Indicates if we are a ui/p2p/api for the kind of interface that this is representing */
-  type: ServiceInterfaceType
+
+/** A {@link ServiceInterface} whose `addressInfo` is a {@link Filled} address — carrying the `filter`/`format`/`nonLocal`/`public`/`toUrl` helpers. */
+export type FilledServiceInterface = Omit<ServiceInterface, 'addressInfo'> & {
+  addressInfo: FilledAddressInfo
+}
+
+/** A {@link BindInfo} whose exported interfaces have {@link FilledServiceInterface} addresses. */
+export type FilledBindInfo = Omit<BindInfo, 'interfaces'> & {
+  interfaces: { [id: ServiceInterfaceId]: FilledServiceInterface }
+}
+
+/** A {@link Host} whose single-port bindings expose {@link Filled} interface addresses. Returned by `sdk.host.get`/`getOwn`. */
+export type FilledHost = Omit<Host, 'bindings'> & {
+  bindings: { [internalPort: number]: FilledBindInfo }
 }
 const either =
   <A>(...args: ((a: A) => boolean)[]) =>
@@ -425,112 +424,27 @@ export const filledAddress = (
   return filledAddressFromHostnames<{}>(hostnames)
 }
 
-const makeInterfaceFilled = async ({
-  effects,
-  id,
-  packageId,
-  callback,
-}: {
-  effects: Effects
-  id: string
-  packageId?: string
-  callback?: () => void
-}) => {
-  const serviceInterfaceValue = await effects.getServiceInterface({
-    serviceInterfaceId: id,
-    packageId,
-    callback,
-  })
-  if (!serviceInterfaceValue) {
-    return null
-  }
-  const hostId = serviceInterfaceValue.addressInfo.hostId
-  const host = await effects.getHostInfo({
-    packageId,
-    hostId,
-    callback,
-  })
+/**
+ * Enrich a raw {@link Host} so each single-port binding's exported interfaces
+ * carry a {@link Filled} address (`filter`/`format`/`nonLocal`/`public`/`toUrl`).
+ * Backs the object returned by `sdk.host.get`/`getOwn`. Port-range bindings are
+ * left untouched — a `RangeServiceInterface` has no per-address `AddressInfo`.
+ */
+export function fillHost(host: Host): FilledHost {
+  const bindings = Object.fromEntries(
+    Object.entries(host.bindings).map(([internalPort, bind]) => [
+      internalPort,
+      {
+        ...bind,
+        interfaces: Object.fromEntries(
+          Object.entries(bind.interfaces).map(([id, iface]) => [
+            id,
+            { ...iface, addressInfo: filledAddress(host, iface.addressInfo) },
+          ]),
+        ),
+      },
+    ]),
+  ) as FilledHost['bindings']
 
-  const interfaceFilled: ServiceInterfaceFilled = {
-    ...serviceInterfaceValue,
-    host,
-    addressInfo: host
-      ? filledAddress(host, serviceInterfaceValue.addressInfo)
-      : null,
-  }
-  return interfaceFilled
-}
-
-export class GetServiceInterface<
-  Mapped = ServiceInterfaceFilled | null,
-> extends Watchable<ServiceInterfaceFilled | null, Mapped> {
-  protected readonly label = 'GetServiceInterface'
-
-  constructor(
-    effects: Effects,
-    readonly opts: { id: string; packageId?: string },
-    options?: {
-      map?: (value: ServiceInterfaceFilled | null) => Mapped
-      eq?: (a: Mapped, b: Mapped) => boolean
-    },
-  ) {
-    super(effects, options)
-  }
-
-  protected fetch(callback?: () => void) {
-    return makeInterfaceFilled({
-      effects: this.effects,
-      id: this.opts.id,
-      packageId: this.opts.packageId,
-      callback,
-    })
-  }
-}
-
-export function getOwnServiceInterface(
-  effects: Effects,
-  id: ServiceInterfaceId,
-): GetServiceInterface
-export function getOwnServiceInterface<Mapped>(
-  effects: Effects,
-  id: ServiceInterfaceId,
-  map: (interfaces: ServiceInterfaceFilled | null) => Mapped,
-  eq?: (a: Mapped, b: Mapped) => boolean,
-): GetServiceInterface<Mapped>
-export function getOwnServiceInterface<Mapped>(
-  effects: Effects,
-  id: ServiceInterfaceId,
-  map?: (interfaces: ServiceInterfaceFilled | null) => Mapped,
-  eq?: (a: Mapped, b: Mapped) => boolean,
-): GetServiceInterface<Mapped> {
-  return new GetServiceInterface<Mapped>(
-    effects,
-    { id },
-    {
-      map: map ?? (a => a as Mapped),
-      eq: eq ?? ((a, b) => deepEqual(a, b)),
-    },
-  )
-}
-
-export function getServiceInterface(
-  effects: Effects,
-  opts: { id: ServiceInterfaceId; packageId: PackageId },
-): GetServiceInterface
-export function getServiceInterface<Mapped>(
-  effects: Effects,
-  opts: { id: ServiceInterfaceId; packageId: PackageId },
-  map: (interfaces: ServiceInterfaceFilled | null) => Mapped,
-  eq?: (a: Mapped, b: Mapped) => boolean,
-): GetServiceInterface<Mapped>
-export function getServiceInterface<Mapped>(
-  effects: Effects,
-  opts: { id: ServiceInterfaceId; packageId: PackageId },
-  map?: (interfaces: ServiceInterfaceFilled | null) => Mapped,
-  eq?: (a: Mapped, b: Mapped) => boolean,
-): GetServiceInterface<Mapped> {
-  return new GetServiceInterface<Mapped>(effects, opts, {
-    map: map ?? (a => a as Mapped),
-    eq: eq ?? ((a, b) => deepEqual(a, b)),
-  })
+  return { ...host, bindings }
 }

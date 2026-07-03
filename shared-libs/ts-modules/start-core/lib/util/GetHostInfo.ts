@@ -1,10 +1,11 @@
 import { Effects } from '../Effects'
-import { Host, HostId, PackageId } from '../osBindings'
+import { HostId, PackageId } from '../osBindings'
 import { deepEqual } from './deepEqual'
+import { fillHost, FilledHost } from './filledAddress'
 import { Watchable } from './Watchable'
 
-export class GetHostInfo<Mapped = Host | null> extends Watchable<
-  Host | null,
+export class GetHostInfo<Mapped = FilledHost | null> extends Watchable<
+  FilledHost | null,
   Mapped
 > {
   protected readonly label = 'GetHostInfo'
@@ -13,15 +14,16 @@ export class GetHostInfo<Mapped = Host | null> extends Watchable<
     effects: Effects,
     readonly opts: { hostId: HostId; packageId?: PackageId },
     options?: {
-      map?: (value: Host | null) => Mapped
+      map?: (value: FilledHost | null) => Mapped
       eq?: (a: Mapped, b: Mapped) => boolean
     },
   ) {
     super(effects, options)
   }
 
-  protected fetch(callback?: () => void) {
-    return this.effects.getHostInfo({ ...this.opts, callback })
+  protected async fetch(callback?: () => void): Promise<FilledHost | null> {
+    const host = await this.effects.getHostInfo({ ...this.opts, callback })
+    return host && fillHost(host)
   }
 }
 
@@ -32,19 +34,21 @@ export class GetHostInfo<Mapped = Host | null> extends Watchable<
  * calling context when the mapped value changes (compared with `eq`, default
  * deep-equal) rather than on any change to the whole host. Reach an exported
  * interface by walking the host — e.g.
- * `map: h => h?.bindings[80]?.interfaces['ui']`.
+ * `map: h => h?.bindings[80]?.interfaces['ui']`. The host's interface
+ * `addressInfo`s come pre-filled, carrying the `filter`/`format`/`nonLocal`/
+ * `public`/`toUrl` helpers.
  */
 export function getOwnHost(effects: Effects, hostId: HostId): GetHostInfo
 export function getOwnHost<Mapped>(
   effects: Effects,
   hostId: HostId,
-  map: (host: Host | null) => Mapped,
+  map: (host: FilledHost | null) => Mapped,
   eq?: (a: Mapped, b: Mapped) => boolean,
 ): GetHostInfo<Mapped>
 export function getOwnHost<Mapped>(
   effects: Effects,
   hostId: HostId,
-  map?: (host: Host | null) => Mapped,
+  map?: (host: FilledHost | null) => Mapped,
   eq?: (a: Mapped, b: Mapped) => boolean,
 ): GetHostInfo<Mapped> {
   return new GetHostInfo<Mapped>(
@@ -69,13 +73,13 @@ export function getHost(
 export function getHost<Mapped>(
   effects: Effects,
   opts: { hostId: HostId; packageId?: PackageId },
-  map: (host: Host | null) => Mapped,
+  map: (host: FilledHost | null) => Mapped,
   eq?: (a: Mapped, b: Mapped) => boolean,
 ): GetHostInfo<Mapped>
 export function getHost<Mapped>(
   effects: Effects,
   opts: { hostId: HostId; packageId?: PackageId },
-  map?: (host: Host | null) => Mapped,
+  map?: (host: FilledHost | null) => Mapped,
   eq?: (a: Mapped, b: Mapped) => boolean,
 ): GetHostInfo<Mapped> {
   return new GetHostInfo<Mapped>(effects, opts, {

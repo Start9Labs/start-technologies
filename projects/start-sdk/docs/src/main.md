@@ -142,23 +142,16 @@ const secretKey = await storeJson.read((s) => s.secretKey).const(effects);
 
 ## Getting Hostnames
 
-Interfaces are reached through their **host**. `sdk.host.getOwn(effects, hostId)` returns the host (`hostId` is the id you passed to `sdk.MultiHost.of`); the interface you exported lives under one of the host's bindings, and `utils.filledAddress(host, addressInfo)` turns its address into resolvable hostnames/URLs:
+Interfaces are reached through their **host**. `sdk.host.getOwn(effects, hostId)` returns the host (`hostId` is the id you passed to `sdk.MultiHost.of`); the interface you exported lives under one of the host's bindings, and its `addressInfo` comes back **pre-filled** — call `.format(...)` on it for resolvable hostnames/URLs (also `.filter(...)`, `.nonLocal`, `.public`, `.toUrl`):
 
 ```typescript
-import { utils } from "@start9labs/start-sdk";
-
 const host = await sdk.host.getOwn(effects, "ui").const();
 const ui = Object.values(host?.bindings ?? {})
   .flatMap((b) => Object.values(b.interfaces))
   .find((i) => i.id === "ui");
 
 const allowedHosts =
-  host && ui
-    ? utils
-        .filledAddress(host, ui.addressInfo)
-        .format("hostname-info")
-        .map((h) => h.hostname.value)
-    : [];
+  ui?.addressInfo.format("hostname-info").map((h) => h.hostname.value) ?? [];
 ```
 
 `.const()` sets up a reactive watcher — `setupMain` re-runs whenever the host's bindings, addresses, or exported interfaces change.

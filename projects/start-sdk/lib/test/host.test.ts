@@ -28,6 +28,22 @@ describe('host', () => {
     }
   })
 
+  test('host.get returns interfaces whose addressInfo is pre-filled', () => {
+    async function _typecheck(effects: Effects) {
+      const host = await sdk.host.getOwn(effects, 'ui').const()
+      const ui = Object.values(host?.bindings ?? {})
+        .flatMap(b => Object.values(b.interfaces))
+        .find(i => i.id === 'ui')
+
+      const urls: string[] = ui?.addressInfo.format('urlstring') ?? []
+      const domains =
+        ui?.addressInfo.filter({ kind: 'domain' }).format('url') ?? []
+      void urls
+      void domains
+    }
+    void _typecheck
+  })
+
   describe('MultiHost.bindPortRange', () => {
     const fakeEffects = (
       bindRange: jest.Mock = jest.fn(async () => null),
