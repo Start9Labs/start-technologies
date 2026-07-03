@@ -24,7 +24,7 @@ The TypeScript SDK (`@start9labs/start-sdk`) for building StartOS service packag
 | `make check` | `tsc --noEmit` |
 | `make fmt` / `make check-fmt` | Prettier write / check on all `.ts` |
 | `make link` | build + `npm link` from `dist/` for local package testing |
-| `make publish` | build, then `npm publish` from `dist/` (`OTP=…` for 2FA) |
+| `make publish` | build, then `npm publish` from `dist/` (`OTP=…` for 2FA, else prompts) |
 
 Tests are jest + ts-jest, Node only (no browser). Test files use `.test.ts`. The ExVer parser is generated from `shared-libs/ts-modules/start-core/lib/exver/exver.pegjs` via Peggy (`make` runs this for you).
 
