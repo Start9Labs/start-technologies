@@ -24,6 +24,12 @@ Both options hide your home IP address, and in both cases the provider knows who
 
 By default, StartOS dynamically selects which gateway to use for outbound traffic for optimal performance ("Auto" mode). You can override this under `System > Gateways > Outbound Traffic` by switching from "Auto" to a specific gateway. This forces _all_ outbound traffic for everything on the server through the selected gateway.
 
+## IPv6 leak prevention
+
+StartOS routes IPv6 through a gateway only when that gateway is selected for outbound traffic — the same way it treats IPv4. Importing a VPN or tunnel does not silently pull your IPv6 traffic through it.
+
+If the gateway you select for outbound traffic can't carry IPv6 — for example a commercial VPN whose WireGuard config has no IPv6 address — StartOS **drops** the server's outbound IPv6 rather than letting it fall back to your ISP connection, so your real IPv6 address never leaks around the VPN. A gateway that does provide IPv6 (such as a StartTunnel with a [delegated prefix](/start-tunnel/ipv6.html)) carries IPv6 normally.
+
 ## Route Individual Services Through VPN
 
 You can override the system default on a per-service basis by navigating to a service and going to **Actions > Set Outbound Gateway**. This lets you route individual services through different VPNs while leaving others on the default.

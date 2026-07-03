@@ -10,6 +10,11 @@ file tracks notable changes since the move to the monorepo.
 
 ## [Unreleased]
 
+### Fixed
+
+- **IPv6 no longer leaks or blackholes around a gateway.** StartOS now applies the same policy routing to IPv6 as to IPv4: a gateway carries the server's IPv6 only when it is selected for outbound traffic (system-wide or per-service). Previously, importing any WireGuard gateway let NetworkManager capture the host's entire IPv6 default route into that tunnel — so a tunnel that carried an IPv6 address (e.g. a StartTunnel with a delegated prefix) but couldn't actually route IPv6 would blackhole all of the server's IPv6, and a commercial VPN selected as the default outbound would leak IPv6 straight out the ISP link. IPv6 destined for a selected gateway that can't carry it is now dropped (no leak), and unselected gateways no longer hijack it.
+- **Updating a WireGuard gateway's config no longer drops its preshared key.** The in-place update path (`net tunnel update` / the **Update config** UI action, NetworkManager `Update2` + `Reapply`) persisted the interface private key but silently dropped each peer's preshared key, so a re-issued PSK-using tunnel failed its handshake and went dead (taking tunnel-routed DNS down with it). The peer secret is now flagged system-owned so the update persists it.
+
 ## [0.4.0-beta.10]
 
 ### Added
