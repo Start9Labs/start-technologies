@@ -66,22 +66,35 @@ the binary, so deploying the binary updates everything.
 StartWRT is a first-class project of the monorepo-wide release tool,
 [`scripts/manage-release.sh`](../../scripts/manage-release.sh) (the `wrt` kind). The version is
 read from `backend/ctrl/Cargo.toml`; the git tag / GitHub release is `start-wrt/v<version>`.
+Releases stage through a beta registry before promotion to production, mirroring the OS.
 
 1. Bump `backend/ctrl/Cargo.toml` and turn the changelog's `## [Unreleased]` into an explicit
    `## [<version>]` heading (`pre-check` requires it), then land that on `master`.
 2. Run the **start-wrt** workflow with `deploy: release` (builds the OpenWrt image and uploads
    the images to `s3://startwrt-images`).
-3. From the repo root, cut the release locally (needs `gh`, `gpg` with the Start9 org key,
-   `start-cli`, and `~/.startos/developer.key.pem`):
+3. From the repo root, register the build into the **beta registry** (needs `gh`, `start-cli`,
+   and `~/.startos/developer.key.pem`):
 
    ```
-   RUN_ID=<the deploy run> ./scripts/manage-release.sh release start-wrt
+   RUN_ID=<the deploy run> ./scripts/manage-release.sh pull-gha start-wrt
+   ./scripts/manage-release.sh register start-wrt
    ```
 
-   This runs pre-check → pull the images from the CI artifact → tag → create the GitHub release
-   → register + index into the StartWRT registry → sign. See `manage-release.sh --help` for the
-   individual subcommands (`pull-gha`, `index`, `sign`, `cosign`, …) and env vars
-   (`STARTWRT_REGISTRY`, `STARTWRT_COMPAT_FLOOR`, `FORCE=1` to re-run an idempotent release).
+   Beta routers — any router whose UCI `startwrt.system.registry` points at the beta registry
+   (`uci set startwrt.system.registry=<beta url>; uci commit startwrt`) — now soak the version
+   as a normal OTA update.
+4. Once the version has soaked, cut the release from the repo root (needs `gh`, `gpg` with the
+   Start9 org key, `start-cli`, and `~/.startos/developer.key.pem`):
+
+   ```
+   ./scripts/manage-release.sh release start-wrt
+   ```
+
+   This runs pre-check → pull the images from the beta registry (signature-verified) → tag →
+   create the GitHub release → promote beta → production → sign. See `manage-release.sh --help`
+   for the individual subcommands (`pull-gha`, `register`, `index`, `sign`, `cosign`, …) and env
+   vars (`STARTWRT_SOURCE_REGISTRY`, `STARTWRT_TARGET_REGISTRY`, `STARTWRT_COMPAT_FLOOR`,
+   `FORCE=1` to re-run an idempotent release).
 
 > **⚠ UNVALIDATED since the monorepo migration.** The riscv dockerized cross-build (`make
 > startwrt`) and the OpenWrt image assembly (`make startwrt-image`) have not yet been run on a

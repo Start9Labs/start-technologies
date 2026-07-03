@@ -16,10 +16,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 REPO="Start9Labs/start-technologies"
-# Registries are scoped per project (<PROJECT>_SOURCE/TARGET_REGISTRY); only the
-# OS promotes between registries. The OS chain: CI indexes images into alpha;
-# alpha -> beta is promoted manually, out of band; the full `release` promotes
-# the source (beta) -> target (production). Override either per run.
+# Registries are scoped per project (<PROJECT>_SOURCE/TARGET_REGISTRY); the OS
+# and StartWRT promote source -> target. The OS chain: CI indexes images into
+# alpha; alpha -> beta is promoted manually, out of band; the full `release`
+# promotes the source (beta) -> target (production). Override either per run.
 STARTOS_SOURCE_REGISTRY="${STARTOS_SOURCE_REGISTRY:-https://beta-registry.start9.com}"
 STARTOS_TARGET_REGISTRY="${STARTOS_TARGET_REGISTRY:-https://registry.start9.com}"
 S3_BUCKET="s3://startos-images"
@@ -31,13 +31,17 @@ APT_BASE_URL="https://start9-debs.nyc3.digitaloceanspaces.com"
 APT_SUITE="stable"
 APT_COMPONENT="main"
 
-# StartWRT publishes flashable images to its own registry + S3 bucket (no
-# beta->prod promotion; it registers + indexes directly into a single registry).
-# It ships two gzipped images: an sdcard image (fresh install -> the registry
-# `img` slot) and a sysupgrade image (OTA update -> the `squashfs` slot; see
-# cmd_index for the hardlink trick that maps the .img.gz names onto those
-# slots). Override the registry per run.
-STARTWRT_REGISTRY="${STARTWRT_REGISTRY:-https://startwrt-registry.start9.com}"
+# StartWRT publishes flashable images to its own registry pair + S3 bucket. The
+# chain mirrors the OS, minus the CI-indexed alpha tier: after CI uploads a
+# build's images to S3, `register` registers + indexes them into the source
+# (beta) registry, where beta routers (UCI `startwrt.system.registry` pointed at
+# it) soak the version; the full `release` promotes source -> target
+# (production). It ships two gzipped images: an sdcard image (fresh install ->
+# the registry `img` slot) and a sysupgrade image (OTA update -> the `squashfs`
+# slot; see cmd_register for the hardlink trick that maps the .img.gz names onto
+# those slots). Override either registry per run.
+STARTWRT_SOURCE_REGISTRY="${STARTWRT_SOURCE_REGISTRY:-https://beta-startwrt-registry.start9.com}"
+STARTWRT_TARGET_REGISTRY="${STARTWRT_TARGET_REGISTRY:-https://startwrt-registry.start9.com}"
 STARTWRT_S3_BUCKET="s3://startwrt-images"
 STARTWRT_S3_CDN="https://startwrt-images.nyc3.cdn.digitaloceanspaces.com"
 STARTWRT_PLATFORM="spacemit,k1-x"
@@ -45,7 +49,7 @@ STARTWRT_PLATFORM="spacemit,k1-x"
 STARTWRT_BUILD_ARTIFACT="startwrt-openwrt-image"
 # Compat floor for `registry os version add`: the oldest installed version
 # allowed to upgrade to this one. An explicit beta floor (not a `^` caret) keeps
-# beta prerelease tags in range. The upper bound (<=$VERSION) is added in cmd_index.
+# beta prerelease tags in range. The upper bound (<=$VERSION) is added in cmd_register.
 STARTWRT_COMPAT_FLOOR="${STARTWRT_COMPAT_FLOOR:->=0.1.0-beta.1}"
 
 # Every OS image platform. Most ship an iso + squashfs; raspberrypi ships a
@@ -381,19 +385,39 @@ cmd_pre_check() {
             fi
             ;;
         wrt)
-            # `release` registers + indexes into the single StartWRT registry, so
-            # it shouldn't already carry this version.
-            if start-cli --registry="$STARTWRT_REGISTRY" registry os index 2>/dev/null \
-                | jq -e ".versions[\"$VERSION\"]" >/dev/null 2>&1; then
-                release_guard "StartWRT ${VERSION} already in registry ${STARTWRT_REGISTRY}" || errors=1
+            # `release` pulls the images from the source (beta) registry and
+            # promotes them into production, so both assets must already be
+            # registered there (see `register`).
+            local wrt_idx slot wrt_missing
+            wrt_idx=$(start-cli --registry="$STARTWRT_SOURCE_REGISTRY" registry os index 2>/dev/null || echo '{}')
+            if ! echo "$wrt_idx" | jq -e ".versions[\"$VERSION\"]" >/dev/null 2>&1; then
+                >&2 echo "  ✗ StartWRT ${VERSION} not in source registry ${STARTWRT_SOURCE_REGISTRY} — run 'register' first"
+                errors=1
             else
-                echo "  ✓ not yet in StartWRT registry"
+                wrt_missing=""
+                for slot in img squashfs; do
+                    echo "$wrt_idx" | jq -e ".versions[\"$VERSION\"].${slot}[\"$STARTWRT_PLATFORM\"].urls[0]" >/dev/null 2>&1 \
+                        || wrt_missing="${wrt_missing} ${slot}"
+                done
+                if [ -n "$wrt_missing" ]; then
+                    >&2 echo "  ✗ source registry is missing StartWRT assets:${wrt_missing}"
+                    errors=1
+                else
+                    echo "  ✓ source registry has both ${VERSION} images"
+                fi
             fi
-            # register/index sign the registry commitments with the developer key.
+            # `release` promotes into production; it shouldn't already be there.
+            if start-cli --registry="$STARTWRT_TARGET_REGISTRY" registry os index 2>/dev/null \
+                | jq -e ".versions[\"$VERSION\"]" >/dev/null 2>&1; then
+                release_guard "StartWRT ${VERSION} already in production registry ${STARTWRT_TARGET_REGISTRY}" || errors=1
+            else
+                echo "  ✓ not yet in production registry"
+            fi
+            # promoting re-signs registry commitments with the developer key.
             if [ -f "$HOME/.startos/developer.key.pem" ]; then
                 echo "  ✓ developer key present"
             else
-                >&2 echo "  ✗ ~/.startos/developer.key.pem missing (needed to register/index in the registry)"
+                >&2 echo "  ✗ ~/.startos/developer.key.pem missing (needed to promote to the registry)"
                 errors=1
             fi
             ;;
@@ -506,14 +530,16 @@ cmd_pull() {
             npm pack "${SDK_NPM_PACKAGE}@${VERSION}"
             ;;
         wrt)
-            # `registry os asset get` verifies the ed25519 registry signature +
-            # blake3 commitment as it streams. start-cli names its output
+            # Pull from the source (beta) registry — at release time the
+            # version is not yet promoted into production. `registry os asset
+            # get` verifies the ed25519 registry signature + blake3 commitment
+            # as it streams. start-cli names its output
             # startos-<ver>_<platform>.<ext>, so move each into place under its
             # published basename (the basename of the indexed URL) to match
             # release_files().
             local slot url published tmp
             for slot in img squashfs; do
-                url=$(start-cli --registry="$STARTWRT_REGISTRY" registry os index 2>/dev/null \
+                url=$(start-cli --registry="$STARTWRT_SOURCE_REGISTRY" registry os index 2>/dev/null \
                     | jq -r ".versions[\"$VERSION\"].${slot}[\"$STARTWRT_PLATFORM\"].urls[0]")
                 if [ -z "$url" ] || [ "$url" = null ]; then
                     >&2 echo "  (no '$slot' asset indexed for v$VERSION, skipping)"
@@ -522,7 +548,7 @@ cmd_pull() {
                 published=$(basename "$url")
                 echo "  ${slot} -> ${published}"
                 tmp=$(mktemp -d "$(pwd)/.get-$slot.XXXXXX")
-                start-cli --registry="$STARTWRT_REGISTRY" registry os asset get "$slot" "$VERSION" "$STARTWRT_PLATFORM" -d "$tmp"
+                start-cli --registry="$STARTWRT_SOURCE_REGISTRY" registry os asset get "$slot" "$VERSION" "$STARTWRT_PLATFORM" -d "$tmp"
                 mv -f "$tmp"/* "$published"
                 rmdir "$tmp"
             done
@@ -609,37 +635,48 @@ cmd_index() {
             start-cli registry os promote --from "$STARTOS_SOURCE_REGISTRY" --to "$STARTOS_TARGET_REGISTRY" "$VERSION"
             ;;
         wrt)
-            # StartWRT has no beta->prod promotion: register the version, then
-            # index each image at its S3/CDN URL. The compat range is the set of
-            # installed versions allowed to upgrade to this one.
-            enter_release_dir
-            echo "Registering StartWRT ${VERSION} in ${STARTWRT_REGISTRY}..."
-            start-cli --registry="$STARTWRT_REGISTRY" registry os version add \
-                "$VERSION" "v$VERSION" '' "${STARTWRT_COMPAT_FLOOR} <=$VERSION"
-
-            # start-cli infers the asset slot from the file extension and only
-            # accepts iso/img/squashfs. Both images ship gzipped, so present each
-            # under a hardlink whose extension names its slot: the sdcard image
-            # as .img (the fresh-install slot) and the sysupgrade image as
-            # .squashfs (start-os's update-asset slot). The indexed URLs still
-            # point at the honestly-named .img.gz files on S3 (the registry only
-            # requires the URL's bytes to match the signed blake3 commitment,
-            # which the hardlinks share).
-            local file index_file
-            for file in $(release_files); do
-                case "$file" in
-                    *-sdcard.img.gz) index_file="${file%.img.gz}.img" ;;
-                    *-sysupgrade.img.gz) index_file="${file%.img.gz}.squashfs" ;;
-                    *) index_file="$file" ;;
-                esac
-                [ "$index_file" = "$file" ] || ln -f "$file" "$index_file"
-                echo "Indexing $file for platform ${STARTWRT_PLATFORM}..."
-                start-cli --registry="$STARTWRT_REGISTRY" registry os asset add \
-                    --platform="$STARTWRT_PLATFORM" --version="$VERSION" \
-                    "$index_file" "$STARTWRT_S3_CDN/v$VERSION/$file"
-            done
+            # Promote the version (+ its img/squashfs assets) from the source
+            # (beta) registry into production — the same index-copy +
+            # developer-key re-sign as the OS; the images stay on the StartWRT
+            # S3 bucket, so nothing is re-uploaded.
+            echo "Promoting StartWRT ${VERSION}: ${STARTWRT_SOURCE_REGISTRY} -> ${STARTWRT_TARGET_REGISTRY} ..."
+            start-cli registry os promote --from "$STARTWRT_SOURCE_REGISTRY" --to "$STARTWRT_TARGET_REGISTRY" "$VERSION"
             ;;
     esac
+}
+
+cmd_register() {
+    require_kind wrt
+    # Register + index a CI build into the source (beta) registry, where beta
+    # routers soak it before `release` promotes it into production. Run
+    # pull-gha first: registering needs the image files locally to compute the
+    # signed blake3 commitments. The compat range is the set of installed
+    # versions allowed to upgrade to this one.
+    enter_release_dir
+    echo "Registering StartWRT ${VERSION} in ${STARTWRT_SOURCE_REGISTRY}..."
+    start-cli --registry="$STARTWRT_SOURCE_REGISTRY" registry os version add \
+        "$VERSION" "v$VERSION" '' "${STARTWRT_COMPAT_FLOOR} <=$VERSION"
+
+    # start-cli infers the asset slot from the file extension and only accepts
+    # iso/img/squashfs. Both images ship gzipped, so present each under a
+    # hardlink whose extension names its slot: the sdcard image as .img (the
+    # fresh-install slot) and the sysupgrade image as .squashfs (start-os's
+    # update-asset slot). The indexed URLs still point at the honestly-named
+    # .img.gz files on S3 (the registry only requires the URL's bytes to match
+    # the signed blake3 commitment, which the hardlinks share).
+    local file index_file
+    for file in $(release_files); do
+        case "$file" in
+            *-sdcard.img.gz) index_file="${file%.img.gz}.img" ;;
+            *-sysupgrade.img.gz) index_file="${file%.img.gz}.squashfs" ;;
+            *) index_file="$file" ;;
+        esac
+        [ "$index_file" = "$file" ] || ln -f "$file" "$index_file"
+        echo "Indexing $file for platform ${STARTWRT_PLATFORM}..."
+        start-cli --registry="$STARTWRT_SOURCE_REGISTRY" registry os asset add \
+            --platform="$STARTWRT_PLATFORM" --version="$VERSION" \
+            "$index_file" "$STARTWRT_S3_CDN/v$VERSION/$file"
+    done
 }
 
 cmd_sign() {
@@ -798,12 +835,14 @@ cmd_release() {
             cmd_push
             ;;
         wrt)
-            # CI (start-wrt.yaml `deploy`) uploaded the images to S3; registering
-            # + indexing into the registry stays a local, developer-key-gated
-            # step. Pull the freshly built images to sign + checksum, tag, cut the
-            # GitHub release, then register + index and sign.
+            # CI (start-wrt.yaml `deploy`) uploaded the images to S3 and
+            # `register` indexed them into the source (beta) registry, where
+            # beta routers soaked the version — so there's no push here. Pull
+            # the registered images (signature-verified) to build the release
+            # notes + sign them, tag, cut the GitHub release, and `index`
+            # promotes them from source into production.
             cmd_pre_check
-            cmd_pull_gha
+            cmd_pull
             cmd_tag
             cmd_create_gh_release
             cmd_index
@@ -823,7 +862,8 @@ Projects:
   start-registry  per-arch .deb -> apt repo + GitHub release
   start-sdk       npm package -> npm
   start-wrt       flashable images (sdcard + sysupgrade .img.gz) -> S3 +
-                  StartWRT registry (register + index; no beta->prod promotion)
+                  StartWRT registries (`register` indexes into beta; `release`
+                  promotes beta -> production)
 
 Version is read from the project's manifest (Cargo.toml — for start-wrt the ctrl
 crate's — or package.json for start-sdk); the git tag / GitHub release is
@@ -842,11 +882,13 @@ Subcommands:
   push               Upload artifacts to their destination (S3 for os, GitHub
                      release + apt for cli/deb, npm publish for sdk). For os this
                      normally runs in CI; use it for a manual re-publish.
-  index              os: promote the OS version from the source registry into the
-                     production registry (CI indexes alpha; alpha->beta is
-                     promoted manually; this does source (beta) -> prod).
-                     wrt: register + index the version's images in the StartWRT
-                     registry, pointing at their S3/CDN URLs.
+  index              Promote the version from the source (beta) registry into
+                     the production registry. (os: CI indexes alpha; alpha->beta
+                     is promoted manually. wrt: `register` indexes into beta.)
+  register           wrt only: register + index a CI build's images into the
+                     source (beta) registry, pointing at their S3/CDN URLs.
+                     Run pull-gha first; beta routers then soak the version
+                     until `release` promotes it.
   sign               Sign artifacts with the Start9 org key (+ personal key if
                      available) and upload signatures.tar.gz. (os/cli/deb/wrt.)
   cosign             Add your personal GPG signature to an existing release's
@@ -866,12 +908,15 @@ Environment variables:
   GH_USER                  Override GitHub username (default: autodetected via gh)
   OTP                      npm one-time password (start-sdk publish)
 
-Registries are scoped per project (only the OS promotes between registries):
-  STARTOS_SOURCE_REGISTRY  registry the OS release pulls/promotes from (default: beta)
-  STARTOS_TARGET_REGISTRY  registry the OS release promotes into (default: production)
-  STARTWRT_REGISTRY        registry StartWRT registers + indexes into
-  STARTWRT_COMPAT_FLOOR    oldest version allowed to upgrade to this StartWRT
-                           release (default: >=0.1.0-beta.1)
+Registries are scoped per project (the OS and StartWRT promote source -> target):
+  STARTOS_SOURCE_REGISTRY   registry the OS release pulls/promotes from (default: beta)
+  STARTOS_TARGET_REGISTRY   registry the OS release promotes into (default: production)
+  STARTWRT_SOURCE_REGISTRY  registry `register` indexes into and the StartWRT
+                            release pulls/promotes from (default: beta)
+  STARTWRT_TARGET_REGISTRY  registry the StartWRT release promotes into
+                            (default: production)
+  STARTWRT_COMPAT_FLOOR     oldest version allowed to upgrade to this StartWRT
+                            release (default: >=0.1.0-beta.1)
 EOF
 }
 
@@ -906,6 +951,7 @@ case "$SUBCOMMAND" in
     create-gh-release) cmd_create_gh_release ;;
     push) cmd_push ;;
     index) cmd_index ;;
+    register) cmd_register ;;
     sign) cmd_sign ;;
     cosign) cmd_cosign ;;
     notes) cmd_notes ;;

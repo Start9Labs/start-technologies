@@ -138,11 +138,12 @@ jobs:
           retention-days: 14
 
   # Publish path: upload the built images to shared S3 (the registry CDN serves
-  # them from here). This is the ONLY publishing step done in CI — tagging,
-  # cutting the GitHub release, and registering + indexing into the registry all
-  # stay a deliberate local gate run from the top-level scripts/manage-release.sh
-  # (`release start-wrt`) with the developer key. The `image` job's
-  # startwrt-openwrt-image artifact is what that script pulls to sign + checksum.
+  # them from here). This is the ONLY publishing step done in CI — indexing into
+  # the beta registry (`register start-wrt`), tagging, cutting the GitHub
+  # release, and the beta -> production promotion (`release start-wrt`) all stay
+  # deliberate local gates run from the top-level scripts/manage-release.sh with
+  # the developer key. The `image` job's startwrt-openwrt-image artifact is what
+  # that script's pull-gha downloads for the `register` step.
   # Dispatch-gated (deploy == 'release'), matching startos-iso.
   deploy:
     name: Deploy
@@ -196,7 +197,8 @@ jobs:
             echo "Uploading $file..."
             s3cmd put -P "$file" "${{ env.S3_BUCKET }}/v${VERSION}/$file"
           done
-          # The GitHub release + tag (start-wrt/v<version>) and the registry
-          # register/index are cut locally from scripts/manage-release.sh
-          # (`release start-wrt`) against this run's startwrt-openwrt-image
-          # artifact — deliberately gated behind the developer key, not CI.
+          # The beta-registry register/index (against this run's
+          # startwrt-openwrt-image artifact), the GitHub release + tag
+          # (start-wrt/v<version>), and the beta -> production promotion are
+          # all cut locally from scripts/manage-release.sh — deliberately
+          # gated behind the developer key, not CI.

@@ -83,14 +83,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   serves from. To match `startos-iso.yaml`, it is `workflow_dispatch`-gated on a `deploy:
   release` input (rather than the old standalone workflow's `v*`-tag push) and reads the
   version from `backend/ctrl/Cargo.toml` (the standalone workflow read the now-removed
-  `web/package.json`). Tagging, cutting the GitHub release, and registering + indexing into
-  the StartWRT registry are now driven by the top-level `scripts/manage-release.sh`
-  (`release start-wrt` — a new `wrt` project kind alongside os/cli/deb/npm), which replaces
-  the standalone `projects/start-wrt/scripts/manage-release.sh`. Registry indexing/signing
-  stays a deliberate local, developer-key-gated step. Releases are cut on
-  `Start9Labs/start-technologies` with the monorepo's `<project>/v<version>` tag convention
-  (`start-wrt/v<version>`), since the monorepo hosts every product's releases on independent
-  cadences. Release assets follow the startos naming convention —
+  `web/package.json`). Tagging, cutting the GitHub release, and the registry publishing are
+  now driven by the top-level `scripts/manage-release.sh` (a new `wrt` project kind alongside
+  os/cli/deb/npm), which replaces the standalone
+  `projects/start-wrt/scripts/manage-release.sh`. Registry publishing mirrors the OS's staged
+  flow: `register start-wrt` indexes a CI build into a beta registry, where beta routers
+  (UCI `startwrt.system.registry` pointed at it) soak the version as a normal OTA update, and
+  `release start-wrt` then promotes it into the production registry — both deliberate local,
+  developer-key-gated steps. Releases are cut on `Start9Labs/start-technologies` with the
+  monorepo's `<project>/v<version>` tag convention (`start-wrt/v<version>`), since the
+  monorepo hosts every product's releases on independent cadences. Release assets follow the
+  startos naming convention —
   `startwrt-<version>-<git hash>_spacemit-k1-{sdcard.img.gz,sysupgrade.img.gz}` — instead
   of the raw OpenWrt output names, which carried no product, version, or hash; the sdcard
   image is now gzipped (it was previously published raw), and balenaEtcher flashes the
