@@ -6,10 +6,10 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 PROJECT=${PROJECT:-"startos"}
 if [ "${PROJECT}" = "startos" ]; then
-    INSTALL_TARGET="install-startos"
+    INSTALL_TARGET="start-os-install"
     PROJECT_DIR="projects/start-os"
 else
-    INSTALL_TARGET="install-${PROJECT#start-}"
+    INSTALL_TARGET="${PROJECT}-install"
     PROJECT_DIR="projects/${PROJECT}"
 fi
 BASENAME=${BASENAME:-"$(./build/env/basename.sh)"}
