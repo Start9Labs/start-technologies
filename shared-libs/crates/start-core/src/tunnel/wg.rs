@@ -287,7 +287,6 @@ impl WgConfig {
         server_pubkey: Base64<PublicKey>,
         server_addr: SocketAddr,
         client_v6: Option<ClientV6>,
-        server_v6: Option<Ipv6Addr>,
     ) -> ClientConfig {
         ClientConfig {
             client_config: self,
@@ -296,7 +295,6 @@ impl WgConfig {
             server_pubkey,
             server_addr,
             client_v6,
-            server_v6,
         }
     }
 }
@@ -345,8 +343,6 @@ pub struct ClientConfig {
     server_addr: SocketAddr,
     #[serde(default)]
     client_v6: Option<ClientV6>,
-    #[serde(default)]
-    server_v6: Option<Ipv6Addr>,
 }
 impl std::fmt::Display for ClientConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -358,10 +354,10 @@ impl std::fmt::Display for ClientConfig {
             Some(c) => format!("{v4_addr}, {}/{}", c.addr, c.delegated.prefix_len()),
             None => v4_addr.to_string(),
         };
-        let dns = match self.server_v6 {
-            Some(v6) => format!("{}, {v6}", self.subnet.addr()),
-            None => self.subnet.addr().to_string(),
-        };
+        // Only the subnet's IPv4 `.1` is advertised for DNS — the proxy binds
+        // IPv4 only, and AAAA resolution works fine over it. No v6 DNS address
+        // is advertised until the proxy also listens on the tunnel's v6.
+        let dns = self.subnet.addr().to_string();
         // IPv6 is full-tunnel (`::/0`): replies sourced from the VPS-delegated
         // global address must return through the tunnel, and a plain WireGuard
         // peer can't source-route otherwise. IPv4 stays split (subnet only).
@@ -403,7 +399,6 @@ mod tests {
                 Base64(WgKey::generate()).verifying_key(),
                 "1.2.3.4:51820".parse().unwrap(),
                 None,
-                None,
             )
             .to_string();
         assert!(cfg.contains("Address = 10.59.0.2/24"));
@@ -427,11 +422,12 @@ mod tests {
                 Base64(WgKey::generate()).verifying_key(),
                 "1.2.3.4:51820".parse().unwrap(),
                 v6,
-                Some("2001:db8:abcd::1".parse().unwrap()),
             )
             .to_string();
         assert!(cfg.contains("Address = 10.59.0.2/24, 2001:db8:abcd::a3b:2/128"));
-        assert!(cfg.contains("DNS = 10.59.0.1, 2001:db8:abcd::1"));
+        // Only the IPv4 DNS is advertised (the proxy binds IPv4 only).
+        assert!(cfg.contains("DNS = 10.59.0.1"));
+        assert!(!cfg.contains("DNS = 10.59.0.1, 2001"));
         // IPv6 is full-tunnel so replies from the delegated GUA return via wg.
         assert!(cfg.contains("AllowedIPs = 10.59.0.0/24, ::/0"));
     }

@@ -34,13 +34,19 @@ import { TunnelData } from 'src/app/services/patch-db/data-model'
 import { UpdateService } from 'src/app/services/update.service'
 import { CHANGE_PASSWORD } from './change-password'
 
-// Empty is allowed (clears the prefix); otherwise the value must parse as an
-// IPv6 network. The daemon revalidates, so this is just UX.
+// Empty is allowed (clears the prefix); otherwise the value must be an IPv6
+// address with an explicit /prefix in [0, 128]. utils.IpNet.parse does not
+// enforce the prefix length, so validate the `/len` ourselves. The daemon
+// revalidates, so this is just UX.
 const ipv6Prefix: ValidatorFn = ({ value }) => {
   if (!value) return null
+  const parts = value.split('/')
+  const len = Number(parts[1])
+  if (parts.length !== 2 || !Number.isInteger(len) || len < 0 || len > 128) {
+    return { ipv6: true }
+  }
   try {
-    const net = utils.IpNet.parse(value)
-    if (utils.IpAddress.parse(net.address).isIpv4()) return { ipv6: true }
+    if (utils.IpAddress.parse(parts[0]).isIpv4()) return { ipv6: true }
     return null
   } catch {
     return { ipv6: true }

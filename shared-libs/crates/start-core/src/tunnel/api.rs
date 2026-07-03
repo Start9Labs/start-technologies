@@ -755,9 +755,13 @@ pub async fn set_ipv6(
         .map(|p| {
             let net = p.trunc();
             let addr = net.network();
-            if addr.is_loopback() || addr.is_unspecified() || addr.is_multicast() {
+            if addr.is_loopback()
+                || addr.is_unspecified()
+                || addr.is_multicast()
+                || addr.is_unicast_link_local()
+            {
                 return Err(Error::new(
-                    eyre!("{net} is not a usable unicast prefix"),
+                    eyre!("{net} is not a usable routed prefix"),
                     ErrorKind::InvalidRequest,
                 ));
             }
@@ -1005,7 +1009,6 @@ pub async fn show_config(
             wg.as_key().de()?.verifying_key(),
             (wan_addr, wg.as_port().de()?).into(),
             wg_server.client_v6(ip),
-            wg_server.server_v6(),
         )
         .to_string())
 }

@@ -20,24 +20,33 @@ Tell StartTunnel the routed prefix your provider assigned:
 start-tunnel set-ipv6 --prefix 2001:db8:abcd::/64
 ```
 
-Pass `--prefix` with no value (or `null`) to turn IPv6 back off.
+To turn IPv6 back off, run `start-tunnel set-ipv6` with no `--prefix` argument
+(or use the **Disable** button on the web UI's settings page).
 
 Once set, StartTunnel re-renders every device's WireGuard config to include an
 IPv6 address. Reconnect (or re-download the config) on each device to pick it up.
+
+> [!NOTE]
+> Devices can make **outbound** IPv6 connections and receive their replies
+> today. Accepting **unsolicited inbound** connections to a device's IPv6
+> address (hosting a service over IPv6) is not yet supported — that arrives in a
+> later release, alongside the existing IPv4 port-forwarding.
 
 ## How addresses are assigned
 
 - **A /64 (the common case).** Every device shares the one /64 and receives a
   single global address. The tunnel answers Neighbor Discovery for those
-  addresses on your VPS's network so inbound traffic reaches the right device.
+  addresses on your VPS's network, so traffic to a device's global address —
+  including the replies to connections it opens — is delivered to it over the
+  tunnel.
 - **A prefix shorter than /64** (a /56, /48, …). Each device is *delegated its
   own /64*, routed to it over WireGuard. A StartOS server behind the tunnel can
   then hand global addresses to its own services and containers.
 - **A prefix longer than /64** (e.g. a /124). Each device gets a single global
   address; the number of devices is limited by the block size.
 
-The tunnel itself uses the first address of the prefix (`…::1`) and advertises
-it to devices as their IPv6 gateway and DNS server.
+The tunnel itself uses the first address of the prefix (`…::1`) as its own
+address on the WireGuard interface and as the next hop for devices' IPv6 traffic.
 
 ## Routing
 
@@ -49,6 +58,7 @@ belongs to your VPS, not the device's local network. IPv4 remains split-tunnel
 
 ## DNS
 
-A device that is allowed to inject DNS records can publish an `AAAA` record for
-its global address, so other devices on the tunnel can reach it by name. See
+Devices keep using the tunnel's IPv4 DNS resolver, which serves `AAAA` records
+too. A device that is allowed to inject DNS records can publish an `AAAA` record
+for its global address, so other devices on the tunnel can reach it by name. See
 [DNS Records](dns-records.md).

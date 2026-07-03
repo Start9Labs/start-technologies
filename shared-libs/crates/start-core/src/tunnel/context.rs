@@ -175,6 +175,11 @@ pub struct TunnelContextSeed {
     /// resync can withdraw the ones that no longer apply. Only populated when a
     /// client's /128 sits inside an on-link /64 (the shared-prefix case).
     pub v6_proxy: SyncMutex<BTreeMap<Ipv6Addr, GatewayId>>,
+    /// Serializes `resync_v6` — same non-atomic read → diff → apply → overwrite
+    /// pattern as `egress_lock` guards for `resync_egress`, so two concurrent
+    /// config changes can't leave the tracked proxy map out of sync with the
+    /// kernel's neighbor table.
+    pub v6_lock: tokio::sync::Mutex<()>,
     pub shutdown: Sender<Option<bool>>,
 }
 
@@ -350,6 +355,7 @@ impl TunnelContext {
             active_forwards: SyncMutex::new(active_forwards),
             egress_lock: tokio::sync::Mutex::new(()),
             v6_proxy: SyncMutex::new(BTreeMap::new()),
+            v6_lock: tokio::sync::Mutex::new(()),
             shutdown,
         }));
 
@@ -401,6 +407,7 @@ impl TunnelContext {
     /// the client over WireGuard. A routed prefix (or a per-client /64) is
     /// delivered to the host without ND, so it needs no proxy entry.
     pub async fn resync_v6(&self) -> Result<(), Error> {
+        let _guard = self.v6_lock.lock().await;
         let server = self.db.peek().await.as_wg().de()?;
         let mut desired: BTreeMap<Ipv6Addr, GatewayId> = BTreeMap::new();
         if let Some(prefix) = server.ipv6 {
