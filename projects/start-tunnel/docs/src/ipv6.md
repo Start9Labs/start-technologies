@@ -12,6 +12,24 @@ budget providers give a single **/64** (Hetzner, Vultr, BuyVM); some give less
 request (Linode) or on dedicated servers. Check your provider's dashboard or
 docs for the exact prefix.
 
+## Requirements
+
+Delegating an IPv6 prefix only works if the server can actually route it:
+
+- **The server must have working IPv6 egress** — an IPv6 default route (`::/0`).
+  A device given an IPv6 address routes *all* its IPv6 through the tunnel
+  (`AllowedIPs = ::/0`); without upstream IPv6 on the server that traffic simply
+  blackholes. `set-ipv6` **hard-errors** if the server has no IPv6 default route,
+  leaving the configuration unchanged. Confirm with `ip -6 route show default`
+  and configure IPv6 on the VPS before delegating a prefix.
+- **The prefix must be delivered to the server** — either *on-link* on a WAN
+  interface (the server holds a global address inside the covering /64, the usual
+  single-/64 case) or *routed* to the server by your provider (a /56 or /64 the
+  VPS statically routes to your host). If the prefix is neither on-link nor
+  something this host can confirm, `set-ipv6` still succeeds but logs a warning:
+  make sure your provider actually routes the block to this host, or connected
+  devices will have no working IPv6.
+
 ## Configuring the prefix
 
 Tell StartTunnel the routed prefix your provider assigned:

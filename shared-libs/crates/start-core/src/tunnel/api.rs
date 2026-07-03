@@ -4,7 +4,7 @@ use std::str::FromStr;
 use clap::{Parser, ValueEnum};
 use hickory_server::proto::rr::{Name, RecordType};
 use imbl_value::InternedString;
-use ipnet::{Ipv4Net, Ipv6Net};
+use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use rpc_toolkit::{Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -768,6 +768,59 @@ pub async fn set_ipv6(
             Ok(net)
         })
         .transpose()?;
+
+    if let Some(net) = prefix {
+        // A delegated prefix is useless without working IPv6 egress: clients
+        // would get a full-tunnel `::/0` that blackholes. Reject at set-time
+        // (before mutating the DB) rather than silently handing out dead IPv6.
+        if !crate::net::utils::has_ipv6_default_route().await? {
+            return Err(Error::new(
+                eyre!(
+                    "this tunnel server has no IPv6 connectivity (no IPv6 default route); configure IPv6 on the server before delegating an IPv6 prefix"
+                ),
+                ErrorKind::Network,
+            ));
+        }
+
+        // On-link prefixes are delivered via proxy-NDP (see `resync_v6`). A
+        // prefix that is not on-link may still be a valid provider-routed
+        // delegation (a /56 or /64 the VPS routes to this host), which we can't
+        // verify locally — warn instead of rejecting, so we don't false-reject
+        // valid routed delegations.
+        let on_link = ctx.net_iface.peek(|ifaces| {
+            for (id, info) in ifaces.iter() {
+                if id.as_str() == WIREGUARD_INTERFACE_NAME {
+                    continue;
+                }
+                let Some(ip) = info.ip_info.as_ref() else {
+                    continue;
+                };
+                if ip.device_type == Some(NetworkInterfaceType::Loopback) {
+                    continue;
+                }
+                for subnet in ip.subnets.iter() {
+                    if let IpNet::V6(n) = subnet {
+                        // Only a global address on the WAN link makes the prefix
+                        // reachable on-link; exclude link-local / ULA / loopback.
+                        if crate::net::utils::ipv6_is_local(n.addr()) {
+                            continue;
+                        }
+                        let n = n.trunc();
+                        if n.contains(&net) || net.contains(&n) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            false
+        });
+        if !on_link {
+            tracing::warn!(
+                "prefix {net} is not on-link on any WAN interface; ensure your provider routes it to this host, otherwise clients will have no IPv6"
+            );
+        }
+    }
+
     ctx.db
         .mutate(|db| db.as_wg_mut().as_ipv6_mut().ser(&prefix))
         .await

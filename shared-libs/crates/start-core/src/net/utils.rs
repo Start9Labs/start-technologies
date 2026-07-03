@@ -189,6 +189,21 @@ pub async fn get_iface_ipv6_addr(iface: &str) -> Result<Option<(Ipv6Addr, Ipv6Ne
     .transpose()?)
 }
 
+/// True iff the host has an IPv6 default route (`::/0`), i.e. some working IPv6
+/// egress. Used to reject delegating an IPv6 prefix on a box that can't route it.
+pub async fn has_ipv6_default_route() -> Result<bool, Error> {
+    let output = String::from_utf8(
+        Command::new("ip")
+            .arg("-6")
+            .arg("route")
+            .arg("show")
+            .arg("default")
+            .invoke(crate::ErrorKind::Network)
+            .await?,
+    )?;
+    Ok(!output.trim().is_empty())
+}
+
 pub async fn probe_iface_type(iface: &str) -> Option<NetworkInterfaceType> {
     match tokio::fs::read_to_string(Path::new("/sys/class/net").join(iface).join("uevent"))
         .await
