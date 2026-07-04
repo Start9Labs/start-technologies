@@ -7,17 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.2.0]
-
-### Added
-
-- **Per-subnet IPv6.** A subnet can now carry a routed IPv6 prefix your VPS delegates, and every host on it — the tunnel and each device — gets one globally-routable `/128` with its tunnel IPv4 embedded (`prefix-network | tunnel-IPv4`), so a device's address is stable and derivable from its IPv4 alone. Configure it per subnet with `start-tunnel subnet <SUBNET> set-ipv6 --prefix <prefix>` or the subnet's Add/Edit dialog (disable by omitting the prefix). Configuring per subnet lets a server with multiple disjoint allocations point different subnets at different prefixes. On the common single-/64 case the tunnel answers Neighbor Discovery for each device's address on the VPS network; device IPv6 is carried full-tunnel (`AllowedIPs = ::/0`) so replies return through the tunnel. Devices can make outbound IPv6 connections today; accepting unsolicited inbound connections (hosting over IPv6) arrives in a later release. The subnets and devices tables show the prefix and each device's computed address. See the IPv6 page in the docs.
-- **`subnet … set-ipv6` validates the server can route the prefix.** Because a device with an IPv6 assignment routes all its IPv6 full-tunnel (`AllowedIPs = ::/0`), a prefix delegated on a server without working IPv6 egress just blackholes. The command **hard-errors** (leaving the config unchanged) when the server has no IPv6 default route, and logs an actionable warning when the prefix is neither on-link on a WAN interface nor otherwise verifiable — so operators catch a misconfigured VPS at set-time instead of discovering dead IPv6 on their devices.
-
 ## [1.1.0]
 
 ### Added
 
+- **Per-subnet IPv6.** A subnet can now carry a routed IPv6 prefix your VPS delegates, and every host on it — the tunnel and each device — gets one globally-routable `/128` with its tunnel IPv4 embedded (`prefix-network | tunnel-IPv4`), so a device's address is stable and derivable from its IPv4 alone. Configure it per subnet with `start-tunnel subnet <SUBNET> set-ipv6 --prefix <prefix>` or the subnet's Add/Edit dialog (disable by omitting the prefix). Configuring per subnet lets a server with multiple disjoint allocations point different subnets at different prefixes. On the common single-/64 case the tunnel answers Neighbor Discovery for each device's address on the VPS network; device IPv6 is carried full-tunnel (`AllowedIPs = ::/0`) so replies return through the tunnel. Devices can make outbound IPv6 connections, and — on a device running a current StartOS (0.4.0-beta.10+) — accept unsolicited inbound connections too, so a service can be hosted over IPv6. The subnets and devices tables show the prefix and each device's computed address. See the IPv6 page in the docs.
+- **`subnet … set-ipv6` validates the server can route the prefix.** Because a device with an IPv6 assignment routes all its IPv6 full-tunnel (`AllowedIPs = ::/0`), a prefix delegated on a server without working IPv6 egress just blackholes. The command **hard-errors** (leaving the config unchanged) when the server has no IPv6 default route, and logs an actionable warning when the prefix is neither on-link on a WAN interface nor otherwise verifiable — so operators catch a misconfigured VPS at set-time instead of discovering dead IPv6 on their devices.
 - **Port-range forwarding.** A manual port forward can now span a contiguous range of ports. Set "Number of Ports" in the Add Port Forward dialog — or `--count` on `start-tunnel port-forward add` — to forward that many consecutive ports counting up from both the external and internal port. Ranges are plain port forwards and cannot be combined with SNI demux. (Automatic PCP PORT_SET range forwarding requested by connected devices was already supported; this exposes it to manually-added forwards.)
 
 ## [1.0.0]
