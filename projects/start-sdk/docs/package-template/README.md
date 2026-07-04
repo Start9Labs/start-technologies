@@ -27,6 +27,7 @@ image tags anywhere — the manifest is the source of truth.
 ## Network Access and Interfaces
 
 <!-- TODO -->
+> **Service-to-Service:** To connect to this service from another StartOS package, use the SDK's host bridge API (see the [Networking Guide](https://docs.start9.com/packaging/networking)).
 
 ## Actions (StartOS UI)
 

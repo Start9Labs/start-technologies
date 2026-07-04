@@ -52,6 +52,7 @@
 
 ## Networking
 
+- [Service-to-Service Networking](networking.md)
 - [Expose a Web UI](recipe-web-ui.md)
 - [Expose Multiple Interfaces](recipe-multi-interface.md)
 - [Expose an API-Only Interface](recipe-api-interface.md)
