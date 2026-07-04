@@ -16,6 +16,8 @@ export interface EditLabelData {
   readonly source: string
   readonly label: T.Tunnel.SniRoute['label']
   readonly hostname: string | null
+  // Set for a v6 pinhole row — relabel the pinhole instead of a v4 forward.
+  readonly pinhole?: { readonly gua: string; readonly externalPort: number }
 }
 
 @Component({
@@ -51,11 +53,17 @@ export class PortForwardsEditLabel {
     const loader = this.loading.open('').subscribe()
 
     try {
-      await this.api.updateForwardLabel({
-        source: this.context.data.source,
-        label: this.form.getRawValue().label,
-        hostname: this.context.data.hostname,
-      })
+      const { pinhole, source, hostname } = this.context.data
+      const label = this.form.getRawValue().label
+      if (pinhole) {
+        await this.api.updatePinholeLabel({
+          gua: pinhole.gua,
+          externalPort: pinhole.externalPort,
+          label,
+        })
+      } else {
+        await this.api.updateForwardLabel({ source, label, hostname })
+      }
     } catch (e: any) {
       console.error(e)
       this.errorService.handleError(e)

@@ -1,4 +1,5 @@
-import { Component, inject } from '@angular/core'
+import { Component, computed, inject } from '@angular/core'
+import { toSignal } from '@angular/core/rxjs-interop'
 import {
   AbstractControl,
   NonNullableFormBuilder,
@@ -10,6 +11,7 @@ import { WA_IS_MOBILE } from '@ng-web-apis/platform'
 import { ErrorService } from '@start9labs/shared'
 import {
   tuiMarkControlAsTouchedAndValidate,
+  TuiContext,
   TuiValueChanges,
 } from '@taiga-ui/cdk'
 import {
@@ -26,6 +28,7 @@ import {
   TuiDataListWrapper,
   TuiInputNumber,
   TuiNotificationMiddleService,
+  TuiRadioList,
   TuiSelect,
   TuiTooltip,
 } from '@taiga-ui/kit'
@@ -47,6 +50,20 @@ function portRangeOverflow(group: AbstractControl): ValidationErrors | null {
     (int != null && int + last > 65535)
     ? { portRangeOverflow: true }
     : null
+}
+
+// IPv6 needs the selected server to have a GUA (its subnet needs a v6 prefix).
+function ipVersionRequiresGua(group: AbstractControl): ValidationErrors | null {
+  const ipVersion = group.get('ipVersion')?.value
+  const device = group.get('device')?.value as MappedDevice | null
+  const needsV6 = ipVersion === 'ipv6' || ipVersion === 'both'
+  return needsV6 && device && !device.ipv6 ? { noGua: true } : null
+}
+
+const IP_VERSION: Record<string, string> = {
+  ipv4: 'IPv4',
+  ipv6: 'IPv6',
+  both: 'IPv4 + IPv6',
 }
 
 @Component({
@@ -120,7 +137,23 @@ function portRangeOverflow(group: AbstractControl): ValidationErrors | null {
       @if (form.errors?.['portRangeOverflow']) {
         <tui-error [error]="'Port range runs past the maximum port (65535)'" />
       }
-      @if (!isRange) {
+
+      <fieldset>
+        <legend>IP Version</legend>
+        <tui-radio-list
+          size="s"
+          formControlName="ipVersion"
+          [items]="ipVersionValues"
+          [itemContent]="ipVersionLabel"
+        />
+      </fieldset>
+      @if (guaError()) {
+        <tui-error
+          [error]="'Selected server has no IPv6 address — its subnet needs an IPv6 prefix'"
+        />
+      }
+
+      @if (form.value.ipVersion === 'ipv4' && !isRange) {
         <tui-textfield>
           <label tuiLabel>Hostname (optional)</label>
           <input
@@ -147,6 +180,11 @@ function portRangeOverflow(group: AbstractControl): ValidationErrors | null {
       </footer>
     </form>
   `,
+  styles: `
+    tui-radio-list {
+      flex-direction: row;
+    }
+  `,
   imports: [
     ReactiveFormsModule,
     TuiButton,
@@ -155,6 +193,7 @@ function portRangeOverflow(group: AbstractControl): ValidationErrors | null {
     TuiError,
     TuiInputNumber,
     TuiNumberFormat,
+    TuiRadioList,
     TuiSelect,
     TuiForm,
     TuiCheckbox,
@@ -173,7 +212,7 @@ export class PortForwardsAdd {
   show80 = false
 
   protected readonly hostnameHint =
-    'Only supported for SSL/TLS services — the gateway routes by the TLS SNI, so several hostnames can share one external port. Leave blank for a plain port forward.'
+    'Only supported for SSL/TLS services — the gateway routes by the TLS SNI, so several hostnames can share one external port. IPv4 only. Leave blank for a plain port forward.'
 
   protected readonly countHint =
     'Forward this many consecutive ports, counting up from the external and internal ports above. Leave at 1 for a single port. SNI hostnames are not supported for ranges.'
@@ -182,12 +221,17 @@ export class PortForwardsAdd {
   protected readonly context =
     injectContext<TuiDialogContext<void, PortForwardsData>>()
 
+  protected readonly ipVersionValues = ['ipv4', 'ipv6', 'both'] as const
+  protected readonly ipVersionLabel = (ctx: TuiContext<string>) =>
+    IP_VERSION[ctx.$implicit]
+
   protected readonly form = inject(NonNullableFormBuilder).group(
     {
       label: ['', Validators.required],
       externalport: [null as number | null, Validators.required],
       device: [null as MappedDevice | null, Validators.required],
       internalport: [null as number | null, Validators.required],
+      ipVersion: ['ipv4' as 'ipv4' | 'ipv6' | 'both'],
       sni: [''],
       also80: [true],
       count: [
@@ -195,8 +239,24 @@ export class PortForwardsAdd {
         [Validators.required, Validators.min(1), Validators.max(65535)],
       ],
     },
-    { validators: portRangeOverflow },
+    { validators: [portRangeOverflow, ipVersionRequiresGua] },
   )
+
+  private readonly selectedDevice = toSignal(
+    this.form.controls.device.valueChanges,
+    { initialValue: null },
+  )
+  private readonly selectedVersion = toSignal(
+    this.form.controls.ipVersion.valueChanges,
+    { initialValue: 'ipv4' as const },
+  )
+
+  // The v6-requires-GUA error, shown proactively (mirrors the form validator).
+  protected readonly guaError = computed(() => {
+    const v = this.selectedVersion()
+    const device = this.selectedDevice()
+    return (v === 'ipv6' || v === 'both') && !!device && !device.ipv6
+  })
 
   protected get isRange(): boolean {
     return this.form.controls.count.value > 1
@@ -219,37 +279,65 @@ export class PortForwardsAdd {
 
     const loader = this.loading.open('').subscribe()
 
-    const { label, externalport, device, internalport, sni, also80, count } =
-      this.form.getRawValue()
+    const {
+      label,
+      externalport,
+      device,
+      internalport,
+      sni,
+      also80,
+      count,
+      ipVersion,
+    } = this.form.getRawValue()
 
     const isRange = count > 1
-    // SNI demux is per-port and can't span a range, so ignore any hostname.
-    const hostname = isRange ? '' : sni.trim()
+    // SNI demux is IPv4-only and per-port; ignore any hostname otherwise.
+    const hostname = isRange || ipVersion !== 'ipv4' ? '' : sni.trim()
+    const v4 = ipVersion === 'ipv4' || ipVersion === 'both'
+    const v6 = ipVersion === 'ipv6' || ipVersion === 'both'
+    const wants80 =
+      !isRange &&
+      !hostname &&
+      externalport === 443 &&
+      internalport === 443 &&
+      also80
 
     try {
-      // One hostname per entry; the external IP is fixed server-side to the
-      // target device's WAN.
-      await this.api.addForward({
-        externalPort: externalport!,
-        target: `${device!.ip}:${internalport}`,
-        label,
-        sni: hostname ? [hostname] : [],
-        count,
-      })
-
-      if (
-        !isRange &&
-        !hostname &&
-        externalport === 443 &&
-        internalport === 443 &&
-        also80
-      ) {
+      if (v4) {
+        // The external IP is fixed server-side to the target device's WAN.
         await this.api.addForward({
-          externalPort: 80,
-          target: `${device!.ip}:443`,
-          label: `${label} (HTTP redirect)`,
-          sni: [],
+          externalPort: externalport!,
+          target: `${device!.ip}:${internalport}`,
+          label,
+          sni: hostname ? [hostname] : [],
+          count,
         })
+        if (wants80) {
+          await this.api.addForward({
+            externalPort: 80,
+            target: `${device!.ip}:443`,
+            label: `${label} (HTTP redirect)`,
+            sni: [],
+          })
+        }
+      }
+      if (v6 && device!.ipv6) {
+        await this.api.addPinhole({
+          gua: device!.ipv6,
+          externalPort: externalport!,
+          internalPort:
+            internalport !== externalport ? internalport! : undefined,
+          label,
+          count,
+        })
+        if (wants80) {
+          await this.api.addPinhole({
+            gua: device!.ipv6,
+            externalPort: 80,
+            internalPort: 443,
+            label: `${label} (HTTP redirect)`,
+          })
+        }
       }
     } catch (e: any) {
       console.error(e)

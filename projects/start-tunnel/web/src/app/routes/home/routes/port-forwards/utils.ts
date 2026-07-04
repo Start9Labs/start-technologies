@@ -4,9 +4,16 @@ import { T } from '@start9labs/start-core'
 export interface MappedDevice {
   readonly ip: string
   readonly name: string
+  // The device's IPv6 GUA (computed via the backend host_v6), or null/absent
+  // when its subnet has no IPv6 prefix. Presence is what makes a v6 pinhole
+  // possible. Optional so consumers that don't care about v6 (e.g. DNS) can omit it.
+  readonly ipv6?: string | null
 }
 
+export type IpVersion = 'ipv4' | 'ipv6'
+
 export interface MappedForward {
+  // For a v4 forward this is the WAN IP; for a v6 pinhole it's the client's GUA.
   readonly externalip: string
   // Start port of the forward; `externalport`/`internalport` stay the raw start
   // (they rebuild the operation source key), while `count` gives the span.
@@ -19,6 +26,8 @@ export interface MappedForward {
   readonly auto: T.Tunnel.SniRoute['auto']
   readonly sni: string | null
   readonly hostname: string | null
+  // v4 (DNAT/SNI on the WAN IP) vs v6 (a firewall pinhole on the client's GUA).
+  readonly ipVersion: IpVersion
 }
 
 export interface PortForwardsData {
@@ -77,6 +86,7 @@ export function mapForwards(
       device: devices.find(d => d.ip === targetip) ?? {
         ip: targetip!,
         name: targetip!,
+        ipv6: null,
       },
       internalport: internalport!,
       count,
@@ -85,6 +95,40 @@ export function mapForwards(
       auto,
       sni: hostname,
       hostname,
+      ipVersion: 'ipv4',
     }
   }
+}
+
+// v6 GUA pinholes keyed by `[gua]:port`. A pure pinhole has `internalPort` null
+// (internal == external); a remap (e.g. 80→443) carries a distinct internal.
+export function mapPinholes(
+  pinholes: T.Tunnel.Pinholes6,
+  devices: readonly MappedDevice[],
+): MappedForward[] {
+  return Object.entries(pinholes).map(([key, ph]) => {
+    const match = key.match(/^\[(.+)\]:(\d+)$/)
+    const gua = match?.[1] ?? key
+    const externalport = match?.[2] ?? ''
+    const internalport =
+      ph.internalPort != null ? String(ph.internalPort) : externalport
+
+    return {
+      externalip: gua,
+      externalport,
+      device: devices.find(d => d.ipv6 === gua) ?? {
+        ip: gua,
+        name: gua,
+        ipv6: gua,
+      },
+      internalport,
+      count: ph.count,
+      label: ph.label,
+      enabled: ph.enabled,
+      auto: ph.auto,
+      sni: null,
+      hostname: null,
+      ipVersion: 'ipv6',
+    }
+  })
 }
