@@ -4,12 +4,11 @@
 # (https://github.com/openwrt/openwrt/archive/refs/tags/v$OPENWRT_VERSION.tar.gz,
 # overridable via OPENWRT_TARBALL_URL) and verified against
 # OPENWRT_TARBALL_SHA256 before extraction — the integrity pin. For human
-# reference: tag v25.12.4 == upstream commit ba915c2ee711d047d5be8575c1e98699119429ab
-# (content equality verified by git tree hash at pin time).
+# reference: tag v25.12.5 == upstream commit f0a60eee2fe051741c643ea6118718aae1ef17fb.
 #
 # To move to a new upstream release: update BOTH values (sha256 of the new
 # tag's tarball), then re-run `make start-wrt-openwrt-setup` — if a patch in
 # openwrt-patches/ no longer applies, refresh it per CONTRIBUTING.md
 # "OpenWrt tree".
-OPENWRT_VERSION=25.12.4
-OPENWRT_TARBALL_SHA256=fd8b78ec4675c8b19831ebf0299335f5c65caa60e34655490a8979720633ee2d
+OPENWRT_VERSION=25.12.5
+OPENWRT_TARBALL_SHA256=19462c4d0d52824b33ae52f60ee5e66528bf103691aabdb5e1e15cc8924067df

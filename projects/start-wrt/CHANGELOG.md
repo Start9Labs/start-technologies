@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- OpenWrt base upgraded **25.12.4 → 25.12.5** (`r33051-f5dae5ece4`), picking up
+  the upstream stable-branch fixes. All three Start9 build-infra patches apply
+  unchanged, and no upstream path collides with the Start9 overlay.
+
 - The OpenWrt image now builds from **pristine upstream OpenWrt** (the release
   tarball pinned by sha256 in `build/openwrt-version`) with the Start9 delta
   applied at build time from in-repo `openwrt-patches/` (3 build-infra patches)
