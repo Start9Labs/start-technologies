@@ -34,10 +34,18 @@ export function deviceIpv6(prefix: string | null, ip: string): string | null {
     const net = utils.IpNet.parse(prefix)
     if (!net.isIpv6()) return null
     const octets = net.zero().octets.slice()
-    const v4 = utils.IpAddress.parse(ip).octets
-    for (let i = 0; i < 4; i++) {
-      octets[12 + i] = (octets[12 + i] ?? 0) | (v4[i] ?? 0)
-    }
+    const v4octets = utils.IpAddress.parse(ip).octets
+    if (v4octets.length !== 4) return null
+    // Clamp the IPv4 to the prefix's host space, mirroring the backend host_v6:
+    // a /64 keeps the whole 32-bit IPv4, a /124 keeps only its low 4 bits.
+    const keep = Math.min(128 - net.prefix, 32)
+    let v4 = 0
+    for (const o of v4octets) v4 = v4 * 256 + o
+    if (keep < 32) v4 %= 2 ** keep
+    octets[12] = (octets[12] ?? 0) | ((v4 >>> 24) & 0xff)
+    octets[13] = (octets[13] ?? 0) | ((v4 >>> 16) & 0xff)
+    octets[14] = (octets[14] ?? 0) | ((v4 >>> 8) & 0xff)
+    octets[15] = (octets[15] ?? 0) | (v4 & 0xff)
     return utils.IpAddress.fromOctets(octets).address
   } catch {
     return null

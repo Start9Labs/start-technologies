@@ -768,15 +768,6 @@ pub async fn set_subnet_ipv6(
                     ErrorKind::InvalidRequest,
                 ));
             }
-            // Each host embeds its 32-bit tunnel IPv4 in the low bits, so the
-            // prefix must leave >= 32 host bits (be /96 or shorter). A /64 is the
-            // typical size; anything longer can't fit the IPv4 and is rejected.
-            if net.prefix_len() > 96 {
-                return Err(Error::new(
-                    eyre!("{net} is too small — the prefix must be /96 or shorter (a /64 is typical)"),
-                    ErrorKind::InvalidRequest,
-                ));
-            }
             Ok(net)
         })
         .transpose()?;

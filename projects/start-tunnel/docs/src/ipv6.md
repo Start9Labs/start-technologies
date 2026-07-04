@@ -37,7 +37,7 @@ Delegating a prefix only works if the server can actually route it:
 Assign the routed prefix your provider gave you to a subnet:
 
 ```bash
-start-tunnel subnet 10.59.0.0/24 set-ipv6 --prefix 2604:a880:4:1d0::/64
+start-tunnel subnet 10.59.0.0/24 set-ipv6 --prefix 2001:db8:abcd::/64
 ```
 
 Or set the **IPv6 Prefix** field in the subnet's Add/Edit dialog in the web UI.
@@ -67,8 +67,9 @@ When the prefix is delivered **on-link** (the common single-/64 case), the
 tunnel answers Neighbor Discovery for each device's address on your VPS's
 network, so traffic to it — including the replies to connections it opens — is
 delivered over the tunnel. A **routed** prefix reaches the host without that
-step. Because a `/64` leaves 64 host bits, a full IPv4 always fits; use a `/64`
-(or shorter) per subnet.
+step. A `/64` is the natural size (its 64 host bits hold the whole tunnel IPv4);
+a smaller block works too but keeps only its low host bits of the IPv4, so keep
+the number of devices within what that block can hold.
 
 ## Routing
 

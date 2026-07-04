@@ -78,7 +78,7 @@ Remove a subnet and all its devices.
 Set (or clear) the routed IPv6 prefix delegated to the subnet. Each host on the
 subnet is assigned a globally-routable `/128` out of it. See [IPv6](ipv6.md).
 
-- `--prefix <PREFIX>` — The routed prefix (e.g. `2604:a880:4:1d0::/64`). Omit to
+- `--prefix <PREFIX>` — The routed prefix (e.g. `2001:db8:abcd::/64`). Omit to
   disable IPv6 on the subnet.
 
 ## Devices

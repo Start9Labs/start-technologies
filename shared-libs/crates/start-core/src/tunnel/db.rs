@@ -119,7 +119,7 @@ fn sni_and_dnat_persistence_round_trip() {
         auto: true,
     };
     let mut routes = BTreeMap::new();
-    routes.insert("id.thebarsonists.run".to_string(), route);
+    routes.insert("id.example.com".to_string(), route);
     let sni = PortForward::Sni { routes };
 
     let sni_json = serde_json::to_value(&sni).unwrap();
@@ -128,7 +128,7 @@ fn sni_and_dnat_persistence_round_trip() {
     let sni_back: PortForward = serde_json::from_value(sni_json).unwrap();
     match &sni_back {
         PortForward::Sni { routes } => {
-            let r = routes.get("id.thebarsonists.run").expect("route present");
+            let r = routes.get("id.example.com").expect("route present");
             assert_eq!(r.target, "10.59.0.2:443".parse().unwrap());
             assert_eq!(r.label, None);
             assert!(r.enabled);
@@ -182,7 +182,7 @@ fn sni_and_dnat_persistence_round_trip() {
         "5.6.7.8:443": {
             "kind": "sni",
             "routes": {
-                "id.thebarsonists.run": {
+                "id.example.com": {
                     "target": "10.59.0.2:443",
                     "label": null,
                     "enabled": true
@@ -197,7 +197,7 @@ fn sni_and_dnat_persistence_round_trip() {
     let sni_e = map.0.get(&"5.6.7.8:443".parse().unwrap()).unwrap();
     match sni_e {
         PortForward::Sni { routes } => {
-            let r = routes.get("id.thebarsonists.run").unwrap();
+            let r = routes.get("id.example.com").unwrap();
             assert!(r.enabled);
         }
         other => panic!("expected Sni, got {other:?}"),
