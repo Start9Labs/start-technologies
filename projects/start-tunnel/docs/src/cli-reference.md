@@ -131,6 +131,32 @@ Enable or disable a port forwarding rule.
 
 Change or clear the label on a port forwarding rule.
 
+## IPv6 Pinholes
+
+Expose a device's port over IPv6 by opening a firewall pinhole on the device's own global address (GUA — see [IPv6](./ipv6.md)). Unlike an IPv4 forward there is no NAT; a differing internal port turns it into a port-only translation on the same GUA (e.g. an `80 → 443` redirect). The GUA must be an address the tunnel delegates to a client (its subnet needs an IPv6 prefix).
+
+### `start-tunnel pinhole add <GUA> <EXTERNAL_PORT>`
+
+Open a pinhole for `[GUA]:EXTERNAL_PORT`.
+
+- `--internal-port <PORT>` — Destination port on the GUA. Omit for a pure pinhole (internal == external); set a different value for a port remap (e.g. `80 → 443`).
+- `--label <LABEL>` — Human-readable label
+- `--count <COUNT>` — Number of contiguous ports to open as a range, counting up from both the external and internal ports. Defaults to 1.
+
+### `start-tunnel pinhole remove <GUA> <EXTERNAL_PORT>`
+
+Remove a pinhole.
+
+### `start-tunnel pinhole set-enabled <GUA> <EXTERNAL_PORT>`
+
+Enable or disable a pinhole.
+
+- `--enabled` — Enable the pinhole
+
+### `start-tunnel pinhole update-label <GUA> <EXTERNAL_PORT> [LABEL]`
+
+Change or clear the label on a pinhole.
+
 ## Updates
 
 ### `start-tunnel update check`

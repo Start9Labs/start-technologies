@@ -18,16 +18,16 @@ docs for the exact prefix. A **/64 per subnet** is the natural fit.
 Delegating a prefix only works if the server can actually route it:
 
 - **The server must have working IPv6 egress** — an IPv6 default route (`::/0`).
-  A device given an IPv6 address routes *all* its IPv6 through the tunnel
+  A device given an IPv6 address routes _all_ its IPv6 through the tunnel
   (`AllowedIPs = ::/0`); without upstream IPv6 on the server that traffic simply
   blackholes. `subnet … set-ipv6` **hard-errors** if the server has no IPv6
   default route, leaving the configuration unchanged. Confirm with
   `ip -6 route show default` and configure IPv6 on the VPS first. StartTunnel
   does not configure the server's own WAN IPv6 — that's the host/provider's job
   (RA, `netplan`, or `cloud-init`).
-- **The prefix must be delivered to the server** — either *on-link* on a WAN
+- **The prefix must be delivered to the server** — either _on-link_ on a WAN
   interface (the server holds a global address inside the covering /64, the usual
-  single-/64 case) or *routed* to the server by your provider. If the prefix is
+  single-/64 case) or _routed_ to the server by your provider. If the prefix is
   neither on-link nor something this host can confirm, the command still succeeds
   but logs a warning: make sure your provider actually routes the block to this
   host, or the subnet's devices will have no working IPv6.
@@ -49,10 +49,12 @@ to include an IPv6 address. Reconnect (or re-download the config) on each device
 to pick it up.
 
 > [!NOTE]
-> Devices can make **outbound** IPv6 connections and receive their replies
-> today. Accepting **unsolicited inbound** connections to a device's IPv6
-> address (hosting a service over IPv6) is not yet supported — that arrives in a
-> later release, alongside the existing IPv4 port-forwarding.
+> Devices can make **outbound** IPv6 connections and receive their replies. To
+> accept **unsolicited inbound** connections to a device's IPv6 address (hosting
+> a service over IPv6), open a forward for it — see
+> [Port Forwarding](./port-forwarding.md). Over IPv6 a forward is a firewall
+> _pinhole_ on the device's global address (no NAT); a connected StartOS server
+> also opens these automatically via PCP.
 
 ## How addresses are assigned
 
