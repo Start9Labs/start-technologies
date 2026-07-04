@@ -1,0 +1,14 @@
+--- a/backport-include/linux/net.h
++++ b/backport-include/linux/net.h
+@@ -11,4 +11,10 @@
+ #ifndef SOCKWQ_ASYNC_WAITDATA
+ #define SOCKWQ_ASYNC_WAITDATA   SOCK_ASYNC_WAITDATA
+ #endif
++#ifndef SOCK_ASYNC_NOSPACE
++#define SOCK_ASYNC_NOSPACE   SOCKWQ_ASYNC_NOSPACE
++#endif
++#ifndef SOCK_ASYNC_WAITDATA
++#define SOCK_ASYNC_WAITDATA   SOCKWQ_ASYNC_WAITDATA
++#endif
+
+ #endif /* __BACKPORT_LINUX_NET_H */

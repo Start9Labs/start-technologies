@@ -1,0 +1,14 @@
+# Common parameter
+earlycon=sbi
+console=ttyS0,115200
+init=/init
+bootdelay=0
+baudrate=115200
+loglevel=8
+
+
+workqueue.default_affinity_scope=system
+
+# Common boot args
+commonargs=setenv bootargs earlycon=${earlycon} earlyprintk console=${console} loglevel=${loglevel} clk_ignore_unused rdinit=${init} workqueue.default_affinity_scope=${workqueue.default_affinity_scope}
+

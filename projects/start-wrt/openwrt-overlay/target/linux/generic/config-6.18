@@ -1,0 +1,3 @@
+# Minimal generic config for kernel 6.18 (git-cloned vendor kernel)
+# The vendor kernel provides its own defaults; this only adds
+# OpenWrt-specific patches that need explicit enablement.

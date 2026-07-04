@@ -1,0 +1,36 @@
+{
+  "version": "1.0",
+  "format": "mtd",
+  "partitions": [
+    {
+      "name": "bootinfo",
+      "comment": "private partition, should not overrided it",
+      "offset": "0",
+      "size": "128K",
+      "image": "factory/bootinfo_spinor.bin"
+    },
+    {
+      "name": "fsbl",
+      "offset": "128K",
+      "size": "256K",
+      "image": "factory/FSBL.bin"
+    },
+    {
+      "name": "env",
+      "offset": "384K",
+      "size": "64K"
+    },
+    {
+      "name": "opensbi",
+      "offset": "448K",
+      "size": "192K",
+      "image": "fw_dynamic.itb"
+    },
+    {
+      "name": "uboot",
+      "offset": "640K",
+      "size": "-",
+      "image": "u-boot.itb"
+    }
+  ]
+}

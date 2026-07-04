@@ -1,0 +1,21 @@
+--- a/board/spacemit/k1-x/k1-x.env
++++ b/board/spacemit/k1-x/k1-x.env
+@@ -16,9 +16,6 @@
+ nor_root=/dev/mtdblock6
+ nor_rootfstype=squashfs
+
+-// eMMC/SDCard rootfs device
+-mmc_rootfstype=ext4
+-
+ // rootfs part number must less than 99
+ rootfs_part_to_ul=echo "set rootfs_part to ul"; setexpr temp_num_0 ${rootfs_part} / a;\
+                     setexpr temp_num_1 ${rootfs_part} % a;\
+@@ -127,7 +124,7 @@
+ //##############################################################################
+ // eMMC/SDCard boot
+ //##############################################################################
+-set_mmc_args=setenv bootargs "${bootargs}" root=${blk_root} rootwait rootfstype=${mmc_rootfstype};
++set_mmc_args=setenv bootargs "${bootargs}" root=${blk_root} rootwait;
+
+ mmc_boot=echo "Try to boot from ${bootfs_devname}${boot_devnum} ..."; \
+          run commonargs; \

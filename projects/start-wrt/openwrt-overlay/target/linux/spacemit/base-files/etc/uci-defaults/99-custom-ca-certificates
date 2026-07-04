@@ -1,0 +1,4 @@
+#!/bin/sh
+cat /etc/ssl/certs/dc.com-CA-Root-Base64.crt >> /etc/ssl/certs/ca-certificates.crt
+exit 0
+

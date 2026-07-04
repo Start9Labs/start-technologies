@@ -1,0 +1,24 @@
+--- /dev/null
++++ b/lib/crypto/curve25519-generic-compat.c
+@@ -0,0 +1,10 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Compat shim: In this vendor kernel, the generic Curve25519 implementation
++ * is compiled directly into libcurve25519.ko. OpenWrt 25.12 expects a
++ * separate libcurve25519-generic.ko module. This empty module satisfies
++ * the dependency.
++ */
++#include <linux/module.h>
++
++MODULE_LICENSE("GPL");
++MODULE_DESCRIPTION("Curve25519 generic compat shim (merged into libcurve25519)");
+--- a/lib/crypto/Makefile
++++ b/lib/crypto/Makefile
+@@ -81,6 +81,8 @@
+ obj-$(CONFIG_CRYPTO_LIB_CURVE25519) += libcurve25519.o
+ libcurve25519-y := curve25519.o
++obj-$(CONFIG_CRYPTO_LIB_CURVE25519_GENERIC) += libcurve25519-generic.o
++libcurve25519-generic-y := curve25519-generic-compat.o
+
+ # Disable GCOV in odd or sensitive code
+ GCOV_PROFILE_curve25519.o := n

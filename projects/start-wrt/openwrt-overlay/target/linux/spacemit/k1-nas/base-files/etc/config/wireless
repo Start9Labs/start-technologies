@@ -1,0 +1,18 @@
+
+config wifi-device 'radio0'
+        option type 'mac80211'
+        option path 'platform/soc/d4280800.sdh/mmc_host/mmc1/mmc1:0001/mmc1:0001:1'
+        option band '2g'
+        option channel '6'
+        option htmode 'HT40'
+        option cell_density '0'
+
+config wifi-iface 'default_radio0'
+        option device 'radio0'
+        option network 'lan'
+        option mode 'ap'
+        option ssid 'OpenWrt-AP'
+        option encryption 'psk+ccmp'
+        option key '12345678'
+
+

@@ -1,0 +1,52 @@
+version: 1.0 # 配置文件版本
+support: # 支持的项目代号
+  - 'k1x'
+  - 'k1pro'
+actions: # 刷机操作的定义
+
+  - getvar:
+      args: 'version-brom'
+      set: 'version'
+      skip_fail: true
+      timeout:
+        seconds: 1
+
+  - stage:
+      file: 'factory/FSBL.bin'
+      skip_when: "not temp.version"
+      timeout:
+        minutes: 2
+
+  - continue:
+      skip_when: "not temp.version"
+      timeout:
+        seconds: 1
+
+  - stage:
+      file: 'u-boot.itb'
+      skip_when: "not temp.version"
+      timeout:
+        minutes: 2
+      retry: 3
+
+  - continue:
+      skip_when: "not temp.version"
+      timeout:
+        seconds: 1
+
+  - getvar:
+      args: 'mtd-size'
+      set_var: 'size0'
+      timeout:
+        seconds: 1
+
+  - getvar:
+      args: 'blk-size'
+      set_var: 'size1'
+      timeout:
+        seconds: 1
+
+  - multi_flash:
+      timeout:
+        minutes: 10
+      relate_partition: ['partition_{size0}.json', 'partition_{size1}.json']

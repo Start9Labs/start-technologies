@@ -89,10 +89,6 @@ jobs:
         if: ${{ github.event.inputs.runner == 'fast' }}
         run: sudo mount -t tmpfs tmpfs .
       - uses: actions/checkout@v6
-        with:
-          # The repo's only submodule (projects/start-wrt/openwrt) is multi-GB and only
-          # the start-wrt image build needs it — never clone it here.
-          submodules: false
       - uses: ./.github/actions/setup-build
         with:
           nodejs-version: ${{ env.NODEJS_VERSION }}
@@ -135,9 +131,6 @@ jobs:
         if: ${{ github.event.inputs.runner == 'fast' }}
         run: sudo mount -t tmpfs tmpfs .
       - uses: actions/checkout@v6
-        with:
-          # cli debs never need the openwrt submodule (see Build Binary above).
-          submodules: false
       - uses: ./.github/actions/setup-build
         with:
           nodejs-version: ${{ env.NODEJS_VERSION }}
@@ -160,7 +153,7 @@ jobs:
           path: target/${{ steps.triple.outputs.triple }}/release
 
       - name: Stamp prebuilt binary as up-to-date
-        # Drop the compiled binary where `make cli-deb` expects it and mark it
+        # Drop the compiled binary where `make start-cli-deb` expects it and mark it
         # newer than its Make prerequisites (the generated env/git-hash stamp
         # files + checked-out sources) so packaging skips a redundant recompile.
         run: |

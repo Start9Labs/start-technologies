@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shadowy Super Coder <fullmetal@start9.com>
+Date: Wed, 6 May 2026 12:00:00 +0000
+Subject: [PATCH] riscv: dts: spacemit: enable BPI-F3 EEPROM on I2C2
+
+The OpenWrt BPI-F3 image (target/linux/spacemit/image/k1-sbc.mk packages
+DEVICE_DTS=k1-x_deb1) boots with the vendor deb1 DTB. The 6.18 vendor
+DTS already declares the on-board GT24C02B EEPROM as eeprom@50 under
+&i2c2 with compatible = "atmel,24c02", but ships it with
+status = "disabled", so the at24 driver never binds despite the chip
+being reachable at I2C bus 2, address 0x50.
+
+Flip status to "okay" so the at24 driver exposes the chip at
+/sys/bus/i2c/devices/2-0050/eeprom for the userspace ONIE-TLV read path
+(StartWRT reads tag 0x2F as the WiFi PMK).
+
+Signed-off-by: Shadowy Super Coder <fullmetal@start9.com>
+---
+ arch/riscv/boot/dts/spacemit/k1-x_deb1.dts | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/arch/riscv/boot/dts/spacemit/k1-x_deb1.dts b/arch/riscv/boot/dts/spacemit/k1-x_deb1.dts
+--- a/arch/riscv/boot/dts/spacemit/k1-x_deb1.dts
++++ b/arch/riscv/boot/dts/spacemit/k1-x_deb1.dts
+@@ -1143,3 +1143,9 @@
+ 	pinctrl-0 = <&pinctrl_rpwm2_0>;
+ 	status = "okay";
+ };
++
++&i2c2 {
++	eeprom@50 {
++		status = "okay";
++	};
++};

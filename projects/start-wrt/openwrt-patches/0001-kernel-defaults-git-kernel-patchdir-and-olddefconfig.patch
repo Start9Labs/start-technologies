@@ -1,0 +1,34 @@
+Subject: include: apply PATCH_DIR to git-cloned kernels; run olddefconfig
+
+Two changes to the generic kernel build needed by the spacemit target's
+git-cloned Armbian vendor kernel (CONFIG_KERNEL_GIT_CLONE_URI):
+
+1. Kernel/Prepare/Default only applies the target PATCH_DIR to tarball
+   kernels; extend the tarball path's PatchDir call so git-cloned trees
+   get target/linux/<target>/patches-<ver>/ applied too.
+2. Run 'make olddefconfig' during Kernel/Configure so a vendor kernel
+   config with unset new symbols resolves to defaults non-interactively.
+
+Start9 downstream patch (start-technologies projects/start-wrt).
+Applies to: openwrt v25.12.4
+
+diff --git a/include/kernel-defaults.mk b/include/kernel-defaults.mk
+index bdfdaaa616..36fea0dd75 100644
+--- a/include/kernel-defaults.mk
++++ b/include/kernel-defaults.mk
+@@ -29,6 +29,7 @@ ifeq ($(strip $(CONFIG_EXTERNAL_KERNEL_TREE)),"")
+   else
+     define Kernel/Prepare/Default
+ 	$(LINUX_CAT) $(DL_DIR)/$(LINUX_SOURCE) | $(TAR) -C $(KERNEL_BUILD_DIR) $(TAR_OPTIONS)
++	$(if $(wildcard $(PATCH_DIR)),$(call PatchDir,$(LINUX_DIR),$(PATCH_DIR),platform/))
+     endef
+   endif
+ else
+@@ -125,6 +126,7 @@ define Kernel/Configure/Default
+ 		cp $(LINUX_DIR)/.config.set $(LINUX_DIR)/.config; \
+ 		cp $(LINUX_DIR)/.config.set $(LINUX_DIR)/.config.prev; \
+ 	}
++	$(_SINGLE)$(KERNEL_MAKE) olddefconfig
+ 	$(_SINGLE) [ -d $(LINUX_DIR)/user_headers ] || $(KERNEL_MAKE) $(if $(findstring uml,$(BOARD)),ARCH=$(ARCH)) INSTALL_HDR_PATH=$(LINUX_DIR)/user_headers headers_install
+ 	grep '=[ym]' $(LINUX_DIR)/.config.set | LC_ALL=C sort | $(MKHASH) md5 > $(LINUX_DIR)/.vermagic
+ endef

@@ -1,0 +1,10 @@
+--- a/crypto/Makefile
++++ b/crypto/Makefile
+@@ -78,7 +78,8 @@
+ obj-$(CONFIG_CRYPTO_SHA1) += sha1.o
+ obj-$(CONFIG_CRYPTO_SHA256) += sha256.o
+-obj-$(CONFIG_CRYPTO_SHA512) += sha512.o
++sha512_generic-y := sha512.o
++obj-$(CONFIG_CRYPTO_SHA512) += sha512_generic.o
+ obj-$(CONFIG_CRYPTO_SHA3) += sha3_generic.o
+ obj-$(CONFIG_CRYPTO_SM3_GENERIC) += sm3_generic.o

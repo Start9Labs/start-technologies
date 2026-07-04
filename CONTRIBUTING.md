@@ -76,7 +76,7 @@ This is a monorepo: one root Cargo workspace and one Angular workspace, both roo
 | start-cli | `make start-cli` | [`projects/start-cli/CONTRIBUTING.md`](projects/start-cli/CONTRIBUTING.md) |
 | start-registry | `make start-registry` | [`projects/start-registry/CONTRIBUTING.md`](projects/start-registry/CONTRIBUTING.md) |
 | StartTunnel | `make start-tunnel` | [`projects/start-tunnel/CONTRIBUTING.md`](projects/start-tunnel/CONTRIBUTING.md) |
-| StartWRT | `make start-wrt` (`make start-wrt-image` for the full OpenWrt image — hours, needs the submodule) | [`projects/start-wrt/CONTRIBUTING.md`](projects/start-wrt/CONTRIBUTING.md) |
+| StartWRT | `make start-wrt` (`make start-wrt-image` for the full OpenWrt image — hours, fetches the pinned OpenWrt tree) | [`projects/start-wrt/CONTRIBUTING.md`](projects/start-wrt/CONTRIBUTING.md) |
 | Start SDK | `make bundle` (from `projects/start-sdk`) | [`projects/start-sdk/CONTRIBUTING.md`](projects/start-sdk/CONTRIBUTING.md) |
 | Web (shared libs + app UIs) | `npm run build:ui` | [`shared-libs/ts-modules/CONTRIBUTING.md`](shared-libs/ts-modules/CONTRIBUTING.md) |
 

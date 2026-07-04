@@ -1,0 +1,25 @@
+Subject: kmod: crypto-crc32c: module renamed crc32c_generic -> crc32c-cryptoapi in 6.18
+
+Kernel 6.18 renamed the generic crc32c module. NOTE: this change is
+unconditional and would break 6.12-kernel targets; we only build the
+spacemit (6.18) target. A kernel-version conditional would make it
+upstreamable.
+
+Start9 downstream patch (start-technologies projects/start-wrt).
+Applies to: openwrt v25.12.4
+
+diff --git a/package/kernel/linux/modules/crypto.mk b/package/kernel/linux/modules/crypto.mk
+index 869601eb70..1c836cae38 100644
+--- a/package/kernel/linux/modules/crypto.mk
++++ b/package/kernel/linux/modules/crypto.mk
+@@ -155,8 +155,8 @@ define KernelPackage/crypto-crc32c
+   TITLE:=CRC32c CRC module
+   DEPENDS:=+kmod-crypto-hash
+   KCONFIG:=CONFIG_CRYPTO_CRC32C
+-  FILES:=$(LINUX_DIR)/crypto/crc32c_generic.ko
+-  AUTOLOAD:=$(call AutoLoad,04,crc32c_generic,1)
++  FILES:=$(LINUX_DIR)/crypto/crc32c-cryptoapi.ko
++  AUTOLOAD:=$(call AutoLoad,04,crc32c-cryptoapi,1)
+   $(call AddDepends/crypto)
+ endef
+ 

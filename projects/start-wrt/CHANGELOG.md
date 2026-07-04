@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The OpenWrt image now builds from **pristine upstream OpenWrt** (release pinned
+  in `build/openwrt-version`, integrity-checked by commit hash) with the Start9
+  delta applied at build time from in-repo `openwrt-patches/` (3 build-infra
+  patches) and `openwrt-overlay/` (the SpacemiT K1 target + boot packages). The
+  `Start9Labs/openwrt` fork and the monorepo's last git submodule are retired;
+  cloning no longer needs `--recursive`. The prepared tree is byte-identical to
+  the former fork (verified by git tree hash), so image contents are unchanged.
+
 ### Fixed
 
 - Changing the admin password now enforces the 12-character minimum. The

@@ -30,6 +30,10 @@ docs/USER.md
 .claude/*
 !.claude/settings.json
 
+# openwrt build substrate: disposable checkout of pristine upstream OpenWrt,
+# managed by projects/start-wrt/build/openwrt-setup.sh (was a git submodule)
+/projects/start-wrt/openwrt/
+
 # monorepo: per-product web build outputs
 /projects/start-os/web/dist/
 /projects/start-tunnel/web/dist/

@@ -53,7 +53,7 @@ start-wrt's targets live in [`build.mk`](build.mk) (included by the root `Makefi
 | Target | Description |
 |--------|-------------|
 | `make start-wrt` | web → riscv64 binary (cross-compiled via dockerized cargo-zigbuild) |
-| `make start-wrt-openwrt-setup` | one-time: openwrt feeds/config/download (needs the `openwrt` submodule) |
+| `make start-wrt-openwrt-setup` | fetch/reset the pinned OpenWrt tree, apply the Start9 delta, feeds/config/download |
 | `make start-wrt-image` | full flashable OpenWrt image → `results/` (**hours**) |
 | `make start-wrt-update STARTWRT_REMOTE=root@IP` | deploy binary over SSH (default `root@192.168.0.1`) |
 | `make start-wrt-clean` | remove start-wrt build artifacts |
@@ -95,8 +95,45 @@ Releases stage through a beta registry before promotion to production, mirroring
 > **⚠ UNVALIDATED since the monorepo migration.** The riscv dockerized cross-build (`make
 > start-wrt`) and the OpenWrt image assembly (`make start-wrt-image`) have not yet been run on a
 > build host. The backend host `cargo check` passes. Validate `make start-wrt` first (it does not
-> need the multi-GB `openwrt` submodule), then `make start-wrt-image`. The OpenWrt build needs a
-> consistent environment — Docker is recommended; native builds on some distros fail silently.
+> need the OpenWrt tree), then `make start-wrt-image`. The OpenWrt build needs a consistent
+> environment — Docker is recommended; native builds on some distros fail silently.
+> The patch/overlay tree prep itself **is** validated: `openwrt-setup.sh --tree-only` reproduces
+> the retired fork's tree byte-for-byte (verified by tree hash).
+
+## OpenWrt tree (pinned upstream + patches + overlay)
+
+`openwrt/` is **not** a submodule and **not** a fork — it's a disposable, gitignored checkout
+of pristine upstream OpenWrt that `build/openwrt-setup.sh` manages. Every setup run:
+
+1. Fetches the upstream release pinned in [`build/openwrt-version`](build/openwrt-version)
+   (`OPENWRT_TAG`, integrity-checked against `OPENWRT_COMMIT`) and hard-resets the checkout to
+   it, dropping any local edits. Ignored paths (`dl/`, `feeds/`, `build_dir/`, `staging_dir/`,
+   `bin/`, `files/`, `.config`) survive the reset, so caches and staged files are preserved.
+2. `git apply`-s [`openwrt-patches/`](openwrt-patches/) — the Start9 modifications to upstream
+   files (currently 3 small build-infra patches for the git-cloned vendor kernel + a 6.18
+   module rename).
+3. Rsyncs [`openwrt-overlay/`](openwrt-overlay/) over the tree — the Start9 *additions*
+   (mirroring upstream layout): `target/linux/spacemit/` (the K1 target, including its
+   `patches-6.18/` kernel patches), `package/boot/{opensbi,uboot}-spacemit/`, the generic
+   6.18 kernel stubs, and one mac80211 build patch. Additions live as plain files, not
+   patches, so upstream bumps can never conflict with them.
+
+`./projects/start-wrt/build/openwrt-setup.sh --tree-only` (from the repo root) runs only the
+tree prep — useful offline and for testing.
+
+**Changing the OpenWrt delta.** Never commit inside `openwrt/`. To add files, edit
+`openwrt-overlay/` (or drop new files into the checkout, verify, then copy them into the
+overlay at the same relative path). To modify an upstream file, edit it in the checkout,
+verify, then regenerate the patch: `git -C projects/start-wrt/openwrt diff <file> >`
+`projects/start-wrt/openwrt-patches/000N-<name>.patch` (keep the explanatory header — patch
+tooling ignores everything before the first `diff --git`).
+
+**Bumping the upstream release.** Update both values in `build/openwrt-version` (the new tag
+and its `^{commit}` SHA), run `make start-wrt-openwrt-setup`, and rebuild the image. If a patch
+no longer applies, fix the affected file in the checkout by hand and regenerate that patch as
+above. The overlay needs attention only if upstream grew a conflicting path (the spacemit
+target dir is ours alone, so this is rare). Commit the pin bump + refreshed patches + a
+`CHANGELOG.md` entry as one ordinary PR.
 
 ## Coupled changes
 

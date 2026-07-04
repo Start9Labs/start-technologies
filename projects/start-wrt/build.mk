@@ -94,10 +94,17 @@ start-wrt-test: $(STARTWRT_RUST_SRC) $(ENVIRONMENT_FILE)
 	./$(STARTWRT_DIR)/build/run-tests.sh
 
 # --- OpenWrt image (HEAVY, UNVALIDATED) ---
-# One-time feeds/config/download.
+# Tree prep + feeds/config/download. openwrt/ is a disposable, gitignored
+# checkout of pristine upstream OpenWrt (not a submodule): openwrt-setup.sh
+# fetches/resets it to the commit pinned in build/openwrt-version, applies the
+# Start9 delta (openwrt-patches/ + openwrt-overlay/), then runs feeds/config/
+# download. Re-runs whenever the pin, patches, overlay, feeds, or diffconfig
+# change.
 .PHONY: start-wrt-openwrt-setup
 start-wrt-openwrt-setup: $(STARTWRT_OPENWRT)/.config
-$(STARTWRT_OPENWRT)/.config: $(STARTWRT_DIR)/build/openwrt.diffconfig $(STARTWRT_DIR)/build/feeds.conf
+$(STARTWRT_OPENWRT)/.config: $(STARTWRT_DIR)/build/openwrt.diffconfig $(STARTWRT_DIR)/build/feeds.conf \
+		$(STARTWRT_DIR)/build/openwrt-version $(STARTWRT_DIR)/build/openwrt-setup.sh \
+		$(call ls-files, $(STARTWRT_DIR)/openwrt-patches) $(call ls-files, $(STARTWRT_DIR)/openwrt-overlay)
 	./$(STARTWRT_DIR)/build/openwrt-setup.sh
 
 # Stage the binary + UCI configs + init scripts into openwrt/files/.

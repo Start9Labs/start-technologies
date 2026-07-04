@@ -69,15 +69,13 @@ env:
 
 jobs:
   # Fast path: cross-compile the riscv64 binary (embeds the web UI). Does NOT
-  # need the multi-GB openwrt submodule.
+  # need the OpenWrt tree.
   compile:
     name: Build riscv64 binary
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-        with:
-          submodules: false
       - uses: ./.github/actions/setup-build
         with:
           nodejs-version: ${{ env.NODEJS_VERSION }}
@@ -99,31 +97,33 @@ jobs:
           path: target/riscv64gc-unknown-linux-musl/release/startwrt
           retention-days: 14
 
-  # Heavy path: full flashable OpenWrt image. Gated to manual dispatch because it
-  # pulls the openwrt submodule and runs a multi-hour build. Also runs when
-  # deploying, since the `deploy` job needs the freshly built images.
+  # Heavy path: full flashable OpenWrt image. Gated to manual dispatch because
+  # it clones pristine upstream OpenWrt (pinned in build/openwrt-version,
+  # patched from openwrt-patches/ + openwrt-overlay/) and runs a multi-hour
+  # build. Also runs when deploying, since the `deploy` job needs the freshly
+  # built images.
   image:
     name: Build OpenWrt image
     if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.build-image == 'true' || github.event.inputs.deploy == 'release') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-        with:
-          submodules: recursive
       - uses: ./.github/actions/setup-build
         with:
           nodejs-version: ${{ env.NODEJS_VERSION }}
 
+      # Restored BEFORE openwrt-setup.sh runs — the script git-inits into the
+      # existing openwrt/ directory around the cached dl/.
       - name: Cache OpenWrt download directory
         uses: actions/cache@v4
         with:
           path: projects/start-wrt/openwrt/dl
-          # Bust the cache when either the feed set or the OpenWrt config
+          # Bust the cache when the upstream pin, feed set, or OpenWrt config
           # changes; restore-keys lets a partial (older) cache seed a fresh run.
-          key: openwrt-dl-${{ hashFiles('projects/start-wrt/build/feeds.conf', 'projects/start-wrt/build/openwrt.diffconfig') }}
+          key: openwrt-dl-${{ hashFiles('projects/start-wrt/build/openwrt-version', 'projects/start-wrt/build/feeds.conf', 'projects/start-wrt/build/openwrt.diffconfig') }}
           restore-keys: openwrt-dl-
 
-      - name: Setup OpenWrt (feeds, config, download)
+      - name: Setup OpenWrt (fetch pinned upstream, patch, feeds, config, download)
         run: make start-wrt-openwrt-setup
 
       - name: Build image
@@ -164,7 +164,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          submodules: false
           sparse-checkout: projects/start-wrt/backend/ctrl/Cargo.toml
           sparse-checkout-cone-mode: false
 

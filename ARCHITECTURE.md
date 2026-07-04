@@ -27,7 +27,7 @@ start-technologies/                # repo root (monorepo)
 │   └── start-registryd.service
 ├── projects/start-tunnel/         # tunnelbox bin + web/ (StartTunnel UI)
 │   └── start-tunneld.service
-├── projects/start-wrt/            # StartWRT router OS: startwrt bin + web/ (root Angular workspace) + openwrt submodule
+├── projects/start-wrt/            # StartWRT router OS: startwrt bin + web/ (root Angular workspace) + pinned-upstream openwrt image build
 ├── projects/start-sdk/                     # @start9labs/start-sdk (source in lib/) + Makefile/s9pk.mk + docs/
 ├── projects/brochure-marketplace/ # marketing/landing Angular app
 ├── shared-libs/

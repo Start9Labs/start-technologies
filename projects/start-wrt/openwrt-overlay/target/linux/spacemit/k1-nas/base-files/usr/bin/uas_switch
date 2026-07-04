@@ -1,0 +1,44 @@
+#!/bin/sh /etc/rc.common
+#must after boot
+START=11
+start(){
+    echo 79 > /sys/class/gpio/export
+    echo out > /sys/class/gpio/gpio79/direction
+    echo 1 > /sys/class/gpio/gpio79/value
+
+    uas-gadget3.sh start /dev/nvme0n1p1
+    sleep 2
+    state=$(cat /sys/class/udc/c0a00000.dwc3/state)
+    echo "u3 state $state"
+    
+    [ $state = "configured" ] && {
+        echo "u3 mass storage connected" > /dev/ttyS0
+        exit 0
+    }
+    uas-gadget3.sh stop
+    
+    uas-gadget2-bot.sh start /dev/nvme0n1p1
+    sleep 2
+    state=$(cat /sys/class/udc/c0900100.udc/state)
+    [ $state = "configured" ] && {
+        echo "u2 mass storage connected" > /dev/ttyS0
+        exit 0
+    }
+    uas-gadget2-bot.sh stop
+    sleep 1
+    echo 0 > /sys/class/gpio/gpio79/value
+    echo "host" > /sys/kernel/debug/usb/c0a00000.dwc3/mode
+    echo "try u3 and u2 mass storage fails, falling to netbox"
+    sleep 3
+    /etc/init.d/network restart
+    uci set firewall.@zone[1].input='ACCEPT'
+    /etc/init.d/firewall reload
+    /etc/init.d/fstab boot
+}
+ 
+stop(){
+       echo "mass storage is stop"
+}
+restart(){
+        echo "mass storage is restart"
+}

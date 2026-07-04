@@ -1,0 +1,6 @@
+#boot part size defined in partions_*.json file
+#config SPACEMIT_SD_BOOT_PARTSIZE
+#	int "Boot (SD Card) filesystem partition size (in MB)"
+#	depends on TARGET_spacemit
+#	default 32
+

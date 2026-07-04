@@ -1,0 +1,31 @@
+--- a/arch/riscv/dts/k1-x.dtsi
++++ b/arch/riscv/dts/k1-x.dtsi
+@@ -910,20 +910,28 @@
+ 						};
+ 					};
+ 
++#ifndef CONFIG_OF_BOARD
+ 					@fdt-SEQ {
+ 						description = "NAME";
+ 						type = "flat_dt";
+ 						compression = "none";
+ 					};
++#endif
+ 				};
+ 
+ 				configurations {
+ 					default = "conf-1";
+ 
++#ifndef CONFIG_OF_BOARD
+ 					@conf-SEQ {
++#else
++					conf-1 {
++#endif
+ 						description = "U-boot FIT config";
+ 						loadables = "uboot";
++#ifndef CONFIG_OF_BOARD
+ 						fdt = "fdt-SEQ";
++#endif
+ 					};
+ 				};
+ 			};
