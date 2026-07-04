@@ -26,9 +26,9 @@ By default, StartOS dynamically selects which gateway to use for outbound traffi
 
 ## IPv6 leak prevention
 
-StartOS routes IPv6 through a gateway only when that gateway is selected for outbound traffic — the same way it treats IPv4. Importing a VPN or tunnel does not silently pull your IPv6 traffic through it.
+StartOS treats IPv6 outbound routing the same way as IPv4: the default gateway is chosen by route metric, and you can pin all traffic to a specific gateway under `System > Gateways > Outbound Traffic`.
 
-If the gateway you select for outbound traffic can't carry IPv6 — for example a commercial VPN whose WireGuard config has no IPv6 address — StartOS **drops** the server's outbound IPv6 rather than letting it fall back to your ISP connection, so your real IPv6 address never leaks around the VPN. A gateway that does provide IPv6 (such as a StartTunnel with a [delegated prefix](/start-tunnel/ipv6.html)) carries IPv6 normally.
+If the gateway you select for outbound traffic can't carry IPv6 — for example a commercial VPN whose WireGuard config has no IPv6 address — StartOS **drops** the server's outbound IPv6 rather than letting it fall back to your ISP connection, so your real IPv6 address never leaks around the VPN. (The drop is a blackhole in that gateway's own routing table.) A gateway that does provide IPv6 (such as a StartTunnel with a [delegated prefix](/start-tunnel/ipv6.html)) carries IPv6 normally; on a server with no native ISP IPv6, such a tunnel can also become your IPv6 default before you pin it, so select an outbound gateway explicitly if you want to control which one.
 
 ## Route Individual Services Through VPN
 

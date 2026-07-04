@@ -1096,16 +1096,17 @@ pub async fn synchronize_network_manager<P: AsRef<Path>>(
         .await
         .log_err();
 
-    // IPv6 twins of the two fallbacks above, plus a terminal blackhole. StartOS
-    // owns v6 routing the way it owns v4: `from all lookup main`/`default` sit
-    // above NetworkManager's per-tunnel `::/0` full-tunnel rules (~pref 30786),
-    // so importing a tunnel that carries an IPv6 address no longer lets NM
-    // capture the host's entire IPv6 default route. When neither the main table
-    // nor a chosen default-outbound gateway has a usable v6 default, the
-    // priority-1200 blackhole drops the traffic instead of letting it fall
-    // through to NM's capture — closing both the hijack and the leak (v6 never
-    // silently exits a gateway that can't carry it). A gateway is used for v6
-    // only when explicitly selected as the default outbound, exactly like v4.
+    // IPv6 twins of the two fallbacks above. StartOS owns v6 routing the way it
+    // owns v4: `from all lookup main`/`default` sit above NetworkManager's
+    // per-tunnel `::/0` full-tunnel rules (~pref 30786), so importing a tunnel
+    // that carries an IPv6 address no longer lets NM capture the host's entire
+    // IPv6 default route — the v6 default is decided by `main` (by metric),
+    // exactly like v4. There is no terminal blackhole: leak prevention is
+    // per-gateway instead. A gateway with no IPv6 that is selected as the default
+    // outbound points its priority-75 catch-all at a `blackhole default` table
+    // (see `apply_policy_routing_v6`), dropping the host's v6 egress without also
+    // blackholing replies to inbound tunnel connections — those are pinned to
+    // their arrival interface by the priority-50 CONNMARK rule.
     Command::new("ip")
         .arg("-6")
         .arg("rule")
@@ -1129,18 +1130,6 @@ pub async fn synchronize_network_manager<P: AsRef<Path>>(
         .arg("all")
         .arg("lookup")
         .arg("default")
-        .invoke(ErrorKind::Network)
-        .await
-        .log_err();
-    Command::new("ip")
-        .arg("-6")
-        .arg("rule")
-        .arg("add")
-        .arg("pref")
-        .arg("1200")
-        .arg("from")
-        .arg("all")
-        .arg("blackhole")
         .invoke(ErrorKind::Network)
         .await
         .log_err();

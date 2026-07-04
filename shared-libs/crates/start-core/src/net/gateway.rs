@@ -1266,14 +1266,23 @@ async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
         .filter_map(|iface| if_nametoindex(iface.as_str()).ok().map(|idx| 1000 + idx))
         .collect();
 
-    // GC fwmark ip rules at priority 50 and their routing tables.
-    if let Ok(rules) = Command::new("ip")
-        .arg("rule")
-        .arg("show")
-        .invoke(ErrorKind::Network)
-        .await
-        .and_then(|b| String::from_utf8(b).with_kind(ErrorKind::Utf8))
-    {
+    // Collect stale per-interface table ids from the priority-50 fwmark rules in
+    // both families (IPv4 and IPv6 install the same `1000 + ifindex` rule).
+    let mut stale = BTreeSet::<u32>::new();
+    for v6 in [false, true] {
+        let mut cmd = Command::new("ip");
+        if v6 {
+            cmd.arg("-6");
+        }
+        let Ok(rules) = cmd
+            .arg("rule")
+            .arg("show")
+            .invoke(ErrorKind::Network)
+            .await
+            .and_then(|b| String::from_utf8(b).with_kind(ErrorKind::Utf8))
+        else {
+            continue;
+        };
         for line in rules.lines() {
             let line = line.trim();
             if !line.starts_with("50:") {
@@ -1289,10 +1298,22 @@ async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
             if table_id < 1000 || active_tables.contains(&table_id) {
                 continue;
             }
-            let table_str = table_id.to_string();
-            tracing::debug!("gc_policy_routing: removing stale table {table_id}");
-            Command::new("ip")
-                .arg("rule")
+            stale.insert(table_id);
+        }
+    }
+
+    // For each stale table, remove the priority-50 fwmark rule and flush its
+    // routing table in both families, so a removed interface leaves no stale
+    // reply-routing rule, v4 default, or v6 default/blackhole behind.
+    for table_id in stale {
+        let table_str = table_id.to_string();
+        tracing::debug!("gc_policy_routing: removing stale table {table_id}");
+        for v6 in [false, true] {
+            let mut del = Command::new("ip");
+            if v6 {
+                del.arg("-6");
+            }
+            del.arg("rule")
                 .arg("del")
                 .arg("fwmark")
                 .arg(&table_str)
@@ -1303,18 +1324,11 @@ async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
                 .invoke(ErrorKind::Network)
                 .await
                 .ok();
-            Command::new("ip")
-                .arg("route")
-                .arg("flush")
-                .arg("table")
-                .arg(&table_str)
-                .invoke(ErrorKind::Network)
-                .await
-                .ok();
-            // The v6 policy table shares this table id (1000 + ifindex); flush it
-            // too so a removed interface leaves no stale v6 default/blackhole.
-            Command::new("ip")
-                .arg("-6")
+            let mut flush = Command::new("ip");
+            if v6 {
+                flush.arg("-6");
+            }
+            flush
                 .arg("route")
                 .arg("flush")
                 .arg("table")
@@ -1471,16 +1485,23 @@ fn policy_table_for(device_type: Option<NetworkInterfaceType>, iface: &GatewayId
 /// Declaratively reconcile the StartOS-owned mangle policy-routing rules.
 ///
 /// Single-writer (only the gateway coordinator calls this) and applied as one
-/// atomic nft transaction: both mangle chains are flushed and rebuilt from the
+/// atomic nft transaction: the mangle chains are flushed and rebuilt from the
 /// active interface set, so there is no multi-writer race and defunct
 /// `mark-<iface>` rules are removed for free by the flush. `restore-mark` is
 /// emitted first so it runs before the per-interface set-mark rules (a new
 /// packet then leaves with mark 0 and routes via the main table).
+///
+/// IPv4 and IPv6 carry the same CONNMARK reply-routing layer, rebuilt together
+/// so a reply to a v6 connection that arrived on a tunnel (host-terminated or
+/// DNAT'd to a container) routes back out it via the priority-50 fwmark rule,
+/// exactly like v4. `sni-divert` is IPv4-only (IP_TRANSPARENT egress is v4).
 async fn reconcile_mangle_rules(policy_ifaces: &BTreeMap<GatewayId, u32>) -> Result<(), Error> {
     nft_ensure_base().await?;
     let mut script = String::new();
     script.push_str("flush chain ip startos mangle_prerouting\n");
     script.push_str("flush chain ip startos mangle_output\n");
+    script.push_str("flush chain ip6 startos mangle_prerouting\n");
+    script.push_str("flush chain ip6 startos mangle_output\n");
     script.push_str(
         "add rule ip startos mangle_prerouting meta mark 0x00000000 meta mark set ct mark comment \"restore-mark\"\n",
     );
@@ -1490,9 +1511,19 @@ async fn reconcile_mangle_rules(policy_ifaces: &BTreeMap<GatewayId, u32>) -> Res
     script.push_str(
         "add rule ip startos mangle_output meta mark 0x00000000 meta mark set ct mark comment \"restore-mark\"\n",
     );
+    script.push_str(
+        "add rule ip6 startos mangle_prerouting meta mark 0x00000000 meta mark set ct mark comment \"restore-mark\"\n",
+    );
+    script.push_str(
+        "add rule ip6 startos mangle_output meta mark 0x00000000 meta mark set ct mark comment \"restore-mark\"\n",
+    );
     for (iface, table_id) in policy_ifaces {
         script.push_str(&format!(
             "add rule ip startos mangle_prerouting iifname \"{iface}\" ct state new ct mark set {table_id} comment \"mark-{iface}\"\n",
+            iface = iface.as_str(),
+        ));
+        script.push_str(&format!(
+            "add rule ip6 startos mangle_prerouting iifname \"{iface}\" ct state new ct mark set {table_id} comment \"mark-{iface}\"\n",
             iface = iface.as_str(),
         ));
     }
@@ -1794,18 +1825,21 @@ async fn apply_policy_routing(
     Ok(())
 }
 
-/// IPv6 counterpart of [`apply_policy_routing`]'s per-interface table work, for
-/// the default-outbound path only. IPv6 has no NAT and no SNI demux here, so the
-/// priority-50 reply-routing / conntrack-mark layer is deliberately omitted;
-/// this only readies the interface's v6 table `1000 + ifindex` for the
-/// priority-75 catch-all that [`apply_default_outbound`] installs when this
-/// gateway is chosen as the default outbound.
+/// IPv6 counterpart of [`apply_policy_routing`]'s per-interface table work.
 ///
-/// The table mirrors `main`'s non-default v6 routes (so on-link/local v6 still
-/// goes direct) plus a default: `default [via gw] dev iface` when the interface
-/// can carry v6, otherwise `blackhole default`. The blackhole is the leak guard
-/// — selecting a gateway with no IPv6 as the default outbound then drops v6
-/// rather than letting it fall through to some other interface's default.
+/// The table `1000 + ifindex` mirrors `main`'s non-default v6 routes (so
+/// on-link/local v6 still goes direct) plus a default: `default [via gw] dev
+/// iface` when the interface can carry v6, otherwise `blackhole default`. That
+/// per-gateway blackhole is the leak guard — a gateway with no IPv6 selected as
+/// the default outbound (the priority-75 catch-all) then drops v6 rather than
+/// letting it fall through to some other interface's default.
+///
+/// The table backs two rule layers, both IPv4 parity: the priority-75
+/// default-outbound catch-all ([`apply_default_outbound`]) and the priority-50
+/// CONNMARK reply-routing rule installed at the end here (marks set by
+/// [`reconcile_mangle_rules`]). IPv6 has no NAT/SNI-demux reply layer to build —
+/// the mark alone routes a reply back out the interface its connection arrived
+/// on, so a v6 service reached through a tunnel can answer.
 async fn apply_policy_routing_v6(
     guard: &PolicyRoutingGuard,
     iface: &GatewayId,
@@ -1924,6 +1958,38 @@ async fn apply_policy_routing_v6(
         }
     }
 
+    // Ensure the priority-50 fwmark ip rule for this interface's table — the
+    // IPv6 half of the CONNMARK reply-routing layer (marks set by
+    // `reconcile_mangle_rules`). Mirrors `apply_policy_routing`'s IPv4 rule so a
+    // reply to a connection that arrived on this interface (host-terminated or
+    // DNAT'd to a container) routes back out it rather than being lost.
+    let rules_output = String::from_utf8(
+        Command::new("ip")
+            .arg("-6")
+            .arg("rule")
+            .arg("list")
+            .invoke(ErrorKind::Network)
+            .await?,
+    )?;
+    if !rules_output
+        .lines()
+        .any(|l| l.contains("fwmark") && l.contains(&format!("lookup {table_id}")))
+    {
+        Command::new("ip")
+            .arg("-6")
+            .arg("rule")
+            .arg("add")
+            .arg("fwmark")
+            .arg(&table_str)
+            .arg("lookup")
+            .arg(&table_str)
+            .arg("priority")
+            .arg("50")
+            .invoke(ErrorKind::Network)
+            .await
+            .log_err();
+    }
+
     Ok(())
 }
 
@@ -1996,9 +2062,11 @@ async fn poll_ip_info(
     // eliminating the need for MASQUERADE.
     if let Some(guard) = policy_guard {
         apply_policy_routing(guard, iface, &lan_ip).await?;
-        // v6 has no NAT/reply-routing, so this only readies the interface's v6
-        // table for the default-outbound catch-all (and installs the leak-guard
-        // blackhole when the interface can't carry v6).
+        // v6 has no NAT/SNI-demux reply layer, but this now installs the v6
+        // CONNMARK reply-routing rule (priority 50, IPv4 parity — marks set by
+        // `reconcile_mangle_rules`) alongside readying the interface's v6 table
+        // for the default-outbound catch-all and the per-gateway leak-guard
+        // blackhole (when the interface can't carry v6).
         apply_policy_routing_v6(guard, iface, &lan_ip, &subnets).await?;
     }
 

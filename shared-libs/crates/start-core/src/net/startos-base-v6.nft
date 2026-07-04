@@ -1,6 +1,9 @@
 # IPv6 counterpart of startos-base.nft. Non-SSL services reachable over an IPv6
 # GUA route inbound to the container here (DNAT host-GUA:port -> container:port),
-# so the same nat + filter chain layout as `ip startos` is mirrored in `ip6`.
+# so the same nat + filter + mangle chain layout as `ip startos` is mirrored in
+# `ip6`. The mangle chains carry the CONNMARK reply-routing layer (mark inbound
+# connections by ingress interface, restore on replies) so a reply to a v6
+# connection that arrived on a tunnel routes back out it — IPv4 parity.
 # `add table`/`add chain` are idempotent; per-forward rules are added elsewhere
 # (comment-tagged for dedup), never here.
 add table ip6 startos
@@ -8,3 +11,7 @@ add chain ip6 startos prerouting { type nat hook prerouting priority dstnat; pol
 add chain ip6 startos output { type nat hook output priority -100; policy accept; }
 add chain ip6 startos postrouting { type nat hook postrouting priority srcnat; policy accept; }
 add chain ip6 startos forward { type filter hook forward priority filter; policy drop; }
+add chain ip6 startos mangle_prerouting { type filter hook prerouting priority mangle; policy accept; }
+# 'route' (not filter) so restore-mark reroutes locally-generated replies (iptables mangle-OUTPUT parity)
+add chain ip6 startos mangle_output { type route hook output priority mangle; policy accept; }
+add chain ip6 startos mangle_forward { type filter hook forward priority mangle; policy accept; }

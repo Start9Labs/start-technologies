@@ -8,13 +8,6 @@ Full per-release notes are published on the
 [GitHub releases page](https://github.com/Start9Labs/start-technologies/releases). This
 file tracks notable changes since the move to the monorepo.
 
-## [Unreleased]
-
-### Fixed
-
-- **IPv6 no longer leaks or blackholes around a gateway.** StartOS now applies the same policy routing to IPv6 as to IPv4: a gateway carries the server's IPv6 only when it is selected for outbound traffic (system-wide or per-service). Previously, importing any WireGuard gateway let NetworkManager capture the host's entire IPv6 default route into that tunnel — so a tunnel that carried an IPv6 address (e.g. a StartTunnel with a delegated prefix) but couldn't actually route IPv6 would blackhole all of the server's IPv6, and a commercial VPN selected as the default outbound would leak IPv6 straight out the ISP link. IPv6 destined for a selected gateway that can't carry it is now dropped (no leak), and unselected gateways no longer hijack it.
-- **Updating a WireGuard gateway's config no longer drops its preshared key.** The in-place update path (`net tunnel update` / the **Update config** UI action, NetworkManager `Update2` + `Reapply`) persisted the interface private key but silently dropped each peer's preshared key, so a re-issued PSK-using tunnel failed its handshake and went dead (taking tunnel-routed DNS down with it). The peer secret is now flagged system-owned so the update persists it.
-
 ## [0.4.0-beta.10]
 
 ### Added
@@ -93,6 +86,8 @@ file tracks notable changes since the move to the monorepo.
 
 ### Fixed
 
+- **IPv6 services exposed through a tunnel are now reachable, and outbound IPv6 no longer leaks around a gateway.** StartOS now applies the full IPv4 policy-routing layer to IPv6, including CONNMARK reply-routing: a reply to an inbound IPv6 connection that arrived over a tunnel — whether terminated on the host or DNAT'd to a service container — is pinned back out the interface it arrived on, so exposing a service over a StartTunnel's delegated IPv6 actually works. Previously those replies had no route back and were blackholed, so inbound IPv6 over a tunnel was dead. Outbound, the server's IPv6 default is now chosen by route metric exactly like IPv4, and leak prevention is per-gateway: an outbound gateway that is explicitly selected but can't carry IPv6 drops the server's IPv6 via a blackhole in that gateway's own routing table — so your real address never leaks out the ISP link — without blackholing the reply traffic that keeps inbound tunnel services working.
+- **Updating a WireGuard gateway's config no longer drops its preshared key.** The in-place update path (`net tunnel update` / the **Update config** UI action, NetworkManager `Update2` + `Reapply`) persisted the interface private key but silently dropped each peer's preshared key, so a re-issued PSK-using tunnel failed its handshake and went dead (taking tunnel-routed DNS down with it). The peer secret is now flagged system-owned so the update persists it.
 - **Dev builds bricked by an empty persisted host id (#3387).** Builds between
   #3366 and #3387 persisted the server host's then-sentinel id (the empty
   string) in the admin UI interface's `addressInfo.hostId`, which strict
