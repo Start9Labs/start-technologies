@@ -3,6 +3,7 @@ import type { AnyVerifyingKey } from './AnyVerifyingKey'
 import type { DnsRecords } from './DnsRecords'
 import type { GatewayId } from './GatewayId'
 import type { NetworkInterfaceInfo } from './NetworkInterfaceInfo'
+import type { Pinholes6 } from './Pinholes6'
 import type { PortForwards } from './PortForwards'
 import type { Sessions } from './Sessions'
 import type { SignerInfo } from './SignerInfo'
@@ -17,5 +18,11 @@ export type TunnelDatabase = {
   gateways: { [key: GatewayId]: NetworkInterfaceInfo }
   wg: WgServer
   portForwards: PortForwards
+  /**
+   * IPv6 GUA firewall pinholes: inbound to a client's own global address is
+   * accepted (no NAT — the GUA is directly routable), keyed by the exposed
+   * `[GUA]:port`. The v4 analogue is a `PortForward::Dnat`.
+   */
+  pinholes6: Pinholes6
   dnsRecords: DnsRecords
 }

@@ -2,7 +2,7 @@ import { T } from '@start9labs/start-core'
 
 export type TunnelData = Pick<
   T.Tunnel.TunnelDatabase,
-  'wg' | 'portForwards' | 'gateways' | 'dnsRecords'
+  'wg' | 'portForwards' | 'pinholes6' | 'gateways' | 'dnsRecords'
 >
 
 export const mockTunnelData: TunnelData = {
@@ -80,6 +80,23 @@ export const mockTunnelData: TunnelData = {
           auto: false,
         },
       },
+    },
+  },
+  pinholes6: {
+    // Client 10.59.0.2's GUA on the subnet's 2001:db8:59::/64 prefix.
+    '[2001:db8:59::a3b:2]:8443': {
+      label: 'Nextcloud',
+      enabled: true,
+      count: 1,
+      internalPort: null,
+      auto: false,
+    },
+    '[2001:db8:59::a3b:2]:443': {
+      label: 'PCP',
+      enabled: true,
+      count: 1,
+      internalPort: null,
+      auto: true,
     },
   },
   dnsRecords: [

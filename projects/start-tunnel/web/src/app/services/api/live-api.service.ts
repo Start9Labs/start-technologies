@@ -148,6 +148,28 @@ export class LiveApiService extends ApiService {
     return this.rpcRequest({ method: 'port-forward.set-enabled', params })
   }
 
+  // pinholes (IPv6)
+
+  async addPinhole(params: T.Tunnel.AddPinholeParams): Promise<null> {
+    return this.rpcRequest({ method: 'pinhole.add', params })
+  }
+
+  async deletePinhole(params: T.Tunnel.RemovePinholeParams): Promise<null> {
+    return this.rpcRequest({ method: 'pinhole.remove', params })
+  }
+
+  async updatePinholeLabel(
+    params: T.Tunnel.UpdatePinholeLabelParams,
+  ): Promise<null> {
+    return this.rpcRequest({ method: 'pinhole.update-label', params })
+  }
+
+  async setPinholeEnabled(
+    params: T.Tunnel.SetPinholeEnabledParams,
+  ): Promise<null> {
+    return this.rpcRequest({ method: 'pinhole.set-enabled', params })
+  }
+
   // ipv6
 
   async setSubnetIpv6(params: T.Tunnel.SetSubnetIpv6Params): Promise<null> {

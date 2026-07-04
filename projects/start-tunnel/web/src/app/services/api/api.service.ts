@@ -57,6 +57,15 @@ export abstract class ApiService {
   abstract setForwardEnabled(
     params: T.Tunnel.SetPortForwardEnabledParams,
   ): Promise<null> // port-forward.set-enabled
+
+  abstract addPinhole(params: T.Tunnel.AddPinholeParams): Promise<null> // pinhole.add
+  abstract deletePinhole(params: T.Tunnel.RemovePinholeParams): Promise<null> // pinhole.remove
+  abstract updatePinholeLabel(
+    params: T.Tunnel.UpdatePinholeLabelParams,
+  ): Promise<null> // pinhole.update-label
+  abstract setPinholeEnabled(
+    params: T.Tunnel.SetPinholeEnabledParams,
+  ): Promise<null> // pinhole.set-enabled
   // ipv6
   abstract setSubnetIpv6(params: T.Tunnel.SetSubnetIpv6Params): Promise<null> // subnet.set-ipv6
   // system
