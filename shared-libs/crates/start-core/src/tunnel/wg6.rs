@@ -1,10 +1,14 @@
 //! IPv6 host addressing for the tunnel. A subnet may carry a routed IPv6 prefix;
 //! every host on that subnet — the server and each client alike — gets exactly
 //! one `/128` with its tunnel IPv4 embedded in the low 32 bits. The same rule
-//! applies to the server (its `.1`) and every client, so addresses are stable,
-//! collision-free, and computable with no allocation state (the UI can derive a
-//! device's IPv6 without a backend round-trip).
+//! applies to the server (its `.1`) and every client, so addresses are stable
+//! and computable with no allocation state (the UI can derive a device's IPv6
+//! without a backend round-trip). On a /64 every host is distinct; on a smaller
+//! block two hosts whose low IPv4 bits collide would share an address, so callers
+//! validate uniqueness (see [`v6_conflict`] / [`first_v6_collision`]) and reject
+//! a duplicate rather than hand it out.
 
+use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use ipnet::Ipv6Net;
@@ -20,6 +24,39 @@ pub fn host_v6(prefix: Ipv6Net, v4: Ipv4Addr) -> Ipv6Addr {
     let mask = if keep >= 32 { u32::MAX } else { (1u32 << keep) - 1 };
     let host = (u32::from(v4) & mask) as u128;
     Ipv6Addr::from(u128::from(prefix.network()) | host)
+}
+
+/// An existing host (a tunnel IPv4 in `existing`) whose IPv6 under `prefix`
+/// equals `candidate`'s — i.e. adding `candidate` would duplicate its address.
+/// `None` when `candidate` is unique. Only ever non-`None` on a prefix too small
+/// to hold every host's low IPv4 bits distinctly.
+pub fn v6_conflict(
+    prefix: Ipv6Net,
+    candidate: Ipv4Addr,
+    existing: impl IntoIterator<Item = Ipv4Addr>,
+) -> Option<Ipv4Addr> {
+    let addr = host_v6(prefix, candidate);
+    existing
+        .into_iter()
+        .find(|&e| e != candidate && host_v6(prefix, e) == addr)
+}
+
+/// The first pair of `hosts` (tunnel IPv4s) that map to the same IPv6 under
+/// `prefix`, with that shared address — for rejecting a prefix that can't give
+/// every host a distinct address.
+pub fn first_v6_collision(
+    prefix: Ipv6Net,
+    hosts: impl IntoIterator<Item = Ipv4Addr>,
+) -> Option<(Ipv4Addr, Ipv4Addr, Ipv6Addr)> {
+    let mut seen: BTreeMap<Ipv6Addr, Ipv4Addr> = BTreeMap::new();
+    for v4 in hosts {
+        let addr = host_v6(prefix, v4);
+        if let Some(&prev) = seen.get(&addr) {
+            return Some((prev, v4, addr));
+        }
+        seen.insert(addr, v4);
+    }
+    None
 }
 
 #[cfg(test)]
@@ -73,6 +110,38 @@ mod tests {
             let h = host_v6(p, "10.59.3.7".parse().unwrap());
             assert!(p.contains(&h), "escaped prefix at /{len}");
         }
+    }
+
+    #[test]
+    fn collision_detection() {
+        let v4 = |s: &str| s.parse::<Ipv4Addr>().unwrap();
+        // A /64 fits the whole IPv4, so distinct v4s never collide.
+        let big = net("2001:db8:abcd::/64");
+        assert_eq!(
+            wg6_conflict(big, "10.59.0.2", &["10.59.0.1", "10.59.16.2"]),
+            None,
+        );
+        assert!(first_v6_collision(big, [v4("10.59.0.1"), v4("10.59.0.2"), v4("10.59.16.2")]).is_none());
+
+        // On a /124 only the low nibble survives: .2 and .18 (0x02 vs 0x12) both
+        // map to ::f2, and .17 (0x11) collides with the server .1.
+        let small = net("2001:db8:abcd:1::f0/124");
+        assert_eq!(wg6_conflict(small, "10.59.0.18", &["10.59.0.2"]), Some(v4("10.59.0.2")));
+        assert_eq!(wg6_conflict(small, "10.59.0.17", &["10.59.0.1"]), Some(v4("10.59.0.1")));
+        // A fresh low nibble is fine.
+        assert_eq!(wg6_conflict(small, "10.59.0.3", &["10.59.0.1", "10.59.0.2"]), None);
+        // first_v6_collision finds the clashing pair.
+        let (a, b, addr) = first_v6_collision(small, [v4("10.59.0.1"), v4("10.59.0.2"), v4("10.59.0.18")]).unwrap();
+        assert_eq!((a, b), (v4("10.59.0.2"), v4("10.59.0.18")));
+        assert_eq!(addr, "2001:db8:abcd:1::f2".parse::<Ipv6Addr>().unwrap());
+    }
+
+    fn wg6_conflict(prefix: Ipv6Net, candidate: &str, existing: &[&str]) -> Option<Ipv4Addr> {
+        v6_conflict(
+            prefix,
+            candidate.parse().unwrap(),
+            existing.iter().map(|s| s.parse().unwrap()),
+        )
     }
 
     #[test]

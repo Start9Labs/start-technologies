@@ -68,8 +68,11 @@ tunnel answers Neighbor Discovery for each device's address on your VPS's
 network, so traffic to it — including the replies to connections it opens — is
 delivered over the tunnel. A **routed** prefix reaches the host without that
 step. A `/64` is the natural size (its 64 host bits hold the whole tunnel IPv4);
-a smaller block works too but keeps only its low host bits of the IPv4, so keep
-the number of devices within what that block can hold.
+a smaller block works too but keeps only its low host bits of the IPv4. Every
+host must get a distinct address, so if a block is too small — or two devices'
+low IP bits would collide — StartTunnel rejects adding the device or setting the
+prefix rather than hand out a duplicate. Keep the number of devices (and their
+low IP bits) within what the block can hold.
 
 ## Routing
 

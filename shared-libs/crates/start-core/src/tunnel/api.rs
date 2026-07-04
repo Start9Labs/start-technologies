@@ -20,6 +20,7 @@ use crate::tunnel::db::{DnsRecordEntry, PortForward};
 use crate::tunnel::wg::{
     DnsConfig, WIREGUARD_INTERFACE_NAME, WgClientKind, WgConfig, WgSubnetClients, WgSubnetConfig,
 };
+use crate::tunnel::wg6;
 use crate::util::serde::{HandlerExtSerde, display_serializable};
 
 pub fn tunnel_api<C: Context>() -> ParentHandler<C> {
@@ -822,16 +823,33 @@ pub async fn set_subnet_ipv6(
                 "prefix {net} is not on-link on any WAN interface; ensure your provider routes it to this host, otherwise clients will have no IPv6"
             );
         }
+
     }
 
     ctx.db
         .mutate(|db| {
-            db.as_wg_mut()
+            let subnet_model = db
+                .as_wg_mut()
                 .as_subnets_mut()
                 .as_idx_mut(&subnet)
-                .or_not_found(&subnet)?
-                .as_ipv6_mut()
-                .ser(&prefix)
+                .or_not_found(&subnet)?;
+            // Reject a prefix too small to give every host on the subnet (the
+            // server `.1` and each device) a distinct IPv6 — inside the mutate so
+            // a concurrent add can't slip a colliding device in between the check
+            // and the write.
+            if let Some(net) = prefix {
+                let clients = subnet_model.as_clients().de()?;
+                let hosts = std::iter::once(subnet.addr()).chain(clients.0.into_keys());
+                if let Some((a, b, addr)) = wg6::first_v6_collision(net, hosts) {
+                    return Err(Error::new(
+                        eyre!(
+                            "prefix {net} is too small: {a} and {b} would both get IPv6 {addr}; give them IPs whose low bits differ, or use a larger prefix"
+                        ),
+                        ErrorKind::InvalidRequest,
+                    ));
+                }
+            }
+            subnet_model.as_ipv6_mut().ser(&prefix)
         })
         .await
         .result?;
@@ -907,18 +925,38 @@ pub async fn add_device(
     let server = ctx
         .db
         .mutate(|db| {
-            db.as_wg_mut()
+            let subnet_model = db
+                .as_wg_mut()
                 .as_subnets_mut()
                 .as_idx_mut(&subnet)
-                .or_not_found(&subnet)?
+                .or_not_found(&subnet)?;
+            // The subnet's IPv6 prefix (if any) — every host gets a /128 out of
+            // it, so a new device must not map to one already taken.
+            let prefix = subnet_model.as_ipv6().de()?;
+            subnet_model
                 .as_clients_mut()
                 .mutate(|WgSubnetClients(clients)| {
+                    let server_v4 = subnet.addr();
                     let ip = if let Some(ip) = ip {
                         ip
                     } else {
+                        // Auto-assign the first free IP that also has a free IPv6
+                        // (a small prefix can exhaust IPv6 before IPv4).
                         subnet
                             .hosts()
-                            .find(|ip| !clients.contains_key(ip) && *ip != subnet.addr())
+                            .find(|ip| {
+                                !clients.contains_key(ip)
+                                    && *ip != server_v4
+                                    && prefix.map_or(true, |p| {
+                                        wg6::v6_conflict(
+                                            p,
+                                            *ip,
+                                            std::iter::once(server_v4)
+                                                .chain(clients.keys().copied()),
+                                        )
+                                        .is_none()
+                                    })
+                            })
                             .ok_or_else(|| {
                                 Error::new(
                                     eyre!("no available ips in subnet"),
@@ -930,7 +968,7 @@ pub async fn add_device(
                     if ip.octets()[3] == 0 || ip.octets()[3] == 255 {
                         return Err(Error::new(eyre!("invalid ip"), ErrorKind::InvalidRequest));
                     }
-                    if ip == subnet.addr() {
+                    if ip == server_v4 {
                         return Err(Error::new(eyre!("invalid ip"), ErrorKind::InvalidRequest));
                     }
                     if !subnet.contains(&ip) {
@@ -938,6 +976,25 @@ pub async fn add_device(
                             eyre!("ip not in subnet"),
                             ErrorKind::InvalidRequest,
                         ));
+                    }
+                    // No two hosts may share an IPv6 address.
+                    if let Some(p) = prefix {
+                        let existing = std::iter::once(server_v4)
+                            .chain(clients.keys().copied().filter(|c| *c != ip));
+                        if let Some(conflict) = wg6::v6_conflict(p, ip, existing) {
+                            let addr = wg6::host_v6(p, ip);
+                            let with = if conflict == server_v4 {
+                                "the tunnel itself".to_string()
+                            } else {
+                                format!("device {conflict}")
+                            };
+                            return Err(Error::new(
+                                eyre!(
+                                    "device {ip} would take IPv6 {addr}, which collides with {with}; choose an IP whose low bits differ, or use a larger IPv6 prefix"
+                                ),
+                                ErrorKind::InvalidRequest,
+                            ));
+                        }
                     }
                     let client = clients
                         .entry(ip)
