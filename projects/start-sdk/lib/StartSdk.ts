@@ -173,6 +173,21 @@ export class StartSdk<Manifest extends T.SDKManifest> {
         effects.getServicePortForward(...args),
       clearBindings: (effects, ...args) => effects.clearBindings(...args),
       getOsIp: (effects, ...args) => effects.getOsIp(...args),
+      /**
+       * Constructs the service-to-service base URL for a given interface over the secure host bridge.
+       * Uses the target service's LAN-domain port (the port shown for its .local or LAN address).
+       * 
+       * Note: Because the bridge network never leaves the host, this communication happens securely 
+       * over plain HTTP, bypassing TLS overhead.
+       * 
+       * @param effects - The effects context
+       * @param port - The LAN-domain port of the target service
+       * @returns The base URL string (e.g. `http://10.0.3.1:8080`)
+       */
+      getServiceBridgeUrl: async (effects: T.Effects, port: number): Promise<string> => {
+        const ip = await effects.getOsIp()
+        return `http://${ip}:${port}`
+      },
       getSslKey: (effects, ...args) => effects.getSslKey(...args),
       shutdown: (effects, ...args) => effects.shutdown(...args),
       getDependencies: (effects, ...args) => effects.getDependencies(...args),

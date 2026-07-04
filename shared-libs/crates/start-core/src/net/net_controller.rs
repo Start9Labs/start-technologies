@@ -625,6 +625,27 @@ impl NetServiceData {
                     }
                 }
             }
+
+            // Expose the service on the host bridge at its LAN-domain port.
+            // The bridge network (lxcbr0) is intrinsically secure, so this explicitly
+            // bypasses the TLS proxy and forwards plain HTTP directly to the container.
+            let lan_domain_port = bind.net.assigned_ssl_port.or(bind.net.assigned_port);
+            if let Some(lan_port) = lan_domain_port {
+                let forward_entry = forwards.entry(lan_port).or_insert_with(|| {
+                    (
+                        SocketAddrV4::new(self.ip, *port),
+                        1, // port count
+                        ForwardRequirements {
+                            public_gateways: BTreeSet::new(),
+                            private_ips: BTreeSet::new(),
+                            secure: true,
+                        },
+                    )
+                });
+                
+                // Whitelist the host bridge IP as a valid private IP source for this forward
+                forward_entry.2.private_ips.insert(IpAddr::V4(Ipv4Addr::from(crate::HOST_IP)));
+            }
         }
 
         // Port-range bindings: forward each enabled range the same way as a
@@ -732,6 +753,27 @@ impl NetServiceData {
                         }
                     }
                 }
+            }
+
+            // Expose the service on the host bridge at its LAN-domain port.
+            // The bridge network (lxcbr0) is intrinsically secure, so this explicitly
+            // bypasses the TLS proxy and forwards plain HTTP directly to the container.
+            let lan_domain_port = bind.net.assigned_ssl_port.or(bind.net.assigned_port);
+            if let Some(lan_port) = lan_domain_port {
+                let forward_entry = forwards.entry(lan_port).or_insert_with(|| {
+                    (
+                        SocketAddrV4::new(self.ip, *port),
+                        1, // port count
+                        ForwardRequirements {
+                            public_gateways: BTreeSet::new(),
+                            private_ips: BTreeSet::new(),
+                            secure: true,
+                        },
+                    )
+                });
+                
+                // Whitelist the host bridge IP as a valid private IP source for this forward
+                forward_entry.2.private_ips.insert(IpAddr::V4(Ipv4Addr::from(crate::HOST_IP)));
             }
         }
         // Withdraw redirect maps that no longer apply (443 unexposed, or 80 became

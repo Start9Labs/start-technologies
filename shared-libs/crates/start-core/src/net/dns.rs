@@ -455,6 +455,10 @@ impl Resolver {
                 }
             }
             if STARTOS.zone_of(name) || EMBASSY.zone_of(name) {
+                tracing::warn!(
+                    "The .startos DNS suffix is deprecated and will be removed in a future release. \
+                    Please migrate to the SDK host bridge API (getServiceBridgeUrl) for service-to-service communication."
+                );
                 let Ok(pkg) = name
                     .iter()
                     .rev()
