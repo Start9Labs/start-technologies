@@ -50,10 +50,10 @@ import { MappedDevice } from './utils'
           <tr>
             <th>Name</th>
             <th>Subnet</th>
-            <th>LAN IP</th>
+            <th>LAN IPv4</th>
             <th>DNS Injection</th>
             <th>Auto Port Forward</th>
-            <th>WAN IP</th>
+            <th>WAN IPv4</th>
             <th></th>
           </tr>
         </thead>
@@ -171,8 +171,8 @@ import { MappedDevice } from './utils'
           <tr>
             <th>Name</th>
             <th>Subnet</th>
-            <th>LAN IP</th>
-            <th>WAN IP</th>
+            <th>LAN IPv4</th>
+            <th>WAN IPv4</th>
             <th></th>
           </tr>
         </thead>

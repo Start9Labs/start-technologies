@@ -42,9 +42,9 @@ import { SUBNETS_ADD } from './add'
         <thead>
           <tr>
             <th>Name</th>
-            <th>IP Range</th>
+            <th>IPv4 Range</th>
             <th>DNS</th>
-            <th>WAN IP</th>
+            <th>WAN IPv4</th>
             <th></th>
           </tr>
         </thead>
