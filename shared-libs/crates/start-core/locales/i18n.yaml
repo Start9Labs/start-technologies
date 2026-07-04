@@ -6125,19 +6125,19 @@ about.set-subnet-dns:
   fr_FR: "Définir le DNS du sous-réseau"
   pl_PL: "Ustaw DNS podsieci"
 
+about.set-subnet-ipv6:
+  en_US: "Set the subnet's routed IPv6 prefix"
+  de_DE: "Das geroutete IPv6-Präfix des Subnetzes festlegen"
+  es_ES: "Establecer el prefijo IPv6 enrutado de la subred"
+  fr_FR: "Définir le préfixe IPv6 routé du sous-réseau"
+  pl_PL: "Ustaw routowany prefiks IPv6 podsieci"
+
 about.set-subnet-wan:
   en_US: "Assign the WAN IP a subnet's traffic uses"
   de_DE: "Die WAN-IP zuweisen, die der Datenverkehr eines Subnetzes verwendet"
   es_ES: "Asignar la IP WAN que usa el tráfico de una subred"
   fr_FR: "Attribuer l'IP WAN qu'utilise le trafic d'un sous-réseau"
   pl_PL: "Przypisz adres IP WAN używany przez ruch podsieci"
-
-about.set-tunnel-ipv6:
-  en_US: "Set the tunnel's routed IPv6 prefix"
-  de_DE: "Das geroutete IPv6-Präfix des Tunnels festlegen"
-  es_ES: "Establecer el prefijo IPv6 enrutado del túnel"
-  fr_FR: "Définir le préfixe IPv6 routé du tunnel"
-  pl_PL: "Ustaw routowany prefiks IPv6 tunelu"
 
 about.set-user-interface-password:
   en_US: "Set user interface password"

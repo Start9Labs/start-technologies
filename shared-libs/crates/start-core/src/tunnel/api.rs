@@ -49,14 +49,6 @@ pub fn tunnel_api<C: Context>() -> ParentHandler<C> {
             dns_api::<C>().with_about("about.view-or-edit-injected-dns-records"),
         )
         .subcommand(
-            "set-ipv6",
-            from_fn_async(set_ipv6)
-                .with_metadata("sync_db", Value::Bool(true))
-                .no_display()
-                .with_about("about.set-tunnel-ipv6")
-                .with_call_remote::<CliContext>(),
-        )
-        .subcommand(
             "port-forward",
             ParentHandler::<C>::new()
                 .subcommand(
@@ -169,6 +161,14 @@ pub fn subnet_api<C: Context>() -> ParentHandler<C, SubnetParams> {
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.set-subnet-wan")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "set-ipv6",
+            from_fn_async(set_subnet_ipv6)
+                .with_metadata("sync_db", Value::Bool(true))
+                .no_display()
+                .with_about("about.set-subnet-ipv6")
                 .with_call_remote::<CliContext>(),
         )
 }
@@ -736,20 +736,23 @@ pub async fn set_subnet_wan(
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-pub struct SetIpv6Params {
-    /// The routed IPv6 prefix the VPS delegates to this host (e.g. a /64 from
-    /// Hetzner, a /56 from Linode). `null` disables tunnel IPv6.
+pub struct SetSubnetIpv6Params {
+    #[ts(type = "string")]
+    subnet: Ipv4Net,
+    /// The routed IPv6 prefix delegated to this subnet (e.g. a /64 from Hetzner,
+    /// a /56 from Linode). `null` disables IPv6 on the subnet.
     #[arg(long)]
     #[ts(type = "string | null")]
     prefix: Option<Ipv6Net>,
 }
 
-/// Configure (or, with `null`, clear) the routed IPv6 prefix delegated to this
-/// tunnel. Clients are assigned global addresses out of it and the WireGuard
-/// configs are re-rendered to carry them.
-pub async fn set_ipv6(
+/// Set (or, with `null`, clear) the routed IPv6 prefix delegated to a subnet.
+/// Every host on the subnet (the server and each client) is assigned one global
+/// `/128` out of it, and the WireGuard configs are re-rendered to carry them.
+/// Validates that the server can actually route the prefix before persisting.
+pub async fn set_subnet_ipv6(
     ctx: TunnelContext,
-    SetIpv6Params { prefix }: SetIpv6Params,
+    SetSubnetIpv6Params { subnet, prefix }: SetSubnetIpv6Params,
 ) -> Result<(), Error> {
     let prefix = prefix
         .map(|p| {
@@ -822,7 +825,14 @@ pub async fn set_ipv6(
     }
 
     ctx.db
-        .mutate(|db| db.as_wg_mut().as_ipv6_mut().ser(&prefix))
+        .mutate(|db| {
+            db.as_wg_mut()
+                .as_subnets_mut()
+                .as_idx_mut(&subnet)
+                .or_not_found(&subnet)?
+                .as_ipv6_mut()
+                .ser(&prefix)
+        })
         .await
         .result?;
     let server = ctx.db.peek().await.as_wg().de()?;
@@ -1024,11 +1034,9 @@ pub async fn show_config(
 ) -> Result<String, Error> {
     let peek = ctx.db.peek().await;
     let wg = peek.as_wg();
-    let wg_server = wg.de()?;
-    let client = wg
-        .as_subnets()
-        .as_idx(&subnet)
-        .or_not_found(&subnet)?
+    let subnet_model = wg.as_subnets().as_idx(&subnet).or_not_found(&subnet)?;
+    let subnet_v6 = subnet_model.as_ipv6().de()?;
+    let client = subnet_model
         .as_clients()
         .as_idx(&ip)
         .or_not_found(&ip)?
@@ -1061,7 +1069,7 @@ pub async fn show_config(
             subnet,
             wg.as_key().de()?.verifying_key(),
             (wan_addr, wg.as_port().de()?).into(),
-            wg_server.client_v6(ip),
+            subnet_v6.map(|p| crate::tunnel::wg6::host_v6(p, ip)),
         )
         .to_string())
 }

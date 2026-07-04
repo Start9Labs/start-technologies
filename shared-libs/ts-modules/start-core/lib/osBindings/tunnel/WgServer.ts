@@ -2,14 +2,4 @@
 import type { Base64 } from './Base64'
 import type { WgSubnetMap } from './WgSubnetMap'
 
-export type WgServer = {
-  port: number
-  key: Base64
-  subnets: WgSubnetMap
-  /**
-   * Operator-configured routed IPv6 prefix delegated to this tunnel host, if
-   * any. Clients are assigned global addresses out of it — see
-   * [`crate::tunnel::wg6`].
-   */
-  ipv6: string | null
-}
+export type WgServer = { port: number; key: Base64; subnets: WgSubnetMap }

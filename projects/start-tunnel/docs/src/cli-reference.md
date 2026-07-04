@@ -73,6 +73,14 @@ Create a new subnet with the given name.
 
 Remove a subnet and all its devices.
 
+### `start-tunnel subnet <SUBNET> set-ipv6`
+
+Set (or clear) the routed IPv6 prefix delegated to the subnet. Each host on the
+subnet is assigned a globally-routable `/128` out of it. See [IPv6](ipv6.md).
+
+- `--prefix <PREFIX>` — The routed prefix (e.g. `2604:a880:4:1d0::/64`). Omit to
+  disable IPv6 on the subnet.
+
 ## Devices
 
 Manage devices within a subnet. Each device gets a unique WireGuard configuration.
@@ -122,16 +130,6 @@ Enable or disable a port forwarding rule.
 ### `start-tunnel port-forward update-label <SOURCE> [LABEL]`
 
 Change or clear the label on a port forwarding rule.
-
-## IPv6
-
-### `start-tunnel set-ipv6`
-
-Set (or clear) the routed IPv6 prefix your VPS delegates to the server. Devices
-are assigned globally-routable addresses out of it. See [IPv6](ipv6.md).
-
-- `--prefix <PREFIX>` — The routed prefix (e.g. `2001:db8:abcd::/64`). Omit to
-  disable tunnel IPv6.
 
 ## Updates
 

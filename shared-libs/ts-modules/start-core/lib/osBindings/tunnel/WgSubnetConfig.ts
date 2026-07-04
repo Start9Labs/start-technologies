@@ -11,4 +11,10 @@ export type WgSubnetConfig = {
    * keeps the default masquerade; a per-device `wan_ip` overrides this.
    */
   wanIp: string | null
+  /**
+   * Routed IPv6 prefix delegated to this subnet, if any. Each host on the
+   * subnet (the server and every client) gets one `/128` out of it with its
+   * tunnel IPv4 embedded — see [`crate::tunnel::wg6`].
+   */
+  ipv6: string | null
 }

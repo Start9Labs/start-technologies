@@ -14,6 +14,7 @@ export interface MappedDevice {
   readonly allowDnsInjection: boolean
   readonly allowAutoPortForward: boolean
   readonly wanIp: string | null
+  readonly ipv6: string | null
 }
 
 export interface MappedSubnet {
@@ -21,6 +22,24 @@ export interface MappedSubnet {
   readonly name: string
   readonly clients: T.Tunnel.WgSubnetClients
   readonly wanIp: string | null
+  readonly ipv6: string | null
+}
+
+// A device's IPv6, mirroring the backend `host_v6`: the subnet prefix's network
+// octets with the device's 4 IPv4 octets OR'd into the low 4. `null` when the
+// subnet has no prefix (or the inputs don't parse).
+export function deviceIpv6(prefix: string | null, ip: string): string | null {
+  if (!prefix) return null
+  try {
+    const octets = utils.IpNet.parse(prefix).zero().octets.slice()
+    const v4 = utils.IpAddress.parse(ip).octets
+    for (let i = 0; i < 4; i++) {
+      octets[12 + i] = (octets[12 + i] ?? 0) | (v4[i] ?? 0)
+    }
+    return utils.IpAddress.fromOctets(octets).address
+  } catch {
+    return null
+  }
 }
 
 export interface DeviceData {

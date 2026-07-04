@@ -40,6 +40,10 @@ const SERVER_PATTERN =
   '|[0-9a-fA-F:]+' +
   ')$'
 
+// A bare IPv6 prefix in CIDR form (addr/len 0-128). Empty clears it. The
+// backend validates strictly and checks the server can actually route it.
+const IPV6_CIDR_PATTERN = '^[0-9a-fA-F:]+/(?:12[0-8]|1[01]\\d|[1-9]?\\d)$'
+
 const MODE_LABEL: Record<T.Tunnel.DnsMode, string> = {
   default: 'Default (VPS provider)',
   device: 'Device',
@@ -159,6 +163,16 @@ const MODE_LABEL: Record<T.Tunnel.DnsMode, string> = {
         }
       </tui-textfield>
 
+      <tui-textfield>
+        <label tuiLabel>IPv6 Prefix</label>
+        <input
+          tuiInput
+          formControlName="ipv6"
+          placeholder="2001:db8:abcd::/64"
+        />
+      </tui-textfield>
+      <tui-error formControlName="ipv6" />
+
       <footer>
         <button tuiButton type="button" (click)="onSave()">Save</button>
       </footer>
@@ -204,6 +218,10 @@ export class SubnetsAdd {
       ),
     ),
     wanIp: this.fb.control<WanItem>({ ip: this.context.data.wanIp }),
+    ipv6: this.fb.control(
+      this.context.data.ipv6 ?? '',
+      Validators.pattern(IPV6_CIDR_PATTERN),
+    ),
   })
 
   protected readonly mode = toSignal(this.form.controls.mode.valueChanges, {
@@ -250,6 +268,10 @@ export class SubnetsAdd {
       tuiMarkControlAsTouchedAndValidate(this.servers)
       return
     }
+    if (this.form.controls.ipv6.invalid) {
+      tuiMarkControlAsTouchedAndValidate(this.form.controls.ipv6)
+      return
+    }
 
     const loader = this.loading.open('').subscribe()
     const { name, subnet } = this.form.getRawValue()
@@ -274,6 +296,11 @@ export class SubnetsAdd {
       const wanIp = this.form.controls.wanIp.value.ip
       if (wanIp !== this.context.data.wanIp) {
         await this.api.setSubnetWan({ subnet, wanIp })
+      }
+
+      const ipv6 = this.form.controls.ipv6.value.trim() || null
+      if (ipv6 !== (this.context.data.ipv6 ?? null)) {
+        await this.api.setSubnetIpv6({ subnet, prefix: ipv6 })
       }
     } catch (e: any) {
       this.errorService.handleError(e)
@@ -322,4 +349,5 @@ interface Data {
   wanIp: string | null
   wanOptions: readonly string[]
   defaultWan: string | null
+  ipv6: string | null
 }

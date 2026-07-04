@@ -1,8 +1,9 @@
 # IPv6
 
-StartTunnel can give every connected device a real, globally-routable IPv6
-address drawn from a prefix your VPS delegates to the server. This is optional
-and off by default — IPv4 port forwarding works without it.
+StartTunnel can give the devices on a subnet a real, globally-routable IPv6
+address drawn from a prefix your VPS delegates. IPv6 is configured **per subnet**
+— each subnet can point at its own prefix (or none). This is optional and off by
+default; IPv4 port forwarding works without it.
 
 ## What your VPS provides
 
@@ -10,39 +11,42 @@ IPv6 addressing depends on the block your provider routes to your VPS. Most
 budget providers give a single **/64** (Hetzner, Vultr, BuyVM); some give less
 (DigitalOcean routes a /124 — 16 addresses); a few give a **/56** or larger on
 request (Linode) or on dedicated servers. Check your provider's dashboard or
-docs for the exact prefix.
+docs for the exact prefix. A **/64 per subnet** is the natural fit.
 
 ## Requirements
 
-Delegating an IPv6 prefix only works if the server can actually route it:
+Delegating a prefix only works if the server can actually route it:
 
 - **The server must have working IPv6 egress** — an IPv6 default route (`::/0`).
   A device given an IPv6 address routes *all* its IPv6 through the tunnel
   (`AllowedIPs = ::/0`); without upstream IPv6 on the server that traffic simply
-  blackholes. `set-ipv6` **hard-errors** if the server has no IPv6 default route,
-  leaving the configuration unchanged. Confirm with `ip -6 route show default`
-  and configure IPv6 on the VPS before delegating a prefix.
+  blackholes. `subnet … set-ipv6` **hard-errors** if the server has no IPv6
+  default route, leaving the configuration unchanged. Confirm with
+  `ip -6 route show default` and configure IPv6 on the VPS first. StartTunnel
+  does not configure the server's own WAN IPv6 — that's the host/provider's job
+  (RA, `netplan`, or `cloud-init`).
 - **The prefix must be delivered to the server** — either *on-link* on a WAN
   interface (the server holds a global address inside the covering /64, the usual
-  single-/64 case) or *routed* to the server by your provider (a /56 or /64 the
-  VPS statically routes to your host). If the prefix is neither on-link nor
-  something this host can confirm, `set-ipv6` still succeeds but logs a warning:
-  make sure your provider actually routes the block to this host, or connected
-  devices will have no working IPv6.
+  single-/64 case) or *routed* to the server by your provider. If the prefix is
+  neither on-link nor something this host can confirm, the command still succeeds
+  but logs a warning: make sure your provider actually routes the block to this
+  host, or the subnet's devices will have no working IPv6.
 
-## Configuring the prefix
+## Configuring a subnet's prefix
 
-Tell StartTunnel the routed prefix your provider assigned:
+Assign the routed prefix your provider gave you to a subnet:
 
 ```bash
-start-tunnel set-ipv6 --prefix 2001:db8:abcd::/64
+start-tunnel subnet 10.59.0.0/24 set-ipv6 --prefix 2604:a880:4:1d0::/64
 ```
 
-To turn IPv6 back off, run `start-tunnel set-ipv6` with no `--prefix` argument
-(or use the **Disable** button on the web UI's settings page).
+Or set the **IPv6 Prefix** field in the subnet's Add/Edit dialog in the web UI.
+To turn IPv6 back off for a subnet, run the command with no `--prefix` argument
+(or clear the field in the UI).
 
-Once set, StartTunnel re-renders every device's WireGuard config to include an
-IPv6 address. Reconnect (or re-download the config) on each device to pick it up.
+Once set, StartTunnel re-renders the WireGuard configs of that subnet's devices
+to include an IPv6 address. Reconnect (or re-download the config) on each device
+to pick it up.
 
 > [!NOTE]
 > Devices can make **outbound** IPv6 connections and receive their replies
@@ -52,27 +56,27 @@ IPv6 address. Reconnect (or re-download the config) on each device to pick it up
 
 ## How addresses are assigned
 
-- **A /64 (the common case).** Every device shares the one /64 and receives a
-  single global address. The tunnel answers Neighbor Discovery for those
-  addresses on your VPS's network, so traffic to a device's global address —
-  including the replies to connections it opens — is delivered to it over the
-  tunnel.
-- **A prefix shorter than /64** (a /56, /48, …). Each device is *delegated its
-  own /64*, routed to it over WireGuard. A StartOS server behind the tunnel can
-  then hand global addresses to its own services and containers.
-- **A prefix longer than /64** (e.g. a /124). Each device gets a single global
-  address; the number of devices is limited by the block size.
+Every host on a subnet — the tunnel itself and each device — gets **one `/128`**
+out of the subnet's prefix, with its tunnel IPv4 embedded in the low bits
+(`prefix-network | tunnel-IPv4`). So a device's IPv6 is stable and predictable:
+the same address every time, derivable from its tunnel IPv4 alone. The tunnel
+uses the subnet's `.1` host as its own address on the WireGuard interface and as
+the next hop for the subnet's IPv6 traffic.
 
-The tunnel itself uses the first address of the prefix (`…::1`) as its own
-address on the WireGuard interface and as the next hop for devices' IPv6 traffic.
+When the prefix is delivered **on-link** (the common single-/64 case), the
+tunnel answers Neighbor Discovery for each device's address on your VPS's
+network, so traffic to it — including the replies to connections it opens — is
+delivered over the tunnel. A **routed** prefix reaches the host without that
+step. Because a `/64` leaves 64 host bits, a full IPv4 always fits; use a `/64`
+(or shorter) per subnet.
 
 ## Routing
 
 For devices with an IPv6 assignment, all IPv6 traffic is carried through the
 tunnel (`AllowedIPs = ::/0`). This is required: replies sent from a device's
-delegated global address have to return through the tunnel, since that address
-belongs to your VPS, not the device's local network. IPv4 remains split-tunnel
-(only the subnet is routed).
+global address have to return through the tunnel, since that address belongs to
+your VPS, not the device's local network. IPv4 remains split-tunnel (only the
+subnet is routed).
 
 ## DNS
 

@@ -150,8 +150,8 @@ export class LiveApiService extends ApiService {
 
   // ipv6
 
-  async setIpv6(params: T.Tunnel.SetIpv6Params): Promise<null> {
-    return this.rpcRequest({ method: 'set-ipv6', params })
+  async setSubnetIpv6(params: T.Tunnel.SetSubnetIpv6Params): Promise<null> {
+    return this.rpcRequest({ method: 'subnet.set-ipv6', params })
   }
 
   // system

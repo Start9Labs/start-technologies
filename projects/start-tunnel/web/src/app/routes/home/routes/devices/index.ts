@@ -31,7 +31,7 @@ import { ApiService } from 'src/app/services/api/api.service'
 import { TunnelData } from 'src/app/services/patch-db/data-model'
 import { DEVICES_ADD } from './add'
 import { DEVICES_CONFIG } from './config'
-import { MappedDevice } from './utils'
+import { deviceIpv6, MappedDevice } from './utils'
 
 @Component({
   template: `
@@ -54,6 +54,7 @@ import { MappedDevice } from './utils'
             <th>DNS Injection</th>
             <th>Auto Port Forward</th>
             <th>WAN IPv4</th>
+            <th>IPv6</th>
             <th></th>
           </tr>
         </thead>
@@ -98,6 +99,7 @@ import { MappedDevice } from './utils'
                 </tui-loader>
               </td>
               <td>{{ device.wan }}</td>
+              <td>{{ device.ipv6 ?? '—' }}</td>
               <td [style.padding-inline-end.rem]="0.625">
                 <button
                   tuiIconButton
@@ -147,7 +149,7 @@ import { MappedDevice } from './utils'
             </tr>
           } @empty {
             <tr>
-              <td colspan="7">
+              <td colspan="8">
                 <app-placeholder icon="@tui.laptop">No servers</app-placeholder>
               </td>
             </tr>
@@ -173,6 +175,7 @@ import { MappedDevice } from './utils'
             <th>Subnet</th>
             <th>LAN IPv4</th>
             <th>WAN IPv4</th>
+            <th>IPv6</th>
             <th></th>
           </tr>
         </thead>
@@ -183,6 +186,7 @@ import { MappedDevice } from './utils'
               <td>{{ device.subnet.name }}</td>
               <td>{{ device.ip }}</td>
               <td>{{ device.wan }}</td>
+              <td>{{ device.ipv6 ?? '—' }}</td>
               <td [style.padding-inline-end.rem]="0.625">
                 <button
                   tuiIconButton
@@ -232,7 +236,7 @@ import { MappedDevice } from './utils'
             </tr>
           } @empty {
             <tr>
-              <td colspan="5">
+              <td colspan="6">
                 <app-placeholder icon="@tui.laptop">No clients</app-placeholder>
               </td>
             </tr>
@@ -286,12 +290,15 @@ export default class Devices {
   protected readonly subnets = toSignal(
     this.patch.watch$('wg', 'subnets').pipe(
       map(subnets =>
-        Object.entries(subnets).map(([range, { name, clients, wanIp }]) => ({
-          range,
-          name,
-          clients,
-          wanIp,
-        })),
+        Object.entries(subnets).map(
+          ([range, { name, clients, wanIp, ipv6 }]) => ({
+            range,
+            name,
+            clients,
+            wanIp,
+            ipv6,
+          }),
+        ),
       ),
     ),
     { initialValue: null },
@@ -317,6 +324,7 @@ export default class Devices {
           allowAutoPortForward,
           wanIp,
           wan: wanLabel(wanIp, 'Subnet default', subnet.wanIp ?? defaultWan),
+          ipv6: deviceIpv6(subnet.ipv6, ip),
         }),
       ),
     )

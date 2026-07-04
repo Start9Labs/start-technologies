@@ -409,8 +409,9 @@ impl TunnelContext {
     pub async fn resync_v6(&self) -> Result<(), Error> {
         let _guard = self.v6_lock.lock().await;
         let server = self.db.peek().await.as_wg().de()?;
+        let any_v6 = server.subnets.0.values().any(|c| c.ipv6.is_some());
         let mut desired: BTreeMap<Ipv6Addr, GatewayId> = BTreeMap::new();
-        if let Some(prefix) = server.ipv6 {
+        if any_v6 {
             Command::new("sysctl")
                 .arg("-w")
                 .arg("net.ipv6.conf.all.proxy_ndp=1")
@@ -437,20 +438,18 @@ impl TunnelContext {
                 }
                 v
             });
-            let mut index = 0u32;
+            // For each subnet with a prefix, proxy-NDP every client's /128 that
+            // falls inside a WAN interface's on-link /64 (the delivery path for
+            // an on-link prefix; a routed prefix reaches the host without ND).
             for (_, cfg) in &server.subnets.0 {
+                let Some(prefix) = cfg.ipv6 else {
+                    continue;
+                };
                 for (client_v4, _) in &cfg.clients.0 {
-                    if let Some(c) = crate::tunnel::wg6::client_v6(prefix, index, *client_v4) {
-                        // Only a single /128 needs proxying; a delegated /64 is routed.
-                        if c.delegated.prefix_len() == 128 {
-                            if let Some((iface, _)) =
-                                onlink.iter().find(|(_, n)| n.contains(&c.addr))
-                            {
-                                desired.insert(c.addr, iface.clone());
-                            }
-                        }
+                    let addr = crate::tunnel::wg6::host_v6(prefix, *client_v4);
+                    if let Some((iface, _)) = onlink.iter().find(|(_, n)| n.contains(&addr)) {
+                        desired.insert(addr, iface.clone());
                     }
-                    index += 1;
                 }
             }
         }
