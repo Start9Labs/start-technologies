@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::net::SocketAddrV4;
+use std::net::{SocketAddrV4, SocketAddrV6};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -47,6 +47,11 @@ pub struct TunnelDatabase {
     pub gateways: OrdMap<GatewayId, NetworkInterfaceInfo>,
     pub wg: WgServer,
     pub port_forwards: PortForwards,
+    /// IPv6 GUA firewall pinholes: inbound to a client's own global address is
+    /// accepted (no NAT — the GUA is directly routable), keyed by the exposed
+    /// `[GUA]:port`. The v4 analogue is a `PortForward::Dnat`.
+    #[serde(default)]
+    pub pinholes6: Pinholes6,
     #[serde(default)]
     pub dns_records: DnsRecords,
 }
@@ -251,6 +256,76 @@ fn port_forward_overlap_detection() {
 }
 
 #[test]
+fn pinhole_persistence_round_trip() {
+    let gua = |s: &str| s.parse::<SocketAddrV6>().unwrap();
+    let ph = Pinhole {
+        label: Some("Home Assistant".into()),
+        enabled: true,
+        count: 1,
+        internal_port: None,
+        auto: false,
+    };
+    let json = serde_json::to_value(&ph).unwrap();
+    let back: Pinhole = serde_json::from_value(json).unwrap();
+    assert_eq!(back.label.as_deref(), Some("Home Assistant"));
+    assert!(back.enabled);
+    assert_eq!(back.count, 1);
+    assert!(!back.auto);
+    // No remap → pure pinhole; internal port resolves to the external (key) port.
+    assert_eq!(back.internal_port(8443), 8443);
+    assert!(!back.is_dnat(8443));
+
+    // A gateway (PCP) entry deserialized from a bare map: defaults fill enabled/count.
+    let map: Pinholes6 = serde_json::from_value(serde_json::json!({
+        "[2001:db8::1]:8443": { "label": "PCP", "auto": true }
+    }))
+    .unwrap();
+    let e = map.0.get(&gua("[2001:db8::1]:8443")).unwrap();
+    assert!(e.enabled);
+    assert_eq!(e.count, 1);
+    assert!(e.auto);
+    assert_eq!(e.internal_port, None);
+
+    // A port-DNAT entry (80 → 443, the v6 HTTP-redirect case).
+    let redirect = Pinhole {
+        label: Some("HTTP redirect".into()),
+        enabled: true,
+        count: 1,
+        internal_port: Some(443),
+        auto: false,
+    };
+    let back: Pinhole = serde_json::from_value(serde_json::to_value(&redirect).unwrap()).unwrap();
+    assert_eq!(back.internal_port(80), 443);
+    assert!(back.is_dnat(80));
+}
+
+#[test]
+fn pinhole_overlap_detection() {
+    let gua = |s: &str| s.parse::<SocketAddrV6>().unwrap();
+    let ph = |count: u16| Pinhole {
+        label: None,
+        enabled: true,
+        count,
+        internal_port: None,
+        auto: false,
+    };
+    let mut map = BTreeMap::new();
+    map.insert(gua("[2001:db8::1]:8000"), ph(10));
+    let holes = Pinholes6(map);
+    // Overlaps the 8000..=8009 range.
+    assert_eq!(
+        holes.overlapping(gua("[2001:db8::1]:8005"), 1),
+        Some(gua("[2001:db8::1]:8000"))
+    );
+    // Adjacent, disjoint (8010) does not overlap.
+    assert_eq!(holes.overlapping(gua("[2001:db8::1]:8010"), 1), None);
+    // Same span on a different GUA does not overlap.
+    assert_eq!(holes.overlapping(gua("[2001:db8::2]:8005"), 1), None);
+    // The exact key is excluded (collision / re-assert, not overlap).
+    assert_eq!(holes.overlapping(gua("[2001:db8::1]:8000"), 10), None);
+}
+
+#[test]
 fn export_bindings_tunnel_db() {
     use crate::tunnel::api::*;
     use crate::tunnel::auth::{AddKeyParams, RemoveKeyParams, SetPasswordParams};
@@ -267,6 +342,10 @@ fn export_bindings_tunnel_db() {
     RemovePortForwardParams::export_all_to("bindings/tunnel").unwrap();
     UpdatePortForwardLabelParams::export_all_to("bindings/tunnel").unwrap();
     SetPortForwardEnabledParams::export_all_to("bindings/tunnel").unwrap();
+    AddPinholeParams::export_all_to("bindings/tunnel").unwrap();
+    RemovePinholeParams::export_all_to("bindings/tunnel").unwrap();
+    UpdatePinholeLabelParams::export_all_to("bindings/tunnel").unwrap();
+    SetPinholeEnabledParams::export_all_to("bindings/tunnel").unwrap();
     SetDnsInjectionParams::export_all_to("bindings/tunnel").unwrap();
     SetAutoPortForwardParams::export_all_to("bindings/tunnel").unwrap();
     SetSubnetWanParams::export_all_to("bindings/tunnel").unwrap();
@@ -364,6 +443,71 @@ impl Map for PortForwards {
     }
     fn key_string(key: &Self::Key) -> Result<InternedString, Error> {
         Ok(InternedString::from_display(key))
+    }
+}
+
+/// One IPv6 GUA firewall entry, keyed by the exposed `[GUA]:external_port`. The
+/// destination is always the same GUA. When `internal_port` is `None` (or equals
+/// the key's port) it's a pure firewall pinhole — `ct state new accept`, no NAT.
+/// When it differs it's a port-only DNAT to `[GUA]:internal_port` (e.g. 80→443),
+/// the v6 analogue of a `PortForward::Dnat`.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct Pinhole {
+    pub label: Option<String>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Contiguous ports opened, counting up from the key's port; `1` for single.
+    #[serde(default = "default_one")]
+    pub count: u16,
+    /// Destination port on the GUA; `None` means "same as the external (key) port"
+    /// — a pure pinhole. A different value makes this a port-DNAT.
+    #[serde(default)]
+    pub internal_port: Option<u16>,
+    /// Gateway-created (PCP) vs user-added. Drives the UI Manual/Automatic split.
+    #[serde(default)]
+    pub auto: bool,
+}
+
+impl Pinhole {
+    /// The destination port on the GUA: `internal_port` if remapped, else the
+    /// external (key) port. `external` is `key.port()`.
+    pub fn internal_port(&self, external: u16) -> u16 {
+        self.internal_port.unwrap_or(external)
+    }
+    /// Whether this entry does port translation (DNAT) rather than a pure pinhole.
+    pub fn is_dnat(&self, external: u16) -> bool {
+        self.internal_port(external) != external
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
+pub struct Pinholes6(pub BTreeMap<SocketAddrV6, Pinhole>);
+impl Map for Pinholes6 {
+    type Key = SocketAddrV6;
+    type Value = Pinhole;
+    fn key_str(key: &Self::Key) -> Result<impl AsRef<str>, Error> {
+        Self::key_string(key)
+    }
+    fn key_string(key: &Self::Key) -> Result<InternedString, Error> {
+        Ok(InternedString::from_display(key))
+    }
+}
+impl Pinholes6 {
+    /// The key of an existing pinhole on the same GUA whose port span overlaps
+    /// `[gua.port(), gua.port() + count - 1]`, if any. An exact key match is
+    /// excluded (idempotent re-assert / same-port collision, handled by callers).
+    pub fn overlapping(&self, gua: SocketAddrV6, count: u16) -> Option<SocketAddrV6> {
+        let new_lo = gua.port();
+        let new_hi = new_lo.saturating_add(count.saturating_sub(1));
+        self.0.iter().find_map(|(key, ph)| {
+            if key.ip() != gua.ip() || *key == gua {
+                return None;
+            }
+            let lo = key.port();
+            let hi = lo.saturating_add(ph.count.max(1).saturating_sub(1));
+            (new_lo <= hi && lo <= new_hi).then_some(*key)
+        })
     }
 }
 impl PortForwards {

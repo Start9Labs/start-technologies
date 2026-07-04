@@ -361,6 +361,7 @@ impl TunnelContext {
 
         ctx.resync_egress().await?;
         ctx.resync_v6().await?;
+        crate::tunnel::forward::pinhole::seed_pinholes(&ctx).await?;
 
         // PCP (preferred) + UPnP IGD (fallback) let connected clients open their
         // public ports automatically.

@@ -4,4 +4,5 @@
 
 pub mod igd;
 pub mod pcp;
+pub mod pinhole;
 pub mod sni;

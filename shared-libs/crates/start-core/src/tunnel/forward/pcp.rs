@@ -6,14 +6,14 @@
 //! The socket is `SO_BINDTODEVICE`-bound to the WireGuard interface, so the PCP
 //! server is never reachable from the VPS's public interface.
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tokio::net::UdpSocket;
 
-use crate::net::port_map::server::{GatewayBackend, PCP_PORT, handle};
+use crate::net::port_map::server::{GatewayBackend, PCP_PORT, handle, handle6};
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::db::PortForward;
@@ -23,15 +23,27 @@ use crate::tunnel::forward::igd::{
 use crate::tunnel::forward::sni::SniDemux;
 use crate::tunnel::wg::WIREGUARD_INTERFACE_NAME;
 
-/// Run the PCP server for the life of the tunnel, self-restarting on error.
+/// Run the PCP server (IPv4 DNAT forwards + IPv6 GUA pinholes) for the life of
+/// the tunnel, each family self-restarting on error.
 pub async fn run(ctx: TunnelContext) {
     let started = Instant::now();
-    loop {
-        if let Err(e) = serve(&ctx, started).await {
-            tracing::warn!("PCP server failed, retrying: {e}");
-            tokio::time::sleep(Duration::from_secs(5)).await;
+    let v4 = async {
+        loop {
+            if let Err(e) = serve(&ctx, started).await {
+                tracing::warn!("PCP v4 server failed, retrying: {e}");
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
         }
-    }
+    };
+    let v6 = async {
+        loop {
+            if let Err(e) = serve6(&ctx, started).await {
+                tracing::warn!("PCP v6 server failed, retrying: {e}");
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        }
+    };
+    tokio::join!(v4, v6);
 }
 
 fn socket() -> Result<UdpSocket, Error> {
@@ -49,6 +61,27 @@ fn socket() -> Result<UdpSocket, Error> {
     UdpSocket::from_std(socket.into()).with_kind(ErrorKind::Network)
 }
 
+/// The v6 counterpart of [`socket`]: an IPv6-only UDP socket on the WireGuard
+/// interface, so a client's PCP MAP for its own GUA reaches us over the tunnel.
+fn socket6() -> Result<UdpSocket, Error> {
+    let socket =
+        Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP)).with_kind(ErrorKind::Network)?;
+    socket.set_reuse_address(true).with_kind(ErrorKind::Network)?;
+    // v4 requests go to the v4 socket; keep this one v6-only so both can bind :5351.
+    socket.set_only_v6(true).with_kind(ErrorKind::Network)?;
+    bind_to_wireguard(&socket)?;
+    socket
+        .bind(&SockAddr::from(SocketAddrV6::new(
+            Ipv6Addr::UNSPECIFIED,
+            PCP_PORT,
+            0,
+            0,
+        )))
+        .with_kind(ErrorKind::Network)?;
+    socket.set_nonblocking(true).with_kind(ErrorKind::Network)?;
+    UdpSocket::from_std(socket.into()).with_kind(ErrorKind::Network)
+}
+
 async fn serve(ctx: &TunnelContext, started: Instant) -> Result<(), Error> {
     let socket = socket()?;
     tracing::info!("PCP server listening on {WIREGUARD_INTERFACE_NAME}:{PCP_PORT}");
@@ -60,6 +93,22 @@ async fn serve(ctx: &TunnelContext, started: Instant) -> Result<(), Error> {
         };
         let epoch = started.elapsed().as_secs() as u32;
         if let Some(resp) = handle(ctx, peer, &buf[..n], epoch).await {
+            socket.send_to(&resp, from).await.ok();
+        }
+    }
+}
+
+async fn serve6(ctx: &TunnelContext, started: Instant) -> Result<(), Error> {
+    let socket = socket6()?;
+    tracing::info!("PCP v6 server listening on {WIREGUARD_INTERFACE_NAME}:{PCP_PORT}");
+    let mut buf = [0u8; 1100];
+    loop {
+        let (n, from) = socket.recv_from(&mut buf).await.with_kind(ErrorKind::Network)?;
+        let IpAddr::V6(peer) = from.ip() else {
+            continue;
+        };
+        let epoch = started.elapsed().as_secs() as u32;
+        if let Some(resp) = handle6(ctx, peer, &buf[..n], epoch).await {
             socket.send_to(&resp, from).await.ok();
         }
     }
@@ -111,6 +160,37 @@ impl GatewayBackend for TunnelContext {
 
     async fn is_known_client(&self, peer: Ipv4Addr) -> bool {
         is_known_client(self, peer).await
+    }
+
+    async fn is_known_gua(&self, gua: Ipv6Addr) -> bool {
+        crate::tunnel::forward::pinhole::is_known_gua(self, gua).await
+    }
+
+    async fn add_pinhole(
+        &self,
+        gua: Ipv6Addr,
+        external_port: u16,
+        internal_port: u16,
+        count: u16,
+    ) -> Result<(), u16> {
+        crate::tunnel::forward::pinhole::add_pinhole(
+            self,
+            gua,
+            external_port,
+            internal_port,
+            count,
+            None,
+            true,
+        )
+        .await
+        .map_err(|e| {
+            tracing::warn!("PCP v6 pinhole {gua}:{external_port} failed: {e}");
+            0
+        })
+    }
+
+    async fn remove_pinhole(&self, gua: Ipv6Addr, external_port: u16) {
+        crate::tunnel::forward::pinhole::remove_pinhole(self, gua, external_port).await
     }
 
     fn sni(&self) -> &Arc<SniDemux> {

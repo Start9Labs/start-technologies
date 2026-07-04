@@ -4388,6 +4388,13 @@ about.add-new-backup-target:
   fr_FR: "Ajouter une nouvelle cible de sauvegarde"
   pl_PL: "Dodaj nowy cel kopii zapasowej"
 
+about.add-new-pinhole:
+  en_US: "Add a new IPv6 pinhole"
+  de_DE: "Ein neues IPv6-Pinhole hinzufügen"
+  es_ES: "Agregar un nuevo pinhole IPv6"
+  fr_FR: "Ajouter un nouveau pinhole IPv6"
+  pl_PL: "Dodaj nowy pinhole IPv6"
+
 about.add-new-port-forward:
   en_US: "Add a new port forward"
   de_DE: "Eine neue Portweiterleitung hinzufügen"
@@ -4850,6 +4857,13 @@ about.commands-packages:
   fr_FR: "Commandes liées aux paquets"
   pl_PL: "Polecenia związane z pakietami"
 
+about.commands-pinhole:
+  en_US: "Commands for managing IPv6 pinholes"
+  de_DE: "Befehle zur Verwaltung von IPv6-Pinholes"
+  es_ES: "Comandos para gestionar pinholes IPv6"
+  fr_FR: "Commandes pour gérer les pinholes IPv6"
+  pl_PL: "Polecenia do zarządzania pinholes IPv6"
+
 about.commands-port-forward:
   en_US: "Commands for managing port forwards"
   de_DE: "Befehle zur Verwaltung von Portweiterleitungen"
@@ -5206,6 +5220,13 @@ about.enable-kiosk-mode:
   es_ES: "Activar el modo kiosco"
   fr_FR: "Activer le mode kiosque"
   pl_PL: "Włącz tryb kiosku"
+
+about.enable-or-disable-pinhole:
+  en_US: "Enable or disable an IPv6 pinhole"
+  de_DE: "IPv6-Pinhole aktivieren oder deaktivieren"
+  es_ES: "Habilitar o deshabilitar un pinhole IPv6"
+  fr_FR: "Activer ou désactiver un pinhole IPv6"
+  pl_PL: "Włącz lub wyłącz pinhole IPv6"
 
 about.enable-or-disable-port-forward:
   en_US: "Enable or disable a port forward"
@@ -5851,6 +5872,13 @@ about.remove-signer:
   fr_FR: "Supprimer le signataire et toutes ses autorisations"
   pl_PL: "Usuń sygnatariusza i wszystkie jego autoryzacje"
 
+about.remove-pinhole:
+  en_US: "Remove IPv6 pinhole"
+  de_DE: "IPv6-Pinhole entfernen"
+  es_ES: "Eliminar pinhole IPv6"
+  fr_FR: "Supprimer le pinhole IPv6"
+  pl_PL: "Usuń pinhole IPv6"
+
 about.remove-port-forward:
   en_US: "Remove port forward"
   de_DE: "Portweiterleitung entfernen"
@@ -6348,6 +6376,13 @@ about.update-firmware:
   es_ES: "Actualizar firmware"
   fr_FR: "Mettre à jour le firmware"
   pl_PL: "Zaktualizuj oprogramowanie układowe"
+
+about.update-pinhole-label:
+  en_US: "Update the label of an IPv6 pinhole"
+  de_DE: "Bezeichnung eines IPv6-Pinholes aktualisieren"
+  es_ES: "Actualizar la etiqueta de un pinhole IPv6"
+  fr_FR: "Mettre à jour le libellé d'un pinhole IPv6"
+  pl_PL: "Zaktualizuj etykietę pinhole IPv6"
 
 about.update-port-forward-label:
   en_US: "Update the label of a port forward"

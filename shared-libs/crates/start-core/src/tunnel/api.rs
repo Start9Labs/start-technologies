@@ -1,4 +1,4 @@
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
 use std::str::FromStr;
 
 use clap::{Parser, ValueEnum};
@@ -17,6 +17,7 @@ use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
 use crate::net::port_map::server::GatewayBackend;
 use crate::tunnel::db::{DnsRecordEntry, PortForward};
+use crate::tunnel::forward::pinhole;
 use crate::tunnel::wg::{
     DnsConfig, WIREGUARD_INTERFACE_NAME, WgClientKind, WgConfig, WgSubnetClients, WgSubnetConfig,
 };
@@ -85,6 +86,43 @@ pub fn tunnel_api<C: Context>() -> ParentHandler<C> {
                         .with_call_remote::<CliContext>(),
                 )
                 .with_about("about.commands-port-forward"),
+        )
+        .subcommand(
+            "pinhole",
+            ParentHandler::<C>::new()
+                .subcommand(
+                    "add",
+                    from_fn_async(add_pinhole)
+                        .with_metadata("sync_db", Value::Bool(true))
+                        .no_display()
+                        .with_about("about.add-new-pinhole")
+                        .with_call_remote::<CliContext>(),
+                )
+                .subcommand(
+                    "remove",
+                    from_fn_async(remove_pinhole)
+                        .with_metadata("sync_db", Value::Bool(true))
+                        .no_display()
+                        .with_about("about.remove-pinhole")
+                        .with_call_remote::<CliContext>(),
+                )
+                .subcommand(
+                    "update-label",
+                    from_fn_async(update_pinhole_label)
+                        .with_metadata("sync_db", Value::Bool(true))
+                        .no_display()
+                        .with_about("about.update-pinhole-label")
+                        .with_call_remote::<CliContext>(),
+                )
+                .subcommand(
+                    "set-enabled",
+                    from_fn_async(set_pinhole_enabled)
+                        .with_metadata("sync_db", Value::Bool(true))
+                        .no_display()
+                        .with_about("about.enable-or-disable-pinhole")
+                        .with_call_remote::<CliContext>(),
+                )
+                .with_about("about.commands-pinhole"),
         )
         .subcommand(
             "restart",
@@ -1497,6 +1535,130 @@ pub async fn set_forward_enabled(
     }
 
     Ok(())
+}
+
+#[derive(Deserialize, Serialize, Parser, TS)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+pub struct AddPinholeParams {
+    /// The client's global IPv6 (GUA) to expose. Must be an address this tunnel
+    /// delegates to a client — its subnet needs an IPv6 prefix.
+    #[ts(type = "string")]
+    gua: Ipv6Addr,
+    /// External port opened on the GUA.
+    external_port: u16,
+    /// Destination port on the GUA. Omit for a pure pinhole (no NAT, internal ==
+    /// external); set a different value for a port remap (e.g. 80 -> 443).
+    #[arg(long)]
+    #[serde(default)]
+    #[ts(optional)]
+    internal_port: Option<u16>,
+    #[arg(long)]
+    label: Option<String>,
+    /// Number of contiguous ports, counting up from external/internal. Default 1.
+    #[arg(long)]
+    #[serde(default)]
+    #[ts(optional)]
+    count: Option<u16>,
+}
+
+pub async fn add_pinhole(
+    ctx: TunnelContext,
+    AddPinholeParams {
+        gua,
+        external_port,
+        internal_port,
+        label,
+        count,
+    }: AddPinholeParams,
+) -> Result<(), Error> {
+    let count = count.unwrap_or(1);
+    if count == 0 {
+        return Err(Error::new(
+            eyre!("count must be at least 1"),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    let internal = internal_port.unwrap_or(external_port);
+    if external_port == 0 || internal == 0 {
+        return Err(Error::new(
+            eyre!("ports must be non-zero"),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    if external_port.checked_add(count - 1).is_none() || internal.checked_add(count - 1).is_none() {
+        return Err(Error::new(
+            eyre!("port range of {count} exceeds 65535"),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    if !pinhole::is_known_gua(&ctx, gua).await {
+        return Err(Error::new(
+            eyre!("{gua} is not a client address on any IPv6-enabled subnet"),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    pinhole::add_pinhole(&ctx, gua, external_port, internal, count, label, false).await
+}
+
+#[derive(Deserialize, Serialize, Parser, TS)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+pub struct RemovePinholeParams {
+    #[ts(type = "string")]
+    gua: Ipv6Addr,
+    external_port: u16,
+}
+
+pub async fn remove_pinhole(
+    ctx: TunnelContext,
+    RemovePinholeParams { gua, external_port }: RemovePinholeParams,
+) -> Result<(), Error> {
+    pinhole::remove_pinhole(&ctx, gua, external_port).await;
+    Ok(())
+}
+
+#[derive(Deserialize, Serialize, Parser, TS)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdatePinholeLabelParams {
+    #[ts(type = "string")]
+    gua: Ipv6Addr,
+    external_port: u16,
+    label: Option<String>,
+}
+
+pub async fn update_pinhole_label(
+    ctx: TunnelContext,
+    UpdatePinholeLabelParams {
+        gua,
+        external_port,
+        label,
+    }: UpdatePinholeLabelParams,
+) -> Result<(), Error> {
+    pinhole::set_pinhole_label(&ctx, gua, external_port, label).await
+}
+
+#[derive(Deserialize, Serialize, Parser, TS)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+pub struct SetPinholeEnabledParams {
+    #[ts(type = "string")]
+    gua: Ipv6Addr,
+    external_port: u16,
+    #[arg(long)]
+    enabled: bool,
+}
+
+pub async fn set_pinhole_enabled(
+    ctx: TunnelContext,
+    SetPinholeEnabledParams {
+        gua,
+        external_port,
+        enabled,
+    }: SetPinholeEnabledParams,
+) -> Result<(), Error> {
+    pinhole::set_pinhole_enabled(&ctx, gua, external_port, enabled).await
 }
 
 #[cfg(test)]

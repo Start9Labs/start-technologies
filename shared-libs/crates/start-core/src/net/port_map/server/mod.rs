@@ -7,7 +7,7 @@
 pub mod igd;
 
 use std::future::Future;
-use std::net::{Ipv4Addr, SocketAddrV4};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4};
 use std::sync::Arc;
 
 use crate::net::port_map::pcp::capability::encode_start9_capability_option;
@@ -79,6 +79,36 @@ pub trait GatewayBackend: Send + Sync {
 
     /// Whether `peer` is a client this gateway will create mappings for.
     fn is_known_client(&self, peer: Ipv4Addr) -> impl Future<Output = bool> + Send;
+
+    /// Whether `gua` is a global IPv6 address this gateway has delegated to a
+    /// client — the authorization check for a v6 pinhole. Default: no v6 support.
+    fn is_known_gua(&self, _gua: Ipv6Addr) -> impl Future<Output = bool> + Send {
+        async { false }
+    }
+
+    /// Open or refresh a firewall pinhole for `count` contiguous ports at
+    /// `[gua]:external_port`, delivered to `[gua]:internal_port` on the same GUA.
+    /// `internal_port == external_port` is a pure pinhole (no NAT); a different
+    /// value is a port-only DNAT (e.g. 80→443). `Err(code)` maps to NO_RESOURCES.
+    /// Default: v6 unsupported.
+    fn add_pinhole(
+        &self,
+        _gua: Ipv6Addr,
+        _external_port: u16,
+        _internal_port: u16,
+        _count: u16,
+    ) -> impl Future<Output = Result<(), u16>> + Send {
+        async { Err(0) }
+    }
+
+    /// Remove the pinhole at `[gua]:external_port`, if owned by `gua`. Default: no-op.
+    fn remove_pinhole(
+        &self,
+        _gua: Ipv6Addr,
+        _external_port: u16,
+    ) -> impl Future<Output = ()> + Send {
+        async {}
+    }
 
     /// The SNI demultiplexer used for HOSTNAME-bound shared-port mappings.
     fn sni(&self) -> &Arc<SniDemux>;
@@ -166,6 +196,30 @@ fn map_response(
     r[40..42].copy_from_slice(&internal_port.to_be_bytes());
     r[42..44].copy_from_slice(&external_port.to_be_bytes());
     r[44..60].copy_from_slice(&ipv4_mapped(external_ip));
+    r
+}
+
+/// A MAP response for a v6 pinhole: identical to [`map_response`] but the
+/// external-address field carries the full GUA rather than a v4-mapped address.
+fn map_response6(
+    result: u8,
+    req: &[u8],
+    internal_port: u16,
+    external_port: u16,
+    gua: Ipv6Addr,
+    lifetime: u32,
+    epoch: u32,
+) -> Vec<u8> {
+    let mut r = map_response(
+        result,
+        req,
+        internal_port,
+        external_port,
+        Ipv4Addr::UNSPECIFIED,
+        lifetime,
+        epoch,
+    );
+    r[44..60].copy_from_slice(&gua.octets());
     r
 }
 
@@ -483,6 +537,105 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
     }
 }
 
+/// Handle one PCP datagram received on the v6 socket from `peer` (the sender's
+/// own GUA). A MAP opens a firewall pinhole for that GUA — the target is forced
+/// to the source, so a client can only expose itself. `internal_port` and the
+/// suggested external port may differ (a port-DNAT, e.g. the 80→443 redirect).
+/// SNI/PORT_SET options don't apply to v6 pinholes and are ignored.
+pub async fn handle6<B: GatewayBackend + ?Sized>(
+    backend: &B,
+    peer: Ipv6Addr,
+    req: &[u8],
+    epoch: u32,
+) -> Option<Vec<u8>> {
+    if req.len() < HEADER_LEN {
+        return None;
+    }
+    let opcode = req[1] & 0x7f;
+    if req[1] & RESPONSE_BIT != 0 {
+        return None;
+    }
+    if req[0] != PCP_VERSION {
+        return Some(error_response(opcode, UNSUPP_VERSION, epoch));
+    }
+    if opcode == OPCODE_ANNOUNCE {
+        tracing::debug!("PCP ANNOUNCE from {peer}: replying with Start9 capability marker");
+        return Some(announce_response(epoch));
+    }
+    if opcode != OPCODE_MAP {
+        return Some(error_response(opcode, UNSUPP_OPCODE, epoch));
+    }
+    if req.len() < MAP_REQUEST_LEN {
+        return Some(error_response(opcode, MALFORMED_REQUEST, epoch));
+    }
+
+    if !backend.is_known_gua(peer).await {
+        return Some(map_response6(NOT_AUTHORIZED, req, 0, 0, Ipv6Addr::UNSPECIFIED, 0, epoch));
+    }
+
+    let lifetime = u32::from_be_bytes([req[4], req[5], req[6], req[7]]);
+    let internal_port = u16::from_be_bytes([req[40], req[41]]);
+    let suggested_external_port = u16::from_be_bytes([req[42], req[43]]);
+    let external_port = if suggested_external_port != 0 {
+        suggested_external_port
+    } else {
+        internal_port
+    };
+
+    if internal_port == 0 {
+        return Some(map_response6(
+            MALFORMED_REQUEST,
+            req,
+            internal_port,
+            external_port,
+            peer,
+            0,
+            epoch,
+        ));
+    }
+
+    // Lifetime 0 deletes the pinhole (RFC 6887 §15).
+    if lifetime == 0 {
+        backend.remove_pinhole(peer, external_port).await;
+        return Some(map_response6(
+            SUCCESS,
+            req,
+            internal_port,
+            external_port,
+            peer,
+            0,
+            epoch,
+        ));
+    }
+
+    match backend
+        .add_pinhole(peer, external_port, internal_port, 1)
+        .await
+    {
+        Ok(()) => {
+            let granted = lifetime.min(MAX_LIFETIME_SECONDS);
+            Some(map_response6(
+                SUCCESS,
+                req,
+                internal_port,
+                external_port,
+                peer,
+                granted,
+                epoch,
+            ))
+        }
+        Err(_) => Some(map_response6(
+            NO_RESOURCES,
+            req,
+            internal_port,
+            external_port,
+            peer,
+            0,
+            epoch,
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -603,5 +756,123 @@ mod tests {
         req[1] = 3; // not ANNOUNCE(0) nor MAP(1)
         let resp = handle(&stub, Ipv4Addr::LOCALHOST, &req, 0).await.unwrap();
         assert_eq!(resp[3], UNSUPP_OPCODE);
+    }
+
+    struct V6Stub {
+        sni: Arc<SniDemux>,
+        known: bool,
+        pinholes: std::sync::Mutex<Vec<(Ipv6Addr, u16, u16, u16)>>,
+        removed: std::sync::Mutex<Vec<(Ipv6Addr, u16)>>,
+    }
+    impl V6Stub {
+        fn new(known: bool) -> Self {
+            Self {
+                sni: SniDemux::new(),
+                known,
+                pinholes: std::sync::Mutex::new(Vec::new()),
+                removed: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+    }
+    impl GatewayBackend for V6Stub {
+        fn add_forward(
+            &self,
+            _: SocketAddrV4,
+            _: SocketAddrV4,
+            _: u16,
+            _: Ipv4Addr,
+        ) -> impl Future<Output = Result<(), u16>> + Send {
+            async { Ok(()) }
+        }
+        fn remove_forward(&self, _: Ipv4Addr, _: u16) -> impl Future<Output = ()> + Send {
+            async {}
+        }
+        fn remove_forward_by_source(
+            &self,
+            _: SocketAddrV4,
+            _: Ipv4Addr,
+        ) -> impl Future<Output = bool> + Send {
+            async { false }
+        }
+        fn external_ipv4(&self, _: Ipv4Addr) -> impl Future<Output = Option<Ipv4Addr>> + Send {
+            async { None }
+        }
+        fn is_known_client(&self, _: Ipv4Addr) -> impl Future<Output = bool> + Send {
+            async { false }
+        }
+        fn is_known_gua(&self, _: Ipv6Addr) -> impl Future<Output = bool> + Send {
+            let known = self.known;
+            async move { known }
+        }
+        fn add_pinhole(
+            &self,
+            gua: Ipv6Addr,
+            external_port: u16,
+            internal_port: u16,
+            count: u16,
+        ) -> impl Future<Output = Result<(), u16>> + Send {
+            self.pinholes
+                .lock()
+                .unwrap()
+                .push((gua, external_port, internal_port, count));
+            async { Ok(()) }
+        }
+        fn remove_pinhole(
+            &self,
+            gua: Ipv6Addr,
+            external_port: u16,
+        ) -> impl Future<Output = ()> + Send {
+            self.removed.lock().unwrap().push((gua, external_port));
+            async {}
+        }
+        fn sni(&self) -> &Arc<SniDemux> {
+            &self.sni
+        }
+    }
+
+    const TEST_GUA: Ipv6Addr = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0x50);
+
+    // A pure pinhole: no suggested external port → external == internal, no NAT.
+    #[tokio::test]
+    async fn handle6_opens_pinhole_for_known_gua() {
+        let stub = V6Stub::new(true);
+        let req = map_request([9u8; 12], 3600, 8443, 0);
+        let resp = handle6(&stub, TEST_GUA, &req, 1).await.expect("answered");
+        assert_eq!(resp[3], SUCCESS);
+        assert_eq!(u16::from_be_bytes([resp[40], resp[41]]), 8443); // internal
+        assert_eq!(u16::from_be_bytes([resp[42], resp[43]]), 8443); // external
+        assert_eq!(&resp[44..60], &TEST_GUA.octets()); // GUA, not v4-mapped
+        assert_eq!(*stub.pinholes.lock().unwrap(), vec![(TEST_GUA, 8443, 8443, 1)]);
+    }
+
+    // A suggested external port different from internal → the 80→443 redirect.
+    #[tokio::test]
+    async fn handle6_honors_suggested_external_port() {
+        let stub = V6Stub::new(true);
+        let req = map_request([9u8; 12], 3600, 443, 80);
+        let resp = handle6(&stub, TEST_GUA, &req, 1).await.expect("answered");
+        assert_eq!(resp[3], SUCCESS);
+        assert_eq!(u16::from_be_bytes([resp[40], resp[41]]), 443); // internal
+        assert_eq!(u16::from_be_bytes([resp[42], resp[43]]), 80); // external
+        assert_eq!(*stub.pinholes.lock().unwrap(), vec![(TEST_GUA, 80, 443, 1)]);
+    }
+
+    #[tokio::test]
+    async fn handle6_rejects_unknown_gua() {
+        let stub = V6Stub::new(false);
+        let req = map_request([9u8; 12], 3600, 8443, 0);
+        let resp = handle6(&stub, TEST_GUA, &req, 1).await.expect("answered");
+        assert_eq!(resp[3], NOT_AUTHORIZED);
+        assert!(stub.pinholes.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn handle6_lifetime_zero_removes() {
+        let stub = V6Stub::new(true);
+        let req = map_request([9u8; 12], 0, 443, 80);
+        let resp = handle6(&stub, TEST_GUA, &req, 1).await.expect("answered");
+        assert_eq!(resp[3], SUCCESS);
+        assert_eq!(*stub.removed.lock().unwrap(), vec![(TEST_GUA, 80)]);
+        assert!(stub.pinholes.lock().unwrap().is_empty());
     }
 }
