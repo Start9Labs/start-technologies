@@ -40,9 +40,10 @@ const SERVER_PATTERN =
   '|[0-9a-fA-F:]+' +
   ')$'
 
-// A bare IPv6 prefix in CIDR form (addr/len 0-128). Empty clears it. The
+// A bare IPv6 prefix in CIDR form (addr/len 0-96 — a host's IPv4 must fit in the
+// low bits, so /96 is the longest allowed; /64 is typical). Empty clears it. The
 // backend validates strictly and checks the server can actually route it.
-const IPV6_CIDR_PATTERN = '^[0-9a-fA-F:]+/(?:12[0-8]|1[01]\\d|[1-9]?\\d)$'
+const IPV6_CIDR_PATTERN = '^[0-9a-fA-F:]+/(?:9[0-6]|[1-8]?\\d)$'
 
 const MODE_LABEL: Record<T.Tunnel.DnsMode, string> = {
   default: 'Default (VPS provider)',

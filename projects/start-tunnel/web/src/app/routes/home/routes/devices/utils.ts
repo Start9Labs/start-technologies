@@ -31,7 +31,9 @@ export interface MappedSubnet {
 export function deviceIpv6(prefix: string | null, ip: string): string | null {
   if (!prefix) return null
   try {
-    const octets = utils.IpNet.parse(prefix).zero().octets.slice()
+    const net = utils.IpNet.parse(prefix)
+    if (!net.isIpv6()) return null
+    const octets = net.zero().octets.slice()
     const v4 = utils.IpAddress.parse(ip).octets
     for (let i = 0; i < 4; i++) {
       octets[12 + i] = (octets[12 + i] ?? 0) | (v4[i] ?? 0)

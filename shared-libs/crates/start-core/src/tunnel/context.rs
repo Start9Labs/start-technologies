@@ -404,8 +404,8 @@ impl TunnelContext {
     /// inside a /64 that a WAN interface holds *on-link* (Hetzner, Vultr), the
     /// VPS gateway resolves that address via Neighbor Discovery on the WAN link,
     /// so the tunnel host must answer for it (`proxy_ndp`) and then forward to
-    /// the client over WireGuard. A routed prefix (or a per-client /64) is
-    /// delivered to the host without ND, so it needs no proxy entry.
+    /// the client over WireGuard. A routed prefix is delivered to the host
+    /// without ND, so it needs no proxy entry.
     pub async fn resync_v6(&self) -> Result<(), Error> {
         let _guard = self.v6_lock.lock().await;
         let server = self.db.peek().await.as_wg().de()?;

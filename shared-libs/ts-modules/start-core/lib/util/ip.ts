@@ -73,19 +73,7 @@ export class IpAddress {
       if (octets.some(o => o > 255)) {
         throw new Error('invalid ip address')
       }
-      let pre = octets.slice(0, 8)
-      while (pre[pre.length - 1] == 0) {
-        pre.pop()
-      }
-      let post = octets.slice(8)
-      while (post[0] == 0) {
-        post.unshift()
-      }
-      if (pre.length + post.length == 16) {
-        return new IpAddress(octets, octets.join(':'))
-      } else {
-        return new IpAddress(octets, pre.join(':') + '::' + post.join(':'))
-      }
+      return new IpAddress(octets, renderIpv6(octets))
     } else {
       throw new Error('invalid ip address')
     }
@@ -178,25 +166,7 @@ export class IpAddress {
       this.renderedAddress = this.octets.join('.')
       this.renderedOctets = [...this.octets]
     } else if (this.octets.length === 16) {
-      const contigZeros = this.octets.reduce(
-        (acc, x, idx) => {
-          if (x === 0) {
-            acc.current++
-          } else {
-            acc.current = 0
-          }
-          if (acc.current > acc.end - acc.start) {
-            acc.end = idx + 1
-            acc.start = acc.end - acc.current
-          }
-          return acc
-        },
-        { start: 0, end: 0, current: 0 },
-      )
-      if (contigZeros.end - contigZeros.start >= 2) {
-        return `${this.octets.slice(0, contigZeros.start).join(':')}::${this.octets.slice(contigZeros.end).join(':')}`
-      }
-      this.renderedAddress = this.octets.join(':')
+      this.renderedAddress = renderIpv6(this.octets)
       this.renderedOctets = [...this.octets]
     } else {
       console.warn('invalid octet length for IpAddress', this.octets)
@@ -327,3 +297,35 @@ export const IPV6_LINK_LOCAL = IpNet.parse('fe80::/10')
 
 /** Carrier-Grade NAT (CGNAT) address range (100.64.0.0/10), per RFC 6598. */
 export const CGNAT = IpNet.parse('100.64.0.0/10')
+
+/**
+ * Render 16 IPv6 octets to a canonical string: eight 16-bit groups in lowercase
+ * hex, with the longest run of two or more all-zero groups collapsed to `::`.
+ */
+function renderIpv6(octets: number[]): string {
+  const groups: number[] = []
+  for (let i = 0; i < 16; i += 2) {
+    groups.push((octets[i] << 8) | octets[i + 1])
+  }
+  let bestStart = -1
+  let bestLen = 0
+  let curStart = -1
+  let curLen = 0
+  for (let i = 0; i <= groups.length; i++) {
+    if (i < groups.length && groups[i] === 0) {
+      if (curStart < 0) curStart = i
+      curLen++
+    } else {
+      if (curLen > bestLen) {
+        bestLen = curLen
+        bestStart = curStart
+      }
+      curStart = -1
+      curLen = 0
+    }
+  }
+  const hex = groups.map(g => g.toString(16))
+  return bestLen >= 2
+    ? `${hex.slice(0, bestStart).join(':')}::${hex.slice(bestStart + bestLen).join(':')}`
+    : hex.join(':')
+}

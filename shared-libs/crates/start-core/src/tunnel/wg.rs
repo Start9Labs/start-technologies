@@ -277,8 +277,8 @@ impl WgConfig {
 pub struct ServerPeerConfig<'a> {
     client_config: &'a WgConfig,
     client_addr: Ipv4Addr,
-    /// The IPv6 network delegated to this client (its /64 under prefix
-    /// delegation, else its /128), routed back to it over WireGuard.
+    /// The client's `/128` out of its subnet's prefix, routed back to it over
+    /// WireGuard. `None` when the subnet has no IPv6 prefix.
     client_v6: Option<Ipv6Net>,
 }
 impl<'a> std::fmt::Display for ServerPeerConfig<'a> {

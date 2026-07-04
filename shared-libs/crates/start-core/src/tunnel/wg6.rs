@@ -57,4 +57,16 @@ mod tests {
         assert_eq!(h, "2001:db8:1200::a3b:5".parse::<Ipv6Addr>().unwrap());
         assert!(p.contains(&h));
     }
+
+    #[test]
+    fn stays_in_prefix_up_to_the_96_boundary() {
+        // /96 is the smallest prefix that still fits a full 32-bit IPv4 in the
+        // host bits; `set_subnet_ipv6` rejects anything longer, so host_v6 is
+        // only ever called with prefixes <= /96 and always stays in-prefix.
+        for len in [48u8, 56, 64, 80, 96] {
+            let p = Ipv6Net::new("2001:db8:abcd:ef00::".parse().unwrap(), len).unwrap();
+            let h = host_v6(p, "10.59.3.7".parse().unwrap());
+            assert!(p.contains(&h), "escaped prefix at /{len}");
+        }
+    }
 }
