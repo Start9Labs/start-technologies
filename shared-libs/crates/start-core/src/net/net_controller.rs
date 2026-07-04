@@ -306,6 +306,10 @@ struct HostBinds {
     /// PortMapController pinhole. Tracked so it is withdrawn when a GUA leaves
     /// LAN+WAN or its binding goes away.
     gua_pinholes: BTreeSet<(Ipv6Addr, u16)>,
+    /// GUAs we asked the gateway for an 80->443 redirect pinhole on (the v6
+    /// analogue of `redirect_maps`). Tracked so the redirect is withdrawn when
+    /// 443 stops being exposed on that GUA, or 80 becomes a real pinhole.
+    gua_redirect_maps: BTreeSet<Ipv6Addr>,
     /// Non-SSL v6 forwards: `(host GUA, external port) -> (container v6, internal
     /// port, LAN source filter)`. A non-SSL GUA has no host terminator, so its
     /// port is DNAT'd to the container (see `forward6`); tracked so a stale
@@ -338,6 +342,9 @@ impl NetServiceData {
         let mut vhosts: BTreeMap<(Option<InternedString>, u16), ProxyTarget> = BTreeMap::new();
         let mut private_dns: BTreeMap<InternedString, BTreeSet<GatewayId>> = BTreeMap::new();
         let mut gua_pinholes: BTreeSet<(Ipv6Addr, u16)> = BTreeSet::new();
+        // Candidate v6 gateways per GUA, so the post-loop 80->443 redirect can
+        // reach the same gateways the GUA's pinholes used.
+        let mut gua_gateways: BTreeMap<Ipv6Addr, Vec<(IpAddr, Option<u32>)>> = BTreeMap::new();
         let mut gua_forwards: BTreeMap<(Ipv6Addr, u16), (Ipv6Addr, u16, Option<IpNet>)> =
             BTreeMap::new();
         let binds = self.binds.entry(id.clone()).or_default();
@@ -375,6 +382,9 @@ impl NetServiceData {
                 if v6_gateways.is_empty() {
                     continue;
                 }
+                gua_gateways
+                    .entry(*gua.ip())
+                    .or_insert_with(|| v6_gateways.clone());
                 if gua_pinholes.insert((*gua.ip(), gua.port())) {
                     ctrl.port_map.ensure(
                         IpAddr::V6(*gua.ip()),
@@ -745,6 +755,28 @@ impl NetServiceData {
             ctrl.port_map.remove(IpAddr::V4(ip), 80);
         }
         binds.redirect_maps = redirect_ips;
+
+        // v6 HTTP→HTTPS redirect: for a GUA exposing 443, also ask the gateway
+        // for an 80->443 redirect pinhole (mirrors redirect_maps). Skipped when
+        // 80 is already a real pinhole on that GUA.
+        let mut gua_redirects: BTreeSet<Ipv6Addr> = BTreeSet::new();
+        for (gua_ip, gws) in &gua_gateways {
+            if gua_pinholes.contains(&(*gua_ip, 443))
+                && !gua_pinholes.contains(&(*gua_ip, 80))
+                && gua_redirects.insert(*gua_ip)
+            {
+                ctrl.port_map.ensure(IpAddr::V6(*gua_ip), 80, 443, gws.clone());
+            }
+        }
+        let stale_redirects: Vec<Ipv6Addr> = binds
+            .gua_redirect_maps
+            .difference(&gua_redirects)
+            .copied()
+            .collect();
+        for ip in stale_redirects {
+            ctrl.port_map.remove(IpAddr::V6(ip), 80);
+        }
+        binds.gua_redirect_maps = gua_redirects;
 
         // Withdraw GUA pinholes that no longer apply (GUA left LAN+WAN, or the
         // binding went away).
