@@ -29,8 +29,8 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 │       ├── routes/      # Feature pages (wan, wifi, profiles, etc.)
 │       └── utils/       # Validators, masks, schedules
 │
-├── openwrt/             # Pristine upstream OpenWrt checkout (gitignored; managed by build/openwrt-setup.sh)
-├── openwrt-patches/     # Start9 patches to upstream OpenWrt files (git apply-ed at setup)
+├── openwrt/             # OpenWrt build workspace (gitignored, no git repo; rebuilt by build/openwrt-setup.sh)
+├── openwrt-patches/     # Start9 patches to upstream OpenWrt files (patch -p1 at setup)
 ├── openwrt-overlay/     # Start9 additions to the OpenWrt tree (spacemit target, boot pkgs; rsynced at setup)
 ├── build/               # Build scripts, OpenWrt diffconfig + version pin
 ├── docs/                # User-facing docs book (src/, book.toml) + cross-cutting specs/proposals
@@ -43,7 +43,7 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 
 - **`web/`** — Angular 22 SPA using Taiga UI v5. Signal-based state, zoneless change detection, standalone components. Communicates with the backend exclusively via JSON-RPC 2.0. Embeds contextual help on every page. See [web/ARCHITECTURE.md](web/ARCHITECTURE.md).
 
-- **`openwrt/`** — Disposable checkout of pristine upstream OpenWrt at the release pinned in `build/openwrt-version`. `build/openwrt-setup.sh` resets it and applies the Start9 delta: `openwrt-patches/` modifies a handful of upstream build-infra files, `openwrt-overlay/` adds the SpacemiT K1 target (`target/linux/spacemit/`) and boot packages (`opensbi-spacemit`, `uboot-spacemit`). The build system compiles the Rust backend + Angular frontend, stages them into `openwrt/files/`, and produces a flashable image.
+- **`openwrt/`** — Disposable build workspace (plain directory, no git repo) rebuilt by `build/openwrt-setup.sh` from the sha256-pinned upstream OpenWrt release tarball (`build/openwrt-version`) plus the Start9 delta: `openwrt-patches/` modifies a handful of upstream build-infra files, `openwrt-overlay/` adds the SpacemiT K1 target (`target/linux/spacemit/`) and boot packages (`opensbi-spacemit`, `uboot-spacemit`). The build system compiles the Rust backend + Angular frontend, stages them into `openwrt/files/`, and produces a flashable image.
 
 ## Data Flow
 

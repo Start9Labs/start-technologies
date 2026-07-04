@@ -102,16 +102,19 @@ Releases stage through a beta registry before promotion to production, mirroring
 
 ## OpenWrt tree (pinned upstream + patches + overlay)
 
-`openwrt/` is **not** a submodule and **not** a fork — it's a disposable, gitignored checkout
-of pristine upstream OpenWrt that `build/openwrt-setup.sh` manages. Every setup run:
+`openwrt/` is **not** a submodule, **not** a fork, and **not even a git repo** — it's a
+disposable, gitignored build workspace (think `node_modules/`) that `build/openwrt-setup.sh`
+rebuilds. Every setup run:
 
-1. Fetches the upstream release pinned in [`build/openwrt-version`](build/openwrt-version)
-   (`OPENWRT_TAG`, integrity-checked against `OPENWRT_COMMIT`) and hard-resets the checkout to
-   it, dropping any local edits. Ignored paths (`dl/`, `feeds/`, `build_dir/`, `staging_dir/`,
-   `bin/`, `files/`, `.config`) survive the reset, so caches and staged files are preserved.
-2. `git apply`-s [`openwrt-patches/`](openwrt-patches/) — the Start9 modifications to upstream
-   files (currently 3 small build-infra patches for the git-cloned vendor kernel + a 6.18
-   module rename).
+1. Downloads the upstream release tarball pinned in
+   [`build/openwrt-version`](build/openwrt-version) (`OPENWRT_VERSION`, integrity-checked
+   against `OPENWRT_TARBALL_SHA256`; cached at `openwrt/dl/openwrt-v<ver>.tar.gz`) and
+   extracts a pristine tree, discarding any local edits. Generated state the tarball doesn't
+   provide (`dl/`, `feeds/`, `build_dir/`, `staging_dir/`, `bin/`, `files/`, `.config`,
+   signing keys, …) is carried over, so caches and staged files are preserved.
+2. Applies [`openwrt-patches/`](openwrt-patches/) with `patch -p1` — the Start9 modifications
+   to upstream files (currently 3 small build-infra patches for the git-cloned vendor kernel
+   + a 6.18 module rename).
 3. Rsyncs [`openwrt-overlay/`](openwrt-overlay/) over the tree — the Start9 *additions*
    (mirroring upstream layout): `target/linux/spacemit/` (the K1 target, including its
    `patches-6.18/` kernel patches), `package/boot/{opensbi,uboot}-spacemit/`, the generic
@@ -119,21 +122,32 @@ of pristine upstream OpenWrt that `build/openwrt-setup.sh` manages. Every setup 
    patches, so upstream bumps can never conflict with them.
 
 `./projects/start-wrt/build/openwrt-setup.sh --tree-only` (from the repo root) runs only the
-tree prep — useful offline and for testing.
+tree rebuild — useful offline (once the tarball is cached) and for testing.
 
-**Changing the OpenWrt delta.** Never commit inside `openwrt/`. To add files, edit
-`openwrt-overlay/` (or drop new files into the checkout, verify, then copy them into the
-overlay at the same relative path). To modify an upstream file, edit it in the checkout,
-verify, then regenerate the patch: `git -C projects/start-wrt/openwrt diff <file> >`
-`projects/start-wrt/openwrt-patches/000N-<name>.patch` (keep the explanatory header — patch
-tooling ignores everything before the first `diff --git`).
+**Changing the OpenWrt delta.** Never keep work inside `openwrt/` — the next setup run
+discards it. To add files, edit `openwrt-overlay/` (or prototype in the workspace, verify,
+then copy the files into the overlay at the same relative path). To modify an upstream file,
+edit it in the workspace, verify, then regenerate the patch against the pristine copy pulled
+straight from the cached tarball:
 
-**Bumping the upstream release.** Update both values in `build/openwrt-version` (the new tag
-and its `^{commit}` SHA), run `make start-wrt-openwrt-setup`, and rebuild the image. If a patch
-no longer applies, fix the affected file in the checkout by hand and regenerate that patch as
-above. The overlay needs attention only if upstream grew a conflicting path (the spacemit
-target dir is ours alone, so this is rare). Commit the pin bump + refreshed patches + a
-`CHANGELOG.md` entry as one ordinary PR.
+```bash
+cd projects/start-wrt
+tar -xzf openwrt/dl/openwrt-v<ver>.tar.gz openwrt-<ver>/<path> -O > /tmp/pristine
+diff -u /tmp/pristine openwrt/<path> \
+  | sed -e 's|^--- .*|--- a/<path>|' -e 's|^+++ .*|+++ b/<path>|' \
+  > openwrt-patches/000N-<name>.patch
+```
+
+(Keep the explanatory header block above the diff — patch tooling ignores everything before
+the first `---`/`diff` line.)
+
+**Bumping the upstream release.** Update both values in `build/openwrt-version` (the new
+version and the sha256 of its tag tarball — download it once and `sha256sum` it), run
+`make start-wrt-openwrt-setup`, and rebuild the image. If a patch no longer applies, fix the
+affected file in the workspace by hand and regenerate that patch as above. The overlay needs
+attention only if upstream grew a conflicting path (the spacemit target dir is ours alone, so
+this is rare). Commit the pin bump + refreshed patches + a `CHANGELOG.md` entry as one
+ordinary PR.
 
 ## Coupled changes
 

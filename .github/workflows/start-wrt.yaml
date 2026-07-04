@@ -98,7 +98,7 @@ jobs:
           retention-days: 14
 
   # Heavy path: full flashable OpenWrt image. Gated to manual dispatch because
-  # it clones pristine upstream OpenWrt (pinned in build/openwrt-version,
+  # it downloads the pinned upstream OpenWrt tarball (build/openwrt-version,
   # patched from openwrt-patches/ + openwrt-overlay/) and runs a multi-hour
   # build. Also runs when deploying, since the `deploy` job needs the freshly
   # built images.
@@ -112,8 +112,8 @@ jobs:
         with:
           nodejs-version: ${{ env.NODEJS_VERSION }}
 
-      # Restored BEFORE openwrt-setup.sh runs — the script git-inits into the
-      # existing openwrt/ directory around the cached dl/.
+      # Restored BEFORE openwrt-setup.sh runs — the script rebuilds openwrt/
+      # around the cached dl/ (which also caches the pinned source tarball).
       - name: Cache OpenWrt download directory
         uses: actions/cache@v4
         with:
