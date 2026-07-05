@@ -35,4 +35,4 @@ The `Port Forwards` page shows two tables: **Manual** forwards you added by hand
 
 ## SNI hostnames (IPv4 only)
 
-When IP Version is `IPv4`, an optional **Hostname** routes by TLS SNI so several hostnames can share one external port. SNI demultiplexing is an IPv4-only feature and cannot be combined with a port range.
+When IP Version includes IPv4 (`IPv4` or `IPv4 + IPv6`), an optional **Hostname** routes by TLS SNI so several hostnames can share one external port. SNI demultiplexing is IPv4-only — in `IPv4 + IPv6` mode it applies to the IPv4 side only, and the IPv6 side is a plain pinhole (each device already has its own address, so no demux is needed) — and it cannot be combined with a port range.

@@ -153,7 +153,7 @@ const IP_VERSION: Record<string, string> = {
         />
       }
 
-      @if (form.value.ipVersion === 'ipv4' && !isRange) {
+      @if (form.value.ipVersion !== 'ipv6' && !isRange) {
         <tui-textfield>
           <label tuiLabel>Hostname (optional)</label>
           <input
@@ -291,8 +291,10 @@ export class PortForwardsAdd {
     } = this.form.getRawValue()
 
     const isRange = count > 1
-    // SNI demux is IPv4-only and per-port; ignore any hostname otherwise.
-    const hostname = isRange || ipVersion !== 'ipv4' ? '' : sni.trim()
+    // SNI demux is IPv4-only and per-port; it applies to the v4 side even in
+    // "both" mode (the v6 side is always a plain pinhole). Ignored for v6-only
+    // and for ranges.
+    const hostname = isRange || ipVersion === 'ipv6' ? '' : sni.trim()
     const v4 = ipVersion === 'ipv4' || ipVersion === 'both'
     const v6 = ipVersion === 'ipv6' || ipVersion === 'both'
     const wants80 =
