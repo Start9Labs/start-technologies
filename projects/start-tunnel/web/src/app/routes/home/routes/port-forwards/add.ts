@@ -155,7 +155,11 @@ const IP_VERSION: Record<string, string> = {
 
       @if (form.value.ipVersion !== 'ipv6' && !isRange) {
         <tui-textfield>
-          <label tuiLabel>Hostname (optional)</label>
+          <label tuiLabel>
+            Hostname (optional{{
+              form.value.ipVersion === 'both' ? ', ipv4 only' : ''
+            }})
+          </label>
           <input
             tuiInput
             formControlName="sni"
