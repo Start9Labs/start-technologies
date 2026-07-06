@@ -18,7 +18,7 @@
     "check:i18n:wrt": "node projects/start-wrt/web/scripts/check-i18n.mjs",
     "build:patch-db": "cd shared-libs/crates/patch-db/client && npm ci && npm run build",
     "build:core": "cd shared-libs/ts-modules/start-core && make dist",
-    "build:deps": "rimraf .angular/cache && npm run build:core && npm run build:patch-db",
+    "build:deps": "node -e \"fs.rmSync('.angular/cache',{recursive:true,force:true})\" && npm run build:core && npm run build:patch-db",
     "build:setup": "ng run setup-wizard:build",
     "build:ui": "ng run ui:build",
     "build:ui:dev": "ng run ui:build:development",
@@ -112,7 +112,6 @@
     "node-html-parser": "^5.3.3",
     "postcss": "^8.4.21",
     "prettier": "3.8.3",
-    "rimraf": "^6.0.1",
     "ts-node": "^10.7.0",
     "tslint": "^6.1.3",
     "typescript": "~6.0.3"
