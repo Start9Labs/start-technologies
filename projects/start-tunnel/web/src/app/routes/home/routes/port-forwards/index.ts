@@ -46,6 +46,7 @@ import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
           <tr>
             <th></th>
             <th>Label</th>
+            <th>IP</th>
             <th>External Address</th>
             <th>External Port</th>
             <th>Hostname</th>
@@ -76,6 +77,7 @@ import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
                 </tui-loader>
               </td>
               <td>{{ forward.label || '—' }}</td>
+              <td>{{ version(forward) }}</td>
               <td>{{ forward.externalip }}</td>
               <td>{{ span(forward.externalport, forward.count) }}</td>
               <td>{{ forward.sni || '—' }}</td>
@@ -117,7 +119,7 @@ import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
             </tr>
           } @empty {
             <tr>
-              <td colspan="9">
+              <td colspan="10">
                 <app-placeholder icon="@tui.globe">
                   No port forwards
                 </app-placeholder>
@@ -136,6 +138,7 @@ import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
       <table class="g-table no-actions" [tuiSkeleton]="!portForwards()">
         <thead>
           <tr>
+            <th>IP</th>
             <th>External Address</th>
             <th>External Port</th>
             <th>Hostname</th>
@@ -147,6 +150,7 @@ import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
         <tbody>
           @for (forward of automatic(); track $index) {
             <tr>
+              <td>{{ version(forward) }}</td>
               <td>{{ forward.externalip }}</td>
               <td>{{ span(forward.externalport, forward.count) }}</td>
               <td>{{ forward.sni || '—' }}</td>
@@ -156,7 +160,7 @@ import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
             </tr>
           } @empty {
             <tr>
-              <td colspan="6">
+              <td colspan="7">
                 <app-placeholder icon="@tui.globe">
                   No port forwards
                 </app-placeholder>
@@ -262,6 +266,10 @@ export default class PortForwards {
 
   protected key(forward: MappedForward): string {
     return `${forward.ipVersion}:${forward.externalip}:${forward.externalport}:${forward.hostname ?? ''}`
+  }
+
+  protected version(forward: MappedForward): string {
+    return forward.ipVersion === 'ipv6' ? 'IPv6' : 'IPv4'
   }
 
   // Renders a forwarded port span: a single port when count is 1, else `start-end`.

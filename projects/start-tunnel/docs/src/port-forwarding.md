@@ -17,7 +17,7 @@ Because each device has its own IPv6 address, two different devices can both pub
 
 ## Manual and automatic forwards
 
-The `Port Forwards` page shows two tables: **Manual** forwards you added by hand, and **Automatic** forwards opened by connected devices via PCP/UPnP. A row's **External Address** is a public IPv4 (a v4 forward) or the device's IPv6 GUA (a v6 pinhole), so the address shows which stack it uses. You can enable, disable, or remove either; automatic forwards have no editable label (they're owned by the device that created them) and may be re-created if you remove one while the device still wants it.
+The `Port Forwards` page shows two tables: **Manual** forwards you added by hand, and **Automatic** forwards opened by connected devices via PCP/UPnP. The **IP** column marks each row `IPv4` or `IPv6`. You can enable, disable, or remove either; automatic forwards have no editable label (they're owned by the device that created them) and may be re-created if you remove one while the device still wants it.
 
 ## Add a forward manually
 
