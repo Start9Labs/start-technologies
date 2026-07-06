@@ -11,15 +11,13 @@
     "check": "tsc --noEmit --skipLibCheck"
   },
   "dependencies": {
-    "sorted-btree": "1.5.0",
-    "uuid": "8.3.2"
+    "sorted-btree": "1.5.0"
   },
   "peerDependencies": {
     "rxjs": ">=7.0.0"
   },
   "devDependencies": {
     "@types/node": "22.15.19",
-    "@types/uuid": "8.3.1",
     "husky": "^4.3.8",
     "lint-staged": "^13.2.0",
     "prettier": "^3.5.3",
