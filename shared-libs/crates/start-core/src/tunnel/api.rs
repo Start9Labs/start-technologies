@@ -11,11 +11,11 @@ use ts_rs::TS;
 
 use crate::context::CliContext;
 use crate::db::model::public::NetworkInterfaceType;
-use crate::net::forward::nft_rule;
 use crate::net::dns_update::rfc2136::InjectedRecord;
+use crate::net::forward::nft_rule;
+use crate::net::port_map::server::GatewayBackend;
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
-use crate::net::port_map::server::GatewayBackend;
 use crate::tunnel::db::{DnsRecordEntry, PortForward};
 use crate::tunnel::forward::pinhole;
 use crate::tunnel::wg::{
@@ -861,7 +861,6 @@ pub async fn set_subnet_ipv6(
                 "prefix {net} is not on-link on any WAN interface; ensure your provider routes it to this host, otherwise clients will have no IPv6"
             );
         }
-
     }
 
     ctx.db
@@ -912,11 +911,7 @@ pub struct SetDeviceWanParams {
 /// `null` falls back to the subnet rule / masquerade.
 pub async fn set_device_wan(
     ctx: TunnelContext,
-    SetDeviceWanParams {
-        subnet,
-        ip,
-        wan_ip,
-    }: SetDeviceWanParams,
+    SetDeviceWanParams { subnet, ip, wan_ip }: SetDeviceWanParams,
 ) -> Result<(), Error> {
     ctx.db
         .mutate(|db| {
@@ -1110,8 +1105,6 @@ pub struct ShowConfigParams {
     subnet: Ipv4Net,
     #[ts(type = "string")]
     ip: Ipv4Addr,
-    #[ts(type = "string | null")]
-    wan_addr: Option<IpAddr>,
     #[serde(rename = "__ConnectInfo_local_addr")]
     #[arg(skip)]
     #[ts(skip)]
@@ -1123,7 +1116,6 @@ pub async fn show_config(
     ShowConfigParams {
         subnet,
         ip,
-        wan_addr,
         local_addr,
     }: ShowConfigParams,
 ) -> Result<String, Error> {
@@ -1136,14 +1128,18 @@ pub async fn show_config(
         .as_idx(&ip)
         .or_not_found(&ip)?
         .de()?;
-    let wan_addr = if let Some(wan_addr) = wan_addr.or(local_addr.map(|a| a.ip())).filter(|ip| {
+    let wan_ip = if let Some(ip) = client.wan_ip {
+        IpAddr::V4(ip)
+    } else if let Some(ip) = subnet_model.as_wan_ip().de()? {
+        IpAddr::V4(ip)
+    } else if let Some(ip) = local_addr.map(|a| a.ip()).filter(|ip| {
         !ip.is_loopback()
             && !match ip {
                 IpAddr::V4(ipv4) => ipv4.is_private() || ipv4.is_link_local(),
                 IpAddr::V6(ipv6) => ipv6.is_unique_local() || ipv6.is_unicast_link_local(),
             }
     }) {
-        wan_addr
+        ip
     } else if let Some(webserver) = peek.as_webserver().as_listen().de()? {
         webserver.ip()
     } else {
@@ -1163,7 +1159,7 @@ pub async fn show_config(
             ip,
             subnet,
             wg.as_key().de()?.verifying_key(),
-            (wan_addr, wg.as_port().de()?).into(),
+            (wan_ip, wg.as_port().de()?).into(),
             subnet_v6
                 .map(|p| Ipv6Net::new_assert(crate::tunnel::wg6::host_v6(p, ip), p.prefix_len())),
         )
@@ -1449,7 +1445,10 @@ pub struct SetPortForwardEnabledParams {
 /// Carries what the db.mutate selected so the dataplane action runs after it.
 enum ForwardToggle {
     Dnat(SocketAddrV4),
-    Sni { hostname: String, target: SocketAddrV4 },
+    Sni {
+        hostname: String,
+        target: SocketAddrV4,
+    },
 }
 
 pub async fn set_forward_enabled(
