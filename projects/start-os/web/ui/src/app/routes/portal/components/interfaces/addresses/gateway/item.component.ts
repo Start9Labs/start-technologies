@@ -2,8 +2,8 @@ import { Component, computed, inject, input, signal } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { i18nPipe, TaskService } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
-import { TuiButton, TuiIcon } from '@taiga-ui/core'
-import { TuiBadge, TuiSegmented, TuiSwitch } from '@taiga-ui/kit'
+import { TuiButton, TuiDataList, TuiDropdown, TuiIcon } from '@taiga-ui/core'
+import { TuiBadge, TuiSwitch } from '@taiga-ui/kit'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { GatewayAddress, MappedServiceInterface } from '../../interface.service'
 import { GatewayActionsComponent } from './actions.component'
@@ -19,35 +19,17 @@ import { DomainHealthService } from './domain-health.service'
     @if (address(); as address) {
       <td>
         @if (address.guaAccess !== null) {
-          <!-- An IPv6 GUA is reachable LAN-only or also from the WAN, so it gets
-               a Disabled / LAN / LAN+WAN tri-state instead of an on/off toggle. -->
-          <tui-segmented
-            class="gua-access"
+          <!-- A GUA's on/off is its own toggle (like every other row); the
+               LAN vs LAN+WAN reach is the dropdown in the access column. -->
+          <input
+            type="checkbox"
+            tuiSwitch
             size="s"
-            [activeItemIndex]="guaIndex(address.guaAccess)"
-          >
-            <button
-              type="button"
-              [disabled]="toggling()"
-              (click)="onSetGuaAccess('disabled')"
-            >
-              {{ 'Disabled' | i18n }}
-            </button>
-            <button
-              type="button"
-              [disabled]="toggling()"
-              (click)="onSetGuaAccess('lan')"
-            >
-              {{ 'LAN' | i18n }}
-            </button>
-            <button
-              type="button"
-              [disabled]="toggling()"
-              (click)="onSetGuaAccess('lan-wan')"
-            >
-              {{ 'LAN+WAN' | i18n }}
-            </button>
-          </tui-segmented>
+            [showIcons]="false"
+            [disabled]="toggling()"
+            [ngModel]="address.guaAccess !== 'disabled'"
+            (ngModelChange)="onToggleGua($event)"
+          />
         } @else {
           <input
             type="checkbox"
@@ -63,12 +45,49 @@ import { DomainHealthService } from './domain-health.service'
         }
       </td>
       <td class="access">
-        <tui-icon
-          [icon]="address.access === 'public' ? '@tui.globe' : '@tui.house'"
-        />
-        <span>
-          {{ (address.access === 'public' ? 'Public' : 'Local') | i18n }}
-        </span>
+        @if (address.guaAccess !== null) {
+          <!-- A GUA's LAN vs LAN+WAN reach shows as Local/Public like the other
+               rows, but as a dropdown so it can be changed here. -->
+          <button
+            class="gua-access"
+            tuiButton
+            tuiDropdown
+            size="s"
+            appearance="flat-grayscale"
+            [tuiDropdownOpen]="guaOpen()"
+            (tuiDropdownOpenChange)="guaOpen.set($event)"
+            [disabled]="toggling() || address.guaAccess === 'disabled'"
+            [iconStart]="
+              guaIsPublic(address.guaAccess) ? '@tui.globe' : '@tui.house'
+            "
+            iconEnd="@tui.chevron-down"
+          >
+            {{ (guaIsPublic(address.guaAccess) ? 'Public' : 'Local') | i18n }}
+            <tui-data-list *tuiDropdown (click)="guaOpen.set(false)">
+              <button
+                tuiOption
+                iconStart="@tui.house"
+                (click)="onSetGuaAccess('lan')"
+              >
+                {{ 'Local' | i18n }}
+              </button>
+              <button
+                tuiOption
+                iconStart="@tui.globe"
+                (click)="onSetGuaAccess('lan-wan')"
+              >
+                {{ 'Public' | i18n }}
+              </button>
+            </tui-data-list>
+          </button>
+        } @else {
+          <tui-icon
+            [icon]="address.access === 'public' ? '@tui.globe' : '@tui.house'"
+          />
+          <span>
+            {{ (address.access === 'public' ? 'Public' : 'Local') | i18n }}
+          </span>
+        }
       </td>
       <td class="type">
         <span
@@ -258,8 +277,9 @@ import { DomainHealthService } from './domain-health.service'
     GatewayActionsComponent,
     TuiBadge,
     TuiButton,
+    TuiDataList,
+    TuiDropdown,
     TuiIcon,
-    TuiSegmented,
     TuiSwitch,
     FormsModule,
   ],
@@ -277,6 +297,7 @@ export class GatewayItemComponent {
 
   readonly toggling = signal(false)
   readonly currentlyMasked = signal(true)
+  readonly guaOpen = signal(false)
   // The Certificate Authority column only shows when some address is SSL; kept
   // in sync with GatewayComponent's header (both derive from the same data).
   readonly showCert = computed(
@@ -375,9 +396,14 @@ export class GatewayItemComponent {
     this.toggling.set(false)
   }
 
-  // Segment index for the Disabled / LAN / LAN+WAN tri-state.
-  guaIndex(access: T.GuaAccess): number {
-    return access === 'disabled' ? 0 : access === 'lan' ? 1 : 2
+  // A GUA's reach is public (LAN+WAN) vs local (LAN); a disabled GUA shows its
+  // would-be reach as local (the left toggle conveys the off state).
+  guaIsPublic(access: T.GuaAccess): boolean {
+    return access === 'lan-wan'
+  }
+
+  onToggleGua(enabled: boolean) {
+    this.onSetGuaAccess(enabled ? 'lan' : 'disabled')
   }
 
   async onSetGuaAccess(access: T.GuaAccess) {
