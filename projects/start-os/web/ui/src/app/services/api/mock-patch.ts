@@ -461,7 +461,7 @@ export const mockPatchData: DataModel = {
               addresses: {
                 enabled: ['203.0.113.45:42443'],
                 disabled: [],
-                guaAccess: {},
+                guaAccess: { '[2001:db8:abcd::a3b:2]:1234': 'lan-wan' },
                 available: [
                   {
                     ssl: true,
@@ -552,6 +552,13 @@ export const mockPatchData: DataModel = {
                       overflowActions: ['regenerate-key'],
                       info: null,
                     },
+                  },
+                  {
+                    ssl: true,
+                    public: true,
+                    hostname: '2001:db8:abcd::a3b:2',
+                    port: 1234,
+                    metadata: { kind: 'ipv6', gateway: 'eth0', scopeId: 0 },
                   },
                 ],
               },

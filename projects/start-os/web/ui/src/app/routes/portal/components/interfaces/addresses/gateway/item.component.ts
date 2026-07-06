@@ -3,7 +3,7 @@ import { FormsModule } from '@angular/forms'
 import { i18nPipe, TaskService } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { TuiButton, TuiDataList, TuiDropdown, TuiIcon } from '@taiga-ui/core'
-import { TuiBadge, TuiSwitch } from '@taiga-ui/kit'
+import { TuiBadge, TuiChevron, TuiSwitch } from '@taiga-ui/kit'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { GatewayAddress, MappedServiceInterface } from '../../interface.service'
 import { GatewayActionsComponent } from './actions.component'
@@ -49,18 +49,18 @@ import { DomainHealthService } from './domain-health.service'
           <!-- A GUA's LAN vs LAN+WAN reach shows as Local/Public like the other
                rows, but as a dropdown so it can be changed here. -->
           <button
-            class="gua-access"
             tuiButton
             tuiDropdown
+            tuiChevron
             size="s"
-            appearance="flat-grayscale"
+            appearance="secondary-grayscale"
+            [tuiAppearanceState]="guaOpen() ? 'hover' : null"
             [tuiDropdownOpen]="guaOpen()"
             (tuiDropdownOpenChange)="guaOpen.set($event)"
             [disabled]="toggling() || address.guaAccess === 'disabled'"
             [iconStart]="
               guaIsPublic(address.guaAccess) ? '@tui.globe' : '@tui.house'
             "
-            iconEnd="@tui.chevron-down"
           >
             {{ (guaIsPublic(address.guaAccess) ? 'Public' : 'Local') | i18n }}
             <tui-data-list *tuiDropdown (click)="guaOpen.set(false)">
@@ -245,7 +245,7 @@ import { DomainHealthService } from './domain-health.service'
         font: var(--tui-typography-body-m);
         font-weight: bold;
         color: var(--tui-text-primary);
-        padding-inline-end: 0.5rem;
+        padding-inline: 0.5rem;
       }
 
       .cert-cell {
@@ -277,6 +277,7 @@ import { DomainHealthService } from './domain-health.service'
     GatewayActionsComponent,
     TuiBadge,
     TuiButton,
+    TuiChevron,
     TuiDataList,
     TuiDropdown,
     TuiIcon,
