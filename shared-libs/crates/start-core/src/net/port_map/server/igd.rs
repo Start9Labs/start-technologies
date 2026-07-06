@@ -215,7 +215,9 @@ async fn add_mapping<B: GatewayBackend + ?Sized>(
     // Secure mode: force the target to the requesting peer's own address.
     let target = SocketAddrV4::new(peer, internal_port);
 
-    match backend.add_forward(source, target, 1, peer).await {
+    // UPnP IGD leases are permanent here (StartOS requests lease 0); PCP is the
+    // lease-bearing path.
+    match backend.add_forward(source, target, 1, peer, None).await {
         Ok(()) if any => ok(
             "AddAnyPortMapping",
             &format!("<NewReservedPort>{external_port}</NewReservedPort>"),

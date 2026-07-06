@@ -48,15 +48,18 @@ const MAX_PORT_SET: u16 = 1024;
 /// Per-gateway I/O and forward backend for the shared PCP server.
 pub trait GatewayBackend: Send + Sync {
     /// Create or refresh a forward of `count` contiguous ports from `source`
-    /// (the external address) to `target`, on behalf of `peer`. `Err(code)` is
-    /// the UPnP/IGD error code (e.g. 718 ConflictInMappingEntry); PCP maps any
-    /// error to NO_RESOURCES.
+    /// (the external address) to `target`, on behalf of `peer`. `lifetime` is
+    /// the granted lease in seconds for a PCP mapping (renewed by the client
+    /// before it lapses), or `None` for a permanent forward (manual / UPnP).
+    /// `Err(code)` is the UPnP/IGD error code (e.g. 718 ConflictInMappingEntry);
+    /// PCP maps any error to NO_RESOURCES.
     fn add_forward(
         &self,
         source: SocketAddrV4,
         target: SocketAddrV4,
         count: u16,
         peer: Ipv4Addr,
+        lifetime: Option<u32>,
     ) -> impl Future<Output = Result<(), u16>> + Send;
 
     /// Remove the peer's forward to `(peer, internal_port)`, if any (PCP
@@ -89,14 +92,16 @@ pub trait GatewayBackend: Send + Sync {
     /// Open or refresh a firewall pinhole for `count` contiguous ports at
     /// `[gua]:external_port`, delivered to `[gua]:internal_port` on the same GUA.
     /// `internal_port == external_port` is a pure pinhole (no NAT); a different
-    /// value is a port-only DNAT (e.g. 80→443). `Err(code)` maps to NO_RESOURCES.
-    /// Default: v6 unsupported.
+    /// value is a port-only DNAT (e.g. 80→443). `lifetime` is the granted PCP
+    /// lease in seconds, or `None` for a permanent pinhole (manual).
+    /// `Err(code)` maps to NO_RESOURCES. Default: v6 unsupported.
     fn add_pinhole(
         &self,
         _gua: Ipv6Addr,
         _external_port: u16,
         _internal_port: u16,
         _count: u16,
+        _lifetime: Option<u32>,
     ) -> impl Future<Output = Result<(), u16>> + Send {
         async { Err(0) }
     }
@@ -475,9 +480,12 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
                     granted,
                 ));
             }
-            return match backend.add_forward(source, target, granted, peer).await {
+            let granted_lifetime = lifetime.min(MAX_LIFETIME_SECONDS);
+            return match backend
+                .add_forward(source, target, granted, peer, Some(granted_lifetime))
+                .await
+            {
                 Ok(()) => {
-                    let granted_lifetime = lifetime.min(MAX_LIFETIME_SECONDS);
                     Some(map_response_with_port_set(
                         SUCCESS,
                         req,
@@ -511,9 +519,12 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
     // Secure: force the target to the requesting peer's own address.
     let source = SocketAddrV4::new(external_ip, external_port);
     let target = SocketAddrV4::new(peer, internal_port);
-    match backend.add_forward(source, target, 1, peer).await {
+    let granted = lifetime.min(MAX_LIFETIME_SECONDS);
+    match backend
+        .add_forward(source, target, 1, peer, Some(granted))
+        .await
+    {
         Ok(()) => {
-            let granted = lifetime.min(MAX_LIFETIME_SECONDS);
             Some(map_response(
                 SUCCESS,
                 req,
@@ -608,12 +619,12 @@ pub async fn handle6<B: GatewayBackend + ?Sized>(
         ));
     }
 
+    let granted = lifetime.min(MAX_LIFETIME_SECONDS);
     match backend
-        .add_pinhole(peer, external_port, internal_port, 1)
+        .add_pinhole(peer, external_port, internal_port, 1, Some(granted))
         .await
     {
         Ok(()) => {
-            let granted = lifetime.min(MAX_LIFETIME_SECONDS);
             Some(map_response6(
                 SUCCESS,
                 req,
@@ -707,6 +718,7 @@ mod tests {
             _: SocketAddrV4,
             _: u16,
             _: Ipv4Addr,
+            _: Option<u32>,
         ) -> impl Future<Output = Result<(), u16>> + Send {
             async { Ok(()) }
         }
@@ -758,6 +770,83 @@ mod tests {
         assert_eq!(resp[3], UNSUPP_OPCODE);
     }
 
+    struct RecordingStub {
+        sni: Arc<SniDemux>,
+        forward_lifetime: std::sync::Mutex<Option<Option<u32>>>,
+    }
+    impl GatewayBackend for RecordingStub {
+        fn add_forward(
+            &self,
+            _: SocketAddrV4,
+            _: SocketAddrV4,
+            _: u16,
+            _: Ipv4Addr,
+            lifetime: Option<u32>,
+        ) -> impl Future<Output = Result<(), u16>> + Send {
+            *self.forward_lifetime.lock().unwrap() = Some(lifetime);
+            async { Ok(()) }
+        }
+        fn remove_forward(&self, _: Ipv4Addr, _: u16) -> impl Future<Output = ()> + Send {
+            async {}
+        }
+        fn remove_forward_by_source(
+            &self,
+            _: SocketAddrV4,
+            _: Ipv4Addr,
+        ) -> impl Future<Output = bool> + Send {
+            async { false }
+        }
+        fn external_ipv4(&self, _: Ipv4Addr) -> impl Future<Output = Option<Ipv4Addr>> + Send {
+            async { Some(Ipv4Addr::new(203, 0, 113, 1)) }
+        }
+        fn is_known_client(&self, _: Ipv4Addr) -> impl Future<Output = bool> + Send {
+            async { true }
+        }
+        fn sni(&self) -> &Arc<SniDemux> {
+            &self.sni
+        }
+    }
+
+    // A MAP asking for more than the server cap is granted the capped lease, and
+    // that SAME capped value is handed to the forward backend (so the tunnel
+    // stamps its lease with the real grant, not the client's larger request).
+    #[tokio::test]
+    async fn map_grants_and_forwards_capped_lifetime() {
+        let stub = RecordingStub {
+            sni: SniDemux::new(),
+            forward_lifetime: std::sync::Mutex::new(None),
+        };
+        let req = map_request([1u8; 12], 7200, 8443, 443); // 7200 > MAX 3600
+        let resp = handle(&stub, Ipv4Addr::new(10, 59, 0, 2), &req, 5)
+            .await
+            .expect("answered");
+        assert_eq!(resp[3], SUCCESS);
+        assert_eq!(
+            u32::from_be_bytes([resp[4], resp[5], resp[6], resp[7]]),
+            MAX_LIFETIME_SECONDS
+        );
+        assert_eq!(
+            *stub.forward_lifetime.lock().unwrap(),
+            Some(Some(MAX_LIFETIME_SECONDS))
+        );
+    }
+
+    // A lifetime-0 MAP is a delete: it removes rather than adds, so the backend
+    // forward — and thus any lease — is never stamped.
+    #[tokio::test]
+    async fn map_lifetime_zero_does_not_add() {
+        let stub = RecordingStub {
+            sni: SniDemux::new(),
+            forward_lifetime: std::sync::Mutex::new(None),
+        };
+        let req = map_request([2u8; 12], 0, 8443, 443);
+        let resp = handle(&stub, Ipv4Addr::new(10, 59, 0, 2), &req, 5)
+            .await
+            .expect("answered");
+        assert_eq!(resp[3], SUCCESS);
+        assert_eq!(*stub.forward_lifetime.lock().unwrap(), None);
+    }
+
     struct V6Stub {
         sni: Arc<SniDemux>,
         known: bool,
@@ -781,6 +870,7 @@ mod tests {
             _: SocketAddrV4,
             _: u16,
             _: Ipv4Addr,
+            _: Option<u32>,
         ) -> impl Future<Output = Result<(), u16>> + Send {
             async { Ok(()) }
         }
@@ -810,6 +900,7 @@ mod tests {
             external_port: u16,
             internal_port: u16,
             count: u16,
+            _lifetime: Option<u32>,
         ) -> impl Future<Output = Result<(), u16>> + Send {
             self.pinholes
                 .lock()

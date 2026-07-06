@@ -168,6 +168,9 @@ pub struct TunnelContextSeed {
     /// Per-injector TSIG keys, read live so the injector can verify UPDATEs.
     pub dns_keys: Arc<SyncMutex<BTreeMap<IpAddr, [u8; 32]>>>,
     pub active_forwards: SyncMutex<BTreeMap<SocketAddrV4, Arc<()>>>,
+    /// In-memory leases for auto (PCP-created) forwards/pinholes/SNI routes,
+    /// reaped by [`crate::tunnel::forward::lease`] when a client stops renewing.
+    pub leases: SyncMutex<crate::tunnel::forward::lease::Leases>,
     /// Serializes `resync_egress`; its read-DB → install → prune isn't atomic,
     /// so a concurrent reconcile could prune a rule another call just installed.
     pub egress_lock: tokio::sync::Mutex<()>,
@@ -353,6 +356,7 @@ impl TunnelContext {
             dns_allowed,
             dns_keys,
             active_forwards: SyncMutex::new(active_forwards),
+            leases: SyncMutex::new(BTreeMap::new()),
             egress_lock: tokio::sync::Mutex::new(()),
             v6_proxy: SyncMutex::new(BTreeMap::new()),
             v6_lock: tokio::sync::Mutex::new(()),
@@ -362,11 +366,16 @@ impl TunnelContext {
         ctx.resync_egress().await?;
         ctx.resync_v6().await?;
         crate::tunnel::forward::pinhole::seed_pinholes(&ctx).await?;
+        // Grant every restored auto entry a fresh lease so a client that never
+        // reconnects is reaped rather than lingering forever.
+        crate::tunnel::forward::lease::seed_from_db(&ctx).await?;
 
         // PCP (preferred) + UPnP IGD (fallback) let connected clients open their
-        // public ports automatically.
+        // public ports automatically; the reaper expires auto mappings whose
+        // client stops renewing.
         tokio::spawn(crate::tunnel::forward::pcp::run(ctx.clone()));
         tokio::spawn(crate::tunnel::forward::igd::run(ctx.clone()));
+        tokio::spawn(crate::tunnel::forward::lease::run(ctx.clone()));
 
         Ok(ctx)
     }
@@ -386,6 +395,14 @@ impl TunnelContext {
         }
         self.active_forwards
             .mutate(|pf| pf.retain(|k, _| keep.contains(k)));
+        // Drop leases for forwards whose target is no longer a known client.
+        use crate::tunnel::forward::lease::LeaseKey;
+        self.leases.mutate(|l| {
+            l.retain(|k, _| match k {
+                LeaseKey::Dnat(s) | LeaseKey::Sni { source: s, .. } => keep.contains(s),
+                LeaseKey::Pinhole(_) => true,
+            })
+        });
         self.forward.gc().await
     }
 

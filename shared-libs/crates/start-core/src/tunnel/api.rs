@@ -377,6 +377,11 @@ pub async fn set_auto_port_forward(
         })
         .await
         .result?;
+    // Turning auto-forwarding off retires the device's existing automatic
+    // forwards immediately, rather than waiting for their leases to lapse.
+    if !enabled {
+        crate::tunnel::forward::clear_for_peer(&ctx, ip, true).await?;
+    }
     Ok(())
 }
 
@@ -439,6 +444,11 @@ pub async fn set_device_kind(
             s.remove(&IpAddr::V4(ip));
         }
     });
+    // A device demoted to client no longer hosts anything, so drop every forward
+    // it held (manual included), not just the automatic ones.
+    if !autoconfig {
+        crate::tunnel::forward::clear_for_peer(&ctx, ip, false).await?;
+    }
     Ok(())
 }
 
@@ -1062,6 +1072,10 @@ pub async fn remove_device(
     ctx: TunnelContext,
     RemoveDeviceParams { subnet, ip }: RemoveDeviceParams,
 ) -> Result<(), Error> {
+    // Tear down the device's exposure (v4 forwards, SNI routes, v6 pinholes, and
+    // their leases) before it's gone. `gc_forwards` below reclaims v4/SNI for any
+    // departed client, but not v6 pinholes, so clear them here.
+    crate::tunnel::forward::clear_for_peer(&ctx, ip, false).await?;
     let (server, (keep, dropped_sni)) = ctx
         .db
         .mutate(|db| {

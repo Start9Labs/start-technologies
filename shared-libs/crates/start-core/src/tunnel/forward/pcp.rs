@@ -20,6 +20,7 @@ use crate::tunnel::db::PortForward;
 use crate::tunnel::forward::igd::{
     apply_peer_forward_range, bind_to_wireguard, external_ipv4, is_known_client,
 };
+use crate::tunnel::forward::lease::{self, LeaseKey};
 use crate::tunnel::forward::sni::SniDemux;
 use crate::tunnel::wg::WIREGUARD_INTERFACE_NAME;
 
@@ -123,8 +124,17 @@ impl GatewayBackend for TunnelContext {
         target: SocketAddrV4,
         count: u16,
         _peer: Ipv4Addr,
+        lifetime: Option<u32>,
     ) -> Result<(), u16> {
-        apply_peer_forward_range(self, source, target, count, "PCP").await
+        let res = apply_peer_forward_range(self, source, target, count, "PCP").await;
+        // Stamp the lease on the renewal (idempotent re-assert) path too, so a
+        // still-renewing client is never reaped.
+        if res.is_ok() {
+            if let Some(lt) = lifetime {
+                lease::stamp(self, LeaseKey::Dnat(source), lt);
+            }
+        }
+        res
     }
 
     async fn remove_forward(&self, peer: Ipv4Addr, internal_port: u16) {
@@ -151,6 +161,7 @@ impl GatewayBackend for TunnelContext {
             drop(rc);
             self.forward.gc().await.log_err();
         }
+        lease::forget(self, &LeaseKey::Dnat(source));
         true
     }
 
@@ -172,6 +183,7 @@ impl GatewayBackend for TunnelContext {
         external_port: u16,
         internal_port: u16,
         count: u16,
+        lifetime: Option<u32>,
     ) -> Result<(), u16> {
         crate::tunnel::forward::pinhole::add_pinhole(
             self,
@@ -185,12 +197,24 @@ impl GatewayBackend for TunnelContext {
         .await
         .map_err(|e| {
             tracing::warn!("PCP v6 pinhole {gua}:{external_port} failed: {e}");
-            0
-        })
+            0u16
+        })?;
+        if let Some(lt) = lifetime {
+            lease::stamp(
+                self,
+                LeaseKey::Pinhole(SocketAddrV6::new(gua, external_port, 0, 0)),
+                lt,
+            );
+        }
+        Ok(())
     }
 
     async fn remove_pinhole(&self, gua: Ipv6Addr, external_port: u16) {
-        crate::tunnel::forward::pinhole::remove_pinhole(self, gua, external_port).await
+        crate::tunnel::forward::pinhole::remove_pinhole(self, gua, external_port).await;
+        lease::forget(
+            self,
+            &LeaseKey::Pinhole(SocketAddrV6::new(gua, external_port, 0, 0)),
+        );
     }
 
     fn sni(&self) -> &Arc<SniDemux> {
@@ -202,7 +226,7 @@ impl GatewayBackend for TunnelContext {
         source: SocketAddrV4,
         target: SocketAddrV4,
         hostnames: &[String],
-        _lifetime: Option<u32>,
+        lifetime: Option<u32>,
     ) -> Result<(), u8> {
         // Persist first (DB is source of truth): reject a DNAT-occupied port or a
         // foreign-owned hostname before touching the dataplane. Registering first
@@ -272,11 +296,32 @@ impl GatewayBackend for TunnelContext {
             self.remove_sni_forward(source, target, hostnames).await;
             return Err(crate::net::port_map::pcp::hostname::RESULT_HOSTNAME_TAKEN);
         }
+        if let Some(lt) = lifetime {
+            for h in hostnames {
+                lease::stamp(
+                    self,
+                    LeaseKey::Sni {
+                        source,
+                        hostname: h.clone(),
+                    },
+                    lt,
+                );
+            }
+        }
         Ok(())
     }
 
     async fn remove_sni_forward(&self, source: SocketAddrV4, target: SocketAddrV4, hostnames: &[String]) {
         self.sni().unregister(*source.ip(), source.port(), hostnames, target);
+        for h in hostnames {
+            lease::forget(
+                self,
+                &LeaseKey::Sni {
+                    source,
+                    hostname: h.clone(),
+                },
+            );
+        }
         let hostnames = hostnames.to_vec();
         self.db
             .mutate(|db| {
@@ -329,4 +374,5 @@ async fn remove_peer_forward(ctx: &TunnelContext, peer: Ipv4Addr, internal_port:
         drop(rc);
         ctx.forward.gc().await.log_err();
     }
+    lease::forget(ctx, &LeaseKey::Dnat(source));
 }

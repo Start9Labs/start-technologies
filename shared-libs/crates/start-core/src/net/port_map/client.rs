@@ -32,8 +32,10 @@ use crate::net::port_map::upnp;
 use crate::net::utils::ipv6_is_link_local;
 use crate::prelude::*;
 
-/// Re-assert/renew every desired mapping on this cadence (well under the PCP
-/// lease, and enough to recover a UPnP mapping lost to a gateway reboot).
+/// Cadence for the refresh tick: re-assert UPnP and retry not-yet-active
+/// mappings, and check whether each active PCP mapping has crossed half its
+/// lease (the point it's renewed). Well under the PCP lease so a renewal that's
+/// come due is caught with ample margin before expiry.
 const REFRESH_INTERVAL: Duration = Duration::from_secs(180);
 /// Retry floor for a desired-but-not-active mapping, so a reconcile burst can't
 /// busy-loop a failing apply yet boot/tunnel-restart races still recover in
@@ -347,13 +349,21 @@ impl State {
     async fn refresh(&mut self) {
         for key in self.desired.keys().cloned().collect::<Vec<_>>() {
             match self.active.get_mut(&key) {
-                Some(Active::Pcp(m)) => {
+                // expiration()/lifetime() reflect the gateway's last grant
+                // (crab_nat uses std::time::Instant), so renewal self-corrects if
+                // the gateway caps the lease below what we asked for, and the
+                // ticks before it's due are skipped.
+                Some(Active::Pcp(m))
+                    if renew_due(std::time::Instant::now(), m.expiration(), m.lifetime()) =>
+                {
                     if let Err(e) = m.renew().await {
                         tracing::debug!("PCP/NAT-PMP renew for {key:?} failed, re-mapping: {e}");
                         self.teardown(key.clone()).await;
                         self.apply(key).await;
                     }
                 }
+                // A PCP mapping not yet at its renewal point: leave it be.
+                Some(Active::Pcp(_)) => {}
                 // UPnP has no lease; re-assert in case a gateway reboot dropped
                 // it. `None` retries a prior failure.
                 Some(Active::Upnp { .. }) | None => {
@@ -689,6 +699,16 @@ async fn probe_announce(local_ip: IpAddr, gw: IpAddr, scope_id: Option<u32>) -> 
     false
 }
 
+/// Whether a PCP mapping granted `lifetime` seconds and expiring at `expiration`
+/// is due for renewal at `now` — RFC 6887 §11.2.1: renew once half the granted
+/// lifetime has elapsed (i.e. remaining lifetime has dropped to ≤ half), well
+/// before expiry. Saturates so a tiny grant or an already-lapsed mapping renews
+/// immediately rather than underflowing the `Instant`.
+fn renew_due(now: std::time::Instant, expiration: std::time::Instant, lifetime: u32) -> bool {
+    let half = Duration::from_secs(u64::from(lifetime) / 2);
+    now >= expiration.checked_sub(half).unwrap_or(now)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -725,6 +745,23 @@ mod tests {
         assert!(!state.desired.contains_key(&a));
         assert!(state.desired.contains_key(&b), "removing a dropped b");
         assert!(state.desired.contains_key(&plain));
+    }
+
+    // Renewal fires at half the granted lifetime, not before — so a healthy
+    // mapping renews with ~half its lease still to spare, well ahead of the
+    // gateway's reap.
+    #[test]
+    fn renew_due_at_half_life() {
+        let now = std::time::Instant::now();
+        let lt = 3600; // half-life = 1800s
+        let due = |remaining: u64| renew_due(now, now + Duration::from_secs(remaining), lt);
+        assert!(!due(3600), "fresh grant: not due");
+        assert!(!due(1801), "just before half-life: not due");
+        assert!(due(1800), "at half-life: due");
+        assert!(due(1), "near expiry: due");
+        // Already expired (or a degenerate tiny lease) renews immediately.
+        assert!(renew_due(now, now - Duration::from_secs(1), lt));
+        assert!(renew_due(now, now, 0));
     }
 
     // The client accepts only a SUCCESS ANNOUNCE reply carrying the exact marker.
