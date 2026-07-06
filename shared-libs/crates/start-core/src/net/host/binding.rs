@@ -49,44 +49,6 @@ impl FromStr for BindId {
     }
 }
 
-/// Per-GUA exposure chosen by the operator. Unlike every other address (an
-/// on/off toggle), an IPv6 global-unicast address is a single globally-routable
-/// address that can be reachable LAN-only or also from the WAN, so it carries a
-/// tri-state:
-///
-/// - `Disabled` — not bound / rejected.
-/// - `Lan` (default) — reachable on-link, source-filtered to the gateway's
-///   subnet (traffic from outside the subnet is rejected). No WAN exposure.
-/// - `LanWan` — also reachable from the WAN; the host attempts an IPv6 PCP
-///   pinhole on the gateway.
-///
-/// Mirrors the WAN-opt-in posture of single-port public IPv4 (disabled by
-/// default), but with an explicit LAN middle state because a GUA — unlike a
-/// private LAN IP — is globally routable, so "on" must distinguish LAN-only
-/// (firewalled) from WAN-exposed.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Deserialize,
-    Serialize,
-    TS,
-    clap::ValueEnum,
-)]
-#[ts(export)]
-#[serde(rename_all = "kebab-case")]
-pub enum GuaAccess {
-    Disabled,
-    #[default]
-    Lan,
-    LanWan,
-}
-
 #[derive(Debug, Default, Clone, Deserialize, Serialize, TS, HasModel)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -96,35 +58,20 @@ pub struct DerivedAddressInfo {
     pub enabled: BTreeSet<SocketAddr>,
     /// User override: disable these addresses (only for domains and private IP & port)
     pub disabled: BTreeSet<(InternedString, u16)>,
-    /// User override: per-GUA exposure (only for IPv6 global-unicast addresses),
-    /// keyed by the GUA's `SocketAddrV6`. Absent ⇒ [`GuaAccess::Lan`].
+    /// User override: IPv6 global-unicast addresses opted into WAN exposure.
+    /// Projected into `HostnameInfo.public` by `update_addresses`, so `public`
+    /// stays the single source of truth for WAN reachability (P2P address
+    /// selection, upstream pinholes). A GUA not in this set is LAN-only.
     #[serde(default)]
-    pub gua_access: BTreeMap<SocketAddrV6, GuaAccess>,
+    pub gua_wan: BTreeSet<SocketAddrV6>,
     /// COMPUTED: NetServiceData::update — all possible addresses for this binding
     pub available: BTreeSet<HostnameInfo>,
 }
 
 impl DerivedAddressInfo {
-    /// Operator's exposure choice for an IPv6 GUA; untouched GUAs default to
-    /// [`GuaAccess::Lan`].
-    pub fn access_for(&self, gua: SocketAddrV6) -> GuaAccess {
-        self.gua_access.get(&gua).copied().unwrap_or_default()
-    }
-
-    /// True if `addr` should be exposed to the WAN (no source filter + an
-    /// upstream pinhole attempt): any `public` address, or a GUA the operator
-    /// set to [`GuaAccess::LanWan`].
-    pub fn is_wan(&self, addr: &HostnameInfo) -> bool {
-        addr.public
-            || addr
-                .gua()
-                .map_or(false, |g| self.access_for(g) == GuaAccess::LanWan)
-    }
-
     /// Returns addresses that are currently enabled after applying overrides.
-    /// Default: public IPs are disabled, GUAs are LAN-only, everything else is
-    /// enabled. Explicit `enabled` / `disabled` / `gua_access` overrides take
-    /// precedence.
+    /// Default: public IPs (including WAN-exposed GUAs) are opt-in via `enabled`,
+    /// everything else is on unless in `disabled`.
     pub fn enabled(&self) -> BTreeSet<&HostnameInfo> {
         self.available
             .iter()
@@ -132,9 +79,6 @@ impl DerivedAddressInfo {
                 if h.is_internal() {
                     // lo / lxcbr0 are always reachable and never operator-disablable.
                     true
-                } else if let Some(gua) = h.gua() {
-                    // GUAs carry a tri-state: Disabled removes them, LAN/LAN+WAN keep them.
-                    self.access_for(gua) != GuaAccess::Disabled
                 } else if h.public && h.metadata.is_ip() {
                     // Public IPs: disabled by default, explicitly enabled via SocketAddr
                     h.to_socket_addr().map_or(
@@ -170,6 +114,15 @@ impl DerivedAddressInfo {
         self.disabled = std::mem::take(&mut self.disabled)
             .into_iter()
             .map(|(h, p)| (h, if p == old { new } else { p }))
+            .collect();
+        self.gua_wan = std::mem::take(&mut self.gua_wan)
+            .into_iter()
+            .map(|mut sa| {
+                if sa.port() == old {
+                    sa.set_port(new);
+                }
+                sa
+            })
             .collect();
     }
 }
@@ -555,12 +508,12 @@ pub fn binding<C: Context, Kind: HostApiKind>()
                 .with_call_remote::<CliContext>(),
         )
         .subcommand(
-            "set-gua-access",
-            from_fn_async(set_gua_access::<Kind>)
+            "set-gua-wan",
+            from_fn_async(set_gua_wan::<Kind>)
                 .with_metadata("sync_db", Value::Bool(true))
                 .with_inherited(Kind::inheritance)
                 .no_display()
-                .with_about("about.set-gua-access-for-binding")
+                .with_about("about.set-gua-wan-for-binding")
                 .with_call_remote::<CliContext>(),
         )
 }
@@ -772,27 +725,28 @@ pub async fn set_range_address_enabled<Kind: HostApiKind>(
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
-pub struct BindingSetGuaAccessParams {
+pub struct BindingSetGuaWanParams {
     #[arg(help = "help.arg.internal-port")]
     internal_port: u16,
     #[arg(long, help = "help.arg.address")]
     #[ts(as = "HostnameInfo")]
     address: CliFromJsonString<HostnameInfo>,
-    #[arg(long, help = "help.arg.gua-access")]
-    access: GuaAccess,
+    #[arg(long, help = "help.arg.gua-wan")]
+    wan: bool,
 }
 
-/// Set the Disabled / LAN / LAN+WAN exposure for a single IPv6 GUA on a binding.
-/// `Lan` is the default, so setting `Lan` clears the entry. The GUA tri-state
-/// only applies to single-port bindings — port ranges are IPv4-only. Errors if
-/// `address` is not an IPv6 global-unicast address.
-pub async fn set_gua_access<Kind: HostApiKind>(
+/// Opt a single IPv6 GUA on a binding into (or out of) WAN exposure. The flag
+/// is projected into `HostnameInfo.public` by `update_addresses`, so the row's
+/// enable/disable override set switches (`disabled` while local, `enabled`
+/// while public) — the current on/off state is carried across the flip. Errors
+/// if `address` is not an IPv6 global-unicast address.
+pub async fn set_gua_wan<Kind: HostApiKind>(
     ctx: RpcContext,
-    BindingSetGuaAccessParams {
+    BindingSetGuaWanParams {
         internal_port,
         address,
-        access,
-    }: BindingSetGuaAccessParams,
+        wan,
+    }: BindingSetGuaWanParams,
     inheritance: Kind::Inheritance,
 ) -> Result<(), Error> {
     let address = address.0;
@@ -808,13 +762,33 @@ pub async fn set_gua_access<Kind: HostApiKind>(
                 .as_bindings_mut()
                 .mutate(|b| {
                     let bind = b.get_mut(&internal_port).or_not_found(internal_port)?;
-                    if access == GuaAccess::default() {
-                        bind.addresses.gua_access.remove(&gua);
+                    let addrs = &mut bind.addresses;
+                    let sa = SocketAddr::V6(gua);
+                    if wan {
+                        let on = !addrs
+                            .disabled
+                            .contains(&(address.hostname.clone(), gua.port()));
+                        addrs.gua_wan.insert(gua);
+                        if on {
+                            addrs.enabled.insert(sa);
+                        } else {
+                            addrs.enabled.remove(&sa);
+                        }
                     } else {
-                        bind.addresses.gua_access.insert(gua, access);
+                        addrs.gua_wan.remove(&gua);
+                        addrs.enabled.remove(&sa);
                     }
                     Ok(())
-                })
+                })?;
+            let hostname = ServerHostname::load(db.as_public().as_server_info())?;
+            let gateways = db
+                .as_public()
+                .as_server_info()
+                .as_network()
+                .as_gateways()
+                .de()?;
+            let ports = db.as_private().as_available_ports().de()?;
+            Kind::host_for(&inheritance, db)?.update_addresses(&hostname, &gateways, &ports)
         })
         .await
         .result?;
@@ -859,26 +833,30 @@ mod test {
     }
 
     #[test]
-    fn gua_tristate_enabled_and_wan() {
-        let gua = ipv6_addr("2001:db8::1", 443);
-        let key = gua.gua().unwrap();
+    fn gua_enabled_follows_public_flag() {
+        let local = ipv6_addr("2001:db8::1", 443);
+        let key = local.gua().unwrap();
         let mut info = DerivedAddressInfo::default();
-        info.available.insert(gua.clone());
+        info.available.insert(local.clone());
 
-        // Default ⇒ LAN: reachable but not WAN-exposed.
-        assert_eq!(info.access_for(key), GuaAccess::Lan);
-        assert!(info.enabled().contains(&gua));
-        assert!(!info.is_wan(&gua));
+        // A local (non-WAN) GUA follows the private rule: on unless disabled.
+        assert!(info.enabled().contains(&local));
+        info.disabled
+            .insert((local.hostname.clone(), key.port()));
+        assert!(!info.enabled().contains(&local));
+        info.disabled.clear();
 
-        // LAN+WAN ⇒ reachable and WAN-exposed.
-        info.gua_access.insert(key, GuaAccess::LanWan);
-        assert!(info.enabled().contains(&gua));
-        assert!(info.is_wan(&gua));
-
-        // Disabled ⇒ removed from the enabled set.
-        info.gua_access.insert(key, GuaAccess::Disabled);
-        assert!(!info.enabled().contains(&gua));
-        assert!(!info.is_wan(&gua));
+        // A WAN GUA carries public=true (projected from gua_wan by
+        // update_addresses) and follows the public rule: opt-in via `enabled`.
+        let public = HostnameInfo {
+            public: true,
+            ..local.clone()
+        };
+        info.available.clear();
+        info.available.insert(public.clone());
+        assert!(!info.enabled().contains(&public));
+        info.enabled.insert(SocketAddr::V6(key));
+        assert!(info.enabled().contains(&public));
     }
 
     #[test]

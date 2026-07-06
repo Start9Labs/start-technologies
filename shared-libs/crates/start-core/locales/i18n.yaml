@@ -2957,12 +2957,12 @@ help.arg.address:
   fr_FR: "Adresse réseau"
   pl_PL: "Adres sieciowy"
 
-help.arg.gua-access:
-  en_US: "IPv6 GUA exposure: disabled, lan, or lan-wan"
-  de_DE: "IPv6-GUA-Freigabe: disabled, lan oder lan-wan"
-  es_ES: "Exposición de GUA IPv6: disabled, lan o lan-wan"
-  fr_FR: "Exposition de la GUA IPv6 : disabled, lan ou lan-wan"
-  pl_PL: "Ekspozycja GUA IPv6: disabled, lan lub lan-wan"
+help.arg.gua-wan:
+  en_US: "Expose the IPv6 GUA to the WAN (false = LAN-only)"
+  de_DE: "IPv6-GUA zum WAN freigeben (false = nur LAN)"
+  es_ES: "Exponer la GUA IPv6 a la WAN (false = solo LAN)"
+  fr_FR: "Exposer la GUA IPv6 au WAN (false = LAN uniquement)"
+  pl_PL: "Udostępnij GUA IPv6 w sieci WAN (false = tylko LAN)"
 
 help.arg.allow-model-mismatch:
   en_US: "Allow database model mismatch"
@@ -6040,12 +6040,12 @@ about.set-range-address-enabled-for-binding:
   fr_FR: "Définir une adresse de passerelle activée pour une liaison de plage de ports"
   pl_PL: "Ustaw adres bramy jako włączony dla powiązania zakresu portów"
 
-about.set-gua-access-for-binding:
-  en_US: "Set the LAN / LAN+WAN exposure of an IPv6 global-unicast address for a binding"
-  de_DE: "LAN-/LAN+WAN-Freigabe einer globalen IPv6-Unicast-Adresse für eine Bindung festlegen"
-  es_ES: "Establecer la exposición LAN / LAN+WAN de una dirección unicast global IPv6 para un vínculo"
-  fr_FR: "Définir l'exposition LAN / LAN+WAN d'une adresse unicast globale IPv6 pour une liaison"
-  pl_PL: "Ustaw ekspozycję LAN / LAN+WAN globalnego adresu unicast IPv6 dla powiązania"
+about.set-gua-wan-for-binding:
+  en_US: "Expose an IPv6 global-unicast address to the WAN (or revert it to LAN-only) for a binding"
+  de_DE: "Eine globale IPv6-Unicast-Adresse für eine Bindung zum WAN freigeben (oder auf nur LAN zurücksetzen)"
+  es_ES: "Exponer una dirección unicast global IPv6 a la WAN (o revertirla a solo LAN) para un vínculo"
+  fr_FR: "Exposer une adresse unicast globale IPv6 au WAN (ou la restreindre au LAN) pour une liaison"
+  pl_PL: "Udostępnij globalny adres unicast IPv6 w sieci WAN (lub przywróć tylko LAN) dla powiązania"
 
 about.set-country:
   en_US: "Set the country"

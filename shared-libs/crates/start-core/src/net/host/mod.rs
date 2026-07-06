@@ -110,6 +110,7 @@ impl Model<Host> {
             // Preserve existing plugin-provided addresses across recomputation
             let mut available = bind.as_addresses().as_available().de()?;
             available.retain(|h| matches!(h.metadata, HostnameMetadata::Plugin { .. }));
+            let gua_wan = bind.as_addresses().as_gua_wan().de()?;
             for (gid, g) in gateways {
                 let Some(ip_info) = &g.ip_info else {
                     continue;
@@ -131,22 +132,31 @@ impl Model<Host> {
                         opt.secure
                             .map_or(gateway_secure, |s| !(s.ssl && opt.add_ssl.is_some()))
                     }) {
-                        available.insert(HostnameInfo {
+                        let mut hi = HostnameInfo {
                             ssl: opt.secure.map_or(false, |s| s.ssl),
                             public: false,
                             hostname: host.clone(),
                             port: Some(port),
                             metadata: metadata.clone(),
-                        });
+                        };
+                        // A GUA's public flag is the operator's WAN opt-in.
+                        if let Some(gua) = hi.gua() {
+                            hi.public = gua_wan.contains(&gua);
+                        }
+                        available.insert(hi);
                     }
                     if let Some(port) = net.assigned_ssl_port {
-                        available.insert(HostnameInfo {
+                        let mut hi = HostnameInfo {
                             ssl: true,
                             public: false,
                             hostname: host.clone(),
                             port: Some(port),
                             metadata,
-                        });
+                        };
+                        if let Some(gua) = hi.gua() {
+                            hi.public = gua_wan.contains(&gua);
+                        }
+                        available.insert(hi);
                     }
                 }
                 if let Some(wan_ip) = &ip_info.wan_ip {
