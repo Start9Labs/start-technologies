@@ -87,9 +87,11 @@ pub fn candidate_gateways(info: &NetworkInterfaceInfo) -> Vec<(IpAddr, Option<u3
     };
 
     for ip in &ip_info.lan_ip {
-        // v4: the gateway must sit within one of our own subnets. v6: accept the
-        // link-local default gateway (fe80::, the common case) or one in our
-        // subnets.
+        // The gateway must sit within one of our own subnets. A link-local v6
+        // gateway is never a PCP server we can reach — a StartTunnel peer owns
+        // none on the wg link, and its own fe80::/64 nominally "contains" any
+        // fe80::, so a subnet check can't distinguish it — so skip it. On a
+        // tunnel the host_v6-derived server fills the v6 slot below.
         match ip {
             IpAddr::V4(_) => {
                 if ip_info.subnets.iter().any(|s| s.contains(ip)) {
@@ -97,16 +99,10 @@ pub fn candidate_gateways(info: &NetworkInterfaceInfo) -> Vec<(IpAddr, Option<u3
                 }
             }
             IpAddr::V6(v6) => {
-                // A StartTunnel peer owns no link-local on the wg link, so an
-                // fe80:: gateway can never answer PCP — reject it even though the
-                // wg iface's own fe80::/64 "contains" it (every link-local shares
-                // that /64), so the host_v6-derived server fills the v6 slot. A
-                // real router's fe80:: default gateway (gateway_type None) stays.
-                let is_ll = ipv6_is_link_local(*v6);
-                if is_ll && info.gateway_type == Some(GatewayType::InboundOutbound) {
+                if ipv6_is_link_local(*v6) {
                     continue;
                 }
-                if is_ll || ip_info.subnets.iter().any(|s| s.contains(ip)) {
+                if ip_info.subnets.iter().any(|s| s.contains(ip)) {
                     push(&mut out, *ip, Some(ip_info.scope_id));
                 }
             }
@@ -903,15 +899,21 @@ mod tests {
         assert!(gws.iter().any(|(g, _)| *g == server_v6), "got {gws:?}");
     }
 
-    // A real router's link-local v6 gateway (the common home case) stays.
+    // A link-local v6 gateway is never a reachable PCP server, so it's skipped
+    // regardless of gateway_type — a home router still keeps its v4 gateway.
     #[test]
-    fn router_link_local_gateway_is_kept() {
+    fn link_local_v6_gateway_is_always_skipped() {
         let gws = candidate_gateways(&iface(
             &["192.168.1.5/24"],
             &["192.168.1.1", "fe80::1"],
             None,
         ));
-        assert!(gws.contains(&("fe80::1".parse().unwrap(), Some(42))));
+        assert!(
+            !gws.iter()
+                .any(|(g, _)| matches!(g, IpAddr::V6(v6) if ipv6_is_link_local(*v6))),
+            "link-local v6 gateway must be skipped: {gws:?}"
+        );
+        assert!(gws.contains(&(Ipv4Addr::new(192, 168, 1, 1).into(), None)));
     }
 
     // Regression for the live-box timeout: the wg iface carries its own
