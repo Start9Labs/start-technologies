@@ -488,10 +488,26 @@ pub(crate) async fn update_wireguard_config(interface: &str, config: &str) -> Re
             HashMap::new(),
         )
         .await?;
-    // Explicit settings: an empty-dict Reapply drops the peer PSKs from the live device.
+    // Full settings so Reapply doesn't strip the connection's other peer fields.
     device_proxy
         .reapply(parsed.to_nm_settings(interface, Some(uuid.as_str()))?, 0, 0)
         .await?;
+    // NM (<=1.52) drops WG peer PSKs on Reapply even when passed explicitly;
+    // restore them on the kernel device directly (PSK over stdin, never argv).
+    for peer in &parsed.peers {
+        if let Some(psk) = &peer.preshared_key {
+            Command::new("wg")
+                .arg("set")
+                .arg(interface)
+                .arg("peer")
+                .arg(&peer.public_key)
+                .arg("preshared-key")
+                .arg("/dev/stdin")
+                .input(Some(&mut std::io::Cursor::new(psk.clone().into_bytes())))
+                .invoke(ErrorKind::Network)
+                .await?;
+        }
+    }
     Ok(())
 }
 
