@@ -15,7 +15,6 @@ use tokio_rustls::rustls::crypto::CryptoProvider;
 use tracing::instrument;
 
 use crate::db::model::Database;
-use crate::db::model::public::GatewayType;
 use crate::hostname::ServerHostname;
 use crate::net::dns::DnsController;
 use crate::net::dns_update::DnsUpdateController;
@@ -891,9 +890,6 @@ impl NetServiceData {
                 let Some(info) = net_ifaces.get(gw_id) else {
                     continue;
                 };
-                if matches!(info.gateway_type, Some(GatewayType::OutboundOnly)) {
-                    continue;
-                }
                 let Some(ip_info) = &info.ip_info else { continue };
                 let gateways = candidate_gateways(info);
                 if gateways.is_empty() {
