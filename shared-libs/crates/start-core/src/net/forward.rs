@@ -681,10 +681,10 @@ impl InterfaceForwardEntry {
                                 continue;
                             }
 
-                            let public = reqs.public_gateways.contains(gw_id);
-                            // The WAN is never secure: an insecure exposure may reach the LAN
-                            // over a secure gateway, but never the public internet.
-                            if !reqs.secure && (public || !info.secure()) {
+                            // The WAN is never secure: an insecure exposure is never public,
+                            // so it still serves the LAN but never the public internet.
+                            let public = reqs.public_gateways.contains(gw_id) && reqs.secure;
+                            if !reqs.secure && !info.secure() {
                                 continue;
                             }
                             let src_filter = if public {

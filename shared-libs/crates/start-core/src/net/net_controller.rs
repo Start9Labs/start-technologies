@@ -576,13 +576,10 @@ impl NetServiceData {
                             continue;
                         };
                         // Secure when StartOS terminates TLS (add_ssl → a.ssl) or the
-                        // underlying protocol is itself secure.
+                        // underlying protocol is itself secure. The WAN is never secure, so an
+                        // insecure exposure that requested public serves the LAN instead.
                         let secure_exposure = a.ssl || bind.options.secure.is_some();
-                        let src_filter = if a.public {
-                            // The WAN is never secure: never DNAT an insecure exposure to it.
-                            if !secure_exposure {
-                                continue;
-                            }
+                        let src_filter = if a.public && secure_exposure {
                             None
                         } else {
                             // LAN: insecure reaches it only over a secure gateway (IPv4 parity).
