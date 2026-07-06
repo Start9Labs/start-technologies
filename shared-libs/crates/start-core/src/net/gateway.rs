@@ -488,7 +488,10 @@ pub(crate) async fn update_wireguard_config(interface: &str, config: &str) -> Re
             HashMap::new(),
         )
         .await?;
-    device_proxy.reapply(HashMap::new(), 0, 0).await?;
+    // Explicit settings: an empty-dict Reapply drops the peer PSKs from the live device.
+    device_proxy
+        .reapply(parsed.to_nm_settings(interface, Some(uuid.as_str()))?, 0, 0)
+        .await?;
     Ok(())
 }
 
