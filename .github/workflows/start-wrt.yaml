@@ -1,9 +1,9 @@
 name: start-wrt
 
-# UNVALIDATED since the monorepo migration — no job has been run yet. The
-# `compile` job (riscv binary + embedded web) should be validated first; the
-# heavy `image` job (OpenWrt) follows; the `deploy` job (S3 upload +
-# beta-registry register) validates last. See projects/start-wrt/CONTRIBUTING.md.
+# CI-UNVALIDATED: the make targets these jobs wrap are proven locally (riscv
+# cross-build, image build, sysupgrade OTA), but no job here has been run yet.
+# Validate `compile` first, then `image` (build-image=true), then `deploy` (S3
+# upload + beta-registry register). See projects/start-wrt/CONTRIBUTING.md.
 
 on:
   workflow_call:

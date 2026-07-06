@@ -8,7 +8,7 @@ instead; the git ref is still recorded in CONFIG_KERNEL_GIT_REF.
 Candidate for upstreaming.
 
 Start9 downstream patch (start-technologies projects/start-wrt).
-Applies to: openwrt v25.12.4
+Applies to: openwrt v25.12.5
 
 diff --git a/include/kernel-version.mk b/include/kernel-version.mk
 index 5e2bff4542..551c3201bd 100644

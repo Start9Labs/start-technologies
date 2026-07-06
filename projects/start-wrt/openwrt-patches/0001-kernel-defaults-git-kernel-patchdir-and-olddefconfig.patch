@@ -10,7 +10,7 @@ git-cloned Armbian vendor kernel (CONFIG_KERNEL_GIT_CLONE_URI):
    config with unset new symbols resolves to defaults non-interactively.
 
 Start9 downstream patch (start-technologies projects/start-wrt).
-Applies to: openwrt v25.12.4
+Applies to: openwrt v25.12.5
 
 diff --git a/include/kernel-defaults.mk b/include/kernel-defaults.mk
 index bdfdaaa616..36fea0dd75 100644

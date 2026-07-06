@@ -58,6 +58,9 @@ start-wrt's targets live in [`build.mk`](build.mk) (included by the root `Makefi
 | `make start-wrt-update STARTWRT_REMOTE=root@IP` | deploy binary over SSH (default `root@192.168.0.1`) |
 | `make start-wrt-clean` | remove start-wrt build artifacts |
 
+The OpenWrt image build needs a consistent environment — Docker is recommended; native builds
+on some distros fail silently.
+
 Deployment is atomic (temp file → sync → rename → daemon restart). The web UI is embedded in
 the binary, so deploying the binary updates everything.
 
@@ -91,14 +94,6 @@ Releases stage through a beta registry before promotion to production, mirroring
    for the individual subcommands (`pull-gha`, `register`, `index`, `sign`, `cosign`, …) and env
    vars (`STARTWRT_SOURCE_REGISTRY`, `STARTWRT_TARGET_REGISTRY`, `STARTWRT_COMPAT_FLOOR`,
    `FORCE=1` to re-run an idempotent release).
-
-> **⚠ UNVALIDATED since the monorepo migration.** The riscv dockerized cross-build (`make
-> start-wrt`) and the OpenWrt image assembly (`make start-wrt-image`) have not yet been run on a
-> build host. The backend host `cargo check` passes. Validate `make start-wrt` first (it does not
-> need the OpenWrt tree), then `make start-wrt-image`. The OpenWrt build needs a consistent
-> environment — Docker is recommended; native builds on some distros fail silently.
-> The patch/overlay tree prep itself **is** validated: `openwrt-setup.sh --tree-only` reproduces
-> the retired fork's tree byte-for-byte (verified by tree hash).
 
 ## OpenWrt tree (pinned upstream + patches + overlay)
 
@@ -144,7 +139,8 @@ the first `---`/`diff` line.)
 **Bumping the upstream release.** Update both values in `build/openwrt-version` (the new
 version and the sha256 of its tag tarball — download it once and `sha256sum` it), run
 `make start-wrt-openwrt-setup`, and rebuild the image. If a patch no longer applies, fix the
-affected file in the workspace by hand and regenerate that patch as above. The overlay needs
+affected file in the workspace by hand and regenerate that patch as above; either way, refresh
+each patch's `Applies to:` header line to the new version. The overlay needs
 attention only if upstream grew a conflicting path (the spacemit target dir is ours alone, so
 this is rare). Commit the pin bump + refreshed patches + a `CHANGELOG.md` entry as one
 ordinary PR.

@@ -6,7 +6,7 @@ spacemit (6.18) target. A kernel-version conditional would make it
 upstreamable.
 
 Start9 downstream patch (start-technologies projects/start-wrt).
-Applies to: openwrt v25.12.4
+Applies to: openwrt v25.12.5
 
 diff --git a/package/kernel/linux/modules/crypto.mk b/package/kernel/linux/modules/crypto.mk
 index 869601eb70..1c836cae38 100644

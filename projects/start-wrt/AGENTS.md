@@ -18,11 +18,6 @@ start-wrt was migrated from its own repo into this monorepo. Key consequences:
 - **`openwrt/` is a disposable, gitignored build workspace** (no submodule, no fork, no git repo inside). `make start-wrt-openwrt-setup` rebuilds it from the sha256-pinned upstream release tarball ([`build/openwrt-version`](build/openwrt-version)) and applies the Start9 delta: [`openwrt-patches/`](openwrt-patches/) (modified upstream files, applied with `patch -p1`) + [`openwrt-overlay/`](openwrt-overlay/) (added files, rsynced over the tree). Every setup run **rebuilds the tree** (generated state — `dl/`, `build_dir/`, `feeds/`, `files/`, `.config`, keys — is preserved) — never keep work inside it; change the patch/overlay dirs instead (workflow in [CONTRIBUTING.md](CONTRIBUTING.md#openwrt-tree-pinned-upstream--patches--overlay)). The binary build does *not* need the workspace, only the full image does.
 - **Build targets live in [`build.mk`](build.mk)** (included by the root `Makefile`), not a standalone product Makefile. From the repo root: `make start-wrt` (binary+web), `make start-wrt-image` (full image), `make start-wrt-update STARTWRT_REMOTE=…` (deploy). When you change a build input in `build.mk`, mirror it into `.github/workflows/start-wrt.yaml` `paths:` (root AGENTS.md "Coupled changes").
 
-> **UNVALIDATED:** the riscv dockerized cross-build and the OpenWrt image assembly have not
-> been run since the migration. `cargo check`/host build of the backend passes; the
-> `make start-wrt` cross-build and `make start-wrt-image` still need a build-host run. Don't
-> present them as known-good until validated.
-
 ## Operating rules
 
 - Don't run `make start-wrt-image` (full OpenWrt build) unsolicited — it fetches the OpenWrt tree and takes hours. For backend work use `cargo build -p startwrt-core --bin startwrt`; for frontend work use `npm run start:wrt`. Use `make start-wrt-update STARTWRT_REMOTE=…` only when explicitly asked to deploy.
