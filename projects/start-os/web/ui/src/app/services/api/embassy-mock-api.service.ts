@@ -43,11 +43,11 @@ import {
   PkgAddPrivateDomainReq,
   PkgAddPublicDomainReq,
   PkgBindingSetAddressEnabledReq,
-  PkgBindingSetGuaAccessReq,
+  PkgBindingSetGuaWanReq,
   PkgRemovePrivateDomainReq,
   PkgRemovePublicDomainReq,
   ServerBindingSetAddressEnabledReq,
-  ServerBindingSetGuaAccessReq,
+  ServerBindingSetGuaWanReq,
   ServerState,
   WebsocketConfig,
 } from './api.types'
@@ -1701,24 +1701,22 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async serverBindingSetGuaAccess(
-    params: ServerBindingSetGuaAccessReq,
+  async serverBindingSetGuaWan(
+    params: ServerBindingSetGuaWanReq,
   ): Promise<null> {
     await pauseFor(2000)
 
     const basePath = `/serverInfo/network/host/bindings/${params.internalPort}/addresses`
-    this.mockSetGuaAccess(basePath, params.address, params.access)
+    this.mockSetGuaWan(basePath, params.address, params.wan)
 
     return null
   }
 
-  async pkgBindingSetGuaAccess(
-    params: PkgBindingSetGuaAccessReq,
-  ): Promise<null> {
+  async pkgBindingSetGuaWan(params: PkgBindingSetGuaWanReq): Promise<null> {
     await pauseFor(2000)
 
     const basePath = `${this.mockHostPath(params.package, params.host)}/bindings/${params.internalPort}/addresses`
-    this.mockSetGuaAccess(basePath, params.address, params.access)
+    this.mockSetGuaWan(basePath, params.address, params.wan)
 
     return null
   }
@@ -2215,28 +2213,42 @@ export class MockApiService extends ApiService {
     }
   }
 
-  private mockSetGuaAccess(
+  // Mirrors the backend set_gua_wan: update the gua_wan set, carry the row's
+  // on/off state into `enabled`, and re-project `public` onto the available
+  // entry (what update_addresses does server-side).
+  private mockSetGuaWan(
     basePath: string,
     h: T.HostnameInfo,
-    access: T.GuaAccess,
+    wan: boolean,
   ): void {
     if (h.metadata.kind !== 'ipv6' || h.port === null) return
 
     const key = `[${h.hostname}]:${h.port}`
     const current = this.mockData(basePath) as T.DerivedAddressInfo
-    const guaAccess = { ...(current.guaAccess ?? {}) }
-
-    // LAN is the default, so it clears the entry.
-    if (access === 'lan') {
-      delete guaAccess[key]
-    } else {
-      guaAccess[key] = access
+    const guaWan = current.guaWan.filter(k => k !== key)
+    let enabled = current.enabled.filter(k => k !== key)
+    if (wan) {
+      guaWan.push(key)
+      const off = current.disabled.some(
+        ([hostname, port]) => hostname === h.hostname && port === h.port,
+      )
+      if (!off) enabled = [...enabled, key]
     }
+    const available = current.available.map(a =>
+      a.hostname === h.hostname && a.port === h.port
+        ? { ...a, public: wan }
+        : a,
+    )
 
-    current.guaAccess = guaAccess
-    this.mockRevision([
-      { op: PatchOp.ADD, path: `${basePath}/guaAccess`, value: guaAccess },
-    ])
+    current.guaWan = guaWan
+    current.enabled = enabled
+    current.available = available
+    const patch: Operation<any>[] = [
+      { op: PatchOp.ADD, path: `${basePath}/guaWan`, value: guaWan },
+      { op: PatchOp.ADD, path: `${basePath}/enabled`, value: enabled },
+      { op: PatchOp.ADD, path: `${basePath}/available`, value: available },
+    ]
+    this.mockRevision(patch)
   }
 
   private mockData(path: string): any {

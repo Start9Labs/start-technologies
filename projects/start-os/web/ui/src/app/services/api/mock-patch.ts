@@ -41,7 +41,7 @@ export const mockPatchData: DataModel = {
             addresses: {
               enabled: [],
               disabled: [],
-              guaAccess: {},
+              guaWan: [],
               available: [
                 {
                   ssl: true,
@@ -459,9 +459,9 @@ export const mockPatchData: DataModel = {
                 assignedSslPort: 42443,
               },
               addresses: {
-                enabled: ['203.0.113.45:42443'],
+                enabled: ['203.0.113.45:42443', '[2001:db8:abcd::a3b:2]:1234'],
                 disabled: [],
-                guaAccess: { '[2001:db8:abcd::a3b:2]:1234': 'lan-wan' },
+                guaWan: ['[2001:db8:abcd::a3b:2]:1234'],
                 available: [
                   {
                     ssl: true,
@@ -619,7 +619,7 @@ export const mockPatchData: DataModel = {
               addresses: {
                 enabled: ['203.0.113.45:49152'],
                 disabled: [],
-                guaAccess: {},
+                guaWan: [],
                 available: [
                   {
                     ssl: false,
@@ -714,7 +714,7 @@ export const mockPatchData: DataModel = {
               addresses: {
                 enabled: [],
                 disabled: [],
-                guaAccess: {},
+                guaWan: [],
                 available: [
                   {
                     ssl: false,
@@ -790,7 +790,7 @@ export const mockPatchData: DataModel = {
               addresses: {
                 enabled: [],
                 disabled: [],
-                guaAccess: {},
+                guaWan: [],
                 available: [],
               },
               options: {

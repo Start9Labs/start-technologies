@@ -2258,9 +2258,9 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
               assignedSslPort: 443,
             },
             addresses: {
-              enabled: [],
+              enabled: ['[2001:db8:abcd::a3b:2]:1234'],
               disabled: [],
-              guaAccess: { '[2001:db8:abcd::a3b:2]:1234': 'lan-wan' },
+              guaWan: ['[2001:db8:abcd::a3b:2]:1234'],
               available: [
                 {
                   ssl: true,
@@ -2350,7 +2350,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
             addresses: {
               enabled: [],
               disabled: [],
-              guaAccess: {},
+              guaWan: [],
               available: [],
             },
             options: {
@@ -2394,7 +2394,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
             addresses: {
               enabled: [],
               disabled: [],
-              guaAccess: {},
+              guaWan: [],
               available: [],
             },
             options: {

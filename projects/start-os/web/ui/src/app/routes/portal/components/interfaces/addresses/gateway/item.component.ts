@@ -18,36 +18,22 @@ import { DomainHealthService } from './domain-health.service'
   template: `
     @if (address(); as address) {
       <td>
-        @if (address.guaAccess !== null) {
-          <!-- A GUA's on/off is its own toggle (like every other row); the
-               LAN vs LAN+WAN reach is the dropdown in the access column. -->
-          <input
-            type="checkbox"
-            tuiSwitch
-            size="s"
-            [showIcons]="false"
-            [disabled]="toggling()"
-            [ngModel]="address.guaAccess !== 'disabled'"
-            (ngModelChange)="onToggleGua($event)"
-          />
-        } @else {
-          <input
-            type="checkbox"
-            tuiSwitch
-            size="s"
-            [showIcons]="false"
-            [disabled]="
-              toggling() || address.hostnameInfo.metadata.kind === 'mdns'
-            "
-            [ngModel]="address.enabled"
-            (ngModelChange)="onToggleEnabled()"
-          />
-        }
+        <input
+          type="checkbox"
+          tuiSwitch
+          size="s"
+          [showIcons]="false"
+          [disabled]="
+            toggling() || address.hostnameInfo.metadata.kind === 'mdns'
+          "
+          [ngModel]="address.enabled"
+          (ngModelChange)="onToggleEnabled()"
+        />
       </td>
       <td class="access">
-        @if (address.guaAccess !== null) {
-          <!-- A GUA's LAN vs LAN+WAN reach shows as Local/Public like the other
-               rows, but as a dropdown so it can be changed here. -->
+        @if (address.gua) {
+          <!-- A GUA's Local vs Public is its WAN opt-in (the public flag), so
+               it shows like the other rows but as a dropdown to change it. -->
           <button
             tuiButton
             tuiDropdown
@@ -57,24 +43,24 @@ import { DomainHealthService } from './domain-health.service'
             [tuiAppearanceState]="guaOpen() ? 'hover' : null"
             [tuiDropdownOpen]="guaOpen()"
             (tuiDropdownOpenChange)="guaOpen.set($event)"
-            [disabled]="toggling() || address.guaAccess === 'disabled'"
+            [disabled]="toggling()"
             [iconStart]="
-              guaIsPublic(address.guaAccess) ? '@tui.globe' : '@tui.house'
+              address.access === 'public' ? '@tui.globe' : '@tui.house'
             "
           >
-            {{ (guaIsPublic(address.guaAccess) ? 'Public' : 'Local') | i18n }}
+            {{ (address.access === 'public' ? 'Public' : 'Local') | i18n }}
             <tui-data-list *tuiDropdown (click)="guaOpen.set(false)">
               <button
                 tuiOption
                 iconStart="@tui.house"
-                (click)="onSetGuaAccess('lan')"
+                (click)="onSetGuaWan(false)"
               >
                 {{ 'Local' | i18n }}
               </button>
               <button
                 tuiOption
                 iconStart="@tui.globe"
-                (click)="onSetGuaAccess('lan-wan')"
+                (click)="onSetGuaWan(true)"
               >
                 {{ 'Public' | i18n }}
               </button>
@@ -397,37 +383,27 @@ export class GatewayItemComponent {
     this.toggling.set(false)
   }
 
-  // A GUA's reach is public (LAN+WAN) vs local (LAN); a disabled GUA shows its
-  // would-be reach as local (the left toggle conveys the off state).
-  guaIsPublic(access: T.GuaAccess): boolean {
-    return access === 'lan-wan'
-  }
-
-  onToggleGua(enabled: boolean) {
-    this.onSetGuaAccess(enabled ? 'lan' : 'disabled')
-  }
-
-  async onSetGuaAccess(access: T.GuaAccess) {
+  async onSetGuaWan(wan: boolean) {
     const addr = this.address()
     const iface = this.value()
-    // Clicking the already-active segment shouldn't re-save.
-    if (!iface || access === addr.guaAccess) return
+    // Selecting the already-active option shouldn't re-save.
+    if (!iface || wan === (addr.access === 'public')) return
 
     this.toggling.set(true)
     await this.tasks.run(async () => {
       if (this.packageId()) {
-        await this.api.pkgBindingSetGuaAccess({
+        await this.api.pkgBindingSetGuaWan({
           internalPort: iface.addressInfo.internalPort,
           address: addr.hostnameInfo,
-          access,
+          wan,
           package: this.packageId(),
           host: iface.addressInfo.hostId,
         })
       } else {
-        await this.api.serverBindingSetGuaAccess({
+        await this.api.serverBindingSetGuaWan({
           internalPort: 80,
           address: addr.hostnameInfo,
-          access,
+          wan,
         })
       }
     }, 'Saving')

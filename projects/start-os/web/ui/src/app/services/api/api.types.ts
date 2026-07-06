@@ -41,18 +41,18 @@ export type PkgBindingSetAddressEnabledReq = Omit<
   host: T.HostId // string
 }
 
-export type ServerBindingSetGuaAccessReq = {
-  // server.host.binding.set-gua-access
+export type ServerBindingSetGuaWanReq = {
+  // server.host.binding.set-gua-wan
   internalPort: 80
   address: T.HostnameInfo
-  access: T.GuaAccess // disabled | lan | lan-wan
+  wan: boolean
 }
 
-export type PkgBindingSetGuaAccessReq = Omit<
-  ServerBindingSetGuaAccessReq,
+export type PkgBindingSetGuaWanReq = Omit<
+  ServerBindingSetGuaWanReq,
   'internalPort'
 > & {
-  // package.host.binding.set-gua-access
+  // package.host.binding.set-gua-wan
   internalPort: number
   package: T.PackageId // string
   host: T.HostId // string
