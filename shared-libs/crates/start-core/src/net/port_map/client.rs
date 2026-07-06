@@ -87,7 +87,13 @@ pub fn candidate_gateways(info: &NetworkInterfaceInfo) -> Vec<(IpAddr, Option<u3
                 }
             }
             IpAddr::V6(v6) => {
-                if ipv6_is_link_local(*v6) || ip_info.subnets.iter().any(|s| s.contains(ip)) {
+                // A StartTunnel peer owns no link-local on the wg link (WireGuard
+                // interfaces carry none), so an NM-reported fe80:: gateway there
+                // can never answer PCP — skip it so the subnet-derived server
+                // address below fills the v6 slot instead.
+                let ll_ok = ipv6_is_link_local(*v6)
+                    && info.gateway_type != Some(GatewayType::InboundOutbound);
+                if ll_ok || ip_info.subnets.iter().any(|s| s.contains(ip)) {
                     push(&mut out, *ip, Some(ip_info.scope_id));
                 }
             }
@@ -825,5 +831,34 @@ mod tests {
         ));
         assert!(gws.contains(&(Ipv4Addr::new(10, 59, 0, 1).into(), None)));
         assert!(!gws.iter().any(|(g, _)| g.is_ipv6()), "no v6 from a bare /128");
+    }
+
+    // NM can report a link-local v6 gateway for the wg connection, but the
+    // tunnel server owns no link-local on the wg link — it must be skipped so
+    // the subnet-derived server v6 fills the slot (else every v6 map times out).
+    #[test]
+    fn tunnel_skips_link_local_nm_gateway() {
+        let gws = candidate_gateways(&iface(
+            &["10.59.0.2/24", "2001:db8:abcd:1::f2/124"],
+            &["fe80::a3b:1"],
+            Some(GatewayType::InboundOutbound),
+        ));
+        assert!(!gws.iter().any(|(g, _)| match g {
+            IpAddr::V6(v6) => ipv6_is_link_local(*v6),
+            _ => false,
+        }));
+        let server_v6: IpAddr = "2001:db8:abcd:1::f1".parse().unwrap();
+        assert!(gws.iter().any(|(g, _)| *g == server_v6), "got {gws:?}");
+    }
+
+    // A real router's link-local v6 gateway (the common home case) stays.
+    #[test]
+    fn router_link_local_gateway_is_kept() {
+        let gws = candidate_gateways(&iface(
+            &["192.168.1.5/24"],
+            &["192.168.1.1", "fe80::1"],
+            None,
+        ));
+        assert!(gws.contains(&("fe80::1".parse().unwrap(), Some(42))));
     }
 }
