@@ -680,11 +680,13 @@ impl InterfaceForwardEntry {
                             if rc.strong_count() == 0 {
                                 continue;
                             }
-                            if !reqs.secure && !info.secure() {
-                                continue;
-                            }
 
                             let public = reqs.public_gateways.contains(gw_id);
+                            // The WAN is never secure: an insecure exposure may reach the LAN
+                            // over a secure gateway, but never the public internet.
+                            if !reqs.secure && (public || !info.secure()) {
+                                continue;
+                            }
                             let src_filter = if public {
                                 None
                             } else if reqs.private_ips.contains(&IpAddr::V4(ip)) {

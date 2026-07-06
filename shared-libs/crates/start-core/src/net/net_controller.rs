@@ -371,6 +371,11 @@ impl NetServiceData {
                 let Some(gua) = a.gua() else {
                     continue;
                 };
+                // The WAN is never secure: no upstream pinhole for an insecure exposure
+                // (add_ssl terminates TLS on the ssl port → a.ssl).
+                if !(a.ssl || bind.options.secure.is_some()) {
+                    continue;
+                }
                 let v6_gateways: Vec<(IpAddr, Option<u32>)> = a
                     .metadata
                     .gateways()
@@ -570,9 +575,26 @@ impl NetServiceData {
                         let Some(gua) = a.gua().filter(|g| g.port() == external) else {
                             continue;
                         };
+                        // Secure when StartOS terminates TLS (add_ssl → a.ssl) or the
+                        // underlying protocol is itself secure.
+                        let secure_exposure = a.ssl || bind.options.secure.is_some();
                         let src_filter = if a.public {
+                            // The WAN is never secure: never DNAT an insecure exposure to it.
+                            if !secure_exposure {
+                                continue;
+                            }
                             None
                         } else {
+                            // LAN: insecure reaches it only over a secure gateway (IPv4 parity).
+                            if !secure_exposure
+                                && !a
+                                    .metadata
+                                    .gateways()
+                                    .filter_map(|gw| net_ifaces.get(gw))
+                                    .any(|info| info.secure())
+                            {
+                                continue;
+                            }
                             match a
                                 .metadata
                                 .gateways()
