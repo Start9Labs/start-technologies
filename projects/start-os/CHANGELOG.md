@@ -12,12 +12,14 @@ file tracks notable changes since the move to the monorepo.
 
 ### Added
 
-- **IPv6 GUA exposure tri-state.** On a service interface, an IPv6 global-unicast
-  address (GUA) now offers a **Disabled / LAN / LAN+WAN** control instead of an
-  on/off toggle. **LAN** (the default) keeps it reachable on the local network
-  only — traffic from outside the subnet is rejected; **LAN+WAN** also exposes it
-  to the Internet and attempts an automatic gateway pinhole (PCP). IPv6 ULAs and
-  IPv4 are unchanged.
+- **IPv6 GUA exposure control.** On a service interface, an IPv6 global-unicast
+  address (GUA) keeps the usual on/off toggle and adds a **Local / Public**
+  dropdown in the access column. **Local** (the default) keeps it reachable on
+  the local network only — traffic from outside the subnet is rejected;
+  **Public** exposes it to the Internet and attempts an automatic gateway
+  pinhole (PCP). The choice is carried by the address's `public` flag, so
+  services selecting addresses for P2P see the correct reachability. IPv6 ULAs
+  and IPv4 are unchanged.
 - **`--force` on service start.** `start-cli package start <id> --force` (and the
   `package.start` RPC `force` flag) starts a service even when it has an unresolved
   critical task.
