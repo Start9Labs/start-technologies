@@ -9,10 +9,10 @@ lib/exver/exver.ts: node_modules lib/exver/exver.pegjs
 
 # Built, self-contained package consumed via file: deps by web, container-runtime,
 # and the SDK (which vendors it into its published bundle).
+# Recipe body is npm/node only (no shell utilities) so it also works on Windows dev
+# machines; the cross-platform file ops live in package.json scripts.
 dist: $(TS_FILES) lib/exver/exver.ts package.json node_modules README.md LICENSE
-	rm -rf dist
-	npm run tsc
-	npm run copy
+	npm run build
 	-@touch dist
 
 test: node_modules
