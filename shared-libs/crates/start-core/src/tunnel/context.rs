@@ -171,6 +171,9 @@ pub struct TunnelContextSeed {
     /// In-memory leases for auto (PCP-created) forwards/pinholes/SNI routes,
     /// reaped by [`crate::tunnel::forward::lease`] when a client stops renewing.
     pub leases: SyncMutex<crate::tunnel::forward::lease::Leases>,
+    /// Wakes the lease reaper when a stamp may have moved the soonest expiry
+    /// earlier, so it can pull its next wake-up forward.
+    pub lease_wake: tokio::sync::Notify,
     /// Serializes `resync_egress`; its read-DB → install → prune isn't atomic,
     /// so a concurrent reconcile could prune a rule another call just installed.
     pub egress_lock: tokio::sync::Mutex<()>,
@@ -357,6 +360,7 @@ impl TunnelContext {
             dns_keys,
             active_forwards: SyncMutex::new(active_forwards),
             leases: SyncMutex::new(BTreeMap::new()),
+            lease_wake: tokio::sync::Notify::new(),
             egress_lock: tokio::sync::Mutex::new(()),
             v6_proxy: SyncMutex::new(BTreeMap::new()),
             v6_lock: tokio::sync::Mutex::new(()),

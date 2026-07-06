@@ -20,8 +20,6 @@ use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::db::PortForward;
 
-/// How often the reaper scans for lapsed leases.
-const REAP_INTERVAL: Duration = Duration::from_secs(30);
 /// Lease granted to an auto entry restored from the DB on startup; the client's
 /// re-MAP refreshes it well within this. Matches the server's max granted lease.
 const STARTUP_LEASE_SECONDS: u32 = 3600;
@@ -38,12 +36,15 @@ pub enum LeaseKey {
 
 pub type Leases = BTreeMap<LeaseKey, Instant>;
 
-/// Stamp (or refresh) an auto mapping's lease to `now + lifetime`.
+/// Stamp (or refresh) an auto mapping's lease to `now + lifetime`, and wake the
+/// reaper so it can pull its next wake-up earlier if this lease is now the
+/// soonest to expire.
 pub fn stamp(ctx: &TunnelContext, key: LeaseKey, lifetime: u32) {
     let expiry = Instant::now() + Duration::from_secs(u64::from(lifetime));
     ctx.leases.mutate(|l| {
         l.insert(key, expiry);
     });
+    ctx.lease_wake.notify_one();
 }
 
 /// Forget a lease (the mapping was explicitly removed).
@@ -86,12 +87,21 @@ pub async fn seed_from_db(ctx: &TunnelContext) -> Result<(), Error> {
     Ok(())
 }
 
-/// The reaper loop: every [`REAP_INTERVAL`], tear down any auto mapping whose
-/// lease has lapsed. Runs for the life of the tunnel.
+/// The reaper: tear down any auto mapping whose lease has lapsed, then sleep
+/// exactly until the soonest remaining lease is due (or until a newly stamped,
+/// sooner lease wakes it). Runs for the life of the tunnel.
 pub async fn run(ctx: TunnelContext) {
     loop {
-        tokio::time::sleep(REAP_INTERVAL).await;
-        reap_expired(&ctx).await;
+        match reap_expired(&ctx).await {
+            Some(next) => {
+                tokio::select! {
+                    _ = tokio::time::sleep_until(tokio::time::Instant::from_std(next)) => {}
+                    _ = ctx.lease_wake.notified() => {}
+                }
+            }
+            // No leases outstanding — wait for the next stamp to wake us.
+            None => ctx.lease_wake.notified().await,
+        }
     }
 }
 
@@ -104,7 +114,9 @@ fn expired_keys(leases: &Leases, now: Instant) -> Vec<LeaseKey> {
         .collect()
 }
 
-async fn reap_expired(ctx: &TunnelContext) {
+/// Reap every lapsed auto mapping, returning the soonest still-pending expiry
+/// (the reaper's next wake-up), or `None` if no leases remain.
+async fn reap_expired(ctx: &TunnelContext) -> Option<Instant> {
     let now = Instant::now();
     let expired = ctx.leases.peek(|l| expired_keys(l, now));
     for key in expired {
@@ -125,6 +137,7 @@ async fn reap_expired(ctx: &TunnelContext) {
             }
         });
     }
+    ctx.leases.peek(|l| l.values().min().copied())
 }
 
 async fn reap_dnat(ctx: &TunnelContext, source: SocketAddrV4) {
