@@ -1,0 +1,48 @@
+#!/bin/bash
+# Shipped in the 0.3.5.1 -> 0.4.0 migration payload as /usr/sbin/update-grub2.
+#
+# StartOS 0.3.5.1's updater runs `chroot next update-grub2` at apply time, with
+# /boot and /proc bind-mounted into the payload. Rather than regenerate grub from
+# the payload rootfs (grub-mkconfig mis-probes root= outside a native boot), we
+# deterministically point the existing 0.3.5.1 bootloader at the 0.4.0
+# kernel/initramfs that sync_boot just copied into /boot, reusing the exact root=
+# this box already booted with. The 0.4.0 initramfs takes over from there.
+set -e
+
+BOOT=/boot
+MIGRATION_BOOT=/usr/lib/startos/migration-boot
+
+if [ -r "$MIGRATION_BOOT" ]; then
+    kernel="$(sed -n 1p "$MIGRATION_BOOT")"
+    initrd="$(sed -n 2p "$MIGRATION_BOOT")"
+else
+    kernel="$(cd "$BOOT" && ls -1 vmlinuz-* 2>/dev/null | sort -V | tail -n1)"
+    initrd="$(cd "$BOOT" && ls -1 initrd.img-* 2>/dev/null | sort -V | tail -n1)"
+fi
+if [ -z "$kernel" ] || [ -z "$initrd" ]; then
+    >&2 echo "migration-update-grub: 0.4.0 kernel/initramfs not found in $BOOT"
+    exit 1
+fi
+
+root="$(grep -oE 'root=[^ ]+' /proc/cmdline | head -n1)"
+if [ -z "$root" ]; then
+    >&2 echo "migration-update-grub: could not read root= from /proc/cmdline"
+    exit 1
+fi
+
+mkdir -p "$BOOT/grub"
+cat > "$BOOT/grub/grub.cfg" <<EOF
+set timeout=1
+set default=0
+insmod all_video
+menuentry "StartOS" {
+    insmod part_gpt
+    insmod part_msdos
+    insmod btrfs
+    insmod ext2
+    insmod fat
+    search --no-floppy --set=root --file "/$kernel"
+    linux "/$kernel" $root ro
+    initrd "/$initrd"
+}
+EOF
