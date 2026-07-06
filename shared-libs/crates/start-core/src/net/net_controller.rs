@@ -519,15 +519,19 @@ impl NetServiceData {
                 .map_or(true, |s| !(s.ssl && bind.options.add_ssl.is_some()))
             {
                 let external = bind.net.assigned_port.or_not_found("assigned lan port")?;
+                // Only addresses at this port drive its forward (ssl-port entries are the vhost's).
                 let fwd_public: BTreeSet<GatewayId> = enabled_addresses
                     .iter()
-                    .filter(|a| a.public)
+                    .filter(|a| a.public && a.port == Some(external))
                     .flat_map(|a| a.metadata.gateways())
                     .cloned()
                     .collect();
                 // Declare which address makes each gateway public, so a stray
                 // auto-port-map can be traced back to the exposure driving it.
-                for a in enabled_addresses.iter().filter(|a| a.public) {
+                for a in enabled_addresses
+                    .iter()
+                    .filter(|a| a.public && a.port == Some(external))
+                {
                     tracing::debug!(
                         "port {external}: WAN address {} (ip={}) on gateway(s) {:?}",
                         a.hostname,
@@ -537,7 +541,7 @@ impl NetServiceData {
                 }
                 let fwd_private: BTreeSet<IpAddr> = enabled_addresses
                     .iter()
-                    .filter(|a| !a.public)
+                    .filter(|a| !a.public && a.port == Some(external))
                     .flat_map(|a| a.metadata.gateways())
                     .filter_map(|gw| net_ifaces.get(gw).and_then(|i| i.ip_info.as_ref()))
                     .flat_map(|ip| ip.subnets.iter().map(|s| s.addr()))
@@ -562,7 +566,8 @@ impl NetServiceData {
                 // can't determine rather than expose it unrestricted.
                 if let Some(container_v6) = self.ipv6 {
                     for a in enabled_addresses.iter() {
-                        let Some(gua) = a.gua() else {
+                        // SSL-port GUAs are the vhost listener's; DNAT only the non-SSL port.
+                        let Some(gua) = a.gua().filter(|g| g.port() == external) else {
                             continue;
                         };
                         let src_filter = if a.public {
