@@ -46,15 +46,15 @@ file tracks notable changes since the move to the monorepo.
 
 ### Changed
 
-- **External port 9050 is no longer restricted (#3407).** The port allocator
-  reserved 9050/9051 for the 0.3.x host Tor daemon, which no longer exists.
-  Freeing 9050 lets the tor service bind its SOCKS proxy with
+- **External ports 9050 and 9051 are no longer restricted (#3407).** The port
+  allocator reserved 9050/9051 for the 0.3.x host Tor daemon, which no longer
+  exists. Freeing 9050 lets the tor service bind its SOCKS proxy with
   `preferredExternalPort: 9050` (without exporting an interface), giving every
   service a stable, always-valid service-to-service address for Tor SOCKS on
   the internal bridge — `10.0.3.1:9050` — with no reactive watch on the tor
   package and therefore no dependent restarts when tor is installed, updated,
-  or removed. 9051 (control port) stays restricted; 0.4.x tor uses a Unix
-  control socket.
+  or removed. 9051 (the old control port) is freed as well; 0.4.x tor uses a
+  Unix control socket, so nothing binds it host-side.
 - **The StartOS admin UI is now addressed like a regular service interface (#3387).**
   At the SDK/effects layer the server's own host is identified by the reserved
   package id `start-os`, host id `admin`, and interface id `admin-ui` (renamed

@@ -199,7 +199,7 @@ export class MultiHost {
     }
     // Both ranges must be in-bounds and above the reserved/privileged range.
     // StartOS additionally rejects a few specific ports (e.g. 5353, 5432,
-    // 9051) server-side at allocation time.
+    // 6010) server-side at allocation time.
     for (const [name, start] of [
       ['internalStartPort', internalStartPort],
       ['externalStartPort', externalStartPort],
