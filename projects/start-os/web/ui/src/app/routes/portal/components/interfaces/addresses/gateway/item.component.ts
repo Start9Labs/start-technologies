@@ -3,7 +3,7 @@ import { FormsModule } from '@angular/forms'
 import { i18nPipe, TaskService } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { TuiButton, TuiIcon } from '@taiga-ui/core'
-import { TuiBadge, TuiSwitch } from '@taiga-ui/kit'
+import { TuiBadge, TuiSegmented, TuiSwitch } from '@taiga-ui/kit'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { GatewayAddress, MappedServiceInterface } from '../../interface.service'
 import { GatewayActionsComponent } from './actions.component'
@@ -21,16 +21,33 @@ import { DomainHealthService } from './domain-health.service'
         @if (address.guaAccess !== null) {
           <!-- An IPv6 GUA is reachable LAN-only or also from the WAN, so it gets
                a Disabled / LAN / LAN+WAN tri-state instead of an on/off toggle. -->
-          <select
+          <tui-segmented
             class="gua-access"
-            [disabled]="toggling()"
-            [ngModel]="address.guaAccess"
-            (ngModelChange)="onSetGuaAccess($event)"
+            size="s"
+            [activeItemIndex]="guaIndex(address.guaAccess)"
           >
-            <option value="disabled">{{ 'Disabled' | i18n }}</option>
-            <option value="lan">{{ 'LAN' | i18n }}</option>
-            <option value="lan-wan">{{ 'LAN+WAN' | i18n }}</option>
-          </select>
+            <button
+              type="button"
+              [disabled]="toggling()"
+              (click)="onSetGuaAccess('disabled')"
+            >
+              {{ 'Disabled' | i18n }}
+            </button>
+            <button
+              type="button"
+              [disabled]="toggling()"
+              (click)="onSetGuaAccess('lan')"
+            >
+              {{ 'LAN' | i18n }}
+            </button>
+            <button
+              type="button"
+              [disabled]="toggling()"
+              (click)="onSetGuaAccess('lan-wan')"
+            >
+              {{ 'LAN+WAN' | i18n }}
+            </button>
+          </tui-segmented>
         } @else {
           <input
             type="checkbox"
@@ -242,6 +259,7 @@ import { DomainHealthService } from './domain-health.service'
     TuiBadge,
     TuiButton,
     TuiIcon,
+    TuiSegmented,
     TuiSwitch,
     FormsModule,
   ],
@@ -357,10 +375,16 @@ export class GatewayItemComponent {
     this.toggling.set(false)
   }
 
+  // Segment index for the Disabled / LAN / LAN+WAN tri-state.
+  guaIndex(access: T.GuaAccess): number {
+    return access === 'disabled' ? 0 : access === 'lan' ? 1 : 2
+  }
+
   async onSetGuaAccess(access: T.GuaAccess) {
     const addr = this.address()
     const iface = this.value()
-    if (!iface) return
+    // Clicking the already-active segment shouldn't re-save.
+    if (!iface || access === addr.guaAccess) return
 
     this.toggling.set(true)
     await this.tasks.run(async () => {
