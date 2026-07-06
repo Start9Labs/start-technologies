@@ -2260,7 +2260,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
             addresses: {
               enabled: [],
               disabled: [],
-              guaAccess: {},
+              guaAccess: { '[2001:db8:abcd::a3b:2]:1234': 'lan-wan' },
               available: [
                 {
                   ssl: true,
@@ -2299,6 +2299,13 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
                   hostname: 'fe80:cd00:0000:0cde:1257:0000:211e:1234',
                   port: 1234,
                   metadata: { kind: 'ipv6', gateway: 'wlan0', scopeId: 3 },
+                },
+                {
+                  ssl: true,
+                  public: true,
+                  hostname: '2001:db8:abcd::a3b:2',
+                  port: 1234,
+                  metadata: { kind: 'ipv6', gateway: 'eth0', scopeId: 0 },
                 },
               ],
             },
