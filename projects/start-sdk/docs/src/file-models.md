@@ -99,6 +99,9 @@ import { FileHelper, z } from "@start9labs/start-sdk";
 import { sdk } from "../sdk";
 
 const knownProxiesSchema = z.object({
+  // 10.0.3.1 is the OS bridge gateway — the reverse proxy this container should
+  // trust. It is the OS's own fixed address (see Service-to-Service Networking),
+  // not a dependency dial, so the literal is correct here.
   string: z.literal("10.0.3.1").array().catch(["10.0.3.1"]),
 });
 

@@ -57,6 +57,7 @@ If you're using [Claude Code](https://claude.com/claude-code) (recommended), poi
 | [Expose a Web UI](recipe-web-ui.md) | Single HTTP interface for browser access |
 | [Expose Multiple Interfaces](recipe-multi-interface.md) | RPC, API, peer, WebSocket, or SSH on different ports |
 | [Expose an API-Only Interface](recipe-api-interface.md) | Programmatic access with no browser UI |
+| [Reach Another Service](service-to-service.md) | Dial a dependency over the host bridge (`getOsIp` + assigned port) |
 
 ## Dependencies
 

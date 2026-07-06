@@ -86,6 +86,7 @@
 - [Main](main.md)
 - [Initialization](init.md)
 - [Interfaces](interfaces.md)
+- [Service-to-Service Networking](service-to-service.md)
 - [Actions](actions.md)
 - [Tasks](tasks.md)
 - [Notifications](notifications.md)

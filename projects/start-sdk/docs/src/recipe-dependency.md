@@ -1,6 +1,6 @@
 # Depend on Another Service
 
-When your service needs another StartOS service (e.g., Bitcoin Core for a wallet, or PostgreSQL from a shared instance), declare it as a dependency. You can require it to be installed, running, or healthy, and optionally pin a version range.
+When your service needs another StartOS service (e.g., a Bitcoin node for a wallet, or PostgreSQL from a shared instance), declare it as a dependency. You can require it to be installed, running, or healthy, and optionally pin a version range.
 
 ## Solution
 
@@ -8,9 +8,9 @@ In `setupDependencies()`, return an object mapping dependency package IDs to the
 
 These declarations drive the **warning UI** StartOS shows the user when a dependency isn't installed, isn't running, or has a listed health check failing. They do **not** gate your service's startup — your service starts whenever the user starts it, regardless of dependency state. If your service genuinely cannot operate before a dependency reaches a particular state, handle that at runtime in `setupMain` (poll, retry, or surface your own error); don't expect the dependency declaration to block startup for you.
 
-Read the dependency's connection info in `setupMain` either via `sdk.host.get()` (walk the host's bindings to the interface) or directly as `http://<package-id>.startos:<port>`.
+Read the dependency's connection info in `setupMain` by resolving its bridge address with `sdk.host.get(...).const()` — see [Service-to-Service Networking](service-to-service.md) for the one correct way (and the two forbidden ones: `.startos` DNS names and cross-package container IPs).
 
-**Reference:** [Dependencies](dependencies.md)
+**Reference:** [Dependencies](dependencies.md) · [Service-to-Service Networking](service-to-service.md)
 
 ## Examples
 

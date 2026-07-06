@@ -63,8 +63,14 @@ export const setDependencies = sdk.setupDependencies(async ({ effects }) => {
   await sdk.action.createTask(effects, 'dependency-id', someAction, 'critical', {
     input: {
       kind: 'partial',
-      accept: [{ /* one or more acceptable partial inputs */ }],
-      set: { /* the value to pre-fill when none are accepted */ },
+      accept: [
+        {
+          /* one or more acceptable partial inputs */
+        },
+      ],
+      set: {
+        /* the value to pre-fill when none are accepted */
+      },
     },
     when: { condition: 'input-not-matches', once: false },
     reason: i18n('Human-readable reason shown to user'),
@@ -98,47 +104,35 @@ sdk.action.createTask(
 ```
 
 > [!NOTE]
+>
 > - Import the action object from the dependency's published package.
 > - The dependency must be listed in your `package.json` (e.g., `"synapse-startos": "file:../synapse-wrapper"`).
 > - `when: { condition: 'input-not-matches', once: false }` re-triggers until the action's input matches.
 > - `replayId` prevents duplicate tasks across restarts.
 
-## Reading Dependency Interfaces
+> [!IMPORTANT]
+> **`accept` entries are matched against the dependency's *resolved* action input, not its raw config file.** That input is the dependency action's prefill — its config parsed through its file model — so an optional field comes back carrying its **resolved default**, never a missing key. bitcoind's `prune`, for example, reads as the number `0` on an unpruned node (its file model coerces an absent `prune` to `0`), so `accept: [{ prune: 0 }]` matches an unpruned node exactly. Match the concrete value the input actually holds.
+>
+> An `accept` field value is compared for equality: `null` matches the literal value `null` — nothing else. It is **not** a wildcard and does **not** stand in for a defaulted or absent field. To leave a field unconstrained, **omit it** from the entry — an absent (`undefined`) key is not checked at all. (`undefined` means absence, not `null`: writing `undefined` for a field in a `set`/config would *delete* that key.) To require a specific value, name it. Multiple entries mean "any of these matches."
 
-Get the dependency's **host** with `sdk.host.get()` (the `hostId` and interface `id` are part of the dependency's documented contract), then read the interface off its bindings — its `addressInfo` is already filled, so `.format()` yields resolvable URLs:
+## Reaching a Dependency at Runtime
 
-```typescript
-const host = await sdk.host
-  .get(effects, { hostId: 'host-id', packageId: 'dependency-id' })
-  .const() // re-runs setupMain if the dependency's host changes
+A dependency is reached over the internal host bridge, by resolving its live bridge address (`10.0.3.1:<assigned port>`) with `sdk.host.get(...).const()`.
 
-const iface = Object.values(host?.bindings ?? {})
-  .flatMap((b) => Object.values(b.interfaces))
-  .find((i) => i.id === 'interface-id')
-
-const url = iface?.addressInfo.format()[0] ?? null
-```
-
-Alternatively, services are reachable directly by hostname at `http://<package-id>.startos:<port>`:
-
-```typescript
-const url = 'http://bitcoind.startos:8332'
-```
+The mechanics — reading `net.assignedPort`, the `.const()` restart matrix, the `bridgeAddress`, the Tor `fallbackPort` case, and where a backend-_selection_ value belongs — are all in **[Service-to-Service Networking](service-to-service.md)**. Read that page before dialing any dependency.
 
 ## Mounting Dependency Volumes
 
 Mount a dependency's volume for direct file access in `main.ts`:
 
 ```typescript
-const mounts = sdk.Mounts.of()
-  .mountVolume({ volumeId: 'main', subpath: null, mountpoint: '/data', readonly: false })
-  .mountDependency({
-    dependencyId: 'bitcoind',
-    volumeId: 'main',
-    subpath: null,
-    mountpoint: '/mnt/bitcoind',
-    readonly: true,
-  })
+const mounts = sdk.Mounts.of().mountVolume({ volumeId: 'main', subpath: null, mountpoint: '/data', readonly: false }).mountDependency({
+  dependencyId: 'bitcoind',
+  volumeId: 'main',
+  subpath: null,
+  mountpoint: '/mnt/bitcoind',
+  readonly: true,
+})
 ```
 
 ## Init Order

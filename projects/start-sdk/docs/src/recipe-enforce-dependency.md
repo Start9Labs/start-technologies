@@ -1,6 +1,6 @@
 # Enforce Settings on a Dependency
 
-Sometimes your service requires specific configuration on a dependency — Bitcoin Core must have `txindex=true`, or ZMQ must be enabled. A cross-service task fires on the dependency whenever its config drifts from the required values.
+Sometimes your service requires specific configuration on a dependency — a Bitcoin node must have `txindex=true`, or ZMQ must be enabled. A cross-service task fires on the dependency whenever its config drifts from the required values.
 
 ## Solution
 
@@ -10,4 +10,4 @@ In `setupDependencies()`, call `sdk.action.createTask()` targeting the dependenc
 
 ## Examples
 
-See `startos/dependencies.ts` in: [fulcrum](https://github.com/Start9Labs/fulcrum-startos) (txindex + ZMQ on Bitcoin Core), [public-pool](https://github.com/Start9Labs/public-pool-startos) (ZMQ on Bitcoin Core)
+See `startos/dependencies.ts` in: [fulcrum](https://github.com/Start9Labs/fulcrum-startos) (txindex + ZMQ on Bitcoin), [public-pool](https://github.com/Start9Labs/public-pool-startos) (ZMQ on Bitcoin)
