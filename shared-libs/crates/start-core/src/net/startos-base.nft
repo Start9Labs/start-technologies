@@ -8,13 +8,20 @@ add chain ip startos mangle_prerouting { type filter hook prerouting priority ma
 add chain ip startos mangle_output { type route hook output priority mangle; policy accept; }
 add chain ip startos mangle_forward { type filter hook forward priority mangle; policy accept; }
 
-# Port-mapping protocols (PCP/NAT-PMP udp/5351, UPnP SSDP udp/1900) may originate
-# only from the host (startd, via the output hook); they are never forwarded
-# from a package container or any other interface. inet family so this covers
-# IPv4 and IPv6; flush+add keeps it idempotent across reloads. Runs before the
-# main forward filter; `accept` is non-terminal so non-port-map traffic still
-# falls through to the ip startos forward policy.
-add table inet startos_portmap_guard
-add chain inet startos_portmap_guard forward { type filter hook forward priority -10; policy accept; }
-flush chain inet startos_portmap_guard forward
-add rule inet startos_portmap_guard forward udp dport { 5351, 1900 } drop
+# Traffic a package container must never send straight at the network — it has to
+# go through the OS instead. Runs at priority -10, ahead of the main forward
+# filter; `drop` is terminal, everything else falls through to the ip startos
+# forward policy. inet family covers IPv4 and IPv6; flush+add keeps it idempotent
+# across reloads. iifname (not iif) matches by name, so the rules load even before
+# lxcbr0 exists.
+#   - Port-mapping (PCP/NAT-PMP udp/5351, UPnP SSDP udp/1900): only startd may open
+#     gateway ports, via the output hook; never forwarded from a container.
+#   - DNS (udp/tcp 53) off the bridge: services resolve through the OS proxy at
+#     10.0.3.1:53, a host-local input-hook destination that never hits this chain;
+#     a query aimed straight at a gateway or public resolver is dropped. lxcbr0 ==
+#     START9_BRIDGE_IFACE.
+add table inet startos_egress_guard
+add chain inet startos_egress_guard forward { type filter hook forward priority -10; policy accept; }
+flush chain inet startos_egress_guard forward
+add rule inet startos_egress_guard forward udp dport { 5351, 1900 } drop
+add rule inet startos_egress_guard forward iifname "lxcbr0" meta l4proto { tcp, udp } th dport 53 drop
