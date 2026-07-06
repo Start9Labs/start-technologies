@@ -243,8 +243,6 @@ fn list_passthrough(ctx: RpcContext) -> Result<Vec<PassthroughInfo>, Error> {
     Ok(ctx.net_controller.vhost.list_passthrough())
 }
 
-// not allowed: <=1024, >=32768, 5355, 5432, 9050, 6010, 9051, 5353
-
 struct PassthroughHandle {
     _rc: Arc<()>,
     backend: SocketAddr,

@@ -26,8 +26,11 @@ use crate::{GatewayId, HOST_IP};
 
 pub const START9_BRIDGE_IFACE: &str = "lxcbr0";
 const EPHEMERAL_PORT_START: u16 = 49152;
-// vhost.rs:89 — not allowed: <=1024, >=32768, 5355, 5432, 9050, 6010, 9051, 5353
-const RESTRICTED_PORTS: &[u16] = &[5353, 5355, 5432, 6010, 9050, 9051];
+// Reserved by/for host daemons (mDNS 5353, LLMNR 5355, postgres 5432, X11
+// forwarding 6010, tor control 9051). 9050 is claimable on purpose: the tor
+// service binds it without exporting an interface so its SOCKS proxy sits at
+// a stable 10.0.3.1:9050 on the bridge — do not re-restrict it.
+const RESTRICTED_PORTS: &[u16] = &[5353, 5355, 5432, 6010, 9051];
 
 fn is_restricted(port: u16) -> bool {
     port <= 1024 || RESTRICTED_PORTS.contains(&port)
