@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{Ipv4Addr, SocketAddr};
 
 use imbl_value::InternedString;
 use ipnet::{Ipv4Net, Ipv6Net};
@@ -261,7 +261,7 @@ impl WgConfig {
         subnet: Ipv4Net,
         server_pubkey: Base64<PublicKey>,
         server_addr: SocketAddr,
-        client_v6: Option<Ipv6Addr>,
+        client_v6: Option<Ipv6Net>,
     ) -> ClientConfig {
         ClientConfig {
             client_config: self,
@@ -317,14 +317,16 @@ pub struct ClientConfig {
     server_pubkey: Base64<PublicKey>,
     server_addr: SocketAddr,
     #[serde(default)]
-    client_v6: Option<Ipv6Addr>,
+    client_v6: Option<Ipv6Net>,
 }
 impl std::fmt::Display for ClientConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let v4_addr = Ipv4Net::new_assert(self.client_addr, self.subnet.prefix_len());
-        // Each host gets a single /128 from its subnet's prefix.
+        // The host's /128 rendered at the subnet's prefix length — declaring the
+        // tunnel's IPv6 subnet on-link, symmetric with the IPv4 /24 above. The
+        // host still owns only this one address; the server routes just its /128.
         let addr = match self.client_v6 {
-            Some(v6) => format!("{v4_addr}, {v6}/128"),
+            Some(v6) => format!("{v4_addr}, {v6}"),
             None => v4_addr.to_string(),
         };
         // Only the subnet's IPv4 `.1` is advertised for DNS — the proxy binds
@@ -381,11 +383,14 @@ mod tests {
     }
 
     #[test]
-    fn client_config_with_subnet_prefix_carries_a_128() {
-        // 10.59.0.2 == 0x0a3b0002, so the /128 host bits are `a3b:2`.
-        let v6 = wg6::host_v6(
-            "2001:db8:abcd::/64".parse().unwrap(),
-            "10.59.0.2".parse().unwrap(),
+    fn client_config_carries_v6_at_the_subnet_prefix() {
+        // 10.59.0.2 == 0x0a3b0002, so the host bits are `a3b:2`; the client's own
+        // /128 is carried at the delegated prefix length (declaring the subnet
+        // on-link like the IPv4 /24) so the client can derive the server's v6.
+        let prefix: Ipv6Net = "2001:db8:abcd::/64".parse().unwrap();
+        let v6 = Ipv6Net::new_assert(
+            wg6::host_v6(prefix, "10.59.0.2".parse().unwrap()),
+            prefix.prefix_len(),
         );
         let cfg = client()
             .client_config(
@@ -396,7 +401,7 @@ mod tests {
                 Some(v6),
             )
             .to_string();
-        assert!(cfg.contains("Address = 10.59.0.2/24, 2001:db8:abcd::a3b:2/128"));
+        assert!(cfg.contains("Address = 10.59.0.2/24, 2001:db8:abcd::a3b:2/64"));
         // Only the IPv4 DNS is advertised (the proxy binds IPv4 only).
         assert!(cfg.contains("DNS = 10.59.0.1"));
         assert!(!cfg.contains("DNS = 10.59.0.1, 2001"));

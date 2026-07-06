@@ -1164,7 +1164,8 @@ pub async fn show_config(
             subnet,
             wg.as_key().de()?.verifying_key(),
             (wan_addr, wg.as_port().de()?).into(),
-            subnet_v6.map(|p| crate::tunnel::wg6::host_v6(p, ip)),
+            subnet_v6
+                .map(|p| Ipv6Net::new_assert(crate::tunnel::wg6::host_v6(p, ip), p.prefix_len())),
         )
         .to_string())
 }

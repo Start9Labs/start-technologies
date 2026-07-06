@@ -18,11 +18,12 @@ use std::time::Duration;
 use crab_nat::{InternetProtocol, PortMapping, PortMappingOptions, TimeoutConfig, pcp};
 use igd_next::aio::Gateway;
 use igd_next::aio::tokio::Tokio;
+use ipnet::IpNet;
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, interval, timeout};
 
-use crate::db::model::public::NetworkInterfaceInfo;
+use crate::db::model::public::{GatewayType, NetworkInterfaceInfo};
 use crate::net::port_map::pcp::capability::has_start9_capability;
 use crate::net::port_map::pcp::hostname::OPTION_HOSTNAME;
 use crate::net::port_map::pcp::portset::{OPTION_PORT_SET, PortSet};
@@ -55,10 +56,12 @@ type MappingKey = (IpAddr, u16, Option<String>);
 
 /// Candidate PCP/NAT-PMP servers for a gateway interface: the NM default
 /// gateways (router) that fall on one of this interface's own subnets, plus the
-/// v6 link-local default gateway.
+/// v6 link-local default gateway. A StartTunnel gateway is on-link (routed by
+/// AllowedIPs, no next-hop), so NM reports no gateway — fall back per family to
+/// the tunnel server's address, the subnet's first host, where its PCP server
+/// listens.
 pub fn candidate_gateways(info: &NetworkInterfaceInfo) -> Vec<(IpAddr, Option<u32>)> {
-    let mut out: Vec<(IpAddr, Option<u32>)> = Vec::new();
-    let mut push = |ip: IpAddr, scope_id: Option<u32>| {
+    fn push(out: &mut Vec<(IpAddr, Option<u32>)>, ip: IpAddr, scope_id: Option<u32>) {
         let bad = match ip {
             IpAddr::V4(v4) => v4.is_unspecified() || v4.is_loopback() || v4.is_broadcast(),
             IpAddr::V6(v6) => v6.is_unspecified() || v6.is_loopback(),
@@ -66,26 +69,62 @@ pub fn candidate_gateways(info: &NetworkInterfaceInfo) -> Vec<(IpAddr, Option<u3
         if !bad && !out.iter().any(|(g, _)| *g == ip) {
             out.push((ip, scope_id));
         }
+    }
+
+    let mut out: Vec<(IpAddr, Option<u32>)> = Vec::new();
+    let Some(ip_info) = &info.ip_info else {
+        return out;
     };
-    if let Some(ip_info) = &info.ip_info {
-        for ip in &ip_info.lan_ip {
-            // v4: the gateway must sit within one of our own subnets. v6: accept
-            // the link-local default gateway (fe80::, the common case) or one in
-            // our subnets.
-            match ip {
-                IpAddr::V4(_) => {
-                    if ip_info.subnets.iter().any(|s| s.contains(ip)) {
-                        push(*ip, None);
-                    }
+
+    for ip in &ip_info.lan_ip {
+        // v4: the gateway must sit within one of our own subnets. v6: accept the
+        // link-local default gateway (fe80::, the common case) or one in our
+        // subnets.
+        match ip {
+            IpAddr::V4(_) => {
+                if ip_info.subnets.iter().any(|s| s.contains(ip)) {
+                    push(&mut out, *ip, None);
                 }
-                IpAddr::V6(v6) => {
-                    if ipv6_is_link_local(*v6) || ip_info.subnets.iter().any(|s| s.contains(ip)) {
-                        push(*ip, Some(ip_info.scope_id));
-                    }
+            }
+            IpAddr::V6(v6) => {
+                if ipv6_is_link_local(*v6) || ip_info.subnets.iter().any(|s| s.contains(ip)) {
+                    push(&mut out, *ip, Some(ip_info.scope_id));
                 }
             }
         }
     }
+
+    // StartTunnel fallback: the tunnel is on-link (routed by AllowedIPs, no
+    // next-hop) so NM reports no gateway and `lan_ip` is empty. The server's PCP
+    // listener is at the subnet's first host — `.1` for v4, and the v6 that host
+    // takes under the delegated prefix, which the client now carries on its own
+    // /prefix v6 so `host_v6` is exact. Fill a family only when NM gave none, so
+    // a real gateway always wins.
+    if info.gateway_type == Some(GatewayType::InboundOutbound) {
+        let have_v4 = out.iter().any(|(g, _)| g.is_ipv4());
+        let have_v6 = out.iter().any(|(g, _)| g.is_ipv6());
+        let server_v4 = ip_info.subnets.iter().find_map(|s| match s {
+            IpNet::V4(n) => n.hosts().next(),
+            IpNet::V6(_) => None,
+        });
+        if let Some(server_v4) = server_v4 {
+            if !have_v4 {
+                push(&mut out, IpAddr::V4(server_v4), None);
+            }
+            // Skip a bare /128 (a legacy config with no prefix): `host_v6` would
+            // resolve to the client's own address, not the server's.
+            if !have_v6 {
+                if let Some(prefix) = ip_info.subnets.iter().find_map(|s| match s {
+                    IpNet::V6(n) if n.prefix_len() < 128 => Some(*n),
+                    _ => None,
+                }) {
+                    let server_v6 = crate::tunnel::wg6::host_v6(prefix, server_v4);
+                    push(&mut out, IpAddr::V6(server_v6), Some(ip_info.scope_id));
+                }
+            }
+        }
+    }
+
     out
 }
 
@@ -707,5 +746,84 @@ mod tests {
         assert!(!announce_marker_ok(&not_success));
 
         assert!(!announce_marker_ok(&resp[..24]), "no marker option");
+    }
+
+    fn iface(
+        subnets: &[&str],
+        lan_ip: &[&str],
+        gateway_type: Option<GatewayType>,
+    ) -> NetworkInterfaceInfo {
+        use crate::db::model::public::IpInfo;
+        NetworkInterfaceInfo {
+            ip_info: Some(std::sync::Arc::new(IpInfo {
+                scope_id: 42,
+                subnets: subnets.iter().map(|s| s.parse::<IpNet>().unwrap()).collect(),
+                lan_ip: lan_ip.iter().map(|s| s.parse::<IpAddr>().unwrap()).collect(),
+                ..Default::default()
+            })),
+            gateway_type,
+            ..Default::default()
+        }
+    }
+
+    // A StartTunnel gateway has no NM gateway (on-link), so we fall back to the
+    // subnet's first host per family: v4 `.1` and the v6 that host maps to under
+    // the delegated /prefix the client now carries.
+    #[test]
+    fn tunnel_fallback_derives_server_v4_and_v6() {
+        let gws = candidate_gateways(&iface(
+            &["10.59.0.2/24", "2001:db8:abcd::a3b:2/64"],
+            &[],
+            Some(GatewayType::InboundOutbound),
+        ));
+        assert!(gws.contains(&(Ipv4Addr::new(10, 59, 0, 1).into(), None)));
+        let server_v6: IpAddr = "2001:db8:abcd::a3b:1".parse().unwrap();
+        assert!(gws.iter().any(|(g, _)| *g == server_v6), "got {gws:?}");
+    }
+
+    // On a /124 the client carries its /128 at /124, so `host_v6` stays exact
+    // where a naive v4-bit XOR would corrupt the prefix.
+    #[test]
+    fn tunnel_fallback_v6_exact_on_a_small_prefix() {
+        let gws = candidate_gateways(&iface(
+            &["10.59.0.2/24", "2001:db8:abcd:1::f2/124"],
+            &[],
+            Some(GatewayType::InboundOutbound),
+        ));
+        let server_v6: IpAddr = "2001:db8:abcd:1::f1".parse().unwrap();
+        assert!(gws.iter().any(|(g, _)| *g == server_v6), "got {gws:?}");
+    }
+
+    // A real NM gateway always wins; the fallback fills only the missing family.
+    #[test]
+    fn tunnel_fallback_is_per_family() {
+        let gws = candidate_gateways(&iface(
+            &["10.59.0.2/24", "2001:db8:abcd::a3b:2/64"],
+            &["10.59.0.1"], // NM has v4 but no v6
+            Some(GatewayType::InboundOutbound),
+        ));
+        assert_eq!(gws.iter().filter(|(g, _)| g.is_ipv4()).count(), 1);
+        let server_v6: IpAddr = "2001:db8:abcd::a3b:1".parse().unwrap();
+        assert!(gws.iter().any(|(g, _)| *g == server_v6), "got {gws:?}");
+    }
+
+    // The fallback is scoped to StartTunnel; a plain interface with no NM gateway
+    // yields nothing (no bogus `.1`).
+    #[test]
+    fn non_tunnel_no_gateway_yields_nothing() {
+        assert!(candidate_gateways(&iface(&["192.168.1.5/24"], &[], None)).is_empty());
+    }
+
+    // A legacy /128 client (pre-/prefix config) can't derive the server v6, so
+    // the v6 fallback is skipped rather than resolving to the client's own addr.
+    #[test]
+    fn tunnel_fallback_skips_bare_128_v6() {
+        let gws = candidate_gateways(&iface(
+            &["10.59.0.2/24", "2001:db8:abcd::a3b:2/128"],
+            &[],
+            Some(GatewayType::InboundOutbound),
+        ));
+        assert!(gws.contains(&(Ipv4Addr::new(10, 59, 0, 1).into(), None)));
+        assert!(!gws.iter().any(|(g, _)| g.is_ipv6()), "no v6 from a bare /128");
     }
 }
