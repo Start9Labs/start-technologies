@@ -153,8 +153,14 @@ parse_run_id() {
     fi
 }
 
+# The commit the tag will point at ($COMMIT, default HEAD), as a full sha.
+tag_commit_sha() { (cd "$REPO_ROOT" && git rev-parse --verify "${COMMIT:-HEAD}^{commit}"); }
+
 # Local staging dir: keeps the flat _v separator (the tag's / would nest dirs).
 release_dir() { echo "$HOME/Downloads/${PROJECT}_v${VERSION}"; }
+
+# Marker recording which commit the release dir's GHA artifacts were built from.
+gha_commit_file() { echo "$(release_dir)/.gha-commit"; }
 
 ensure_release_dir() {
     local dir
@@ -479,8 +485,20 @@ cmd_pull_gha() {
         exit 2
     fi
 
+    # The tag must point at the commit these artifacts were built from.
+    local run_sha tag_sha
+    run_sha=$(gh run view -R "$REPO" "$RUN_ID" --json headSha -q .headSha)
+    tag_sha=$(tag_commit_sha)
+    if [ "$run_sha" != "$tag_sha" ]; then
+        >&2 echo "Run ${RUN_ID} built commit ${run_sha},"
+        >&2 echo "but tag ${TAG} would be cut at ${COMMIT:-HEAD} (${tag_sha})."
+        >&2 echo "Pass the run for that commit, or set COMMIT=${run_sha}."
+        exit 1
+    fi
+
     ensure_release_dir
-    echo "Downloading ${PROJECT} artifacts from run ${RUN_ID}..."
+    echo "$run_sha" > "$(gha_commit_file)"
+    echo "Downloading ${PROJECT} artifacts from run ${RUN_ID} (commit ${run_sha})..."
 
     case "$KIND" in
         os)
@@ -513,6 +531,8 @@ cmd_pull_gha() {
 
 cmd_pull() {
     ensure_release_dir
+    # Released assets replace any GHA-pulled ones, so the marker no longer applies.
+    rm -f "$(gha_commit_file)"
     echo "Downloading released ${PROJECT} v${VERSION} from its official location..."
 
     case "$KIND" in
@@ -562,11 +582,22 @@ cmd_pull() {
 }
 
 cmd_tag() {
-    local commit="${COMMIT:-HEAD}"
+    local commit="${COMMIT:-HEAD}" tag_sha pulled_sha
+    tag_sha=$(tag_commit_sha)
+    # Refuse to tag a commit other than the one the pulled GHA assets were built from.
+    if [ -f "$(gha_commit_file)" ]; then
+        pulled_sha=$(cat "$(gha_commit_file)")
+        if [ "$pulled_sha" != "$tag_sha" ]; then
+            >&2 echo "Release dir assets were built from commit ${pulled_sha},"
+            >&2 echo "but tag ${TAG} would be cut at ${commit} (${tag_sha})."
+            >&2 echo "Re-run pull-gha with the matching run, or set COMMIT=${pulled_sha}."
+            exit 1
+        fi
+    fi
     if [ -n "$(cd "$REPO_ROOT" && git status --porcelain)" ]; then
         >&2 echo "Warning: working tree is dirty; tagging ${commit} anyway."
     fi
-    echo "Tagging ${TAG} at ${commit}..."
+    echo "Tagging ${TAG} at ${commit} (${tag_sha})..."
     (cd "$REPO_ROOT" && git tag ${FORCE:+-f} "$TAG" "$commit" && git push origin ${FORCE:+-f} "refs/tags/${TAG}")
 }
 
@@ -885,10 +916,13 @@ Subcommands:
   pre-check          Verify the changelog documents this version and that the
                      version is not already tagged/released.
   pull-gha           Download build artifacts from a GitHub Actions run.
+                     Fails unless the run built the commit being tagged
+                     (COMMIT, default HEAD).
                      (os/cli/deb/wrt; set RUN_ID or you'll be prompted.)
   pull               Download the released assets from their official location
                      (registry / apt repo / GitHub release / npm).
-  tag                Create and push the <project>/v<version> git tag.
+  tag                Create and push the <project>/v<version> git tag. Fails if
+                     pull-gha'd assets were built from a different commit.
   create-gh-release  Create (or update) the GitHub release with notes.
                      (all projects.)
   push               Upload artifacts to their destination (S3 for os, GitHub
