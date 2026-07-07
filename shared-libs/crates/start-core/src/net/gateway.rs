@@ -120,6 +120,13 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
                 .with_call_remote::<CliContext>(),
         )
         .subcommand(
+            "check-port-v6",
+            from_fn_async(check_port_v6)
+                .with_display_serializable()
+                .with_about("about.check-port-v6-reachability")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
             "check-dns",
             from_fn_async(check_dns)
                 .with_display_serializable()
@@ -564,12 +571,11 @@ pub struct CheckPortRes {
     pub open_externally: bool,
     pub open_internally: bool,
     pub hairpinning: bool,
-    /// v6 reachability of the box's GUA at this port, when the gateway has one.
-    /// v6 is NAT-free, so there is no hairpinning to report.
-    #[serde(default)]
-    pub ipv6: Option<CheckPortV6Res>,
 }
 
+/// v6 reachability of the box's GUA at a port. v6 is NAT-free (the GUA is the
+/// box's own address), so there is no hairpinning. Queried separately from
+/// [`CheckPortRes`] so the IPv4 and IPv6 checks can run independently.
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -638,15 +644,6 @@ pub async fn check_port(
         })
         .unwrap_or(Ipv4Addr::UNSPECIFIED);
 
-    let ipv6 = check_gua_port(
-        &gateway,
-        ip_info,
-        port,
-        &base_urls,
-        &ctx.net_controller.port_map,
-    )
-    .await?;
-
     // If automatic port forwarding (PCP/NAT-PMP/UPnP) already succeeded for this
     // port, it's reachable — skip the remote echo service and report success.
     // The mapping reports the gateway-assigned external IP, so we still know our
@@ -670,7 +667,6 @@ pub async fn check_port(
                 open_externally: true,
                 open_internally,
                 hairpinning,
-                ipv6: ipv6.clone(),
             });
         }
     }
@@ -724,8 +720,40 @@ pub async fn check_port(
         open_externally,
         open_internally,
         hairpinning,
-        ipv6,
     })
+}
+
+/// v6 counterpart of [`check_port`]: probe the box's IPv6 GUA reachability at
+/// `port` on `gateway`. `None` when the gateway has no GUA.
+pub async fn check_port_v6(
+    ctx: RpcContext,
+    CheckPortParams { port, gateway }: CheckPortParams,
+) -> Result<Option<CheckPortV6Res>, Error> {
+    let db = ctx.db.peek().await;
+    let base_urls = db.as_public().as_server_info().as_echoip_urls().de()?;
+    let gateways = db
+        .as_public()
+        .as_server_info()
+        .as_network()
+        .as_gateways()
+        .de()?;
+    let gw_info = gateways
+        .get(&gateway)
+        .ok_or_else(|| Error::new(eyre!("unknown gateway: {gateway}"), ErrorKind::NotFound))?;
+    let ip_info = gw_info.ip_info.as_ref().ok_or_else(|| {
+        Error::new(
+            eyre!("gateway {gateway} has no IP info"),
+            ErrorKind::NotFound,
+        )
+    })?;
+    check_gua_port(
+        &gateway,
+        ip_info,
+        port,
+        &base_urls,
+        &ctx.net_controller.port_map,
+    )
+    .await
 }
 
 /// Probe the box's IPv6 GUA reachability at `port` on `gateway`, if it has one.

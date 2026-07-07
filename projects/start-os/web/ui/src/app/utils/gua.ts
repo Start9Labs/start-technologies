@@ -50,11 +50,11 @@ export function dnsAllPass(
  */
 export function portAllPass(
   port: T.CheckPortRes | null | undefined,
+  portV6: T.CheckPortV6Res | null | undefined,
   gua: string | null,
 ): boolean {
   if (!port) return false
   const v4Ok = port.openInternally && port.openExternally && port.hairpinning
-  const v6Ok =
-    !gua || (!!port.ipv6?.openInternally && !!port.ipv6?.openExternally)
+  const v6Ok = !gua || (!!portV6?.openInternally && !!portV6?.openExternally)
   return v4Ok && v6Ok
 }

@@ -35,27 +35,35 @@ export class DomainHealthService {
       let dns: T.QueryDnsRes | null
       let port: number
       let portResult: T.CheckPortRes | null
+      let portV6Result: T.CheckPortV6Res | null
 
       if (typeof portOrRes === 'number') {
         port = portOrRes
-        const [dnsRes, portRes] = await Promise.all([
+        const [dnsRes, portRes, portV6Res] = await Promise.all([
           this.api.queryDns({ fqdn }).catch((): null => null),
           isRange
             ? Promise.resolve(null)
             : this.api
                 .checkPort({ gateway: gatewayId, port: portOrRes })
                 .catch((): null => null),
+          isRange || !gua
+            ? Promise.resolve(null)
+            : this.api
+                .checkPortV6({ gateway: gatewayId, port: portOrRes })
+                .catch((): null => null),
         ])
         dns = dnsRes
         portResult = portRes
+        portV6Result = portV6Res
       } else {
         dns = portOrRes.dns
         port = portOrRes.port.port
         portResult = isRange ? null : portOrRes.port
+        portV6Result = isRange ? null : portOrRes.portV6
       }
 
       const dnsPass = dnsAllPass(dns, gateway.ipInfo.wanIp, gua)
-      const portOk = isRange || portAllPass(portResult, gua)
+      const portOk = isRange || portAllPass(portResult, portV6Result, gua)
 
       if (!dnsPass || !portOk) {
         setTimeout(
@@ -63,6 +71,7 @@ export class DomainHealthService {
             this.openPublicDomainModal(fqdn, gateway, port, count, {
               dns,
               portResult,
+              portV6Result,
             }),
           250,
         )
@@ -182,6 +191,7 @@ export class DomainHealthService {
     initialResults?: {
       dns: T.QueryDnsRes | null
       portResult: T.CheckPortRes | null
+      portV6Result: T.CheckPortV6Res | null
     },
   ) {
     this.dialog

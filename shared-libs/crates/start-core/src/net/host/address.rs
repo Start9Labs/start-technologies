@@ -13,7 +13,10 @@ use crate::db::model::DatabaseModel;
 use crate::hostname::ServerHostname;
 use crate::net::acme::AcmeProvider;
 use crate::net::dns::QueryDnsRes;
-use crate::net::gateway::{CheckDnsParams, CheckPortParams, CheckPortRes, check_dns, check_port};
+use crate::net::gateway::{
+    CheckDnsParams, CheckPortParams, CheckPortRes, CheckPortV6Res, check_dns, check_port,
+    check_port_v6,
+};
 use crate::net::host::{HostApiKind, all_hosts};
 use crate::net::service_interface::HostnameMetadata;
 use crate::prelude::*;
@@ -229,6 +232,7 @@ pub struct AddPublicDomainParams {
 pub struct AddPublicDomainRes {
     pub dns: QueryDnsRes,
     pub port: CheckPortRes,
+    pub port_v6: Option<CheckPortV6Res>,
 }
 
 pub async fn add_public_domain<Kind: HostApiKind>(
@@ -386,7 +390,7 @@ pub async fn add_public_domain<Kind: HostApiKind>(
     let ctx2 = ctx.clone();
     let fqdn2 = fqdn.clone();
 
-    let (dns_result, port_result) = tokio::join!(
+    let (dns_result, port_result, port_v6_result) = tokio::join!(
         async {
             tokio::task::spawn_blocking(move || {
                 crate::net::dns::query_dns(ctx2, crate::net::dns::QueryDnsParams { fqdn: fqdn2 })
@@ -400,12 +404,20 @@ pub async fn add_public_domain<Kind: HostApiKind>(
                 port: ext_port,
                 gateway: gateway.clone(),
             },
+        ),
+        check_port_v6(
+            ctx.clone(),
+            CheckPortParams {
+                port: ext_port,
+                gateway: gateway.clone(),
+            },
         )
     );
 
     Ok(AddPublicDomainRes {
         dns: dns_result?,
         port: port_result?,
+        port_v6: port_v6_result?,
     })
 }
 

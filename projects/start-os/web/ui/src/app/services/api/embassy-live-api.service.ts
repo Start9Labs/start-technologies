@@ -290,6 +290,15 @@ export class LiveApiService extends ApiService {
     })
   }
 
+  async checkPortV6(
+    params: T.CheckPortParams,
+  ): Promise<T.CheckPortV6Res | null> {
+    return this.rpcRequest({
+      method: 'net.gateway.check-port-v6',
+      params,
+    })
+  }
+
   async checkDns(params: T.CheckDnsParams): Promise<CheckDnsRes> {
     return this.rpcRequest({
       method: 'net.gateway.check-dns',

@@ -1,10 +1,4 @@
-import {
-  Component,
-  computed,
-  inject,
-  signal,
-  WritableSignal,
-} from '@angular/core'
+import { Component, computed, inject, signal } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { ErrorService, i18nPipe } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
@@ -33,6 +27,7 @@ export type DomainValidationData = {
   initialResults?: {
     dns: T.QueryDnsRes | null
     portResult: T.CheckPortRes | null
+    portV6Result: T.CheckPortV6Res | null
   }
 }
 
@@ -239,7 +234,7 @@ export type DomainValidationData = {
           <tr>
             <td class="status">
               <port-check-icon
-                [result]="portRes?.ipv6 || undefined"
+                [result]="portV6Result() || undefined"
                 [loading]="portV6Loading()"
               />
             </td>
@@ -261,7 +256,7 @@ export type DomainValidationData = {
         <div class="card">
           <div class="card-status">
             <port-check-icon
-              [result]="portRes?.ipv6 || undefined"
+              [result]="portV6Result() || undefined"
               [loading]="portV6Loading()"
             />
           </div>
@@ -439,6 +434,7 @@ export class DomainValidationComponent {
   readonly portV6Loading = signal(false)
   readonly dnsResult = signal<T.QueryDnsRes | undefined>(undefined)
   readonly portResult = signal<T.CheckPortRes | undefined>(undefined)
+  readonly portV6Result = signal<T.CheckPortV6Res | undefined>(undefined)
 
   readonly dnsV4Pass = computed(() => {
     const dns = this.dnsResult()
@@ -452,7 +448,8 @@ export class DomainValidationComponent {
   readonly allPass = computed(
     () =>
       dnsAllPass(this.dnsResult(), this.wanIp, this.gua) &&
-      (this.isRange || portAllPass(this.portResult(), this.gua)),
+      (this.isRange ||
+        portAllPass(this.portResult(), this.portV6Result(), this.gua)),
   )
 
   readonly isManualMode = !this.context.data.initialResults
@@ -462,6 +459,7 @@ export class DomainValidationComponent {
     if (initial) {
       if (initial.dns) this.dnsResult.set(initial.dns)
       if (initial.portResult) this.portResult.set(initial.portResult)
+      if (initial.portV6Result) this.portV6Result.set(initial.portV6Result)
     }
   }
 
@@ -480,17 +478,7 @@ export class DomainValidationComponent {
   }
 
   async testPort() {
-    await this.runPortCheck(this.portLoading)
-  }
-
-  // check_port returns both families in one call, so the IPv6 Firewall box's own
-  // Test runs the same probe; only the loading indicator differs.
-  async testPortV6() {
-    await this.runPortCheck(this.portV6Loading)
-  }
-
-  private async runPortCheck(loading: WritableSignal<boolean>) {
-    loading.set(true)
+    this.portLoading.set(true)
 
     try {
       this.portResult.set(
@@ -502,7 +490,26 @@ export class DomainValidationComponent {
     } catch (e: any) {
       this.errorService.handleError(e)
     } finally {
-      loading.set(false)
+      this.portLoading.set(false)
+    }
+  }
+
+  // A separate endpoint from checkPort so the IPv4 and IPv6 reachability probes
+  // run independently — clicking one Test does not trigger the other family.
+  async testPortV6() {
+    this.portV6Loading.set(true)
+
+    try {
+      this.portV6Result.set(
+        (await this.api.checkPortV6({
+          gateway: this.context.data.gateway.id,
+          port: this.context.data.port,
+        })) ?? undefined,
+      )
+    } catch (e: any) {
+      this.errorService.handleError(e)
+    } finally {
+      this.portV6Loading.set(false)
     }
   }
 

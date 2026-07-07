@@ -4598,6 +4598,13 @@ about.check-port-reachability:
   fr_FR: "Vérifier si un port est accessible depuis le WAN"
   pl_PL: "Sprawdź, czy port jest osiągalny z WAN"
 
+about.check-port-v6-reachability:
+  en_US: "Check if a port is reachable over IPv6 (GUA firewall)"
+  de_DE: "Prüfen, ob ein Port über IPv6 erreichbar ist (GUA-Firewall)"
+  es_ES: "Comprobar si un puerto es accesible por IPv6 (firewall GUA)"
+  fr_FR: "Vérifier si un port est accessible via IPv6 (pare-feu GUA)"
+  pl_PL: "Sprawdź, czy port jest osiągalny przez IPv6 (zapora GUA)"
+
 about.check-update-startos:
   en_US: "Check a given registry for StartOS updates and update if available"
   de_DE: "Ein bestimmtes Registry auf StartOS-Updates prüfen und bei Verfügbarkeit aktualisieren"

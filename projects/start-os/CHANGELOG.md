@@ -31,9 +31,10 @@ file tracks notable changes since the move to the monorepo.
   exposed — only traffic matching the domain by SNI is accepted — so an SSL
   domain needs no separate GUA WAN opt-in (a plaintext domain, which has no SNI
   to filter on, exposes the GUA the same way it exposes the WAN IPv4). The
-  add-domain DNS check, the `net.gateway.check-port` result, and the domain setup
-  modal now verify and display both the `A`/IPv4 and `AAAA`/IPv6 records and
-  reachability.
+  add-domain DNS check and the domain setup modal now verify and display both
+  the `A`/IPv4 and `AAAA`/IPv6 records and reachability; IPv6 reachability is its
+  own `net.gateway.check-port-v6` endpoint (separate from the IPv4
+  `net.gateway.check-port`) so each family is probed independently.
 - **`--force` on service start.** `start-cli package start <id> --force` (and the
   `package.start` RPC `force` flag) starts a service even when it has an unresolved
   critical task.

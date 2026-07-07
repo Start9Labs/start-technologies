@@ -558,7 +558,18 @@ export class MockApiService extends ApiService {
       openExternally: true,
       openInternally: false,
       hairpinning: true,
-      ipv6: null,
+    }
+  }
+
+  async checkPortV6(
+    params: T.CheckPortParams,
+  ): Promise<T.CheckPortV6Res | null> {
+    await pauseFor(2000)
+
+    return {
+      ip: '::',
+      openExternally: true,
+      openInternally: false,
     }
   }
 
@@ -1613,8 +1624,8 @@ export class MockApiService extends ApiService {
         openExternally: false,
         openInternally: false,
         hairpinning: false,
-        ipv6: null,
       },
+      portV6: null,
     }
   }
 
@@ -1758,8 +1769,8 @@ export class MockApiService extends ApiService {
         openExternally: false,
         openInternally: false,
         hairpinning: false,
-        ipv6: null,
       },
+      portV6: null,
     }
   }
 
