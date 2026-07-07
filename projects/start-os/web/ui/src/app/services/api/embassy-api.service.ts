@@ -131,7 +131,7 @@ export abstract class ApiService {
 
   abstract setDns(params: T.SetStaticDnsParams): Promise<null>
 
-  abstract queryDns(params: T.QueryDnsParams): Promise<string | null>
+  abstract queryDns(params: T.QueryDnsParams): Promise<T.QueryDnsRes>
 
   abstract checkPort(params: T.CheckPortParams): Promise<T.CheckPortRes>
 

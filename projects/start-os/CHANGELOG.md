@@ -22,6 +22,18 @@ file tracks notable changes since the move to the monorepo.
   StartOS-terminated SSL port is served by the host's own TLS listener; a port
   StartOS does not terminate is forwarded (DNAT) directly to the service
   container. IPv6 ULAs and IPv4 are unchanged.
+- **DualStack public domains.** A public (clearnet) domain is now reachable over
+  both IPv4 and IPv6 whenever its gateway has an IPv6 global-unicast address
+  (GUA). StartOS advertises an `AAAA` target (the GUA) alongside the `A` target,
+  opens an inbound IPv6 firewall pinhole for the domain's port (via PCP — v6 is
+  NAT-free, so there is nothing to forward), and serves the domain on the GUA
+  through its existing SNI-routed TLS listener. The bare GUA itself is not
+  exposed — only traffic matching the domain by SNI is accepted — so an SSL
+  domain needs no separate GUA WAN opt-in (a plaintext domain, which has no SNI
+  to filter on, exposes the GUA the same way it exposes the WAN IPv4). The
+  add-domain DNS check, the `net.gateway.check-port` result, and the domain setup
+  modal now verify and display both the `A`/IPv4 and `AAAA`/IPv6 records and
+  reachability.
 - **`--force` on service start.** `start-cli package start <id> --force` (and the
   `package.start` RPC `force` flag) starts a service even when it has an unresolved
   critical task.

@@ -5,6 +5,7 @@ import { PatchDB } from 'patch-db-client'
 import { firstValueFrom } from 'rxjs'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
+import { dnsAllPass, getGua, portAllPass } from 'src/app/utils/gua'
 import { DOMAIN_VALIDATION, DnsGateway } from './dns.component'
 import { PORT_FORWARD_VALIDATION } from './port-forward.component'
 import { PRIVATE_DNS_VALIDATION } from './private-dns.component'
@@ -29,43 +30,38 @@ export class DomainHealthService {
       // A port range can't be reachability-tested a port at a time, so we only
       // verify DNS and never claim its port forward is (or isn't) open.
       const isRange = count > 1
+      const gua = getGua(gateway.ipInfo)
 
-      let dnsPass: boolean
+      let dns: T.QueryDnsRes | null
       let port: number
       let portResult: T.CheckPortRes | null
 
       if (typeof portOrRes === 'number') {
         port = portOrRes
-        const [dns, portRes] = await Promise.all([
-          this.api
-            .queryDns({ fqdn })
-            .then(ip => ip === gateway.ipInfo.wanIp)
-            .catch(() => false),
+        const [dnsRes, portRes] = await Promise.all([
+          this.api.queryDns({ fqdn }).catch((): null => null),
           isRange
             ? Promise.resolve(null)
             : this.api
                 .checkPort({ gateway: gatewayId, port: portOrRes })
                 .catch((): null => null),
         ])
-        dnsPass = dns
+        dns = dnsRes
         portResult = portRes
       } else {
-        dnsPass = portOrRes.dns === gateway.ipInfo.wanIp
+        dns = portOrRes.dns
         port = portOrRes.port.port
         portResult = isRange ? null : portOrRes.port
       }
 
-      const portOk =
-        isRange ||
-        (!!portResult?.openInternally &&
-          !!portResult?.openExternally &&
-          !!portResult?.hairpinning)
+      const dnsPass = dnsAllPass(dns, gateway.ipInfo.wanIp, gua)
+      const portOk = isRange || portAllPass(portResult, gua)
 
       if (!dnsPass || !portOk) {
         setTimeout(
           () =>
             this.openPublicDomainModal(fqdn, gateway, port, count, {
-              dnsPass,
+              dns,
               portResult,
             }),
           250,
@@ -184,7 +180,7 @@ export class DomainHealthService {
     port: number,
     count: number,
     initialResults?: {
-      dnsPass: boolean
+      dns: T.QueryDnsRes | null
       portResult: T.CheckPortRes | null
     },
   ) {

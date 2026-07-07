@@ -793,4 +793,6 @@ export const ENGLISH: Record<string, number> = {
   'Terminate': 891, // verb, terminate a session
   'selected': 892, // as in, "3 selected"
   'Your personal StartOS web user interface.': 893,
+  'create these DNS records': 894,
+  'IPv6 reachability': 895,
 }

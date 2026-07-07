@@ -51,7 +51,12 @@ StartOS tests DNS automatically when you add or enable a public domain, and will
 
 1. Access your domain's DNS settings, usually in the registrar where you originally leased the domain.
 
-1. Create a DNS record that points your domain to your gateway's public IP address. If you use subdomains, consider using a wildcard (`*`) for that host so that all future subdomains work without needed additional records.
+1. Create a DNS record that points your domain to your gateway's public IP address:
+
+   - An **`A` record** pointing at your gateway's public **IPv4** address.
+   - If your gateway also has an IPv6 **global-unicast address (GUA)**, add an **`AAAA` record** pointing at that address. StartOS serves a public domain over both IPv4 and IPv6 (DualStack) whenever a GUA is available, so adding both records lets clients reach the domain over either protocol. The exact record values are shown in the DNS setup modal.
+
+   If you use subdomains, consider using a wildcard (`*`) for that host so that all future subdomains work without needing additional records.
 
    > [!TIP]
    > It can take up to a few hours for DNS changes to propagate. You can check propagation using [https://dnschecker.org](https://dnschecker.org).
@@ -61,6 +66,9 @@ StartOS tests DNS automatically when you add or enable a public domain, and will
 To expose a public domain to the Internet, the appropriate port must be forwarded in the corresponding gateway. StartOS tests port forwarding automatically when you add or enable a public domain, and will guide you through the setup if the test fails.
 
 When a public address is enabled, StartOS first **attempts to open the port automatically** on the corresponding gateway, using PCP (preferred), then NAT-PMP, then UPnP. If the gateway supports one of these (and it is enabled), no manual step is required — and when the address is later disabled or deleted, StartOS removes the port forward it created. This is best-effort: if the gateway supports none of them, the automatic test will fail and you create the rule manually as described below.
+
+> [!NOTE]
+> IPv6 needs no port _forwarding_. An IPv6 GUA is your server's own globally-routable address, so there is nothing to translate — StartOS instead opens an inbound **firewall pinhole** for the domain's port on the upstream gateway (again via PCP) and serves the domain on the GUA directly. The bare GUA itself stays local-only: only traffic that matches the domain (by TLS SNI) is accepted, so exposing a public domain over IPv6 does not expose the address for anything else.
 
 > [!TIP]
 > Most websites and APIs on the Internet are hosted on port `443`. Port `443` is so common, in fact, that apps and browsers _infer_ its presence. The _absence_ of a port _means_ the port is `443`. With rare exceptions, domains on StartOS also use port `443`, and that is why your domains usually do not display a port. The port forwarding rule needed for these standard domains is always the same, which means you only have to do it once!

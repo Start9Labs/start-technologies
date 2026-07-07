@@ -276,7 +276,7 @@ export class LiveApiService extends ApiService {
     })
   }
 
-  async queryDns(params: T.QueryDnsParams): Promise<string | null> {
+  async queryDns(params: T.QueryDnsParams): Promise<T.QueryDnsRes> {
     return this.rpcRequest({
       method: 'net.dns.query',
       params,

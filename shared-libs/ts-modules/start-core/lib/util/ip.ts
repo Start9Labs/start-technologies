@@ -91,6 +91,20 @@ export class IpAddress {
     return this.isIpv4() && !PRIVATE_IPV4_RANGES.some(r => r.contains(this))
   }
   /**
+   * Returns true if this is an IPv6 global-unicast address (a GUA) — i.e. IPv6
+   * that is not loopback, unique-local (`fc00::/7`), or link-local (`fe80::/10`).
+   * Mirrors the backend's `ipv6_is_local`, so it identifies the same globally
+   * routable address StartOS advertises for DualStack.
+   */
+  isGua(): boolean {
+    return (
+      this.isIpv6() &&
+      !IPV6_LOOPBACK.contains(this) &&
+      !IPV6_ULA.contains(this) &&
+      !IPV6_LINK_LOCAL.contains(this)
+    )
+  }
+  /**
    * Returns a new IpAddress incremented by `n`.
    * @param n - The integer amount to add (fractional part is truncated)
    * @returns A new IpAddress with the result
@@ -294,6 +308,8 @@ export const IPV4_LOOPBACK = IpNet.parse('127.0.0.0/8')
 export const IPV6_LOOPBACK = IpNet.parse('::1/128')
 /** IPv6 link-local network (fe80::/10). */
 export const IPV6_LINK_LOCAL = IpNet.parse('fe80::/10')
+/** IPv6 unique-local network (fc00::/7). */
+export const IPV6_ULA = IpNet.parse('fc00::/7')
 
 /** Carrier-Grade NAT (CGNAT) address range (100.64.0.0/10), per RFC 6598. */
 export const CGNAT = IpNet.parse('100.64.0.0/10')

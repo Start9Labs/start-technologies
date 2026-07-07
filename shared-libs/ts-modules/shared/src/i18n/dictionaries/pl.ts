@@ -792,4 +792,6 @@ export default {
   891: 'Zakończ',
   892: 'wybrane',
   893: 'Twój osobisty interfejs webowy StartOS.',
+  894: 'utwórz te rekordy DNS',
+  895: 'osiągalność IPv6',
 } satisfies i18n

@@ -543,10 +543,10 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async queryDns(params: T.QueryDnsParams): Promise<string | null> {
+  async queryDns(params: T.QueryDnsParams): Promise<T.QueryDnsRes> {
     await pauseFor(2000)
 
-    return null
+    return { ipv4: null, ipv6: null }
   }
 
   async checkPort(params: T.CheckPortParams): Promise<T.CheckPortRes> {
@@ -558,6 +558,7 @@ export class MockApiService extends ApiService {
       openExternally: true,
       openInternally: false,
       hairpinning: true,
+      ipv6: null,
     }
   }
 
@@ -1605,13 +1606,14 @@ export class MockApiService extends ApiService {
     this.mockRevision(patch)
 
     return {
-      dns: null,
+      dns: { ipv4: null, ipv6: null },
       port: {
         ip: '0.0.0.0',
         port: 443,
         openExternally: false,
         openInternally: false,
         hairpinning: false,
+        ipv6: null,
       },
     }
   }
@@ -1749,13 +1751,14 @@ export class MockApiService extends ApiService {
     this.mockRevision(patch)
 
     return {
-      dns: null,
+      dns: { ipv4: null, ipv6: null },
       port: {
         ip: '0.0.0.0',
         port: 443,
         openExternally: false,
         openInternally: false,
         hairpinning: false,
+        ipv6: null,
       },
     }
   }

@@ -792,4 +792,6 @@ export default {
   891: 'Terminar',
   892: 'seleccionados',
   893: 'Tu interfaz web personal de StartOS.',
+  894: 'cree estos registros DNS',
+  895: 'accesibilidad IPv6',
 } satisfies i18n

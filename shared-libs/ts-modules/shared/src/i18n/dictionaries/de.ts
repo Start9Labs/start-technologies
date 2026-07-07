@@ -792,4 +792,6 @@ export default {
   891: 'Beenden',
   892: 'ausgewählt',
   893: 'Ihre persönliche StartOS-Web-Benutzeroberfläche.',
+  894: 'diese DNS-Einträge erstellen',
+  895: 'IPv6-Erreichbarkeit',
 } satisfies i18n

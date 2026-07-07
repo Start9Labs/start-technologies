@@ -53,8 +53,11 @@ pub fn dns_api<C: Context>() -> ParentHandler<C> {
                         return display_serializable(format, res);
                     }
 
-                    if let Some(ip) = res {
-                        println!("{}", ip)
+                    if let Some(ip) = res.ipv4 {
+                        println!("{ip}")
+                    }
+                    if let Some(ip) = res.ipv6 {
+                        println!("{ip}")
                     }
 
                     Ok(())
@@ -106,17 +109,30 @@ pub struct QueryDnsParams {
     pub fqdn: InternedString,
 }
 
+/// What a public domain currently resolves to, per address family. A public
+/// domain is DualStack: the operator points an `A` record at the gateway's WAN
+/// IPv4 and an `AAAA` at the box's IPv6 GUA. Either may be absent.
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct QueryDnsRes {
+    #[ts(type = "string | null")]
+    pub ipv4: Option<Ipv4Addr>,
+    #[ts(type = "string | null")]
+    pub ipv6: Option<Ipv6Addr>,
+}
+
 pub fn query_dns<C: Context>(
     _: C,
     QueryDnsParams { fqdn }: QueryDnsParams,
-) -> Result<Option<Ipv4Addr>, Error> {
+) -> Result<QueryDnsRes, Error> {
     let hints = dns_lookup::AddrInfoHints {
         flags: 0,
-        address: libc::AF_INET,
+        address: libc::AF_UNSPEC,
         socktype: 0,
         protocol: 0,
     };
-    dns_lookup::getaddrinfo(Some(&*fqdn), None, Some(hints))
+    let addrs = dns_lookup::getaddrinfo(Some(&*fqdn), None, Some(hints))
         .map(Some)
         .or_else(|e| {
             if matches!(
@@ -130,14 +146,22 @@ pub fn query_dns<C: Context>(
         })
         .with_kind(ErrorKind::Network)?
         .into_iter()
-        .flatten()
-        .find_map(|a| match a.map(|a| a.sockaddr.ip()) {
-            Ok(IpAddr::V4(a)) => Some(Ok(a)),
-            Err(e) => Some(Err(e)),
-            _ => None,
-        })
-        .transpose()
-        .map_err(Error::from)
+        .flatten();
+    let mut res = QueryDnsRes {
+        ipv4: None,
+        ipv6: None,
+    };
+    for a in addrs {
+        match a.map_err(Error::from)?.sockaddr.ip() {
+            IpAddr::V4(v4) => {
+                res.ipv4.get_or_insert(v4);
+            }
+            IpAddr::V6(v6) => {
+                res.ipv6.get_or_insert(v6);
+            }
+        }
+    }
+    Ok(res)
 }
 
 #[derive(Deserialize, Serialize, Parser, TS)]

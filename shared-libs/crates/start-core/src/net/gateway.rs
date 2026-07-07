@@ -564,6 +564,19 @@ pub struct CheckPortRes {
     pub open_externally: bool,
     pub open_internally: bool,
     pub hairpinning: bool,
+    /// v6 reachability of the box's GUA at this port, when the gateway has one.
+    /// v6 is NAT-free, so there is no hairpinning to report.
+    #[serde(default)]
+    pub ipv6: Option<CheckPortV6Res>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct CheckPortV6Res {
+    pub ip: Ipv6Addr,
+    pub open_externally: bool,
+    pub open_internally: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -572,6 +585,11 @@ pub struct IfconfigPortRes {
     pub ip: Ipv4Addr,
     pub port: u16,
     pub reachable: bool,
+}
+
+#[derive(Deserialize)]
+struct PortReachable {
+    reachable: bool,
 }
 
 pub async fn check_port(
@@ -620,6 +638,15 @@ pub async fn check_port(
         })
         .unwrap_or(Ipv4Addr::UNSPECIFIED);
 
+    let ipv6 = check_gua_port(
+        &gateway,
+        ip_info,
+        port,
+        &base_urls,
+        &ctx.net_controller.port_map,
+    )
+    .await?;
+
     // If automatic port forwarding (PCP/NAT-PMP/UPnP) already succeeded for this
     // port, it's reachable — skip the remote echo service and report success.
     // The mapping reports the gateway-assigned external IP, so we still know our
@@ -643,6 +670,7 @@ pub async fn check_port(
                 open_externally: true,
                 open_internally,
                 hairpinning,
+                ipv6: ipv6.clone(),
             });
         }
     }
@@ -696,7 +724,83 @@ pub async fn check_port(
         open_externally,
         open_internally,
         hairpinning,
+        ipv6,
     })
+}
+
+/// Probe the box's IPv6 GUA reachability at `port` on `gateway`, if it has one.
+/// v6 is NAT-free — the GUA is the box's own address — so "external" reachability
+/// is just whether the upstream firewall lets an inbound connection through; there
+/// is no hairpinning. An open PCP pinhole is taken as reachable; otherwise the
+/// echoip backends (which support v6) probe the GUA from outside.
+async fn check_gua_port(
+    gateway: &GatewayId,
+    ip_info: &IpInfo,
+    port: u16,
+    base_urls: &[Url],
+    port_map: &crate::net::port_map::PortMapController,
+) -> Result<Option<CheckPortV6Res>, Error> {
+    let Some(gua) = ip_info.subnets.iter().find_map(|s| match s.addr() {
+        IpAddr::V6(v6) if !ipv6_is_local(v6) => Some(v6),
+        _ => None,
+    }) else {
+        return Ok(None);
+    };
+
+    let open_internally = tokio::time::timeout(
+        Duration::from_secs(5),
+        tokio::net::TcpStream::connect(SocketAddr::new(IpAddr::V6(gua), port)),
+    )
+    .await
+    .map_or(false, |r| r.is_ok());
+
+    if let Ok(Some(_)) = tokio::time::timeout(
+        Duration::from_secs(2),
+        port_map.mapped_external_ip(IpAddr::V6(gua), port),
+    )
+    .await
+    {
+        return Ok(Some(CheckPortV6Res {
+            ip: gua,
+            open_externally: true,
+            open_internally,
+        }));
+    }
+
+    let client = reqwest::Client::builder();
+    #[cfg(target_os = "linux")]
+    let client = client
+        .interface(gateway.as_str())
+        .local_address(IpAddr::V6(gua));
+    let client = client.build()?;
+
+    let mut open_externally = false;
+    for base_url in base_urls {
+        let url = base_url
+            .join(&format!("/port/{port}"))
+            .with_kind(ErrorKind::ParseUrl)?;
+        if let Ok(PortReachable { reachable }) = async {
+            client
+                .get(url)
+                .timeout(Duration::from_secs(5))
+                .send()
+                .await?
+                .error_for_status()?
+                .json()
+                .await
+        }
+        .await
+        {
+            open_externally = reachable;
+            break;
+        }
+    }
+
+    Ok(Some(CheckPortV6Res {
+        ip: gua,
+        open_externally,
+        open_internally,
+    }))
 }
 
 #[cfg(target_os = "linux")]

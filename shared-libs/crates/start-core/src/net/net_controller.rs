@@ -779,6 +779,49 @@ impl NetServiceData {
         }
         binds.redirect_maps = redirect_ips;
 
+        // Public domains are DualStack: the domain vhost already binds and
+        // SNI-routes on each gateway's GUA, but the upstream firewall must be
+        // opened for it. Request a GUA pinhole per public domain port — without
+        // exposing the bare GUA (never added to gua_wan), so SNI at our vhost
+        // disambiguates domain traffic from bare-IP traffic. Unlike the v4
+        // SNI-demux (hostname_maps) this needs no gateway-side demux: every host
+        // has its own GUA, so there is nothing to share.
+        for ((maybe_host, external), target) in vhosts.iter() {
+            if maybe_host.is_none() || target.public.is_empty() {
+                continue;
+            }
+            for gw_id in &target.public {
+                let Some(info) = net_ifaces.get(gw_id) else {
+                    continue;
+                };
+                let Some(ip_info) = &info.ip_info else {
+                    continue;
+                };
+                let v6_gateways: Vec<(IpAddr, Option<u32>)> = candidate_gateways(info)
+                    .into_iter()
+                    .filter(|(g, _)| g.is_ipv6())
+                    .collect();
+                if v6_gateways.is_empty() {
+                    continue;
+                }
+                for subnet in &ip_info.subnets {
+                    let IpAddr::V6(gua) = subnet.addr() else {
+                        continue;
+                    };
+                    if crate::net::utils::ipv6_is_local(gua) {
+                        continue;
+                    }
+                    gua_gateways
+                        .entry(gua)
+                        .or_insert_with(|| v6_gateways.clone());
+                    if gua_pinholes.insert((gua, *external)) {
+                        ctrl.port_map
+                            .ensure(IpAddr::V6(gua), *external, *external, v6_gateways.clone());
+                    }
+                }
+            }
+        }
+
         // v6 HTTP→HTTPS redirect: for a GUA exposing 443, also ask the gateway
         // for an 80->443 redirect pinhole (mirrors redirect_maps). Skipped when
         // 80 is already a real pinhole on that GUA.

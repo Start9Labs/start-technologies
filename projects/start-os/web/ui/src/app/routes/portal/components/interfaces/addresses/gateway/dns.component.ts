@@ -2,14 +2,16 @@ import { Component, computed, inject, signal } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { ErrorService, i18nPipe } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
-import { TuiButton, TuiDialogContext, TuiIcon, TuiLoader } from '@taiga-ui/core'
+import { TuiButton, TuiDialogContext } from '@taiga-ui/core'
 import { TuiButtonLoading, TuiSwitch } from '@taiga-ui/kit'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
+import { CheckIconComponent } from 'src/app/routes/portal/components/check-icon.component'
 import { PortCheckIconComponent } from 'src/app/routes/portal/components/port-check-icon.component'
 import { PortCheckWarningsComponent } from 'src/app/routes/portal/components/port-check-warnings.component'
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { formatPortRange } from 'src/app/utils/format-port-range'
+import { dnsAllPass, getGua, portAllPass } from 'src/app/utils/gua'
 import { parse } from 'tldts'
 
 export type DnsGateway = T.NetworkInterfaceInfo & {
@@ -22,7 +24,10 @@ export type DomainValidationData = {
   gateway: DnsGateway
   port: number
   count: number
-  initialResults?: { dnsPass: boolean; portResult: T.CheckPortRes | null }
+  initialResults?: {
+    dns: T.QueryDnsRes | null
+    portResult: T.CheckPortRes | null
+  }
 }
 
 @Component({
@@ -35,7 +40,7 @@ export type DomainValidationData = {
     <h2>{{ 'DNS' | i18n }}</h2>
     <p>
       {{ 'In your domain registrar for' | i18n }} {{ domain }},
-      {{ 'create this DNS record' | i18n }}
+      {{ (gua ? 'create these DNS records' : 'create this DNS record') | i18n }}
     </p>
 
     @if (context.data.gateway.ipInfo.deviceType !== 'wireguard') {
@@ -45,7 +50,7 @@ export type DomainValidationData = {
           type="checkbox"
           tuiSwitch
           [(ngModel)]="ddns"
-          (ngModelChange)="dnsPass.set(undefined)"
+          (ngModelChange)="dnsResult.set(undefined)"
         />
         {{ 'Dynamic DNS' | i18n }}
       </label>
@@ -55,15 +60,7 @@ export type DomainValidationData = {
       <table [appTable]="[null, 'Type', 'Host', 'Value', null]">
         <tr>
           <td class="status">
-            @if (dnsLoading()) {
-              <tui-loader size="s" />
-            } @else if (dnsPass() === true) {
-              <tui-icon class="g-positive" icon="@tui.check" />
-            } @else if (dnsPass() === false) {
-              <tui-icon class="g-negative" icon="@tui.x" />
-            } @else {
-              <tui-icon class="g-secondary" icon="@tui.minus" />
-            }
+            <check-icon [pass]="dnsV4Pass()" [loading]="dnsLoading()" />
           </td>
           <td>{{ ddns ? 'ALIAS' : 'A' }}</td>
           <td>*</td>
@@ -79,20 +76,23 @@ export type DomainValidationData = {
             </button>
           </td>
         </tr>
+        @if (gua) {
+          <tr>
+            <td class="status">
+              <check-icon [pass]="dnsV6Pass()" [loading]="dnsLoading()" />
+            </td>
+            <td>AAAA</td>
+            <td>*</td>
+            <td>{{ gua }}</td>
+            <td></td>
+          </tr>
+        }
       </table>
     </div>
     <div class="mobile">
       <div class="card">
         <div class="card-status">
-          @if (dnsLoading()) {
-            <tui-loader size="s" />
-          } @else if (dnsPass() === true) {
-            <tui-icon class="g-positive" icon="@tui.check" />
-          } @else if (dnsPass() === false) {
-            <tui-icon class="g-negative" icon="@tui.x" />
-          } @else {
-            <tui-icon class="g-secondary" icon="@tui.minus" />
-          }
+          <check-icon [pass]="dnsV4Pass()" [loading]="dnsLoading()" />
         </div>
         <div class="card-fields">
           <div class="field">
@@ -112,6 +112,27 @@ export type DomainValidationData = {
           {{ 'Test' | i18n }}
         </button>
       </div>
+      @if (gua) {
+        <div class="card">
+          <div class="card-status">
+            <check-icon [pass]="dnsV6Pass()" [loading]="dnsLoading()" />
+          </div>
+          <div class="card-fields">
+            <div class="field">
+              <span class="field-label">{{ 'Type' | i18n }}</span>
+              <span>AAAA</span>
+            </div>
+            <div class="field">
+              <span class="field-label">{{ 'Host' | i18n }}</span>
+              <span>*</span>
+            </div>
+            <div class="field">
+              <span class="field-label">{{ 'Value' | i18n }}</span>
+              <span>{{ gua }}</span>
+            </div>
+          </div>
+        </div>
+      }
     </div>
 
     <h2>{{ 'Port Forwarding' | i18n }}</h2>
@@ -198,6 +219,16 @@ export type DomainValidationData = {
 
     <port-check-warnings [result]="portRes" />
 
+    @if (!isRange && gua) {
+      <div class="ipv6-status">
+        <port-check-icon
+          [result]="portRes?.ipv6 || undefined"
+          [loading]="portLoading()"
+        />
+        <span>{{ 'IPv6 reachability' | i18n }} ({{ gua }})</span>
+      </div>
+    }
+
     @if (!isManualMode) {
       <footer class="g-buttons padding-top">
         <button
@@ -234,13 +265,15 @@ export type DomainValidationData = {
       margin-top: 0.5rem;
     }
 
-    tui-icon {
-      font-size: 1.3rem;
-      vertical-align: text-bottom;
-    }
-
     .status {
       width: 3.2rem;
+    }
+
+    .ipv6-status {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
     }
 
     .padding-top {
@@ -317,8 +350,7 @@ export type DomainValidationData = {
     TuiSwitch,
     FormsModule,
     TuiButtonLoading,
-    TuiIcon,
-    TuiLoader,
+    CheckIconComponent,
     PortCheckIconComponent,
     PortCheckWarningsComponent,
   ],
@@ -335,6 +367,11 @@ export class DomainValidationComponent {
   readonly domain =
     parse(this.context.data.fqdn).domain || this.context.data.fqdn
 
+  private readonly wanIp = this.context.data.gateway.ipInfo.wanIp
+  // The gateway's IPv6 GUA (the AAAA target), if it has one. When present the
+  // domain is DualStack and the modal verifies both families.
+  readonly gua = getGua(this.context.data.gateway.ipInfo)
+
   // A port range forwards a span of ports and can't be tested a port at a time;
   // only its DNS is verifiable here.
   readonly isRange = this.context.data.count > 1
@@ -345,26 +382,30 @@ export class DomainValidationComponent {
 
   readonly dnsLoading = signal(false)
   readonly portLoading = signal(false)
-  readonly dnsPass = signal<boolean | undefined>(undefined)
+  readonly dnsResult = signal<T.QueryDnsRes | undefined>(undefined)
   readonly portResult = signal<T.CheckPortRes | undefined>(undefined)
 
-  readonly allPass = computed(() => {
-    const result = this.portResult()
-    return (
-      this.dnsPass() === true &&
-      (this.isRange ||
-        (!!result?.openInternally &&
-          !!result?.openExternally &&
-          !!result?.hairpinning))
-    )
+  readonly dnsV4Pass = computed(() => {
+    const dns = this.dnsResult()
+    return dns ? dns.ipv4 === this.wanIp : undefined
   })
+  readonly dnsV6Pass = computed(() => {
+    const dns = this.dnsResult()
+    return dns && this.gua ? dns.ipv6 === this.gua : undefined
+  })
+
+  readonly allPass = computed(
+    () =>
+      dnsAllPass(this.dnsResult(), this.wanIp, this.gua) &&
+      (this.isRange || portAllPass(this.portResult(), this.gua)),
+  )
 
   readonly isManualMode = !this.context.data.initialResults
 
   constructor() {
     const initial = this.context.data.initialResults
     if (initial) {
-      this.dnsPass.set(initial.dnsPass)
+      if (initial.dns) this.dnsResult.set(initial.dns)
       if (initial.portResult) this.portResult.set(initial.portResult)
     }
   }
@@ -373,11 +414,9 @@ export class DomainValidationComponent {
     this.dnsLoading.set(true)
 
     try {
-      const ip = await this.api.queryDns({
-        fqdn: this.context.data.fqdn,
-      })
-
-      this.dnsPass.set(ip === this.context.data.gateway.ipInfo.wanIp)
+      this.dnsResult.set(
+        await this.api.queryDns({ fqdn: this.context.data.fqdn }),
+      )
     } catch (e: any) {
       this.errorService.handleError(e)
     } finally {
