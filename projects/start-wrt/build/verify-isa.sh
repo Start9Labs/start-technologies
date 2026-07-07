@@ -28,7 +28,9 @@ for candidate in \
     fi
 done
 if [ -z "$OBJDUMP" ]; then
-    for f in openwrt/staging_dir/toolchain-riscv64*/bin/*-objdump; do
+    # Script-relative so the fallback works from any cwd (the build runs from
+    # the monorepo root, where a bare openwrt/ would miss projects/start-wrt/).
+    for f in "$(dirname "$0")/../openwrt"/staging_dir/toolchain-riscv64*/bin/*-objdump; do
         if [ -x "$f" ]; then
             OBJDUMP="$f"
             break
