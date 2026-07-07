@@ -10,7 +10,7 @@ use axum::body::Body;
 use axum::extract::Request;
 use axum::response::Response;
 use bytes::Bytes;
-use futures::{FutureExt, Stream, StreamExt, ready};
+use futures::{Stream, StreamExt, ready};
 use http::header::{CONTENT_LENGTH, CONTENT_RANGE};
 use http::{HeaderMap, StatusCode};
 use imbl_value::InternedString;
@@ -105,6 +105,22 @@ impl Progress {
     async fn ready(watch: &mut watch::Receiver<Self>) -> Result<(), Error> {
         match &*watch
             .wait_for(|progress| progress.error.is_some() || progress.complete)
+            .await
+            .map_err(|_| {
+                Error::new(
+                    eyre!("failed to determine upload progress"),
+                    ErrorKind::Network,
+                )
+            })? {
+            Progress { error: Some(e), .. } => Err(e.clone_output()),
+            _ => Ok(()),
+        }
+    }
+    async fn data_at(watch: &mut watch::Receiver<Self>, position: u64) -> Result<(), Error> {
+        match &*watch
+            .wait_for(|progress| {
+                progress.error.is_some() || progress.complete || progress.written > position
+            })
             .await
             .map_err(|_| {
                 Error::new(
@@ -270,12 +286,20 @@ impl ArchiveSource for UploadingFile {
             position: 0,
             to_seek: None,
             progress: self.progress.clone(),
+            wait: None,
         })
     }
     async fn fetch(&self, position: u64, size: u64) -> Result<Self::FetchReader, Error> {
         Progress::ready_for(&mut self.progress.clone(), position + size).await?;
         self.file.fetch(position, size).await
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WaitTarget {
+    Complete,
+    SizeAtLeast(u64),
+    DataAt(u64),
 }
 
 #[pin_project::pin_project(project = UploadingFileReaderProjection)]
@@ -286,27 +310,44 @@ pub struct UploadingFileReader {
     #[pin]
     file: FileCursor,
     progress: watch::Receiver<Progress>,
+    wait: Option<(
+        WaitTarget,
+        Pin<Box<dyn Future<Output = Result<(), Error>> + Send + Sync>>,
+    )>,
 }
 impl<'a> UploadingFileReaderProjection<'a> {
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Result<bool, std::io::Error> {
-        let ready = Progress::ready(&mut *self.progress);
-        tokio::pin!(ready);
-        Ok(ready
-            .poll_unpin(cx)
-            .map_err(|e| std::io::Error::other(e.source))?
-            .is_ready())
-    }
-    fn poll_ready_for(
+    // The wait future is kept across polls — dropping it would deregister its waker.
+    fn poll_wait(
         &mut self,
         cx: &mut std::task::Context<'_>,
-        size: u64,
+        target: WaitTarget,
     ) -> Result<bool, std::io::Error> {
-        let ready = Progress::ready_for(&mut *self.progress, size);
-        tokio::pin!(ready);
-        Ok(ready
-            .poll_unpin(cx)
-            .map_err(|e| std::io::Error::other(e.source))?
-            .is_ready())
+        if self.wait.as_ref().map(|(t, _)| *t) != Some(target) {
+            let mut progress = self.progress.clone();
+            *self.wait = Some((
+                target,
+                Box::pin(async move {
+                    match target {
+                        WaitTarget::Complete => Progress::ready(&mut progress).await,
+                        WaitTarget::SizeAtLeast(size) => {
+                            Progress::ready_for(&mut progress, size).await
+                        }
+                        WaitTarget::DataAt(position) => {
+                            Progress::data_at(&mut progress, position).await
+                        }
+                    }
+                }),
+            ));
+        }
+        let (_, wait) = self.wait.as_mut().expect("wait future was just created");
+        match wait.as_mut().poll(cx) {
+            Poll::Ready(res) => {
+                *self.wait = None;
+                res.map_err(|e| std::io::Error::other(e.source))?;
+                Ok(true)
+            }
+            Poll::Pending => Ok(false),
+        }
     }
 }
 impl AsyncRead for UploadingFileReader {
@@ -318,7 +359,7 @@ impl AsyncRead for UploadingFileReader {
         let mut this = self.project();
 
         let position = *this.position;
-        if this.poll_ready(cx)? || this.poll_ready_for(cx, position + buf.remaining() as u64)? {
+        if this.poll_wait(cx, WaitTarget::DataAt(position))? {
             let start = buf.filled().len();
             let res = this.file.poll_read(cx, buf);
             *this.position += (buf.filled().len() - start) as u64;
@@ -348,7 +389,7 @@ impl AsyncSeek for UploadingFileReader {
                     match expected_size {
                         Some(end) => (end as i64 + n) as u64,
                         None => {
-                            if !this.poll_ready(cx)? {
+                            if !this.poll_wait(cx, WaitTarget::Complete)? {
                                 return Poll::Pending;
                             }
                             (this.progress.borrow().expected_size.ok_or_else(|| {
@@ -362,7 +403,7 @@ impl AsyncSeek for UploadingFileReader {
                     }
                 }
             };
-            if !this.poll_ready_for(cx, size)? {
+            if !this.poll_wait(cx, WaitTarget::SizeAtLeast(size))? {
                 return Poll::Pending;
             }
         }
