@@ -203,7 +203,7 @@ impl BufferedHttpSource {
         progress: PhaseProgressTrackerHandle,
     ) -> Result<Self, Error> {
         let (handle, file) = UploadingFile::new_for_download(progress).await?;
-        Self::spawn_mirror_download(handle, file, urls, client).await
+        Ok(Self::spawn_mirror_download(handle, file, urls, client))
     }
     async fn from_urls_with_path(
         path: impl AsRef<Path>,
@@ -212,23 +212,21 @@ impl BufferedHttpSource {
         progress: PhaseProgressTrackerHandle,
     ) -> Result<Self, Error> {
         let (handle, file) = UploadingFile::with_path_for_download(path, progress).await?;
-        Self::spawn_mirror_download(handle, file, urls, client).await
+        Ok(Self::spawn_mirror_download(handle, file, urls, client))
     }
-    async fn spawn_mirror_download(
+    // Must stay in the background — reads gate on Progress, which also surfaces download errors.
+    fn spawn_mirror_download(
         mut handle: DownloadHandle,
         file: UploadingFile,
         urls: &[Url],
         client: Client,
-    ) -> Result<Self, Error> {
-        handle
-            .download_from(MirrorRetry::new(urls.to_vec(), client).next_response())
-            .await;
-        drop(handle);
-        file.wait_for_complete().await?;
-        Ok(Self {
-            _download: tokio::spawn(async {}).into(),
+    ) -> Self {
+        let next_response = MirrorRetry::new(urls.to_vec(), client).next_response();
+        Self {
+            _download: tokio::spawn(async move { handle.download_from(next_response).await })
+                .into(),
             file,
-        })
+        }
     }
     pub async fn wait_for_buffered(&self) -> Result<(), Error> {
         self.file.wait_for_complete().await
@@ -413,6 +411,14 @@ mod tests {
                                 )
                                 .await;
                         }
+                        "/slow-tail" => {
+                            let _ = stream
+                                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\nhello")
+                                .await;
+                            let _ = stream.flush().await;
+                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                            let _ = stream.write_all(b" world").await;
+                        }
                         _ => {
                             let _ = stream
                                 .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
@@ -505,6 +511,41 @@ mod tests {
         };
 
         assert!(buffered_contents(asset).await.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn buffered_download_serves_reads_before_download_completes() -> Result<(), Error> {
+        let server = spawn_test_server().await?;
+        let asset = RegistryAsset {
+            published_at: Utc::now(),
+            urls: vec![server.url.join("slow-tail")?],
+            commitment: (),
+            signatures: HashMap::new(),
+        };
+
+        let progress = FullProgressTracker::new().add_phase("Downloading".into(), Some(100));
+        let tmp_dir = TmpDir::new().await?;
+        // Opening the source and reading the head must not wait out the 5s tail.
+        let source = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            let source = asset
+                .load_buffered_http_source_with_path(
+                    tmp_dir.join("package.s9pk"),
+                    Client::new(),
+                    progress,
+                )
+                .await?;
+            let mut head = Vec::new();
+            source.fetch(0, 5).await?.read_to_end(&mut head).await?;
+            assert_eq!(head, b"hello");
+            Ok::<_, Error>(source)
+        })
+        .await
+        .with_kind(ErrorKind::Timeout)??;
+
+        let mut contents = Vec::new();
+        source.fetch_all().await?.read_to_end(&mut contents).await?;
+        assert_eq!(contents, b"hello world");
         Ok(())
     }
 }
