@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Manual SNI (hostname) forwards no longer show as Automatic.** A port forward you added by hand with a hostname was stored as if a connected device had created it via PCP — so it appeared in the **Automatic** table (labeled `PCP`) instead of **Manual**, and, being treated as a lease-based automatic route, could be reaped when no device renewed it. Manually-added hostname forwards are now correctly recorded as manual, keep the label you gave them, and stay put. Automatic (PCP) hostname routes are unaffected, and a PCP renewal can no longer take over a hostname you added by hand.
+
 ## [1.1.0]
 
 ### Added

@@ -1236,7 +1236,7 @@ pub async fn add_forward(
                 ErrorKind::InvalidRequest,
             ));
         }
-        ctx.add_sni_forward(source, target, &sni, None)
+        ctx.persist_sni_forward(source, target, &sni, None, false, label)
             .await
             .map_err(|code| {
                 Error::new(

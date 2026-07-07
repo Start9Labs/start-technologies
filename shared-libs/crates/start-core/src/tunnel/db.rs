@@ -114,218 +114,6 @@ impl Model<TunnelDatabase> {
 }
 
 #[test]
-fn sni_and_dnat_persistence_round_trip() {
-    use crate::tunnel::migrations::{PortForwardKind, TunnelMigration};
-
-    let route = SniRoute {
-        target: "10.59.0.2:443".parse().unwrap(),
-        label: None,
-        enabled: true,
-        auto: true,
-    };
-    let mut routes = BTreeMap::new();
-    routes.insert("id.example.com".to_string(), route);
-    let sni = PortForward::Sni { routes };
-
-    let sni_json = serde_json::to_value(&sni).unwrap();
-    eprintln!("SNI serialized: {sni_json}");
-    assert_eq!(sni_json["kind"], serde_json::json!("sni"));
-    let sni_back: PortForward = serde_json::from_value(sni_json).unwrap();
-    match &sni_back {
-        PortForward::Sni { routes } => {
-            let r = routes.get("id.example.com").expect("route present");
-            assert_eq!(r.target, "10.59.0.2:443".parse().unwrap());
-            assert_eq!(r.label, None);
-            assert!(r.enabled);
-        }
-        other => panic!("expected Sni, got {other:?}"),
-    }
-
-    let dnat = PortForward::Dnat {
-        target: "10.59.0.2:443".parse().unwrap(),
-        label: None,
-        enabled: true,
-        count: 1,
-        auto: false,
-    };
-    let dnat_json = serde_json::to_value(&dnat).unwrap();
-    eprintln!("DNAT serialized: {dnat_json}");
-    assert_eq!(dnat_json["kind"], serde_json::json!("dnat"));
-    let dnat_back: PortForward = serde_json::from_value(dnat_json).unwrap();
-    assert!(matches!(dnat_back, PortForward::Dnat { count: 1, .. }));
-
-    // Legacy entry with no `kind` field, run through the m_01 migration.
-    let mut legacy: imbl_value::Value = imbl_value::json!({
-        "portForwards": {
-            "1.2.3.4:443": {
-                "target": "10.59.0.2:443",
-                "label": null,
-                "enabled": true,
-                "count": 1
-            }
-        }
-    });
-    PortForwardKind.action(&mut legacy).unwrap();
-    eprintln!("Migrated legacy: {legacy}");
-    let migrated_entry = legacy["portForwards"]["1.2.3.4:443"].clone();
-    let migrated: PortForward =
-        serde_json::from_value(serde_json::to_value(&migrated_entry).unwrap()).unwrap();
-    assert!(
-        matches!(migrated, PortForward::Dnat { count: 1, .. }),
-        "migrated legacy entry should be Dnat, got {migrated:?}"
-    );
-
-    // Whole PortForwards map mixing a migrated dnat and a new sni entry.
-    let mixed = serde_json::json!({
-        "1.2.3.4:443": {
-            "kind": "dnat",
-            "target": "10.59.0.2:443",
-            "label": null,
-            "enabled": true,
-            "count": 1
-        },
-        "5.6.7.8:443": {
-            "kind": "sni",
-            "routes": {
-                "id.example.com": {
-                    "target": "10.59.0.2:443",
-                    "label": null,
-                    "enabled": true
-                }
-            }
-        }
-    });
-    let map: PortForwards = serde_json::from_value(mixed).unwrap();
-    assert_eq!(map.0.len(), 2);
-    let dnat_e = map.0.get(&"1.2.3.4:443".parse().unwrap()).unwrap();
-    assert!(matches!(dnat_e, PortForward::Dnat { .. }));
-    let sni_e = map.0.get(&"5.6.7.8:443".parse().unwrap()).unwrap();
-    match sni_e {
-        PortForward::Sni { routes } => {
-            let r = routes.get("id.example.com").unwrap();
-            assert!(r.enabled);
-        }
-        other => panic!("expected Sni, got {other:?}"),
-    }
-}
-
-#[test]
-fn port_forward_overlap_detection() {
-    let dnat = |target: &str, count: u16| PortForward::Dnat {
-        target: target.parse().unwrap(),
-        label: None,
-        enabled: true,
-        count,
-        auto: false,
-    };
-    let src = |s: &str| s.parse::<SocketAddrV4>().unwrap();
-
-    let mut map = BTreeMap::new();
-    // An existing 10-port range 8000..=8009 on WAN IP 1.2.3.4.
-    map.insert(src("1.2.3.4:8000"), dnat("10.0.0.2:8000", 10));
-    // An SNI forward occupying the single port 443.
-    map.insert(
-        src("1.2.3.4:443"),
-        PortForward::Sni {
-            routes: BTreeMap::new(),
-        },
-    );
-    let forwards = PortForwards(map);
-
-    // A single port inside the existing range overlaps it.
-    assert_eq!(
-        forwards.overlapping(src("1.2.3.4:8005"), 1),
-        Some(src("1.2.3.4:8000")),
-    );
-    // A new range straddling the end of the existing range overlaps.
-    assert_eq!(
-        forwards.overlapping(src("1.2.3.4:8009"), 5),
-        Some(src("1.2.3.4:8000")),
-    );
-    // A range that swallows the single SNI port overlaps it.
-    assert_eq!(
-        forwards.overlapping(src("1.2.3.4:440"), 8),
-        Some(src("1.2.3.4:443")),
-    );
-    // An adjacent, disjoint range (8010..=8019) does not overlap.
-    assert_eq!(forwards.overlapping(src("1.2.3.4:8010"), 10), None);
-    // The same span on a different WAN IP does not overlap.
-    assert_eq!(forwards.overlapping(src("5.6.7.8:8005"), 1), None);
-    // The exact same source key is excluded (collision / re-assert, not overlap).
-    assert_eq!(forwards.overlapping(src("1.2.3.4:8000"), 10), None);
-}
-
-#[test]
-fn pinhole_persistence_round_trip() {
-    let gua = |s: &str| s.parse::<SocketAddrV6>().unwrap();
-    let ph = Pinhole {
-        label: Some("Home Assistant".into()),
-        enabled: true,
-        count: 1,
-        internal_port: None,
-        auto: false,
-    };
-    let json = serde_json::to_value(&ph).unwrap();
-    let back: Pinhole = serde_json::from_value(json).unwrap();
-    assert_eq!(back.label.as_deref(), Some("Home Assistant"));
-    assert!(back.enabled);
-    assert_eq!(back.count, 1);
-    assert!(!back.auto);
-    // No remap → pure pinhole; internal port resolves to the external (key) port.
-    assert_eq!(back.internal_port(8443), 8443);
-    assert!(!back.is_dnat(8443));
-
-    // A gateway (PCP) entry deserialized from a bare map: defaults fill enabled/count.
-    let map: Pinholes6 = serde_json::from_value(serde_json::json!({
-        "[2001:db8::1]:8443": { "label": "PCP", "auto": true }
-    }))
-    .unwrap();
-    let e = map.0.get(&gua("[2001:db8::1]:8443")).unwrap();
-    assert!(e.enabled);
-    assert_eq!(e.count, 1);
-    assert!(e.auto);
-    assert_eq!(e.internal_port, None);
-
-    // A port-DNAT entry (80 → 443, the v6 HTTP-redirect case).
-    let redirect = Pinhole {
-        label: Some("HTTP redirect".into()),
-        enabled: true,
-        count: 1,
-        internal_port: Some(443),
-        auto: false,
-    };
-    let back: Pinhole = serde_json::from_value(serde_json::to_value(&redirect).unwrap()).unwrap();
-    assert_eq!(back.internal_port(80), 443);
-    assert!(back.is_dnat(80));
-}
-
-#[test]
-fn pinhole_overlap_detection() {
-    let gua = |s: &str| s.parse::<SocketAddrV6>().unwrap();
-    let ph = |count: u16| Pinhole {
-        label: None,
-        enabled: true,
-        count,
-        internal_port: None,
-        auto: false,
-    };
-    let mut map = BTreeMap::new();
-    map.insert(gua("[2001:db8::1]:8000"), ph(10));
-    let holes = Pinholes6(map);
-    // Overlaps the 8000..=8009 range.
-    assert_eq!(
-        holes.overlapping(gua("[2001:db8::1]:8005"), 1),
-        Some(gua("[2001:db8::1]:8000"))
-    );
-    // Adjacent, disjoint (8010) does not overlap.
-    assert_eq!(holes.overlapping(gua("[2001:db8::1]:8010"), 1), None);
-    // Same span on a different GUA does not overlap.
-    assert_eq!(holes.overlapping(gua("[2001:db8::2]:8005"), 1), None);
-    // The exact key is excluded (collision / re-assert, not overlap).
-    assert_eq!(holes.overlapping(gua("[2001:db8::1]:8000"), 10), None);
-}
-
-#[test]
 fn export_bindings_tunnel_db() {
     use crate::tunnel::api::*;
     use crate::tunnel::auth::{AddKeyParams, RemoveKeyParams, SetPasswordParams};
@@ -780,4 +568,216 @@ pub async fn subscribe(
         .await;
 
     Ok(SubscribeRes { dump, guid })
+}
+
+#[test]
+fn sni_and_dnat_persistence_round_trip() {
+    use crate::tunnel::migrations::{PortForwardKind, TunnelMigration};
+
+    let route = SniRoute {
+        target: "10.59.0.2:443".parse().unwrap(),
+        label: None,
+        enabled: true,
+        auto: true,
+    };
+    let mut routes = BTreeMap::new();
+    routes.insert("id.example.com".to_string(), route);
+    let sni = PortForward::Sni { routes };
+
+    let sni_json = serde_json::to_value(&sni).unwrap();
+    eprintln!("SNI serialized: {sni_json}");
+    assert_eq!(sni_json["kind"], serde_json::json!("sni"));
+    let sni_back: PortForward = serde_json::from_value(sni_json).unwrap();
+    match &sni_back {
+        PortForward::Sni { routes } => {
+            let r = routes.get("id.example.com").expect("route present");
+            assert_eq!(r.target, "10.59.0.2:443".parse().unwrap());
+            assert_eq!(r.label, None);
+            assert!(r.enabled);
+        }
+        other => panic!("expected Sni, got {other:?}"),
+    }
+
+    let dnat = PortForward::Dnat {
+        target: "10.59.0.2:443".parse().unwrap(),
+        label: None,
+        enabled: true,
+        count: 1,
+        auto: false,
+    };
+    let dnat_json = serde_json::to_value(&dnat).unwrap();
+    eprintln!("DNAT serialized: {dnat_json}");
+    assert_eq!(dnat_json["kind"], serde_json::json!("dnat"));
+    let dnat_back: PortForward = serde_json::from_value(dnat_json).unwrap();
+    assert!(matches!(dnat_back, PortForward::Dnat { count: 1, .. }));
+
+    // Legacy entry with no `kind` field, run through the m_01 migration.
+    let mut legacy: imbl_value::Value = imbl_value::json!({
+        "portForwards": {
+            "1.2.3.4:443": {
+                "target": "10.59.0.2:443",
+                "label": null,
+                "enabled": true,
+                "count": 1
+            }
+        }
+    });
+    PortForwardKind.action(&mut legacy).unwrap();
+    eprintln!("Migrated legacy: {legacy}");
+    let migrated_entry = legacy["portForwards"]["1.2.3.4:443"].clone();
+    let migrated: PortForward =
+        serde_json::from_value(serde_json::to_value(&migrated_entry).unwrap()).unwrap();
+    assert!(
+        matches!(migrated, PortForward::Dnat { count: 1, .. }),
+        "migrated legacy entry should be Dnat, got {migrated:?}"
+    );
+
+    // Whole PortForwards map mixing a migrated dnat and a new sni entry.
+    let mixed = serde_json::json!({
+        "1.2.3.4:443": {
+            "kind": "dnat",
+            "target": "10.59.0.2:443",
+            "label": null,
+            "enabled": true,
+            "count": 1
+        },
+        "5.6.7.8:443": {
+            "kind": "sni",
+            "routes": {
+                "id.example.com": {
+                    "target": "10.59.0.2:443",
+                    "label": null,
+                    "enabled": true
+                }
+            }
+        }
+    });
+    let map: PortForwards = serde_json::from_value(mixed).unwrap();
+    assert_eq!(map.0.len(), 2);
+    let dnat_e = map.0.get(&"1.2.3.4:443".parse().unwrap()).unwrap();
+    assert!(matches!(dnat_e, PortForward::Dnat { .. }));
+    let sni_e = map.0.get(&"5.6.7.8:443".parse().unwrap()).unwrap();
+    match sni_e {
+        PortForward::Sni { routes } => {
+            let r = routes.get("id.example.com").unwrap();
+            assert!(r.enabled);
+        }
+        other => panic!("expected Sni, got {other:?}"),
+    }
+}
+
+#[test]
+fn port_forward_overlap_detection() {
+    let dnat = |target: &str, count: u16| PortForward::Dnat {
+        target: target.parse().unwrap(),
+        label: None,
+        enabled: true,
+        count,
+        auto: false,
+    };
+    let src = |s: &str| s.parse::<SocketAddrV4>().unwrap();
+
+    let mut map = BTreeMap::new();
+    // An existing 10-port range 8000..=8009 on WAN IP 1.2.3.4.
+    map.insert(src("1.2.3.4:8000"), dnat("10.0.0.2:8000", 10));
+    // An SNI forward occupying the single port 443.
+    map.insert(
+        src("1.2.3.4:443"),
+        PortForward::Sni {
+            routes: BTreeMap::new(),
+        },
+    );
+    let forwards = PortForwards(map);
+
+    // A single port inside the existing range overlaps it.
+    assert_eq!(
+        forwards.overlapping(src("1.2.3.4:8005"), 1),
+        Some(src("1.2.3.4:8000")),
+    );
+    // A new range straddling the end of the existing range overlaps.
+    assert_eq!(
+        forwards.overlapping(src("1.2.3.4:8009"), 5),
+        Some(src("1.2.3.4:8000")),
+    );
+    // A range that swallows the single SNI port overlaps it.
+    assert_eq!(
+        forwards.overlapping(src("1.2.3.4:440"), 8),
+        Some(src("1.2.3.4:443")),
+    );
+    // An adjacent, disjoint range (8010..=8019) does not overlap.
+    assert_eq!(forwards.overlapping(src("1.2.3.4:8010"), 10), None);
+    // The same span on a different WAN IP does not overlap.
+    assert_eq!(forwards.overlapping(src("5.6.7.8:8005"), 1), None);
+    // The exact same source key is excluded (collision / re-assert, not overlap).
+    assert_eq!(forwards.overlapping(src("1.2.3.4:8000"), 10), None);
+}
+
+#[test]
+fn pinhole_persistence_round_trip() {
+    let gua = |s: &str| s.parse::<SocketAddrV6>().unwrap();
+    let ph = Pinhole {
+        label: Some("Home Assistant".into()),
+        enabled: true,
+        count: 1,
+        internal_port: None,
+        auto: false,
+    };
+    let json = serde_json::to_value(&ph).unwrap();
+    let back: Pinhole = serde_json::from_value(json).unwrap();
+    assert_eq!(back.label.as_deref(), Some("Home Assistant"));
+    assert!(back.enabled);
+    assert_eq!(back.count, 1);
+    assert!(!back.auto);
+    // No remap → pure pinhole; internal port resolves to the external (key) port.
+    assert_eq!(back.internal_port(8443), 8443);
+    assert!(!back.is_dnat(8443));
+
+    // A gateway (PCP) entry deserialized from a bare map: defaults fill enabled/count.
+    let map: Pinholes6 = serde_json::from_value(serde_json::json!({
+        "[2001:db8::1]:8443": { "label": "PCP", "auto": true }
+    }))
+    .unwrap();
+    let e = map.0.get(&gua("[2001:db8::1]:8443")).unwrap();
+    assert!(e.enabled);
+    assert_eq!(e.count, 1);
+    assert!(e.auto);
+    assert_eq!(e.internal_port, None);
+
+    // A port-DNAT entry (80 → 443, the v6 HTTP-redirect case).
+    let redirect = Pinhole {
+        label: Some("HTTP redirect".into()),
+        enabled: true,
+        count: 1,
+        internal_port: Some(443),
+        auto: false,
+    };
+    let back: Pinhole = serde_json::from_value(serde_json::to_value(&redirect).unwrap()).unwrap();
+    assert_eq!(back.internal_port(80), 443);
+    assert!(back.is_dnat(80));
+}
+
+#[test]
+fn pinhole_overlap_detection() {
+    let gua = |s: &str| s.parse::<SocketAddrV6>().unwrap();
+    let ph = |count: u16| Pinhole {
+        label: None,
+        enabled: true,
+        count,
+        internal_port: None,
+        auto: false,
+    };
+    let mut map = BTreeMap::new();
+    map.insert(gua("[2001:db8::1]:8000"), ph(10));
+    let holes = Pinholes6(map);
+    // Overlaps the 8000..=8009 range.
+    assert_eq!(
+        holes.overlapping(gua("[2001:db8::1]:8005"), 1),
+        Some(gua("[2001:db8::1]:8000"))
+    );
+    // Adjacent, disjoint (8010) does not overlap.
+    assert_eq!(holes.overlapping(gua("[2001:db8::1]:8010"), 1), None);
+    // Same span on a different GUA does not overlap.
+    assert_eq!(holes.overlapping(gua("[2001:db8::2]:8005"), 1), None);
+    // The exact key is excluded (collision / re-assert, not overlap).
+    assert_eq!(holes.overlapping(gua("[2001:db8::1]:8000"), 10), None);
 }

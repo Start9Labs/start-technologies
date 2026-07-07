@@ -228,6 +228,61 @@ impl GatewayBackend for TunnelContext {
         hostnames: &[String],
         lifetime: Option<u32>,
     ) -> Result<(), u8> {
+        // The PCP path owns its routes: mark them automatic, default label `PCP`.
+        self.persist_sni_forward(source, target, hostnames, lifetime, true, None)
+            .await
+    }
+
+    async fn remove_sni_forward(&self, source: SocketAddrV4, target: SocketAddrV4, hostnames: &[String]) {
+        self.sni().unregister(*source.ip(), source.port(), hostnames, target);
+        for h in hostnames {
+            lease::forget(
+                self,
+                &LeaseKey::Sni {
+                    source,
+                    hostname: h.clone(),
+                },
+            );
+        }
+        let hostnames = hostnames.to_vec();
+        self.db
+            .mutate(|db| {
+                db.as_port_forwards_mut().mutate(|pf| {
+                    use crate::tunnel::db::PortForward;
+                    let mut now_empty = false;
+                    if let Some(PortForward::Sni { routes }) = pf.0.get_mut(&source) {
+                        routes.retain(|h, r| !(r.target == target && hostnames.contains(h)));
+                        now_empty = routes.is_empty();
+                    }
+                    if now_empty {
+                        pf.0.remove(&source);
+                    }
+                    Ok(())
+                })
+            })
+            .await
+            .result
+            .log_err();
+    }
+}
+
+impl TunnelContext {
+    /// Persist + register SNI-demuxed hostname routes on `source` to `target`.
+    /// `auto` records who owns the route for the UI Manual/Automatic split: the
+    /// PCP path passes `true`; a manual add passes `false` and its own `label`.
+    /// `lifetime` leases the routes (auto only). Shared by both so the two paths
+    /// can't drift; only the ownership/label inputs differ.
+    pub async fn persist_sni_forward(
+        &self,
+        source: SocketAddrV4,
+        target: SocketAddrV4,
+        hostnames: &[String],
+        lifetime: Option<u32>,
+        auto: bool,
+        label: Option<String>,
+    ) -> Result<(), u8> {
+        // A fresh route with no explicit label defaults to `PCP` only when auto.
+        let default_label = if auto { Some("PCP".to_string()) } else { label };
         // Persist first (DB is source of truth): reject a DNAT-occupied port or a
         // foreign-owned hostname before touching the dataplane. Registering first
         // risked a rollback on a transient DB error tearing down a valid binding.
@@ -259,17 +314,9 @@ impl GatewayBackend for TunnelContext {
                                 }
                             }
                             for h in &hostnames_owned {
-                                // A renewal must not clobber a user's edits, so
-                                // keep any existing label/enabled; a brand-new
-                                // route gets a default label marking it PCP-added.
-                                let (label, enabled) = match routes.get(h) {
-                                    Some(r) => (
-                                        r.label.clone().or_else(|| Some("PCP".into())),
-                                        r.enabled,
-                                    ),
-                                    None => (Some("PCP".into()), true),
-                                };
-                                routes.insert(h.clone(), SniRoute { target, label, enabled, auto: true });
+                                let (label, enabled, auto) =
+                                    sni_route_fields(routes.get(h), auto, &default_label);
+                                routes.insert(h.clone(), SniRoute { target, label, enabled, auto });
                             }
                             Ok(())
                         }
@@ -310,37 +357,24 @@ impl GatewayBackend for TunnelContext {
         }
         Ok(())
     }
+}
 
-    async fn remove_sni_forward(&self, source: SocketAddrV4, target: SocketAddrV4, hostnames: &[String]) {
-        self.sni().unregister(*source.ip(), source.port(), hostnames, target);
-        for h in hostnames {
-            lease::forget(
-                self,
-                &LeaseKey::Sni {
-                    source,
-                    hostname: h.clone(),
-                },
-            );
-        }
-        let hostnames = hostnames.to_vec();
-        self.db
-            .mutate(|db| {
-                db.as_port_forwards_mut().mutate(|pf| {
-                    use crate::tunnel::db::PortForward;
-                    let mut now_empty = false;
-                    if let Some(PortForward::Sni { routes }) = pf.0.get_mut(&source) {
-                        routes.retain(|h, r| !(r.target == target && hostnames.contains(h)));
-                        now_empty = routes.is_empty();
-                    }
-                    if now_empty {
-                        pf.0.remove(&source);
-                    }
-                    Ok(())
-                })
-            })
-            .await
-            .result
-            .log_err();
+/// The stored `(label, enabled, auto)` for an upserted SNI route. A brand-new
+/// route takes the caller's `auto` and `default_label`; an existing one keeps
+/// its owner (`auto`), enabled state, and any user label — so a PCP renewal
+/// can't hijack a manual route, nor a manual re-add flip an automatic one.
+fn sni_route_fields(
+    existing: Option<&crate::tunnel::db::SniRoute>,
+    auto: bool,
+    default_label: &Option<String>,
+) -> (Option<String>, bool, bool) {
+    match existing {
+        Some(r) => (
+            r.label.clone().or_else(|| default_label.clone()),
+            r.enabled,
+            r.auto,
+        ),
+        None => (default_label.clone(), true, auto),
     }
 }
 
@@ -375,4 +409,63 @@ async fn remove_peer_forward(ctx: &TunnelContext, peer: Ipv4Addr, internal_port:
         ctx.forward.gc().await.log_err();
     }
     lease::forget(ctx, &LeaseKey::Dnat(source));
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::SocketAddrV4;
+
+    use super::sni_route_fields;
+    use crate::tunnel::db::SniRoute;
+
+    fn route(label: Option<&str>, enabled: bool, auto: bool) -> SniRoute {
+        SniRoute {
+            target: "10.59.0.2:443".parse::<SocketAddrV4>().unwrap(),
+            label: label.map(str::to_string),
+            enabled,
+            auto,
+        }
+    }
+
+    // A manually-added hostname on a fresh source is stored as manual, with the
+    // user's own label — never as an automatic `PCP` route (the reported bug).
+    #[test]
+    fn new_manual_route_is_not_auto() {
+        let (label, enabled, auto) = sni_route_fields(None, false, &Some("my label".to_string()));
+        assert_eq!(label.as_deref(), Some("my label"));
+        assert!(enabled);
+        assert!(!auto);
+    }
+
+    // A fresh PCP route defaults to the `PCP` label and is automatic.
+    #[test]
+    fn new_pcp_route_is_auto() {
+        let (label, enabled, auto) = sni_route_fields(None, true, &Some("PCP".to_string()));
+        assert_eq!(label.as_deref(), Some("PCP"));
+        assert!(enabled);
+        assert!(auto);
+    }
+
+    // A PCP re-assert of a hostname the user added manually keeps it manual — the
+    // renewal preserves the existing owner, label, and enabled state.
+    #[test]
+    fn pcp_renewal_preserves_manual_owner() {
+        let existing = route(Some("mine"), false, false);
+        let (label, enabled, auto) =
+            sni_route_fields(Some(&existing), true, &Some("PCP".to_string()));
+        assert_eq!(label.as_deref(), Some("mine"));
+        assert!(!enabled);
+        assert!(!auto);
+    }
+
+    // Symmetrically, a manual re-add over an existing automatic route leaves it
+    // automatic; an unlabeled existing route inherits the caller's default label.
+    #[test]
+    fn manual_readd_preserves_auto_owner_and_backfills_label() {
+        let existing = route(None, true, true);
+        let (label, _enabled, auto) =
+            sni_route_fields(Some(&existing), false, &Some("ignored".to_string()));
+        assert_eq!(label.as_deref(), Some("ignored"));
+        assert!(auto);
+    }
 }
