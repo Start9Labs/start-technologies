@@ -42,7 +42,7 @@ APT_COMPONENT="main"
 # slot) and a sysupgrade image (OTA update -> the `squashfs` slot; see
 # cmd_register for the hardlink trick that maps the .img.gz names onto those
 # slots). Override either registry per run.
-STARTWRT_SOURCE_REGISTRY="${STARTWRT_SOURCE_REGISTRY:-https://beta-startwrt-registry.start9.com}"
+STARTWRT_SOURCE_REGISTRY="${STARTWRT_SOURCE_REGISTRY:-https://startwrt-beta-registry.start9.com}"
 STARTWRT_TARGET_REGISTRY="${STARTWRT_TARGET_REGISTRY:-https://startwrt-registry.start9.com}"
 STARTWRT_S3_BUCKET="s3://startwrt-images"
 STARTWRT_S3_CDN="https://startwrt-images.nyc3.cdn.digitaloceanspaces.com"

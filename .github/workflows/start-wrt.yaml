@@ -159,7 +159,7 @@ jobs:
     env:
       S3_BUCKET: s3://startwrt-images
       S3_CDN: https://startwrt-images.nyc3.cdn.digitaloceanspaces.com
-      REGISTRY: https://beta-startwrt-registry.start9.com
+      REGISTRY: https://startwrt-beta-registry.start9.com
       PLATFORM: spacemit,k1-x
     steps:
       - uses: actions/checkout@v6
