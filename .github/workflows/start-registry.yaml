@@ -55,9 +55,11 @@ on:
       - ".github/workflows/start-registry.yaml"
       - ".github/actions/setup-build/**"
 
+# The group is scoped by event so a master push can't cancel an in-flight
+# dispatched release build; dispatches queue behind each other, never cancel.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 env:
   NODEJS_VERSION: "24.11.0"
