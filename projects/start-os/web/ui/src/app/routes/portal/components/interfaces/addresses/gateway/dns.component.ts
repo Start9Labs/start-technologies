@@ -1,4 +1,10 @@
-import { Component, computed, inject, signal } from '@angular/core'
+import {
+  Component,
+  computed,
+  inject,
+  signal,
+  WritableSignal,
+} from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { ErrorService, i18nPipe } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
@@ -11,7 +17,7 @@ import { PortCheckWarningsComponent } from 'src/app/routes/portal/components/por
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { formatPortRange } from 'src/app/utils/format-port-range'
-import { dnsAllPass, getGua, portAllPass } from 'src/app/utils/gua'
+import { dnsAllPass, getGua, getLanIpv4, portAllPass } from 'src/app/utils/gua'
 import { parse } from 'tldts'
 
 export type DnsGateway = T.NetworkInterfaceInfo & {
@@ -157,7 +163,7 @@ export type DomainValidationData = {
         [appTable]="
           isRange
             ? ['External Range', 'Internal Range']
-            : [null, 'External Port', 'Internal Port', null]
+            : [null, 'External', 'Internal', null]
         "
       >
         <tr>
@@ -166,8 +172,8 @@ export type DomainValidationData = {
               <port-check-icon [result]="portRes" [loading]="portLoading()" />
             </td>
           }
-          <td>{{ portDisplay }}</td>
-          <td>{{ portDisplay }}</td>
+          <td>{{ externalAddr }}</td>
+          <td>{{ internalAddr }}</td>
           @if (!isRange) {
             <td>
               <button
@@ -193,15 +199,15 @@ export type DomainValidationData = {
         <div class="card-fields">
           <div class="field">
             <span class="field-label">
-              {{ (isRange ? 'External Range' : 'External Port') | i18n }}
+              {{ (isRange ? 'External Range' : 'External') | i18n }}
             </span>
-            <span>{{ portDisplay }}</span>
+            <span>{{ externalAddr }}</span>
           </div>
           <div class="field">
             <span class="field-label">
-              {{ (isRange ? 'Internal Range' : 'Internal Port') | i18n }}
+              {{ (isRange ? 'Internal Range' : 'Internal') | i18n }}
             </span>
-            <span>{{ portDisplay }}</span>
+            <span>{{ internalAddr }}</span>
           </div>
         </div>
         @if (!isRange) {
@@ -220,12 +226,60 @@ export type DomainValidationData = {
     <port-check-warnings [result]="portRes" />
 
     @if (!isRange && gua) {
-      <div class="ipv6-status">
-        <port-check-icon
-          [result]="portRes?.ipv6 || undefined"
-          [loading]="portLoading()"
-        />
-        <span>{{ 'IPv6 reachability' | i18n }} ({{ gua }})</span>
+      <h2>{{ 'IPv6 Firewall' | i18n }}</h2>
+      <p>
+        {{
+          'IPv6 has no port forwarding — your server is reachable directly at its global address. Your gateway firewall must allow inbound connections to it, or enable automatic firewall configuration (PCP) on the gateway.'
+            | i18n
+        }}
+      </p>
+
+      <div class="desktop">
+        <table [appTable]="[null, 'Address', null]">
+          <tr>
+            <td class="status">
+              <port-check-icon
+                [result]="portRes?.ipv6 || undefined"
+                [loading]="portV6Loading()"
+              />
+            </td>
+            <td>{{ ipv6Addr }}</td>
+            <td>
+              <button
+                tuiButton
+                size="s"
+                [loading]="portV6Loading()"
+                (click)="testPortV6()"
+              >
+                {{ 'Test' | i18n }}
+              </button>
+            </td>
+          </tr>
+        </table>
+      </div>
+      <div class="mobile">
+        <div class="card">
+          <div class="card-status">
+            <port-check-icon
+              [result]="portRes?.ipv6 || undefined"
+              [loading]="portV6Loading()"
+            />
+          </div>
+          <div class="card-fields">
+            <div class="field">
+              <span class="field-label">{{ 'Address' | i18n }}</span>
+              <span>{{ ipv6Addr }}</span>
+            </div>
+          </div>
+          <button
+            tuiButton
+            size="s"
+            [loading]="portV6Loading()"
+            (click)="testPortV6()"
+          >
+            {{ 'Test' | i18n }}
+          </button>
+        </div>
       </div>
     }
 
@@ -267,13 +321,6 @@ export type DomainValidationData = {
 
     .status {
       width: 3.2rem;
-    }
-
-    .ipv6-status {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      margin-top: 0.5rem;
     }
 
     .padding-top {
@@ -368,6 +415,7 @@ export class DomainValidationComponent {
     parse(this.context.data.fqdn).domain || this.context.data.fqdn
 
   private readonly wanIp = this.context.data.gateway.ipInfo.wanIp
+  private readonly lanIpv4 = getLanIpv4(this.context.data.gateway.ipInfo)
   // The gateway's IPv6 GUA (the AAAA target), if it has one. When present the
   // domain is DualStack and the modal verifies both families.
   readonly gua = getGua(this.context.data.gateway.ipInfo)
@@ -380,8 +428,15 @@ export class DomainValidationComponent {
     this.context.data.count,
   )
 
+  // Full socket addresses make the boxes self-distinguishing: the IPv4 forward
+  // (external WAN -> internal LAN) vs the IPv6 firewall (the server's own GUA).
+  readonly externalAddr = this.socketAddr(this.wanIp)
+  readonly internalAddr = this.socketAddr(this.lanIpv4)
+  readonly ipv6Addr = this.gua ? `[${this.gua}]:${this.portDisplay}` : ''
+
   readonly dnsLoading = signal(false)
   readonly portLoading = signal(false)
+  readonly portV6Loading = signal(false)
   readonly dnsResult = signal<T.QueryDnsRes | undefined>(undefined)
   readonly portResult = signal<T.CheckPortRes | undefined>(undefined)
 
@@ -425,20 +480,34 @@ export class DomainValidationComponent {
   }
 
   async testPort() {
-    this.portLoading.set(true)
+    await this.runPortCheck(this.portLoading)
+  }
+
+  // check_port returns both families in one call, so the IPv6 Firewall box's own
+  // Test runs the same probe; only the loading indicator differs.
+  async testPortV6() {
+    await this.runPortCheck(this.portV6Loading)
+  }
+
+  private async runPortCheck(loading: WritableSignal<boolean>) {
+    loading.set(true)
 
     try {
-      const result = await this.api.checkPort({
-        gateway: this.context.data.gateway.id,
-        port: this.context.data.port,
-      })
-
-      this.portResult.set(result)
+      this.portResult.set(
+        await this.api.checkPort({
+          gateway: this.context.data.gateway.id,
+          port: this.context.data.port,
+        }),
+      )
     } catch (e: any) {
       this.errorService.handleError(e)
     } finally {
-      this.portLoading.set(false)
+      loading.set(false)
     }
+  }
+
+  private socketAddr(ip: string | null): string {
+    return ip ? `${ip}:${this.portDisplay}` : this.portDisplay
   }
 }
 
