@@ -66,6 +66,7 @@ StartOS provides the client side — see
 
 ### Fixed
 
+- **Automatic port forwarding no longer goes silent after a network config change.** Adding or removing a device or subnet (or any other change that reloads the WireGuard interface) recreated the interface out from under the PCP and UPnP IGD listeners, which are bound to it — leaving them unreachable until the daemon was restarted. Connected devices' renewals then went unanswered, so their automatic forwards, SNI routes, and IPv6 pinholes expired and their exposed services dropped offline. The listeners now rebind whenever the interface is reloaded. The same reload could also leave a subnet's DNS proxy serving a stale upstream configuration ("Address in use" in the logs); proxies now shut down cleanly before rebinding.
 - **Forwarded TCP MSS is clamped to the WireGuard path MTU (#3262, #3261).** A `mangle FORWARD … TCPMSS --clamp-mss-to-pmtu` rule fixes hung TLS handshakes where a large ClientHello (e.g. desktop Firefox/Chromium with the X25519MLKEM768 post-quantum key share) split into a segment that exceeded the tunnel's effective path MTU after WireGuard encapsulation and was silently dropped.
 - **"Default" DNS mode falls back to `/etc/resolv.conf`** when systemd-resolved is absent, unreadable, or yields no usable servers (84e99f1e9).
 - **Gateway type is auto-detected from the StartTunnel marker** when a pasted config declares no type, so outbound-only configs (e.g. Mullvad) are no longer mislabeled as inbound-capable (f76ac4bfe).
