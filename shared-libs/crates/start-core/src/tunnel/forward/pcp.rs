@@ -86,15 +86,16 @@ fn socket6() -> Result<UdpSocket, Error> {
 
 async fn serve(ctx: &TunnelContext, started: Instant) -> Result<(), Error> {
     // Subscribe before binding so a bounce during setup still triggers a rebind.
-    let mut rebind = ctx.forward_rebind.clone();
-    rebind.mark_seen();
+    let rebind = ctx.forward_rebind.notified();
+    tokio::pin!(rebind);
+    rebind.as_mut().enable();
     let socket = socket()?;
     tracing::info!("PCP server listening on {WIREGUARD_INTERFACE_NAME}:{PCP_PORT}");
     let mut buf = [0u8; 1100];
     loop {
         let (n, from) = tokio::select! {
             res = socket.recv_from(&mut buf) => res.with_kind(ErrorKind::Network)?,
-            _ = rebind.changed() => {
+            _ = rebind.as_mut() => {
                 tracing::info!("{WIREGUARD_INTERFACE_NAME} recreated; rebinding PCP server");
                 return Ok(());
             }
@@ -110,15 +111,16 @@ async fn serve(ctx: &TunnelContext, started: Instant) -> Result<(), Error> {
 }
 
 async fn serve6(ctx: &TunnelContext, started: Instant) -> Result<(), Error> {
-    let mut rebind = ctx.forward_rebind.clone();
-    rebind.mark_seen();
+    let rebind = ctx.forward_rebind.notified();
+    tokio::pin!(rebind);
+    rebind.as_mut().enable();
     let socket = socket6()?;
     tracing::info!("PCP v6 server listening on {WIREGUARD_INTERFACE_NAME}:{PCP_PORT}");
     let mut buf = [0u8; 1100];
     loop {
         let (n, from) = tokio::select! {
             res = socket.recv_from(&mut buf) => res.with_kind(ErrorKind::Network)?,
-            _ = rebind.changed() => {
+            _ = rebind.as_mut() => {
                 tracing::info!("{WIREGUARD_INTERFACE_NAME} recreated; rebinding PCP v6 server");
                 return Ok(());
             }

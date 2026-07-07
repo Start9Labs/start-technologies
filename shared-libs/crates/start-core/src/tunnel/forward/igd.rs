@@ -83,15 +83,16 @@ fn ssdp_socket() -> Result<UdpSocket, Error> {
 
 async fn ssdp_loop(ctx: &TunnelContext, uuid: &str) -> Result<(), Error> {
     // Subscribe before binding so a bounce during setup still triggers a rebind.
-    let mut rebind = ctx.forward_rebind.clone();
-    rebind.mark_seen();
+    let rebind = ctx.forward_rebind.notified();
+    tokio::pin!(rebind);
+    rebind.as_mut().enable();
     let socket = ssdp_socket()?;
     tracing::info!("UPnP IGD SSDP responder listening on {WIREGUARD_INTERFACE_NAME}");
     let mut buf = [0u8; 2048];
     loop {
         let (n, from) = tokio::select! {
             res = socket.recv_from(&mut buf) => res.with_kind(ErrorKind::Network)?,
-            _ = rebind.changed() => {
+            _ = rebind.as_mut() => {
                 tracing::info!("{WIREGUARD_INTERFACE_NAME} recreated; rebinding SSDP responder");
                 return Ok(());
             }
@@ -136,14 +137,16 @@ pub(super) async fn subnet_gateway_for(ctx: &TunnelContext, peer: Ipv4Addr) -> O
 }
 
 async fn http_server(ctx: TunnelContext, root_desc: Arc<str>) {
-    let mut rebind = ctx.forward_rebind.clone();
     let app = Router::new()
         .route(ROOT_DESC_PATH, get(move || serve_static(root_desc.clone(), "text/xml")))
         .route(SCPD_PATH, get(|| serve_static(Arc::from(SCPD), "text/xml")))
         .route(CONTROL_PATH, post(control))
-        .with_state(ctx);
+        .with_state(ctx.clone());
     loop {
-        rebind.mark_seen();
+        // Subscribe before binding so a bounce during setup still triggers a rebind.
+        let rebind = ctx.forward_rebind.notified();
+        tokio::pin!(rebind);
+        rebind.as_mut().enable();
         match igd_http_listener() {
             Ok(listener) => {
                 tracing::info!("UPnP IGD control server listening on {WIREGUARD_INTERFACE_NAME}:{IGD_HTTP_PORT}");
@@ -157,7 +160,7 @@ async fn http_server(ctx: TunnelContext, root_desc: Arc<str>) {
                             tracing::warn!("UPnP IGD control server exited, retrying: {e}");
                         }
                     }
-                    _ = rebind.changed() => {
+                    _ = rebind.as_mut() => {
                         tracing::info!("{WIREGUARD_INTERFACE_NAME} recreated; rebinding IGD control server");
                         continue;
                     }

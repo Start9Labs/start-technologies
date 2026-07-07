@@ -174,10 +174,10 @@ pub struct TunnelContextSeed {
     /// Wakes the lease reaper when a stamp may have moved the soonest expiry
     /// earlier, so it can pull its next wake-up forward.
     pub lease_wake: tokio::sync::Notify,
-    /// Bumped after every `wg-quick` bounce: the PCP/IGD listeners are
+    /// Notified after every `wg-quick` bounce: the PCP/IGD listeners are
     /// `SO_BINDTODEVICE`-bound, which pins the ifindex at bind time, so a
     /// recreated interface leaves them deaf until they rebind.
-    pub forward_rebind: Watch<()>,
+    pub forward_rebind: tokio::sync::Notify,
     /// Serializes `resync_egress`; its read-DB → install → prune isn't atomic,
     /// so a concurrent reconcile could prune a rule another call just installed.
     pub egress_lock: tokio::sync::Mutex<()>,
@@ -365,7 +365,7 @@ impl TunnelContext {
             active_forwards: SyncMutex::new(active_forwards),
             leases: SyncMutex::new(BTreeMap::new()),
             lease_wake: tokio::sync::Notify::new(),
-            forward_rebind: Watch::new(()),
+            forward_rebind: tokio::sync::Notify::new(),
             egress_lock: tokio::sync::Mutex::new(()),
             v6_proxy: SyncMutex::new(BTreeMap::new()),
             v6_lock: tokio::sync::Mutex::new(()),
@@ -420,7 +420,7 @@ impl TunnelContext {
     /// must follow `server.sync()`.
     pub async fn sync_network(&self, server: &WgServer) -> Result<(), Error> {
         server.sync().await?;
-        self.forward_rebind.mark_changed();
+        self.forward_rebind.notify_waiters();
         self.dns_allowed.mutate(|s| *s = allowed_injectors(server));
         self.dns_keys.mutate(|m| *m = injector_keys(server));
         self.dns_proxy.sync(server, self.dns_injector.clone()).await?;
