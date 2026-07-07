@@ -377,7 +377,7 @@ impl Model<Host> {
             for (gid, g) in gateways {
                 // Never expose a range on an outbound-only gateway (e.g. a VPN
                 // egress) — they don't receive inbound forwards.
-                if matches!(g.gateway_type, Some(GatewayType::OutboundOnly)) {
+                if g.gateway_type == GatewayType::OutboundOnly {
                     continue;
                 }
                 let Some(ip_info) = &g.ip_info else {

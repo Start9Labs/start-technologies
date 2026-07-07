@@ -87,7 +87,7 @@ pub async fn add_tunnel(
                         name: Some(name),
                         secure: None,
                         ip_info: None,
-                        gateway_type: Some(gateway_type),
+                        gateway_type,
                     },
                 );
                 return true;

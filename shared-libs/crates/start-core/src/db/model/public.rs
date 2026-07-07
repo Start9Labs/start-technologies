@@ -260,8 +260,20 @@ pub struct NetworkInterfaceInfo {
     pub name: Option<InternedString>,
     pub secure: Option<bool>,
     pub ip_info: Option<Arc<IpInfo>>,
+    // Pre-release dev DBs persisted this as `null` for auto-discovered gateways;
+    // coerce absent/null to the default so those nodes still load.
     #[serde(default, rename = "type")]
-    pub gateway_type: Option<GatewayType>,
+    #[serde(deserialize_with = "deserialize_null_default")]
+    #[ts(rename = "type")]
+    pub gateway_type: GatewayType,
+}
+
+fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    T: Default + Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 impl NetworkInterfaceInfo {
     pub fn secure(&self) -> bool {
@@ -395,4 +407,40 @@ pub struct ServerSpecs {
     pub cpu: String,
     pub disk: String,
     pub memory: String,
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn gateway_type_of(type_field: serde_json::Value) -> GatewayType {
+        serde_json::from_value::<NetworkInterfaceInfo>(serde_json::json!({ "type": type_field }))
+            .unwrap()
+            .gateway_type
+    }
+
+    #[test]
+    fn gateway_type_defaults_and_tolerates_legacy_null() {
+        // Absent `type` (fresh installs / interfaces older than the field) -> default.
+        assert_eq!(
+            serde_json::from_value::<NetworkInterfaceInfo>(serde_json::json!({}))
+                .unwrap()
+                .gateway_type,
+            GatewayType::InboundOutbound
+        );
+        // Pre-release dev DBs persisted `type: null` for auto-discovered gateways;
+        // it must still load (else the whole db fails to deserialize on boot).
+        assert_eq!(
+            gateway_type_of(serde_json::Value::Null),
+            GatewayType::InboundOutbound
+        );
+        assert_eq!(
+            gateway_type_of(serde_json::json!("inbound-outbound")),
+            GatewayType::InboundOutbound
+        );
+        assert_eq!(
+            gateway_type_of(serde_json::json!("outbound-only")),
+            GatewayType::OutboundOnly
+        );
+    }
 }

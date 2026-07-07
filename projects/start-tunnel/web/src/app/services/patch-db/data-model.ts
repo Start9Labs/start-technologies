@@ -112,7 +112,7 @@ export const mockTunnelData: TunnelData = {
     eth0: {
       name: null,
       secure: null,
-      type: null,
+      type: 'inbound-outbound',
       ipInfo: {
         name: 'Wired Connection 1',
         scopeId: 1,

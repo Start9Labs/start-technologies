@@ -6,5 +6,5 @@ export type NetworkInterfaceInfo = {
   name: string | null
   secure: boolean | null
   ipInfo: IpInfo | null
-  type: GatewayType | null
+  type: GatewayType
 }

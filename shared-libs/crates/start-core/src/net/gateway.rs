@@ -2107,7 +2107,7 @@ async fn poll_ip_info(
 
     write_to.send_if_modified(|m: &mut OrdMap<GatewayId, NetworkInterfaceInfo>| {
         let (name, secure, gateway_type, prev_wan_ip) =
-            m.get(iface).map_or((None, None, None, None), |i| {
+            m.get(iface).map_or((None, None, Default::default(), None), |i| {
                 (
                     i.name.clone(),
                     i.secure,

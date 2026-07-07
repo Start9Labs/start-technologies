@@ -67,7 +67,7 @@ pub fn candidate_gateways(info: &NetworkInterfaceInfo) -> Vec<(IpAddr, Option<u3
     // VPN) exposes no PCP/NAT-PMP server we'd ever ask for a pinhole. Return no
     // candidates so every port-map call site — this is the one they all funnel
     // through — never attempts PCP against it.
-    if info.gateway_type == Some(GatewayType::OutboundOnly) {
+    if info.gateway_type == GatewayType::OutboundOnly {
         return Vec::new();
     }
 
@@ -115,7 +115,7 @@ pub fn candidate_gateways(info: &NetworkInterfaceInfo) -> Vec<(IpAddr, Option<u3
     // takes under the delegated prefix, which the client now carries on its own
     // /prefix v6 so `host_v6` is exact. Fill a family only when NM gave none, so
     // a real gateway always wins.
-    if info.gateway_type == Some(GatewayType::InboundOutbound) {
+    if info.gateway_type == GatewayType::InboundOutbound {
         let have_v4 = out.iter().any(|(g, _)| g.is_ipv4());
         let have_v6 = out.iter().any(|(g, _)| g.is_ipv6());
         let server_v4 = ip_info.subnets.iter().find_map(|s| match s {
@@ -802,11 +802,7 @@ mod tests {
         assert!(!announce_marker_ok(&resp[..24]), "no marker option");
     }
 
-    fn iface(
-        subnets: &[&str],
-        lan_ip: &[&str],
-        gateway_type: Option<GatewayType>,
-    ) -> NetworkInterfaceInfo {
+    fn iface(subnets: &[&str], lan_ip: &[&str], gateway_type: GatewayType) -> NetworkInterfaceInfo {
         use crate::db::model::public::IpInfo;
         NetworkInterfaceInfo {
             ip_info: Some(std::sync::Arc::new(IpInfo {
@@ -828,7 +824,7 @@ mod tests {
         let gws = candidate_gateways(&iface(
             &["10.59.0.2/24", "2001:db8:abcd::a3b:2/64"],
             &[],
-            Some(GatewayType::InboundOutbound),
+            GatewayType::InboundOutbound,
         ));
         assert!(gws.contains(&(Ipv4Addr::new(10, 59, 0, 1).into(), None)));
         let server_v6: IpAddr = "2001:db8:abcd::a3b:1".parse().unwrap();
@@ -842,7 +838,7 @@ mod tests {
         let gws = candidate_gateways(&iface(
             &["10.59.0.2/24", "2001:db8:abcd:1::f2/124"],
             &[],
-            Some(GatewayType::InboundOutbound),
+            GatewayType::InboundOutbound,
         ));
         let server_v6: IpAddr = "2001:db8:abcd:1::f1".parse().unwrap();
         assert!(gws.iter().any(|(g, _)| *g == server_v6), "got {gws:?}");
@@ -854,18 +850,24 @@ mod tests {
         let gws = candidate_gateways(&iface(
             &["10.59.0.2/24", "2001:db8:abcd::a3b:2/64"],
             &["10.59.0.1"], // NM has v4 but no v6
-            Some(GatewayType::InboundOutbound),
+            GatewayType::InboundOutbound,
         ));
         assert_eq!(gws.iter().filter(|(g, _)| g.is_ipv4()).count(), 1);
         let server_v6: IpAddr = "2001:db8:abcd::a3b:1".parse().unwrap();
         assert!(gws.iter().any(|(g, _)| *g == server_v6), "got {gws:?}");
     }
 
-    // The fallback is scoped to StartTunnel; a plain interface with no NM gateway
-    // yields nothing (no bogus `.1`).
+    // Gateway type is a two-state default of inbound-outbound, so the
+    // subnet-derived `.1` fallback now applies to any inbound-outbound gateway
+    // with no NM gateway — not only explicit StartTunnel ones.
     #[test]
-    fn non_tunnel_no_gateway_yields_nothing() {
-        assert!(candidate_gateways(&iface(&["192.168.1.5/24"], &[], None)).is_empty());
+    fn inbound_outbound_no_nm_gateway_derives_first_host() {
+        let gws = candidate_gateways(&iface(
+            &["192.168.1.5/24"],
+            &[],
+            GatewayType::InboundOutbound,
+        ));
+        assert!(gws.contains(&(Ipv4Addr::new(192, 168, 1, 1).into(), None)));
     }
 
     // A legacy /128 client (pre-/prefix config) can't derive the server v6, so
@@ -875,7 +877,7 @@ mod tests {
         let gws = candidate_gateways(&iface(
             &["10.59.0.2/24", "2001:db8:abcd::a3b:2/128"],
             &[],
-            Some(GatewayType::InboundOutbound),
+            GatewayType::InboundOutbound,
         ));
         assert!(gws.contains(&(Ipv4Addr::new(10, 59, 0, 1).into(), None)));
         assert!(!gws.iter().any(|(g, _)| g.is_ipv6()), "no v6 from a bare /128");
@@ -889,7 +891,7 @@ mod tests {
         let gws = candidate_gateways(&iface(
             &["10.59.0.2/24", "2001:db8:abcd:1::f2/124"],
             &["fe80::a3b:1"],
-            Some(GatewayType::InboundOutbound),
+            GatewayType::InboundOutbound,
         ));
         assert!(!gws.iter().any(|(g, _)| match g {
             IpAddr::V6(v6) => ipv6_is_link_local(*v6),
@@ -906,7 +908,7 @@ mod tests {
         let gws = candidate_gateways(&iface(
             &["192.168.1.5/24"],
             &["192.168.1.1", "fe80::1"],
-            None,
+            GatewayType::InboundOutbound,
         ));
         assert!(
             !gws.iter()
@@ -930,7 +932,7 @@ mod tests {
                 "fe80::1234:5678:9abc:def0/64",
             ],
             &["fe80::a3b:1"],
-            Some(GatewayType::InboundOutbound),
+            GatewayType::InboundOutbound,
         ));
         assert!(
             !gws.iter().any(|(g, _)| match g {
@@ -954,7 +956,7 @@ mod tests {
         let gws = candidate_gateways(&iface(
             &["10.8.0.2/24", "2001:db8::2/64"],
             &["10.8.0.1", "fe80::1"],
-            Some(GatewayType::OutboundOnly),
+            GatewayType::OutboundOnly,
         ));
         assert!(gws.is_empty(), "OutboundOnly must yield no candidates, got {gws:?}");
     }
