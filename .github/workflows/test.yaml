@@ -69,3 +69,25 @@ jobs:
         run: docker build -t start9/fmt-env -f build/fmt/fmtenv.Dockerfile build/fmt
       - name: Check formatting
         run: make format-check
+
+  generated:
+    name: Generated Artifacts
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-build
+        with:
+          nodejs-version: ${{ env.NODEJS_VERSION }}
+          free-space: 'true'
+          setup-docker: 'false'
+          setup-sccache: 'true'
+      # The bindings regen prettifies generated .ts via start-core's node deps.
+      - name: Install start-core node deps
+        run: npm --prefix shared-libs/ts-modules/start-core ci
+      # Both gates compile start-core once in the start9/cargo-zigbuild container,
+      # regenerate the committed artifacts, and fail if anything drifted.
+      - name: Check man pages up to date
+        run: make manpages-check
+      - name: Check TS bindings up to date
+        run: make start-core-ts-bindings-check

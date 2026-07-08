@@ -16,6 +16,31 @@ shared-libs/crates/start-core/bindings/index.ts: $(call ls-files, shared-libs/cr
 	npm --prefix shared-libs/ts-modules/start-core exec -- prettier -w './shared-libs/crates/start-core/bindings/**/*.ts'
 	touch shared-libs/crates/start-core/bindings/index.ts
 
+# --- generated-artifact freshness (CI gates: regenerate, then fail on any diff) ---
+MAN_DIRS := projects/start-cli/man projects/start-registry/man projects/start-tunnel/man projects/start-os/man
+OSBINDINGS_DIR := shared-libs/ts-modules/start-core/lib/osBindings
+
+.PHONY: manpages manpages-check start-core-ts-bindings-check
+# Regenerate the committed clap man pages (roff) for every product binary.
+manpages:
+	./shared-libs/crates/start-core/build/build-manpage.sh
+
+# Fail if the committed man pages don't match the current CLI definitions.
+manpages-check: manpages
+	@if [ -n "$$(git status --porcelain -- $(MAN_DIRS))" ]; then \
+		echo "Man pages are out of date — run 'make manpages' and commit the result:"; \
+		git --no-pager diff --stat -- $(MAN_DIRS); git status --porcelain -- $(MAN_DIRS); \
+		exit 1; \
+	fi
+
+# Fail if the committed TS osBindings don't match the current Rust types.
+start-core-ts-bindings-check: start-core-ts-bindings
+	@if [ -n "$$(git status --porcelain -- $(OSBINDINGS_DIR))" ]; then \
+		echo "TS bindings are out of date — run 'make start-core-ts-bindings' and commit the result:"; \
+		git --no-pager diff --stat -- $(OSBINDINGS_DIR); git status --porcelain -- $(OSBINDINGS_DIR); \
+		exit 1; \
+	fi
+
 .PHONY: start-core-clean
 # Owns the shared Rust build root, generated bindings, and global build metadata.
 start-core-clean:
