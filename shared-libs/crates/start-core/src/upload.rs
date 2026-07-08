@@ -77,60 +77,48 @@ impl Progress {
             .ok()
             .and_then(|a| a.expected_size)
     }
-    async fn ready_for(watch: &mut watch::Receiver<Self>, size: u64) -> Result<(), Error> {
-        match &*watch
-            .wait_for(|progress| {
-                progress.error.is_some()
-                    || progress.written >= size
-                    || progress.expected_size.map_or(false, |e| e < size)
-            })
+    /// `None` = keep waiting; `Some(res)` = stop waiting with `res`.
+    fn check(&self, target: WaitTarget) -> Option<Result<(), Error>> {
+        if let Some(e) = &self.error {
+            return Some(Err(e.clone_output()));
+        }
+        match target {
+            WaitTarget::Complete => self.complete.then(|| Ok(())),
+            WaitTarget::DataAt(position) => {
+                (self.complete || self.written > position).then(|| Ok(()))
+            }
+            WaitTarget::SizeAtLeast(size) => {
+                if self.written >= size {
+                    Some(Ok(()))
+                } else if self.expected_size.map_or(false, |e| e < size) {
+                    Some(Err(Error::new(
+                        eyre!("file size is less than requested"),
+                        ErrorKind::Network,
+                    )))
+                } else {
+                    None
+                }
+            }
+        }
+    }
+    async fn wait(watch: &mut watch::Receiver<Self>, target: WaitTarget) -> Result<(), Error> {
+        watch
+            .wait_for(|progress| progress.check(target).is_some())
             .await
             .map_err(|_| {
                 Error::new(
                     eyre!("failed to determine upload progress"),
                     ErrorKind::Network,
                 )
-            })? {
-            Progress { error: Some(e), .. } => Err(e.clone_output()),
-            Progress {
-                expected_size: Some(e),
-                ..
-            } if *e < size => Err(Error::new(
-                eyre!("file size is less than requested"),
-                ErrorKind::Network,
-            )),
-            _ => Ok(()),
-        }
+            })?
+            .check(target)
+            .expect("wait_for predicate held")
+    }
+    async fn ready_for(watch: &mut watch::Receiver<Self>, size: u64) -> Result<(), Error> {
+        Self::wait(watch, WaitTarget::SizeAtLeast(size)).await
     }
     async fn ready(watch: &mut watch::Receiver<Self>) -> Result<(), Error> {
-        match &*watch
-            .wait_for(|progress| progress.error.is_some() || progress.complete)
-            .await
-            .map_err(|_| {
-                Error::new(
-                    eyre!("failed to determine upload progress"),
-                    ErrorKind::Network,
-                )
-            })? {
-            Progress { error: Some(e), .. } => Err(e.clone_output()),
-            _ => Ok(()),
-        }
-    }
-    async fn data_at(watch: &mut watch::Receiver<Self>, position: u64) -> Result<(), Error> {
-        match &*watch
-            .wait_for(|progress| {
-                progress.error.is_some() || progress.complete || progress.written > position
-            })
-            .await
-            .map_err(|_| {
-                Error::new(
-                    eyre!("failed to determine upload progress"),
-                    ErrorKind::Network,
-                )
-            })? {
-            Progress { error: Some(e), .. } => Err(e.clone_output()),
-            _ => Ok(()),
-        }
+        Self::wait(watch, WaitTarget::Complete).await
     }
     fn complete(&mut self) -> bool {
         let mut changed = !self.complete;
@@ -323,20 +311,17 @@ impl<'a> UploadingFileReaderProjection<'a> {
         target: WaitTarget,
     ) -> Result<bool, std::io::Error> {
         if self.wait.as_ref().map(|(t, _)| *t) != Some(target) {
+            // fast path: already satisfied — skip allocating a wait future
+            let ready = self.progress.borrow().check(target);
+            if let Some(res) = ready {
+                *self.wait = None;
+                res.map_err(|e| std::io::Error::other(e.source))?;
+                return Ok(true);
+            }
             let mut progress = self.progress.clone();
             *self.wait = Some((
                 target,
-                Box::pin(async move {
-                    match target {
-                        WaitTarget::Complete => Progress::ready(&mut progress).await,
-                        WaitTarget::SizeAtLeast(size) => {
-                            Progress::ready_for(&mut progress, size).await
-                        }
-                        WaitTarget::DataAt(position) => {
-                            Progress::data_at(&mut progress, position).await
-                        }
-                    }
-                }),
+                Box::pin(async move { Progress::wait(&mut progress, target).await }),
             ));
         }
         let (_, wait) = self.wait.as_mut().expect("wait future was just created");
@@ -358,12 +343,29 @@ impl AsyncRead for UploadingFileReader {
     ) -> Poll<std::io::Result<()>> {
         let mut this = self.project();
 
+        if buf.remaining() == 0 {
+            return Poll::Ready(Ok(()));
+        }
         let position = *this.position;
         if this.poll_wait(cx, WaitTarget::DataAt(position))? {
             let start = buf.filled().len();
-            let res = this.file.poll_read(cx, buf);
-            *this.position += (buf.filled().len() - start) as u64;
-            res
+            ready!(this.file.as_mut().poll_read(cx, buf))?;
+            let read = (buf.filled().len() - start) as u64;
+            *this.position += read;
+            if read == 0 {
+                let eof = {
+                    let p = this.progress.borrow();
+                    p.error.is_none() && p.complete && p.written <= *this.position
+                };
+                if !eof {
+                    // A mirror retry truncated the file out from under us (or its bytes
+                    // aren't visible yet) — retry rather than report a false EOF. The
+                    // self-wake yields so the writer task can catch up.
+                    cx.waker().wake_by_ref();
+                    return Poll::Pending;
+                }
+            }
+            Poll::Ready(Ok(()))
         } else {
             Poll::Pending
         }
