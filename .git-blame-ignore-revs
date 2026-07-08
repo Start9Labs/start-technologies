@@ -1,3 +1,3 @@
 # Repo-wide formatting normalization (rustfmt + prettier + taplo).
 # Configure locally with: git config blame.ignoreRevsFile .git-blame-ignore-revs
-8fddfdb5d480e34985f3603f3e30afc8c4c74e62
+b89f1d091854b87b05c963d106c013142eca6bee
