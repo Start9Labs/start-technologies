@@ -349,28 +349,6 @@ jobs:
           retention-days: 14
         if: ${{ matrix.platform == 'raspberrypi' }}
 
-      # Legacy OTA payload: the 0.4.0 base squashfs repackaged onto the published
-      # 0.3.5.1 rootfs, so pre-0.4.0 boxes can update via their frozen rsync
-      # updater. Built after the base uploads so the results/*.squashfs glob
-      # above doesn't sweep it up. Only platforms that shipped in 0.3.5.1
-      # (no nvidia/riscv); raspberrypi is pending (its base is a .img.gz and it
-      # boots firmware-direct rather than via grub).
-      - name: Build migration payload
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y xorriso squashfs-tools b3sum
-          PLATFORM=${{ matrix.platform }} make start-os-migration-squashfs
-        if: ${{ contains(fromJson('["x86_64", "x86_64-nonfree", "aarch64", "aarch64-nonfree"]'), matrix.platform) }}
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: ${{ matrix.platform }}.migration.squashfs
-          path: results/*.migration.squashfs
-          retention-days: 14
-        if: ${{ contains(fromJson('["x86_64", "x86_64-nonfree", "aarch64", "aarch64-nonfree"]'), matrix.platform) }}
-
   deploy:
     name: Deploy
     needs: [image]
