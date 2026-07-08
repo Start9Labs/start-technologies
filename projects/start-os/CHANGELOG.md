@@ -8,6 +8,18 @@ Full per-release notes are published on the
 [GitHub releases page](https://github.com/Start9Labs/start-technologies/releases). This
 file tracks notable changes since the move to the monorepo.
 
+## [Unreleased]
+
+### Added
+
+- **In-place 0.3.5.1 → 0.4.0 update path.** Updating the OS from 0.3.5.1 no longer
+  requires syncing a whole root filesystem file-by-file — the step that grew
+  flakier the more files a device had. StartOS 0.3.5.1's existing over-the-air
+  updater instead receives a compact migration payload (the 0.4.0 base image plus
+  a boot-time rewire) and the 0.4.0 initramfs converts the on-disk layout to the
+  0.4.0 format on first boot. The data partition is preserved and the existing
+  package/database migration runs afterward as before.
+
 ## [0.4.0-beta.10]
 
 ### Added
