@@ -1,0 +1,22 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-server-host-binding-set-gua-wan 1  "set-gua-wan " 
+.SH NAME
+start\-cli\-server\-host\-binding\-set\-gua\-wan \- Expose an IPv6 global\-unicast address to the WAN (or revert it to LAN\-only) for a binding
+.SH SYNOPSIS
+\fBstart\-cli server host binding set\-gua\-wan\fR <\fB\-\-address\fR> [\fB\-\-wan\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIINTERNAL_PORT\fR> 
+.SH DESCRIPTION
+Expose an IPv6 global\-unicast address to the WAN (or revert it to LAN\-only) for a binding
+.SH OPTIONS
+.TP
+\fB\-\-address\fR \fI<ADDRESS>\fR
+Network address
+.TP
+\fB\-\-wan\fR
+Expose the IPv6 GUA to the WAN (false = LAN\-only)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIINTERNAL_PORT\fR>
+Internal port number

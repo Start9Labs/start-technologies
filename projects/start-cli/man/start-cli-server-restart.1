@@ -4,10 +4,13 @@
 .SH NAME
 start\-cli\-server\-restart \- Restart the server
 .SH SYNOPSIS
-\fBstart\-cli server restart\fR [\fB\-h\fR|\fB\-\-help\fR] 
+\fBstart\-cli server restart\fR [\fB\-\-nowait\fR] [\fB\-h\fR|\fB\-\-help\fR] 
 .SH DESCRIPTION
 Restart the server
 .SH OPTIONS
+.TP
+\fB\-\-nowait\fR
+Return immediately instead of waiting for graceful shutdown to complete
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help

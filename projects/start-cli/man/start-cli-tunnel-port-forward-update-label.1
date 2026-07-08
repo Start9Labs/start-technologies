@@ -4,10 +4,13 @@
 .SH NAME
 start\-cli\-tunnel\-port\-forward\-update\-label \- Update the label of a port forward
 .SH SYNOPSIS
-\fBstart\-cli tunnel port\-forward update\-label\fR [\fB\-h\fR|\fB\-\-help\fR] <\fISOURCE\fR> [\fILABEL\fR] 
+\fBstart\-cli tunnel port\-forward update\-label\fR [\fB\-\-hostname\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fISOURCE\fR> [\fILABEL\fR] 
 .SH DESCRIPTION
 Update the label of a port forward
 .SH OPTIONS
+.TP
+\fB\-\-hostname\fR \fI<HOSTNAME>\fR
+Label a single SNI route on `source`; omit to label the DNAT forward
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help

@@ -4,7 +4,7 @@
 .SH NAME
 start\-cli\-tunnel\-port\-forward\-add \- Add a new port forward
 .SH SYNOPSIS
-\fBstart\-cli tunnel port\-forward add\fR [\fB\-\-label\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fISOURCE\fR> <\fITARGET\fR> 
+\fBstart\-cli tunnel port\-forward add\fR [\fB\-\-label\fR] [\fB\-\-sni\fR] [\fB\-\-count\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIEXTERNAL_PORT\fR> <\fITARGET\fR> 
 .SH DESCRIPTION
 Add a new port forward
 .SH OPTIONS
@@ -12,11 +12,17 @@ Add a new port forward
 \fB\-\-label\fR \fI<LABEL>\fR
 
 .TP
+\fB\-\-sni\fR \fI<SNI>\fR
+Hostnames to SNI\-demux on the shared external port. Empty = normal DNAT
+.TP
+\fB\-\-count\fR \fI<COUNT>\fR
+Number of contiguous ports to forward (a PCP PORT_SET range), counting up from both `external_port` and the target port. Defaults to 1. Not valid together with SNI demux
+.TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help
 .TP
-<\fISOURCE\fR>
-
+<\fIEXTERNAL_PORT\fR>
+External (WAN) port to forward. The external IP is fixed to the target\*(Aqs WAN so return traffic stays symmetric
 .TP
 <\fITARGET\fR>
 

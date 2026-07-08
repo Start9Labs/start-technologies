@@ -1,0 +1,19 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-tunnel-subnet-set-ipv6 1  "set-ipv6 " 
+.SH NAME
+start\-cli\-tunnel\-subnet\-set\-ipv6 \- Set the subnet\*(Aqs routed IPv6 prefix
+.SH SYNOPSIS
+\fBstart\-cli tunnel subnet set\-ipv6\fR [\fB\-\-prefix\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fISUBNET\fR> 
+.SH DESCRIPTION
+Set the subnet\*(Aqs routed IPv6 prefix
+.SH OPTIONS
+.TP
+\fB\-\-prefix\fR \fI<PREFIX>\fR
+The routed IPv6 prefix delegated to this subnet (e.g. a /64 from Hetzner, a /56 from Linode). `null` disables IPv6 on the subnet
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fISUBNET\fR>
+

@@ -1,0 +1,30 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-container-bind-mount 1  "bind-mount " 
+.SH NAME
+start\-container\-bind\-mount
+.SH SYNOPSIS
+\fBstart\-container bind\-mount\fR <\fB\-\-source\fR> <\fB\-\-target\fR> [\fB\-\-recursive\fR] [\fB\-\-readonly\fR] [\fB\-\-file\fR] [\fB\-\-idmap\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+.SH OPTIONS
+.TP
+\fB\-\-source\fR \fI<SOURCE>\fR
+Source path. May be any path on the filesystem; the kernel produces a detached bind clone via `open_tree(OPEN_TREE_CLONE)`
+.TP
+\fB\-\-target\fR \fI<TARGET>\fR
+Mountpoint to attach to. Created if it doesn\*(Aqt exist (as a directory, unless `\-\-file` is set)
+.TP
+\fB\-\-recursive\fR
+Apply the bind recursively (the `\-\-rbind` semantic)
+.TP
+\fB\-\-readonly\fR
+Mark the mount read\-only via `mount_setattr(MOUNT_ATTR_RDONLY)`
+.TP
+\fB\-\-file\fR
+Treat the target as a regular file rather than a directory when creating it
+.TP
+\fB\-\-idmap\fR \fI<IDMAP>\fR
+Idmap entries; repeat the flag for each entry. Format `from:to[:range]` (range defaults to 1)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

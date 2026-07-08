@@ -1,0 +1,32 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-server-host-binding-set-range-address-enabled 1  "set-range-address-enabled " 
+.SH NAME
+start\-cli\-server\-host\-binding\-set\-range\-address\-enabled \- Set a gateway address enabled for a port\-range binding
+.SH SYNOPSIS
+\fBstart\-cli server host binding set\-range\-address\-enabled\fR <\fB\-\-address\fR> [\fB\-\-enabled\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIINTERNAL_PORT\fR> 
+.SH DESCRIPTION
+Set a gateway address enabled for a port\-range binding
+.SH OPTIONS
+.TP
+\fB\-\-address\fR \fI<ADDRESS>\fR
+Network address
+.TP
+\fB\-\-enabled\fR \fI<ENABLED>\fR
+Enable or disable this binding
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+true
+.IP \(bu 2
+false
+.RE
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIINTERNAL_PORT\fR>
+Internal port number

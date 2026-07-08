@@ -4,13 +4,16 @@
 .SH NAME
 start\-cli\-tunnel\-port\-forward\-set\-enabled \- Enable or disable a port forward
 .SH SYNOPSIS
-\fBstart\-cli tunnel port\-forward set\-enabled\fR [\fB\-\-enabled\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fISOURCE\fR> 
+\fBstart\-cli tunnel port\-forward set\-enabled\fR [\fB\-\-enabled\fR] [\fB\-\-hostname\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fISOURCE\fR> 
 .SH DESCRIPTION
 Enable or disable a port forward
 .SH OPTIONS
 .TP
 \fB\-\-enabled\fR
 
+.TP
+\fB\-\-hostname\fR \fI<HOSTNAME>\fR
+Toggle a single SNI route on `source`; omit for a DNAT forward
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help

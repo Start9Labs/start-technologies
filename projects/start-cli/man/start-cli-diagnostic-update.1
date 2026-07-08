@@ -1,0 +1,22 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-diagnostic-update 1  "update " 
+.SH NAME
+start\-cli\-diagnostic\-update \- Check a given registry for StartOS updates and update if available
+.SH SYNOPSIS
+\fBstart\-cli diagnostic update\fR [\fB\-\-to\fR] [\fB\-\-no\-progress\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIREGISTRY\fR> 
+.SH DESCRIPTION
+Check a given registry for StartOS updates and update if available
+.SH OPTIONS
+.TP
+\fB\-\-to\fR \fI<TARGET>\fR
+Target version for update
+.TP
+\fB\-\-no\-progress\fR
+Disable progress display
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIREGISTRY\fR>
+URL of the registry

@@ -4,10 +4,13 @@
 .SH NAME
 start\-cli\-tunnel\-port\-forward\-remove \- Remove port forward
 .SH SYNOPSIS
-\fBstart\-cli tunnel port\-forward remove\fR [\fB\-h\fR|\fB\-\-help\fR] <\fISOURCE\fR> 
+\fBstart\-cli tunnel port\-forward remove\fR [\fB\-\-hostname\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fISOURCE\fR> 
 .SH DESCRIPTION
 Remove port forward
 .SH OPTIONS
+.TP
+\fB\-\-hostname\fR \fI<HOSTNAME>\fR
+Remove a single SNI route on `source`; omit to remove the whole forward
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help

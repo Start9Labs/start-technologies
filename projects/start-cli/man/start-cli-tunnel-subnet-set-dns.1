@@ -1,0 +1,34 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-tunnel-subnet-set-dns 1  "set-dns " 
+.SH NAME
+start\-cli\-tunnel\-subnet\-set\-dns \- Set subnet DNS
+.SH SYNOPSIS
+\fBstart\-cli tunnel subnet set\-dns\fR <\fB\-\-mode\fR> [\fB\-\-device\-ip\fR] [\fB\-\-server\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Set subnet DNS
+.SH OPTIONS
+.TP
+\fB\-\-mode\fR \fI<MODE>\fR
+DNS mode for the subnet: default, device, or custom
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+default
+.IP \(bu 2
+device
+.IP \(bu 2
+custom
+.RE
+.TP
+\fB\-\-device\-ip\fR \fI<DEVICE_IP>\fR
+WireGuard IP of the device to use as DNS server (device mode)
+.TP
+\fB\-\-server\fR \fI<SERVERS>\fR
+Upstream DNS server (IP or IP:port); repeatable, up to 3 (custom mode)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

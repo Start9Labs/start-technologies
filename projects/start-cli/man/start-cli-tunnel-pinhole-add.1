@@ -1,0 +1,28 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-tunnel-pinhole-add 1  "add " 
+.SH NAME
+start\-cli\-tunnel\-pinhole\-add \- Add a new IPv6 pinhole
+.SH SYNOPSIS
+\fBstart\-cli tunnel pinhole add\fR [\fB\-\-internal\-port\fR] [\fB\-\-label\fR] [\fB\-\-count\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIGUA\fR> <\fIEXTERNAL_PORT\fR> 
+.SH DESCRIPTION
+Add a new IPv6 pinhole
+.SH OPTIONS
+.TP
+\fB\-\-internal\-port\fR \fI<INTERNAL_PORT>\fR
+Destination port on the GUA. Omit for a pure pinhole (no NAT, internal == external); set a different value for a port remap (e.g. 80 \-> 443)
+.TP
+\fB\-\-label\fR \fI<LABEL>\fR
+
+.TP
+\fB\-\-count\fR \fI<COUNT>\fR
+Number of contiguous ports, counting up from external/internal. Default 1
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIGUA\fR>
+The client\*(Aqs global IPv6 (GUA) to expose. Must be an address this tunnel delegates to a client — its subnet needs an IPv6 prefix
+.TP
+<\fIEXTERNAL_PORT\fR>
+External port opened on the GUA
