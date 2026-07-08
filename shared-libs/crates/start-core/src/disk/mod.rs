@@ -281,7 +281,7 @@ fn display_disk_info(params: WithIoFormat<Empty>, args: Vec<DiskInfo>) -> Result
 
 // #[command(display(display_disk_info))]
 pub async fn list(ctx: RpcContext, _: Empty) -> Result<Vec<DiskInfo>, Error> {
-    crate::disk::util::list(&ctx.os_partitions).await
+    crate::disk::util::list(&ctx.os_partitions, None).await
 }
 
 pub async fn repair() -> Result<(), Error> {

@@ -458,7 +458,7 @@ async fn install_os_inner(
         data_drive,
     }: InstallOsParams,
 ) -> Result<SetupInfo, Error> {
-    let disks = crate::disk::util::list(&Default::default()).await?;
+    let disks = crate::disk::util::list(&Default::default(), None).await?;
 
     // With an os_drive we install StartOS onto it; without one we're already
     // booted from the installed OS, so we load the running setup.json and just

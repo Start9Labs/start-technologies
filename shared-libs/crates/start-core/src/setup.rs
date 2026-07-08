@@ -160,6 +160,7 @@ pub async fn list_disks(_ctx: SetupContext) -> Result<Vec<DiskInfo>, Error> {
         &crate::disk::OsPartitionInfo::from_fstab()
             .await
             .unwrap_or_default(),
+        None,
     )
     .await?;
 

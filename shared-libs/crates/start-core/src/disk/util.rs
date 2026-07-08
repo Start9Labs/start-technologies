@@ -62,12 +62,19 @@ pub struct PartitionInfo {
     pub filesystem: Option<String>,
 }
 
-/// Whether a pre-V2 `StartOSBackups` folder is present on a mounted target.
-pub async fn has_legacy_backup(mountpoint: impl AsRef<Path>) -> bool {
-    tokio::fs::metadata(mountpoint.as_ref().join(super::LEGACY_BACKUP_DIR_NAME))
-        .await
-        .map(|m| m.is_dir())
-        .unwrap_or(false)
+/// Whether this server's pre-V2 `StartOSBackups/<server_id>` backup is present
+/// on a mounted target. Scoped to `server_id` so a target shared by several
+/// servers only flags (and later deletes) this server's own legacy backup.
+pub async fn has_legacy_backup(mountpoint: impl AsRef<Path>, server_id: &str) -> bool {
+    tokio::fs::metadata(
+        mountpoint
+            .as_ref()
+            .join(super::LEGACY_BACKUP_DIR_NAME)
+            .join(server_id),
+    )
+    .await
+    .map(|m| m.is_dir())
+    .unwrap_or(false)
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, ts_rs::TS)]
@@ -304,7 +311,7 @@ pub async fn get_mount_source(mountpoint: impl AsRef<Path>) -> Result<Option<Pat
 }
 
 #[instrument(skip_all)]
-pub async fn list(os: &OsPartitionInfo) -> Result<Vec<DiskInfo>, Error> {
+pub async fn list(os: &OsPartitionInfo, server_id: Option<&str>) -> Result<Vec<DiskInfo>, Error> {
     struct DiskIndex {
         parts: BTreeSet<PathBuf>,
         internal: bool,
@@ -389,7 +396,7 @@ pub async fn list(os: &OsPartitionInfo) -> Result<Vec<DiskInfo>, Error> {
                     disk_info.guid = pi.guid;
                     disk_info.filesystem = pi.filesystem;
                 } else {
-                    let Some(part_info) = part_info(part).await else {
+                    let Some(part_info) = part_info(part, server_id).await else {
                         continue;
                     };
                     disk_info.logicalname = part_info.logicalname.clone();
@@ -416,7 +423,7 @@ pub async fn list(os: &OsPartitionInfo) -> Result<Vec<DiskInfo>, Error> {
                     let part_info = if let Some(g) = disk_guids.get(&part) {
                         lvm_pv_part_info(part, g.clone()).await
                     } else {
-                        let Some(pi) = part_info(part).await else {
+                        let Some(pi) = part_info(part, server_id).await else {
                             continue;
                         };
                         pi
@@ -533,7 +540,7 @@ async fn lvm_pv_part_info(part: PathBuf, guid: Option<InternedString>) -> Partit
     }
 }
 
-async fn part_info(part: PathBuf) -> Option<PartitionInfo> {
+async fn part_info(part: PathBuf, server_id: Option<&str>) -> Option<PartitionInfo> {
     let label = get_label(&part)
         .await
         .map_err(|e| {
@@ -612,7 +619,10 @@ async fn part_info(part: PathBuf) -> Option<PartitionInfo> {
             BTreeMap::new()
         }
     };
-    let legacy_backup = has_legacy_backup(mount_guard.path()).await;
+    let legacy_backup = match server_id {
+        Some(server_id) => has_legacy_backup(mount_guard.path(), server_id).await,
+        None => false,
+    };
     if let Err(e) = mount_guard.unmount().await {
         tracing::error!(
             "{}",

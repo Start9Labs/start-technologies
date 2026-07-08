@@ -106,10 +106,18 @@ pub async fn add(
         username,
         password,
     };
+    let server_id = ctx
+        .db
+        .peek()
+        .await
+        .as_public()
+        .as_server_info()
+        .as_id()
+        .de()?;
     let guard = TmpMountGuard::mount(&cifs, ReadOnly).await?;
     let start_os = recovery_info(guard.path()).await?;
     let available = get_available(guard.path()).await.ok();
-    let legacy_backup = has_legacy_backup(guard.path()).await;
+    let legacy_backup = has_legacy_backup(guard.path(), &server_id).await;
     guard.unmount().await?;
     let id = ctx
         .db
@@ -182,10 +190,18 @@ pub async fn update(
         username,
         password,
     };
+    let server_id = ctx
+        .db
+        .peek()
+        .await
+        .as_public()
+        .as_server_info()
+        .as_id()
+        .de()?;
     let guard = TmpMountGuard::mount(&cifs, ReadOnly).await?;
     let start_os = recovery_info(guard.path()).await?;
     let available = get_available(guard.path()).await.ok();
-    let legacy_backup = has_legacy_backup(guard.path()).await;
+    let legacy_backup = has_legacy_backup(guard.path(), &server_id).await;
     guard.unmount().await?;
     ctx.db
         .mutate(|db| {
@@ -264,7 +280,10 @@ pub fn load(db: &DatabaseModel, id: u32) -> Result<Cifs, Error> {
         .de()
 }
 
-pub async fn list(db: &DatabaseModel) -> Result<Vec<(u32, CifsBackupTarget)>, Error> {
+pub async fn list(
+    db: &DatabaseModel,
+    server_id: &str,
+) -> Result<Vec<(u32, CifsBackupTarget)>, Error> {
     let mut cifs = Vec::new();
     for (id, model) in db.as_private().as_cifs().as_entries()? {
         let mount_info = model.de()?;
@@ -272,7 +291,7 @@ pub async fn list(db: &DatabaseModel) -> Result<Vec<(u32, CifsBackupTarget)>, Er
             let guard = TmpMountGuard::mount(&mount_info, ReadOnly).await?;
             let start_os = recovery_info(guard.path()).await?;
             let available = get_available(guard.path()).await.ok();
-            let legacy_backup = has_legacy_backup(guard.path()).await;
+            let legacy_backup = has_legacy_backup(guard.path(), server_id).await;
             guard.unmount().await?;
             Ok::<_, Error>((start_os, available, legacy_backup))
         }

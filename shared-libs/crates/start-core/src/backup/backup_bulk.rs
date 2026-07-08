@@ -164,8 +164,9 @@ impl Drop for BackupStatusGuard {
     }
 }
 
-/// Warn that the just-backed-up target still holds a pre-V2 `StartOSBackups`
-/// folder, which is now redundant and can be removed from the backup create page.
+/// Warn that the just-backed-up target still holds this server's pre-V2
+/// `StartOSBackups` backup, which is now redundant and can be removed from the
+/// backup create page.
 fn notify_legacy_present(db: &mut DatabaseModel) -> Result<(), Error> {
     notify(
         db,
@@ -232,7 +233,7 @@ pub async fn backup_all(
         backup_guard.change_password(&password)?;
     }
     let legacy_present =
-        crate::disk::util::has_legacy_backup(backup_guard.backup_disk_path()).await;
+        crate::disk::util::has_legacy_backup(backup_guard.backup_disk_path(), &server_id).await;
     tokio::task::spawn(async move {
         status_guard
             .handle_result(

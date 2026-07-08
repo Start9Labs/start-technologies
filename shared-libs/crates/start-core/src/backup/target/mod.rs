@@ -185,9 +185,10 @@ pub fn target<C: Context>() -> ParentHandler<C> {
 // #[command(display(display_serializable))]
 pub async fn list(ctx: RpcContext) -> Result<BTreeMap<BackupTargetId, BackupTarget>, Error> {
     let peek = ctx.db.peek().await;
+    let server_id = peek.as_public().as_server_info().as_id().de()?;
     let (disks_res, cifs) = tokio::try_join!(
-        crate::disk::util::list(&ctx.os_partitions),
-        cifs::list(&peek),
+        crate::disk::util::list(&ctx.os_partitions, Some(server_id.as_str())),
+        cifs::list(&peek, &server_id),
     )?;
     Ok(disks_res
         .into_iter()
@@ -442,15 +443,24 @@ pub struct DeleteLegacyParams {
     target_id: BackupTargetId,
 }
 
-/// Delete the pre-V2 `StartOSBackups` folder from a target, freeing the space it
-/// occupied. The current `StartOSBackupsV2` data is untouched. No-op if absent.
+/// Delete this server's pre-V2 `StartOSBackups/<server_id>` backup from a target,
+/// freeing the space it occupied. Other servers' legacy backups and the current
+/// `StartOSBackupsV2` data are untouched. No-op if absent.
 #[instrument(skip_all)]
 pub async fn delete_legacy(
     ctx: RpcContext,
     DeleteLegacyParams { target_id }: DeleteLegacyParams,
 ) -> Result<(), Error> {
-    let guard = TmpMountGuard::mount(&target_id.load(&ctx.db.peek().await)?, ReadWrite).await?;
-    crate::util::io::delete_dir(guard.path().join(crate::disk::LEGACY_BACKUP_DIR_NAME)).await?;
+    let peek = ctx.db.peek().await;
+    let server_id = peek.as_public().as_server_info().as_id().de()?;
+    let guard = TmpMountGuard::mount(&target_id.load(&peek)?, ReadWrite).await?;
+    crate::util::io::delete_dir(
+        guard
+            .path()
+            .join(crate::disk::LEGACY_BACKUP_DIR_NAME)
+            .join(&server_id),
+    )
+    .await?;
     guard.unmount().await?;
     Ok(())
 }
