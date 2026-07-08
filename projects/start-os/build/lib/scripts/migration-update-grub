@@ -30,6 +30,11 @@ if [ -z "$root" ]; then
     exit 1
 fi
 
+# boot=startos is what selects the StartOS initramfs module
+# (/etc/initramfs-tools/scripts/startos); without it the 0.4.0 layout rewire
+# never runs. The rest matches 0.4.0's GRUB_CMDLINE_LINUX (debian/postinst).
+CMDLINE="$root boot=startos console=ttyS0,115200n8 console=tty0"
+
 mkdir -p "$BOOT/grub"
 cat > "$BOOT/grub/grub.cfg" <<EOF
 set timeout=1
@@ -42,7 +47,7 @@ menuentry "StartOS" {
     insmod ext2
     insmod fat
     search --no-floppy --set=root --file "/$kernel"
-    linux "/$kernel" $root ro
+    linux "/$kernel" $CMDLINE
     initrd "/$initrd"
 }
 EOF
