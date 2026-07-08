@@ -50,19 +50,19 @@ patch-db/
 
 The main database engine. Key types:
 
-| Type | Role |
-|------|------|
-| `PatchDb` | Thread-safe async handle (clone to share). All reads/writes go through this. |
-| `TypedPatchDb<T>` | Generic wrapper that enforces a schema type `T` via `HasModel`. |
-| `Store` | Internal state container. File-backed with CBOR. Holds the current `Value`, revision counter, and `Broadcast`. |
-| `Dump` | Snapshot: `{ id: u64, value: Value }` |
-| `Revision` | Incremental change: `{ id: u64, patch: DiffPatch }` |
-| `DiffPatch` | Newtype over `json_patch::Patch` with scoping, rebasing, and key-tracking methods. |
-| `DbWatch` | Combines a `Dump` + `Subscriber` into a `Stream` of values. |
-| `TypedDbWatch<T>` | Type-safe wrapper around `DbWatch`. |
-| `Subscriber` | `tokio::sync::mpsc::UnboundedReceiver<Revision>`. |
-| `Broadcast` | Fan-out dispatcher. Holds `ScopedSender`s that filter patches by JSON Pointer prefix. Automatically removes disconnected senders. |
-| `MutateResult<T, E>` | Pairs a `Result<T, E>` with an optional `Revision`, allowing callers to check both the outcome and whether a patch was produced. |
+| Type                 | Role                                                                                                                              |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `PatchDb`            | Thread-safe async handle (clone to share). All reads/writes go through this.                                                      |
+| `TypedPatchDb<T>`    | Generic wrapper that enforces a schema type `T` via `HasModel`.                                                                   |
+| `Store`              | Internal state container. File-backed with CBOR. Holds the current `Value`, revision counter, and `Broadcast`.                    |
+| `Dump`               | Snapshot: `{ id: u64, value: Value }`                                                                                             |
+| `Revision`           | Incremental change: `{ id: u64, patch: DiffPatch }`                                                                               |
+| `DiffPatch`          | Newtype over `json_patch::Patch` with scoping, rebasing, and key-tracking methods.                                                |
+| `DbWatch`            | Combines a `Dump` + `Subscriber` into a `Stream` of values.                                                                       |
+| `TypedDbWatch<T>`    | Type-safe wrapper around `DbWatch`.                                                                                               |
+| `Subscriber`         | `tokio::sync::mpsc::UnboundedReceiver<Revision>`.                                                                                 |
+| `Broadcast`          | Fan-out dispatcher. Holds `ScopedSender`s that filter patches by JSON Pointer prefix. Automatically removes disconnected senders. |
+| `MutateResult<T, E>` | Pairs a `Result<T, E>` with an optional `Revision`, allowing callers to check both the outcome and whether a patch was produced.  |
 
 #### Write path
 
@@ -116,6 +116,7 @@ struct Config {
 ```
 
 Generates:
+
 - `impl HasModel for Config { type Model = Model<Self>; }`
 - Typed accessor methods: `as_hostname()`, `as_hostname_mut()`, `into_hostname()`
 - `from_parts()` constructor
@@ -126,6 +127,7 @@ Generates:
 ### `json-ptr`
 
 RFC 6901 JSON Pointer implementation. Provides:
+
 - `JsonPointer<S, V>` — generic over string storage and segment list representation
 - Zero-copy `BorrowedSegList` for efficient path slicing
 - Navigation: `get`, `get_mut`, `set`, `insert`, `remove`, `take`
@@ -135,6 +137,7 @@ RFC 6901 JSON Pointer implementation. Provides:
 ### `json-patch`
 
 RFC 6902 JSON Patch implementation. Provides:
+
 - `Patch(Vec<PatchOperation>)` — the patch type
 - `PatchOperation` enum: `Add`, `Remove`, `Replace`, `Test`, `Move`, `Copy`
 - `patch()` — apply a patch to a `Value`, returns an `Undo` for rollback
@@ -143,6 +146,7 @@ RFC 6902 JSON Patch implementation. Provides:
 ### `util`
 
 CLI tool with two subcommands:
+
 - `dump <path>` — deserialize a patch-db file and print the final state as JSON
 - `from-dump <path>` — read JSON from stdin and write it as a fresh patch-db file
 
@@ -170,6 +174,7 @@ watch$(...path) → BehaviorSubject per unique path → Observable to consumer
 ```
 
 **Key design decisions:**
+
 - `watch$()` has overloads for 0–6 path segments, providing type-safe deep property access
 - Watched nodes are keyed by their JSON Pointer path string
 - A revision triggers updates only for watchers whose path overlaps with any operation in the patch (prefix match in either direction)
@@ -183,12 +188,12 @@ Operations are applied immutably — objects are spread-copied, arrays are slice
 
 ### Types
 
-| Type | Definition |
-|------|-----------|
-| `Revision` | `{ id: number, patch: Operation<unknown>[] }` |
-| `Dump<T>` | `{ id: number, value: T }` |
-| `Update<T>` | `Revision \| Dump<T>` |
-| `PatchOp` | Enum: `'add' \| 'remove' \| 'replace'` |
+| Type           | Definition                                                  |
+| -------------- | ----------------------------------------------------------- |
+| `Revision`     | `{ id: number, patch: Operation<unknown>[] }`               |
+| `Dump<T>`      | `{ id: number, value: T }`                                  |
+| `Update<T>`    | `Revision \| Dump<T>`                                       |
+| `PatchOp`      | Enum: `'add' \| 'remove' \| 'replace'`                      |
 | `Operation<T>` | `AddOperation<T> \| RemoveOperation \| ReplaceOperation<T>` |
 
 ## Storage format

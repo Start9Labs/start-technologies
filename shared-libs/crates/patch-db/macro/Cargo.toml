@@ -1,11 +1,11 @@
 [package]
-name = "patch-db-macro"
-version = "0.1.0"
 authors = ["Aiden McClelland <me@drbonez.dev>"]
-edition = "2018"
 description = "macros for defining typed patch dbs"
+edition = "2018"
 license = "MIT"
+name = "patch-db-macro"
 repository = "https://github.com/Start9Labs/start-technologies"
+version = "0.1.0"
 
 [lib]
 proc-macro = true
@@ -13,5 +13,5 @@ proc-macro = true
 
 [dependencies]
 patch-db-macro-internals = { path = "../macro-internals" }
-syn = "1.0.62"
 proc-macro2 = "1.0.1"
+syn = "1.0.62"

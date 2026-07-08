@@ -1,11 +1,11 @@
 [package]
-name = "jsonpath-wasm"
-version = "0.3.0"
 authors = ["Changseok Han <freestrings@gmail.com>"]
 description = "It is Webassembly version of jsonpath_lib that is JsonPath engine written in Rust - Demo: https://freestrings.github.io/jsonpath"
 keywords = ["jsonpath", "json", "webassembly", "parsing", "rust"]
-repository = "https://github.com/freestrings/jsonpath"
 license = "MIT"
+name = "jsonpath-wasm"
+repository = "https://github.com/freestrings/jsonpath"
+version = "0.3.0"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -15,21 +15,21 @@ default = ["console_error_panic_hook", "wee_alloc"]
 
 [dependencies]
 cfg-if = "0.1"
-wasm-bindgen = { version = "0.2", features = ["serde-serialize"] }
 console_error_panic_hook = { version = "0.1", optional = true }
+wasm-bindgen = { version = "0.2", features = ["serde-serialize"] }
 wee_alloc = { version = "0.4", optional = true }
 
+js-sys = "0.3"
 jsonpath_lib = { path = "../" }
+lazy_static = "1.4.0"
 serde = "1.0"
 serde_json = { version = "1.0", features = ["preserve_order"] }
-lazy_static = "1.4.0"
 web-sys = { version = "0.3", features = ['console'] }
-js-sys = "0.3"
 
 [dev-dependencies]
-wasm-bindgen-test = "0.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+wasm-bindgen-test = "0.2"
 
 [profile.release]
 opt-level = "s"

@@ -1,11 +1,13 @@
 use std::path::PathBuf;
 
 use axum::body::Body;
-use axum::http::{Response, header};
+use axum::http::{header, Response};
 use imbl_value::imbl::OrdMap;
 use imbl_value::json;
 use itertools::Itertools;
-use rpc_toolkit::{from_fn_async, CallRemote, Context, Empty, HandlerArgs, HandlerExt, ParentHandler};
+use rpc_toolkit::{
+    from_fn_async, CallRemote, Context, Empty, HandlerArgs, HandlerExt, ParentHandler,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::continuations::{self, Guid, RpcContinuation};
@@ -36,7 +38,10 @@ async fn create(ctx: ServerContext) -> Result<DiagnosticsCreateRes, Error> {
                 "Failed to read diagnostics log",
                 Some(&format!("logread exited with {}: {stderr}", o.status)),
             );
-            return Err(Error::new(eyre!("logread failed: {stderr}"), ErrorKind::Filesystem));
+            return Err(Error::new(
+                eyre!("logread failed: {stderr}"),
+                ErrorKind::Filesystem,
+            ));
         }
         Err(e) => {
             tracing::warn!("failed to run logread: {e}");
@@ -47,7 +52,10 @@ async fn create(ctx: ServerContext) -> Result<DiagnosticsCreateRes, Error> {
                 "Failed to read diagnostics log",
                 Some(&e.to_string()),
             );
-            return Err(Error::new(eyre!("Failed to run logread: {e}"), ErrorKind::Filesystem));
+            return Err(Error::new(
+                eyre!("Failed to run logread: {e}"),
+                ErrorKind::Filesystem,
+            ));
         }
     };
     let body = output.stdout;
@@ -101,15 +109,22 @@ async fn cli_download(
         )
         .await?,
     )
-    .map_err(|e| Error::new(eyre!("Failed to parse response: {e}"), ErrorKind::Deserialization))?;
+    .map_err(|e| {
+        Error::new(
+            eyre!("Failed to parse response: {e}"),
+            ErrorKind::Deserialization,
+        )
+    })?;
 
     let (bytes, _) = ctx.rest_download(res.guid.as_ref()).await?;
 
-    let download_dir = dirs::download_dir()
-        .unwrap_or_else(|| PathBuf::from("."));
+    let download_dir = dirs::download_dir().unwrap_or_else(|| PathBuf::from("."));
     let path = download_dir.join(&res.filename);
     tokio::fs::write(&path, &bytes).await.map_err(|e| {
-        Error::new(eyre!("Failed to write {}: {e}", path.display()), ErrorKind::Filesystem)
+        Error::new(
+            eyre!("Failed to write {}: {e}", path.display()),
+            ErrorKind::Filesystem,
+        )
     })?;
 
     println!("{}", path.display());

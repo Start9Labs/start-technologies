@@ -65,7 +65,7 @@ Select your platform:
 
 1. Right click on the "Certificates" directory, then navigate to `All Tasks > Import`.
 
-1. Click "Next" on the first page of the Certificate Import Wizard, then click the [Browse...] button and use the resulting dialog window to navigate to the location on the Windows filesystem where you saved the downloaded Root CA certificate, select that file, then click "Open".  Next, click "Next".
+1. Click "Next" on the first page of the Certificate Import Wizard, then click the [Browse...] button and use the resulting dialog window to navigate to the location on the Windows filesystem where you saved the downloaded Root CA certificate, select that file, then click "Open". Next, click "Next".
 
 1. On the "Certificate Store" window, ensure that it says "Trusted Root Certificate Authorities" and click "Next". Then click "Finish" on the final screen.
 

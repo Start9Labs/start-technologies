@@ -155,45 +155,45 @@ The key steps are:
 
 ## bindPort Options
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `protocol` | `'http'` \| `'https'` \| `null` | The protocol. Use `null` for raw TCP (non-HTTP). |
-| `preferredExternalPort` | `number` | The port users will see in their URLs. |
-| `addSsl` | `object` \| `null` | SSL termination options for HTTPS. Set to `null` for no SSL. |
-| `addSsl.alpn` | `string` \| `null` | ALPN protocol negotiation (e.g., `'h2'`). Usually `null`. |
-| `addSsl.preferredExternalPort` | `number` | External port for SSL connections. |
-| `addSsl.addXForwardedHeaders` | `boolean` | Whether to add `X-Forwarded-*` headers. |
-| `addSsl.auth` | `ProxyAuth` \| `null` | Optional auth gate enforced by the OS reverse proxy. See [Authenticating at the Proxy](#authenticating-at-the-proxy). |
+| Option                          | Type                                                  | Description                                                                                                                                                                                                                 |
+| ------------------------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `protocol`                      | `'http'` \| `'https'` \| `null`                       | The protocol. Use `null` for raw TCP (non-HTTP).                                                                                                                                                                            |
+| `preferredExternalPort`         | `number`                                              | The port users will see in their URLs.                                                                                                                                                                                      |
+| `addSsl`                        | `object` \| `null`                                    | SSL termination options for HTTPS. Set to `null` for no SSL.                                                                                                                                                                |
+| `addSsl.alpn`                   | `string` \| `null`                                    | ALPN protocol negotiation (e.g., `'h2'`). Usually `null`.                                                                                                                                                                   |
+| `addSsl.preferredExternalPort`  | `number`                                              | External port for SSL connections.                                                                                                                                                                                          |
+| `addSsl.addXForwardedHeaders`   | `boolean`                                             | Whether to add `X-Forwarded-*` headers.                                                                                                                                                                                     |
+| `addSsl.auth`                   | `ProxyAuth` \| `null`                                 | Optional auth gate enforced by the OS reverse proxy. See [Authenticating at the Proxy](#authenticating-at-the-proxy).                                                                                                       |
 | `addSsl.upstreamCertValidation` | `'disable'` \| `{ certificate: string }` \| _omitted_ | How the OS validates your container's TLS cert when it [rewraps SSL](#rewrapping-ssl-to-a-tls-container). Omit to validate against the StartOS root CA (default). See [Rewrapping SSL](#rewrapping-ssl-to-a-tls-container). |
-| `secure` | `{ ssl: boolean }` \| `null` | For non-HTTP protocols, whether the connection is secure. |
+| `secure`                        | `{ ssl: boolean }` \| `null`                          | For non-HTTP protocols, whether the connection is secure.                                                                                                                                                                   |
 
 ## Interface Options
 
 ```typescript
 sdk.createInterface(effects, {
-  name: i18n('Display Name'),      // Shown in UI (wrap with i18n)
-  id: 'unique-id',                 // How you find this interface under its host
-  description: i18n('Description'),// Shown in UI (wrap with i18n)
-  type: 'ui',                      // 'ui', 'api', or 'p2p'
-  masked: false,                   // Hide URLs with sensitive credentials?
-  schemeOverride: null,            // Override URL scheme (see below)
-  username: null,                  // Auth username embedded in URL
-  path: '/some/path/',             // URL path
-  query: {},                       // URL query params
+  name: i18n('Display Name'), // Shown in UI (wrap with i18n)
+  id: 'unique-id', // How you find this interface under its host
+  description: i18n('Description'), // Shown in UI (wrap with i18n)
+  type: 'ui', // 'ui', 'api', or 'p2p'
+  masked: false, // Hide URLs with sensitive credentials?
+  schemeOverride: null, // Override URL scheme (see below)
+  username: null, // Auth username embedded in URL
+  path: '/some/path/', // URL path
+  query: {}, // URL query params
 })
 ```
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `name` | `string` | Display name shown to the user. Wrap with `i18n()`. |
-| `id` | `string` | Unique identifier. How you find this interface at runtime, by walking the host from `sdk.host.getOwn()` (see [main.ts](./main.md)). |
-| `description` | `string` | Description shown to the user. Wrap with `i18n()`. |
-| `type` | `'ui'`, `'api'`, or `'p2p'` | `'ui'` for browser interfaces, `'api'` for programmatic endpoints, `'p2p'` for peer-to-peer connections. |
-| `masked` | `boolean` | If `true`, the interface URL is shown as a copyable secret. Use for URLs containing credentials or tokens. |
+| Option           | Type                                                       | Description                                                                                                                                                                    |
+| ---------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `name`           | `string`                                                   | Display name shown to the user. Wrap with `i18n()`.                                                                                                                            |
+| `id`             | `string`                                                   | Unique identifier. How you find this interface at runtime, by walking the host from `sdk.host.getOwn()` (see [main.ts](./main.md)).                                            |
+| `description`    | `string`                                                   | Description shown to the user. Wrap with `i18n()`.                                                                                                                             |
+| `type`           | `'ui'`, `'api'`, or `'p2p'`                                | `'ui'` for browser interfaces, `'api'` for programmatic endpoints, `'p2p'` for peer-to-peer connections.                                                                       |
+| `masked`         | `boolean`                                                  | If `true`, the interface URL is shown as a copyable secret. Use for URLs containing credentials or tokens.                                                                     |
 | `schemeOverride` | `{ ssl: string \| null; noSsl: string \| null }` \| `null` | Override the URL scheme for custom protocols. For example, `{ ssl: 'lndconnect', noSsl: 'lndconnect' }` produces `lndconnect://` URLs. Use `null` for standard `http`/`https`. |
-| `username` | `string` \| `null` | Username embedded in the URL (e.g., for `smp://fingerprint:password@host`). |
-| `path` | `string` | URL path appended to the base address (e.g., `'/admin/'`). |
-| `query` | `object` | URL query parameters as key-value pairs (e.g., `{ macaroon: 'abc123' }`). |
+| `username`       | `string` \| `null`                                         | Username embedded in the URL (e.g., for `smp://fingerprint:password@host`).                                                                                                    |
+| `path`           | `string`                                                   | URL path appended to the base address (e.g., `'/admin/'`).                                                                                                                     |
+| `query`          | `object`                                                   | URL query parameters as key-value pairs (e.g., `{ macaroon: 'abc123' }`).                                                                                                      |
 
 > [!TIP]
 > The `id` you assign to an interface is what you use in `main.ts` to retrieve hostnames for it. Interfaces are reached through their **host**: `sdk.host.getOwn(effects, hostId)` returns the host, and the interface lives at `host.bindings[internalPort].interfaces[id]`. See [Main](./main.md#getting-hostnames) for details.
@@ -208,7 +208,7 @@ export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
   const range = await turn.bindPortRange({
     internalStartPort: 49152,
     externalStartPort: 49152, // may differ; the forward maps by offset
-    numberOfPorts: 100,       // 2–500 contiguous ports
+    numberOfPorts: 100, // 2–500 contiguous ports
   })
 
   await range.export(
@@ -243,12 +243,12 @@ await zmqRange.export(
 
 Two distinct endpoints are two `bindPortRange` calls — a range is a homogeneous pool of ports, so it maps to one named interface. Range interfaces show up in the service's **Interfaces** page using the same per-gateway address cards as single-port interfaces (non-SSL, IPv4-only). The public/WAN address is disabled by default; enabling it surfaces the exact port range to forward on the router.
 
-| `createRangeInterface` option | Type | Description |
-|--------|------|-------------|
-| `id` | `string` | Unique identifier for the range interface. |
-| `name` | `string` | Display name shown to the user. Wrap with `i18n()`. |
-| `description` | `string` | Description shown to the user. Wrap with `i18n()`. |
-| `scheme` | `string` \| `null` | Optional transport prefix (e.g. `'tcp'`). Omit for raw UDP/TCP ranges. |
+| `createRangeInterface` option | Type               | Description                                                            |
+| ----------------------------- | ------------------ | ---------------------------------------------------------------------- |
+| `id`                          | `string`           | Unique identifier for the range interface.                             |
+| `name`                        | `string`           | Display name shown to the user. Wrap with `i18n()`.                    |
+| `description`                 | `string`           | Description shown to the user. Wrap with `i18n()`.                     |
+| `scheme`                      | `string` \| `null` | Optional transport prefix (e.g. `'tcp'`). Omit for raw UDP/TCP ranges. |
 
 ## TLS Termination
 
@@ -276,11 +276,11 @@ The guidance above ("do not configure in-container HTTPS") applies when StartOS 
 
 On that inner OS→container leg, StartOS validates your container's certificate. By default it requires a certificate signed by the StartOS root CA. A container serving a **self-signed** certificate on the internal bridge will fail that check, so use `addSsl.upstreamCertValidation` to control it:
 
-| Value | Behavior |
-|-------|----------|
-| _omitted_ | Validate against the StartOS root CA (default). |
-| `'disable'` | Skip certificate validation entirely. Appropriate for a self-signed cert on the trusted internal bridge. |
-| `{ certificate: '<pem>' }` | Validate against the supplied PEM certificate/chain instead of the root CA. |
+| Value                      | Behavior                                                                                                 |
+| -------------------------- | -------------------------------------------------------------------------------------------------------- |
+| _omitted_                  | Validate against the StartOS root CA (default).                                                          |
+| `'disable'`                | Skip certificate validation entirely. Appropriate for a self-signed cert on the trusted internal bridge. |
+| `{ certificate: '<pem>' }` | Validate against the supplied PEM certificate/chain instead of the root CA.                              |
 
 ```typescript
 const origin = await multi.bindPort(443, {
@@ -322,12 +322,12 @@ const apiOrigin = await apiMulti.bindPort(apiPort, {
 })
 ```
 
-| `ProxyAuth` field | Type | Description |
-|--------|------|-------------|
-| `type` | `'basic'` \| `'bearer'` | The auth scheme the proxy enforces. |
-| `credentials` (basic) | `Array<{ username, password }>` | Accepted pairs. Any match passes. The matched `username` is forwarded upstream as `X-Forwarded-User`. |
-| `tokens` (bearer) | `Array<string>` | Accepted bearer tokens. Any match passes. |
-| `realm` | `string` \| `null` | Realm advertised in the 401 `WWW-Authenticate` challenge. Defaults to `"StartOS"`. Use a stable realm across bindings that share credentials so browsers reuse them. |
+| `ProxyAuth` field     | Type                            | Description                                                                                                                                                          |
+| --------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `type`                | `'basic'` \| `'bearer'`         | The auth scheme the proxy enforces.                                                                                                                                  |
+| `credentials` (basic) | `Array<{ username, password }>` | Accepted pairs. Any match passes. The matched `username` is forwarded upstream as `X-Forwarded-User`.                                                                |
+| `tokens` (bearer)     | `Array<string>`                 | Accepted bearer tokens. Any match passes.                                                                                                                            |
+| `realm`               | `string` \| `null`              | Realm advertised in the 401 `WWW-Authenticate` challenge. Defaults to `"StartOS"`. Use a stable realm across bindings that share credentials so browsers reuse them. |
 
 Setting `auth` implies HTTP-aware proxying, so it is only valid on the SSL-variant protocols above — not on raw TCP (`protocol: null`).
 
@@ -340,7 +340,7 @@ Don't hard-code the password. Generate it at install time and let the user rotat
 
 ```typescript
 export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
-  const password = await storeJson.read((s) => s.uiPassword).const(effects)
+  const password = await storeJson.read(s => s.uiPassword).const(effects)
 
   const uiMulti = sdk.MultiHost.of(effects, 'ui-multi')
   const uiOrigin = await uiMulti.bindPort(uiPort, {

@@ -13,22 +13,22 @@ There are two ways a wallet can connect to your self-hosted Bitcoin infrastructu
 
 ## Summary
 
-| Wallet                              | Platforms                           | Connects to      | Tor |
-| ----------------------------------- | ----------------------------------- | ---------------- | --- |
-| [BitBoxApp](#bitboxapp)             | Android, iOS, Linux, macOS, Windows | Electrum server  | Yes |
-| [Bitcoin Keeper](#bitcoin-keeper)   | Android, iOS                        | Electrum server  | Yes |
-| [Blockstream App](#blockstream-app) | Android, iOS, Linux, macOS, Windows | Electrum server  | Yes |
-| [BlueWallet](#bluewallet)           | Android, iOS                        | Electrum server  | Yes |
-| [Bull Wallet](#bull-wallet)         | Android, iOS                        | Electrum server  | Yes |
-| [BTCPay Server](#btcpay-server)     | Web (self-hosted)                   | Bitcoin RPC | Yes |
-| [Electrum](#electrum)               | Android, Linux, macOS, Windows      | Electrum server  | Yes |
-| [Envoy](#envoy)                     | Android, iOS                        | Electrum server  | Yes |
-| [FullyNoded](#fullynoded)           | iOS, macOS                          | Bitcoin RPC | Yes |
-| [Liana](#liana)                     | Linux, macOS, Windows               | Both             | No  |
-| [Nunchuk](#nunchuk)                 | Android, iOS, Linux, macOS, Windows | Both             | Yes |
-| [Sparrow](#sparrow)                 | Linux, macOS, Windows               | Both             | Yes |
-| [Trezor Suite](#trezor-suite)       | Linux, macOS, Windows               | Electrum server  | Yes |
-| [Wasabi](#wasabi)                   | Linux, macOS, Windows               | Bitcoin RPC | Yes |
+| Wallet                              | Platforms                           | Connects to     | Tor |
+| ----------------------------------- | ----------------------------------- | --------------- | --- |
+| [BitBoxApp](#bitboxapp)             | Android, iOS, Linux, macOS, Windows | Electrum server | Yes |
+| [Bitcoin Keeper](#bitcoin-keeper)   | Android, iOS                        | Electrum server | Yes |
+| [Blockstream App](#blockstream-app) | Android, iOS, Linux, macOS, Windows | Electrum server | Yes |
+| [BlueWallet](#bluewallet)           | Android, iOS                        | Electrum server | Yes |
+| [Bull Wallet](#bull-wallet)         | Android, iOS                        | Electrum server | Yes |
+| [BTCPay Server](#btcpay-server)     | Web (self-hosted)                   | Bitcoin RPC     | Yes |
+| [Electrum](#electrum)               | Android, Linux, macOS, Windows      | Electrum server | Yes |
+| [Envoy](#envoy)                     | Android, iOS                        | Electrum server | Yes |
+| [FullyNoded](#fullynoded)           | iOS, macOS                          | Bitcoin RPC     | Yes |
+| [Liana](#liana)                     | Linux, macOS, Windows               | Both            | No  |
+| [Nunchuk](#nunchuk)                 | Android, iOS, Linux, macOS, Windows | Both            | Yes |
+| [Sparrow](#sparrow)                 | Linux, macOS, Windows               | Both            | Yes |
+| [Trezor Suite](#trezor-suite)       | Linux, macOS, Windows               | Electrum server | Yes |
+| [Wasabi](#wasabi)                   | Linux, macOS, Windows               | Bitcoin RPC     | Yes |
 
 ## BitBoxApp
 

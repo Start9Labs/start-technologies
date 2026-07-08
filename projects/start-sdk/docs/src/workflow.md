@@ -1,6 +1,6 @@
 # Development Workflow
 
-This page covers how to *behave* while working on a package — the disciplines that apply to every change, no matter which SDK constructs you touch. The rest of the guide describes *what* to build; this page describes *how* to work while building it. These rules are the canonical home for the working discipline an AI coding agent should follow on every task.
+This page covers how to _behave_ while working on a package — the disciplines that apply to every change, no matter which SDK constructs you touch. The rest of the guide describes _what_ to build; this page describes _how_ to work while building it. These rules are the canonical home for the working discipline an AI coding agent should follow on every task.
 
 ## Keep README and instructions in sync
 
@@ -13,7 +13,7 @@ Apply this loop on every task:
 3. If either no longer matches the code, update it in the same change.
 4. If a file is silent on the area and doesn't need to speak to it, leave it.
 
-Don't skip step 2 on the theory that a change was "internal." If you're unsure whether a change is worth documenting, the doc check *is* the answer: if neither file mentions the area, it was internal; if one does, your change probably affects that file.
+Don't skip step 2 on the theory that a change was "internal." If you're unsure whether a change is worth documenting, the doc check _is_ the answer: if neither file mentions the area, it was internal; if one does, your change probably affects that file.
 
 See [Writing READMEs](./writing-readmes.md) and [Writing Instructions](./writing-instructions.md) for the content rules.
 

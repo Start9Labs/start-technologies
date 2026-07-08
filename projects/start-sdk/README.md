@@ -49,32 +49,31 @@ From there, `sdk` exposes the full toolkit:
 ```typescript
 // Define daemons
 export const main = sdk.setupMain(async ({ effects }) =>
-  sdk.Daemons.of(effects)
-    .addDaemon('primary', { /* ... */ })
+  sdk.Daemons.of(effects).addDaemon('primary', {
+    /* ... */
+  }),
 )
 
 // Define actions
-export const setName = sdk.Action.withInput('set-name', /* ... */)
+export const setName = sdk.Action.withInput('set-name' /* ... */)
 
 // Define interfaces
 export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
   const multi = sdk.MultiHost.of(effects, 'web')
   const origin = await multi.bindPort(80, { protocol: 'http' })
-  const ui = sdk.createInterface(effects, { name: 'Web UI', id: 'ui', /* ... */ })
+  const ui = sdk.createInterface(effects, { name: 'Web UI', id: 'ui' /* ... */ })
   return [await origin.export([ui])]
 })
 
 // Define backups
-export const { createBackup, restoreBackup } = sdk.setupBackups(
-  async () => sdk.Backups.ofVolumes('main')
-)
+export const { createBackup, restoreBackup } = sdk.setupBackups(async () => sdk.Backups.ofVolumes('main'))
 ```
 
 ## Packages
 
-| Source | npm | Description |
-|--------|-----|-------------|
-| `projects/start-sdk/lib/` | `@start9labs/start-sdk` | Full SDK for service developers (the one package you install) |
+| Source                               | npm                      | Description                                                                                         |
+| ------------------------------------ | ------------------------ | --------------------------------------------------------------------------------------------------- |
+| `projects/start-sdk/lib/`            | `@start9labs/start-sdk`  | Full SDK for service developers (the one package you install)                                       |
 | `shared-libs/ts-modules/start-core/` | `@start9labs/start-core` | Core types, ABI definitions, and effects interface — bundled into the SDK, not published separately |
 
 The published package also ships `s9pk.mk` and `tsconfig.base.json` at its root, so a service package consumes the canonical build plumbing by reference: `include node_modules/@start9labs/start-sdk/s9pk.mk` in its `Makefile` and `"extends": "@start9labs/start-sdk/tsconfig.base.json"` in its `tsconfig.json`.
@@ -86,6 +85,7 @@ For comprehensive packaging guides, tutorials, and API reference:
 **[docs.start9.com/packaging](https://docs.start9.com/packaging)**
 
 The packaging docs cover:
+
 - Environment setup and prerequisites
 - Project structure and conventions
 - Manifest, main, interfaces, actions, and all other service modules

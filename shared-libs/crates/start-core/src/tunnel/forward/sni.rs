@@ -43,7 +43,8 @@ struct PortBindings {
 
 impl PortBindings {
     fn prune(&mut self, now: Instant) {
-        self.hostnames.retain(|_, b| b.expiry.is_none_or(|e| e > now));
+        self.hostnames
+            .retain(|_, b| b.expiry.is_none_or(|e| e > now));
     }
     fn is_empty(&self) -> bool {
         self.hostnames.is_empty() && self.fallback.is_none()
@@ -148,7 +149,11 @@ impl SniDemux {
         self.ports.mutate(|ports| {
             if let Some(entry) = ports.get_mut(&key) {
                 for name in hostnames {
-                    if entry.hostnames.get(name).is_some_and(|b| b.target == target) {
+                    if entry
+                        .hostnames
+                        .get(name)
+                        .is_some_and(|b| b.target == target)
+                    {
                         entry.hostnames.remove(name);
                     }
                 }
@@ -216,7 +221,9 @@ async fn run_listener(
     ports: Arc<SyncMutex<BTreeMap<PortKey, PortBindings>>>,
 ) -> Result<(), Error> {
     if let Err(e) = crate::net::transparent::ensure_divert_infra().await {
-        tracing::warn!("SNI demux reply-path divert setup failed (source preservation may be degraded): {e}");
+        tracing::warn!(
+            "SNI demux reply-path divert setup failed (source preservation may be degraded): {e}"
+        );
     }
     let listener = TcpListener::bind(SocketAddrV4::new(key.0, key.1))
         .await
@@ -355,8 +362,14 @@ mod tests {
         pb.hostnames.insert("a.example.com".into(), mk(1));
         pb.hostnames.insert("*.example.com".into(), mk(2));
         pb.fallback = Some(SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 9), 443));
-        assert_eq!(pb.select(Some("a.example.com")).unwrap().ip().octets()[3], 1);
-        assert_eq!(pb.select(Some("b.example.com")).unwrap().ip().octets()[3], 2);
+        assert_eq!(
+            pb.select(Some("a.example.com")).unwrap().ip().octets()[3],
+            1
+        );
+        assert_eq!(
+            pb.select(Some("b.example.com")).unwrap().ip().octets()[3],
+            2
+        );
         assert_eq!(pb.select(Some("other.org")).unwrap().ip().octets()[3], 9);
         assert_eq!(pb.select(None).unwrap().ip().octets()[3], 9);
     }

@@ -1,7 +1,9 @@
-use crate::exver;
 use std::cmp::Ordering;
 use std::str::FromStr;
+
 use wasm_bindgen::prelude::*;
+
+use crate::exver;
 
 fn js_parse<T>(s: &str) -> Result<T, JsValue>
 where

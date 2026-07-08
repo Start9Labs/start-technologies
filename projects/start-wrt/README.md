@@ -8,7 +8,7 @@ StartWRT is [Start9's](https://start9.com) fork of [OpenWrt](https://openwrt.org
 
 ### Security Profiles
 
-The core concept in StartWRT. Every device on the network receives a **Security Profile**, which governs what it can access — LAN devices, Internet, DNS servers, VPN tunnels, and time-of-day restrictions. A device's Security Profile is determined by *how* it gained access to the network: which Ethernet port it plugged into, which WiFi password it used, or which VPN server it connected to.
+The core concept in StartWRT. Every device on the network receives a **Security Profile**, which governs what it can access — LAN devices, Internet, DNS servers, VPN tunnels, and time-of-day restrictions. A device's Security Profile is determined by _how_ it gained access to the network: which Ethernet port it plugged into, which WiFi password it used, or which VPN server it connected to.
 
 ### Ethernet
 
@@ -62,13 +62,13 @@ The StartWRT web interface is a single-page application that communicates with t
 
 The interface is organized around the router's feature areas:
 
-| Section | Routes | Description |
-|---------|--------|-------------|
-| **Internet** | WAN Settings, Published Ports, Outbound VPNs | External connectivity, port forwarding, VPN clients |
-| **Network** | LAN Settings, Devices | Local network configuration and device management |
-| **Security Profiles** | Profiles | Create and manage access control profiles |
-| **Points of Entry** | Ethernet, Wi-Fi, Inbound VPNs | How devices join the network and get profiled |
-| **System** | Settings | General, advanced, password, SSH keys, logs, activity |
+| Section               | Routes                                       | Description                                           |
+| --------------------- | -------------------------------------------- | ----------------------------------------------------- |
+| **Internet**          | WAN Settings, Published Ports, Outbound VPNs | External connectivity, port forwarding, VPN clients   |
+| **Network**           | LAN Settings, Devices                        | Local network configuration and device management     |
+| **Security Profiles** | Profiles                                     | Create and manage access control profiles             |
+| **Points of Entry**   | Ethernet, Wi-Fi, Inbound VPNs                | How devices join the network and get profiled         |
+| **System**            | Settings                                     | General, advanced, password, SSH keys, logs, activity |
 
 ## Documentation
 

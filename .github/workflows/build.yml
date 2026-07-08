@@ -4,12 +4,12 @@ on:
   workflow_call:
     inputs:
       FREE_DISK_SPACE:
-        description: "Free up disk space before building"
+        description: 'Free up disk space before building'
         type: boolean
         default: false
     secrets:
       DEV_KEY:
-        description: "Developer signing key"
+        description: 'Developer signing key'
         required: false
 
 jobs:
@@ -117,6 +117,6 @@ jobs:
       - name: Upload each s9pk as its own artifact
         uses: Start9Labs/start-technologies/.github/actions/upload-each@master
         with:
-          pattern: "*.s9pk"
+          pattern: '*.s9pk'
           retention-days: 14
           compression-level: 0

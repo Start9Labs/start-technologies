@@ -60,9 +60,7 @@ pub async fn bind_range(
     }
     if number_of_ports > MAX_BIND_PORT_RANGE_SIZE {
         return Err(Error::new(
-            eyre!(
-                "numberOfPorts ({number_of_ports}) exceeds maximum ({MAX_BIND_PORT_RANGE_SIZE})"
-            ),
+            eyre!("numberOfPorts ({number_of_ports}) exceeds maximum ({MAX_BIND_PORT_RANGE_SIZE})"),
             ErrorKind::InvalidRequest,
         ));
     }

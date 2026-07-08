@@ -1,12 +1,14 @@
-use crate::prelude::*;
-use clap::{ArgMatches, CommandFactory, FromArgMatches};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::any::type_name;
 use std::io::Write as _;
 use std::process::Command;
 
+use clap::{ArgMatches, CommandFactory, FromArgMatches};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 // Re-export startos utilities — same behavior, maintained in one place.
 pub use startos::util::serde::{DisplaySerializable, HandlerExtSerde};
+
+use crate::prelude::*;
 
 /// A clap-compatible wrapper that reads the inner value as JSON from stdin
 /// instead of from CLI args. Used for commands that take complex structured
@@ -56,8 +58,12 @@ where
 {
     let mut temp_file = tempfile::Builder::new().suffix(".json").tempfile()?;
 
-    serde_json::to_writer_pretty(&mut temp_file, data)
-        .map_err(|e| Error::new(eyre!("Failed to write JSON: {}", e), ErrorKind::Serialization))?;
+    serde_json::to_writer_pretty(&mut temp_file, data).map_err(|e| {
+        Error::new(
+            eyre!("Failed to write JSON: {}", e),
+            ErrorKind::Serialization,
+        )
+    })?;
     temp_file.flush()?;
 
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
@@ -66,14 +72,26 @@ where
     let status = Command::new(&editor)
         .arg(&temp_path)
         .status()
-        .map_err(|e| Error::new(eyre!("starting editor {editor}: {e}"), ErrorKind::Filesystem))?;
+        .map_err(|e| {
+            Error::new(
+                eyre!("starting editor {editor}: {e}"),
+                ErrorKind::Filesystem,
+            )
+        })?;
 
     if !status.success() {
-        return Err(Error::new(eyre!("Editor exited with non-zero status"), ErrorKind::Filesystem));
+        return Err(Error::new(
+            eyre!("Editor exited with non-zero status"),
+            ErrorKind::Filesystem,
+        ));
     }
 
     let content = std::fs::read_to_string(&temp_path)?;
 
-    serde_json::from_str(&content)
-        .map_err(|e| Error::new(eyre!("Failed to parse JSON: {}", e), ErrorKind::Deserialization))
+    serde_json::from_str(&content).map_err(|e| {
+        Error::new(
+            eyre!("Failed to parse JSON: {}", e),
+            ErrorKind::Deserialization,
+        )
+    })
 }

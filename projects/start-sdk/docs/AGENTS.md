@@ -30,7 +30,7 @@ To track a different source (e.g. a fork), repoint `start-technologies`'s remote
 
 The guide has two layers:
 
-- **Recipes** — intent-driven pages: *what* to do and *which* constructs to combine. **Start here.** Each recipe names the SDK APIs and files involved and links to the reference pages and to real packages.
+- **Recipes** — intent-driven pages: _what_ to do and _which_ constructs to combine. **Start here.** Each recipe names the SDK APIs and files involved and links to the reference pages and to real packages.
 - **Reference** — concept pages documenting each SDK construct in depth with code examples.
 
 Workflow for any task:
@@ -44,31 +44,31 @@ Read pages from your local checkout (`start-technologies/projects/start-sdk/docs
 
 ## Where to read for X
 
-| Need | Read |
-| --- | --- |
-| Find the right recipe for a task | `start-technologies/projects/start-sdk/docs/src/recipes.md` |
-| How to behave on every task (the disciplines below) | `start-technologies/projects/start-sdk/docs/src/workflow.md` |
-| File/directory layout of a package | `start-technologies/projects/start-sdk/docs/src/project-structure.md` |
-| Service metadata, descriptions | `start-technologies/projects/start-sdk/docs/src/manifest.md` |
-| Versions, migrations, release notes | `start-technologies/projects/start-sdk/docs/src/versions.md` |
-| Daemons, health checks, oneshots, lifecycle | `start-technologies/projects/start-sdk/docs/src/main.md` |
-| Install / update / restore init logic | `start-technologies/projects/start-sdk/docs/src/init.md` |
-| Network interfaces and ports | `start-technologies/projects/start-sdk/docs/src/interfaces.md` |
-| User-facing actions | `start-technologies/projects/start-sdk/docs/src/actions.md` |
-| Prompting the user to run actions | `start-technologies/projects/start-sdk/docs/src/tasks.md` |
-| Config files as typed models | `start-technologies/projects/start-sdk/docs/src/file-models.md` |
-| Service dependencies | `start-technologies/projects/start-sdk/docs/src/dependencies.md` |
-| Build / install commands | `start-technologies/projects/start-sdk/docs/src/makefile.md` |
-| Writing the README | `start-technologies/projects/start-sdk/docs/src/writing-readmes.md` |
-| Writing user instructions | `start-technologies/projects/start-sdk/docs/src/writing-instructions.md` |
-| Publishing / registries | `start-technologies/projects/start-sdk/docs/src/publishing.md` |
-| `start-cli` reference | `start-technologies/projects/start-sdk/docs/src/cli.md` |
+| Need                                                | Read                                                                     |
+| --------------------------------------------------- | ------------------------------------------------------------------------ |
+| Find the right recipe for a task                    | `start-technologies/projects/start-sdk/docs/src/recipes.md`              |
+| How to behave on every task (the disciplines below) | `start-technologies/projects/start-sdk/docs/src/workflow.md`             |
+| File/directory layout of a package                  | `start-technologies/projects/start-sdk/docs/src/project-structure.md`    |
+| Service metadata, descriptions                      | `start-technologies/projects/start-sdk/docs/src/manifest.md`             |
+| Versions, migrations, release notes                 | `start-technologies/projects/start-sdk/docs/src/versions.md`             |
+| Daemons, health checks, oneshots, lifecycle         | `start-technologies/projects/start-sdk/docs/src/main.md`                 |
+| Install / update / restore init logic               | `start-technologies/projects/start-sdk/docs/src/init.md`                 |
+| Network interfaces and ports                        | `start-technologies/projects/start-sdk/docs/src/interfaces.md`           |
+| User-facing actions                                 | `start-technologies/projects/start-sdk/docs/src/actions.md`              |
+| Prompting the user to run actions                   | `start-technologies/projects/start-sdk/docs/src/tasks.md`                |
+| Config files as typed models                        | `start-technologies/projects/start-sdk/docs/src/file-models.md`          |
+| Service dependencies                                | `start-technologies/projects/start-sdk/docs/src/dependencies.md`         |
+| Build / install commands                            | `start-technologies/projects/start-sdk/docs/src/makefile.md`             |
+| Writing the README                                  | `start-technologies/projects/start-sdk/docs/src/writing-readmes.md`      |
+| Writing user instructions                           | `start-technologies/projects/start-sdk/docs/src/writing-instructions.md` |
+| Publishing / registries                             | `start-technologies/projects/start-sdk/docs/src/publishing.md`           |
+| `start-cli` reference                               | `start-technologies/projects/start-sdk/docs/src/cli.md`                  |
 
 ## Reading the SDK and OS source (last resort)
 
 `start-technologies/` is a sparse checkout of the full Start9 monorepo, so beyond the guide you also have the complete **SDK source** (`start-technologies/projects/start-sdk/lib`) and **StartOS source** (`start-technologies/projects/start-os`, plus the shared core in `start-technologies/shared-libs/`) on hand.
 
-Reach for them **only when the recipes, reference pages, real packages, and the installed SDK types (`node_modules/@start9labs/start-sdk/**/*.d.ts`) don't answer the question** — e.g. to confirm exactly what an SDK call does or how an OS effect behaves. Open one file to settle one question; don't browse the monorepo to "understand the system."
+Reach for them **only when the recipes, reference pages, real packages, and the installed SDK types (`node_modules/@start9labs/start-sdk/**/\*.d.ts`) don't answer the question\*\* — e.g. to confirm exactly what an SDK call does or how an OS effect behaves. Open one file to settle one question; don't browse the monorepo to "understand the system."
 
 Only the guide is checked out by default — fetch a source path you need on demand:
 

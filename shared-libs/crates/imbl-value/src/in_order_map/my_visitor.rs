@@ -1,9 +1,9 @@
-use std::{fmt, marker::PhantomData, ops::Deref};
+use std::fmt;
+use std::marker::PhantomData;
+use std::ops::Deref;
 
-use serde::{
-    de::{MapAccess, Visitor},
-    Deserialize,
-};
+use serde::de::{MapAccess, Visitor};
+use serde::Deserialize;
 
 use crate::InOMap;
 

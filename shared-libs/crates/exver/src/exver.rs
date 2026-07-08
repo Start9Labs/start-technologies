@@ -8,12 +8,10 @@ use fp_core::empty::Empty;
 use fp_core::monoid::Monoid;
 use fp_core::semigroup::Semigroup;
 use itertools::Itertools;
-
 use pest::iterators::Pair;
 use pest::Parser;
 use pest_derive::Parser;
-use smallvec::smallvec;
-use smallvec::SmallVec;
+use smallvec::{smallvec, SmallVec};
 use yasi::InternedString;
 
 #[derive(Clone, Debug)]

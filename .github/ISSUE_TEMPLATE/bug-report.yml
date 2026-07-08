@@ -1,6 +1,6 @@
 name: 🐛 Bug Report
 description: Create a report to help us improve StartOS
-title: "[bug]: "
+title: '[bug]: '
 labels: [Bug, Needs Triage]
 assignees:
   - MattDHill

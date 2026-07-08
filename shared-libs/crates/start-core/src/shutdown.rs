@@ -118,7 +118,10 @@ async fn begin_shutdown(ctx: &RpcContext, restart: bool, wait: bool) {
     }
 }
 
-pub async fn shutdown(ctx: RpcContext, ShutdownParams { wait }: ShutdownParams) -> Result<(), Error> {
+pub async fn shutdown(
+    ctx: RpcContext,
+    ShutdownParams { wait }: ShutdownParams,
+) -> Result<(), Error> {
     ctx.db
         .mutate(|db| {
             db.as_public_mut()
@@ -133,7 +136,10 @@ pub async fn shutdown(ctx: RpcContext, ShutdownParams { wait }: ShutdownParams) 
     Ok(())
 }
 
-pub async fn restart(ctx: RpcContext, ShutdownParams { wait }: ShutdownParams) -> Result<(), Error> {
+pub async fn restart(
+    ctx: RpcContext,
+    ShutdownParams { wait }: ShutdownParams,
+) -> Result<(), Error> {
     ctx.db
         .mutate(|db| {
             db.as_public_mut()

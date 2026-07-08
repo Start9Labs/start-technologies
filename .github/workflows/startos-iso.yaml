@@ -46,47 +46,47 @@ on:
       - master
       - next/*
     paths:
-      - "projects/start-os/**"
-      - "shared-libs/**"
-      - "projects/start-sdk/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "angular.json"
-      - "package.json"
-      - "package-lock.json"
-      - "tsconfig.json"
-      - "tsconfig.lib.json"
-      - "build/**"
-      - "debian/**"
-      - "apt/**"
-      - ".github/workflows/startos-iso.yaml"
-      - ".github/actions/setup-build/**"
+      - 'projects/start-os/**'
+      - 'shared-libs/**'
+      - 'projects/start-sdk/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'angular.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'tsconfig.lib.json'
+      - 'build/**'
+      - 'debian/**'
+      - 'apt/**'
+      - '.github/workflows/startos-iso.yaml'
+      - '.github/actions/setup-build/**'
       # Doc-only edits under the allowlisted project trees (e.g.
       # projects/start-os/docs/**) shouldn't trigger a build.
-      - "!**/*.md"
+      - '!**/*.md'
   pull_request:
     branches:
       - master
       - next/*
     paths:
-      - "projects/start-os/**"
-      - "shared-libs/**"
-      - "projects/start-sdk/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "angular.json"
-      - "package.json"
-      - "package-lock.json"
-      - "tsconfig.json"
-      - "tsconfig.lib.json"
-      - "build/**"
-      - "debian/**"
-      - "apt/**"
-      - ".github/workflows/startos-iso.yaml"
-      - ".github/actions/setup-build/**"
+      - 'projects/start-os/**'
+      - 'shared-libs/**'
+      - 'projects/start-sdk/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'angular.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'tsconfig.lib.json'
+      - 'build/**'
+      - 'debian/**'
+      - 'apt/**'
+      - '.github/workflows/startos-iso.yaml'
+      - '.github/actions/setup-build/**'
       # Doc-only edits under the allowlisted project trees (e.g.
       # projects/start-os/docs/**) shouldn't trigger a build.
-      - "!**/*.md"
+      - '!**/*.md'
 
 # The group is scoped by event so a master push can't cancel an in-flight
 # dispatched release build; dispatches queue behind each other, never cancel.
@@ -95,7 +95,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 env:
-  NODEJS_VERSION: "24.17.0"
+  NODEJS_VERSION: '24.17.0'
   ENVIRONMENT: '${{ fromJson(format(''["{0}", ""]'', github.event.inputs.environment || ''dev''))[github.event.inputs.environment == ''NONE''] }}'
 
 jobs:
@@ -146,7 +146,7 @@ jobs:
       - uses: ./.github/actions/setup-build
         with:
           nodejs-version: ${{ env.NODEJS_VERSION }}
-          setup-python: "true"
+          setup-python: 'true'
 
       - name: Make
         run: make ARCH=${{ matrix.arch }} compiled-${{ matrix.arch }}.tar
@@ -391,21 +391,21 @@ jobs:
       - name: Download squashfs artifacts
         uses: actions/download-artifact@v8
         with:
-          pattern: "*.squashfs"
+          pattern: '*.squashfs'
           path: artifacts/
           merge-multiple: true
 
       - name: Download ISO artifacts
         uses: actions/download-artifact@v8
         with:
-          pattern: "*.iso"
+          pattern: '*.iso'
           path: artifacts/
           merge-multiple: true
 
       - name: Download IMG artifacts
         uses: actions/download-artifact@v8
         with:
-          pattern: "*.img"
+          pattern: '*.img'
           path: artifacts/
           merge-multiple: true
 

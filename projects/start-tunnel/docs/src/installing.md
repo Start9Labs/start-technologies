@@ -2,7 +2,7 @@
 
 Install StartTunnel on a Debian VPS by renting a server, running the one-line installer script, and initializing the web interface. The entire process takes just a few minutes.
 
-## Watch The Video 
+## Watch The Video
 
 <div class="yt-video" data-id="JGhBFZ0hNOU" data-title="Installing StartTunnel"></div>
 

@@ -32,7 +32,6 @@ One SSID, multiple passwords. One router, multiple isolated networks. The profil
 1. Enter a **Name** at the top of the dialog (e.g. "Admin", "Guest", "Children", "Smart Devices"). The Name field sits above three tabs — **LAN**, **WAN / Internet**, and **DNS**.
 
 1. On the **LAN** tab, configure local-network settings:
-
    - **Subnet** — Set the third octet of the profile's `/24` subnet. The first two octets are shown but locked; for example, a value of `2` creates the subnet `192.168.2.0/24`. They are locked because every profile must stay within the primary [LAN network block](lan.md)'s `/16` for cross-subnet routing to work — changing the LAN network block moves all profiles with it. Each profile must have a unique subnet. The gateway address is always `.1` within the subnet (e.g. `192.168.2.1`).
 
    - **Access control** — Controls which other profiles this profile can communicate with on the local network:
@@ -45,7 +44,6 @@ One SSID, multiple passwords. One router, multiple isolated networks. The profil
    - **Outbound Routing** — Choose how traffic from this profile reaches the Internet. Select **Direct** for direct Internet access, or **VPN** to route all traffic through an outbound VPN. Choosing VPN reveals an [Outbound VPN](outbound-vpn.md) client picker (disabled if you have no outbound VPN clients).
 
 1. On the **WAN / Internet** tab, configure Internet access:
-
    - **WAN Access** — Controls Internet access for devices on this profile:
      - **All** — Unrestricted Internet access.
      - **None** — No Internet access. Devices can only reach LAN resources permitted by the LAN access setting.
@@ -88,7 +86,6 @@ WAN Blackout is edited inline on the **WAN / Internet** tab of the profile creat
 1. The schedule is displayed as a 7-day visual timeline grid, with one row per day of the week.
 
 1. Click "Add" to create a block window:
-
    - Set the **start** and **end** times. Times use a 12-hour `HH:MM AM/PM` format, with a 15-minute quick-pick dropdown. A window may cross midnight (e.g. 10:00 PM to 6:00 AM). Setting the start time equal to the end time creates a full 24-hour window.
    - Select which **days** of the week the window applies to.
    - Click "Save".
@@ -107,10 +104,10 @@ Overlapping windows are rejected when you save. A schedule that covers the entir
 
 Here is an example of how a household might use Security Profiles:
 
-| Profile | WAN Access | LAN Access | DNS | Outbound Routing | WAN Blackout |
-|---------|------------|------------|-----|-------------------|----------|
-| **Admin** | All | All | Inherit | Mullvad VPN | — |
-| **Children** | All | Same profile | Custom (filtering) | DNS-filtering VPN | Block 9 PM - 7 AM |
-| **Guest** | All | Same profile | Inherit | Proton VPN | — |
-| **Smart Devices** | Whitelist | Same profile | Inherit | Direct | — |
-| **Shared Services** | None | Whitelist | Inherit | Direct | — |
+| Profile             | WAN Access | LAN Access   | DNS                | Outbound Routing  | WAN Blackout      |
+| ------------------- | ---------- | ------------ | ------------------ | ----------------- | ----------------- |
+| **Admin**           | All        | All          | Inherit            | Mullvad VPN       | —                 |
+| **Children**        | All        | Same profile | Custom (filtering) | DNS-filtering VPN | Block 9 PM - 7 AM |
+| **Guest**           | All        | Same profile | Inherit            | Proton VPN        | —                 |
+| **Smart Devices**   | Whitelist  | Same profile | Inherit            | Direct            | —                 |
+| **Shared Services** | None       | Whitelist    | Inherit            | Direct            | —                 |

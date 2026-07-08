@@ -38,9 +38,7 @@ impl FileSystem for HttpDirFS {
     ) -> Result<(), Error> {
         mount_httpdirfs(&self.url, mountpoint).await
     }
-    async fn source_hash(
-        &self,
-    ) -> Result<digest::Output<Sha256>, Error> {
+    async fn source_hash(&self) -> Result<digest::Output<Sha256>, Error> {
         let mut sha = Sha256::new();
         sha.update("HttpDirFS");
         sha.update(self.url.as_str());

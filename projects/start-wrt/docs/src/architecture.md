@@ -26,12 +26,12 @@ All persistent configuration lives in UCI files under `/etc/config/` — the sam
 
 When you create a [Security Profile](security-profiles.md), the backend orchestrates changes across multiple UCI config files:
 
-| UCI Config | What Changes |
-|------------|-------------|
-| `network` | New bridge interface, VLAN, and subnet |
+| UCI Config | What Changes                                             |
+| ---------- | -------------------------------------------------------- |
+| `network`  | New bridge interface, VLAN, and subnet                   |
 | `firewall` | New zone with inter-zone forwarding rules (fw4/nftables) |
-| `dhcp` | New DHCP server for the profile's subnet |
-| `wireless` | New PSK entry in `wpa_psk_file` (for Wi-Fi passwords) |
+| `dhcp`     | New DHCP server for the profile's subnet                 |
+| `wireless` | New PSK entry in `wpa_psk_file` (for Wi-Fi passwords)    |
 
 This is why the web interface never exposes raw VLANs or firewall rules — the profile abstraction handles all of it consistently. StartWRT's firewall is built on fw4/nftables, so any custom firewall rules you add must be written as nftables (fw4) rules.
 

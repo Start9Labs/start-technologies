@@ -2,20 +2,20 @@ name: Build and deploy docs
 
 on:
   push:
-    branches: ["master"]
+    branches: ['master']
     paths:
-      - "projects/start-docs/**"
-      - "projects/start-os/docs/**"
-      - "projects/start-tunnel/docs/**"
-      - "projects/start-sdk/docs/**"
-      - "projects/start-wrt/docs/**"
+      - 'projects/start-docs/**'
+      - 'projects/start-os/docs/**'
+      - 'projects/start-tunnel/docs/**'
+      - 'projects/start-sdk/docs/**'
+      - 'projects/start-wrt/docs/**'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: "deploy"
+  group: 'deploy'
   cancel-in-progress: false
 
 jobs:
@@ -30,7 +30,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: '22'
 
       - name: Install mdBook
         run: |

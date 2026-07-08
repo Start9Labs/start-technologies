@@ -1,6 +1,7 @@
+use std::collections::HashSet;
+
 use imbl_value::imbl::{vector, Vector};
 use imbl_value::Value;
-use std::collections::HashSet;
 
 pub(super) struct ValueWalker;
 

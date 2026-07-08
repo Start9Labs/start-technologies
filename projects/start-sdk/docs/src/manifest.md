@@ -19,16 +19,11 @@ export const short = {
 }
 
 export const long = {
-  en_US:
-    'Longer description explaining what the service does and its key features.',
-  es_ES:
-    'Descripcion mas larga que explica que hace el servicio y sus caracteristicas principales.',
-  de_DE:
-    'Langere Beschreibung, die erklart, was der Dienst tut und seine wichtigsten Funktionen.',
-  pl_PL:
-    'Dluzszy opis wyjasniajacy, co robi usluga i jej kluczowe funkcje.',
-  fr_FR:
-    'Description plus longue expliquant ce que fait le service et ses fonctionnalites principales.',
+  en_US: 'Longer description explaining what the service does and its key features.',
+  es_ES: 'Descripcion mas larga que explica que hace el servicio y sus caracteristicas principales.',
+  de_DE: 'Langere Beschreibung, die erklart, was der Dienst tut und seine wichtigsten Funktionen.',
+  pl_PL: 'Dluzszy opis wyjasniajacy, co robi usluga i jej kluczowe funkcje.',
+  fr_FR: 'Description plus longue expliquant ce que fait le service et ses fonctionnalites principales.',
 }
 ```
 
@@ -57,20 +52,20 @@ export const manifest = setupManifest({
 
 ## Required Fields
 
-| Field               | Description                                            |
-| ------------------- | ------------------------------------------------------ |
+| Field               | Description                                                                              |
+| ------------------- | ---------------------------------------------------------------------------------------- |
 | `id`                | Unique identifier (lowercase, hyphens allowed; `start-os` is reserved for the OS itself) |
-| `title`             | Display name shown in UI                               |
-| `license`           | SPDX identifier (`MIT`, `Apache-2.0`, `GPL-3.0`, etc.) |
-| `packageRepo`       | URL to the StartOS package repository                  |
-| `upstreamRepo`      | URL to the original project repository                 |
-| `marketingUrl`      | URL for the project's main website                     |
-| `donationUrl`       | Donation URL or `null`                                 |
-| `description.short` | Locale object (see `manifest/i18n.ts`)                 |
-| `description.long`  | Locale object (see `manifest/i18n.ts`)                 |
-| `volumes`           | Storage volumes (usually `['main']`)                   |
-| `images`            | Docker image configuration (including `arch`)          |
-| `dependencies`      | Service dependencies                                   |
+| `title`             | Display name shown in UI                                                                 |
+| `license`           | SPDX identifier (`MIT`, `Apache-2.0`, `GPL-3.0`, etc.)                                   |
+| `packageRepo`       | URL to the StartOS package repository                                                    |
+| `upstreamRepo`      | URL to the original project repository                                                   |
+| `marketingUrl`      | URL for the project's main website                                                       |
+| `donationUrl`       | Donation URL or `null`                                                                   |
+| `description.short` | Locale object (see `manifest/i18n.ts`)                                                   |
+| `description.long`  | Locale object (see `manifest/i18n.ts`)                                                   |
+| `volumes`           | Storage volumes (usually `['main']`)                                                     |
+| `images`            | Docker image configuration (including `arch`)                                            |
+| `dependencies`      | Service dependencies                                                                     |
 
 ## License
 
@@ -167,11 +162,11 @@ COPY upstream-project/ .
 
 The `arch` field accepts these values:
 
-| Value       | Architecture     |
-|-------------|------------------|
-| `x86_64`    | Intel/AMD 64-bit |
-| `aarch64`   | ARM 64-bit       |
-| `riscv64`   | RISC-V 64-bit    |
+| Value     | Architecture     |
+| --------- | ---------------- |
+| `x86_64`  | Intel/AMD 64-bit |
+| `aarch64` | ARM 64-bit       |
+| `riscv64` | RISC-V 64-bit    |
 
 Most services support `['x86_64', 'aarch64']`. Only add `riscv64` if the upstream image actually supports it. The `ARCHES` variable in the Makefile must align (see [Makefile](./makefile.md)).
 

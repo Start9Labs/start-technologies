@@ -277,7 +277,8 @@ where
 }
 impl NetworkInterfaceInfo {
     pub fn secure(&self) -> bool {
-        self.secure.unwrap_or_else(|| self.is_intrinsically_secure())
+        self.secure
+            .unwrap_or_else(|| self.is_intrinsically_secure())
     }
 
     // lo and lxcbr0 (the only Loopback/Bridge interfaces on StartOS) never leave the

@@ -15,7 +15,12 @@ export default tseslint.config({
     // `${sub.rootfs}` where rootfs is Promise<string> -> "[object Promise]"
     '@typescript-eslint/restrict-template-expressions': [
       'error',
-      { allowNumber: true, allowBoolean: true, allowNullish: true, allowRegExp: true },
+      {
+        allowNumber: true,
+        allowBoolean: true,
+        allowNullish: true,
+        allowRegExp: true,
+      },
     ],
   },
 })

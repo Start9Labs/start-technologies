@@ -16,12 +16,11 @@ use rustls::server::ClientHello;
 use rustls::ServerConfig;
 use rustls_pemfile::{certs, pkcs8_private_keys};
 use startos::net::ssl::{
-    CertBranding, SANInfo, gen_nistp256, make_int_cert, make_leaf_cert, make_root_cert,
-    should_use_cert,
+    gen_nistp256, make_int_cert, make_leaf_cert, make_root_cert, should_use_cert, CertBranding,
+    SANInfo,
 };
 use startos::net::tls::{TlsHandler, TlsHandlerAction};
 use startos::net::web_server::Accept;
-
 use uciedit::openwrt::NetworkInterface;
 use uciedit::{parse_all, Arena};
 
@@ -80,17 +79,23 @@ fn ensure_dirs() -> Result<(), Error> {
     // Create /etc/ssl/certs with world-readable
     let mut builder = fs::DirBuilder::new();
     builder.recursive(true).mode(0o755);
-    builder
-        .create(SSL_CERT_DIR)
-        .map_err(|e| Error::new(eyre!("failed to create {SSL_CERT_DIR}: {e}"), ErrorKind::Filesystem))?;
+    builder.create(SSL_CERT_DIR).map_err(|e| {
+        Error::new(
+            eyre!("failed to create {SSL_CERT_DIR}: {e}"),
+            ErrorKind::Filesystem,
+        )
+    })?;
 
     // Create /etc/ssl/private with restricted access — rebuild builder
     // to avoid applying 0o700 to the intermediate /etc/ssl/ directory
     let mut builder = fs::DirBuilder::new();
     builder.recursive(true).mode(0o700);
-    builder
-        .create(SSL_KEY_DIR)
-        .map_err(|e| Error::new(eyre!("failed to create {SSL_KEY_DIR}: {e}"), ErrorKind::Filesystem))?;
+    builder.create(SSL_KEY_DIR).map_err(|e| {
+        Error::new(
+            eyre!("failed to create {SSL_KEY_DIR}: {e}"),
+            ErrorKind::Filesystem,
+        )
+    })?;
 
     Ok(())
 }
@@ -107,9 +112,7 @@ fn startwrt_branding(root_ca_suffix: &str) -> CertBranding {
     CertBranding {
         organization: InternedString::intern("Start9"),
         organizational_unit: InternedString::intern("StartWRT"),
-        root_ca_cn: InternedString::intern(&format!(
-            "StartWRT Local Root CA {root_ca_suffix}"
-        )),
+        root_ca_cn: InternedString::intern(&format!("StartWRT Local Root CA {root_ca_suffix}")),
         intermediate_ca_cn: InternedString::intern("StartWRT Local Intermediate CA"),
     }
 }
@@ -162,10 +165,16 @@ fn generate_intermediate_ca(
     let cert = make_int_cert((&ca_key, &ca_cert), &key, &startwrt_branding(""))?;
 
     let cert_pem = String::from_utf8(cert.to_pem()?).map_err(|e| {
-        Error::new(eyre!("intermediate cert PEM is not UTF-8: {e}"), ErrorKind::OpenSsl)
+        Error::new(
+            eyre!("intermediate cert PEM is not UTF-8: {e}"),
+            ErrorKind::OpenSsl,
+        )
     })?;
     let key_pem = String::from_utf8(key.private_key_to_pem_pkcs8()?).map_err(|e| {
-        Error::new(eyre!("intermediate key PEM is not UTF-8: {e}"), ErrorKind::OpenSsl)
+        Error::new(
+            eyre!("intermediate key PEM is not UTF-8: {e}"),
+            ErrorKind::OpenSsl,
+        )
     })?;
     Ok((cert_pem, key_pem))
 }
@@ -213,6 +222,7 @@ fn generate_leaf_cert(
 /// Write a PEM file atomically, with the given permissions.
 async fn write_pem(path: &Path, content: &str, mode: u32) -> Result<(), Error> {
     use std::os::unix::fs::PermissionsExt;
+
     use tokio::io::AsyncWriteExt;
 
     let mut file = startos::util::io::AtomicFile::new(path, None::<&Path>)
@@ -221,9 +231,12 @@ async fn write_pem(path: &Path, content: &str, mode: u32) -> Result<(), Error> {
 
     // Set mode on the underlying temp file before writing
     let perms = std::fs::Permissions::from_mode(mode);
-    file.set_permissions(perms)
-        .await
-        .map_err(|e| Error::new(eyre!("failed to set temp file permissions: {e}"), ErrorKind::Filesystem))?;
+    file.set_permissions(perms).await.map_err(|e| {
+        Error::new(
+            eyre!("failed to set temp file permissions: {e}"),
+            ErrorKind::Filesystem,
+        )
+    })?;
 
     file.write_all(content.as_bytes())
         .await
@@ -291,7 +304,10 @@ pub async fn read_lan_ipv6_from_ubus() -> Option<Ipv6Addr> {
     }
 
     // Collect from ipv6-prefix-assignment local addresses
-    if let Some(arr) = json.get("ipv6-prefix-assignment").and_then(|v| v.as_array()) {
+    if let Some(arr) = json
+        .get("ipv6-prefix-assignment")
+        .and_then(|v| v.as_array())
+    {
         for entry in arr {
             if let Some(addr) = entry
                 .pointer("/local-address/address")
@@ -385,8 +401,12 @@ pub async fn ensure_intermediate_ca() -> Result<String, Error> {
     let key_path = int_key_path();
 
     if cert_path.exists() && key_path.exists() {
-        return fs::read_to_string(&cert_path)
-            .map_err(|e| Error::new(eyre!("failed to read intermediate cert: {e}"), ErrorKind::Filesystem));
+        return fs::read_to_string(&cert_path).map_err(|e| {
+            Error::new(
+                eyre!("failed to read intermediate cert: {e}"),
+                ErrorKind::Filesystem,
+            )
+        });
     }
 
     let ca_cert_pem = fs::read_to_string(ca_cert_path())
@@ -451,17 +471,34 @@ pub async fn ensure_server_cert(addrs: &LanAddresses) -> Result<(), Error> {
 
 /// Force-regenerate the server leaf cert (e.g. after LAN IP or IPv6 change).
 async fn generate_and_write_server_cert(addrs: &LanAddresses) -> Result<(), Error> {
-    let int_cert_pem = fs::read_to_string(int_cert_path())
-        .map_err(|e| Error::new(eyre!("failed to read intermediate cert: {e}"), ErrorKind::Filesystem))?;
-    let int_key_pem = fs::read_to_string(int_key_path())
-        .map_err(|e| Error::new(eyre!("failed to read intermediate key: {e}"), ErrorKind::Filesystem))?;
+    let int_cert_pem = fs::read_to_string(int_cert_path()).map_err(|e| {
+        Error::new(
+            eyre!("failed to read intermediate cert: {e}"),
+            ErrorKind::Filesystem,
+        )
+    })?;
+    let int_key_pem = fs::read_to_string(int_key_path()).map_err(|e| {
+        Error::new(
+            eyre!("failed to read intermediate key: {e}"),
+            ErrorKind::Filesystem,
+        )
+    })?;
     let ca_cert_pem = fs::read_to_string(ca_cert_path())
         .map_err(|e| Error::new(eyre!("failed to read CA cert: {e}"), ErrorKind::Filesystem))?;
 
     if let Some(ipv6) = addrs.ipv6 {
-        tracing::info!("generating server certificate for {}, {}, and {}", addrs.ipv4, ipv6, ROUTER_HOSTNAME);
+        tracing::info!(
+            "generating server certificate for {}, {}, and {}",
+            addrs.ipv4,
+            ipv6,
+            ROUTER_HOSTNAME
+        );
     } else {
-        tracing::info!("generating server certificate for {} and {}", addrs.ipv4, ROUTER_HOSTNAME);
+        tracing::info!(
+            "generating server certificate for {} and {}",
+            addrs.ipv4,
+            ROUTER_HOSTNAME
+        );
     }
     let (cert_pem, key_pem) = generate_leaf_cert(&int_cert_pem, &int_key_pem, &ca_cert_pem, addrs)?;
 
@@ -492,19 +529,39 @@ impl TlsMaterials {
     /// Read and parse the on-disk server cert and key. Used at startup to
     /// validate the files and to refresh them after regeneration.
     pub fn load_from_disk() -> Result<Self, Error> {
-        let cert_file = fs::File::open(server_cert_path())
-            .map_err(|e| Error::new(eyre!("failed to open server cert: {e}"), ErrorKind::Filesystem))?;
-        let key_file = fs::File::open(server_key_path())
-            .map_err(|e| Error::new(eyre!("failed to open server key: {e}"), ErrorKind::Filesystem))?;
+        let cert_file = fs::File::open(server_cert_path()).map_err(|e| {
+            Error::new(
+                eyre!("failed to open server cert: {e}"),
+                ErrorKind::Filesystem,
+            )
+        })?;
+        let key_file = fs::File::open(server_key_path()).map_err(|e| {
+            Error::new(
+                eyre!("failed to open server key: {e}"),
+                ErrorKind::Filesystem,
+            )
+        })?;
 
         let chain: Vec<_> = certs(&mut BufReader::new(cert_file))
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| Error::new(eyre!("failed to parse server cert: {e}"), ErrorKind::OpenSsl))?;
+            .map_err(|e| {
+                Error::new(
+                    eyre!("failed to parse server cert: {e}"),
+                    ErrorKind::OpenSsl,
+                )
+            })?;
 
         let key = pkcs8_private_keys(&mut BufReader::new(key_file))
             .next()
-            .ok_or_else(|| Error::new(eyre!("no private key found in server key file"), ErrorKind::OpenSsl))?
-            .map_err(|e| Error::new(eyre!("failed to parse server key: {e}"), ErrorKind::OpenSsl))?;
+            .ok_or_else(|| {
+                Error::new(
+                    eyre!("no private key found in server key file"),
+                    ErrorKind::OpenSsl,
+                )
+            })?
+            .map_err(|e| {
+                Error::new(eyre!("failed to parse server key: {e}"), ErrorKind::OpenSsl)
+            })?;
 
         Ok(Self {
             chain,
@@ -596,9 +653,17 @@ mod tests {
 
         // Verify it parses back and the CN carries the base label.
         let cert = X509::from_pem(cert_pem.as_bytes()).unwrap();
-        let cn = cert.subject_name().entries_by_nid(Nid::COMMONNAME).next().unwrap();
+        let cn = cert
+            .subject_name()
+            .entries_by_nid(Nid::COMMONNAME)
+            .next()
+            .unwrap();
         assert!(
-            cn.data().as_utf8().unwrap().to_string().starts_with("StartWRT Local Root CA "),
+            cn.data()
+                .as_utf8()
+                .unwrap()
+                .to_string()
+                .starts_with("StartWRT Local Root CA "),
             "Root CA CN missing base label"
         );
     }
@@ -635,14 +700,36 @@ mod tests {
         let int_cert = X509::from_pem(int_cert_pem.as_bytes()).unwrap();
 
         // Verify CN
-        let cn = int_cert.subject_name().entries_by_nid(Nid::COMMONNAME).next().unwrap();
-        assert_eq!(cn.data().as_utf8().unwrap().to_string(), "StartWRT Local Intermediate CA");
+        let cn = int_cert
+            .subject_name()
+            .entries_by_nid(Nid::COMMONNAME)
+            .next()
+            .unwrap();
+        assert_eq!(
+            cn.data().as_utf8().unwrap().to_string(),
+            "StartWRT Local Intermediate CA"
+        );
 
         // Verify issuer matches root CA subject
         let ca = X509::from_pem(ca_cert.as_bytes()).unwrap();
         assert_eq!(
-            int_cert.issuer_name().entries().next().unwrap().data().as_utf8().unwrap().to_string(),
-            ca.subject_name().entries().next().unwrap().data().as_utf8().unwrap().to_string(),
+            int_cert
+                .issuer_name()
+                .entries()
+                .next()
+                .unwrap()
+                .data()
+                .as_utf8()
+                .unwrap()
+                .to_string(),
+            ca.subject_name()
+                .entries()
+                .next()
+                .unwrap()
+                .data()
+                .as_utf8()
+                .unwrap()
+                .to_string(),
         );
 
         // Verify it has AKI and SKI
@@ -658,11 +745,15 @@ mod tests {
             ipv4: Ipv4Addr::new(192, 168, 0, 1),
             ipv6: None,
         };
-        let (cert_pem, key_pem) = generate_leaf_cert(&int_cert, &int_key, &ca_cert, &addrs).unwrap();
+        let (cert_pem, key_pem) =
+            generate_leaf_cert(&int_cert, &int_key, &ca_cert, &addrs).unwrap();
         assert!(key_pem.contains("BEGIN PRIVATE KEY"));
         // Chain should contain three certificates: leaf + intermediate + root CA
         let cert_count = cert_pem.matches("BEGIN CERTIFICATE").count();
-        assert_eq!(cert_count, 3, "chain should contain leaf + intermediate + root CA");
+        assert_eq!(
+            cert_count, 3,
+            "chain should contain leaf + intermediate + root CA"
+        );
     }
 
     #[test]
@@ -709,8 +800,16 @@ mod tests {
             }
         }
 
-        assert!(dns_names.contains(&ROUTER_HOSTNAME.to_string()), "missing router.lan DNS SAN");
-        assert_eq!(ip_addrs.len(), 2, "expected 2 IP SANs (IPv4 + IPv6), got {}", ip_addrs.len());
+        assert!(
+            dns_names.contains(&ROUTER_HOSTNAME.to_string()),
+            "missing router.lan DNS SAN"
+        );
+        assert_eq!(
+            ip_addrs.len(),
+            2,
+            "expected 2 IP SANs (IPv4 + IPv6), got {}",
+            ip_addrs.len()
+        );
         // IPv4 is 4 bytes, IPv6 is 16 bytes
         assert!(ip_addrs.iter().any(|ip| ip.len() == 4), "missing IPv4 SAN");
         assert!(ip_addrs.iter().any(|ip| ip.len() == 16), "missing IPv6 SAN");
@@ -730,7 +829,12 @@ mod tests {
         let sans = leaf.subject_alt_names().expect("missing SAN");
 
         let ip_addrs: Vec<_> = sans.iter().filter_map(|n| n.ipaddress()).collect();
-        assert_eq!(ip_addrs.len(), 1, "expected only 1 IP SAN (IPv4), got {}", ip_addrs.len());
+        assert_eq!(
+            ip_addrs.len(),
+            1,
+            "expected only 1 IP SAN (IPv4), got {}",
+            ip_addrs.len()
+        );
         assert_eq!(ip_addrs[0].len(), 4, "expected IPv4 (4 bytes)");
     }
 

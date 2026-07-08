@@ -22,7 +22,6 @@ The Wi-Fi password printed on the sticker on the bottom of your router is the de
 1. Click "Add".
 
 1. Configure the password:
-
    - **Label** — A descriptive name for this password (e.g. "Home", "Guest Network", "Kids").
    - **Password** — Enter a password (8–63 characters) or click "Generate" to create a strong random password.
    - **Security Profile** — Select the [Security Profile](security-profiles.md) this password should map to.
@@ -64,9 +63,9 @@ Configure the Wi-Fi radio hardware under `Points of Entry > Wi-Fi > Settings`:
 
 ## Example
 
-| Label | Password | Profile | Who uses it |
-|-------|----------|---------|-------------|
-| Default | *(sticker)* | Admin | You — full LAN and Internet access |
-| Guest | `Rv3kWpTm8xNqYb5J` | Guest | Visitors — Internet only, through Proton VPN |
-| Kids | `Dn7cXfHs4uEgAw2R` | Children | Your children — Internet during daytime only, with DNS filtering |
-| IoT | `Ym9pVtKe6jQrZh3F` | Smart Devices | IoT devices — limited Internet, no LAN access |
+| Label   | Password           | Profile       | Who uses it                                                      |
+| ------- | ------------------ | ------------- | ---------------------------------------------------------------- |
+| Default | _(sticker)_        | Admin         | You — full LAN and Internet access                               |
+| Guest   | `Rv3kWpTm8xNqYb5J` | Guest         | Visitors — Internet only, through Proton VPN                     |
+| Kids    | `Dn7cXfHs4uEgAw2R` | Children      | Your children — Internet during daytime only, with DNS filtering |
+| IoT     | `Ym9pVtKe6jQrZh3F` | Smart Devices | IoT devices — limited Internet, no LAN access                    |

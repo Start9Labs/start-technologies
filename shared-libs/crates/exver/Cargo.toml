@@ -1,7 +1,7 @@
 [package]
 authors = [
-    "Keagan McClelland <keagan@start9.com>",
-    "Aiden McClelland <aiden@start9.com>",
+  "Keagan McClelland <keagan@start9.com>",
+  "Aiden McClelland <aiden@start9.com>",
 ]
 description = "Semver extension with upstream and downstream versions. Designed for package distributors"
 documentation = "https://docs.rs/exver"
@@ -19,27 +19,27 @@ wasm-opt = false
 
 [features]
 default = []
-wasm = ["js-sys", "wasm-bindgen", "getrandom/js"]
 serde = ["dep:serde", "emver/serde"]
+wasm = ["js-sys", "wasm-bindgen", "getrandom/js"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
-emver = "0.1.5"
-smallvec = "1.13"
 either = "1.6"
+emver = "0.1.5"
 fp-core = "0.1"
-js-sys = { version = "0.3.69", optional = true }
 getrandom = "0.2.15"
 itertools = "0.13"
+js-sys = { version = "0.3.69", optional = true }
 memchr = "2.7"
 pest = "2.7"
 pest_derive = "2.7"
 serde = { version = "1", optional = true }
+smallvec = "1.13"
 wasm-bindgen = { version = "0.2", optional = true, features = [
-    "enable-interning",
+  "enable-interning",
 ] }
 yasi = { path = "../yasi" }
 

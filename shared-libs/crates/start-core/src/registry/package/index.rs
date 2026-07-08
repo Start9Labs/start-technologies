@@ -17,9 +17,7 @@ use crate::registry::device_info::DeviceInfo;
 use crate::rpc_continuations::Guid;
 use crate::s9pk::S9pk;
 use crate::s9pk::git_hash::GitHash;
-use crate::s9pk::manifest::{
-    Description, HardwareRequirements, LocaleString, current_version,
-};
+use crate::s9pk::manifest::{Description, HardwareRequirements, LocaleString, current_version};
 use crate::s9pk::merkle_archive::source::FileSource;
 use crate::service::effects::plugin::PluginId;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;

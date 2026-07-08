@@ -3,6 +3,7 @@
 Extended semver supporting **downstream versioning** (wrapper updates independent of upstream) and **flavors** (package fork variants).
 
 Two implementations exist:
+
 - **Rust crate** (`exver`) — used in `core/`. Source: https://github.com/Start9Labs/start-technologies/tree/master/shared-libs/crates/exver
 - **TypeScript** (`shared-libs/ts-modules/start-core/lib/exver/index.ts`, package `@start9labs/start-core`) — used in `sdk/` and `web/`
 
@@ -21,6 +22,7 @@ An **ExtendedVersion** string looks like:
 - **flavor** — optional lowercase ASCII prefix for fork variants
 
 Examples:
+
 - `1.2.3:0` — upstream 1.2.3, first downstream release
 - `1.2.3:2` — upstream 1.2.3, third downstream release
 - `#bitcoin:21.0:1` — bitcoin flavor, upstream 21.0, downstream 1
@@ -33,6 +35,7 @@ Examples:
 A semver-style version with arbitrary digit segments and optional prerelease.
 
 **Rust:**
+
 ```rust
 use exver::Version;
 
@@ -45,13 +48,14 @@ v.prerelease()  // &[]
 ```
 
 **TypeScript:**
+
 ```typescript
 const v = new Version([1, 2, 3], [])
-const v = Version.parse("1.2.3")
+const v = Version.parse('1.2.3')
 
-v.number      // number[]
-v.prerelease  // (string | number)[]
-v.compare(other)        // 'greater' | 'equal' | 'less'
+v.number // number[]
+v.prerelease // (string | number)[]
+v.compare(other) // 'greater' | 'equal' | 'less'
 v.compareForSort(other) // -1 | 0 | 1
 ```
 
@@ -62,6 +66,7 @@ Default: `0`
 The primary version type. Wraps upstream + downstream `Version` plus an optional flavor.
 
 **Rust:**
+
 ```rust
 use exver::ExtendedVersion;
 
@@ -83,21 +88,22 @@ ev.map_downstream(|v| ...)
 ```
 
 **TypeScript:**
+
 ```typescript
 const ev = new ExtendedVersion(null, upstream, downstream)
-const ev = ExtendedVersion.parse("1.2.3:0")
-const ev = ExtendedVersion.parseEmver("1.2.3.4")  // emver compat
+const ev = ExtendedVersion.parse('1.2.3:0')
+const ev = ExtendedVersion.parseEmver('1.2.3.4') // emver compat
 
-ev.flavor      // string | null
-ev.upstream    // Version
-ev.downstream  // Version
+ev.flavor // string | null
+ev.upstream // Version
+ev.downstream // Version
 
-ev.compare(other)        // 'greater' | 'equal' | 'less' | null
-ev.equals(other)         // boolean
-ev.greaterThan(other)    // boolean
-ev.lessThan(other)       // boolean
-ev.incrementMajor()      // new ExtendedVersion
-ev.incrementMinor()      // new ExtendedVersion
+ev.compare(other) // 'greater' | 'equal' | 'less' | null
+ev.equals(other) // boolean
+ev.greaterThan(other) // boolean
+ev.lessThan(other) // boolean
+ev.incrementMajor() // new ExtendedVersion
+ev.incrementMinor() // new ExtendedVersion
 ```
 
 **Ordering:** Versions with different flavors are **not comparable** (`PartialOrd`/`compare` returns `None`/`null`).
@@ -130,6 +136,7 @@ AsRef::<str>::as_ref(&vs);
 A predicate over `ExtendedVersion`. Supports comparison operators, boolean logic, and flavor constraints.
 
 **Rust:**
+
 ```rust
 use exver::VersionRange;
 
@@ -160,6 +167,7 @@ AllRange  // fold with and, empty = Any
 ```
 
 **TypeScript:**
+
 ```typescript
 // Constructors:
 VersionRange.any()
@@ -196,9 +204,10 @@ range.intersects(other)                      // boolean
 // Rust:
 version.satisfies(&range)  // bool
 ```
+
 ```typescript
 // TypeScript:
-version.satisfies(range)   // boolean
+version.satisfies(range) // boolean
 range.satisfiedBy(version) // boolean (convenience)
 ```
 
@@ -208,16 +217,16 @@ When no operator is specified in a range string, `^` (caret) is the default.
 
 ## Operators
 
-| Syntax | Rust | TS | Meaning |
-|--------|------|----|---------|
-| `=`    | `EQ` | `'='` | Equal |
-| `!=`   | `NEQ` | `'!='` | Not equal |
-| `>`    | `GT` | `'>'` | Greater than |
-| `>=`   | `GTE` | `'>='` | Greater than or equal |
-| `<`    | `LT` | `'<'` | Less than |
-| `<=`   | `LTE` | `'<='` | Less than or equal |
-| `^`    | expanded to `And(GTE, LT)` | `'^'` | Compatible (first non-zero digit unchanged) |
-| `~`    | expanded to `And(GTE, LT)` | `'~'` | Patch-level (minor unchanged) |
+| Syntax | Rust                       | TS     | Meaning                                     |
+| ------ | -------------------------- | ------ | ------------------------------------------- |
+| `=`    | `EQ`                       | `'='`  | Equal                                       |
+| `!=`   | `NEQ`                      | `'!='` | Not equal                                   |
+| `>`    | `GT`                       | `'>'`  | Greater than                                |
+| `>=`   | `GTE`                      | `'>='` | Greater than or equal                       |
+| `<`    | `LT`                       | `'<'`  | Less than                                   |
+| `<=`   | `LTE`                      | `'<='` | Less than or equal                          |
+| `^`    | expanded to `And(GTE, LT)` | `'^'`  | Compatible (first non-zero digit unchanged) |
+| `~`    | expanded to `And(GTE, LT)` | `'~'`  | Patch-level (minor unchanged)               |
 
 ## Flavor Rules
 
@@ -235,14 +244,17 @@ When no operator is specified in a range string, `^` (caret) is the default.
 **Smart constructor rules applied by `and`, `or`, `not`, and `reduce`:**
 
 `and`:
+
 - `and(Any, b) → b`, `and(a, Any) → a`
 - `and(None, _) → None`, `and(_, None) → None`
 
 `or`:
+
 - `or(Any, _) → Any`, `or(_, Any) → Any`
 - `or(None, b) → b`, `or(a, None) → a`
 
 `not`:
+
 - `not(=v) → !=v`, `not(!=v) → =v`
 - `not(and(a, b)) → or(not(a), not(b))` (De Morgan)
 - `not(or(a, b)) → and(not(a), not(b))` (De Morgan)
@@ -266,27 +278,29 @@ When no operator is specified in a range string, `^` (caret) is the default.
 5. **`VersionRangeTable.minterms()`** — Converts truth tables back into a VersionRange AST in [sum-of-products](https://en.wikipedia.org/wiki/Canonical_normal_form#Minterms) canonical form. Each `true` segment becomes a product term (conjunction of boundary constraints), and all terms are joined with `or`. Adjacent boundary points collapse into `=` anchors.
 
 **Example:** `normalize` can simplify:
+
 - `>=1.0.0:0 && <=1.0.0:0` → `=1.0.0:0`
 - `>=2.0.0:0 || >=1.0.0:0` → `>=1.0.0:0`
 - `!(!>=1.0.0:0)` → `>=1.0.0:0`
 
 **Also exposes:**
+
 - `satisfiable(): boolean` — returns `true` if there exists any version satisfying the range (checks if `collapse(tables())` is not `false`)
 - `intersects(other): boolean` — returns `true` if `and(this, other)` is satisfiable
 
 ## API Differences Between Rust and TypeScript
 
-| | Rust | TypeScript |
-|-|------|------------|
-| **`^` / `~`** | Expanded at construction to `And(GTE, LT)` | First-class operator on `Anchor` |
-| **`not()`** | Static, eagerly simplifies (De Morgan, double negation) | Instance method, just wraps |
-| **`and()`/`or()`** | Binary static | Both binary instance and variadic static |
-| **Normalization** | `reduce()` — shallow, one AST level | `normalize()` — deep canonical form via truth tables |
-| **Satisfiability** | Not available | `satisfiable()` and `intersects(other)` |
+|                             | Rust                                                                      | TypeScript                                                                              |
+| --------------------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| **`^` / `~`**               | Expanded at construction to `And(GTE, LT)`                                | First-class operator on `Anchor`                                                        |
+| **`not()`**                 | Static, eagerly simplifies (De Morgan, double negation)                   | Instance method, just wraps                                                             |
+| **`and()`/`or()`**          | Binary static                                                             | Both binary instance and variadic static                                                |
+| **Normalization**           | `reduce()` — shallow, one AST level                                       | `normalize()` — deep canonical form via truth tables                                    |
+| **Satisfiability**          | Not available                                                             | `satisfiable()` and `intersects(other)`                                                 |
 | **ExtendedVersion helpers** | `with_flavor()`, `without_flavor()`, `map_upstream()`, `map_downstream()` | `incrementMajor()`, `incrementMinor()`, `greaterThan()`, `lessThan()`, `equals()`, etc. |
-| **Monoid wrappers** | `AnyRange` (fold with `or`) and `AllRange` (fold with `and`) | Not present — use variadic static methods |
-| **`VersionString`** | Wrapper caching parsed + string form | Not present |
-| **Emver compat** | `From<emver::Version>` for `ExtendedVersion` | `ExtendedVersion.parseEmver()`, `VersionRange.parseEmver()` |
+| **Monoid wrappers**         | `AnyRange` (fold with `or`) and `AllRange` (fold with `and`)              | Not present — use variadic static methods                                               |
+| **`VersionString`**         | Wrapper caching parsed + string form                                      | Not present                                                                             |
+| **Emver compat**            | `From<emver::Version>` for `ExtendedVersion`                              | `ExtendedVersion.parseEmver()`, `VersionRange.parseEmver()`                             |
 
 ## Serde
 

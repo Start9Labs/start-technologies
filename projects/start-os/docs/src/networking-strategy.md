@@ -10,11 +10,11 @@ StartOS supports multiple networking strategies that can be used alone or in com
 
 **Censorship resistance** means a service cannot be taken offline by third parties — domain registrars, DNS providers, ISPs, or governments. Tor onion services are the strongest option here, since they rely on no centralized infrastructure. Clearnet services depend on DNS and domain registration, which can be seized or blocked. VPN is resistant to censorship but is primarily designed for private access rather than public hosting.
 
-|              | Security                   | Privacy                                                                                                                       | Censorship Resistance                                        |
-| ------------ | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| **Clearnet** | Strong (HTTPS/TLS)         | Low (router) / Medium ([StartTunnel](/start-tunnel/)) — gateway IP is public, but StartTunnel hides your home IP behind a VPS | Low — depends on DNS and domain registrar                    |
-| **Tor**      | Strong (onion routing)     | High — hides both server and client                                                                                           | High — no DNS, no domain, no port forwarding                 |
-| **VPN**      | Strong (WireGuard/OpenVPN) | High — service not publicly visible                                                                                           | N/A — private access only                                    |
+|              | Security                   | Privacy                                                                                                                       | Censorship Resistance                        |
+| ------------ | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| **Clearnet** | Strong (HTTPS/TLS)         | Low (router) / Medium ([StartTunnel](/start-tunnel/)) — gateway IP is public, but StartTunnel hides your home IP behind a VPS | Low — depends on DNS and domain registrar    |
+| **Tor**      | Strong (onion routing)     | High — hides both server and client                                                                                           | High — no DNS, no domain, no port forwarding |
+| **VPN**      | Strong (WireGuard/OpenVPN) | High — service not publicly visible                                                                                           | N/A — private access only                    |
 
 ## Common Misconceptions
 

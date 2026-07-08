@@ -232,7 +232,7 @@ The context lives once, at the workspace root — it is never copied into your p
 
 Workspaces can be nested — running `init-workspace` inside another workspace is fine. When `start-cli` needs a workspace's signing key or targets (building, signing, reading `host`/`registry`), it walks **up** from the current directory and uses the nearest `.startos/`. So an inner workspace transparently overrides an outer one, and settings you don't override are inherited from above — conceptually a deep merge of every `.startos/` on the path, innermost first.
 
-The one thing `init-workspace` refuses is running **inside a package repo**: a workspace is the directory that *holds* package repos, not a package itself. If you already have package repos, run `init-workspace` in the directory that contains them (their parent); building, signing, and publishing then walk up to find the workspace. Starting fresh, run it in a new directory, then `start-cli s9pk init-package` inside it.
+The one thing `init-workspace` refuses is running **inside a package repo**: a workspace is the directory that _holds_ package repos, not a package itself. If you already have package repos, run `init-workspace` in the directory that contains them (their parent); building, signing, and publishing then walk up to find the workspace. Starting fresh, run it in a new directory, then `start-cli s9pk init-package` inside it.
 
 Until a workspace exists, `make` / `s9pk pack` / `s9pk publish` fail with a message pointing you to `init-workspace` — packaging is designed around the workspace (and its AI guide), so there is no build-key to sign with until you create one.
 
@@ -290,4 +290,3 @@ git -C start-technologies pull --ff-only
 There's no separate update command — re-running `init-workspace` on an existing workspace just fills in anything missing, and your `AGENTS.local.md` is never touched.
 
 Your environment is ready. Continue to [Quick Start](./quick-start.md) to scaffold and build your first package inside the workspace.
-

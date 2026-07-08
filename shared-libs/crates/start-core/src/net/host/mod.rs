@@ -447,7 +447,10 @@ impl Model<Host> {
                 });
             }
 
-            range.as_addresses_mut().as_available_mut().ser(&available)?;
+            range
+                .as_addresses_mut()
+                .as_available_mut()
+                .ser(&available)?;
         }
 
         // compute port forwards from enabled public addresses. A non-exported

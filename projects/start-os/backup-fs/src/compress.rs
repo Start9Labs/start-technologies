@@ -169,7 +169,10 @@ mod tests {
         let big = vec![0u8; 1 << 20];
         let c = compress(&big, Codec::Zstd(9));
         assert_eq!(c[0], TAG_ZSTD);
-        assert!(decompress(&c, 4096).is_err(), "expansion past cap must error");
+        assert!(
+            decompress(&c, 4096).is_err(),
+            "expansion past cap must error"
+        );
         // The same frame decodes fine under an adequate ceiling.
         assert_eq!(decompress(&c, 1 << 20).unwrap(), big);
     }

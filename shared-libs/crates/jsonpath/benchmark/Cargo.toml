@@ -1,13 +1,13 @@
 [package]
-name = "jsonpath_lib_benches"
-version = "0.1.0"
 authors = ["Changseok Han <freestrings@gmail.com>"]
 description = "jsonpath_lib benchmark"
 license = "MIT"
+name = "jsonpath_lib_benches"
+version = "0.1.0"
 [dependencies]
+jsonpath_lib = { path = "../" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
-jsonpath_lib = { path = "../" }
 
 [dev-dependencies]
 bencher = "0.1.5"

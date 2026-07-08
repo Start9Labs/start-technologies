@@ -4,7 +4,7 @@ When you release a new version of your package, users upgrading from older versi
 
 ## Solution
 
-Define a `VersionGraph` with a `current` version and an array of `other` (previous) versions. Each version has `up` and `down` migration functions. Use `IMPOSSIBLE` for directions that can't be migrated. The `up` migration transforms old config, moves files, or runs `storeJson.merge(effects, {})` to apply new zod defaults. Only versions that users might be upgrading *from* need entries in the `other` array.
+Define a `VersionGraph` with a `current` version and an array of `other` (previous) versions. Each version has `up` and `down` migration functions. Use `IMPOSSIBLE` for directions that can't be migrated. The `up` migration transforms old config, moves files, or runs `storeJson.merge(effects, {})` to apply new zod defaults. Only versions that users might be upgrading _from_ need entries in the `other` array.
 
 The latest version always lives in `startos/versions/current.ts`. Adding a migration is the one case where you create a new file: rename the existing `current.ts` to the version it holds (e.g. `v2.3.2_1.ts`), add that version to `other`, then write a fresh `current.ts` carrying the new version and its `up`/`down` migration. Bumps that need no migration just edit `current.ts` in place. See [Versions — When to Create a New Version File](versions.md#when-to-create-a-new-version-file).
 

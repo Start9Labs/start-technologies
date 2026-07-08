@@ -6,7 +6,6 @@ After [installing StartOS](installing-startos.md), follow these steps to initial
 
 <div class="yt-video" data-id="S5v0LW3BNj4" data-title="Initial Setup"></div>
 
-
 1. Connect your server to power and Ethernet.
 
    > [!IMPORTANT]

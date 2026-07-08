@@ -16,15 +16,15 @@ CLAUDE.md is a one-line `@AGENTS.md` import. See [ARCHITECTURE.md](./ARCHITECTUR
 
 ## Build & test (run from the monorepo root, not this dir)
 
-| Command | What |
-|---------|------|
-| `cargo build -p start-registry --bin registrybox` | build the binary (host target, debug) |
-| `cargo check -p start-registry` | fast type-check (linux only locally) |
-| `cargo clippy -p start-registry` | lints |
-| `cargo test -p start-core registry` | exercise the registry logic (lives in start-core) |
-| `make start-registry-format` | format (`make start-registry-format-check` for the read-only CI check) |
-| `make start-registry` | release musl build via `shared-libs/crates/start-core/build/build-registrybox.sh` |
-| `make start-registry-install DESTDIR=…` | stage binary + symlinks + service |
+| Command                                           | What                                                                              |
+| ------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `cargo build -p start-registry --bin registrybox` | build the binary (host target, debug)                                             |
+| `cargo check -p start-registry`                   | fast type-check (linux only locally)                                              |
+| `cargo clippy -p start-registry`                  | lints                                                                             |
+| `cargo test -p start-core registry`               | exercise the registry logic (lives in start-core)                                 |
+| `make start-registry-format`                      | format (`make start-registry-format-check` for the read-only CI check)            |
+| `make start-registry`                             | release musl build via `shared-libs/crates/start-core/build/build-registrybox.sh` |
+| `make start-registry-install DESTDIR=…`           | stage binary + symlinks + service                                                 |
 
 Because the code lives in `start-core`, most meaningful tests and lints target `-p start-core`, not `-p start-registry`. The thin wrapper mainly verifies that the bin links.
 
@@ -43,6 +43,7 @@ Feature flags are forwarded to `start-core`: `beta`, `console`, `dev`, `test`, `
 ## Multi-call binary
 
 `registrybox` dispatches on `argv[0]`:
+
 - `start-registryd` → server daemon (`registry::main`)
 - `start-registry` → CLI client (`registry::cli`)
 

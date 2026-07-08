@@ -45,11 +45,11 @@ projects/start-tunnel/
 
 The single `tunnelbox` binary is installed as three symlinks:
 
-| Command         | Role                                   |
-| --------------- | -------------------------------------- |
-| `start-tunneld` | the long-running daemon (systemd)      |
-| `start-tunnel`  | the management CLI / RPC client        |
-| `tunnelbox`     | the multi-call binary itself           |
+| Command         | Role                              |
+| --------------- | --------------------------------- |
+| `start-tunneld` | the long-running daemon (systemd) |
+| `start-tunnel`  | the management CLI / RPC client   |
+| `tunnelbox`     | the multi-call binary itself      |
 
 ## Quickstart
 

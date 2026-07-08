@@ -244,7 +244,10 @@ pub fn cli(args: impl IntoIterator<Item = OsString>) {
 #[test]
 fn export_manpage_start_tunnel() {
     // Pages live with the start-tunnel product; anchored to start-core's crate dir.
-    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../projects/start-tunnel/man");
+    let dir = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../projects/start-tunnel/man"
+    );
     std::fs::create_dir_all(dir).unwrap();
     clap_mangen::generate_to(app().into_command(), dir).unwrap();
 }

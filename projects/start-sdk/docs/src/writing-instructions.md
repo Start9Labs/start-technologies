@@ -2,20 +2,20 @@
 
 `instructions.md` is a required file at the root of every StartOS package, alongside `README.md`. Its contents are packed into the s9pk archive and surfaced to the user under the **Instructions** tab on the service details page in StartOS.
 
-Instructions are **for the human running the service** — not for developers, not for AI assistants. They pick up where the marketplace listing left off: by the time someone reads this tab they have seen the short and long description and clicked Install, so don't reintroduce the service. Orient them to what it does *on StartOS*, walk them through getting it usefully running, and point them at upstream documentation when they need to go deeper.
+Instructions are **for the human running the service** — not for developers, not for AI assistants. They pick up where the marketplace listing left off: by the time someone reads this tab they have seen the short and long description and clicked Install, so don't reintroduce the service. Orient them to what it does _on StartOS_, walk them through getting it usefully running, and point them at upstream documentation when they need to go deeper.
 
 ## Instructions vs. README — they are not the same file
 
 It is tempting to treat `instructions.md` as a copy of the README. Resist this. The two files serve different audiences and answer different questions.
 
-| | README | instructions.md |
-|---|---|---|
-| **Audience** | Developers, AI assistants, contributors | End users running the service on StartOS |
-| **Question it answers** | "How does this package work, and how does it differ from running the upstream service directly?" | "I just installed this — now what? How do I use it on StartOS?" |
-| **Tone** | Technical, structured, scannable for parsing | Practical, instructional, written in second person |
-| **Versions / image tags** | Avoided (manifest is source of truth) | Avoided for the same reason |
-| **Upstream behavior** | "Anything not listed here behaves as upstream documents" | Linked from the Documentation section; never duplicated |
-| **Surfaced where** | The package repository on GitHub | Inside the StartOS UI, post-install |
+|                           | README                                                                                           | instructions.md                                                 |
+| ------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
+| **Audience**              | Developers, AI assistants, contributors                                                          | End users running the service on StartOS                        |
+| **Question it answers**   | "How does this package work, and how does it differ from running the upstream service directly?" | "I just installed this — now what? How do I use it on StartOS?" |
+| **Tone**                  | Technical, structured, scannable for parsing                                                     | Practical, instructional, written in second person              |
+| **Versions / image tags** | Avoided (manifest is source of truth)                                                            | Avoided for the same reason                                     |
+| **Upstream behavior**     | "Anything not listed here behaves as upstream documents"                                         | Linked from the Documentation section; never duplicated         |
+| **Surfaced where**        | The package repository on GitHub                                                                 | Inside the StartOS UI, post-install                             |
 
 If your README is a reference manual, your instructions are a quick-start guide for a non-developer who just clicked Install.
 
@@ -23,7 +23,7 @@ If your README is a reference manual, your instructions are a quick-start guide 
 
 A good `instructions.md` covers, roughly in this order:
 
-1. **A brief orientation — usually skip it.** The reader already saw the marketplace short and long description before clicking Install, so don't restate them. The default is to omit this section and go straight to **Documentation**. Add a line only if there is genuinely new context the listing did not cover — a hard ordering constraint, a permanent decision the user is about to make, or similar. "You've installed X" framing is *not* useful; the reader knows. Don't pad.
+1. **A brief orientation — usually skip it.** The reader already saw the marketplace short and long description before clicking Install, so don't restate them. The default is to omit this section and go straight to **Documentation**. Add a line only if there is genuinely new context the listing did not cover — a hard ordering constraint, a permanent decision the user is about to make, or similar. "You've installed X" framing is _not_ useful; the reader knows. Don't pad.
 
 2. **Documentation links.** A `## Documentation` section. Port exactly the URLs the manifest previously carried in its `docsUrls` array, each with a few words on what it is ("the upstream admin guide", "the official Foo configuration reference"). Do not add marketing, donation, project-home, or support-channel links — those live elsewhere and were deliberately omitted from `docsUrls`. Link to canonical, stable URLs the upstream maintains — not specific commits, not your own README.
 
@@ -43,8 +43,8 @@ A good `instructions.md` covers, roughly in this order:
 - **A restatement of the marketplace description.** The reader saw the short and long description before installing — opening with "Foo is a self-hosted bar" wastes their time. Start from "now what."
 - **"You've installed X" or any other orientation that tells the reader something they already know.** They installed it; that's why they're on this tab.
 - **Install or download steps.** They've already installed the service. Begin at first launch.
-- **How StartOS itself works.** The interface panel's copy-address / QR-code / LAN-Tor-domain controls, the Dashboard and Instructions tabs, how backups and updates work, how to start or stop a service — these are platform features a user learns once, not per-package. Mention only what's specific to *this* service: which interfaces it exposes and what each is for, which actions it adds and when to run them. Naming a screen to send the user to ("open it from the **Dashboard** tab") is fine; explaining what that screen is, isn't.
-- **Invented navigation paths.** Don't guess at how to reach a UI surface. Reference only screens, tabs, and tables that actually exist in StartOS for *this* service. "Set X in the network settings" is wrong if there is no such page; "add the domain on the Homeserver interface" is right if that's where it actually lives.
+- **How StartOS itself works.** The interface panel's copy-address / QR-code / LAN-Tor-domain controls, the Dashboard and Instructions tabs, how backups and updates work, how to start or stop a service — these are platform features a user learns once, not per-package. Mention only what's specific to _this_ service: which interfaces it exposes and what each is for, which actions it adds and when to run them. Naming a screen to send the user to ("open it from the **Dashboard** tab") is fine; explaining what that screen is, isn't.
+- **Invented navigation paths.** Don't guess at how to reach a UI surface. Reference only screens, tabs, and tables that actually exist in StartOS for _this_ service. "Set X in the network settings" is wrong if there is no such page; "add the domain on the Homeserver interface" is right if that's where it actually lives.
 - **Hidden actions.** Actions marked `visibility: 'hidden'` in source — typically those invoked by the platform or by another package's plugin handshake — are not user-facing. Do not list them, even to "explain" them.
 - **Status preconditions for critical tasks.** A critical task suspends every other control: the user does not see a Start / Stop / Run button while the task is required, only the task. Telling them "the service must be stopped" or "start the service first" before running a critical task is not just noise, it's wrong.
 - **Platform plumbing the user can't act on.** "Registration is typically triggered automatically by the bridge service" tells the reader nothing they can do with the information. If they'd never act on a sentence, cut it.

@@ -12,15 +12,19 @@ build-dir = "book"
 [output]
 
 [output.html]
-sidebar-header-nav = true
-admonitions = true
-no-section-label = false
-default-theme = "ayu"
-preferred-dark-theme = "ayu"
 additional-css = ["./theme/youtube.css", "./theme/tabs.css", "./accent.css"]
-additional-js = ["./theme/youtube.js", "./theme/tabs.js", "./theme/home-link.js"]
-git-repository-url = "https://github.com/Start9Labs/start-technologies"
+additional-js = [
+  "./theme/youtube.js",
+  "./theme/tabs.js",
+  "./theme/home-link.js",
+]
+admonitions = true
+default-theme = "ayu"
 edit-url-template = "https://github.com/Start9Labs/start-technologies/edit/master/projects/start-sdk/docs/{path}"
+git-repository-url = "https://github.com/Start9Labs/start-technologies"
+no-section-label = false
+preferred-dark-theme = "ayu"
+sidebar-header-nav = true
 site-url = "/packaging/"
 
 [output.html.fold]

@@ -1,8 +1,8 @@
-name: "Free Disk Space"
-description: "Removes unnecessary files to free up disk space"
+name: 'Free Disk Space'
+description: 'Removes unnecessary files to free up disk space'
 
 runs:
-  using: "composite"
+  using: 'composite'
   steps:
     - name: Free up disk space
       run: |

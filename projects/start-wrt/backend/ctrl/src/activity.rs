@@ -1,12 +1,14 @@
-use crate::prelude::*;
-use crate::utils::HandlerExtSerde;
-use crate::{CliContext, ServerContext};
+use std::sync::{LazyLock, Mutex};
+
 use clap::Parser;
 use rpc_toolkit::{from_fn_async, HandlerExt as _, ParentHandler};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
-use std::sync::{LazyLock, Mutex};
 use tracing::instrument;
+
+use crate::prelude::*;
+use crate::utils::HandlerExtSerde;
+use crate::{CliContext, ServerContext};
 
 const ACTIVITY_DIR: &str = "/etc/startwrt";
 #[cfg(not(test))]
@@ -226,7 +228,12 @@ async fn list(
 
     let total: usize = conn
         .query_row("SELECT COUNT(*) FROM activity", [], |row| row.get(0))
-        .map_err(|e| Error::new(eyre!("failed to count activity: {e}"), ErrorKind::Filesystem))?;
+        .map_err(|e| {
+            Error::new(
+                eyre!("failed to count activity: {e}"),
+                ErrorKind::Filesystem,
+            )
+        })?;
 
     let mut stmt = conn
         .prepare(
@@ -247,9 +254,19 @@ async fn list(
                 error: row.get(6)?,
             })
         })
-        .map_err(|e| Error::new(eyre!("failed to query activity: {e}"), ErrorKind::Filesystem))?
+        .map_err(|e| {
+            Error::new(
+                eyre!("failed to query activity: {e}"),
+                ErrorKind::Filesystem,
+            )
+        })?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| Error::new(eyre!("failed to read activity row: {e}"), ErrorKind::Filesystem))?;
+        .map_err(|e| {
+            Error::new(
+                eyre!("failed to read activity row: {e}"),
+                ErrorKind::Filesystem,
+            )
+        })?;
 
     Ok(ActivityListResponse { entries, total })
 }
@@ -263,9 +280,17 @@ async fn delete(
         .lock()
         .map_err(|e| Error::new(eyre!("lock poisoned: {e}"), ErrorKind::Incoherent))?;
     conn.execute("DELETE FROM activity WHERE id = ?1", [id])
-        .map_err(|e| Error::new(eyre!("failed to delete activity: {e}"), ErrorKind::Filesystem))?;
+        .map_err(|e| {
+            Error::new(
+                eyre!("failed to delete activity: {e}"),
+                ErrorKind::Filesystem,
+            )
+        })?;
     if conn.changes() == 0 {
-        return Err(Error::new(eyre!("Activity entry not found"), ErrorKind::NotFound));
+        return Err(Error::new(
+            eyre!("Activity entry not found"),
+            ErrorKind::NotFound,
+        ));
     }
     Ok(())
 }
@@ -275,8 +300,12 @@ async fn clear(_ctx: ServerContext) -> Result<(), Error> {
     let conn = DB
         .lock()
         .map_err(|e| Error::new(eyre!("lock poisoned: {e}"), ErrorKind::Incoherent))?;
-    conn.execute("DELETE FROM activity", [])
-        .map_err(|e| Error::new(eyre!("failed to clear activity: {e}"), ErrorKind::Filesystem))?;
+    conn.execute("DELETE FROM activity", []).map_err(|e| {
+        Error::new(
+            eyre!("failed to clear activity: {e}"),
+            ErrorKind::Filesystem,
+        )
+    })?;
     Ok(())
 }
 

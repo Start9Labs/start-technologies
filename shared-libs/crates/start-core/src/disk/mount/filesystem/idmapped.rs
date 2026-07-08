@@ -119,9 +119,7 @@ impl<Fs: FileSystem> FileSystem for IdMapped<Fs> {
 
         Ok(())
     }
-    async fn source_hash(
-        &self,
-    ) -> Result<digest::Output<Sha256>, Error> {
+    async fn source_hash(&self) -> Result<digest::Output<Sha256>, Error> {
         let mut sha = Sha256::new();
         sha.update("IdMapped");
         sha.update(self.filesystem.source_hash().await?);

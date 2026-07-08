@@ -1,3 +1,15 @@
+use std::collections::{HashMap, HashSet};
+use std::net::{Ipv4Addr, Ipv6Addr};
+
+use imbl_value::Value;
+use rpc_toolkit::{from_fn_async_local, HandlerExt as _, ParentHandler};
+use serde::{Deserialize, Serialize};
+use uciedit::openwrt::{
+    DhcpHost, FirewallRedirect, FirewallRule, FirewallTarget, FirewallZone, InterfaceProto,
+    NetworkInterface,
+};
+use uciedit::{dump_all, parse_all, Arena, Configs};
+
 use crate::devices::{self, Device, DeviceStatus};
 use crate::error::ErrorKind;
 use crate::invoke::Invoke;
@@ -5,17 +17,6 @@ use crate::prelude::*;
 use crate::profiles::Lookup;
 use crate::utils::{DeserializeStdin, HandlerExtSerde};
 use crate::{CliContext, CtrlContext, Error, ServerContext};
-use imbl_value::Value;
-use rpc_toolkit::{from_fn_async_local, HandlerExt as _, ParentHandler};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::net::{Ipv4Addr, Ipv6Addr};
-use uciedit::openwrt::{
-    DhcpHost, FirewallRedirect, FirewallRule, FirewallTarget, FirewallZone, InterfaceProto,
-    NetworkInterface,
-};
-use uciedit::{dump_all, parse_all, Arena, Configs};
 
 pub fn published_ports<C: CtrlContext>() -> ParentHandler<C> {
     ParentHandler::new()
@@ -398,24 +399,42 @@ fn validate_id(s: &str) -> bool {
 fn validate_inputs(ports: &[PublishedPortInput]) -> Result<(), Error> {
     for port in ports {
         if !validate_id(&port.id) {
-            return Err(Error::new(eyre!("invalid id: {}", port.id), ErrorKind::InvalidValue));
+            return Err(Error::new(
+                eyre!("invalid id: {}", port.id),
+                ErrorKind::InvalidValue,
+            ));
         }
         if port.label.trim().is_empty() {
-            return Err(Error::new(eyre!("invalid label: {}", port.label), ErrorKind::InvalidValue));
+            return Err(Error::new(
+                eyre!("invalid label: {}", port.label),
+                ErrorKind::InvalidValue,
+            ));
         }
         if !port.device_mac.is_empty() && !validate_mac(&port.device_mac) {
-            return Err(Error::new(eyre!("invalid device_mac: {}", port.device_mac), ErrorKind::InvalidValue));
+            return Err(Error::new(
+                eyre!("invalid device_mac: {}", port.device_mac),
+                ErrorKind::InvalidValue,
+            ));
         }
         if !validate_port_or_range(&port.ports) {
-            return Err(Error::new(eyre!("invalid ports: {}", port.ports), ErrorKind::InvalidValue));
+            return Err(Error::new(
+                eyre!("invalid ports: {}", port.ports),
+                ErrorKind::InvalidValue,
+            ));
         }
         if let Some(ref pub_port) = port.ipv4_public_port {
             if !validate_port_or_range(pub_port) {
-                return Err(Error::new(eyre!("invalid ipv4_public_port: {pub_port}"), ErrorKind::InvalidValue));
+                return Err(Error::new(
+                    eyre!("invalid ipv4_public_port: {pub_port}"),
+                    ErrorKind::InvalidValue,
+                ));
             }
         }
         if port.source != "any" && !validate_source(&port.source) {
-            return Err(Error::new(eyre!("invalid source: {}", port.source), ErrorKind::InvalidValue));
+            return Err(Error::new(
+                eyre!("invalid source: {}", port.source),
+                ErrorKind::InvalidValue,
+            ));
         }
     }
     Ok(())
@@ -664,7 +683,9 @@ fn uuid_v4() -> String {
         u16::from_be_bytes([bytes[4], bytes[5]]),
         u16::from_be_bytes([bytes[6], bytes[7]]),
         u16::from_be_bytes([bytes[8], bytes[9]]),
-        u64::from_be_bytes([0, 0, bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]]),
+        u64::from_be_bytes([
+            0, 0, bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
+        ]),
     )
 }
 
@@ -758,7 +779,14 @@ pub async fn set<C: CtrlContext>(
                     .map(|i| (i.ipv4.as_ref(), i.ipv6.as_ref()))
                     .unwrap_or((None, None));
                 if port.ipv4 && ipv4_addr.is_none() {
-                    return Err(Error::new(eyre!("missing IPv4 address for device {} (port forward '{}')", port.device_mac, port.label), ErrorKind::MissingDeviceAddress));
+                    return Err(Error::new(
+                        eyre!(
+                            "missing IPv4 address for device {} (port forward '{}')",
+                            port.device_mac,
+                            port.label
+                        ),
+                        ErrorKind::MissingDeviceAddress,
+                    ));
                 }
                 // IPv6 publishing requires a Global Unicast Address: ULA and
                 // link-local are unreachable from the WAN, so a rule for them is
@@ -865,8 +893,7 @@ pub async fn set<C: CtrlContext>(
                         dns: Some("1".to_string()),
                         ..Default::default()
                     };
-                    let section_name =
-                        format!("host_{}", mac.replace(':', "").to_lowercase());
+                    let section_name = format!("host_{}", mac.replace(':', "").to_lowercase());
                     cfgs["dhcp"].append(&host, Some(&section_name))?;
                     dhcp_modified = true;
                 }
@@ -979,7 +1006,13 @@ pub async fn set<C: CtrlContext>(
                 continue;
             }
             Err(err) => {
-                crate::activity::log("published-ports", "updated", false, "Failed to update published ports", Some(&err.to_string()));
+                crate::activity::log(
+                    "published-ports",
+                    "updated",
+                    false,
+                    "Failed to update published ports",
+                    Some(&err.to_string()),
+                );
                 return Err(err.into());
             }
             Ok(()) => {
@@ -992,7 +1025,13 @@ pub async fn set<C: CtrlContext>(
                         reload_odhcpd();
                     }
                 }
-                crate::activity::log("published-ports", "updated", true, &format!("Updated published ports ({} rules)", req.ports.len()), None);
+                crate::activity::log(
+                    "published-ports",
+                    "updated",
+                    true,
+                    &format!("Updated published ports ({} rules)", req.ports.len()),
+                    None,
+                );
                 return Ok(());
             }
         }
@@ -1064,9 +1103,7 @@ pub async fn reconcile<C: CtrlContext>(ctx: C) -> Result<Value, Error> {
         let device_ipv6: HashMap<String, String> = resolve_device_info_for_macs(v6_macs)
             .await
             .into_iter()
-            .filter_map(|(mac, info)| {
-                info.ipv6.filter(|a| is_gua(a)).map(|gua| (mac, gua))
-            })
+            .filter_map(|(mac, info)| info.ipv6.filter(|a| is_gua(a)).map(|gua| (mac, gua)))
             .collect();
 
         let changed = rewrite_v6_dest_ips(&mut cfgs, prefix, prefix_len, &device_ipv6, &hostids)?;
@@ -1080,12 +1117,24 @@ pub async fn reconcile<C: CtrlContext>(ctx: C) -> Result<Value, Error> {
                 continue;
             }
             Err(err) => {
-                crate::activity::log("published-ports", "reconciled", false, "Failed to reconcile IPv6 published ports", Some(&err.to_string()));
+                crate::activity::log(
+                    "published-ports",
+                    "reconciled",
+                    false,
+                    "Failed to reconcile IPv6 published ports",
+                    Some(&err.to_string()),
+                );
                 return Err(err.into());
             }
             Ok(()) => {
                 restart_firewall();
-                crate::activity::log("published-ports", "reconciled", true, &format!("Reconciled {changed} IPv6 published port(s) to new prefix"), None);
+                crate::activity::log(
+                    "published-ports",
+                    "reconciled",
+                    true,
+                    &format!("Reconciled {changed} IPv6 published port(s) to new prefix"),
+                    None,
+                );
                 return Ok(Value::Null);
             }
         }
@@ -1169,22 +1218,15 @@ struct DeviceNetInfo {
 }
 
 /// Resolve IPv4/IPv6 addresses and ARP interface for devices referenced by published ports.
-async fn resolve_device_info(
-    ports: &[PublishedPortInput],
-) -> HashMap<String, DeviceNetInfo> {
-    let macs: HashSet<String> = ports
-        .iter()
-        .map(|p| p.device_mac.to_uppercase())
-        .collect();
+async fn resolve_device_info(ports: &[PublishedPortInput]) -> HashMap<String, DeviceNetInfo> {
+    let macs: HashSet<String> = ports.iter().map(|p| p.device_mac.to_uppercase()).collect();
     resolve_device_info_for_macs(macs).await
 }
 
 /// Core of [`resolve_device_info`], keyed directly on uppercased MACs so callers
 /// that work from firewall sections (e.g. `reconcile`) can drive it without
 /// synthesising `PublishedPortInput`s.
-async fn resolve_device_info_for_macs(
-    macs: HashSet<String>,
-) -> HashMap<String, DeviceNetInfo> {
+async fn resolve_device_info_for_macs(macs: HashSet<String>) -> HashMap<String, DeviceNetInfo> {
     let mut result: HashMap<String, DeviceNetInfo> = HashMap::new();
 
     if macs.is_empty() {
@@ -1237,9 +1279,7 @@ async fn resolve_device_info_for_macs(
                                 .or_default()
                                 .push(ip.to_string());
                         } else {
-                            arp_ipv4
-                                .entry(mac_upper)
-                                .or_insert_with(|| ip.to_string());
+                            arp_ipv4.entry(mac_upper).or_insert_with(|| ip.to_string());
                         }
                     }
                 }
@@ -1251,8 +1291,7 @@ async fn resolve_device_info_for_macs(
     let arp_ipv6: HashMap<String, String> = arp_ipv6_candidates
         .iter()
         .filter_map(|(mac, candidates)| {
-            devices::pick_ipv6(candidates.iter().map(|s| s.as_str()))
-                .map(|ip| (mac.clone(), ip))
+            devices::pick_ipv6(candidates.iter().map(|s| s.as_str())).map(|ip| (mac.clone(), ip))
         })
         .collect();
 
@@ -1265,7 +1304,9 @@ async fn resolve_device_info_for_macs(
         if parts.len() >= 3 {
             let mac = parts[1].to_uppercase();
             if macs.contains(&mac) {
-                lease_ipv4.entry(mac).or_insert_with(|| parts[2].to_string());
+                lease_ipv4
+                    .entry(mac)
+                    .or_insert_with(|| parts[2].to_string());
             }
         }
     }
@@ -1282,14 +1323,18 @@ async fn resolve_device_info_for_macs(
         // No usable (GUA/ULA) address picked, but the neighbor table did have
         // IPv6 candidates for this MAC → they were all link-local. The device
         // is online with only an unreachable address, not merely offline.
-        let ipv6_link_local_only = ipv6.is_none()
-            && arp_ipv6_candidates
-                .get(mac)
-                .is_some_and(|c| !c.is_empty());
+        let ipv6_link_local_only =
+            ipv6.is_none() && arp_ipv6_candidates.get(mac).is_some_and(|c| !c.is_empty());
         let arp_interface = arp_iface.get(mac).cloned();
         result.insert(
             mac.clone(),
-            DeviceNetInfo { ipv4, ipv6, ipv6_link_local_only, arp_interface, has_static_ipv4 },
+            DeviceNetInfo {
+                ipv4,
+                ipv6,
+                ipv6_link_local_only,
+                arp_interface,
+                has_static_ipv4,
+            },
         );
     }
 
@@ -1371,10 +1416,9 @@ pub(crate) fn reload_dnsmasq() {
 
 pub(crate) fn reload_odhcpd() {
     tokio::spawn(async {
-        if let Err(e) = crate::run_quiet_async(
-            tokio::process::Command::new("/etc/init.d/odhcpd").arg("reload"),
-        )
-        .await
+        if let Err(e) =
+            crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/odhcpd").arg("reload"))
+                .await
         {
             tracing::error!("failed to reload odhcpd: {e}");
         }
@@ -1383,13 +1427,15 @@ pub(crate) fn reload_odhcpd() {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use rpc_toolkit::Context;
+    use tokio::runtime::Runtime;
+
     use super::*;
     use crate::utils::DeserializeStdin;
     use crate::CtrlContext;
-    use rpc_toolkit::Context;
-    use std::path::PathBuf;
-    use std::sync::Arc;
-    use tokio::runtime::Runtime;
 
     #[derive(Clone)]
     struct TestContext(PathBuf);
@@ -1431,9 +1477,9 @@ mod tests {
         assert!(!is_gua("::")); // unspecified
         assert!(!is_gua("1fff::1")); // just below 2000::/3
         assert!(!is_gua("4000::1")); // just above 2000::/3
-        // Regression: the old prefix-string heuristic wrongly classified
-        // deprecated site-local (fec0::/10) as global; the parsed range check
-        // correctly rejects it.
+                                     // Regression: the old prefix-string heuristic wrongly classified
+                                     // deprecated site-local (fec0::/10) as global; the parsed range check
+                                     // correctly rejects it.
         assert!(!is_gua("fec0::1"));
 
         // Garbage never parses → not global.
@@ -1450,7 +1496,9 @@ mod tests {
         // /64: high 64 from prefix, low 64 from the hostid suffix.
         assert_eq!(
             recombine_gua(p, 64, "dead:beef:0:50").unwrap(),
-            "2001:db8:abcd:0:dead:beef:0:50".parse::<Ipv6Addr>().unwrap()
+            "2001:db8:abcd:0:dead:beef:0:50"
+                .parse::<Ipv6Addr>()
+                .unwrap()
         );
         // Short suffix (just the last hextet).
         assert_eq!(
@@ -1469,9 +1517,10 @@ mod tests {
         // hostid (lower 64 bits) supplies the rest — proving the mask width is
         // honored rather than hard-coded to /64.
         assert_eq!(
-            recombine_gua("2001:db8:abcd::".parse().unwrap(), 48, "dead:beef:0:50")
-                .unwrap(),
-            "2001:db8:abcd:0:dead:beef:0:50".parse::<Ipv6Addr>().unwrap()
+            recombine_gua("2001:db8:abcd::".parse().unwrap(), 48, "dead:beef:0:50").unwrap(),
+            "2001:db8:abcd:0:dead:beef:0:50"
+                .parse::<Ipv6Addr>()
+                .unwrap()
         );
 
         // Garbage suffix → None.
@@ -1567,7 +1616,10 @@ config rule 'pp_a_v6'
         )
         .await;
         assert_eq!(changed, 1);
-        assert!(content.contains("option dest_ip '2001:db8:9999::abcd'"), "got:\n{content}");
+        assert!(
+            content.contains("option dest_ip '2001:db8:9999::abcd'"),
+            "got:\n{content}"
+        );
     }
 
     #[tokio::test]
@@ -1854,7 +1906,10 @@ config rule 'Allow_ICMPv6_Forward'
         );
         let arena = Arena::new();
         let ports = extract_ports(&arena, dir.path()).await.unwrap();
-        assert!(ports.is_empty(), "standard firewall rules should not appear as published ports");
+        assert!(
+            ports.is_empty(),
+            "standard firewall rules should not appear as published ports"
+        );
     }
 
     #[tokio::test]
@@ -1890,7 +1945,10 @@ config rule 'cfg0b0b0b'
         );
         let arena = Arena::new();
         let ports = extract_ports(&arena, dir.path()).await.unwrap();
-        assert!(ports.is_empty(), "ghost entries with empty _pp_mac should be ignored");
+        assert!(
+            ports.is_empty(),
+            "ghost entries with empty _pp_mac should be ignored"
+        );
     }
 
     #[tokio::test]
@@ -1996,7 +2054,8 @@ config redirect 'pp_pub2'
             DeserializeStdin(PublishedPortsSetRequest {
                 ports: vec![make_port("test1", true, false)],
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let arena = Arena::new();
@@ -2007,7 +2066,10 @@ config redirect 'pp_pub2'
 
         // Verify section names in raw config
         let content = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
-        assert!(content.contains("config redirect pp_test1"), "missing redirect section");
+        assert!(
+            content.contains("config redirect pp_test1"),
+            "missing redirect section"
+        );
     }
 
     #[tokio::test]
@@ -2035,7 +2097,8 @@ config redirect 'pp_old1'
             DeserializeStdin(PublishedPortsSetRequest {
                 ports: vec![make_port("new1", true, false)],
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let arena = Arena::new();
@@ -2044,7 +2107,10 @@ config redirect 'pp_old1'
         assert_eq!(ports[0].id, "new1");
 
         let content = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
-        assert!(!content.contains("pp_old1"), "old section should be removed");
+        assert!(
+            !content.contains("pp_old1"),
+            "old section should be removed"
+        );
     }
 
     #[tokio::test]
@@ -2070,7 +2136,8 @@ config redirect 'pp_del1'
         set(
             ctx,
             DeserializeStdin(PublishedPortsSetRequest { ports: vec![] }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let arena = Arena::new();
@@ -2089,10 +2156,9 @@ config redirect 'pp_del1'
 
         set(
             ctx,
-            DeserializeStdin(PublishedPortsSetRequest {
-                ports: vec![port],
-            }),
-        ).await
+            DeserializeStdin(PublishedPortsSetRequest { ports: vec![port] }),
+        )
+        .await
         .unwrap();
 
         let arena = Arena::new();
@@ -2101,7 +2167,10 @@ config redirect 'pp_del1'
         assert!(!ports[0].enabled);
 
         let content = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
-        assert!(content.contains("option enabled '0'"), "expected 'option enabled 0' in:\n{content}");
+        assert!(
+            content.contains("option enabled '0'"),
+            "expected 'option enabled 0' in:\n{content}"
+        );
     }
 
     #[tokio::test]
@@ -2115,15 +2184,20 @@ config redirect 'pp_del1'
 
         set(
             ctx,
-            DeserializeStdin(PublishedPortsSetRequest {
-                ports: vec![port],
-            }),
-        ).await
+            DeserializeStdin(PublishedPortsSetRequest { ports: vec![port] }),
+        )
+        .await
         .unwrap();
 
         let content = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
-        assert!(content.contains("option src_dport '9090'"), "public port should be 9090");
-        assert!(content.contains("option dest_port '80'"), "internal port should be 80");
+        assert!(
+            content.contains("option src_dport '9090'"),
+            "public port should be 9090"
+        );
+        assert!(
+            content.contains("option dest_port '80'"),
+            "internal port should be 80"
+        );
 
         let arena = Arena::new();
         let ports = extract_ports(&arena, dir.path()).await.unwrap();
@@ -2141,15 +2215,17 @@ config redirect 'pp_del1'
 
         set(
             ctx.clone(),
-            DeserializeStdin(PublishedPortsSetRequest {
-                ports: vec![port],
-            }),
-        ).await
+            DeserializeStdin(PublishedPortsSetRequest { ports: vec![port] }),
+        )
+        .await
         .unwrap();
 
         let content = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
         assert!(content.contains("src_ip"), "expected src_ip in:\n{content}");
-        assert!(content.contains("10.0.0.0/24"), "expected source CIDR in:\n{content}");
+        assert!(
+            content.contains("10.0.0.0/24"),
+            "expected source CIDR in:\n{content}"
+        );
 
         // Now test with "any" — no src_ip
         let port_any = make_port("src2", true, false);
@@ -2158,11 +2234,15 @@ config redirect 'pp_del1'
             DeserializeStdin(PublishedPortsSetRequest {
                 ports: vec![port_any],
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let content = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
-        assert!(!content.contains("src_ip"), "source 'any' should not produce src_ip");
+        assert!(
+            !content.contains("src_ip"),
+            "source 'any' should not produce src_ip"
+        );
     }
 
     // ── uuid_v4 tests ──
@@ -2216,7 +2296,8 @@ config redirect 'pp_del1'
             DeserializeStdin(PublishedPortsSetRequest {
                 ports: vec![make_port("a-b-c", true, false)],
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let content = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
@@ -2272,9 +2353,18 @@ config redirect 'pp_del1'
 
     #[test]
     fn validate_rejects_invalid_mac() {
-        assert_validation_fails(make_input(|p| p.device_mac = "not-a-mac".into()), "device_mac");
-        assert_validation_fails(make_input(|p| p.device_mac = "AA:BB:CC:DD:EE".into()), "device_mac");
-        assert_validation_fails(make_input(|p| p.device_mac = "GG:BB:CC:DD:EE:FF".into()), "device_mac");
+        assert_validation_fails(
+            make_input(|p| p.device_mac = "not-a-mac".into()),
+            "device_mac",
+        );
+        assert_validation_fails(
+            make_input(|p| p.device_mac = "AA:BB:CC:DD:EE".into()),
+            "device_mac",
+        );
+        assert_validation_fails(
+            make_input(|p| p.device_mac = "GG:BB:CC:DD:EE:FF".into()),
+            "device_mac",
+        );
     }
 
     #[test]
@@ -2295,7 +2385,8 @@ config redirect 'pp_del1'
         assert_validation_fails(make_input(|p| p.ports = "99999".into()), "ports");
         assert_validation_fails(make_input(|p| p.ports = "abc".into()), "ports");
         assert_validation_fails(make_input(|p| p.ports = "".into()), "ports");
-        assert_validation_fails(make_input(|p| p.ports = "100-50".into()), "ports"); // start > end
+        assert_validation_fails(make_input(|p| p.ports = "100-50".into()), "ports");
+        // start > end
     }
 
     #[test]
@@ -2349,7 +2440,8 @@ config redirect 'pp_del1'
             DeserializeStdin(PublishedPortsSetRequest {
                 ports: vec![make_input(|p| p.ports = "0".into())],
             }),
-        ).await;
+        )
+        .await;
         assert!(result.is_err());
     }
 
@@ -2557,7 +2649,10 @@ config host 'host_b'
 
         // AA is on Ethernet (not in wifi_macs) and BB is on the Admin subnet, so
         // nothing is affected even though Guest is vacated.
-        let eth_only: HashSet<String> = ["BB:BB:BB:BB:BB:BB"].iter().map(|s| s.to_string()).collect();
+        let eth_only: HashSet<String> = ["BB:BB:BB:BB:BB:BB"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let (macs, ports) = affected_wifi_ports_for_vacated_profiles(
             &ctx,
             &vacated,
@@ -2635,8 +2730,7 @@ config rule 'pp_c_v6'
         let ctx = TestContext(dir.path().to_path_buf());
 
         let vacated: HashSet<String> = ["Guest".to_string()].into_iter().collect();
-        let wifi_macs: HashSet<String> =
-            ["CC:CC:CC:CC:CC:CC".to_string()].into_iter().collect();
+        let wifi_macs: HashSet<String> = ["CC:CC:CC:CC:CC:CC".to_string()].into_iter().collect();
         let device_profiles: HashMap<String, String> =
             [("CC:CC:CC:CC:CC:CC".to_string(), "Guest".to_string())]
                 .into_iter()
@@ -2710,10 +2804,22 @@ config host 'host_b'
 
         let dhcp = std::fs::read_to_string(dir.path().join("dhcp")).unwrap();
         // Named host kept; its stale IPv4 cleared but name + manual hostid survive.
-        assert!(dhcp.contains("Living Room NAS"), "named host should survive:\n{dhcp}");
-        assert!(dhcp.contains("dead:beef:0:50"), "manual hostid should survive:\n{dhcp}");
-        assert!(!dhcp.contains("192.168.3.50"), "stale IPv4 should be cleared:\n{dhcp}");
+        assert!(
+            dhcp.contains("Living Room NAS"),
+            "named host should survive:\n{dhcp}"
+        );
+        assert!(
+            dhcp.contains("dead:beef:0:50"),
+            "manual hostid should survive:\n{dhcp}"
+        );
+        assert!(
+            !dhcp.contains("192.168.3.50"),
+            "stale IPv4 should be cleared:\n{dhcp}"
+        );
         // Anonymous host removed entirely.
-        assert!(!dhcp.contains("BB:BB:BB:BB:BB:BB"), "anonymous host should be removed:\n{dhcp}");
+        assert!(
+            !dhcp.contains("BB:BB:BB:BB:BB:BB"),
+            "anonymous host should be removed:\n{dhcp}"
+        );
     }
 }

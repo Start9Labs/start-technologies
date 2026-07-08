@@ -1,21 +1,21 @@
-name: "Upload Each"
-description: "Upload every file matching a glob as its own individually-named artifact, from a single step."
+name: 'Upload Each'
+description: 'Upload every file matching a glob as its own individually-named artifact, from a single step.'
 inputs:
   pattern:
-    description: "Glob pattern. Each matched file is uploaded as a separate artifact named after its basename."
+    description: 'Glob pattern. Each matched file is uploaded as a separate artifact named after its basename.'
     required: true
   retention-days:
-    description: "Artifact retention in days. 0 or empty uses the repo default."
+    description: 'Artifact retention in days. 0 or empty uses the repo default.'
     required: false
-    default: "0"
+    default: '0'
   compression-level:
-    description: "Zip compression level passed to @actions/artifact (0-9)."
+    description: 'Zip compression level passed to @actions/artifact (0-9).'
     required: false
-    default: "6"
+    default: '6'
   if-no-files-found:
-    description: "Behavior when the glob matches nothing: warn | error | ignore."
+    description: 'Behavior when the glob matches nothing: warn | error | ignore.'
     required: false
-    default: "warn"
+    default: 'warn'
 runs:
-  using: "node24"
-  main: "dist/index.js"
+  using: 'node24'
+  main: 'dist/index.js'

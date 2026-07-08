@@ -289,17 +289,18 @@ async fn perform_backup(
         })
         .collect();
     let mut os_data_phase = progress.add_phase("OS Data".into(), Some(1));
-    let _progress_db_sync = NonDetachingJoinHandle::from(tokio::spawn(progress.clone().sync_to_db(
-        ctx.db.clone(),
-        |db| {
-            db.as_public_mut()
-                .as_server_info_mut()
-                .as_status_info_mut()
-                .as_backup_progress_mut()
-                .transpose_mut()
-        },
-        Some(Duration::from_millis(300)),
-    )));
+    let _progress_db_sync =
+        NonDetachingJoinHandle::from(tokio::spawn(progress.clone().sync_to_db(
+            ctx.db.clone(),
+            |db| {
+                db.as_public_mut()
+                    .as_server_info_mut()
+                    .as_status_info_mut()
+                    .as_backup_progress_mut()
+                    .transpose_mut()
+            },
+            Some(Duration::from_millis(300)),
+        )));
 
     for id in package_ids {
         let mut phase = phase_handles.remove(id).expect("phase exists");

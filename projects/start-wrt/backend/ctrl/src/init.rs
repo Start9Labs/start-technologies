@@ -27,15 +27,18 @@ fn validate_password(password: &str) -> Result<(), String> {
 fn prompt_password_secure() -> Result<String, Error> {
     loop {
         let pw = rpassword::prompt_password("Enter WiFi password (12 chars from charset): ")
-            .map_err(|e| Error::new(eyre!("failed to read password: {e}"), ErrorKind::Filesystem))?;
+            .map_err(|e| {
+                Error::new(eyre!("failed to read password: {e}"), ErrorKind::Filesystem)
+            })?;
 
         if let Err(msg) = validate_password(&pw) {
             println!("Invalid: {msg}");
             continue;
         }
 
-        let confirm = rpassword::prompt_password("Confirm: ")
-            .map_err(|e| Error::new(eyre!("failed to read password: {e}"), ErrorKind::Filesystem))?;
+        let confirm = rpassword::prompt_password("Confirm: ").map_err(|e| {
+            Error::new(eyre!("failed to read password: {e}"), ErrorKind::Filesystem)
+        })?;
 
         if pw != confirm {
             println!("Passwords do not match. Try again.");
@@ -68,10 +71,7 @@ pub async fn set_wifi_password(manual: bool) -> Result<(), Error> {
     println!("Configuring WiFi and reloading...");
     configure_wifi("/etc/config", &password, None).await?;
 
-    let _ = crate::run_quiet_async(
-        tokio::process::Command::new("wifi").arg("reload"),
-    )
-    .await;
+    let _ = crate::run_quiet_async(tokio::process::Command::new("wifi").arg("reload")).await;
 
     println!("WiFi AP is now active.");
     Ok(())
@@ -86,7 +86,11 @@ pub async fn set_wifi_password(manual: bool) -> Result<(), Error> {
 /// `max_stations` optionally limits the number of associated stations per
 /// interface (UCI `maxassoc`). Pass `Some(1)` in setup mode to restrict the
 /// AP to a single client during reflash. Pass `None` for normal operation.
-pub async fn configure_wifi(uci_root: &str, password: &str, max_stations: Option<u32>) -> Result<(), Error> {
+pub async fn configure_wifi(
+    uci_root: &str,
+    password: &str,
+    max_stations: Option<u32>,
+) -> Result<(), Error> {
     let mut retries = 4;
     loop {
         // Read raw bytes (Send future) — no arena yet
@@ -165,11 +169,7 @@ pub async fn restore_wifi_if_needed() -> Result<bool, Error> {
     configure_wifi("/etc/config", &password, None).await?;
 
     // 4. Reload WiFi
-    let _ = crate::run_quiet_async(
-        tokio::process::Command::new("wifi").arg("reload"),
-    )
-    .await;
+    let _ = crate::run_quiet_async(tokio::process::Command::new("wifi").arg("reload")).await;
 
     Ok(true)
 }
-

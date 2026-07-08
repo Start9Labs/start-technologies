@@ -535,8 +535,8 @@ mod test {
         assert_eq!(
             pointer_idmap(&[idmap(0, 1000, 1)]),
             vec![
-                idmap(0, 101000, 1),     // override: on-disk 0 -> container 1000
-                idmap(1, 100001, 999),   // base: on-disk 1..999 -> container 1..999
+                idmap(0, 101000, 1),        // override: on-disk 0 -> container 1000
+                idmap(1, 100001, 999),      // base: on-disk 1..999 -> container 1..999
                 idmap(1001, 101001, 64535), // base: on-disk 1001..65535 (1000 dropped)
             ],
         );
@@ -548,7 +548,11 @@ mod test {
         // so they compose: on-disk 0 -> 1000 -> 2000 (host 102000), not 101000.
         let custom = [idmap(0, 1000, 1), idmap(1000, 2000, 1)];
         let flat = pointer_idmap(&custom);
-        assert_eq!(apply(&flat, 0), Some(102000), "0 composes through both layers");
+        assert_eq!(
+            apply(&flat, 0),
+            Some(102000),
+            "0 composes through both layers"
+        );
         // an untouched id keeps its base mapping
         assert_eq!(apply(&flat, 5), Some(100005));
         // on-disk 1000 ALSO composes to 102000 (passthrough idmap 0, then 1000->2000),
@@ -588,7 +592,10 @@ mod test {
             v.sort();
             v.windows(2).any(|w| w[0].1 > w[1].0)
         };
-        let froms: Vec<(u32, u32)> = map.iter().map(|m| (m.from_id, m.from_id + m.range)).collect();
+        let froms: Vec<(u32, u32)> = map
+            .iter()
+            .map(|m| (m.from_id, m.from_id + m.range))
+            .collect();
         let tos: Vec<(u32, u32)> = map.iter().map(|m| (m.to_id, m.to_id + m.range)).collect();
         !overlaps(froms) && !overlaps(tos)
     }
@@ -650,9 +657,12 @@ mod test {
         // stand-in for the startbox `unshare-userns` applet (see which_self_exe):
         // unshare a userns, print `ready`, block on stdin while the parent maps it.
         let helper = PathBuf::from(format!("/tmp/idmap-it-helper-{}", std::process::id()));
-        tokio::fs::write(&helper, "#!/bin/sh\nexec unshare -U sh -c 'echo ready; exec cat'\n")
-            .await
-            .unwrap();
+        tokio::fs::write(
+            &helper,
+            "#!/bin/sh\nexec unshare -U sh -c 'echo ready; exec cat'\n",
+        )
+        .await
+        .unwrap();
         std::fs::set_permissions(&helper, std::os::unix::fs::PermissionsExt::from_mode(0o755))
             .unwrap();
         unsafe { std::env::set_var("STARTOS_TEST_USERNS_HELPER", &helper) };
@@ -669,7 +679,9 @@ mod test {
 
         // exactly what mount() runs for a pointer mount with idmap [{0->1000}]
         IdMapped::new(
-            Bind::new(&src).with_type(FileType::Directory).recursive(true),
+            Bind::new(&src)
+                .with_type(FileType::Directory)
+                .recursive(true),
             pointer_idmap(&[idmap(0, 1000, 1)]),
         )
         .mount(&target, MountType::ReadWrite)
@@ -685,9 +697,15 @@ mod test {
         unsafe { std::env::remove_var("STARTOS_TEST_USERNS_HELPER") };
 
         // override: on-disk 0 -> 0:1000 lifted by the base offset -> host 101000
-        assert_eq!(u0, 101000, "overridden on-disk 0 should surface as host 101000");
+        assert_eq!(
+            u0, 101000,
+            "overridden on-disk 0 should surface as host 101000"
+        );
         // base preserved: on-disk 5 keeps its base mapping -> host 100005
-        assert_eq!(u5, 100005, "non-overridden on-disk 5 should keep base -> 100005");
+        assert_eq!(
+            u5, 100005,
+            "non-overridden on-disk 5 should keep base -> 100005"
+        );
         // collision: base target of on-disk 1000 == override target, so it drops
         assert_eq!(u1000, 65534, "colliding on-disk 1000 should drop to nobody");
     }

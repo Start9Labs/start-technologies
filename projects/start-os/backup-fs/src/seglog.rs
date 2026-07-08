@@ -95,13 +95,23 @@ fn segment_size() -> u64 {
 /// `superblock::FORMAT_VERSION` bump.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Record {
-    Inode { inode: u64, attrs: Attributes },
-    Tombstone { inode: u64 },
+    Inode {
+        inode: u64,
+        attrs: Attributes,
+    },
+    Tombstone {
+        inode: u64,
+    },
     /// Packed content for a small/medium file (≤ one chunk). Shares the
     /// segments with inode records but lives in a separate `content` index,
     /// so a content id may equal its file's inode number without colliding.
-    Content { id: u64, bytes: Vec<u8> },
-    ContentTombstone { id: u64 },
+    Content {
+        id: u64,
+        bytes: Vec<u8>,
+    },
+    ContentTombstone {
+        id: u64,
+    },
 }
 
 /// Which index a record belongs to. Inode numbers and content ids occupy
@@ -128,30 +138,62 @@ pub fn seal_inode(
     inode: Inode,
     attrs: &Attributes,
 ) -> BkfsResult<SealedRecord> {
-    let plain = encode(&Record::Inode { inode: inode.0, attrs: attrs.clone() }, data_config())?;
+    let plain = encode(
+        &Record::Inode {
+            inode: inode.0,
+            attrs: attrs.clone(),
+        },
+        data_config(),
+    )?;
     let bytes = vault::seal(&plain, key, ecc);
-    Ok(SealedRecord { key: inode.0, bytes, space: Space::Inode, tombstone: false })
+    Ok(SealedRecord {
+        key: inode.0,
+        bytes,
+        space: Space::Inode,
+        tombstone: false,
+    })
 }
 
 /// Seal an inode tombstone record without touching the log.
 pub fn seal_tombstone(key: &Key, ecc: EccParams, inode: Inode) -> BkfsResult<SealedRecord> {
     let plain = encode(&Record::Tombstone { inode: inode.0 }, data_config())?;
     let bytes = vault::seal(&plain, key, ecc);
-    Ok(SealedRecord { key: inode.0, bytes, space: Space::Inode, tombstone: true })
+    Ok(SealedRecord {
+        key: inode.0,
+        bytes,
+        space: Space::Inode,
+        tombstone: true,
+    })
 }
 
 /// Seal a packed-content record without touching the log.
 pub fn seal_content(key: &Key, ecc: EccParams, id: u64, bytes: &[u8]) -> BkfsResult<SealedRecord> {
-    let plain = encode(&Record::Content { id, bytes: bytes.to_vec() }, data_config())?;
+    let plain = encode(
+        &Record::Content {
+            id,
+            bytes: bytes.to_vec(),
+        },
+        data_config(),
+    )?;
     let sealed = vault::seal(&plain, key, ecc);
-    Ok(SealedRecord { key: id, bytes: sealed, space: Space::Content, tombstone: false })
+    Ok(SealedRecord {
+        key: id,
+        bytes: sealed,
+        space: Space::Content,
+        tombstone: false,
+    })
 }
 
 /// Seal a content tombstone record without touching the log.
 pub fn seal_content_tombstone(key: &Key, ecc: EccParams, id: u64) -> BkfsResult<SealedRecord> {
     let plain = encode(&Record::ContentTombstone { id }, data_config())?;
     let bytes = vault::seal(&plain, key, ecc);
-    Ok(SealedRecord { key: id, bytes, space: Space::Content, tombstone: true })
+    Ok(SealedRecord {
+        key: id,
+        bytes,
+        space: Space::Content,
+        tombstone: true,
+    })
 }
 
 /// Physical location of a record's frame within the log.
@@ -287,13 +329,15 @@ impl SegmentLog {
                     break; // truncated tail
                 }
                 let payload = &bytes[pos + HEADER_LEN..end];
-                match vault::open(payload, &key).and_then(|p| {
-                    decode::<Record>(&p, data_config())
-                }) {
+                match vault::open(payload, &key).and_then(|p| decode::<Record>(&p, data_config())) {
                     Ok(record) => {
                         next_seq = next_seq.max(seq + 1);
                         let key = record.key();
-                        let loc = Location { segment: id, offset: pos as u64, len: frame_len as u32 };
+                        let loc = Location {
+                            segment: id,
+                            offset: pos as u64,
+                            len: frame_len as u32,
+                        };
                         match record {
                             Record::Inode { .. } | Record::Tombstone { .. } => {
                                 max_inode = max_inode.max(key);
@@ -331,7 +375,13 @@ impl SegmentLog {
                 }
                 pos += frame_len as usize;
             }
-            seg_meta.insert(id, SegMeta { total: bytes.len() as u64, live });
+            seg_meta.insert(
+                id,
+                SegMeta {
+                    total: bytes.len() as u64,
+                    live,
+                },
+            );
         }
 
         // Recompute live bytes precisely: a frame is live iff it is the
@@ -433,7 +483,11 @@ impl SegmentLog {
         let offset = self.active_offset;
         self.active.write_all_at(&frame, offset)?;
         self.active_offset += frame.len() as u64;
-        let loc = Location { segment: self.active_id, offset, len: frame.len() as u32 };
+        let loc = Location {
+            segment: self.active_id,
+            offset,
+            len: frame.len() as u32,
+        };
 
         let seg = self.seg_meta.entry(self.active_id).or_default();
         seg.total += frame.len() as u64;
@@ -501,7 +555,12 @@ impl SegmentLog {
         let fd = self.active.as_raw_fd();
         // SAFETY: fd is a valid owned fd; DONTNEED on a synced range is advisory.
         unsafe {
-            libc::posix_fadvise(fd, 0, self.active_offset as libc::off_t, libc::POSIX_FADV_DONTNEED);
+            libc::posix_fadvise(
+                fd,
+                0,
+                self.active_offset as libc::off_t,
+                libc::POSIX_FADV_DONTNEED,
+            );
         }
         Ok(())
     }
@@ -539,7 +598,11 @@ impl SegmentLog {
         let offset = self.active_offset;
         self.active.write_all_at(frame, offset)?;
         self.active_offset += frame.len() as u64;
-        let loc = Location { segment: self.active_id, offset, len: frame.len() as u32 };
+        let loc = Location {
+            segment: self.active_id,
+            offset,
+            len: frame.len() as u32,
+        };
         let seg = self.seg_meta.entry(self.active_id).or_default();
         seg.total += frame.len() as u64;
         seg.live += frame.len() as u64;
@@ -664,7 +727,8 @@ mod tests {
     }
 
     fn attrs(size: u64) -> Attributes {
-        let mut a = InodeAttributes::new(Inode(1), None, FileData::File(crate::inode::ContentId(1)));
+        let mut a =
+            InodeAttributes::new(Inode(1), None, FileData::File(crate::inode::ContentId(1)));
         a.attrs.size = size;
         a.attrs
     }
@@ -754,6 +818,10 @@ mod tests {
         let log = SegmentLog::open(dir, key()).unwrap();
         // At least all-but-one inode survive (the corrupted frame's inode is
         // beyond ECC repair and is dropped).
-        assert!(log.index_len() >= 19, "expected ≥19 survivors, got {}", log.index_len());
+        assert!(
+            log.index_len() >= 19,
+            "expected ≥19 survivors, got {}",
+            log.index_len()
+        );
     }
 }

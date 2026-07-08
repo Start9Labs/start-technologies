@@ -83,9 +83,7 @@ impl<Src: AsRef<Path> + Send + Sync> FileSystem for Bind<Src> {
         }
         Ok(())
     }
-    async fn source_hash(
-        &self,
-    ) -> Result<digest::Output<Sha256>, Error> {
+    async fn source_hash(&self) -> Result<digest::Output<Sha256>, Error> {
         let mut sha = Sha256::new();
         sha.update("Bind");
         // tolerant of a not-yet-created source dir; pre_mount creates the leaf

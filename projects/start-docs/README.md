@@ -8,12 +8,12 @@ This project (the `projects/start-docs/` directory of the `start-os` monorepo) o
 
 ## Books and where they live
 
-| Book | URL | Source dir | Content |
-|------|-----|-----------|---------|
-| StartOS | [docs.start9.com/start-os](https://docs.start9.com/start-os/) | `../start-os/docs/` | Setup, services, networking, backups, system admin, firmware |
-| StartTunnel | [docs.start9.com/start-tunnel](https://docs.start9.com/start-tunnel/) | `../start-tunnel/docs/` | Installation, subnets, devices, port forwarding |
-| Service Packaging | [docs.start9.com/packaging](https://docs.start9.com/packaging/) | `../start-sdk/docs/` | Developer guide for building and publishing StartOS services |
-| Bitcoin Guides | [docs.start9.com/bitcoin-guides](https://docs.start9.com/bitcoin-guides/) | `bitcoin-guides/` | Running Bitcoin and related services on StartOS |
+| Book              | URL                                                                       | Source dir              | Content                                                      |
+| ----------------- | ------------------------------------------------------------------------- | ----------------------- | ------------------------------------------------------------ |
+| StartOS           | [docs.start9.com/start-os](https://docs.start9.com/start-os/)             | `../start-os/docs/`     | Setup, services, networking, backups, system admin, firmware |
+| StartTunnel       | [docs.start9.com/start-tunnel](https://docs.start9.com/start-tunnel/)     | `../start-tunnel/docs/` | Installation, subnets, devices, port forwarding              |
+| Service Packaging | [docs.start9.com/packaging](https://docs.start9.com/packaging/)           | `../start-sdk/docs/`    | Developer guide for building and publishing StartOS services |
+| Bitcoin Guides    | [docs.start9.com/bitcoin-guides](https://docs.start9.com/bitcoin-guides/) | `bitcoin-guides/`       | Running Bitcoin and related services on StartOS              |
 
 The first three books were moved out of this directory into their product dirs so each book sits next to the code it documents. `build.sh` maps each book name to its source dir, so build output and deployed URLs are unchanged. Only `bitcoin-guides` still lives here.
 

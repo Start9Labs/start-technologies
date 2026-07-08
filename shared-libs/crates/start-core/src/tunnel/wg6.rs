@@ -21,7 +21,11 @@ use ipnet::Ipv6Net;
 /// distinct there as long as the clients' low host bits differ.
 pub fn host_v6(prefix: Ipv6Net, v4: Ipv4Addr) -> Ipv6Addr {
     let keep = (128 - prefix.prefix_len()).min(32);
-    let mask = if keep >= 32 { u32::MAX } else { (1u32 << keep) - 1 };
+    let mask = if keep >= 32 {
+        u32::MAX
+    } else {
+        (1u32 << keep) - 1
+    };
     let host = (u32::from(v4) & mask) as u128;
     Ipv6Addr::from(u128::from(prefix.network()) | host)
 }
@@ -121,17 +125,30 @@ mod tests {
             wg6_conflict(big, "10.59.0.2", &["10.59.0.1", "10.59.16.2"]),
             None,
         );
-        assert!(first_v6_collision(big, [v4("10.59.0.1"), v4("10.59.0.2"), v4("10.59.16.2")]).is_none());
+        assert!(
+            first_v6_collision(big, [v4("10.59.0.1"), v4("10.59.0.2"), v4("10.59.16.2")]).is_none()
+        );
 
         // On a /124 only the low nibble survives: .2 and .18 (0x02 vs 0x12) both
         // map to ::f2, and .17 (0x11) collides with the server .1.
         let small = net("2001:db8:abcd:1::f0/124");
-        assert_eq!(wg6_conflict(small, "10.59.0.18", &["10.59.0.2"]), Some(v4("10.59.0.2")));
-        assert_eq!(wg6_conflict(small, "10.59.0.17", &["10.59.0.1"]), Some(v4("10.59.0.1")));
+        assert_eq!(
+            wg6_conflict(small, "10.59.0.18", &["10.59.0.2"]),
+            Some(v4("10.59.0.2"))
+        );
+        assert_eq!(
+            wg6_conflict(small, "10.59.0.17", &["10.59.0.1"]),
+            Some(v4("10.59.0.1"))
+        );
         // A fresh low nibble is fine.
-        assert_eq!(wg6_conflict(small, "10.59.0.3", &["10.59.0.1", "10.59.0.2"]), None);
+        assert_eq!(
+            wg6_conflict(small, "10.59.0.3", &["10.59.0.1", "10.59.0.2"]),
+            None
+        );
         // first_v6_collision finds the clashing pair.
-        let (a, b, addr) = first_v6_collision(small, [v4("10.59.0.1"), v4("10.59.0.2"), v4("10.59.0.18")]).unwrap();
+        let (a, b, addr) =
+            first_v6_collision(small, [v4("10.59.0.1"), v4("10.59.0.2"), v4("10.59.0.18")])
+                .unwrap();
         assert_eq!((a, b), (v4("10.59.0.2"), v4("10.59.0.18")));
         assert_eq!(addr, "2001:db8:abcd:1::f2".parse::<Ipv6Addr>().unwrap());
     }

@@ -9,8 +9,7 @@ use futures::FutureExt;
 use http::{HeaderMap, HeaderValue};
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
-use hyper::body::Body as HyperBody;
-use hyper::body::Incoming;
+use hyper::body::{Body as HyperBody, Incoming};
 use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
@@ -32,9 +31,7 @@ fn box_incoming(b: Incoming) -> ProxyBody {
 }
 
 fn box_full(bytes: Bytes) -> ProxyBody {
-    Full::new(bytes)
-        .map_err(|e: Infallible| match e {})
-        .boxed()
+    Full::new(bytes).map_err(|e: Infallible| match e {}).boxed()
 }
 
 /// Pre-compiled view of a [`ProxyAuth`] used on the proxy hot-path.
@@ -80,8 +77,7 @@ impl AuthGate {
             ProxyAuth::Basic { credentials, realm } => {
                 for cred in credentials {
                     let raw = format!("{}:{}", cred.username, cred.password);
-                    let encoded =
-                        base64::engine::general_purpose::STANDARD.encode(raw.as_bytes());
+                    let encoded = base64::engine::general_purpose::STANDARD.encode(raw.as_bytes());
                     let header = HeaderValue::from_str(&format!("Basic {encoded}"))
                         .with_kind(ErrorKind::InvalidRequest)?;
                     let user = HeaderValue::from_str(&cred.username)
@@ -482,9 +478,7 @@ mod tests {
         let resp = apply_request_policy(&mut req, None, false, Some(&gate)).unwrap_err();
         assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
         assert_eq!(
-            resp.headers()
-                .get(http::header::WWW_AUTHENTICATE)
-                .unwrap(),
+            resp.headers().get(http::header::WWW_AUTHENTICATE).unwrap(),
             "Basic realm=\"My App\""
         );
 
@@ -546,9 +540,7 @@ mod tests {
         let mut req = req_with_auth(None);
         let resp = apply_request_policy(&mut req, None, false, Some(&gate)).unwrap_err();
         assert_eq!(
-            resp.headers()
-                .get(http::header::WWW_AUTHENTICATE)
-                .unwrap(),
+            resp.headers().get(http::header::WWW_AUTHENTICATE).unwrap(),
             "Basic realm=\"haxor\""
         );
     }

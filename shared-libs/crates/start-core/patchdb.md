@@ -16,11 +16,13 @@ pub struct ServerInfo {
 ```
 
 **Generated accessors** (one per field):
+
 - `as_version()` — `&Model<Version>`
 - `as_version_mut()` — `&mut Model<Version>`
 - `into_version()` — `Model<Version>`
 
 **`Model<T>` APIs:**
+
 - `.de()` — Deserialize to `T`
 - `.ser(&value)` — Serialize from `T`
 - `.mutate(|v| ...)` — Deserialize, mutate, reserialize

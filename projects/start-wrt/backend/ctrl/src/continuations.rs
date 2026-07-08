@@ -96,7 +96,10 @@ impl Future for RestFuture {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
         if self.kill.as_ref().map_or(false, |k| !k.is_empty()) {
-            std::task::Poll::Ready(Err(Error::new(eyre!("session killed"), ErrorKind::Cancelled)))
+            std::task::Poll::Ready(Err(Error::new(
+                eyre!("session killed"),
+                ErrorKind::Cancelled,
+            )))
         } else {
             self.fut.as_mut().poll(cx)
         }

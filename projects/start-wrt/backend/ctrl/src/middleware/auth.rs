@@ -12,7 +12,9 @@ use rpc_toolkit::{Context, Middleware, RpcRequest, RpcResponse};
 use serde::Deserialize;
 use startos::net::web_server::TcpMetadata;
 
-use crate::auth::{error_code, validate_local_auth_cookie, validate_session, HashSessionToken, LoginRes};
+use crate::auth::{
+    error_code, validate_local_auth_cookie, validate_session, HashSessionToken, LoginRes,
+};
 use crate::prelude::*;
 
 /// Simple synchronous mutex wrapper with mutate helper
@@ -110,11 +112,7 @@ pub fn extract_local_cookie_value(cookie_header: &HeaderValue) -> Option<String>
 impl<C: Context> Middleware<C> for SessionAuth {
     type Metadata = Metadata;
 
-    async fn process_http_request(
-        &mut self,
-        _: &C,
-        request: &mut Request,
-    ) -> Result<(), Response> {
+    async fn process_http_request(&mut self, _: &C, request: &mut Request) -> Result<(), Response> {
         self.cookie = request.headers().get(COOKIE).cloned();
         self.user_agent = request.headers().get(USER_AGENT).cloned();
         self.is_loopback = request
@@ -161,7 +159,10 @@ impl<C: Context> Middleware<C> for SessionAuth {
                         *time = Instant::now();
                         Ok(())
                     } else if *count >= 3 {
-                        Err(Error::new(eyre!("Login attempt limit exceeded."), ErrorKind::RateLimited))
+                        Err(Error::new(
+                            eyre!("Login attempt limit exceeded."),
+                            ErrorKind::RateLimited,
+                        ))
                     } else {
                         *count += 1;
                         Ok(())

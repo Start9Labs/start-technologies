@@ -4,28 +4,28 @@ on:
   workflow_call:
     inputs:
       TAG:
-        description: "Release tag (defaults to github.ref_name for tag-triggered runs)"
+        description: 'Release tag (defaults to github.ref_name for tag-triggered runs)'
         type: string
-        default: ""
+        default: ''
       FREE_DISK_SPACE:
-        description: "Free up disk space before building"
+        description: 'Free up disk space before building'
         type: boolean
         default: false
       RELEASE_REGISTRY:
-        description: "The registry to publish to"
+        description: 'The registry to publish to'
         type: string
       S3_S9PKS_BASE_URL:
-        description: "S3 base URL for package uploads (e.g. https://bucket.region.digitaloceanspaces.com)"
+        description: 'S3 base URL for package uploads (e.g. https://bucket.region.digitaloceanspaces.com)'
         type: string
     secrets:
       DEV_KEY:
-        description: "Developer signing key"
+        description: 'Developer signing key'
         required: true
       S3_ACCESS_KEY:
-        description: "S3 access key for uploading packages"
+        description: 'S3 access key for uploading packages'
         required: false
       S3_SECRET_KEY:
-        description: "S3 secret key for uploading packages"
+        description: 'S3 secret key for uploading packages'
         required: false
 
 jobs:
@@ -355,6 +355,6 @@ jobs:
       - name: Upload each s9pk as its own artifact
         uses: Start9Labs/start-technologies/.github/actions/upload-each@master
         with:
-          pattern: "*.s9pk"
+          pattern: '*.s9pk'
           retention-days: 14
           compression-level: 0

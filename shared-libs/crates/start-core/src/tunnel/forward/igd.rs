@@ -64,7 +64,9 @@ async fn ssdp_server(ctx: TunnelContext, uuid: String) {
 fn ssdp_socket() -> Result<UdpSocket, Error> {
     let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))
         .with_kind(ErrorKind::Network)?;
-    socket.set_reuse_address(true).with_kind(ErrorKind::Network)?;
+    socket
+        .set_reuse_address(true)
+        .with_kind(ErrorKind::Network)?;
     bind_to_wireguard(&socket)?;
     socket
         .bind(&SockAddr::from(SocketAddrV4::new(
@@ -76,7 +78,9 @@ fn ssdp_socket() -> Result<UdpSocket, Error> {
     socket
         .join_multicast_v4_n(&SSDP_MULTICAST, &InterfaceIndexOrAddress::Index(ifindex))
         .with_kind(ErrorKind::Network)?;
-    socket.set_multicast_loop_v4(false).with_kind(ErrorKind::Network)?;
+    socket
+        .set_multicast_loop_v4(false)
+        .with_kind(ErrorKind::Network)?;
     socket.set_nonblocking(true).with_kind(ErrorKind::Network)?;
     UdpSocket::from_std(socket.into()).with_kind(ErrorKind::Network)
 }
@@ -138,7 +142,10 @@ pub(super) async fn subnet_gateway_for(ctx: &TunnelContext, peer: Ipv4Addr) -> O
 
 async fn http_server(ctx: TunnelContext, root_desc: Arc<str>) {
     let app = Router::new()
-        .route(ROOT_DESC_PATH, get(move || serve_static(root_desc.clone(), "text/xml")))
+        .route(
+            ROOT_DESC_PATH,
+            get(move || serve_static(root_desc.clone(), "text/xml")),
+        )
         .route(SCPD_PATH, get(|| serve_static(Arc::from(SCPD), "text/xml")))
         .route(CONTROL_PATH, post(control))
         .with_state(ctx.clone());
@@ -149,7 +156,9 @@ async fn http_server(ctx: TunnelContext, root_desc: Arc<str>) {
         rebind.as_mut().enable();
         match igd_http_listener() {
             Ok(listener) => {
-                tracing::info!("UPnP IGD control server listening on {WIREGUARD_INTERFACE_NAME}:{IGD_HTTP_PORT}");
+                tracing::info!(
+                    "UPnP IGD control server listening on {WIREGUARD_INTERFACE_NAME}:{IGD_HTTP_PORT}"
+                );
                 tokio::select! {
                     res = axum::serve(
                         listener,
@@ -175,7 +184,9 @@ async fn http_server(ctx: TunnelContext, root_desc: Arc<str>) {
 fn igd_http_listener() -> Result<TcpListener, Error> {
     let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))
         .with_kind(ErrorKind::Network)?;
-    socket.set_reuse_address(true).with_kind(ErrorKind::Network)?;
+    socket
+        .set_reuse_address(true)
+        .with_kind(ErrorKind::Network)?;
     bind_to_wireguard(&socket)?;
     socket
         .bind(&SockAddr::from(SocketAddrV4::new(
@@ -256,7 +267,9 @@ pub(super) async fn apply_peer_forward_range(
     }
     match current_forward(ctx, source).await {
         Some(PortForward::Dnat {
-            target: t, count: c, ..
+            target: t,
+            count: c,
+            ..
         }) if t != target || c != count => {
             return Err(718); // ConflictInMappingEntry
         }
@@ -342,7 +355,10 @@ pub(super) async fn apply_peer_forward_range(
     Ok(())
 }
 
-pub(super) async fn current_forward(ctx: &TunnelContext, source: SocketAddrV4) -> Option<PortForward> {
+pub(super) async fn current_forward(
+    ctx: &TunnelContext,
+    source: SocketAddrV4,
+) -> Option<PortForward> {
     ctx.db
         .peek()
         .await
@@ -369,8 +385,13 @@ pub(super) async fn is_known_client(ctx: &TunnelContext, peer: Ipv4Addr) -> bool
 
 /// The WAN IPv4 `peer`'s egress uses: its assigned WAN if pinned, else the
 /// gateway's default WAN.
-pub(in crate::tunnel) async fn external_ipv4(ctx: &TunnelContext, peer: Ipv4Addr) -> Option<Ipv4Addr> {
-    assigned_wan_for(ctx, peer).await.or_else(|| default_wan(ctx))
+pub(in crate::tunnel) async fn external_ipv4(
+    ctx: &TunnelContext,
+    peer: Ipv4Addr,
+) -> Option<Ipv4Addr> {
+    assigned_wan_for(ctx, peer)
+        .await
+        .or_else(|| default_wan(ctx))
 }
 
 /// First usable WAN candidate across the gateway's non-loopback, non-wg
@@ -390,7 +411,9 @@ fn default_wan(ctx: &TunnelContext) -> Option<Ipv4Addr> {
                 .filter(|v4| crate::net::port_map::upnp::is_wan_candidate(*v4))
                 .or_else(|| {
                     ip_info.subnets.iter().find_map(|s| match s.addr() {
-                        IpAddr::V4(v4) if crate::net::port_map::upnp::is_wan_candidate(v4) => Some(v4),
+                        IpAddr::V4(v4) if crate::net::port_map::upnp::is_wan_candidate(v4) => {
+                            Some(v4)
+                        }
                         _ => None,
                     })
                 })

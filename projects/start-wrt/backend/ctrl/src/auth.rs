@@ -2,8 +2,6 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::LazyLock;
 
-use tokio::io::AsyncWriteExt;
-
 use chrono::{DateTime, TimeDelta, Utc};
 use clap::Parser;
 use imbl_value::imbl::OrdMap;
@@ -15,11 +13,11 @@ use rpc_toolkit::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tokio::io::AsyncWriteExt;
 use tracing::instrument;
 
-use crate::captive;
 use crate::prelude::*;
-use crate::{CliContext, ServerContext};
+use crate::{captive, CliContext, ServerContext};
 
 const DEFAULT_SESSION_FILE_PATH: &str = "/etc/startwrt/sessions.json";
 const SESSION_EXPIRY_DAYS: i64 = 1;
@@ -39,9 +37,12 @@ pub async fn init_local_auth_cookie() -> Result<(), Error> {
 
     let path = std::path::Path::new(LOCAL_AUTH_COOKIE_PATH);
     if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|e| Error::new(eyre!("Failed to create {}: {e}", parent.display()), ErrorKind::Filesystem))?;
+        tokio::fs::create_dir_all(parent).await.map_err(|e| {
+            Error::new(
+                eyre!("Failed to create {}: {e}", parent.display()),
+                ErrorKind::Filesystem,
+            )
+        })?;
     }
 
     let mut file = tokio::fs::OpenOptions::new()
@@ -51,12 +52,23 @@ pub async fn init_local_auth_cookie() -> Result<(), Error> {
         .mode(0o640)
         .open(path)
         .await
-        .map_err(|e| Error::new(eyre!("Failed to create local auth cookie: {e}"), ErrorKind::Filesystem))?;
+        .map_err(|e| {
+            Error::new(
+                eyre!("Failed to create local auth cookie: {e}"),
+                ErrorKind::Filesystem,
+            )
+        })?;
     file.write_all(token.as_bytes()).await.map_err(|e| {
-        Error::new(eyre!("Failed to write local auth cookie: {e}"), ErrorKind::Filesystem)
+        Error::new(
+            eyre!("Failed to write local auth cookie: {e}"),
+            ErrorKind::Filesystem,
+        )
     })?;
     file.sync_all().await.map_err(|e| {
-        Error::new(eyre!("Failed to sync local auth cookie: {e}"), ErrorKind::Filesystem)
+        Error::new(
+            eyre!("Failed to sync local auth cookie: {e}"),
+            ErrorKind::Filesystem,
+        )
     })?;
 
     tracing::info!("Local auth cookie initialized at {LOCAL_AUTH_COOKIE_PATH}");
@@ -150,7 +162,12 @@ pub struct LoginParams {
 async fn get_shadow_hash(username: &str) -> Result<Option<String>, Error> {
     let shadow_content = tokio::fs::read_to_string("/etc/shadow")
         .await
-        .map_err(|e| Error::new(eyre!("Failed to read /etc/shadow: {}", e), ErrorKind::Filesystem))?;
+        .map_err(|e| {
+            Error::new(
+                eyre!("Failed to read /etc/shadow: {}", e),
+                ErrorKind::Filesystem,
+            )
+        })?;
 
     for line in shadow_content.lines() {
         let parts: Vec<&str> = line.split(':').collect();
@@ -191,7 +208,10 @@ pub async fn check_password(password: &str) -> Result<(), Error> {
         if password == dev_password {
             return Ok(());
         }
-        return Err(Error::new(eyre!("Incorrect password"), ErrorKind::IncorrectPassword));
+        return Err(Error::new(
+            eyre!("Incorrect password"),
+            ErrorKind::IncorrectPassword,
+        ));
     }
 
     let hash = get_shadow_hash("root").await?;
@@ -211,7 +231,10 @@ pub async fn check_password(password: &str) -> Result<(), Error> {
             if pwhash::unix::verify(password, &hash) {
                 Ok(())
             } else {
-                Err(Error::new(eyre!("Incorrect password"), ErrorKind::IncorrectPassword))
+                Err(Error::new(
+                    eyre!("Incorrect password"),
+                    ErrorKind::IncorrectPassword,
+                ))
             }
         }
     }
@@ -251,10 +274,18 @@ async fn persist_sessions() {
             .map_err(Error::from)?;
         file.set_permissions(std::fs::Permissions::from_mode(0o600))
             .await
-            .map_err(|e| Error::new(eyre!("Failed to set session file permissions: {e}"), ErrorKind::Filesystem))?;
-        file.write_all(content.as_bytes())
-            .await
-            .map_err(|e| Error::new(eyre!("Failed to write sessions: {e}"), ErrorKind::Filesystem))?;
+            .map_err(|e| {
+                Error::new(
+                    eyre!("Failed to set session file permissions: {e}"),
+                    ErrorKind::Filesystem,
+                )
+            })?;
+        file.write_all(content.as_bytes()).await.map_err(|e| {
+            Error::new(
+                eyre!("Failed to write sessions: {e}"),
+                ErrorKind::Filesystem,
+            )
+        })?;
         file.save().await.map_err(Error::from)?;
         Ok(())
     }
@@ -303,7 +334,10 @@ pub async fn validate_session(token_hash: &str) -> Result<(), Error> {
                 let _ = sessions_clone; // ensure removal is reflected if we persist later
                 persist_sessions().await;
             });
-            return Err(Error::new(eyre!("Session expired"), ErrorKind::Authorization));
+            return Err(Error::new(
+                eyre!("Session expired"),
+                ErrorKind::Authorization,
+            ));
         }
     }
 
@@ -390,9 +424,12 @@ async fn update_shadow_hash(username: &str, new_hash: &str) -> Result<(), Error>
     const SHADOW_PATH: &str = "/etc/shadow";
     let shadow_path = Path::new(SHADOW_PATH);
 
-    let shadow_content = tokio::fs::read_to_string(SHADOW_PATH)
-        .await
-        .map_err(|e| Error::new(eyre!("Failed to read /etc/shadow: {e}"), ErrorKind::Filesystem))?;
+    let shadow_content = tokio::fs::read_to_string(SHADOW_PATH).await.map_err(|e| {
+        Error::new(
+            eyre!("Failed to read /etc/shadow: {e}"),
+            ErrorKind::Filesystem,
+        )
+    })?;
 
     // Update the user's hash line
     let mut found = false;
@@ -414,7 +451,10 @@ async fn update_shadow_hash(username: &str, new_hash: &str) -> Result<(), Error>
         .join("\n");
 
     if !found {
-        return Err(Error::new(eyre!("User '{username}' not found in /etc/shadow"), ErrorKind::NotFound));
+        return Err(Error::new(
+            eyre!("User '{username}' not found in /etc/shadow"),
+            ErrorKind::NotFound,
+        ));
     }
 
     // Ensure file ends with newline
@@ -431,10 +471,18 @@ async fn update_shadow_hash(username: &str, new_hash: &str) -> Result<(), Error>
         .map_err(Error::from)?;
     file.set_permissions(std::fs::Permissions::from_mode(0o600))
         .await
-        .map_err(|e| Error::new(eyre!("Failed to set shadow file permissions: {e}"), ErrorKind::Filesystem))?;
-    file.write_all(new_content.as_bytes())
-        .await
-        .map_err(|e| Error::new(eyre!("Failed to write shadow file: {e}"), ErrorKind::Filesystem))?;
+        .map_err(|e| {
+            Error::new(
+                eyre!("Failed to set shadow file permissions: {e}"),
+                ErrorKind::Filesystem,
+            )
+        })?;
+    file.write_all(new_content.as_bytes()).await.map_err(|e| {
+        Error::new(
+            eyre!("Failed to write shadow file: {e}"),
+            ErrorKind::Filesystem,
+        )
+    })?;
     file.save().await.map_err(Error::from)?;
 
     Ok(())
@@ -455,14 +503,30 @@ pub async fn reset_password_impl(
     validate_password_length(&new_password)?;
 
     // Generate new password hash using SHA-512 crypt
-    let new_hash = pwhash::sha512_crypt::hash(&new_password)
-        .map_err(|e| Error::new(eyre!("Failed to hash password: {e}"), ErrorKind::PasswordHashGeneration))?;
+    let new_hash = pwhash::sha512_crypt::hash(&new_password).map_err(|e| {
+        Error::new(
+            eyre!("Failed to hash password: {e}"),
+            ErrorKind::PasswordHashGeneration,
+        )
+    })?;
 
     // Update /etc/shadow directly
     let result = update_shadow_hash("root", &new_hash).await;
     match &result {
-        Ok(()) => crate::activity::log("auth", "password-changed", true, "Changed admin password", None),
-        Err(e) => crate::activity::log("auth", "password-changed", false, "Failed to change admin password", Some(&e.to_string())),
+        Ok(()) => crate::activity::log(
+            "auth",
+            "password-changed",
+            true,
+            "Changed admin password",
+            None,
+        ),
+        Err(e) => crate::activity::log(
+            "auth",
+            "password-changed",
+            false,
+            "Failed to change admin password",
+            Some(&e.to_string()),
+        ),
     }
     result
 }
@@ -504,8 +568,13 @@ async fn cli_reset_password(
     let old_password = rpassword::prompt_password("Current Password: ")?;
 
     // Verify old password before prompting for new one
-    ctx.call_remote("auth.verify-password", OrdMap::new(), json!({ "password": old_password }), Empty {})
-        .await?;
+    ctx.call_remote(
+        "auth.verify-password",
+        OrdMap::new(),
+        json!({ "password": old_password }),
+        Empty {},
+    )
+    .await?;
 
     // Old password verified, now prompt for new password
     let new_password = rpassword::prompt_password("New Password: ")?;
@@ -537,9 +606,7 @@ pub struct CheckInitializedRes {
 }
 
 #[instrument(skip_all)]
-pub async fn check_initialized_impl(
-    _ctx: ServerContext,
-) -> Result<CheckInitializedRes, Error> {
+pub async fn check_initialized_impl(_ctx: ServerContext) -> Result<CheckInitializedRes, Error> {
     let has_password = get_shadow_hash("root").await?.is_some();
     Ok(CheckInitializedRes {
         initialized: has_password,
@@ -559,24 +626,29 @@ pub async fn set_initial_password_impl(
 ) -> Result<LoginRes, Error> {
     // Reject if password already set
     if get_shadow_hash("root").await?.is_some() {
-        return Err(Error::new(eyre!("admin password is already set"), ErrorKind::InvalidRequest));
+        return Err(Error::new(
+            eyre!("admin password is already set"),
+            ErrorKind::InvalidRequest,
+        ));
     }
 
     // Validate minimum length
     validate_password_length(&password)?;
 
     // Hash and write to shadow
-    let new_hash = pwhash::sha512_crypt::hash(&password)
-        .map_err(|e| Error::new(eyre!("failed to hash password: {e}"), ErrorKind::PasswordHashGeneration))?;
+    let new_hash = pwhash::sha512_crypt::hash(&password).map_err(|e| {
+        Error::new(
+            eyre!("failed to hash password: {e}"),
+            ErrorKind::PasswordHashGeneration,
+        )
+    })?;
     update_shadow_hash("root", &new_hash).await?;
 
     // Disable captive portal now that password is set
-    captive::disable_captive_portal()
-        .await
-        .map_err(|e| {
-            tracing::error!("failed to disable captive portal: {e}");
-            e
-        })?;
+    captive::disable_captive_portal().await.map_err(|e| {
+        tracing::error!("failed to disable captive portal: {e}");
+        e
+    })?;
 
     // Create login session so user is immediately authenticated
     let hash_token = HashSessionToken::new();
@@ -621,10 +693,7 @@ pub fn auth<C: Context>() -> ParentHandler<C> {
             from_fn_async(verify_password_impl).no_cli(),
         )
         // RPC/HTTP set-password endpoint (hidden from CLI)
-        .subcommand(
-            "set-password",
-            from_fn_async(reset_password_impl).no_cli(),
-        )
+        .subcommand("set-password", from_fn_async(reset_password_impl).no_cli())
         // CLI set-password endpoint (prompts for passwords, calls RPC)
         .subcommand(
             "set-password",

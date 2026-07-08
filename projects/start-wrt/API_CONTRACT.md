@@ -155,14 +155,11 @@ Connect via WebSocket to stream `FullProgress` JSON frames:
 
 ```typescript
 type FullProgress = {
-  overall: Progress;
-  phases: NamedProgress[];
-};
-type NamedProgress = { name: string; progress: Progress };
-type Progress =
-  | null
-  | boolean
-  | { done: number; total: number | null; units: string | null };
+  overall: Progress
+  phases: NamedProgress[]
+}
+type NamedProgress = { name: string; progress: Progress }
+type Progress = null | boolean | { done: number; total: number | null; units: string | null }
 // null = NotStarted, true = Complete(success), false = Complete(failure)
 // Phases: "Downloading firmware", "Verifying integrity", "Applying update"
 ```
@@ -800,12 +797,13 @@ struct PublishedPortsSetRequest {
 ```
 
 Validation (errors with `MissingDeviceAddress`, rejecting the whole request):
+
 - An enabled `ipv4` port whose device has no resolvable IPv4 address.
 - An enabled `ipv6` port when IPv6 publishing is impossible — any of:
   the router has no global IPv6 prefix delegated; the device resolved to a ULA
   address; or the device is online but has only a link-local address. ULA and
   link-local are unreachable from the WAN, so the request is rejected rather than
-  silently saving a dead IPv6 forward. Only a *genuinely offline* device (no IPv6
+  silently saving a dead IPv6 forward. Only a _genuinely offline_ device (no IPv6
   seen at all) on a GUA-capable router is not rejected; its IPv6 rule is deferred
   by the rule-creation GUA guard so a briefly-offline device doesn't fail an
   otherwise-valid save.
@@ -1122,7 +1120,7 @@ struct BlackoutWindow {
 ```
 
 A window may cross midnight: when `end_time < start_time` (e.g. `22:00`–`06:00`) it runs
-from `start_time` on each selected day until `end_time` the *following* day, and the
+from `start_time` on each selected day until `end_time` the _following_ day, and the
 backend shifts the closing cron edge forward one day. Equal `start_time`/`end_time` is
 rejected (ambiguous 0h/24h). On `*-set`, windows that overlap on the weekly timeline
 (wrap-aware) are also rejected with `InvalidValue`. The same wrap and overlap semantics
@@ -1296,62 +1294,62 @@ struct SshKeyDeleteRequest {
 
 ## Endpoint Summary
 
-| RPC Method               | Status  | Category        |
-| ------------------------ | ------- | --------------- |
-| `auth.login`             | Exists  | Auth            |
-| `auth.logout`            | Exists  | Auth            |
-| `auth.set-password`      | Exists  | Auth            |
-| `system.info`            | Exists  | System          |
-| `system.newer-versions`  | Exists  | System          |
-| `system.restart`         | Exists  | System          |
-| `system.set-preferences` | Exists  | System          |
-| `system.logs`            | Exists  | System          |
-| `/api/logs` (WebSocket)  | Exists  | System          |
-| `wan.ipv4-get`           | **New** | WAN             |
-| `wan.ipv4-set`           | **New** | WAN             |
-| `wan.ipv6-get`           | **New** | WAN             |
-| `wan.ipv6-set`           | **New** | WAN             |
-| `wan.mac-get`            | **New** | WAN             |
-| `wan.mac-set`            | **New** | WAN             |
-| `wan.dns-get`            | **New** | WAN             |
-| `wan.dns-set`            | **New** | WAN             |
-| `wan.ddns-get`           | **New** | WAN             |
-| `wan.ddns-set`           | **New** | WAN             |
-| `lan.ipv4-get`           | **New** | LAN             |
-| `lan.ipv4-set`           | **New** | LAN             |
-| `lan.ipv6-get`           | **New** | LAN             |
-| `lan.ipv6-set`           | **New** | LAN             |
-| `ethernet.get`           | **New** | Ethernet        |
-| `ethernet.set`           | **New** | Ethernet        |
-| `devices.list`           | **New** | Devices         |
-| `devices.update`         | **New** | Devices         |
-| `devices.forget`         | **New** | Devices         |
-| `devices.data-usage`     | **New** | Devices         |
-| `published-ports.list`      | **New** | Published Ports |
-| `published-ports.set`       | **New** | Published Ports |
+| RPC Method                  | Status  | Category                            |
+| --------------------------- | ------- | ----------------------------------- |
+| `auth.login`                | Exists  | Auth                                |
+| `auth.logout`               | Exists  | Auth                                |
+| `auth.set-password`         | Exists  | Auth                                |
+| `system.info`               | Exists  | System                              |
+| `system.newer-versions`     | Exists  | System                              |
+| `system.restart`            | Exists  | System                              |
+| `system.set-preferences`    | Exists  | System                              |
+| `system.logs`               | Exists  | System                              |
+| `/api/logs` (WebSocket)     | Exists  | System                              |
+| `wan.ipv4-get`              | **New** | WAN                                 |
+| `wan.ipv4-set`              | **New** | WAN                                 |
+| `wan.ipv6-get`              | **New** | WAN                                 |
+| `wan.ipv6-set`              | **New** | WAN                                 |
+| `wan.mac-get`               | **New** | WAN                                 |
+| `wan.mac-set`               | **New** | WAN                                 |
+| `wan.dns-get`               | **New** | WAN                                 |
+| `wan.dns-set`               | **New** | WAN                                 |
+| `wan.ddns-get`              | **New** | WAN                                 |
+| `wan.ddns-set`              | **New** | WAN                                 |
+| `lan.ipv4-get`              | **New** | LAN                                 |
+| `lan.ipv4-set`              | **New** | LAN                                 |
+| `lan.ipv6-get`              | **New** | LAN                                 |
+| `lan.ipv6-set`              | **New** | LAN                                 |
+| `ethernet.get`              | **New** | Ethernet                            |
+| `ethernet.set`              | **New** | Ethernet                            |
+| `devices.list`              | **New** | Devices                             |
+| `devices.update`            | **New** | Devices                             |
+| `devices.forget`            | **New** | Devices                             |
+| `devices.data-usage`        | **New** | Devices                             |
+| `published-ports.list`      | **New** | Published Ports                     |
+| `published-ports.set`       | **New** | Published Ports                     |
 | `published-ports.reconcile` | **New** | Published Ports (internal, hotplug) |
-| `vpn-client.list`        | **New** | Outbound VPN    |
-| `vpn-client.create`      | **New** | Outbound VPN    |
-| `vpn-client.update`      | **New** | Outbound VPN    |
-| `vpn-client.delete`      | **New** | Outbound VPN    |
-| `vpn-client.set-enabled` | **New** | Outbound VPN    |
-| `vpn-server.list`        | Exists  | Inbound VPN     |
-| `vpn-server.set`         | Exists  | Inbound VPN     |
-| `vpn-server.delete`      | Exists  | Inbound VPN     |
-| `vpn-server.peer-add`    | Exists  | Inbound VPN     |
-| `vpn-server.peer-delete` | Exists  | Inbound VPN     |
-| `wifi.get`               | Exists  | WiFi            |
-| `wifi.set`               | Exists  | WiFi            |
-| `wifi.blackout-get`      | Exists  | WiFi            |
-| `wifi.blackout-set`      | Exists  | WiFi            |
-| `profiles.list`          | Exists  | Profiles        |
-| `profiles.get`           | Exists  | Profiles        |
-| `profiles.create`        | Exists  | Profiles        |
-| `profiles.set`           | Exists  | Profiles        |
-| `profiles.delete`        | Exists  | Profiles        |
-| `ssh-keys.list`          | **New** | SSH Keys        |
-| `ssh-keys.add`           | **New** | SSH Keys        |
-| `ssh-keys.delete`        | **New** | SSH Keys        |
+| `vpn-client.list`           | **New** | Outbound VPN                        |
+| `vpn-client.create`         | **New** | Outbound VPN                        |
+| `vpn-client.update`         | **New** | Outbound VPN                        |
+| `vpn-client.delete`         | **New** | Outbound VPN                        |
+| `vpn-client.set-enabled`    | **New** | Outbound VPN                        |
+| `vpn-server.list`           | Exists  | Inbound VPN                         |
+| `vpn-server.set`            | Exists  | Inbound VPN                         |
+| `vpn-server.delete`         | Exists  | Inbound VPN                         |
+| `vpn-server.peer-add`       | Exists  | Inbound VPN                         |
+| `vpn-server.peer-delete`    | Exists  | Inbound VPN                         |
+| `wifi.get`                  | Exists  | WiFi                                |
+| `wifi.set`                  | Exists  | WiFi                                |
+| `wifi.blackout-get`         | Exists  | WiFi                                |
+| `wifi.blackout-set`         | Exists  | WiFi                                |
+| `profiles.list`             | Exists  | Profiles                            |
+| `profiles.get`              | Exists  | Profiles                            |
+| `profiles.create`           | Exists  | Profiles                            |
+| `profiles.set`              | Exists  | Profiles                            |
+| `profiles.delete`           | Exists  | Profiles                            |
+| `ssh-keys.list`             | **New** | SSH Keys                            |
+| `ssh-keys.add`              | **New** | SSH Keys                            |
+| `ssh-keys.delete`           | **New** | SSH Keys                            |
 
 **Totals:** 51 endpoints (22 existing, 29 new)
 

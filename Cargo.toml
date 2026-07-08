@@ -1,5 +1,4 @@
 [workspace]
-resolver = "3"
 members = [
   "shared-libs/crates/start-core",
   "shared-libs/crates/exver",
@@ -23,6 +22,7 @@ members = [
   "projects/start-wrt/backend/uciedit_macros",
   "projects/start-wrt/backend/ctrl",
 ]
+resolver = "3"
 
 [profile.test]
 opt-level = 3

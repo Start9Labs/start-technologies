@@ -110,7 +110,16 @@ pub async fn ensure_divert_infra() -> Result<(), Error> {
     // Local-delivery default in the divert table: marked replies are delivered
     // to the local transparent socket instead of being forwarded back out.
     Command::new("ip")
-        .args(["route", "replace", "local", "0.0.0.0/0", "dev", "lo", "table", &table])
+        .args([
+            "route",
+            "replace",
+            "local",
+            "0.0.0.0/0",
+            "dev",
+            "lo",
+            "table",
+            &table,
+        ])
         .invoke(ErrorKind::Network)
         .await?;
 
@@ -124,8 +133,14 @@ pub async fn ensure_divert_infra() -> Result<(), Error> {
     if !String::from_utf8_lossy(&rules).contains(&format!("lookup {table}")) {
         Command::new("ip")
             .args([
-                "rule", "add", "fwmark", &format!("{DIVERT_MARK:#x}"), "lookup", &table,
-                "priority", "49",
+                "rule",
+                "add",
+                "fwmark",
+                &format!("{DIVERT_MARK:#x}"),
+                "lookup",
+                &table,
+                "priority",
+                "49",
             ])
             .invoke(ErrorKind::Network)
             .await?;
@@ -142,9 +157,23 @@ pub async fn ensure_divert_infra() -> Result<(), Error> {
     if !String::from_utf8_lossy(&chain).contains("sni-divert") {
         Command::new("nft")
             .args([
-                "add", "rule", "ip", "startos", "mangle_prerouting", "meta", "l4proto",
-                "tcp", "socket", "transparent", "1", "meta", "mark", "set",
-                &format!("{DIVERT_MARK:#010x}"), "comment", "sni-divert",
+                "add",
+                "rule",
+                "ip",
+                "startos",
+                "mangle_prerouting",
+                "meta",
+                "l4proto",
+                "tcp",
+                "socket",
+                "transparent",
+                "1",
+                "meta",
+                "mark",
+                "set",
+                &format!("{DIVERT_MARK:#010x}"),
+                "comment",
+                "sni-divert",
             ])
             .invoke(ErrorKind::Network)
             .await?;

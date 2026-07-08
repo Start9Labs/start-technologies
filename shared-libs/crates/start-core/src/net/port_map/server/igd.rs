@@ -37,7 +37,22 @@ pub fn format_uuid(bytes: &[u8]) -> String {
     // bits are left unset.
     format!(
         "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
+        b[0],
+        b[1],
+        b[2],
+        b[3],
+        b[4],
+        b[5],
+        b[6],
+        b[7],
+        b[8],
+        b[9],
+        b[10],
+        b[11],
+        b[12],
+        b[13],
+        b[14],
+        b[15]
     )
 }
 
@@ -302,7 +317,12 @@ mod tests {
         let mut actions = std::collections::HashMap::new();
         for child in &action_list.children {
             if let Some(a) = child.as_element() {
-                let name = a.get_child("name").unwrap().get_text().unwrap().into_owned();
+                let name = a
+                    .get_child("name")
+                    .unwrap()
+                    .get_text()
+                    .unwrap()
+                    .into_owned();
                 let ins: Vec<String> = a
                     .get_child("argumentList")
                     .map(|al| {
@@ -310,10 +330,14 @@ mod tests {
                             .iter()
                             .filter_map(|c| c.as_element())
                             .filter(|arg| {
-                                arg.get_child("direction").and_then(|d| d.get_text()).as_deref()
+                                arg.get_child("direction")
+                                    .and_then(|d| d.get_text())
+                                    .as_deref()
                                     == Some("in")
                             })
-                            .filter_map(|arg| arg.get_child("name")?.get_text().map(|t| t.into_owned()))
+                            .filter_map(|arg| {
+                                arg.get_child("name")?.get_text().map(|t| t.into_owned())
+                            })
                             .collect()
                     })
                     .unwrap_or_default();
@@ -360,7 +384,10 @@ mod tests {
     #[test]
     fn parses_action_and_ports_from_soap_body() {
         let body = add_port_body();
-        assert_eq!(soap_action(&HeaderMap::new(), &body).as_deref(), Some("AddPortMapping"));
+        assert_eq!(
+            soap_action(&HeaderMap::new(), &body).as_deref(),
+            Some("AddPortMapping")
+        );
         assert_eq!(soap_u16(&body, "NewExternalPort"), Some(443));
         assert_eq!(soap_u16(&body, "NewInternalPort"), Some(8443));
         assert_eq!(soap_u16(&body, "NoSuchArg"), None);
@@ -375,7 +402,10 @@ mod tests {
                 .parse()
                 .unwrap(),
         );
-        assert_eq!(soap_action(&headers, "").as_deref(), Some("DeletePortMapping"));
+        assert_eq!(
+            soap_action(&headers, "").as_deref(),
+            Some("DeletePortMapping")
+        );
     }
 
     #[test]
@@ -395,7 +425,9 @@ mod tests {
         assert!(st_matches("ssdp:all"));
         assert!(st_matches("upnp:rootdevice"));
         assert!(st_matches(WANIP_SERVICE));
-        assert!(!st_matches("urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1"));
+        assert!(!st_matches(
+            "urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1"
+        ));
     }
 
     #[test]

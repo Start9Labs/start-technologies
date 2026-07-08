@@ -64,12 +64,18 @@ pub async fn add(
     let result = add_key(Path::new(SSH_DIR), Path::new(AUTHORIZED_KEYS), &key).await;
     match &result {
         Ok(resp) => crate::activity::log(
-            "ssh-key", "added", true,
-            &format!("Added SSH key ({}: {})", resp.algorithm, resp.fingerprint), None,
+            "ssh-key",
+            "added",
+            true,
+            &format!("Added SSH key ({}: {})", resp.algorithm, resp.fingerprint),
+            None,
         ),
         Err(e) => crate::activity::log(
-            "ssh-key", "added", false,
-            "Failed to add SSH key", Some(&e.to_string()),
+            "ssh-key",
+            "added",
+            false,
+            "Failed to add SSH key",
+            Some(&e.to_string()),
         ),
     }
     result
@@ -88,7 +94,12 @@ pub async fn delete(
     SshKeyDeleteParams { fingerprint }: SshKeyDeleteParams,
 ) -> Result<(), Error> {
     let result = delete_key(Path::new(AUTHORIZED_KEYS), &fingerprint).await;
-    crate::activity::log_result("ssh-key", "deleted", &format!("SSH key ({fingerprint})"), result)
+    crate::activity::log_result(
+        "ssh-key",
+        "deleted",
+        &format!("SSH key ({fingerprint})"),
+        result,
+    )
 }
 
 // --- Core logic (testable, accepts paths) ---
@@ -145,7 +156,10 @@ async fn add_key(
         }
         if let Ok(existing_pk) = trimmed.parse::<openssh_keys::PublicKey>() {
             if existing_pk.fingerprint_md5() == fingerprint {
-                return Err(Error::new(eyre!("SSH key already exists"), ErrorKind::Duplicate));
+                return Err(Error::new(
+                    eyre!("SSH key already exists"),
+                    ErrorKind::Duplicate,
+                ));
             }
         }
     }
@@ -228,9 +242,11 @@ async fn set_permissions(path: &Path, mode: u32) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::os::unix::fs::PermissionsExt;
+
     use tempfile::tempdir;
+
+    use super::*;
 
     const TEST_KEY_1: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl matt@macbook";
     const TEST_KEY_2: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJf3LQXK5m7dZtQgkVwMYxPragThKvOHPrLwfCfMR7fa lucy@desktop";
@@ -356,7 +372,9 @@ mod tests {
         let ssh_dir = dir.path().join(".ssh");
         let auth_keys = ssh_dir.join("authorized_keys");
 
-        let err = add_key(&ssh_dir, &auth_keys, "not-a-key").await.unwrap_err();
+        let err = add_key(&ssh_dir, &auth_keys, "not-a-key")
+            .await
+            .unwrap_err();
         assert!(format!("{err}").contains("invalid SSH public key"));
     }
 

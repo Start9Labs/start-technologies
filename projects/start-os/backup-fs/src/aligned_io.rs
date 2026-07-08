@@ -135,12 +135,7 @@ fn pread_full<F: FileExt>(file: &F, buf: &mut [u8], offset: u64) -> io::Result<u
 
 /// Plain synchronous pwrite loop. Used as a fallback when io_uring is
 /// disabled or has been poisoned by a timeout.
-fn pwrite_all<F: FileExt>(
-    file: &F,
-    buf: &[u8],
-    offset: u64,
-    chunk_size: usize,
-) -> io::Result<()> {
+fn pwrite_all<F: FileExt>(file: &F, buf: &[u8], offset: u64, chunk_size: usize) -> io::Result<()> {
     for (i, chunk) in buf.chunks(chunk_size).enumerate() {
         let base = offset + (i * chunk_size) as u64;
         let mut pos = 0;
@@ -215,8 +210,7 @@ fn uring_pwrite_all(
     match ring.submitter().submit_with_args(n_chunks, &args) {
         Ok(_) => {}
         Err(e)
-            if e.raw_os_error() == Some(libc::ETIME)
-                || e.raw_os_error() == Some(libc::EINTR) =>
+            if e.raw_os_error() == Some(libc::ETIME) || e.raw_os_error() == Some(libc::EINTR) =>
         {
             return UringFlushOutcome::Poisoned(io::Error::new(
                 io::ErrorKind::TimedOut,
@@ -354,8 +348,7 @@ impl<F: FileExt + AsRawFd> BufferedDirectFile<F> {
         //
         // `state.loaded` tracks the prefix that's already current with disk,
         // so a previously-loaded edge can skip the pread.
-        let head_needs_read =
-            start < state.dirty_start && state.loaded < state.dirty_start;
+        let head_needs_read = start < state.dirty_start && state.loaded < state.dirty_start;
         let tail_needs_read = end > state.dirty_end && state.loaded < end;
         if head_needs_read || tail_needs_read {
             let head_block_start = start;
@@ -577,14 +570,12 @@ impl<F: FileExt + AsRawFd> Seek for BufferedDirectFile<F> {
         let state = self.state.get_mut();
         state.pos = match pos {
             SeekFrom::Start(n) => n,
-            SeekFrom::Current(n) => {
-                if n >= 0 {
-                    state.pos.checked_add(n as u64)
-                } else {
-                    state.pos.checked_sub(n.unsigned_abs())
-                }
-                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid seek"))?
+            SeekFrom::Current(n) => if n >= 0 {
+                state.pos.checked_add(n as u64)
+            } else {
+                state.pos.checked_sub(n.unsigned_abs())
             }
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid seek"))?,
             SeekFrom::End(_) => {
                 return Err(io::Error::new(
                     io::ErrorKind::Unsupported,

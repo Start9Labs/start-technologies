@@ -1,6 +1,6 @@
 # Post a Notification to the User
 
-Surface information to the user in the StartOS notifications panel — the same panel where StartOS shows backup-completion notices, install failures, and similar OS-generated events. Use this **sparingly**, only for information the user genuinely needs to know about — most commonly that a long-running action has finished (a sync health check that finally passes, a lengthy reindex or migration completing). Notifications are not a changelog feed or an activity log. If you need the user to *do* something, use a [Task](tasks.md) instead.
+Surface information to the user in the StartOS notifications panel — the same panel where StartOS shows backup-completion notices, install failures, and similar OS-generated events. Use this **sparingly**, only for information the user genuinely needs to know about — most commonly that a long-running action has finished (a sync health check that finally passes, a lengthy reindex or migration completing). Notifications are not a changelog feed or an activity log. If you need the user to _do_ something, use a [Task](tasks.md) instead.
 
 ## Solution
 

@@ -35,33 +35,33 @@ on:
       - master
       - next/*
     paths:
-      - "projects/start-cli/**"
-      - "shared-libs/crates/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "build/**"
-      - "debian/**"
-      - ".github/workflows/start-cli.yaml"
-      - ".github/actions/setup-build/**"
+      - 'projects/start-cli/**'
+      - 'shared-libs/crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'build/**'
+      - 'debian/**'
+      - '.github/workflows/start-cli.yaml'
+      - '.github/actions/setup-build/**'
       # Doc-only edits shouldn't trigger a build. (start-cli has no docs/ subtree
       # today, but this guards a README or future docs added under the allowlist.)
-      - "!**/*.md"
+      - '!**/*.md'
   pull_request:
     branches:
       - master
       - next/*
     paths:
-      - "projects/start-cli/**"
-      - "shared-libs/crates/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "build/**"
-      - "debian/**"
-      - ".github/workflows/start-cli.yaml"
-      - ".github/actions/setup-build/**"
+      - 'projects/start-cli/**'
+      - 'shared-libs/crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'build/**'
+      - 'debian/**'
+      - '.github/workflows/start-cli.yaml'
+      - '.github/actions/setup-build/**'
       # Doc-only edits shouldn't trigger a build. (start-cli has no docs/ subtree
       # today, but this guards a README or future docs added under the allowlist.)
-      - "!**/*.md"
+      - '!**/*.md'
 
 # The group is scoped by event so a master push can't cancel an in-flight
 # dispatched release build; dispatches queue behind each other, never cancel.
@@ -70,7 +70,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 env:
-  NODEJS_VERSION: "24.11.0"
+  NODEJS_VERSION: '24.11.0'
   ENVIRONMENT: '${{ fromJson(format(''["{0}", ""]'', github.event.inputs.environment || ''dev''))[github.event.inputs.environment == ''NONE''] }}'
 
 jobs:

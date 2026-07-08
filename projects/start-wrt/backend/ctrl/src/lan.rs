@@ -1,15 +1,17 @@
-use crate::profiles;
-use crate::utils::DeserializeStdin;
-use crate::utils::HandlerExtSerde;
-use crate::CtrlContext;
-use crate::prelude::*;
-use crate::invoke::Invoke;
-use rpc_toolkit::{from_fn_async_local, ParentHandler};
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::net::Ipv4Addr;
-use uciedit::openwrt::{Dhcp, DhcpHost, FirewallRedirect, NetworkInterface, NetworkRoute, NetworkRule, ProfileDnsmasq};
+
+use rpc_toolkit::{from_fn_async_local, ParentHandler};
+use serde::{Deserialize, Serialize};
+use uciedit::openwrt::{
+    Dhcp, DhcpHost, FirewallRedirect, NetworkInterface, NetworkRoute, NetworkRule, ProfileDnsmasq,
+};
 use uciedit::{dump_all, parse_all, Arena, Configs};
+
+use crate::invoke::Invoke;
+use crate::prelude::*;
+use crate::utils::{DeserializeStdin, HandlerExtSerde};
+use crate::{profiles, CtrlContext};
 
 pub const LAN_INTERFACE: &str = "lan";
 pub const WAN6_INTERFACE: &str = "wan6";
@@ -91,10 +93,22 @@ pub struct LanIpv6SetRequest {
 
 pub fn lan<C: CtrlContext + Clone>() -> ParentHandler<C> {
     ParentHandler::new()
-        .subcommand("ipv4-get", from_fn_async_local(ipv4_get::<C>).with_display_serializable())
-        .subcommand("ipv4-set", from_fn_async_local(ipv4_set::<C>).with_display_serializable())
-        .subcommand("ipv6-get", from_fn_async_local(ipv6_get::<C>).with_display_serializable())
-        .subcommand("ipv6-set", from_fn_async_local(ipv6_set::<C>).with_display_serializable())
+        .subcommand(
+            "ipv4-get",
+            from_fn_async_local(ipv4_get::<C>).with_display_serializable(),
+        )
+        .subcommand(
+            "ipv4-set",
+            from_fn_async_local(ipv4_set::<C>).with_display_serializable(),
+        )
+        .subcommand(
+            "ipv6-get",
+            from_fn_async_local(ipv6_get::<C>).with_display_serializable(),
+        )
+        .subcommand(
+            "ipv6-set",
+            from_fn_async_local(ipv6_set::<C>).with_display_serializable(),
+        )
 }
 
 #[instrument(skip_all)]
@@ -130,10 +144,12 @@ pub async fn ipv4_set<C: CtrlContext>(
     ctx: C,
     DeserializeStdin(req): DeserializeStdin<LanIpv4SetRequest>,
 ) -> Result<(), Error> {
-    let address: Ipv4Addr = req
-        .address
-        .parse()
-        .map_err(|_| Error::new(eyre!("Invalid IPv4 address: {}", req.address), ErrorKind::ParseNetAddress))?;
+    let address: Ipv4Addr = req.address.parse().map_err(|_| {
+        Error::new(
+            eyre!("Invalid IPv4 address: {}", req.address),
+            ErrorKind::ParseNetAddress,
+        )
+    })?;
     // Enforce the RFC 1918 block boundaries the UI exposes — fail before
     // touching any config so a bad value can't partially apply.
     validate_lan_block(address)?;
@@ -141,7 +157,12 @@ pub async fn ipv4_set<C: CtrlContext>(
     let mut retries = 4;
     loop {
         let arena = Arena::new();
-        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["network", "startwrt", "dhcp", "firewall"]).await?;
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["network", "startwrt", "dhcp", "firewall"],
+        )
+        .await?;
 
         // Reject a /24 owned by another profile before touching any config — a
         // colliding LAN subnet strands the router (same guard as
@@ -176,14 +197,16 @@ pub async fn ipv4_set<C: CtrlContext>(
             }
         }
         if !found {
-            return Err(Error::new(eyre!("LAN interface not found in network config"), ErrorKind::MissingLanInterface));
+            return Err(Error::new(
+                eyre!("LAN interface not found in network config"),
+                ErrorKind::MissingLanInterface,
+            ));
         }
 
         // Detect network block change (first two octets differ)
         let block_changed = match old_address {
             Some(old) => {
-                old.octets()[0] != address.octets()[0]
-                    || old.octets()[1] != address.octets()[1]
+                old.octets()[0] != address.octets()[0] || old.octets()[1] != address.octets()[1]
             }
             None => false,
         };
@@ -216,7 +239,9 @@ pub async fn ipv4_set<C: CtrlContext>(
         let removed_vpns = if ip_changed {
             let affected: Vec<&str> = if block_changed {
                 // Block change affects all profiles
-                profile_interfaces.iter().map(|s| s.as_str())
+                profile_interfaces
+                    .iter()
+                    .map(|s| s.as_str())
                     .chain(std::iter::once(LAN_INTERFACE))
                     .collect()
             } else {
@@ -237,7 +262,9 @@ pub async fn ipv4_set<C: CtrlContext>(
             }
             Err(err) => {
                 crate::activity::log(
-                    "lan", "ipv4-updated", false,
+                    "lan",
+                    "ipv4-updated",
+                    false,
                     &format!("Failed to update LAN IPv4 to {address}"),
                     Some(&err.to_string()),
                 );
@@ -252,7 +279,9 @@ pub async fn ipv4_set<C: CtrlContext>(
                     );
                 } else {
                     crate::activity::log(
-                        "lan", "ipv4-updated", true,
+                        "lan",
+                        "ipv4-updated",
+                        true,
                         &format!("Updated LAN IPv4 to {address}"),
                         None,
                     );
@@ -273,7 +302,12 @@ pub async fn ipv4_set<C: CtrlContext>(
                     }
 
                     let mut ifaces: Vec<String> = vec![LAN_INTERFACE.to_string()];
-                    ifaces.extend(profile_interfaces.iter().filter(|i| *i != LAN_INTERFACE).cloned());
+                    ifaces.extend(
+                        profile_interfaces
+                            .iter()
+                            .filter(|i| *i != LAN_INTERFACE)
+                            .cloned(),
+                    );
                     restart_network_services(address, ifaces).await;
                     removed_vpns.apply_post_reload().await;
                 }
@@ -331,9 +365,7 @@ pub async fn ipv6_get<C: CtrlContext>(ctx: C) -> Result<LanIpv6Response, Error> 
         }
     }
 
-    let prefix = ip6assign
-        .and_then(|s| s.parse::<u8>().ok())
-        .unwrap_or(64);
+    let prefix = ip6assign.and_then(|s| s.parse::<u8>().ok()).unwrap_or(64);
 
     // Drop arena before any .await — Arena is !Send
     drop(cfgs);
@@ -343,7 +375,9 @@ pub async fn ipv6_get<C: CtrlContext>(ctx: C) -> Result<LanIpv6Response, Error> 
     // assigned by odhcpd (which isn't written to UCI).
     let ip6addr = match ip6addr {
         Some(v) => Some(v),
-        None => crate::ssl::read_lan_ipv6_from_ubus().await.map(|a| a.to_string()),
+        None => crate::ssl::read_lan_ipv6_from_ubus()
+            .await
+            .map(|a| a.to_string()),
     };
 
     // Runtime delegation status
@@ -389,7 +423,10 @@ pub async fn ipv6_set<C: CtrlContext>(
             }
         }
         if !found_network {
-            return Err(Error::new(eyre!("LAN interface not found in network config"), ErrorKind::MissingLanInterface));
+            return Err(Error::new(
+                eyre!("LAN interface not found in network config"),
+                ErrorKind::MissingLanInterface,
+            ));
         }
 
         // Update DHCP LAN section RA/DHCPv6
@@ -398,8 +435,7 @@ pub async fn ipv6_set<C: CtrlContext>(
             if section.name().as_deref() == Some(LAN_INTERFACE) {
                 if let Some(mut dhcp) = section.get_typed::<Dhcp>()? {
                     dhcp.ra = Some(if req.slaac { "server" } else { "disabled" }.to_string());
-                    dhcp.dhcpv6 =
-                        Some(if req.dhcpv6 { "server" } else { "disabled" }.to_string());
+                    dhcp.dhcpv6 = Some(if req.dhcpv6 { "server" } else { "disabled" }.to_string());
                     section.set(&dhcp)?;
                     found_dhcp = true;
                     break;
@@ -407,7 +443,10 @@ pub async fn ipv6_set<C: CtrlContext>(
             }
         }
         if !found_dhcp {
-            return Err(Error::new(eyre!("LAN section not found in DHCP config"), ErrorKind::MissingLanInterface));
+            return Err(Error::new(
+                eyre!("LAN section not found in DHCP config"),
+                ErrorKind::MissingLanInterface,
+            ));
         }
 
         // Update all profile DHCP/network sections to match global IPv6 state.
@@ -421,8 +460,7 @@ pub async fn ipv6_set<C: CtrlContext>(
         for section in &cfgs["startwrt"].sections {
             if let Ok(p) = section.get::<profiles::UciProfile>() {
                 let outbound = p.outbound.unwrap_or_else(|| "wan".to_string());
-                let has_ipv6 = ipv6_requested
-                    && profiles::outbound_supports_ipv6(&cfgs, &outbound);
+                let has_ipv6 = ipv6_requested && profiles::outbound_supports_ipv6(&cfgs, &outbound);
                 profile_ipv6_map.insert(p.interface.clone(), has_ipv6);
             }
         }
@@ -437,7 +475,11 @@ pub async fn ipv6_set<C: CtrlContext>(
                 if name.as_ref() != LAN_INTERFACE {
                     if let Some(&has_ipv6) = profile_ipv6_map.get(name.as_ref()) {
                         if let Some(mut iface) = section.get_typed::<NetworkInterface>()? {
-                            let want = if has_ipv6 { Some("64".to_string()) } else { None };
+                            let want = if has_ipv6 {
+                                Some("64".to_string())
+                            } else {
+                                None
+                            };
                             if iface.ip6assign != want {
                                 iface.ip6assign = want;
                                 section.set(&iface)?;
@@ -452,9 +494,22 @@ pub async fn ipv6_set<C: CtrlContext>(
             if let Some(name) = section.name() {
                 if let Some(&profile_ipv6) = profile_ipv6_map.get(name.as_ref()) {
                     if let Some(mut dhcp) = section.get_typed::<Dhcp>()? {
-                        dhcp.ra = Some(if profile_ipv6 && req.slaac { "server" } else { "disabled" }.to_string());
-                        dhcp.dhcpv6 =
-                            Some(if profile_ipv6 && req.dhcpv6 { "server" } else { "disabled" }.to_string());
+                        dhcp.ra = Some(
+                            if profile_ipv6 && req.slaac {
+                                "server"
+                            } else {
+                                "disabled"
+                            }
+                            .to_string(),
+                        );
+                        dhcp.dhcpv6 = Some(
+                            if profile_ipv6 && req.dhcpv6 {
+                                "server"
+                            } else {
+                                "disabled"
+                            }
+                            .to_string(),
+                        );
                         section.set(&dhcp)?;
                     }
                 }
@@ -469,11 +524,23 @@ pub async fn ipv6_set<C: CtrlContext>(
                 continue;
             }
             Err(err) => {
-                crate::activity::log("lan", "ipv6-updated", false, "Failed to update LAN IPv6 settings", Some(&err.to_string()));
+                crate::activity::log(
+                    "lan",
+                    "ipv6-updated",
+                    false,
+                    "Failed to update LAN IPv6 settings",
+                    Some(&err.to_string()),
+                );
                 return Err(err.into());
             }
             Ok(()) => {
-                crate::activity::log("lan", "ipv6-updated", true, "Updated LAN IPv6 settings", None);
+                crate::activity::log(
+                    "lan",
+                    "ipv6-updated",
+                    true,
+                    "Updated LAN IPv6 settings",
+                    None,
+                );
                 if ctx.effectful() {
                     let ipv6_enabled = req.slaac || req.dhcpv6;
 
@@ -481,8 +548,14 @@ pub async fn ipv6_set<C: CtrlContext>(
                     // (prefix lifetimes=0) while the network is still up.
                     // Without this, disabling IPv6 leaves clients with stale
                     // SLAAC addresses until they naturally expire.
-                    let _ = crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/odhcpd").arg("restart")).await;
-                    let _ = crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/network").arg("restart")).await;
+                    let _ = crate::run_quiet_async(
+                        tokio::process::Command::new("/etc/init.d/odhcpd").arg("restart"),
+                    )
+                    .await;
+                    let _ = crate::run_quiet_async(
+                        tokio::process::Command::new("/etc/init.d/network").arg("restart"),
+                    )
+                    .await;
 
                     // Regenerate server cert to include/remove IPv6 SAN.
                     // When enabling IPv6, poll for the address to appear on
@@ -498,7 +571,9 @@ pub async fn ipv6_set<C: CtrlContext>(
                             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                         }
                         if found.is_none() {
-                            tracing::warn!("IPv6 address not yet available on LAN after network restart");
+                            tracing::warn!(
+                                "IPv6 address not yet available on LAN after network restart"
+                            );
                         }
                         found
                     } else {
@@ -543,9 +618,7 @@ pub(crate) fn guard_dhcp_static_hosts(cfgs: &Configs, old_prefix: &[u8]) -> Resu
 
     if !affected.is_empty() {
         return Err(Error::new(
-            eyre!(
-                "cannot change subnet while devices have static IP reservations: {affected:?}"
-            ),
+            eyre!("cannot change subnet while devices have static IP reservations: {affected:?}"),
             ErrorKind::DhcpStaticHostsInSubnet,
         ));
     }
@@ -570,9 +643,7 @@ pub fn update_profile_ips_for_block_change(
                 if let Some(mut iface) = section.get_typed::<NetworkInterface>()? {
                     if let Some(ip) = iface.ipaddr {
                         let o = ip.octets();
-                        iface.ipaddr = Some(Ipv4Addr::new(
-                            new_oct[0], new_oct[1], o[2], o[3],
-                        ));
+                        iface.ipaddr = Some(Ipv4Addr::new(new_oct[0], new_oct[1], o[2], o[3]));
                         section.set(&iface)?;
                     }
                 }
@@ -591,7 +662,9 @@ pub fn update_profile_ips_for_block_change(
                                 if let Ok(src_ip) = ip_part.parse::<Ipv4Addr>() {
                                     rule.src = Some(format!(
                                         "{}.{}.{}.0/24",
-                                        new_oct[0], new_oct[1], src_ip.octets()[2]
+                                        new_oct[0],
+                                        new_oct[1],
+                                        src_ip.octets()[2]
                                     ));
                                     section.set(&rule)?;
                                 }
@@ -613,7 +686,9 @@ pub fn update_profile_ips_for_block_change(
                             if let Ok(tgt) = ip_part.parse::<Ipv4Addr>() {
                                 route.target = format!(
                                     "{}.{}.{}.0/24",
-                                    new_oct[0], new_oct[1], tgt.octets()[2]
+                                    new_oct[0],
+                                    new_oct[1],
+                                    tgt.octets()[2]
                                 );
                                 section.set(&route)?;
                             }
@@ -634,9 +709,8 @@ pub fn update_profile_ips_for_block_change(
                         for addr in &mut dnsmasq.listen_address {
                             if let Ok(ip) = addr.parse::<Ipv4Addr>() {
                                 let o = ip.octets();
-                                *addr = Ipv4Addr::new(
-                                    new_oct[0], new_oct[1], o[2], o[3],
-                                ).to_string();
+                                *addr =
+                                    Ipv4Addr::new(new_oct[0], new_oct[1], o[2], o[3]).to_string();
                                 changed = true;
                             }
                         }
@@ -657,9 +731,8 @@ pub fn update_profile_ips_for_block_change(
                     if let Ok(ip) = dest.parse::<Ipv4Addr>() {
                         let o = ip.octets();
                         if o[0] == old_oct[0] && o[1] == old_oct[1] {
-                            redir.dest_ip = Some(Ipv4Addr::new(
-                                new_oct[0], new_oct[1], o[2], o[3],
-                            ).to_string());
+                            redir.dest_ip =
+                                Some(Ipv4Addr::new(new_oct[0], new_oct[1], o[2], o[3]).to_string());
                             section.set(&redir)?;
                         }
                     }
@@ -708,10 +781,14 @@ pub async fn restart_network_services(new_lan_ip: Ipv4Addr, interfaces: Vec<Stri
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
     // Regenerate nftables rules so masquerade/NAT covers the new subnets.
-    let _ = crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/firewall").arg("reload")).await;
+    let _ =
+        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/firewall").arg("reload"))
+            .await;
     // Full restart (not reload) so dnsmasq rebinds to new interface IPs.
     // A reload (SIGHUP) re-reads config but doesn't rebind listeners.
-    let _ = crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/dnsmasq").arg("restart")).await;
+    let _ =
+        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/dnsmasq").arg("restart"))
+            .await;
     // Bounce WiFi so all clients disassociate and reassociate,
     // triggering fresh DHCP on the new subnet. Without this,
     // clients that stay connected keep stale leases from the
@@ -721,11 +798,13 @@ pub async fn restart_network_services(new_lan_ip: Ipv4Addr, interfaces: Vec<Stri
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use rpc_toolkit::Context;
     use std::path::PathBuf;
     use std::sync::Arc;
+
+    use rpc_toolkit::Context;
     use tokio::runtime::Runtime;
+
+    use super::*;
 
     #[derive(Clone)]
     struct TestContext(PathBuf);
@@ -1030,7 +1109,9 @@ config redirect 'dns_override_guest'
 
         // Re-read all configs
         let arena = Arena::new();
-        let cfgs = parse_all(ctx.uci_root(), &arena, &["network", "dhcp", "firewall"]).await.unwrap();
+        let cfgs = parse_all(ctx.uci_root(), &arena, &["network", "dhcp", "firewall"])
+            .await
+            .unwrap();
 
         for section in &cfgs["network"].sections {
             if section.name().as_deref() == Some("guest") {
@@ -1044,7 +1125,8 @@ config redirect 'dns_override_guest'
             if section.name().as_deref() == Some("prr_guest") {
                 let rule = section.get_typed::<NetworkRule>().unwrap().unwrap();
                 assert_eq!(
-                    rule.src.as_deref(), Some("10.0.2.0/24"),
+                    rule.src.as_deref(),
+                    Some("10.0.2.0/24"),
                     "Guest routing rule src should be updated to new block"
                 );
             }
@@ -1150,7 +1232,9 @@ config profile guest
 
         // Guest should be untouched
         let arena = Arena::new();
-        let cfgs = parse_all(ctx.uci_root(), &arena, &["network"]).await.unwrap();
+        let cfgs = parse_all(ctx.uci_root(), &arena, &["network"])
+            .await
+            .unwrap();
 
         for section in &cfgs["network"].sections {
             if section.name().as_deref() == Some("guest") {
@@ -1298,7 +1382,8 @@ config profile guest
                 dhcpv6: false,
                 prefix: 60,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let res = ipv6_get(ctx).await.unwrap();
@@ -1321,7 +1406,8 @@ config profile guest
                 dhcpv6: false,
                 prefix: 64,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let res = ipv6_get(ctx).await.unwrap();
@@ -1345,7 +1431,8 @@ config profile guest
                 dhcpv6: true,
                 prefix: 60,
             }),
-        ).await
+        )
+        .await
         .unwrap_err();
 
         assert!(
@@ -1459,7 +1546,9 @@ config profile iot
         .unwrap();
 
         let arena = Arena::new();
-        let cfgs = parse_all(ctx.uci_root(), &arena, &["network"]).await.unwrap();
+        let cfgs = parse_all(ctx.uci_root(), &arena, &["network"])
+            .await
+            .unwrap();
         let ip6assign_of = |name: &str| -> Option<String> {
             cfgs["network"]
                 .sections

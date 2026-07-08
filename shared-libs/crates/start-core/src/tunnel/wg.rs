@@ -194,7 +194,9 @@ impl Base64<WgKey> {
 /// gateway (DNS injection / auto port-forward); a `Client` is a plain peer with
 /// no autoconfig. Stored and sticky — toggling the capability flags never changes
 /// it; the migration backfills it from those flags.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, TS, clap::ValueEnum)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, TS, clap::ValueEnum,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum WgClientKind {
     #[default]

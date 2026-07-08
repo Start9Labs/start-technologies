@@ -1,34 +1,34 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::ffi::OsString;
+use std::future::ready;
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::body::Body;
-use axum::http::{Response, header};
 use axum::extract::DefaultBodyLimit;
+use axum::http::{header, Response};
 use axum::routing::{any, get, post};
 use axum::{Extension, Json, Router};
-use crate::prelude::*;
 use rpc_toolkit::Server;
 use serde::Deserialize;
 use startos::net::tls::TlsListener;
 use startos::net::web_server::{Accept, Acceptor, DynAccept, MetadataVisitor, WebServer};
-use std::future::ready;
-use std::net::SocketAddr;
-use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::signal::unix::SignalKind;
 use tokio::sync::mpsc;
+use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer};
 use tracing::instrument;
 use visit_rs::Visit;
-
-use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer};
 
 use crate::continuations::{self, RpcContinuations};
 use crate::embedded_web::serve_embedded;
 use crate::luci_proxy::{self, ProxyClient};
+use crate::middleware::SessionAuth;
+use crate::prelude::*;
 use crate::setup::{self, FlashMode, SetupEvent};
-use crate::{init_logging, main_api, middleware::SessionAuth, ssl, ServerContext};
+use crate::{init_logging, main_api, ssl, ServerContext};
 
 /// Shared state passed to HTTP handlers via Extension.
 #[derive(Clone)]
@@ -106,7 +106,13 @@ async fn setup_flash_handler(
             .build()
             .expect("failed to create setup-flash runtime");
         rt.block_on(async move {
-            setup::run_setup_flash(params.mode, &params.password, params.timezone.as_deref(), &tx).await;
+            setup::run_setup_flash(
+                params.mode,
+                &params.password,
+                params.timezone.as_deref(),
+                &tx,
+            )
+            .await;
             flash_flag.store(false, Ordering::SeqCst);
         });
     });
@@ -223,15 +229,12 @@ async fn inner_main() -> Result<(), Error> {
 
         if let Some(ref wifi_password) = pwd {
             // Configure WiFi AP with the EEPROM password (single-client limit).
-            if let Err(e) =
-                crate::init::configure_wifi("/etc/config", wifi_password, Some(1)).await
+            if let Err(e) = crate::init::configure_wifi("/etc/config", wifi_password, Some(1)).await
             {
                 tracing::error!("WiFi AP setup failed: {e}");
             }
-            let _ = crate::run_quiet_async(
-                tokio::process::Command::new("wifi").arg("reload"),
-            )
-            .await;
+            let _ =
+                crate::run_quiet_async(tokio::process::Command::new("wifi").arg("reload")).await;
 
             // Enable captive portal only when WiFi AP can start
             if let Err(e) = crate::captive::enable_captive_portal().await {
@@ -273,7 +276,9 @@ async fn inner_main() -> Result<(), Error> {
             tracing::error!("Remote access rule apply failed: {e}");
         }
         // Apply WAN schedule enforcement (UCI firewall rules)
-        if let Err(e) = crate::profiles::evaluate_and_apply_schedules(&ServerContext::default()).await {
+        if let Err(e) =
+            crate::profiles::evaluate_and_apply_schedules(&ServerContext::default()).await
+        {
             tracing::error!("Failed to evaluate WAN schedules at boot: {e}");
         }
 
@@ -292,10 +297,9 @@ async fn inner_main() -> Result<(), Error> {
         if let Err(e) = crate::wifi::regenerate_blackout_crontab(&schedule_ctx).await {
             tracing::error!("Failed to regenerate WiFi blackout crontab at boot: {e}");
         }
-        if let Err(e) = crate::run_quiet_async(
-            tokio::process::Command::new("/etc/init.d/cron").arg("restart"),
-        )
-        .await
+        if let Err(e) =
+            crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/cron").arg("restart"))
+                .await
         {
             tracing::error!("Failed to restart cron at boot: {e}");
         }
@@ -316,8 +320,8 @@ async fn inner_main() -> Result<(), Error> {
         continuations: continuations.clone(),
         open_authed_continuations: open_authed,
     };
-    let handler = Server::new(move || ready(Ok(ctx.clone())), main_api())
-        .middleware(SessionAuth::new());
+    let handler =
+        Server::new(move || ready(Ok(ctx.clone())), main_api()).middleware(SessionAuth::new());
 
     let proxy_client = ProxyClient(
         reqwest::Client::builder()
@@ -340,8 +344,10 @@ async fn inner_main() -> Result<(), Error> {
         // RPC API at /rpc/v1 (matches frontend's RELATIVE_URL)
         .route("/rpc/v1", post(handler))
         // RPC continuation endpoint (binary I/O for backup/restore/diagnostics)
-        .route("/rest/rpc/{guid}", any(continuations::continuation_handler)
-            .layer(DefaultBodyLimit::max(10 * 1024 * 1024)))
+        .route(
+            "/rest/rpc/{guid}",
+            any(continuations::continuation_handler).layer(DefaultBodyLimit::max(10 * 1024 * 1024)),
+        )
         // WebSocket continuation endpoint (progress streaming for updates).
         // Registered with `any` (not `get`) so HTTP/2 CONNECT requests (RFC
         // 8441 extended CONNECT, used for WebSocket-over-h2) reach the
@@ -365,9 +371,7 @@ async fn inner_main() -> Result<(), Error> {
         // Convenience redirect: /luci → /cgi-bin/luci
         .route(
             "/luci",
-            get(|| async {
-                axum::response::Redirect::temporary("/cgi-bin/luci")
-            }),
+            get(|| async { axum::response::Redirect::temporary("/cgi-bin/luci") }),
         )
         // Everything else serves the embedded web UI
         .fallback(axum::routing::any(serve_embedded))
@@ -409,10 +413,10 @@ async fn inner_main() -> Result<(), Error> {
     let server = WebServer::new(Acceptor::new(listeners), app);
 
     // Wait for SIGTERM (procd) or SIGINT, then drain in-flight connections.
-    let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate())
-        .with_kind(ErrorKind::Filesystem)?;
-    let mut sigint = tokio::signal::unix::signal(SignalKind::interrupt())
-        .with_kind(ErrorKind::Filesystem)?;
+    let mut sigterm =
+        tokio::signal::unix::signal(SignalKind::terminate()).with_kind(ErrorKind::Filesystem)?;
+    let mut sigint =
+        tokio::signal::unix::signal(SignalKind::interrupt()).with_kind(ErrorKind::Filesystem)?;
     tokio::select! {
         _ = sigterm.recv() => tracing::info!("received SIGTERM, shutting down"),
         _ = sigint.recv() => tracing::info!("received SIGINT, shutting down"),

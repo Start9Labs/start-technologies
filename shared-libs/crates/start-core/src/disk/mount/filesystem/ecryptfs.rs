@@ -60,9 +60,7 @@ impl<EncryptedDir: AsRef<Path> + Send + Sync, Key: AsRef<str> + Send + Sync> Fil
             .await?;
         Ok(())
     }
-    async fn source_hash(
-        &self,
-    ) -> Result<digest::Output<Sha256>, Error> {
+    async fn source_hash(&self) -> Result<digest::Output<Sha256>, Error> {
         let mut sha = Sha256::new();
         sha.update("EcryptFS");
         sha.update(

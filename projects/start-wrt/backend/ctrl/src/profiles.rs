@@ -1,18 +1,11 @@
-use crate::dns::{self, DnsServer};
-use crate::ethernet::find_lan_bridge;
-use crate::system::UciPreferences;
-use crate::utils::DeserializeStdin;
-use crate::CtrlContext;
-use crate::prelude::*;
-use crate::utils::HandlerExtSerde;
-use clap::Parser;
-use rpc_toolkit::{from_fn_async_local, HandlerExt as _, ParentHandler};
-use serde::{Deserialize, Serialize};
 use std::cell::OnceCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
-use crate::invoke::Invoke;
+
+use clap::Parser;
+use rpc_toolkit::{from_fn_async_local, HandlerExt as _, ParentHandler};
+use serde::{Deserialize, Serialize};
 use uciedit::openwrt::{
     DeviceType, Dhcp, FirewallForwarding, FirewallRedirect, FirewallRule, FirewallTarget,
     FirewallZone, InterfaceProto, NetworkBridgeVlan, NetworkDevice, NetworkInterface, NetworkRoute,
@@ -20,6 +13,14 @@ use uciedit::openwrt::{
     ProfileDnsmasq, WifiStation, WifiVlan,
 };
 use uciedit::{dump_all, parse_all, Arena, Configs, Line, LineComment, Token, TypedSection};
+
+use crate::dns::{self, DnsServer};
+use crate::ethernet::find_lan_bridge;
+use crate::invoke::Invoke;
+use crate::prelude::*;
+use crate::system::UciPreferences;
+use crate::utils::{DeserializeStdin, HandlerExtSerde};
+use crate::CtrlContext;
 
 pub const DEFAULT_WAN_ZONE: &str = "wan";
 /// Max length of a generated profile interface id. The binding constraint is the
@@ -93,12 +94,27 @@ pub struct ProfileSetRequest {
 
 pub fn profiles<C: CtrlContext>() -> ParentHandler<C> {
     ParentHandler::new()
-        .subcommand("get", from_fn_async_local(get::<C>).with_display_serializable())
-        .subcommand("set", from_fn_async_local(set::<C>).with_display_serializable())
+        .subcommand(
+            "get",
+            from_fn_async_local(get::<C>).with_display_serializable(),
+        )
+        .subcommand(
+            "set",
+            from_fn_async_local(set::<C>).with_display_serializable(),
+        )
         .subcommand("delete", from_fn_async_local(delete::<C>).no_display())
-        .subcommand("list", from_fn_async_local(list::<C>).with_display_serializable())
-        .subcommand("create", from_fn_async_local(create::<C>).with_display_serializable())
-        .subcommand("edit", from_fn_async_local(edit::<C>).with_display_serializable())
+        .subcommand(
+            "list",
+            from_fn_async_local(list::<C>).with_display_serializable(),
+        )
+        .subcommand(
+            "create",
+            from_fn_async_local(create::<C>).with_display_serializable(),
+        )
+        .subcommand(
+            "edit",
+            from_fn_async_local(edit::<C>).with_display_serializable(),
+        )
         .subcommand(
             "schedule-get",
             from_fn_async_local(schedule_get::<C>).with_display_serializable(),
@@ -265,7 +281,7 @@ pub(crate) fn rewrite_all_dns_forwarding(cfgs: &mut Configs) -> Result<(), Error
                 },
                 outbound: uci_profile.outbound.unwrap_or_else(|| "wan".into()),
                 lan_access: LanAccess::All, // Not used by rewrite_dns_forwarding
-                wan_access: WanAccess::All,  // Not used by rewrite_dns_forwarding
+                wan_access: WanAccess::All, // Not used by rewrite_dns_forwarding
                 dns_override,
                 dns_source: String::new(),
                 access_to_new_profiles: false,
@@ -310,10 +326,7 @@ fn rewrite_dns_redirect(cfgs: &mut Configs, profile: &Profile) -> Result<(), Err
     if has_effective_dns(cfgs, profile) || !dns::get_system_dns_servers(cfgs).is_empty() {
         cfgs["firewall"].append(
             &FirewallRedirect {
-                name: format!(
-                    "DNS-Override-{}",
-                    profile.id.fullname.replace(" ", "-"),
-                ),
+                name: format!("DNS-Override-{}", profile.id.fullname.replace(" ", "-"),),
                 src: zone_name,
                 proto: vec!["tcp".into(), "udp".into()],
                 src_dport: Some("53".into()),
@@ -473,12 +486,18 @@ pub(crate) fn get_config(
             let Some(name) = section.name() else { continue };
             if name == id.interface {
                 if iface.proto != InterfaceProto::STATIC {
-                    return Err(Error::new(eyre!("corrupted profile: {query:?}"), ErrorKind::CorruptedProfile));
+                    return Err(Error::new(
+                        eyre!("corrupted profile: {query:?}"),
+                        ErrorKind::CorruptedProfile,
+                    ));
                 }
                 if let Some(ip) = iface.ipaddr {
                     wip_profile.gateway_ip = ip;
                 } else {
-                    return Err(Error::new(eyre!("corrupted profile: {query:?}"), ErrorKind::CorruptedProfile));
+                    return Err(Error::new(
+                        eyre!("corrupted profile: {query:?}"),
+                        ErrorKind::CorruptedProfile,
+                    ));
                 }
                 found = true;
                 break;
@@ -486,7 +505,10 @@ pub(crate) fn get_config(
         }
     }
     if !found {
-        return Err(Error::new(eyre!("corrupted profile: {query:?}"), ErrorKind::CorruptedProfile));
+        return Err(Error::new(
+            eyre!("corrupted profile: {query:?}"),
+            ErrorKind::CorruptedProfile,
+        ));
     }
     let mut this_zone_name = format!("vlan_{}", id.interface);
     cfgs["firewall"].each::<FirewallZone, Error>(|_, zone| {
@@ -560,9 +582,16 @@ pub async fn delete<C: CtrlContext>(ctx: C, id: ProfileIdOpt) -> Result<(), Erro
             ctx.uci_root(),
             &arena,
             &["startwrt", "network", "firewall", "dhcp", "wireless"],
-        ).await?;
+        )
+        .await?;
         if let Err(e) = delete_config(ctx.clone(), &mut cfgs, &id) {
-            crate::activity::log("profile", "deleted", false, &format!("Failed to delete profile '{name}'"), Some(&e.to_string()));
+            crate::activity::log(
+                "profile",
+                "deleted",
+                false,
+                &format!("Failed to delete profile '{name}'"),
+                Some(&e.to_string()),
+            );
             return Err(e);
         }
         let dump_result = dump_all(ctx.uci_root(), cfgs).await;
@@ -573,7 +602,13 @@ pub async fn delete<C: CtrlContext>(ctx: C, id: ProfileIdOpt) -> Result<(), Erro
                 continue;
             }
             Err(err) => {
-                crate::activity::log("profile", "deleted", false, &format!("Failed to delete profile '{name}'"), Some(&err.to_string()));
+                crate::activity::log(
+                    "profile",
+                    "deleted",
+                    false,
+                    &format!("Failed to delete profile '{name}'"),
+                    Some(&err.to_string()),
+                );
                 return Err(err.into());
             }
             Ok(()) => {
@@ -589,17 +624,31 @@ pub async fn delete<C: CtrlContext>(ctx: C, id: ProfileIdOpt) -> Result<(), Erro
 
                     // Bring down the WireGuard interface before reloading services.
                     // reload_system() alone won't tear down an active WireGuard tunnel.
-                    let _ = crate::run_quiet_async(tokio::process::Command::new("ifdown").arg(&wg_interface_name)).await;
+                    let _ = crate::run_quiet_async(
+                        tokio::process::Command::new("ifdown").arg(&wg_interface_name),
+                    )
+                    .await;
                     reload_system_and_wifi().await?;
                 }
                 // Regenerate schedule crontab to remove deleted profile's entries
                 if let Err(e) = regenerate_schedule_crontab(&ctx).await {
-                    tracing::error!("Failed to regenerate schedule crontab after profile delete: {e}");
+                    tracing::error!(
+                        "Failed to regenerate schedule crontab after profile delete: {e}"
+                    );
                 }
                 if ctx.effectful() {
-                    let _ = crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/cron").arg("restart")).await;
+                    let _ = crate::run_quiet_async(
+                        tokio::process::Command::new("/etc/init.d/cron").arg("restart"),
+                    )
+                    .await;
                 }
-                crate::activity::log("profile", "deleted", true, &format!("Deleted profile '{name}'"), None);
+                crate::activity::log(
+                    "profile",
+                    "deleted",
+                    true,
+                    &format!("Deleted profile '{name}'"),
+                    None,
+                );
                 return Ok(());
             }
         }
@@ -616,7 +665,10 @@ fn delete_config(
 
     // Prevent deleting the LAN owner profile
     if id.interface == "lan" {
-        return Err(Error::new(eyre!("cannot delete LAN owner profile"), ErrorKind::CannotDeleteLanOwner));
+        return Err(Error::new(
+            eyre!("cannot delete LAN owner profile"),
+            ErrorKind::CannotDeleteLanOwner,
+        ));
     }
 
     // Remove profile and its VPN server metadata from startwrt config
@@ -819,13 +871,24 @@ pub async fn reload_system_full() -> Result<(), Error> {
 
 async fn reload_system_inner(restart_network: bool) -> Result<(), Error> {
     let network_action = if restart_network { "restart" } else { "reload" };
-    let _ = crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/network").arg(network_action)).await;
+    let _ = crate::run_quiet_async(
+        tokio::process::Command::new("/etc/init.d/network").arg(network_action),
+    )
+    .await;
     // odhcpd holds RA/DHCPv6 config in memory; restart so dhcp.*.ra_default
     // (and other v6 advertisement changes) actually take effect.
-    let _ = crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/odhcpd").arg("restart")).await;
-    let _ = crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/smartdns").arg("restart")).await;
-    let _ = crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/firewall").arg("restart")).await;
-    let _ = crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/dnsmasq").arg("restart")).await;
+    let _ =
+        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/odhcpd").arg("restart"))
+            .await;
+    let _ =
+        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/smartdns").arg("restart"))
+            .await;
+    let _ =
+        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/firewall").arg("restart"))
+            .await;
+    let _ =
+        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/dnsmasq").arg("restart"))
+            .await;
     // Re-apply WAN schedules — firewall restart rebuilds the nftables ruleset
     reapply_schedules_after_reload().await;
     Ok(())
@@ -847,14 +910,25 @@ pub async fn reload_system_and_wifi_full() -> Result<(), Error> {
 
 async fn reload_system_and_wifi_inner(restart_network: bool) -> Result<(), Error> {
     let network_action = if restart_network { "restart" } else { "reload" };
-    let _ = crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/network").arg(network_action)).await;
+    let _ = crate::run_quiet_async(
+        tokio::process::Command::new("/etc/init.d/network").arg(network_action),
+    )
+    .await;
     let _ = crate::run_quiet_async(&mut tokio::process::Command::new("wifi")).await;
     // odhcpd holds RA/DHCPv6 config in memory; restart so dhcp.*.ra_default
     // (and other v6 advertisement changes) actually take effect.
-    let _ = crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/odhcpd").arg("restart")).await;
-    let _ = crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/smartdns").arg("restart")).await;
-    let _ = crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/firewall").arg("restart")).await;
-    let _ = crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/dnsmasq").arg("restart")).await;
+    let _ =
+        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/odhcpd").arg("restart"))
+            .await;
+    let _ =
+        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/smartdns").arg("restart"))
+            .await;
+    let _ =
+        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/firewall").arg("restart"))
+            .await;
+    let _ =
+        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/dnsmasq").arg("restart"))
+            .await;
     // Re-apply WAN schedules — firewall restart rebuilds the nftables ruleset
     reapply_schedules_after_reload().await;
     Ok(())
@@ -884,14 +958,11 @@ async fn reapply_schedules_after_reload() {
 /// a VLAN 1 entry with all existing bridge ports. Once VLAN filtering is active, any
 /// port without an explicit VLAN entry loses all traffic.
 fn ensure_vlan_filtering(cfgs: &mut Configs, bridge_name: &str) -> Result<(), Error> {
-    let has_any = cfgs["network"]
-        .sections
-        .iter()
-        .any(|s| {
-            s.get::<NetworkBridgeVlan>()
-                .map(|v| v.device == bridge_name)
-                .unwrap_or(false)
-        });
+    let has_any = cfgs["network"].sections.iter().any(|s| {
+        s.get::<NetworkBridgeVlan>()
+            .map(|v| v.device == bridge_name)
+            .unwrap_or(false)
+    });
     if has_any {
         return Ok(());
     }
@@ -954,7 +1025,8 @@ pub async fn set<C: CtrlContext>(
             ctx.uci_root(),
             &arena,
             &["startwrt", "network", "firewall", "dhcp"],
-        ).await?;
+        )
+        .await?;
 
         // Capture old LAN IP before set_config modifies it
         let old_lan_ip = if profile.owns_lan {
@@ -966,15 +1038,20 @@ pub async fn set<C: CtrlContext>(
         let (out, old_state) = match set_config(ctx.clone(), &mut cfgs, &profile) {
             Ok(result) => result,
             Err(e) => {
-                crate::activity::log("profile", "updated", false, &format!("Failed to update profile '{name}'"), Some(&e.to_string()));
+                crate::activity::log(
+                    "profile",
+                    "updated",
+                    false,
+                    &format!("Failed to update profile '{name}'"),
+                    Some(&e.to_string()),
+                );
                 return Err(e);
             }
         };
 
         // Detect admin IP change and propagate block changes to sibling profiles
-        let admin_ip_changed = profile.owns_lan
-            && old_lan_ip.is_some()
-            && old_lan_ip != Some(profile.gateway_ip);
+        let admin_ip_changed =
+            profile.owns_lan && old_lan_ip.is_some() && old_lan_ip != Some(profile.gateway_ip);
         let block_changed = match (admin_ip_changed, old_lan_ip) {
             (true, Some(old)) => {
                 old.octets()[0] != profile.gateway_ip.octets()[0]
@@ -983,12 +1060,11 @@ pub async fn set<C: CtrlContext>(
             _ => false,
         };
         let restart_ifaces: Vec<String> = if block_changed {
-            let pi: std::collections::HashSet<String> =
-                list_config(ctx.clone(), &cfgs)?
-                    .into_iter()
-                    .filter(|p| p.interface != crate::lan::LAN_INTERFACE)
-                    .map(|p| p.interface)
-                    .collect();
+            let pi: std::collections::HashSet<String> = list_config(ctx.clone(), &cfgs)?
+                .into_iter()
+                .filter(|p| p.interface != crate::lan::LAN_INTERFACE)
+                .map(|p| p.interface)
+                .collect();
             crate::lan::update_profile_ips_for_block_change(
                 &mut cfgs,
                 old_lan_ip.unwrap(),
@@ -1041,7 +1117,13 @@ pub async fn set<C: CtrlContext>(
                 continue;
             }
             Err(err) => {
-                crate::activity::log("profile", "updated", false, &format!("Failed to update profile '{name}'"), Some(&err.to_string()));
+                crate::activity::log(
+                    "profile",
+                    "updated",
+                    false,
+                    &format!("Failed to update profile '{name}'"),
+                    Some(&err.to_string()),
+                );
                 return Err(err.into());
             }
             Ok(()) => {
@@ -1056,7 +1138,8 @@ pub async fn set<C: CtrlContext>(
                     dns::apply_smartdns_groups(smartdns_groups).await?;
 
                     if admin_ip_changed {
-                        crate::lan::restart_network_services(profile.gateway_ip, restart_ifaces).await;
+                        crate::lan::restart_network_services(profile.gateway_ip, restart_ifaces)
+                            .await;
                     } else {
                         // Full network restart (not reload) so an outbound change
                         // that flips IPv6 eligibility re-runs netifd prefix
@@ -1099,9 +1182,7 @@ pub async fn set<C: CtrlContext>(
                     if old.gateway_ip.is_some() && old.gateway_ip != Some(profile.gateway_ip) {
                         changes.push(format!("gateway: {}", profile.gateway_ip));
                     }
-                    if old.dns_override
-                        != dns::serialize_dns_server_list(&profile.dns_override)
-                    {
+                    if old.dns_override != dns::serialize_dns_server_list(&profile.dns_override) {
                         changes.push("DNS".to_string());
                     }
                 }
@@ -1137,10 +1218,7 @@ fn get_lan_ip(cfgs: &uciedit::Configs) -> Option<Ipv4Addr> {
 /// admin LAN's /16 (matching first two octets) so VLAN subnets can't escape the
 /// chosen private range — `sync_cross_subnet_routes` assumes siblings share the
 /// block, and an out-of-block subnet would also dodge the LAN-level boundary.
-fn validate_profile_block(
-    cfgs: &Configs,
-    profile: &Profile<ProfileIdOpt>,
-) -> Result<(), Error> {
+fn validate_profile_block(cfgs: &Configs, profile: &Profile<ProfileIdOpt>) -> Result<(), Error> {
     if profile.owns_lan {
         return crate::lan::validate_lan_block(profile.gateway_ip);
     }
@@ -1232,15 +1310,17 @@ fn set_config<C: CtrlContext>(
     profile: &Profile<ProfileIdOpt>,
 ) -> Result<(ProfileId, Option<OldProfileState>), Error> {
     validate_profile_block(cfgs, profile)?;
-    let ipv6 = is_ipv6_enabled(cfgs)
-        && outbound_supports_ipv6(cfgs, &profile.outbound);
+    let ipv6 = is_ipv6_enabled(cfgs) && outbound_supports_ipv6(cfgs, &profile.outbound);
     // Check fullname uniqueness before renaming
     if let Some(given_fullname) = &profile.id.fullname {
         let pre_lookup = Lookup::parse(ctx.clone(), cfgs)?;
         if let Some(existing) = pre_lookup.from_fullname(given_fullname) {
             // Only error if the name belongs to a different profile
             if !profile.id.matches(&existing.clone().into()) {
-                return Err(Error::new(eyre!("duplicate profile name: {given_fullname}"), ErrorKind::DuplicateFullname));
+                return Err(Error::new(
+                    eyre!("duplicate profile name: {given_fullname}"),
+                    ErrorKind::DuplicateFullname,
+                ));
             }
         }
     }
@@ -1329,7 +1409,9 @@ fn set_config<C: CtrlContext>(
         }
     }
     if !found_interface {
-        let found_bridge = found_bridge.clone().ok_or_else(|| Error::new(eyre!("missing LAN bridge"), ErrorKind::MissingLanBridge))?;
+        let found_bridge = found_bridge
+            .clone()
+            .ok_or_else(|| Error::new(eyre!("missing LAN bridge"), ErrorKind::MissingLanBridge))?;
         cfgs["network"].append(
             &NetworkInterface {
                 device: format!("{}.{}", found_bridge, profile.id.vlan_tag),
@@ -1344,17 +1426,16 @@ fn set_config<C: CtrlContext>(
     }
     // Ensure a portless bridge-vlan exists for this profile's VLAN
     if !profile.owns_lan {
-        let bridge_name = found_bridge.as_ref().ok_or_else(|| Error::new(eyre!("missing LAN bridge"), ErrorKind::MissingLanBridge))?;
+        let bridge_name = found_bridge
+            .as_ref()
+            .ok_or_else(|| Error::new(eyre!("missing LAN bridge"), ErrorKind::MissingLanBridge))?;
         // Transition to VLAN filtering: ensure VLAN 1 exists for existing bridge ports
         ensure_vlan_filtering(cfgs, bridge_name)?;
-        let has_bridge_vlan = cfgs["network"]
-            .sections
-            .iter()
-            .any(|s| {
-                s.get::<NetworkBridgeVlan>()
-                    .map(|v| v.vlan == profile.id.vlan_tag && v.device == *bridge_name)
-                    .unwrap_or(false)
-            });
+        let has_bridge_vlan = cfgs["network"].sections.iter().any(|s| {
+            s.get::<NetworkBridgeVlan>()
+                .map(|v| v.vlan == profile.id.vlan_tag && v.device == *bridge_name)
+                .unwrap_or(false)
+        });
         if !has_bridge_vlan {
             cfgs["network"].append(
                 &NetworkBridgeVlan {
@@ -1437,11 +1518,23 @@ pub async fn create<C: CtrlContext>(
             ctx.uci_root(),
             &arena,
             &["startwrt", "network", "firewall", "dhcp", "wireless"],
-        ).await?;
-        let out = match create_config(ctx.clone(), &mut cfgs, &profile, pre_allocated_interface.clone()) {
+        )
+        .await?;
+        let out = match create_config(
+            ctx.clone(),
+            &mut cfgs,
+            &profile,
+            pre_allocated_interface.clone(),
+        ) {
             Ok(out) => out,
             Err(e) => {
-                crate::activity::log("profile", "created", false, &format!("Failed to create profile '{name}'"), Some(&e.to_string()));
+                crate::activity::log(
+                    "profile",
+                    "created",
+                    false,
+                    &format!("Failed to create profile '{name}'"),
+                    Some(&e.to_string()),
+                );
                 return Err(e);
             }
         };
@@ -1453,7 +1546,13 @@ pub async fn create<C: CtrlContext>(
                 continue;
             }
             Err(err) => {
-                crate::activity::log("profile", "created", false, &format!("Failed to create profile '{name}'"), Some(&err.to_string()));
+                crate::activity::log(
+                    "profile",
+                    "created",
+                    false,
+                    &format!("Failed to create profile '{name}'"),
+                    Some(&err.to_string()),
+                );
                 return Err(err.into());
             }
             Ok(()) => {
@@ -1471,7 +1570,13 @@ pub async fn create<C: CtrlContext>(
                     // prefix distribution and the new profile's VLAN gets its /64.
                     reload_system_and_wifi_full().await?;
                 }
-                crate::activity::log("profile", "created", true, &format!("Created profile '{name}'"), None);
+                crate::activity::log(
+                    "profile",
+                    "created",
+                    true,
+                    &format!("Created profile '{name}'"),
+                    None,
+                );
                 return Ok(out);
             }
         }
@@ -1488,16 +1593,21 @@ fn create_config(
     // The new interface isn't in the config yet, so no self-exclusion is needed:
     // reject if the requested /24 already belongs to any existing profile.
     guard_subnet_collision(cfgs, profile.gateway_ip, None)?;
-    let ipv6 = is_ipv6_enabled(cfgs)
-        && outbound_supports_ipv6(cfgs, &profile.outbound);
+    let ipv6 = is_ipv6_enabled(cfgs) && outbound_supports_ipv6(cfgs, &profile.outbound);
     let interface = if profile.owns_lan {
         if Lookup::parse(ctx.clone(), cfgs)?.lan_owner.is_some() {
-            return Err(Error::new(eyre!("LAN owner already exists"), ErrorKind::LanOwnerExists));
+            return Err(Error::new(
+                eyre!("LAN owner already exists"),
+                ErrorKind::LanOwnerExists,
+            ));
         }
         "lan".into()
     } else {
         pre_allocated_interface.ok_or_else(|| {
-            Error::new(eyre!("missing pre-allocated interface name"), ErrorKind::Filesystem)
+            Error::new(
+                eyre!("missing pre-allocated interface name"),
+                ErrorKind::Filesystem,
+            )
         })?
     };
     let fullname = profile
@@ -1509,7 +1619,10 @@ fn create_config(
     {
         let lookup = Lookup::parse(ctx.clone(), cfgs)?;
         if lookup.from_fullname(&fullname).is_some() {
-            return Err(Error::new(eyre!("duplicate profile name: {fullname}"), ErrorKind::DuplicateFullname));
+            return Err(Error::new(
+                eyre!("duplicate profile name: {fullname}"),
+                ErrorKind::DuplicateFullname,
+            ));
         }
     }
     let mut all_interfaces = BTreeSet::<String>::new();
@@ -1519,7 +1632,10 @@ fn create_config(
             NetworkInterface::TY => {
                 let Some(name) = section.name() else { continue };
                 if name == interface && !profile.owns_lan {
-                    return Err(Error::new(eyre!("interface name conflict: {interface}"), ErrorKind::InterfaceNameConflict));
+                    return Err(Error::new(
+                        eyre!("interface name conflict: {interface}"),
+                        ErrorKind::InterfaceNameConflict,
+                    ));
                 }
                 if let Ok(iface) = section.get::<NetworkInterface>() {
                     if iface.proto == InterfaceProto::STATIC {
@@ -1541,7 +1657,10 @@ fn create_config(
     let vlan_tag = match profile.id.vlan_tag {
         Some(chosen_tag) => {
             if existing_tags.contains(&chosen_tag) {
-                return Err(Error::new(eyre!("duplicate VLAN tag: {chosen_tag}"), ErrorKind::DuplicateVlanTag));
+                return Err(Error::new(
+                    eyre!("duplicate VLAN tag: {chosen_tag}"),
+                    ErrorKind::DuplicateVlanTag,
+                ));
             }
             chosen_tag
         }
@@ -1562,7 +1681,10 @@ fn create_config(
             }
         }
         if !found_lan_interface {
-            return Err(Error::new(eyre!("missing LAN interface"), ErrorKind::MissingLanInterface));
+            return Err(Error::new(
+                eyre!("missing LAN interface"),
+                ErrorKind::MissingLanInterface,
+            ));
         }
         // Create bridge-vlan with all bridge ports so ethernet devices reach the LAN owner
         let bridge_ports: Vec<String> = cfgs["network"]
@@ -1716,7 +1838,10 @@ fn rewrite_firewall(
         }
     }
     if !found_wan {
-        return Err(Error::new(eyre!("missing WAN interface"), ErrorKind::MissingWanInterface));
+        return Err(Error::new(
+            eyre!("missing WAN interface"),
+            ErrorKind::MissingWanInterface,
+        ));
     }
     if remake_zone || existing_zone_index.is_none() {
         if let Some(index) = existing_zone_index {
@@ -1788,10 +1913,7 @@ fn rewrite_firewall(
     if has_effective_dns(cfgs, profile) || !dns::get_system_dns_servers(cfgs).is_empty() {
         cfgs["firewall"].append(
             &FirewallRedirect {
-                name: format!(
-                    "DNS-Override-{}",
-                    profile.id.fullname.replace(" ", "-"),
-                ),
+                name: format!("DNS-Override-{}", profile.id.fullname.replace(" ", "-"),),
                 src: this_zone_name.clone(),
                 proto: vec!["tcp".into(), "udp".into()],
                 src_dport: Some("53".into()),
@@ -1848,7 +1970,13 @@ fn rewrite_firewall(
                         None,
                     )?,
                     None => {
-                        return Err(Error::new(eyre!("missing firewall zone for interface: {}", other_profile.interface), ErrorKind::MissingFirewallZone));
+                        return Err(Error::new(
+                            eyre!(
+                                "missing firewall zone for interface: {}",
+                                other_profile.interface
+                            ),
+                            ErrorKind::MissingFirewallZone,
+                        ));
                     }
                 }
             }
@@ -1864,7 +1992,13 @@ fn rewrite_firewall(
                 None,
             )?,
             None => {
-                return Err(Error::new(eyre!("missing firewall zone for interface: {}", other_profile.interface), ErrorKind::MissingFirewallZone));
+                return Err(Error::new(
+                    eyre!(
+                        "missing firewall zone for interface: {}",
+                        other_profile.interface
+                    ),
+                    ErrorKind::MissingFirewallZone,
+                ));
             }
         }
     }
@@ -1921,10 +2055,7 @@ fn rewrite_firewall(
             // Catch-all REJECT for everything else
             cfgs["firewall"].append(
                 &FirewallRule {
-                    name: format!(
-                        "WAN-WL-{}-reject",
-                        profile.id.fullname.replace(" ", "-")
-                    ),
+                    name: format!("WAN-WL-{}-reject", profile.id.fullname.replace(" ", "-")),
                     src: this_zone_name.clone(),
                     dest: Some(outbound_zone.clone()),
                     proto: vec!["all".into()],
@@ -2003,8 +2134,7 @@ pub fn rewrite_dhcp(
     cfgs: &mut Configs,
     profile: &Profile,
 ) -> Result<(), Error> {
-    let ipv6 = is_ipv6_enabled(cfgs)
-        && outbound_supports_ipv6(cfgs, &profile.outbound);
+    let ipv6 = is_ipv6_enabled(cfgs) && outbound_supports_ipv6(cfgs, &profile.outbound);
     let ra_value = if ipv6 { "server" } else { "disabled" }.to_string();
     let dhcpv6_value = if ipv6 { "server" } else { "disabled" }.to_string();
     // When IPv6 routes through a VPN, force odhcpd to advertise this router as
@@ -2026,7 +2156,9 @@ pub fn rewrite_dhcp(
         };
         if dhcp.interface == profile.id.interface {
             let mut changed = false;
-            if dhcp.ra.as_deref() != Some(&ra_value) || dhcp.dhcpv6.as_deref() != Some(&dhcpv6_value) {
+            if dhcp.ra.as_deref() != Some(&ra_value)
+                || dhcp.dhcpv6.as_deref() != Some(&dhcpv6_value)
+            {
                 dhcp.ra = Some(ra_value.clone());
                 dhcp.dhcpv6 = Some(dhcpv6_value.clone());
                 changed = true;
@@ -2456,10 +2588,7 @@ pub(crate) fn resolve_outbound_zone(outbound: &str) -> String {
 /// Side effects: creates `vpn_<wg_name>` if missing; strips `wg_name` from any
 /// other zone's `network` (notably leftover `wan` membership from before this
 /// layout).
-pub(crate) fn ensure_vpn_outbound_zone(
-    cfgs: &mut Configs,
-    wg_name: &str,
-) -> Result<String, Error> {
+pub(crate) fn ensure_vpn_outbound_zone(cfgs: &mut Configs, wg_name: &str) -> Result<String, Error> {
     let zone_name = resolve_outbound_zone(wg_name);
 
     // Strip wg_name from any zone that isn't ours (esp. wan).
@@ -2637,8 +2766,9 @@ async fn netdev_exists(name: &str) -> bool {
         .invoke(ErrorKind::Network.into())
         .await
     {
-        Err(e) if e.to_string().contains("can't find device")
-            || e.to_string().contains("does not exist") =>
+        Err(e)
+            if e.to_string().contains("can't find device")
+                || e.to_string().contains("does not exist") =>
         {
             false
         }
@@ -2687,7 +2817,10 @@ pub async fn allocate_interface_name(
         // Collides with a reserved id or a live device — try another random one.
         name = random_interface_name();
     }
-    Err(Error::new(eyre!("gave up looking for a new interface name"), ErrorKind::InterfaceNameConflict))
+    Err(Error::new(
+        eyre!("gave up looking for a new interface name"),
+        ErrorKind::InterfaceNameConflict,
+    ))
 }
 
 pub struct Lookup {
@@ -2738,7 +2871,10 @@ impl Lookup {
                 return Ok(o);
             }
         }
-        Err(Error::new(eyre!("missing profile: {q:?}"), ErrorKind::MissingProfile))
+        Err(Error::new(
+            eyre!("missing profile: {q:?}"),
+            ErrorKind::MissingProfile,
+        ))
     }
 
     pub fn from_vlan(&self, vlan_tag: u16) -> Option<&ProfileId> {
@@ -2871,10 +3007,14 @@ pub async fn edit<C: CtrlContext>(ctx: C, args: EditArgs) -> Result<ProfileId, E
             owns_lan: current_profile.owns_lan,
         };
         let modified_profile = crate::utils::edit_in_editor(&current_profile)?;
-        set(ctx, DeserializeStdin(ProfileSetRequest {
-            profile: modified_profile,
-            force: false,
-        })).await
+        set(
+            ctx,
+            DeserializeStdin(ProfileSetRequest {
+                profile: modified_profile,
+                force: false,
+            }),
+        )
+        .await
     }
 }
 
@@ -2895,16 +3035,25 @@ fn schedule_crontab_path(ctx: &impl CtrlContext) -> PathBuf {
 fn parse_hhmm(s: &str) -> Result<(u32, u32), Error> {
     let parts: Vec<&str> = s.split(':').collect();
     if parts.len() != 2 {
-        return Err(Error::new(eyre!("invalid time format: {s:?}"), ErrorKind::InvalidValue));
+        return Err(Error::new(
+            eyre!("invalid time format: {s:?}"),
+            ErrorKind::InvalidValue,
+        ));
     }
     let h: u32 = parts[0]
         .parse()
         .map_err(|_| Error::new(eyre!("invalid hour: {}", parts[0]), ErrorKind::InvalidValue))?;
-    let m: u32 = parts[1]
-        .parse()
-        .map_err(|_| Error::new(eyre!("invalid minute: {}", parts[1]), ErrorKind::InvalidValue))?;
+    let m: u32 = parts[1].parse().map_err(|_| {
+        Error::new(
+            eyre!("invalid minute: {}", parts[1]),
+            ErrorKind::InvalidValue,
+        )
+    })?;
     if h > 23 || m > 59 {
-        return Err(Error::new(eyre!("time out of range: {s:?}"), ErrorKind::InvalidValue));
+        return Err(Error::new(
+            eyre!("time out of range: {s:?}"),
+            ErrorKind::InvalidValue,
+        ));
     }
     Ok((h, m))
 }
@@ -2916,7 +3065,13 @@ fn parse_hhmm(s: &str) -> Result<(u32, u32), Error> {
 /// the previous day's mask bit. This mirrors the edge logic in
 /// `regenerate_schedule_crontab` (which shifts the unblock edge forward a day) so
 /// the boot/reload reconciler agrees with the cron edges.
-pub(crate) fn window_contains(start_min: u32, end_min: u32, mask: &[bool; 7], day: usize, minute: u32) -> bool {
+pub(crate) fn window_contains(
+    start_min: u32,
+    end_min: u32,
+    mask: &[bool; 7],
+    day: usize,
+    minute: u32,
+) -> bool {
     let prev_day = (day + 6) % 7;
     if start_min < end_min {
         mask[day] && minute >= start_min && minute < end_min
@@ -2965,7 +3120,10 @@ pub async fn schedule_get<C: CtrlContext>(
             }
         }
     }
-    Err(Error::new(eyre!("missing profile: {}", params.interface), ErrorKind::MissingProfile))
+    Err(Error::new(
+        eyre!("missing profile: {}", params.interface),
+        ErrorKind::MissingProfile,
+    ))
 }
 
 /// Write schedule data for a single profile, regenerate crontab and firewall rules.
@@ -3028,7 +3186,10 @@ pub async fn schedule_set<C: CtrlContext>(
             }
         }
         if !found {
-            return Err(Error::new(eyre!("missing profile: {}", params.interface), ErrorKind::MissingProfile));
+            return Err(Error::new(
+                eyre!("missing profile: {}", params.interface),
+                ErrorKind::MissingProfile,
+            ));
         }
 
         let dump_result = dump_all(ctx.uci_root(), cfgs).await;
@@ -3301,9 +3462,11 @@ pub(crate) async fn chrono_now() -> (usize, u32) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use rpc_toolkit::Context;
     use std::path::PathBuf;
+
+    use rpc_toolkit::Context;
+
+    use super::*;
 
     #[test]
     fn test_window_contains_non_wrap() {
@@ -3326,12 +3489,12 @@ mod tests {
         // Head: Saturday night, gated on Saturday's mask bit.
         assert!(window_contains(s, e, &sat, 6, 23 * 60)); // Sat 23:00: blocked
         assert!(!window_contains(s, e, &sat, 6, 21 * 60)); // Sat 21:00: before start
-        // Tail: Sunday morning, gated on the *previous* day (Saturday) — this is
-        // the case the old reconciler missed (it checked days[Sunday]).
+                                                           // Tail: Sunday morning, gated on the *previous* day (Saturday) — this is
+                                                           // the case the old reconciler missed (it checked days[Sunday]).
         assert!(window_contains(s, e, &sat, 0, 2 * 60)); // Sun 02:00: blocked
         assert!(!window_contains(s, e, &sat, 0, 6 * 60)); // Sun 06:00: half-open end
         assert!(!window_contains(s, e, &sat, 0, 8 * 60)); // Sun 08:00: after end
-        // Sunday-night must NOT be blocked: neither Sun nor Mon mask is set.
+                                                          // Sunday-night must NOT be blocked: neither Sun nor Mon mask is set.
         assert!(!window_contains(s, e, &sat, 0, 23 * 60));
     }
 
@@ -3346,13 +3509,14 @@ mod tests {
         assert!(window_contains(s, e, &mon, 1, 12 * 60)); // Mon noon: blocked
         assert!(window_contains(s, e, &mon, 1, 9 * 60)); // Mon 09:00: start, blocked
         assert!(!window_contains(s, e, &mon, 1, 8 * 60)); // Mon 08:00: before start
-        // Tail: from midnight to 09:00 on Tuesday, gated on Monday's mask bit.
+                                                          // Tail: from midnight to 09:00 on Tuesday, gated on Monday's mask bit.
         assert!(window_contains(s, e, &mon, 2, 2 * 60)); // Tue 02:00: blocked
         assert!(window_contains(s, e, &mon, 2, 8 * 60)); // Tue 08:00: blocked
         assert!(!window_contains(s, e, &mon, 2, 9 * 60)); // Tue 09:00: half-open end
         assert!(!window_contains(s, e, &mon, 2, 10 * 60)); // Tue 10:00: after end
     }
     use std::sync::Arc;
+
     use tokio::runtime::Runtime;
 
     #[derive(Clone)]
@@ -3549,8 +3713,14 @@ config wifi-vlan
                 }
             }
         }
-        assert_eq!(station_count, 1, "expected 1 WifiStation with vid=101 before delete");
-        assert_eq!(vlan_count, 1, "expected 1 WifiVlan with vid=101 before delete");
+        assert_eq!(
+            station_count, 1,
+            "expected 1 WifiStation with vid=101 before delete"
+        );
+        assert_eq!(
+            vlan_count, 1,
+            "expected 1 WifiVlan with vid=101 before delete"
+        );
 
         // Delete the guest profile
         delete_config(
@@ -3733,7 +3903,10 @@ config interface 'kids'
                 }
             }
         }
-        assert!(found_kids_station, "kids WifiStation (vid=102) should survive");
+        assert!(
+            found_kids_station,
+            "kids WifiStation (vid=102) should survive"
+        );
         assert!(found_kids_vlan, "kids WifiVlan (vid=102) should survive");
     }
 
@@ -3970,7 +4143,9 @@ config interface 'lan'
         .unwrap();
         let ctx = TestContext(dir.path().to_path_buf());
         let arena = Arena::new();
-        let cfgs = parse_all(ctx.uci_root(), &arena, &["network"]).await.unwrap();
+        let cfgs = parse_all(ctx.uci_root(), &arena, &["network"])
+            .await
+            .unwrap();
 
         let make = |gw: Ipv4Addr, owns_lan: bool| Profile {
             id: ProfileIdOpt {
@@ -3995,8 +4170,8 @@ config interface 'lan'
         validate_profile_block(&cfgs, &make(Ipv4Addr::new(10, 42, 1, 1), true))
             .expect("admin in a valid RFC 1918 block should be accepted");
         // Sibling escaping the block — still rejected.
-        let err = validate_profile_block(&cfgs, &make(Ipv4Addr::new(192, 168, 5, 1), false))
-            .unwrap_err();
+        let err =
+            validate_profile_block(&cfgs, &make(Ipv4Addr::new(192, 168, 5, 1), false)).unwrap_err();
         assert_eq!(err.kind, ErrorKind::InvalidRequest);
     }
 
@@ -4174,7 +4349,11 @@ config profile guest
                     && r.dest_ip.is_some()
             })
             .collect();
-        assert_eq!(accept_rules.len(), 2, "should have 2 ACCEPT rules for whitelisted IPs");
+        assert_eq!(
+            accept_rules.len(),
+            2,
+            "should have 2 ACCEPT rules for whitelisted IPs"
+        );
         assert_eq!(accept_rules[0].dest_ip.as_deref(), Some("1.1.1.1/32"));
         assert_eq!(accept_rules[1].dest_ip.as_deref(), Some("8.8.8.8/32"));
 
@@ -4189,7 +4368,10 @@ config profile guest
                     && r.target == FirewallTarget::REJECT
                     && r.dest_ip.is_none()
             });
-        assert!(reject_rule.is_some(), "whitelist should have a catch-all REJECT rule");
+        assert!(
+            reject_rule.is_some(),
+            "whitelist should have a catch-all REJECT rule"
+        );
     }
 
     #[tokio::test]
@@ -4245,7 +4427,11 @@ config profile guest
                     && r.dest_ip.is_some()
             })
             .collect();
-        assert_eq!(reject_rules.len(), 1, "should have 1 REJECT rule for blacklisted IP");
+        assert_eq!(
+            reject_rules.len(),
+            1,
+            "should have 1 REJECT rule for blacklisted IP"
+        );
         assert_eq!(reject_rules[0].dest_ip.as_deref(), Some("10.0.0.0/8"));
 
         // Should NOT have a catch-all reject (blacklist allows everything else)
@@ -4259,7 +4445,10 @@ config profile guest
                     && r.target == FirewallTarget::REJECT
                     && r.dest_ip.is_none()
             });
-        assert!(catchall_reject.is_none(), "blacklist should NOT have a catch-all REJECT");
+        assert!(
+            catchall_reject.is_none(),
+            "blacklist should NOT have a catch-all REJECT"
+        );
     }
 
     #[tokio::test]
@@ -4382,7 +4571,10 @@ config profile guest
         )
         .unwrap();
 
-        assert_eq!(result.outbound, "wg0", "outbound should persist through set_config");
+        assert_eq!(
+            result.outbound, "wg0",
+            "outbound should persist through set_config"
+        );
     }
 
     #[tokio::test]
@@ -4988,9 +5180,15 @@ config profile guest
                 .filter_map(|s| s.get::<FirewallForwarding>().ok())
                 .any(|f| f.src == "vlan_guest" && f.dest == "vpn_wg_v6")
         };
-        assert!(fwd_to_vpn(&cfgs), "precondition: vlan_guest → vpn_wg_v6 forwarding");
         assert!(
-            cfgs["network"].sections.iter().any(|s| s.name().as_deref() == Some("prt6b_guest")),
+            fwd_to_vpn(&cfgs),
+            "precondition: vlan_guest → vpn_wg_v6 forwarding"
+        );
+        assert!(
+            cfgs["network"]
+                .sections
+                .iter()
+                .any(|s| s.name().as_deref() == Some("prt6b_guest")),
             "precondition: v6 kill switch present"
         );
 
@@ -5007,7 +5205,11 @@ config profile guest
         reapply_profile_config(
             &ctx,
             &mut cfgs,
-            ProfileIdOpt { fullname: None, interface: Some("guest".into()), vlan_tag: None },
+            ProfileIdOpt {
+                fullname: None,
+                interface: Some("guest".into()),
+                vlan_tag: None,
+            },
         )
         .unwrap();
         cleanup_orphaned_vpn_zones(&mut cfgs);
@@ -5021,7 +5223,10 @@ config profile guest
                 .any(|f| f.src == "vlan_guest" && f.dest == "wan"),
             "vlan_guest → wan forwarding must be restored"
         );
-        assert!(!fwd_to_vpn(&cfgs), "stale vlan_guest → vpn_wg_v6 forwarding must be gone");
+        assert!(
+            !fwd_to_vpn(&cfgs),
+            "stale vlan_guest → vpn_wg_v6 forwarding must be gone"
+        );
         assert!(
             !cfgs["firewall"]
                 .sections
@@ -5030,9 +5235,20 @@ config profile guest
                 .any(|z| z.name == "vpn_wg_v6"),
             "orphaned vpn_wg_v6 zone must be removed"
         );
-        for name in &["prt_guest", "prtb_guest", "prr_guest", "prt6_guest", "prt6b_guest", "prr6_guest", "prl6_guest"] {
+        for name in &[
+            "prt_guest",
+            "prtb_guest",
+            "prr_guest",
+            "prt6_guest",
+            "prt6b_guest",
+            "prr6_guest",
+            "prl6_guest",
+        ] {
             assert!(
-                !cfgs["network"].sections.iter().any(|s| s.name().as_deref() == Some(*name)),
+                !cfgs["network"]
+                    .sections
+                    .iter()
+                    .any(|s| s.name().as_deref() == Some(*name)),
                 "{name} kill-switch/policy section must be removed after reset to wan"
             );
         }
@@ -5135,7 +5351,10 @@ config profile guest
             outbound: "wan".into(),
             lan_access: LanAccess::SameProfile,
             wan_access: WanAccess::All,
-            dns_override: vec![DnsServer { address: "1.1.1.1".into(), ssl: false }],
+            dns_override: vec![DnsServer {
+                address: "1.1.1.1".into(),
+                ssl: false,
+            }],
             dns_source: String::new(),
             access_to_new_profiles: false,
             owns_lan: false,
@@ -5184,8 +5403,14 @@ config profile guest
             lan_access: LanAccess::SameProfile,
             wan_access: WanAccess::All,
             dns_override: vec![
-                DnsServer { address: "1.1.1.1".into(), ssl: false },
-                DnsServer { address: "8.8.8.8".into(), ssl: false },
+                DnsServer {
+                    address: "1.1.1.1".into(),
+                    ssl: false,
+                },
+                DnsServer {
+                    address: "8.8.8.8".into(),
+                    ssl: false,
+                },
             ],
             dns_source: String::new(),
             access_to_new_profiles: false,
@@ -5219,8 +5444,14 @@ config profile guest
         assert_eq!(
             got.dns_override,
             vec![
-                DnsServer { address: "1.1.1.1".into(), ssl: false },
-                DnsServer { address: "8.8.8.8".into(), ssl: false },
+                DnsServer {
+                    address: "1.1.1.1".into(),
+                    ssl: false
+                },
+                DnsServer {
+                    address: "8.8.8.8".into(),
+                    ssl: false
+                },
             ],
             "dns_override should round-trip through UCI"
         );
@@ -5647,8 +5878,13 @@ config zone
         .unwrap();
 
         let arena = Arena::new();
-        let mut cfgs =
-            parse_all(dir.path(), &arena, &["startwrt", "network", "dhcp", "firewall"]).await.unwrap();
+        let mut cfgs = parse_all(
+            dir.path(),
+            &arena,
+            &["startwrt", "network", "dhcp", "firewall"],
+        )
+        .await
+        .unwrap();
         rewrite_all_dns_forwarding(&mut cfgs).unwrap();
 
         // Both profiles should get per-profile dnsmasq sections pointing to SmartDNS
@@ -5782,7 +6018,10 @@ config dhcp 'guest'
         assert_eq!(route6_data.target, "::/0");
         assert_eq!(route6_data.table, Some(101));
         assert_eq!(route6_data.metric, Some(VPN_DEFAULT_ROUTE_METRIC));
-        assert!(route6_data.kind.is_none(), "dev-wg route is not unreachable");
+        assert!(
+            route6_data.kind.is_none(),
+            "dev-wg route is not unreachable"
+        );
 
         // prt6b_guest: the fail-closed fallback that backstops the dev-wg route
         // if the WG interface goes down (higher metric, loopback, unreachable).
@@ -5896,7 +6135,10 @@ config dhcp 'guest'
             .expect("dnat_return6 rule6 should exist for a VPN-routed profile")
             .get::<NetworkRule6>()
             .unwrap();
-        assert_eq!(rule6.lookup, 254, "dnat_return6 must look up the main table");
+        assert_eq!(
+            rule6.lookup, 254,
+            "dnat_return6 must look up the main table"
+        );
         assert_eq!(rule6.mark.as_deref(), Some("0x80/0x80"));
         assert_eq!(
             rule6.priority,

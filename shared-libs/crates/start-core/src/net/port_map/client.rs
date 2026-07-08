@@ -240,7 +240,14 @@ impl PortMapController {
         gateways: Vec<(IpAddr, Option<u32>)>,
         hostname: String,
     ) {
-        self.send_ensure(local_ip, external_port, internal_port, gateways, Some(hostname), 1);
+        self.send_ensure(
+            local_ip,
+            external_port,
+            internal_port,
+            gateways,
+            Some(hostname),
+            1,
+        );
     }
 
     /// Map `count` contiguous ports starting at `external_port` via the PCP
@@ -254,7 +261,14 @@ impl PortMapController {
         count: u16,
         gateways: Vec<(IpAddr, Option<u32>)>,
     ) {
-        self.send_ensure(local_ip, external_port, internal_port, gateways, None, count);
+        self.send_ensure(
+            local_ip,
+            external_port,
+            internal_port,
+            gateways,
+            None,
+            count,
+        );
     }
 
     fn send_ensure(
@@ -299,11 +313,7 @@ impl PortMapController {
     /// Gateway-assigned external IP if a mapping is active for
     /// `(local_ip, external_port)`, else `None`. `Some` means the port was
     /// forwarded automatically, so a remote reachability check can be skipped.
-    pub async fn mapped_external_ip(
-        &self,
-        local_ip: IpAddr,
-        external_port: u16,
-    ) -> Option<IpAddr> {
+    pub async fn mapped_external_ip(&self, local_ip: IpAddr, external_port: u16) -> Option<IpAddr> {
         let (resp, rx) = oneshot::channel();
         self.req
             .send(Command::ExternalIp {
@@ -392,9 +402,15 @@ impl State {
         self.upnp_cache
             .retain(|_, (_, at)| at.elapsed() < GATEWAY_CACHE_TTL);
         self.hostname_caps.retain(|_, (ok, at)| {
-            at.elapsed() < if *ok { GATEWAY_CACHE_TTL } else { RETRY_INTERVAL }
+            at.elapsed()
+                < if *ok {
+                    GATEWAY_CACHE_TTL
+                } else {
+                    RETRY_INTERVAL
+                }
         });
-        self.last_attempt.retain(|k, _| self.desired.contains_key(k));
+        self.last_attempt
+            .retain(|k, _| self.desired.contains_key(k));
     }
 
     async fn teardown(&mut self, key: MappingKey) {
@@ -444,7 +460,10 @@ impl State {
                 }
                 // Never hand a Private-Use OPTION_HOSTNAME to a gateway that
                 // hasn't confirmed it speaks the extension via ANNOUNCE.
-                if !self.gateway_supports_hostname(local_ip, *gw, *scope_id).await {
+                if !self
+                    .gateway_supports_hostname(local_ip, *gw, *scope_id)
+                    .await
+                {
                     tracing::debug!("PCP HOSTNAME skip {gw}: no ANNOUNCE confirmation of support");
                     continue;
                 }
@@ -466,7 +485,9 @@ impl State {
                     // confirms the binding took, independent of the ANNOUNCE marker.
                     Ok(m)
                         if m.external_port() == ext
-                            && m.response_options().iter().any(|o| o.code == OPTION_HOSTNAME) =>
+                            && m.response_options()
+                                .iter()
+                                .any(|o| o.code == OPTION_HOSTNAME) =>
                     {
                         tracing::debug!(
                             "PCP HOSTNAME mapped {external_port}->{local_ip}:{} {hostname} via {gw}",
@@ -582,7 +603,9 @@ impl State {
                     let _ = m.try_drop().await;
                 }
                 Err(e) => {
-                    tracing::debug!("PCP/NAT-PMP map {local_ip}:{external_port} via {gw} failed: {e}")
+                    tracing::debug!(
+                        "PCP/NAT-PMP map {local_ip}:{external_port} via {gw} failed: {e}"
+                    )
                 }
             }
         }
@@ -590,16 +613,21 @@ impl State {
         // Fall back to UPnP (IPv4 only).
         if let IpAddr::V4(local_v4) = local_ip {
             let added = match self.gateway_for(local_v4).await {
-                Some(gw) => match upnp::add_port(gw, external_port, local_v4, spec.internal_port).await {
-                    Ok(()) => {
-                        tracing::debug!("UPnP mapped {external_port}->{local_v4}:{}", spec.internal_port);
-                        true
+                Some(gw) => {
+                    match upnp::add_port(gw, external_port, local_v4, spec.internal_port).await {
+                        Ok(()) => {
+                            tracing::debug!(
+                                "UPnP mapped {external_port}->{local_v4}:{}",
+                                spec.internal_port
+                            );
+                            true
+                        }
+                        Err(e) => {
+                            tracing::debug!("UPnP map {local_v4}:{external_port} failed: {e}");
+                            false
+                        }
                     }
-                    Err(e) => {
-                        tracing::debug!("UPnP map {local_v4}:{external_port} failed: {e}");
-                        false
-                    }
-                },
+                }
                 None => false,
             };
             if added {
@@ -645,7 +673,11 @@ impl State {
         scope_id: Option<u32>,
     ) -> bool {
         if let Some((ok, at)) = self.hostname_caps.get(&gw) {
-            let ttl = if *ok { GATEWAY_CACHE_TTL } else { RETRY_INTERVAL };
+            let ttl = if *ok {
+                GATEWAY_CACHE_TTL
+            } else {
+                RETRY_INTERVAL
+            };
             if at.elapsed() < ttl {
                 return *ok;
             }
@@ -753,10 +785,17 @@ mod tests {
         state.ensure(a.clone(), spec()).await;
         state.ensure(b.clone(), spec()).await;
         assert!(state.desired.contains_key(&a));
-        assert!(state.desired.contains_key(&b), "adding b clobbered a's siblings");
+        assert!(
+            state.desired.contains_key(&b),
+            "adding b clobbered a's siblings"
+        );
 
         state.ensure(plain.clone(), spec()).await;
-        assert_eq!(state.desired.len(), 3, "plain mapping is a distinct identity");
+        assert_eq!(
+            state.desired.len(),
+            3,
+            "plain mapping is a distinct identity"
+        );
 
         state.remove(a.clone()).await;
         assert!(!state.desired.contains_key(&a));
@@ -807,8 +846,14 @@ mod tests {
         NetworkInterfaceInfo {
             ip_info: Some(std::sync::Arc::new(IpInfo {
                 scope_id: 42,
-                subnets: subnets.iter().map(|s| s.parse::<IpNet>().unwrap()).collect(),
-                lan_ip: lan_ip.iter().map(|s| s.parse::<IpAddr>().unwrap()).collect(),
+                subnets: subnets
+                    .iter()
+                    .map(|s| s.parse::<IpNet>().unwrap())
+                    .collect(),
+                lan_ip: lan_ip
+                    .iter()
+                    .map(|s| s.parse::<IpAddr>().unwrap())
+                    .collect(),
                 ..Default::default()
             })),
             gateway_type,
@@ -880,7 +925,10 @@ mod tests {
             GatewayType::InboundOutbound,
         ));
         assert!(gws.contains(&(Ipv4Addr::new(10, 59, 0, 1).into(), None)));
-        assert!(!gws.iter().any(|(g, _)| g.is_ipv6()), "no v6 from a bare /128");
+        assert!(
+            !gws.iter().any(|(g, _)| g.is_ipv6()),
+            "no v6 from a bare /128"
+        );
     }
 
     // NM can report a link-local v6 gateway for the wg connection, but the
@@ -958,6 +1006,9 @@ mod tests {
             &["10.8.0.1", "fe80::1"],
             GatewayType::OutboundOnly,
         ));
-        assert!(gws.is_empty(), "OutboundOnly must yield no candidates, got {gws:?}");
+        assert!(
+            gws.is_empty(),
+            "OutboundOnly must yield no candidates, got {gws:?}"
+        );
     }
 }

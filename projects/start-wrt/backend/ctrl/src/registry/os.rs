@@ -30,10 +30,7 @@ pub struct OsVersionInfo {
 impl OsVersionInfo {
     /// Find the asset for a given platform, checking all asset type maps.
     /// Prefers squashfs, then img, then iso.
-    pub fn asset_for_platform(
-        &self,
-        platform: &str,
-    ) -> Option<&RegistryAsset<Blake3Commitment>> {
+    pub fn asset_for_platform(&self, platform: &str) -> Option<&RegistryAsset<Blake3Commitment>> {
         self.squashfs
             .get(platform)
             .or_else(|| self.img.get(platform))

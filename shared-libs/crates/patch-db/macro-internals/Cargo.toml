@@ -1,16 +1,16 @@
 [package]
-name = "patch-db-macro-internals"
-version = "0.1.0"
 authors = ["Aiden McClelland <me@drbonez.dev>"]
-edition = "2018"
 description = "internals for macros for defining typed patch dbs"
+edition = "2018"
 license = "MIT"
+name = "patch-db-macro-internals"
 repository = "https://github.com/Start9Labs/start-technologies"
+version = "0.1.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-syn = { version = "1.0.5", features = ["full", "extra-traits"] }
-quote = "1.0.1"
-proc-macro2 = "1.0.1"
 heck = "0.4.1"
+proc-macro2 = "1.0.1"
+quote = "1.0.1"
+syn = { version = "1.0.5", features = ["full", "extra-traits"] }

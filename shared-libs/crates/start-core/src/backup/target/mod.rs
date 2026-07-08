@@ -128,9 +128,7 @@ impl FileSystem for BackupTargetFS {
             BackupTargetFS::Cifs(a) => a.mount(mountpoint, mount_type).await,
         }
     }
-    async fn source_hash(
-        &self,
-    ) -> Result<digest::Output<Sha256>, Error> {
+    async fn source_hash(&self) -> Result<digest::Output<Sha256>, Error> {
         match self {
             BackupTargetFS::Disk(a) => a.source_hash().await,
             BackupTargetFS::Cifs(a) => a.source_hash().await,

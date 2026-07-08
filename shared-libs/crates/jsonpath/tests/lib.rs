@@ -4,12 +4,11 @@ extern crate serde_json;
 #[macro_use]
 extern crate imbl_value;
 
+use common::{compare_result, read_contents, read_json, setup};
 use imbl_value::imbl::{vector, Vector};
 use imbl_value::Value;
-use serde::Deserialize;
-
-use common::{compare_result, read_contents, read_json, setup};
 use jsonpath::JsonPathError;
+use serde::Deserialize;
 
 mod common;
 

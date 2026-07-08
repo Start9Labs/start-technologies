@@ -1,13 +1,13 @@
 [package]
 authors = ["Aiden McClelland <me@drbonez.dev>"]
-edition = "2018"
-name = "rpc-toolkit"
-version = "0.3.2"
 description = "A toolkit for creating JSON-RPC 2.0 servers with automatic cli bindings"
-license = "MIT"
 documentation = "https://docs.rs/rpc-toolkit"
+edition = "2018"
 keywords = ["json", "rpc", "cli"]
+license = "MIT"
+name = "rpc-toolkit"
 repository = "https://github.com/Start9Labs/start-technologies"
+version = "0.3.2"
 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -16,16 +16,16 @@ cbor = ["serde_cbor"]
 default = ["cbor"]
 
 [dependencies]
-axum = "0.8"
 async-stream = "0.3"
 async-trait = "0.1"
+axum = "0.8"
 clap = { version = "4", features = ["derive"] }
 futures = "0.3"
 http = "1"
 http-body-util = "0.1"
 # hyper = { version = "1", features = ["server", "http1", "http2", "client"] }
-itertools = "0.14"
 imbl-value = { path = "../imbl-value" }
+itertools = "0.14"
 lazy_format = "2"
 lazy_static = "1.4"
 openssl = { version = "0.10", features = ["vendored"] }

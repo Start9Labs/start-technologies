@@ -29,11 +29,10 @@ use hickory_server::net::runtime::Time;
 use hickory_server::proto::op::{Header, HeaderCounts, Metadata, OpCode, ResponseCode};
 use hickory_server::proto::rr::rdata::{CNAME, TXT};
 use hickory_server::proto::rr::{DNSClass, LowerName, Name, RData, Record, RecordType};
-
-use crate::prelude::*;
 use hickory_server::server::{Request, RequestHandler, ResponseHandler, ResponseInfo};
 use hickory_server::zone_handler::{Catalog, MessageResponseBuilder};
 
+use crate::prelude::*;
 use crate::util::sync::SyncMutex;
 
 /// One injected record. Kept Rust-only; each gateway maps it to its own
@@ -89,21 +88,37 @@ impl InjectedRecord {
 }
 
 fn parse_rdata(rtype: &str, value: &str) -> Result<(RecordType, RData), Error> {
-    let invalid = |what: &str| Error::new(eyre!("invalid {what}: {value}"), ErrorKind::InvalidRequest);
+    let invalid =
+        |what: &str| Error::new(eyre!("invalid {what}: {value}"), ErrorKind::InvalidRequest);
     Ok(match rtype.to_ascii_uppercase().as_str() {
         "A" => (
             RecordType::A,
-            RData::A(value.parse::<Ipv4Addr>().map_err(|_| invalid("A record"))?.into()),
+            RData::A(
+                value
+                    .parse::<Ipv4Addr>()
+                    .map_err(|_| invalid("A record"))?
+                    .into(),
+            ),
         ),
         "AAAA" => (
             RecordType::AAAA,
-            RData::AAAA(value.parse::<Ipv6Addr>().map_err(|_| invalid("AAAA record"))?.into()),
+            RData::AAAA(
+                value
+                    .parse::<Ipv6Addr>()
+                    .map_err(|_| invalid("AAAA record"))?
+                    .into(),
+            ),
         ),
         "CNAME" => (
             RecordType::CNAME,
-            RData::CNAME(CNAME(Name::from_utf8(value).with_kind(ErrorKind::ParseUrl)?)),
+            RData::CNAME(CNAME(
+                Name::from_utf8(value).with_kind(ErrorKind::ParseUrl)?,
+            )),
         ),
-        "TXT" => (RecordType::TXT, RData::TXT(TXT::new(vec![value.to_string()]))),
+        "TXT" => (
+            RecordType::TXT,
+            RData::TXT(TXT::new(vec![value.to_string()])),
+        ),
         other => {
             return Err(Error::new(
                 eyre!("unsupported DNS record type: {other}"),
@@ -239,9 +254,7 @@ impl DnsInjector {
                             source: src,
                         };
                         let v = m.entry(key).or_default();
-                        v.retain(|r| {
-                            !(r.rtype == record.rtype && r.rdata == record.rdata)
-                        });
+                        v.retain(|r| !(r.rtype == record.rtype && r.rdata == record.rdata));
                         v.push(record);
                     }
                     // Delete an RRset (a whole type, or every type for the name).
@@ -332,8 +345,13 @@ impl RequestHandler for InjectingHandler {
                 let header = header_with_code(request, code);
                 response_handle
                     .send_response(
-                        MessageResponseBuilder::from_message_request(&*request)
-                            .build(header, [], [], [], []),
+                        MessageResponseBuilder::from_message_request(&*request).build(
+                            header,
+                            [],
+                            [],
+                            [],
+                            [],
+                        ),
                     )
                     .await
                     .unwrap_or_else(|_| fallback_info(header))
@@ -342,7 +360,10 @@ impl RequestHandler for InjectingHandler {
                 let req = request.request_info().ok();
                 let answers = req
                     .as_ref()
-                    .map(|req| self.injector.lookup(req.query.name(), req.query.query_type()))
+                    .map(|req| {
+                        self.injector
+                            .lookup(req.query.name(), req.query.query_type())
+                    })
                     .unwrap_or_default();
                 // Authoritative for any injected name: serve records or NODATA.
                 // Forwarding a held name's missing-type query lets upstream NXDOMAIN
@@ -351,22 +372,33 @@ impl RequestHandler for InjectingHandler {
                     .as_ref()
                     .is_some_and(|req| self.injector.contains_name(req.query.name()));
                 if answers.is_empty() && !known {
-                    return self.forwarder.handle_request::<R, T>(request, response_handle).await;
+                    return self
+                        .forwarder
+                        .handle_request::<R, T>(request, response_handle)
+                        .await;
                 }
                 let header = header_with_code(request, ResponseCode::NoError);
                 response_handle
                     .send_response(
-                        MessageResponseBuilder::from_message_request(&*request)
-                            .build(header, &answers, [], [], []),
+                        MessageResponseBuilder::from_message_request(&*request).build(
+                            header,
+                            &answers,
+                            [],
+                            [],
+                            [],
+                        ),
                     )
                     .await
                     .unwrap_or_else(|_| fallback_info(header))
             }
-            _ => self.forwarder.handle_request::<R, T>(request, response_handle).await,
+            _ => {
+                self.forwarder
+                    .handle_request::<R, T>(request, response_handle)
+                    .await
+            }
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -401,16 +433,30 @@ mod tests {
         );
         let q = fqdn("scrunge.goop");
         assert_eq!(inj.lookup(&q, RecordType::A).len(), 1, "A query resolves");
-        assert!(inj.lookup(&q, RecordType::AAAA).is_empty(), "no AAAA record");
+        assert!(
+            inj.lookup(&q, RecordType::AAAA).is_empty(),
+            "no AAAA record"
+        );
         assert!(inj.contains_name(&q), "held name -> handler answers NODATA");
-        assert!(!inj.contains_name(&fqdn("nope.goop")), "unknown name -> handler forwards");
+        assert!(
+            !inj.contains_name(&fqdn("nope.goop")),
+            "unknown name -> handler forwards"
+        );
     }
 
     #[test]
     fn tsig_key_derivation_is_deterministic() {
         let a = super::super::derive_tsig_key(&[1u8; 32]);
-        assert_eq!(a, super::super::derive_tsig_key(&[1u8; 32]), "same psk -> same key");
-        assert_ne!(a, super::super::derive_tsig_key(&[2u8; 32]), "different psk -> different key");
+        assert_eq!(
+            a,
+            super::super::derive_tsig_key(&[1u8; 32]),
+            "same psk -> same key"
+        );
+        assert_ne!(
+            a,
+            super::super::derive_tsig_key(&[2u8; 32]),
+            "different psk -> different key"
+        );
     }
 
     // A signed UPDATE built the way the server signs it must verify; an unsigned
@@ -426,7 +472,11 @@ mod tests {
             name.set_fqdn(true);
             let mut rrset = RecordSet::new(name.clone(), RecordType::A, 0);
             rrset.insert(
-                Record::from_rdata(name.clone(), 300, RData::A(A::from(Ipv4Addr::new(10, 59, 0, 2)))),
+                Record::from_rdata(
+                    name.clone(),
+                    300,
+                    RData::A(A::from(Ipv4Addr::new(10, 59, 0, 2))),
+                ),
                 0,
             );
             let mut msg = append(rrset, name.base_name(), false, false);
@@ -446,8 +496,16 @@ mod tests {
         let signed = build(Some(key_a));
         let unsigned = build(None);
 
-        let inj = DnsInjector::new(Vec::new(), |_| true, move |ip| (ip == src).then_some(key_a), |_| {});
-        assert!(inj.verify_tsig(src, &signed), "valid TSIG from the right key accepted");
+        let inj = DnsInjector::new(
+            Vec::new(),
+            |_| true,
+            move |ip| (ip == src).then_some(key_a),
+            |_| {},
+        );
+        assert!(
+            inj.verify_tsig(src, &signed),
+            "valid TSIG from the right key accepted"
+        );
         assert!(!inj.verify_tsig(src, &unsigned), "unsigned UPDATE rejected");
         assert!(
             !inj.verify_tsig(IpAddr::V4(Ipv4Addr::new(10, 59, 0, 9)), &signed),

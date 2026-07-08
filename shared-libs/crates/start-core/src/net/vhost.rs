@@ -20,11 +20,11 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::TlsConnector;
-use tokio_util::sync::CancellationToken;
 use tokio_rustls::rustls::crypto::CryptoProvider;
 use tokio_rustls::rustls::pki_types::ServerName;
 use tokio_rustls::rustls::server::ClientHello;
 use tokio_rustls::rustls::{ClientConfig, ServerConfig};
+use tokio_util::sync::CancellationToken;
 use tracing::instrument;
 use ts_rs::TS;
 use visit_rs::Visit;
@@ -39,11 +39,9 @@ use crate::net::acme::{
 use crate::net::gateway::{
     GatewayInfo, NetworkInterfaceController, NetworkInterfaceListenerAcceptMetadata,
 };
-use crate::net::ssl::{CertBranding, CertStore, RootCaTlsHandler};
-use crate::net::tls::{
-    ChainedHandler, TlsHandler, TlsHandlerAction, TlsListener, TlsMetadata,
-};
 use crate::net::port_map::PortMapController;
+use crate::net::ssl::{CertBranding, CertStore, RootCaTlsHandler};
+use crate::net::tls::{ChainedHandler, TlsHandler, TlsHandlerAction, TlsListener, TlsMetadata};
 use crate::net::utils::{bind_mio_listener, ipv6_is_link_local, is_private_ip};
 use crate::net::web_server::{Accept, AcceptStream, ExtractVisitor, TcpMetadata, extract};
 use crate::prelude::*;
@@ -588,9 +586,8 @@ impl Accept for VHostBindListener {
         for (&addr, (listener, gw_info)) in &self.listeners {
             match listener.poll_accept(cx) {
                 Poll::Ready(Ok((stream, peer_addr))) => {
-                    if let Err(e) =
-                        socket2::SockRef::from(&stream)
-                            .set_tcp_keepalive(&crate::net::utils::default_keepalive())
+                    if let Err(e) = socket2::SockRef::from(&stream)
+                        .set_tcp_keepalive(&crate::net::utils::default_keepalive())
                     {
                         tracing::error!("Failed to set tcp keepalive: {e}");
                         tracing::debug!("{e:?}");
@@ -916,7 +913,11 @@ where
         // closed: we log and drop the connection rather than risk
         // silently exposing an upstream that the operator intended to
         // gate.
-        let auth_gate = match self.auth.as_ref().map(crate::net::http::AuthGate::from_auth) {
+        let auth_gate = match self
+            .auth
+            .as_ref()
+            .map(crate::net::http::AuthGate::from_auth)
+        {
             Some(Ok(g)) => Some(g),
             Some(Err(e)) => {
                 tracing::error!("Failed to compile proxy auth gate; refusing connection: {e}");
@@ -1080,7 +1081,13 @@ impl ConnRegistry {
                     m.remove(&victim_id);
                 }
             }
-            m.insert(id, ConnEntry { last_active, cancel });
+            m.insert(
+                id,
+                ConnEntry {
+                    last_active,
+                    cancel,
+                },
+            );
         });
         ConnRegHandle {
             id,
@@ -1202,10 +1209,7 @@ impl<A: Accept + 'static> GetAcmeProvider for GetVHostAcmeProvider<A> {
                     if x.parse::<IpAddr>().is_ok() {
                         return Some(acc);
                     }
-                    let (t, _) = m
-                        .get(&Some(x.clone()))?
-                        .iter()
-                        .find(|(_, e)| e.alive())?;
+                    let (t, _) = m.get(&Some(x.clone()))?.iter().find(|(_, e)| e.alive())?;
                     let acme = t.0.acme()?;
                     Some(if let Some(acc) = acc {
                         if acme == acc {
@@ -1232,17 +1236,12 @@ impl<A: Accept + 'static> GetAcmeProvider for GetVHostAcmeProvider<A> {
 #[derive(Debug)]
 struct NoCertResolver;
 impl tokio_rustls::rustls::server::ResolvesServerCert for NoCertResolver {
-    fn resolve(
-        &self,
-        _: ClientHello,
-    ) -> Option<Arc<tokio_rustls::rustls::sign::CertifiedKey>> {
+    fn resolve(&self, _: ClientHello) -> Option<Arc<tokio_rustls::rustls::sign::CertifiedKey>> {
         None
     }
 }
 
-fn passthrough_stub_config(
-    crypto_provider: &Arc<CryptoProvider>,
-) -> Result<ServerConfig, Error> {
+fn passthrough_stub_config(crypto_provider: &Arc<CryptoProvider>) -> Result<ServerConfig, Error> {
     Ok(ServerConfig::builder_with_provider(crypto_provider.clone())
         .with_safe_default_protocol_versions()
         .with_kind(ErrorKind::OpenSsl)?
@@ -1283,10 +1282,8 @@ impl<I: Clone, A: Accept + 'static> Clone for VHostTlsHandler<I, A> {
 impl<'a, A, I> TlsHandler<'a, A> for VHostTlsHandler<I, A>
 where
     A: Accept + 'a,
-    <A as Accept>::Metadata: Visit<ExtractVisitor<GatewayInfo>>
-        + Visit<ExtractVisitor<TcpMetadata>>
-        + Send
-        + Sync,
+    <A as Accept>::Metadata:
+        Visit<ExtractVisitor<GatewayInfo>> + Visit<ExtractVisitor<TcpMetadata>> + Send + Sync,
     I: TlsHandler<'a, A> + Send,
 {
     async fn get_config(
@@ -1645,8 +1642,9 @@ async fn copy_bidirectional_hangs_without_keepalive_when_peer_idle() {
 mod conn_cap_tests {
     use std::time::Duration;
 
-    use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    use super::*;
 
     #[tokio::test]
     async fn lru_eviction_cancels_only_the_oldest() {

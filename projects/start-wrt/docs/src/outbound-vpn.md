@@ -7,7 +7,6 @@ Route your network's Internet traffic through one or more WireGuard VPN provider
 1. Navigate to `Internet > Outbound VPNs` and click "Add".
 
 1. Configure the VPN:
-
    - **Label** — A descriptive name (e.g. "Mullvad Sweden", "Proton US").
    - **Config File** — Upload or paste a WireGuard `.conf` file from your VPN provider. Most providers (Mullvad, ProtonVPN, IVPN, etc.) offer WireGuard config file downloads from their account dashboard.
    - **Target** — Where this VPN's traffic should be routed:
@@ -30,6 +29,7 @@ Your device → StartWRT → First VPN → Second VPN → Internet
 ```
 
 For example, if "Mullvad" targets "Proton" and "Proton" targets "Internet":
+
 - Mullvad knows your home IP but not your destination.
 - Proton knows your destination but sees Mullvad's IP, not yours.
 

@@ -1,4 +1,5 @@
-use std::{fmt, net::Ipv4Addr};
+use std::fmt;
+use std::net::Ipv4Addr;
 
 use inpt::Inpt;
 use uciedit_macros::TypedSection;
@@ -506,4 +507,3 @@ pub struct DdnsService {
     #[uci(default)]
     pub lookup_host: Option<String>,
 }
-

@@ -606,8 +606,9 @@ pub struct InterfaceAddresses {
 
 #[cfg(test)]
 mod task_input_tests {
-    use super::TaskInput;
     use serde_json::json;
+
+    use super::TaskInput;
 
     #[test]
     fn legacy_value_shape_normalizes_to_accept_set() {

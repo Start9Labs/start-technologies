@@ -90,10 +90,9 @@ impl CliContextSeed {
             CookieStore::default()
         };
         let merged = {
-            let store = self
-                .cookie_store
-                .lock()
-                .map_err(|_| Error::new(eyre!("cookie store mutex poisoned"), ErrorKind::Unknown))?;
+            let store = self.cookie_store.lock().map_err(|_| {
+                Error::new(eyre!("cookie store mutex poisoned"), ErrorKind::Unknown)
+            })?;
             CookieStore::from_cookies(
                 on_disk
                     .iter_unexpired()
@@ -109,7 +108,9 @@ impl CliContextSeed {
         let mut writer = File::create(&tmp).with_ctx(|_| (ErrorKind::Filesystem, &tmp))?;
         cookie_store::serde::json::save(&merged, &mut writer)
             .map_err(|e| Error::new(eyre!("{e}"), ErrorKind::Filesystem))?;
-        writer.sync_all().with_ctx(|_| (ErrorKind::Filesystem, &tmp))?;
+        writer
+            .sync_all()
+            .with_ctx(|_| (ErrorKind::Filesystem, &tmp))?;
         std::fs::rename(&tmp, &self.cookie_path)
             .with_ctx(|_| (ErrorKind::Filesystem, self.cookie_path.display()))?;
         Ok(())
@@ -227,8 +228,8 @@ impl CliContext {
         for ca_path in &self.root_ca {
             let pem = std::fs::read(ca_path)
                 .with_ctx(|_| (crate::ErrorKind::Filesystem, ca_path.display()))?;
-            let cert = native_tls::Certificate::from_pem(&pem)
-                .with_kind(crate::ErrorKind::OpenSsl)?;
+            let cert =
+                native_tls::Certificate::from_pem(&pem).with_kind(crate::ErrorKind::OpenSsl)?;
             builder.add_root_certificate(cert);
         }
         let connector = builder.build().with_kind(crate::ErrorKind::OpenSsl)?;
@@ -317,14 +318,10 @@ impl CliContext {
             .push("rpc")
             .push(guid.as_ref());
         let connector = self.ws_tls_connector()?;
-        let (stream, _) = tokio_tungstenite::connect_async_tls_with_config(
-            url,
-            None,
-            false,
-            connector,
-        )
-        .await
-        .with_kind(ErrorKind::Network)?;
+        let (stream, _) =
+            tokio_tungstenite::connect_async_tls_with_config(url, None, false, connector)
+                .await
+                .with_kind(ErrorKind::Network)?;
         Ok(stream)
     }
 

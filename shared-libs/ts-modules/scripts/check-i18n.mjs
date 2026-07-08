@@ -8,10 +8,7 @@ const __dirname = dirname(__filename)
 const root = join(__dirname, '..')
 
 // Extract dictionary keys from en.ts
-const enPath = join(
-  root,
-  'shared/src/i18n/dictionaries/en.ts',
-)
+const enPath = join(root, 'shared/src/i18n/dictionaries/en.ts')
 const enSource = readFileSync(enPath, 'utf-8')
 const validKeys = new Set()
 
@@ -119,7 +116,9 @@ for (const lang of otherLangs) {
     dictKeys.add(Number(match[1]))
   }
 
-  const missing = [...enNumericKeys].filter(k => !dictKeys.has(k)).sort((a, b) => a - b)
+  const missing = [...enNumericKeys]
+    .filter(k => !dictKeys.has(k))
+    .sort((a, b) => a - b)
 
   if (missing.length > 0) {
     dictErrors.push({ lang, missing })

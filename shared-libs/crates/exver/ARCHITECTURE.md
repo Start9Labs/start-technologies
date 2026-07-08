@@ -11,7 +11,7 @@ revision separately. It also provides a `VersionRange` algebra with exact satisf
 - Crate-type: `["cdylib", "rlib"]` — an rlib for Rust consumers and a cdylib for the WebAssembly
   build published to npm as `@start9labs/exver`.
 - Consumers: `start-core` (`shared-libs/crates/start-core`, `exver = { path = "../exver",
-  features = ["serde"] }`) uses `Version`, `ExtendedVersion`, and `VersionRange` throughout
+features = ["serde"] }`) uses `Version`, `ExtendedVersion`, and `VersionRange` throughout
   package management, the registry, dependency resolution, and manifest handling.
 - First-party: a direct path dependency, not a registry crate and not under any `[patch]`.
 

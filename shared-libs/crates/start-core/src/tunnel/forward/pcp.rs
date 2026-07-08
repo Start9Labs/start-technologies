@@ -49,9 +49,11 @@ pub async fn run(ctx: TunnelContext) {
 }
 
 fn socket() -> Result<UdpSocket, Error> {
-    let socket =
-        Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)).with_kind(ErrorKind::Network)?;
-    socket.set_reuse_address(true).with_kind(ErrorKind::Network)?;
+    let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))
+        .with_kind(ErrorKind::Network)?;
+    socket
+        .set_reuse_address(true)
+        .with_kind(ErrorKind::Network)?;
     bind_to_wireguard(&socket)?;
     socket
         .bind(&SockAddr::from(SocketAddrV4::new(
@@ -66,9 +68,11 @@ fn socket() -> Result<UdpSocket, Error> {
 /// The v6 counterpart of [`socket`]: an IPv6-only UDP socket on the WireGuard
 /// interface, so a client's PCP MAP for its own GUA reaches us over the tunnel.
 fn socket6() -> Result<UdpSocket, Error> {
-    let socket =
-        Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP)).with_kind(ErrorKind::Network)?;
-    socket.set_reuse_address(true).with_kind(ErrorKind::Network)?;
+    let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))
+        .with_kind(ErrorKind::Network)?;
+    socket
+        .set_reuse_address(true)
+        .with_kind(ErrorKind::Network)?;
     // v4 requests go to the v4 socket; keep this one v6-only so both can bind :5351.
     socket.set_only_v6(true).with_kind(ErrorKind::Network)?;
     bind_to_wireguard(&socket)?;
@@ -253,8 +257,14 @@ impl GatewayBackend for TunnelContext {
             .await
     }
 
-    async fn remove_sni_forward(&self, source: SocketAddrV4, target: SocketAddrV4, hostnames: &[String]) {
-        self.sni().unregister(*source.ip(), source.port(), hostnames, target);
+    async fn remove_sni_forward(
+        &self,
+        source: SocketAddrV4,
+        target: SocketAddrV4,
+        hostnames: &[String],
+    ) {
+        self.sni()
+            .unregister(*source.ip(), source.port(), hostnames, target);
         for h in hostnames {
             lease::forget(
                 self,
@@ -328,7 +338,9 @@ impl TunnelContext {
                             for h in &hostnames_owned {
                                 if routes.get(h).is_some_and(|r| r.target != target) {
                                     return Err(Error::new(
-                                        eyre!("SNI hostname {h} on {source} is held by another client"),
+                                        eyre!(
+                                            "SNI hostname {h} on {source} is held by another client"
+                                        ),
                                         ErrorKind::InvalidRequest,
                                     ));
                                 }
@@ -336,7 +348,15 @@ impl TunnelContext {
                             for h in &hostnames_owned {
                                 let (label, enabled, auto) =
                                     sni_route_fields(routes.get(h), auto, &default_label);
-                                routes.insert(h.clone(), SniRoute { target, label, enabled, auto });
+                                routes.insert(
+                                    h.clone(),
+                                    SniRoute {
+                                        target,
+                                        label,
+                                        enabled,
+                                        auto,
+                                    },
+                                );
                             }
                             Ok(())
                         }

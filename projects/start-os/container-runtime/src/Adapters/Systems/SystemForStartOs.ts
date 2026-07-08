@@ -1,8 +1,8 @@
-import { System } from "../../Interfaces/System"
-import { Effects } from "../../Models/Effects"
-import { ExtendedVersion, T, utils, VersionRange } from "@start9labs/start-sdk"
+import { System } from '../../Interfaces/System'
+import { Effects } from '../../Models/Effects'
+import { ExtendedVersion, T, utils, VersionRange } from '@start9labs/start-sdk'
 
-export const STARTOS_JS_LOCATION = "/usr/lib/startos/package/index.js"
+export const STARTOS_JS_LOCATION = '/usr/lib/startos/package/index.js'
 
 type RunningMain = {
   stop: () => Promise<void>
@@ -22,7 +22,7 @@ export class SystemForStartOs implements System {
 
   async init(
     effects: Effects,
-    kind: "install" | "update" | "restore" | null,
+    kind: 'install' | 'update' | 'restore' | null,
   ): Promise<void> {
     return void (await this.abi.init({ effects, kind }))
   }
@@ -70,7 +70,7 @@ export class SystemForStartOs implements System {
       if (this.runningMain || this.starting) return
       this.starting = true
       effects.constRetry = utils.once(() => {
-        console.debug(".const() triggered")
+        console.debug('.const() triggered')
         if (effects.isInContext) effects.restart()
       })
       let mainOnTerm: () => Promise<void> | undefined

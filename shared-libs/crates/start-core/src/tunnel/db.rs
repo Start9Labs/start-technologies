@@ -84,7 +84,13 @@ impl Model<TunnelDatabase> {
     /// unregister from the in-memory demux dataplane.
     pub fn gc_forwards(
         &mut self,
-    ) -> Result<(BTreeSet<SocketAddrV4>, Vec<(SocketAddrV4, String, SocketAddrV4)>), Error> {
+    ) -> Result<
+        (
+            BTreeSet<SocketAddrV4>,
+            Vec<(SocketAddrV4, String, SocketAddrV4)>,
+        ),
+        Error,
+    > {
         let mut keep_sources = BTreeSet::new();
         let mut dropped_sni: Vec<(SocketAddrV4, String, SocketAddrV4)> = Vec::new();
         let mut keep_targets = BTreeSet::new();

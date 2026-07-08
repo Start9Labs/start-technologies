@@ -32,7 +32,9 @@ impl Progress {
     /// into `Progress { done: 0, total: Some(total) }`.
     pub fn add_total(&mut self, total: u64) {
         match self {
-            Self::Progress { total: Some(old), .. } => *old += total,
+            Self::Progress {
+                total: Some(old), ..
+            } => *old += total,
             _ => {
                 *self = Self::Progress {
                     done: 0,
@@ -258,7 +260,9 @@ impl PhaseProgressTrackerHandle {
         let fraction = match progress {
             Progress::Complete(_) => 1.0,
             Progress::Progress {
-                done, total: Some(total), ..
+                done,
+                total: Some(total),
+                ..
             } if total > 0 => (done as f64) / (total as f64),
             _ => 0.0,
         };

@@ -604,7 +604,6 @@ mod expr_term_inner_tests {
 
     use imbl_value::imbl::vector;
     use imbl_value::{Number, Value};
-
     use selector::terms::ExprTerm;
 
     #[test]

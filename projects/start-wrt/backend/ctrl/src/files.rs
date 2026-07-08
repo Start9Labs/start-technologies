@@ -1,14 +1,16 @@
-use crate::utils::HandlerExtSerde;
-use crate::prelude::*;
-use crate::{CliContext, ServerContext};
+use std::os::unix::fs::MetadataExt;
+use std::path::PathBuf;
+
 use chrono::{DateTime, Utc};
 use clap::Parser;
 use fd_lock_rs::{FdLock, LockType};
-use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
+use rpc_toolkit::{from_fn_async, Context, HandlerExt, ParentHandler};
 use serde::{Deserialize, Serialize};
-use std::os::unix::fs::MetadataExt;
-use std::path::PathBuf;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+
+use crate::prelude::*;
+use crate::utils::HandlerExtSerde;
+use crate::{CliContext, ServerContext};
 
 // === File namespace (file.get, file.set) ===
 
@@ -91,12 +93,11 @@ pub async fn set(
         .await?;
 
     // flock is a blocking syscall — run it on the blocking pool
-    let mut locked = tokio::task::spawn_blocking(move || {
-        FdLock::lock(file, LockType::Exclusive, true)
-    })
-    .await
-    .map_err(|e| Error::new(eyre!("lock task panicked: {e}"), ErrorKind::Incoherent))?
-    .map_err(|e| Error::new(eyre!("failed to lock file: {e}"), ErrorKind::Filesystem))?;
+    let mut locked =
+        tokio::task::spawn_blocking(move || FdLock::lock(file, LockType::Exclusive, true))
+            .await
+            .map_err(|e| Error::new(eyre!("lock task panicked: {e}"), ErrorKind::Incoherent))?
+            .map_err(|e| Error::new(eyre!("failed to lock file: {e}"), ErrorKind::Filesystem))?;
 
     // Check if file was modified since client last read it (while holding lock)
     if let Some(expected) = modified {
@@ -107,11 +108,14 @@ pub async fn set(
             .and_then(|m| m.modified().ok())
             .map(DateTime::<Utc>::from);
         if found.is_some_and(|found| found > expected) {
-            return Err(Error::new(eyre!(
-                "file was modified: expected {}, found {}",
-                expected,
-                found.unwrap()
-            ), ErrorKind::Filesystem));
+            return Err(Error::new(
+                eyre!(
+                    "file was modified: expected {}, found {}",
+                    expected,
+                    found.unwrap()
+                ),
+                ErrorKind::Filesystem,
+            ));
         }
     }
 
@@ -233,11 +237,12 @@ pub async fn dir_get(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::fs;
-    use std::thread;
     use std::time::Duration;
+    use std::{fs, thread};
+
     use tempfile::{tempdir, NamedTempFile};
+
+    use super::*;
 
     // === file::get tests ===
 
@@ -251,7 +256,8 @@ mod tests {
             GetFileArgs {
                 path: temp_file.path().to_path_buf(),
             },
-        ).await;
+        )
+        .await;
 
         assert!(result.is_ok());
         let file_contents = result.unwrap();
@@ -265,7 +271,8 @@ mod tests {
             GetFileArgs {
                 path: PathBuf::from("/nonexistent/file.txt"),
             },
-        ).await;
+        )
+        .await;
 
         assert!(result.is_err());
     }
@@ -284,7 +291,8 @@ mod tests {
                 contents: "new content".to_string(),
                 modified: None,
             },
-        ).await;
+        )
+        .await;
 
         assert!(result.is_ok());
         assert_eq!(fs::read_to_string(&file_path).unwrap(), "new content");
@@ -303,7 +311,8 @@ mod tests {
                 contents: "updated".to_string(),
                 modified: None,
             },
-        ).await;
+        )
+        .await;
 
         assert!(result.is_ok());
         assert_eq!(fs::read_to_string(&path).unwrap(), "updated");
@@ -325,7 +334,8 @@ mod tests {
                 contents: "updated".to_string(),
                 modified: Some(modified),
             },
-        ).await;
+        )
+        .await;
 
         assert!(result.is_ok());
         assert_eq!(fs::read_to_string(&path).unwrap(), "updated");
@@ -352,11 +362,15 @@ mod tests {
                 contents: "my update".to_string(),
                 modified: Some(old_modified),
             },
-        ).await;
+        )
+        .await;
 
         assert!(result.is_err());
         // File should still have the "changed by someone else" content
-        assert_eq!(fs::read_to_string(&path).unwrap(), "changed by someone else");
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "changed by someone else"
+        );
     }
 
     #[tokio::test]
@@ -371,7 +385,8 @@ mod tests {
                 contents: "nested content".to_string(),
                 modified: None,
             },
-        ).await;
+        )
+        .await;
 
         assert!(result.is_ok());
         assert!(nested_path.exists());
@@ -513,7 +528,8 @@ mod tests {
             DirGetArgs {
                 path: temp_dir.path().to_path_buf(),
             },
-        ).await;
+        )
+        .await;
 
         assert!(result.is_ok());
         let entries = result.unwrap();
@@ -536,7 +552,8 @@ mod tests {
             DirGetArgs {
                 path: temp_dir.path().to_path_buf(),
             },
-        ).await;
+        )
+        .await;
 
         assert!(result.is_ok());
         assert!(result.unwrap().is_empty());
@@ -549,7 +566,8 @@ mod tests {
             DirGetArgs {
                 path: PathBuf::from("/nonexistent/directory"),
             },
-        ).await;
+        )
+        .await;
 
         assert!(result.is_err());
     }

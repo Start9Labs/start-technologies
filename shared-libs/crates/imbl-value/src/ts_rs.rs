@@ -1,5 +1,6 @@
-use crate::{InOMap, Value};
 use ts_rs::{TypeVisitor, TS};
+
+use crate::{InOMap, Value};
 
 impl TS for Value {
     type WithoutGenerics = Self;

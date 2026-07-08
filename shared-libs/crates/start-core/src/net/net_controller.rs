@@ -3,8 +3,8 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV
 use std::sync::{Arc, Weak};
 
 use color_eyre::eyre::eyre;
-use ipnet::IpNet;
 use imbl_value::InternedString;
+use ipnet::IpNet;
 use nix::net::if_::if_nametoindex;
 use patch_db::json_ptr::JsonPointer;
 use tokio::process::Command;
@@ -22,9 +22,7 @@ use crate::net::forward::{
     ForwardRequirements, InterfacePortForwardController, START9_BRIDGE_IFACE, nft_rule, nft_rule_v6,
 };
 use crate::net::gateway::NetworkInterfaceController;
-use crate::net::host::binding::{
-    AddSslOptions, BindId, BindOptions, UpstreamCertValidation,
-};
+use crate::net::host::binding::{AddSslOptions, BindId, BindOptions, UpstreamCertValidation};
 use crate::net::host::{Host, Hosts, host_for};
 use crate::net::port_map::{PortMapController, candidate_gateways};
 use crate::net::service_interface::{
@@ -131,15 +129,17 @@ impl NetController {
             dns: DnsController::init(db, &net_iface.watcher).await?,
             dns_update: DnsUpdateController::new(
                 net_iface.watcher.subscribe(),
-                Arc::new(|gw: GatewayId| -> std::pin::Pin<
-                    Box<dyn std::future::Future<Output = Result<Option<[u8; 32]>, ()>> + Send>,
-                > {
-                    Box::pin(async move {
-                        crate::net::gateway::wireguard_psk(gw.as_str())
-                            .await
-                            .map_err(|_| ())
-                    })
-                }),
+                Arc::new(
+                    |gw: GatewayId| -> std::pin::Pin<
+                        Box<dyn std::future::Future<Output = Result<Option<[u8; 32]>, ()>> + Send>,
+                    > {
+                        Box::pin(async move {
+                            crate::net::gateway::wireguard_psk(gw.as_str())
+                                .await
+                                .map_err(|_| ())
+                        })
+                    },
+                ),
             ),
             forward: InterfacePortForwardController::new(
                 net_iface.watcher.subscribe(),
@@ -766,8 +766,12 @@ impl NetServiceData {
                         .entry(gua)
                         .or_insert_with(|| v6_gateways.clone());
                     if gua_pinholes.insert((gua, *external)) {
-                        ctrl.port_map
-                            .ensure(IpAddr::V6(gua), *external, *external, v6_gateways.clone());
+                        ctrl.port_map.ensure(
+                            IpAddr::V6(gua),
+                            *external,
+                            *external,
+                            v6_gateways.clone(),
+                        );
                     }
                 }
             }
@@ -782,7 +786,8 @@ impl NetServiceData {
                 && !gua_pinholes.contains(&(*gua_ip, 80))
                 && gua_redirects.insert(*gua_ip)
             {
-                ctrl.port_map.ensure(IpAddr::V6(*gua_ip), 80, 443, gws.clone());
+                ctrl.port_map
+                    .ensure(IpAddr::V6(*gua_ip), 80, 443, gws.clone());
             }
         }
         let stale_redirects: Vec<Ipv6Addr> = binds
@@ -908,7 +913,9 @@ impl NetServiceData {
                 let Some(info) = net_ifaces.get(gw_id) else {
                     continue;
                 };
-                let Some(ip_info) = &info.ip_info else { continue };
+                let Some(ip_info) = &info.ip_info else {
+                    continue;
+                };
                 let gateways = candidate_gateways(info);
                 if gateways.is_empty() {
                     continue;
@@ -1225,11 +1232,7 @@ impl NetService {
                     .de()?;
                 let hostname = ServerHostname::load(db.as_public().as_server_info())?;
                 let mut ports = db.as_private().as_available_ports().de()?;
-                let host = host_for(
-                    db,
-                    pkg_id.as_ref().unwrap_or(&PackageId::start_os()),
-                    &id,
-                )?;
+                let host = host_for(db, pkg_id.as_ref().unwrap_or(&PackageId::start_os()), &id)?;
                 host.add_binding(&mut ports, internal_port, options)?;
                 host.update_addresses(&hostname, &gateways, &ports)?;
                 db.as_private_mut().as_available_ports_mut().ser(&ports)?;
@@ -1260,11 +1263,7 @@ impl NetService {
                     .de()?;
                 let hostname = ServerHostname::load(db.as_public().as_server_info())?;
                 let mut ports = db.as_private().as_available_ports().de()?;
-                let host = host_for(
-                    db,
-                    pkg_id.as_ref().unwrap_or(&PackageId::start_os()),
-                    &id,
-                )?;
+                let host = host_for(db, pkg_id.as_ref().unwrap_or(&PackageId::start_os()), &id)?;
                 host.add_binding_range(
                     &mut ports,
                     internal_start_port,

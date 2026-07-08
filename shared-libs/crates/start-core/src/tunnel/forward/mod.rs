@@ -126,8 +126,14 @@ mod tests {
         let other: Ipv4Addr = "10.59.0.3".parse().unwrap();
         let mut fwds: BTreeMap<SocketAddrV4, PortForward> = BTreeMap::new();
         fwds.insert("1.2.3.4:443".parse().unwrap(), dnat("10.59.0.2:443", true));
-        fwds.insert("1.2.3.4:8443".parse().unwrap(), dnat("10.59.0.2:8443", false));
-        fwds.insert("1.2.3.4:9000".parse().unwrap(), dnat("10.59.0.3:9000", true));
+        fwds.insert(
+            "1.2.3.4:8443".parse().unwrap(),
+            dnat("10.59.0.2:8443", false),
+        );
+        fwds.insert(
+            "1.2.3.4:9000".parse().unwrap(),
+            dnat("10.59.0.3:9000", true),
+        );
         let mut routes = BTreeMap::new();
         routes.insert(
             "auto.example.com".to_string(),

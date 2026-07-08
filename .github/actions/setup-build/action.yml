@@ -8,19 +8,19 @@ inputs:
   setup-python:
     description: Set up Python
     required: false
-    default: "false"
+    default: 'false'
   setup-docker:
     description: Set up Docker QEMU and Buildx
     required: false
-    default: "true"
+    default: 'true'
   setup-sccache:
     description: Configure sccache for GitHub Actions
     required: false
-    default: "true"
+    default: 'true'
   free-space:
     description: Remove unnecessary packages to free disk space
     required: false
-    default: "true"
+    default: 'true'
 
 runs:
   using: composite
@@ -56,13 +56,13 @@ runs:
       if: inputs.setup-python == 'true'
       uses: actions/setup-python@v6
       with:
-        python-version: "3.x"
+        python-version: '3.x'
 
     - uses: actions/setup-node@v6
       with:
         node-version: ${{ inputs.nodejs-version }}
         cache: npm
-        cache-dependency-path: "**/package-lock.json"
+        cache-dependency-path: '**/package-lock.json'
 
     - name: Set up Docker QEMU
       if: inputs.setup-docker == 'true'

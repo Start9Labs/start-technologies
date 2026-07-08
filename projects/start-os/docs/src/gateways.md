@@ -2,7 +2,7 @@
 
 A gateway is a network interface that connects your server to the Internet. Your router is the default gateway — it is always present. You can add additional gateways using WireGuard configuration files. All gateways are managed under `System > Gateways`.
 
-## WATCH THE VIDEO 
+## WATCH THE VIDEO
 
 <div class="yt-video" data-id="ZCc8sZdalNE" data-title="Gateways"></div>
 

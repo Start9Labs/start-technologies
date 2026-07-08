@@ -5,7 +5,7 @@
 lib name `start_core`). The CLI surfaces the same RPC API the StartOS server exposes, plus
 local developer tooling for building and signing `.s9pk` packages.
 
-Most subcommands are *remote* calls: you point `start-cli` at a running StartOS server
+Most subcommands are _remote_ calls: you point `start-cli` at a running StartOS server
 (`--host`/`-H`) and it invokes the server's RPC API over HTTPS. A handful of commands
 (`s9pk`, `init-key`, `pubkey`, `util`) run locally and are what package authors use day to day.
 
@@ -42,14 +42,14 @@ target/debug/start-cli s9pk pack ...                # build a package
 `-H/--host` accepts either a URL (`https://server.local`) or a `host` profile name
 defined in a workspace `.startos/config.yaml`. Common flags:
 
-| Flag | Purpose |
-|------|---------|
-| `-H, --host <url\|profile>` | Target server URL or config profile |
-| `--registry <url\|profile>` | Target registry for `registry` commands |
-| `--proxy <url>` | HTTP/SOCKS proxy for outbound requests |
-| `--cookie-path <path>` | Where the session cookie is stored |
-| `--developer-key-path <path>` | Developer signing key location |
-| `--insecure` | Skip TLS verification (testing only) |
+| Flag                          | Purpose                                 |
+| ----------------------------- | --------------------------------------- |
+| `-H, --host <url\|profile>`   | Target server URL or config profile     |
+| `--registry <url\|profile>`   | Target registry for `registry` commands |
+| `--proxy <url>`               | HTTP/SOCKS proxy for outbound requests  |
+| `--cookie-path <path>`        | Where the session cookie is stored      |
+| `--developer-key-path <path>` | Developer signing key location          |
+| `--insecure`                  | Skip TLS verification (testing only)    |
 
 Configuration is layered: explicit flags override `.startos/config.yaml` (local workspace),
 which overrides `/etc/startos/config.yaml`. See

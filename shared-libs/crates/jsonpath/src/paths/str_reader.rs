@@ -28,7 +28,12 @@ pub(crate) struct StrReader<'a> {
 
 impl<'a> StrReader<'a> {
     pub fn new(input: &'a str) -> Self {
-        StrReader { input, pos: 0, chars: input.chars(), peeked: None }
+        StrReader {
+            input,
+            pos: 0,
+            chars: input.chars(),
+            peeked: None,
+        }
     }
 
     pub fn peek_char(&mut self) -> Result<char, ReaderError> {
@@ -37,8 +42,8 @@ impl<'a> StrReader<'a> {
     }
 
     pub fn take_while<F>(&mut self, fun: F) -> Result<StrRange, ReaderError>
-        where
-            F: Fn(&char) -> bool,
+    where
+        F: Fn(&char) -> bool,
     {
         let mut char_len: usize = 0;
         while let Some(c) = self.peek() {
@@ -47,7 +52,7 @@ impl<'a> StrReader<'a> {
             }
             match self.next() {
                 Some(ch) => char_len += ch.len_utf8(),
-                _ => return Err(ReaderError::Eof)
+                _ => return Err(ReaderError::Eof),
             }
         }
 

@@ -127,7 +127,11 @@ impl Contents {
             FileData::Packed(cid) => {
                 let mut buf = ctrl.cpack_load(*cid)?.unwrap_or_default();
                 buf.truncate(inode.attrs.size as usize);
-                Body::Packed { content_id: *cid, buf, dirty: false }
+                Body::Packed {
+                    content_id: *cid,
+                    buf,
+                    dirty: false,
+                }
             }
             FileData::File(cid) => Body::Blocks {
                 content_id: *cid,
@@ -225,7 +229,10 @@ impl Contents {
     }
 
     fn load_block(&self, idx: u64) -> BkfsResult<Vec<u8>> {
-        let Body::Blocks { content_id, dirty, .. } = &self.body else {
+        let Body::Blocks {
+            content_id, dirty, ..
+        } = &self.body
+        else {
             return Ok(Vec::new());
         };
         if let Some(buf) = dirty.get(&idx) {
@@ -258,7 +265,9 @@ impl Contents {
                     }
                     data[offset as usize..end as usize].copy_from_slice(buf);
                 }
-                Body::Packed { buf: data, dirty, .. } => {
+                Body::Packed {
+                    buf: data, dirty, ..
+                } => {
                     if (data.len() as u64) < end {
                         data.resize(end as usize, 0);
                     }
@@ -298,17 +307,26 @@ impl Contents {
     /// Inline → Packed: the in-memory bytes become a packed extent (written
     /// to the content log on flush). Content id = the (never-reused) inode #.
     fn inline_to_packed(&mut self) {
-        let Body::Inline(data) = &mut self.body else { return };
+        let Body::Inline(data) = &mut self.body else {
+            return;
+        };
         let buf = std::mem::take(data);
         let content_id = ContentId(self.inode.inode.0);
-        self.body = Body::Packed { content_id, buf, dirty: true };
+        self.body = Body::Packed {
+            content_id,
+            buf,
+            dirty: true,
+        };
         self.inode.attrs.contents = FileData::Packed(content_id);
     }
 
     /// Packed → Blocks: the extent becomes block 0+, and the now-superseded
     /// packed content record is tombstoned (its content moved to block files).
     fn packed_to_blocks(&mut self) -> BkfsResult<()> {
-        let Body::Packed { content_id, buf, .. } = &mut self.body else {
+        let Body::Packed {
+            content_id, buf, ..
+        } = &mut self.body
+        else {
             return Ok(());
         };
         let content_id = *content_id;
@@ -322,7 +340,12 @@ impl Contents {
             dirty_bytes += chunk.len();
             dirty.insert(i as u64, chunk.to_vec());
         }
-        self.body = Body::Blocks { content_id, dirty, dirty_bytes, disk_blocks: 0 };
+        self.body = Body::Blocks {
+            content_id,
+            dirty,
+            dirty_bytes,
+            disk_blocks: 0,
+        };
         self.inode.attrs.contents = FileData::File(content_id);
         Ok(())
     }
@@ -338,15 +361,20 @@ impl Contents {
             let (idx, within) = blockstore::locate(pos);
             let take = (buf.len() - written).min(CHUNK_SIZE as usize - within);
             let valid = self.valid_len(idx);
-            let Body::Blocks { dirty, dirty_bytes, .. } = &mut self.body else { unreachable!() };
+            let Body::Blocks {
+                dirty, dirty_bytes, ..
+            } = &mut self.body
+            else {
+                unreachable!()
+            };
             let mut block = match dirty.remove(&idx) {
                 Some(b) => {
                     *dirty_bytes -= b.len();
                     b
                 }
                 None => {
-                    let mut b = blockstore::read_block(&self.ctrl, content_id, idx)?
-                        .unwrap_or_default();
+                    let mut b =
+                        blockstore::read_block(&self.ctrl, content_id, idx)?.unwrap_or_default();
                     b.truncate(valid);
                     b
                 }
@@ -355,7 +383,12 @@ impl Contents {
                 block.resize(within + take, 0);
             }
             block[within..within + take].copy_from_slice(&buf[written..written + take]);
-            let Body::Blocks { dirty, dirty_bytes, .. } = &mut self.body else { unreachable!() };
+            let Body::Blocks {
+                dirty, dirty_bytes, ..
+            } = &mut self.body
+            else {
+                unreachable!()
+            };
             *dirty_bytes += block.len();
             dirty.insert(idx, block);
             written += take;
@@ -366,7 +399,9 @@ impl Contents {
     /// Migrate an inline file to block storage, preserving its bytes as the
     /// initial dirty blocks. Content id is the (never-reused) inode number.
     fn inline_to_blocks(&mut self) -> BkfsResult<()> {
-        let Body::Inline(data) = &mut self.body else { return Ok(()) };
+        let Body::Inline(data) = &mut self.body else {
+            return Ok(());
+        };
         let data = std::mem::take(data);
         let content_id = ContentId(self.inode.inode.0);
         let mut dirty = BTreeMap::new();
@@ -375,7 +410,12 @@ impl Contents {
             dirty_bytes += chunk.len();
             dirty.insert(i as u64, chunk.to_vec());
         }
-        self.body = Body::Blocks { content_id, dirty, dirty_bytes, disk_blocks: 0 };
+        self.body = Body::Blocks {
+            content_id,
+            dirty,
+            dirty_bytes,
+            disk_blocks: 0,
+        };
         self.inode.attrs.contents = FileData::File(content_id);
         Ok(())
     }
@@ -388,14 +428,25 @@ impl Contents {
         };
         loop {
             let idx = {
-                let Body::Blocks { dirty, dirty_bytes, .. } = &self.body else { return Ok(()) };
+                let Body::Blocks {
+                    dirty, dirty_bytes, ..
+                } = &self.body
+                else {
+                    return Ok(());
+                };
                 if *dirty_bytes <= budget || dirty.len() <= 1 {
                     return Ok(());
                 }
                 *dirty.keys().next().unwrap()
             };
             let valid = self.valid_len(idx);
-            let Body::Blocks { dirty, dirty_bytes, disk_blocks, .. } = &mut self.body else {
+            let Body::Blocks {
+                dirty,
+                dirty_bytes,
+                disk_blocks,
+                ..
+            } = &mut self.body
+            else {
                 return Ok(());
             };
             let mut block = dirty.remove(&idx).unwrap();
@@ -485,7 +536,11 @@ impl Contents {
                 data.resize(size as usize, 0);
                 Plan::Done
             }
-            Body::Packed { content_id, buf, dirty } => {
+            Body::Packed {
+                content_id,
+                buf,
+                dirty,
+            } => {
                 buf.resize(size as usize, 0);
                 let bytes = if *dirty { Some(buf.clone()) } else { None };
                 *dirty = false;
@@ -495,7 +550,9 @@ impl Contents {
         };
         match plan {
             Plan::Done => {
-                let Body::Inline(data) = &self.body else { unreachable!() };
+                let Body::Inline(data) = &self.body else {
+                    unreachable!()
+                };
                 self.inode.attrs.contents = FileData::Inline(data.clone());
                 return Ok(());
             }
@@ -512,7 +569,12 @@ impl Contents {
 
         let required = blockstore::block_count(self.inode.attrs.size);
         let (content_id, dirty, disk_blocks) = match &mut self.body {
-            Body::Blocks { content_id, dirty, dirty_bytes, disk_blocks } => {
+            Body::Blocks {
+                content_id,
+                dirty,
+                dirty_bytes,
+                disk_blocks,
+            } => {
                 *dirty_bytes = 0;
                 (*content_id, std::mem::take(dirty), *disk_blocks)
             }

@@ -1,12 +1,14 @@
 use std::path::PathBuf;
 
 use axum::body::Body;
-use axum::http::{Response, header};
+use axum::http::{header, Response};
 use clap::Parser;
 use imbl_value::imbl::OrdMap;
 use imbl_value::json;
 use itertools::Itertools;
-use rpc_toolkit::{from_fn_async, CallRemote, Context, Empty, HandlerArgs, HandlerExt, ParentHandler};
+use rpc_toolkit::{
+    from_fn_async, CallRemote, Context, Empty, HandlerArgs, HandlerExt, ParentHandler,
+};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
@@ -59,12 +61,24 @@ async fn create(ctx: ServerContext) -> Result<BackupCreateRes, Error> {
     {
         Ok(output) => output,
         Err(e) => {
-            crate::activity::log("backup", "downloaded", false, "Failed to create config backup", Some(&e.to_string()));
+            crate::activity::log(
+                "backup",
+                "downloaded",
+                false,
+                "Failed to create config backup",
+                Some(&e.to_string()),
+            );
             return Err(e.into());
         }
     };
 
-    crate::activity::log("backup", "downloaded", true, "Downloaded config backup", None);
+    crate::activity::log(
+        "backup",
+        "downloaded",
+        true,
+        "Downloaded config backup",
+        None,
+    );
 
     let body = output;
     let fname = filename.clone();
@@ -108,15 +122,22 @@ async fn cli_download(
         )
         .await?,
     )
-    .map_err(|e| Error::new(eyre!("Failed to parse response: {e}"), ErrorKind::Deserialization))?;
+    .map_err(|e| {
+        Error::new(
+            eyre!("Failed to parse response: {e}"),
+            ErrorKind::Deserialization,
+        )
+    })?;
 
     let (bytes, _) = ctx.rest_download(res.guid.as_ref()).await?;
 
-    let download_dir = dirs::download_dir()
-        .unwrap_or_else(|| PathBuf::from("."));
+    let download_dir = dirs::download_dir().unwrap_or_else(|| PathBuf::from("."));
     let path = download_dir.join(&res.filename);
     tokio::fs::write(&path, &bytes).await.map_err(|e| {
-        crate::Error::new(eyre!("Failed to write {}: {e}", path.display()), ErrorKind::Filesystem)
+        crate::Error::new(
+            eyre!("Failed to write {}: {e}", path.display()),
+            ErrorKind::Filesystem,
+        )
     })?;
 
     println!("{}", path.display());
@@ -133,7 +154,9 @@ async fn restore(ctx: ServerContext) -> Result<BackupRestoreRes, Error> {
             move |req| async move {
                 let body_bytes = axum::body::to_bytes(req.into_body(), 10 * 1024 * 1024)
                     .await
-                    .map_err(|e| Error::new(eyre!("Failed to read upload: {e}"), ErrorKind::Network))?;
+                    .map_err(|e| {
+                        Error::new(eyre!("Failed to read upload: {e}"), ErrorKind::Network)
+                    })?;
 
                 // Atomic file write
                 let tmp_path = "/tmp/backup-restore.tar.gz";
@@ -149,8 +172,17 @@ async fn restore(ctx: ServerContext) -> Result<BackupRestoreRes, Error> {
                     .await
                 {
                     let _ = tokio::fs::remove_file(tmp_path).await;
-                    crate::activity::log("backup", "restored", false, "Failed to restore config backup", Some("Invalid backup archive"));
-                    return Err(Error::new(eyre!("Invalid backup archive"), ErrorKind::InvalidRequest));
+                    crate::activity::log(
+                        "backup",
+                        "restored",
+                        false,
+                        "Failed to restore config backup",
+                        Some("Invalid backup archive"),
+                    );
+                    return Err(Error::new(
+                        eyre!("Invalid backup archive"),
+                        ErrorKind::InvalidRequest,
+                    ));
                 }
 
                 // Apply the backup
@@ -162,11 +194,23 @@ async fn restore(ctx: ServerContext) -> Result<BackupRestoreRes, Error> {
                 let _ = tokio::fs::remove_file(tmp_path).await;
 
                 if let Err(e) = apply {
-                    crate::activity::log("backup", "restored", false, "Failed to restore config backup", Some(&e.to_string()));
+                    crate::activity::log(
+                        "backup",
+                        "restored",
+                        false,
+                        "Failed to restore config backup",
+                        Some(&e.to_string()),
+                    );
                     return Err(e.into());
                 }
 
-                crate::activity::log("backup", "restored", true, "Restored config backup (rebooting)", None);
+                crate::activity::log(
+                    "backup",
+                    "restored",
+                    true,
+                    "Restored config backup (rebooting)",
+                    None,
+                );
 
                 // Spawn delayed reboot
                 tokio::spawn(async {
@@ -208,7 +252,10 @@ async fn cli_upload(
     }: HandlerArgs<CliContext, RestoreParams>,
 ) -> Result<(), Error> {
     let data = tokio::fs::read(&file).await.map_err(|e| {
-        crate::Error::new(eyre!("Failed to read {}: {e}", file.display()), ErrorKind::Filesystem)
+        crate::Error::new(
+            eyre!("Failed to read {}: {e}", file.display()),
+            ErrorKind::Filesystem,
+        )
     })?;
 
     let res: BackupRestoreRes = imbl_value::from_value(
@@ -220,7 +267,12 @@ async fn cli_upload(
         )
         .await?,
     )
-    .map_err(|e| Error::new(eyre!("Failed to parse response: {e}"), ErrorKind::Deserialization))?;
+    .map_err(|e| {
+        Error::new(
+            eyre!("Failed to parse response: {e}"),
+            ErrorKind::Deserialization,
+        )
+    })?;
 
     ctx.rest_upload(res.upload.as_ref(), data).await?;
 

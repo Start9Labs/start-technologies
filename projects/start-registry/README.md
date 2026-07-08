@@ -16,10 +16,10 @@ This directory is a thin product wrapper inside the `start-os` monorepo. The cra
 
 `registrybox` is a multi-call binary (like BusyBox). It dispatches on the name it is invoked as:
 
-| Invoked as | Role |
-|------------|------|
-| `start-registryd` | the registry **server** daemon (`registry::main`) |
-| `start-registry` | the registry **CLI** client against a running server (`registry::cli`) |
+| Invoked as        | Role                                                                   |
+| ----------------- | ---------------------------------------------------------------------- |
+| `start-registryd` | the registry **server** daemon (`registry::main`)                      |
+| `start-registry`  | the registry **CLI** client against a running server (`registry::cli`) |
 
 The Debian package installs the binary as `/usr/bin/start-registrybox` and symlinks `start-registryd` and `start-registry` to it. The `start-registryd.service` systemd unit runs the daemon.
 
@@ -40,13 +40,13 @@ cargo build -p start-registry --bin registrybox
 
 Configuration is read from CLI flags and a config file (`-c <path>`; default search includes the standard StartOS config path). Key flags:
 
-| Flag | Purpose |
-|------|---------|
-| `-l, --listen <addr>` | listen address (default `127.0.0.1:5959`) |
+| Flag                    | Purpose                                         |
+| ----------------------- | ----------------------------------------------- |
+| `-l, --listen <addr>`   | listen address (default `127.0.0.1:5959`)       |
 | `-H, --hostname <host>` | public hostname(s) used in generated asset URLs |
-| `-p, --tor-proxy <url>` | SOCKS proxy for outbound (e.g. Tor) requests |
-| `-d, --datadir <path>` | data directory (default `/var/lib/startos`) |
-| `-c, --config <path>` | config file |
+| `-p, --tor-proxy <url>` | SOCKS proxy for outbound (e.g. Tor) requests    |
+| `-d, --datadir <path>`  | data directory (default `/var/lib/startos`)     |
+| `-c, --config <path>`   | config file                                     |
 
 Server state lives in `<datadir>/registry.db` (PatchDB) plus a SQLite metrics database and hosted asset files.
 

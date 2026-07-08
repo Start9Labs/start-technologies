@@ -331,7 +331,9 @@ mod test {
         let todos = |v| json!({ "public": { "serverInfo": { "postInitMigrationTodos": v } } });
 
         assert!(!migrated_from_pre_0_4_0(&todos(json!({})))); // empty at up() time
-        assert!(!migrated_from_pre_0_4_0(&json!({ "public": { "serverInfo": {} } })));
+        assert!(!migrated_from_pre_0_4_0(
+            &json!({ "public": { "serverInfo": {} } })
+        ));
         assert!(!migrated_from_pre_0_4_0(&todos(
             json!({ "0.4.0-alpha.6": null, "0.4.0-beta.9": null })
         )));

@@ -1,14 +1,13 @@
+use std::cmp::Ordering;
+use std::fmt::{self, Debug, Display};
+use std::hash::{Hash, Hasher};
+use std::io;
+use std::sync::Arc;
+
 use imbl::Vector;
 use index::Index;
-use serde::{de::DeserializeOwned, Serialize};
-
-use std::{
-    cmp::Ordering,
-    fmt::{self, Debug, Display},
-    hash::{Hash, Hasher},
-    io,
-    sync::Arc,
-};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 
 pub mod de;
 mod from;
@@ -25,8 +24,7 @@ mod ts_rs;
 
 pub use imbl;
 pub use in_order_map::InOMap;
-pub use serde_json::Error as ErrorSource;
-pub use serde_json::Number;
+pub use serde_json::{Error as ErrorSource, Number};
 pub use yasi::InternedString;
 
 pub const NULL: Value = Value::Null;

@@ -1,12 +1,12 @@
-import { matchManifest } from "./matchManifest"
-import giteaManifest from "./__fixtures__/giteaManifest"
-import synapseManifest from "./__fixtures__/synapseManifest"
+import { matchManifest } from './matchManifest'
+import giteaManifest from './__fixtures__/giteaManifest'
+import synapseManifest from './__fixtures__/synapseManifest'
 
-describe("matchManifest", () => {
-  test("gittea", () => {
+describe('matchManifest', () => {
+  test('gittea', () => {
     matchManifest.parse(giteaManifest)
   })
-  test("synapse", () => {
+  test('synapse', () => {
     matchManifest.parse(synapseManifest)
   })
 })

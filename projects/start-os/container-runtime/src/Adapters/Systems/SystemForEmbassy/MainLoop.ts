@@ -1,13 +1,13 @@
-import { polyfillEffects } from "./polyfillEffects"
-import { DockerProcedureContainer } from "./DockerProcedureContainer"
-import { SystemForEmbassy } from "."
-import { T, utils } from "@start9labs/start-sdk"
-import { Daemon } from "@start9labs/start-sdk/lib/mainFn/Daemon"
-import { Effects } from "../../../Models/Effects"
-import { off } from "node:process"
-import { CommandController } from "@start9labs/start-sdk/lib/mainFn/CommandController"
-import { SDKManifest } from "@start9labs/start-core/types"
-import { SubContainer } from "@start9labs/start-sdk/lib/util/SubContainer"
+import { polyfillEffects } from './polyfillEffects'
+import { DockerProcedureContainer } from './DockerProcedureContainer'
+import { SystemForEmbassy } from '.'
+import { T, utils } from '@start9labs/start-sdk'
+import { Daemon } from '@start9labs/start-sdk/lib/mainFn/Daemon'
+import { Effects } from '../../../Models/Effects'
+import { off } from 'node:process'
+import { CommandController } from '@start9labs/start-sdk/lib/mainFn/CommandController'
+import { SDKManifest } from '@start9labs/start-core/types'
+import { SubContainer } from '@start9labs/start-sdk/lib/util/SubContainer'
 
 const EMBASSY_HEALTH_INTERVAL = 15 * 1000
 /**
@@ -56,25 +56,25 @@ export class MainLoop {
     ]
 
     await this.setupInterfaces(effects)
-    await effects.setMainStatus({ status: "running" })
+    await effects.setMainStatus({ status: 'running' })
     const jsMain = (this.system.moduleCode as any)?.jsMain
     if (jsMain) {
-      throw new Error("Unreachable")
+      throw new Error('Unreachable')
     }
     const subcontainer = await DockerProcedureContainer.createSubContainer(
       effects,
       this.system.manifest.id,
       this.system.manifest.main,
       this.system.manifest.volumes,
-      `Main - ${currentCommand.join(" ")}`,
+      `Main - ${currentCommand.join(' ')}`,
     )
     const daemon = await Daemon.of()(this.effects, subcontainer, {
       command: currentCommand,
       runAsInit: true,
       env: {
-        TINI_SUBREAPER: "true",
+        TINI_SUBREAPER: 'true',
       },
-      sigtermTimeout: utils.inMs(this.system.manifest.main["sigterm-timeout"]),
+      sigtermTimeout: utils.inMs(this.system.manifest.main['sigterm-timeout']),
     })
 
     daemon.start()
@@ -88,28 +88,28 @@ export class MainLoop {
       const iface = this.system.manifest.interfaces[interfaceId]
       const internalPorts = new Set<number>()
       for (const port of Object.values(
-        iface["tor-config"]?.["port-mapping"] || {},
+        iface['tor-config']?.['port-mapping'] || {},
       )) {
         internalPorts.add(parseInt(port))
       }
-      for (const port of Object.values(iface["lan-config"] || {})) {
+      for (const port of Object.values(iface['lan-config'] || {})) {
         internalPorts.add(port.internal)
       }
       for (const internalPort of internalPorts) {
         const torConf = Object.entries(
-          iface["tor-config"]?.["port-mapping"] || {},
+          iface['tor-config']?.['port-mapping'] || {},
         )
           .map(([external, internal]) => ({
             internal: parseInt(internal),
             external: parseInt(external),
           }))
-          .find((conf) => conf.internal == internalPort)
-        const lanConf = Object.entries(iface["lan-config"] || {})
+          .find(conf => conf.internal == internalPort)
+        const lanConf = Object.entries(iface['lan-config'] || {})
           .map(([external, conf]) => ({
             external: parseInt(external),
             ...conf,
           }))
-          .find((conf) => conf.internal == internalPort)
+          .find(conf => conf.internal == internalPort)
         await effects.bind({
           id: interfaceId,
           internalPort,
@@ -118,7 +118,7 @@ export class MainLoop {
           addSsl: lanConf?.ssl
             ? {
                 preferredExternalPort: lanConf.external,
-                alpn: { specified: ["http/1.1"] },
+                alpn: { specified: ['http/1.1'] },
                 addXForwardedHeaders: false,
                 auth: null,
               }
@@ -136,28 +136,28 @@ export class MainLoop {
     await main?.daemon
       .term()
       .catch((e: unknown) => console.error(`Main loop error`, utils.asError(e)))
-    this.effects.setMainStatus({ status: "stopped" })
-    if (healthLoops) healthLoops.forEach((x) => clearInterval(x.interval))
+    this.effects.setMainStatus({ status: 'stopped' })
+    if (healthLoops) healthLoops.forEach(x => clearInterval(x.interval))
   }
 
   private constructHealthLoops() {
     const { manifest } = this.system
     const effects = this.effects
     const start = Date.now()
-    return Object.entries(manifest["health-checks"]).map(
+    return Object.entries(manifest['health-checks']).map(
       ([healthId, value]) => {
         effects
           .setHealth({
             id: healthId,
             name: value.name,
-            result: "starting",
+            result: 'starting',
             message: null,
           })
-          .catch((e) => console.error(utils.asError(e)))
+          .catch(e => console.error(utils.asError(e)))
         const interval = setInterval(async () => {
           const actionProcedure = value
           const timeChanged = Date.now() - start
-          if (actionProcedure.type === "docker") {
+          if (actionProcedure.type === 'docker') {
             const subcontainer = actionProcedure.inject
               ? this.mainSubContainerHandle
               : undefined
@@ -170,14 +170,14 @@ export class MainLoop {
               manifest.id,
               actionProcedure,
               manifest.volumes,
-              `Health Check - ${commands.join(" ")}`,
+              `Health Check - ${commands.join(' ')}`,
               {
                 subcontainer,
               },
             )
             const env: Record<string, string> = actionProcedure.inject
               ? {
-                  HOME: "/root",
+                  HOME: '/root',
                 }
               : {}
             const executed = await container.exec(commands, {
@@ -189,8 +189,8 @@ export class MainLoop {
               await effects.setHealth({
                 id: healthId,
                 name: value.name,
-                result: "success",
-                message: actionProcedure["success-message"] ?? null,
+                result: 'success',
+                message: actionProcedure['success-message'] ?? null,
               })
               return
             }
@@ -198,7 +198,7 @@ export class MainLoop {
               await effects.setHealth({
                 id: healthId,
                 name: value.name,
-                result: "disabled",
+                result: 'disabled',
                 message:
                   executed.stderr.toString() || executed.stdout.toString(),
               })
@@ -208,7 +208,7 @@ export class MainLoop {
               await effects.setHealth({
                 id: healthId,
                 name: value.name,
-                result: "starting",
+                result: 'starting',
                 message:
                   executed.stderr.toString() || executed.stdout.toString(),
               })
@@ -218,7 +218,7 @@ export class MainLoop {
               await effects.setHealth({
                 id: healthId,
                 name: value.name,
-                result: "loading",
+                result: 'loading',
                 message:
                   executed.stderr.toString() || executed.stdout.toString(),
               })
@@ -230,7 +230,7 @@ export class MainLoop {
               await effects.setHealth({
                 id: healthId,
                 name: value.name,
-                result: "failure",
+                result: 'failure',
                 message: errorMessage,
               })
               return
@@ -239,7 +239,7 @@ export class MainLoop {
               await effects.setHealth({
                 id: healthId,
                 name: value.name,
-                result: "failure",
+                result: 'failure',
                 message:
                   executed.stderr.toString() ||
                   executed.stdout.toString() ||
@@ -250,7 +250,7 @@ export class MainLoop {
             await effects.setHealth({
               id: healthId,
               name: value.name,
-              result: "success",
+              result: 'success',
               message,
             })
             return
@@ -262,7 +262,7 @@ export class MainLoop {
               await effects.setHealth({
                 id: healthId,
                 name: value.name,
-                result: "failure",
+                result: 'failure',
                 message: `Expecting that the js health check ${healthId} exists`,
               })
               return
@@ -273,39 +273,39 @@ export class MainLoop {
               timeChanged,
             )
 
-            if ("result" in result) {
+            if ('result' in result) {
               await effects.setHealth({
                 id: healthId,
                 name: value.name,
-                result: "success",
+                result: 'success',
                 message: null,
               })
               return
             }
-            if ("error" in result) {
+            if ('error' in result) {
               await effects.setHealth({
                 id: healthId,
                 name: value.name,
-                result: "failure",
+                result: 'failure',
                 message: result.error,
               })
               return
             }
-            if (!("error-code" in result)) {
+            if (!('error-code' in result)) {
               await effects.setHealth({
                 id: healthId,
                 name: value.name,
-                result: "failure",
+                result: 'failure',
                 message: `Unknown error type ${JSON.stringify(result)}`,
               })
               return
             }
-            const [code, message] = result["error-code"]
+            const [code, message] = result['error-code']
             if (code === 59) {
               await effects.setHealth({
                 id: healthId,
                 name: value.name,
-                result: "disabled",
+                result: 'disabled',
                 message,
               })
               return
@@ -314,7 +314,7 @@ export class MainLoop {
               await effects.setHealth({
                 id: healthId,
                 name: value.name,
-                result: "starting",
+                result: 'starting',
                 message,
               })
               return
@@ -323,7 +323,7 @@ export class MainLoop {
               await effects.setHealth({
                 id: healthId,
                 name: value.name,
-                result: "loading",
+                result: 'loading',
                 message,
               })
               return
@@ -332,8 +332,8 @@ export class MainLoop {
             await effects.setHealth({
               id: healthId,
               name: value.name,
-              result: "failure",
-              message: `${result["error-code"][0]}: ${result["error-code"][1]}`,
+              result: 'failure',
+              message: `${result['error-code'][0]}: ${result['error-code'][1]}`,
             })
             return
           }

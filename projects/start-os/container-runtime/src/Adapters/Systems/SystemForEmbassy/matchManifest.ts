@@ -1,9 +1,9 @@
-import { z } from "@start9labs/start-sdk"
-import { matchVolume } from "./matchVolume"
-import { matchDockerProcedure } from "../../../Models/DockerProcedure"
+import { z } from '@start9labs/start-sdk'
+import { matchVolume } from './matchVolume'
+import { matchDockerProcedure } from '../../../Models/DockerProcedure'
 
 const matchJsProcedure = z.object({
-  type: z.literal("script"),
+  type: z.literal('script'),
   args: z.array(z.unknown()).nullable().optional().default([]),
 })
 
@@ -12,7 +12,7 @@ export type Procedure = z.infer<typeof matchProcedure>
 
 const healthCheckFields = {
   name: z.string(),
-  "success-message": z.string().nullable().optional(),
+  'success-message': z.string().nullable().optional(),
 }
 
 const matchAction = z.object({
@@ -20,8 +20,8 @@ const matchAction = z.object({
   description: z.string(),
   warning: z.string().nullable().optional(),
   implementation: matchProcedure,
-  "allowed-statuses": z.array(z.enum(["running", "stopped"])),
-  "input-spec": z.unknown().nullable().optional(),
+  'allowed-statuses': z.array(z.enum(['running', 'stopped'])),
+  'input-spec': z.unknown().nullable().optional(),
 })
 export const matchManifest = z.object({
   id: z.string(),
@@ -35,7 +35,7 @@ export const matchManifest = z.object({
     })
     .nullable()
     .optional(),
-  "health-checks": z.record(
+  'health-checks': z.record(
     z.string(),
     z.union([
       matchDockerProcedure.extend(healthCheckFields),
@@ -56,13 +56,13 @@ export const matchManifest = z.object({
     z.object({
       name: z.string(),
       description: z.string(),
-      "tor-config": z
+      'tor-config': z
         .object({
-          "port-mapping": z.record(z.string(), z.string()),
+          'port-mapping': z.record(z.string(), z.string()),
         })
         .nullable()
         .optional(),
-      "lan-config": z
+      'lan-config': z
         .record(
           z.string(),
           z.object({
@@ -94,22 +94,22 @@ export const matchManifest = z.object({
         version: z.string(),
         requirement: z.union([
           z.object({
-            type: z.literal("opt-in"),
+            type: z.literal('opt-in'),
             how: z.string(),
           }),
           z.object({
-            type: z.literal("opt-out"),
+            type: z.literal('opt-out'),
             how: z.string(),
           }),
           z.object({
-            type: z.literal("required"),
+            type: z.literal('required'),
           }),
         ]),
         description: z.string().nullable().optional(),
         config: z
           .object({
             check: matchProcedure,
-            "auto-configure": matchProcedure,
+            'auto-configure': matchProcedure,
           })
           .nullable()
           .optional(),

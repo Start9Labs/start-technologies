@@ -1,15 +1,13 @@
 use core::convert::TryFrom;
 use core::fmt::Display;
 use core::result;
+use std::sync::Arc;
+
 use imbl::Vector;
 use serde::ser::{Impossible, Serialize};
 use serde_json::{Error, Number, Result};
-use std::sync::Arc;
 
-use crate::to_value;
-use crate::InOMap as Map;
-use crate::InternedString;
-use crate::Value;
+use crate::{to_value, InOMap as Map, InternedString, Value};
 
 impl Serialize for Value {
     #[inline]

@@ -1,13 +1,13 @@
 [package]
-name = "json-ptr"
-version = "0.1.0"
 authors = ["Aiden McClelland <me@drbonez.dev>"]
+description = "RFC 6901, JavaScript Object Notation (JSON) Pointer"
 edition = "2021"
 keywords = ["json", "json-pointer"]
-description = "RFC 6901, JavaScript Object Notation (JSON) Pointer"
-repository = "https://github.com/dr-bonez/json-ptr"
 license = "MIT"
+name = "json-ptr"
 readme = "README.md"
+repository = "https://github.com/dr-bonez/json-ptr"
+version = "0.1.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

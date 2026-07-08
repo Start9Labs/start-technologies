@@ -32,7 +32,6 @@ A microSD reflash boots the router from a StartWRT image and replaces the firmwa
 1. Connect to the `StartWRT` network via ethernet or by using the Wi-Fi password printed on the sticker. The captive portal opens the wizard automatically.
 
 1. Choose a reflash path:
-
    - **Keep settings** — Keeps your settings, prompts for a new admin password, and replaces the firmware. Your configuration (including Wi-Fi and profile settings) is preserved. User-installed extra package binaries are wiped, so you will need to reinstall them — but their config files are retained. See also [Updating](updating.md).
    - **Fresh Start** — Wipes everything and installs a clean copy of StartWRT. You set a new admin password, and the timezone is auto-detected from your browser (you can change it later in [Settings](settings.md)). After reboot, Wi-Fi comes back up automatically using the sticker password re-read from the router's EEPROM — no Wi-Fi credentials are carried over from the old configuration. Equivalent to a factory reset plus a firmware reinstall.
 
@@ -43,12 +42,12 @@ A microSD reflash boots the router from a StartWRT image and replaces the firmwa
 
 ## What Gets Wiped
 
-| Soft Reset | Keep settings (microSD) | Fresh Start (microSD) |
-|------------|------------------|-----------------------|
-| All settings and customizations | Settings preserved | All settings and customizations |
-| Admin password cleared | New admin password | Admin password cleared |
-| Firmware unchanged | Firmware replaced | Firmware replaced |
-| Wi-Fi password preserved | Wi-Fi password preserved | Wi-Fi password preserved |
+| Soft Reset                      | Keep settings (microSD)  | Fresh Start (microSD)           |
+| ------------------------------- | ------------------------ | ------------------------------- |
+| All settings and customizations | Settings preserved       | All settings and customizations |
+| Admin password cleared          | New admin password       | Admin password cleared          |
+| Firmware unchanged              | Firmware replaced        | Firmware replaced               |
+| Wi-Fi password preserved        | Wi-Fi password preserved | Wi-Fi password preserved        |
 
 The Wi-Fi password survives in every case. For Soft Reset and Fresh Start — which wipe the overlay — it is re-read from the router's EEPROM on boot. With Keep settings, the existing Wi-Fi configuration (including any password you set yourself) is preserved as-is.
 

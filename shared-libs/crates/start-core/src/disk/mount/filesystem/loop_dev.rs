@@ -39,9 +39,7 @@ impl<LogicalName: AsRef<Path> + Send + Sync> FileSystem for LoopDev<LogicalName>
             Box::new(lazy_format!("sizelimit={}", self.size)),
         ]
     }
-    async fn source_hash(
-        &self,
-    ) -> Result<digest::Output<Sha256>, Error> {
+    async fn source_hash(&self) -> Result<digest::Output<Sha256>, Error> {
         let mut sha = Sha256::new();
         sha.update("LoopDev");
         sha.update(

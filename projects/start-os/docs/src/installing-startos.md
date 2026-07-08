@@ -11,7 +11,6 @@ This guide is for flashing StartOS to a USB drive, then installing it onto a des
 1.  Visit the [Github release page](https://github.com/Start9Labs/start-technologies/releases/latest) to find the latest version of StartOS.
 
 1.  Under "ISO Downloads", select the ISO for your architecture. StartOS is available in x86_64 (AMD64), aarch64 (ARM64), and RISC-V (RVA23). For x86_64 and aarch64, two variants are available:
-
     - **Standard**: Includes proprietary firmware and drivers for broader hardware compatibility, including display and wireless. Recommended for most users.
 
     - **Slim (FOSS-only)**: 100% open source, containing **no** proprietary firmware or drivers. Only compatible with certain hardware, such as the Start9 Server Pure.
@@ -66,4 +65,4 @@ This guide is for flashing StartOS to a USB drive, then installing it onto a des
 
 1. At the Select Drives dialog, select the disk(s) you want to use as your OS and data drives.
 
-1. If a previous StartOS install is detected, it will ask whether you want to Overwrite or Preserve the existing StartOS data.  Select Overwrite to start fresh, or Preserve to flash the OS on the booted USB thumb drive over the old installation, while preserving your data.  After install is complete, you will be prompted to Continue to Setup.
+1. If a previous StartOS install is detected, it will ask whether you want to Overwrite or Preserve the existing StartOS data. Select Overwrite to start fresh, or Preserve to flash the OS on the booted USB thumb drive over the old installation, while preserving your data. After install is complete, you will be prompted to Continue to Setup.

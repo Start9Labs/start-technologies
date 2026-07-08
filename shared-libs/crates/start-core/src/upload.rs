@@ -450,7 +450,8 @@ impl UploadHandle {
     ) {
         while let Some(next) = body.next().await {
             if let Err(e) = async {
-                self.write_all(&next.map_err(std::io::Error::other)?).await?;
+                self.write_all(&next.map_err(std::io::Error::other)?)
+                    .await?;
                 Ok(())
             }
             .await
@@ -659,8 +660,7 @@ impl DownloadHandle {
         match outcome {
             Ok(()) => {
                 if let Err(e) = self.file.sync_all().await {
-                    self.progress
-                        .send_if_modified(|p| p.handle_error(&e));
+                    self.progress.send_if_modified(|p| p.handle_error(&e));
                 }
             }
             Err(e) => {

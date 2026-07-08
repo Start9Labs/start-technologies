@@ -103,6 +103,7 @@ The database has two layers:
 ### Container Isolation
 
 Each service runs in its own LXC container with:
+
 - Separate filesystem (id-mapped volumes)
 - Network namespace isolation
 - Resource limits
@@ -122,17 +123,17 @@ S9PK files are signed with Ed25519 keys. The registry and StartOS verify signatu
 
 ## Tech Stack
 
-| Component         | Technology                                     |
-| ----------------- | ---------------------------------------------- |
-| Backend           | Rust (async Tokio, Axum)                       |
-| Frontend          | Angular, TypeScript, Taiga UI                  |
-| Container Runtime | Node.js, TypeScript                            |
-| Containers        | LXC                                            |
-| Database          | Patch-DB (custom, diff-based)                  |
-| API               | JSON-RPC                                       |
-| Package Format    | S9PK (merkle archive, Ed25519 signed)          |
-| Networking        | WireGuard, Tor (Arti), mDNS, ACME              |
-| Supported Archs   | x86_64, aarch64, riscv64                       |
+| Component         | Technology                            |
+| ----------------- | ------------------------------------- |
+| Backend           | Rust (async Tokio, Axum)              |
+| Frontend          | Angular, TypeScript, Taiga UI         |
+| Container Runtime | Node.js, TypeScript                   |
+| Containers        | LXC                                   |
+| Database          | Patch-DB (custom, diff-based)         |
+| API               | JSON-RPC                              |
+| Package Format    | S9PK (merkle archive, Ed25519 signed) |
+| Networking        | WireGuard, Tor (Arti), mDNS, ACME     |
+| Supported Archs   | x86_64, aarch64, riscv64              |
 
 ## Source Code
 

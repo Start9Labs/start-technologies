@@ -14,7 +14,6 @@ An inbound VPN server listens for WireGuard connections from the Internet. When 
 1. Navigate to `Points of Entry > Inbound VPNs` and click "Add".
 
 1. Configure the server:
-
    - **Label** — A descriptive name (e.g. "Home VPN", "Friends", "Work").
    - **Endpoint** — The address where remote clients will connect. Select from available options: WAN IPv4 address, WAN IPv6 address, or a DDNS domain (if [Dynamic DNS](ddns.md) is configured). If you have a dynamic IP, use a DDNS domain so clients do not need to update their configuration when your IP changes.
    - **Security Profile** — The [Security Profile](security-profiles.md) to assign to connecting clients.
@@ -31,7 +30,6 @@ Each VPN server has a client management page listing all peers. Navigate to a VP
 1. Select the VPN server and click "Add".
 
 1. Configure the client:
-
    - **Label** — A name for the client (e.g. "My iPhone", "Work Laptop").
    - **LAN IP Address** — The IP address assigned to this client on the VPN subnet.
    - **Public Key** — (Optional) Enter an existing WireGuard public key if the device already has a keypair configured. Leave empty to auto-generate a keypair.
@@ -83,8 +81,8 @@ Install the [WireGuard app](https://www.wireguard.com/install/) on the remote de
 
 ## Example
 
-| VPN Server | Profile | Endpoint | Use Case |
-|------------|---------|----------|----------|
-| Primary | Admin | DDNS domain | Your personal remote access to everything |
-| Family | Shared Services | DDNS domain | Family members accessing the home server |
-| Friends | Guest | DDNS domain | Friends using your Internet connection via VPN |
+| VPN Server | Profile         | Endpoint    | Use Case                                       |
+| ---------- | --------------- | ----------- | ---------------------------------------------- |
+| Primary    | Admin           | DDNS domain | Your personal remote access to everything      |
+| Family     | Shared Services | DDNS domain | Family members accessing the home server       |
+| Friends    | Guest           | DDNS domain | Friends using your Internet connection via VPN |

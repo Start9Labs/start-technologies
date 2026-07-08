@@ -20,7 +20,10 @@
             },
             "index": "projects/start-os/web/ui/src/index.html",
             "browser": "projects/start-os/web/ui/src/main.ts",
-            "polyfills": ["zone.js", "projects/start-os/web/ui/src/polyfills.ts"],
+            "polyfills": [
+              "zone.js",
+              "projects/start-os/web/ui/src/polyfills.ts"
+            ],
             "tsConfig": "projects/start-os/web/ui/tsconfig.json",
             "inlineStyleLanguage": "scss",
             "assets": [

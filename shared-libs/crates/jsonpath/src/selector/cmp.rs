@@ -214,9 +214,8 @@ impl Cmp for CmpOr {
 mod cmp_inner_tests {
     use std::sync::Arc;
 
-    use imbl_value::Value;
-
     use imbl_value::imbl::vector;
+    use imbl_value::Value;
     use selector::cmp::*;
 
     #[test]

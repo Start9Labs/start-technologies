@@ -2,15 +2,14 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use clap::Parser;
 use color_eyre::eyre::eyre;
 use const_format::formatcp;
+use itertools::Itertools;
 use josekit::jwk::Jwk;
 use patch_db::json_ptr::ROOT;
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
-
-use crate::context::CliContext;
-use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
@@ -25,7 +24,7 @@ use crate::backup::target::BackupTargetFS;
 use crate::bins::set_locale;
 use crate::context::rpc::InitRpcContextPhases;
 use crate::context::setup::SetupResult;
-use crate::context::{RpcContext, SetupContext};
+use crate::context::{CliContext, RpcContext, SetupContext};
 use crate::db::model::Database;
 use crate::disk::REPAIR_DISK_PATH;
 use crate::disk::fsck::RepairStrategy;
@@ -44,8 +43,6 @@ use crate::shutdown::Shutdown;
 use crate::system::{KeyboardOptions, SetLanguageParams, save_language, sync_kiosk};
 use crate::util::Invoke;
 use crate::util::crypto::EncryptedWire;
-
-use clap::Parser;
 use crate::util::io::{Counter, create_file, dir_copy, dir_size, read_file_to_string};
 use crate::util::serde::{HandlerExtSerde, IoFormat, Pem};
 use crate::{DATA_DIR, Error, ErrorKind, MAIN_DATA, PACKAGE_DATA, PLATFORM, ResultExt};
@@ -586,10 +583,7 @@ async fn cli_install_os(
         imbl_value::json!({ "osDrive": os_drive })
     };
     let res = ctx
-        .call_remote::<SetupContext>(
-            &parent_method.into_iter().chain(method).join("."),
-            body,
-        )
+        .call_remote::<SetupContext>(&parent_method.into_iter().chain(method).join("."), body)
         .await?;
     print_remote_result(res)
 }
@@ -626,17 +620,16 @@ fn read_new_password_env_or_prompt() -> Result<String, RpcError> {
 /// Fetch the setup-mode public key via JSON-RPC and JWE-encrypt
 /// `plaintext` against it, producing the `EncryptedWire` blob the
 /// server expects on the wire (same shape the web UI sends).
-async fn encrypt_for_setup(
-    ctx: &CliContext,
-    plaintext: &str,
-) -> Result<EncryptedWire, RpcError> {
+async fn encrypt_for_setup(ctx: &CliContext, plaintext: &str) -> Result<EncryptedWire, RpcError> {
     let pubkey_value = ctx
         .call_remote::<SetupContext>("setup.get-pubkey", imbl_value::json!({}))
         .await?;
-    let pubkey: josekit::jwk::Jwk = imbl_value::from_value(pubkey_value)
-        .map_err(|e| {
-            crate::Error::new(eyre!("setup get-pubkey: {e}"), crate::ErrorKind::Deserialization)
-        })?;
+    let pubkey: josekit::jwk::Jwk = imbl_value::from_value(pubkey_value).map_err(|e| {
+        crate::Error::new(
+            eyre!("setup get-pubkey: {e}"),
+            crate::ErrorKind::Deserialization,
+        )
+    })?;
     EncryptedWire::encrypt(plaintext, &pubkey).map_err(RpcError::from)
 }
 
@@ -646,9 +639,10 @@ fn print_remote_result(res: imbl_value::Value) -> Result<(), RpcError> {
             println!("{s}");
             Ok(())
         }
-        Err(e) => Err(RpcError::from(
-            crate::Error::new(eyre!("{e}"), crate::ErrorKind::Serialization),
-        )),
+        Err(e) => Err(RpcError::from(crate::Error::new(
+            eyre!("{e}"),
+            crate::ErrorKind::Serialization,
+        ))),
     }
 }
 

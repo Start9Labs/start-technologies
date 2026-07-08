@@ -70,8 +70,8 @@ struct OsBackupV0 {
     #[allow(dead_code)] // parsed for format-validation; StartOS no longer restores the tor key
     tor_key: Base32<[u8; 64]>, // Base32 Encoded Ed25519 Expanded Secret Key
     root_ca_key: Pem<PKey<Private>>, // PEM Encoded OpenSSL Key
-    root_ca_cert: Pem<X509>,   // PEM Encoded OpenSSL X509 Certificate
-    ui: Value,                 // JSON Value
+    root_ca_cert: Pem<X509>,         // PEM Encoded OpenSSL X509 Certificate
+    ui: Value,                       // JSON Value
 }
 impl OsBackupV0 {
     fn project(self) -> Result<OsBackup, Error> {

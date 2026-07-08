@@ -36,15 +36,15 @@ LNC is supported by [Zeus](#zeus) and [Lightning Terminal's web UI](https://term
 
 These tools run as web applications on your server. Several are available as services on the StartOS Marketplace.
 
-| Tool                                | LND | CLN | Eclair | StartOS |
-| ----------------------------------- | --- | --- | ------ | ------- |
-| [Alby Hub](#alby-hub)               | Yes | No  | No     | Yes     |
-| [BTCPay Server](#btcpay-server)     | Yes | Yes | Yes    | Yes     |
-| [CLN Application](#cln-application) | No  | Yes | No     | Yes     |
+| Tool                                      | LND | CLN | Eclair | StartOS |
+| ----------------------------------------- | --- | --- | ------ | ------- |
+| [Alby Hub](#alby-hub)                     | Yes | No  | No     | Yes     |
+| [BTCPay Server](#btcpay-server)           | Yes | Yes | Yes    | Yes     |
+| [CLN Application](#cln-application)       | No  | Yes | No     | Yes     |
 | [Lightning Terminal](#lightning-terminal) | Yes | No  | No     | Yes     |
-| [LNbits](#lnbits)                   | Yes | Yes | Yes    | Yes     |
-| [RTL](#rtl)                         | Yes | Yes | Yes    | Yes     |
-| [ThunderHub](#thunderhub)           | Yes | No  | No     | Yes     |
+| [LNbits](#lnbits)                         | Yes | Yes | Yes    | Yes     |
+| [RTL](#rtl)                               | Yes | Yes | Yes    | Yes     |
+| [ThunderHub](#thunderhub)                 | Yes | No  | No     | Yes     |
 
 ## Native Apps
 

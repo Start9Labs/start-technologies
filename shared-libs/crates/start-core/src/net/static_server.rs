@@ -514,7 +514,10 @@ fn mobileconfig_send(cert: &X509, hostname: &ServerHostname) -> Result<Response,
             )
             .to_lowercase(),
         )
-        .header(http::header::CONTENT_TYPE, "application/x-apple-aspen-config")
+        .header(
+            http::header::CONTENT_TYPE,
+            "application/x-apple-aspen-config",
+        )
         .header(http::header::CONTENT_LENGTH, plist.len())
         .header(
             http::header::CONTENT_DISPOSITION,

@@ -11,14 +11,14 @@ the monorepo and how a request flows through the system. For the product-level
 The `projects/start-tunnel/` directory is a thin product wrapper. The substance is in the
 shared `start-core` crate.
 
-| Concern                         | Location                                              |
-| ------------------------------- | ---------------------------------------------------- |
-| Binary entry point              | `projects/start-tunnel/src/main.rs`                  |
-| Daemon + CLI dispatch           | `shared-libs/crates/start-core/src/bins/tunnel.rs`        |
-| Tunnel module root              | `shared-libs/crates/start-core/src/tunnel/mod.rs`         |
-| Angular UI                      | `projects/start-tunnel/web/`                          |
-| systemd unit                    | `projects/start-tunnel/start-tunneld.service`        |
-| User & reference docs (mdbook)  | `projects/start-tunnel/docs/`                        |
+| Concern                        | Location                                           |
+| ------------------------------ | -------------------------------------------------- |
+| Binary entry point             | `projects/start-tunnel/src/main.rs`                |
+| Daemon + CLI dispatch          | `shared-libs/crates/start-core/src/bins/tunnel.rs` |
+| Tunnel module root             | `shared-libs/crates/start-core/src/tunnel/mod.rs`  |
+| Angular UI                     | `projects/start-tunnel/web/`                       |
+| systemd unit                   | `projects/start-tunnel/start-tunneld.service`      |
+| User & reference docs (mdbook) | `projects/start-tunnel/docs/`                      |
 
 `src/main.rs` embeds the compiled UI (`web/dist/static/start-tunnel`) via
 `include_dir!` into `start_core::tunnel::context::TUNNEL_UI_CELL`, then hands off to

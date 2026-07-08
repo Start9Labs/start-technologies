@@ -1,6 +1,6 @@
 # Contributing to Start SDK
 
-This guide covers developing the SDK itself. If you're building a service package *using* the SDK, see the [packaging docs](https://docs.start9.com/packaging).
+This guide covers developing the SDK itself. If you're building a service package _using_ the SDK, see the [packaging docs](https://docs.start9.com/packaging).
 
 The SDK lives at `projects/start-sdk/` inside the [start-technologies monorepo](../../README.md). For contributing to the broader StartOS project, see the root [CONTRIBUTING.md](../../CONTRIBUTING.md) and root [AGENTS.md](../../AGENTS.md).
 
@@ -75,13 +75,13 @@ This runs the complete pipeline: build `@start9labs/start-core` (prerequisite), 
 
 ### Individual Targets
 
-| Target | Description |
-|--------|-------------|
-| `make bundle` | Full build: compile + format + test |
-| `make dist` | Compile the SDK (depends on the built start-core) |
-| `make fmt` | Run Prettier on all `.ts` files |
-| `make check` | Type-check without emitting |
-| `make clean` | Remove all build artifacts and node_modules |
+| Target        | Description                                       |
+| ------------- | ------------------------------------------------- |
+| `make bundle` | Full build: compile + format + test               |
+| `make dist`   | Compile the SDK (depends on the built start-core) |
+| `make fmt`    | Run Prettier on all `.ts` files                   |
+| `make check`  | Type-check without emitting                       |
+| `make clean`  | Remove all build artifacts and node_modules       |
 
 To build the bundled start-core lib on its own: `cd shared-libs/ts-modules/start-core && make dist`.
 

@@ -20,7 +20,7 @@ make start-wrt-test                                              # same tests, c
 ```
 
 > **Always scope `cargo test` with `-p`.** A bare `cargo test` (or `cargo test` run from
-> `backend/`) now tests the *entire* monorepo workspace — including `startos-backup-fs`, whose
+> `backend/`) now tests the _entire_ monorepo workspace — including `startos-backup-fs`, whose
 > `fuser` dependency needs FUSE dev libs that exist only in the build container, so it fails on a
 > bare host. start-wrt's own crates are fuser-free, so the `-p`-scoped command above runs cleanly
 > on the host. `make start-wrt-test` runs the same scoped set inside `start9/cargo-zigbuild`.
@@ -50,13 +50,13 @@ npm run check:i18n:wrt  # i18n dictionary check
 
 start-wrt's targets live in [`build.mk`](build.mk) (included by the root `Makefile`):
 
-| Target | Description |
-|--------|-------------|
-| `make start-wrt` | web → riscv64 binary (cross-compiled via dockerized cargo-zigbuild) |
-| `make start-wrt-openwrt-setup` | fetch/reset the pinned OpenWrt tree, apply the Start9 delta, feeds/config/download |
-| `make start-wrt-image` | full flashable OpenWrt image → `results/` (**hours**) |
-| `make start-wrt-update STARTWRT_REMOTE=root@IP` | deploy binary over SSH (default `root@192.168.0.1`) |
-| `make start-wrt-clean` | remove start-wrt build artifacts |
+| Target                                          | Description                                                                        |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `make start-wrt`                                | web → riscv64 binary (cross-compiled via dockerized cargo-zigbuild)                |
+| `make start-wrt-openwrt-setup`                  | fetch/reset the pinned OpenWrt tree, apply the Start9 delta, feeds/config/download |
+| `make start-wrt-image`                          | full flashable OpenWrt image → `results/` (**hours**)                              |
+| `make start-wrt-update STARTWRT_REMOTE=root@IP` | deploy binary over SSH (default `root@192.168.0.1`)                                |
+| `make start-wrt-clean`                          | remove start-wrt build artifacts                                                   |
 
 The OpenWrt image build needs a consistent environment — Docker is recommended; native builds
 on some distros fail silently.
@@ -77,7 +77,7 @@ Releases stage through a beta registry before promotion to production, mirroring
    the images to `s3://startwrt-images`, and registers + indexes the version into the **beta
    registry** (signing with the `DEV_KEY` repo secret). Beta routers — any router whose UCI
    `startwrt.system.registry` points at the beta registry (`uci set
-   startwrt.system.registry=<beta url>; uci commit startwrt`) — now soak the version as a
+startwrt.system.registry=<beta url>; uci commit startwrt`) — now soak the version as a
    normal OTA update. (If the register step failed or must be redone, the manual fallback is
    `RUN_ID=<the deploy run> ./scripts/manage-release.sh pull-gha start-wrt` followed by
    `./scripts/manage-release.sh register start-wrt` — needs `gh`, `start-cli`, and
@@ -109,8 +109,8 @@ rebuilds. Every setup run:
    signing keys, …) is carried over, so caches and staged files are preserved.
 2. Applies [`openwrt-patches/`](openwrt-patches/) with `patch -p1` — the Start9 modifications
    to upstream files (currently 3 small build-infra patches for the git-cloned vendor kernel
-   + a 6.18 module rename).
-3. Rsyncs [`openwrt-overlay/`](openwrt-overlay/) over the tree — the Start9 *additions*
+   - a 6.18 module rename).
+3. Rsyncs [`openwrt-overlay/`](openwrt-overlay/) over the tree — the Start9 _additions_
    (mirroring upstream layout): `target/linux/spacemit/` (the K1 target, including its
    `patches-6.18/` kernel patches), `package/boot/{opensbi,uboot}-spacemit/`, the generic
    6.18 kernel stubs, and one mac80211 build patch. Additions live as plain files, not

@@ -114,7 +114,7 @@ Every README should begin with the service icon centered above the title. Use th
 
 ```html
 <p align="center">
-  <img src="icon.svg" alt="[Service Name] Logo" width="21%">
+  <img src="icon.svg" alt="[Service Name] Logo" width="21%" />
 </p>
 ```
 

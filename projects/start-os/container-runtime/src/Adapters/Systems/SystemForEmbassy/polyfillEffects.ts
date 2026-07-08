@@ -1,15 +1,15 @@
-import * as fs from "fs/promises"
-import * as oet from "./oldEmbassyTypes"
-import { Volume } from "../../../Models/Volume"
-import * as child_process from "child_process"
-import { promisify } from "util"
-import { daemons, startSdk, T, utils } from "@start9labs/start-sdk"
-import "isomorphic-fetch"
-import { Manifest } from "./matchManifest"
-import { DockerProcedureContainer } from "./DockerProcedureContainer"
-import * as cp from "child_process"
-import { Effects } from "../../../Models/Effects"
-import { Mounts } from "@start9labs/start-sdk/lib/mainFn/Mounts"
+import * as fs from 'fs/promises'
+import * as oet from './oldEmbassyTypes'
+import { Volume } from '../../../Models/Volume'
+import * as child_process from 'child_process'
+import { promisify } from 'util'
+import { daemons, startSdk, T, utils } from '@start9labs/start-sdk'
+import 'isomorphic-fetch'
+import { Manifest } from './matchManifest'
+import { DockerProcedureContainer } from './DockerProcedureContainer'
+import * as cp from 'child_process'
+import { Effects } from '../../../Models/Effects'
+import { Mounts } from '@start9labs/start-sdk/lib/mainFn/Mounts'
 export const execFile = promisify(cp.execFile)
 export const polyfillEffects = (
   effects: Effects,
@@ -39,7 +39,7 @@ export const polyfillEffects = (
     }): Promise<oet.Metadata> {
       const stats = await fs.stat(new Volume(input.volumeId, input.path).path)
       return {
-        fileType: stats.isFile() ? "file" : "directory",
+        fileType: stats.isFile() ? 'file' : 'directory',
         gid: stats.gid,
         uid: stats.uid,
         mode: stats.mode,
@@ -113,7 +113,7 @@ export const polyfillEffects = (
           { imageId: manifest.main.image },
           commands,
           { mounts: Mounts.of() },
-          commands.join(" "),
+          commands.join(' '),
         )
         .then((x: any) => ({
           stderr: x.stderr.toString(),
@@ -132,21 +132,21 @@ export const polyfillEffects = (
         manifest.id,
         manifest.main,
         manifest.volumes,
-        [input.command, ...(input.args || [])].join(" "),
+        [input.command, ...(input.args || [])].join(' '),
       )
-      const daemon = promiseSubcontainer.then((subcontainer) =>
+      const daemon = promiseSubcontainer.then(subcontainer =>
         daemons.runCommand()(effects, subcontainer, {
           command: [input.command, ...(input.args || [])],
         }),
       )
       return {
         wait: () =>
-          daemon.then((daemon) =>
+          daemon.then(daemon =>
             daemon.wait().then(() => {
-              return { result: "" }
+              return { result: '' }
             }),
           ),
-        term: () => daemon.then((daemon) => daemon.term()),
+        term: () => daemon.then(daemon => daemon.term()),
       }
     },
     async chown(input: {
@@ -155,8 +155,8 @@ export const polyfillEffects = (
       uid: string
     }): Promise<null> {
       const commands: [string, ...string[]] = [
-        "chown",
-        "--recursive",
+        'chown',
+        '--recursive',
         input.uid,
         `/drive/${input.path}`,
       ]
@@ -169,11 +169,11 @@ export const polyfillEffects = (
             mounts: Mounts.of().mountVolume({
               volumeId: input.volumeId,
               subpath: null,
-              mountpoint: "/drive",
+              mountpoint: '/drive',
               readonly: false,
             }),
           },
-          commands.join(" "),
+          commands.join(' '),
         )
         .then((x: any) => ({
           stderr: x.stderr.toString(),
@@ -192,8 +192,8 @@ export const polyfillEffects = (
       mode: string
     }): Promise<null> {
       const commands: [string, ...string[]] = [
-        "chmod",
-        "--recursive",
+        'chmod',
+        '--recursive',
         input.mode,
         `/drive/${input.path}`,
       ]
@@ -206,11 +206,11 @@ export const polyfillEffects = (
             mounts: Mounts.of().mountVolume({
               volumeId: input.volumeId,
               subpath: null,
-              mountpoint: "/drive",
+              mountpoint: '/drive',
               readonly: false,
             }),
           },
-          commands.join(" "),
+          commands.join(' '),
         )
         .then((x: any) => ({
           stderr: x.stderr.toString(),
@@ -224,7 +224,7 @@ export const polyfillEffects = (
       return null
     },
     sleep(timeMs: number): Promise<null> {
-      return new Promise((resolve) => setTimeout(resolve, timeMs))
+      return new Promise(resolve => setTimeout(resolve, timeMs))
     },
     trace(whatToPrint: string): void {
       console.trace(utils.asError(whatToPrint))
@@ -255,12 +255,12 @@ export const polyfillEffects = (
       options?:
         | {
             method?:
-              | "GET"
-              | "POST"
-              | "PUT"
-              | "DELETE"
-              | "HEAD"
-              | "PATCH"
+              | 'GET'
+              | 'POST'
+              | 'PUT'
+              | 'DELETE'
+              | 'HEAD'
+              | 'PATCH'
               | undefined
             headers?: Record<string, string> | undefined
             body?: string | undefined
@@ -300,7 +300,7 @@ export const polyfillEffects = (
     } {
       let secondRun: ReturnType<typeof self._runRsync> | undefined
       let firstRun = self._runRsync(rsyncOptions)
-      let waitValue = firstRun.wait().then((x) => {
+      let waitValue = firstRun.wait().then(x => {
         secondRun = self._runRsync(rsyncOptions)
         return secondRun.wait()
       })
@@ -329,22 +329,22 @@ export const polyfillEffects = (
       progress: () => Promise<number>
     } {
       const { srcVolume, dstVolume, srcPath, dstPath, options } = rsyncOptions
-      const command = "rsync"
+      const command = 'rsync'
       const args: string[] = []
       if (options.delete) {
-        args.push("--delete")
+        args.push('--delete')
       }
       if (options.force) {
-        args.push("--force")
+        args.push('--force')
       }
       if (options.ignoreExisting) {
-        args.push("--ignore-existing")
+        args.push('--ignore-existing')
       }
       for (const exclude of options.exclude) {
         args.push(`--exclude=${exclude}`)
       }
-      args.push("-actAXH")
-      args.push("--info=progress2")
+      args.push('-actAXH')
+      args.push('--info=progress2')
       // --no-inc-recursive would give accurate progress percentages (since
       // rsync knows the full file list up front), but it forces a full
       // pre-scan that causes timeouts on large transfers. If we start
@@ -355,8 +355,8 @@ export const polyfillEffects = (
       args.push(new Volume(dstVolume, dstPath).path)
       const spawned = child_process.spawn(command, args, { detached: true })
       let percentage = 0.0
-      spawned.stdout.on("data", (data: unknown) => {
-        const lines = String(data).replace("\r", "\n").split("\n")
+      spawned.stdout.on('data', (data: unknown) => {
+        const lines = String(data).replace('\r', '\n').split('\n')
         for (const line of lines) {
           const parsed = /$([0-9.]+)%/.exec(line)?.[1]
           if (!parsed) continue
@@ -364,19 +364,19 @@ export const polyfillEffects = (
         }
       })
 
-      spawned.stderr.on("data", (data: unknown) => {
+      spawned.stderr.on('data', (data: unknown) => {
         console.error(`polyfill.runAsync`, utils.asError(data))
       })
 
       const id = async () => {
         const pid = spawned.pid
         if (pid === undefined) {
-          throw new Error("rsync process has no pid")
+          throw new Error('rsync process has no pid')
         }
         return String(pid)
       }
       const waitPromise = new Promise<null>((resolve, reject) => {
-        spawned.on("exit", (code: any) => {
+        spawned.on('exit', (code: any) => {
           if (code === 0) {
             resolve(null)
           } else {
@@ -391,7 +391,7 @@ export const polyfillEffects = (
     async diskUsage(
       options?: { volumeId: string; path: string } | undefined,
     ): Promise<{ used: number; total: number }> {
-      const output = await execFile("df", ["--block-size=1", "-P", "/"])
+      const output = await execFile('df', ['--block-size=1', '-P', '/'])
         .then((x: any) => ({
           stderr: x.stderr.toString(),
           stdout: x.stdout.toString(),
@@ -403,10 +403,10 @@ export const polyfillEffects = (
           return parseDfOutput(x.stdout)
         })
       if (!!options) {
-        const used = await execFile("du", [
-          "-s",
-          "--block-size=1",
-          "-P",
+        const used = await execFile('du', [
+          '-s',
+          '--block-size=1',
+          '-P',
           new Volume(options.volumeId, options.path).path,
         ])
           .then((x: any) => ({
@@ -432,13 +432,13 @@ export const polyfillEffects = (
 
 function parseDfOutput(output: string): { used: number; total: number } {
   const lines = output
-    .split("\n")
-    .filter((x) => x.length)
-    .map((x) => x.split(/\s+/))
-  const index = lines.splice(0, 1)[0].map((x) => x.toLowerCase())
-  const usedIndex = index.indexOf("used")
-  const sizeIndex = index.indexOf("size")
-  const used = lines.map((x) => Number.parseInt(x[usedIndex]))[0] || 0
-  const total = lines.map((x) => Number.parseInt(x[sizeIndex]))[0] || 0
+    .split('\n')
+    .filter(x => x.length)
+    .map(x => x.split(/\s+/))
+  const index = lines.splice(0, 1)[0].map(x => x.toLowerCase())
+  const usedIndex = index.indexOf('used')
+  const sizeIndex = index.indexOf('size')
+  const used = lines.map(x => Number.parseInt(x[usedIndex]))[0] || 0
+  const total = lines.map(x => Number.parseInt(x[sizeIndex]))[0] || 0
   return { used, total }
 }

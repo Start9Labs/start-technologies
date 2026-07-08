@@ -5,10 +5,9 @@ extern crate serde_json;
 
 use std::sync::Arc;
 
-use imbl_value::Value;
-
 use common::{read_json, setup};
 use imbl_value::imbl::{vector, Vector};
+use imbl_value::Value;
 use jsonpath::{JsonSelector, JsonSelectorMut, PathParser};
 
 mod common;

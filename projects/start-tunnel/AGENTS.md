@@ -27,16 +27,16 @@ entry/CLI dispatch in `shared-libs/crates/start-core/src/bins/tunnel.rs`.
 
 Where to make changes:
 
-| You want to change…                  | Edit…                                                        |
-| ------------------------------------ | ----------------------------------------------------------- |
+| You want to change…                  | Edit…                                                            |
+| ------------------------------------ | ---------------------------------------------------------------- |
 | API methods / RPC commands           | `shared-libs/crates/start-core/src/tunnel/api.rs`                |
 | db schema / state model              | `shared-libs/crates/start-core/src/tunnel/db.rs` (+ a migration) |
 | WireGuard behavior                   | `shared-libs/crates/start-core/src/tunnel/wg.rs`                 |
-| Port forwarding (DNAT, SNI, IGD/PCP) | `shared-libs/crates/start-core/src/tunnel/forward/`             |
-| HTTPS / cert handling                | `shared-libs/crates/start-core/src/tunnel/web.rs`               |
-| daemon startup / shutdown            | `shared-libs/crates/start-core/src/bins/tunnel.rs`              |
-| the UI                               | `web/src/`                                                  |
-| user docs                            | `docs/src/`                                                 |
+| Port forwarding (DNAT, SNI, IGD/PCP) | `shared-libs/crates/start-core/src/tunnel/forward/`              |
+| HTTPS / cert handling                | `shared-libs/crates/start-core/src/tunnel/web.rs`                |
+| daemon startup / shutdown            | `shared-libs/crates/start-core/src/bins/tunnel.rs`               |
+| the UI                               | `web/src/`                                                       |
+| user docs                            | `docs/src/`                                                      |
 
 Almost all backend work happens in `start-core`, not here. The one tunnel-local
 Rust file is `src/main.rs`.
@@ -53,6 +53,7 @@ make start-core-test                                 # backend tests (tunnel log
 ```
 
 Notes:
+
 - `cargo check`/`cargo build` here only cover the linux target. The CI matrix
   also builds `*-apple-darwin` and `riscv64`/`aarch64` musl — platform-specific
   code (`libc`, resolv-conf, etc.) can pass locally and break darwin. cfg-gate

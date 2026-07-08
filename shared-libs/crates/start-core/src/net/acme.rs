@@ -219,9 +219,7 @@ where
                         (None, Some(retry_after.unwrap_or(DEFAULT_FAILURE_BACKOFF)))
                     }
                     Err(_) => {
-                        tracing::warn!(
-                            "ACME order timed out for {san_info_clone:?} after 120s"
-                        );
+                        tracing::warn!("ACME order timed out for {san_info_clone:?} after 120s");
                         (None, Some(DEFAULT_FAILURE_BACKOFF))
                     }
                 };
@@ -235,9 +233,7 @@ where
                         };
                         entry.in_flight = None;
                         entry.backoff_until = Some(Instant::now() + d);
-                        tracing::info!(
-                            "ACME order for {san_info_clone:?} backing off for {d:?}"
-                        );
+                        tracing::info!("ACME order for {san_info_clone:?} backing off for {d:?}");
                         true
                     });
                 }
@@ -717,8 +713,7 @@ mod tests {
 
     #[test]
     fn non_http_errors_return_none() {
-        let err =
-            OrderError::TooManyAttemptsAuth(Identifier::Dns("example.test".into()));
+        let err = OrderError::TooManyAttemptsAuth(Identifier::Dns("example.test".into()));
         assert_eq!(retry_after_from_order_error(&err), None);
     }
 

@@ -1,12 +1,12 @@
-name: "Setup Build Environment"
-description: "Sets up the CI build environment for building .s9pk packages"
+name: 'Setup Build Environment'
+description: 'Sets up the CI build environment for building .s9pk packages'
 runs:
-  using: "composite"
+  using: 'composite'
   steps:
     - name: Setup Node.js environment
       uses: actions/setup-node@v6
       with:
-        node-version: "22"
+        node-version: '22'
 
     - name: Install dependencies
       run: |

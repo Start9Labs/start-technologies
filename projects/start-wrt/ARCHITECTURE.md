@@ -59,6 +59,7 @@ Browser (Angular SPA)
 ```
 
 Additional HTTP routes:
+
 - `GET /api/logs` — WebSocket for live log streaming
 - `POST /api/setup/flash` — NDJSON streaming for setup wizard
 - `GET|POST /rest/rpc/{guid}` — Continuation endpoint for backup/restore/diagnostics
@@ -77,11 +78,11 @@ The core concept. Each profile creates:
 
 Devices receive a profile based on how they join the network:
 
-| Entry Point | Mechanism |
-|-------------|-----------|
-| **WiFi** | One SSID, many passwords. Each password maps to a profile via `wpa_psk_file` with dynamic VLAN. |
-| **Ethernet** | Bridge VLAN port assignments — each physical port tagged to a profile's VLAN. OpenWrt maps UCI `bridge-vlan` config to DSA hardware tables or software bridge filtering depending on the board. |
-| **Inbound VPN** | Each WireGuard server interface bound to a profile. |
+| Entry Point     | Mechanism                                                                                                                                                                                       |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **WiFi**        | One SSID, many passwords. Each password maps to a profile via `wpa_psk_file` with dynamic VLAN.                                                                                                 |
+| **Ethernet**    | Bridge VLAN port assignments — each physical port tagged to a profile's VLAN. OpenWrt maps UCI `bridge-vlan` config to DSA hardware tables or software bridge filtering depending on the board. |
+| **Inbound VPN** | Each WireGuard server interface bound to a profile.                                                                                                                                             |
 
 Profile orchestration spans four UCI configs: `startwrt`, `network`, `firewall`, `dhcp`.
 
@@ -104,13 +105,13 @@ toolchain pinned to the SpaceMiT K1 ISA (`build/build-rust.sh` + `build/zigcc-k1
 
 ### Key Make Targets
 
-| Target | Description |
-|--------|-------------|
-| `make start-wrt` | web → Rust binary (embeds the UI) |
-| `make start-wrt-image` | Full build: stage → OpenWrt image → `results/` |
-| `make start-wrt-openwrt-setup` | Fetch/reset the pinned OpenWrt tree, apply the Start9 delta, feeds/config/download |
-| `make start-wrt-update STARTWRT_REMOTE=root@IP` | Deploy binary over SSH (atomic: temp → sync → rename → restart) |
-| `make start-wrt-clean` | Delete start-wrt build artifacts |
+| Target                                          | Description                                                                        |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `make start-wrt`                                | web → Rust binary (embeds the UI)                                                  |
+| `make start-wrt-image`                          | Full build: stage → OpenWrt image → `results/`                                     |
+| `make start-wrt-openwrt-setup`                  | Fetch/reset the pinned OpenWrt tree, apply the Start9 delta, feeds/config/download |
+| `make start-wrt-update STARTWRT_REMOTE=root@IP` | Deploy binary over SSH (atomic: temp → sync → rename → restart)                    |
+| `make start-wrt-clean`                          | Delete start-wrt build artifacts                                                   |
 
 ### Deployment
 

@@ -1,12 +1,12 @@
-use paths::{ParserTokenHandler, StrRange};
 use paths::path_parser::ParserNode;
 use paths::tokens::{FilterToken, ParseToken};
+use paths::{ParserTokenHandler, StrRange};
 
 pub trait ParserNodeVisitor<'a> {
     fn visit<F, F1>(&self, parse_node: &ParserNode, token_handler: &mut F, parse_value_reader: &F1)
-        where
-            F: ParserTokenHandler<'a>,
-            F1: Fn(&StrRange) -> &'a str
+    where
+        F: ParserTokenHandler<'a>,
+        F1: Fn(&StrRange) -> &'a str,
     {
         trace!("visit {:?}", parse_node);
         match &parse_node.token {

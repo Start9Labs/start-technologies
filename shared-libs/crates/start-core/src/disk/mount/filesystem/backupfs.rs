@@ -45,9 +45,7 @@ impl<DataDir: AsRef<Path> + Send + Sync, Password: fmt::Display + Send + Sync> F
     async fn source(&self) -> Result<Option<impl AsRef<Path>>, Error> {
         Ok(Some(&self.data_dir))
     }
-    async fn source_hash(
-        &self,
-    ) -> Result<digest::Output<Sha256>, Error> {
+    async fn source_hash(&self) -> Result<digest::Output<Sha256>, Error> {
         let mut sha = Sha256::new();
         sha.update("BackupFS");
         sha.update(

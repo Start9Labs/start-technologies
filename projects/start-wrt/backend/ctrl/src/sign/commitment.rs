@@ -7,13 +7,12 @@ use crate::Error;
 
 /// Base64 engine matching start-os: standard alphabet, no padding on encode,
 /// accepts both padded and unpadded on decode.
-const BASE64: base64::engine::GeneralPurpose =
-    base64::engine::general_purpose::GeneralPurpose::new(
-        &base64::alphabet::STANDARD,
-        base64::engine::GeneralPurposeConfig::new()
-            .with_encode_padding(false)
-            .with_decode_padding_mode(base64::engine::DecodePaddingMode::Indifferent),
-    );
+const BASE64: base64::engine::GeneralPurpose = base64::engine::general_purpose::GeneralPurpose::new(
+    &base64::alphabet::STANDARD,
+    base64::engine::GeneralPurposeConfig::new()
+        .with_encode_padding(false)
+        .with_decode_padding_mode(base64::engine::DecodePaddingMode::Indifferent),
+);
 
 // ── Digestable ───────────────────────────────────────────────────────
 
@@ -143,9 +142,7 @@ mod base64_bytes {
 
     pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<[u8; 32], D::Error> {
         let s = String::deserialize(deserializer)?;
-        let bytes = BASE64
-            .decode(&s)
-            .map_err(serde::de::Error::custom)?;
+        let bytes = BASE64.decode(&s).map_err(serde::de::Error::custom)?;
         bytes
             .try_into()
             .map_err(|_| serde::de::Error::custom("expected 32 bytes"))

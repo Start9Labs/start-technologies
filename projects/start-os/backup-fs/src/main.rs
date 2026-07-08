@@ -1,11 +1,12 @@
+use std::ffi::OsString;
+use std::io::ErrorKind;
+use std::path::{Path, PathBuf};
+
 use backupfs::error::BkfsErrorKind;
 use backupfs::{BackupFS, BackupFSOptions};
 use clap::{CommandFactory, FromArgMatches, Parser};
 use fuser::MountOption;
 use log::{error, info};
-use std::ffi::OsString;
-use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
 
 #[derive(clap::Parser)]
 struct MountOptions {

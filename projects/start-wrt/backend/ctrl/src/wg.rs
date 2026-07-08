@@ -34,9 +34,12 @@ impl AsRef<[u8]> for WgKey {
 impl TryFrom<Vec<u8>> for WgKey {
     type Error = Error;
     fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
-        let bytes: [u8; 32] = value
-            .try_into()
-            .map_err(|_| Error::new(eyre!("invalid key length: expected 32 bytes"), ErrorKind::InvalidValue))?;
+        let bytes: [u8; 32] = value.try_into().map_err(|_| {
+            Error::new(
+                eyre!("invalid key length: expected 32 bytes"),
+                ErrorKind::InvalidValue,
+            )
+        })?;
         Ok(Self(bytes.into()))
     }
 }
@@ -71,9 +74,12 @@ impl AsRef<[u8]> for WgPublicKey {
 impl TryFrom<Vec<u8>> for WgPublicKey {
     type Error = Error;
     fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
-        let bytes: [u8; 32] = value
-            .try_into()
-            .map_err(|_| Error::new(eyre!("invalid public key length: expected 32 bytes"), ErrorKind::InvalidValue))?;
+        let bytes: [u8; 32] = value.try_into().map_err(|_| {
+            Error::new(
+                eyre!("invalid public key length: expected 32 bytes"),
+                ErrorKind::InvalidValue,
+            )
+        })?;
         Ok(Self(PublicKey::from(bytes)))
     }
 }
@@ -114,7 +120,8 @@ where
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(s)
             .map_err(|e| Error::new(eyre!("invalid base64: {}", e), ErrorKind::Deserialization))?;
-        let value = T::try_from(bytes).map_err(|e| Error::new(eyre!("{}", e), ErrorKind::InvalidValue))?;
+        let value =
+            T::try_from(bytes).map_err(|e| Error::new(eyre!("{}", e), ErrorKind::InvalidValue))?;
         Ok(Self(value))
     }
 }

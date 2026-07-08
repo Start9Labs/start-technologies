@@ -644,7 +644,8 @@ impl JsonPointer<String> {
             range.end += prefix_len;
         }
         self.src = src;
-        self.segments.insert(0, PtrSegment::Unescaped(1..prefix_len));
+        self.segments
+            .insert(0, PtrSegment::Unescaped(1..prefix_len));
     }
     pub fn pop_end(&mut self) {
         if let Some(last) = self.segments.pop_back() {

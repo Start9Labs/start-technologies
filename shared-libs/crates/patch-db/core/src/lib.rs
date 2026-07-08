@@ -12,14 +12,16 @@ mod subscriber;
 #[cfg(test)]
 mod test;
 
+pub use imbl_value as value;
 pub use imbl_value::Value;
+pub use json_patch;
+pub use json_ptr;
 pub use model::{DestructureMut, HasModel, Model, ModelExt, Pointer};
 pub use patch::{DiffPatch, Dump, Revision};
 pub use patch_db_macro::HasModel;
 pub use store::{MutateResult, PatchDb, Store, TypedPatchDb};
 pub use subscriber::{DbWatch, Subscriber, TypedDbWatch};
 use tokio::sync::TryLockError;
-pub use {imbl_value as value, json_patch, json_ptr};
 
 #[derive(Error, Debug)]
 pub enum Error {

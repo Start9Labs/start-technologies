@@ -111,9 +111,9 @@ sdk.action.createTask(
 > - `replayId` prevents duplicate tasks across restarts.
 
 > [!IMPORTANT]
-> **`accept` entries are matched against the dependency's *resolved* action input, not its raw config file.** That input is the dependency action's prefill — its config parsed through its file model — so an optional field comes back carrying its **resolved default**, never a missing key. bitcoind's `prune`, for example, reads as the number `0` on an unpruned node (its file model coerces an absent `prune` to `0`), so `accept: [{ prune: 0 }]` matches an unpruned node exactly. Match the concrete value the input actually holds.
+> **`accept` entries are matched against the dependency's _resolved_ action input, not its raw config file.** That input is the dependency action's prefill — its config parsed through its file model — so an optional field comes back carrying its **resolved default**, never a missing key. bitcoind's `prune`, for example, reads as the number `0` on an unpruned node (its file model coerces an absent `prune` to `0`), so `accept: [{ prune: 0 }]` matches an unpruned node exactly. Match the concrete value the input actually holds.
 >
-> An `accept` field value is compared for equality: `null` matches the literal value `null` — nothing else. It is **not** a wildcard and does **not** stand in for a defaulted or absent field. To leave a field unconstrained, **omit it** from the entry — an absent (`undefined`) key is not checked at all. (`undefined` means absence, not `null`: writing `undefined` for a field in a `set`/config would *delete* that key.) To require a specific value, name it. Multiple entries mean "any of these matches."
+> An `accept` field value is compared for equality: `null` matches the literal value `null` — nothing else. It is **not** a wildcard and does **not** stand in for a defaulted or absent field. To leave a field unconstrained, **omit it** from the entry — an absent (`undefined`) key is not checked at all. (`undefined` means absence, not `null`: writing `undefined` for a field in a `set`/config would _delete_ that key.) To require a specific value, name it. Multiple entries mean "any of these matches."
 
 ## Reaching a Dependency at Runtime
 

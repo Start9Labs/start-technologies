@@ -14,9 +14,7 @@ use crate::db::model::DatabaseModel;
 use crate::disk::mount::filesystem::ReadOnly;
 use crate::disk::mount::filesystem::cifs::Cifs;
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
-use crate::disk::util::{
-    LegacyBackupInfo, StartOsRecoveryInfo, legacy_backup_info, recovery_info,
-};
+use crate::disk::util::{LegacyBackupInfo, StartOsRecoveryInfo, legacy_backup_info, recovery_info};
 use crate::prelude::*;
 use crate::util::serde::KeyVal;
 

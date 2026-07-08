@@ -1,15 +1,16 @@
-use crate::dns::{self, DnsServer};
-use crate::profiles;
-use crate::system::{get_wan_ipv6s, has_global_ipv6};
-use crate::utils::DeserializeStdin;
-use crate::utils::HandlerExtSerde;
-use crate::CtrlContext;
-use crate::prelude::*;
 use rpc_toolkit::{from_fn_async_local, ParentHandler};
 use serde::{Deserialize, Serialize};
-use crate::invoke::Invoke;
-use uciedit::openwrt::{DdnsService, InterfaceProto, NetworkDevice, NetworkInterface, UciSystemDns};
+use uciedit::openwrt::{
+    DdnsService, InterfaceProto, NetworkDevice, NetworkInterface, UciSystemDns,
+};
 use uciedit::{dump_all, parse_all, Arena};
+
+use crate::dns::{self, DnsServer};
+use crate::invoke::Invoke;
+use crate::prelude::*;
+use crate::system::{get_wan_ipv6s, has_global_ipv6};
+use crate::utils::{DeserializeStdin, HandlerExtSerde};
+use crate::{profiles, CtrlContext};
 
 /// Returns the serde-serialized string representation of an enum variant (e.g. "dhcp", "6rd").
 fn serde_name(v: &impl Serialize) -> String {
@@ -205,16 +206,46 @@ fn service_to_provider(s: &str) -> DdnsProvider {
 
 pub fn wan<C: CtrlContext + Clone>() -> ParentHandler<C> {
     ParentHandler::new()
-        .subcommand("ipv4-get", from_fn_async_local(ipv4_get::<C>).with_display_serializable())
-        .subcommand("ipv4-set", from_fn_async_local(ipv4_set::<C>).with_display_serializable())
-        .subcommand("ipv6-get", from_fn_async_local(ipv6_get::<C>).with_display_serializable())
-        .subcommand("ipv6-set", from_fn_async_local(ipv6_set::<C>).with_display_serializable())
-        .subcommand("mac-get", from_fn_async_local(mac_get::<C>).with_display_serializable())
-        .subcommand("mac-set", from_fn_async_local(mac_set::<C>).with_display_serializable())
-        .subcommand("dns-get", from_fn_async_local(dns_get::<C>).with_display_serializable())
-        .subcommand("dns-set", from_fn_async_local(dns_set::<C>).with_display_serializable())
-        .subcommand("ddns-get", from_fn_async_local(ddns_get::<C>).with_display_serializable())
-        .subcommand("ddns-set", from_fn_async_local(ddns_set::<C>).with_display_serializable())
+        .subcommand(
+            "ipv4-get",
+            from_fn_async_local(ipv4_get::<C>).with_display_serializable(),
+        )
+        .subcommand(
+            "ipv4-set",
+            from_fn_async_local(ipv4_set::<C>).with_display_serializable(),
+        )
+        .subcommand(
+            "ipv6-get",
+            from_fn_async_local(ipv6_get::<C>).with_display_serializable(),
+        )
+        .subcommand(
+            "ipv6-set",
+            from_fn_async_local(ipv6_set::<C>).with_display_serializable(),
+        )
+        .subcommand(
+            "mac-get",
+            from_fn_async_local(mac_get::<C>).with_display_serializable(),
+        )
+        .subcommand(
+            "mac-set",
+            from_fn_async_local(mac_set::<C>).with_display_serializable(),
+        )
+        .subcommand(
+            "dns-get",
+            from_fn_async_local(dns_get::<C>).with_display_serializable(),
+        )
+        .subcommand(
+            "dns-set",
+            from_fn_async_local(dns_set::<C>).with_display_serializable(),
+        )
+        .subcommand(
+            "ddns-get",
+            from_fn_async_local(ddns_get::<C>).with_display_serializable(),
+        )
+        .subcommand(
+            "ddns-set",
+            from_fn_async_local(ddns_set::<C>).with_display_serializable(),
+        )
 }
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -260,10 +291,9 @@ async fn get_start9_hostname() -> Option<String> {
 }
 
 async fn restart_network() {
-    let _ = crate::run_quiet_async(
-        tokio::process::Command::new("/etc/init.d/network").arg("restart"),
-    )
-    .await;
+    let _ =
+        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/network").arg("restart"))
+            .await;
 }
 
 // ── IPv4 handlers ───────────────────────────────────────────
@@ -310,7 +340,10 @@ pub async fn ipv4_get<C: CtrlContext>(ctx: C) -> Result<WanIpv4Response, Error> 
                 device: Some(iface.device),
             })
         }
-        None => Err(Error::new(eyre!("WAN interface not found"), ErrorKind::MissingWanInterface)),
+        None => Err(Error::new(
+            eyre!("WAN interface not found"),
+            ErrorKind::MissingWanInterface,
+        )),
     }
 }
 
@@ -372,7 +405,10 @@ pub async fn ipv4_set<C: CtrlContext>(
             }
         }
         if !found {
-            return Err(Error::new(eyre!("WAN interface not found"), ErrorKind::MissingWanInterface));
+            return Err(Error::new(
+                eyre!("WAN interface not found"),
+                ErrorKind::MissingWanInterface,
+            ));
         }
 
         let dump_result = dump_all(ctx.uci_root(), cfgs).await;
@@ -383,11 +419,23 @@ pub async fn ipv4_set<C: CtrlContext>(
                 continue;
             }
             Err(err) => {
-                crate::activity::log("wan", "ipv4-updated", false, "Failed to update WAN IPv4", Some(&err.to_string()));
+                crate::activity::log(
+                    "wan",
+                    "ipv4-updated",
+                    false,
+                    "Failed to update WAN IPv4",
+                    Some(&err.to_string()),
+                );
                 return Err(err.into());
             }
             Ok(()) => {
-                crate::activity::log("wan", "ipv4-updated", true, &format!("Updated WAN IPv4 (mode: {})", serde_name(&req.mode)), None);
+                crate::activity::log(
+                    "wan",
+                    "ipv4-updated",
+                    true,
+                    &format!("Updated WAN IPv4 (mode: {})", serde_name(&req.mode)),
+                    None,
+                );
                 if ctx.effectful() {
                     restart_network().await;
                 }
@@ -445,7 +493,8 @@ pub async fn ipv6_get<C: CtrlContext>(ctx: C) -> Result<WanIpv6Response, Error> 
 
     let (address, prefix) = match mode {
         WanIpv6Mode::Slaac | WanIpv6Mode::Dhcpv6 => {
-            let prefix = iface.reqprefix
+            let prefix = iface
+                .reqprefix
                 .filter(|p| p != "auto" && !p.is_empty())
                 .map(|p| format!("/{}", p));
             (None, prefix)
@@ -530,7 +579,9 @@ pub async fn ipv6_set<C: CtrlContext>(
                 cfgs["network"].sections.remove(idx);
             }
         } else {
-            let reqprefix = req.prefix.as_ref()
+            let reqprefix = req
+                .prefix
+                .as_ref()
                 .map(|p| p.trim_start_matches('/').to_string())
                 .filter(|p| !p.is_empty());
 
@@ -571,8 +622,14 @@ pub async fn ipv6_set<C: CtrlContext>(
                     proto: InterfaceProto::SIXRD,
                     peeraddr: req.border_relay.clone(),
                     ip6prefix: req.ip6prefix.clone(),
-                    ip6prefixlen: req.ip6prefixlen.as_ref().map(|p| p.trim_start_matches('/').to_string()),
-                    ip4prefixlen: req.ip4prefixlen.as_ref().map(|p| p.trim_start_matches('/').to_string()),
+                    ip6prefixlen: req
+                        .ip6prefixlen
+                        .as_ref()
+                        .map(|p| p.trim_start_matches('/').to_string()),
+                    ip4prefixlen: req
+                        .ip4prefixlen
+                        .as_ref()
+                        .map(|p| p.trim_start_matches('/').to_string()),
                     ..Default::default()
                 },
                 WanIpv6Mode::Disabled => unreachable!(),
@@ -602,11 +659,23 @@ pub async fn ipv6_set<C: CtrlContext>(
                 continue;
             }
             Err(err) => {
-                crate::activity::log("wan", "ipv6-updated", false, "Failed to update WAN IPv6", Some(&err.to_string()));
+                crate::activity::log(
+                    "wan",
+                    "ipv6-updated",
+                    false,
+                    "Failed to update WAN IPv6",
+                    Some(&err.to_string()),
+                );
                 return Err(err.into());
             }
             Ok(()) => {
-                crate::activity::log("wan", "ipv6-updated", true, &format!("Updated WAN IPv6 (mode: {})", serde_name(&req.mode)), None);
+                crate::activity::log(
+                    "wan",
+                    "ipv6-updated",
+                    true,
+                    &format!("Updated WAN IPv6 (mode: {})", serde_name(&req.mode)),
+                    None,
+                );
                 if ctx.effectful() {
                     restart_network().await;
                     let _ = crate::run_quiet_async(
@@ -661,11 +730,14 @@ pub async fn mac_get<C: CtrlContext>(ctx: C) -> Result<WanMacResponse, Error> {
     };
 
     let has_custom = device_macaddr.is_some();
-    let effective_mac = device_macaddr
-        .unwrap_or_else(|| default_mac.clone());
+    let effective_mac = device_macaddr.unwrap_or_else(|| default_mac.clone());
 
     Ok(WanMacResponse {
-        strategy: if has_custom { MacStrategy::Custom } else { MacStrategy::Router },
+        strategy: if has_custom {
+            MacStrategy::Custom
+        } else {
+            MacStrategy::Router
+        },
         mac: effective_mac,
         default_mac,
     })
@@ -690,8 +762,12 @@ pub async fn mac_set<C: CtrlContext>(
                 }
             }
         }
-        let dev_name =
-            wan_device_name.ok_or_else(|| Error::new(eyre!("WAN interface not found"), ErrorKind::MissingWanInterface))?;
+        let dev_name = wan_device_name.ok_or_else(|| {
+            Error::new(
+                eyre!("WAN interface not found"),
+                ErrorKind::MissingWanInterface,
+            )
+        })?;
 
         // Set macaddr on the device section, creating it if needed
         let mut found = false;
@@ -733,7 +809,13 @@ pub async fn mac_set<C: CtrlContext>(
                 continue;
             }
             Err(err) => {
-                crate::activity::log("wan", "mac-updated", false, "Failed to update WAN MAC address", Some(&err.to_string()));
+                crate::activity::log(
+                    "wan",
+                    "mac-updated",
+                    false,
+                    "Failed to update WAN MAC address",
+                    Some(&err.to_string()),
+                );
                 return Err(err.into());
             }
             Ok(()) => {
@@ -780,7 +862,8 @@ pub async fn dns_set<C: CtrlContext>(
             ctx.uci_root(),
             &arena,
             &["startwrt", "network", "dhcp", "firewall"],
-        ).await?;
+        )
+        .await?;
 
         // Remove existing system_dns section
         cfgs["startwrt"]
@@ -838,11 +921,23 @@ pub async fn dns_set<C: CtrlContext>(
                 continue;
             }
             Err(err) => {
-                crate::activity::log("wan", "dns-updated", false, "Failed to update WAN DNS", Some(&err.to_string()));
+                crate::activity::log(
+                    "wan",
+                    "dns-updated",
+                    false,
+                    "Failed to update WAN DNS",
+                    Some(&err.to_string()),
+                );
                 return Err(err.into());
             }
             Ok(()) => {
-                crate::activity::log("wan", "dns-updated", true, &format!("Updated WAN DNS (mode: {})", serde_name(&req.mode)), None);
+                crate::activity::log(
+                    "wan",
+                    "dns-updated",
+                    true,
+                    &format!("Updated WAN DNS (mode: {})", serde_name(&req.mode)),
+                    None,
+                );
                 if ctx.effectful() {
                     // Re-read configs to regenerate SmartDNS with the updated state
                     let smartdns_groups = {
@@ -973,15 +1068,30 @@ pub async fn ddns_set<C: CtrlContext>(
                 continue;
             }
             Err(err) => {
-                crate::activity::log("wan", "ddns-updated", false, "Failed to update DDNS", Some(&err.to_string()));
+                crate::activity::log(
+                    "wan",
+                    "ddns-updated",
+                    false,
+                    "Failed to update DDNS",
+                    Some(&err.to_string()),
+                );
                 return Err(err.into());
             }
             Ok(()) => {
-                crate::activity::log("wan", "ddns-updated", true, &format!("Updated DDNS (provider: {})", serde_name(&req.provider)), None);
+                crate::activity::log(
+                    "wan",
+                    "ddns-updated",
+                    true,
+                    &format!("Updated DDNS (provider: {})", serde_name(&req.provider)),
+                    None,
+                );
                 if ctx.effectful() {
                     let _ = crate::run_quiet_async(
-                        tokio::process::Command::new("/etc/init.d/ddns")
-                            .arg(if req.enabled { "restart" } else { "stop" }),
+                        tokio::process::Command::new("/etc/init.d/ddns").arg(if req.enabled {
+                            "restart"
+                        } else {
+                            "stop"
+                        }),
                     )
                     .await;
                 }
@@ -993,11 +1103,13 @@ pub async fn ddns_set<C: CtrlContext>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use rpc_toolkit::Context;
     use std::path::PathBuf;
     use std::sync::Arc;
+
+    use rpc_toolkit::Context;
     use tokio::runtime::Runtime;
+
+    use super::*;
 
     #[derive(Clone)]
     struct TestContext(PathBuf);
@@ -1081,7 +1193,8 @@ config service 'wan'
                 password: None,
                 device: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let res = ipv4_get(ctx).await.unwrap();
@@ -1107,7 +1220,8 @@ config service 'wan'
                 password: Some("secret".to_string()),
                 device: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let res = ipv4_get(ctx).await.unwrap();
@@ -1147,7 +1261,8 @@ config service 'wan'
                 border_relay: None,
                 lan_prefix: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let res = ipv6_get(ctx).await.unwrap();
@@ -1178,7 +1293,8 @@ config service 'wan'
                 strategy: MacStrategy::Custom,
                 mac: Some("AA:BB:CC:DD:EE:FF".to_string()),
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let res = mac_get(ctx).await.unwrap();
@@ -1259,19 +1375,35 @@ config zone
             DeserializeStdin(WanDnsSetRequest {
                 mode: DnsMode::Custom,
                 servers: Some(vec![
-                    DnsServer { address: "1.1.1.1".into(), ssl: false },
-                    DnsServer { address: "8.8.8.8".into(), ssl: true },
+                    DnsServer {
+                        address: "1.1.1.1".into(),
+                        ssl: false,
+                    },
+                    DnsServer {
+                        address: "8.8.8.8".into(),
+                        ssl: true,
+                    },
                 ]),
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let res = dns_get(ctx).await.unwrap();
         assert_eq!(res.mode, DnsMode::Custom);
-        assert_eq!(res.servers, vec![
-            DnsServer { address: "1.1.1.1".into(), ssl: false },
-            DnsServer { address: "8.8.8.8".into(), ssl: true },
-        ]);
+        assert_eq!(
+            res.servers,
+            vec![
+                DnsServer {
+                    address: "1.1.1.1".into(),
+                    ssl: false
+                },
+                DnsServer {
+                    address: "8.8.8.8".into(),
+                    ssl: true
+                },
+            ]
+        );
     }
 
     // ── DDNS ──
@@ -1317,7 +1449,8 @@ config zone
                 token: Some("cf-api-token-123".to_string()),
                 zone: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let res = ddns_get(ctx).await.unwrap();
@@ -1345,7 +1478,8 @@ config zone
                 password: None,
                 device: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         // ipv4_set sets peerdns=0 and dns=gateway on the WAN interface,
@@ -1366,9 +1500,13 @@ config zone
             ctx.clone(),
             DeserializeStdin(WanDnsSetRequest {
                 mode: DnsMode::Custom,
-                servers: Some(vec![DnsServer { address: "1.1.1.1".into(), ssl: false }]),
+                servers: Some(vec![DnsServer {
+                    address: "1.1.1.1".into(),
+                    ssl: false,
+                }]),
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         // Switch to static — should NOT overwrite system DNS
@@ -1383,12 +1521,19 @@ config zone
                 password: None,
                 device: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let res = dns_get(ctx).await.unwrap();
         assert_eq!(res.mode, DnsMode::Custom);
-        assert_eq!(res.servers, vec![DnsServer { address: "1.1.1.1".into(), ssl: false }]);
+        assert_eq!(
+            res.servers,
+            vec![DnsServer {
+                address: "1.1.1.1".into(),
+                ssl: false
+            }]
+        );
     }
 
     // ── IPv4 mode switching ──
@@ -1411,7 +1556,8 @@ config zone
                 password: None,
                 device: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         // Switch back to DHCP
@@ -1426,7 +1572,8 @@ config zone
                 password: None,
                 device: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let res = ipv4_get(ctx).await.unwrap();
@@ -1453,7 +1600,8 @@ config zone
                 password: Some("secret".to_string()),
                 device: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         ipv4_set(
@@ -1467,7 +1615,8 @@ config zone
                 password: None,
                 device: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let res = ipv4_get(ctx).await.unwrap();
@@ -1493,7 +1642,8 @@ config zone
                 password: None,
                 device: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         ipv4_set(
@@ -1507,7 +1657,8 @@ config zone
                 password: Some("secret".to_string()),
                 device: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let res = ipv4_get(ctx).await.unwrap();
@@ -1531,22 +1682,34 @@ config zone
             ctx.clone(),
             DeserializeStdin(WanIpv6SetRequest {
                 mode: WanIpv6Mode::Disabled,
-                address: None, prefix: None, gateway: None,
-                ip6prefix: None, ip6prefixlen: None, ip4prefixlen: None, border_relay: None,
+                address: None,
+                prefix: None,
+                gateway: None,
+                ip6prefix: None,
+                ip6prefixlen: None,
+                ip4prefixlen: None,
+                border_relay: None,
                 lan_prefix: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         ipv6_set(
             ctx.clone(),
             DeserializeStdin(WanIpv6SetRequest {
                 mode: WanIpv6Mode::Slaac,
-                address: None, prefix: None, gateway: None,
-                ip6prefix: None, ip6prefixlen: None, ip4prefixlen: None, border_relay: None,
+                address: None,
+                prefix: None,
+                gateway: None,
+                ip6prefix: None,
+                ip6prefixlen: None,
+                ip4prefixlen: None,
+                border_relay: None,
                 lan_prefix: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let res = ipv6_get(ctx).await.unwrap();
@@ -1563,11 +1726,17 @@ config zone
             ctx.clone(),
             DeserializeStdin(WanIpv6SetRequest {
                 mode: WanIpv6Mode::Dhcpv6,
-                address: None, prefix: None, gateway: None,
-                ip6prefix: None, ip6prefixlen: None, ip4prefixlen: None, border_relay: None,
+                address: None,
+                prefix: None,
+                gateway: None,
+                ip6prefix: None,
+                ip6prefixlen: None,
+                ip4prefixlen: None,
+                border_relay: None,
                 lan_prefix: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let res = ipv6_get(ctx).await.unwrap();
@@ -1587,10 +1756,14 @@ config zone
                 address: Some("fd00::2".to_string()),
                 prefix: Some("/64".to_string()),
                 gateway: Some("fd00::1".to_string()),
-                ip6prefix: None, ip6prefixlen: None, ip4prefixlen: None, border_relay: None,
+                ip6prefix: None,
+                ip6prefixlen: None,
+                ip4prefixlen: None,
+                border_relay: None,
                 lan_prefix: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let res = ipv6_get(ctx).await.unwrap();
@@ -1619,7 +1792,8 @@ config zone
                 border_relay: Some("203.0.113.1".to_string()),
                 lan_prefix: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let res = ipv6_get(ctx).await.unwrap();
@@ -1645,21 +1819,31 @@ config zone
                 address: Some("fd00::2".to_string()),
                 prefix: Some("/64".to_string()),
                 gateway: Some("fd00::1".to_string()),
-                ip6prefix: None, ip6prefixlen: None, ip4prefixlen: None, border_relay: None,
+                ip6prefix: None,
+                ip6prefixlen: None,
+                ip4prefixlen: None,
+                border_relay: None,
                 lan_prefix: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         ipv6_set(
             ctx.clone(),
             DeserializeStdin(WanIpv6SetRequest {
                 mode: WanIpv6Mode::Slaac,
-                address: None, prefix: None, gateway: None,
-                ip6prefix: None, ip6prefixlen: None, ip4prefixlen: None, border_relay: None,
+                address: None,
+                prefix: None,
+                gateway: None,
+                ip6prefix: None,
+                ip6prefixlen: None,
+                ip4prefixlen: None,
+                border_relay: None,
                 lan_prefix: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let res = ipv6_get(ctx).await.unwrap();
@@ -1687,18 +1871,25 @@ config zone
                 border_relay: Some("203.0.113.1".to_string()),
                 lan_prefix: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         ipv6_set(
             ctx.clone(),
             DeserializeStdin(WanIpv6SetRequest {
                 mode: WanIpv6Mode::Disabled,
-                address: None, prefix: None, gateway: None,
-                ip6prefix: None, ip6prefixlen: None, ip4prefixlen: None, border_relay: None,
+                address: None,
+                prefix: None,
+                gateway: None,
+                ip6prefix: None,
+                ip6prefixlen: None,
+                ip4prefixlen: None,
+                border_relay: None,
                 lan_prefix: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let res = ipv6_get(ctx).await.unwrap();
@@ -1721,7 +1912,8 @@ config zone
                 strategy: MacStrategy::Custom,
                 mac: Some("AA:BB:CC:DD:EE:FF".to_string()),
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         mac_set(
@@ -1730,7 +1922,8 @@ config zone
                 strategy: MacStrategy::Router,
                 mac: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let res = mac_get(ctx).await.unwrap();
@@ -1750,9 +1943,13 @@ config zone
             ctx.clone(),
             DeserializeStdin(WanDnsSetRequest {
                 mode: DnsMode::Custom,
-                servers: Some(vec![DnsServer { address: "1.1.1.1".into(), ssl: false }]),
+                servers: Some(vec![DnsServer {
+                    address: "1.1.1.1".into(),
+                    ssl: false,
+                }]),
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         dns_set(
@@ -1761,7 +1958,8 @@ config zone
                 mode: DnsMode::Isp,
                 servers: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let res = dns_get(ctx).await.unwrap();
@@ -1781,19 +1979,28 @@ config zone
             ctx.clone(),
             DeserializeStdin(WanDnsSetRequest {
                 mode: DnsMode::Custom,
-                servers: Some(vec![DnsServer { address: "9.9.9.9".into(), ssl: false }]),
+                servers: Some(vec![DnsServer {
+                    address: "9.9.9.9".into(),
+                    ssl: false,
+                }]),
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         // Verify that a per-profile dnsmasq section was created for the Admin profile
         let arena = Arena::new();
-        let cfgs = parse_all(ctx.uci_root(), &arena, &["dhcp", "network"]).await.unwrap();
+        let cfgs = parse_all(ctx.uci_root(), &arena, &["dhcp", "network"])
+            .await
+            .unwrap();
         let has_dns_lan = cfgs["dhcp"]
             .sections
             .iter()
             .any(|s| s.name().as_deref() == Some("dns_lan"));
-        assert!(has_dns_lan, "dns_set should create per-profile dnsmasq for existing profiles");
+        assert!(
+            has_dns_lan,
+            "dns_set should create per-profile dnsmasq for existing profiles"
+        );
 
         // Verify peerdns=0 on both WAN and WAN6
         for iface_name in &[WAN_INTERFACE, WAN6_INTERFACE] {
@@ -1823,9 +2030,13 @@ config zone
             ctx.clone(),
             DeserializeStdin(WanDnsSetRequest {
                 mode: DnsMode::Custom,
-                servers: Some(vec![DnsServer { address: "9.9.9.9".into(), ssl: false }]),
+                servers: Some(vec![DnsServer {
+                    address: "9.9.9.9".into(),
+                    ssl: false,
+                }]),
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         // Switch back to ISP
@@ -1835,17 +2046,23 @@ config zone
                 mode: DnsMode::Isp,
                 servers: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         // Verify that the per-profile dnsmasq section was removed
         let arena = Arena::new();
-        let cfgs = parse_all(ctx.uci_root(), &arena, &["dhcp", "network"]).await.unwrap();
+        let cfgs = parse_all(ctx.uci_root(), &arena, &["dhcp", "network"])
+            .await
+            .unwrap();
         let has_dns_lan = cfgs["dhcp"]
             .sections
             .iter()
             .any(|s| s.name().as_deref() == Some("dns_lan"));
-        assert!(!has_dns_lan, "dns_set ISP should remove per-profile dnsmasq sections");
+        assert!(
+            !has_dns_lan,
+            "dns_set ISP should remove per-profile dnsmasq sections"
+        );
 
         // Verify peerdns=1 on both WAN and WAN6
         for iface_name in &[WAN_INTERFACE, WAN6_INTERFACE] {
@@ -1882,7 +2099,8 @@ config zone
                 token: Some("tok123".to_string()),
                 zone: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         ddns_set(
@@ -1896,7 +2114,8 @@ config zone
                 token: None,
                 zone: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let res = ddns_get(ctx).await.unwrap();
@@ -1921,13 +2140,17 @@ config zone
                 token: Some("duck-token".to_string()),
                 zone: None,
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let res = ddns_get(ctx).await.unwrap();
         assert_eq!(res.provider, DdnsProvider::Duckdns);
         assert_eq!(res.token.as_deref(), Some("duck-token"));
         assert_eq!(res.hostname.as_deref(), Some("myhost.duckdns.org"));
-        assert!(res.username.is_none(), "username should not be set for token-based provider");
+        assert!(
+            res.username.is_none(),
+            "username should not be set for token-based provider"
+        );
     }
 }

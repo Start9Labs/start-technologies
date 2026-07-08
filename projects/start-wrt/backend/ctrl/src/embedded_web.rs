@@ -1,6 +1,6 @@
 use axum::body::Body;
-use axum::http::{Request, Response, StatusCode, header};
-use include_dir::{Dir, include_dir};
+use axum::http::{header, Request, Response, StatusCode};
+use include_dir::{include_dir, Dir};
 
 static WEB_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/../../web/dist/startwrt/browser");
 
@@ -8,7 +8,9 @@ pub async fn serve_embedded(req: Request<Body>) -> Response<Body> {
     let path = req.uri().path().trim_start_matches('/');
     let path = if path.is_empty() { "index.html" } else { path };
 
-    let file = WEB_DIR.get_file(path).or_else(|| WEB_DIR.get_file("index.html"));
+    let file = WEB_DIR
+        .get_file(path)
+        .or_else(|| WEB_DIR.get_file("index.html"));
 
     match file {
         Some(file) => {

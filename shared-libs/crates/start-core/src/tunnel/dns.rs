@@ -60,7 +60,10 @@ impl DnsProxyController {
         let old = self.listeners.mutate(std::mem::take);
         for (subnet, proxy) in old {
             proxy.shutdown.cancel();
-            if tokio::time::timeout(SHUTDOWN_TIMEOUT, proxy.task).await.is_err() {
+            if tokio::time::timeout(SHUTDOWN_TIMEOUT, proxy.task)
+                .await
+                .is_err()
+            {
                 tracing::warn!("DNS proxy for {subnet} did not shut down in time; aborting it");
             }
         }
@@ -150,12 +153,17 @@ async fn bind_proxy(
     injector: Arc<DnsInjector>,
 ) -> Result<ProxyHandle, Error> {
     let listen = SocketAddrV4::new(addr, DNS_PORT);
-    let udp = UdpSocket::bind(listen).await.with_kind(ErrorKind::Network)?;
+    let udp = UdpSocket::bind(listen)
+        .await
+        .with_kind(ErrorKind::Network)?;
     let tcp = TcpListener::bind(listen)
         .await
         .with_kind(ErrorKind::Network)?;
 
-    let mut server = Server::new(InjectingHandler::new(injector, forwarding_catalog(upstreams)?));
+    let mut server = Server::new(InjectingHandler::new(
+        injector,
+        forwarding_catalog(upstreams)?,
+    ));
     server.register_socket(udp);
     server.register_listener(tcp, FORWARD_TIMEOUT, DNS_RESPONSE_BUFFER_SIZE);
 

@@ -3,8 +3,9 @@ extern crate rand;
 
 mod util;
 
-use super::*;
 use serde_json::from_str;
+
+use super::*;
 
 #[test]
 fn parse_from_value() {
@@ -117,5 +118,8 @@ fn many_ops_undo_on_failure() {
     }));
     let p = Patch(ops);
     assert!(patch(&mut doc, &p).is_err());
-    assert_eq!(doc, original, "document should be fully restored after failed patch");
+    assert_eq!(
+        doc, original,
+        "document should be fully restored after failed patch"
+    );
 }

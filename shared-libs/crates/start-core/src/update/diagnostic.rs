@@ -78,8 +78,7 @@ async fn run_update(
     let client = Client::new();
 
     let current_version = Current::default().semver();
-    let mut available =
-        get_versions(&client, registry, &current_version, &target_range).await?;
+    let mut available = get_versions(&client, registry, &current_version, &target_range).await?;
     let Some((target_version, asset)) = available
         .pop_last()
         .and_then(|(v, mut info)| info.squashfs.remove(&**PLATFORM).map(|a| (v, a)))

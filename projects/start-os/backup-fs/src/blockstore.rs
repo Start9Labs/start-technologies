@@ -53,11 +53,7 @@ pub fn locate(offset: u64) -> (u64, usize) {
 /// zeros. The returned buffer may be shorter than `CHUNK_SIZE` (the final
 /// block) or, with size padding enabled, longer; callers must slice it to
 /// the logically-valid length.
-pub fn read_block(
-    ctrl: &Controller,
-    content: ContentId,
-    idx: u64,
-) -> BkfsResult<Option<Vec<u8>>> {
+pub fn read_block(ctrl: &Controller, content: ContentId, idx: u64) -> BkfsResult<Option<Vec<u8>>> {
     let path = ctrl.resolve_block_path(content, idx);
     let mut file = match open_direct(&path, false) {
         Ok(f) => f,
@@ -71,7 +67,10 @@ pub fn read_block(
     // block; cap the decompressed size accordingly so a malformed frame can't
     // allocate without bound.
     let stored = vault::open(&blob, ctrl.key())?;
-    Ok(Some(crate::compress::decompress(&stored, max_block_len(ctrl))?))
+    Ok(Some(crate::compress::decompress(
+        &stored,
+        max_block_len(ctrl),
+    )?))
 }
 
 /// Upper bound on a decompressed block: one chunk, grown by the configured

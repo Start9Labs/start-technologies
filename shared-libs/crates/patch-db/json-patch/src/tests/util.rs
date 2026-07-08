@@ -1,7 +1,8 @@
-use imbl_value::Value;
-use serde::Deserialize;
 use std::fmt::Write;
 use std::{fs, io};
+
+use imbl_value::Value;
+use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 struct TestCase {

@@ -102,22 +102,20 @@ extern crate log;
 extern crate imbl_value;
 extern crate serde;
 
-use imbl_value::Value;
+use std::rc::Rc;
 
 use imbl_value::imbl::Vector;
+use imbl_value::Value;
 #[allow(deprecated)]
 use parser::Node;
 #[allow(deprecated)]
 pub use parser::Parser;
-#[allow(deprecated)]
-pub use select::{Selector, SelectorMut};
-
+pub use paths::PathParser;
 #[deprecated(since = "0.4.0", note = "It will be move to common module. since 0.5")]
 pub use select::JsonPathError;
-
-pub use paths::PathParser;
+#[allow(deprecated)]
+pub use select::{Selector, SelectorMut};
 pub use selector::{JsonSelector, JsonSelectorMut};
-use std::rc::Rc;
 
 #[doc(hidden)]
 #[deprecated(

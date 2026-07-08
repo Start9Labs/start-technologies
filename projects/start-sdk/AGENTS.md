@@ -9,22 +9,22 @@ The TypeScript SDK (`@start9labs/start-sdk`) for building StartOS service packag
 - `lib/` — `@start9labs/start-sdk`: developer-facing facade (`StartSdk`), daemons, health checks, backups, file helpers, subcontainers, i18n, triggers. Imports core types, OS bindings, ABI, `Effects`, ExVer parser, actions/input builders, interfaces, dependencies, s9pk reader from `@start9labs/start-core` (`shared-libs/ts-modules/start-core/`).
 - `dist/` — build output (generated; what publishes to npm). It bundles `@start9labs/start-core` (via npm `bundleDependencies`) so it stays self-contained. **Container-runtime consumes the built `dist/`, not the source.**
 - `Makefile` — build orchestration for the SDK itself.
-- `s9pk.mk`, `tsconfig.base.json` — build plumbing shipped *inside* the published package for service packages to `include`/`extends`. Marked DO NOT EDIT in the consuming-package contract; edits here change the contract for every package.
+- `s9pk.mk`, `tsconfig.base.json` — build plumbing shipped _inside_ the published package for service packages to `include`/`extends`. Marked DO NOT EDIT in the consuming-package contract; edits here change the contract for every package.
 - `docs/` — the "Service Packaging" mdbook (`book.toml`), published at docs.start9.com/packaging. Has its own `docs/AGENTS.md`.
 - `CHANGELOG.md` — Keep a Changelog style, headings `## <sdk-version> — StartOS <os-version> (<date>)`.
 
 ## Build & test (run from `projects/start-sdk/`)
 
-| Command | What |
-|---------|------|
-| `make node_modules` | `npm ci` |
-| `make bundle` | full build: build `@start9labs/start-core` (prerequisite), compile SDK → `dist/`, then `test` + `check-fmt` |
-| `make dist` | compile SDK (depends on start-core) |
-| `make test` | jest |
-| `make check` | `tsc --noEmit` |
-| `make fmt` / `make check-fmt` | Prettier write / check on all `.ts` |
-| `make link` | build + `npm link` from `dist/` for local package testing |
-| `make publish` | build, then `npm publish` from `dist/` (`OTP=…` for 2FA, else prompts) |
+| Command                       | What                                                                                                        |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `make node_modules`           | `npm ci`                                                                                                    |
+| `make bundle`                 | full build: build `@start9labs/start-core` (prerequisite), compile SDK → `dist/`, then `test` + `check-fmt` |
+| `make dist`                   | compile SDK (depends on start-core)                                                                         |
+| `make test`                   | jest                                                                                                        |
+| `make check`                  | `tsc --noEmit`                                                                                              |
+| `make fmt` / `make check-fmt` | Prettier write / check on all `.ts`                                                                         |
+| `make link`                   | build + `npm link` from `dist/` for local package testing                                                   |
+| `make publish`                | build, then `npm publish` from `dist/` (`OTP=…` for 2FA, else prompts)                                      |
 
 Tests are jest + ts-jest, Node only (no browser). Test files use `.test.ts`. The ExVer parser is generated from `shared-libs/ts-modules/start-core/lib/exver/exver.pegjs` via Peggy (`make` runs this for you).
 

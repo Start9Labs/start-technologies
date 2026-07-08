@@ -1,15 +1,15 @@
-use std::{
-    borrow::Borrow,
-    cmp::Ordering,
-    fmt::{Debug, Formatter},
-    hash::{Hash, Hasher},
-    iter::Sum,
-    ops::{Add, Deref, Index, IndexMut},
-};
+use std::borrow::Borrow;
+use std::cmp::Ordering;
+use std::fmt::{Debug, Formatter};
+use std::hash::{Hash, Hasher};
+use std::iter::Sum;
+use std::ops::{Add, Deref, Index, IndexMut};
 
 pub mod my_visitor;
-use imbl::{shared_ptr::DefaultSharedPtr, Vector};
-use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
+use imbl::shared_ptr::DefaultSharedPtr;
+use imbl::Vector;
+use serde::ser::SerializeMap;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[macro_export]
 macro_rules! inOMap {

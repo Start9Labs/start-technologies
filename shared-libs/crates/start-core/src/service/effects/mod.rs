@@ -116,10 +116,8 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
         // notification
         .subcommand(
             "notification",
-            ParentHandler::<C>::new().subcommand(
-                "create",
-                from_fn_async(notification::create).no_cli(),
-            ),
+            ParentHandler::<C>::new()
+                .subcommand("create", from_fn_async(notification::create).no_cli()),
         )
         // subcontainer
         .subcommand(

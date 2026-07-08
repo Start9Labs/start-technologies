@@ -86,11 +86,12 @@
 #[cfg_attr(test, macro_use)]
 extern crate imbl_value;
 
+use std::error::Error;
+use std::{fmt, mem};
+
 use imbl_value::{InOMap as Map, Value};
 use json_ptr::{JsonPointer, SegList};
 use serde::{Deserialize, Serialize};
-use std::error::Error;
-use std::{fmt, mem};
 
 /// Representation of JSON Patch (list of patch operations)
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -441,27 +442,23 @@ fn apply_patches<'a>(
     let initial_len = undo.0.len();
     for patch in patches {
         let res = match *patch {
-            PatchOperation::Add(ref op) => {
-                add(doc, &op.path, op.value.clone()).map(|prev| {
-                    undo.0.push(Box::new(move |doc| {
-                        match prev {
-                            None => {
-                                remove(doc, &op.path, true).unwrap();
-                            }
-                            Some(v) => {
-                                add(doc, &op.path, v).unwrap().unwrap();
-                            }
-                        };
-                    }));
-                })
-            }
-            PatchOperation::Remove(ref op) => {
-                remove(doc, &op.path, false).map(|prev| {
-                    undo.0.push(Box::new(move |doc| {
-                        assert!(add(doc, &op.path, prev).unwrap().is_none());
-                    }));
-                })
-            }
+            PatchOperation::Add(ref op) => add(doc, &op.path, op.value.clone()).map(|prev| {
+                undo.0.push(Box::new(move |doc| {
+                    match prev {
+                        None => {
+                            remove(doc, &op.path, true).unwrap();
+                        }
+                        Some(v) => {
+                            add(doc, &op.path, v).unwrap().unwrap();
+                        }
+                    };
+                }));
+            }),
+            PatchOperation::Remove(ref op) => remove(doc, &op.path, false).map(|prev| {
+                undo.0.push(Box::new(move |doc| {
+                    assert!(add(doc, &op.path, prev).unwrap().is_none());
+                }));
+            }),
             PatchOperation::Replace(ref op) => {
                 replace(doc, &op.path, op.value.clone()).map(|prev| {
                     undo.0.push(Box::new(move |doc| {
@@ -469,35 +466,29 @@ fn apply_patches<'a>(
                     }));
                 })
             }
-            PatchOperation::Move(ref op) => {
-                mov(doc, &op.from, &op.path, false).map(|prev| {
-                    undo.0.push(Box::new(move |doc| {
-                        mov(doc, &op.path, &op.from, true).unwrap();
-                        if let Some(prev) = prev {
-                            assert!(add(doc, &op.path, prev).unwrap().is_none());
+            PatchOperation::Move(ref op) => mov(doc, &op.from, &op.path, false).map(|prev| {
+                undo.0.push(Box::new(move |doc| {
+                    mov(doc, &op.path, &op.from, true).unwrap();
+                    if let Some(prev) = prev {
+                        assert!(add(doc, &op.path, prev).unwrap().is_none());
+                    }
+                }));
+            }),
+            PatchOperation::Copy(ref op) => copy(doc, &op.from, &op.path).map(|prev| {
+                undo.0.push(Box::new(move |doc| {
+                    match prev {
+                        None => {
+                            remove(doc, &op.path, true).unwrap();
                         }
-                    }));
-                })
-            }
-            PatchOperation::Copy(ref op) => {
-                copy(doc, &op.from, &op.path).map(|prev| {
-                    undo.0.push(Box::new(move |doc| {
-                        match prev {
-                            None => {
-                                remove(doc, &op.path, true).unwrap();
-                            }
-                            Some(v) => {
-                                add(doc, &op.path, v).unwrap().unwrap();
-                            }
-                        };
-                    }));
-                })
-            }
-            PatchOperation::Test(ref op) => {
-                test(doc, &op.path, &op.value).map(|()| {
-                    undo.0.push(Box::new(move |_| ()));
-                })
-            }
+                        Some(v) => {
+                            add(doc, &op.path, v).unwrap().unwrap();
+                        }
+                    };
+                }));
+            }),
+            PatchOperation::Test(ref op) => test(doc, &op.path, &op.value).map(|()| {
+                undo.0.push(Box::new(move |_| ()));
+            }),
         };
         if let Err(e) = res {
             while undo.0.len() > initial_len {

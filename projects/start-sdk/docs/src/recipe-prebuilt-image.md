@@ -90,7 +90,7 @@ Either way, **verify a real login succeeds** before shipping. A credential flow 
 Two more traps surface only when you actually test the login:
 
 - **Reverse-proxy guards.** StartOS fronts the service with its own proxy, so the request the app sees has a different `Host`/`Origin`/port than it served. Apps with host-header or CSRF validation (qBittorrent's `WebUI\HostHeaderValidation`, many others) reject every proxied request — often with a `401` that looks like a bad password but isn't. Check the app's log for the real reason, and disable the guard the app provides for running behind a proxy. Watch the inverse too: a "trust localhost" auth bypass can let proxy-local requests skip the password entirely — disable it.
-- **Config you write while the app runs can be clobbered.** Many apps rewrite their whole config file on shutdown from in-memory state. If your action edits the config and then restarts the service, the shutdown flush overwrites your edit before the new instance reads it. Write config-file changes from `setupMain` *before* the daemon launches (the previous instance has already stopped and flushed), or apply them through the running app's API instead.
+- **Config you write while the app runs can be clobbered.** Many apps rewrite their whole config file on shutdown from in-memory state. If your action edits the config and then restarts the service, the shutdown flush overwrites your edit before the new instance reads it. Write config-file changes from `setupMain` _before_ the daemon launches (the previous instance has already stopped and flushed), or apply them through the running app's API instead.
 
 ## Examples
 

@@ -7,12 +7,12 @@
 //! defaults to 1) so they can come straight from the SDK's
 //! `SharedOptions.idmap` field.
 
+use std::os::fd::AsFd;
 use std::path::PathBuf;
 
 use clap::Parser;
 use rpc_toolkit::Context;
 use serde::{Deserialize, Serialize};
-use std::os::fd::AsFd;
 use ts_rs::TS;
 
 use crate::disk::mount::filesystem::idmapped::IdMap;

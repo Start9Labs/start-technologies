@@ -21,12 +21,12 @@ workspace and shares the one `Cargo.lock`.
 
 All product binaries are thin wrappers that depend on this crate:
 
-| Binary | Product crate | Source |
-|--------|---------------|--------|
-| `startbox` / `start-container` | `start-os` | `projects/start-os/src/bin/*.rs` |
-| `start-cli` | `start-cli` | `projects/start-cli/src/main.rs` |
-| `registrybox` | `start-registry` | `projects/start-registry/src/main.rs` |
-| `tunnelbox` | `start-tunnel` | `projects/start-tunnel/src/main.rs` |
+| Binary                         | Product crate    | Source                                |
+| ------------------------------ | ---------------- | ------------------------------------- |
+| `startbox` / `start-container` | `start-os`       | `projects/start-os/src/bin/*.rs`      |
+| `start-cli`                    | `start-cli`      | `projects/start-cli/src/main.rs`      |
+| `registrybox`                  | `start-registry` | `projects/start-registry/src/main.rs` |
+| `tunnelbox`                    | `start-tunnel`   | `projects/start-tunnel/src/main.rs`   |
 
 Key module groups under `crates/start-core/src/` include `bins`, `service`,
 `s9pk`, `net`, `db`, `install`, `update`, `lxc`, `os_install`, `backup`, `sign`,

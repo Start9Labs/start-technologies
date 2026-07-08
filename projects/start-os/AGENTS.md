@@ -24,7 +24,7 @@ monorepo-wide rules, and [ARCHITECTURE.md](ARCHITECTURE.md) and
 ## Build & test (run from the repo root)
 
 - Compile the OS bins: `cargo check -p start-os` (or `cargo build -p start-os
-  --bin startbox`). Local `cargo check` is **linux-only** — CI also builds
+--bin startbox`). Local `cargo check` is **linux-only** — CI also builds
   apple-darwin and aarch64/riscv64 musl; platform-specific changes can pass here
   yet break those.
 - Regenerate TS bindings after any change to exported Rust types:

@@ -1,14 +1,6 @@
 #![allow(clippy::needless_return)]
 #![allow(clippy::unnecessary_cast)] // libc::S_* are u16 or u32 depending on the platform
 
-use fd_lock_rs::{FdLock, LockType};
-use fuser::consts::{FOPEN_DIRECT_IO, FUSE_HANDLE_KILLPRIV};
-use fuser::{
-    Filesystem, KernelConfig, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory,
-    ReplyDirectoryPlus, ReplyEmpty, ReplyEntry, ReplyOpen, ReplyStatfs, ReplyWrite, ReplyXattr,
-    Request, TimeOrNow, FUSE_ROOT_ID,
-};
-use log::{debug, error};
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
@@ -19,13 +11,20 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
+use fd_lock_rs::{FdLock, LockType};
+use fuser::consts::{FOPEN_DIRECT_IO, FUSE_HANDLE_KILLPRIV};
+use fuser::{
+    Filesystem, KernelConfig, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory,
+    ReplyDirectoryPlus, ReplyEmpty, ReplyEntry, ReplyOpen, ReplyStatfs, ReplyWrite, ReplyXattr,
+    Request, TimeOrNow, FUSE_ROOT_ID,
+};
+use log::{debug, error};
+
 use crate::ctrl::{Controller, StatFs};
 use crate::directory::DirectoryContents;
 use crate::error::{BkfsError, BkfsResult};
 use crate::handle::{FileHandleId, Handler};
-use crate::inode::FileData;
-use crate::inode::BLOCK_SIZE;
-use crate::inode::{Inode, InodeAttributes};
+use crate::inode::{FileData, Inode, InodeAttributes, BLOCK_SIZE};
 
 mod aligned_io;
 mod atomic_file;
@@ -42,11 +41,11 @@ mod pool;
 mod seglog;
 mod serde;
 mod superblock;
-mod vault;
 #[cfg(test)]
 mod tests;
 #[allow(dead_code)]
 mod util;
+mod vault;
 
 pub const MAX_NAME_LENGTH: u32 = 255;
 // const MAX_FILE_SIZE: u64 = 1024 * 1024 * 1024 * 1024;
@@ -62,7 +61,10 @@ pub(crate) static FSYNCDIR_CALL_COUNT: std::sync::atomic::AtomicU64 =
 
 const FMODE_EXEC: i32 = 0x20;
 
-pub(crate) fn open_direct(path: &Path, create: bool) -> io::Result<aligned_io::BufferedDirectFile<File>> {
+pub(crate) fn open_direct(
+    path: &Path,
+    create: bool,
+) -> io::Result<aligned_io::BufferedDirectFile<File>> {
     use std::os::unix::fs::OpenOptionsExt;
     let mut opts = File::options();
     opts.read(true).custom_flags(libc::O_DIRECT);
@@ -501,11 +503,9 @@ impl Filesystem for BackupFS {
         // Route by inode so fsync observes prior write jobs for the
         // same file (shard FIFO order).
         let key = handle.inode.0;
-        pool::global().submit_for(key, move || {
-            match handle.contents.lock().unwrap().fsync() {
-                Ok(()) => reply.ok(),
-                Err(e) => reply.error(e.to_errno_log()),
-            }
+        pool::global().submit_for(key, move || match handle.contents.lock().unwrap().fsync() {
+            Ok(()) => reply.ok(),
+            Err(e) => reply.error(e.to_errno_log()),
         });
     }
 
@@ -744,9 +744,7 @@ impl Filesystem for BackupFS {
         // chdir — breaking rsync --mkpath into a fresh mount.
         let idmap = self.handler.ctrl().config().idmapped_root.clone();
         match self.handler.peek_inode(Inode(inode), |inode| {
-            inode
-                .attrs
-                .check_access(&idmap, req.uid(), req.gid(), mask)
+            inode.attrs.check_access(&idmap, req.uid(), req.gid(), mask)
         }) {
             Ok(_) => reply.ok(),
             Err(e) => reply.error(e.to_errno()),

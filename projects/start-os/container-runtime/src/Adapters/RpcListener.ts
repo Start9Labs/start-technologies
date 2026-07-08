@@ -1,6 +1,6 @@
 // @ts-check
 
-import * as net from "net"
+import * as net from 'net'
 
 import {
   ExtendedVersion,
@@ -8,14 +8,14 @@ import {
   utils,
   VersionRange,
   z,
-} from "@start9labs/start-sdk"
-import * as fs from "fs"
+} from '@start9labs/start-sdk'
+import * as fs from 'fs'
 
-import { CallbackHolder } from "../Models/CallbackHolder"
-import { AllGetDependencies } from "../Interfaces/AllGetDependencies"
-import { jsonPath, unNestPath } from "../Models/JsonPath"
-import { System } from "../Interfaces/System"
-import { makeEffects } from "./EffectCreator"
+import { CallbackHolder } from '../Models/CallbackHolder'
+import { AllGetDependencies } from '../Interfaces/AllGetDependencies'
+import { jsonPath, unNestPath } from '../Models/JsonPath'
+import { System } from '../Interfaces/System'
+import { makeEffects } from './EffectCreator'
 type MaybePromise<T> = T | Promise<T>
 export const matchRpcResult = z.union([
   z.object({ result: z.any() }),
@@ -35,11 +35,11 @@ export const matchRpcResult = z.union([
 ])
 
 export type RpcResult = z.infer<typeof matchRpcResult>
-type SocketResponse = ({ jsonrpc: "2.0"; id: IdType } & RpcResult) | null
+type SocketResponse = ({ jsonrpc: '2.0'; id: IdType } & RpcResult) | null
 
-const SOCKET_PARENT = "/media/startos/rpc"
-const SOCKET_PATH = "/media/startos/rpc/service.sock"
-const jsonrpc = "2.0" as const
+const SOCKET_PARENT = '/media/startos/rpc'
+const SOCKET_PATH = '/media/startos/rpc/service.sock'
+const jsonrpc = '2.0' as const
 
 const isResultSchema = z.object({ result: z.any() })
 const isResult = (v: unknown): v is z.infer<typeof isResultSchema> =>
@@ -49,7 +49,7 @@ const idType = z.union([z.string(), z.number(), z.literal(null)])
 type IdType = null | string | number | undefined
 const runType = z.object({
   id: idType.optional(),
-  method: z.literal("execute"),
+  method: z.literal('execute'),
   params: z.object({
     id: z.string(),
     procedure: z.string(),
@@ -59,7 +59,7 @@ const runType = z.object({
 })
 const sandboxRunType = z.object({
   id: idType.optional(),
-  method: z.literal("sandbox"),
+  method: z.literal('sandbox'),
   params: z.object({
     id: z.string(),
     procedure: z.string(),
@@ -68,7 +68,7 @@ const sandboxRunType = z.object({
   }),
 })
 const callbackType = z.object({
-  method: z.literal("callback"),
+  method: z.literal('callback'),
   params: z.object({
     id: z.number(),
     args: z.array(z.unknown()),
@@ -76,23 +76,23 @@ const callbackType = z.object({
 })
 const initType = z.object({
   id: idType.optional(),
-  method: z.literal("init"),
+  method: z.literal('init'),
   params: z.object({
     id: z.string(),
-    kind: z.enum(["install", "update", "restore"]).nullable(),
+    kind: z.enum(['install', 'update', 'restore']).nullable(),
   }),
 })
 const startType = z.object({
   id: idType.optional(),
-  method: z.literal("start"),
+  method: z.literal('start'),
 })
 const stopType = z.object({
   id: idType.optional(),
-  method: z.literal("stop"),
+  method: z.literal('stop'),
 })
 const exitType = z.object({
   id: idType.optional(),
-  method: z.literal("exit"),
+  method: z.literal('exit'),
   params: z.object({
     id: z.string(),
     target: z.string().nullable(),
@@ -100,42 +100,42 @@ const exitType = z.object({
 })
 const evalType = z.object({
   id: idType.optional(),
-  method: z.literal("eval"),
+  method: z.literal('eval'),
   params: z.object({
     script: z.string(),
   }),
 })
 
-const isDevBuild = (process.env.STARTOS_ENVIRONMENT ?? "")
-  .split("-")
-  .includes("dev")
+const isDevBuild = (process.env.STARTOS_ENVIRONMENT ?? '')
+  .split('-')
+  .includes('dev')
 
 const jsonParse = (x: string) => JSON.parse(x)
 
 const handleRpc = (id: IdType, result: Promise<RpcResult>) =>
   result
-    .then((result) => {
+    .then(result => {
       return {
         jsonrpc,
         id,
         ...result,
       }
     })
-    .then((x) => {
+    .then(x => {
       if (
-        ("result" in x && x.result === undefined) ||
-        !("error" in x || "result" in x)
+        ('result' in x && x.result === undefined) ||
+        !('error' in x || 'result' in x)
       )
         (x as any).result = null
       return x
     })
-    .catch((error) => ({
+    .catch(error => ({
       jsonrpc,
       id,
       error: {
         code: 0,
         message: typeof error,
-        data: { details: "" + error, debug: error?.stack },
+        data: { details: '' + error, debug: error?.stack },
       },
     }))
 
@@ -144,7 +144,7 @@ const hasId = (v: unknown): v is z.infer<typeof hasIdSchema> =>
   hasIdSchema.safeParse(v).success
 export class RpcListener {
   shouldExit = false
-  unixSocketServer = net.createServer(async (server) => {})
+  unixSocketServer = net.createServer(async server => {})
   private _system: System | undefined
   private callbacks: CallbackHolder | undefined
 
@@ -156,11 +156,11 @@ export class RpcListener {
 
     this.unixSocketServer.listen(SOCKET_PATH)
 
-    console.log("Listening on %s", SOCKET_PATH)
+    console.log('Listening on %s', SOCKET_PATH)
 
-    this.unixSocketServer.on("connection", (s) => {
+    this.unixSocketServer.on('connection', s => {
       let id: IdType = null
-      let lineBuffer = ""
+      let lineBuffer = ''
       const captureId = <X>(x: X) => {
         if (hasId(x)) id = x.id
         return x
@@ -191,31 +191,31 @@ export class RpcListener {
       })
       const writeDataToSocket = (x: SocketResponse) => {
         if (x != null) {
-          return new Promise((resolve) =>
-            s.write(JSON.stringify(x) + "\n", resolve),
+          return new Promise(resolve =>
+            s.write(JSON.stringify(x) + '\n', resolve),
           )
         }
       }
-      s.on("data", (a) => {
+      s.on('data', a => {
         lineBuffer += a.toString()
-        const lines = lineBuffer.split("\n")
+        const lines = lineBuffer.split('\n')
         lineBuffer = lines.pop()! // keep incomplete trailing chunk in buffer
         for (const line of lines) {
           if (line)
             Promise.resolve(line)
-              .then(logData("dataIn"))
+              .then(logData('dataIn'))
               .then(jsonParse)
               .then(captureId)
-              .then((x) => this.dealWithInput(x))
+              .then(x => this.dealWithInput(x))
               .catch(mapError)
-              .then(logData("response"))
+              .then(logData('response'))
               .then(writeDataToSocket)
-              .then((_) => {
+              .then(_ => {
                 if (this.shouldExit) {
                   process.exit(0)
                 }
               })
-              .catch((e) => {
+              .catch(e => {
                 console.error(`Major error in socket handling: ${e}`)
                 console.debug(`Data in: ${line}`)
               })
@@ -225,7 +225,7 @@ export class RpcListener {
   }
 
   private get system() {
-    if (!this._system) throw new Error("System not initialized")
+    if (!this._system) throw new Error('System not initialized')
     return this._system
   }
 
@@ -233,7 +233,7 @@ export class RpcListener {
     if (this.callbacks) {
       this.callbacks
         .callCallback(callback, args)
-        .catch((error) =>
+        .catch(error =>
           console.error(`callback ${callback} failed`, utils.asError(error)),
         )
     } else {
@@ -254,7 +254,7 @@ export class RpcListener {
         id: (input as any)?.id,
         error: {
           code: -32602,
-          message: "invalid params",
+          message: 'invalid params',
           data: {
             details: JSON.stringify(input),
           },
@@ -263,7 +263,7 @@ export class RpcListener {
     }
 
     switch (parsed.data.method) {
-      case "execute": {
+      case 'execute': {
         const { id, params } = runType.parse(input)
         const system = this.system
         const procedure = jsonPath.parse(params.procedure)
@@ -272,7 +272,7 @@ export class RpcListener {
 
         return handleRpc(id, result)
       }
-      case "sandbox": {
+      case 'sandbox': {
         const { id, params } = sandboxRunType.parse(input)
         const system = this.system
         const procedure = jsonPath.parse(params.procedure)
@@ -281,35 +281,35 @@ export class RpcListener {
 
         return handleRpc(id, result)
       }
-      case "callback": {
+      case 'callback': {
         const {
           params: { id, args },
         } = callbackType.parse(input)
         this.callCallback(id, args)
         return null
       }
-      case "start": {
+      case 'start': {
         const { id } = startType.parse(input)
         const callbacks =
-          this.callbacks?.getChild("main") || this.callbacks?.child("main")
+          this.callbacks?.getChild('main') || this.callbacks?.child('main')
         const effects = makeEffects({
           eventId: null,
           callbacks,
         })
         return handleRpc(
           id,
-          this.system.start(effects).then((result) => ({ result })),
+          this.system.start(effects).then(result => ({ result })),
         )
       }
-      case "stop": {
+      case 'stop': {
         const { id } = stopType.parse(input)
-        this.callbacks?.removeChild("main")
+        this.callbacks?.removeChild('main')
         return handleRpc(
           id,
-          this.system.stop().then((result) => ({ result })),
+          this.system.stop().then(result => ({ result })),
         )
       }
-      case "exit": {
+      case 'exit': {
         const { id, params } = exitType.parse(input)
         return handleRpc(
           id,
@@ -330,10 +330,10 @@ export class RpcListener {
               )
               this.shouldExit = true
             }
-          })().then((result) => ({ result })),
+          })().then(result => ({ result })),
         )
       }
-      case "init": {
+      case 'init': {
         const { id, params } = initType.parse(input)
         return handleRpc(
           id,
@@ -345,8 +345,8 @@ export class RpcListener {
                   eventId: params.id,
                 }),
               )
-              const callbacks = this.callbacks.child("init")
-              console.error("Initializing...")
+              const callbacks = this.callbacks.child('init')
+              console.error('Initializing...')
               await system.init(
                 makeEffects({
                   eventId: params.id,
@@ -354,13 +354,13 @@ export class RpcListener {
                 }),
                 params.kind,
               )
-              console.error("Initialization complete.")
+              console.error('Initialization complete.')
               this._system = system
             }
-          })().then((result) => ({ result })),
+          })().then(result => ({ result })),
         )
       }
-      case "eval": {
+      case 'eval': {
         const { id, params } = evalType.parse(input)
         return handleRpc(
           id,
@@ -375,11 +375,11 @@ export class RpcListener {
               jsonrpc,
               id,
               result: ![
-                "string",
-                "number",
-                "boolean",
-                "null",
-                "object",
+                'string',
+                'number',
+                'boolean',
+                'null',
+                'object',
               ].includes(typeof result)
                 ? null
                 : result,
@@ -397,7 +397,7 @@ export class RpcListener {
           id,
           error: {
             code: -32601,
-            message: "Method not found",
+            message: 'Method not found',
             data: {
               details: method,
             },
@@ -426,19 +426,19 @@ export class RpcListener {
 
     return (async () => {
       switch (procedure) {
-        case "/backup/create":
+        case '/backup/create':
           return system.createBackup(effects, timeout || null)
         default:
           const procedures = unNestPath(procedure)
           switch (true) {
-            case procedures[1] === "actions" && procedures[3] === "getInput":
+            case procedures[1] === 'actions' && procedures[3] === 'getInput':
               return system.getActionInput(
                 effects,
                 procedures[2],
                 input?.prefill ?? null,
                 timeout || null,
               )
-            case procedures[1] === "actions" && procedures[3] === "run":
+            case procedures[1] === 'actions' && procedures[3] === 'run':
               return system.runAction(
                 effects,
                 procedures[2],
@@ -447,7 +447,7 @@ export class RpcListener {
               )
           }
       }
-    })().then(ensureResultTypeShape, (error) => {
+    })().then(ensureResultTypeShape, error => {
       const errorSchema = z.object({
         error: z.string(),
         code: z.number().default(0),

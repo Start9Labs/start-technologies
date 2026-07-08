@@ -42,8 +42,9 @@ pub async fn apply_pinhole(
     let ext = port_span(external_port, count);
     let int = port_span(internal_port, count);
     if internal_port == external_port {
-        let accept =
-            format!("ip6 daddr {gua} meta l4proto {{ tcp, udp }} th dport {ext} ct state new accept");
+        let accept = format!(
+            "ip6 daddr {gua} meta l4proto {{ tcp, udp }} th dport {ext} ct state new accept"
+        );
         nft_rule_v6("forward", &comment, false, false, &accept).await?;
         // Pure pinhole: ensure no stale DNAT lingers from a prior remap.
         nft_rule_v6("prerouting", &comment, true, false, "").await?;
@@ -52,8 +53,9 @@ pub async fn apply_pinhole(
             "ip6 daddr {gua} meta l4proto {{ tcp, udp }} th dport {ext} dnat to [{gua}]:{int}"
         );
         nft_rule_v6("prerouting", &comment, false, false, &dnat).await?;
-        let accept =
-            format!("ip6 daddr {gua} meta l4proto {{ tcp, udp }} th dport {int} ct state new accept");
+        let accept = format!(
+            "ip6 daddr {gua} meta l4proto {{ tcp, udp }} th dport {int} ct state new accept"
+        );
         nft_rule_v6("forward", &comment, false, false, &accept).await?;
     }
     Ok(())
@@ -156,9 +158,10 @@ pub async fn set_pinhole_enabled(
     ctx.db
         .mutate(|db| {
             db.as_pinholes6_mut().mutate(|ph| {
-                let e = ph.0.get_mut(&key).ok_or_else(|| {
-                    Error::new(eyre!("no pinhole at {key}"), ErrorKind::NotFound)
-                })?;
+                let e = ph
+                    .0
+                    .get_mut(&key)
+                    .ok_or_else(|| Error::new(eyre!("no pinhole at {key}"), ErrorKind::NotFound))?;
                 e.enabled = enabled;
                 Ok(())
             })
@@ -187,9 +190,10 @@ pub async fn set_pinhole_label(
     ctx.db
         .mutate(|db| {
             db.as_pinholes6_mut().mutate(|ph| {
-                let e = ph.0.get_mut(&key).ok_or_else(|| {
-                    Error::new(eyre!("no pinhole at {key}"), ErrorKind::NotFound)
-                })?;
+                let e = ph
+                    .0
+                    .get_mut(&key)
+                    .ok_or_else(|| Error::new(eyre!("no pinhole at {key}"), ErrorKind::NotFound))?;
                 e.label = label.clone();
                 Ok(())
             })
@@ -219,7 +223,13 @@ pub async fn seed_pinholes(ctx: &TunnelContext) -> Result<(), Error> {
         if !ph.enabled {
             continue;
         }
-        apply_pinhole(*key.ip(), key.port(), ph.internal_port(key.port()), ph.count).await?;
+        apply_pinhole(
+            *key.ip(),
+            key.port(),
+            ph.internal_port(key.port()),
+            ph.count,
+        )
+        .await?;
     }
     Ok(())
 }

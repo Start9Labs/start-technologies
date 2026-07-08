@@ -84,7 +84,10 @@ pub struct EccParams {
 
 impl Default for EccParams {
     fn default() -> Self {
-        EccParams { data: DEFAULT_ECC_DATA, parity: DEFAULT_ECC_PARITY }
+        EccParams {
+            data: DEFAULT_ECC_DATA,
+            parity: DEFAULT_ECC_PARITY,
+        }
     }
 }
 
@@ -269,11 +272,12 @@ pub(crate) fn derive_key(
     rounds: u32,
 ) -> BkfsResult<Zeroizing<[u8; 32]>> {
     let mut key = Zeroizing::new([0u8; 32]);
-    pbkdf2::<Hmac<Sha256>>(password.as_bytes(), salt, rounds, key.as_mut_slice())
-        .map_err(|_| BkfsError {
+    pbkdf2::<Hmac<Sha256>>(password.as_bytes(), salt, rounds, key.as_mut_slice()).map_err(
+        |_| BkfsError {
             kind: BkfsErrorKind::BadCrypt,
             backtrace: Some(Box::new(Backtrace::capture())),
-        })?;
+        },
+    )?;
     Ok(key)
 }
 
@@ -356,9 +360,24 @@ mod tests {
 
     #[test]
     fn ecc_params_validate() {
-        assert!(EccParams { data: 10, parity: 2 }.validate().is_ok());
+        assert!(EccParams {
+            data: 10,
+            parity: 2
+        }
+        .validate()
+        .is_ok());
         assert!(EccParams { data: 0, parity: 2 }.validate().is_err());
-        assert!(EccParams { data: 10, parity: 0 }.validate().is_err());
-        assert!(EccParams { data: 254, parity: 2 }.validate().is_err()); // sum > 255
+        assert!(EccParams {
+            data: 10,
+            parity: 0
+        }
+        .validate()
+        .is_err());
+        assert!(EccParams {
+            data: 254,
+            parity: 2
+        }
+        .validate()
+        .is_err()); // sum > 255
     }
 }

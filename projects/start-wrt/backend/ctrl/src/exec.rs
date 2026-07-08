@@ -31,8 +31,18 @@ pub async fn exec_command(_ctx: ServerContext, req: ExecReq) -> Result<ExecRes, 
         Command::new(&req.command).args(&req.args).output(),
     )
     .await
-    .map_err(|_| Error::new(eyre!("command {} timed out after {}ms", req.command, req.timeout), ErrorKind::Timeout))?
-    .map_err(|e| Error::new(eyre!("failed to execute {}: {}", req.command, e), ErrorKind::Filesystem))?;
+    .map_err(|_| {
+        Error::new(
+            eyre!("command {} timed out after {}ms", req.command, req.timeout),
+            ErrorKind::Timeout,
+        )
+    })?
+    .map_err(|e| {
+        Error::new(
+            eyre!("failed to execute {}: {}", req.command, e),
+            ErrorKind::Filesystem,
+        )
+    })?;
 
     Ok(ExecRes {
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),

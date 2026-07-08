@@ -1,18 +1,15 @@
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use imbl_value::imbl::vector;
-use imbl_value::imbl::Vector;
+use imbl_value::imbl::{vector, Vector};
 use imbl_value::in_order_map::Entry;
-use imbl_value::InternedString;
-use imbl_value::Number;
-use imbl_value::Value;
-
-use super::utils;
-use paths::{tokens::*, ParserTokenHandler, PathParser, StrRange};
+use imbl_value::{InternedString, Number, Value};
+use paths::tokens::*;
+use paths::{ParserTokenHandler, PathParser, StrRange};
 use JsonPathError;
 
 use super::terms::*;
+use super::utils;
 
 #[derive(Debug, Default)]
 pub struct JsonSelector<'a> {

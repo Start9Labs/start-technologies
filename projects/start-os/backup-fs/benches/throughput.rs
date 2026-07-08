@@ -19,9 +19,8 @@ use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-
 use backupfs::{BackupFS, BackupFSOptions};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use fuser::{MountOption, Session};
 
 const MIB: usize = 1024 * 1024;

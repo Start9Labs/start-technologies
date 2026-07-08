@@ -2,8 +2,9 @@ use std::fmt::Display;
 use std::io::Stdin;
 use std::str::FromStr;
 
+pub use clap;
 use clap::ArgMatches;
-pub use {clap, serde};
+pub use serde;
 
 pub fn default_arg_parser<T>(arg: &str, _: &ArgMatches) -> Result<T, clap::Error>
 where

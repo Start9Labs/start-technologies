@@ -8,14 +8,14 @@ HTTP server on ports 80 (HTTP) and 443 (HTTPS, if TLS setup succeeds). JSON-RPC 
 
 Additional routes:
 
-| Route | Purpose |
-|-------|---------|
-| `GET /api/logs` | WebSocket for live log streaming |
-| `POST /api/setup/flash` | NDJSON streaming for setup wizard |
-| `GET\|POST /rest/rpc/{guid}` | Continuation endpoint for backup/restore/diagnostics (10MB limit) |
-| `GET /static/root-ca.crt` | Root CA certificate download (no auth) |
-| `/cgi-bin/*`, `/luci-static/*`, `/ubus/*` | LuCI reverse proxy (localhost:8080) |
-| Fallback | Serves embedded web UI via `include_dir` |
+| Route                                     | Purpose                                                           |
+| ----------------------------------------- | ----------------------------------------------------------------- |
+| `GET /api/logs`                           | WebSocket for live log streaming                                  |
+| `POST /api/setup/flash`                   | NDJSON streaming for setup wizard                                 |
+| `GET\|POST /rest/rpc/{guid}`              | Continuation endpoint for backup/restore/diagnostics (10MB limit) |
+| `GET /static/root-ca.crt`                 | Root CA certificate download (no auth)                            |
+| `/cgi-bin/*`, `/luci-static/*`, `/ubus/*` | LuCI reverse proxy (localhost:8080)                               |
+| Fallback                                  | Serves embedded web UI via `include_dir`                          |
 
 ## Server vs CLI
 
@@ -125,6 +125,7 @@ exec                    # Shell command execution (being phased out)
 The core module. Each profile creates a VLAN on the LAN bridge, a network interface, a firewall zone with forwarding rules, and a DHCP server. Orchestrates changes across four UCI configs: `startwrt`, `network`, `firewall`, `dhcp`. Uses retry loops (4 attempts) for conflict resolution.
 
 Key types:
+
 - `Profile<Id>` — gateway IP, outbound route, `LanAccess` (All/SameProfile/OtherProfiles), `WanAccess` (All/None/Whitelist/Blacklist)
 - `ProfileId` — fullname + interface name + VLAN tag
 - `Lookup` — index for resolving profiles across configs
@@ -173,26 +174,26 @@ Low-level UCI, file, and shell access. These are vestigial — all features now 
 
 ### Other Modules
 
-| Module | Purpose |
-|--------|---------|
-| `system.rs` | System settings, remote access rules, schedules, restart, factory reset |
-| `devices.rs` | Device enumeration from ARP/DHCP, rename, forget (flush ARP + lease) |
-| `wan.rs` / `lan.rs` | WAN/LAN interface configuration |
-| `published_ports.rs` | Port forwarding rules (firewall redirects) |
-| `ssh_keys.rs` | SSH public key CRUD (`/etc/dropbear/authorized_keys`) |
-| `vpn_client.rs` / `vpn_server.rs` | WireGuard VPN management |
-| `dns.rs` | DNS server configuration |
-| `activity.rs` | Activity logging via SQLite |
-| `backup.rs` / `diagnostics.rs` | Backup/restore and diagnostic bundles (via continuations) |
-| `logs.rs` | WebSocket log streaming |
-| `ssl.rs` | TLS cert generation: Root CA → Intermediate CA → Server cert |
-| `init.rs` | Early boot WiFi config, password generation |
-| `setup.rs` / `flash.rs` | Setup wizard, firmware flashing |
-| `captive.rs` | Captive portal management |
-| `embedded_web.rs` | Serves the Angular SPA from `include_dir` |
-| `luci_proxy.rs` | Reverse proxy to LuCI on localhost:8080 |
-| `continuations.rs` | Long-running operation handling (GUID-based, timeout, kill signals) |
-| `error.rs` | `ErrorKind` enum and `Error` type |
+| Module                            | Purpose                                                                 |
+| --------------------------------- | ----------------------------------------------------------------------- |
+| `system.rs`                       | System settings, remote access rules, schedules, restart, factory reset |
+| `devices.rs`                      | Device enumeration from ARP/DHCP, rename, forget (flush ARP + lease)    |
+| `wan.rs` / `lan.rs`               | WAN/LAN interface configuration                                         |
+| `published_ports.rs`              | Port forwarding rules (firewall redirects)                              |
+| `ssh_keys.rs`                     | SSH public key CRUD (`/etc/dropbear/authorized_keys`)                   |
+| `vpn_client.rs` / `vpn_server.rs` | WireGuard VPN management                                                |
+| `dns.rs`                          | DNS server configuration                                                |
+| `activity.rs`                     | Activity logging via SQLite                                             |
+| `backup.rs` / `diagnostics.rs`    | Backup/restore and diagnostic bundles (via continuations)               |
+| `logs.rs`                         | WebSocket log streaming                                                 |
+| `ssl.rs`                          | TLS cert generation: Root CA → Intermediate CA → Server cert            |
+| `init.rs`                         | Early boot WiFi config, password generation                             |
+| `setup.rs` / `flash.rs`           | Setup wizard, firmware flashing                                         |
+| `captive.rs`                      | Captive portal management                                               |
+| `embedded_web.rs`                 | Serves the Angular SPA from `include_dir`                               |
+| `luci_proxy.rs`                   | Reverse proxy to LuCI on localhost:8080                                 |
+| `continuations.rs`                | Long-running operation handling (GUID-based, timeout, kill signals)     |
+| `error.rs`                        | `ErrorKind` enum and `Error` type                                       |
 
 ## UCI Library (uciedit)
 
@@ -233,6 +234,7 @@ struct FirewallZone {
 ```
 
 Macro attributes:
+
 - `#[uci(ty = "zone")]` — UCI section type name
 - `#[uci(rename = "type")]` — field name differs from UCI option name
 - `#[uci(default)]` — use `Default::default()` if option missing
@@ -241,13 +243,13 @@ Macro attributes:
 
 All typed sections live in `uciedit/src/openwrt.rs`:
 
-| Config | Structs |
-|--------|---------|
-| **firewall** | `FirewallZone`, `FirewallRule`, `FirewallRedirect`, `FirewallForwarding` |
-| **network** | `NetworkInterface`, `NetworkDevice`, `NetworkBridgeVlan`, `NetworkRoute`, `NetworkRule` |
-| **wireless** | `WifiDevice`, `WifiInterface`, `WifiVlan`, `WifiStation` |
-| **dhcp** | `Dhcp`, `DhcpHost`, `ProfileDnsmasq` |
-| **system** | `UciSystemDns`, `DdnsService` |
+| Config       | Structs                                                                                 |
+| ------------ | --------------------------------------------------------------------------------------- |
+| **firewall** | `FirewallZone`, `FirewallRule`, `FirewallRedirect`, `FirewallForwarding`                |
+| **network**  | `NetworkInterface`, `NetworkDevice`, `NetworkBridgeVlan`, `NetworkRoute`, `NetworkRule` |
+| **wireless** | `WifiDevice`, `WifiInterface`, `WifiVlan`, `WifiStation`                                |
+| **dhcp**     | `Dhcp`, `DhcpHost`, `ProfileDnsmasq`                                                    |
+| **system**   | `UciSystemDns`, `DdnsService`                                                           |
 
 `NetworkVlanPort` and `NetworkVlanPortTagging` are plain structs (not `TypedSection`) used as fields within `NetworkBridgeVlan`.
 
@@ -270,4 +272,3 @@ Auth-specific RPC error codes: 7 (incorrect password), 34 (authorization — tri
 - **Service reloads.** After writing UCI configs, call `/etc/init.d/<service> reload`. The `effectful` flag on `CtrlContext` controls whether reloads happen.
 - **Arena lifetimes.** uciedit uses arena allocation — parsed values borrow from the arena. Don't try to outlive it.
 - **Bridge VLAN filtering.** StartWRT uses UCI `bridge-vlan` configuration for per-port VLAN assignment. OpenWrt maps this to DSA hardware switch tables when available (e.g., DeepComputing 4-port board) or to the kernel's software bridge filter when not (e.g., BPI-F3, which has two independent GMACs and no switch chip). The backend code is the same for both — it writes `NetworkBridgeVlan` / `NetworkVlanPort` sections regardless of the underlying hardware.
-

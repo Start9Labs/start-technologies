@@ -1,6 +1,7 @@
-use crate::exver::*;
 use proptest::prelude::*;
 use yasi::InternedString;
+
+use crate::exver::*;
 
 prop_compose! {
     fn flavor_gen()(

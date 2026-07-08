@@ -53,9 +53,8 @@ pub async fn mount_cifs(
         .env("PASSWD", password.unwrap_or_default())
         .arg(format!("//{}{}", ip, absolute_path.display()))
         .arg(mountpoint.as_ref());
-    let mut opts = String::from(
-        "vers=3,hard,actimeo=0,wsize=1048576,rsize=1048576,nobrl,noserverino",
-    );
+    let mut opts =
+        String::from("vers=3,hard,actimeo=0,wsize=1048576,rsize=1048576,nobrl,noserverino");
     match mount_type {
         ReadOnly => opts.push_str(",ro,cache=strict"),
         ReadWrite => opts.push_str(",cache=strict"),
@@ -97,9 +96,7 @@ impl FileSystem for Cifs {
         )
         .await
     }
-    async fn source_hash(
-        &self,
-    ) -> Result<digest::Output<Sha256>, Error> {
+    async fn source_hash(&self) -> Result<digest::Output<Sha256>, Error> {
         let mut sha = Sha256::new();
         sha.update("Cifs");
         sha.update(self.hostname.as_bytes());

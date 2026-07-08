@@ -10,8 +10,8 @@ use std::task::{Poll, ready};
 use std::time::Duration;
 
 use axum::Router;
-use futures::future::Either;
 use futures::FutureExt;
+use futures::future::Either;
 use http::Extensions;
 use hyper_util::rt::{TokioIo, TokioTimer};
 use tokio::net::TcpListener;
@@ -413,11 +413,9 @@ where
                     // aborts the task on drop, preserving shutdown-cancel.
                     self.queue.peek(|q| {
                         if let Some(q) = q {
-                            q.add_job(NonDetachingJoinHandle::from(tokio::spawn(
-                                async move {
-                                    fut.await;
-                                },
-                            )));
+                            q.add_job(NonDetachingJoinHandle::from(tokio::spawn(async move {
+                                fut.await;
+                            })));
                         } else {
                             tracing::warn!("job queued after shutdown");
                         }
@@ -489,11 +487,9 @@ where
                                     )
                                     .into_owned(),
                             );
-                            queue.add_job(NonDetachingJoinHandle::from(tokio::spawn(
-                                async move {
-                                    let _ = conn.await;
-                                },
-                            )));
+                            queue.add_job(NonDetachingJoinHandle::from(tokio::spawn(async move {
+                                let _ = conn.await;
+                            })));
 
                             Ok::<_, Error>(())
                         }

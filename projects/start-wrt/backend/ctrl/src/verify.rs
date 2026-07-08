@@ -4,9 +4,9 @@ use std::time::Duration;
 use uciedit::openwrt::{WifiInterface, WifiMode};
 use uciedit::{parse_all, Arena};
 
+use crate::flash;
 use crate::invoke::Invoke;
 use crate::prelude::*;
-use crate::flash;
 
 /// Run all factory QC verification checks.
 pub async fn run_verify() -> Result<(), Error> {
@@ -43,7 +43,10 @@ pub async fn run_verify() -> Result<(), Error> {
         println!("========================================");
         println!("   VERIFICATION FAILED");
         println!("========================================");
-        return Err(Error::new(eyre!("one or more checks failed"), ErrorKind::Filesystem));
+        return Err(Error::new(
+            eyre!("one or more checks failed"),
+            ErrorKind::Filesystem,
+        ));
     }
     println!();
 
@@ -68,7 +71,12 @@ async fn verify_firmware_integrity() -> Result<bool, Error> {
     let rootfs = partitions
         .iter()
         .find(|p| p.name.as_deref() == Some("rootfs"))
-        .ok_or_else(|| Error::new(eyre!("no rootfs partition found on eMMC"), ErrorKind::NotFound))?;
+        .ok_or_else(|| {
+            Error::new(
+                eyre!("no rootfs partition found on eMMC"),
+                ErrorKind::NotFound,
+            )
+        })?;
 
     let rootfs_start_bytes = rootfs.start * flash::SECTOR_SIZE;
     let rootfs_size_bytes = rootfs.size * flash::SECTOR_SIZE;

@@ -1,9 +1,10 @@
-use fuser::ReplyEntry;
-use libc::c_int;
-use log::{debug, warn};
 use std::backtrace::Backtrace;
 use std::fmt::{Debug, Display};
 use std::io;
+
+use fuser::ReplyEntry;
+use libc::c_int;
+use log::{debug, warn};
 
 use crate::error;
 

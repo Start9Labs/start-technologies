@@ -1,8 +1,9 @@
-use crate::profiles::UciProfile;
-use crate::CtrlContext;
-use crate::prelude::*;
 use serde::{Deserialize, Serialize};
 use uciedit::Configs;
+
+use crate::prelude::*;
+use crate::profiles::UciProfile;
+use crate::CtrlContext;
 
 /// A single DNS server entry with protocol info.
 /// `ssl: false` = plain UDP on port 53.
@@ -150,10 +151,9 @@ pub async fn apply_smartdns_groups(groups: Vec<SmartDnsGroup>) -> Result<(), Err
     let conf = generate_smartdns_conf(&groups);
     tokio::fs::create_dir_all("/etc/smartdns").await?;
     tokio::fs::write(SMARTDNS_CONF_PATH, &conf).await?;
-    let _ = crate::run_quiet_async(
-        tokio::process::Command::new("/etc/init.d/smartdns").arg("restart"),
-    )
-    .await;
+    let _ =
+        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/smartdns").arg("restart"))
+            .await;
     Ok(())
 }
 

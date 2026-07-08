@@ -17,7 +17,7 @@ than relying on a PC-speaker driver.
   - `shared-libs/crates/start-core/build/build-pi-beep.sh` — cross-compiles via the `rust-zig-builder`
     container (`cargo zigbuild ... -p pi-beep --bin pi-beep --target=$ARCH-unknown-linux-musl`).
   - `projects/start-os/build/image-recipe/build.sh` symlinks `/usr/local/bin/beep ->
-    /usr/bin/pi-beep`, so callers expecting plain `beep` (e.g. `init_resize.sh`) hit this binary.
+/usr/bin/pi-beep`, so callers expecting plain `beep` (e.g. `init_resize.sh`) hit this binary.
 
 ## How it works
 
@@ -25,7 +25,7 @@ The only dependency is `clap`. `main`:
 
 1. Builds a `clap` `Command` with `args_override_self(true)` and these flags:
    `-f <FREQ_Hz>` (f64, default 440), `-l <LENGTH_ms>` (u64, default 200),
-   `-d <DELAY_ms>` (u64, default 100, delay *between* reps), `-D <DELAY_ms>` (u64, delay *with* a
+   `-d <DELAY_ms>` (u64, default 100, delay _between_ reps), `-D <DELAY_ms>` (u64, delay _with_ a
    trailing delay after the last rep), `-r <REPS>` (usize, default 1), and `-n`/`--new` which begins
    a fresh tone specification (raw, variadic args).
 2. If `/sys/class/pwm/pwmchip0/pwm0` does not exist, writes `0` to

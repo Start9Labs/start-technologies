@@ -1,6 +1,6 @@
-import { z } from "@start9labs/start-sdk"
+import { z } from '@start9labs/start-sdk'
 
-export type TimeUnit = "d" | "h" | "s" | "ms" | "m" | "µs" | "ns"
+export type TimeUnit = 'd' | 'h' | 's' | 'ms' | 'm' | 'µs' | 'ns'
 export type Duration = `${number}${TimeUnit}`
 
 const durationRegex = /^([0-9]*(\.[0-9]+)?)(ns|µs|ms|s|m|d)$/
@@ -10,7 +10,7 @@ export function isDuration(value: string): value is Duration {
   return durationRegex.test(value)
 }
 
-export function duration(timeValue: number, timeUnit: TimeUnit = "s") {
+export function duration(timeValue: number, timeUnit: TimeUnit = 's') {
   return `${timeValue > 0 ? timeValue : 0}${timeUnit}` as Duration
 }
 const unitsToSeconds: Record<string, number> = {
@@ -24,7 +24,7 @@ const unitsToSeconds: Record<string, number> = {
 }
 
 export function fromDuration(duration: Duration | number): number {
-  if (typeof duration === "number") return duration
+  if (typeof duration === 'number') return duration
   const [, num, , unit] = duration.match(durationRegex) || []
   return Number(num) * unitsToSeconds[unit]
 }

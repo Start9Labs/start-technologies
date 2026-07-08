@@ -117,11 +117,7 @@ impl Progress {
                     units: None,
                 };
             }
-            Self::Progress {
-                done: d,
-                total,
-                ..
-            } => {
+            Self::Progress { done: d, total, .. } => {
                 *d = match total {
                     Some(t) => done.min(*t),
                     None => done,
@@ -145,9 +141,7 @@ impl Progress {
     }
     pub fn add_total(&mut self, total: u64) {
         match self {
-            Self::Progress {
-                total: Some(t), ..
-            } => *t += total,
+            Self::Progress { total: Some(t), .. } => *t += total,
             Self::Complete(true) | Self::Nested(_) => {}
             _ => self.set_total(total),
         }
@@ -194,11 +188,7 @@ impl std::ops::AddAssign<u64> for Progress {
                     units: None,
                 };
             }
-            Self::Progress {
-                done,
-                total,
-                ..
-            } => {
+            Self::Progress { done, total, .. } => {
                 let new = *done + rhs;
                 *done = match total {
                     Some(t) => new.min(*t),

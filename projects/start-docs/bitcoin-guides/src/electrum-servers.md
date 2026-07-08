@@ -59,13 +59,13 @@ electrs is a lightweight Electrum server written in Rust. It takes a different a
 
 ## Comparison
 
-| Feature              | Fulcrum                     | electrs                        |
-| -------------------- | --------------------------- | ------------------------------ |
-| **Query speed**      | Fast (full index)           | Slower (partial on-demand)     |
-| **Disk usage**       | ~60-100 GB for index        | ~5-10 GB for index             |
-| **Initial sync**     | Several hours               | Faster                         |
-| **StartOS**          | Yes                         | No                             |
-| **Maintenance**      | Active                      | Active                         |
+| Feature          | Fulcrum              | electrs                    |
+| ---------------- | -------------------- | -------------------------- |
+| **Query speed**  | Fast (full index)    | Slower (partial on-demand) |
+| **Disk usage**   | ~60-100 GB for index | ~5-10 GB for index         |
+| **Initial sync** | Several hours        | Faster                     |
+| **StartOS**      | Yes                  | No                         |
+| **Maintenance**  | Active               | Active                     |
 
 For StartOS users, **Fulcrum is the clear choice** — it is the only Electrum server available on the StartOS Marketplace and provides the best query performance for everyday wallet use.
 

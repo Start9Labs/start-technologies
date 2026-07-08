@@ -6,10 +6,9 @@ Through the StartOS web interface, users can discover, download, install, config
 
 ## Designed for AI-Assisted Development
 
-StartOS service packaging is designed to be done with an AI coding agent. This guide, the SDK, and every existing package are structured so that an AI assistant can read the docs, study real packages, and write or modify package code with minimal human intervention. You do not need to be an expert TypeScript developer -- you need to understand *what* your service requires and let the AI handle *how* to implement it.
+StartOS service packaging is designed to be done with an AI coding agent. This guide, the SDK, and every existing package are structured so that an AI assistant can read the docs, study real packages, and write or modify package code with minimal human intervention. You do not need to be an expert TypeScript developer -- you need to understand _what_ your service requires and let the AI handle _how_ to implement it.
 
 The recommended setup is [Claude Code](https://claude.com/claude-code) with this guide and your package in the same workspace, scaffolded by `start-cli s9pk init-workspace`. See [Environment Setup](./environment-setup.md#set-up-your-packaging-workspace) and the [Quick Start](./quick-start.md) to get going.
-
 
 ## What is a StartOS Package?
 
@@ -30,7 +29,7 @@ What makes this experience possible is a unique package format (`.s9pk`) that pe
 
 1. **Set up your environment** — Follow [Environment Setup](./environment-setup.md), including the Claude Code section.
 2. **Build your first package** — Follow [Quick Start](./quick-start.md) to create, build, and install the Hello World template.
-3. **Use recipes to build your service** — Browse [Recipes](./recipes.md) to find the patterns you need. Each recipe describes *what* to do, links to reference pages for API details, and points to real packages for working code. Your AI agent reads these docs and writes the code.
+3. **Use recipes to build your service** — Browse [Recipes](./recipes.md) to find the patterns you need. Each recipe describes _what_ to do, links to reference pages for API details, and points to real packages for working code. Your AI agent reads these docs and writes the code.
 
 ## Recipes
 

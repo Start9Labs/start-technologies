@@ -20,8 +20,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use hickory_server::proto::op::update_message::{append, delete_rrset};
 use hickory_server::proto::op::{Message, ResponseCode};
-use hickory_server::proto::rr::rdata::{A, AAAA};
 use hickory_server::proto::rr::rdata::tsig::TsigAlgorithm;
+use hickory_server::proto::rr::rdata::{A, AAAA};
 use hickory_server::proto::rr::{Name, RData, Record, RecordSet, RecordType, TSigner};
 use hkdf::Hkdf;
 use imbl::OrdMap;
@@ -31,12 +31,12 @@ use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio::time::{interval, timeout};
 
+use crate::GatewayId;
 use crate::db::model::public::NetworkInterfaceInfo;
 use crate::net::port_map::candidate_gateways;
 use crate::net::utils::ipv6_is_link_local;
 use crate::prelude::*;
 use crate::util::sync::Watch;
-use crate::GatewayId;
 
 const DNS_PORT: u16 = 53;
 const RECORD_TTL: u32 = 300;
@@ -67,8 +67,13 @@ pub(crate) fn derive_tsig_key(psk: &[u8; 32]) -> [u8; 32] {
 
 /// HMAC-SHA256 TSIG signer/verifier for a derived key.
 pub(crate) fn tsig_signer(key: [u8; 32]) -> TSigner {
-    TSigner::new(key.to_vec(), TsigAlgorithm::HmacSha256, tsig_key_name(), TSIG_FUDGE)
-        .expect("HmacSha256 supported; static name valid")
+    TSigner::new(
+        key.to_vec(),
+        TsigAlgorithm::HmacSha256,
+        tsig_key_name(),
+        TSIG_FUDGE,
+    )
+    .expect("HmacSha256 supported; static name valid")
 }
 
 /// (gateway this target belongs to, DNS server to update, our address on that
@@ -179,7 +184,10 @@ fn targets_for(info: &NetworkInterfaceInfo) -> Vec<(IpAddr, IpAddr)> {
     let Some(ip_info) = &info.ip_info else {
         return Vec::new();
     };
-    let resolvers: Vec<IpAddr> = candidate_gateways(info).into_iter().map(|(g, _)| g).collect();
+    let resolvers: Vec<IpAddr> = candidate_gateways(info)
+        .into_iter()
+        .map(|(g, _)| g)
+        .collect();
     let mut out = Vec::new();
     for subnet in &ip_info.subnets {
         let our_ip = subnet.addr();
@@ -269,11 +277,7 @@ fn fqdn_to_name(fqdn: &str) -> Result<Name, Error> {
 /// own servers don't enforce it strictly.
 fn zone_of(fqdn: &Name) -> Name {
     let base = fqdn.base_name();
-    if base.is_root() {
-        fqdn.clone()
-    } else {
-        base
-    }
+    if base.is_root() { fqdn.clone() } else { base }
 }
 
 /// A record for an IPv4 address, AAAA for an IPv6 one.

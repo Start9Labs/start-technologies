@@ -23,10 +23,11 @@ pub fn validate_hostname(name: &str) -> bool {
     }
     name.split('.').enumerate().all(|(i, label)| {
         !label.is_empty()
-            && label
-                .bytes()
-                .enumerate()
-                .all(|(j, b)| b.is_ascii_alphanumeric() || b == b'-' || (b == b'*' && i == 0 && j == 0 && label.len() == 1))
+            && label.bytes().enumerate().all(|(j, b)| {
+                b.is_ascii_alphanumeric()
+                    || b == b'-'
+                    || (b == b'*' && i == 0 && j == 0 && label.len() == 1)
+            })
     })
 }
 
@@ -80,7 +81,10 @@ mod tests {
         assert_eq!(buf.len(), 20);
         assert_eq!(buf.len() % 4, 0);
         assert_eq!(buf[0], OPTION_HOSTNAME);
-        assert_eq!(parse_hostname_options(&buf).unwrap(), vec!["git.example.com"]);
+        assert_eq!(
+            parse_hostname_options(&buf).unwrap(),
+            vec!["git.example.com"]
+        );
     }
 
     #[test]
@@ -99,7 +103,10 @@ mod tests {
         // An unknown 4-byte option (code 200, len 0) before a HOSTNAME.
         let mut buf = vec![200u8, 0, 0, 0];
         encode_hostname_option(&mut buf, "host.example.com");
-        assert_eq!(parse_hostname_options(&buf).unwrap(), vec!["host.example.com"]);
+        assert_eq!(
+            parse_hostname_options(&buf).unwrap(),
+            vec!["host.example.com"]
+        );
     }
 
     #[test]

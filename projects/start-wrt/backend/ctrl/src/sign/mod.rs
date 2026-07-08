@@ -9,10 +9,9 @@ use ::ed25519_dalek::pkcs8::spki::AlgorithmIdentifierRef;
 use serde::{Deserialize, Serialize};
 use sha2::Sha512;
 
-use crate::Error;
-
 use self::commitment::Digestable;
 use self::ed25519::Ed25519;
+use crate::Error;
 
 // ── SignatureScheme trait ─────────────────────────────────────────────
 

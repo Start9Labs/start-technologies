@@ -11,6 +11,7 @@ The API is JSON-RPC (not REST). All endpoints are RPC methods organized in a hie
 There are four types of handler functions, chosen based on the function's characteristics:
 
 ### `from_fn_async` - Async handlers
+
 For standard async functions. Most handlers use this.
 
 ```rust
@@ -30,6 +31,7 @@ pub async fn no_params_handler(ctx: RpcContext) -> Result<MyResponse, Error> {
 ```
 
 ### `from_fn_async_local` - Non-thread-safe async handlers
+
 For async functions that are not `Send` (cannot be safely moved between threads). Use when working with non-thread-safe types.
 
 ```rust
@@ -41,6 +43,7 @@ from_fn_async_local(cli_download)
 ```
 
 ### `from_fn_blocking` - Sync blocking handlers
+
 For synchronous functions that perform blocking I/O or long computations.
 
 ```rust
@@ -52,6 +55,7 @@ from_fn_blocking(query_dns)
 ```
 
 ### `from_fn` - Sync non-blocking handlers
+
 For pure functions or quick synchronous operations with no I/O.
 
 ```rust
@@ -81,20 +85,22 @@ pub fn my_api<C: Context>() -> ParentHandler<C> {
 Chain methods to configure handler behavior.
 
 **Ordering rules:**
+
 1. `with_about()` must come AFTER other CLI modifiers (`no_display()`, `with_custom_display_fn()`, etc.)
 2. `with_call_remote()` must be the LAST adapter in the chain
 
-| Method | Purpose |
-|--------|---------|
-| `.with_metadata("key", Value)` | Attach metadata for middleware |
-| `.no_cli()` | RPC-only, not available via CLI |
-| `.no_display()` | No CLI output |
-| `.with_display_serializable()` | Default JSON/YAML output for CLI |
-| `.with_custom_display_fn(\|_, res\| ...)` | Custom CLI output formatting |
-| `.with_about("about.description")` | Add help text (i18n key) - **after CLI modifiers** |
-| `.with_call_remote::<CliContext>()` | Enable CLI to call remotely - **must be last** |
+| Method                                    | Purpose                                            |
+| ----------------------------------------- | -------------------------------------------------- |
+| `.with_metadata("key", Value)`            | Attach metadata for middleware                     |
+| `.no_cli()`                               | RPC-only, not available via CLI                    |
+| `.no_display()`                           | No CLI output                                      |
+| `.with_display_serializable()`            | Default JSON/YAML output for CLI                   |
+| `.with_custom_display_fn(\|_, res\| ...)` | Custom CLI output formatting                       |
+| `.with_about("about.description")`        | Add help text (i18n key) - **after CLI modifiers** |
+| `.with_call_remote::<CliContext>()`       | Enable CLI to call remotely - **must be last**     |
 
 ### Correct ordering example:
+
 ```rust
 from_fn_async(my_handler)
     .with_metadata("sync_db", Value::Bool(true))  // metadata early
@@ -109,34 +115,34 @@ Metadata tags are processed by different middleware. Group them logically:
 
 ### Auth Middleware (`middleware/auth/mod.rs`)
 
-| Metadata | Default | Description |
-|----------|---------|-------------|
-| `authenticated` | `true` | Whether endpoint requires authentication. Set to `false` for public endpoints. |
+| Metadata        | Default | Description                                                                    |
+| --------------- | ------- | ------------------------------------------------------------------------------ |
+| `authenticated` | `true`  | Whether endpoint requires authentication. Set to `false` for public endpoints. |
 
 ### Session Auth Middleware (`middleware/auth/session.rs`)
 
-| Metadata | Default | Description |
-|----------|---------|-------------|
-| `login` | `false` | Special handling for login endpoints (rate limiting, cookie setting) |
-| `get_session` | `false` | Inject session ID into params as `__Auth_session` |
+| Metadata      | Default | Description                                                          |
+| ------------- | ------- | -------------------------------------------------------------------- |
+| `login`       | `false` | Special handling for login endpoints (rate limiting, cookie setting) |
+| `get_session` | `false` | Inject session ID into params as `__Auth_session`                    |
 
 ### Signature Auth Middleware (`middleware/auth/signature.rs`)
 
-| Metadata | Default | Description |
-|----------|---------|-------------|
+| Metadata     | Default | Description                                             |
+| ------------ | ------- | ------------------------------------------------------- |
 | `get_signer` | `false` | Inject signer public key into params as `__Auth_signer` |
 
 ### Registry Auth (extends Signature Auth)
 
-| Metadata | Default | Description |
-|----------|---------|-------------|
-| `admin` | `false` | Require admin privileges (signer must be in admin list) |
-| `get_device_info` | `false` | Inject device info header for hardware filtering |
+| Metadata          | Default | Description                                             |
+| ----------------- | ------- | ------------------------------------------------------- |
+| `admin`           | `false` | Require admin privileges (signer must be in admin list) |
+| `get_device_info` | `false` | Inject device info header for hardware filtering        |
 
 ### Database Middleware (`middleware/db.rs`)
 
-| Metadata | Default | Description |
-|----------|---------|-------------|
+| Metadata  | Default | Description                                                 |
+| --------- | ------- | ----------------------------------------------------------- |
 | `sync_db` | `false` | Sync database after mutation, add `X-Patch-Sequence` header |
 
 ## Context Types

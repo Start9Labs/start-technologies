@@ -281,7 +281,8 @@ impl WgConfig {
                                     p.trim().parse().map_err(|_| invalid("prefix"))?,
                                 ),
                                 None => {
-                                    let ip: IpAddr = part.parse().map_err(|_| invalid("address"))?;
+                                    let ip: IpAddr =
+                                        part.parse().map_err(|_| invalid("address"))?;
                                     (ip, if ip.is_ipv4() { 32 } else { 128 })
                                 }
                             };
@@ -470,8 +471,7 @@ pub(crate) async fn update_wireguard_config(interface: &str, config: &str) -> Re
         ));
     }
     let ac_proxy = active_connection::ActiveConnectionProxy::new(&connection, ac).await?;
-    let settings =
-        ConnectionSettingsProxy::new(&connection, ac_proxy.connection().await?).await?;
+    let settings = ConnectionSettingsProxy::new(&connection, ac_proxy.connection().await?).await?;
 
     // Preserve the connection's uuid so this updates the existing profile rather
     // than defining a new one.
@@ -1501,8 +1501,12 @@ async fn snapshot_outbound_rules(v6: bool) -> (BTreeSet<u32>, BTreeSet<u32>) {
         if v6 {
             cmd.arg("-6");
         }
-        let output =
-            String::from_utf8(cmd.arg("rule").arg("show").invoke(ErrorKind::Network).await?)?;
+        let output = String::from_utf8(
+            cmd.arg("rule")
+                .arg("show")
+                .invoke(ErrorKind::Network)
+                .await?,
+        )?;
         let mut fwmarks_74 = BTreeSet::<u32>::new();
         let mut tables_75 = BTreeSet::<u32>::new();
         for line in output.lines() {
@@ -1630,7 +1634,9 @@ fn policy_table_for(device_type: Option<NetworkInterfaceType>, iface: &GatewayId
     ) {
         return None;
     }
-    if_nametoindex(iface.as_str()).map(|idx| 1000 + idx).log_err()
+    if_nametoindex(iface.as_str())
+        .map(|idx| 1000 + idx)
+        .log_err()
 }
 
 /// Declaratively reconcile the StartOS-owned mangle policy-routing rules.
@@ -1780,9 +1786,7 @@ async fn watch_ip(
                                 )
                                 .with_stream(ip6_proxy.receive_address_data_changed().await.stub())
                                 .with_stream(ip6_proxy.receive_gateway_changed().await.stub())
-                                .with_stream(
-                                    ip6_proxy.receive_nameservers_changed().await.stub(),
-                                );
+                                .with_stream(ip6_proxy.receive_nameservers_changed().await.stub());
 
                             let dhcp4_proxy = if &*dhcp4_config != "/" {
                                 let dhcp4_proxy =
@@ -2064,7 +2068,10 @@ async fn apply_policy_routing_v6(
             if let Some(gw) = ipv6_gateway {
                 cmd.arg("via").arg(gw.to_string());
             }
-            cmd.arg("dev").arg(iface.as_str()).arg("table").arg(&table_str);
+            cmd.arg("dev")
+                .arg(iface.as_str())
+                .arg("table")
+                .arg(&table_str);
         } else {
             cmd.arg("blackhole")
                 .arg("default")
@@ -2239,14 +2246,15 @@ async fn poll_ip_info(
 
     write_to.send_if_modified(|m: &mut OrdMap<GatewayId, NetworkInterfaceInfo>| {
         let (name, secure, gateway_type, prev_wan_ip) =
-            m.get(iface).map_or((None, None, Default::default(), None), |i| {
-                (
-                    i.name.clone(),
-                    i.secure,
-                    i.gateway_type,
-                    i.ip_info.as_ref().and_then(|i| i.wan_ip),
-                )
-            });
+            m.get(iface)
+                .map_or((None, None, Default::default(), None), |i| {
+                    (
+                        i.name.clone(),
+                        i.secure,
+                        i.gateway_type,
+                        i.ip_info.as_ref().and_then(|i| i.wan_ip),
+                    )
+                });
         ip_info.wan_ip = prev_wan_ip;
         let ip_info = Arc::new(ip_info);
         m.insert(
@@ -3047,7 +3055,8 @@ mod wg_config_tests {
         .unwrap();
         assert_eq!(peers.len(), 1);
         assert_eq!(as_str(&peers[0]["public-key"]), "aPublicKey=");
-        let allowed = Vec::<String>::try_from(peers[0]["allowed-ips"].try_clone().unwrap()).unwrap();
+        let allowed =
+            Vec::<String>::try_from(peers[0]["allowed-ips"].try_clone().unwrap()).unwrap();
         assert_eq!(allowed, vec!["0.0.0.0/0".to_string(), "::/0".to_string()]);
     }
 

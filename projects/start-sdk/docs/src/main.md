@@ -5,9 +5,9 @@
 ## Basic Structure
 
 ```typescript
-import { i18n } from "./i18n";
-import { sdk } from "./sdk";
-import { uiPort } from "./utils";
+import { i18n } from './i18n'
+import { sdk } from './sdk'
+import { uiPort } from './utils'
 
 export const main = sdk.setupMain(async ({ effects }) => {
   /**
@@ -15,7 +15,7 @@ export const main = sdk.setupMain(async ({ effects }) => {
    *
    * In this section, we fetch any resources or run any desired preliminary commands.
    */
-  console.info(i18n("Starting Hello World!"));
+  console.info(i18n('Starting Hello World!'))
 
   /**
    * ======================== Daemons ========================
@@ -24,30 +24,30 @@ export const main = sdk.setupMain(async ({ effects }) => {
    *
    * Each daemon defines its own health check, which can optionally be exposed to the user.
    */
-  return sdk.Daemons.of(effects).addDaemon("primary", {
+  return sdk.Daemons.of(effects).addDaemon('primary', {
     subcontainer: sdk.SubContainer.of(
       effects,
-      { imageId: "hello-world" },
+      { imageId: 'hello-world' },
       sdk.Mounts.of().mountVolume({
-        volumeId: "main",
+        volumeId: 'main',
         subpath: null,
-        mountpoint: "/data",
+        mountpoint: '/data',
         readonly: false,
       }),
-      "hello-world-sub",
+      'hello-world-sub',
     ),
-    exec: { command: ["hello-world"] },
+    exec: { command: ['hello-world'] },
     ready: {
-      display: i18n("Web Interface"),
+      display: i18n('Web Interface'),
       fn: () =>
         sdk.healthCheck.checkPortListening(effects, uiPort, {
-          successMessage: i18n("The web interface is ready"),
-          errorMessage: i18n("The web interface is not ready"),
+          successMessage: i18n('The web interface is ready'),
+          errorMessage: i18n('The web interface is not ready'),
         }),
     },
     requires: [],
-  });
-});
+  })
+})
 ```
 
 > [!NOTE]
@@ -64,15 +64,15 @@ SubContainers are isolated filesystem environments created from Docker images. T
 ```typescript
 const appSub = sdk.SubContainer.of(
   effects,
-  { imageId: "my-app" },
+  { imageId: 'my-app' },
   sdk.Mounts.of().mountVolume({
-    volumeId: "main",
+    volumeId: 'main',
     subpath: null,
-    mountpoint: "/data",
+    mountpoint: '/data',
     readonly: false,
   }),
-  "my-app-sub",
-);
+  'my-app-sub',
+)
 ```
 
 > [!NOTE]
@@ -81,25 +81,19 @@ const appSub = sdk.SubContainer.of(
 **`SubContainer.withTemp()`** -- creates a temporary subcontainer that is automatically destroyed after the callback completes. Use this for one-off commands in actions, init functions, or migrations:
 
 ```typescript
-await sdk.SubContainer.withTemp(
-  effects,
-  { imageId: "my-app" },
-  mounts,
-  "temp-task",
-  async (sub) => {
-    await sub.execFail(["my-command", "--flag"]);
-  },
-);
+await sdk.SubContainer.withTemp(effects, { imageId: 'my-app' }, mounts, 'temp-task', async sub => {
+  await sub.execFail(['my-command', '--flag'])
+})
 ```
 
 ### Image Options
 
 The second argument to `SubContainer.of()` and `SubContainer.withTemp()` accepts:
 
-| Option      | Type    | Default | Description                                                            |
-| ----------- | ------- | ------- | ---------------------------------------------------------------------- |
-| `imageId`   | string  | —       | Required. The Docker image ID from the manifest `images` field         |
-| `sharedRun` | boolean | `false` | Bind-mount the host's `/run` directory into the subcontainer           |
+| Option      | Type    | Default | Description                                                    |
+| ----------- | ------- | ------- | -------------------------------------------------------------- |
+| `imageId`   | string  | —       | Required. The Docker image ID from the manifest `images` field |
+| `sharedRun` | boolean | `false` | Bind-mount the host's `/run` directory into the subcontainer   |
 
 By default, subcontainers share `/dev` and `/sys` with the host. Setting `sharedRun: true` additionally shares `/run`, giving access to host runtime sockets (D-Bus, systemd, PID files). Most services do not need this -- only use it when the container must communicate with host system services.
 
@@ -118,10 +112,10 @@ When reading configuration in `main.ts`, you choose how the system responds to c
 
 ```typescript
 // Reactive: re-runs setupMain when value changes (restarts daemons)
-const store = await storeJson.read().const(effects);
+const store = await storeJson.read().const(effects)
 
 // One-time: read once, no re-run on change
-const store = await storeJson.read().once();
+const store = await storeJson.read().once()
 ```
 
 ### Subset Reading
@@ -130,7 +124,7 @@ Use a mapper function to read only specific fields. This is more efficient and l
 
 ```typescript
 // Read only secretKey - re-runs only if secretKey changes
-const secretKey = await storeJson.read((s) => s.secretKey).const(effects);
+const secretKey = await storeJson.read(s => s.secretKey).const(effects)
 ```
 
 ### Other Reading Methods
@@ -145,13 +139,12 @@ const secretKey = await storeJson.read((s) => s.secretKey).const(effects);
 Interfaces are reached through their **host**. `sdk.host.getOwn(effects, hostId)` returns the host (`hostId` is the id you passed to `sdk.MultiHost.of`); the interface you exported lives under one of the host's bindings, and its `addressInfo` comes back **pre-filled** — call `.format(...)` on it for resolvable hostnames/URLs (also `.filter(...)`, `.nonLocal`, `.public`, `.bridge`, `.toUrl`):
 
 ```typescript
-const host = await sdk.host.getOwn(effects, "ui").const();
+const host = await sdk.host.getOwn(effects, 'ui').const()
 const ui = Object.values(host?.bindings ?? {})
-  .flatMap((b) => Object.values(b.interfaces))
-  .find((i) => i.id === "ui");
+  .flatMap(b => Object.values(b.interfaces))
+  .find(i => i.id === 'ui')
 
-const allowedHosts =
-  ui?.addressInfo.format("hostname-info").map((h) => h.hostname.value) ?? [];
+const allowedHosts = ui?.addressInfo.format('hostname-info').map(h => h.hostname.value) ?? []
 ```
 
 `.const()` sets up a reactive watcher — `setupMain` re-runs whenever the host's bindings, addresses, or exported interfaces change.
@@ -160,9 +153,7 @@ To react to only a slice of the host, pass a `map` selector (and optional `eq`, 
 
 ```typescript
 // re-run only when THIS interface's address info changes
-const ui = await sdk.host
-  .getOwn(effects, "ui", (host) => host?.bindings[80]?.interfaces["ui"])
-  .const();
+const ui = await sdk.host.getOwn(effects, 'ui', host => host?.bindings[80]?.interfaces['ui']).const()
 ```
 
 ## Oneshots (Runtime)
@@ -342,13 +333,13 @@ Standalone health checks can be conditional — return `null` instead of the con
 
 The `fn` returns an object with `result` and `message`:
 
-| Result | Meaning | When to use |
-|--------|---------|-------------|
-| `success` | Healthy and fully operational | Service is ready and serving |
-| `loading` | Operational but catching up | Syncing blocks, indexing data |
-| `disabled` | Intentionally inactive | Feature excluded by config (e.g. onlynet) |
-| `starting` | Not yet ready | Still initializing (also set automatically during `gracePeriod`) |
-| `failure` | Unhealthy | Process crashed, port not listening, dependency unreachable |
+| Result     | Meaning                       | When to use                                                      |
+| ---------- | ----------------------------- | ---------------------------------------------------------------- |
+| `success`  | Healthy and fully operational | Service is ready and serving                                     |
+| `loading`  | Operational but catching up   | Syncing blocks, indexing data                                    |
+| `disabled` | Intentionally inactive        | Feature excluded by config (e.g. onlynet)                        |
+| `starting` | Not yet ready                 | Still initializing (also set automatically during `gracePeriod`) |
+| `failure`  | Unhealthy                     | Process crashed, port not listening, dependency unreachable      |
 
 `loading` and `failure` require a `message` string. Other states accept an optional message.
 
@@ -392,19 +383,19 @@ trigger: sdk.trigger.statusTrigger(30_000, {
 sdk.Mounts.of()
   // Mount entire volume (directory)
   .mountVolume({
-    volumeId: "main",
+    volumeId: 'main',
     subpath: null,
-    mountpoint: "/data",
+    mountpoint: '/data',
     readonly: false,
   })
   // Mount specific file from volume (requires type: 'file')
   .mountVolume({
-    volumeId: "main",
-    subpath: "config.py",
-    mountpoint: "/app/config.py",
+    volumeId: 'main',
+    subpath: 'config.py',
+    mountpoint: '/app/config.py',
     readonly: true,
-    type: "file", // Required when mounting a single file
-  });
+    type: 'file', // Required when mounting a single file
+  })
 ```
 
 > [!WARNING]
@@ -412,15 +403,23 @@ sdk.Mounts.of()
 >
 > ```typescript
 > // BROKEN — conditional mount is lost
-> const mounts = sdk.Mounts.of().mountVolume({ /* ... */ });
+> const mounts = sdk.Mounts.of().mountVolume({
+>   /* ... */
+> })
 > if (needsCookie) {
->   mounts.mountDependency({ /* ... */ }); // ← return value discarded
+>   mounts.mountDependency({
+>     /* ... */
+>   }) // ← return value discarded
 > }
 >
 > // CORRECT — reassign each time
-> let mounts = sdk.Mounts.of().mountVolume({ /* ... */ });
+> let mounts = sdk.Mounts.of().mountVolume({
+>   /* ... */
+> })
 > if (needsCookie) {
->   mounts = mounts.mountDependency({ /* ... */ });
+>   mounts = mounts.mountDependency({
+>     /* ... */
+>   })
 > }
 > ```
 >
@@ -432,26 +431,23 @@ Every mount (`mountVolume` / `mountAssets` / `mountDependency` / `mountBackups`)
 
 ```typescript
 sdk.Mounts.of().mountVolume({
-  volumeId: "main",
+  volumeId: 'main',
   subpath: null,
-  mountpoint: "/data",
+  mountpoint: '/data',
   readonly: false,
   idmap: [{ fromId: 0, toId: 1000 }], // files owned by uid 0 on the volume appear as uid 1000 in the container
-});
+})
 ```
 
 ## Writing to Subcontainer Rootfs
 
-For config files that are *generated from code* on every startup (e.g., a Python settings file built from hostnames and secrets), write directly to the subcontainer's rootfs:
+For config files that are _generated from code_ on every startup (e.g., a Python settings file built from hostnames and secrets), write directly to the subcontainer's rootfs:
 
 ```typescript
 import { writeFile } from 'node:fs/promises'
 
 // Write a generated config to subcontainer rootfs
-await writeFile(
-  `${await appSub.rootfs}/app/config.py`,
-  generateConfig({ secretKey, allowedHosts }),
-)
+await writeFile(`${await appSub.rootfs}/app/config.py`, generateConfig({ secretKey, allowedHosts }))
 ```
 
 > [!WARNING]
@@ -459,7 +455,7 @@ await writeFile(
 
 **When to use rootfs vs volume mounts:**
 
-- **Rootfs**: Config files *generated from code* that don't exist on a volume (e.g., built from hostnames, env vars, or templates)
+- **Rootfs**: Config files _generated from code_ that don't exist on a volume (e.g., built from hostnames, env vars, or templates)
 - **Volume mount (directory)**: Mount a directory that contains the config file alongside other persistent data. The config file is just one of many files in the mounted directory.
 - **Volume mount (file)**: Mount a single config file with `type: 'file'` when the config lives on a volume that is otherwise unrelated to the container's filesystem.
 
@@ -474,17 +470,17 @@ Use `exec` or `execFail` to run commands in a subcontainer:
 
 ```typescript
 // exec() - manual error handling (good for optional/warning cases)
-const result = await appSub.exec(["update-ca-certificates"], { user: "root" });
+const result = await appSub.exec(['update-ca-certificates'], { user: 'root' })
 if (result.exitCode !== 0) {
-  console.warn("Failed to update CA certificates:", result.stderr);
+  console.warn('Failed to update CA certificates:', result.stderr)
 }
 
 // execFail() - throws on error (good for required commands)
 // Uses the default user from the Dockerfile (no need to specify { user: '...' })
-await appSub.execFail(["git", "clone", "https://github.com/user/repo.git"]);
+await appSub.execFail(['git', 'clone', 'https://github.com/user/repo.git'])
 
 // Override user when needed (e.g., run as root)
-await appSub.exec(["update-ca-certificates"], { user: "root" });
+await appSub.exec(['update-ca-certificates'], { user: 'root' })
 ```
 
 The `user` option is optional. If omitted, commands run as the default user defined in the Dockerfile (`USER` directive). Only specify `{ user: 'root' }` when you need elevated privileges.
@@ -512,10 +508,10 @@ Use password authentication with localhost-only binding. Auto-generate the passw
 **Password generation** (in `utils.ts`):
 
 ```typescript
-import { utils } from "@start9labs/start-sdk";
+import { utils } from '@start9labs/start-sdk'
 
 export function getDefaultPgPassword(): string {
-  return utils.getDefaultString({ charset: "a-z,A-Z,0-9", len: 22 });
+  return utils.getDefaultString({ charset: 'a-z,A-Z,0-9', len: 22 })
 }
 ```
 
@@ -523,30 +519,30 @@ export function getDefaultPgPassword(): string {
 
 ```typescript
 const shape = z.object({
-  pgPassword: z.string().catch(""),
+  pgPassword: z.string().catch(''),
   // ...other fields
-});
+})
 ```
 
 **Seed on install** (in `init/seedFiles.ts`):
 
 ```typescript
 export const seedFiles = sdk.setupOnInit(async (effects, kind) => {
-  if (kind !== "install") return;
+  if (kind !== 'install') return
   await storeJson.merge(effects, {
     pgPassword: getDefaultPgPassword(),
-  });
-});
+  })
+})
 ```
 
 **Seed on upgrade** (in version migration):
 
 ```typescript
 // Generate pgPassword for users upgrading from a version that didn't have one
-const existing = await storeJson.read((s) => s.pgPassword).once();
+const existing = await storeJson.read(s => s.pgPassword).once()
 await storeJson.merge(effects, {
   pgPassword: existing || getDefaultPgPassword(),
-});
+})
 ```
 
 ### Daemon Configuration
@@ -607,6 +603,7 @@ const postgresSub = sdk.SubContainer.of(
 ```
 
 Key points:
+
 - **`listen_addresses=127.0.0.1`**: Restricts connections to localhost only — no external access
 - **`POSTGRES_PASSWORD`**: Auto-generated password, stored in `store.json`
 - **`display: null`**: Internal sidecar health checks are typically not shown to the user
@@ -640,7 +637,7 @@ Some actions need to query PostgreSQL directly (e.g., resetting a user password)
 ```typescript
 import { Client } from 'pg'
 
-const pgPassword = (await storeJson.read((s) => s.pgPassword).once()) || ''
+const pgPassword = (await storeJson.read(s => s.pgPassword).once()) || ''
 
 const client = new Client({
   user: 'postgres',
@@ -652,10 +649,7 @@ const client = new Client({
 
 try {
   await client.connect()
-  await client.query(
-    `UPDATE "Users" SET "PasswordHash"=$1 WHERE "Id"=$2`,
-    [hash, userId],
-  )
+  await client.query(`UPDATE "Users" SET "PasswordHash"=$1 WHERE "Id"=$2`, [hash, userId])
 } finally {
   await client.end()
 }
@@ -670,10 +664,7 @@ try {
 > }
 >
 > // Use in psql commands
-> await sub.execFail(
->   ['psql', '-c', `ALTER USER myuser PASSWORD ${sqlLiteral(password)}`],
->   { user: 'postgres' },
-> )
+> await sub.execFail(['psql', '-c', `ALTER USER myuser PASSWORD ${sqlLiteral(password)}`], { user: 'postgres' })
 > ```
 >
 > Prefer parameterized queries (the `$1` syntax above) whenever possible — they handle escaping automatically.
@@ -683,16 +674,13 @@ try {
 A common pattern is to define a helper function that generates a config file string from your service's configuration values:
 
 ```typescript
-function generateConfig(config: {
-  secretKey: string;
-  allowedHosts: string[];
-}): string {
-  const hostsList = config.allowedHosts.map((h) => `'${h}'`).join(", ");
+function generateConfig(config: { secretKey: string; allowedHosts: string[] }): string {
+  const hostsList = config.allowedHosts.map(h => `'${h}'`).join(', ')
 
   return `
 SECRET_KEY = '${config.secretKey}'
 ALLOWED_HOSTS = [${hostsList}]
 DATABASE = '/data/db.sqlite3'
-`;
+`
 }
 ```

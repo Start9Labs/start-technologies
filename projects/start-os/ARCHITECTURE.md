@@ -110,13 +110,13 @@ start-core (Rust)
       → container-runtime consumes start-sdk/dist (+ @start9labs/start-core)
 ```
 
-| Step | Command (from repo root) | What it does |
-|---|---|---|
-| 1 | `cargo check -p start-os` | Verify the OS bins compile |
-| 2 | `make start-core-ts-bindings` | Export ts-rs types from `start-core` |
-| 3 | `cd projects/start-sdk && make bundle` | Build the SDK `dist` (builds `@start9labs/start-core` first and bundles it) |
-| 4 | `npm run check:ui && npm run check:setup` | Type-check the apps |
-| 5 | `cd projects/start-os/container-runtime && npm run check` | Type-check the runtime |
+| Step | Command (from repo root)                                  | What it does                                                                |
+| ---- | --------------------------------------------------------- | --------------------------------------------------------------------------- |
+| 1    | `cargo check -p start-os`                                 | Verify the OS bins compile                                                  |
+| 2    | `make start-core-ts-bindings`                             | Export ts-rs types from `start-core`                                        |
+| 3    | `cd projects/start-sdk && make bundle`                    | Build the SDK `dist` (builds `@start9labs/start-core` first and bundles it) |
+| 4    | `npm run check:ui && npm run check:setup`                 | Type-check the apps                                                         |
+| 5    | `cd projects/start-os/container-runtime && npm run check` | Type-check the runtime                                                      |
 
 Editing the generated bindings under `shared-libs/ts-modules/start-core/lib/osBindings/*.ts` alone
 is **not** enough — start-core (and the SDK bundle) must be rebuilt before the web apps and

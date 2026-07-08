@@ -1,10 +1,11 @@
-pub mod prelude;
 pub mod error;
 pub mod invoke;
+pub mod prelude;
 
 pub mod activity;
 pub mod auth;
 pub mod backup;
+pub mod bins;
 pub mod captive;
 pub mod continuations;
 pub mod device_names;
@@ -12,6 +13,7 @@ pub mod devices;
 pub mod diagnostics;
 pub mod dns;
 pub mod eeprom;
+pub mod embedded_web;
 pub mod ethernet;
 pub mod exec;
 pub mod files;
@@ -21,8 +23,8 @@ pub mod lan;
 pub mod logs;
 pub mod luci_proxy;
 pub mod middleware;
-pub mod progress;
 pub mod profiles;
+pub mod progress;
 pub mod published_ports;
 pub mod registry;
 pub mod setup;
@@ -34,29 +36,25 @@ pub mod uci;
 pub mod update;
 pub mod utils;
 pub mod verify;
-pub mod wan;
 pub mod vpn_client;
 pub mod vpn_server;
+pub mod wan;
 pub mod wg;
 pub mod wifi;
-pub mod embedded_web;
-pub mod bins;
 
 use std::fs::{File, OpenOptions};
 use std::io::BufReader;
 use std::ops::Deref;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-
 use std::sync::{Arc, OnceLock};
 
 use clap::Parser;
 use color_eyre::eyre::eyre;
 use cookie_store::CookieStore;
+pub use error::{Error, ErrorKind};
 use reqwest_cookie_store::CookieStoreMutex;
 use tokio::runtime::Runtime;
-
-pub use error::{Error, ErrorKind};
 
 /// Non-ambiguous character set for generated passwords.
 ///
@@ -67,8 +65,7 @@ pub const PASSWORD_CHARS: &str =
 /// Non-ambiguous alphanumeric subset (no special characters).
 ///
 /// 57 chars: A-Z minus I,O (24) + a-z minus l (25) + 2-9 (8)
-pub const PASSWORD_CHARS_ALNUM: &str =
-    "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+pub const PASSWORD_CHARS_ALNUM: &str = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
 
 /// Generate a random password from the given charset using rejection sampling.
 pub fn generate_password(charset: &[u8], len: usize) -> String {
@@ -90,11 +87,10 @@ pub fn generate_password(charset: &[u8], len: usize) -> String {
 }
 use imbl_value::imbl::OrdMap;
 use imbl_value::Value;
+use rpc_toolkit::reqwest::{self, Client, Url};
 use rpc_toolkit::yajrc::{GenericRpcMethod, Id, RpcError, RpcRequest};
 use rpc_toolkit::{
-    from_fn_async,
-    reqwest::{self, Client, Url},
-    CallRemote, Context, Empty, HandlerExt, ParentHandler, RpcResponse,
+    from_fn_async, CallRemote, Context, Empty, HandlerExt, ParentHandler, RpcResponse,
 };
 
 pub trait CtrlContext: Context + Clone {
@@ -193,11 +189,14 @@ impl CliContext {
     pub fn init(args: CliArgs) -> Result<Self, Error> {
         let cookie_path = cookies_path();
         let cookie_store = Arc::new(CookieStoreMutex::new(if cookie_path.exists() {
-            cookie_store::serde::json::load(BufReader::new(
-                File::open(&cookie_path).map_err(|e| {
-                    Error::new(eyre!("Failed to open cookie file: {}", e), ErrorKind::Filesystem)
-                })?,
-            ))
+            cookie_store::serde::json::load(BufReader::new(File::open(&cookie_path).map_err(
+                |e| {
+                    Error::new(
+                        eyre!("Failed to open cookie file: {}", e),
+                        ErrorKind::Filesystem,
+                    )
+                },
+            )?))
             .unwrap_or_default()
         } else {
             CookieStore::default()
@@ -208,16 +207,26 @@ impl CliContext {
         if let Ok(local_token) = std::fs::read_to_string(crate::auth::LOCAL_AUTH_COOKIE_PATH) {
             let local_token = local_token.trim();
             let domain = args.host.host_str().unwrap_or("localhost");
-            let cookie_value = format!("local={local_token}; Domain={domain}; Path=/; SameSite=Strict");
+            let cookie_value =
+                format!("local={local_token}; Domain={domain}; Path=/; SameSite=Strict");
             if let Ok(cookie) = cookie_store::RawCookie::parse(cookie_value) {
-                cookie_store.lock().unwrap().insert_raw(&cookie, &args.host).ok();
+                cookie_store
+                    .lock()
+                    .unwrap()
+                    .insert_raw(&cookie, &args.host)
+                    .ok();
             }
         }
 
         let client = Client::builder()
             .cookie_provider(cookie_store.clone())
             .build()
-            .map_err(|e| Error::new(eyre!("Failed to build HTTP client: {}", e), ErrorKind::Network))?;
+            .map_err(|e| {
+                Error::new(
+                    eyre!("Failed to build HTTP client: {}", e),
+                    ErrorKind::Network,
+                )
+            })?;
 
         Ok(Self(Arc::new(CliContextSeed {
             config_root: args.config_root,
@@ -244,19 +253,27 @@ impl CliContext {
     /// GET a continuation, returning (bytes, filename).
     pub async fn rest_download(&self, guid: &str) -> Result<(Vec<u8>, String), Error> {
         let url = self.rest_url(guid);
-        let res = self.client.get(url).send().await
-            .map_err(|e| Error::new(eyre!("Download request failed: {e}"), ErrorKind::Network))?;
+        let res =
+            self.client.get(url).send().await.map_err(|e| {
+                Error::new(eyre!("Download request failed: {e}"), ErrorKind::Network)
+            })?;
         if !res.status().is_success() {
-            return Err(Error::new(eyre!("Download failed: {}", res.status()), ErrorKind::Network));
+            return Err(Error::new(
+                eyre!("Download failed: {}", res.status()),
+                ErrorKind::Network,
+            ));
         }
-        let filename = res.headers()
+        let filename = res
+            .headers()
             .get(reqwest::header::CONTENT_DISPOSITION)
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.split("filename=\"").nth(1))
             .and_then(|v| v.strip_suffix('"'))
             .unwrap_or("download")
             .to_string();
-        let bytes = res.bytes().await
+        let bytes = res
+            .bytes()
+            .await
             .map_err(|e| Error::new(eyre!("Failed to read response: {e}"), ErrorKind::Network))?
             .to_vec();
         Ok((bytes, filename))
@@ -265,11 +282,19 @@ impl CliContext {
     /// POST data to a continuation.
     pub async fn rest_upload(&self, guid: &str, data: Vec<u8>) -> Result<(), Error> {
         let url = self.rest_url(guid);
-        let res = self.client.post(url).body(data).send().await
+        let res = self
+            .client
+            .post(url)
+            .body(data)
+            .send()
+            .await
             .map_err(|e| Error::new(eyre!("Upload request failed: {e}"), ErrorKind::Network))?;
         if !res.status().is_success() {
             let text = res.text().await.unwrap_or_default();
-            return Err(Error::new(eyre!("Upload failed: {text}"), ErrorKind::Network));
+            return Err(Error::new(
+                eyre!("Upload failed: {text}"),
+                ErrorKind::Network,
+            ));
         }
         Ok(())
     }
@@ -359,9 +384,11 @@ impl CallRemote<ServerContext> for CliContext {
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|v| v.to_str().ok())
         {
-            Some("application/json") => serde_json::from_slice::<RpcResponse>(&*res.bytes().await?)
-                .map_err(|e| Error::new(eyre!("{e}"), ErrorKind::Deserialization))?
-                .result,
+            Some("application/json") => {
+                serde_json::from_slice::<RpcResponse>(&*res.bytes().await?)
+                    .map_err(|e| Error::new(eyre!("{e}"), ErrorKind::Deserialization))?
+                    .result
+            }
             _ => Err(Error::new(
                 eyre!("unexpected content type from daemon"),
                 ErrorKind::Network,
@@ -448,17 +475,14 @@ pub async fn run_quiet_async(
 }
 
 pub fn init_logging(_name: &str) {
-    use tracing_rfc_5424::{
-        rfc3164::Rfc3164, tracing::TrivialTracingFormatter, transport::UnixSocket,
-    };
-    use tracing_subscriber::Registry;
-    use tracing_subscriber::{
-        layer::SubscriberExt,
-        EnvFilter,
-    };
+    use tracing_rfc_5424::rfc3164::Rfc3164;
+    use tracing_rfc_5424::tracing::TrivialTracingFormatter;
+    use tracing_rfc_5424::transport::UnixSocket;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::{EnvFilter, Registry};
 
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("warn,activity=info"));
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn,activity=info"));
 
     let syslog = tracing_rfc_5424::layer::Layer::<
         tracing_subscriber::Registry,
@@ -468,9 +492,7 @@ pub fn init_logging(_name: &str) {
     >::try_default()
     .unwrap();
 
-    let subscriber = Registry::default()
-        .with(syslog)
-        .with(filter);
+    let subscriber = Registry::default().with(syslog).with(filter);
     tracing::subscriber::set_global_default(subscriber)
         .expect("failed to set global tracing subscriber");
 }

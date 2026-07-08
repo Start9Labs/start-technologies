@@ -48,9 +48,7 @@ impl<P0: AsRef<Path> + Send + Sync, P1: AsRef<Path> + Send + Sync, P2: AsRef<Pat
         tokio::fs::create_dir_all(mountpoint).await?;
         Ok(())
     }
-    async fn source_hash(
-        &self,
-    ) -> Result<digest::Output<Sha256>, Error> {
+    async fn source_hash(&self) -> Result<digest::Output<Sha256>, Error> {
         tokio::fs::create_dir_all(self.upper.as_ref()).await?;
         tokio::fs::create_dir_all(self.work.as_ref()).await?;
         let mut sha = Sha256::new();

@@ -30,7 +30,10 @@ const STARTUP_LEASE_SECONDS: u32 = 3600;
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum LeaseKey {
     Dnat(SocketAddrV4),
-    Sni { source: SocketAddrV4, hostname: String },
+    Sni {
+        source: SocketAddrV4,
+        hostname: String,
+    },
     Pinhole(SocketAddrV6),
 }
 
@@ -122,7 +125,10 @@ async fn reap_expired(ctx: &TunnelContext) -> Option<Instant> {
     for key in expired {
         // Re-check under the lock: a renewal between the snapshot and here
         // re-stamps a later expiry, in which case the client still wants it.
-        if ctx.leases.peek(|l| l.get(&key).is_none_or(|exp| *exp > now)) {
+        if ctx
+            .leases
+            .peek(|l| l.get(&key).is_none_or(|exp| *exp > now))
+        {
             continue;
         }
         match &key {

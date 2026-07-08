@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ## [0.1.0-beta.4]
+
 ### Added
 
 - **`--version` flag.** `startwrt --version` now reports the StartWRT version (e.g.
@@ -100,9 +101,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ~875 kB of unused shared code). This also shrinks the other apps' bundles.
 - Restored the release CI that the monorepo migration had dropped, then folded StartWRT
   into the monorepo-wide release tool: `start-wrt.yaml` again has a `deploy` job, but it
-  now *only* uploads the built images to S3 (`s3://startwrt-images`) — the CDN the registry
+  now _only_ uploads the built images to S3 (`s3://startwrt-images`) — the CDN the registry
   serves from. To match `startos-iso.yaml`, it is `workflow_dispatch`-gated on a `deploy:
-  release` input (rather than the old standalone workflow's `v*`-tag push) and reads the
+release` input (rather than the old standalone workflow's `v*`-tag push) and reads the
   version from `backend/ctrl/Cargo.toml` (the standalone workflow read the now-removed
   `web/package.json`). Tagging, cutting the GitHub release, and the registry publishing are
   now driven by the top-level `scripts/manage-release.sh` (a new `wrt` project kind alongside

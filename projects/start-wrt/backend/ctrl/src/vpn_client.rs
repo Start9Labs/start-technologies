@@ -1,14 +1,18 @@
+use std::net::IpAddr;
+
+use clap::Parser;
+use rpc_toolkit::{from_fn_async_local, HandlerExt, ParentHandler};
+use serde::{Deserialize, Serialize};
+use uciedit::{
+    dump_all, parse_all, Arena, Configs, Line, LineComment, Section, Token, TypedSection,
+};
+
 use crate::prelude::*;
 use crate::profiles::reload_system;
 use crate::utils::{DeserializeStdin, HandlerExtSerde};
 use crate::vpn_server::{UciVpnServer, WgInterface};
 use crate::wg::WgKey;
 use crate::{CliContext, Error, ErrorKind, ServerContext};
-use clap::Parser;
-use rpc_toolkit::{from_fn_async_local, HandlerExt, ParentHandler};
-use serde::{Deserialize, Serialize};
-use std::net::IpAddr;
-use uciedit::{dump_all, parse_all, Arena, Configs, Line, LineComment, Section, Token, TypedSection};
 
 /// VPN client metadata stored in /etc/config/startwrt
 #[derive(Debug, TypedSection)]
@@ -135,19 +139,18 @@ pub fn vpn_client<C: rpc_toolkit::Context>() -> ParentHandler<C> {
 
 /// Restart a WireGuard interface (ifdown + ifup)
 async fn restart_wireguard_interface(interface_name: &str) -> Result<(), Error> {
-    let _ = crate::run_quiet_async(
-        tokio::process::Command::new("ifdown").arg(interface_name),
-    )
-    .await;
+    let _ =
+        crate::run_quiet_async(tokio::process::Command::new("ifdown").arg(interface_name)).await;
 
-    let status = crate::run_quiet_async(
-        tokio::process::Command::new("ifup").arg(interface_name),
-    )
-    .await
-    .map_err(|e| Error::new(eyre!("ifup {interface_name}: {e}"), ErrorKind::Network))?;
+    let status = crate::run_quiet_async(tokio::process::Command::new("ifup").arg(interface_name))
+        .await
+        .map_err(|e| Error::new(eyre!("ifup {interface_name}: {e}"), ErrorKind::Network))?;
     if !status.success() {
         return Err(Error::new(
-            eyre!("ifup {interface_name} failed with exit code {:?}", status.code()),
+            eyre!(
+                "ifup {interface_name} failed with exit code {:?}",
+                status.code()
+            ),
             ErrorKind::Network,
         ));
     }
@@ -211,12 +214,15 @@ fn sanitize_interface_name(label: &str) -> Result<String, Error> {
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect();
     if sanitized.len() > MAX_LABEL_SANITIZED_LEN {
-        return Err(Error::new(eyre!(
-            "invalid label: '{}' produces a {}-char interface name, max is {}",
-            label,
-            INTERFACE_PREFIX.len() + sanitized.len(),
-            MAX_INTERFACE_NAME_LEN
-        ), ErrorKind::InvalidValue));
+        return Err(Error::new(
+            eyre!(
+                "invalid label: '{}' produces a {}-char interface name, max is {}",
+                label,
+                INTERFACE_PREFIX.len() + sanitized.len(),
+                MAX_INTERFACE_NAME_LEN
+            ),
+            ErrorKind::InvalidValue,
+        ));
     }
     Ok(format!("{}{}", INTERFACE_PREFIX, sanitized))
 }
@@ -295,7 +301,9 @@ fn parse_wireguard_config(config: &str) -> Result<ParsedWgConfig, Error> {
             continue;
         }
 
-        let Some((key, value)) = line.split_once('=') else { continue };
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
         let key = key.trim().to_lowercase();
         let value = value.trim();
 
@@ -305,10 +313,12 @@ fn parse_wireguard_config(config: &str) -> Result<ParsedWgConfig, Error> {
                 "address" => addresses = value.split(',').map(|s| s.trim().to_string()).collect(),
                 "dns" => dns = value.split(',').map(|s| s.trim().to_string()).collect(),
                 "mtu" => {
-                    let parsed = value.parse::<u32>().map_err(|_| Error::new(
-                        eyre!("Invalid MTU '{}': must be a number", value),
-                        ErrorKind::InvalidValue,
-                    ))?;
+                    let parsed = value.parse::<u32>().map_err(|_| {
+                        Error::new(
+                            eyre!("Invalid MTU '{}': must be a number", value),
+                            ErrorKind::InvalidValue,
+                        )
+                    })?;
                     validate_mtu(parsed)?;
                     mtu = Some(parsed as u16);
                 }
@@ -324,7 +334,9 @@ fn parse_wireguard_config(config: &str) -> Result<ParsedWgConfig, Error> {
                         endpoint_port = Some(endpoint[colon_idx + 1..].to_string());
                     }
                 }
-                "allowedips" => allowed_ips = value.split(',').map(|s| s.trim().to_string()).collect(),
+                "allowedips" => {
+                    allowed_ips = value.split(',').map(|s| s.trim().to_string()).collect()
+                }
                 "persistentkeepalive" => persistent_keepalive = Some(value.to_string()),
                 _ => {}
             },
@@ -341,59 +353,109 @@ fn parse_wireguard_config(config: &str) -> Result<ParsedWgConfig, Error> {
         if looks_like_openvpn(config) {
             return Err(Error::new(eyre!("This looks like an OpenVPN configuration. Only WireGuard configs are supported."), ErrorKind::InvalidValue));
         }
-        return Err(Error::new(eyre!("Not a WireGuard configuration: missing [Interface] section"), ErrorKind::InvalidValue));
+        return Err(Error::new(
+            eyre!("Not a WireGuard configuration: missing [Interface] section"),
+            ErrorKind::InvalidValue,
+        ));
     }
     if !saw_peer_header {
-        return Err(Error::new(eyre!("WireGuard config missing [Peer] section"), ErrorKind::InvalidValue));
+        return Err(Error::new(
+            eyre!("WireGuard config missing [Peer] section"),
+            ErrorKind::InvalidValue,
+        ));
     }
 
     if private_key.is_empty() {
-        return Err(Error::new(eyre!("WireGuard config missing PrivateKey in [Interface] section"), ErrorKind::InvalidValue));
+        return Err(Error::new(
+            eyre!("WireGuard config missing PrivateKey in [Interface] section"),
+            ErrorKind::InvalidValue,
+        ));
     }
     if public_key.is_empty() {
-        return Err(Error::new(eyre!("WireGuard config missing PublicKey in [Peer] section"), ErrorKind::InvalidValue));
+        return Err(Error::new(
+            eyre!("WireGuard config missing PublicKey in [Peer] section"),
+            ErrorKind::InvalidValue,
+        ));
     }
 
     // Validate WireGuard keys are valid base64-encoded 32-byte keys
-    WgKey::try_from(private_key.as_str())
-        .map_err(|_| Error::new(eyre!("Invalid PrivateKey: must be a valid base64-encoded 32-byte key"), ErrorKind::InvalidValue))?;
-    WgKey::try_from(public_key.as_str())
-        .map_err(|_| Error::new(eyre!("Invalid PublicKey: must be a valid base64-encoded 32-byte key"), ErrorKind::InvalidValue))?;
+    WgKey::try_from(private_key.as_str()).map_err(|_| {
+        Error::new(
+            eyre!("Invalid PrivateKey: must be a valid base64-encoded 32-byte key"),
+            ErrorKind::InvalidValue,
+        )
+    })?;
+    WgKey::try_from(public_key.as_str()).map_err(|_| {
+        Error::new(
+            eyre!("Invalid PublicKey: must be a valid base64-encoded 32-byte key"),
+            ErrorKind::InvalidValue,
+        )
+    })?;
     if let Some(ref psk) = preshared_key {
-        WgKey::try_from(psk.as_str())
-            .map_err(|_| Error::new(eyre!("Invalid PresharedKey: must be a valid base64-encoded 32-byte key"), ErrorKind::InvalidValue))?;
+        WgKey::try_from(psk.as_str()).map_err(|_| {
+            Error::new(
+                eyre!("Invalid PresharedKey: must be a valid base64-encoded 32-byte key"),
+                ErrorKind::InvalidValue,
+            )
+        })?;
     }
 
     // Require an interface Address and a peer Endpoint. A WG config can parse
     // cleanly without these, but the resulting outbound tunnel would have no
     // local IP / nothing to connect to — a silent dead interface. Reject early.
     if addresses.is_empty() {
-        return Err(Error::new(eyre!("WireGuard config missing Address in [Interface] section"), ErrorKind::InvalidValue));
+        return Err(Error::new(
+            eyre!("WireGuard config missing Address in [Interface] section"),
+            ErrorKind::InvalidValue,
+        ));
     }
     if endpoint_host.is_none() {
-        return Err(Error::new(eyre!("WireGuard config missing or invalid Endpoint in [Peer] section"), ErrorKind::InvalidValue));
+        return Err(Error::new(
+            eyre!("WireGuard config missing or invalid Endpoint in [Peer] section"),
+            ErrorKind::InvalidValue,
+        ));
     }
 
     // Validate endpoint_host: non-empty, no whitespace
     if let Some(ref host) = endpoint_host {
         if host.is_empty() || host.chars().any(|c| c.is_whitespace()) {
-            return Err(Error::new(eyre!("Invalid Endpoint host: must be non-empty with no whitespace"), ErrorKind::InvalidValue));
+            return Err(Error::new(
+                eyre!("Invalid Endpoint host: must be non-empty with no whitespace"),
+                ErrorKind::InvalidValue,
+            ));
         }
     }
 
     // Validate endpoint_port: must be a valid u16 in range 1-65535
     if let Some(ref port) = endpoint_port {
-        let p = port.parse::<u16>()
-            .map_err(|_| Error::new(eyre!("Invalid Endpoint port '{}': must be a valid port number (1-65535)", port), ErrorKind::InvalidValue))?;
+        let p = port.parse::<u16>().map_err(|_| {
+            Error::new(
+                eyre!(
+                    "Invalid Endpoint port '{}': must be a valid port number (1-65535)",
+                    port
+                ),
+                ErrorKind::InvalidValue,
+            )
+        })?;
         if p == 0 {
-            return Err(Error::new(eyre!("Invalid Endpoint port '0': must be 1-65535"), ErrorKind::InvalidValue));
+            return Err(Error::new(
+                eyre!("Invalid Endpoint port '0': must be 1-65535"),
+                ErrorKind::InvalidValue,
+            ));
         }
     }
 
     // Validate persistent_keepalive: must be a valid u16
     if let Some(ref ka) = persistent_keepalive {
-        ka.parse::<u16>()
-            .map_err(|_| Error::new(eyre!("Invalid PersistentKeepalive '{}': must be a number (0-65535)", ka), ErrorKind::InvalidValue))?;
+        ka.parse::<u16>().map_err(|_| {
+            Error::new(
+                eyre!(
+                    "Invalid PersistentKeepalive '{}': must be a number (0-65535)",
+                    ka
+                ),
+                ErrorKind::InvalidValue,
+            )
+        })?;
     }
 
     // Validate allowed_ips: each entry must be a valid CIDR
@@ -418,15 +480,36 @@ fn parse_wireguard_config(config: &str) -> Result<ParsedWgConfig, Error> {
 /// Validate a CIDR notation string (e.g., "10.0.0.0/24" or "0.0.0.0/0")
 fn validate_cidr(cidr: &str) -> Result<(), Error> {
     let Some((ip_part, prefix_part)) = cidr.split_once('/') else {
-        return Err(Error::new(eyre!("Invalid AllowedIPs entry '{}': expected CIDR notation (e.g., 0.0.0.0/0)", cidr), ErrorKind::InvalidValue));
+        return Err(Error::new(
+            eyre!(
+                "Invalid AllowedIPs entry '{}': expected CIDR notation (e.g., 0.0.0.0/0)",
+                cidr
+            ),
+            ErrorKind::InvalidValue,
+        ));
     };
-    ip_part.parse::<IpAddr>()
-        .map_err(|_| Error::new(eyre!("Invalid AllowedIPs entry '{}': invalid IP address", cidr), ErrorKind::InvalidValue))?;
-    let prefix: u8 = prefix_part.parse()
-        .map_err(|_| Error::new(eyre!("Invalid AllowedIPs entry '{}': invalid prefix length", cidr), ErrorKind::InvalidValue))?;
+    ip_part.parse::<IpAddr>().map_err(|_| {
+        Error::new(
+            eyre!("Invalid AllowedIPs entry '{}': invalid IP address", cidr),
+            ErrorKind::InvalidValue,
+        )
+    })?;
+    let prefix: u8 = prefix_part.parse().map_err(|_| {
+        Error::new(
+            eyre!("Invalid AllowedIPs entry '{}': invalid prefix length", cidr),
+            ErrorKind::InvalidValue,
+        )
+    })?;
     let max_prefix = if ip_part.contains(':') { 128 } else { 32 };
     if prefix > max_prefix {
-        return Err(Error::new(eyre!("Invalid AllowedIPs entry '{}': prefix length exceeds maximum ({})", cidr, max_prefix), ErrorKind::InvalidValue));
+        return Err(Error::new(
+            eyre!(
+                "Invalid AllowedIPs entry '{}': prefix length exceeds maximum ({})",
+                cidr,
+                max_prefix
+            ),
+            ErrorKind::InvalidValue,
+        ));
     }
     Ok(())
 }
@@ -455,7 +538,10 @@ fn validate_mtu(mtu: u32) -> Result<(), Error> {
 fn validate_label(label: &str) -> Result<(), Error> {
     let trimmed = label.trim();
     if trimmed.is_empty() || trimmed.chars().any(|c| c < '\x20') {
-        return Err(Error::new(eyre!("invalid label: {label}"), ErrorKind::InvalidValue));
+        return Err(Error::new(
+            eyre!("invalid label: {label}"),
+            ErrorKind::InvalidValue,
+        ));
     }
     Ok(())
 }
@@ -481,7 +567,10 @@ fn validate_target(cfgs: &Configs, target: &str, self_label: &str) -> Result<(),
 
     // Check that target exists as a label
     if !label_to_target.contains_key(target) {
-        return Err(Error::new(eyre!("invalid target: {target}"), ErrorKind::InvalidValue));
+        return Err(Error::new(
+            eyre!("invalid target: {target}"),
+            ErrorKind::InvalidValue,
+        ));
     }
 
     // Walk the chain from target, checking for cycles back to self_label
@@ -489,7 +578,14 @@ fn validate_target(cfgs: &Configs, target: &str, self_label: &str) -> Result<(),
     let mut current = target;
     loop {
         if current == self_label {
-            return Err(Error::new(eyre!("VPN chain cycle detected for '{}': {:?}", self_label, visited), ErrorKind::VpnChainCycle));
+            return Err(Error::new(
+                eyre!(
+                    "VPN chain cycle detected for '{}': {:?}",
+                    self_label,
+                    visited
+                ),
+                ErrorKind::VpnChainCycle,
+            ));
         }
         if current == "Internet" {
             return Ok(());
@@ -571,7 +667,10 @@ pub async fn create(
             .iter()
             .any(|s| s.name().as_deref() == Some(interface_name.as_str()));
         if name_conflict {
-            return Err(Error::new(eyre!("interface name conflict: {interface_name}"), ErrorKind::InterfaceNameConflict));
+            return Err(Error::new(
+                eyre!("interface name conflict: {interface_name}"),
+                ErrorKind::InterfaceNameConflict,
+            ));
         }
 
         // Check for duplicate label
@@ -581,7 +680,10 @@ pub async fn create(
             .filter_map(|s| s.get::<UciVpnClient>().ok())
             .any(|meta| meta.label == req.label);
         if label_conflict {
-            return Err(Error::new(eyre!("invalid label: {} (duplicate)", req.label), ErrorKind::InvalidValue));
+            return Err(Error::new(
+                eyre!("invalid label: {} (duplicate)", req.label),
+                ErrorKind::InvalidValue,
+            ));
         }
 
         validate_target(&cfgs, &req.target, &req.label)?;
@@ -608,13 +710,25 @@ pub async fn create(
                 continue;
             }
             Err(err) => {
-                crate::activity::log("vpn-client", "created", false, &format!("Failed to create outbound VPN '{}'", req.label), Some(&err.to_string()));
+                crate::activity::log(
+                    "vpn-client",
+                    "created",
+                    false,
+                    &format!("Failed to create outbound VPN '{}'", req.label),
+                    Some(&err.to_string()),
+                );
                 return Err(err.into());
             }
             Ok(()) => {
                 restart_wireguard_interface(&interface_name).await?;
                 reload_system().await?;
-                crate::activity::log("vpn-client", "created", true, &format!("Created outbound VPN '{}'", req.label), None);
+                crate::activity::log(
+                    "vpn-client",
+                    "created",
+                    true,
+                    &format!("Created outbound VPN '{}'", req.label),
+                    None,
+                );
                 return Ok(OutboundVpnCreateResponse { id: interface_name });
             }
         }
@@ -644,14 +758,19 @@ pub async fn update(
             .filter_map(|s| s.get::<UciVpnClient>().ok())
             .any(|m| m.label == req.label && m.interface != req.id);
         if label_conflict {
-            return Err(Error::new(eyre!("invalid label: {} (duplicate)", req.label), ErrorKind::InvalidValue));
+            return Err(Error::new(
+                eyre!("invalid label: {} (duplicate)", req.label),
+                ErrorKind::InvalidValue,
+            ));
         }
 
         // Find and update metadata, capturing old label for cascade
         let mut found = false;
         let mut old_label = String::new();
         for section in &mut cfgs["startwrt"].sections {
-            let Ok(mut meta) = section.get::<UciVpnClient>() else { continue };
+            let Ok(mut meta) = section.get::<UciVpnClient>() else {
+                continue;
+            };
             if meta.interface != req.id {
                 continue;
             }
@@ -665,7 +784,10 @@ pub async fn update(
         }
 
         if !found {
-            return Err(Error::new(eyre!("VPN client {} not found", req.id), ErrorKind::NotFound));
+            return Err(Error::new(
+                eyre!("VPN client {} not found", req.id),
+                ErrorKind::NotFound,
+            ));
         }
 
         validate_target(&cfgs, &req.target, &req.label)?;
@@ -673,7 +795,9 @@ pub async fn update(
         // Cascade label rename: update any VPN clients targeting the old label
         if old_label != req.label {
             for section in &mut cfgs["startwrt"].sections {
-                let Ok(mut meta) = section.get::<UciVpnClient>() else { continue };
+                let Ok(mut meta) = section.get::<UciVpnClient>() else {
+                    continue;
+                };
                 if meta.target == old_label {
                     meta.target = req.label.clone();
                     let _ = section.set(&meta);
@@ -688,7 +812,9 @@ pub async fn update(
             if section.name().as_deref() != Some(req.id.as_str()) {
                 continue;
             }
-            let Ok(iface) = section.get::<WgInterface>() else { continue };
+            let Ok(iface) = section.get::<WgInterface>() else {
+                continue;
+            };
             if !iface.is_wireguard() {
                 continue;
             }
@@ -704,7 +830,13 @@ pub async fn update(
                 continue;
             }
             Err(err) => {
-                crate::activity::log("vpn-client", "updated", false, &format!("Failed to update outbound VPN '{}'", req.label), Some(&err.to_string()));
+                crate::activity::log(
+                    "vpn-client",
+                    "updated",
+                    false,
+                    &format!("Failed to update outbound VPN '{}'", req.label),
+                    Some(&err.to_string()),
+                );
                 return Err(err.into());
             }
             Ok(()) => {
@@ -715,7 +847,13 @@ pub async fn update(
                     restart_wireguard_interface(&req.id).await?;
                 }
                 reload_system().await?;
-                crate::activity::log("vpn-client", "updated", true, &format!("Updated outbound VPN '{}'", req.label), None);
+                crate::activity::log(
+                    "vpn-client",
+                    "updated",
+                    true,
+                    &format!("Updated outbound VPN '{}'", req.label),
+                    None,
+                );
                 return Ok(());
             }
         }
@@ -730,7 +868,12 @@ pub async fn delete(ctx: ServerContext, args: OutboundVpnDeleteRequest) -> Resul
     let mut retries = 4;
     loop {
         let arena = Arena::new();
-        let mut cfgs = parse_all("/etc/config", &arena, &["network", "startwrt", "firewall", "dhcp"]).await?;
+        let mut cfgs = parse_all(
+            "/etc/config",
+            &arena,
+            &["network", "startwrt", "firewall", "dhcp"],
+        )
+        .await?;
 
         // Block deletion if other VPNs chain through this one
         let this_label = cfgs["startwrt"]
@@ -739,11 +882,19 @@ pub async fn delete(ctx: ServerContext, args: OutboundVpnDeleteRequest) -> Resul
             .filter_map(|s| s.get::<UciVpnClient>().ok())
             .find(|meta| meta.interface == *interface_name)
             .map(|meta| meta.label.clone())
-            .ok_or_else(|| Error::new(eyre!("VPN client {} not found", interface_name), ErrorKind::NotFound))?;
+            .ok_or_else(|| {
+                Error::new(
+                    eyre!("VPN client {} not found", interface_name),
+                    ErrorKind::NotFound,
+                )
+            })?;
 
         let dependents = get_vpn_dependents(&cfgs, &this_label);
         if !dependents.is_empty() {
-            return Err(Error::new(eyre!("VPN '{}' has dependents: {:?}", this_label, dependents), ErrorKind::VpnHasDependents));
+            return Err(Error::new(
+                eyre!("VPN '{}' has dependents: {:?}", this_label, dependents),
+                ErrorKind::VpnHasDependents,
+            ));
         }
 
         // Find profiles that reference this VPN and reset them to WAN
@@ -812,14 +963,26 @@ pub async fn delete(ctx: ServerContext, args: OutboundVpnDeleteRequest) -> Resul
                 continue;
             }
             Err(err) => {
-                crate::activity::log("vpn-client", "deleted", false, &format!("Failed to delete outbound VPN '{}'", this_label), Some(&err.to_string()));
+                crate::activity::log(
+                    "vpn-client",
+                    "deleted",
+                    false,
+                    &format!("Failed to delete outbound VPN '{}'", this_label),
+                    Some(&err.to_string()),
+                );
                 return Err(err.into());
             }
             Ok(()) => {
                 // network reload will see the WG interface is gone from config
                 // and tear it down atomically — no separate ifdown needed.
                 reload_system().await?;
-                crate::activity::log("vpn-client", "deleted", true, &format!("Deleted outbound VPN '{}'", this_label), None);
+                crate::activity::log(
+                    "vpn-client",
+                    "deleted",
+                    true,
+                    &format!("Deleted outbound VPN '{}'", this_label),
+                    None,
+                );
                 return Ok(());
             }
         }
@@ -828,7 +991,10 @@ pub async fn delete(ctx: ServerContext, args: OutboundVpnDeleteRequest) -> Resul
 
 /// Reset profiles that use the given VPN interface back to "wan".
 /// Returns `(interface, vlan_tag, gateway_ip)` tuples for each modified profile.
-fn reset_profiles_using_vpn(cfgs: &mut Configs, vpn_interface: &str) -> Vec<(String, u16, std::net::Ipv4Addr)> {
+fn reset_profiles_using_vpn(
+    cfgs: &mut Configs,
+    vpn_interface: &str,
+) -> Vec<(String, u16, std::net::Ipv4Addr)> {
     #[derive(Debug, TypedSection)]
     #[uci(ty = "profile")]
     struct UciProfileReset {
@@ -853,7 +1019,9 @@ fn reset_profiles_using_vpn(cfgs: &mut Configs, vpn_interface: &str) -> Vec<(Str
 
     let mut affected = Vec::new();
     for section in &mut cfgs["startwrt"].sections {
-        let Ok(mut profile) = section.get::<UciProfileReset>() else { continue };
+        let Ok(mut profile) = section.get::<UciProfileReset>() else {
+            continue;
+        };
         if profile.outbound.as_deref() == Some(vpn_interface) {
             let gateway_ip = gateway_ips
                 .get(&profile.interface)
@@ -882,7 +1050,8 @@ pub async fn set_enabled(
             "/etc/config",
             &arena,
             &["network", "startwrt", "firewall", "dhcp"],
-        ).await?;
+        )
+        .await?;
 
         // Verify the VPN client exists in metadata and get its label
         let this_meta = cfgs["startwrt"]
@@ -891,7 +1060,10 @@ pub async fn set_enabled(
             .filter_map(|s| s.get::<UciVpnClient>().ok())
             .find(|meta| meta.interface == *interface_name);
         let Some(this_meta) = this_meta else {
-            return Err(Error::new(eyre!("VPN client {} not found", interface_name), ErrorKind::NotFound));
+            return Err(Error::new(
+                eyre!("VPN client {} not found", interface_name),
+                ErrorKind::NotFound,
+            ));
         };
         let vpn_label = this_meta.label.clone();
 
@@ -899,7 +1071,10 @@ pub async fn set_enabled(
         if !req.enabled {
             let dependents = get_vpn_dependents(&cfgs, &this_meta.label);
             if !dependents.is_empty() {
-                return Err(Error::new(eyre!("VPN '{}' has dependents: {:?}", this_meta.label, dependents), ErrorKind::VpnHasDependents));
+                return Err(Error::new(
+                    eyre!("VPN '{}' has dependents: {:?}", this_meta.label, dependents),
+                    ErrorKind::VpnHasDependents,
+                ));
             }
         }
 
@@ -930,7 +1105,9 @@ pub async fn set_enabled(
             if section.name().as_deref() != Some(interface_name.as_str()) {
                 continue;
             }
-            let Ok(iface) = section.get::<WgInterface>() else { continue };
+            let Ok(iface) = section.get::<WgInterface>() else {
+                continue;
+            };
             if !iface.is_wireguard() {
                 continue;
             }
@@ -942,10 +1119,10 @@ pub async fn set_enabled(
         }
 
         if !found {
-            return Err(Error::new(eyre!(
-                "WireGuard interface {} not found",
-                interface_name
-            ), ErrorKind::NotFound));
+            return Err(Error::new(
+                eyre!("WireGuard interface {} not found", interface_name),
+                ErrorKind::NotFound,
+            ));
         }
 
         // Rebuild cross-subnet routes (profile routing may have changed)
@@ -963,7 +1140,17 @@ pub async fn set_enabled(
             }
             Err(err) => {
                 let action = if req.enabled { "enabled" } else { "disabled" };
-                crate::activity::log("vpn-client", action, false, &format!("Failed to {} outbound VPN '{}'", if req.enabled { "enable" } else { "disable" }, vpn_label), Some(&err.to_string()));
+                crate::activity::log(
+                    "vpn-client",
+                    action,
+                    false,
+                    &format!(
+                        "Failed to {} outbound VPN '{}'",
+                        if req.enabled { "enable" } else { "disable" },
+                        vpn_label
+                    ),
+                    Some(&err.to_string()),
+                );
                 return Err(err.into());
             }
             Ok(()) => {
@@ -977,7 +1164,17 @@ pub async fn set_enabled(
                 }
                 reload_system().await?;
                 let action = if req.enabled { "enabled" } else { "disabled" };
-                crate::activity::log("vpn-client", action, true, &format!("{} outbound VPN '{}'", if req.enabled { "Enabled" } else { "Disabled" }, vpn_label), None);
+                crate::activity::log(
+                    "vpn-client",
+                    action,
+                    true,
+                    &format!(
+                        "{} outbound VPN '{}'",
+                        if req.enabled { "Enabled" } else { "Disabled" },
+                        vpn_label
+                    ),
+                    None,
+                );
                 return Ok(());
             }
         }
@@ -998,10 +1195,7 @@ fn get_peer_endpoint_host(cfgs: &Configs, interface: &str) -> Option<String> {
         .find(|s| s.ty() == peer_type)
         .and_then(|s| {
             s.lines.iter().find_map(|line| {
-                if let Line::Option {
-                    option, value, ..
-                } = line
-                {
+                if let Line::Option { option, value, .. } = line {
                     if option.as_str() == "endpoint_host" {
                         let raw = value.as_str();
                         let stripped = raw
@@ -1098,7 +1292,10 @@ fn set_disabled_option<'a>(section: &mut Section<'a>, disabled: bool, arena: &'a
 
     // Try to update existing disabled option
     for line in &mut section.lines {
-        if let Line::Option { option, value: val, .. } = line {
+        if let Line::Option {
+            option, value: val, ..
+        } = line
+        {
             if option.as_str() == "disabled" {
                 *val = Token::from_str(value, arena);
                 return;
@@ -1248,7 +1445,10 @@ fn create_wg_client_peer<'a>(
 ) -> Result<(), Error> {
     let peer_type = format!("wireguard_{}", interface_name);
     let peer_type_str: &str = arena.alloc(peer_type);
-    let peer_name = format!("{}_peer0", interface_name.strip_prefix("wg_").unwrap_or(interface_name));
+    let peer_name = format!(
+        "{}_peer0",
+        interface_name.strip_prefix("wg_").unwrap_or(interface_name)
+    );
     let peer_name_str: &str = arena.alloc(peer_name);
 
     let mut lines = vec![Line::Section {
@@ -1334,13 +1534,15 @@ fn create_wg_client_peer<'a>(
 
 #[cfg(test)]
 mod tests {
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+
+    use rpc_toolkit::Context;
+    use tokio::runtime::Runtime;
+
     use super::*;
     use crate::wg::{Base64, WgKey};
     use crate::CtrlContext;
-    use rpc_toolkit::Context;
-    use std::path::{Path, PathBuf};
-    use std::sync::Arc;
-    use tokio::runtime::Runtime;
 
     #[derive(Clone)]
     #[allow(dead_code)]
@@ -1349,7 +1551,7 @@ mod tests {
     impl Context for TestContext {
         fn runtime(&self) -> Option<Arc<Runtime>> {
             None
-}
+        }
     }
 
     impl CtrlContext for TestContext {
@@ -1673,7 +1875,10 @@ config interface 'wg_guest'
                  PublicKey = {pubkey}\n\
                  AllowedIPs = 0.0.0.0/0\n"
             );
-            assert!(parse_wireguard_config(&conf).is_err(), "MTU {bad} should be rejected");
+            assert!(
+                parse_wireguard_config(&conf).is_err(),
+                "MTU {bad} should be rejected"
+            );
         }
     }
 
@@ -1933,11 +2138,19 @@ MIID...snip...
         setup_with_vpn_client(dir.path());
 
         let arena = Arena::new();
-        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         let servers = get_vpn_server_interfaces(&cfgs);
-        assert!(servers.contains("wg_guest"), "should contain VPN server interface");
-        assert!(!servers.contains("wg_proton"), "should not contain VPN client interface");
+        assert!(
+            servers.contains("wg_guest"),
+            "should contain VPN server interface"
+        );
+        assert!(
+            !servers.contains("wg_proton"),
+            "should not contain VPN client interface"
+        );
     }
 
     // === Config helper tests: get_used_by_profiles ===
@@ -1948,7 +2161,9 @@ MIID...snip...
         setup_with_vpn_client(dir.path());
 
         let arena = Arena::new();
-        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         let used_by = get_used_by_profiles(&cfgs, "wg_proton");
         assert_eq!(used_by, vec!["Admin"]);
@@ -1960,7 +2175,9 @@ MIID...snip...
         setup_with_vpn_client(dir.path());
 
         let arena = Arena::new();
-        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         let used_by = get_used_by_profiles(&cfgs, "wg_nonexistent");
         assert!(used_by.is_empty());
@@ -1974,7 +2191,9 @@ MIID...snip...
         setup_with_vpn_client(dir.path());
 
         let arena = Arena::new();
-        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         let affected = reset_profiles_using_vpn(&mut cfgs, "wg_proton");
         assert_eq!(affected.len(), 1);
@@ -1984,7 +2203,10 @@ MIID...snip...
 
         // Verify outbound was reset to "wan"
         let used_by = get_used_by_profiles(&cfgs, "wg_proton");
-        assert!(used_by.is_empty(), "no profiles should reference wg_proton after reset");
+        assert!(
+            used_by.is_empty(),
+            "no profiles should reference wg_proton after reset"
+        );
     }
 
     #[tokio::test]
@@ -1993,7 +2215,9 @@ MIID...snip...
         setup_base_configs(dir.path());
 
         let arena = Arena::new();
-        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         let affected = reset_profiles_using_vpn(&mut cfgs, "wg_nonexistent");
         assert!(affected.is_empty());
@@ -2007,7 +2231,9 @@ MIID...snip...
         setup_with_vpn_client(dir.path());
 
         let arena = Arena::new();
-        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         let section = cfgs["network"]
             .sections
@@ -2018,7 +2244,10 @@ MIID...snip...
         set_disabled_option(section, true, &arena);
 
         let wg = section.get::<WgInterface>().unwrap();
-        assert!(wg.disabled(), "should be disabled after set_disabled_option(true)");
+        assert!(
+            wg.disabled(),
+            "should be disabled after set_disabled_option(true)"
+        );
     }
 
     #[tokio::test]
@@ -2028,7 +2257,9 @@ MIID...snip...
 
         // Create a WG interface without a disabled option
         let arena = Arena::new();
-        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         let privkey = gen_key();
         let parsed = parse_wireguard_config(&wg_conf(&privkey, &gen_key())).unwrap();
@@ -2064,7 +2295,9 @@ MIID...snip...
         let parsed = parse_wireguard_config(&conf).unwrap();
 
         let arena = Arena::new();
-        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         create_wg_client_interface(&mut cfgs, "wg_proton", &parsed, &arena).unwrap();
 
@@ -2089,7 +2322,9 @@ MIID...snip...
         let parsed = parse_wireguard_config(&wg_conf(&gen_key(), &gen_key())).unwrap();
 
         let arena = Arena::new();
-        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         create_wg_client_interface(&mut cfgs, "wg_test", &parsed, &arena).unwrap();
 
@@ -2099,14 +2334,18 @@ MIID...snip...
             .find(|s| s.name().as_deref() == Some("wg_test"))
             .expect("wg_test should exist");
 
-        let has_defaultroute_0 = section.lines.iter().any(|l| matches!(l,
+        let has_defaultroute_0 = section.lines.iter().any(|l| {
+            matches!(l,
             Line::Option { option, value, .. }
-            if option.as_str() == "defaultroute" && value.as_str() == "0"));
+            if option.as_str() == "defaultroute" && value.as_str() == "0")
+        });
         assert!(has_defaultroute_0, "should have defaultroute=0");
 
-        let has_peerdns_0 = section.lines.iter().any(|l| matches!(l,
+        let has_peerdns_0 = section.lines.iter().any(|l| {
+            matches!(l,
             Line::Option { option, value, .. }
-            if option.as_str() == "peerdns" && value.as_str() == "0"));
+            if option.as_str() == "peerdns" && value.as_str() == "0")
+        });
         assert!(has_peerdns_0, "should have peerdns=0");
     }
 
@@ -2123,7 +2362,9 @@ MIID...snip...
         let parsed = parse_wireguard_config(&conf).unwrap();
 
         let arena = Arena::new();
-        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         create_wg_client_peer(&mut cfgs, "wg_proton", &parsed, &arena).unwrap();
 
@@ -2141,27 +2382,35 @@ MIID...snip...
         assert_eq!(peer.name().as_deref(), Some("proton_peer0"));
 
         // Check public_key
-        let has_pubkey = peer.lines.iter().any(|l| matches!(l,
+        let has_pubkey = peer.lines.iter().any(|l| {
+            matches!(l,
             Line::Option { option, value, .. }
-            if option.as_str() == "public_key" && value.as_str() == pubkey));
+            if option.as_str() == "public_key" && value.as_str() == pubkey)
+        });
         assert!(has_pubkey, "should have correct public_key");
 
         // Check endpoint_host
-        let has_endpoint = peer.lines.iter().any(|l| matches!(l,
+        let has_endpoint = peer.lines.iter().any(|l| {
+            matches!(l,
             Line::Option { option, value, .. }
-            if option.as_str() == "endpoint_host" && value.as_str() == "vpn.example.com"));
+            if option.as_str() == "endpoint_host" && value.as_str() == "vpn.example.com")
+        });
         assert!(has_endpoint, "should have endpoint_host");
 
         // Check endpoint_port
-        let has_port = peer.lines.iter().any(|l| matches!(l,
+        let has_port = peer.lines.iter().any(|l| {
+            matches!(l,
             Line::Option { option, value, .. }
-            if option.as_str() == "endpoint_port" && value.as_str() == "51820"));
+            if option.as_str() == "endpoint_port" && value.as_str() == "51820")
+        });
         assert!(has_port, "should have endpoint_port");
 
         // Check route_allowed_ips = 0
-        let has_no_route = peer.lines.iter().any(|l| matches!(l,
+        let has_no_route = peer.lines.iter().any(|l| {
+            matches!(l,
             Line::Option { option, value, .. }
-            if option.as_str() == "route_allowed_ips" && value.as_str() == "0"));
+            if option.as_str() == "route_allowed_ips" && value.as_str() == "0")
+        });
         assert!(has_no_route, "should have route_allowed_ips=0");
 
         // Check allowed_ips list
@@ -2178,9 +2427,11 @@ MIID...snip...
         assert_eq!(allowed_ips, vec!["0.0.0.0/0", "::/0"]);
 
         // Check persistent_keepalive
-        let has_keepalive = peer.lines.iter().any(|l| matches!(l,
+        let has_keepalive = peer.lines.iter().any(|l| {
+            matches!(l,
             Line::Option { option, value, .. }
-            if option.as_str() == "persistent_keepalive" && value.as_str() == "25"));
+            if option.as_str() == "persistent_keepalive" && value.as_str() == "25")
+        });
         assert!(has_keepalive, "should have persistent_keepalive");
     }
 
@@ -2204,7 +2455,9 @@ MIID...snip...
         let parsed = parse_wireguard_config(&conf).unwrap();
 
         let arena = Arena::new();
-        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         create_wg_client_peer(&mut cfgs, "wg_test", &parsed, &arena).unwrap();
 
@@ -2216,12 +2469,16 @@ MIID...snip...
 
         // Endpoint is required (so it's present), but preshared_key and
         // persistent_keepalive are genuinely optional and must be omitted here.
-        let has_psk = peer.lines.iter().any(|l| matches!(l,
-            Line::Option { option, .. } if option.as_str() == "preshared_key"));
+        let has_psk = peer.lines.iter().any(|l| {
+            matches!(l,
+            Line::Option { option, .. } if option.as_str() == "preshared_key")
+        });
         assert!(!has_psk, "should not have preshared_key");
 
-        let has_keepalive = peer.lines.iter().any(|l| matches!(l,
-            Line::Option { option, .. } if option.as_str() == "persistent_keepalive"));
+        let has_keepalive = peer.lines.iter().any(|l| {
+            matches!(l,
+            Line::Option { option, .. } if option.as_str() == "persistent_keepalive")
+        });
         assert!(!has_keepalive, "should not have persistent_keepalive");
     }
 
@@ -2240,7 +2497,9 @@ MIID...snip...
         assert_eq!(interface_name, "wg_proton");
 
         let arena = Arena::new();
-        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         // No name conflict
         let name_conflict = cfgs["network"]
@@ -2258,13 +2517,17 @@ MIID...snip...
             label: "Proton".into(),
             target: "Internet".into(),
         };
-        cfgs["startwrt"].append(&meta, Some(&interface_name)).unwrap();
+        cfgs["startwrt"]
+            .append(&meta, Some(&interface_name))
+            .unwrap();
 
         // Persist and re-read to verify round-trip
         dump_all(dir.path(), cfgs).await.unwrap();
 
         let arena2 = Arena::new();
-        let cfgs2 = parse_all(dir.path(), &arena2, &["network", "startwrt"]).await.unwrap();
+        let cfgs2 = parse_all(dir.path(), &arena2, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         // Verify WG interface
         let wg = cfgs2["network"]
@@ -2301,7 +2564,9 @@ MIID...snip...
         setup_with_vpn_client(dir.path());
 
         let arena = Arena::new();
-        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         let interface_name = "wg_proton";
 
@@ -2360,7 +2625,10 @@ MIID...snip...
             .iter()
             .filter(|s| s.ty() == "profile")
             .count();
-        assert_eq!(profile_count, 2, "both profiles should survive VPN deletion");
+        assert_eq!(
+            profile_count, 2,
+            "both profiles should survive VPN deletion"
+        );
 
         // VPN server should survive
         let server_count = cfgs["startwrt"]
@@ -2383,7 +2651,9 @@ MIID...snip...
         setup_with_vpn_client(dir.path());
 
         let arena = Arena::new();
-        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         // "lan" already exists as a network interface
         let conflict = cfgs["network"]
@@ -2413,7 +2683,9 @@ MIID...snip...
         setup_with_vpn_client(dir.path());
 
         let arena = Arena::new();
-        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         // "Proton VPN" already exists
         let conflict = cfgs["startwrt"]
@@ -2438,12 +2710,16 @@ MIID...snip...
         setup_with_vpn_client(dir.path());
 
         let arena = Arena::new();
-        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         // Update label and target
         let mut found = false;
         for section in &mut cfgs["startwrt"].sections {
-            let Ok(mut meta) = section.get::<UciVpnClient>() else { continue };
+            let Ok(mut meta) = section.get::<UciVpnClient>() else {
+                continue;
+            };
             if meta.interface != "wg_proton" {
                 continue;
             }
@@ -2471,7 +2747,10 @@ MIID...snip...
             .iter()
             .filter_map(|s| s.get::<UciVpnClient>().ok())
             .count();
-        assert_eq!(client_count, 1, "should have exactly one vpn_client after update");
+        assert_eq!(
+            client_count, 1,
+            "should have exactly one vpn_client after update"
+        );
     }
 
     // === VPN chain dependency tests ===
@@ -2561,7 +2840,9 @@ config wireguard_wg_mullvad 'mullvad_peer0'
         setup_with_chained_vpns(dir.path());
 
         let arena = Arena::new();
-        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         let deps = get_vpn_dependents(&cfgs, "Proton VPN");
         assert_eq!(deps, vec!["Mullvad"]);
@@ -2573,7 +2854,9 @@ config wireguard_wg_mullvad 'mullvad_peer0'
         setup_with_chained_vpns(dir.path());
 
         let arena = Arena::new();
-        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         // Mullvad is not targeted by anyone
         let deps = get_vpn_dependents(&cfgs, "Mullvad");
@@ -2586,7 +2869,9 @@ config wireguard_wg_mullvad 'mullvad_peer0'
         setup_with_chained_vpns(dir.path());
 
         let arena = Arena::new();
-        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         // Proton VPN has Mullvad as a dependent — should be blocked
         let this_label = cfgs["startwrt"]
@@ -2608,7 +2893,9 @@ config wireguard_wg_mullvad 'mullvad_peer0'
         setup_with_chained_vpns(dir.path());
 
         let arena = Arena::new();
-        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         // Mullvad has no dependents — should be allowed
         let this_label = cfgs["startwrt"]
@@ -2629,7 +2916,9 @@ config wireguard_wg_mullvad 'mullvad_peer0'
         setup_with_chained_vpns(dir.path());
 
         let arena = Arena::new();
-        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         // Proton VPN has Mullvad as a dependent — disabling should be blocked
         let this_label = cfgs["startwrt"]
@@ -2641,7 +2930,10 @@ config wireguard_wg_mullvad 'mullvad_peer0'
             .unwrap();
 
         let dependents = get_vpn_dependents(&cfgs, &this_label);
-        assert!(!dependents.is_empty(), "should block disable for VPN with dependents");
+        assert!(
+            !dependents.is_empty(),
+            "should block disable for VPN with dependents"
+        );
     }
 
     #[tokio::test]
@@ -2650,7 +2942,9 @@ config wireguard_wg_mullvad 'mullvad_peer0'
         setup_with_chained_vpns(dir.path());
 
         let arena = Arena::new();
-        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         // Mullvad has no dependents — disabling should be allowed
         let this_label = cfgs["startwrt"]
@@ -2662,7 +2956,10 @@ config wireguard_wg_mullvad 'mullvad_peer0'
             .unwrap();
 
         let dependents = get_vpn_dependents(&cfgs, &this_label);
-        assert!(dependents.is_empty(), "should allow disable for VPN without dependents");
+        assert!(
+            dependents.is_empty(),
+            "should allow disable for VPN without dependents"
+        );
     }
 
     #[tokio::test]
@@ -2671,15 +2968,21 @@ config wireguard_wg_mullvad 'mullvad_peer0'
         setup_with_chained_vpns(dir.path());
 
         let arena = Arena::new();
-        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         let old_label = "Proton VPN";
         let new_label = "Proton US";
 
         // Update the primary VPN's label
         for section in &mut cfgs["startwrt"].sections {
-            let Ok(mut meta) = section.get::<UciVpnClient>() else { continue };
-            if meta.interface != "wg_proton" { continue }
+            let Ok(mut meta) = section.get::<UciVpnClient>() else {
+                continue;
+            };
+            if meta.interface != "wg_proton" {
+                continue;
+            }
             meta.label = new_label.to_string();
             section.set(&meta).unwrap();
             break;
@@ -2687,7 +2990,9 @@ config wireguard_wg_mullvad 'mullvad_peer0'
 
         // Cascade: update dependents' target fields
         for section in &mut cfgs["startwrt"].sections {
-            let Ok(mut meta) = section.get::<UciVpnClient>() else { continue };
+            let Ok(mut meta) = section.get::<UciVpnClient>() else {
+                continue;
+            };
             if meta.target == old_label {
                 meta.target = new_label.to_string();
                 let _ = section.set(&meta);
@@ -2701,7 +3006,10 @@ config wireguard_wg_mullvad 'mullvad_peer0'
             .filter_map(|s| s.get::<UciVpnClient>().ok())
             .find(|m| m.interface == "wg_mullvad")
             .unwrap();
-        assert_eq!(mullvad.target, "Proton US", "dependent's target should be updated");
+        assert_eq!(
+            mullvad.target, "Proton US",
+            "dependent's target should be updated"
+        );
 
         // Verify Proton's label was updated
         let proton = cfgs["startwrt"]
@@ -2776,7 +3084,10 @@ config dnsmasq 'dns_lan'
                         if list.as_str() == "notinterface" && item.as_str() == "lan")
                 })
         });
-        assert!(has_notinterface_lan, "main dnsmasq should have notinterface 'lan'");
+        assert!(
+            has_notinterface_lan,
+            "main dnsmasq should have notinterface 'lan'"
+        );
 
         // Reset profiles and run DNS cleanup (same as delete() does)
         let affected = reset_profiles_using_vpn(&mut cfgs, "wg_proton");
@@ -2914,7 +3225,9 @@ config wireguard_wg_mullvad_sto 'sto_peer0'
         setup_chain_with_ip_endpoints(dir.path());
 
         let arena = Arena::new();
-        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         rewrite_vpn_chain_routes(&mut cfgs).unwrap();
 
@@ -2928,7 +3241,10 @@ config wireguard_wg_mullvad_sto 'sto_peer0'
         let route_data = route.get::<uciedit::openwrt::NetworkRoute>().unwrap();
         assert_eq!(route_data.interface, "wg_mullvad_dal");
         assert_eq!(route_data.target, "185.65.135.70/32");
-        assert!(route_data.table.is_none(), "should be in main routing table");
+        assert!(
+            route_data.table.is_none(),
+            "should be in main routing table"
+        );
 
         // dal targets Internet, so no vcr_wg_mullvad_dal route
         assert!(
@@ -2992,7 +3308,9 @@ config wireguard_wg_b 'b_peer0'
         .unwrap();
 
         let arena = Arena::new();
-        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         rewrite_vpn_chain_routes(&mut cfgs).unwrap();
 
@@ -3013,7 +3331,9 @@ config wireguard_wg_b 'b_peer0'
         setup_chain_with_ip_endpoints(dir.path());
 
         let arena = Arena::new();
-        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         // First call creates the route
         rewrite_vpn_chain_routes(&mut cfgs).unwrap();
@@ -3027,7 +3347,9 @@ config wireguard_wg_b 'b_peer0'
 
         // Change sto's target to Internet
         for section in &mut cfgs["startwrt"].sections {
-            let Ok(mut meta) = section.get::<UciVpnClient>() else { continue };
+            let Ok(mut meta) = section.get::<UciVpnClient>() else {
+                continue;
+            };
             if meta.interface == "wg_mullvad_sto" {
                 meta.target = "Internet".to_string();
                 section.set(&meta).unwrap();
@@ -3114,7 +3436,9 @@ config wireguard_wg_c 'c_peer0'
         .unwrap();
 
         let arena = Arena::new();
-        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         rewrite_vpn_chain_routes(&mut cfgs).unwrap();
 
@@ -3155,7 +3479,9 @@ config wireguard_wg_c 'c_peer0'
         setup_chain_with_ip_endpoints(dir.path());
 
         let arena = Arena::new();
-        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         rewrite_vpn_chain_routes(&mut cfgs).unwrap();
         rewrite_vpn_chain_routes(&mut cfgs).unwrap();
@@ -3166,7 +3492,10 @@ config wireguard_wg_c 'c_peer0'
             .iter()
             .filter(|s| s.name().map(|n| n.starts_with("vcr_")).unwrap_or(false))
             .count();
-        assert_eq!(vcr_count, 1, "idempotent: should have exactly one chain route");
+        assert_eq!(
+            vcr_count, 1,
+            "idempotent: should have exactly one chain route"
+        );
 
         let route = cfgs["network"]
             .sections
@@ -3220,10 +3549,7 @@ config wireguard_wg_c 'c_peer0'
     async fn test_validate_target_rejects_cycle() {
         let dir = tempfile::tempdir().unwrap();
         // A→B, B→Internet. Now validate B targeting A → cycle
-        setup_vpn_chain_configs(
-            dir.path(),
-            &[("wg_a", "A", "B"), ("wg_b", "B", "Internet")],
-        );
+        setup_vpn_chain_configs(dir.path(), &[("wg_a", "A", "B"), ("wg_b", "B", "Internet")]);
         let arena = Arena::new();
         let cfgs = parse_all(dir.path(), &arena, &["startwrt"]).await.unwrap();
         let err = validate_target(&cfgs, "A", "B").unwrap_err();
@@ -3260,10 +3586,7 @@ config wireguard_wg_c 'c_peer0'
     async fn test_validate_target_accepts_valid_chain() {
         let dir = tempfile::tempdir().unwrap();
         // A→B→Internet. New VPN "C" targeting A is valid (C→A→B→Internet)
-        setup_vpn_chain_configs(
-            dir.path(),
-            &[("wg_a", "A", "B"), ("wg_b", "B", "Internet")],
-        );
+        setup_vpn_chain_configs(dir.path(), &[("wg_a", "A", "B"), ("wg_b", "B", "Internet")]);
         let arena = Arena::new();
         let cfgs = parse_all(dir.path(), &arena, &["startwrt"]).await.unwrap();
         assert!(validate_target(&cfgs, "A", "C").is_ok());
@@ -3327,7 +3650,9 @@ config wireguard_wg_inner 'in_peer0'
         setup_chain_with_ipv6_endpoint(dir.path());
 
         let arena = Arena::new();
-        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         assert_eq!(
             get_peer_endpoint_host(&cfgs, "wg_inner").as_deref(),
@@ -3347,7 +3672,9 @@ config wireguard_wg_inner 'in_peer0'
         setup_chain_with_ipv6_endpoint(dir.path());
 
         let arena = Arena::new();
-        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         rewrite_vpn_chain_routes(&mut cfgs).unwrap();
 
@@ -3367,7 +3694,10 @@ config wireguard_wg_inner 'in_peer0'
             .unwrap();
         assert_eq!(route_data.interface, "wg_upstream");
         assert_eq!(route_data.target, "2001:db8::1/128");
-        assert!(route_data.table.is_none(), "chain routes live in main table");
+        assert!(
+            route_data.table.is_none(),
+            "chain routes live in main table"
+        );
 
         // wg_upstream targets Internet → no chain route
         assert!(
@@ -3385,7 +3715,9 @@ config wireguard_wg_inner 'in_peer0'
         setup_chain_with_ipv6_endpoint(dir.path());
 
         let arena = Arena::new();
-        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         rewrite_vpn_chain_routes(&mut cfgs).unwrap();
         rewrite_vpn_chain_routes(&mut cfgs).unwrap();
@@ -3405,7 +3737,9 @@ config wireguard_wg_inner 'in_peer0'
         setup_with_vpn_client(dir.path());
 
         let arena = Arena::new();
-        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"]).await.unwrap();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
 
         // Replicate the list() filter inline so we don't need to spin up the
         // full ServerContext just to read addresses+metadata.
@@ -3437,7 +3771,13 @@ config wireguard_wg_inner 'in_peer0'
             .collect();
 
         // setup_with_vpn_client gives wg_proton only an IPv4 /32 address.
-        let proton = entries.iter().find(|e| e.id == "wg_proton").expect("wg_proton listed");
-        assert!(!proton.supports_ipv6, "v4-only VPN must report supports_ipv6=false");
+        let proton = entries
+            .iter()
+            .find(|e| e.id == "wg_proton")
+            .expect("wg_proton listed");
+        assert!(
+            !proton.supports_ipv6,
+            "v4-only VPN must report supports_ipv6=false"
+        );
     }
 }

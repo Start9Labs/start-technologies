@@ -1732,7 +1732,9 @@ fn canonicalize_rec(path: &Path, create_parent: bool) -> BoxFuture<'_, Result<Pa
                     })?;
                 }
                 // resolve the first existing ancestor, then re-append the tail
-                Ok(canonicalize_rec(parent, create_parent).await?.join(file_name))
+                Ok(canonicalize_rec(parent, create_parent)
+                    .await?
+                    .join(file_name))
             }
             Err(e) => {
                 Err(e).with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("canonicalize {path:?}")))

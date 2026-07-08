@@ -31,9 +31,12 @@ fn search_options(local_ip: Ipv4Addr) -> SearchOptions {
 
 /// Discover the IGD reachable from `local_ip` (SSDP M-SEARCH out that interface).
 pub async fn discover(local_ip: Ipv4Addr) -> Result<Gateway<Tokio>, Error> {
-    search_gateway(search_options(local_ip))
-        .await
-        .map_err(|e| Error::new(eyre!("UPnP gateway discovery failed: {e}"), ErrorKind::Network))
+    search_gateway(search_options(local_ip)).await.map_err(|e| {
+        Error::new(
+            eyre!("UPnP gateway discovery failed: {e}"),
+            ErrorKind::Network,
+        )
+    })
 }
 
 /// Map `external_port` -> `local_ip:internal_port` (TCP) on `gateway`.

@@ -6,32 +6,32 @@ name: Deploy brochure (marketplace.start9.com)
 
 on:
   push:
-    branches: ["master"]
+    branches: ['master']
     paths:
-      - "projects/brochure-marketplace/**"
-      - "shared-libs/ts-modules/shared/**"
-      - "shared-libs/ts-modules/marketplace/**"
-      - "shared-libs/ts-modules/start-core/**"
-      - "angular.json"
-      - "package.json"
-      - "package-lock.json"
-      - "tsconfig.json"
-      - "tsconfig.lib.json"
-      - "shared-libs/crates/patch-db"
-      - ".github/workflows/deploy-brochure.yml"
+      - 'projects/brochure-marketplace/**'
+      - 'shared-libs/ts-modules/shared/**'
+      - 'shared-libs/ts-modules/marketplace/**'
+      - 'shared-libs/ts-modules/start-core/**'
+      - 'angular.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'tsconfig.lib.json'
+      - 'shared-libs/crates/patch-db'
+      - '.github/workflows/deploy-brochure.yml'
       # Doc-only edits under the allowlisted paths (e.g. start-core/**) shouldn't redeploy.
-      - "!**/*.md"
+      - '!**/*.md'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: "deploy-brochure"
+  group: 'deploy-brochure'
   cancel-in-progress: false
 
 env:
-  NODEJS_VERSION: "24.17.0"
+  NODEJS_VERSION: '24.17.0'
 
 jobs:
   build-and-deploy:
@@ -44,7 +44,7 @@ jobs:
         with:
           node-version: ${{ env.NODEJS_VERSION }}
           cache: npm
-          cache-dependency-path: "**/package-lock.json"
+          cache-dependency-path: '**/package-lock.json'
 
       # web resolves start-core via file:shared-libs/ts-modules/start-core/dist, so it must exist
       # before web's `npm ci` and the brochure build.

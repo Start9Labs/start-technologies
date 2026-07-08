@@ -1,15 +1,13 @@
 extern crate self as uciedit;
 
-use chrono::DateTime;
-use chrono::Utc;
-use serde::Serializer;
 use std::borrow::Borrow;
 use std::collections::BTreeMap;
-use std::fmt;
-use std::ops;
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::Utf8Error;
+use std::{fmt, ops};
+
+use chrono::{DateTime, Utc};
+use serde::Serializer;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 pub mod openwrt;
@@ -211,18 +209,17 @@ impl LockedConfig {
             })?;
         // flock is a fast syscall; run it on the blocking pool to avoid
         // stalling the async runtime on contended files.
-        let locked = tokio::task::spawn_blocking(move || {
-            FdLock::lock(file, LockType::Exclusive, true)
-        })
-        .await
-        .map_err(|e| Error::Io {
-            cause: std::io::Error::other(format!("flock task panicked: {e}")),
-            src: Source::Path(path.clone()),
-        })?
-        .map_err(|cause| Error::FdLock {
-            cause,
-            src: Source::Path(path.clone()),
-        })?;
+        let locked =
+            tokio::task::spawn_blocking(move || FdLock::lock(file, LockType::Exclusive, true))
+                .await
+                .map_err(|e| Error::Io {
+                    cause: std::io::Error::other(format!("flock task panicked: {e}")),
+                    src: Source::Path(path.clone()),
+                })?
+                .map_err(|cause| Error::FdLock {
+                    cause,
+                    src: Source::Path(path.clone()),
+                })?;
         Ok(LockedConfig { path, locked })
     }
 
@@ -284,13 +281,10 @@ impl LockedConfig {
                 cause,
                 src: Source::Path(self.path.clone()),
             })?;
-        tmp_file
-            .write_all(bytes)
-            .await
-            .map_err(|cause| Error::Io {
-                cause,
-                src: Source::Path(self.path.clone()),
-            })?;
+        tmp_file.write_all(bytes).await.map_err(|cause| Error::Io {
+            cause,
+            src: Source::Path(self.path.clone()),
+        })?;
         tmp_file.flush().await.map_err(|cause| Error::Io {
             cause,
             src: Source::Path(self.path.clone()),
@@ -389,10 +383,13 @@ pub async fn read_all<N: Borrow<str>>(
             let (modified, text) = match tokio::fs::metadata(&path).await {
                 Ok(meta) => {
                     let modified = meta.modified().map(DateTime::<Utc>::from).ok();
-                    let text = tokio::fs::read_to_string(&path).await.map_err(|cause| Error::Io {
-                        cause,
-                        src: Source::Path(path.clone()),
-                    })?;
+                    let text =
+                        tokio::fs::read_to_string(&path)
+                            .await
+                            .map_err(|cause| Error::Io {
+                                cause,
+                                src: Source::Path(path.clone()),
+                            })?;
                     (modified, text)
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => (None, String::new()),

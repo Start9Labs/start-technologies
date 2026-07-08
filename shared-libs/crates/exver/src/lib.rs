@@ -7,9 +7,9 @@
 /// or let the issue persist until the next update. Neither of these promote good user experiences, for different reasons.
 /// This module extends the semver standard linked above with a 4th digit, which is given PATCH semantics.
 pub mod exver;
-pub use crate::exver::*;
-
 pub use emver;
+
+pub use crate::exver::*;
 
 #[cfg(feature = "wasm")]
 pub mod wasm;

@@ -14,12 +14,12 @@ await sdk.action.createOwnTask(effects, setAdminPassword, 'critical', {
 
 ### Parameters
 
-| Parameter  | Type                                       | Description                                            |
-| ---------- | ------------------------------------------ | ------------------------------------------------------ |
-| `effects`  | `Effects`                                  | Provided by the calling context                        |
-| `action`   | `ActionDefinition`                         | The action to prompt the user to run                   |
-| `severity` | `'critical' \| 'important' \| 'optional'` | How urgently the task is surfaced in the UI           |
-| `options`  | `{ reason: string }`                       | Human-readable explanation shown to the user           |
+| Parameter  | Type                                      | Description                                  |
+| ---------- | ----------------------------------------- | -------------------------------------------- |
+| `effects`  | `Effects`                                 | Provided by the calling context              |
+| `action`   | `ActionDefinition`                        | The action to prompt the user to run         |
+| `severity` | `'critical' \| 'important' \| 'optional'` | How urgently the task is surfaced in the UI  |
+| `options`  | `{ reason: string }`                      | Human-readable explanation shown to the user |
 
 ### Severity Levels
 
@@ -34,7 +34,7 @@ await sdk.action.createOwnTask(effects, setAdminPassword, 'critical', {
 The standard admin-credentials pattern: init reads the store and surfaces a critical task when the password is unset. Generation lives in the matching action, which covers both first-set and later rotation. The watcher runs on every init kind; the prompt is idempotent (see [Idempotency and `replayId`](#idempotency-and-replayid)), so a container rebuild after the password is set is a no-op:
 
 ```typescript
-export const watchCredentials = sdk.setupOnInit(async (effects) => {
+export const watchCredentials = sdk.setupOnInit(async effects => {
   const store = await storeJson.read().const(effects)
 
   if (!store?.adminPassword) {
@@ -68,8 +68,14 @@ export const setDependencies = sdk.setupDependencies(async ({ effects }) => {
   await sdk.action.createTask(effects, 'dependency-id', someAction, 'critical', {
     input: {
       kind: 'partial',
-      accept: [{ /* one or more acceptable partial inputs */ }],
-      set: { /* the value to pre-fill when none are accepted */ },
+      accept: [
+        {
+          /* one or more acceptable partial inputs */
+        },
+      ],
+      set: {
+        /* the value to pre-fill when none are accepted */
+      },
     },
     when: { condition: 'input-not-matches', once: false },
     reason: i18n('Configure the dependency for use with this service'),
@@ -87,22 +93,22 @@ export const setDependencies = sdk.setupDependencies(async ({ effects }) => {
 
 ### Parameters
 
-| Parameter  | Type                                       | Description                                            |
-| ---------- | ------------------------------------------ | ------------------------------------------------------ |
-| `effects`  | `Effects`                                  | Provided by the calling context                        |
-| `packageId`| `string`                                   | The dependency's service ID                            |
-| `action`   | `ActionDefinition`                         | Imported from the dependency's package                 |
-| `severity` | `'critical' \| 'important' \| 'optional'` | How urgently the task is surfaced                    |
-| `options`  | `object`                                   | See below                                              |
+| Parameter   | Type                                      | Description                            |
+| ----------- | ----------------------------------------- | -------------------------------------- |
+| `effects`   | `Effects`                                 | Provided by the calling context        |
+| `packageId` | `string`                                  | The dependency's service ID            |
+| `action`    | `ActionDefinition`                        | Imported from the dependency's package |
+| `severity`  | `'critical' \| 'important' \| 'optional'` | How urgently the task is surfaced      |
+| `options`   | `object`                                  | See below                              |
 
 ### Options
 
-| Field      | Type                                                  | Description                                                      |
-| ---------- | ----------------------------------------------------- | ---------------------------------------------------------------- |
+| Field      | Type                                                                         | Description                                                                                                              |
+| ---------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `input`    | `{ kind: 'partial', accept: Partial<InputSpec>[], set: Partial<InputSpec> }` | `accept` lists the partial inputs that satisfy the task; `set` pre-fills the action's input form when none of them match |
-| `when`     | `{ condition: 'input-not-matches', once: boolean }`   | Re-trigger until the action's input matches one of the `accept` values |
-| `reason`   | `string`                                              | Human-readable explanation shown to the user                     |
-| `replayId` | `string` (optional)                                   | Overrides the default idempotency key (see below)                |
+| `when`     | `{ condition: 'input-not-matches', once: boolean }`                          | Re-trigger until the action's input matches one of the `accept` values                                                   |
+| `reason`   | `string`                                                                     | Human-readable explanation shown to the user                                                                             |
+| `replayId` | `string` (optional)                                                          | Overrides the default idempotency key (see below)                                                                        |
 
 With `condition: 'input-not-matches'`, the task is **satisfied** when the action's current input is a superset of **any** entry in `accept` (each entry is matched partially — only the fields you list must agree). When none match, the task is shown and the action form is pre-filled with `set`. Use multiple `accept` entries to tolerate several already-good configurations while still steering the user to one recommended value; for the common case where any value but one specific target is unacceptable, pass a single `accept` entry equal to `set`.
 

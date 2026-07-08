@@ -1786,8 +1786,7 @@ pub async fn list_http_redirects(ctx: TunnelContext) -> Result<Vec<HttpRedirectS
         .into_iter()
         .map(|ip| HttpRedirectStatus {
             enabled: !disabled.contains(&ip),
-            forwarded: forwards
-                .occupied(SocketAddrV4::new(ip, crate::tunnel::redirect::HTTP_PORT)),
+            forwarded: forwards.occupied(SocketAddrV4::new(ip, crate::tunnel::redirect::HTTP_PORT)),
             ip,
         })
         .collect())

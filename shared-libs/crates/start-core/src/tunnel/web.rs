@@ -18,8 +18,7 @@ use tokio_rustls::rustls::server::ClientHello;
 use ts_rs::TS;
 
 use crate::context::CliContext;
-use crate::net::ssl::CertBranding;
-use crate::net::ssl::{SANInfo, root_ca_start_time};
+use crate::net::ssl::{CertBranding, SANInfo, root_ca_start_time};
 use crate::net::tls::{TlsHandler, TlsHandlerAction};
 use crate::net::web_server::Accept;
 use crate::prelude::*;
@@ -302,12 +301,10 @@ pub async fn generate_certificate(
     let root_cert =
         crate::net::ssl::make_root_cert(&root_key, &branding, root_ca_start_time().await)?;
     let int_key = crate::net::ssl::gen_nistp256()?;
-    let int_cert =
-        crate::net::ssl::make_int_cert((&root_key, &root_cert), &int_key, &branding)?;
+    let int_cert = crate::net::ssl::make_int_cert((&root_key, &root_cert), &int_key, &branding)?;
 
     let key = crate::net::ssl::gen_nistp256()?;
-    let cert =
-        crate::net::ssl::make_leaf_cert((&int_key, &int_cert), (&key, &saninfo), &branding)?;
+    let cert = crate::net::ssl::make_leaf_cert((&int_key, &int_cert), (&key, &saninfo), &branding)?;
     let chain = Pem(vec![cert, int_cert, root_cert]);
 
     ctx.db

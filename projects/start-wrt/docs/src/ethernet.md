@@ -43,9 +43,9 @@ If you need to use a different physical port for your ISP connection:
 
 ## Example
 
-| Port | Profile | Use Case |
-|------|---------|----------|
-| Port 1 | *(WAN)* | Connected to ISP modem |
-| Port 2 | Admin | Desktop computer with full LAN and Internet access |
-| Port 3 | Admin | StartOS server with full LAN and Internet access |
-| Port 4 | Guest | Guest-accessible Ethernet jack in the living room |
+| Port   | Profile | Use Case                                           |
+| ------ | ------- | -------------------------------------------------- |
+| Port 1 | _(WAN)_ | Connected to ISP modem                             |
+| Port 2 | Admin   | Desktop computer with full LAN and Internet access |
+| Port 3 | Admin   | StartOS server with full LAN and Internet access   |
+| Port 4 | Guest   | Guest-accessible Ethernet jack in the living room  |

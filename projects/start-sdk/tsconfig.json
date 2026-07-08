@@ -17,5 +17,11 @@
     "resolveJsonModule": true
   },
   "include": ["lib/**/*"],
-  "exclude": ["lib/**/*.spec.ts", "lib/**/*.test.ts", "lib/**/*.gen.ts", "list", "node_modules"]
+  "exclude": [
+    "lib/**/*.spec.ts",
+    "lib/**/*.test.ts",
+    "lib/**/*.gen.ts",
+    "list",
+    "node_modules"
+  ]
 }

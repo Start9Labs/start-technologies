@@ -1,9 +1,10 @@
 use std::collections::HashSet;
 
-use super::utils;
 use imbl_value::imbl::Vector;
 use imbl_value::Value;
 use selector::utils::PathKey;
+
+use super::utils;
 
 pub(super) struct ValueWalker;
 

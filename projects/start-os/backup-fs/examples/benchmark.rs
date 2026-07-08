@@ -97,7 +97,11 @@ fn main() {
             f.sync_all().unwrap();
         }
         let dt = t.elapsed();
-        println!("sequential write : {:7.1} MiB/s  ({} MiB)", mbps(total, dt), total / MIB);
+        println!(
+            "sequential write : {:7.1} MiB/s  ({} MiB)",
+            mbps(total, dt),
+            total / MIB
+        );
 
         // ── 2. Large sequential read ──
         let t = Instant::now();
@@ -114,7 +118,11 @@ fn main() {
             assert_eq!(read, total);
         }
         let dt = t.elapsed();
-        println!("sequential read  : {:7.1} MiB/s  ({} MiB)", mbps(total, dt), total / MIB);
+        println!(
+            "sequential read  : {:7.1} MiB/s  ({} MiB)",
+            mbps(total, dt),
+            total / MIB
+        );
 
         // ── 3. Many small files ──
         let dir = mnt.join("small");

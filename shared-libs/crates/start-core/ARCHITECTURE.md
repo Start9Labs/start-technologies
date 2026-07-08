@@ -9,13 +9,13 @@ This crate is a **library** (`src/lib.rs`). It exposes every backend subsystem p
 entrypoints under `src/bins/`. The product crates are thin wrappers that pick which entrypoints
 to enable via `start_core::bins::MultiExecutable` and call `.execute()`:
 
-| Binary | Wrapper crate / file | Role |
-|--------|----------------------|------|
-| `startbox` / `startd` | `projects/start-os/src/bin/startbox.rs` | Main OS daemon |
-| `start-container` | `projects/start-os/src/bin/start-container.rs` | Runs inside package LXC containers; talks to the host and manages subcontainers |
-| `start-cli` | `projects/start-cli/src/main.rs` | CLI over the daemon's JSON-RPC API |
-| `registrybox` | `projects/start-registry/src/main.rs` | Package registry server |
-| `tunnelbox` | `projects/start-tunnel/src/main.rs` | StartTunnel VPN/forwarding server |
+| Binary                | Wrapper crate / file                           | Role                                                                            |
+| --------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------- |
+| `startbox` / `startd` | `projects/start-os/src/bin/startbox.rs`        | Main OS daemon                                                                  |
+| `start-container`     | `projects/start-os/src/bin/start-container.rs` | Runs inside package LXC containers; talks to the host and manages subcontainers |
+| `start-cli`           | `projects/start-cli/src/main.rs`               | CLI over the daemon's JSON-RPC API                                              |
+| `registrybox`         | `projects/start-registry/src/main.rs`          | Package registry server                                                         |
+| `tunnelbox`           | `projects/start-tunnel/src/main.rs`            | StartTunnel VPN/forwarding server                                               |
 
 A sixth bin, `startwrt` (`projects/start-wrt/backend/ctrl/src/bin/startwrt.rs`), also links
 against this crate but is not a `MultiExecutable` wrapper — it is a full backend of its own
@@ -53,16 +53,19 @@ See [rpc-toolkit.md](rpc-toolkit.md) for full handler patterns and configuration
 Patch-DB provides diff-based state synchronization. Changes to `db/model/public.rs` automatically sync to the frontend.
 
 **Key patterns:**
+
 - `db.peek().await` — Get a read-only snapshot of the database state
 - `db.mutate(|db| { ... }).await` — Apply mutations atomically, returns `MutateResult`
 - `#[derive(HasModel)]` — Derive macro for types stored in the database, generates typed accessors
 
 **Generated accessor types** (from `HasModel` derive):
+
 - `as_field()` — Immutable reference: `&Model<T>`
 - `as_field_mut()` — Mutable reference: `&mut Model<T>`
 - `into_field()` — Owned value: `Model<T>`
 
 **`Model<T>` APIs** (from `db/prelude.rs`):
+
 - `.de()` — Deserialize to `T`
 - `.ser(&value)` — Serialize from `T`
 - `.mutate(|v| ...)` — Deserialize, mutate, reserialize

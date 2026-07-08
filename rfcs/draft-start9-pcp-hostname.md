@@ -33,8 +33,9 @@ informative:
   RFC7652:
   I-D.ietf-tls-esni:
   I-D.ietf-quic-load-balancers:
+---
 
---- abstract
+abstract
 
 This document defines a Port Control Protocol (PCP) option, HOSTNAME, that
 associates one or more fully qualified domain names with a MAP request. A
@@ -85,19 +86,19 @@ internal host, external address, mapping, mapping nonce). In addition:
 
 Hostname binding:
 : an association, held by the PCP server, from (protocol, external IP
-  address, external port, hostname) to an internal address and internal
-  port, created by a MAP request carrying a HOSTNAME option.
+address, external port, hostname) to an internal address and internal
+port, created by a MAP request carrying a HOSTNAME option.
 
 Fallback mapping:
 : a conventional mapping (created by a MAP request with no HOSTNAME
-  option) on a port that also has hostname bindings; it receives
-  connections that match no hostname binding (see {{validity}}).
+option) on a port that also has hostname bindings; it receives
+connections that match no hostname binding (see {{validity}}).
 
 Demultiplexed port:
 : a (protocol, external IP address, external port) tuple holding at least
-  one hostname binding. Inbound connections to a demultiplexed port are
-  routed per {{tcp-demux}} or {{quic-demux}} rather than by conventional
-  destination NAT.
+one hostname binding. Inbound connections to a demultiplexed port are
+routed per {{tcp-demux}} or {{quic-demux}} rather than by conventional
+destination NAT.
 
 # Overview of Operation {#overview}
 
@@ -134,7 +135,7 @@ MAP requests; see {{client}}.
 
 The option follows the PCP option format ({{Section 7.3 of RFC6887}}):
 
-~~~
+```
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -144,7 +145,8 @@ The option follows the PCP option format ({{Section 7.3 of RFC6887}}):
 :                hostname (variable length)                     :
 |                                                               |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-~~~
+```
+
 {: #fig-format title="HOSTNAME Option Format"}
 
 Option Code:
@@ -152,17 +154,17 @@ Option Code:
 
 Option Length:
 : length of the hostname field in octets (1 to 255). The option data is
-  zero-padded to a 32-bit boundary per {{RFC6887}}; padding is not
-  included in Option Length.
+zero-padded to a 32-bit boundary per {{RFC6887}}; padding is not
+included in Option Length.
 
 hostname:
 : the name to bind, encoded exactly as it appears on the wire in the SNI
-  HostName field ({{Section 3 of RFC6066}}): ASCII, internationalized
-  names as A-labels {{RFC5890}}, no trailing dot, no NUL octets, total
-  length 1 to 255 octets. Literal IPv4 and IPv6 addresses MUST NOT be used
-  ({{Section 3 of RFC6066}}). Comparison is case-insensitive; servers
-  SHOULD normalize names to lowercase on receipt. A syntactically invalid
-  hostname MUST be rejected with MALFORMED_OPTION.
+HostName field ({{Section 3 of RFC6066}}): ASCII, internationalized
+names as A-labels {{RFC5890}}, no trailing dot, no NUL octets, total
+length 1 to 255 octets. Literal IPv4 and IPv6 addresses MUST NOT be used
+({{Section 3 of RFC6066}}). Comparison is case-insensitive; servers
+SHOULD normalize names to lowercase on receipt. A syntactically invalid
+hostname MUST be rejected with MALFORMED_OPTION.
 
 Because the option code is in the optional-to-process range, a server that
 does not implement this option ignores it and processes the request as a
@@ -376,21 +378,21 @@ and preserves the source address inherently.
 
 FILTER ({{RFC6887}}):
 : composes normally; filters restrict which remote peers may connect and
-  are evaluated before demultiplexing.
+are evaluated before demultiplexing.
 
 PREFER_FAILURE ({{RFC6887}}):
 : composes normally; see {{client}} for its use on multihomed gateways.
 
 THIRD_PARTY ({{RFC6887}}):
 : a request combining THIRD_PARTY and HOSTNAME options creates hostname
-  bindings on behalf of the third party, subject to the server's
-  THIRD_PARTY authorization policy; the conflict rules of {{conflicts}}
-  apply to the third party's bindings identically.
+bindings on behalf of the third party, subject to the server's
+THIRD_PARTY authorization policy; the conflict rules of {{conflicts}}
+apply to the third party's bindings identically.
 
 PORT_SET ({{RFC7753}}):
 : a request combining PORT_SET and HOSTNAME options is not meaningful (a
-  hostname binding targets a single internal port) and MUST be rejected
-  with MALFORMED_OPTION.
+hostname binding targets a single internal port) and MUST be rejected
+with MALFORMED_OPTION.
 
 # Interaction with Encrypted ClientHello {#ech}
 
@@ -407,13 +409,13 @@ not a defect of this extension.
 
 HOSTNAME_TAKEN (TBD2):
 : the requested hostname is already bound on this external IP address and
-  port by another client. This is a short lifetime error; the condition
-  clears when the conflicting binding expires or is deleted.
+port by another client. This is a short lifetime error; the condition
+clears when the conflicting binding expires or is deleted.
 
 UNSUPP_HOSTNAME (TBD3):
 : the hostname is syntactically valid but the request uses a feature this
-  server does not support (e.g. wildcard bindings, or protocol UDP without
-  QUIC demultiplexing support). This is a long lifetime error.
+server does not support (e.g. wildcard bindings, or protocol UDP without
+QUIC demultiplexing support). This is a long lifetime error.
 
 Syntactically invalid hostnames are rejected with the existing
 MALFORMED_OPTION ({{RFC6887}}).
@@ -467,16 +469,16 @@ Options" registry of the "Port Control Protocol (PCP) Parameters" group,
 from the Specification Required range (192-223); values in this range are
 optional-to-process:
 
-| Field | Value |
-| ----- | ----- |
-| Value | TBD1 |
-| Name | HOSTNAME |
-| Purpose | Associates a fully qualified domain name with a MAP request; inbound connections on the mapped external port are forwarded to the internal host whose binding matches the SNI presented in the TLS or QUIC ClientHello. |
-| Valid for Opcodes | MAP |
-| Length | variable; 1 to 255 octets |
-| May Appear in | Request. May appear in response only if it appeared in the associated request. |
-| Maximum Occurrences | As many as fit within maximum PCP message size. |
-| Reference | This document |
+| Field               | Value                                                                                                                                                                                                                   |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Value               | TBD1                                                                                                                                                                                                                    |
+| Name                | HOSTNAME                                                                                                                                                                                                                |
+| Purpose             | Associates a fully qualified domain name with a MAP request; inbound connections on the mapped external port are forwarded to the internal host whose binding matches the SNI presented in the TLS or QUIC ClientHello. |
+| Valid for Opcodes   | MAP                                                                                                                                                                                                                     |
+| Length              | variable; 1 to 255 octets                                                                                                                                                                                               |
+| May Appear in       | Request. May appear in response only if it appeared in the associated request.                                                                                                                                          |
+| Maximum Occurrences | As many as fit within maximum PCP message size.                                                                                                                                                                         |
+| Reference           | This document                                                                                                                                                                                                           |
 
 ## PCP Result Codes {#iana-results}
 
@@ -484,10 +486,10 @@ IANA is requested to assign two result codes in the "PCP Result Codes"
 registry of the same group, from the Specification Required range
 (128-191):
 
-| Value | Name | Description | Reference |
-| ----- | ---- | ----------- | --------- |
-| TBD2 | HOSTNAME_TAKEN | The requested hostname is already bound on the assigned external address and port by another client. This is a short lifetime error. | This document |
-| TBD3 | UNSUPP_HOSTNAME | The HOSTNAME option requests a feature not supported by this server. This is a long lifetime error. | This document |
+| Value | Name            | Description                                                                                                                          | Reference     |
+| ----- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------- |
+| TBD2  | HOSTNAME_TAKEN  | The requested hostname is already bound on the assigned external address and port by another client. This is a short lifetime error. | This document |
+| TBD3  | UNSUPP_HOSTNAME | The HOSTNAME option requests a feature not supported by this server. This is a long lifetime error.                                  | This document |
 
 --- back
 

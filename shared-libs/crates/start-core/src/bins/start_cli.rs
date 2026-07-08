@@ -41,7 +41,10 @@ pub fn main(args: impl IntoIterator<Item = OsString>) {
 #[test]
 fn export_manpage_start_cli() {
     // Pages live with the start-cli product; anchored to start-core's crate dir.
-    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../projects/start-cli/man");
+    let dir = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../projects/start-cli/man"
+    );
     std::fs::create_dir_all(dir).unwrap();
     clap_mangen::generate_to(app().into_command(), dir).unwrap();
 }

@@ -8,8 +8,6 @@ use rpc_toolkit::{Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_f
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::HostId;
-use crate::ServiceInterfaceId;
 use crate::context::{CliContext, RpcContext};
 use crate::db::prelude::Map;
 use crate::hostname::ServerHostname;
@@ -22,6 +20,7 @@ use crate::net::vhost::AlpnInfo;
 use crate::prelude::*;
 use crate::util::FromStrParser;
 use crate::util::serde::{CliFromJsonString, HandlerExtSerde, display_serializable};
+use crate::{HostId, ServiceInterfaceId};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -795,7 +794,6 @@ pub async fn set_gua_wan<Kind: HostApiKind>(
     Ok(())
 }
 
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -841,8 +839,7 @@ mod test {
 
         // A local (non-WAN) GUA follows the private rule: on unless disabled.
         assert!(info.enabled().contains(&local));
-        info.disabled
-            .insert((local.hostname.clone(), key.port()));
+        info.disabled.insert((local.hostname.clone(), key.port()));
         assert!(!info.enabled().contains(&local));
         info.disabled.clear();
 
@@ -876,11 +873,14 @@ mod test {
         assert!(info.enabled.contains(&"1.2.3.4:5000".parse().unwrap()));
         assert!(!info.enabled.contains(&wan));
         assert!(info.enabled.contains(&unrelated)); // unrelated port untouched
-        assert!(info
-            .disabled
-            .contains(&(InternedString::intern("example.com"), 5000)));
-        assert!(!info
-            .disabled
-            .contains(&(InternedString::intern("example.com"), 49152)));
+        assert!(
+            info.disabled
+                .contains(&(InternedString::intern("example.com"), 5000))
+        );
+        assert!(
+            !info
+                .disabled
+                .contains(&(InternedString::intern("example.com"), 49152))
+        );
     }
 }

@@ -48,7 +48,9 @@ fn build_listen_socket(
 /// ([`LISTEN_BACKLOG`]) instead of mio's hardcoded 128. Use everywhere we'd
 /// otherwise reach for `mio::net::TcpListener::bind`.
 pub fn bind_mio_listener(addr: SocketAddr) -> std::io::Result<mio::net::TcpListener> {
-    Ok(mio::net::TcpListener::from_std(build_listen_socket(addr, false)?))
+    Ok(mio::net::TcpListener::from_std(build_listen_socket(
+        addr, false,
+    )?))
 }
 
 /// Bind a `tokio::net::TcpListener` with an explicit listen backlog

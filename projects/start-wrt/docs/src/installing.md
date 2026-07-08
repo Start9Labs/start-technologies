@@ -10,20 +10,20 @@ StartWRT comes pre-installed on Start9 routers. If you need to reinstall or flas
 
 ## Download the Image
 
-1. Download the latest StartWRT firmware image from the [Start9 releases page](https://github.com/Start9Labs/start-technologies/releases?q=start-wrt&expanded=true) (StartWRT releases are the ones tagged `start-wrt/v…`). For a fresh install, download the **sdcard** image — it is named `startwrt-<version>-<git hash>_spacemit-k1-sdcard.img.gz` (the `…-sysupgrade.img.gz` file is the [update](updating.md) payload). There is no need to decompress it — balenaEtcher flashes the `.img.gz` directly. The commands below use `startwrt.img.gz` as a placeholder for the downloaded filename.
+1.  Download the latest StartWRT firmware image from the [Start9 releases page](https://github.com/Start9Labs/start-technologies/releases?q=start-wrt&expanded=true) (StartWRT releases are the ones tagged `start-wrt/v…`). For a fresh install, download the **sdcard** image — it is named `startwrt-<version>-<git hash>_spacemit-k1-sdcard.img.gz` (the `…-sysupgrade.img.gz` file is the [update](updating.md) payload). There is no need to decompress it — balenaEtcher flashes the `.img.gz` directly. The commands below use `startwrt.img.gz` as a placeholder for the downloaded filename.
 
-1. Verify the SHA256 checksum against the one listed on GitHub (optional but recommended).
-   - **Mac**. Open a terminal and run:
+1.  Verify the SHA256 checksum against the one listed on GitHub (optional but recommended).
+    - **Mac**. Open a terminal and run:
 
-         openssl dgst -sha256 startwrt.img.gz
+          openssl dgst -sha256 startwrt.img.gz
 
-   - **Linux**. Open a terminal and run:
+    - **Linux**. Open a terminal and run:
 
-         sha256sum startwrt.img.gz
+          sha256sum startwrt.img.gz
 
-   - **Windows**. Open PowerShell and run:
+    - **Windows**. Open PowerShell and run:
 
-         Get-FileHash startwrt.img.gz
+          Get-FileHash startwrt.img.gz
 
 ## Write the Image to microSD
 
@@ -62,19 +62,18 @@ Start9 routers ship with a unique Wi-Fi password programmed into the device's EE
 
 If you are flashing a bare BananaPi BPI-F3 that was never programmed with a Wi-Fi password, the Wi-Fi access point will **not** come up after boot. To bring it online:
 
-1. Connect to the router over Ethernet (or serial console).
+1.  Connect to the router over Ethernet (or serial console).
 
-1. Set a Wi-Fi password:
+1.  Set a Wi-Fi password:
+    - **Random** — Generates a random 12-character password and prints it:
 
-   - **Random** — Generates a random 12-character password and prints it:
+          startwrt-cli set-wifi-password
 
-         startwrt-cli set-wifi-password
+    - **Manual** — Prompts you to enter your own password:
 
-   - **Manual** — Prompts you to enter your own password:
+          startwrt-cli set-wifi-password --manual
 
-         startwrt-cli set-wifi-password --manual
-
-1. Record the printed (or entered) password — this becomes your Wi-Fi password.
+1.  Record the printed (or entered) password — this becomes your Wi-Fi password.
 
 The password lives in the router's configuration. A factory reset re-reads the EEPROM, so on an unprogrammed board you will need to run `startwrt-cli set-wifi-password` again after a reset.
 

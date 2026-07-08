@@ -4,28 +4,28 @@ on:
   workflow_call:
     inputs:
       REFERENCE_REGISTRY:
-        description: "Registry where published versions are permanent (used to check if a version is already taken)"
+        description: 'Registry where published versions are permanent (used to check if a version is already taken)'
         type: string
         required: true
       FREE_DISK_SPACE:
-        description: "Free up disk space before building"
+        description: 'Free up disk space before building'
         type: boolean
         default: false
       RELEASE_REGISTRY:
-        description: "Test registry to publish to"
+        description: 'Test registry to publish to'
         type: string
       S3_S9PKS_BASE_URL:
-        description: "S3 base URL for package uploads"
+        description: 'S3 base URL for package uploads'
         type: string
     secrets:
       DEV_KEY:
-        description: "Developer signing key"
+        description: 'Developer signing key'
         required: true
       S3_ACCESS_KEY:
-        description: "S3 access key for uploading packages"
+        description: 'S3 access key for uploading packages'
         required: false
       S3_SECRET_KEY:
-        description: "S3 secret key for uploading packages"
+        description: 'S3 secret key for uploading packages'
         required: false
 
 jobs:

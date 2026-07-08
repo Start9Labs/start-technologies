@@ -28,43 +28,43 @@ on:
       - master
       - next/*
     paths:
-      - "projects/start-wrt/**"
-      - "shared-libs/crates/**"
-      - "shared-libs/ts-modules/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "angular.json"
-      - "package.json"
-      - "package-lock.json"
-      - "tsconfig.json"
-      - "tsconfig.lib.json"
-      - "build/**"
-      - ".github/workflows/start-wrt.yaml"
-      - ".github/actions/setup-build/**"
+      - 'projects/start-wrt/**'
+      - 'shared-libs/crates/**'
+      - 'shared-libs/ts-modules/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'angular.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'tsconfig.lib.json'
+      - 'build/**'
+      - '.github/workflows/start-wrt.yaml'
+      - '.github/actions/setup-build/**'
       # Doc-only edits under the allowlisted project trees (e.g.
       # projects/start-wrt/docs/**) shouldn't trigger a build.
-      - "!**/*.md"
+      - '!**/*.md'
   pull_request:
     branches:
       - master
       - next/*
     paths:
-      - "projects/start-wrt/**"
-      - "shared-libs/crates/**"
-      - "shared-libs/ts-modules/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "angular.json"
-      - "package.json"
-      - "package-lock.json"
-      - "tsconfig.json"
-      - "tsconfig.lib.json"
-      - "build/**"
-      - ".github/workflows/start-wrt.yaml"
-      - ".github/actions/setup-build/**"
+      - 'projects/start-wrt/**'
+      - 'shared-libs/crates/**'
+      - 'shared-libs/ts-modules/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'angular.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'tsconfig.lib.json'
+      - 'build/**'
+      - '.github/workflows/start-wrt.yaml'
+      - '.github/actions/setup-build/**'
       # Doc-only edits under the allowlisted project trees (e.g.
       # projects/start-wrt/docs/**) shouldn't trigger a build.
-      - "!**/*.md"
+      - '!**/*.md'
 
 # The group is scoped by event so a master push can't cancel an in-flight
 # dispatched release build; dispatches queue behind each other, never cancel.
@@ -73,7 +73,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 env:
-  NODEJS_VERSION: "24.17.0"
+  NODEJS_VERSION: '24.17.0'
 
 jobs:
   # Fast path: cross-compile the riscv64 binary (embeds the web UI). Does NOT

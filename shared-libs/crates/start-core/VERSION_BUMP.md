@@ -139,7 +139,7 @@ Remove `// VERSION_BUMP`, add new match arm, add comment:
 Update the OSVersion constant (~line 64):
 
 ```typescript
-export const OSVersion = testTypeVersion("0.4.0-alpha.15");
+export const OSVersion = testTypeVersion('0.4.0-alpha.15')
 ```
 
 ### 5. Web UI Package Version

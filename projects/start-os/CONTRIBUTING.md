@@ -75,8 +75,8 @@ make start-os-deb               # Debian package (start-os-squashfs for the squa
 
 These targets push to a **live device** and are slow/destructive — be deliberate. For devices on the same network:
 
-| Target                                       | Description                                     |
-| -------------------------------------------- | ----------------------------------------------- |
+| Target                                        | Description                                     |
+| --------------------------------------------- | ----------------------------------------------- |
 | `start-os-update-startbox REMOTE=start9@<ip>` | Deploy binary + UI only (fastest)               |
 | `start-os-update-deb REMOTE=start9@<ip>`      | Deploy full Debian package                      |
 | `start-os-update REMOTE=start9@<ip>`          | OTA-style update                                |
@@ -85,11 +85,11 @@ These targets push to a **live device** and are slow/destructive — be delibera
 
 For devices on a different network (uses [magic-wormhole](https://github.com/magic-wormhole/magic-wormhole)):
 
-| Target                      | Description               |
-| --------------------------- | ------------------------- |
-| `start-os-wormhole`          | Send the startbox binary  |
-| `start-os-wormhole-deb`      | Send the Debian package   |
-| `start-os-wormhole-squashfs` | Send the squashfs image   |
+| Target                       | Description              |
+| ---------------------------- | ------------------------ |
+| `start-os-wormhole`          | Send the startbox binary |
+| `start-os-wormhole-deb`      | Send the Debian package  |
+| `start-os-wormhole-squashfs` | Send the squashfs image  |
 
 ### Creating a VM
 

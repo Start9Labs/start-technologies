@@ -1,19 +1,30 @@
-use crate::prelude::*;
-use crate::utils::DeserializeStdin;
-use crate::CtrlContext;
-use crate::utils::HandlerExtSerde;
-use chrono::{offset::Utc, DateTime};
+use std::collections::{BTreeMap, HashMap};
+
+use chrono::offset::Utc;
+use chrono::DateTime;
 use clap::Parser;
 use rpc_toolkit::{from_fn_async_local, ParentHandler};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
 use uciedit::{parse_all, Arena, Line, LockedConfig, Token};
+
+use crate::prelude::*;
+use crate::utils::{DeserializeStdin, HandlerExtSerde};
+use crate::CtrlContext;
 
 pub fn uci<C: CtrlContext>() -> ParentHandler<C> {
     ParentHandler::new()
-        .subcommand("get", from_fn_async_local(get::<C>).with_display_serializable())
-        .subcommand("set", from_fn_async_local(set::<C>).with_display_serializable())
-        .subcommand("edit", from_fn_async_local(edit::<C>).with_display_serializable())
+        .subcommand(
+            "get",
+            from_fn_async_local(get::<C>).with_display_serializable(),
+        )
+        .subcommand(
+            "set",
+            from_fn_async_local(set::<C>).with_display_serializable(),
+        )
+        .subcommand(
+            "edit",
+            from_fn_async_local(edit::<C>).with_display_serializable(),
+        )
 }
 
 #[derive(Debug, Serialize, Deserialize)]

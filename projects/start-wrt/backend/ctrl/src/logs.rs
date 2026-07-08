@@ -1,8 +1,9 @@
+use std::process::Stdio;
+
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
-use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
@@ -41,10 +42,7 @@ pub fn parse_logread_line(line: &str) -> Option<LogEntry> {
     })
 }
 
-pub async fn logs_ws_handler(
-    headers: axum::http::HeaderMap,
-    ws: WebSocketUpgrade,
-) -> Response {
+pub async fn logs_ws_handler(headers: axum::http::HeaderMap, ws: WebSocketUpgrade) -> Response {
     // Validate session cookie before upgrading
     if !crate::middleware::validate_session_from_headers(&headers).await {
         return StatusCode::UNAUTHORIZED.into_response();
@@ -128,8 +126,7 @@ mod tests {
 
     #[test]
     fn test_parse_two_digit_day() {
-        let line =
-            "Mon Mar 13 08:00:00 2026 kern.info kernel: [12345.678] something happened";
+        let line = "Mon Mar 13 08:00:00 2026 kern.info kernel: [12345.678] something happened";
         let entry = parse_logread_line(line).unwrap();
         assert_eq!(entry.timestamp, "Mon Mar 13 08:00:00 2026");
         assert_eq!(
@@ -150,8 +147,6 @@ mod tests {
 
     #[test]
     fn test_parse_no_year() {
-        assert!(
-            parse_logread_line("Thu Mar  3 12:34:56 abcd rest of message").is_none()
-        );
+        assert!(parse_logread_line("Thu Mar  3 12:34:56 abcd rest of message").is_none());
     }
 }

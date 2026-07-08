@@ -421,10 +421,7 @@ pub async fn install_os_to(
     })
 }
 
-pub async fn install_os(
-    ctx: SetupContext,
-    params: InstallOsParams,
-) -> Result<SetupInfo, Error> {
+pub async fn install_os(ctx: SetupContext, params: InstallOsParams) -> Result<SetupInfo, Error> {
     let fut = ctx.install_os_future.mutate(|slot| {
         if let Some(existing) = slot.as_ref() {
             if existing.peek().is_none() {
@@ -434,10 +431,9 @@ pub async fn install_os(
         // Own the task via NonDetachingJoinHandle inside the Shared so it survives
         // dropped awaiters but is aborted when the last reference goes away.
         let ctx = ctx.clone();
-        let handle: NonDetachingJoinHandle<Result<SetupInfo, Arc<Error>>> = tokio::spawn(
-            async move { install_os_inner(ctx, params).await.map_err(Arc::new) },
-        )
-        .into();
+        let handle: NonDetachingJoinHandle<Result<SetupInfo, Arc<Error>>> =
+            tokio::spawn(async move { install_os_inner(ctx, params).await.map_err(Arc::new) })
+                .into();
         let new_fut = async move {
             match handle.await {
                 Ok(res) => res,

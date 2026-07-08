@@ -1,6 +1,7 @@
-use super::*; // Access items from lib.rs
 use inpt::split::SingleQuoted;
-use uciedit_macros::TypedSection; // Import the derive macro
+use uciedit_macros::TypedSection;
+
+use super::*; // Access items from lib.rs // Import the derive macro
 
 // Helper to normalize whitespace for comparisons
 fn normalize(s: String) -> String {

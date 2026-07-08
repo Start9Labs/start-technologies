@@ -73,6 +73,11 @@ mod tests {
     #[test]
     fn rejects_empty_and_malformed() {
         assert!(!has_start9_capability(&[]));
-        assert!(!has_start9_capability(&[OPTION_START9_CAPABILITY, 0, 0, 10]));
+        assert!(!has_start9_capability(&[
+            OPTION_START9_CAPABILITY,
+            0,
+            0,
+            10
+        ]));
     }
 }

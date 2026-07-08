@@ -6,19 +6,19 @@ patch-db is a JSON Patch–based database with a Rust backend and a TypeScript c
 
 ## Layout
 
-| Area | Path |
-|------|------|
-| Core API | `core/src/store.rs` — `PatchDb`, `TypedPatchDb`, `Store`, `MutateResult` |
-| Types | `core/src/patch.rs` — `Revision`, `Dump`, `DiffPatch`, `diff()` |
+| Area          | Path                                                                            |
+| ------------- | ------------------------------------------------------------------------------- |
+| Core API      | `core/src/store.rs` — `PatchDb`, `TypedPatchDb`, `Store`, `MutateResult`        |
+| Types         | `core/src/patch.rs` — `Revision`, `Dump`, `DiffPatch`, `diff()`                 |
 | Subscriptions | `core/src/subscriber.rs` — `DbWatch`, `TypedDbWatch`, `Subscriber`, `Broadcast` |
-| Model system | `core/src/model.rs` — `HasModel`, `Model`, `ModelExt`, `Pointer` |
-| Derive macro | `macro-internals/src/lib.rs` — `HasModel` derive implementation |
-| Error types | `core/src/lib.rs` — `Error` enum, re-exports |
-| JSON Pointer | `json-ptr/src/lib.rs` — `JsonPointer`, `ROOT`, path navigation |
-| JSON Patch | `json-patch/src/lib.rs` — `Patch`, `PatchOperation`, `diff()`, `patch()` |
-| TS client | `client/lib/patch-db.ts` — `PatchDB<T>` class |
-| TS patch lib | `client/lib/json-patch-lib.ts` — client-side patch application |
-| TS types | `client/lib/types.ts` — `Revision`, `Dump`, `Update`, `PatchOp` |
+| Model system  | `core/src/model.rs` — `HasModel`, `Model`, `ModelExt`, `Pointer`                |
+| Derive macro  | `macro-internals/src/lib.rs` — `HasModel` derive implementation                 |
+| Error types   | `core/src/lib.rs` — `Error` enum, re-exports                                    |
+| JSON Pointer  | `json-ptr/src/lib.rs` — `JsonPointer`, `ROOT`, path navigation                  |
+| JSON Patch    | `json-patch/src/lib.rs` — `Patch`, `PatchOperation`, `diff()`, `patch()`        |
+| TS client     | `client/lib/patch-db.ts` — `PatchDB<T>` class                                   |
+| TS patch lib  | `client/lib/json-patch-lib.ts` — client-side patch application                  |
+| TS types      | `client/lib/types.ts` — `Revision`, `Dump`, `Update`, `PatchOp`                 |
 
 Workspace members (`Cargo.toml`): `patch-db` (`core/`), `json-patch`, `json-ptr`, `patch-db-macro` (`macro/`), `patch-db-macro-internals` (`macro-internals/`), `patch-db-util` (`util/`).
 

@@ -24,8 +24,12 @@ fn find_dnsmasq_conf_dir() -> Result<String, Error> {
         if !name.to_string_lossy().starts_with("dnsmasq.conf.") {
             continue;
         }
-        let contents = fs::read_to_string(entry.path())
-            .map_err(|e| Error::new(eyre!("read {}: {e}", entry.path().display()), ErrorKind::Filesystem))?;
+        let contents = fs::read_to_string(entry.path()).map_err(|e| {
+            Error::new(
+                eyre!("read {}: {e}", entry.path().display()),
+                ErrorKind::Filesystem,
+            )
+        })?;
         for line in contents.lines() {
             if let Some(dir) = line.strip_prefix("conf-dir=") {
                 return Ok(dir.to_string());
@@ -58,8 +62,12 @@ pub async fn enable_captive_portal() -> Result<(), Error> {
             .map_err(|e| Error::new(eyre!("failed to create {dir}: {e}"), ErrorKind::Filesystem))?;
     }
 
-    fs::write(&conf, CAPTIVE_CONTENT)
-        .map_err(|e| Error::new(eyre!("failed to write {}: {e}", conf.display()), ErrorKind::Filesystem))?;
+    fs::write(&conf, CAPTIVE_CONTENT).map_err(|e| {
+        Error::new(
+            eyre!("failed to write {}: {e}", conf.display()),
+            ErrorKind::Filesystem,
+        )
+    })?;
 
     restart_dnsmasq().await
 }
@@ -72,8 +80,12 @@ pub async fn disable_captive_portal() -> Result<(), Error> {
     let conf = Path::new(&dir).join(CAPTIVE_CONF_NAME);
 
     if conf.exists() {
-        fs::remove_file(&conf)
-            .map_err(|e| Error::new(eyre!("failed to remove {}: {e}", conf.display()), ErrorKind::Filesystem))?;
+        fs::remove_file(&conf).map_err(|e| {
+            Error::new(
+                eyre!("failed to remove {}: {e}", conf.display()),
+                ErrorKind::Filesystem,
+            )
+        })?;
     }
 
     restart_dnsmasq().await
@@ -83,8 +95,12 @@ pub async fn disable_captive_portal() -> Result<(), Error> {
 ///
 /// Synchronous version of the check in auth.rs — reads /etc/shadow directly.
 pub fn is_admin_password_set() -> Result<bool, Error> {
-    let shadow = fs::read_to_string("/etc/shadow")
-        .map_err(|e| Error::new(eyre!("failed to read /etc/shadow: {e}"), ErrorKind::Filesystem))?;
+    let shadow = fs::read_to_string("/etc/shadow").map_err(|e| {
+        Error::new(
+            eyre!("failed to read /etc/shadow: {e}"),
+            ErrorKind::Filesystem,
+        )
+    })?;
 
     for line in shadow.lines() {
         let parts: Vec<&str> = line.split(':').collect();
@@ -126,15 +142,17 @@ pub async fn ensure_captive_portal_state() -> Result<(), Error> {
 }
 
 async fn restart_dnsmasq() -> Result<(), Error> {
-    let status = crate::run_quiet_async(
-        tokio::process::Command::new("/etc/init.d/dnsmasq").arg("restart"),
-    )
-    .await
-    .map_err(|e| Error::new(eyre!("failed to restart dnsmasq: {e}"), ErrorKind::Network))?;
+    let status =
+        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/dnsmasq").arg("restart"))
+            .await
+            .map_err(|e| Error::new(eyre!("failed to restart dnsmasq: {e}"), ErrorKind::Network))?;
 
     if !status.success() {
         return Err(Error::new(
-            eyre!("dnsmasq restart failed (exit {})", status.code().unwrap_or(-1)),
+            eyre!(
+                "dnsmasq restart failed (exit {})",
+                status.code().unwrap_or(-1)
+            ),
             ErrorKind::Network,
         ));
     }

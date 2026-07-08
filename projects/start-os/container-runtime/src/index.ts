@@ -1,25 +1,25 @@
-import { RpcListener } from "./Adapters/RpcListener"
-import { AllGetDependencies } from "./Interfaces/AllGetDependencies"
-import { getSystem } from "./Adapters/Systems"
+import { RpcListener } from './Adapters/RpcListener'
+import { AllGetDependencies } from './Interfaces/AllGetDependencies'
+import { getSystem } from './Adapters/Systems'
 
 const getDependencies: AllGetDependencies = {
   system: getSystem,
 }
 
-process.on("unhandledRejection", (reason) => {
+process.on('unhandledRejection', reason => {
   if (
     reason instanceof Error &&
-    "muteUnhandled" in reason &&
+    'muteUnhandled' in reason &&
     reason.muteUnhandled
   ) {
     // mute
   } else {
-    console.error("Unhandled promise rejection", reason)
+    console.error('Unhandled promise rejection', reason)
   }
 })
 
-for (let s of ["SIGTERM", "SIGINT", "SIGHUP"]) {
-  process.on(s, (s) => {
+for (let s of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
+  process.on(s, s => {
     console.log(`Caught ${s}`)
   })
 }

@@ -2,12 +2,12 @@
 
 `setupOnInit` runs during container initialization. The `kind` parameter indicates why init is running:
 
-| Kind | When | Use For |
-|------|------|---------|
-| `'install'` | Fresh install | Generate internal secrets, seed file-model defaults, create critical tasks for user setup actions, bootstrap via API |
-| `'update'` | After a package version upgrade | Re-apply config, handle post-migration setup |
-| `'restore'` | Restoring from backup | Re-register triggers; credentials are already present from the restored store |
-| `null` | Container rebuild, server restart | Register long-lived triggers (e.g., `.const()` watchers) |
+| Kind        | When                              | Use For                                                                                                              |
+| ----------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `'install'` | Fresh install                     | Generate internal secrets, seed file-model defaults, create critical tasks for user setup actions, bootstrap via API |
+| `'update'`  | After a package version upgrade   | Re-apply config, handle post-migration setup                                                                         |
+| `'restore'` | Restoring from backup             | Re-register triggers; credentials are already present from the restored store                                        |
+| `null`      | Container rebuild, server restart | Register long-lived triggers (e.g., `.const()` watchers)                                                             |
 
 ## Init Kinds
 
@@ -51,7 +51,7 @@ export const registerWatchers = sdk.setupOnInit(async (effects, kind) => {
   // Runs on install, restore, AND container rebuild
 
   // Register a watcher that lives for the container lifetime
-  someConfig.read((c) => c.setting).const(effects)
+  someConfig.read(c => c.setting).const(effects)
 
   // Install-specific setup
   if (kind === 'install') {
@@ -73,7 +73,7 @@ import { storeJson } from '../fileModels/store.json'
 import { i18n } from '../i18n'
 import { sdk } from '../sdk'
 
-export const watchCredentials = sdk.setupOnInit(async (effects) => {
+export const watchCredentials = sdk.setupOnInit(async effects => {
   const store = await storeJson.read().const(effects)
 
   if (!store?.adminPassword) {
@@ -97,9 +97,7 @@ export const setAdminPassword = sdk.Action.withoutInput(
   'set-admin-password',
   async () => ({
     name: i18n('Set Admin Password'),
-    description: i18n(
-      'Generate a new random password for the admin account. Replaces any existing password.',
-    ),
+    description: i18n('Generate a new random password for the admin account. Replaces any existing password.'),
     warning: null,
     allowedStatuses: 'any',
     group: null,
@@ -297,22 +295,20 @@ You never call the progress effect directly. The init harness builds one `FullPr
 `progress.addPhase(name, contribution)` returns a `PhaseHandle` with `start()`, `setTotal(n)`, `setDone(n)`, `setUnits('steps' | 'bytes')`, and `complete()`. Just update the handle; the report follows automatically.
 
 ```typescript
-export const initializeService = sdk.setupOnInit(
-  async (effects, kind, progress) => {
-    if (kind !== 'install') return
+export const initializeService = sdk.setupOnInit(async (effects, kind, progress) => {
+  if (kind !== 'install') return
 
-    const phase = progress.addPhase('Seeding files', 1)
-    phase.setUnits('steps')
-    phase.setTotal(seedFiles.length)
+  const phase = progress.addPhase('Seeding files', 1)
+  phase.setUnits('steps')
+  phase.setTotal(seedFiles.length)
 
-    for (let i = 0; i < seedFiles.length; i++) {
-      await seedFiles[i](effects)
-      phase.setDone(i + 1) // auto-reports in the background
-    }
+  for (let i = 0; i < seedFiles.length; i++) {
+    await seedFiles[i](effects)
+    phase.setDone(i + 1) // auto-reports in the background
+  }
 
-    phase.complete()
-  },
-)
+  phase.complete()
+})
 ```
 
 Auto-sync is coalesced — at most one report is in flight and one queued, so a tight update loop collapses to the latest snapshot instead of stacking up calls. If you ever need to guarantee the latest state has landed before doing something else, `await progress.sync()` flushes the in-flight and queued reports (the harness already does this when your handler returns).
@@ -426,7 +422,7 @@ When a `setupOnInit` does nothing but seed file models with their schema default
 
 ```typescript
 // init/seedFiles.ts
-export const seedFiles = sdk.setupOnInit(async (effects) => {
+export const seedFiles = sdk.setupOnInit(async effects => {
   await storeJson.merge(effects, {})
   await configToml.merge(effects, {})
 })

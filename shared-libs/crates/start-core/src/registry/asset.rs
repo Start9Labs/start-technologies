@@ -271,7 +271,9 @@ impl MirrorRetry {
     }
     fn next_response(
         mut self,
-    ) -> impl FnMut(DownloadAttemptContext) -> std::pin::Pin<
+    ) -> impl FnMut(
+        DownloadAttemptContext,
+    ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = Result<Response, Error>> + Send>,
     > {
         move |ctx| {
@@ -289,7 +291,10 @@ impl MirrorRetry {
             let exhausted = (next.is_none()).then(|| self.errors.join("; "));
             Box::pin(async move {
                 match next {
-                    Some(req) => req.send().await.map_err(|e| Error::new(e, ErrorKind::Network)),
+                    Some(req) => req
+                        .send()
+                        .await
+                        .map_err(|e| Error::new(e, ErrorKind::Network)),
                     None => Err(Error::new(
                         eyre!(
                             "failed to download package from any mirror: {}",
@@ -336,12 +341,12 @@ impl MirrorRetry {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
+    use super::*;
     use crate::progress::FullProgressTracker;
     use crate::s9pk::merkle_archive::source::ArchiveSource;
 

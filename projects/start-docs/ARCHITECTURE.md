@@ -31,6 +31,7 @@ start-os/ (monorepo root)
 ```
 
 This multi-book design was chosen over a single monolithic book because:
+
 - Each product gets its own sidebar, search, and URL namespace
 - Adding a new product means adding a book directory + one `versions.conf` line, not restructuring existing content
 - Books share a flat page layout (all pages directly in `src/`) with sidebar section headers (`# Part Title` in `SUMMARY.md`)
@@ -55,6 +56,7 @@ So `packaging` is served from `projects/start-sdk/docs`, and any book not explic
 ## Shared Theme
 
 `theme/` in this project is the single source of truth for styling. Each book symlinks to it (e.g. `bitcoin-guides/theme -> ../theme`, `start-os/docs/theme -> ../../start-docs/theme`). It includes:
+
 - YouTube embed styling (`youtube.css` / `youtube.js`)
 - mdbook-tabs CSS/JS (`tabs.css` / `tabs.js`)
 - Theme toggle (`theme-toggle.js`) and home link (`home-link.js`)
@@ -80,6 +82,7 @@ Build output goes to `docs/<book>/<version>/` (e.g. `docs/start-os/0.4.0.x/`). `
 ## Build Pipeline
 
 `build.sh`:
+
 1. Wipes and recreates the `docs/` output dir
 2. Iterates over `versions.conf`, resolves each book's source dir via `book_dir()`, and runs `mdbook build -d docs/<book>/<version>` with the versioned `SITE_URL`
 3. Writes a redirect stub `docs/<book>/index.html` → `/<book>/<version>/`
@@ -104,8 +107,8 @@ The VPS is reached over SSH using the `WEBSITE_DEPLOY_KEY` GitHub Actions secret
 
 ## Scripts
 
-| Script | Purpose |
-|--------|---------|
+| Script                         | Purpose                                                                            |
+| ------------------------------ | ---------------------------------------------------------------------------------- |
 | `scripts/generate-llms-txt.ts` | Produces `llms.txt` (index) and `llms-full.txt` (full content) for LLM consumption |
 
 Run via `cd scripts && npm run generate-llms-txt` (uses `tsx`).

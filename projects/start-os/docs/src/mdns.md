@@ -2,7 +2,7 @@
 
 [Multicast DNS (mDNS)](https://en.wikipedia.org/wiki/Multicast_DNS) gives your server a `<server-name>.local` address on your LAN. The address is derived from your [server name](server-name.md) by lowercasing it, removing non-alphanumeric characters, and replacing spaces with hyphens. For example, a server named "My Cool Server" gets the mDNS address `my-cool-server.local`.
 
-## Watch The Video 
+## Watch The Video
 
 <div class="yt-video" data-id="_Sutx4vhwr0" data-title="mDNS"></div>
 

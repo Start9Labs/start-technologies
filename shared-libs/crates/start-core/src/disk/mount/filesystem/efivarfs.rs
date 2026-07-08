@@ -14,9 +14,7 @@ impl FileSystem for EfiVarFs {
     async fn source(&self) -> Result<Option<impl AsRef<Path>>, Error> {
         Ok(Some("efivarfs"))
     }
-    async fn source_hash(
-        &self,
-    ) -> Result<digest::Output<Sha256>, Error> {
+    async fn source_hash(&self) -> Result<digest::Output<Sha256>, Error> {
         let mut sha = Sha256::new();
         sha.update("EfiVarFs");
         Ok(sha.finalize())

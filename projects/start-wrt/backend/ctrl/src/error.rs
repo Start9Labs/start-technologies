@@ -4,7 +4,7 @@ use color_eyre::eyre::eyre;
 use imbl_value::Value;
 use num_enum::TryFromPrimitive;
 use rpc_toolkit::yajrc::{
-    INVALID_PARAMS_ERROR, INVALID_REQUEST_ERROR, METHOD_NOT_FOUND_ERROR, PARSE_ERROR, RpcError,
+    RpcError, INVALID_PARAMS_ERROR, INVALID_REQUEST_ERROR, METHOD_NOT_FOUND_ERROR, PARSE_ERROR,
 };
 use serde::{Deserialize, Serialize};
 
@@ -136,7 +136,6 @@ pub struct Error {
     pub info: Value,
 }
 
-
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}: {:#}", self.kind.as_str(), self.source)
@@ -239,7 +238,6 @@ impl From<reqwest::Error> for Error {
         Error::new(e, kind)
     }
 }
-
 
 impl From<tokio::task::JoinError> for Error {
     fn from(e: tokio::task::JoinError) -> Self {
@@ -392,7 +390,6 @@ where
         }
     }
 }
-
 
 pub trait OptionExt<T>
 where

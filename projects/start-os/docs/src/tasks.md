@@ -18,7 +18,7 @@ After installing a service, you will often see tasks guiding you through initial
 
 ### Dependency Tasks
 
-Some tasks prompt you to configure a *different* service so it can work with the one you just installed. For example, installing a chat service might create a task asking you to register it with your Matrix homeserver. These tasks link directly to the relevant action on the dependency, sometimes with form fields pre-filled.
+Some tasks prompt you to configure a _different_ service so it can work with the one you just installed. For example, installing a chat service might create a task asking you to register it with your Matrix homeserver. These tasks link directly to the relevant action on the dependency, sometimes with form fields pre-filled.
 
 ## Completing Tasks
 

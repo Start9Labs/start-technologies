@@ -1,5 +1,8 @@
 use core::fmt;
 use core::str::FromStr;
+use std::ops::Deref;
+use std::sync::Arc;
+
 use imbl::shared_ptr::DefaultSharedPtr;
 use imbl::Vector;
 use serde::de::{
@@ -7,13 +10,9 @@ use serde::de::{
     SeqAccess, Unexpected, VariantAccess, Visitor,
 };
 use serde::forward_to_deserialize_any;
-use serde_json::Error;
-use serde_json::Number;
-use std::ops::Deref;
-use std::sync::Arc;
+use serde_json::{Error, Number};
 
-use crate::Value;
-use crate::{InOMap as Map, InternedString};
+use crate::{InOMap as Map, InternedString, Value};
 
 impl<'de> Deserialize<'de> for Value {
     #[inline]

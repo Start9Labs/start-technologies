@@ -1,16 +1,18 @@
-use crate::profiles::{self, ProfileId, ProfileIdOpt};
-use crate::utils::{DeserializeStdin, HandlerExtSerde as _};
-use crate::prelude::*;
-use crate::CtrlContext;
-use rpc_toolkit::{from_fn, from_fn_async_local, ParentHandler};
-use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
+
+use rpc_toolkit::{from_fn, from_fn_async_local, ParentHandler};
+use serde::{Deserialize, Serialize};
 use uciedit::openwrt::{
     NetworkBridgeVlan, WifiChannel, WifiDevice, WifiDynamicVlan, WifiInterface, WifiMode,
     WifiStation, WifiVlan,
 };
 use uciedit::{dump_all, parse_all, Arena, Configs, TypedSection};
+
+use crate::prelude::*;
+use crate::profiles::{self, ProfileId, ProfileIdOpt};
+use crate::utils::{DeserializeStdin, HandlerExtSerde as _};
+use crate::CtrlContext;
 
 pub const DEFAULT_LAN_BRIDGE: &str = "br-lan";
 
@@ -35,7 +37,15 @@ pub fn find_ap_interface_names(cfgs: &Configs) -> Result<Vec<String>, Error> {
     let mut names = Vec::new();
     cfgs["wireless"].try_each(|name, iface: WifiInterface| {
         if iface.mode == WifiMode::AP {
-            names.push(name.ok_or_else(|| Error::new(eyre!("unnamed wireless interface"), ErrorKind::UnnamedWirelessInterface))?.to_string());
+            names.push(
+                name.ok_or_else(|| {
+                    Error::new(
+                        eyre!("unnamed wireless interface"),
+                        ErrorKind::UnnamedWirelessInterface,
+                    )
+                })?
+                .to_string(),
+            );
         }
         Ok::<_, Error>(())
     })?;
@@ -117,9 +127,18 @@ pub(crate) struct UciWifiBlackout {
 
 pub fn wifi<C: CtrlContext + Clone>() -> ParentHandler<C> {
     ParentHandler::new()
-        .subcommand("get", from_fn_async_local(get::<C>).with_display_serializable())
-        .subcommand("set", from_fn_async_local(set::<C>).with_display_serializable())
-        .subcommand("edit", from_fn_async_local(edit::<C>).with_display_serializable())
+        .subcommand(
+            "get",
+            from_fn_async_local(get::<C>).with_display_serializable(),
+        )
+        .subcommand(
+            "set",
+            from_fn_async_local(set::<C>).with_display_serializable(),
+        )
+        .subcommand(
+            "edit",
+            from_fn_async_local(edit::<C>).with_display_serializable(),
+        )
         .subcommand(
             "blackout-get",
             from_fn_async_local(blackout_get::<C>).with_display_serializable(),
@@ -135,7 +154,10 @@ pub fn wifi<C: CtrlContext + Clone>() -> ParentHandler<C> {
 }
 
 fn generate_password<C: CtrlContext>(_ctx: C) -> Result<String, Error> {
-    Ok(crate::generate_password(crate::PASSWORD_CHARS_ALNUM.as_bytes(), 16))
+    Ok(crate::generate_password(
+        crate::PASSWORD_CHARS_ALNUM.as_bytes(),
+        16,
+    ))
 }
 
 fn find_relevant_with_radios(
@@ -145,7 +167,13 @@ fn find_relevant_with_radios(
     let mut devices = HashMap::new();
     cfgs["wireless"].try_each(|name, device: WifiDevice| {
         devices.insert(
-            name.ok_or_else(|| Error::new(eyre!("unnamed wireless device"), ErrorKind::UnnamedWirelessDevice))?.to_string(),
+            name.ok_or_else(|| {
+                Error::new(
+                    eyre!("unnamed wireless device"),
+                    ErrorKind::UnnamedWirelessDevice,
+                )
+            })?
+            .to_string(),
             device,
         );
         Ok::<_, Error>(())
@@ -158,7 +186,14 @@ fn find_relevant_with_radios(
         let Some(device) = devices.get(&*iface.device) else {
             return Ok(());
         };
-        let name = name.ok_or_else(|| Error::new(eyre!("unnamed wireless interface"), ErrorKind::UnnamedWirelessInterface))?.to_string();
+        let name = name
+            .ok_or_else(|| {
+                Error::new(
+                    eyre!("unnamed wireless interface"),
+                    ErrorKind::UnnamedWirelessInterface,
+                )
+            })?
+            .to_string();
         let radio = match radios.get(&name) {
             None => return Ok(()),
             Some(r) => r.clone(),
@@ -173,7 +208,13 @@ fn find_relevant(cfgs: &Configs) -> Result<Vec<(String, WifiInterface, WifiDevic
     let mut devices = HashMap::new();
     cfgs["wireless"].try_each(|name, device: WifiDevice| {
         devices.insert(
-            name.ok_or_else(|| Error::new(eyre!("unnamed wireless device"), ErrorKind::UnnamedWirelessDevice))?.to_string(),
+            name.ok_or_else(|| {
+                Error::new(
+                    eyre!("unnamed wireless device"),
+                    ErrorKind::UnnamedWirelessDevice,
+                )
+            })?
+            .to_string(),
             device,
         );
         Ok::<_, Error>(())
@@ -186,7 +227,14 @@ fn find_relevant(cfgs: &Configs) -> Result<Vec<(String, WifiInterface, WifiDevic
         let Some(device) = devices.get(&*iface.device) else {
             return Ok(());
         };
-        let name = name.ok_or_else(|| Error::new(eyre!("unnamed wireless interface"), ErrorKind::UnnamedWirelessInterface))?.to_string();
+        let name = name
+            .ok_or_else(|| {
+                Error::new(
+                    eyre!("unnamed wireless interface"),
+                    ErrorKind::UnnamedWirelessInterface,
+                )
+            })?
+            .to_string();
         relevant_interfaces.push((name, iface, device.clone()));
         Ok::<_, Error>(())
     })?;
@@ -200,7 +248,8 @@ pub async fn get<C: CtrlContext>(ctx: C) -> Result<Wifi, Error> {
         ctx.uci_root(),
         &arena,
         &["wireless", "startwrt", "network", "firewall"],
-    ).await?;
+    )
+    .await?;
     get_config(ctx, &cfgs)
 }
 
@@ -208,7 +257,10 @@ fn get_config(ctx: impl CtrlContext, cfgs: &Configs) -> Result<Wifi, Error> {
     let lookup = profiles::Lookup::parse(ctx.clone(), cfgs)?;
     let relevant_interfaces = find_relevant(cfgs)?;
     let Some(first_interface) = relevant_interfaces.first() else {
-        return Err(Error::new(eyre!("corrupted WiFi configuration"), ErrorKind::CorruptedWifi));
+        return Err(Error::new(
+            eyre!("corrupted WiFi configuration"),
+            ErrorKind::CorruptedWifi,
+        ));
     };
     let mut passwords = BTreeSet::new();
     cfgs["wireless"].try_each(|_, station: WifiStation| {
@@ -218,15 +270,12 @@ fn get_config(ctx: impl CtrlContext, cfgs: &Configs) -> Result<Wifi, Error> {
             }
         }
         let profile = station.vid.and_then(|vid| lookup.from_vlan(vid)).cloned();
-        let label = station
-            .label
-            .filter(|l| !l.is_empty())
-            .unwrap_or_else(|| {
-                profile
-                    .as_ref()
-                    .map(|p| p.fullname.clone())
-                    .unwrap_or_default()
-            });
+        let label = station.label.filter(|l| !l.is_empty()).unwrap_or_else(|| {
+            profile
+                .as_ref()
+                .map(|p| p.fullname.clone())
+                .unwrap_or_default()
+        });
         passwords.insert(Password {
             label,
             profile,
@@ -330,13 +379,21 @@ fn set_config(
     let mut iface_config_changed = false;
     for s in &mut cfgs["wireless"].sections {
         if let Some(mut device) = s.get_typed::<WifiDevice>()? {
-            let name = s.name().ok_or_else(|| Error::new(eyre!("unnamed wireless device"), ErrorKind::UnnamedWirelessDevice))?;
+            let name = s.name().ok_or_else(|| {
+                Error::new(
+                    eyre!("unnamed wireless device"),
+                    ErrorKind::UnnamedWirelessDevice,
+                )
+            })?;
             for (_, rel_iface, _, rel_radio) in &relevant_interfaces {
                 if rel_iface.device == name {
                     let new_disabled = !rel_radio.enabled;
                     let new_channel = match rel_radio.channel.as_str() {
                         "auto" | "Auto" => WifiChannel::Auto,
-                        n => n.parse::<u32>().map(WifiChannel::Int).unwrap_or(WifiChannel::Auto),
+                        n => n
+                            .parse::<u32>()
+                            .map(WifiChannel::Int)
+                            .unwrap_or(WifiChannel::Auto),
                     };
                     if device.disabled != new_disabled
                         || device.channel != new_channel
@@ -353,7 +410,12 @@ fn set_config(
             }
         }
         if let Some(mut iface) = s.get_typed::<WifiInterface>()? {
-            let name = s.name().ok_or_else(|| Error::new(eyre!("unnamed wireless interface"), ErrorKind::UnnamedWirelessInterface))?;
+            let name = s.name().ok_or_else(|| {
+                Error::new(
+                    eyre!("unnamed wireless interface"),
+                    ErrorKind::UnnamedWirelessInterface,
+                )
+            })?;
             for (rel_name, _, rel_device, rel_radio) in &relevant_interfaces {
                 if rel_name == &*name {
                     let new_ssid = if wifi.broadcast_separately && rel_device.band == "5g" {
@@ -449,8 +511,12 @@ fn set_config(
 
     let mut vlans_created = false;
     for psswd in &wifi.passwords {
-        let Some(profile) = &psswd.profile else { continue; };
-        if !bridge_vlan_tags.contains(&profile.vlan_tag) { continue; }
+        let Some(profile) = &psswd.profile else {
+            continue;
+        };
+        if !bridge_vlan_tags.contains(&profile.vlan_tag) {
+            continue;
+        }
         for (niface, _, _, _) in &relevant_interfaces {
             let key = (profile.vlan_tag, niface.clone());
             if existing_wifi_vlans.insert(key) {
@@ -540,9 +606,7 @@ pub async fn set<C: CtrlContext>(
             // ports (which have no IPv4 reservation subnet to consult).
             let device_profiles: HashMap<String, String> = devices
                 .iter()
-                .filter_map(|d| {
-                    Some((d.mac.as_ref()?.to_uppercase(), d.security_profile.clone()?))
-                })
+                .filter_map(|d| Some((d.mac.as_ref()?.to_uppercase(), d.security_profile.clone()?)))
                 .collect();
             let wifi_macs: HashSet<String> = devices
                 .iter()
@@ -583,7 +647,8 @@ pub async fn set<C: CtrlContext>(
             ctx.uci_root(),
             &arena,
             &["wireless", "startwrt", "network", "firewall", "dhcp"],
-        ).await?;
+        )
+        .await?;
         let lookup = profiles::Lookup::parse(ctx.clone(), &cfgs)?;
         let mut wifi = Wifi {
             ssid: wifi.ssid.clone(),
@@ -608,30 +673,66 @@ pub async fn set<C: CtrlContext>(
         let mut seen_labels = std::collections::HashSet::new();
         for pass in &wifi.passwords {
             if pass.password.len() < MIN_PSK_LEN {
-                crate::activity::log("wifi", "updated", false, "Failed to update WiFi: password too short", Some("InvalidValue"));
+                crate::activity::log(
+                    "wifi",
+                    "updated",
+                    false,
+                    "Failed to update WiFi: password too short",
+                    Some("InvalidValue"),
+                );
                 return Err(Error::new(
                     eyre!("WiFi password must be at least {MIN_PSK_LEN} characters"),
                     ErrorKind::InvalidValue,
                 ));
             }
             if pass.password.len() > MAX_PSK_LEN {
-                crate::activity::log("wifi", "updated", false, "Failed to update WiFi: password too long", Some("InvalidValue"));
+                crate::activity::log(
+                    "wifi",
+                    "updated",
+                    false,
+                    "Failed to update WiFi: password too long",
+                    Some("InvalidValue"),
+                );
                 return Err(Error::new(
                     eyre!("WiFi password must be at most {MAX_PSK_LEN} characters"),
                     ErrorKind::InvalidValue,
                 ));
             }
             if !seen_passwords.insert(&pass.password) {
-                crate::activity::log("wifi", "updated", false, "Failed to update WiFi: duplicate password", Some("DuplicatePassword"));
-                return Err(Error::new(eyre!("duplicate WiFi password"), ErrorKind::DuplicatePassword));
+                crate::activity::log(
+                    "wifi",
+                    "updated",
+                    false,
+                    "Failed to update WiFi: duplicate password",
+                    Some("DuplicatePassword"),
+                );
+                return Err(Error::new(
+                    eyre!("duplicate WiFi password"),
+                    ErrorKind::DuplicatePassword,
+                ));
             }
             if !pass.label.is_empty() && !seen_labels.insert(&pass.label) {
-                crate::activity::log("wifi", "updated", false, "Failed to update WiFi: duplicate password label", Some("DuplicatePasswordLabel"));
-                return Err(Error::new(eyre!("duplicate WiFi password label"), ErrorKind::DuplicatePasswordLabel));
+                crate::activity::log(
+                    "wifi",
+                    "updated",
+                    false,
+                    "Failed to update WiFi: duplicate password label",
+                    Some("DuplicatePasswordLabel"),
+                );
+                return Err(Error::new(
+                    eyre!("duplicate WiFi password label"),
+                    ErrorKind::DuplicatePasswordLabel,
+                ));
             }
         }
         if auto_enable_radios_on_first_admin_password(&mut wifi, &cfgs)? {
-            crate::activity::log("wifi", "auto-enabled-radios", true, "Auto-enabled radios for first admin password", None);
+            crate::activity::log(
+                "wifi",
+                "auto-enabled-radios",
+                true,
+                "Auto-enabled radios for first admin password",
+                None,
+            );
         }
         let restart = match set_config(&ctx, &mut cfgs, &wifi, &lookup) {
             Err(Error {
@@ -645,11 +746,23 @@ pub async fn set<C: CtrlContext>(
                 crate::run_quiet_async(tokio::process::Command::new("wifi").arg("config"))
                     .await
                     .map_err(|e| Error::new(eyre!("wifi config: {e}"), ErrorKind::Filesystem))?;
-                crate::activity::log("wifi", "recovered", true, "Recovered corrupted WiFi config (auto-regenerated)", None);
+                crate::activity::log(
+                    "wifi",
+                    "recovered",
+                    true,
+                    "Recovered corrupted WiFi config (auto-regenerated)",
+                    None,
+                );
                 continue;
             }
             Err(err) => {
-                crate::activity::log("wifi", "updated", false, "Failed to update WiFi settings", Some(&err.to_string()));
+                crate::activity::log(
+                    "wifi",
+                    "updated",
+                    false,
+                    "Failed to update WiFi settings",
+                    Some(&err.to_string()),
+                );
                 return Err(err);
             }
             Ok(v) => v,
@@ -668,7 +781,13 @@ pub async fn set<C: CtrlContext>(
                 continue;
             }
             Err(err) => {
-                crate::activity::log("wifi", "updated", false, "Failed to write WiFi config", Some(&err.to_string()));
+                crate::activity::log(
+                    "wifi",
+                    "updated",
+                    false,
+                    "Failed to write WiFi config",
+                    Some(&err.to_string()),
+                );
                 return Err(err.into());
             }
             Ok(()) => {
@@ -678,7 +797,9 @@ pub async fn set<C: CtrlContext>(
                             // SSID/channel/enabled/hidden changed or new VLANs — full restart
                             crate::run_quiet_async(&mut tokio::process::Command::new("wifi"))
                                 .await
-                                .map_err(|e| Error::new(eyre!("wifi restart: {e}"), ErrorKind::Network))?;
+                                .map_err(|e| {
+                                    Error::new(eyre!("wifi restart: {e}"), ErrorKind::Network)
+                                })?;
                         }
                         WifiRestart::PskOnly => {
                             // PSK-only change — fast path, no client disconnection
@@ -686,7 +807,9 @@ pub async fn set<C: CtrlContext>(
                                 tokio::process::Command::new("wifi").arg("reload"),
                             )
                             .await
-                            .map_err(|e| Error::new(eyre!("wifi reload: {e}"), ErrorKind::Network))?;
+                            .map_err(|e| {
+                                Error::new(eyre!("wifi reload: {e}"), ErrorKind::Network)
+                            })?;
                         }
                     }
                     // Removing published-port firewall sections needs a firewall
@@ -706,10 +829,22 @@ pub async fn set<C: CtrlContext>(
                 }
                 match restart {
                     WifiRestart::Full => {
-                        crate::activity::log("wifi", "updated", true, &format!("Updated WiFi settings (SSID: '{}')", wifi.ssid), None);
+                        crate::activity::log(
+                            "wifi",
+                            "updated",
+                            true,
+                            &format!("Updated WiFi settings (SSID: '{}')", wifi.ssid),
+                            None,
+                        );
                     }
                     WifiRestart::PskOnly => {
-                        crate::activity::log("wifi", "passwords-updated", true, "Updated WiFi passwords (PSK hot-reload)", None);
+                        crate::activity::log(
+                            "wifi",
+                            "passwords-updated",
+                            true,
+                            "Updated WiFi passwords (PSK hot-reload)",
+                            None,
+                        );
                     }
                 }
                 return Ok(WifiSetResult::default());
@@ -762,14 +897,20 @@ fn crontab_path(ctx: &impl CtrlContext) -> PathBuf {
 fn parse_hhmm(s: &str) -> Result<(u32, u32), Error> {
     let parts: Vec<&str> = s.split(':').collect();
     if parts.len() != 2 {
-        return Err(Error::new(eyre!("invalid time format: {s:?}"), ErrorKind::InvalidValue));
+        return Err(Error::new(
+            eyre!("invalid time format: {s:?}"),
+            ErrorKind::InvalidValue,
+        ));
     }
     let h: u32 = parts[0]
         .parse()
         .map_err(|_| Error::new(eyre!("invalid hour: {}", parts[0]), ErrorKind::InvalidValue))?;
-    let m: u32 = parts[1]
-        .parse()
-        .map_err(|_| Error::new(eyre!("invalid minute: {}", parts[1]), ErrorKind::InvalidValue))?;
+    let m: u32 = parts[1].parse().map_err(|_| {
+        Error::new(
+            eyre!("invalid minute: {}", parts[1]),
+            ErrorKind::InvalidValue,
+        )
+    })?;
     Ok((h, m))
 }
 
@@ -815,7 +956,12 @@ pub(crate) fn windows_overlap(windows: &[(u32, u32, [bool; 7])]) -> bool {
             }
             let base = d as i64 * 24 * 60;
             let s = base + start as i64;
-            let e = base + if end <= start { end as i64 + 24 * 60 } else { end as i64 };
+            let e = base
+                + if end <= start {
+                    end as i64 + 24 * 60
+                } else {
+                    end as i64
+                };
             if e <= WEEK {
                 segs.push((s, e));
             } else {
@@ -883,8 +1029,16 @@ pub(crate) fn deconflict_edges(
         let umask = ups.get(&m).copied().unwrap_or([false; 7]);
         let conflict: [bool; 7] = std::array::from_fn(|d| dmask[d] && umask[d]);
         if conflict.iter().any(|&b| b) {
-            set_or_remove(&mut downs, m, std::array::from_fn(|d| dmask[d] && !conflict[d]));
-            set_or_remove(&mut ups, m, std::array::from_fn(|d| umask[d] && !conflict[d]));
+            set_or_remove(
+                &mut downs,
+                m,
+                std::array::from_fn(|d| dmask[d] && !conflict[d]),
+            );
+            set_or_remove(
+                &mut ups,
+                m,
+                std::array::from_fn(|d| umask[d] && !conflict[d]),
+            );
         }
     }
     (downs, ups)
@@ -956,15 +1110,17 @@ pub(crate) fn windows_to_minutes(
 ) -> Vec<(u32, u32, [bool; 7])> {
     windows
         .iter()
-        .filter_map(|(start, end, days)| match (parse_hhmm(start), parse_hhmm(end)) {
-            (Ok((sh, sm)), Ok((eh, em))) => Some((sh * 60 + sm, eh * 60 + em, *days)),
-            _ => {
-                tracing::warn!(
-                    "schedule: dropping window with unparseable time(s) {start:?}..{end:?}"
-                );
-                None
-            }
-        })
+        .filter_map(
+            |(start, end, days)| match (parse_hhmm(start), parse_hhmm(end)) {
+                (Ok((sh, sm)), Ok((eh, em))) => Some((sh * 60 + sm, eh * 60 + em, *days)),
+                _ => {
+                    tracing::warn!(
+                        "schedule: dropping window with unparseable time(s) {start:?}..{end:?}"
+                    );
+                    None
+                }
+            },
+        )
         .collect()
 }
 
@@ -1078,7 +1234,13 @@ pub async fn blackout_set<C: CtrlContext>(
                 continue;
             }
             Err(err) => {
-                crate::activity::log("wifi", "blackout-updated", false, "Failed to write blackout schedule", Some(&err.to_string()));
+                crate::activity::log(
+                    "wifi",
+                    "blackout-updated",
+                    false,
+                    "Failed to write blackout schedule",
+                    Some(&err.to_string()),
+                );
                 return Err(err.into());
             }
             Ok(()) => break,
@@ -1093,7 +1255,13 @@ pub async fn blackout_set<C: CtrlContext>(
             .map_err(|e| Error::new(eyre!("restarting cron: {e}"), ErrorKind::Filesystem))?;
     }
 
-    crate::activity::log("wifi", "blackout-updated", true, "Updated WiFi blackout schedule", None);
+    crate::activity::log(
+        "wifi",
+        "blackout-updated",
+        true,
+        "Updated WiFi blackout schedule",
+        None,
+    );
     Ok(())
 }
 
@@ -1194,36 +1362,31 @@ pub(crate) async fn reconcile_blackout_at_boot(ctx: &impl CtrlContext) -> Result
 /// (wrap-aware via `profiles::window_contains`). Malformed time fields are
 /// skipped. Split out from `reconcile_blackout_at_boot` so it is unit-testable
 /// without reading the system clock or spawning `wifi`.
-fn windows_contain_now(
-    windows: &[(String, String, [bool; 7])],
-    day: usize,
-    minute: u32,
-) -> bool {
-    windows.iter().any(|(start, end, days)| {
-        match (parse_hhmm(start), parse_hhmm(end)) {
+fn windows_contain_now(windows: &[(String, String, [bool; 7])], day: usize, minute: u32) -> bool {
+    windows.iter().any(
+        |(start, end, days)| match (parse_hhmm(start), parse_hhmm(end)) {
             (Ok((sh, sm)), Ok((eh, em))) => {
                 crate::profiles::window_contains(sh * 60 + sm, eh * 60 + em, days, day, minute)
             }
             _ => false,
-        }
-    })
+        },
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use rpc_toolkit::Context;
     use std::sync::Arc;
+
+    use rpc_toolkit::Context;
     use tokio::runtime::Runtime;
+
+    use super::*;
 
     /// Test shim: the production `set` now takes a `WifiSetRequest` and returns
     /// `WifiSetResult`; these tests predate that and pass a bare `Wifi`. Wrap it
     /// (no published-port confirmation needed — tests run non-effectfully) so the
     /// existing call sites stay unchanged.
-    async fn set(
-        ctx: TestContext,
-        w: DeserializeStdin<Wifi<ProfileIdOpt>>,
-    ) -> Result<(), Error> {
+    async fn set(ctx: TestContext, w: DeserializeStdin<Wifi<ProfileIdOpt>>) -> Result<(), Error> {
         super::set(
             ctx,
             DeserializeStdin(super::WifiSetRequest {
@@ -1416,7 +1579,12 @@ config wifi-iface 'default_radio0'
         radios
     }
 
-    fn write_wireless_config_dual_radio(dir: &std::path::Path, ssid_2g: &str, ssid_5g: &str, stations: &str) {
+    fn write_wireless_config_dual_radio(
+        dir: &std::path::Path,
+        ssid_2g: &str,
+        ssid_5g: &str,
+        stations: &str,
+    ) {
         std::fs::write(
             dir.join("wireless"),
             format!(
@@ -1593,14 +1761,15 @@ config wifi-station
         .unwrap();
 
         let mut found_kids = false;
-        cfgs2["wireless"].try_each(|_, station: WifiStation| {
-            if station.key == "kidspass1" {
-                assert_eq!(station.label.as_deref(), Some("Kids WiFi"));
-                found_kids = true;
-            }
-            Ok::<_, Error>(())
-        })
-        .unwrap();
+        cfgs2["wireless"]
+            .try_each(|_, station: WifiStation| {
+                if station.key == "kidspass1" {
+                    assert_eq!(station.label.as_deref(), Some("Kids WiFi"));
+                    found_kids = true;
+                }
+                Ok::<_, Error>(())
+            })
+            .unwrap();
 
         assert!(found_kids, "did not find station with key 'kidspass1'");
     }
@@ -1892,7 +2061,11 @@ config wifi-station
             passwords,
         };
         let restart = set_config(&ctx, &mut cfgs, &wifi, &lookup).unwrap();
-        assert_eq!(restart, WifiRestart::Full, "SSID change should require full restart");
+        assert_eq!(
+            restart,
+            WifiRestart::Full,
+            "SSID change should require full restart"
+        );
     }
 
     #[tokio::test]
@@ -1900,13 +2073,16 @@ config wifi-station
         let dir = tempfile::tempdir().unwrap();
         let ctx = TestContext(dir.path().to_path_buf());
         setup_test_configs(dir.path());
-        write_wireless_config(dir.path(), "\
+        write_wireless_config(
+            dir.path(),
+            "\
 config wifi-station
 \toption key 'guestpass1'
 \toption vid '101'
 \toption iface 'default_radio0'
 \toption label 'Guest'
-");
+",
+        );
 
         // First set to establish baseline
         let arena = Arena::new();
@@ -1972,7 +2148,11 @@ config wifi-station
             passwords: passwords2,
         };
         let restart = set_config(&ctx, &mut cfgs2, &wifi2, &lookup2).unwrap();
-        assert_eq!(restart, WifiRestart::PskOnly, "password-only change should use PSK reload");
+        assert_eq!(
+            restart,
+            WifiRestart::PskOnly,
+            "password-only change should use PSK reload"
+        );
     }
 
     /// Wireless config mimicking a fresh device with no admin password and
@@ -2095,7 +2275,10 @@ config wifi-iface 'default_radio1'
         };
 
         let flipped = auto_enable_radios_on_first_admin_password(&mut wifi, &cfgs).unwrap();
-        assert!(!flipped, "should not auto-enable when admin password already present");
+        assert!(
+            !flipped,
+            "should not auto-enable when admin password already present"
+        );
         assert!(
             wifi.radios.values().all(|r| !r.enabled),
             "user's explicit disable should be respected on subsequent edits"
@@ -2141,7 +2324,10 @@ config wifi-iface 'default_radio1'
         };
 
         let flipped = auto_enable_radios_on_first_admin_password(&mut wifi, &cfgs).unwrap();
-        assert!(!flipped, "should not flip when user already enabled at least one radio");
+        assert!(
+            !flipped,
+            "should not flip when user already enabled at least one radio"
+        );
         assert!(wifi.radios["default_radio0"].enabled);
         assert!(!wifi.radios["default_radio1"].enabled);
     }
@@ -2238,8 +2424,14 @@ config wifi-iface 'default_radio1'
     #[test]
     fn test_days_to_cron() {
         // [Sun..Sat]; 0 = Sunday.
-        assert_eq!(days_to_cron(&[false, true, false, false, false, false, false]), "1");
-        assert_eq!(days_to_cron(&[true, false, false, false, false, false, true]), "0,6");
+        assert_eq!(
+            days_to_cron(&[false, true, false, false, false, false, false]),
+            "1"
+        );
+        assert_eq!(
+            days_to_cron(&[true, false, false, false, false, false, true]),
+            "0,6"
+        );
         assert_eq!(days_to_cron(&[false; 7]), "");
     }
 
@@ -2271,15 +2463,27 @@ config wifi-iface 'default_radio1'
         tue[2] = true;
 
         // Disjoint times, same day.
-        assert!(!windows_overlap(&[(9 * 60, 17 * 60, mon), (18 * 60, 20 * 60, mon)]));
+        assert!(!windows_overlap(&[
+            (9 * 60, 17 * 60, mon),
+            (18 * 60, 20 * 60, mon)
+        ]));
         // Overlapping times, same day.
-        assert!(windows_overlap(&[(9 * 60, 17 * 60, mon), (16 * 60, 18 * 60, mon)]));
+        assert!(windows_overlap(&[
+            (9 * 60, 17 * 60, mon),
+            (16 * 60, 18 * 60, mon)
+        ]));
         // Same times, different days: no overlap.
-        assert!(!windows_overlap(&[(9 * 60, 17 * 60, mon), (9 * 60, 17 * 60, tue)]));
+        assert!(!windows_overlap(&[
+            (9 * 60, 17 * 60, mon),
+            (9 * 60, 17 * 60, tue)
+        ]));
         // Daily 22:00-06:00 does not self-overlap (8h nightly gap).
         assert!(!windows_overlap(&[(22 * 60, 6 * 60, all)]));
         // Mon-night wrap (->Tue 06:00) overlaps a Tue 04:00-05:00 window.
-        assert!(windows_overlap(&[(22 * 60, 6 * 60, mon), (4 * 60, 5 * 60, tue)]));
+        assert!(windows_overlap(&[
+            (22 * 60, 6 * 60, mon),
+            (4 * 60, 5 * 60, tue)
+        ]));
 
         // The two surviving mock windows must not overlap.
         let mut sun_fri_sat = [false; 7];
@@ -2471,8 +2675,7 @@ config wifi-iface 'default_radio1'
         assert!(downs.is_empty() && ups.is_empty());
         assert!(covers_full_week(&[(0, 0, [true; 7])]));
         // Seven adjacent windows tiling the week also count as full coverage.
-        let tiling: Vec<(u32, u32, [bool; 7])> =
-            (0..7).map(|d| (0, 0, mask(&[d]))).collect();
+        let tiling: Vec<(u32, u32, [bool; 7])> = (0..7).map(|d| (0, 0, mask(&[d]))).collect();
         assert!(covers_full_week(&tiling));
         // A single day's gap is not full coverage.
         assert!(!covers_full_week(&[(9 * 60, 17 * 60, [true; 7])]));
@@ -2484,7 +2687,10 @@ config wifi-iface 'default_radio1'
         // Two parts (missing the days field) is malformed and dropped; the valid
         // entry is kept.
         let out = parse_windows(&["09:00|17:00".to_string(), "09:00|17:00|1".to_string()]);
-        assert_eq!(out, vec![("09:00".to_string(), "17:00".to_string(), mask(&[1]))]);
+        assert_eq!(
+            out,
+            vec![("09:00".to_string(), "17:00".to_string(), mask(&[1]))]
+        );
     }
 
     #[test]

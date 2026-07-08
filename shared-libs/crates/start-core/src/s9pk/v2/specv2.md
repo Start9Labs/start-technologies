@@ -32,6 +32,7 @@
       - size (8B: u64 BE)
 
 #### SigHash
+
 Hash of TOC with all contents MISSING
 
 ### FILE
@@ -43,47 +44,49 @@ Hash of TOC with all contents MISSING
 `foo/bar/baz.txt`
 
 ROOT TOC:
-  - 1 section
-    - name: foo
-      hash: sighash('a)
-      type: TOC
-      position: 'a
-      length: _
+
+- 1 section
+  - name: foo
+    hash: sighash('a)
+    type: TOC
+    position: 'a
+    length: \_
 
 'a:
-  - 1 section
-    - name: bar
-      hash: sighash('b)
-      type: TOC
-      position: 'b
-      size: _
+
+- 1 section
+  - name: bar
+    hash: sighash('b)
+    type: TOC
+    position: 'b
+    size: \_
 
 'b:
-  - 2 sections
-    - name: baz.txt
-      hash: hash('c)
-      type: FILE
-      position: 'c
-      length: _
-    - name: qux
-      hash: `<unverifiable>`
-      type: MISSING
+
+- 2 sections
+  - name: baz.txt
+    hash: hash('c)
+    type: FILE
+    position: 'c
+    length: \_
+  - name: qux
+    hash: `<unverifiable>`
+    type: MISSING
 
 'c: `<CONTENTS OF baz.txt>`
 
 "foo/"
-hash: _
+hash: \_
 size: 15b
 
 "bar.txt"
-hash: _
+hash: \_
 size: 5b
 
 `<CONTENTS OF foo/>` (
-  "baz.txt"
-  hash: _
-  size: 2b
+"baz.txt"
+hash: \_
+size: 2b
 )
 `<CONTENTS OF bar.txt>` ("hello")
 `<CONTENTS OF baz.txt>` ("hi")
-

@@ -1,4 +1,4 @@
-name: "Setup Publish Environment"
+name: 'Setup Publish Environment'
 description: |
   Minimal environment for the Publish job: installs start-cli only.
 
@@ -12,7 +12,7 @@ description: |
       step when S3_S9PKS_BASE_URL is set; start-cli s9pk publish shells
       out to s3cmd)
 runs:
-  using: "composite"
+  using: 'composite'
   steps:
     - name: Install start-cli
       run: |

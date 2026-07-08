@@ -6,9 +6,8 @@ extern crate serde_json;
 
 use imbl_value::imbl::{vector, Vector};
 use imbl_value::Value;
-use serde::Deserialize;
-
 use jsonpath::{JsonSelector, JsonSelectorMut, PathParser};
+use serde::Deserialize;
 
 mod common;
 

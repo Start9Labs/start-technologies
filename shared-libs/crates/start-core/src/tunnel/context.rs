@@ -29,13 +29,13 @@ use crate::db::model::public::{NetworkInterfaceInfo, NetworkInterfaceType};
 use crate::middleware::auth::Auth;
 use crate::middleware::auth::local::LocalAuthContext;
 use crate::middleware::cors::Cors;
+use crate::net::dns_update::rfc2136::{DnsInjector, InjectedRecord};
 use crate::net::forward::{PortForwardController, nft_comments_with_prefix, nft_rule, nft_rule_v6};
 use crate::net::static_server::{EMPTY_DIR, UiContext};
 use crate::prelude::*;
 use crate::rpc_continuations::{OpenAuthedContinuations, RpcContinuations};
 use crate::tunnel::TUNNEL_DEFAULT_LISTEN;
 use crate::tunnel::api::tunnel_api;
-use crate::net::dns_update::rfc2136::{DnsInjector, InjectedRecord};
 use crate::tunnel::db::{DnsRecordEntry, DnsRecords, PortForward, PortForwards, TunnelDatabase};
 use crate::tunnel::dns::DnsProxyController;
 use crate::tunnel::migrations::run_migrations;
@@ -324,7 +324,9 @@ impl TunnelContext {
                         .unwrap_or(32);
                     active_forwards.insert(
                         from,
-                        forward.add_forward_range(from, to, count, prefix, None).await?,
+                        forward
+                            .add_forward_range(from, to, count, prefix, None)
+                            .await?,
                     );
                 }
                 PortForward::Sni { routes } => {
@@ -423,7 +425,9 @@ impl TunnelContext {
         self.forward_rebind.notify_waiters();
         self.dns_allowed.mutate(|s| *s = allowed_injectors(server));
         self.dns_keys.mutate(|m| *m = injector_keys(server));
-        self.dns_proxy.sync(server, self.dns_injector.clone()).await?;
+        self.dns_proxy
+            .sync(server, self.dns_injector.clone())
+            .await?;
         self.resync_egress().await?;
         self.resync_v6().await
     }
@@ -589,15 +593,14 @@ impl TunnelContext {
                 }
                 PortForward::Sni { routes } => {
                     for (host, route) in routes {
-                        let ip = crate::tunnel::forward::igd::external_ipv4(self, *route.target.ip())
-                            .await
-                            .unwrap_or(*src.ip());
+                        let ip =
+                            crate::tunnel::forward::igd::external_ipv4(self, *route.target.ip())
+                                .await
+                                .unwrap_or(*src.ip());
                         let key = SocketAddrV4::new(ip, src.port());
-                        match want
-                            .entry(key)
-                            .or_insert_with(|| PortForward::Sni {
-                                routes: BTreeMap::new(),
-                            }) {
+                        match want.entry(key).or_insert_with(|| PortForward::Sni {
+                            routes: BTreeMap::new(),
+                        }) {
                             PortForward::Sni { routes } => {
                                 routes.insert(host.clone(), route.clone());
                             }
@@ -633,10 +636,13 @@ impl TunnelContext {
         }
         for ((src, host), target) in &new_sni {
             if old_sni.get(&(*src, host.clone())) != Some(target) {
-                if let Err(code) =
-                    self.sni
-                        .register(*src.ip(), src.port(), std::slice::from_ref(host), *target, None)
-                {
+                if let Err(code) = self.sni.register(
+                    *src.ip(),
+                    src.port(),
+                    std::slice::from_ref(host),
+                    *target,
+                    None,
+                ) {
                     tracing::warn!("failed to register SNI route {host} on {src}: code {code}");
                 }
             }

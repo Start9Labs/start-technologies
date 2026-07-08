@@ -16,7 +16,6 @@ Published ports (port forwarding) allow devices on the Internet to reach specifi
 1. Navigate to `Internet > Published Ports` and click "Add".
 
 1. Configure the rule:
-
    - **Label** — A descriptive name (e.g. "Home Assistant", "Minecraft Server", "Bitcoin P2P").
    - **Device** — Select the target device from the list. The device is identified by name and IP address. If the device does not already have a reserved IPv4 address, one will be assigned automatically to ensure the rule always reaches the correct device.
    - **Port** — The port or port range on the device to expose. Enter a single port (e.g. `443`) or a range (e.g. `27015-27030`).

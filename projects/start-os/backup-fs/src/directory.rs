@@ -217,7 +217,12 @@ impl DirectoryContents {
 
     /// Reap a superseded bucket generation. Call ONLY after the new-gen
     /// marker has been durably persisted (see [`Self::insert`]).
-    pub fn reap_generation(ctrl: &Controller, dir: Inode, gen: u64, buckets: u32) -> BkfsResult<()> {
+    pub fn reap_generation(
+        ctrl: &Controller,
+        dir: Inode,
+        gen: u64,
+        buckets: u32,
+    ) -> BkfsResult<()> {
         for idx in 0..buckets {
             ctrl.remove_dir_bucket(dir, gen, idx)?;
         }
@@ -343,11 +348,16 @@ impl DirectoryContents {
     /// deleting it before the new marker is on stable storage would lose the
     /// whole directory on crash.
     fn reshard(&mut self, ctrl: &Controller, dir: Inode) -> BkfsResult<Option<(u64, u32)>> {
-        let DirEntries::Spilled { gen, buckets, len, .. } = self.0 else {
+        let DirEntries::Spilled {
+            gen, buckets, len, ..
+        } = self.0
+        else {
             return Ok(None);
         };
         let entries = self.snapshot(ctrl, dir)?;
-        let new_buckets = choose_buckets(len).max(buckets.saturating_mul(2)).min(MAX_BUCKETS);
+        let new_buckets = choose_buckets(len)
+            .max(buckets.saturating_mul(2))
+            .min(MAX_BUCKETS);
         if new_buckets == buckets {
             return Ok(None);
         }
@@ -414,7 +424,10 @@ mod tests {
     }
 
     fn entry(i: u64) -> DirectoryEntry {
-        DirectoryEntry { inode: Inode(1000 + i), ty: FileType::RegularFile }
+        DirectoryEntry {
+            inode: Inode(1000 + i),
+            ty: FileType::RegularFile,
+        }
     }
 
     /// Drive spill + reshard directly: insert past the spill threshold, then
@@ -442,35 +455,56 @@ mod tests {
 
         // Every entry resolves through the bucketed lookup.
         for i in 0..n {
-            let got = dc.get(&c, dir, &OsString::from(format!("f{i:05}"))).unwrap();
+            let got = dc
+                .get(&c, dir, &OsString::from(format!("f{i:05}")))
+                .unwrap();
             assert_eq!(got.unwrap().inode, Inode(1000 + i));
         }
 
         // Force a reshard; it must hand back the old generation and grow.
         let reap = dc.reshard(&c, dir).unwrap();
-        assert_eq!(reap, Some((gen0, buckets0)), "reshard must return old gen for reaping");
+        assert_eq!(
+            reap,
+            Some((gen0, buckets0)),
+            "reshard must return old gen for reaping"
+        );
         let (_, gen1, buckets1) = dc.debug_state();
-        assert!(gen1 > gen0 && buckets1 > buckets0, "reshard should grow buckets/gen");
+        assert!(
+            gen1 > gen0 && buckets1 > buckets0,
+            "reshard should grow buckets/gen"
+        );
         assert_eq!(dc.len(), n, "len preserved across reshard");
 
         // New generation resolves everything; old-gen buckets still exist.
         for i in 0..n {
             assert_eq!(
-                dc.get(&c, dir, &OsString::from(format!("f{i:05}"))).unwrap().unwrap().inode,
+                dc.get(&c, dir, &OsString::from(format!("f{i:05}")))
+                    .unwrap()
+                    .unwrap()
+                    .inode,
                 Inode(1000 + i)
             );
         }
-        assert!(!c.load_dir_bucket(dir, gen0, 0).unwrap().is_empty(), "old gen present pre-reap");
+        assert!(
+            !c.load_dir_bucket(dir, gen0, 0).unwrap().is_empty(),
+            "old gen present pre-reap"
+        );
 
         // Simulated durable-marker commit, then reap the old generation.
         DirectoryContents::reap_generation(&c, dir, gen0, buckets0).unwrap();
         for idx in 0..buckets0 {
-            assert!(c.load_dir_bucket(dir, gen0, idx).unwrap().is_empty(), "old gen reaped");
+            assert!(
+                c.load_dir_bucket(dir, gen0, idx).unwrap().is_empty(),
+                "old gen reaped"
+            );
         }
         // New generation still intact after reap.
         for i in (0..n).step_by(101) {
             assert_eq!(
-                dc.get(&c, dir, &OsString::from(format!("f{i:05}"))).unwrap().unwrap().inode,
+                dc.get(&c, dir, &OsString::from(format!("f{i:05}")))
+                    .unwrap()
+                    .unwrap()
+                    .inode,
                 Inode(1000 + i)
             );
         }
@@ -486,10 +520,12 @@ mod tests {
         let mut dc = DirectoryContents::new();
         let n: u64 = 1500;
         for i in 0..n {
-            dc.insert(&c, dir, OsString::from(format!("f{i:05}")), entry(i), false).unwrap();
+            dc.insert(&c, dir, OsString::from(format!("f{i:05}")), entry(i), false)
+                .unwrap();
         }
         for i in 0..500 {
-            dc.remove(&c, dir, &OsString::from(format!("f{i:05}")), false).unwrap();
+            dc.remove(&c, dir, &OsString::from(format!("f{i:05}")), false)
+                .unwrap();
         }
         assert_eq!(dc.len(), n - 500);
         // Corrupt the cached count, then recompute from buckets.
@@ -498,6 +534,9 @@ mod tests {
         }
         assert!(dc.recompute_counts(&c, dir).unwrap());
         assert_eq!(dc.len(), n - 500);
-        assert!(!dc.recompute_counts(&c, dir).unwrap(), "recompute is idempotent");
+        assert!(
+            !dc.recompute_counts(&c, dir).unwrap(),
+            "recompute is idempotent"
+        );
     }
 }

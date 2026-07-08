@@ -89,9 +89,10 @@ pub(crate) fn node_partition_number(node: &str) -> Result<u64, Error> {
             return Ok(n);
         }
     }
-    Err(Error::new(eyre!(
-        "can't parse partition number from {node}"
-    ), ErrorKind::Filesystem))
+    Err(Error::new(
+        eyre!("can't parse partition number from {node}"),
+        ErrorKind::Filesystem,
+    ))
 }
 
 /// Run sfdisk with the given arguments, piping `script` to stdin.
@@ -138,14 +139,22 @@ pub(crate) fn strip_partition(dev: &str) -> &str {
 /// the sysfs type file doesn't exist (e.g. USB mass-storage).
 pub(crate) async fn mmc_device_type(dev: &str) -> Option<String> {
     let path = format!("/sys/block/{dev}/device/type");
-    tokio::fs::read_to_string(&path).await.ok().map(|s| s.trim().to_string())
+    tokio::fs::read_to_string(&path)
+        .await
+        .ok()
+        .map(|s| s.trim().to_string())
 }
 
 /// Parse /proc/cmdline to find the root device.
 pub(crate) async fn boot_device() -> Result<String, Error> {
     let cmdline = tokio::fs::read_to_string("/proc/cmdline")
         .await
-        .map_err(|e| Error::new(eyre!("failed to read /proc/cmdline: {e}"), ErrorKind::Filesystem))?;
+        .map_err(|e| {
+            Error::new(
+                eyre!("failed to read /proc/cmdline: {e}"),
+                ErrorKind::Filesystem,
+            )
+        })?;
 
     for token in cmdline.split_whitespace() {
         if let Some(root) = token.strip_prefix("root=") {
@@ -167,9 +176,12 @@ pub(crate) async fn boot_device() -> Result<String, Error> {
 pub(crate) async fn find_emmc(boot_dev: &str) -> Result<String, Error> {
     let mut candidates = Vec::new();
 
-    let mut read_dir = tokio::fs::read_dir("/sys/block")
-        .await
-        .map_err(|e| Error::new(eyre!("failed to read /sys/block: {e}"), ErrorKind::Filesystem))?;
+    let mut read_dir = tokio::fs::read_dir("/sys/block").await.map_err(|e| {
+        Error::new(
+            eyre!("failed to read /sys/block: {e}"),
+            ErrorKind::Filesystem,
+        )
+    })?;
     while let Some(entry) = read_dir
         .next_entry()
         .await
@@ -197,12 +209,15 @@ pub(crate) async fn find_emmc(boot_dev: &str) -> Result<String, Error> {
     }
 
     match candidates.len() {
-        0 => Err(Error::new(eyre!("no eMMC device found"), ErrorKind::NotFound)),
+        0 => Err(Error::new(
+            eyre!("no eMMC device found"),
+            ErrorKind::NotFound,
+        )),
         1 => Ok(candidates.into_iter().next().unwrap()),
-        _ => Err(Error::new(eyre!(
-            "multiple eMMC candidates found: {}",
-            candidates.join(", ")
-        ), ErrorKind::Filesystem)),
+        _ => Err(Error::new(
+            eyre!("multiple eMMC candidates found: {}", candidates.join(", ")),
+            ErrorKind::Filesystem,
+        )),
     }
 }
 
@@ -211,10 +226,12 @@ pub(crate) fn device_size_sectors(dev: &str) -> Result<u64, Error> {
     let path = format!("/sys/block/{dev}/size");
     let content = fs::read_to_string(&path)
         .map_err(|e| Error::new(eyre!("failed to read {path}: {e}"), ErrorKind::Filesystem))?;
-    content
-        .trim()
-        .parse::<u64>()
-        .map_err(|e| Error::new(eyre!("failed to parse device size: {e}"), ErrorKind::Deserialization))
+    content.trim().parse::<u64>().map_err(|e| {
+        Error::new(
+            eyre!("failed to parse device size: {e}"),
+            ErrorKind::Deserialization,
+        )
+    })
 }
 
 /// Run sfdisk --json on a device and parse the partition table.
@@ -224,8 +241,12 @@ pub(crate) async fn read_partition_table(dev_path: &str) -> Result<SfdiskOutput,
         .invoke(ErrorKind::Filesystem.into())
         .await?;
 
-    serde_json::from_slice(&output)
-        .map_err(|e| Error::new(eyre!("failed to parse sfdisk JSON: {e}"), ErrorKind::Deserialization))
+    serde_json::from_slice(&output).map_err(|e| {
+        Error::new(
+            eyre!("failed to parse sfdisk JSON: {e}"),
+            ErrorKind::Deserialization,
+        )
+    })
 }
 
 /// Find the end of actual firmware data and return its byte offset.
@@ -239,7 +260,10 @@ pub(crate) fn find_copy_end(dev_path: &str, partitions: &[SfdiskPartition]) -> R
         .iter()
         .find(|p| p.name.as_deref() == Some("rootfs"))
         .ok_or_else(|| {
-            Error::new(eyre!("no partition named 'rootfs' found on source device"), ErrorKind::NotFound)
+            Error::new(
+                eyre!("no partition named 'rootfs' found on source device"),
+                ErrorKind::NotFound,
+            )
         })?;
     let rootfs_start = rootfs.start * SECTOR_SIZE;
     let rootfs_end = (rootfs.start + rootfs.size) * SECTOR_SIZE;
@@ -317,22 +341,32 @@ fn copy_raw(
 
     while copied < total_bytes {
         let to_read = std::cmp::min(buf_size as u64, total_bytes - copied) as usize;
-        let n = src_file
-            .read(&mut buf[..to_read])
-            .map_err(|e| Error::new(eyre!("read error at offset {copied}: {e}"), ErrorKind::Filesystem))?;
+        let n = src_file.read(&mut buf[..to_read]).map_err(|e| {
+            Error::new(
+                eyre!("read error at offset {copied}: {e}"),
+                ErrorKind::Filesystem,
+            )
+        })?;
         if n == 0 {
-            return Err(Error::new(eyre!(
-                "unexpected EOF at offset {copied} (expected {total_bytes} bytes)"
-            ), ErrorKind::Filesystem));
+            return Err(Error::new(
+                eyre!("unexpected EOF at offset {copied} (expected {total_bytes} bytes)"),
+                ErrorKind::Filesystem,
+            ));
         }
-        dst_file
-            .write_all(&buf[..n])
-            .map_err(|e| Error::new(eyre!("write error at offset {copied}: {e}"), ErrorKind::Filesystem))?;
+        dst_file.write_all(&buf[..n]).map_err(|e| {
+            Error::new(
+                eyre!("write error at offset {copied}: {e}"),
+                ErrorKind::Filesystem,
+            )
+        })?;
         copied += n as u64;
 
         if copied - last_report >= 10 * 1024 * 1024 || copied >= total_bytes {
             if let Some(cb) = on_progress {
-                cb(FlashEvent::Copying { copied, total: total_bytes });
+                cb(FlashEvent::Copying {
+                    copied,
+                    total: total_bytes,
+                });
             } else {
                 let pct = (copied as f64 / total_bytes as f64) * 100.0;
                 let mb = copied / 1_000_000;
@@ -363,7 +397,9 @@ async fn run_flash_core(
 ) -> Result<Option<FlashResult>, Error> {
     let report = |msg: &str| {
         if let Some(cb) = on_progress {
-            cb(FlashEvent::Status { message: msg.to_string() });
+            cb(FlashEvent::Status {
+                message: msg.to_string(),
+            });
         }
         if interactive {
             println!("{msg}");
@@ -397,10 +433,13 @@ async fn run_flash_core(
     let sd_sectors = device_size_sectors(&boot_dev)?;
 
     if copy_end_bytes > emmc_bytes {
-        return Err(Error::new(eyre!(
-            "source image ({} bytes) exceeds eMMC capacity ({emmc_bytes} bytes)",
-            copy_end_bytes
-        ), ErrorKind::Filesystem));
+        return Err(Error::new(
+            eyre!(
+                "source image ({} bytes) exceeds eMMC capacity ({emmc_bytes} bytes)",
+                copy_end_bytes
+            ),
+            ErrorKind::Filesystem,
+        ));
     }
 
     // 6. Display summary and confirm (interactive only)
@@ -410,9 +449,15 @@ async fn run_flash_core(
         println!("   StartWRT eMMC Flash");
         println!("========================================");
         println!();
-        println!("Source:  {sd_path} ({} MB)", sd_sectors * SECTOR_SIZE / 1_000_000);
+        println!(
+            "Source:  {sd_path} ({} MB)",
+            sd_sectors * SECTOR_SIZE / 1_000_000
+        );
         println!("Target:  {emmc_path} ({} MB)", emmc_bytes / 1_000_000);
-        println!("Copy:    {} MB (GPT through squashfs data)", copy_end_bytes / 1_000_000);
+        println!(
+            "Copy:    {} MB (GPT through squashfs data)",
+            copy_end_bytes / 1_000_000
+        );
         println!();
         println!("Partitions on source:");
         for p in partitions {
@@ -435,8 +480,12 @@ async fn run_flash_core(
     }
 
     // 7. Unmount any eMMC partitions
-    let mounts = fs::read_to_string("/proc/mounts")
-        .map_err(|e| Error::new(eyre!("failed to read /proc/mounts: {e}"), ErrorKind::Filesystem))?;
+    let mounts = fs::read_to_string("/proc/mounts").map_err(|e| {
+        Error::new(
+            eyre!("failed to read /proc/mounts: {e}"),
+            ErrorKind::Filesystem,
+        )
+    })?;
     for line in mounts.lines() {
         let mut fields = line.split_whitespace();
         if let (Some(dev), Some(mount_point)) = (fields.next(), fields.next()) {
@@ -458,14 +507,24 @@ async fn run_flash_core(
     let rootfs_part = emmc_parts
         .iter()
         .find(|p| p.name.as_deref() == Some("rootfs"))
-        .ok_or_else(|| Error::new(eyre!("rootfs partition not found on eMMC"), ErrorKind::NotFound))?;
+        .ok_or_else(|| {
+            Error::new(
+                eyre!("rootfs partition not found on eMMC"),
+                ErrorKind::NotFound,
+            )
+        })?;
     let rootfs_part_num = node_partition_number(&rootfs_part.node)?;
     let rootfs_dev = format!("{emmc_path}p{rootfs_part_num}");
 
     let rootfs_data_part = emmc_parts
         .iter()
         .find(|p| p.name.as_deref() == Some("rootfs_data"))
-        .ok_or_else(|| Error::new(eyre!("rootfs_data partition not found on eMMC"), ErrorKind::NotFound))?;
+        .ok_or_else(|| {
+            Error::new(
+                eyre!("rootfs_data partition not found on eMMC"),
+                ErrorKind::NotFound,
+            )
+        })?;
     let rootfs_data_start = rootfs_data_part.start;
     let rootfs_data_part_num = node_partition_number(&rootfs_data_part.node)?;
 
@@ -480,7 +539,8 @@ async fn run_flash_core(
     run_sfdisk(
         &["--no-reread", "--force", "-N", &part_num_str, &emmc_path],
         &format!("size={new_rootfs_data_size}\n"),
-    ).await?;
+    )
+    .await?;
 
     // 11. Refresh kernel partition table.
     //     partx -d + -a is the cleanest (wipe stale entries, re-read GPT),
@@ -545,14 +605,21 @@ pub async fn run_flash() -> Result<bool, Error> {
 pub async fn run_flash_unattended(
     on_progress: &(dyn Fn(FlashEvent) + Sync),
 ) -> Result<FlashResult, Error> {
-    run_flash_core(false, Some(on_progress)).await?
-        .ok_or_else(|| Error::new(eyre!("flash aborted unexpectedly in unattended mode"), ErrorKind::Filesystem))
+    run_flash_core(false, Some(on_progress))
+        .await?
+        .ok_or_else(|| {
+            Error::new(
+                eyre!("flash aborted unexpectedly in unattended mode"),
+                ErrorKind::Filesystem,
+            )
+        })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::path::Path;
+
+    use super::*;
 
     /// Write a minimal squashfs superblock at the given sector offset in a sparse file.
     fn make_fake_device(path: &Path, rootfs_start_sectors: u64, bytes_used: u64) {

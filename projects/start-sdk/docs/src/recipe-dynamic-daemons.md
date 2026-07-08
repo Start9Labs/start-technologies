@@ -23,12 +23,7 @@ export const main = sdk.Daemons.dynamic(async ({ effects }) => {
       // Must be a LAZY SubContainer (`.of`, not `.eager`): the reconciler
       // rejects eager handles, and lazy ones are never materialized for
       // daemons that diff to "leave alone".
-      subcontainer: sdk.SubContainer.of(
-        effects,
-        { imageId: 'tunnel' },
-        sdk.Mounts.of(),
-        `tunnel-${t.id}`,
-      ),
+      subcontainer: sdk.SubContainer.of(effects, { imageId: 'tunnel' }, sdk.Mounts.of(), `tunnel-${t.id}`),
       exec: { command: ['tunnel', '--port', String(t.port)] },
       requires: [],
     })

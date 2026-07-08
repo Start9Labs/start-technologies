@@ -76,27 +76,26 @@ pub async fn partition(
         // Layout: boot 2048..BOOT_END_SECTOR, root BOOT_END_SECTOR..root_end_sector,
         // data root_end_sector..end. root shrinks toward ROOT_MIN_END_SECTOR if a
         // protected partition sits in the way.
-        let root_end_sector: u32 = if let Some((starting_lba, _, ref path)) =
-            protected_partition_info
-        {
-            if starting_lba < ROOT_MIN_END_SECTOR {
-                return Err(Error::new(
-                    eyre!(
-                        "{}",
-                        t!(
-                            "os-install.protected-partition-overlaps-os-root-sectors",
-                            path = path.display(),
-                            first_lba = starting_lba,
-                            min_end_sector = ROOT_MIN_END_SECTOR,
-                        )
-                    ),
-                    crate::ErrorKind::DiskManagement,
-                ));
-            }
-            std::cmp::min(starting_lba, ROOT_TARGET_END_SECTOR)
-        } else {
-            ROOT_TARGET_END_SECTOR
-        };
+        let root_end_sector: u32 =
+            if let Some((starting_lba, _, ref path)) = protected_partition_info {
+                if starting_lba < ROOT_MIN_END_SECTOR {
+                    return Err(Error::new(
+                        eyre!(
+                            "{}",
+                            t!(
+                                "os-install.protected-partition-overlaps-os-root-sectors",
+                                path = path.display(),
+                                first_lba = starting_lba,
+                                min_end_sector = ROOT_MIN_END_SECTOR,
+                            )
+                        ),
+                        crate::ErrorKind::DiskManagement,
+                    ));
+                }
+                std::cmp::min(starting_lba, ROOT_TARGET_END_SECTOR)
+            } else {
+                ROOT_TARGET_END_SECTOR
+            };
 
         let mut file = std::fs::File::options()
             .read(true)

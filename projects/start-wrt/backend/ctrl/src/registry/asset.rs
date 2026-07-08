@@ -5,11 +5,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+use super::signer::AcceptSigners;
 use crate::sign::commitment::Blake3Commitment;
 use crate::sign::{AnySignature, AnyVerifyingKey};
 use crate::Error;
-
-use super::signer::AcceptSigners;
 
 /// A downloadable, signed asset from the registry.
 /// Wire-compatible with start-os's `RegistryAsset<Commitment>`.
@@ -68,11 +67,7 @@ impl RegistryAsset<Blake3Commitment> {
                         .await;
                 }
                 Ok(response) => {
-                    last_err = Some(format!(
-                        "HTTP {} from {}",
-                        response.status(),
-                        url
-                    ));
+                    last_err = Some(format!("HTTP {} from {}", response.status(), url));
                 }
                 Err(e) => {
                     last_err = Some(format!("request to {} failed: {e}", url));

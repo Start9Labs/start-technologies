@@ -2,7 +2,7 @@
 
 CGNAT is a networking technique where your ISP places your home network behind an additional layer of NAT that you do not control. This page explains what CGNAT is, how to tell if you're behind it, and what it means for self-hosting on StartOS.
 
-## Watch The Video 
+## Watch The Video
 
 <div class="yt-video" data-id="nMGNKv8Mor0" data-title="CGNAT"></div>
 

@@ -1,16 +1,18 @@
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::Instant;
+
+use rpc_toolkit::{from_fn_async, from_fn_async_local, HandlerExt as _, ParentHandler};
+use serde::{Deserialize, Serialize};
+use uciedit::openwrt::{DhcpHost, WifiDevice, WifiInterface};
+use uciedit::{dump_all, parse_all, Arena, Configs, Line, TypedSection};
+
+use crate::error::ErrorKind;
+use crate::invoke::Invoke;
 use crate::prelude::*;
 use crate::profiles::Lookup;
 use crate::utils::{DeserializeStdin, HandlerExtSerde};
-use crate::error::ErrorKind;
 use crate::{CliContext, CtrlContext, Error, ServerContext};
-use rpc_toolkit::{from_fn_async, from_fn_async_local, HandlerExt as _, ParentHandler};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use crate::invoke::Invoke;
-use std::sync::Mutex;
-use std::time::Instant;
-use uciedit::openwrt::{DhcpHost, WifiDevice, WifiInterface};
-use uciedit::{dump_all, parse_all, Arena, Configs, Line, TypedSection};
 
 pub fn devices<C: CtrlContext>() -> ParentHandler<C> {
     ParentHandler::new()
@@ -329,15 +331,9 @@ fn parse_nlbw_json(output: &str) -> Vec<(String, u64, u64)> {
         None => return Vec::new(),
     };
 
-    let mac_idx = columns
-        .iter()
-        .position(|c| c.as_str() == Some("mac"));
-    let rx_idx = columns
-        .iter()
-        .position(|c| c.as_str() == Some("rx_bytes"));
-    let tx_idx = columns
-        .iter()
-        .position(|c| c.as_str() == Some("tx_bytes"));
+    let mac_idx = columns.iter().position(|c| c.as_str() == Some("mac"));
+    let rx_idx = columns.iter().position(|c| c.as_str() == Some("rx_bytes"));
+    let tx_idx = columns.iter().position(|c| c.as_str() == Some("tx_bytes"));
 
     let (mac_idx, rx_idx, tx_idx) = match (mac_idx, rx_idx, tx_idx) {
         (Some(m), Some(r), Some(t)) => (m, r, t),
@@ -352,14 +348,8 @@ fn parse_nlbw_json(output: &str) -> Vec<(String, u64, u64)> {
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_uppercase();
-            let rx = row
-                .get(rx_idx)
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            let tx = row
-                .get(tx_idx)
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
+            let rx = row.get(rx_idx).and_then(|v| v.as_u64()).unwrap_or(0);
+            let tx = row.get(tx_idx).and_then(|v| v.as_u64()).unwrap_or(0);
             if !mac.is_empty() {
                 results.push((mac, rx, tx));
             }
@@ -396,28 +386,32 @@ async fn get_wifi_clients() -> (HashMap<String, String>, std::collections::HashS
     if let Ok(cfgs) = parse_all("/etc/config", &arena, &["wireless"]).await {
         // Build radio → band map
         let mut radio_band: HashMap<String, String> = HashMap::new();
-        cfgs["wireless"].each::<WifiDevice, Error>(|name, dev| {
-            if let Some(name) = name {
-                let band_label = match dev.band.as_str() {
-                    "2g" => "Wi-Fi 2.4GHz",
-                    "5g" => "Wi-Fi 5GHz",
-                    "6g" => "Wi-Fi 6GHz",
-                    _ => "Wi-Fi",
-                };
-                radio_band.insert(name.to_string(), band_label.to_string());
-            }
-        }).ok();
+        cfgs["wireless"]
+            .each::<WifiDevice, Error>(|name, dev| {
+                if let Some(name) = name {
+                    let band_label = match dev.band.as_str() {
+                        "2g" => "Wi-Fi 2.4GHz",
+                        "5g" => "Wi-Fi 5GHz",
+                        "6g" => "Wi-Fi 6GHz",
+                        _ => "Wi-Fi",
+                    };
+                    radio_band.insert(name.to_string(), band_label.to_string());
+                }
+            })
+            .ok();
 
         // Map wifi-iface section name → band via its device field
-        cfgs["wireless"].try_each(|name, iface: WifiInterface| {
-            if let Some(name) = name {
-                if let Some(band) = radio_band.get(&iface.device) {
-                    // hostapd uses the section name as the interface name
-                    iface_to_band.insert(name.to_string(), band.clone());
+        cfgs["wireless"]
+            .try_each(|name, iface: WifiInterface| {
+                if let Some(name) = name {
+                    if let Some(band) = radio_band.get(&iface.device) {
+                        // hostapd uses the section name as the interface name
+                        iface_to_band.insert(name.to_string(), band.clone());
+                    }
                 }
-            }
-            Ok::<_, Error>(())
-        }).ok();
+                Ok::<_, Error>(())
+            })
+            .ok();
     }
 
     // 3. Query each hostapd interface for clients
@@ -567,8 +561,7 @@ fn get_vpn_peer_configs(cfgs: &Configs, wg_interface: &str) -> Vec<VpnPeerConfig
 
             Some(VpnPeerConfig {
                 public_key,
-                name: description
-                    .unwrap_or_else(|| section.name().unwrap_or_default().to_string()),
+                name: description.unwrap_or_else(|| section.name().unwrap_or_default().to_string()),
                 ip,
             })
         })
@@ -653,10 +646,8 @@ async fn flush_device_from_network(mac: &str) {
     }
 
     // Stop dnsmasq so it flushes in-memory leases to disk and exits.
-    let _ = crate::run_quiet_async(
-        tokio::process::Command::new("/etc/init.d/dnsmasq").arg("stop"),
-    )
-    .await;
+    let _ = crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/dnsmasq").arg("stop"))
+        .await;
 
     // Remove the device's lease line from every (now-stable) lease file — the
     // base file and any per-profile `/tmp/dhcp.leases.dns_*`.
@@ -681,10 +672,9 @@ async fn flush_device_from_network(mac: &str) {
     }
 
     // Start dnsmasq — picks up both the UCI host removal and edited leases.
-    let _ = crate::run_quiet_async(
-        tokio::process::Command::new("/etc/init.d/dnsmasq").arg("start"),
-    )
-    .await;
+    let _ =
+        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/dnsmasq").arg("start"))
+            .await;
 }
 
 // --- Handlers ---
@@ -702,7 +692,10 @@ async fn flush_device_from_network(mac: &str) {
 fn non_wifi_probe_candidates(
     arp_entries: &[ArpEntry],
     wifi_clients: &HashMap<String, String>,
-) -> (Vec<(String, String, String)>, std::collections::HashSet<String>) {
+) -> (
+    Vec<(String, String, String)>,
+    std::collections::HashSet<String>,
+) {
     // Collect MACs that have any REACHABLE entry.
     let reachable_macs: std::collections::HashSet<&str> = arp_entries
         .iter()
@@ -743,11 +736,7 @@ fn non_wifi_probe_candidates(
             // don't probe these, the device slips through as "Online Ethernet"
             // because the status check counts them as alive but
             // unreachable_macs never flagged them.
-            "STALE" | "DELAY" | "PROBE"
-                if reachable_macs.contains(entry.mac.as_str()) =>
-            {
-                continue
-            }
+            "STALE" | "DELAY" | "PROBE" if reachable_macs.contains(entry.mac.as_str()) => continue,
             "STALE" | "DELAY" | "PROBE" => {}
             // REACHABLE entries are normally trusted, but if the MAC was
             // recently a WiFi client (not in hostapd anymore, not in
@@ -763,10 +752,7 @@ fn non_wifi_probe_candidates(
 
     // MACs with only IPv6 neighbor entries can't be probed — treat as
     // unreachable so lingering NDP entries don't resurrect offline devices.
-    let ipv6_only = alive_non_wifi_macs
-        .difference(&has_ipv4)
-        .cloned()
-        .collect();
+    let ipv6_only = alive_non_wifi_macs.difference(&has_ipv4).cloned().collect();
 
     (targets, ipv6_only)
 }
@@ -889,7 +875,11 @@ async fn mdns_resolve(ip: &str) -> Option<String> {
     let stdout = String::from_utf8_lossy(&out.stdout);
     // First line, second whitespace-delimited field: "<ip>\t<name>.local".
     let line = stdout.lines().next()?;
-    let rest = line.split_once(char::is_whitespace)?.1.trim().trim_end_matches('.');
+    let rest = line
+        .split_once(char::is_whitespace)?
+        .1
+        .trim()
+        .trim_end_matches('.');
     let name = rest.strip_suffix(".local").unwrap_or(rest).trim();
     if name.is_empty() {
         return None;
@@ -1034,8 +1024,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
     // already dropped them. MACs with only IPv6 neighbor entries (no IPv4 to
     // probe) are treated as unreachable. Runs concurrently with nlbw,
     // conntrack, and lease reads so it adds zero net latency.
-    let (probe_targets, ipv6_only_macs) =
-        non_wifi_probe_candidates(&initial_arp, &wifi_clients);
+    let (probe_targets, ipv6_only_macs) = non_wifi_probe_candidates(&initial_arp, &wifi_clients);
 
     // Collect WireGuard interface names for querying active peers.
     // We need to extract this before the uci_result is consumed, but uci_result
@@ -1051,7 +1040,13 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
         })
         .unwrap_or_default();
 
-    let ((unreachable_macs, live_ipv4s), leases_output, nlbw_output, conntrack_output, wg_active_peers) = tokio::join!(
+    let (
+        (unreachable_macs, live_ipv4s),
+        leases_output,
+        nlbw_output,
+        conntrack_output,
+        wg_active_peers,
+    ) = tokio::join!(
         ping_unreachable_macs(probe_targets),
         read_all_dhcp_leases(),
         run_cmd("nlbw", &["-c", "json", "-g", "mac"]),
@@ -1130,10 +1125,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
     // Build ARP index
     let mut arp_by_mac: HashMap<String, Vec<&ArpEntry>> = HashMap::new();
     for entry in &arp_entries {
-        arp_by_mac
-            .entry(entry.mac.clone())
-            .or_default()
-            .push(entry);
+        arp_by_mac.entry(entry.mac.clone()).or_default().push(entry);
     }
 
     // Lease index
@@ -1193,7 +1185,10 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             if attempted.contains(mac) {
                 continue;
             }
-            let already_named = hosts_by_mac.get(mac).and_then(|h| h.name.as_ref()).is_some()
+            let already_named = hosts_by_mac
+                .get(mac)
+                .and_then(|h| h.name.as_ref())
+                .is_some()
                 || lease_by_mac
                     .get(mac)
                     .map(|l| l.hostname != "*" && !l.hostname.is_empty())
@@ -1321,16 +1316,13 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
         // does NOT place the MAC on a WiFi port. This prevents recently
         // disconnected WiFi clients from being mislabelled.
         let connection = if matches!(status, DeviceStatus::Online) {
-            wifi_clients
-                .get(mac)
-                .cloned()
-                .or_else(|| {
-                    if !on_wifi_port && (!arp_list.is_empty() || fdb_by_mac.contains_key(mac)) {
-                        Some("Ethernet".to_string())
-                    } else {
-                        None
-                    }
-                })
+            wifi_clients.get(mac).cloned().or_else(|| {
+                if !on_wifi_port && (!arp_list.is_empty() || fdb_by_mac.contains_key(mac)) {
+                    Some("Ethernet".to_string())
+                } else {
+                    None
+                }
+            })
         } else {
             None
         };
@@ -1343,9 +1335,9 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
         };
 
         // Data usage (GB)
-        let data_usage = nlbw_by_mac.get(mac).map(|(rx, tx)| {
-            ((rx + tx) as f64 / 1_073_741_824.0 * 10.0).round() / 10.0
-        });
+        let data_usage = nlbw_by_mac
+            .get(mac)
+            .map(|(rx, tx)| ((rx + tx) as f64 / 1_073_741_824.0 * 10.0).round() / 10.0);
 
         devices.push(Device {
             mac: Some(mac.clone()),
@@ -1381,10 +1373,8 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
     // Build active peer index: public_key → WgActivePeer, keyed per interface
     let mut wg_active_by_iface: HashMap<String, HashMap<String, &WgActivePeer>> = HashMap::new();
     for (iface, peers) in &wg_active_peers {
-        let peer_map: HashMap<String, &WgActivePeer> = peers
-            .iter()
-            .map(|p| (p.public_key.clone(), p))
-            .collect();
+        let peer_map: HashMap<String, &WgActivePeer> =
+            peers.iter().map(|p| (p.public_key.clone(), p)).collect();
         wg_active_by_iface.insert(iface.clone(), peer_map);
     }
 
@@ -1396,7 +1386,10 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
 
             // Only show peers with a recent handshake
             let is_online = active
-                .map(|a| a.latest_handshake > 0 && now_unix.saturating_sub(a.latest_handshake) < handshake_timeout)
+                .map(|a| {
+                    a.latest_handshake > 0
+                        && now_unix.saturating_sub(a.latest_handshake) < handshake_timeout
+                })
                 .unwrap_or(false);
 
             if !is_online {
@@ -1518,10 +1511,7 @@ pub async fn update<C: CtrlContext>(
                 },
                 dns: Some("1".to_string()),
             };
-            let section_name = format!(
-                "host_{}",
-                req.mac.replace(':', "").to_lowercase()
-            );
+            let section_name = format!("host_{}", req.mac.replace(':', "").to_lowercase());
             cfgs["dhcp"].append(&new_host, Some(&section_name))?;
         }
 
@@ -1541,7 +1531,12 @@ pub async fn update<C: CtrlContext>(
                 let summary = if details.is_empty() {
                     format!("Failed to update device '{}' ({})", req.name, mac_upper)
                 } else {
-                    format!("Failed to update device '{}' ({}) — {}", req.name, mac_upper, details.join(", "))
+                    format!(
+                        "Failed to update device '{}' ({}) — {}",
+                        req.name,
+                        mac_upper,
+                        details.join(", ")
+                    )
                 };
                 crate::activity::log("device", "updated", false, &summary, Some(&err.to_string()));
                 return Err(err.into());
@@ -1557,7 +1552,12 @@ pub async fn update<C: CtrlContext>(
                 let summary = if details.is_empty() {
                     format!("Updated device '{}' ({})", req.name, mac_upper)
                 } else {
-                    format!("Updated device '{}' ({}) — {}", req.name, mac_upper, details.join(", "))
+                    format!(
+                        "Updated device '{}' ({}) — {}",
+                        req.name,
+                        mac_upper,
+                        details.join(", ")
+                    )
                 };
                 crate::activity::log("device", "updated", true, &summary, None);
                 if ctx.effectful() {
@@ -1597,7 +1597,9 @@ pub async fn forget<C: CtrlContext>(
             }
             Err(err) => {
                 crate::activity::log(
-                    "device", "forgotten", false,
+                    "device",
+                    "forgotten",
+                    false,
                     &format!("Failed to forget device {}", mac_upper),
                     Some(&err.to_string()),
                 );
@@ -1605,7 +1607,9 @@ pub async fn forget<C: CtrlContext>(
             }
             Ok(()) => {
                 crate::activity::log(
-                    "device", "forgotten", true,
+                    "device",
+                    "forgotten",
+                    true,
                     &format!("Forgot device {}", mac_upper),
                     None,
                 );
@@ -1667,14 +1671,22 @@ pub async fn data_usage(
 
                 // Zero-fill days that aren't in the archive set (no data captured that day).
                 if !retained.contains(&day) {
-                    return DataUsagePoint { timestamp, upload: 0, download: 0 };
+                    return DataUsagePoint {
+                        timestamp,
+                        upload: 0,
+                        download: 0,
+                    };
                 }
 
                 let (y, m, d) = days_to_ymd(day);
                 let date = format!("{:04}-{:02}-{:02}", y, m, d);
                 let output = run_cmd("nlbw", &["-c", "json", "-g", "mac", "-t", &date]).await;
                 let (download, upload) = lookup_mac_bytes(&output, &mac);
-                DataUsagePoint { timestamp, upload, download }
+                DataUsagePoint {
+                    timestamp,
+                    upload,
+                    download,
+                }
             }
         })
         .buffer_unordered(CONCURRENCY)

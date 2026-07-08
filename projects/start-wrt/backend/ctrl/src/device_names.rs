@@ -24,12 +24,14 @@
 //! authoritative (mirrors the `sessions.json` pattern in `auth.rs`); disk is
 //! rewritten only when the map actually changes.
 
-use crate::prelude::*;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{LazyLock, Mutex};
+
+use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
+
+use crate::prelude::*;
 
 const DIR: &str = "/etc/startwrt";
 const PATH: &str = "/etc/startwrt/device_names.json";
@@ -190,8 +192,10 @@ fn prune(map: &mut HashMap<String, CachedName>, now: i64) -> bool {
 
     // Count cap: keep the newest MAX_ENTRIES by last_seen.
     if map.len() > MAX_ENTRIES {
-        let mut by_recency: Vec<(String, i64)> =
-            map.iter().map(|(mac, v)| (mac.clone(), v.last_seen)).collect();
+        let mut by_recency: Vec<(String, i64)> = map
+            .iter()
+            .map(|(mac, v)| (mac.clone(), v.last_seen))
+            .collect();
         by_recency.sort_by(|a, b| b.1.cmp(&a.1));
         for (mac, _) in by_recency.into_iter().skip(MAX_ENTRIES) {
             map.remove(&mac);
@@ -291,7 +295,11 @@ mod tests {
         let mut m = HashMap::new();
         apply_observations(&mut m, &[obs("AA:BB:CC:00:00:05", Some("nas"))], 1000);
         let t = 1000 + TOUCH_INTERVAL_SECS + 1;
-        assert!(apply_observations(&mut m, &[obs("AA:BB:CC:00:00:05", None)], t));
+        assert!(apply_observations(
+            &mut m,
+            &[obs("AA:BB:CC:00:00:05", None)],
+            t
+        ));
         let entry = m.get("AA:BB:CC:00:00:05").unwrap();
         assert_eq!(entry.last_seen, t);
         assert_eq!(entry.hostname, "nas");

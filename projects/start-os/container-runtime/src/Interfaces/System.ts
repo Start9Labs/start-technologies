@@ -2,12 +2,12 @@ import {
   ExtendedVersion,
   types as T,
   VersionRange,
-} from "@start9labs/start-sdk"
-import { Effects } from "../Models/Effects"
-import { CallbackHolder } from "../Models/CallbackHolder"
+} from '@start9labs/start-sdk'
+import { Effects } from '../Models/Effects'
+import { CallbackHolder } from '../Models/CallbackHolder'
 
 export type Procedure =
-  | "/backup/create"
+  | '/backup/create'
   | `/actions/${string}/getInput`
   | `/actions/${string}/run`
 
@@ -17,7 +17,7 @@ export type ExecuteResult =
 export type System = {
   init(
     effects: T.Effects,
-    kind: "install" | "update" | "restore" | null,
+    kind: 'install' | 'update' | 'restore' | null,
   ): Promise<void>
 
   start(effects: T.Effects): Promise<void>

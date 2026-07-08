@@ -1,11 +1,11 @@
 [package]
-name = "pi-beep"
-version = "0.1.0"
-edition = "2021"
 description = "A reimplementation of `beep` but using the pwm chip of the raspberry pi"
+edition = "2021"
 license = "MIT"
+name = "pi-beep"
 readme = "README.txt"
 repository = "https://github.com/Start9Labs/start-technologies"
+version = "0.1.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

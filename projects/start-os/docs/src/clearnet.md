@@ -23,13 +23,13 @@ When hosting services on the clearnet, anyone who connects will know the IP addr
 
 If your gateway is your home router, you are revealing the approximate location of your home. If your gateway is a virtual private router ([StartTunnel](/start-tunnel/)), you are revealing the approximate location of the VPS, not your home.
 
-| | Router | [StartTunnel](/start-tunnel/) |
-| --- | --- | --- |
-| **Cost** | Free | VPS rental (~$5–10/mo) |
-| **IP stability** | Home IP can change without warning, breaking all your domains until DNS is updated. [Dynamic DNS](https://en.wikipedia.org/wiki/Dynamic_DNS) is highly recommended, but support varies by router and may cost money. | Static IP from the VPS provider. No dynamic DNS needed. |
-| **Privacy** | Exposes your home's approximate location | Exposes the VPS location, not your home |
-| **CGNAT compatible** | No. If your ISP uses [CGNAT](cgnat.md), you cannot use your router as a gateway. | Yes |
-| **Port forwarding** | Configured in router admin panel | Configured in [StartTunnel](/start-tunnel/port-forwarding.html) |
+|                      | Router                                                                                                                                                                                                               | [StartTunnel](/start-tunnel/)                                   |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| **Cost**             | Free                                                                                                                                                                                                                 | VPS rental (~$5–10/mo)                                          |
+| **IP stability**     | Home IP can change without warning, breaking all your domains until DNS is updated. [Dynamic DNS](https://en.wikipedia.org/wiki/Dynamic_DNS) is highly recommended, but support varies by router and may cost money. | Static IP from the VPS provider. No dynamic DNS needed.         |
+| **Privacy**          | Exposes your home's approximate location                                                                                                                                                                             | Exposes the VPS location, not your home                         |
+| **CGNAT compatible** | No. If your ISP uses [CGNAT](cgnat.md), you cannot use your router as a gateway.                                                                                                                                     | Yes                                                             |
+| **Port forwarding**  | Configured in router admin panel                                                                                                                                                                                     | Configured in [StartTunnel](/start-tunnel/port-forwarding.html) |
 
 ## Add a Public Domain
 
@@ -52,7 +52,6 @@ StartOS tests DNS automatically when you add or enable a public domain, and will
 1. Access your domain's DNS settings, usually in the registrar where you originally leased the domain.
 
 1. Create a DNS record that points your domain to your gateway's public IP address:
-
    - An **`A` record** pointing at your gateway's public **IPv4** address.
    - If your gateway also has an IPv6 **global-unicast address (GUA)**, add an **`AAAA` record** pointing at that address. StartOS serves a public domain over both IPv4 and IPv6 (DualStack) whenever a GUA is available, so adding both records lets clients reach the domain over either protocol. The exact record values are shown in the DNS setup modal.
 

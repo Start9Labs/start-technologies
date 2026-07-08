@@ -64,7 +64,7 @@ Transports wrap a `Server`:
 constructs the context, dispatches synchronously, then renders the result with `PrintCliResult`.
 `mutate_command` / `into_command` expose the underlying `clap::Command`.
 
-For talking to a *remote* server, `CallRemote` + `CallRemoteHandler` forward a local invocation
+For talking to a _remote_ server, `CallRemote` + `CallRemoteHandler` forward a local invocation
 over the wire using `call_remote_http` (CBOR or JSON over `reqwest`) or `call_remote_socket`
 (line-delimited JSON over a duplex connection).
 

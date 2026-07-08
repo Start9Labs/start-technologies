@@ -23,8 +23,9 @@ impl TS for InternedString {
 
 #[cfg(test)]
 mod test {
-    use crate::InternedString;
     use ts_rs::TS;
+
+    use crate::InternedString;
 
     #[derive(TS)]
     struct HasString {

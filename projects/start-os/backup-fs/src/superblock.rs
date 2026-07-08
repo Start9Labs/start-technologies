@@ -213,10 +213,16 @@ impl Constants {
             ));
         }
         if self.path_hash_scheme != PATH_HASH_SCHEME_V1 {
-            return bad(format!("path hash scheme {} unsupported", self.path_hash_scheme));
+            return bad(format!(
+                "path hash scheme {} unsupported",
+                self.path_hash_scheme
+            ));
         }
         if self.dirent_hash_scheme != DIRENT_HASH_SCHEME_V1 {
-            return bad(format!("dirent hash scheme {} unsupported", self.dirent_hash_scheme));
+            return bad(format!(
+                "dirent hash scheme {} unsupported",
+                self.dirent_hash_scheme
+            ));
         }
         // validate-on-adopt
         self.ecc().validate()?;
@@ -233,7 +239,10 @@ impl Constants {
             ));
         }
         if self.segment_size < 4096 {
-            return bad(format!("segment_size {} below minimum 4096", self.segment_size));
+            return bad(format!(
+                "segment_size {} below minimum 4096",
+                self.segment_size
+            ));
         }
         if self.dir_spill == 0 || self.dir_max_bucket == 0 {
             return bad("dir_spill / dir_max_bucket must be non-zero".to_owned());
@@ -251,7 +260,10 @@ impl Constants {
     }
 
     pub fn ecc(&self) -> EccParams {
-        EccParams { data: self.ecc_data, parity: self.ecc_parity }
+        EccParams {
+            data: self.ecc_data,
+            parity: self.ecc_parity,
+        }
     }
 }
 
@@ -308,7 +320,9 @@ pub fn any_exists(primary: &Path) -> bool {
 /// fresh store has none of these yet (they are created lazily after the
 /// superblock), so this never false-positives at first creation.
 fn data_store_nonempty(primary: &Path) -> bool {
-    let Some(dir) = primary.parent() else { return false };
+    let Some(dir) = primary.parent() else {
+        return false;
+    };
     ["segments", "contents", "dirents"].iter().any(|sub| {
         std::fs::read_dir(dir.join(sub))
             .map(|mut entries| entries.next().is_some())
@@ -319,7 +333,11 @@ fn data_store_nonempty(primary: &Path) -> bool {
 impl Superblock {
     /// Open the existing superblock at `primary`, or create a fresh one if no
     /// replica exists (unless `readonly`).
-    pub fn open_or_create(primary: &Path, password: &str, readonly: bool) -> BkfsResult<Superblock> {
+    pub fn open_or_create(
+        primary: &Path,
+        password: &str,
+        readonly: bool,
+    ) -> BkfsResult<Superblock> {
         if any_exists(primary) {
             Self::load(primary, password, readonly)
         } else if primary.with_file_name("cryptinfo").exists() {
@@ -425,15 +443,12 @@ impl Superblock {
             // (`> 0`, not `== readable`, so a second replica that is also
             // independently corrupt at the envelope level can't mask the
             // wrong-password signal — `best` is None here, so `healthy == 0`.)
-            None if bad_checksum > 0 => {
-                Err(BkfsError {
-                    kind: BkfsErrorKind::BadChecksum,
-                    backtrace: None,
-                })
-            }
-            None => Err(last_err.unwrap_or_else(|| {
-                BkfsError::unsupported("no readable superblock replica found")
-            })),
+            None if bad_checksum > 0 => Err(BkfsError {
+                kind: BkfsErrorKind::BadChecksum,
+                backtrace: None,
+            }),
+            None => Err(last_err
+                .unwrap_or_else(|| BkfsError::unsupported("no readable superblock replica found"))),
         }
     }
 
@@ -506,7 +521,8 @@ fn parse_one(raw: &[u8], password: &str) -> BkfsResult<Superblock> {
             "superblock envelope version {envelope_ver} unsupported (this build understands {ENVELOPE_VER})"
         )));
     }
-    let format_version = u32::from_le_bytes(raw[OFF_FORMAT_VERSION..OFF_KDF_ALGO].try_into().unwrap());
+    let format_version =
+        u32::from_le_bytes(raw[OFF_FORMAT_VERSION..OFF_KDF_ALGO].try_into().unwrap());
     if format_version == 0 || format_version > SUPPORTED_FORMAT_VERSION {
         return Err(BkfsError::unsupported(format!(
             "unsupported filesystem format version {format_version}; this build supports \
@@ -516,7 +532,9 @@ fn parse_one(raw: &[u8], password: &str) -> BkfsResult<Superblock> {
     }
     let kdf_algo = raw[OFF_KDF_ALGO];
     if kdf_algo != KDF_PBKDF2_HMAC_SHA256 {
-        return Err(BkfsError::unsupported(format!("unknown KDF algorithm id {kdf_algo}")));
+        return Err(BkfsError::unsupported(format!(
+            "unknown KDF algorithm id {kdf_algo}"
+        )));
     }
     let kdf_rounds = u32::from_le_bytes(raw[OFF_KDF_ROUNDS..OFF_SALT].try_into().unwrap());
     // Bound + pin BEFORE deriving: never run PBKDF2 over an attacker-tunable
@@ -602,7 +620,10 @@ mod tests {
 
         let mut c = default_constants();
         c.ecc_data = 0;
-        assert!(c.validate().is_err(), "invalid ecc must be refused, not clamped");
+        assert!(
+            c.validate().is_err(),
+            "invalid ecc must be refused, not clamped"
+        );
 
         let mut c = default_constants();
         c.pack_max = c.chunk_size + 1;

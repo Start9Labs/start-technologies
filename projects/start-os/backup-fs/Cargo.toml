@@ -1,11 +1,11 @@
 [package]
+edition = "2021"
 name = "startos-backup-fs"
 version = "1.0.0"
-edition = "2021"
 
 [features]
-default = ["cli"]
 cli = ["clap", "env_logger"]
+default = ["cli"]
 
 [lib]
 name = "backupfs"
@@ -19,14 +19,20 @@ required-features = ["cli"]
 [dependencies]
 bincode = { version = "2", features = ["serde"] }
 chacha20 = { version = "0.10.1", features = ["zeroize"] }
+clap = { version = "4.5.7", optional = true, features = ["derive", "cargo"] }
+crc32fast = "1"
+crossbeam-channel = "0.5"
+ctrlc = "3.4.4"
+env_logger = { version = "0.11", optional = true }
 fd-lock-rs = "0.1.4"
 fuser = { git = "https://github.com/Start9Labs/fuser.git", rev = "b6f91ac", features = [
-    "abi-7-31",
-    "serializable",
-    "clap",
+  "abi-7-31",
+  "serializable",
+  "clap",
 ] }
 generic-array = { version = "1", features = ["serde"] }
 imbl = { version = "3", features = ["serde"] }
+io-uring = "0.7.11"
 itertools = "0.13"
 libc = "0.2"
 log = "0.4"
@@ -34,27 +40,21 @@ nix = { version = "0.29.0", features = ["process"] }
 pbkdf2 = "0.13"
 ppv-lite86 = "0.2.17"
 rand = "0.10"
+reed-solomon-erasure = "6"
 serde = { version = "*", features = ["derive"] }
 sha2 = "0.11.0"
 smallvec = "1"
 typenum = "1"
 zeroize = { version = "1.8.1", features = ["serde"] }
-clap = { version = "4.5.7", optional = true, features = ["derive", "cargo"] }
-env_logger = { version = "0.11", optional = true }
-ctrlc = "3.4.4"
-io-uring = "0.7.11"
-crossbeam-channel = "0.5"
-reed-solomon-erasure = "6"
-crc32fast = "1"
 zstd = "0.13"
 
 [dev-dependencies]
-tempdir = "0.3.7"
+criterion = { version = "0.5", features = ["html_reports"] }
 oneshot = "0.1.8"
+tempdir = "0.3.7"
 test-log = "0.2.16"
 tokio = { version = "1.38.0", features = ["fs", "rt", "macros"] }
-criterion = { version = "0.5", features = ["html_reports"] }
 
 [[bench]]
-name = "throughput"
 harness = false
+name = "throughput"

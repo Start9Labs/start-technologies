@@ -220,7 +220,8 @@ impl InternedString {
         let written: Self = {
             let mut guard = TABLE.write().unwrap();
             // RACE CONDITION: check again under the write lock.
-            let already_present: Option<Self> = match guard.get_mut(hash, |ts: &StringRef| match ts {
+            let already_present: Option<Self> = match guard.get_mut(hash, |ts: &StringRef| match ts
+            {
                 StringRef::Heap(ts) => match Weak::upgrade(ts) {
                     Some(arc) => {
                         let matched = DisplayEq::eq(&s, arc.0.as_str());

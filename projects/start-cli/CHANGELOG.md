@@ -39,7 +39,7 @@ or the CLI's externally observable behavior.
   cwd it now explains that packaging happens inside a workspace (which also brings the
   AI guide) and points to `init-workspace`. If you're **inside a package repo**, the
   error names the parent directory to run it in (`cd <parent> && start-cli s9pk
-  init-workspace`), so an existing package repo is one command away from building. The
+init-workspace`), so an existing package repo is one command away from building. The
   `init-workspace`-inside-a-package-repo refusal points at the same parent.
 - **`--version` now reports `start-cli`'s own version** (`1.0.1`) rather than the StartOS
   platform version it was previously wired to.

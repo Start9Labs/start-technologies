@@ -48,8 +48,7 @@ impl AccountInfo {
         let ssh_key = ssh_key::PrivateKey::from(ssh_key::private::Ed25519Keypair::random(
             &mut crate::util::crypto::os_rng(),
         ));
-        let developer_key =
-            ed25519_dalek::SigningKey::generate(&mut crate::util::crypto::os_rng());
+        let developer_key = ed25519_dalek::SigningKey::generate(&mut crate::util::crypto::os_rng());
         Ok(Self {
             server_id,
             hostname,

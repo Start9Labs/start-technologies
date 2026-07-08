@@ -1,12 +1,11 @@
 use std::ffi::OsString;
 use std::fs::File;
 use std::io;
+use std::io::Write;
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-
-use std::io::Write;
 
 use chacha20::Key;
 use fuser::{FileType, FUSE_ROOT_ID};
@@ -20,10 +19,9 @@ use crate::directory::{DirectoryContents, DirectoryEntry};
 use crate::error::{BkfsResult, BkfsResultExt};
 use crate::inode::{Attributes, ContentId, FileData, Inode, InodeAttributes};
 use crate::seglog::{self, SegmentLog};
-use crate::serde;
 use crate::superblock::{Constants, Superblock};
 use crate::vault::EccParams;
-use crate::BackupFSOptions;
+use crate::{serde, BackupFSOptions};
 
 #[derive(Clone)]
 pub struct Controller(Arc<ControllerSeed>);

@@ -1,18 +1,18 @@
 [package]
-name = "start-cli"
-version = "1.0.1" # VERSION_BUMP
 edition = "2024"
 license = "MIT"
+name = "start-cli"
 repository = "https://github.com/Start9Labs/start-technologies"
+version = "1.0.1"                                               # VERSION_BUMP
 
 [[bin]]
 name = "start-cli"
 path = "src/main.rs"
 
 [features]
-default = []
 beta = ["start-core/beta"]
 console = ["start-core/console"]
+default = []
 dev = ["start-core/dev"]
 test = ["start-core/test"]
 unstable = ["start-core/unstable"]

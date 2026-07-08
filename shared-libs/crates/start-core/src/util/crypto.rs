@@ -90,8 +90,8 @@ impl EncryptedWire {
             &*encrypter,
         )
         .map_err(|e| Error::new(eyre!("{e}"), crate::ErrorKind::OpenSsl))?;
-        let encrypted: Value = serde_json::from_str(&jwe_json)
-            .with_kind(crate::ErrorKind::Deserialization)?;
+        let encrypted: Value =
+            serde_json::from_str(&jwe_json).with_kind(crate::ErrorKind::Deserialization)?;
         Ok(EncryptedWire { encrypted })
     }
 
@@ -156,7 +156,9 @@ fn test_encrypt_decrypt_roundtrip() {
 
     for plaintext in ["", "hunter2", "a longer password with spaces and \u{1f600}"] {
         let wire = EncryptedWire::encrypt(plaintext, &public_key).unwrap();
-        let recovered = wire.decrypt(std::sync::Arc::new(private_key.clone())).unwrap();
+        let recovered = wire
+            .decrypt(std::sync::Arc::new(private_key.clone()))
+            .unwrap();
         assert_eq!(plaintext, &recovered);
     }
 }

@@ -834,9 +834,7 @@ impl Handler {
 
         let result = self.mutate_inode(entry.inode, |handler, inode| {
             if let FileData::Directory(dir) = &inode.attrs.contents {
-                if inode.attrs.parents.len() <= 1
-                    && !dir.is_empty_exact(&ctrl, inode.inode)?
-                {
+                if inode.attrs.parents.len() <= 1 && !dir.is_empty_exact(&ctrl, inode.inode)? {
                     return BkfsResult::errno(libc::ENOTEMPTY);
                 }
             }
@@ -988,14 +986,24 @@ impl Handler {
                     // Replace the entry. When we're about to gc the old
                     // target, the new pointer must be durable first.
                     if let FileData::Directory(dir) = &mut new_parent.attrs.contents {
-                        reap_gen =
-                            dir.insert(&ctrl, new_parent_inode, new_name.to_owned(), new_entry, should_gc)?;
+                        reap_gen = dir.insert(
+                            &ctrl,
+                            new_parent_inode,
+                            new_name.to_owned(),
+                            new_entry,
+                            should_gc,
+                        )?;
                     }
                 }
                 (None, _) => {
                     if let FileData::Directory(dir) = &mut new_parent.attrs.contents {
-                        reap_gen =
-                            dir.insert(&ctrl, new_parent_inode, new_name.to_owned(), new_entry, false)?;
+                        reap_gen = dir.insert(
+                            &ctrl,
+                            new_parent_inode,
+                            new_name.to_owned(),
+                            new_entry,
+                            false,
+                        )?;
                     } else {
                         return BkfsResult::errno(libc::ENOTDIR);
                     }
@@ -1193,12 +1201,7 @@ impl Handler {
         Ok(buf.len())
     }
 
-    pub fn fsync(
-        &mut self,
-        _req: &Request,
-        _inode: Inode,
-        fh: FileHandleId,
-    ) -> BkfsResult<()> {
+    pub fn fsync(&mut self, _req: &Request, _inode: Inode, fh: FileHandleId) -> BkfsResult<()> {
         let fh = self
             .handle(fh)
             .ok_or(libc::EBADF)

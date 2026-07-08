@@ -83,8 +83,8 @@ name: Build
 on:
   workflow_dispatch:
   pull_request:
-    branches: ["master"]
-    paths-ignore: ["*.md"]
+    branches: ['master']
+    paths-ignore: ['*.md']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
@@ -105,8 +105,8 @@ name: Tag and Release
 
 on:
   push:
-    branches: ["master"]
-    paths-ignore: ["*.md"]
+    branches: ['master']
+    paths-ignore: ['*.md']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -135,7 +135,7 @@ name: Release
 on:
   push:
     tags:
-      - "v*.*"
+      - 'v*.*'
 
 jobs:
   release:
@@ -153,9 +153,9 @@ jobs:
 
 ### AGENTS.md and CLAUDE.md
 
-`AGENTS.md` is the package's agent-context file. Generic packaging knowledge — SDK patterns, the disciplines on the [Development Workflow](./workflow.md) page, the rules throughout this guide — lives in one canonical place: the packaging guide, **not** copied into each package repo where 40+ duplicates would drift out of sync. `AGENTS.md` carries only what's specific to *this* repo.
+`AGENTS.md` is the package's agent-context file. Generic packaging knowledge — SDK patterns, the disciplines on the [Development Workflow](./workflow.md) page, the rules throughout this guide — lives in one canonical place: the packaging guide, **not** copied into each package repo where 40+ duplicates would drift out of sync. `AGENTS.md` carries only what's specific to _this_ repo.
 
-Keep it short and repo-specific: state that this is a StartOS service package, point at the repo's `TODO.md` as the worklist, give the doc-sync rule (keep `README.md` and `instructions.md` in step with every change), and capture any package-specific gotchas — in short, how to work in *this* repo. Do **not** restate generic guide content or turn it into a web-fetch driver (don't instruct the agent to pull guide pages over the web up front). Developers work with the guide checked out locally alongside the package (see [Environment Setup](./environment-setup.md)); the local-first navigation — read `start-technologies/projects/start-sdk/docs/src/` directly, fall back to <https://docs.start9.com/packaging> only when no local copy exists — is set up once by the workspace-level `CLAUDE.md`, not repeated per repo.
+Keep it short and repo-specific: state that this is a StartOS service package, point at the repo's `TODO.md` as the worklist, give the doc-sync rule (keep `README.md` and `instructions.md` in step with every change), and capture any package-specific gotchas — in short, how to work in _this_ repo. Do **not** restate generic guide content or turn it into a web-fetch driver (don't instruct the agent to pull guide pages over the web up front). Developers work with the guide checked out locally alongside the package (see [Environment Setup](./environment-setup.md)); the local-first navigation — read `start-technologies/projects/start-sdk/docs/src/` directly, fall back to <https://docs.start9.com/packaging> only when no local copy exists — is set up once by the workspace-level `CLAUDE.md`, not repeated per repo.
 
 `CLAUDE.md` is a one-line import of that same file:
 
@@ -218,15 +218,15 @@ The `startos/` directory is where you take advantage of the StartOS SDK and APIs
 
 ### Core TypeScript Modules
 
-| File              | Purpose                                         |
-| ----------------- | ----------------------------------------------- |
-| `main.ts`         | Daemon runtime configuration and health checks  |
+| File              | Purpose                                                    |
+| ----------------- | ---------------------------------------------------------- |
+| `main.ts`         | Daemon runtime configuration and health checks             |
 | `interfaces.ts`   | Network interface definitions and port bindings (optional) |
-| `backups.ts`      | Backup volumes and exclusion patterns           |
-| `dependencies.ts` | Service dependencies and version requirements   |
-| `sdk.ts`          | SDK initialization (boilerplate)                |
-| `utils.ts`        | Package-specific constants and helper functions |
-| `index.ts`        | Module exports (boilerplate)                    |
+| `backups.ts`      | Backup volumes and exclusion patterns                      |
+| `dependencies.ts` | Service dependencies and version requirements              |
+| `sdk.ts`          | SDK initialization (boilerplate)                           |
+| `utils.ts`        | Package-specific constants and helper functions            |
+| `index.ts`        | Module exports (boilerplate)                               |
 
 #### backups.ts
 

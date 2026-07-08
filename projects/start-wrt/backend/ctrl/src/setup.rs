@@ -181,7 +181,6 @@ fn mark_overlay_ready(overlay_mount: &str) -> Result<(), Error> {
     Ok(())
 }
 
-
 // ---------------------------------------------------------------------------
 // Disk state detection
 // ---------------------------------------------------------------------------
@@ -391,6 +390,7 @@ fn backup_conffiles(rootfs_mount: &str) -> Vec<BackedUpFile> {
 /// Restore backed-up conffiles to a mounted rootfs.
 async fn restore_conffiles(rootfs_mount: &str, files: &[BackedUpFile]) -> Result<(), Error> {
     use std::os::unix::fs::PermissionsExt;
+
     use tokio::io::AsyncWriteExt;
 
     for file in files {
@@ -469,6 +469,7 @@ async fn write_admin_password(rootfs_mount: &str, password: &str) -> Result<(), 
 
     // Atomic write
     use std::os::unix::fs::PermissionsExt;
+
     use tokio::io::AsyncWriteExt;
     let mut f = startos::util::io::AtomicFile::new(&shadow_path, None::<&Path>)
         .await
@@ -517,12 +518,22 @@ async fn write_timezone(merged_mount: &str, iana: &str) -> Result<(), Error> {
     let result = async {
         flash::run_cmd(
             "uci",
-            &["-c", &config_dir, "set", &format!("system.@system[0].zonename={iana}")],
+            &[
+                "-c",
+                &config_dir,
+                "set",
+                &format!("system.@system[0].zonename={iana}"),
+            ],
         )
         .await?;
         flash::run_cmd(
             "uci",
-            &["-c", &config_dir, "set", &format!("system.@system[0].timezone={posix}")],
+            &[
+                "-c",
+                &config_dir,
+                "set",
+                &format!("system.@system[0].timezone={posix}"),
+            ],
         )
         .await?;
         flash::run_cmd("uci", &["-c", &config_dir, "commit", "system"]).await
@@ -801,10 +812,12 @@ pub fn setup<C: Context>() -> ParentHandler<C> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::os::unix::fs::PermissionsExt;
+
     use tempfile::TempDir;
     use tokio::sync::mpsc;
+
+    use super::*;
 
     // ── SetupEvent serialization ─────────────────────────────────────
 

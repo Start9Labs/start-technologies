@@ -105,7 +105,7 @@ export type Effects = {
   fetch(
     url: string,
     options?: {
-      method?: "GET" | "POST" | "PUT" | "DELETE" | "HEAD" | "PATCH"
+      method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'HEAD' | 'PATCH'
       headers?: Record<string, string>
       body?: string
     },
@@ -166,7 +166,7 @@ export type MigrationRes = {
 }
 
 export type ActionResult = {
-  version: "0"
+  version: '0'
   message: string
   value?: string
   copyable: boolean
@@ -249,7 +249,7 @@ export type ValueSpecString = // deno-lint-ignore ban-types
     | {}
     | {
         pattern: string
-        "pattern-description": string
+        'pattern-description': string
       }
   ) & {
     copyable?: boolean
@@ -266,26 +266,26 @@ export type ValueSpecNumber = {
 }
 export type ValueSpecBoolean = Record<string, unknown>
 export type ValueSpecAny =
-  | Tag<"boolean", WithDescription<WithDefault<ValueSpecBoolean, boolean>>>
+  | Tag<'boolean', WithDescription<WithDefault<ValueSpecBoolean, boolean>>>
   | Tag<
-      "string",
+      'string',
       WithDescription<
         WithNullableDefault<WithNullable<ValueSpecString>, DefaultString>
       >
     >
   | Tag<
-      "number",
+      'number',
       WithDescription<
         WithNullableDefault<WithNullable<ValueSpecNumber>, number>
       >
     >
   | Tag<
-      "enum",
+      'enum',
       WithDescription<
         WithDefault<
           {
             values: readonly string[] | string[]
-            "value-names": {
+            'value-names': {
               [key: string]: string
             }
           },
@@ -293,45 +293,45 @@ export type ValueSpecAny =
         >
       >
     >
-  | Tag<"list", ValueSpecList>
-  | Tag<"object", WithDescription<WithNullableDefault<ValueSpecObject, Config>>>
-  | Tag<"union", WithOptionalDescription<WithDefault<ValueSpecUnion, string>>>
+  | Tag<'list', ValueSpecList>
+  | Tag<'object', WithDescription<WithNullableDefault<ValueSpecObject, Config>>>
+  | Tag<'union', WithOptionalDescription<WithDefault<ValueSpecUnion, string>>>
   | Tag<
-      "pointer",
+      'pointer',
       WithDescription<
         | Subtype<
-            "package",
+            'package',
             | Target<
-                "tor-key",
+                'tor-key',
                 {
-                  "package-id": string
+                  'package-id': string
                   interface: string
                 }
               >
             | Target<
-                "tor-address",
+                'tor-address',
                 {
-                  "package-id": string
+                  'package-id': string
                   interface: string
                 }
               >
             | Target<
-                "lan-address",
+                'lan-address',
                 {
-                  "package-id": string
+                  'package-id': string
                   interface: string
                 }
               >
             | Target<
-                "config",
+                'config',
                 {
-                  "package-id": string
+                  'package-id': string
                   selector: string
                   multi: boolean
                 }
               >
           >
-        | Subtype<"system", Record<string, unknown>>
+        | Subtype<'system', Record<string, unknown>>
       >
     >
 export type ValueSpecUnion = {
@@ -340,7 +340,7 @@ export type ValueSpecUnion = {
     id: string
     name: string
     description?: string
-    "variant-names": {
+    'variant-names': {
       [key: string]: string
     }
   }
@@ -348,33 +348,33 @@ export type ValueSpecUnion = {
   variants: {
     [key: string]: ConfigSpec
   }
-  "display-as"?: string
-  "unique-by"?: UniqueBy
+  'display-as'?: string
+  'unique-by'?: UniqueBy
 }
 export type ValueSpecObject = {
   spec: ConfigSpec
-  "display-as"?: string
-  "unique-by"?: UniqueBy
+  'display-as'?: string
+  'unique-by'?: UniqueBy
 }
 export type ValueSpecList =
   | Subtype<
-      "boolean",
+      'boolean',
       WithDescription<WithDefault<ListSpec<ValueSpecBoolean>, boolean[]>>
     >
   | Subtype<
-      "string",
+      'string',
       WithDescription<WithDefault<ListSpec<ValueSpecString>, string[]>>
     >
   | Subtype<
-      "number",
+      'number',
       WithDescription<WithDefault<ListSpec<ValueSpecNumber>, number[]>>
     >
   | Subtype<
-      "enum",
+      'enum',
       WithDescription<WithDefault<ListSpec<ValueSpecEnum>, string[]>>
     >
   | Subtype<
-      "object",
+      'object',
       WithDescription<
         WithNullableDefault<
           ListSpec<ValueSpecObject>,
@@ -383,51 +383,51 @@ export type ValueSpecList =
       >
     >
   | Subtype<
-      "union",
+      'union',
       WithDescription<WithDefault<ListSpec<ValueSpecUnion>, string[]>>
     >
 export type ValueSpecEnum = {
   values: string[]
-  "value-names": { [key: string]: string }
+  'value-names': { [key: string]: string }
 }
 
 export type SetResult = {
   /** These are the unix process signals */
   signal:
-    | "SIGTERM"
-    | "SIGHUP"
-    | "SIGINT"
-    | "SIGQUIT"
-    | "SIGILL"
-    | "SIGTRAP"
-    | "SIGABRT"
-    | "SIGBUS"
-    | "SIGFPE"
-    | "SIGKILL"
-    | "SIGUSR1"
-    | "SIGSEGV"
-    | "SIGUSR2"
-    | "SIGPIPE"
-    | "SIGALRM"
-    | "SIGSTKFLT"
-    | "SIGCHLD"
-    | "SIGCONT"
-    | "SIGSTOP"
-    | "SIGTSTP"
-    | "SIGTTIN"
-    | "SIGTTOU"
-    | "SIGURG"
-    | "SIGXCPU"
-    | "SIGXFSZ"
-    | "SIGVTALRM"
-    | "SIGPROF"
-    | "SIGWINCH"
-    | "SIGIO"
-    | "SIGPWR"
-    | "SIGSYS"
-    | "SIGEMT"
-    | "SIGINFO"
-  "depends-on": DependsOn
+    | 'SIGTERM'
+    | 'SIGHUP'
+    | 'SIGINT'
+    | 'SIGQUIT'
+    | 'SIGILL'
+    | 'SIGTRAP'
+    | 'SIGABRT'
+    | 'SIGBUS'
+    | 'SIGFPE'
+    | 'SIGKILL'
+    | 'SIGUSR1'
+    | 'SIGSEGV'
+    | 'SIGUSR2'
+    | 'SIGPIPE'
+    | 'SIGALRM'
+    | 'SIGSTKFLT'
+    | 'SIGCHLD'
+    | 'SIGCONT'
+    | 'SIGSTOP'
+    | 'SIGTSTP'
+    | 'SIGTTIN'
+    | 'SIGTTOU'
+    | 'SIGURG'
+    | 'SIGXCPU'
+    | 'SIGXFSZ'
+    | 'SIGVTALRM'
+    | 'SIGPROF'
+    | 'SIGWINCH'
+    | 'SIGIO'
+    | 'SIGPWR'
+    | 'SIGSYS'
+    | 'SIGEMT'
+    | 'SIGINFO'
+  'depends-on': DependsOn
 }
 
 export type DependsOn = {
@@ -437,7 +437,7 @@ export type DependsOn = {
 export type KnownError =
   | { error: string }
   | {
-      "error-code": [number, string] | readonly [number, string]
+      'error-code': [number, string] | readonly [number, string]
     }
 export type ResultType<T> = KnownError | { result: T }
 
@@ -445,7 +445,7 @@ export type PackagePropertiesV2 = {
   [name: string]: PackagePropertyObject | PackagePropertyString
 }
 export type PackagePropertyString = {
-  type: "string"
+  type: 'string'
   description?: string
   value: string
   /** Let's the ui make this copyable button */
@@ -457,7 +457,7 @@ export type PackagePropertyString = {
 }
 export type PackagePropertyObject = {
   value: PackagePropertiesV2
-  type: "object"
+  type: 'object'
   description: string
 }
 

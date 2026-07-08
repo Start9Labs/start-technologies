@@ -1,17 +1,17 @@
-name: "Extract Version"
-description: "Extracts the package ID and current version from StartOS service source"
+name: 'Extract Version'
+description: 'Extracts the package ID and current version from StartOS service source'
 outputs:
   package_id:
-    description: "The package ID from startos/manifest/index.ts"
+    description: 'The package ID from startos/manifest/index.ts'
     value: ${{ steps.extract.outputs.package_id }}
   version:
-    description: "The full version string (e.g. 2.0.0:2 or #knots:29.3:2-beta.1)"
+    description: 'The full version string (e.g. 2.0.0:2 or #knots:29.3:2-beta.1)'
     value: ${{ steps.extract.outputs.version }}
   tag:
-    description: "The git tag (v prefix, : replaced with _, flavor appended as -<flavor> when present)"
+    description: 'The git tag (v prefix, : replaced with _, flavor appended as -<flavor> when present)'
     value: ${{ steps.extract.outputs.tag }}
 runs:
-  using: "composite"
+  using: 'composite'
   steps:
     - name: Extract package ID and version
       id: extract

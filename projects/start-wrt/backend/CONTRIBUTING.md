@@ -41,11 +41,11 @@ For dev authentication, set `STARTWRT_DEV_PASSWORD` to bypass `/etc/shadow` vali
 
 ### Crates
 
-| Crate | Package | Description |
-|-------|---------|-------------|
-| `ctrl` | `startwrt-core` (lib `startwrt`) | RPC server (`startwrt-ctrld`) and CLI (`startwrt-cli`) |
-| `uciedit` | `uciedit` | UCI config parser/serializer with atomic writes and conflict detection |
-| `uciedit_macros` | `uciedit_macros` | `#[derive(TypedSection)]` proc macro for typed UCI sections |
+| Crate            | Package                          | Description                                                            |
+| ---------------- | -------------------------------- | ---------------------------------------------------------------------- |
+| `ctrl`           | `startwrt-core` (lib `startwrt`) | RPC server (`startwrt-ctrld`) and CLI (`startwrt-cli`)                 |
+| `uciedit`        | `uciedit`                        | UCI config parser/serializer with atomic writes and conflict detection |
+| `uciedit_macros` | `uciedit_macros`                 | `#[derive(TypedSection)]` proc macro for typed UCI sections            |
 
 ### Other Directories
 
@@ -121,6 +121,7 @@ pub struct MySection {
 ```
 
 Macro attributes:
+
 - `#[uci(ty = "name")]` — UCI section type
 - `#[uci(rename = "option")]` — field name differs from UCI option name
 - `#[uci(default)]` — use `Default::default()` if option missing

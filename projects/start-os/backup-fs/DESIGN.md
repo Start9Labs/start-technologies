@@ -45,16 +45,16 @@ A regular file is `ceil(size / 1 MiB)` blocks. Writes do read-modify-write at
 block granularity and a block is always written **whole** — buffered, then
 atomically renamed into place. This is the core of the redesign:
 
-* **No random writes into existing objects.** Backends that can only replace
+- **No random writes into existing objects.** Backends that can only replace
   an object wholesale (S3/`rclone`) never see a sub-object overwrite; a small
   edit rewrites one ≤ 1 MiB block, not the whole file.
-* **Cheap incremental backup.** A block's filename is a stable keyed
+- **Cheap incremental backup.** A block's filename is a stable keyed
   SHA-256 of `(content_id, block_index)`. Editing one region rewrites exactly
   one block file and leaves every other block byte-for-byte identical, so
   `rsync`/`rclone` of `$data_dir` transfer only the changed blocks.
-* **Small and large files both behave.** A tiny file is one small block file;
+- **Small and large files both behave.** A tiny file is one small block file;
   a huge file is many independent blocks written/verified in parallel.
-* **Sparse files** cost nothing for holes — unwritten blocks have no file on
+- **Sparse files** cost nothing for holes — unwritten blocks have no file on
   disk and read back as zeros.
 
 ## Cache-deadlock avoidance

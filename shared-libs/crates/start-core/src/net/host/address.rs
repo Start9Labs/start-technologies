@@ -180,11 +180,8 @@ pub fn address_api<C: Context, Kind: HostApiKind>()
                             .as_ref()
                             .and_then(|p| p.acme.as_ref())
                             .map_or_else(|| "—".to_owned(), |a| a.0.to_string());
-                        let private_gateways = addr
-                            .private
-                            .as_ref()
-                            .filter(|g| !g.is_empty())
-                            .map_or_else(
+                        let private_gateways =
+                            addr.private.as_ref().filter(|g| !g.is_empty()).map_or_else(
                                 || "—".to_owned(),
                                 |g| {
                                     g.iter()

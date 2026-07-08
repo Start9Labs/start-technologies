@@ -1,4 +1,4 @@
-import { T } from "@start9labs/start-sdk"
+import { T } from '@start9labs/start-sdk'
 
 const CallbackIdCell = { inc: 1 }
 
@@ -24,7 +24,7 @@ export class CallbackHolder {
       return
     }
     const id = this.newId()
-    console.error("adding callback", id)
+    console.error('adding callback', id)
     this.callbacks.set(id, callback)
     if (this.effects)
       callbackRegistry.register(this, {
@@ -67,7 +67,7 @@ export class CallbackHolder {
     if (!callback) return Promise.resolve()
     return Promise.resolve()
       .then(() => callback(...args))
-      .catch((e) => console.error("callback failed", e))
+      .catch(e => console.error('callback failed', e))
   }
   onLeaveContext(fn: Function) {
     this.onLeaveContextCallbacks.push(fn)

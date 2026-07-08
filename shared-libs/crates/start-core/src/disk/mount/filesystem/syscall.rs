@@ -17,8 +17,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use libc::{
-    AT_EMPTY_PATH, AT_FDCWD, AT_RECURSIVE, MOUNT_ATTR_IDMAP, MOUNT_ATTR_RDONLY,
-    OPEN_TREE_CLOEXEC, OPEN_TREE_CLONE,
+    AT_EMPTY_PATH, AT_FDCWD, AT_RECURSIVE, MOUNT_ATTR_IDMAP, MOUNT_ATTR_RDONLY, OPEN_TREE_CLOEXEC,
+    OPEN_TREE_CLONE,
 };
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
@@ -56,8 +56,11 @@ fn cstr_str(s: &str) -> Result<CString, Error> {
 
 fn fd_from_raw(raw: i64, what: &'static str) -> Result<OwnedFd, Error> {
     if raw < 0 {
-        Err(Error::new(io::Error::last_os_error(), ErrorKind::Filesystem))
-            .with_ctx(|_| (ErrorKind::Filesystem, what))
+        Err(Error::new(
+            io::Error::last_os_error(),
+            ErrorKind::Filesystem,
+        ))
+        .with_ctx(|_| (ErrorKind::Filesystem, what))
     } else {
         Ok(unsafe { OwnedFd::from_raw_fd(raw as RawFd) })
     }
@@ -65,8 +68,11 @@ fn fd_from_raw(raw: i64, what: &'static str) -> Result<OwnedFd, Error> {
 
 fn check(ret: i64, what: &'static str) -> Result<(), Error> {
     if ret < 0 {
-        Err(Error::new(io::Error::last_os_error(), ErrorKind::Filesystem))
-            .with_ctx(|_| (ErrorKind::Filesystem, what))
+        Err(Error::new(
+            io::Error::last_os_error(),
+            ErrorKind::Filesystem,
+        ))
+        .with_ctx(|_| (ErrorKind::Filesystem, what))
     } else {
         Ok(())
     }

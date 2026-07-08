@@ -50,7 +50,7 @@ CLI subcommands, or served over HTTP via `HttpServer` / over a socket via `Serve
 
 ## Features
 
-- `cbor` *(default)* — enables CBOR request/response encoding alongside JSON over HTTP.
+- `cbor` _(default)_ — enables CBOR request/response encoding alongside JSON over HTTP.
 - `ts-rs` — emits TypeScript type definitions; exposes `type_helpers()`.
 
 ## License

@@ -1,34 +1,34 @@
 [package]
+authors = ["Changseok Han <freestrings@gmail.com>"]
 name = "jsonpath_lib"
 version = "0.3.0"
-authors = ["Changseok Han <freestrings@gmail.com>"]
 
 description = "It is JsonPath engine written in Rust. it provide a similar API interface in Webassembly and Javascript too. - Webassembly Demo: https://freestrings.github.io/jsonpath"
 readme = "README.md"
 
-keywords = ["jsonpath", "json", "webassembly", "lua", "query"]
 categories = ['wasm', "parser-implementations", "api-bindings"]
+keywords = ["jsonpath", "json", "webassembly", "lua", "query"]
 
-repository = "https://github.com/freestrings/jsonpath"
 documentation = "https://docs.rs/jsonpath_lib/0.3.0/jsonpath_lib"
 license = "MIT"
+repository = "https://github.com/freestrings/jsonpath"
 
 [badges]
 travis-ci = { repository = "freestrings/jsonpath", branch = "master" }
 
 [dependencies]
+imbl-value = { path = "../imbl-value" }
 log = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
-imbl-value = { path = "../imbl-value" }
 
 [dev-dependencies]
 env_logger = "0.8"
 
 [lib]
+crate-type = ["cdylib", "rlib"]
 name = "jsonpath_lib"
 path = "src/lib.rs"
-crate-type = ["cdylib", "rlib"]
 
 #[profile.release]
 #debug = true

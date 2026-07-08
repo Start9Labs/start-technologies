@@ -6,19 +6,19 @@ This document covers common utilities and patterns used throughout the StartOS c
 
 The `util` module contains reusable utilities. Key submodules:
 
-| Module | Purpose |
-|--------|---------|
-| `actor/` | Actor pattern implementation for concurrent state management |
-| `collections/` | Custom collection types |
-| `crypto.rs` | Cryptographic utilities (encryption, hashing) |
-| `future.rs` | Future/async utilities |
-| `io.rs` | File I/O helpers (create_file, canonicalize, etc.) |
-| `iter.rs` | Iterator extensions |
-| `net.rs` | Network utilities |
-| `rpc.rs` | RPC helpers |
-| `rpc_client.rs` | RPC client utilities |
-| `serde.rs` | Serialization helpers (Base64, display/fromstr, etc.) |
-| `sync.rs` | Synchronization primitives (SyncMutex, etc.) |
+| Module          | Purpose                                                      |
+| --------------- | ------------------------------------------------------------ |
+| `actor/`        | Actor pattern implementation for concurrent state management |
+| `collections/`  | Custom collection types                                      |
+| `crypto.rs`     | Cryptographic utilities (encryption, hashing)                |
+| `future.rs`     | Future/async utilities                                       |
+| `io.rs`         | File I/O helpers (create_file, canonicalize, etc.)           |
+| `iter.rs`       | Iterator extensions                                          |
+| `net.rs`        | Network utilities                                            |
+| `rpc.rs`        | RPC helpers                                                  |
+| `rpc_client.rs` | RPC client utilities                                         |
+| `serde.rs`      | Serialization helpers (Base64, display/fromstr, etc.)        |
+| `sync.rs`       | Synchronization primitives (SyncMutex, etc.)                 |
 
 ## Command Invocation (`Invoke` trait)
 
@@ -155,18 +155,18 @@ let subdir = SubPath::new(mount, "data/subdir");
 
 Various filesystem types that can be mounted:
 
-| Type | Description |
-|------|-------------|
-| `bind.rs` | Bind mounts |
-| `block_dev.rs` | Block device mounts |
-| `cifs.rs` | CIFS/SMB network shares |
-| `ecryptfs.rs` | Encrypted filesystem |
-| `efivarfs.rs` | EFI variables |
+| Type           | Description                  |
+| -------------- | ---------------------------- |
+| `bind.rs`      | Bind mounts                  |
+| `block_dev.rs` | Block device mounts          |
+| `cifs.rs`      | CIFS/SMB network shares      |
+| `ecryptfs.rs`  | Encrypted filesystem         |
+| `efivarfs.rs`  | EFI variables                |
 | `httpdirfs.rs` | HTTP directory as filesystem |
-| `idmapped.rs` | ID-mapped mounts |
-| `label.rs` | Mount by label |
-| `loop_dev.rs` | Loop device mounts |
-| `overlayfs.rs` | Overlay filesystem |
+| `idmapped.rs`  | ID-mapped mounts             |
+| `label.rs`     | Mount by label               |
+| `loop_dev.rs`  | Loop device mounts           |
+| `overlayfs.rs` | Overlay filesystem           |
 
 ## Other Useful Utilities
 

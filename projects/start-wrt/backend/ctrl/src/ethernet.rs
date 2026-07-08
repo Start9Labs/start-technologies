@@ -1,18 +1,19 @@
-use crate::profiles::{self, ProfileId, ProfileIdOpt};
-use crate::utils::DeserializeStdin;
-use crate::utils::HandlerExtSerde;
-use crate::CtrlContext;
-use crate::prelude::*;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::time::Duration;
+
 use rpc_toolkit::{from_fn_async_local, ParentHandler};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap, HashSet};
-use crate::invoke::Invoke;
-use std::time::Duration;
 use uciedit::openwrt::{
     DeviceType, InterfaceProto, NetworkBridgeVlan, NetworkDevice, NetworkInterface,
     NetworkVlanPort, NetworkVlanPortTagging,
 };
 use uciedit::{dump_all, parse_all, Arena, Configs};
+
+use crate::invoke::Invoke;
+use crate::prelude::*;
+use crate::profiles::{self, ProfileId, ProfileIdOpt};
+use crate::utils::{DeserializeStdin, HandlerExtSerde};
+use crate::CtrlContext;
 
 pub const DEFAULT_LAN_BRIDGE: &str = "br-lan";
 
@@ -21,8 +22,7 @@ pub const DEFAULT_LAN_BRIDGE: &str = "br-lan";
 pub fn find_lan_bridge(cfgs: &Configs) -> Result<Option<NetworkDevice>, Error> {
     let mut found = None;
     cfgs["network"].try_each(|_, dev: NetworkDevice| {
-        if dev.ty == Some(DeviceType::BRIDGE)
-            && (found.is_none() || dev.name == DEFAULT_LAN_BRIDGE)
+        if dev.ty == Some(DeviceType::BRIDGE) && (found.is_none() || dev.name == DEFAULT_LAN_BRIDGE)
         {
             found = Some(dev);
         }
@@ -92,9 +92,18 @@ fn changed_vlan_ports(
 
 pub fn ethernet<C: CtrlContext + Clone>() -> ParentHandler<C> {
     ParentHandler::new()
-        .subcommand("get", from_fn_async_local(get::<C>).with_display_serializable())
-        .subcommand("set", from_fn_async_local(set::<C>).with_display_serializable())
-        .subcommand("edit", from_fn_async_local(edit::<C>).with_display_serializable())
+        .subcommand(
+            "get",
+            from_fn_async_local(get::<C>).with_display_serializable(),
+        )
+        .subcommand(
+            "set",
+            from_fn_async_local(set::<C>).with_display_serializable(),
+        )
+        .subcommand(
+            "edit",
+            from_fn_async_local(edit::<C>).with_display_serializable(),
+        )
 }
 
 #[instrument(skip_all)]
@@ -106,7 +115,8 @@ pub async fn get<C: CtrlContext>(ctx: C) -> Result<Ethernet, Error> {
 
 fn get_config(ctx: impl CtrlContext, cfgs: &Configs) -> Result<Ethernet, Error> {
     let lookup = profiles::Lookup::parse(ctx.clone(), cfgs)?;
-    let found_bridge = find_lan_bridge(cfgs)?.ok_or_else(|| Error::new(eyre!("missing LAN bridge"), ErrorKind::MissingLanBridge))?;
+    let found_bridge = find_lan_bridge(cfgs)?
+        .ok_or_else(|| Error::new(eyre!("missing LAN bridge"), ErrorKind::MissingLanBridge))?;
 
     let mut wan_ipv6 = false;
     let mut wan_port = None;
@@ -207,23 +217,21 @@ pub async fn set<C: CtrlContext>(
     // Devices behind any port whose profile (VLAN) is changing will move to a new
     // subnet, breaking their published ports. Find those ports' MACs (bridge FDB
     // is port-precise) and the published ports they'd break.
-    let (affected_macs, changed_ports): (HashSet<String>, HashSet<String>) =
-        if ctx.effectful() {
-            let arena = Arena::new();
-            let cfgs =
-                parse_all(ctx.uci_root(), &arena, &["network", "startwrt", "firewall"]).await?;
-            let lookup = profiles::Lookup::parse(ctx.clone(), &cfgs)?;
-            let changed_ports = changed_vlan_ports(&ethernet.ports, &old_ports, &lookup)?;
-            let macs = crate::devices::get_bridge_fdb()
-                .await
-                .into_iter()
-                .filter(|(_, port)| changed_ports.contains(port))
-                .map(|(mac, _)| mac)
-                .collect();
-            (macs, changed_ports)
-        } else {
-            (HashSet::new(), HashSet::new())
-        };
+    let (affected_macs, changed_ports): (HashSet<String>, HashSet<String>) = if ctx.effectful() {
+        let arena = Arena::new();
+        let cfgs = parse_all(ctx.uci_root(), &arena, &["network", "startwrt", "firewall"]).await?;
+        let lookup = profiles::Lookup::parse(ctx.clone(), &cfgs)?;
+        let changed_ports = changed_vlan_ports(&ethernet.ports, &old_ports, &lookup)?;
+        let macs = crate::devices::get_bridge_fdb()
+            .await
+            .into_iter()
+            .filter(|(_, port)| changed_ports.contains(port))
+            .map(|(mac, _)| mac)
+            .collect();
+        (macs, changed_ports)
+    } else {
+        (HashSet::new(), HashSet::new())
+    };
 
     if ctx.effectful() && !confirm {
         // Dry run: report what would be deleted and apply nothing. The UI calls
@@ -244,8 +252,12 @@ pub async fn set<C: CtrlContext>(
     let mut retries = 4;
     loop {
         let arena = Arena::new();
-        let mut cfgs =
-            parse_all(ctx.uci_root(), &arena, &["network", "startwrt", "firewall", "dhcp"]).await?;
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["network", "startwrt", "firewall", "dhcp"],
+        )
+        .await?;
         let lookup = profiles::Lookup::parse(ctx.clone(), &cfgs)?;
         let ethernet = Ethernet::<ProfileId> {
             wan_ipv6: ethernet.wan_ipv6,
@@ -267,7 +279,13 @@ pub async fn set<C: CtrlContext>(
                 .collect::<Result<_, Error>>()?,
         };
         if let Err(err) = set_config(&ctx, &mut cfgs, &ethernet, &lookup) {
-            crate::activity::log("ethernet", "updated", false, "Failed to update Ethernet port assignments", Some(&err.to_string()));
+            crate::activity::log(
+                "ethernet",
+                "updated",
+                false,
+                "Failed to update Ethernet port assignments",
+                Some(&err.to_string()),
+            );
             return Err(err);
         }
         // Confirmed path: delete the published ports (and stale reservations) for
@@ -281,7 +299,13 @@ pub async fn set<C: CtrlContext>(
                 continue;
             }
             Err(err) => {
-                crate::activity::log("ethernet", "updated", false, "Failed to update Ethernet port assignments", Some(&err.to_string()));
+                crate::activity::log(
+                    "ethernet",
+                    "updated",
+                    false,
+                    "Failed to update Ethernet port assignments",
+                    Some(&err.to_string()),
+                );
                 return Err(err.into());
             }
             Ok(()) => {
@@ -294,7 +318,10 @@ pub async fn set<C: CtrlContext>(
                 let summary = if changed.is_empty() {
                     "Updated Ethernet port assignments".to_string()
                 } else {
-                    format!("Updated Ethernet port assignments (changed: {})", changed.join(", "))
+                    format!(
+                        "Updated Ethernet port assignments (changed: {})",
+                        changed.join(", ")
+                    )
                 };
                 crate::activity::log("ethernet", "updated", true, &summary, None);
 
@@ -344,9 +371,16 @@ pub async fn set<C: CtrlContext>(
                     // doesn't race the network reload.
                     let dhcp_changed = !affected_macs.is_empty();
                     tokio::spawn(async move {
-                        let _ = crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/network").arg("reload")).await;
-                        let _ = crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/firewall").arg("reload")).await;
-                        let _ = crate::run_quiet_async(&mut tokio::process::Command::new("wifi")).await;
+                        let _ = crate::run_quiet_async(
+                            tokio::process::Command::new("/etc/init.d/network").arg("reload"),
+                        )
+                        .await;
+                        let _ = crate::run_quiet_async(
+                            tokio::process::Command::new("/etc/init.d/firewall").arg("reload"),
+                        )
+                        .await;
+                        let _ =
+                            crate::run_quiet_async(&mut tokio::process::Command::new("wifi")).await;
                         if dhcp_changed {
                             crate::published_ports::reload_dnsmasq();
                             // odhcpd owns IPv6 leases/hostids; reload so a cleared
@@ -364,10 +398,7 @@ pub async fn set<C: CtrlContext>(
 
 /// Bounce (link down/up) any ports whose VLAN assignment changed, so that
 /// connected clients detect carrier loss and re-run DHCP on the new subnet.
-async fn bounce_changed_ports(
-    old_ports: &HashMap<String, Option<u16>>,
-    new_ethernet: &Ethernet,
-) {
+async fn bounce_changed_ports(old_ports: &HashMap<String, Option<u16>>, new_ethernet: &Ethernet) {
     let mut to_bounce = Vec::new();
     for (name, new_port) in &new_ethernet.ports {
         let new_vlan = new_port.profile.as_ref().map(|p| p.vlan_tag);
@@ -431,7 +462,10 @@ fn set_config(
     for (port_name, port) in &ethernet.ports {
         if Some(port_name) == ethernet.wan_port.as_ref() {
             if port.profile.is_some() {
-                return Err(Error::new(eyre!("WAN port cannot have profile: {port_name}"), ErrorKind::WanPortWithProfile));
+                return Err(Error::new(
+                    eyre!("WAN port cannot have profile: {port_name}"),
+                    ErrorKind::WanPortWithProfile,
+                ));
             }
         } else {
             bridge.ports.push(port_name.clone());
@@ -542,9 +576,8 @@ fn set_config(
                 continue;
             }
             let assigned = port.profile.as_ref() == Some(profile);
-            let default_to_admin = needs_vlan_filtering
-                && port.profile.is_none()
-                && profile.vlan_tag == 1;
+            let default_to_admin =
+                needs_vlan_filtering && port.profile.is_none() && profile.vlan_tag == 1;
             if assigned || default_to_admin {
                 ports.push(NetworkVlanPort {
                     port: port_name.clone(),
@@ -643,12 +676,14 @@ pub async fn edit<C: CtrlContext + Clone>(ctx: C) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use rpc_toolkit::Context;
     use std::path::PathBuf;
     use std::sync::Arc;
+
+    use rpc_toolkit::Context;
     use tokio::runtime::Runtime;
     use uciedit::{parse_all, Arena};
+
+    use super::*;
 
     /// Test shim: the production `set` now takes an `EthernetSetRequest` and
     /// returns `EthernetSetResult`; these tests predate that and pass a bare
@@ -886,7 +921,10 @@ config interface 'wan'
         let ctx = TestContext(dir.path().to_path_buf());
 
         let result = get(ctx).await.unwrap();
-        assert!(result.wan_ipv6, "wan_ipv6 should be true even with @wan device alias");
+        assert!(
+            result.wan_ipv6,
+            "wan_ipv6 should be true even with @wan device alias"
+        );
     }
 
     #[tokio::test]
@@ -1053,7 +1091,8 @@ config interface 'wan'
                     })
                     .collect(),
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let after = get(ctx).await.unwrap();
@@ -1104,7 +1143,8 @@ config interface 'wan'
                     ),
                 ]),
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let after = get(ctx).await.unwrap();
@@ -1144,7 +1184,8 @@ config interface 'wan'
                     ("eth1".into(), Port { profile: None }),
                 ]),
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let after = get(ctx).await.unwrap();
@@ -1181,7 +1222,8 @@ config interface 'wan'
                     ("eth1".into(), Port { profile: None }),
                 ]),
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let after = get(ctx).await.unwrap();
@@ -1220,7 +1262,8 @@ config interface 'wan'
                     ("eth2".into(), Port { profile: None }),
                 ]),
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let after = get(ctx).await.unwrap();
@@ -1253,7 +1296,8 @@ config interface 'wan'
                     ),
                 ]),
             }),
-        ).await
+        )
+        .await
         .unwrap_err();
 
         assert!(
@@ -1301,12 +1345,15 @@ config interface 'wan'
                     ),
                 ]),
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         // Verify WAN moved to eth0 in UCI config
         let arena = Arena::new();
-        let cfgs = parse_all(ctx.uci_root(), &arena, &["network", "startwrt", "firewall"]).await.unwrap();
+        let cfgs = parse_all(ctx.uci_root(), &arena, &["network", "startwrt", "firewall"])
+            .await
+            .unwrap();
         for section in &cfgs["network"].sections {
             if let Some(iface) = section.get_typed::<NetworkInterface>().unwrap() {
                 if section.name().as_deref() == Some("wan") && iface.proto == InterfaceProto::DHCP {
@@ -1362,7 +1409,8 @@ config interface 'wan'
                     })
                     .collect(),
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let after = get(ctx).await.unwrap();
@@ -1371,7 +1419,10 @@ config interface 'wan'
             Some("eth2"),
             "WAN port should be preserved after round-trip"
         );
-        assert!(after.wan_ipv6, "WAN IPv6 should be preserved after round-trip");
+        assert!(
+            after.wan_ipv6,
+            "WAN IPv6 should be preserved after round-trip"
+        );
         assert!(
             after.ports.contains_key("eth2"),
             "WAN port should appear in ports map"
@@ -1404,7 +1455,8 @@ config interface 'wan'
                     ("eth1".into(), Port { profile: None }),
                 ]),
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         let after = get(ctx).await.unwrap();
@@ -1432,7 +1484,7 @@ config interface 'wan'
         // gateway (br-lan.1) and the default-network WiFi SSID.
         let dir = tempfile::tempdir().unwrap();
         setup_basic(dir.path()); // startwrt: lan(vlan 1) + guest(vlan 3); firewall
-        // Single-port bridge, no wireless in config (mirrors real hardware).
+                                 // Single-port bridge, no wireless in config (mirrors real hardware).
         std::fs::write(
             dir.path().join("network"),
             "\
@@ -1487,8 +1539,9 @@ config interface 'guest'
         // default-network SSID keep their bridge VLAN, even though it now has
         // no member ports.
         let arena = Arena::new();
-        let cfgs =
-            parse_all(ctx.uci_root(), &arena, &["network", "startwrt", "firewall"]).await.unwrap();
+        let cfgs = parse_all(ctx.uci_root(), &arena, &["network", "startwrt", "firewall"])
+            .await
+            .unwrap();
         let mut vlans: Vec<u16> = Vec::new();
         for section in &cfgs["network"].sections {
             if let Some(v) = section.get_typed::<NetworkBridgeVlan>().unwrap() {
@@ -1516,7 +1569,9 @@ config interface 'guest'
         let ctx = TestContext(dir.path().to_path_buf());
 
         let arena = Arena::new();
-        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["network", "startwrt", "firewall"]).await.unwrap();
+        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["network", "startwrt", "firewall"])
+            .await
+            .unwrap();
 
         // Count bridge-vlan sections before
         let before_count = cfgs["network"]
@@ -1558,7 +1613,9 @@ config interface 'guest'
         let ctx = TestContext(dir.path().to_path_buf());
 
         let arena = Arena::new();
-        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["network", "startwrt", "firewall"]).await.unwrap();
+        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["network", "startwrt", "firewall"])
+            .await
+            .unwrap();
 
         let ethernet = Ethernet {
             wan_ipv6: true,
@@ -1598,7 +1655,9 @@ config interface 'guest'
         let ctx = TestContext(dir.path().to_path_buf());
 
         let arena = Arena::new();
-        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["network", "startwrt", "firewall"]).await.unwrap();
+        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["network", "startwrt", "firewall"])
+            .await
+            .unwrap();
 
         let ethernet = Ethernet {
             wan_ipv6: false,
@@ -1699,13 +1758,15 @@ config interface 'guest'
                     ),
                 ]),
             }),
-        ).await
+        )
+        .await
         .unwrap();
 
         // Verify wlan0 is still in the bridge
         let arena = Arena::new();
-        let cfgs =
-            parse_all(ctx.uci_root(), &arena, &["network", "startwrt", "firewall"]).await.unwrap();
+        let cfgs = parse_all(ctx.uci_root(), &arena, &["network", "startwrt", "firewall"])
+            .await
+            .unwrap();
         for section in &cfgs["network"].sections {
             if let Some(dev) = section.get_typed::<NetworkDevice>().unwrap() {
                 if dev.name == "br-lan" {
@@ -1744,7 +1805,9 @@ config device
         let ctx = TestContext(dir.path().to_path_buf());
 
         let arena = Arena::new();
-        let cfgs = parse_all(ctx.uci_root(), &arena, &["network"]).await.unwrap();
+        let cfgs = parse_all(ctx.uci_root(), &arena, &["network"])
+            .await
+            .unwrap();
         let bridge = find_lan_bridge(&cfgs).unwrap().unwrap();
         assert_eq!(bridge.name, "br-lan");
     }
@@ -1765,7 +1828,9 @@ config device
         let ctx = TestContext(dir.path().to_path_buf());
 
         let arena = Arena::new();
-        let cfgs = parse_all(ctx.uci_root(), &arena, &["network"]).await.unwrap();
+        let cfgs = parse_all(ctx.uci_root(), &arena, &["network"])
+            .await
+            .unwrap();
         let bridge = find_lan_bridge(&cfgs).unwrap().unwrap();
         assert_eq!(bridge.name, "br-custom");
     }
@@ -1777,7 +1842,9 @@ config device
         let ctx = TestContext(dir.path().to_path_buf());
 
         let arena = Arena::new();
-        let cfgs = parse_all(ctx.uci_root(), &arena, &["network"]).await.unwrap();
+        let cfgs = parse_all(ctx.uci_root(), &arena, &["network"])
+            .await
+            .unwrap();
         assert!(find_lan_bridge(&cfgs).unwrap().is_none());
     }
 }

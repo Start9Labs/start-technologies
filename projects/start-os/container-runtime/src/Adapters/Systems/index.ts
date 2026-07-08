@@ -1,7 +1,7 @@
-import * as fs from "node:fs/promises"
-import { System } from "../../Interfaces/System"
-import { EMBASSY_JS_LOCATION, SystemForEmbassy } from "./SystemForEmbassy"
-import { STARTOS_JS_LOCATION, SystemForStartOs } from "./SystemForStartOs"
+import * as fs from 'node:fs/promises'
+import { System } from '../../Interfaces/System'
+import { EMBASSY_JS_LOCATION, SystemForEmbassy } from './SystemForEmbassy'
+import { STARTOS_JS_LOCATION, SystemForStartOs } from './SystemForStartOs'
 export async function getSystem(): Promise<System> {
   if (
     await fs.access(STARTOS_JS_LOCATION).then(

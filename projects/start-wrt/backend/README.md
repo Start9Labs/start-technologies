@@ -4,13 +4,14 @@ Rust workspace powering the StartWRT router daemon and CLI. Reads and writes Ope
 
 ## Crates
 
-| Crate | Package | Description |
-|-------|---------|-------------|
-| `ctrl` | `startwrt-ctrl` | RPC server (Axum) + CLI. Produces a single `startwrt` binary. |
-| `uciedit` | `uciedit` | Zero-copy UCI config parser/writer with atomic writes and conflict detection. |
-| `uciedit_macros` | `uciedit_macros` | `#[derive(TypedSection)]` proc macro for compile-time-safe UCI access. |
+| Crate            | Package          | Description                                                                   |
+| ---------------- | ---------------- | ----------------------------------------------------------------------------- |
+| `ctrl`           | `startwrt-ctrl`  | RPC server (Axum) + CLI. Produces a single `startwrt` binary.                 |
+| `uciedit`        | `uciedit`        | Zero-copy UCI config parser/writer with atomic writes and conflict detection. |
+| `uciedit_macros` | `uciedit_macros` | `#[derive(TypedSection)]` proc macro for compile-time-safe UCI access.        |
 
 Other directories:
+
 - `firstboot_config/` — Factory-default UCI configs embedded in the binary via `include_dir`
 - `config_experiments/` — Reference UCI configs for manual testing
 

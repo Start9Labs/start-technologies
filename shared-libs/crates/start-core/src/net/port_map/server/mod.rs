@@ -64,7 +64,8 @@ pub trait GatewayBackend: Send + Sync {
 
     /// Remove the peer's forward to `(peer, internal_port)`, if any (PCP
     /// identifies a mapping by its target).
-    fn remove_forward(&self, peer: Ipv4Addr, internal_port: u16) -> impl Future<Output = ()> + Send;
+    fn remove_forward(&self, peer: Ipv4Addr, internal_port: u16)
+    -> impl Future<Output = ()> + Send;
 
     /// Remove the forward at external address `source` if owned by `peer` (UPnP
     /// IGD identifies a mapping by its external port). Returns whether a
@@ -319,7 +320,15 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
     }
 
     if !backend.is_known_client(peer).await {
-        return Some(map_response(NOT_AUTHORIZED, req, 0, 0, Ipv4Addr::UNSPECIFIED, 0, epoch));
+        return Some(map_response(
+            NOT_AUTHORIZED,
+            req,
+            0,
+            0,
+            Ipv4Addr::UNSPECIFIED,
+            0,
+            epoch,
+        ));
     }
 
     let lifetime = u32::from_be_bytes([req[4], req[5], req[6], req[7]]);
@@ -485,18 +494,16 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
                 .add_forward(source, target, granted, peer, Some(granted_lifetime))
                 .await
             {
-                Ok(()) => {
-                    Some(map_response_with_port_set(
-                        SUCCESS,
-                        req,
-                        internal_port,
-                        external_port,
-                        external_ip,
-                        granted_lifetime,
-                        epoch,
-                        granted,
-                    ))
-                }
+                Ok(()) => Some(map_response_with_port_set(
+                    SUCCESS,
+                    req,
+                    internal_port,
+                    external_port,
+                    external_ip,
+                    granted_lifetime,
+                    epoch,
+                    granted,
+                )),
                 Err(_) => Some(map_response(
                     NO_RESOURCES,
                     req,
@@ -513,7 +520,15 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
     // Lifetime 0 deletes the mapping (RFC 6887 §15).
     if lifetime == 0 {
         backend.remove_forward(peer, internal_port).await;
-        return Some(map_response(SUCCESS, req, internal_port, external_port, external_ip, 0, epoch));
+        return Some(map_response(
+            SUCCESS,
+            req,
+            internal_port,
+            external_port,
+            external_ip,
+            0,
+            epoch,
+        ));
     }
 
     // Secure: force the target to the requesting peer's own address.
@@ -524,17 +539,15 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
         .add_forward(source, target, 1, peer, Some(granted))
         .await
     {
-        Ok(()) => {
-            Some(map_response(
-                SUCCESS,
-                req,
-                internal_port,
-                external_port,
-                external_ip,
-                granted,
-                epoch,
-            ))
-        }
+        Ok(()) => Some(map_response(
+            SUCCESS,
+            req,
+            internal_port,
+            external_port,
+            external_ip,
+            granted,
+            epoch,
+        )),
         // The external port is taken by another mapping; the client may retry.
         Err(_) => Some(map_response(
             NO_RESOURCES,
@@ -581,7 +594,15 @@ pub async fn handle6<B: GatewayBackend + ?Sized>(
     }
 
     if !backend.is_known_gua(peer).await {
-        return Some(map_response6(NOT_AUTHORIZED, req, 0, 0, Ipv6Addr::UNSPECIFIED, 0, epoch));
+        return Some(map_response6(
+            NOT_AUTHORIZED,
+            req,
+            0,
+            0,
+            Ipv6Addr::UNSPECIFIED,
+            0,
+            epoch,
+        ));
     }
 
     let lifetime = u32::from_be_bytes([req[4], req[5], req[6], req[7]]);
@@ -624,17 +645,15 @@ pub async fn handle6<B: GatewayBackend + ?Sized>(
         .add_pinhole(peer, external_port, internal_port, 1, Some(granted))
         .await
     {
-        Ok(()) => {
-            Some(map_response6(
-                SUCCESS,
-                req,
-                internal_port,
-                external_port,
-                peer,
-                granted,
-                epoch,
-            ))
-        }
+        Ok(()) => Some(map_response6(
+            SUCCESS,
+            req,
+            internal_port,
+            external_port,
+            peer,
+            granted,
+            epoch,
+        )),
         Err(_) => Some(map_response6(
             NO_RESOURCES,
             req,
@@ -667,13 +686,27 @@ mod tests {
     fn map_response_echoes_nonce_and_encodes_external() {
         let nonce = [1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
         let req = map_request(nonce, 3600, 8443, 443);
-        let resp = map_response(SUCCESS, &req, 8443, 443, Ipv4Addr::new(203, 0, 113, 7), 3600, 42);
+        let resp = map_response(
+            SUCCESS,
+            &req,
+            8443,
+            443,
+            Ipv4Addr::new(203, 0, 113, 7),
+            3600,
+            42,
+        );
         assert_eq!(resp.len(), MAP_RESPONSE_LEN);
         assert_eq!(resp[0], PCP_VERSION);
         assert_eq!(resp[1], RESPONSE_BIT | OPCODE_MAP);
         assert_eq!(resp[3], SUCCESS);
-        assert_eq!(u32::from_be_bytes([resp[4], resp[5], resp[6], resp[7]]), 3600);
-        assert_eq!(u32::from_be_bytes([resp[8], resp[9], resp[10], resp[11]]), 42);
+        assert_eq!(
+            u32::from_be_bytes([resp[4], resp[5], resp[6], resp[7]]),
+            3600
+        );
+        assert_eq!(
+            u32::from_be_bytes([resp[8], resp[9], resp[10], resp[11]]),
+            42
+        );
         assert_eq!(&resp[24..36], &nonce);
         assert_eq!(resp[36], 6);
         assert_eq!(u16::from_be_bytes([resp[40], resp[41]]), 8443);
@@ -933,7 +966,10 @@ mod tests {
         assert_eq!(u16::from_be_bytes([resp[40], resp[41]]), 8443); // internal
         assert_eq!(u16::from_be_bytes([resp[42], resp[43]]), 8443); // external
         assert_eq!(&resp[44..60], &TEST_GUA.octets()); // GUA, not v4-mapped
-        assert_eq!(*stub.pinholes.lock().unwrap(), vec![(TEST_GUA, 8443, 8443, 1)]);
+        assert_eq!(
+            *stub.pinholes.lock().unwrap(),
+            vec![(TEST_GUA, 8443, 8443, 1)]
+        );
     }
 
     // A suggested external port different from internal → the 80→443 redirect.

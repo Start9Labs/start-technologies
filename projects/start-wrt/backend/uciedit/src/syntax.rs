@@ -1,11 +1,13 @@
-use crate::{Error, ResultExt as _, Source, TypedSection};
-use chrono::{DateTime, Utc};
-use inpt::split::{unescape, Quoted, SingleQuoted, Spaced};
-use inpt::{inpt, inpt_step, Inpt, InptStep};
 use std::borrow::Cow;
 use std::path::Path;
 use std::str::FromStr;
 use std::{fmt, io};
+
+use chrono::{DateTime, Utc};
+use inpt::split::{unescape, Quoted, SingleQuoted, Spaced};
+use inpt::{inpt, inpt_step, Inpt, InptStep};
+
+use crate::{Error, ResultExt as _, Source, TypedSection};
 
 pub type Arena = typed_arena::Arena<String>;
 
