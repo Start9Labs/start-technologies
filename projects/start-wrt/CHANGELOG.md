@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-beta.4]
+
 ### Changed
 
 - OpenWrt base upgraded **25.12.4 → 25.12.5** (`r33051-f5dae5ece4`), picking up
