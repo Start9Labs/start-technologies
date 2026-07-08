@@ -41,6 +41,8 @@ or the CLI's externally observable behavior.
   error names the parent directory to run it in (`cd <parent> && start-cli s9pk
   init-workspace`), so an existing package repo is one command away from building. The
   `init-workspace`-inside-a-package-repo refusal points at the same parent.
+- **`--version` now reports `start-cli`'s own version** (`1.0.1`) rather than the StartOS
+  platform version it was previously wired to.
 
 ## [1.0.0]
 

@@ -5,7 +5,6 @@ use serde_json::Value;
 
 use crate::service::cli::{ContainerCliContext, ContainerClientConfig};
 use crate::util::logger::LOGGER;
-use crate::version::{Current, VersionT};
 
 fn app() -> CliApp<ContainerCliContext, ContainerClientConfig> {
     CliApp::new(
@@ -13,10 +12,7 @@ fn app() -> CliApp<ContainerCliContext, ContainerClientConfig> {
         crate::service::effects::handler(),
     )
     .mutate_command(super::translate_cli)
-    .mutate_command(|cmd| {
-        cmd.name("start-container")
-            .version(Current::default().semver().to_string())
-    })
+    .mutate_command(|cmd| cmd.name("start-container").version(super::product_version()))
 }
 
 pub fn main(args: impl IntoIterator<Item = OsString>) {

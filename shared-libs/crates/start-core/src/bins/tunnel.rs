@@ -25,7 +25,6 @@ use crate::tunnel::tunnel_router;
 use crate::tunnel::web::TunnelCertHandler;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::logger::LOGGER;
-use crate::version::{Current, VersionT};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum WebserverListener {
@@ -217,10 +216,7 @@ fn app() -> CliApp<CliContext, ClientConfig> {
         crate::tunnel::api::tunnel_api(),
     )
     .mutate_command(super::translate_cli)
-    .mutate_command(|cmd| {
-        cmd.name("start-tunnel")
-            .version(Current::default().semver().to_string())
-    })
+    .mutate_command(|cmd| cmd.name("start-tunnel").version(super::product_version()))
 }
 
 pub fn cli(args: impl IntoIterator<Item = OsString>) {

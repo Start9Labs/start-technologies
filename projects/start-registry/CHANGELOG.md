@@ -6,6 +6,9 @@ All notable changes to `start-registry` (the Start Registry server) are document
 
 ## [1.0.0]
 
+- **`--version` reports `start-registry`'s own version** (`1.0.0`), not the StartOS platform
+  version.
+
 - **Independent versioning.** `start-registry` now carries its own version (starting at `1.0.0`) in its `Cargo.toml`, decoupled from the StartOS release line; its `.deb` is versioned from the manifest.
 
 ## [0.4.0-beta.10] — StartOS 0.4.0-beta.10

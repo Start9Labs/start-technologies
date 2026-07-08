@@ -1,6 +1,9 @@
 use start_core::bins::MultiExecutable;
 
 fn main() {
+    start_core::bins::PRODUCT_VERSION
+        .set(env!("CARGO_PKG_VERSION"))
+        .ok();
     start_core::net::static_server::UI_CELL
         .set(include_dir::include_dir!(
             "$CARGO_MANIFEST_DIR/web/dist/static/ui"

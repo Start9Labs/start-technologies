@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::ffi::OsString;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use rust_i18n::t;
 
@@ -12,6 +13,18 @@ pub mod start_init;
 pub mod startd;
 pub mod tunnel;
 pub mod unshare_userns;
+
+/// Each product wrapper's `main()` sets this to its own crate `CARGO_PKG_VERSION`; the shared
+/// bins report it as `--version`, so each product shows its own version rather than start-core's.
+pub static PRODUCT_VERSION: OnceLock<&'static str> = OnceLock::new();
+
+/// The product version set by the wrapper, or start-core's own version as a fallback.
+pub fn product_version() -> &'static str {
+    PRODUCT_VERSION
+        .get()
+        .copied()
+        .unwrap_or(env!("CARGO_PKG_VERSION"))
+}
 
 pub fn set_locale_from_env() {
     let lang = std::env::var("LANG").ok();

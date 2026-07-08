@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Automatic (PCP) mappings now honor their lease.** A forward, pinhole, or SNI route opened automatically by a connected device carries a finite lease that the device renews while it still wants the port. The tunnel now expires and tears down an automatic mapping whose device stops renewing it — because it went offline, rotated its key, or withdrew the exposure — instead of leaving a stale forward in place indefinitely. Manually-added forwards are unaffected and remain persistent.
 - **Admin actions retire a device's forwards immediately.** Deleting a device or demoting it to a client now clears all of its forwards, SNI routes, and IPv6 pinholes (previously a deleted device's v6 pinholes could linger); disabling **automatic port forwarding** for a device clears its automatic forwards while leaving any you added manually. Cleanup no longer waits for the lease to lapse.
 
+### Fixed
+
+- **`--version` now reports StartTunnel's own version** (`1.1.0`) instead of the StartOS
+  platform version.
+
 ## [1.0.0]
 
 - **Independent versioning.** `start-tunnel` now carries its own version (starting at `1.0.0`) in its `Cargo.toml`, decoupled from the StartOS release line; its `.deb` is versioned from the manifest.

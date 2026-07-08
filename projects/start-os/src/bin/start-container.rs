@@ -1,6 +1,9 @@
 use start_core::bins::MultiExecutable;
 
 fn main() {
+    start_core::bins::PRODUCT_VERSION
+        .set(env!("CARGO_PKG_VERSION"))
+        .ok();
     // unshare-userns must be a multi-call applet, not a CLI subcommand: it
     // runs `unshare(CLONE_NEWUSER)`, which the kernel rejects (EINVAL) on a
     // multi-threaded process. The CLI path isn't single-threaded — its

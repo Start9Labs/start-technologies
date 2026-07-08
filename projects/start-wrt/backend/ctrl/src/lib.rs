@@ -110,6 +110,7 @@ fn cookies_path() -> PathBuf {
 
 /// CLI arguments parsed by clap
 #[derive(Clone, Parser)]
+#[command(name = "startwrt", version)]
 pub struct CliArgs {
     #[clap(long, default_value = "/etc/config")]
     pub config_root: PathBuf,

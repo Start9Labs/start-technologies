@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ## [0.1.0-beta.4]
+### Added
+
+- **`--version` flag.** `startwrt --version` now reports the StartWRT version (e.g.
+  `0.1.0-beta.4`); the CLI previously exposed no `--version`.
 
 ### Changed
 
