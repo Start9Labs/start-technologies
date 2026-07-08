@@ -29,7 +29,7 @@ start-registry-clean:
 
 .PHONY: start-registry-format start-registry-format-check
 start-registry-format:
-	cargo +nightly fmt -p start-registry
+	$(FMT) cargo fmt -p start-registry
 
 start-registry-format-check:
-	cargo +nightly fmt --check -p start-registry
+	$(FMT) cargo fmt --check -p start-registry

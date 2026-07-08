@@ -13,7 +13,7 @@ shared-libs/crates/start-core/bindings/index.ts: $(call ls-files, shared-libs/cr
 		ls shared-libs/crates/start-core/bindings/tunnel/*.ts | sed 's|.*/bindings/tunnel/\([^.]*\)\.ts|export { \1 } from "./\1";|g' | grep -v '"./index"' > shared-libs/crates/start-core/bindings/tunnel/index.ts; \
 		echo 'export * as Tunnel from "./tunnel";' >> shared-libs/crates/start-core/bindings/index.ts; \
 	fi
-	npm --prefix shared-libs/ts-modules/start-core exec -- prettier --config=./shared-libs/ts-modules/start-core/package.json -w './shared-libs/crates/start-core/bindings/**/*.ts'
+	npm --prefix shared-libs/ts-modules/start-core exec -- prettier -w './shared-libs/crates/start-core/bindings/**/*.ts'
 	touch shared-libs/crates/start-core/bindings/index.ts
 
 .PHONY: start-core-clean
@@ -27,7 +27,7 @@ SHARED_CRATE_PKGS := -p start-core -p exver -p imbl-value -p yasi -p rpc-toolkit
 
 .PHONY: start-core-format start-core-format-check
 start-core-format:
-	cargo +nightly fmt $(SHARED_CRATE_PKGS)
+	$(FMT) cargo fmt $(SHARED_CRATE_PKGS)
 
 start-core-format-check:
-	cargo +nightly fmt --check $(SHARED_CRATE_PKGS)
+	$(FMT) cargo fmt --check $(SHARED_CRATE_PKGS)

@@ -33,11 +33,18 @@ metadata: $(VERSION_FILE) $(PLATFORM_FILE) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE)
 # Per-project cleans live in each build.mk; this only aggregates them.
 clean: start-core-clean web-clean start-sdk-clean start-cli-clean start-registry-clean start-tunnel-clean start-os-clean start-wrt-clean start-docs-clean
 
-# Per-project formats live in each build.mk; this only aggregates them. Run one
-# project with e.g. `make start-cli-format`, or all of them with `make format`.
-format: start-core-format web-format start-sdk-format start-cli-format start-registry-format start-tunnel-format start-os-format start-wrt-format
+# Whole-repo formatting: rustfmt (pinned nightly, in a container), then prettier
+# and taplo (pinned via npm, native). Per-project `<project>-format` targets format
+# just one scope through the same tools/config.
+format:
+	$(FMT) cargo fmt --all
+	npm --prefix . run format
+	npm --prefix . run format:toml
 
-# Read-only formatting verification (used by CI); mirrors `format` per project.
-format-check: start-core-format-check web-format-check start-sdk-format-check start-cli-format-check start-registry-format-check start-tunnel-format-check start-os-format-check start-wrt-format-check
+# Read-only verification (what CI runs); mirrors `format`.
+format-check:
+	$(FMT) cargo fmt --all --check
+	npm --prefix . run format:check
+	npm --prefix . run format:toml:check
 
 test: | start-core-test start-sdk-test container-runtime-test start-wrt-test

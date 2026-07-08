@@ -43,7 +43,7 @@ sudo apt install -y containerd.io docker-ce docker-ce-cli docker-compose-plugin
 sudo usermod -aG docker $USER
 sudo su $USER
 
-# Rust (the nightly toolchain is used for formatting)
+# Rust (stable; rustfmt runs in a pinned-nightly container — see Formatting)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh # proceed with default installation
 
 # Node.js 24 (required by Angular 22's CLI)
@@ -70,15 +70,15 @@ This is a monorepo: one root Cargo workspace and one Angular workspace, both roo
 - **A single Rust bin:** `cargo build -p <crate> --bin <bin>` — crates are `start-os` (`startbox` / `start-container`), `start-cli`, `start-registry` (`registrybox`), `start-tunnel` (`tunnelbox`), and `startwrt-core` (`startwrt`).
 - **A whole product** (bins + UI + packaging) has its own `make` targets and build instructions in its `CONTRIBUTING.md`:
 
-| Product | Primary build target | Build & deploy docs |
-| --- | --- | --- |
-| StartOS (OS image, UIs, device deploy) | `make start-os` | [`projects/start-os/CONTRIBUTING.md`](projects/start-os/CONTRIBUTING.md) |
-| start-cli | `make start-cli` | [`projects/start-cli/CONTRIBUTING.md`](projects/start-cli/CONTRIBUTING.md) |
-| start-registry | `make start-registry` | [`projects/start-registry/CONTRIBUTING.md`](projects/start-registry/CONTRIBUTING.md) |
-| StartTunnel | `make start-tunnel` | [`projects/start-tunnel/CONTRIBUTING.md`](projects/start-tunnel/CONTRIBUTING.md) |
-| StartWRT | `make start-wrt` (`make start-wrt-image` for the full OpenWrt image — hours, fetches the pinned OpenWrt tree) | [`projects/start-wrt/CONTRIBUTING.md`](projects/start-wrt/CONTRIBUTING.md) |
-| Start SDK | `make bundle` (from `projects/start-sdk`) | [`projects/start-sdk/CONTRIBUTING.md`](projects/start-sdk/CONTRIBUTING.md) |
-| Web (shared libs + app UIs) | `npm run build:ui` | [`shared-libs/ts-modules/CONTRIBUTING.md`](shared-libs/ts-modules/CONTRIBUTING.md) |
+| Product                                | Primary build target                                                                                          | Build & deploy docs                                                                  |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| StartOS (OS image, UIs, device deploy) | `make start-os`                                                                                               | [`projects/start-os/CONTRIBUTING.md`](projects/start-os/CONTRIBUTING.md)             |
+| start-cli                              | `make start-cli`                                                                                              | [`projects/start-cli/CONTRIBUTING.md`](projects/start-cli/CONTRIBUTING.md)           |
+| start-registry                         | `make start-registry`                                                                                         | [`projects/start-registry/CONTRIBUTING.md`](projects/start-registry/CONTRIBUTING.md) |
+| StartTunnel                            | `make start-tunnel`                                                                                           | [`projects/start-tunnel/CONTRIBUTING.md`](projects/start-tunnel/CONTRIBUTING.md)     |
+| StartWRT                               | `make start-wrt` (`make start-wrt-image` for the full OpenWrt image — hours, fetches the pinned OpenWrt tree) | [`projects/start-wrt/CONTRIBUTING.md`](projects/start-wrt/CONTRIBUTING.md)           |
+| Start SDK                              | `make bundle` (from `projects/start-sdk`)                                                                     | [`projects/start-sdk/CONTRIBUTING.md`](projects/start-sdk/CONTRIBUTING.md)           |
+| Web (shared libs + app UIs)            | `npm run build:ui`                                                                                            | [`shared-libs/ts-modules/CONTRIBUTING.md`](shared-libs/ts-modules/CONTRIBUTING.md)   |
 
 `make start-core-ts-bindings` regenerates the TypeScript bindings from the Rust types, and `make clean` removes all compiled artifacts. Cross-layer changes (Rust → bindings → SDK → web/runtime) are described in [ARCHITECTURE.md](ARCHITECTURE.md#build-pipeline).
 
@@ -86,12 +86,12 @@ This is a monorepo: one root Cargo workspace and one Angular workspace, both roo
 
 Builds are parameterized by environment variables shared across all products:
 
-| Variable             | Description                                                                                       |
-| -------------------- | ------------------------------------------------------------------------------------------------ |
+| Variable             | Description                                                                                        |
+| -------------------- | -------------------------------------------------------------------------------------------------- |
 | `PLATFORM`           | Target platform (e.g. `x86_64`, `aarch64`, `riscv64`). For non-OS products it only derives `ARCH`. |
-| `ENVIRONMENT`        | Hyphen-separated feature flags; the available options depend on the product.                      |
-| `PROFILE`            | Build profile: `release` (default) or `dev`.                                                      |
-| `GIT_BRANCH_AS_HASH` | Set to `1` to use the git branch name as the version hash (avoids rebuilds).                      |
+| `ENVIRONMENT`        | Hyphen-separated feature flags; the available options depend on the product.                       |
+| `PROFILE`            | Build profile: `release` (default) or `dev`.                                                       |
+| `GIT_BRANCH_AS_HASH` | Set to `1` to use the git branch name as the version hash (avoids rebuilds).                       |
 
 Each product's `CONTRIBUTING.md` documents the `PLATFORM` values and `ENVIRONMENT` flags it actually supports.
 
@@ -112,21 +112,37 @@ Each product's `CONTRIBUTING.md` covers its own scoped tests.
 
 ## Formatting
 
+Three tools, one config each at the repo root: **rustfmt** (`rustfmt.toml`) for Rust,
+**prettier** (`.prettierrc.json`) for TS/JS/HTML/SCSS/Markdown/YAML/JSON, and **taplo**
+(`taplo.toml`) for TOML.
+
 ```bash
-make format          # format every project
+make format          # format the whole repo
 make format-check    # read-only check (what CI runs)
 ```
 
-Or scope it to one project — each has a `format-check-*` read-only variant that CI runs:
+rustfmt uses options that are still nightly-only, so to keep output identical for
+everyone it runs in a pinned-nightly container — `build/fmt/fmtenv.Dockerfile`, which
+adds the pinned nightly to `start9/cargo-zigbuild` (the same image the Rust build
+uses) and is built on first use. prettier and taplo are pinned via npm
+devDependencies and run natively. To bump a version, edit the Dockerfile's
+`RUSTFMT_TOOLCHAIN` (rustfmt) or `package.json` (prettier / `@taplo/cli`).
+
+If you already have the pinned nightly installed and want to skip Docker:
 
 ```bash
-make start-core-format         # shared Rust crates
-make start-cli-format          # start-cli  (also start-registry-format / start-tunnel-format / start-os-format / start-wrt-format)
-make web-format          # the Angular workspace (shared libs + all app UIs, incl. brochure)
-make start-sdk-format          # the SDK
+FMT_NATIVE=1 make format
 ```
 
-Run the formatters before committing. Configuration is handled by `rustfmt.toml` (Rust) and prettier configs (TypeScript).
+Or scope Rust formatting to one crate (still through the container):
+
+```bash
+make start-core-format   # shared Rust crates
+make start-cli-format    # also start-registry-format / start-tunnel-format / start-os-format / start-wrt-format
+make web-format          # prettier over the whole repo
+```
+
+Run the formatters before committing.
 
 ## Code Style Guidelines
 

@@ -1,5 +1,10 @@
-ls-files = $(shell git ls-files --cached --others --exclude-standard $1) 
+ls-files = $(shell git ls-files --cached --others --exclude-standard $1)
 PROFILE = release
+
+# rustfmt runs in a container pinned to a specific nightly (our rustfmt.toml uses
+# nightly-only options); prettier and taplo are pinned via npm and run natively.
+# Set FMT_NATIVE=1 to run rustfmt on the host instead.
+FMT := ./build/fmt/run-fmt.sh
 
 PLATFORM_FILE := $(shell ./build/env/check-platform.sh)
 ENVIRONMENT_FILE := $(shell ./build/env/check-environment.sh)

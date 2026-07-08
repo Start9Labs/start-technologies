@@ -29,7 +29,7 @@ start-cli-clean:
 
 .PHONY: start-cli-format start-cli-format-check
 start-cli-format:
-	cargo +nightly fmt -p start-cli
+	$(FMT) cargo fmt -p start-cli
 
 start-cli-format-check:
-	cargo +nightly fmt --check -p start-cli
+	$(FMT) cargo fmt --check -p start-cli

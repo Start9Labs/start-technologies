@@ -6,20 +6,20 @@ on:
       - master
       - next/*
     paths-ignore:
-      - "**/*.md"
+      - '**/*.md'
   pull_request:
     branches:
       - master
       - next/*
     paths-ignore:
-      - "**/*.md"
+      - '**/*.md'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 env:
-  NODEJS_VERSION: "24.17.0"
+  NODEJS_VERSION: '24.17.0'
   ENVIRONMENT: dev-unstable
 
 jobs:
@@ -32,9 +32,9 @@ jobs:
       - uses: ./.github/actions/setup-build
         with:
           nodejs-version: ${{ env.NODEJS_VERSION }}
-          free-space: "false"
-          setup-docker: "false"
-          setup-sccache: "false"
+          free-space: 'false'
+          setup-docker: 'false'
+          setup-sccache: 'false'
 
       - name: Build And Run Tests
         run: make test
@@ -48,9 +48,9 @@ jobs:
       - uses: ./.github/actions/setup-build
         with:
           nodejs-version: ${{ env.NODEJS_VERSION }}
-          free-space: "false"
-          setup-docker: "false"
-          setup-sccache: "false"
+          free-space: 'false'
+          setup-docker: 'false'
+          setup-sccache: 'false'
       # `npm ci` fails if a lockfile is out of sync with its package.json, unlike the
       # build's `npm i` which silently rewrites it. This is the lockfile-drift gate.
       # web and the SDK both resolve start-core via file:shared-libs/ts-modules/start-core/dist,
@@ -63,8 +63,9 @@ jobs:
           npm --prefix projects/start-sdk ci
       - name: Validate web lockfile
         run: npm ci
+      # rustfmt runs in start9/fmt-env (pinned nightly); prettier + taplo run
+      # natively. Building the image here means run-fmt.sh reuses it.
+      - name: Build rustfmt container
+        run: docker build -t start9/fmt-env -f build/fmt/fmtenv.Dockerfile build/fmt
       - name: Check formatting
-        run: |
-          npm run format:check
-          cd shared-libs/ts-modules/start-core && npx prettier "**/*.ts" --check
-          cd "$GITHUB_WORKSPACE/projects/start-sdk" && npx prettier "**/*.ts" --check
+        run: make format-check

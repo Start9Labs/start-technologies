@@ -38,7 +38,7 @@ start-tunnel-clean:
 # The tunnel web app is formatted by `web-format` (whole Angular workspace); this is the Rust crate.
 .PHONY: start-tunnel-format start-tunnel-format-check
 start-tunnel-format:
-	cargo +nightly fmt -p start-tunnel
+	$(FMT) cargo fmt -p start-tunnel
 
 start-tunnel-format-check:
-	cargo +nightly fmt --check -p start-tunnel
+	$(FMT) cargo fmt --check -p start-tunnel

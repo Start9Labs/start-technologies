@@ -146,7 +146,7 @@ start-wrt-clean:
 # through `web-format`/`web-format-check`. This target is just the Rust crate.
 .PHONY: start-wrt-format start-wrt-format-check
 start-wrt-format:
-	cargo +nightly fmt -p startwrt-core -p uciedit -p uciedit_macros
+	$(FMT) cargo fmt -p startwrt-core -p uciedit -p uciedit_macros
 
 start-wrt-format-check:
-	cargo +nightly fmt --check -p startwrt-core -p uciedit -p uciedit_macros
+	$(FMT) cargo fmt --check -p startwrt-core -p uciedit -p uciedit_macros

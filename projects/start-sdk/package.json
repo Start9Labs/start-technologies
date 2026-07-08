@@ -50,13 +50,6 @@
     "eslint",
     "typescript-eslint"
   ],
-  "prettier": {
-    "trailingComma": "all",
-    "tabWidth": 2,
-    "semi": false,
-    "singleQuote": true,
-    "arrowParens": "avoid"
-  },
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "jest": "^30.0.0",

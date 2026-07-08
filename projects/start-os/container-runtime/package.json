@@ -12,12 +12,6 @@
     "test": "jest -c ./jest.config.js"
   },
   "author": "",
-  "prettier": {
-    "trailingComma": "all",
-    "tabWidth": 2,
-    "semi": false,
-    "singleQuote": false
-  },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
     "@noble/curves": "^1.4.0",

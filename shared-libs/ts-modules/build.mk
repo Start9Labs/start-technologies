@@ -62,12 +62,11 @@ web-clean:
 	$(MAKE) -C shared-libs/ts-modules/start-core clean
 	rm -f config.json
 
-# Formats the whole Angular workspace (shared/marketplace libs + every app dir incl. brochure).
+# Runs prettier over the whole repo (one root config); `web-` name kept for the
+# many docs that reference it. Repo-wide, so it also covers the shared TS modules.
 .PHONY: web-format web-format-check
 web-format:
 	npm --prefix . run format
-	$(MAKE) -C shared-libs/ts-modules/start-core fmt
 
 web-format-check:
 	npm --prefix . run format:check
-	$(MAKE) -C shared-libs/ts-modules/start-core check-fmt

@@ -34,8 +34,10 @@
     "start:brochure": "ng serve --project brochure-marketplace --host 0.0.0.0",
     "start:ui:proxy": "npm run-script build-config && ng serve --project ui --host 0.0.0.0 --proxy-config proxy.conf.json",
     "build-config": "node shared-libs/ts-modules/build-config.js",
-    "format": "prettier --write shared-libs/ts-modules/shared/ shared-libs/ts-modules/marketplace/ projects/start-os/web/ projects/start-tunnel/web/ projects/start-wrt/web/ projects/brochure-marketplace/",
-    "format:check": "prettier --check shared-libs/ts-modules/shared/ shared-libs/ts-modules/marketplace/ projects/start-os/web/ projects/start-tunnel/web/ projects/start-wrt/web/ projects/brochure-marketplace/"
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "format:toml": "taplo fmt",
+    "format:toml:check": "taplo fmt --check"
   },
   "dependencies": {
     "@angular/cdk": "^22.0.0",
@@ -99,6 +101,7 @@
     "@angular/cli": "^22.0.0",
     "@angular/compiler-cli": "^22.0.0",
     "@angular/language-service": "^22.0.0",
+    "@taplo/cli": "0.7.0",
     "@types/estree": "^0.0.51",
     "@types/js-yaml": "^4.0.5",
     "@types/marked": "^4.0.3",
@@ -106,8 +109,6 @@
     "@types/node": "^22.15.19",
     "@types/node-jose": "^1.1.10",
     "@types/pbkdf2": "^3.1.0",
-    "husky": "^4.3.8",
-    "lint-staged": "^13.2.0",
     "ng-packagr": "^22.0.0",
     "node-html-parser": "^5.3.3",
     "postcss": "^8.4.21",
@@ -126,18 +127,5 @@
     "@angular/build": {
       "picomatch": "^4.0.4"
     }
-  },
-  "husky": {
-    "hooks": {
-      "pre-commit": "lint-staged --concurrent false"
-    }
-  },
-  "prettier": {
-    "singleQuote": true,
-    "semi": false,
-    "arrowParens": "avoid",
-    "trailingComma": "all",
-    "htmlWhitespaceSensitivity": "ignore",
-    "tabWidth": 2
   }
 }

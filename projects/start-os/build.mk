@@ -216,9 +216,9 @@ start-os-clean:
 # The ui/setup-wizard web apps are formatted by `web-format` (whole Angular workspace).
 .PHONY: start-os-format start-os-format-check
 start-os-format:
-	cargo +nightly fmt -p start-os -p startos-backup-fs
+	$(FMT) cargo fmt -p start-os -p startos-backup-fs
 	npm --prefix projects/start-os/container-runtime run format
 
 start-os-format-check:
-	cargo +nightly fmt --check -p start-os -p startos-backup-fs
+	$(FMT) cargo fmt --check -p start-os -p startos-backup-fs
 	npm --prefix projects/start-os/container-runtime run format:check

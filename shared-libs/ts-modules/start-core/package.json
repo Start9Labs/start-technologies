@@ -34,13 +34,6 @@
     "zod": "4.4.3",
     "zod-deep-partial": "^1.4.4"
   },
-  "prettier": {
-    "trailingComma": "all",
-    "tabWidth": 2,
-    "semi": false,
-    "singleQuote": true,
-    "arrowParens": "avoid"
-  },
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "@types/lodash.merge": "^4.6.2",
