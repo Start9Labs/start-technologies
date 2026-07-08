@@ -797,4 +797,5 @@ export default {
   900: 'Sprawdź dostępne miejsce',
   901: 'Upewnij się, że wybrane usługi zmieszczą się w wolnym miejscu pozostałym na tym celu.',
   902: 'Wolne miejsce:',
+  903: 'Wolne',
 } satisfies i18n

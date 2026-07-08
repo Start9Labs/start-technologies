@@ -797,4 +797,5 @@ export default {
   900: 'Prüfen Sie Ihren verfügbaren Speicherplatz',
   901: 'Stellen Sie sicher, dass die ausgewählten Dienste in den auf diesem Ziel verbleibenden freien Speicherplatz passen.',
   902: 'Freier Speicherplatz:',
+  903: 'Frei',
 } satisfies i18n

@@ -82,12 +82,12 @@ export class BackupService {
   clearLegacy(id: string): void {
     this.drives.update(drives =>
       drives.map(t =>
-        t.id === id ? { ...t, entry: { ...t.entry, legacyBackup: null } } : t,
+        t.id === id ? { ...t, entry: { ...t.entry, legacyBackup: false } } : t,
       ),
     )
     this.cifs.update(cifs =>
       cifs.map(t =>
-        t.id === id ? { ...t, entry: { ...t.entry, legacyBackup: null } } : t,
+        t.id === id ? { ...t, entry: { ...t.entry, legacyBackup: false } } : t,
       ),
     )
   }

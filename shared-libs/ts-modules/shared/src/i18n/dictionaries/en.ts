@@ -772,6 +772,7 @@ export const ENGLISH: Record<string, number> = {
   'Check your available space': 900,
   'Make sure the services you select will fit within the free space remaining on this target.': 901,
   'Free space:': 902,
+  'Free': 903,
   'Option 1': 868,
   'Option 2': 870,
   'OK': 872,

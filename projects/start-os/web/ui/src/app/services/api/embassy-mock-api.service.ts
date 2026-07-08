@@ -881,8 +881,9 @@ export class MockApiService extends ApiService {
         path: path.replace(/\\/g, '/'),
         username,
         mountable: true,
+        available: 50000000000,
         startOs: {},
-        legacyBackup: null,
+        legacyBackup: false,
       },
     }
   }
@@ -910,7 +911,7 @@ export class MockApiService extends ApiService {
   async deleteLegacyBackup(params: T.DeleteLegacyParams): Promise<null> {
     await pauseFor(2000)
     const target = Mock.BackupTargets[params.targetId]
-    if (target) target.legacyBackup = null
+    if (target) target.legacyBackup = false
     return null
   }
 

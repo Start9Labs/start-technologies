@@ -9,7 +9,7 @@ import {
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 
 export interface LegacyBackupData {
-  available: number
+  available: number | null
 }
 
 @Component({
@@ -47,10 +47,12 @@ export interface LegacyBackupData {
               | i18n
           }}
         </span>
-        <span tuiSubtitle>
-          <strong>{{ 'Free space:' | i18n }}</strong>
-          {{ data.available | convertBytes }}
-        </span>
+        @if (data.available !== null) {
+          <span tuiSubtitle>
+            <strong>{{ 'Free space:' | i18n }}</strong>
+            {{ data.available | convertBytes }}
+          </span>
+        }
       </span>
     </div>
 

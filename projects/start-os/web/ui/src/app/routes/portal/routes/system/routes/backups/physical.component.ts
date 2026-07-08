@@ -1,6 +1,6 @@
 import { Component, inject, output } from '@angular/core'
 import { ActivatedRoute } from '@angular/router'
-import { DialogService, i18nPipe } from '@start9labs/shared'
+import { ConvertBytesPipe, DialogService, i18nPipe } from '@start9labs/shared'
 import { TuiButton } from '@taiga-ui/core'
 import { PlaceholderComponent } from 'src/app/routes/portal/components/placeholder.component'
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
@@ -16,7 +16,9 @@ import { BackupStatusComponent } from './status.component'
       {{ 'Physical Drives' | i18n }}
     </header>
 
-    <table [appTable]="['Status', 'Logicalname', 'Name', 'Capacity', null]">
+    <table
+      [appTable]="['Status', 'Logicalname', 'Name', 'Capacity', 'Free', null]"
+    >
       @for (target of service.drives(); track $index) {
         <tr
           tabindex="0"
@@ -29,6 +31,13 @@ import { BackupStatusComponent } from './status.component'
           <td class="name">{{ target.entry.logicalname }}</td>
           <td>{{ driveName(target.entry) }}</td>
           <td>{{ formatCapacity(target.entry.capacity) }}</td>
+          <td>
+            @if (target.entry.available !== null) {
+              {{ target.entry.available | convertBytes }}
+            } @else {
+              &mdash;
+            }
+          </td>
           <td class="actions">
             @if (
               type === 'create' &&
@@ -41,7 +50,7 @@ import { BackupStatusComponent } from './status.component'
         </tr>
       } @empty {
         <tr>
-          <td colspan="5">
+          <td colspan="6">
             <app-placeholder icon="@tui.save-off">
               {{ 'No drives detected' | i18n }}
               <button
@@ -116,6 +125,7 @@ import { BackupStatusComponent } from './status.component'
     BackupStatusComponent,
     BackupLegacyWarningComponent,
     TableComponent,
+    ConvertBytesPipe,
     i18nPipe,
   ],
 })

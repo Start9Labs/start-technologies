@@ -25,6 +25,8 @@ Back up your server's data to a physical drive or a network folder.
 
 1. Backups are differential — each new backup to the same target overwrites the previous one. To maintain multiple backup points, use multiple backup targets.
 
+1. The backup targets list shows the free space available on each drive and network folder, so you can confirm your backup will fit before you start.
+
 1. Backups taken from a specific system architecture (x86, ARM, RISC-V) are backed up for just that architecture. If restored to another architecture, they will likely need to be reinstalled to run efficiently.
 
 1. The backup format changed. New backups are written to a `StartOSBackupsV2` folder on the target, replacing the older `StartOSBackups` (V1) format. StartOS helps you clean up the obsolete V1 data:

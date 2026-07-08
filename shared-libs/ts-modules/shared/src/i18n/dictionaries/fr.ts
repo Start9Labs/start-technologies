@@ -797,4 +797,5 @@ export default {
   900: 'Vérifiez votre espace disponible',
   901: 'Assurez-vous que les services que vous sélectionnez tiendront dans l’espace libre restant sur cette cible.',
   902: 'Espace libre :',
+  903: 'Libre',
 } satisfies i18n
