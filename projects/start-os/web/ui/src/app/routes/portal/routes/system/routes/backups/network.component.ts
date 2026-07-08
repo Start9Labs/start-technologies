@@ -75,10 +75,12 @@ const ERROR =
               @if (
                 type === 'create' &&
                 target.entry.mountable &&
-                target.hasAnyBackup &&
                 target.entry.legacyBackup
               ) {
-                <backup-legacy-warning [id]="target.id" />
+                <backup-legacy-warning
+                  [id]="target.id"
+                  [hasCurrentBackup]="target.hasCurrentBackup"
+                />
               }
               <button
                 tuiIconButton
@@ -293,7 +295,8 @@ export class BackupNetworkComponent {
       }
 
       const hasAnyBackup = this.service.hasAnyBackup(entry)
-      const added = { id, entry, hasAnyBackup }
+      const hasCurrentBackup = this.service.hasCurrentBackup(entry)
+      const added = { id, entry, hasAnyBackup, hasCurrentBackup }
       this.service.cifs.update(cifs => [added, ...cifs])
     }, 'Testing connectivity to shared folder')
   }

@@ -790,6 +790,10 @@ export const ENGLISH: Record<string, number> = {
   'Old backup deleted': 888,
   'Delete old backup?': 889,
   'Permanently delete the old (V1) backup from this target? This cannot be undone. Your current (V2) backup will not be affected.': 890,
+  'Permanently delete the old (V1) backup from this target? This cannot be undone.': 904,
+  'This target has no other backup': 905,
+  'There is no current (V2) backup for this server on this target, so deleting the old (V1) backup will leave this server with no backup here. Continue?': 906,
+  'Delete anyway': 907,
   'Terminate': 891, // verb, terminate a session
   'selected': 892, // as in, "3 selected"
   'Your personal StartOS web user interface.': 893,

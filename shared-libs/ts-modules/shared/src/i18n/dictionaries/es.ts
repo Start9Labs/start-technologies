@@ -798,4 +798,8 @@ export default {
   901: 'Asegúrate de que los servicios que selecciones quepan en el espacio libre restante en este destino.',
   902: 'Espacio libre:',
   903: 'Libre',
+  904: '¿Eliminar permanentemente la antigua copia de seguridad (V1) de este destino? Esto no se puede deshacer.',
+  905: 'Este destino no tiene ninguna otra copia de seguridad',
+  906: 'No hay una copia de seguridad actual (V2) para este servidor en este destino, así que eliminar la antigua (V1) dejará a este servidor sin ninguna copia de seguridad aquí. ¿Continuar?',
+  907: 'Eliminar de todos modos',
 } satisfies i18n

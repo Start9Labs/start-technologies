@@ -39,12 +39,11 @@ import { BackupStatusComponent } from './status.component'
             }
           </td>
           <td class="actions">
-            @if (
-              type === 'create' &&
-              target.hasAnyBackup &&
-              target.entry.legacyBackup
-            ) {
-              <backup-legacy-warning [id]="target.id" />
+            @if (type === 'create' && target.entry.legacyBackup) {
+              <backup-legacy-warning
+                [id]="target.id"
+                [hasCurrentBackup]="target.hasCurrentBackup"
+              />
             }
           </td>
         </tr>

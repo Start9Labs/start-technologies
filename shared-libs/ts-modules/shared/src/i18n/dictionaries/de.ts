@@ -798,4 +798,8 @@ export default {
   901: 'Stellen Sie sicher, dass die ausgewählten Dienste in den auf diesem Ziel verbleibenden freien Speicherplatz passen.',
   902: 'Freier Speicherplatz:',
   903: 'Frei',
+  904: 'Die alte (V1) Sicherung endgültig von diesem Ziel löschen? Dies kann nicht rückgängig gemacht werden.',
+  905: 'Dieses Ziel hat keine andere Sicherung',
+  906: 'Für diesen Server gibt es auf diesem Ziel keine aktuelle (V2) Sicherung. Wenn Sie die alte (V1) Sicherung löschen, hat dieser Server hier keine Sicherung mehr. Fortfahren?',
+  907: 'Trotzdem löschen',
 } satisfies i18n

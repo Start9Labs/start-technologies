@@ -798,4 +798,8 @@ export default {
   901: 'Upewnij się, że wybrane usługi zmieszczą się w wolnym miejscu pozostałym na tym celu.',
   902: 'Wolne miejsce:',
   903: 'Wolne',
+  904: 'Trwale usunąć starą kopię zapasową (V1) z tego celu? Tej operacji nie można cofnąć.',
+  905: 'Ten cel nie ma żadnej innej kopii zapasowej',
+  906: 'Dla tego serwera nie ma na tym celu aktualnej kopii zapasowej (V2), więc usunięcie starej (V1) pozostawi ten serwer bez żadnej kopii zapasowej w tym miejscu. Kontynuować?',
+  907: 'Usuń mimo to',
 } satisfies i18n

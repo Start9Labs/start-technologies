@@ -798,4 +798,8 @@ export default {
   901: 'Assurez-vous que les services que vous sélectionnez tiendront dans l’espace libre restant sur cette cible.',
   902: 'Espace libre :',
   903: 'Libre',
+  904: "Supprimer définitivement l'ancienne sauvegarde (V1) de cette cible ? Cette action est irréversible.",
+  905: "Cette cible n'a aucune autre sauvegarde",
+  906: "Il n'existe aucune sauvegarde actuelle (V2) pour ce serveur sur cette cible ; supprimer l'ancienne (V1) laissera donc ce serveur sans aucune sauvegarde ici. Continuer ?",
+  907: 'Supprimer quand même',
 } satisfies i18n
