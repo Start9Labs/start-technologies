@@ -28,12 +28,12 @@ Back up your server's data to a physical drive or a network folder.
 1. Backups taken from a specific system architecture (x86, ARM, RISC-V) are backed up for just that architecture. If restored to another architecture, they will likely need to be reinstalled to run efficiently.
 
 1. The backup format changed. New backups are written to a `StartOSBackupsV2` folder on the target, replacing the older `StartOSBackups` (V1) format. StartOS helps you clean up the obsolete V1 data:
-   - When you select a target that still holds a V1 backup, StartOS warns you before backing up (and refuses if the old folder is too large to leave room for the new one — see below).
+   - When you select a target that still holds a V1 backup, StartOS warns you before backing up and shows how much free space remains on the target (see below).
    - After a backup completes, if the target still contains a V1 backup, StartOS raises a notification reminding you it is no longer needed.
    - On the `Create Backup` page, any target holding **both** a V1 and a V2 backup shows a warning with a **Delete old backup** button. After you confirm, StartOS removes the old `StartOSBackups` folder to reclaim space; your current `StartOSBackupsV2` backup is untouched.
 
    > [!WARNING]
-   > If the old `StartOSBackups` folder is larger than the free space remaining on the drive, a new backup will not fit and StartOS will not start it. Use the **Delete old backup** button (or remove the `StartOSBackups` folder manually), or choose another drive.
+   > Before backing up, check the free space remaining on the target and make sure your selected services will fit. If space is tight, use the **Delete old backup** button (or remove the `StartOSBackups` folder manually) to reclaim the space the old backup occupies, or choose another drive.
 
 ## Best Practices
 

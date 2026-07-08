@@ -22,7 +22,6 @@ use crate::disk::mount::guard::GenericMountGuard;
 use crate::hostname::ServerHostname;
 use crate::prelude::*;
 use crate::util::Invoke;
-use crate::util::io::dir_size;
 use crate::util::serde::IoFormat;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
@@ -61,14 +60,12 @@ pub struct PartitionInfo {
     pub filesystem: Option<String>,
 }
 
-/// A pre-V2 `StartOSBackups` folder found on a backup target. Surfaced so the
-/// UI can warn (or refuse, when it wouldn't fit) before a new V2 backup runs.
+/// A pre-V2 `StartOSBackups` folder on a backup target, with the target's free
+/// space for the create-backup warning.
 #[derive(Clone, Debug, Deserialize, Serialize, ts_rs::TS)]
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct LegacyBackupInfo {
-    #[ts(type = "number")]
-    pub size: u64,
     #[ts(type = "number")]
     pub available: u64,
 }
@@ -77,24 +74,14 @@ pub struct LegacyBackupInfo {
 pub async fn legacy_backup_info(
     mountpoint: impl AsRef<Path>,
 ) -> Result<Option<LegacyBackupInfo>, Error> {
-    let legacy_dir = mountpoint.as_ref().join(super::LEGACY_BACKUP_DIR_NAME);
-    if !tokio::fs::metadata(&legacy_dir)
-        .await
-        .map(|m| m.is_dir())
-        .unwrap_or(false)
-    {
+    if !has_legacy_backup(&mountpoint).await {
         return Ok(None);
     }
-    let size = dir_size(&legacy_dir, None)
-        .await
-        .with_kind(crate::ErrorKind::Filesystem)?;
     let available = get_available(mountpoint.as_ref()).await?;
-    Ok(Some(LegacyBackupInfo { size, available }))
+    Ok(Some(LegacyBackupInfo { available }))
 }
 
-/// Whether a pre-V2 `StartOSBackups` folder is present on a mounted target. A
-/// lightweight existence check — unlike [`legacy_backup_info`], it computes
-/// neither the folder size nor the free space.
+/// Whether a pre-V2 `StartOSBackups` folder is present on a mounted target.
 pub async fn has_legacy_backup(mountpoint: impl AsRef<Path>) -> bool {
     tokio::fs::metadata(mountpoint.as_ref().join(super::LEGACY_BACKUP_DIR_NAME))
         .await

@@ -189,7 +189,7 @@ export default class SystemBackupComponent implements OnInit {
       this.dialog.openComponent<boolean>(LEGACY_BACKUP, {
         label: 'Important!',
         size: 'm',
-        data: { fits: legacy.size <= legacy.available },
+        data: { available: legacy.available },
       }),
       { defaultValue: false },
     )
