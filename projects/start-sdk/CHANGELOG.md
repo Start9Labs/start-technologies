@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.3 — StartOS 0.4.0-beta.10 (2026-07-08)
+
+### Fixed
+
+- **A dependency-gated daemon no longer wedges permanently after its dependency's readiness flaps.** Since 2.0.0's hold/release refactor, `Daemon.term()` unconditionally destroyed the daemon's `SubContainer`, and `HealthDaemon` calls `term()` every time a dependency goes not-ready. When the dependency's health then recovered, the daemon's `start()` called `hold()` on the already-destroyed subcontainer and threw `cannot hold subcontainer …: already destroyed`. Because that `start()` was un-awaited, it surfaced as an unhandled rejection and the daemon never recovered — the health check reported "not ready" / "daemon crashed" indefinitely, curable only by a full package restart. Any service with a dependency-gated daemon was exposed (e.g. `c-lightning`'s and BTCPay's web UIs). The 2.0.0 refactor had removed the `destroySubcontainer` flag that previously kept the subcontainer alive across a stop, collapsing "pause" and "teardown" into one destroying `term()`. This restores the distinction under the hold/release model: `Daemon` gains a non-destroying **`stop()`** (aborts the loop, terminates the process, releases the hold — but leaves the `SubContainer` intact so a later `start()` re-holds it), and `HealthDaemon.changeRunning(false)` now calls `stop()` for a dependency-driven pause. `Daemon.term()` (used by `HealthDaemon.term()` and `Daemons.term()` for genuine teardown) still releases the hold and destroys the subcontainer. `HealthDaemon.changeRunning(true)` additionally awaits and catches `start()`, so a start failure becomes a health failure rather than a silent unhandled-rejection wedge
+- **Dependency-driven pause/resume transitions are now serialized.** `HealthDaemon.updateStatus()` runs fire-and-forget from dependency watchers, so a fast readiness flap (not-ready → ready before the pause's `stop()` finished draining the process) could overlap the pause with the following resume. Because `Daemon.start()` is a no-op while the previous run loop is still winding down, the resume's `start()` could silently do nothing and leave the daemon stopped while the health session believed it was running — the same class of wedge, reachable via a fast flap. `HealthDaemon` now applies pause/resume transitions on an in-order promise chain, so a resume always waits for the in-flight pause to complete before re-holding and restarting
+
 ## 2.0.2 — StartOS 0.4.0-beta.10 (2026-07-08)
 
 ### Changed

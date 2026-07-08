@@ -3,6 +3,7 @@ import { defaultTrigger } from '../trigger/defaultTrigger'
 import { Ready } from './Daemons'
 import { Daemon } from './Daemon'
 import { SetHealth, Effects, SDKManifest } from '@start9labs/start-core/types'
+import { asError } from '@start9labs/start-core/util/asError'
 
 export const EXIT_SUCCESS = 'EXIT_SUCCESS' as const
 
@@ -17,6 +18,7 @@ export class HealthDaemon<Manifest extends SDKManifest> {
   private _health: HealthCheckResult = { result: 'waiting', message: null }
   private healthWatchers: Array<() => unknown> = []
   private running = false
+  private transition: Promise<void> = Promise.resolve()
   private started?: number
   private resolveReady: (() => void) | undefined
   private resolvedReady: boolean = false
@@ -62,7 +64,23 @@ export class HealthDaemon<Manifest extends SDKManifest> {
     return Object.freeze(this._health)
   }
 
-  private async changeRunning(newStatus: boolean) {
+  // updateStatus() runs fire-and-forget from dependency watchers, so several
+  // invocations can overlap. A transition both flips `running` and awaits
+  // stop()/start(); if a resume's start() ran while the preceding pause's stop()
+  // were still draining the process, start() would no-op against the not-yet
+  // cleared run loop (see Daemon.start's `if (this.loop) return`) and leave the
+  // daemon stopped while we believe it is running — until the next flap. Apply
+  // transitions on an in-order promise chain so pause always finishes before the
+  // following resume re-holds and restarts.
+  private changeRunning(newStatus: boolean): Promise<void> {
+    const next = this.transition
+      .catch(() => {})
+      .then(() => this.applyRunning(newStatus))
+    this.transition = next
+    return next
+  }
+
+  private async applyRunning(newStatus: boolean) {
     if (this.running === newStatus) return
 
     this.running = newStatus
@@ -70,12 +88,26 @@ export class HealthDaemon<Manifest extends SDKManifest> {
     if (newStatus) {
       console.debug(`Launching ${this.id}...`)
       this.startSession()
-      this.daemon?.start()
       this.started = performance.now()
+      // Await + catch start(): its hold() on the (possibly re-held) SubContainer
+      // can throw `already destroyed`. Surfacing that as a health failure keeps
+      // an un-awaited rejection from becoming an unhandled rejection that wedges
+      // the daemon permanently.
+      try {
+        await this.daemon?.start()
+      } catch (e) {
+        await this.setHealth({
+          result: 'failure',
+          message: `${this.id} daemon failed to start: ${asError(e).message}`,
+        })
+      }
     } else {
       console.debug(`Stopping ${this.id}...`)
       await this.stopSession()
-      await this.daemon?.term()
+      // A dependency-driven stop is a pause, not a teardown: stop() releases the
+      // SubContainer hold but leaves the container intact so a later start()
+      // re-holds it. Only term() (genuine teardown) destroys the SubContainer.
+      await this.daemon?.stop()
     }
   }
 

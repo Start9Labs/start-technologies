@@ -173,7 +173,8 @@ export class CommandController<
    * Terminate the running command by sending a signal.
    *
    * Sends the specified signal (default: SIGTERM), then escalates to SIGKILL
-   * after the timeout expires. Destroys the subcontainer after the process exits.
+   * after the timeout expires, and awaits the process's exit. Does not touch
+   * the SubContainer — its lifecycle is owned by {@link Daemon} (`stop`/`term`).
    *
    * @param options.signal - The signal to send (default: SIGTERM)
    * @param options.timeout - Milliseconds before escalating to SIGKILL
