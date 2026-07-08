@@ -17,9 +17,9 @@ export default [
         title: 'Devices',
       },
       {
-        path: 'port-forwards',
-        loadComponent: () => import('./routes/port-forwards'),
-        title: 'Port forwards',
+        path: 'published-ports',
+        loadComponent: () => import('./routes/published-ports'),
+        title: 'Published Ports',
       },
       {
         path: 'dns',

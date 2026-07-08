@@ -9,6 +9,9 @@ import { T } from '@start9labs/start-core'
 import { TuiButton, TuiDialogContext, TuiError, TuiInput } from '@taiga-ui/core'
 import { TuiForm } from '@taiga-ui/layout'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
+import { provideHelp } from 'src/app/help/help'
+import { ModalHelp } from 'src/app/help/modal-help'
+import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { ApiService } from 'src/app/services/api/api.service'
 
 export interface EditLabelData {
@@ -23,20 +26,29 @@ export interface EditLabelData {
   template: `
     <form tuiForm="m" [formGroup]="form">
       <tui-textfield>
-        <label tuiLabel>Label</label>
+        <label tuiLabel>{{ 'Label' | i18n }}</label>
         <input tuiInput formControlName="label" />
       </tui-textfield>
       <tui-error formControlName="label" />
       <footer>
         <button tuiButton [disabled]="form.invalid" (click)="onSave()">
-          Save
+          {{ 'Save' | i18n }}
         </button>
       </footer>
     </form>
   `,
-  imports: [ReactiveFormsModule, TuiButton, TuiError, TuiInput, TuiForm],
+  imports: [
+    ReactiveFormsModule,
+    TuiButton,
+    TuiError,
+    TuiInput,
+    TuiForm,
+    i18nPipe,
+  ],
+  hostDirectives: [ModalHelp],
+  providers: [provideHelp('/published-ports/edit-label')],
 })
-export class PortForwardsEditLabel {
+export class PublishedPortsEditLabel {
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)
 
@@ -63,6 +75,6 @@ export class PortForwardsEditLabel {
   }
 }
 
-export const PORT_FORWARDS_EDIT_LABEL = new PolymorpheusComponent(
-  PortForwardsEditLabel,
+export const PUBLISHED_PORTS_EDIT_LABEL = new PolymorpheusComponent(
+  PublishedPortsEditLabel,
 )

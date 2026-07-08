@@ -2,6 +2,7 @@ import { Signal } from '@angular/core'
 import { AbstractControl } from '@angular/forms'
 import { T, utils } from '@start9labs/start-core'
 import { IpNet } from '@start9labs/start-core/util'
+import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 
 export interface MappedDevice {
   readonly subnet: {
@@ -60,20 +61,24 @@ export interface DeviceData {
   readonly defaultWan: string | null
 }
 
-export function subnetValidator({ value }: AbstractControl<MappedSubnet>) {
-  return !value?.clients || getIp(value)
-    ? null
-    : { noHosts: 'No hosts available' }
+export function subnetValidator(i18n: i18nPipe) {
+  return ({ value }: AbstractControl<MappedSubnet>) =>
+    !value?.clients || getIp(value)
+      ? null
+      : { noHosts: i18n.transform('No hosts available') }
 }
 
-export const ipInSubnetValidator = (subnet: string | null = null) => {
+export const ipInSubnetValidator = (
+  i18n: i18nPipe,
+  subnet: string | null = null,
+) => {
   const ipnet = subnet && utils.IpNet.parse(subnet)
   return ({ value }: AbstractControl<string>) => {
     let ip: utils.IpAddress
     try {
       ip = utils.IpAddress.parse(value)
     } catch (e) {
-      return { invalidIp: 'Not a valid IP Address' }
+      return { invalidIp: i18n.transform('Not a valid IP Address') }
     }
     if (!ipnet) return null
     const zero = ipnet.zero().cmp(ip)
@@ -81,10 +86,16 @@ export const ipInSubnetValidator = (subnet: string | null = null) => {
     return zero + broadcast === 0
       ? null
       : zero === 0
-        ? { isZeroAddr: `Address cannot be the zero address` }
+        ? { isZeroAddr: i18n.transform('Address cannot be the zero address') }
         : broadcast === 0
-          ? { isBroadcastAddress: `Address cannot be the broadcast address` }
-          : { notInSubnet: `Address is not part of ${subnet}` }
+          ? {
+              isBroadcastAddress: i18n.transform(
+                'Address cannot be the broadcast address',
+              ),
+            }
+          : {
+              notInSubnet: `${i18n.transform('Address is not part of')} ${subnet}`,
+            }
   }
 }
 

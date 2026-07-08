@@ -3,7 +3,7 @@
 StartTunnel can give the devices on a subnet a real, globally-routable IPv6
 address drawn from a prefix your VPS delegates. IPv6 is configured **per subnet**
 — each subnet can point at its own prefix (or none). This is optional and off by
-default; IPv4 port forwarding works without it.
+default; IPv4 published ports work without it.
 
 ## What your VPS provides
 
@@ -51,8 +51,8 @@ to pick it up.
 > [!NOTE]
 > Devices can make **outbound** IPv6 connections and receive their replies. To
 > accept **unsolicited inbound** connections to a device's IPv6 address (hosting
-> a service over IPv6), open a forward for it — see
-> [Port Forwarding](./port-forwarding.md). Over IPv6 a forward is a firewall
+> a service over IPv6), publish a port for it — see
+> [Published Ports](./published-ports.md). Over IPv6 a published port is a firewall
 > _pinhole_ on the device's global address (no NAT); a connected StartOS server
 > also opens these automatically via PCP.
 

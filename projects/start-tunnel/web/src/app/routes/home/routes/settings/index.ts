@@ -2,20 +2,36 @@ import { Component, computed, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { FormsModule } from '@angular/forms'
 import { Router } from '@angular/router'
-import { ErrorService, TaskService } from '@start9labs/shared'
+import { WA_IS_MOBILE } from '@ng-web-apis/platform'
+import {
+  ErrorService,
+  i18nService,
+  Language,
+  LANGUAGES,
+  TaskService,
+} from '@start9labs/shared'
 import { T, utils } from '@start9labs/start-core'
 import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
 import {
   TuiButton,
   TuiCell,
   TuiIcon,
+  TuiInput,
   TuiLoader,
   TuiTitle,
 } from '@taiga-ui/core'
-import { TuiBadge, TuiButtonLoading, TuiSwitch } from '@taiga-ui/kit'
+import {
+  TuiBadge,
+  TuiButtonLoading,
+  TuiChevron,
+  TuiDataListWrapper,
+  TuiSelect,
+  TuiSwitch,
+} from '@taiga-ui/kit'
 import { TuiCardLarge, TuiHeader } from '@taiga-ui/layout'
 import { PatchDB } from 'patch-db-client'
 import { map } from 'rxjs'
+import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { ApiService } from 'src/app/services/api/api.service'
 import { AuthService } from 'src/app/services/auth.service'
 import { TunnelData } from 'src/app/services/patch-db/data-model'
@@ -28,18 +44,20 @@ import { CHANGE_PASSWORD } from './change-password'
       <div tuiCell>
         <span tuiTitle>
           <strong>
-            Version
+            {{ 'Version' | i18n }}
             @if (update.hasUpdate()) {
               <span tuiBadge appearance="positive" size="s">
-                Update Available
+                {{ 'Update Available' | i18n }}
               </span>
             }
           </strong>
-          <span tuiSubtitle>Current: {{ update.installed() ?? '—' }}</span>
+          <span tuiSubtitle>
+            {{ 'Current' | i18n }}: {{ update.installed() ?? '—' }}
+          </span>
         </span>
         @if (update.hasUpdate()) {
           <button tuiButton size="s" [loading]="applying()" (click)="onApply()">
-            Update to {{ update.candidate() }}
+            {{ 'Update to' | i18n }} {{ update.candidate() }}
           </button>
         } @else {
           <button
@@ -49,7 +67,7 @@ import { CHANGE_PASSWORD } from './change-password'
             [loading]="checking()"
             (click)="onCheckUpdate()"
           >
-            Check for updates
+            {{ 'Check for updates' | i18n }}
           </button>
         }
       </div>
@@ -57,13 +75,13 @@ import { CHANGE_PASSWORD } from './change-password'
     <div tuiCardLarge="compact" appearance="floating">
       <header tuiHeader="body-l">
         <tui-icon icon="@tui.milestone" />
-        <h3 tuiTitle>HTTP Redirect (80 → 443)</h3>
+        <h3 tuiTitle>{{ 'HTTP Redirect (80 → 443)' | i18n }}</h3>
       </header>
       <table class="g-table no-actions">
         <thead>
           <tr>
-            <th>WAN IP</th>
-            <th>Enabled</th>
+            <th>{{ 'WAN IP' | i18n }}</th>
+            <th>{{ 'Enabled' | i18n }}</th>
           </tr>
         </thead>
         <tbody>
@@ -91,11 +109,38 @@ import { CHANGE_PASSWORD } from './change-password'
             </tr>
           } @empty {
             <tr>
-              <td colspan="2">No public IPv4 addresses</td>
+              <td colspan="2">{{ 'No public IPv4 addresses' | i18n }}</td>
             </tr>
           }
         </tbody>
       </table>
+    </div>
+    <div tuiCardLarge="compact" appearance="floating">
+      <tui-textfield
+        tuiChevron
+        [tuiTextfieldCleaner]="false"
+        [identityMatcher]="matchLanguage"
+        [stringify]="stringifyLanguage"
+      >
+        <label tuiLabel>{{ 'Language' | i18n }}</label>
+        @if (mobile) {
+          <select
+            tuiSelect
+            [ngModel]="language()"
+            [items]="languages"
+            (ngModelChange)="setLanguage($event)"
+          ></select>
+        } @else {
+          <input
+            tuiSelect
+            [ngModel]="language()"
+            (ngModelChange)="setLanguage($event)"
+          />
+        }
+        @if (!mobile) {
+          <tui-data-list-wrapper *tuiDropdown [items]="languages" />
+        }
+      </tui-textfield>
     </div>
     <div
       tuiCardLarge="compact"
@@ -103,7 +148,7 @@ import { CHANGE_PASSWORD } from './change-password'
       [style.align-items]="'start'"
     >
       <button tuiButton size="s" (click)="onChangePassword()">
-        Change password
+        {{ 'Change password' | i18n }}
       </button>
       <button
         tuiButton
@@ -112,10 +157,10 @@ import { CHANGE_PASSWORD } from './change-password'
         [loading]="restarting()"
         (click)="onRestart()"
       >
-        Reboot VPS
+        {{ 'Reboot VPS' | i18n }}
       </button>
       <button tuiButton size="s" iconStart="@tui.log-out" (click)="onLogout()">
-        Logout
+        {{ 'Logout' | i18n }}
       </button>
     </div>
   `,
@@ -143,11 +188,16 @@ import { CHANGE_PASSWORD } from './change-password'
     TuiTitle,
     TuiHeader,
     TuiIcon,
+    TuiInput,
     TuiButton,
     TuiButtonLoading,
     TuiBadge,
+    TuiChevron,
+    TuiDataListWrapper,
     TuiLoader,
+    TuiSelect,
     TuiSwitch,
+    i18nPipe,
   ],
 })
 export default class Settings {
@@ -158,12 +208,28 @@ export default class Settings {
   private readonly router = inject(Router)
   private readonly tasks = inject(TaskService)
   private readonly patch = inject<PatchDB<TunnelData>>(PatchDB)
+  private readonly i18n = inject(i18nPipe)
+  private readonly i18nSvc = inject(i18nService)
 
   protected readonly update = inject(UpdateService)
   protected readonly checking = signal(false)
   protected readonly applying = signal(false)
   protected readonly restarting = signal(false)
   protected readonly toggling = signal<string | null>(null)
+
+  protected readonly mobile = inject(WA_IS_MOBILE)
+  protected readonly languages = LANGUAGES
+  protected readonly language = signal(
+    LANGUAGES.find(l => l.name === this.i18nSvc.lang) ?? LANGUAGES[0]!,
+  )
+  protected readonly stringifyLanguage = (l: Language) => l.nativeName
+  protected readonly matchLanguage = (a: Language, b: Language) =>
+    a.name === b.name
+
+  protected setLanguage(language: Language): void {
+    this.language.set(language)
+    this.i18nSvc.setLang(language.name)
+  }
 
   private readonly ips = toSignal(
     this.patch.watch$('gateways').pipe(
@@ -212,7 +278,9 @@ export default class Settings {
   }
 
   protected onChangePassword(): void {
-    this.dialogs.open(CHANGE_PASSWORD, { label: 'Change Password' }).subscribe()
+    this.dialogs
+      .open(CHANGE_PASSWORD, { label: this.i18n.transform('Change Password') })
+      .subscribe()
   }
 
   protected async onCheckUpdate() {
@@ -246,9 +314,11 @@ export default class Settings {
       await this.api.restart()
       this.dialogs
         .open(
-          'The VPS is rebooting. Please wait 1\u20132 minutes, then refresh the page.',
+          this.i18n.transform(
+            'The VPS is rebooting. Please wait 1\u20132 minutes, then refresh the page.',
+          ),
           {
-            label: 'Rebooting',
+            label: this.i18n.transform('Rebooting'),
           },
         )
         .subscribe()

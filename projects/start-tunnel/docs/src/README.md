@@ -12,7 +12,7 @@ StartTunnel is a virtual private router (VPR) — a minimal, self-hosted router 
 
 - [Subnets](subnets.md)
 - [Devices](devices.md)
-- [Port Forwarding](port-forwarding.md)
+- [Published Ports](published-ports.md)
 - [Updating](updating.md)
 - [Uninstalling](uninstalling.md)
 

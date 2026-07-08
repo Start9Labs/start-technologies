@@ -4,20 +4,23 @@ import { TuiCopy, TuiSegmented, TuiTextarea } from '@taiga-ui/kit'
 import { TuiHeader } from '@taiga-ui/layout'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { QrCodeComponent } from 'ng-qrcode'
+import { provideHelp } from 'src/app/help/help'
+import { ModalHelp } from 'src/app/help/modal-help'
+import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 
 @Component({
   template: `
     <header tuiHeader>
-      <h2 tuiTitle>Device Config</h2>
+      <h2 tuiTitle>{{ 'Device Config' | i18n }}</h2>
       <aside tuiAccessories>
         <tui-segmented #segmented>
           <button>
             <tui-icon icon="@tui.file" />
-            File
+            {{ 'File' | i18n }}
           </button>
           <button>
             <tui-icon icon="@tui.qr-code" />
-            QR
+            {{ 'QR' | i18n }}
           </button>
         </tui-segmented>
       </aside>
@@ -41,7 +44,7 @@ import { QrCodeComponent } from 'ng-qrcode'
           size="s"
           [href]="href"
         >
-          Download
+          {{ 'Download' | i18n }}
         </a>
       </tui-textfield>
     }
@@ -55,7 +58,10 @@ import { QrCodeComponent } from 'ng-qrcode'
     TuiSegmented,
     TuiTextarea,
     TuiCopy,
+    i18nPipe,
   ],
+  hostDirectives: [ModalHelp],
+  providers: [provideHelp('/devices/config')],
 })
 export class DevicesConfig {
   protected readonly config =

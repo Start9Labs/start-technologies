@@ -7,7 +7,9 @@ import {
 } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { TaskService } from '@start9labs/shared'
+import { T } from '@start9labs/start-core'
 import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
+import { TuiComparator, TuiTable } from '@taiga-ui/addon-table'
 import {
   TuiButton,
   TuiDataList,
@@ -19,8 +21,9 @@ import { TUI_CONFIRM, TuiSkeleton } from '@taiga-ui/kit'
 import { TuiCardLarge, TuiHeader } from '@taiga-ui/layout'
 import { PatchDB } from 'patch-db-client'
 import { filter, map } from 'rxjs'
+import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { PlaceholderComponent } from 'src/app/routes/home/components/placeholder'
-import { MappedDevice } from 'src/app/routes/home/routes/port-forwards/utils'
+import { MappedDevice } from 'src/app/routes/home/routes/published-ports/utils'
 import { ApiService } from 'src/app/services/api/api.service'
 import { TunnelData } from 'src/app/services/patch-db/data-model'
 
@@ -31,29 +34,31 @@ import { DNS_ADD } from './add'
     <div tuiCardLarge="compact" appearance="floating">
       <header tuiHeader="body-l">
         <tui-icon icon="@tui.pencil" />
-        <h3 tuiTitle>Manual</h3>
+        <h3 tuiTitle>{{ 'Manual' | i18n }}</h3>
         <aside tuiAccessories>
-          <button tuiButton iconStart="@tui.plus" (click)="onAdd()">Add</button>
+          <button tuiButton iconStart="@tui.plus" (click)="onAdd()">
+            {{ 'Add' | i18n }}
+          </button>
         </aside>
       </header>
-      <table class="g-table" [tuiSkeleton]="!records()">
+      <table tuiTable class="g-table" [tuiSkeleton]="!records()">
         <thead>
           <tr>
-            <th>Name</th>
-            <th>Type</th>
-            <th>Server</th>
-            <th>TTL</th>
-            <th></th>
+            <th tuiTh [sorter]="byName">{{ 'Hostname' | i18n }}</th>
+            <th tuiTh [sorter]="byType">{{ 'Type' | i18n }}</th>
+            <th tuiTh [sorter]="byServer">{{ 'Server' | i18n }}</th>
+            <th tuiTh [sorter]="byTtl">{{ 'TTL' | i18n }}</th>
+            <th tuiTh></th>
           </tr>
         </thead>
         <tbody>
-          @for (record of manual(); track $index) {
+          @for (record of manual() | tuiTableSort; track $index) {
             <tr>
-              <td>{{ record.name }}</td>
-              <td>{{ record.type }}</td>
-              <td>{{ serverDisplay(record) }}</td>
-              <td>{{ record.ttl }}</td>
-              <td [style.padding-inline-end.rem]="0.625">
+              <td tuiTd>{{ record.name }}</td>
+              <td tuiTd>{{ record.type }}</td>
+              <td tuiTd>{{ serverDisplay(record) }}</td>
+              <td tuiTd>{{ record.ttl }}</td>
+              <td tuiTd [style.padding-inline-end.rem]="0.625">
                 <button
                   tuiIconButton
                   size="xs"
@@ -62,7 +67,7 @@ import { DNS_ADD } from './add'
                   appearance="flat-grayscale"
                   iconStart="@tui.ellipsis-vertical"
                 >
-                  Actions
+                  {{ 'Actions' | i18n }}
                   <tui-data-list
                     *tuiDropdown="let close"
                     size="s"
@@ -73,7 +78,7 @@ import { DNS_ADD } from './add'
                       iconStart="@tui.trash"
                       (click)="onDelete(record)"
                     >
-                      Delete
+                      {{ 'Delete' | i18n }}
                     </button>
                   </tui-data-list>
                 </button>
@@ -83,7 +88,7 @@ import { DNS_ADD } from './add'
             <tr>
               <td colspan="5">
                 <app-placeholder icon="@tui.list">
-                  No manual DNS records. Add one to get started.
+                  {{ 'No manual DNS records. Add one to get started.' | i18n }}
                 </app-placeholder>
               </td>
             </tr>
@@ -95,31 +100,33 @@ import { DNS_ADD } from './add'
     <div tuiCardLarge="compact" appearance="floating">
       <header tuiHeader="body-l">
         <tui-icon icon="@tui.zap" />
-        <h3 tuiTitle>Automatic</h3>
+        <h3 tuiTitle>{{ 'Automatic' | i18n }}</h3>
       </header>
-      <table class="g-table no-actions" [tuiSkeleton]="!records()">
+      <table tuiTable class="g-table no-actions" [tuiSkeleton]="!records()">
         <thead>
           <tr>
-            <th>Name</th>
-            <th>Type</th>
-            <th>Server</th>
-            <th>TTL</th>
+            <th tuiTh [sorter]="byName">{{ 'Hostname' | i18n }}</th>
+            <th tuiTh [sorter]="byType">{{ 'Type' | i18n }}</th>
+            <th tuiTh [sorter]="byServer">{{ 'Server' | i18n }}</th>
+            <th tuiTh [sorter]="byTtl">{{ 'TTL' | i18n }}</th>
           </tr>
         </thead>
         <tbody>
-          @for (record of automatic(); track $index) {
+          @for (record of automatic() | tuiTableSort; track $index) {
             <tr>
-              <td>{{ record.name }}</td>
-              <td>{{ record.type }}</td>
-              <td>{{ serverDisplay(record) }}</td>
-              <td>{{ record.ttl }}</td>
+              <td tuiTd>{{ record.name }}</td>
+              <td tuiTd>{{ record.type }}</td>
+              <td tuiTd>{{ serverDisplay(record) }}</td>
+              <td tuiTd>{{ record.ttl }}</td>
             </tr>
           } @empty {
             <tr>
               <td colspan="4">
                 <app-placeholder icon="@tui.list">
-                  No automatic DNS records. Devices you trust can add their own
-                  via RFC 2136.
+                  {{
+                    'No automatic DNS records. Devices you trust can add their own via RFC 2136.'
+                      | i18n
+                  }}
                 </app-placeholder>
               </td>
             </tr>
@@ -141,11 +148,13 @@ import { DNS_ADD } from './add'
     TuiCardLarge,
     TuiDropdown,
     TuiDataList,
+    TuiTable,
     PlaceholderComponent,
     TuiSkeleton,
     TuiHeader,
     TuiIcon,
     TuiTitle,
+    i18nPipe,
   ],
 })
 export default class Dns {
@@ -153,6 +162,7 @@ export default class Dns {
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)
   private readonly patch = inject<PatchDB<TunnelData>>(PatchDB)
+  private readonly i18n = inject(i18nPipe)
 
   protected readonly records = toSignal(this.patch.watch$('dnsRecords'))
   protected readonly manual = computed(() =>
@@ -189,6 +199,19 @@ export default class Dns {
     { initialValue: [] },
   )
 
+  protected readonly byName: TuiComparator<T.Tunnel.DnsRecordEntry> = (a, b) =>
+    (a.name || '').localeCompare(b.name || '')
+  protected readonly byType: TuiComparator<T.Tunnel.DnsRecordEntry> = (a, b) =>
+    (a.type || '').localeCompare(b.type || '')
+  // Sort by the rendered display so the order matches the visible "name (ip)"
+  // text (falls back to raw rdata for non-A/AAAA records).
+  protected readonly byServer: TuiComparator<T.Tunnel.DnsRecordEntry> = (
+    a,
+    b,
+  ) => this.serverDisplay(a).localeCompare(this.serverDisplay(b))
+  protected readonly byTtl: TuiComparator<T.Tunnel.DnsRecordEntry> = (a, b) =>
+    a.ttl - b.ttl
+
   // Only A/AAAA values are server IPs; for those, show the server's friendly
   // name and IP (the injecting server for automatic records, the selected one
   // for manual). CNAME/TXT/other rdata renders verbatim.
@@ -207,7 +230,7 @@ export default class Dns {
   protected onAdd(): void {
     this.dialogs
       .open(DNS_ADD, {
-        label: 'Add DNS record',
+        label: this.i18n.transform('Add DNS record'),
         data: { devices: this.servers },
       })
       .subscribe()
@@ -215,7 +238,7 @@ export default class Dns {
 
   protected onDelete(record: { name: string; type: string }): void {
     this.dialogs
-      .open(TUI_CONFIRM, { label: 'Are you sure?' })
+      .open(TUI_CONFIRM, { label: this.i18n.transform('Are you sure?') })
       .pipe(filter(Boolean))
       .subscribe(() =>
         this.tasks.run(

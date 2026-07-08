@@ -1,5 +1,6 @@
 import { Component, inject, linkedSignal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
+import { FormsModule } from '@angular/forms'
 import {
   NavigationEnd,
   Router,
@@ -8,8 +9,12 @@ import {
   TitleStrategy,
 } from '@angular/router'
 import { TUI_BREAKPOINT, TuiIcon, TuiScrollbar } from '@taiga-ui/core'
+import { TuiBlock, TuiSwitch } from '@taiga-ui/kit'
 import { TuiNavigation } from '@taiga-ui/layout'
 import { filter, map } from 'rxjs'
+import { Aside } from 'src/app/help/aside'
+import { HELP_OPEN } from 'src/app/help/help'
+import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { UpdateService } from 'src/app/services/update.service'
 
 @Component({
@@ -18,6 +23,10 @@ import { UpdateService } from 'src/app/services/update.service'
     <header tuiNavigationHeader>
       <tui-icon icon="assets/icons/favicon.svg" />
       <h1>StartTunnel</h1>
+      <label class="help-toggle" tuiBlock="s" appearance="secondary-grayscale">
+        <input type="checkbox" tuiSwitch size="s" [(ngModel)]="help" />
+        {{ 'Help' | i18n }}
+      </label>
     </header>
     <section>
       <aside [tuiNavigationAside]="open()">
@@ -28,7 +37,7 @@ import { UpdateService } from 'src/app/services/update.service'
             [iconStart]="route.icon"
             [routerLink]="route.link"
           >
-            {{ route.name }}
+            {{ route.name | i18n }}
           </a>
         }
         <a
@@ -38,7 +47,7 @@ import { UpdateService } from 'src/app/services/update.service'
           routerLink="settings"
           [iconEnd]="update.hasUpdate() ? '@tui.rocket' : ''"
         >
-          Settings
+          {{ 'Settings' | i18n }}
         </a>
         <footer>
           <button
@@ -48,7 +57,7 @@ import { UpdateService } from 'src/app/services/update.service'
             [iconStart]="open() ? '@tui.chevron-left' : '@tui.chevron-right'"
             (click)="open.set(!open())"
           >
-            {{ open() ? 'Collapse' : 'Expand' }}
+            {{ (open() ? 'Collapse' : 'Expand') | i18n }}
           </button>
         </footer>
       </aside>
@@ -57,6 +66,7 @@ import { UpdateService } from 'src/app/services/update.service'
           <router-outlet />
         </tui-scrollbar>
       </main>
+      <aside appAside></aside>
     </section>
   `,
   styles: `
@@ -101,6 +111,11 @@ import { UpdateService } from 'src/app/services/update.service'
         margin-inline: 0.25rem 0.5rem;
       }
 
+      .help-toggle {
+        margin-inline: auto 0.5rem;
+        border-radius: 2rem;
+      }
+
       section {
         display: flex;
         flex: 1;
@@ -129,13 +144,25 @@ import { UpdateService } from 'src/app/services/update.service'
       }
     }
   `,
-  imports: [RouterOutlet, TuiNavigation, RouterLink, TuiIcon, TuiScrollbar],
+  imports: [
+    RouterOutlet,
+    TuiNavigation,
+    RouterLink,
+    TuiIcon,
+    TuiScrollbar,
+    FormsModule,
+    TuiBlock,
+    TuiSwitch,
+    Aside,
+    i18nPipe,
+  ],
 })
 export class Outlet {
   protected readonly router = inject(Router)
   protected readonly breakpoint = inject(TUI_BREAKPOINT)
   protected readonly update = inject(UpdateService)
   protected readonly strategy = inject(TitleStrategy)
+  protected readonly help = inject(HELP_OPEN)
   protected readonly routes = [
     {
       name: 'Subnets',
@@ -148,9 +175,9 @@ export class Outlet {
       link: 'devices',
     },
     {
-      name: 'Port Forwards',
+      name: 'Published Ports',
       icon: '@tui.globe',
-      link: 'port-forwards',
+      link: 'published-ports',
     },
     {
       name: 'DNS',

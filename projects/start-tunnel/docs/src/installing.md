@@ -24,13 +24,13 @@ Rent a cheap VPS with a dedicated public IP. Minimum CPU/RAM/disk is fine. For b
 
 - Debian 13
 - Root access
-- Dedicated public IPv4 address (required for clearnet port forwarding)
+- Dedicated public IPv4 address (required for publishing ports to the clearnet)
 
 > [!IMPORTANT]
 > StartTunnel is designed to be the sole application on your VPS. The installer disables UFW and manages its own firewall rules via iptables. Do not run other Internet-facing services on the same VPS.
 
 > [!WARNING]
-> Port forwarding requires a **dedicated public IPv4 address** assigned to your VPS. Shared IPv4 addresses (CGNAT, shared NAT, or load-balanced IPs) will not work. IPv6-only VPSes will not work for clearnet hosting either — see [Can I use an IPv6-only VPS?](faq.md#does-starttunnel-work-on-an-ipv6-only-vps) in the FAQ. Confirm with your VPS provider that the IPv4 address is dedicated to your VM before purchasing.
+> Publishing ports requires a **dedicated public IPv4 address** assigned to your VPS. Shared IPv4 addresses (CGNAT, shared NAT, or load-balanced IPs) will not work. IPv6-only VPSes will not work for clearnet hosting either — see [Can I use an IPv6-only VPS?](faq.md#does-starttunnel-work-on-an-ipv6-only-vps) in the FAQ. Confirm with your VPS provider that the IPv4 address is dedicated to your VM before purchasing.
 
 ### Cloud firewalls
 
@@ -253,4 +253,4 @@ Trust the Root CA on each device that will access the web UI. Select your operat
 
 - [Subnets](subnets.md) — Create isolated VLANs
 - [Devices](devices.md) — Add servers, phones, and laptops
-- [Port Forwarding](port-forwarding.md) — Expose ports on your VPS's public IP
+- [Published Ports](published-ports.md) — Expose ports on your VPS's public IP

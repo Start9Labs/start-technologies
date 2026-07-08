@@ -89,7 +89,7 @@ Manage devices within a subnet. Each device gets a unique WireGuard configuratio
 
 Add a device to a subnet. Optionally assign a specific IP address.
 
-- `--kind <client|server>` — Device kind (default `client`). A `server` enables gateway autoconfiguration (DNS injection + auto port forwarding) by default.
+- `--kind <client|server>` — Device kind (default `client`). A `server` enables gateway autoconfiguration (DNS injection + auto-publish) by default.
 
 ### `start-tunnel device list <SUBNET>`
 

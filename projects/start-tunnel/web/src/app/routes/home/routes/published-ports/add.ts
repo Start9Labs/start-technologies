@@ -28,9 +28,13 @@ import {
 } from '@taiga-ui/kit'
 import { TuiForm } from '@taiga-ui/layout'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
+import { provideHelp } from 'src/app/help/help'
+import { ModalHelp } from 'src/app/help/modal-help'
+import { i18nPipe } from 'src/app/i18n/i18n.pipe'
+import { i18nKey } from 'src/app/i18n/i18n.providers'
 import { ApiService } from 'src/app/services/api/api.service'
 
-import { MappedDevice, PortForwardsData } from './utils'
+import { MappedDevice, PublishedPortsData } from './utils'
 
 // A range counts up from both the external and internal port, so neither side
 // may run past the u16 port space. Mirrors the server-side guard in add_forward.
@@ -54,7 +58,7 @@ function ipVersionRequiresGua(group: AbstractControl): ValidationErrors | null {
   return needsV6 && device && !device.ipv6 ? { noGua: true } : null
 }
 
-const IP_VERSION: Record<string, string> = {
+const IP_VERSION: Record<string, i18nKey> = {
   ipv4: 'IPv4',
   ipv6: 'IPv6',
   both: 'IPv4 + IPv6',
@@ -64,12 +68,12 @@ const IP_VERSION: Record<string, string> = {
   template: `
     <form tuiForm="m" [formGroup]="form">
       <tui-textfield>
-        <label tuiLabel>Label</label>
+        <label tuiLabel>{{ 'Label' | i18n }}</label>
         <input tuiInput formControlName="label" />
       </tui-textfield>
       <tui-error formControlName="label" />
       <tui-textfield>
-        <label tuiLabel>External Port</label>
+        <label tuiLabel>{{ 'External Port' | i18n }}</label>
         <input
           tuiInputNumber
           formControlName="externalport"
@@ -84,12 +88,12 @@ const IP_VERSION: Record<string, string> = {
         [stringify]="stringify"
         [tuiTextfieldCleaner]="false"
       >
-        <label tuiLabel>Server</label>
+        <label tuiLabel>{{ 'Server' | i18n }}</label>
         @if (mobile) {
           <select
             tuiSelect
             formControlName="device"
-            placeholder="Select Server"
+            [placeholder]="'Select Server' | i18n"
             [items]="context.data.devices()"
           ></select>
         } @else {
@@ -104,7 +108,7 @@ const IP_VERSION: Record<string, string> = {
       </tui-textfield>
       <tui-error formControlName="device" />
       <tui-textfield>
-        <label tuiLabel>Internal Port</label>
+        <label tuiLabel>{{ 'Internal Port' | i18n }}</label>
         <input
           tuiInputNumber
           formControlName="internalport"
@@ -115,7 +119,7 @@ const IP_VERSION: Record<string, string> = {
       </tui-textfield>
       <tui-error formControlName="internalport" />
       <tui-textfield>
-        <label tuiLabel>Number of Ports</label>
+        <label tuiLabel>{{ 'Number of Ports' | i18n }}</label>
         <input
           tuiInputNumber
           formControlName="count"
@@ -123,15 +127,17 @@ const IP_VERSION: Record<string, string> = {
           [max]="65535"
           [tuiNumberFormat]="{ thousandSeparator: '' }"
         />
-        <tui-icon [tuiTooltip]="countHint" />
+        <tui-icon [tuiTooltip]="countHint | i18n" />
       </tui-textfield>
       <tui-error formControlName="count" />
       @if (form.errors?.['portRangeOverflow']) {
-        <tui-error [error]="'Port range runs past the maximum port (65535)'" />
+        <tui-error
+          [error]="'Port range runs past the maximum port (65535)' | i18n"
+        />
       }
 
       <fieldset>
-        <legend>IP Version</legend>
+        <legend>{{ 'IP Version' | i18n }}</legend>
         <tui-radio-list
           size="s"
           formControlName="ipVersion"
@@ -141,28 +147,34 @@ const IP_VERSION: Record<string, string> = {
       </fieldset>
       @if (guaError()) {
         <tui-error
-          [error]="'Selected server has no IPv6 address — its subnet needs an IPv6 prefix'"
+          [error]="
+            'Selected server has no IPv6 address — its subnet needs an IPv6 prefix'
+              | i18n
+          "
         />
       }
 
       @if (form.value.ipVersion !== 'ipv6' && !isRange) {
         <tui-textfield>
           <label tuiLabel>
-            Hostname (optional{{
-              form.value.ipVersion === 'both' ? ', ipv4 only' : ''
-            }})
+            {{
+              (form.value.ipVersion === 'both'
+                ? 'Hostname (optional, ipv4 only)'
+                : 'Hostname (optional)'
+              ) | i18n
+            }}
           </label>
           <input
             tuiInput
             formControlName="sni"
             placeholder="host.example.com"
           />
-          <tui-icon [tuiTooltip]="hostnameHint" />
+          <tui-icon [tuiTooltip]="hostnameHint | i18n" />
         </tui-textfield>
       }
       <footer>
         <button tuiButton [disabled]="form.invalid" (click)="onSave()">
-          Save
+          {{ 'Save' | i18n }}
         </button>
       </footer>
     </form>
@@ -186,25 +198,29 @@ const IP_VERSION: Record<string, string> = {
     TuiTooltip,
     TuiIcon,
     TuiInput,
+    i18nPipe,
   ],
+  hostDirectives: [ModalHelp],
+  providers: [provideHelp('/published-ports/add')],
 })
-export class PortForwardsAdd {
+export class PublishedPortsAdd {
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)
+  private readonly i18n = inject(i18nPipe)
 
   protected readonly hostnameHint =
-    'Only supported for SSL/TLS services — the gateway routes by the TLS SNI, so several hostnames can share one external port. IPv4 only. Leave blank for a plain port forward.'
+    'Only supported for SSL/TLS services — the gateway routes by the TLS SNI, so several hostnames can share one external port. IPv4 only. Leave blank for a plain published port.'
 
   protected readonly countHint =
-    'Forward this many consecutive ports, counting up from the external and internal ports above. Leave at 1 for a single port. SNI hostnames are not supported for ranges.'
+    'Publish this many consecutive ports, counting up from the external and internal ports above. Leave at 1 for a single port. SNI hostnames are not supported for ranges.'
 
   protected readonly mobile = inject(WA_IS_MOBILE)
   protected readonly context =
-    injectContext<TuiDialogContext<void, PortForwardsData>>()
+    injectContext<TuiDialogContext<void, PublishedPortsData>>()
 
   protected readonly ipVersionValues = ['ipv4', 'ipv6', 'both'] as const
   protected readonly ipVersionLabel = (ctx: TuiContext<string>) =>
-    IP_VERSION[ctx.$implicit]
+    this.i18n.transform(IP_VERSION[ctx.$implicit])
 
   protected readonly form = inject(NonNullableFormBuilder).group(
     {
@@ -289,4 +305,4 @@ export class PortForwardsAdd {
   }
 }
 
-export const PORT_FORWARDS_ADD = new PolymorpheusComponent(PortForwardsAdd)
+export const PUBLISHED_PORTS_ADD = new PolymorpheusComponent(PublishedPortsAdd)

@@ -30,7 +30,7 @@ export interface MappedForward {
   readonly ipVersion: IpVersion
 }
 
-export interface PortForwardsData {
+export interface PublishedPortsData {
   readonly ips: Signal<readonly string[]>
   readonly devices: Signal<readonly MappedDevice[]>
 }

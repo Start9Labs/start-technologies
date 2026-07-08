@@ -34,7 +34,10 @@ import {
 } from '@taiga-ui/kit'
 import { TuiForm } from '@taiga-ui/layout'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
-import { MappedDevice } from 'src/app/routes/home/routes/port-forwards/utils'
+import { provideHelp } from 'src/app/help/help'
+import { ModalHelp } from 'src/app/help/modal-help'
+import { i18nPipe } from 'src/app/i18n/i18n.pipe'
+import { MappedDevice } from 'src/app/routes/home/routes/published-ports/utils'
 import { ApiService } from 'src/app/services/api/api.service'
 
 const TYPES = ['A', 'AAAA', 'CNAME', 'TXT'] as const
@@ -77,12 +80,12 @@ function configure(
   template: `
     <form tuiForm="m" [formGroup]="form">
       <tui-textfield>
-        <label tuiLabel>Name</label>
+        <label tuiLabel>{{ 'Hostname' | i18n }}</label>
         <input tuiInput formControlName="name" placeholder="host.example.com" />
       </tui-textfield>
       <tui-error formControlName="name" />
       <tui-textfield tuiChevron [tuiTextfieldCleaner]="false">
-        <label tuiLabel>Type</label>
+        <label tuiLabel>{{ 'Type' | i18n }}</label>
         @if (mobile) {
           <select tuiSelect formControlName="type" [items]="types"></select>
         } @else {
@@ -99,19 +102,19 @@ function configure(
           [stringify]="stringifyDevice"
           [tuiTextfieldCleaner]="false"
         >
-          <label tuiLabel>Server</label>
+          <label tuiLabel>{{ 'Server' | i18n }}</label>
           @if (mobile) {
             <select
               tuiSelect
               formControlName="device"
-              placeholder="Select server"
               [items]="deviceItems()"
+              [placeholder]="'Select server' | i18n"
             ></select>
           } @else {
             <input
               tuiSelect
               formControlName="device"
-              placeholder="Select server"
+              [placeholder]="'Select server' | i18n"
             />
           }
           @if (!mobile) {
@@ -122,7 +125,11 @@ function configure(
         @if (isOther()) {
           <tui-textfield>
             <label tuiLabel>
-              {{ type() === 'AAAA' ? 'IPv6 address' : 'IPv4 address' }}
+              {{
+                type() === 'AAAA'
+                  ? ('IPv6 address' | i18n)
+                  : ('IPv4 address' | i18n)
+              }}
             </label>
             <input
               tuiInput
@@ -134,13 +141,13 @@ function configure(
         }
       } @else {
         <tui-textfield>
-          <label tuiLabel>Value</label>
+          <label tuiLabel>{{ 'Value' | i18n }}</label>
           <input tuiInput formControlName="value" />
         </tui-textfield>
         <tui-error formControlName="value" />
       }
       <tui-textfield>
-        <label tuiLabel>TTL (seconds)</label>
+        <label tuiLabel>{{ 'TTL (seconds)' | i18n }}</label>
         <input
           tuiInputNumber
           formControlName="ttl"
@@ -149,11 +156,13 @@ function configure(
         />
       </tui-textfield>
       <footer>
-        <button tuiButton (click)="onSave()">Save</button>
+        <button tuiButton (click)="onSave()">{{ 'Save' | i18n }}</button>
       </footer>
     </form>
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  hostDirectives: [ModalHelp],
+  providers: [provideHelp('/dns/add')],
   imports: [
     ReactiveFormsModule,
     TuiButton,
@@ -165,11 +174,13 @@ function configure(
     TuiNumberFormat,
     TuiSelect,
     TuiForm,
+    i18nPipe,
   ],
 })
 export class DnsAdd {
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)
+  private readonly i18n = inject(i18nPipe)
 
   protected readonly mobile = inject(WA_IS_MOBILE)
   protected readonly context =
@@ -200,7 +211,7 @@ export class DnsAdd {
   )
   protected readonly deviceItems = computed(() => [
     ...this.context.data.devices(),
-    OTHER,
+    { ...OTHER, name: this.i18n.transform('Other (custom)') },
   ])
 
   protected readonly stringifyDevice = ({ name, ip }: MappedDevice) =>

@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms'
 import { ErrorService, TaskService } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
+import { TuiComparator, TuiTable } from '@taiga-ui/addon-table'
 import {
   TuiButton,
   TuiDataList,
@@ -17,49 +18,48 @@ import { TuiCardLarge, TuiHeader } from '@taiga-ui/layout'
 import { PatchDB } from 'patch-db-client'
 import { filter, map } from 'rxjs'
 import { PlaceholderComponent } from 'src/app/routes/home/components/placeholder'
-import {
-  defaultWanIp,
-  wanLabel,
-  wanOptions,
-} from 'src/app/routes/home/components/wan'
+import { defaultWanIp, wanOptions } from 'src/app/routes/home/components/wan'
+import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { ApiService } from 'src/app/services/api/api.service'
 import { TunnelData } from 'src/app/services/patch-db/data-model'
 import { DEVICES_ADD } from './add'
 import { DEVICES_CONFIG } from './config'
 import { deviceIpv6, MappedDevice } from './utils'
 
+type DeviceRow = { name: string; subnet: { name: string }; ip: string }
+
 @Component({
   template: `
     <div tuiCardLarge="compact" appearance="floating">
       <header tuiHeader="body-l">
         <tui-icon icon="@tui.server" />
-        <h3 tuiTitle>Servers</h3>
+        <h3 tuiTitle>{{ 'Servers' | i18n }}</h3>
         <aside tuiAccessories>
           <button tuiButton iconStart="@tui.plus" (click)="onAdd('server')">
-            Add
+            {{ 'Add' | i18n }}
           </button>
         </aside>
       </header>
-      <table class="g-table" [tuiSkeleton]="!servers()">
+      <table tuiTable class="g-table" [tuiSkeleton]="!servers()">
         <thead>
           <tr>
-            <th>Name</th>
-            <th>Subnet</th>
-            <th>LAN IPv4</th>
-            <th>DNS Injection</th>
-            <th>Auto Port Forward</th>
-            <th>WAN IPv4</th>
-            <th>IPv6</th>
-            <th></th>
+            <th tuiTh [sorter]="byName">{{ 'Name' | i18n }}</th>
+            <th tuiTh [sorter]="bySubnet">{{ 'Subnet' | i18n }}</th>
+            <th tuiTh [sorter]="byIp">{{ 'LAN IPv4' | i18n }}</th>
+            <th tuiTh>{{ 'DNS Injection' | i18n }}</th>
+            <th tuiTh>{{ 'Auto-publish' | i18n }}</th>
+            <th tuiTh>{{ 'WAN IPv4' | i18n }}</th>
+            <th tuiTh>{{ 'IPv6' | i18n }}</th>
+            <th tuiTh></th>
           </tr>
         </thead>
         <tbody>
-          @for (device of servers(); track $index) {
+          @for (device of servers() | tuiTableSort; track $index) {
             <tr>
-              <td>{{ device.name }}</td>
-              <td>{{ device.subnet.name }}</td>
-              <td>{{ device.ip }}</td>
-              <td>
+              <td tuiTd>{{ device.name }}</td>
+              <td tuiTd>{{ device.subnet.name }}</td>
+              <td tuiTd>{{ device.ip }}</td>
+              <td tuiTd>
                 <tui-loader
                   size="xs"
                   [loading]="togglingDns() === device.ip"
@@ -76,7 +76,7 @@ import { deviceIpv6, MappedDevice } from './utils'
                   />
                 </tui-loader>
               </td>
-              <td>
+              <td tuiTd>
                 <tui-loader
                   size="xs"
                   [loading]="togglingPf() === device.ip"
@@ -93,9 +93,17 @@ import { deviceIpv6, MappedDevice } from './utils'
                   />
                 </tui-loader>
               </td>
-              <td>{{ device.wan }}</td>
-              <td>{{ device.ipv6 ?? '—' }}</td>
-              <td [style.padding-inline-end.rem]="0.625">
+              <td tuiTd>
+                @if (device.wanIp) {
+                  {{ device.wanIp }}
+                } @else if (device.inheritedWan) {
+                  {{ 'Subnet default' | i18n }} ({{ device.inheritedWan }})
+                } @else {
+                  {{ 'Subnet default' | i18n }}
+                }
+              </td>
+              <td tuiTd>{{ device.ipv6 ?? '—' }}</td>
+              <td tuiTd [style.padding-inline-end.rem]="0.625">
                 <button
                   tuiIconButton
                   size="xs"
@@ -104,7 +112,7 @@ import { deviceIpv6, MappedDevice } from './utils'
                   appearance="flat-grayscale"
                   iconStart="@tui.ellipsis-vertical"
                 >
-                  Actions
+                  {{ 'Actions' | i18n }}
                   <tui-data-list
                     *tuiDropdown="let close"
                     size="s"
@@ -115,28 +123,28 @@ import { deviceIpv6, MappedDevice } from './utils'
                       iconStart="@tui.pencil"
                       (click)="onEdit(device)"
                     >
-                      Edit
+                      {{ 'Edit' | i18n }}
                     </button>
                     <button
                       tuiOption
                       iconStart="@tui.settings"
                       (click)="onConfig(device)"
                     >
-                      View Config
+                      {{ 'View Config' | i18n }}
                     </button>
                     <button
                       tuiOption
                       iconStart="@tui.laptop"
                       (click)="onSetKind(device, 'client')"
                     >
-                      Change to Client
+                      {{ 'Change to Client' | i18n }}
                     </button>
                     <button
                       tuiOption
                       iconStart="@tui.trash"
                       (click)="onDelete(device)"
                     >
-                      Delete
+                      {{ 'Delete' | i18n }}
                     </button>
                   </tui-data-list>
                 </button>
@@ -145,7 +153,9 @@ import { deviceIpv6, MappedDevice } from './utils'
           } @empty {
             <tr>
               <td colspan="8">
-                <app-placeholder icon="@tui.laptop">No servers</app-placeholder>
+                <app-placeholder icon="@tui.laptop">
+                  {{ 'No servers' | i18n }}
+                </app-placeholder>
               </td>
             </tr>
           }
@@ -156,33 +166,41 @@ import { deviceIpv6, MappedDevice } from './utils'
     <div tuiCardLarge="compact" appearance="floating">
       <header tuiHeader="body-l">
         <tui-icon icon="@tui.laptop" />
-        <h3 tuiTitle>Clients</h3>
+        <h3 tuiTitle>{{ 'Clients' | i18n }}</h3>
         <aside tuiAccessories>
           <button tuiButton iconStart="@tui.plus" (click)="onAdd('client')">
-            Add
+            {{ 'Add' | i18n }}
           </button>
         </aside>
       </header>
-      <table class="g-table" [tuiSkeleton]="!clients()">
+      <table tuiTable class="g-table" [tuiSkeleton]="!clients()">
         <thead>
           <tr>
-            <th>Name</th>
-            <th>Subnet</th>
-            <th>LAN IPv4</th>
-            <th>WAN IPv4</th>
-            <th>IPv6</th>
-            <th></th>
+            <th tuiTh [sorter]="byName">{{ 'Name' | i18n }}</th>
+            <th tuiTh [sorter]="bySubnet">{{ 'Subnet' | i18n }}</th>
+            <th tuiTh [sorter]="byIp">{{ 'LAN IPv4' | i18n }}</th>
+            <th tuiTh>{{ 'WAN IPv4' | i18n }}</th>
+            <th tuiTh>{{ 'IPv6' | i18n }}</th>
+            <th tuiTh></th>
           </tr>
         </thead>
         <tbody>
-          @for (device of clients(); track $index) {
+          @for (device of clients() | tuiTableSort; track $index) {
             <tr>
-              <td>{{ device.name }}</td>
-              <td>{{ device.subnet.name }}</td>
-              <td>{{ device.ip }}</td>
-              <td>{{ device.wan }}</td>
-              <td>{{ device.ipv6 ?? '—' }}</td>
-              <td [style.padding-inline-end.rem]="0.625">
+              <td tuiTd>{{ device.name }}</td>
+              <td tuiTd>{{ device.subnet.name }}</td>
+              <td tuiTd>{{ device.ip }}</td>
+              <td tuiTd>
+                @if (device.wanIp) {
+                  {{ device.wanIp }}
+                } @else if (device.inheritedWan) {
+                  {{ 'Subnet default' | i18n }} ({{ device.inheritedWan }})
+                } @else {
+                  {{ 'Subnet default' | i18n }}
+                }
+              </td>
+              <td tuiTd>{{ device.ipv6 ?? '—' }}</td>
+              <td tuiTd [style.padding-inline-end.rem]="0.625">
                 <button
                   tuiIconButton
                   size="xs"
@@ -191,7 +209,7 @@ import { deviceIpv6, MappedDevice } from './utils'
                   appearance="flat-grayscale"
                   iconStart="@tui.ellipsis-vertical"
                 >
-                  Actions
+                  {{ 'Actions' | i18n }}
                   <tui-data-list
                     *tuiDropdown="let close"
                     size="s"
@@ -202,28 +220,28 @@ import { deviceIpv6, MappedDevice } from './utils'
                       iconStart="@tui.pencil"
                       (click)="onEdit(device)"
                     >
-                      Edit
+                      {{ 'Edit' | i18n }}
                     </button>
                     <button
                       tuiOption
                       iconStart="@tui.settings"
                       (click)="onConfig(device)"
                     >
-                      View Config
+                      {{ 'View Config' | i18n }}
                     </button>
                     <button
                       tuiOption
                       iconStart="@tui.server"
                       (click)="onSetKind(device, 'server')"
                     >
-                      Change to Server
+                      {{ 'Change to Server' | i18n }}
                     </button>
                     <button
                       tuiOption
                       iconStart="@tui.trash"
                       (click)="onDelete(device)"
                     >
-                      Delete
+                      {{ 'Delete' | i18n }}
                     </button>
                   </tui-data-list>
                 </button>
@@ -232,7 +250,9 @@ import { deviceIpv6, MappedDevice } from './utils'
           } @empty {
             <tr>
               <td colspan="6">
-                <app-placeholder icon="@tui.laptop">No clients</app-placeholder>
+                <app-placeholder icon="@tui.laptop">
+                  {{ 'No clients' | i18n }}
+                </app-placeholder>
               </td>
             </tr>
           }
@@ -255,11 +275,13 @@ import { deviceIpv6, MappedDevice } from './utils'
     TuiDataList,
     TuiLoader,
     TuiSwitch,
+    TuiTable,
     PlaceholderComponent,
     TuiSkeleton,
     TuiHeader,
     TuiIcon,
     TuiTitle,
+    i18nPipe,
   ],
 })
 export default class Devices {
@@ -268,6 +290,7 @@ export default class Devices {
   private readonly tasks = inject(TaskService)
   private readonly errorService = inject(ErrorService)
   private readonly patch = inject<PatchDB<TunnelData>>(PatchDB)
+  private readonly i18n = inject(i18nPipe)
 
   protected readonly togglingDns = signal<string | null>(null)
   protected readonly togglingPf = signal<string | null>(null)
@@ -318,7 +341,9 @@ export default class Devices {
           allowDnsInjection,
           allowAutoPortForward,
           wanIp,
-          wan: wanLabel(wanIp, 'Subnet default', subnet.wanIp ?? defaultWan),
+          // Raw inherited IP; the 'Subnet default' label is translated in the
+          // template so the column reacts to a live language switch.
+          inheritedWan: subnet.wanIp ?? defaultWan,
           ipv6: deviceIpv6(subnet.ipv6, ip),
         }),
       ),
@@ -333,10 +358,28 @@ export default class Devices {
     this.devices()?.filter(d => d.kind === 'client'),
   )
 
+  protected readonly byName: TuiComparator<DeviceRow> = (a, b) =>
+    (a.name || '').localeCompare(b.name || '')
+
+  protected readonly bySubnet: TuiComparator<DeviceRow> = (a, b) =>
+    a.subnet.name.localeCompare(b.subnet.name)
+
+  protected readonly byIp: TuiComparator<DeviceRow> = (a, b) =>
+    this.ip4(a.ip) - this.ip4(b.ip)
+
+  private ip4(s: string): number {
+    return (s.split('/')[0] ?? '')
+      .split('.')
+      .reduce((n, o) => n * 256 + Number(o), 0)
+  }
+
   protected onAdd(kind: T.Tunnel.WgClientKind) {
     this.dialogs
       .open(DEVICES_ADD, {
-        label: kind === 'server' ? 'Add server' : 'Add client',
+        label:
+          kind === 'server'
+            ? this.i18n.transform('Add server')
+            : this.i18n.transform('Add client'),
         data: {
           kind,
           subnets: this.subnets,
@@ -350,7 +393,7 @@ export default class Devices {
   protected onEdit(device: MappedDevice) {
     this.dialogs
       .open(DEVICES_ADD, {
-        label: 'Edit device',
+        label: this.i18n.transform('Edit device'),
         data: {
           device,
           subnets: this.subnets,
@@ -373,7 +416,7 @@ export default class Devices {
 
   protected onDelete({ subnet, ip }: MappedDevice): void {
     this.dialogs
-      .open(TUI_CONFIRM, { label: 'Are you sure?' })
+      .open(TUI_CONFIRM, { label: this.i18n.transform('Are you sure?') })
       .pipe(filter(Boolean))
       .subscribe(() =>
         this.tasks.run(
@@ -425,7 +468,7 @@ export default class Devices {
     kind: T.Tunnel.WgClientKind,
   ): void {
     this.dialogs
-      .open(TUI_CONFIRM, { label: 'Are you sure?' })
+      .open(TUI_CONFIRM, { label: this.i18n.transform('Are you sure?') })
       .pipe(filter(Boolean))
       .subscribe(() =>
         this.tasks.run(

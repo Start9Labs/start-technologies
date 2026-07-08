@@ -13,6 +13,9 @@ import { TuiButton, TuiDialogContext, TuiError, TuiInput } from '@taiga-ui/core'
 import { TuiChevron, TuiDataListWrapper, TuiSelect } from '@taiga-ui/kit'
 import { TuiForm } from '@taiga-ui/layout'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
+import { provideHelp } from 'src/app/help/help'
+import { ModalHelp } from 'src/app/help/modal-help'
+import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import {
   matchWan,
   toWanItems,
@@ -21,7 +24,7 @@ import {
 } from 'src/app/routes/home/components/wan'
 import { ApiService } from 'src/app/services/api/api.service'
 
-import { MappedDevice } from '../port-forwards/utils'
+import { MappedDevice } from '../published-ports/utils'
 
 const CIDR_PATTERN =
   '^(?:(?:25[0-5]|2[0-4]\\d|1\\d{2}|[1-9]?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1\\d{2}|[1-9]?\\d)/(?:[0-9]|1\\d|2[0-4])$'
@@ -49,14 +52,14 @@ const MODE_LABEL: Record<T.Tunnel.DnsMode, string> = {
   template: `
     <form tuiForm="m" [formGroup]="form">
       <tui-textfield>
-        <label tuiLabel>Name</label>
+        <label tuiLabel>{{ 'Name' | i18n }}</label>
         <input tuiInput tuiAutoFocus formControlName="name" />
       </tui-textfield>
       <tui-error formControlName="name" />
 
       @if (!context.data.name) {
         <tui-textfield>
-          <label tuiLabel>IP Range</label>
+          <label tuiLabel>{{ 'IP Range' | i18n }}</label>
           <input tuiInput formControlName="subnet" />
         </tui-textfield>
         <tui-error formControlName="subnet" />
@@ -67,7 +70,7 @@ const MODE_LABEL: Record<T.Tunnel.DnsMode, string> = {
         [tuiTextfieldCleaner]="false"
         [stringify]="modeLabel"
       >
-        <label tuiLabel>DNS</label>
+        <label tuiLabel>{{ 'DNS' | i18n }}</label>
         @if (mobile) {
           <select tuiSelect formControlName="mode" [items]="modes"></select>
         } @else {
@@ -86,12 +89,12 @@ const MODE_LABEL: Record<T.Tunnel.DnsMode, string> = {
               [tuiTextfieldCleaner]="false"
               [stringify]="stringifyDevice"
             >
-              <label tuiLabel>Device</label>
+              <label tuiLabel>{{ 'Device' | i18n }}</label>
               @if (mobile) {
                 <select
                   tuiSelect
                   formControlName="device"
-                  placeholder="Select device"
+                  [placeholder]="'Select device' | i18n"
                   [items]="context.data.devices"
                 ></select>
               } @else {
@@ -105,13 +108,13 @@ const MODE_LABEL: Record<T.Tunnel.DnsMode, string> = {
               }
             </tui-textfield>
           } @else {
-            <p>Add a device to this subnet first.</p>
+            <p>{{ 'Add a device to this subnet first.' | i18n }}</p>
           }
         }
         @case ('custom') {
           @for (control of servers.controls; track $index) {
             <tui-textfield>
-              <label tuiLabel>Server {{ $index + 1 }}</label>
+              <label tuiLabel>{{ 'Server' | i18n }} {{ $index + 1 }}</label>
               <input tuiInput [formControl]="control" placeholder="1.1.1.1" />
               @if (servers.length > 1) {
                 <button
@@ -121,7 +124,7 @@ const MODE_LABEL: Record<T.Tunnel.DnsMode, string> = {
                   iconStart="@tui.x"
                   (click)="removeServer($index)"
                 >
-                  Remove
+                  {{ 'Remove' | i18n }}
                 </button>
               }
             </tui-textfield>
@@ -135,7 +138,7 @@ const MODE_LABEL: Record<T.Tunnel.DnsMode, string> = {
               iconStart="@tui.plus"
               (click)="addServer()"
             >
-              Add server
+              {{ 'Add server' | i18n }}
             </button>
           }
         }
@@ -147,7 +150,7 @@ const MODE_LABEL: Record<T.Tunnel.DnsMode, string> = {
         [tuiTextfieldCleaner]="false"
         [stringify]="stringifyWan"
       >
-        <label tuiLabel>WAN IP</label>
+        <label tuiLabel>{{ 'WAN IP' | i18n }}</label>
         @if (mobile) {
           <select tuiSelect formControlName="wanIp" [items]="wanItems"></select>
         } @else {
@@ -159,7 +162,7 @@ const MODE_LABEL: Record<T.Tunnel.DnsMode, string> = {
       </tui-textfield>
 
       <tui-textfield>
-        <label tuiLabel>IPv6 Prefix</label>
+        <label tuiLabel>{{ 'IPv6 Prefix' | i18n }}</label>
         <input
           tuiInput
           formControlName="ipv6"
@@ -169,7 +172,9 @@ const MODE_LABEL: Record<T.Tunnel.DnsMode, string> = {
       <tui-error formControlName="ipv6" />
 
       <footer>
-        <button tuiButton type="button" (click)="onSave()">Save</button>
+        <button tuiButton type="button" (click)="onSave()">
+          {{ 'Save' | i18n }}
+        </button>
       </footer>
     </form>
   `,
@@ -183,12 +188,16 @@ const MODE_LABEL: Record<T.Tunnel.DnsMode, string> = {
     TuiForm,
     TuiInput,
     TuiSelect,
+    i18nPipe,
   ],
+  hostDirectives: [ModalHelp],
+  providers: [provideHelp('/subnets/add')],
 })
 export class SubnetsAdd {
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)
   private readonly fb = inject(NonNullableFormBuilder)
+  private readonly i18n = inject(i18nPipe)
 
   protected readonly mobile = inject(WA_IS_MOBILE)
   protected readonly context = injectContext<TuiDialogContext<void, Data>>()
@@ -228,10 +237,15 @@ export class SubnetsAdd {
     return this.form.controls.servers
   }
 
-  protected readonly modeLabel = (m: T.Tunnel.DnsMode) => MODE_LABEL[m]
+  protected readonly modeLabel = (m: T.Tunnel.DnsMode) =>
+    this.i18n.transform(MODE_LABEL[m])
   protected readonly matchWan = matchWan
   protected readonly stringifyWan = ({ ip }: WanItem) =>
-    wanLabel(ip, 'System default', this.context.data.defaultWan)
+    wanLabel(
+      ip,
+      this.i18n.transform('System default'),
+      this.context.data.defaultWan,
+    )
   protected readonly stringifyDevice = ({ ip, name }: MappedDevice) =>
     ip ? `${name} (${ip})` : ''
 

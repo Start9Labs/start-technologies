@@ -6,7 +6,7 @@
   "license": "MIT",
   "scripts": {
     "ng": "ng",
-    "check": "npm run check:i18n && npm run check:i18n:wrt && npm run check:shared && npm run check:marketplace && npm run check:ui && npm run check:setup && npm run check:brochure && npm run check:wrt",
+    "check": "npm run check:i18n && npm run check:i18n:tunnel && npm run check:i18n:wrt && npm run check:shared && npm run check:marketplace && npm run check:ui && npm run check:setup && npm run check:brochure && npm run check:wrt",
     "check:shared": "tsc --project shared-libs/ts-modules/shared/tsconfig.json --noEmit --skipLibCheck",
     "check:marketplace": "tsc --project shared-libs/ts-modules/marketplace/tsconfig.json --noEmit --skipLibCheck",
     "check:setup": "tsc --project projects/start-os/web/setup-wizard/tsconfig.json --noEmit --skipLibCheck",
@@ -15,6 +15,7 @@
     "check:brochure": "tsc --project projects/brochure-marketplace/tsconfig.json --noEmit --skipLibCheck",
     "check:wrt": "tsc --project projects/start-wrt/web/tsconfig.json --noEmit --skipLibCheck",
     "check:i18n": "node shared-libs/ts-modules/scripts/check-i18n.mjs",
+    "check:i18n:tunnel": "node projects/start-tunnel/web/scripts/check-i18n.mjs",
     "check:i18n:wrt": "node projects/start-wrt/web/scripts/check-i18n.mjs",
     "build:patch-db": "cd shared-libs/crates/patch-db/client && npm ci && npm run build",
     "build:core": "cd shared-libs/ts-modules/start-core && make dist",

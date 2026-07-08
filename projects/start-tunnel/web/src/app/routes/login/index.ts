@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms'
 import { Router } from '@angular/router'
 import { TuiButton, TuiError, TuiInput } from '@taiga-ui/core'
 import { TuiButtonLoading } from '@taiga-ui/kit'
+import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { ApiService } from 'src/app/services/api/api.service'
 import { AuthService } from 'src/app/services/auth.service'
 
@@ -14,7 +15,7 @@ import { AuthService } from 'src/app/services/auth.service'
         <input
           tuiInput
           type="password"
-          placeholder="Enter password"
+          [placeholder]="'Enter password' | i18n"
           [ngModelOptions]="{ standalone: true }"
           [(ngModel)]="password"
           (ngModelChange)="error.set(false)"
@@ -26,11 +27,11 @@ import { AuthService } from 'src/app/services/auth.service'
           iconStart="@tui.log-in"
           [loading]="loading()"
         >
-          Login
+          {{ 'Login' | i18n }}
         </button>
       </tui-textfield>
       @if (error()) {
-        <tui-error error="Password is invalid" />
+        <tui-error [error]="'Password is invalid' | i18n" />
       }
     </form>
   `,
@@ -53,7 +54,14 @@ import { AuthService } from 'src/app/services/auth.service'
       width: 18rem;
     }
   `,
-  imports: [TuiButton, TuiInput, FormsModule, TuiError, TuiButtonLoading],
+  imports: [
+    TuiButton,
+    TuiInput,
+    FormsModule,
+    TuiError,
+    TuiButtonLoading,
+    i18nPipe,
+  ],
 })
 export default class Login {
   private readonly auth = inject(AuthService)

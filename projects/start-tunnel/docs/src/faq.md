@@ -4,7 +4,7 @@ Answers to common questions about StartTunnel's security model, compatibility, V
 
 ## Can anyone else see my traffic?
 
-No. Port forwarding operates at Layer 3/4 (iptables DNAT), meaning the VPS rewrites IP headers and forwards packets without inspecting payloads. If your service uses HTTPS, TLS terminates at the service itself — the VPS never sees plaintext. For VPN traffic between devices, WireGuard provides end-to-end encryption. Since you own the VPS, there is no third party in the data path.
+No. Published ports operate at Layer 3/4 (iptables DNAT), meaning the VPS rewrites IP headers and forwards packets without inspecting payloads. If your service uses HTTPS, TLS terminates at the service itself — the VPS never sees plaintext. For VPN traffic between devices, WireGuard provides end-to-end encryption. Since you own the VPS, there is no third party in the data path.
 
 ## Do I need a WireGuard client on my devices?
 
@@ -16,7 +16,7 @@ No. StartTunnel manages its own firewall rules and disables UFW. It is designed 
 
 ## Does StartTunnel work behind CGNAT?
 
-Yes. WireGuard clients initiate outbound UDP connections, so CGNAT is not a problem for connecting devices to the VPN. Port forwarding still works because public traffic arrives at the VPS's public IP.
+Yes. WireGuard clients initiate outbound UDP connections, so CGNAT is not a problem for connecting devices to the VPN. Publishing ports still works because public traffic arrives at the VPS's public IP.
 
 ## What if I forget my password?
 
@@ -39,14 +39,14 @@ StartTunnel is designed to run on a dedicated VPS. To remove it, simply destroy 
 Any provider that offers Debian 13 with root access and a **dedicated public IPv4 address**. Common choices include Hetzner, DigitalOcean, Linode, Vultr, and OVH. Budget VPS providers (~$5/mo) work fine — StartTunnel has minimal resource requirements.
 
 > [!WARNING]
-> StartTunnel's port forwarding (clearnet hosting) requires a dedicated public IPv4 address. Shared IPv4 addresses (CGNAT, shared NAT, load-balanced IPs) will not work. Some budget providers and IPv6-only tiers do not include a dedicated IPv4 — confirm with your provider before purchasing.
+> StartTunnel's published ports (clearnet hosting) require a dedicated public IPv4 address. Shared IPv4 addresses (CGNAT, shared NAT, load-balanced IPs) will not work. Some budget providers and IPv6-only tiers do not include a dedicated IPv4 — confirm with your provider before purchasing.
 
 Some providers (AWS, Google Cloud, Azure, Oracle Cloud, IONOS) have cloud-panel firewalls that block WireGuard (UDP 51820) by default. See [Installing — Cloud firewalls](installing.md#cloud-firewalls) for setup instructions.
 
 ## Does StartTunnel work on an IPv6-only VPS?
 
-Partially. The WireGuard tunnel itself works over IPv6, so devices with IPv6 connectivity can join your private VPN and reach each other through the VPS. However, **port forwarding (clearnet hosting) is IPv4-only** and cannot be used on an IPv6-only VPS. Additionally, any device joining the VPN must have IPv6 connectivity on its current network — most modern carriers and home ISPs are dual-stack, but some are still IPv4-only. For clearnet hosting, choose a VPS with a dedicated public IPv4 address.
+Partially. The WireGuard tunnel itself works over IPv6, so devices with IPv6 connectivity can join your private VPN and reach each other through the VPS. However, **published ports for clearnet hosting are IPv4-only** and cannot be used on an IPv6-only VPS. Additionally, any device joining the VPN must have IPv6 connectivity on its current network — most modern carriers and home ISPs are dual-stack, but some are still IPv4-only. For clearnet hosting, choose a VPS with a dedicated public IPv4 address.
 
 ## Does StartTunnel provide DDoS protection?
 
-No. Your VPS IP is exposed on forwarded ports. Use your VPS provider's built-in DDoS protection, or place a CDN in front if needed. See the [Architecture](./architecture.md) page for a full comparison of trade-offs.
+No. Your VPS IP is exposed on published ports. Use your VPS provider's built-in DDoS protection, or place a CDN in front if needed. See the [Architecture](./architecture.md) page for a full comparison of trade-offs.

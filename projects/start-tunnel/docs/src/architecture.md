@@ -14,7 +14,7 @@ StartTunnel is a virtual private router (VPR) — a minimal, self-hosted router 
 
 - **Create Subnets** — Each subnet is a private LAN, just like the one your home router creates
 - **Add Devices** — Servers, phones, laptops join the LAN and get an IP address and WireGuard config
-- **Forward Ports** — Expose specific ports on specific devices to the public Internet, just like port forwarding on a home router. StartTunnel also acts as a port-control gateway (PCP and UPnP), so a StartOS device can open its own ports automatically
+- **Publish Ports** — Expose specific ports on specific devices to the public Internet, the way a home router forwards ports to devices on your LAN. StartTunnel also acts as a port-control gateway (PCP and UPnP), so a StartOS device can open its own ports automatically
 
 ## How StartTunnel Compares
 
@@ -22,7 +22,7 @@ StartTunnel occupies a unique position between Cloudflare Tunnel and Tailscale. 
 
 ### Architecture
 
-**StartTunnel** is a virtual private router that runs on a VPS you control. Like a home router, it creates private networks, assigns IPs, and forwards ports — but using WireGuard tunnels instead of physical cables. Port forwarding uses kernel-level iptables NAT (Layer 3/4) to route public traffic to devices on the VPN. There is no central service, no coordination server, and no third party in the data path.
+**StartTunnel** is a virtual private router that runs on a VPS you control. Like a home router, it creates private networks, assigns IPs, and forwards ports — but using WireGuard tunnels instead of physical cables. Publishing a port uses kernel-level iptables NAT (Layer 3/4) to route public traffic to devices on the VPN. There is no central service, no coordination server, and no third party in the data path.
 
 **Cloudflare Tunnel** runs a daemon (`cloudflared`) on your machine that makes outbound connections to Cloudflare's global edge network. Public traffic hits Cloudflare's CDN first, where Cloudflare terminates TLS, inspects the request at Layer 7, and proxies it to your origin through the tunnel.
 
@@ -32,7 +32,7 @@ StartTunnel occupies a unique position between Cloudflare Tunnel and Tailscale. 
 
 This is the most important difference. It comes down to: **who can see your traffic?**
 
-**StartTunnel**: Nobody but you. Port forwarding operates at Layer 3/4 (iptables DNAT), meaning the VPS rewrites IP headers and forwards packets without inspecting payloads. If a service uses HTTPS, TLS terminates at the service itself — the VPS never sees plaintext. For VPN traffic between devices, WireGuard provides end-to-end encryption. Since you own the VPS, there is no third party with access to your traffic or metadata.
+**StartTunnel**: Nobody but you. Published ports operate at Layer 3/4 (iptables DNAT), meaning the VPS rewrites IP headers and forwards packets without inspecting payloads. If a service uses HTTPS, TLS terminates at the service itself — the VPS never sees plaintext. For VPN traffic between devices, WireGuard provides end-to-end encryption. Since you own the VPS, there is no third party with access to your traffic or metadata.
 
 **Cloudflare Tunnel**: Cloudflare terminates TLS at their edge and re-encrypts to your origin. This means Cloudflare can — and does — see plaintext traffic. They offer "TLS inspection" as a feature and can scan request bodies, filter content, and inject responses. Using Cloudflare Tunnel requires trusting a publicly traded company not to misuse its position as a man-in-the-middle on all your traffic.
 
@@ -77,7 +77,7 @@ This is the most important difference. It comes down to: **who can see your traf
 
 StartTunnel prioritizes sovereignty over convenience. That means:
 
-- **No DDoS protection** — Your VPS IP is exposed on forwarded ports. Use your VPS provider's DDoS protection, or place a CDN in front if needed.
+- **No DDoS protection** — Your VPS IP is exposed on published ports. Use your VPS provider's DDoS protection, or place a CDN in front if needed.
 - **No global edge network** — Traffic routes through one VPS, not a global CDN. Latency depends on VPS location.
 - **No built-in DNS** — You manage your own DNS records.
 - **No identity provider integration** — Authentication is key-based and password-based, not SSO.
@@ -92,14 +92,14 @@ StartTunnel is built on [WireGuard](https://www.wireguard.com/), a modern VPN pr
 - **Encryption**: ChaCha20-Poly1305 for symmetric encryption, Curve25519 for key exchange, BLAKE2s for hashing
 - **Pre-shared keys**: Each peer connection uses an additional pre-shared key (PSK) for a layer of post-quantum resistance
 - **Key isolation**: Private keys are generated on-device and never leave the device. Only public keys are exchanged.
-- **TLS passthrough**: Port-forwarded traffic is not decrypted by the VPS. If your service uses HTTPS, TLS terminates at the service, not the tunnel.
+- **TLS passthrough**: Traffic to a published port is not decrypted by the VPS. If your service uses HTTPS, TLS terminates at the service, not the tunnel.
 
 ## Requirements
 
 - Debian 13
 - x86_64, aarch64, or riscv64
 - Root access
-- Public IP (required for clearnet port forwarding; not required for private VPN use)
+- Public IP (required for publishing ports to the clearnet; not required for private VPN use)
 
 ## Source Code
 

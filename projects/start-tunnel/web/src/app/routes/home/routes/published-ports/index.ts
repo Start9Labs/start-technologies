@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms'
 import { ErrorService, TaskService } from '@start9labs/shared'
 import { utils } from '@start9labs/start-core'
 import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
+import { TuiComparator, TuiTable } from '@taiga-ui/addon-table'
 import {
   TuiButton,
   TuiDataList,
@@ -23,9 +24,10 @@ import { TuiCardLarge, TuiHeader } from '@taiga-ui/layout'
 import { PatchDB } from 'patch-db-client'
 import { filter, map } from 'rxjs'
 import { PlaceholderComponent } from 'src/app/routes/home/components/placeholder'
-import { PORT_FORWARDS_ADD } from 'src/app/routes/home/routes/port-forwards/add'
-import { PORT_FORWARDS_EDIT_LABEL } from 'src/app/routes/home/routes/port-forwards/edit-label'
+import { PUBLISHED_PORTS_ADD } from 'src/app/routes/home/routes/published-ports/add'
+import { PUBLISHED_PORTS_EDIT_LABEL } from 'src/app/routes/home/routes/published-ports/edit-label'
 import { deviceIpv6 } from 'src/app/routes/home/routes/devices/utils'
+import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { ApiService } from 'src/app/services/api/api.service'
 import { TunnelData } from 'src/app/services/patch-db/data-model'
 
@@ -36,29 +38,35 @@ import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
     <div tuiCardLarge="compact" appearance="floating">
       <header tuiHeader="body-l">
         <tui-icon icon="@tui.pencil" />
-        <h3 tuiTitle>Manual</h3>
+        <h3 tuiTitle>{{ 'Manual' | i18n }}</h3>
         <aside tuiAccessories>
-          <button tuiButton iconStart="@tui.plus" (click)="onAdd()">Add</button>
+          <button tuiButton iconStart="@tui.plus" (click)="onAdd()">
+            {{ 'Add' | i18n }}
+          </button>
         </aside>
       </header>
-      <table class="g-table" [tuiSkeleton]="!portForwards()">
+      <table tuiTable class="g-table" [tuiSkeleton]="!portForwards()">
         <thead>
           <tr>
-            <th></th>
-            <th>Label</th>
-            <th>External IP</th>
-            <th>External Port</th>
-            <th>Hostname</th>
-            <th>Server</th>
-            <th>Internal Port</th>
-            <th>Protocol</th>
-            <th></th>
+            <th tuiTh></th>
+            <th tuiTh [sorter]="byLabel">{{ 'Label' | i18n }}</th>
+            <th tuiTh [sorter]="byServer">{{ 'Server' | i18n }}</th>
+            <th tuiTh [sorter]="byHostname">{{ 'Hostname' | i18n }}</th>
+            <th tuiTh [sorter]="byExternalPort">
+              {{ 'External Port' | i18n }}
+            </th>
+            <th tuiTh [sorter]="byInternalPort">
+              {{ 'Internal Port' | i18n }}
+            </th>
+            <th tuiTh>{{ 'Protocol' | i18n }}</th>
+            <th tuiTh [sorter]="byIp">{{ 'IP' | i18n }}</th>
+            <th tuiTh></th>
           </tr>
         </thead>
         <tbody>
-          @for (forward of manual(); track $index) {
+          @for (forward of manual() | tuiTableSort; track $index) {
             <tr>
-              <td>
+              <td tuiTd>
                 <tui-loader
                   size="xs"
                   [loading]="toggling() === key(forward)"
@@ -75,14 +83,14 @@ import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
                   />
                 </tui-loader>
               </td>
-              <td>{{ forward.label || '—' }}</td>
-              <td>{{ forward.externalip }}</td>
-              <td>{{ span(forward.externalport, forward.count) }}</td>
-              <td>{{ forward.sni || '—' }}</td>
-              <td>{{ forward.device.name }}</td>
-              <td>{{ span(forward.internalport, forward.count) }}</td>
-              <td>TCP/UDP</td>
-              <td [style.padding-inline-end.rem]="0.625">
+              <td tuiTd>{{ forward.label || '—' }}</td>
+              <td tuiTd>{{ forward.device.name }}</td>
+              <td tuiTd>{{ forward.sni || '—' }}</td>
+              <td tuiTd>{{ span(forward.externalport, forward.count) }}</td>
+              <td tuiTd>{{ span(forward.internalport, forward.count) }}</td>
+              <td tuiTd>{{ 'TCP/UDP' | i18n }}</td>
+              <td tuiTd>{{ forward.externalip }}</td>
+              <td tuiTd [style.padding-inline-end.rem]="0.625">
                 <button
                   tuiIconButton
                   size="xs"
@@ -91,7 +99,7 @@ import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
                   appearance="flat-grayscale"
                   iconStart="@tui.ellipsis-vertical"
                 >
-                  Actions
+                  {{ 'Actions' | i18n }}
                   <tui-data-list
                     *tuiDropdown="let close"
                     size="s"
@@ -102,14 +110,16 @@ import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
                       iconStart="@tui.pencil"
                       (click)="onEditLabel(forward)"
                     >
-                      {{ forward.label ? 'Rename' : 'Add label' }}
+                      {{
+                        forward.label ? ('Rename' | i18n) : ('Add label' | i18n)
+                      }}
                     </button>
                     <button
                       tuiOption
                       iconStart="@tui.trash"
                       (click)="onDelete(forward)"
                     >
-                      Delete
+                      {{ 'Delete' | i18n }}
                     </button>
                   </tui-data-list>
                 </button>
@@ -119,7 +129,7 @@ import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
             <tr>
               <td colspan="9">
                 <app-placeholder icon="@tui.globe">
-                  No port forwards
+                  {{ 'No published ports' | i18n }}
                 </app-placeholder>
               </td>
             </tr>
@@ -131,34 +141,42 @@ import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
     <div tuiCardLarge="compact" appearance="floating">
       <header tuiHeader="body-l">
         <tui-icon icon="@tui.zap" />
-        <h3 tuiTitle>Automatic</h3>
+        <h3 tuiTitle>{{ 'Automatic' | i18n }}</h3>
       </header>
-      <table class="g-table no-actions" [tuiSkeleton]="!portForwards()">
+      <table
+        tuiTable
+        class="g-table no-actions"
+        [tuiSkeleton]="!portForwards()"
+      >
         <thead>
           <tr>
-            <th>External IP</th>
-            <th>External Port</th>
-            <th>Hostname</th>
-            <th>Server</th>
-            <th>Internal Port</th>
-            <th>Protocol</th>
+            <th tuiTh [sorter]="byServer">{{ 'Server' | i18n }}</th>
+            <th tuiTh [sorter]="byHostname">{{ 'Hostname' | i18n }}</th>
+            <th tuiTh [sorter]="byExternalPort">
+              {{ 'External Port' | i18n }}
+            </th>
+            <th tuiTh [sorter]="byInternalPort">
+              {{ 'Internal Port' | i18n }}
+            </th>
+            <th tuiTh>{{ 'Protocol' | i18n }}</th>
+            <th tuiTh [sorter]="byIp">{{ 'IP' | i18n }}</th>
           </tr>
         </thead>
         <tbody>
-          @for (forward of automatic(); track $index) {
+          @for (forward of automatic() | tuiTableSort; track $index) {
             <tr>
-              <td>{{ forward.externalip }}</td>
-              <td>{{ span(forward.externalport, forward.count) }}</td>
-              <td>{{ forward.sni || '—' }}</td>
-              <td>{{ forward.device.name }}</td>
-              <td>{{ span(forward.internalport, forward.count) }}</td>
-              <td>TCP/UDP</td>
+              <td tuiTd>{{ forward.device.name }}</td>
+              <td tuiTd>{{ forward.sni || '—' }}</td>
+              <td tuiTd>{{ span(forward.externalport, forward.count) }}</td>
+              <td tuiTd>{{ span(forward.internalport, forward.count) }}</td>
+              <td tuiTd>{{ 'TCP/UDP' | i18n }}</td>
+              <td tuiTd>{{ forward.externalip }}</td>
             </tr>
           } @empty {
             <tr>
               <td colspan="6">
                 <app-placeholder icon="@tui.globe">
-                  No port forwards
+                  {{ 'No published ports' | i18n }}
                 </app-placeholder>
               </td>
             </tr>
@@ -178,6 +196,7 @@ import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
     FormsModule,
     TuiButton,
     TuiCardLarge,
+    TuiTable,
     TuiDropdown,
     TuiDataList,
     TuiLoader,
@@ -188,14 +207,16 @@ import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
     TuiHeader,
     TuiIcon,
     TuiTitle,
+    i18nPipe,
   ],
 })
-export default class PortForwards {
+export default class PublishedPorts {
   private readonly dialogs = inject(TuiResponsiveDialogService)
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)
   private readonly patch = inject<PatchDB<TunnelData>>(PatchDB)
   private readonly errorService = inject(ErrorService)
+  private readonly i18n = inject(i18nPipe)
   private readonly ips = toSignal(
     this.patch.watch$('gateways').pipe(
       map(g =>
@@ -260,6 +281,19 @@ export default class PortForwards {
 
   protected readonly toggling = signal<string | null>(null)
 
+  protected readonly byLabel: TuiComparator<MappedForward> = (a, b) =>
+    (a.label || '').localeCompare(b.label || '')
+  protected readonly byIp: TuiComparator<MappedForward> = (a, b) =>
+    a.externalip.localeCompare(b.externalip)
+  protected readonly byHostname: TuiComparator<MappedForward> = (a, b) =>
+    (a.sni || '').localeCompare(b.sni || '')
+  protected readonly byExternalPort: TuiComparator<MappedForward> = (a, b) =>
+    Number(a.externalport) - Number(b.externalport)
+  protected readonly byServer: TuiComparator<MappedForward> = (a, b) =>
+    a.device.name.localeCompare(b.device.name)
+  protected readonly byInternalPort: TuiComparator<MappedForward> = (a, b) =>
+    Number(a.internalport) - Number(b.internalport)
+
   protected key(forward: MappedForward): string {
     return `${forward.ipVersion}:${forward.externalip}:${forward.externalport}:${forward.hostname ?? ''}`
   }
@@ -296,8 +330,8 @@ export default class PortForwards {
 
   protected onAdd(): void {
     this.dialogs
-      .open(PORT_FORWARDS_ADD, {
-        label: 'Add port forward',
+      .open(PUBLISHED_PORTS_ADD, {
+        label: this.i18n.transform('Add published port'),
         data: { ips: this.ips, devices: this.devices },
       })
       .subscribe()
@@ -305,8 +339,8 @@ export default class PortForwards {
 
   protected onEditLabel(forward: MappedForward): void {
     this.dialogs
-      .open(PORT_FORWARDS_EDIT_LABEL, {
-        label: 'Edit label',
+      .open(PUBLISHED_PORTS_EDIT_LABEL, {
+        label: this.i18n.transform('Edit label'),
         data: {
           source: `${forward.externalip}:${forward.externalport}`,
           label: forward.label,
@@ -325,7 +359,7 @@ export default class PortForwards {
 
   protected onDelete(forward: MappedForward): void {
     this.dialogs
-      .open(TUI_CONFIRM, { label: 'Are you sure?' })
+      .open(TUI_CONFIRM, { label: this.i18n.transform('Are you sure?') })
       .pipe(filter(Boolean))
       .subscribe(() =>
         this.tasks.run(async () => {

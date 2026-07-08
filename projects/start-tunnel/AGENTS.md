@@ -102,4 +102,4 @@ rest of the Angular workspace via `make web-format`.
 User-facing changes (UI, CLI flags/output, install flow, subnet/device/forward
 behavior) must update `docs/src/` in the same change. The mdbook is published at
 `start9.com/start-tunnel/`. Reference: `docs/src/cli-reference.md`,
-`installing.md`, `subnets.md`, `devices.md`, `port-forwarding.md`.
+`installing.md`, `subnets.md`, `devices.md`, `published-ports.md`.
