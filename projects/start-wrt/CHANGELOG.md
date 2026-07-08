@@ -129,6 +129,18 @@ VPN chaining, WiFi schedules, dynamic DNS, and published-port forwarding.
 Ships as a flashable image for the SpaceMiT K1 (BananaPi-F3), with OTA updates
 delivered through the Start9 registry.
 
+### Fixed
+
+- Browsers could keep serving a stale, cached copy of the web UI after a
+  firmware update — the router previously sent no cache headers, leaving cache
+  behavior to per-browser heuristics (Firefox/Safari could silently run an old
+  UI against the new backend). The embedded UI is now served with explicit
+  headers: stable-named files (`index.html`, `assets/`) revalidate on every
+  load against a per-build `ETag` (a cheap `304 Not Modified` when unchanged),
+  while Angular's content-hashed bundles are cached as `immutable`. Requests
+  for assets from an older build now get a `404` instead of a mis-typed
+  `index.html` fallback.
+
 ## [0.1.0-beta.4]
 
 ### Added
