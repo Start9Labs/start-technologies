@@ -159,9 +159,46 @@ jobs:
           name: compiled-${{ matrix.arch }}.tar
           path: compiled-${{ matrix.arch }}.tar
           retention-days: 1
+
+  # On pull requests, only build the (expensive, ~2h with emulated riscv) image
+  # matrix when the change actually affects image assembly — packaging, image
+  # recipe, systemd units, apt, or shared build infra. Pure code/web/docs PRs are
+  # already covered by `compile` (the binaries) and the Automated Tests workflow,
+  # so they skip images here and get full image coverage on the push to master.
+  # On push/dispatch the guard below is bypassed and images always build.
+  changes:
+    name: Detect image-affecting changes
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      image: ${{ steps.filter.outputs.image }}
+    steps:
+      - name: Check changed paths
+        id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files="$(gh api --paginate \
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --jq '.[].filename')"
+          matched="$(printf '%s\n' "$files" | grep -E '^(build/|debian/|apt/|projects/start-os/build/|projects/start-os/debian/|projects/start-os/[^/]+\.(service|slice)$|\.github/workflows/startos-iso\.yaml$|\.github/actions/setup-build/)' || true)"
+          if [ -n "$matched" ]; then
+            echo "Image-affecting files changed:"; printf '  %s\n' "$matched"
+            echo "image=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No image-affecting files changed; skipping image build on this PR."
+            echo "image=false" >> "$GITHUB_OUTPUT"
+          fi
+
   image:
     name: Build Image
-    needs: [compile]
+    needs: [compile, changes]
+    # Build on push/dispatch always; on PRs only when packaging/image inputs changed.
+    if: >-
+      !cancelled() && needs.compile.result == 'success'
+      && (github.event_name != 'pull_request' || needs.changes.outputs.image == 'true')
     strategy:
       fail-fast: false
       matrix:
