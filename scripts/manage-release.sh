@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # manage-release.sh — drive a monorepo product through its release steps.
 #
@@ -10,7 +10,18 @@
 # git tag / GitHub release is <project>/v<version> (the slash namespaces each
 # product's tags; releases before July 2026 used <project>_v<version>).
 
+# mapfile, inherit_errexit, and safe empty-array expansion under `set -u` all
+# need bash >= 4.4; macOS's /bin/bash is 3.2, so fail fast before half-running.
+if [ -z "${BASH_VERSINFO:-}" ] || [ "${BASH_VERSINFO[0]}" -lt 4 ] \
+    || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -lt 4 ]; }; then
+    >&2 echo "manage-release.sh requires bash >= 4.4 (macOS: brew install bash)"
+    exit 1
+fi
+
 set -euo pipefail
+# Without this, a failure inside $(release_notes) is silently swallowed and the
+# release is created with broken notes.
+shopt -s inherit_errexit
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -441,12 +452,25 @@ cmd_pre_check() {
         >&2 echo "  ✗ gh not authenticated (run: gh auth login)"
         errors=1
     fi
-    # os/cli/deb/wrt also sign their artifacts with the Start9 org key.
+    # os/cli/deb/wrt also sign their artifacts with the Start9 org key, and
+    # render checksum blocks into the release notes (see checksum_block).
     if [ "$KIND" != npm ]; then
         if gpg --list-secret-keys "$START9_GPG_KEY" >/dev/null 2>&1; then
             echo "  ✓ Start9 signing key ${START9_GPG_KEY} present"
         else
             >&2 echo "  ✗ Start9 GPG secret key ${START9_GPG_KEY} not in keyring (needed to sign)"
+            errors=1
+        fi
+        if command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1; then
+            echo "  ✓ sha-256 tool available"
+        else
+            >&2 echo "  ✗ neither sha256sum nor shasum installed (needed for release-notes checksums)"
+            errors=1
+        fi
+        if command -v b3sum >/dev/null 2>&1; then
+            echo "  ✓ b3sum available"
+        else
+            >&2 echo "  ✗ b3sum not installed (needed for release-notes checksums; brew/cargo install b3sum)"
             errors=1
         fi
     fi
@@ -832,12 +856,17 @@ checksum_block() {
     echo
     echo "### SHA-256"
     echo '```'
-    sha256sum "$@" 2>/dev/null || true
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$@"
+    else
+        # macOS ships shasum but not coreutils' sha256sum; same output format.
+        shasum -a 256 "$@"
+    fi
     echo '```'
     echo
     echo "### BLAKE-3"
     echo '```'
-    b3sum "$@" 2>/dev/null || true
+    b3sum "$@"
     echo '```'
 }
 
