@@ -15,7 +15,7 @@ only dependency is `clap`.
   - `projects/start-os/build.mk` — OS image build; cross-compiles to
     `target/aarch64-unknown-linux-musl/release/pi-beep` and installs it to `/usr/bin/pi-beep` on
     `raspberrypi` builds.
-  - `shared-libs/crates/start-core/build/build-pi-beep.sh` — cross-compiles for aarch64-musl via the
+  - `build-pi-beep.sh` (in this dir) — cross-compiles for aarch64-musl via the
     `rust-zig-builder` container.
   - The image recipe symlinks `/usr/local/bin/beep -> /usr/bin/pi-beep`, so callers expecting a
     plain `beep` resolve to this binary.

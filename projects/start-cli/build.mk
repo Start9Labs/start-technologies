@@ -4,11 +4,11 @@
 CLI_TARGETS := target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/start-cli
 
 start-cli: $(GIT_HASH_FILE)
-	./shared-libs/crates/start-core/build/build-cli.sh
+	./projects/start-cli/build/build-cli.sh
 
 # Build into a workspace-relative path for packaging (musl release).
-$(CLI_TARGETS): $(CORE_SRC) $(ENVIRONMENT_FILE)
-	ARCH=$(ARCH) PROFILE=$(PROFILE) ./shared-libs/crates/start-core/build/build-cli.sh
+$(CLI_TARGETS): $(CORE_SRC) $(ENVIRONMENT_FILE) projects/start-cli/build/build-cli.sh
+	ARCH=$(ARCH) PROFILE=$(PROFILE) ./projects/start-cli/build/build-cli.sh
 	touch $@
 
 # Stage the binary into DESTDIR (used by debian/build.sh and for a system install).

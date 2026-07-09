@@ -26,7 +26,7 @@ Run from the repo root:
 ```bash
 cargo build -p pi-beep                                          # host build
 cargo build -p pi-beep --target=aarch64-unknown-linux-musl      # cross-compile for RPi
-ARCH=aarch64 PROFILE=release ./shared-libs/crates/start-core/build/build-pi-beep.sh  # OS-image build path
+ARCH=aarch64 PROFILE=release ./shared-libs/crates/pi-beep/build-pi-beep.sh      # OS-image build path
 ```
 
 ## Testing

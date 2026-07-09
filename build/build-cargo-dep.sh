@@ -16,7 +16,7 @@ fi
 
 mkdir -p target
 
-source shared-libs/crates/start-core/build/builder-alias.sh
+source ./build/builder-alias.sh
 
 RUSTFLAGS="-C target-feature=+crt-static"
 

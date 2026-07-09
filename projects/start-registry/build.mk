@@ -14,8 +14,8 @@ start-registry-install: $(REGISTRY_TARGETS)
 	$(call mkdir,$(DESTDIR)/lib/systemd/system)
 	$(call cp,projects/start-registry/start-registryd.service,$(DESTDIR)/lib/systemd/system/start-registryd.service)
 
-target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/registrybox: $(CORE_SRC) $(ENVIRONMENT_FILE)
-	ARCH=$(ARCH) PROFILE=$(PROFILE) ./shared-libs/crates/start-core/build/build-registrybox.sh
+target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/registrybox: $(CORE_SRC) $(ENVIRONMENT_FILE) projects/start-registry/build/build-registrybox.sh
+	ARCH=$(ARCH) PROFILE=$(PROFILE) ./projects/start-registry/build/build-registrybox.sh
 
 start-registry-deb: results/$(REGISTRY_BASENAME).deb
 

@@ -1,8 +1,8 @@
 #!/bin/bash
 
-cd "$(dirname "${BASH_SOURCE[0]}")"
+cd "$(dirname "${BASH_SOURCE[0]}")/../../.."
 
-source ./builder-alias.sh
+source ./build/builder-alias.sh
 
 set -ea
 
@@ -60,7 +60,6 @@ if [ -z "${TARGET:-}" ]; then
   fi
 fi
 
-cd ../../../..
 FEATURES="$(echo "${ENVIRONMENT:-}" | sed 's/-/,/g')"
 RUSTFLAGS=""
 if [[ "${ENVIRONMENT:-}" =~ (^|-)console($|-) ]]; then

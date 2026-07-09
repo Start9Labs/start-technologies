@@ -22,8 +22,8 @@ start-tunnel-install: target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/tunnelbo
 	$(call mkdir,$(DESTDIR)/usr/share/keyrings)
 	$(call cp,apt/start9.gpg,$(DESTDIR)/usr/share/keyrings/start9.gpg)
 
-target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/tunnelbox: $(CORE_SRC) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) projects/start-tunnel/web/dist/static/start-tunnel/index.html
-	ARCH=$(ARCH) PROFILE=$(PROFILE) ./shared-libs/crates/start-core/build/build-tunnelbox.sh
+target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/tunnelbox: $(CORE_SRC) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) projects/start-tunnel/web/dist/static/start-tunnel/index.html projects/start-tunnel/build/build-tunnelbox.sh
+	ARCH=$(ARCH) PROFILE=$(PROFILE) ./projects/start-tunnel/build/build-tunnelbox.sh
 
 start-tunnel-deb: results/$(TUNNEL_BASENAME).deb
 

@@ -14,7 +14,7 @@ than relying on a PC-speaker driver.
   - `projects/start-os/build.mk` — the OS image build. The `aarch64-unknown-linux-musl/release/pi-beep`
     target invokes the build script, and on `raspberrypi` platform builds the binary is copied to
     `/usr/bin/pi-beep`.
-  - `shared-libs/crates/start-core/build/build-pi-beep.sh` — cross-compiles via the `rust-zig-builder`
+  - `build-pi-beep.sh` (in this dir) — cross-compiles via the `rust-zig-builder`
     container (`cargo zigbuild ... -p pi-beep --bin pi-beep --target=$ARCH-unknown-linux-musl`).
   - `projects/start-os/build/image-recipe/build.sh` symlinks `/usr/local/bin/beep ->
 /usr/bin/pi-beep`, so callers expecting plain `beep` (e.g. `init_resize.sh`) hit this binary.

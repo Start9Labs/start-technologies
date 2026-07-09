@@ -11,20 +11,21 @@ CLAUDE.md is a one-line `@AGENTS.md` import. See [ARCHITECTURE.md](./ARCHITECTUR
 - `src/main.rs` — `MultiExecutable` wiring (`enable_start_registry` + `enable_start_registryd`).
 - `Cargo.toml` — crate metadata; `[[bin]] name = "registrybox"`; depends on `start-core = { path = "../../shared-libs/crates/start-core" }`.
 - `start-registryd.service` — systemd unit (`ExecStart=/usr/bin/start-registryd`).
+- `build/build-registrybox.sh` — release musl build via the `rust-zig-builder` container (what `make start-registry` runs).
 - **Real implementation:** `shared-libs/crates/start-core/src/bins/registry.rs` (server `main` + CLI `cli`) and `shared-libs/crates/start-core/src/registry/` (context, db, info, os, package, admin, metrics, signer, migrations, asset).
 - **UI:** `shared-libs/ts-modules/marketplace/` (`@start9labs/marketplace`) — not built or served by this crate.
 
 ## Build & test (run from the monorepo root, not this dir)
 
-| Command                                           | What                                                                              |
-| ------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `cargo build -p start-registry --bin registrybox` | build the binary (host target, debug)                                             |
-| `cargo check -p start-registry`                   | fast type-check (linux only locally)                                              |
-| `cargo clippy -p start-registry`                  | lints                                                                             |
-| `cargo test -p start-core registry`               | exercise the registry logic (lives in start-core)                                 |
-| `make start-registry-format`                      | format (`make start-registry-format-check` for the read-only CI check)            |
-| `make start-registry`                             | release musl build via `shared-libs/crates/start-core/build/build-registrybox.sh` |
-| `make start-registry-install DESTDIR=…`           | stage binary + symlinks + service                                                 |
+| Command                                           | What                                                                        |
+| ------------------------------------------------- | --------------------------------------------------------------------------- |
+| `cargo build -p start-registry --bin registrybox` | build the binary (host target, debug)                                       |
+| `cargo check -p start-registry`                   | fast type-check (linux only locally)                                        |
+| `cargo clippy -p start-registry`                  | lints                                                                       |
+| `cargo test -p start-core registry`               | exercise the registry logic (lives in start-core)                           |
+| `make start-registry-format`                      | format (`make start-registry-format-check` for the read-only CI check)      |
+| `make start-registry`                             | release musl build via `projects/start-registry/build/build-registrybox.sh` |
+| `make start-registry-install DESTDIR=…`           | stage binary + symlinks + service                                           |
 
 Because the code lives in `start-core`, most meaningful tests and lints target `-p start-core`, not `-p start-registry`. The thin wrapper mainly verifies that the bin links.
 

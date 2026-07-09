@@ -16,7 +16,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the layout and [CONTRIBUTING.md](CONT
 
 Each product lives under `projects/` as a thin wrapper; the bulk of the code lives in the top-level shared libs (`shared-libs/`).
 
-- `projects/start-os/` — OS product. Rust bins `startbox` + `start-container` (`src/bin/*.rs`), `web/` (Angular UI + setup-wizard), `container-runtime/` (Node LXC service runtime), OS image build (`build/`), Debian control (`debian/`), VM-setup `assets/`, `backup-fs/`, `docs/`, `*.service`.
+- `projects/start-os/` — OS product. Rust bins `startbox` + `start-container` (`src/bin/*.rs`), `web/` (Angular UI + setup-wizard), `container-runtime/` (Node LXC service runtime), bin build scripts + OS image build (`build/`), Debian control (`debian/`), VM-setup `assets/`, `backup-fs/`, `docs/`, `*.service`.
 - `projects/start-cli/` — `start-cli` bin (`src/main.rs`); thin wrapper over `start-core`.
 - `projects/start-registry/` — `registrybox` bin; registry server, serves the shared marketplace UI lib.
 - `projects/start-tunnel/` — `tunnelbox` bin + `web/` (StartTunnel UI).

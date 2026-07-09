@@ -20,6 +20,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
     and `enable` under `/sys/class/pwm/pwmchip0/pwm0/`, sleeps for the tone length, then disables.
 - `README.txt` — plaintext usage/help text (not Markdown; preserved as-is).
 - `Cargo.toml` — package metadata; sole dependency `clap`.
+- `build-pi-beep.sh` — cross-compiles for aarch64-musl via the `rust-zig-builder` container (what
+  the OS image build runs).
 - `LICENSE` — MIT.
 
 ## Build & test (run from the repo root)
@@ -27,7 +29,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 ```bash
 cargo build -p pi-beep                                          # host build
 cargo build -p pi-beep --target=aarch64-unknown-linux-musl      # cross-compile for RPi (needs rust-zig-builder)
-ARCH=aarch64 PROFILE=release ./shared-libs/crates/start-core/build/build-pi-beep.sh  # what the OS image build runs
+ARCH=aarch64 PROFILE=release ./shared-libs/crates/pi-beep/build-pi-beep.sh      # what the OS image build runs
 cargo test -p pi-beep                                           # no tests defined; passes trivially
 ```
 

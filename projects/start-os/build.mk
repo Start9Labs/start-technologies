@@ -172,12 +172,12 @@ projects/start-os/build/lib/depends projects/start-os/build/lib/conflicts: $(ENV
 $(FIRMWARE_ROMS): projects/start-os/build/lib/firmware.json ./projects/start-os/build/download-firmware.sh $(PLATFORM_FILE)
 	./projects/start-os/build/download-firmware.sh $(PLATFORM)
 
-target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox: $(CORE_SRC) $(COMPRESSED_WEB_UIS) projects/start-os/web/patchdb-ui-seed.json $(ENVIRONMENT_FILE)
-	ARCH=$(ARCH) PROFILE=$(PROFILE) ./shared-libs/crates/start-core/build/build-startbox.sh
+target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox: $(CORE_SRC) $(COMPRESSED_WEB_UIS) projects/start-os/web/patchdb-ui-seed.json $(ENVIRONMENT_FILE) projects/start-os/build/build-startbox.sh
+	ARCH=$(ARCH) PROFILE=$(PROFILE) ./projects/start-os/build/build-startbox.sh
 	touch target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox
 
-target/$(RUST_ARCH)-unknown-linux-musl/release/start-container: $(CORE_SRC) $(ENVIRONMENT_FILE)
-	ARCH=$(ARCH) ./shared-libs/crates/start-core/build/build-start-container.sh
+target/$(RUST_ARCH)-unknown-linux-musl/release/start-container: $(CORE_SRC) $(ENVIRONMENT_FILE) projects/start-os/build/build-start-container.sh
+	ARCH=$(ARCH) ./projects/start-os/build/build-start-container.sh
 	touch target/$(RUST_ARCH)-unknown-linux-musl/release/start-container
 
 # used by github actions
@@ -185,12 +185,12 @@ compiled-$(ARCH).tar: $(COMPILED_TARGETS) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $
 	tar -cvf $@ $^
 
 target/$(RUST_ARCH)-unknown-linux-musl/release/startos-backup-fs: $(call ls-files, projects/start-os/backup-fs) $(ENVIRONMENT_FILE)
-	ARCH=$(ARCH) PROFILE=release ./shared-libs/crates/start-core/build/build-backup-fs.sh
+	ARCH=$(ARCH) PROFILE=release ./projects/start-os/backup-fs/build-backup-fs.sh
 	touch $@
 
 # --- pi-beep: first-party crate, built like the other in-repo bins ---
 target/aarch64-unknown-linux-musl/release/pi-beep: $(call ls-files, shared-libs/crates/pi-beep) $(ENVIRONMENT_FILE)
-	ARCH=aarch64 PROFILE=release ./shared-libs/crates/start-core/build/build-pi-beep.sh
+	ARCH=aarch64 PROFILE=release ./shared-libs/crates/pi-beep/build-pi-beep.sh
 	touch $@
 
 # --- external cargo dev tools (crates.io) bundled into unstable/console images ---

@@ -27,7 +27,7 @@ CORE_SRC := $(call ls-files, shared-libs/crates/start-core) \
 	$(call ls-files, shared-libs/crates/jsonpath) \
 	$(call ls-files, shared-libs/crates/rpc-toolkit) \
 	$(call ls-files, shared-libs/crates/yasi) \
-	$(shell git ls-files shared-libs/crates/patch-db) $(GIT_HASH_FILE)
+	$(shell git ls-files shared-libs/crates/patch-db) build/builder-alias.sh $(GIT_HASH_FILE)
 PATCH_DB_CLIENT_SRC := $(shell git ls-files shared-libs/crates/patch-db/client)
 GZIP_BIN := $(shell which pigz || which gzip)
 TAR_BIN := $(shell which gtar || which tar)

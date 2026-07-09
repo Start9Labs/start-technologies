@@ -1,6 +1,6 @@
 #!/bin/bash
 
-cd "$(dirname "${BASH_SOURCE[0]}")"
+cd "$(dirname "${BASH_SOURCE[0]}")/../../.."
 
 source ./build/builder-alias.sh
 
@@ -30,7 +30,6 @@ if tty -s; then
 	USE_TTY="-it"
 fi
 
-cd ../../..
 FEATURES="$(echo $ENVIRONMENT | sed 's/-/,/g')"
 RUSTFLAGS=""
 

@@ -22,6 +22,8 @@ entry/CLI dispatch in `shared-libs/crates/start-core/src/bins/tunnel.rs`.
   to `start-core`. Rarely needs changes.
 - `Cargo.toml` — crate `start-tunnel`, bin `tunnelbox`. Depends on `start-core`.
 - `start-tunneld.service` — systemd unit running `/usr/bin/start-tunneld`.
+- `build/build-tunnelbox.sh` — release musl build via the `rust-zig-builder` container
+  (what `make start-tunnel` runs).
 - `web/` — Angular project `start-tunnel` (registered in the root `angular.json`).
 - `docs/` — mdbook (book title "StartTunnel"), output to `docs/book`.
 

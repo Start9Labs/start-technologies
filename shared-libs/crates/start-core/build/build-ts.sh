@@ -1,8 +1,8 @@
 #!/bin/bash
 
-cd "$(dirname "${BASH_SOURCE[0]}")"
+cd "$(dirname "${BASH_SOURCE[0]}")/../../../.."
 
-source ./builder-alias.sh
+source ./build/builder-alias.sh
 
 set -ea
 shopt -s expand_aliases
@@ -30,7 +30,6 @@ if [ "$ARCH" = "riscv64" ]; then
 	RUST_ARCH="riscv64gc"
 fi
 
-cd ../../../..
 FEATURES="$(echo $ENVIRONMENT | sed 's/-/,/g')"
 RUSTFLAGS=""
 if [[ "${ENVIRONMENT}" =~ (^|-)console($|-) ]]; then

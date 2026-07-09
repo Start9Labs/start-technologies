@@ -17,9 +17,11 @@ monorepo-wide rules, and [ARCHITECTURE.md](ARCHITECTURE.md) and
 - `container-runtime/` — Node.js LXC runtime with its **own** AGENTS/CLAUDE;
   read `container-runtime/AGENTS.md` before touching it.
 - `docs/` — the end-user mdbook (book "StartOS"), served at `/start-os/`.
-- Systemd units + `services.slice` live directly in this dir; OS image
-  packaging (`debian/`, `apt/`, `build/`) is at the **repo root**; `assets/` is
-  directly in this dir.
+- `build/` — OS image assembly (image-recipe, dpkg-deps, firmware) plus the
+  `startbox`/`start-container` build scripts; `debian/` — Debian control;
+  `backup-fs/` carries its own build script. Systemd units + `services.slice`
+  and `assets/` live directly in this dir; the shared build infra (root
+  `build/`) and `apt/` are at the repo root.
 
 ## Build & test (run from the repo root)
 
