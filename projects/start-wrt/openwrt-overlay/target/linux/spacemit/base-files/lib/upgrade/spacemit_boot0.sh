@@ -24,10 +24,14 @@ _boot0_read_u32() { # <file> <byte offset>
 
 # Compare <sector count> sectors of <dev> at <sector offset> against
 # <reference file>. Uses $_boot0_direct (set by the caller) to bypass the
-# page cache where supported.
+# page cache where supported. Compared via md5sum, not cmp: the sysupgrade
+# ramfs (stage2 switch_to_ramfs) copies a fixed binary list that includes
+# md5sum but NOT cmp.
 _boot0_region_matches() { # <dev> <sector offset> <sector count> <reference file>
-	dd if="$1" bs=512 skip="$2" count="$3" $_boot0_direct 2>/dev/null |
-		cmp -s - "$4"
+	local want have
+	want="$(md5sum < "$4")"
+	have="$(dd if="$1" bs=512 skip="$2" count="$3" $_boot0_direct 2>/dev/null | md5sum)"
+	[ "${want%% *}" = "${have%% *}" ]
 }
 
 _boot0_write_verified() { # <dev> <sector offset> <source file>
@@ -68,9 +72,9 @@ spacemit_provision_boot0() {
 	cp -f "$mnt/bootinfo_emmc.bin" "$bootinfo"
 	umount "$mnt"
 
-	# Sanity-check the blob: magic 0xb00714f0, flash type "eMMC", and
-	# sector-aligned SPL offsets (bytes 0x20/0x24).
-	if [ "$(_boot0_read_u32 "$bootinfo" 0)" != "2953778416" ] ||
+	# Sanity-check the blob: magic 0xb00714f0 (= 2953254128), flash type
+	# "eMMC", and sector-aligned SPL offsets (bytes 0x20/0x24).
+	if [ "$(_boot0_read_u32 "$bootinfo" 0)" != "2953254128" ] ||
 	   [ "$(dd if="$bootinfo" bs=1 skip=8 count=4 2>/dev/null)" != "eMMC" ]; then
 		echo "boot0: invalid bootinfo_emmc.bin, skipping provisioning"
 		return 0
