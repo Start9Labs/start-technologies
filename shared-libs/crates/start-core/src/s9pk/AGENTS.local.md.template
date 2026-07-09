@@ -1,0 +1,19 @@
+# AGENTS.local.md — your workspace preferences
+
+<!--
+Notes and preferences for AI assistants working in this workspace. CLAUDE.md loads this file
+alongside AGENTS.md, and syncing the guide never overwrites it — so it is the right home for
+anything true of *your* setup rather than of packaging in general:
+
+  - the StartOS box you install to, and the registry you publish to
+  - the packages you maintain, and where they live
+  - conventions your team follows that the guide doesn't mandate
+  - any way your workspace departs from the scaffolded layout — for example, a
+    start-technologies/ symlinked to a monorepo checkout you maintain yourself
+
+Rule of thumb: if a note would help *every* packager, it does not belong here. Open a PR
+against start-technologies so it lands in the guide — otherwise it stays trapped in one
+workspace and drifts out of date.
+
+Delete this comment once you have something to say.
+-->
