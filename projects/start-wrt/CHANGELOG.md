@@ -18,7 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "Refresh Needed" dialog with a Reload button rather than reloading out from
   under unsaved work. Detection rides an `x-startwrt-git-hash` header on every
   RPC response, so an open tab notices within seconds of its next request even
-  when the update restarted the daemon too quickly to drop a connection.
+  when the update restarted the daemon too quickly to drop a connection; pages
+  that make no requests while idle re-check every 30 seconds.
 
 ### Changed
 

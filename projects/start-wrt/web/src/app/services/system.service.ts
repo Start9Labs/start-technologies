@@ -35,6 +35,29 @@ export class SystemService {
   readonly updating = signal(false)
   readonly rebooting = signal(false)
 
+  constructor() {
+    // Detection floor for idle pages: stale-UI detection rides the
+    // x-startwrt-git-hash header on RPC responses, but non-FormService pages
+    // (e.g. Settings General) make no requests while idle, so a firmware
+    // deploy would go unnoticed until navigation. Skipped while hidden
+    // (background tabs throttle timers anyway), while the in-tab update flow
+    // owns polling (preserves its latch-then-reload-synchronously invariant,
+    // no dialog flash), and while the reconnect loop is already probing
+    // system.info every 3s.
+    setInterval(() => {
+      if (
+        document.visibilityState === 'hidden' ||
+        this.updating() ||
+        this.rebooting() ||
+        this.connection.unreachable()
+      ) {
+        return
+      }
+      // Silent: form pollers and user actions own unreachable reporting.
+      this.refresh().catch(() => {})
+    }, 30_000)
+  }
+
   async init(): Promise<void> {
     // Confirmation deferred across the post-update reload in pollForReconnect.
     const updatedTo = sessionStorage.getItem(UPDATED_TO_KEY)

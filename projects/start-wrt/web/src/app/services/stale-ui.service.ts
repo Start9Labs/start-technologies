@@ -54,7 +54,9 @@ export class StaleUiService {
    * is what lets ANY request an open tab makes (including the 5s background
    * form polls) detect a firmware deploy, not just the few flows that fetch
    * system.info. A quick daemon restart (CLI deploy) drops no request, so
-   * connection-loss recovery alone never sees it.
+   * connection-loss recovery alone never sees it. Pages that make no requests
+   * while idle (non-FormService routes like Settings General) are covered by
+   * SystemService's 30s system.info heartbeat.
    */
   checkHash(hash: string | null | undefined): void {
     if (this.differs(hash ?? undefined)) {
