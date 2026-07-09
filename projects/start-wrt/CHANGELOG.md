@@ -99,6 +99,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while Angular's content-hashed bundles are cached as `immutable`. Requests
   for assets from an older build now get a `404` instead of a mis-typed
   `index.html` fallback.
+- The "Updated to vX" confirmation shown after a firmware update is now
+  translated instead of always appearing in English.
 
 - **Documentation corrected against the code in a full docs-vs-code audit.** The
   user guide no longer misstates product behavior: backups _do_ preserve assigned

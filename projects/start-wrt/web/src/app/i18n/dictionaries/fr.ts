@@ -527,4 +527,5 @@ export default {
   545: 'Actualisation requise',
   546: "Le micrologiciel du routeur a été mis à jour, mais cette page exécute encore l'interface précédente. Rechargez la page pour obtenir la dernière version.",
   547: 'Recharger',
+  548: 'Mise à jour vers la v{version} effectuée',
 } satisfies i18n

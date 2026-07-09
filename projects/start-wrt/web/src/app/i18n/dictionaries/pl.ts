@@ -527,4 +527,5 @@ export default {
   545: 'Wymagane odświeżenie',
   546: 'Oprogramowanie routera zostało zaktualizowane, ale ta strona nadal używa poprzedniego interfejsu. Załaduj stronę ponownie, aby uzyskać najnowszą wersję.',
   547: 'Załaduj ponownie',
+  548: 'Zaktualizowano do v{version}',
 } satisfies i18n

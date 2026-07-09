@@ -527,4 +527,5 @@ export default {
   545: 'Actualización necesaria',
   546: 'El firmware del router se ha actualizado, pero esta página sigue ejecutando la interfaz anterior. Recarga la página para obtener la versión más reciente.',
   547: 'Recargar',
+  548: 'Actualizado a la v{version}',
 } satisfies i18n

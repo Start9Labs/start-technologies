@@ -527,4 +527,5 @@ export default {
   545: 'Aktualisierung erforderlich',
   546: 'Die Router-Firmware wurde aktualisiert, aber diese Seite verwendet noch die vorherige Oberfläche. Laden Sie die Seite neu, um die neueste Version zu erhalten.',
   547: 'Neu laden',
+  548: 'Auf v{version} aktualisiert',
 } satisfies i18n

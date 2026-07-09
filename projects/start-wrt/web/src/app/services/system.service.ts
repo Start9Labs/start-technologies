@@ -10,6 +10,7 @@ import { AuthService } from './auth.service'
 import { ConnectionService, isNetworkError } from './connection.service'
 import { StaleUiService } from './stale-ui.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
+import { fill } from 'src/app/i18n/validation-errors'
 
 // sessionStorage key carrying the "Updated to vX" confirmation across the
 // post-update reload (the reload discards the JS context that owns the toast).
@@ -40,7 +41,12 @@ export class SystemService {
     if (updatedTo) {
       sessionStorage.removeItem(UPDATED_TO_KEY)
       this.alerts
-        .open(`Updated to v${updatedTo}`, { appearance: 'positive' })
+        .open(
+          fill(this.i18n.transform('Updated to v{version}'), {
+            version: updatedTo,
+          }),
+          { appearance: 'positive' },
+        )
         .subscribe()
     }
 
@@ -178,9 +184,12 @@ export class SystemService {
           // Same-bundle update (e.g. a re-flash): confirm success, then send
           // the user to login rather than waiting for their next action to 401.
           this.alerts
-            .open(`Updated to v${this.targetVersion}`, {
-              appearance: 'positive',
-            })
+            .open(
+              fill(this.i18n.transform('Updated to v{version}'), {
+                version: this.targetVersion,
+              }),
+              { appearance: 'positive' },
+            )
             .subscribe()
           this.auth.setUnverified()
         } else {

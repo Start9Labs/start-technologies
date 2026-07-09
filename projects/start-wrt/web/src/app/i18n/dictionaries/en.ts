@@ -532,4 +532,5 @@ export const ENGLISH: Record<string, number> = {
   'Refresh Needed': 545,
   'The router firmware has been updated, but this page is still running the previous interface. Reload the page to get the latest version.': 546,
   'Reload': 547,
+  'Updated to v{version}': 548,
 }
