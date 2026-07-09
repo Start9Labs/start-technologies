@@ -21,36 +21,52 @@ function base(hash: string): string {
 }
 
 /**
- * Detects a stale cached UI bundle. The firmware reports its build stamp in
- * `system.info` (`gitHash`) and the web build bakes the identical stamp into
- * `config.json` (the GIT_HASH token) — build-rust.sh, ctrl's build.rs, and
- * check-git-hash.sh all emit the same format, so divergence means this tab is
- * running a bundle from a previous firmware. Where the divergence is observed
- * decides the UX: the in-tab update flow reloads outright (SystemService),
- * while passive observers only raise `stale` and StaleUiAlert prompts for a
- * reload — never forcing one out from under unsaved work.
+ * Detects a stale cached UI bundle. The firmware reports its build stamp on
+ * every RPC response (the `x-startwrt-git-hash` header) and in `system.info`
+ * (`gitHash`), and the web build bakes the identical stamp into `config.json`
+ * (the GIT_HASH token) — build-rust.sh, ctrl's build.rs, and check-git-hash.sh
+ * all emit the same format, so divergence means this tab is running a bundle
+ * from a previous firmware. Where the divergence is observed decides the UX:
+ * the in-tab update flow reloads outright (SystemService), while passive
+ * observers only raise `stale` and StaleUiAlert prompts for a reload — never
+ * forcing one out from under unsaved work.
  */
 @Injectable({ providedIn: 'root' })
 export class StaleUiService {
   private readonly bundleHash = inject(GIT_HASH)
 
   /**
-   * Latches true once any system.info response reports a different build than
-   * this bundle. Never resets — only a reload can un-stale the bundle.
+   * Latches true once any response reports a different build than this
+   * bundle. Never resets — only a reload can un-stale the bundle.
    */
   readonly stale = signal(false)
 
   isStale(info: SystemInfoRes): boolean {
-    return (
-      comparable(this.bundleHash) &&
-      comparable(info.gitHash) &&
-      base(this.bundleHash) !== base(info.gitHash)
-    )
+    return this.differs(info.gitHash)
   }
 
   check(info: SystemInfoRes): void {
-    if (this.isStale(info)) {
+    this.checkHash(info.gitHash)
+  }
+
+  /**
+   * Same comparison fed from the `x-startwrt-git-hash` response header — this
+   * is what lets ANY request an open tab makes (including the 5s background
+   * form polls) detect a firmware deploy, not just the few flows that fetch
+   * system.info. A quick daemon restart (CLI deploy) drops no request, so
+   * connection-loss recovery alone never sees it.
+   */
+  checkHash(hash: string | null | undefined): void {
+    if (this.differs(hash ?? undefined)) {
       this.stale.set(true)
     }
+  }
+
+  private differs(hash: string | undefined): boolean {
+    return (
+      comparable(this.bundleHash) &&
+      comparable(hash) &&
+      base(this.bundleHash) !== base(hash)
+    )
   }
 }

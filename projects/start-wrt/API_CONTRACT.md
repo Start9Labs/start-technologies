@@ -4,6 +4,8 @@ Complete RPC API contract for the StartWRT backend. All endpoints use **JSON-RPC
 
 **Goal:** The frontend should never touch UCI files, run shell commands, or read raw files. Every operation goes through a purpose-built RPC method. The backend handles all UCI manipulation, service restarts, and system queries internally.
 
+Every `/rpc/v1` response carries an `x-startwrt-git-hash` header with the firmware's build stamp (full git hash, `-modified` suffix on dirty builds — same value as `system.info`'s `gitHash`, exposed through CORS). The UI compares it against its baked-in `config.json` gitHash on every response, so an open tab detects a firmware update from its next request (including the periodic background form polls) even when the daemon restart was too quick to drop a connection.
+
 ---
 
 ## Shared Types

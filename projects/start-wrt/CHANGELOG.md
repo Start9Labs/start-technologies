@@ -10,12 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - The UI now detects when the running firmware ships a newer interface than
-  the page is displaying (`system.info` reports the firmware's build stamp and
-  the UI compares it to its own). An update installed from the current tab
-  reloads the page automatically once the router is back (the "Updated to
-  vX" confirmation follows after login); an update applied any other way — CLI
-  deploy, another device — shows a "Refresh Needed" dialog with a Reload
-  button rather than reloading out from under unsaved work.
+  the page is displaying (every RPC response and `system.info` report the
+  firmware's build stamp and the UI compares it to its own). An update
+  installed from the current tab reloads the page automatically once the
+  router is back (the "Updated to vX" confirmation follows after login); an
+  update applied any other way — CLI deploy, another device — shows a
+  "Refresh Needed" dialog with a Reload button rather than reloading out from
+  under unsaved work. Detection rides an `x-startwrt-git-hash` header on every
+  RPC response, so an open tab notices within seconds of its next request even
+  when the update restarted the daemon too quickly to drop a connection.
 
 ### Changed
 

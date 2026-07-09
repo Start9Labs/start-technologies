@@ -259,10 +259,13 @@ export class ConnectionService {
       return
     }
     try {
-      // The recovery probe doubles as stale-UI detection: a daemon restart
-      // (firmware update applied outside this tab) is exactly the disruption
-      // that lands here, and system.info is no_auth so the check works even
-      // when the update wiped the session.
+      // The recovery probe doubles as stale-UI detection for disruptive
+      // updates (a sysupgrade reboot lands here once a request fails), and
+      // system.info is no_auth so the check works even when the update wiped
+      // the session. It is only a fallback: primary detection is the
+      // x-startwrt-git-hash header HttpService checks on every RPC response —
+      // a quick daemon restart (CLI deploy) never drops a request, so this
+      // path alone would miss it.
       this.staleUi.check(await this.api.systemInfo(PROBE_TIMEOUT_MS))
     } catch (e) {
       // Still unreachable only on a network-level failure; any RPC/HTTP
