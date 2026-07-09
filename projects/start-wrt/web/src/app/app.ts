@@ -1,5 +1,6 @@
 import {
   Component,
+  computed,
   effect,
   ElementRef,
   inject,
@@ -148,16 +149,24 @@ export class App {
     const system = inject(SystemService)
     const i18n = inject(i18nService)
     system.init()
+    // Saved settings are the source of truth: apply theme and language
+    // globally when they load or change (boot + after Save). Keyed on the
+    // values, not the info object — a refresh that changes neither (e.g. the
+    // 30s stale-UI heartbeat) must not re-apply saved settings over an
+    // unsaved live preview on Settings → General.
+    const language = computed(() => system.info()?.language)
+    const theme = computed(() => system.info()?.theme)
     effect(() => {
-      const info = system.info()
-      if (!info) return
-      // Saved settings are the source of truth: apply theme and language
-      // globally whenever system info loads or changes (boot + after Save).
-      i18n.setLangLocal(info.language as Language)
-      if (info.theme === 'system') {
+      const lang = language()
+      if (lang) i18n.setLangLocal(lang as Language)
+    })
+    effect(() => {
+      const t = theme()
+      if (!t) return
+      if (t === 'system') {
         this.dark.reset()
       } else {
-        this.dark.set(info.theme === 'dark')
+        this.dark.set(t === 'dark')
       }
     })
   }
