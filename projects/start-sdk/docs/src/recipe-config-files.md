@@ -4,7 +4,7 @@ Most services read their configuration from files (YAML, TOML, INI, JSON, ENV). 
 
 ## Solution
 
-Define a `FileHelper` (`.json()`, `.yaml()`, `.toml()`, etc.) with a zod schema where every field has `.catch()` for self-healing defaults. Use `.merge()` to write (preserves unknown keys), `.read().const(effects)` for reactive reads that restart the daemon on change, and `.read().once()` for one-time reads. Seed defaults on install with `fileModel.merge(effects, {})` — the empty merge applies all `.catch()` defaults.
+Define a `FileHelper` (`.json()`, `.yaml()`, `.toml()`, etc.) with a zod schema where every field has `.catch()` for self-healing defaults. Use `.merge()` to write (preserves unknown keys), `.read().const(effects)` for reactive reads that restart the daemon on change, and `.read().once()` for one-time reads. Seed defaults on install with `fileModel.merge(effects, {})` — the empty merge fills every missing field from its `.catch()` default. It does not strip or regenerate what's already there; see [What an Empty merge() Does](file-models.md#what-an-empty-merge-does).
 
 **Reference:** [File Models](file-models.md) · [Main](main.md)
 

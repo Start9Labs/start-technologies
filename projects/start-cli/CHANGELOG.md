@@ -11,6 +11,33 @@ or the CLI's externally observable behavior.
 
 ## [Unreleased]
 
+## [1.0.2]
+
+### Changed
+
+- **`s9pk init-workspace` clones the whole monorepo, not just the guide.** The checkout is no
+  longer sparse or shallow, so a packager has the SDK and StartOS source on hand when the guide
+  can't settle a question — and a repo they can open a fix PR from. `--filter=blob:none` keeps it
+  cheap: a few seconds and roughly 75 MB, with `git log`, `blame`, and rebase all working normally.
+  An existing workspace keeps its narrow checkout. Widen it in place by running
+  `sparse-checkout disable` in `start-technologies/`, plus `fetch --unshallow` if you want history.
+- **`init-workspace` uses an existing `start-technologies` if you point at one.** Symlink it into
+  the workspace before running, and the clone is skipped.
+- **`s9pk init-workspace` links `AGENTS.md` to the guide's Agent Context page.** The workspace
+  context file moved to `projects/start-sdk/docs/src/agent-context.md`, so it publishes with the
+  rest of the packaging guide instead of being reachable only by scaffolding a workspace or
+  browsing the monorepo. A `start-technologies/` that is a symlink to a monorepo checkout you
+  maintain yourself is now a supported layout, and the guide says so.
+- **The scaffolded `AGENTS.local.md` explains what belongs in it.** The stub now names the split:
+  your box, your registry, your packages, and any departure from the scaffolded layout go there,
+  while anything that would help every packager belongs upstream in the guide.
+
+### Fixed
+
+- `init-workspace` repoints a workspace `AGENTS.md` left over from an earlier release. Those
+  symlinks target a path that no longer exists; re-running `init-workspace` in such a workspace
+  replaces the dangling link. Everything else it finds is still left untouched.
+
 ## [1.0.1]
 
 - **`s9pk init-package` initializes a git repository in the new package.** Packages are
@@ -76,5 +103,7 @@ init-workspace`), so an existing package repo is one command away from building.
 - `ws_continuation` honors `--root-ca` / `--insecure` (#3274).
 - `choose` falls back to a generic non-tty prompt instead of failing when stdin isn't a terminal (#3265).
 
-[Unreleased]: https://github.com/Start9Labs/start-technologies/compare/v0.4.0-beta.10...HEAD
-[0.4.0-beta.10]: https://github.com/Start9Labs/start-technologies/releases/tag/v0.4.0-beta.10
+[Unreleased]: https://github.com/Start9Labs/start-technologies/compare/start-cli/v1.0.2...HEAD
+[1.0.2]: https://github.com/Start9Labs/start-technologies/releases/tag/start-cli/v1.0.2
+[1.0.1]: https://github.com/Start9Labs/start-technologies/releases/tag/start-cli/v1.0.1
+[1.0.0]: https://github.com/Start9Labs/start-technologies/releases/tag/start-cli/v1.0.0

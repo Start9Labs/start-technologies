@@ -196,6 +196,23 @@ await storeJson.write(effects, {
 })
 ```
 
+### What an Empty `merge()` Does
+
+Every `merge()` — including `merge(effects, {})` — reads the file, parses it through your schema, deep-merges the patch over the parsed value, re-serializes, and writes only if the result differs from what was on disk. With an empty patch, against a file that already exists:
+
+| Existing content        | Result                                                                |
+| ----------------------- | --------------------------------------------------------------------- |
+| Key present and valid   | Untouched                                                             |
+| Key missing             | Filled from its `.catch()` default                                    |
+| Key present but invalid | **Replaced** by its `.catch()` default — this is the self-healing     |
+| Key outside the schema  | Preserved (see [Unknown Key Preservation](#unknown-key-preservation)) |
+| Comments, formatting    | **Not preserved** — the file is re-serialized from the parsed value   |
+
+So `merge(effects, {})` is safe to call on every init: it seeds a fresh file, repairs a corrupted one, and does nothing to a file that already round-trips cleanly. The parse is why [every key needs `.catch()`](#every-key-should-have-catch) — a value the schema can't repair makes `merge()` throw rather than heal.
+
+> [!WARNING]
+> An empty merge is **not** a way to clean, strip, or regenerate a config. It never removes a key you didn't name — pass the key explicitly as `undefined` for that. And because it re-serializes, the first empty merge against a hand-written or upstream-generated `.toml`/`.yaml` **discards its comments**.
+
 ### Exporting Defaults from File Models
 
 When a default value from the file model is also needed elsewhere (e.g., as a placeholder or default in an action's input spec), define the value as a constant in the file model, use it in the schema, and export it:
@@ -389,7 +406,10 @@ export const confFile = FileHelper.ini(
 
 ### Unknown Key Preservation
 
-The SDK patches `z.object()` to use loose mode by default — unknown keys in the parsed data are **preserved**, not stripped. This is intentional: upstream config files often contain keys your schema doesn't model (auto-generated secrets, internal state, plugin settings, etc.), and stripping them would break the service.
+The SDK patches `z.object()` to use loose mode by default — unknown keys in the parsed data are **preserved**, not stripped, at **every nesting level**. This is intentional: upstream config files often contain keys your schema doesn't model (auto-generated secrets, internal state, plugin settings, etc.), and stripping them would break the service.
+
+> [!IMPORTANT]
+> Import `z` from `@start9labs/start-sdk` and use `z.object`. **You never need `z.looseObject`.** Plain zod's `z.object` strips unknown keys, so a reader who knows zod reaches for `looseObject` to protect a two-way-bound config file — but the SDK's `z.object` already preserves them, deeply. `z.looseObject` is still exported and still compiles; it is not the convention.
 
 This has two important consequences:
 

@@ -39,20 +39,25 @@ registry:
 /// a package repo.
 const DOCS_URL: &str = "https://docs.start9.com/packaging/environment-setup.html";
 
-/// Default source for the packaging guide (which also carries the package
-/// template). The guide lives in the start-technologies monorepo; the clone is
-/// sparse (see GUIDE_SUBPATH) so packagers don't pull the whole repo. Re-point the
-/// `start-technologies` remote afterward to track a fork; the session-start sync
-/// follows whatever remote is configured.
+/// Default source for the packaging guide (which also carries the package template).
+/// The guide lives in the start-technologies monorepo, and the clone takes the whole
+/// tree: past the guide, packagers get the SDK and StartOS source to answer questions
+/// the guide can't, and a repo they can open a fix PR from. `--filter=blob:none` keeps
+/// it cheap (blobs fetch on demand) while leaving full history, so `log`/`blame`/rebase
+/// all work. Re-point the `start-technologies` remote afterward to track a fork; the
+/// session-start sync follows whatever remote is configured.
 const MONOREPO_URL: &str = "https://github.com/Start9Labs/start-technologies.git";
-/// Workspace-relative path to the sparse monorepo checkout that carries the guide.
+/// Workspace-relative path to the monorepo checkout that carries the guide.
 const MONOREPO_DIR: &str = "start-technologies";
-/// Monorepo subtree holding the packaging guide + package template; the clone is
-/// sparse-checked-out to just this path.
-const GUIDE_SUBPATH: &str = "projects/start-sdk/docs";
 /// Symlink target for the workspace `AGENTS.md` — the guide's canonical copy, so
-/// a sync keeps the workspace context current with no extra step.
-const AGENTS_SYMLINK_TARGET: &str = "start-technologies/projects/start-sdk/docs/AGENTS.md";
+/// a sync keeps the workspace context current with no extra step. It is also a page
+/// of the published guide, so packagers can read it without scaffolding a workspace.
+const AGENTS_SYMLINK_TARGET: &str =
+    "start-technologies/projects/start-sdk/docs/src/agent-context.md";
+/// Where the workspace `AGENTS.md` pointed before the context became a guide page. Nothing
+/// lives there now, so a workspace scaffolded by an older start-cli has a dangling link;
+/// a re-run repoints it.
+const LEGACY_AGENTS_SYMLINK_TARGET: &str = "start-technologies/projects/start-sdk/docs/AGENTS.md";
 /// Path to the package template inside the cloned guide (joined onto MONOREPO_DIR).
 const TEMPLATE_SUBPATH: &str = "projects/start-sdk/docs/package-template";
 
@@ -64,9 +69,21 @@ const CLAUDE_MD_CONTENTS: &str = "@AGENTS.md\n@AGENTS.local.md\n";
 const AGENTS_LOCAL_STUB: &str = r#"# AGENTS.local.md — your workspace preferences
 
 <!--
-Notes and preferences for AI assistants working in this workspace. This file is yours;
-syncing the guide never overwrites it. Put anything you want always in scope here — the
-registry you publish to, the packages you're focused on, local conventions, and so on.
+Notes and preferences for AI assistants working in this workspace. CLAUDE.md loads this file
+alongside AGENTS.md, and syncing the guide never overwrites it — so it is the right home for
+anything true of *your* setup rather than of packaging in general:
+
+  - the StartOS box you install to, and the registry you publish to
+  - the packages you maintain, and where they live
+  - conventions your team follows that the guide doesn't mandate
+  - any way your workspace departs from the scaffolded layout — for example, a
+    start-technologies/ symlinked to a monorepo checkout you maintain yourself
+
+Rule of thumb: if a note would help *every* packager, it does not belong here. Open a PR
+against start-technologies so it lands in the guide — otherwise it stays trapped in one
+workspace and drifts out of date.
+
+Delete this comment once you have something to say.
 -->
 "#;
 
@@ -122,39 +139,20 @@ pub async fn init_workspace(
     // `.startos/`, so a nested workspace transparently overrides an outer one — no need
     // to look at, or refuse, an enclosing workspace here.
 
-    // Provision the guide. Clone only when absent — refreshing is the session-start
-    // sync's job, not this command's, so an existing checkout is left untouched. A
-    // blobless, sparse, depth-1 clone fetches only GUIDE_SUBPATH, not the whole monorepo.
+    // Provision the guide. Clone only when absent — refreshing is the session-start sync's
+    // job, not this command's — so an existing checkout is left untouched. `exists()`
+    // follows symlinks, so pointing `start-technologies` at a checkout you already maintain
+    // skips the clone entirely.
     let docs = root.join(MONOREPO_DIR);
     if !docs.exists() {
         eprintln!("{}", t!("s9pk.init.cloning-guide"));
         Command::new("git")
             .arg("clone")
             .arg("--filter=blob:none")
-            .arg("--no-checkout")
-            .arg("--depth")
-            .arg("1")
             .arg("--branch")
             .arg("master")
             .arg(MONOREPO_URL)
             .arg(&docs)
-            .capture(false)
-            .invoke(ErrorKind::Git)
-            .await?;
-        Command::new("git")
-            .arg("-C")
-            .arg(&docs)
-            .arg("sparse-checkout")
-            .arg("set")
-            .arg("--no-cone")
-            .arg(GUIDE_SUBPATH)
-            .capture(false)
-            .invoke(ErrorKind::Git)
-            .await?;
-        Command::new("git")
-            .arg("-C")
-            .arg(&docs)
-            .arg("checkout")
             .capture(false)
             .invoke(ErrorKind::Git)
             .await?;
@@ -163,6 +161,14 @@ pub async fn init_workspace(
     // Symlink (not a copy) so a guide sync keeps the workspace AGENTS.md current.
     // symlink_metadata treats a broken link as present, so a re-run never clobbers.
     let agents = root.join("AGENTS.md");
+    if tokio::fs::read_link(&agents)
+        .await
+        .is_ok_and(|target| target == Path::new(LEGACY_AGENTS_SYMLINK_TARGET))
+    {
+        tokio::fs::remove_file(&agents)
+            .await
+            .with_ctx(|_| (ErrorKind::Filesystem, agents.display().to_string()))?;
+    }
     if tokio::fs::symlink_metadata(&agents).await.is_err() {
         tokio::fs::symlink(AGENTS_SYMLINK_TARGET, &agents)
             .await

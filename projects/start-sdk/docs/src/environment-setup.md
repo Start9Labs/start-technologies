@@ -143,7 +143,7 @@ curl -fsSL https://start9.com/start-cli/install.sh | sh
 
 ## Git
 
-[Git](https://git-scm.com/) is used by `start-cli s9pk init-workspace` to fetch the packaging guide, and to keep it up to date afterward.
+[Git](https://git-scm.com/) is used by `start-cli s9pk init-workspace` to fetch the Start9 monorepo — the packaging guide, and the SDK and OS source behind it — and to keep it up to date afterward.
 
 {{#tabs global="platform"}}
 
@@ -214,22 +214,39 @@ StartOS packaging is designed to be done with an AI coding agent. `start-cli` sc
 ### Create the workspace
 
 ```sh
-start-cli s9pk init-workspace my-workspace
-cd my-workspace
+start-cli s9pk init-workspace start9-workspace
+cd start9-workspace
 ```
 
-This clones the packaging guide into `start-technologies/` — a sparse, blobless checkout of just the `projects/start-sdk/docs/` subtree of the Start9 monorepo, not the whole repo — sets up the agent-context files (`AGENTS.md`, your own `AGENTS.local.md`, and a `CLAUDE.md` that loads both), and creates a `.startos/` directory that marks the workspace and holds your package-signing key and host/registry config:
+This clones the Start9 monorepo into `start-technologies/`, sets up the agent-context files (`AGENTS.md`, your own `AGENTS.local.md`, and a `CLAUDE.md` that loads both), and creates a `.startos/` directory that marks the workspace and holds your package-signing key and host/registry config:
 
 ```
-my-workspace/
+start9-workspace/
 ├── .startos/              ← workspace marker: build-key (signs your packages) + config.yaml (hosts, registries)
-├── AGENTS.md              ← agent context (symlink into start-technologies/projects/start-sdk/docs), read by AI assistants
+├── AGENTS.md              ← agent context (symlink to the guide's Agent Context page), read by AI assistants
 ├── AGENTS.local.md        ← your own notes, kept across guide updates
 ├── CLAUDE.md              ← loads AGENTS.md + AGENTS.local.md (Claude Code)
-└── start-technologies/    ← sparse monorepo checkout; the guide lives at projects/start-sdk/docs/
+└── start-technologies/    ← the monorepo: the guide, the SDK source, the OS source
 ```
 
-The context lives once, at the workspace root — it is never copied into your package repos. Open the workspace in your AI tool and it picks up `AGENTS.md` / `CLAUDE.md` automatically.
+You get the **whole** monorepo, not just the guide. That's deliberate: when the guide can't settle a question, the SDK source (`projects/start-sdk/lib`) and the StartOS source (`projects/start-os`, `shared-libs/`) are right there to read — and if you find a bug, you're already in a repo you can open a pull request from. The clone is `--filter=blob:none`, so file contents are fetched on demand: it lands in a few seconds and takes ~75 MB, while `git log`, `git blame`, and rebase all behave normally.
+
+The context lives once, at the workspace root — it is never copied into your package repos. Open the workspace in your AI tool and it picks up `AGENTS.md` / `CLAUDE.md` automatically. You can read exactly what it contains on the [Agent Context](./agent-context.md) page.
+
+### Already have the monorepo?
+
+If you already keep a `start-technologies` checkout — you work on StartOS itself, or you've cloned it for another reason — don't let the workspace clone a second copy. Point at the one you have **before** running `init-workspace`, and it will use it:
+
+```sh
+mkdir start9-workspace && cd start9-workspace
+ln -s /path/to/your/start-technologies start-technologies
+start-cli s9pk init-workspace .
+```
+
+`init-workspace` skips the clone whenever `start-technologies` already resolves to a directory, so the symlink is left alone and everything else is provisioned around it. The workspace `AGENTS.md` links through it, and `s9pk init-package` scaffolds from its package template, exactly as with a fresh clone.
+
+> [!IMPORTANT]
+> A symlinked checkout is **yours to maintain**. Skip the `git pull` in [Keep it current](#keep-it-current): that repo has its own branches and its own work in progress, and a blind pull would fast-forward whatever branch happens to be checked out rather than refresh the guide. Update it on your own schedule instead.
 
 ### Nested workspaces and config resolution
 

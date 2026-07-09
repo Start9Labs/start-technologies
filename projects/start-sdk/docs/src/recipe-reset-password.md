@@ -4,7 +4,7 @@ When users lose their admin password, they need a way to generate a new one. A r
 
 ## Solution
 
-Create an action with `sdk.Action.withoutInput()` that generates a new password using `utils.getDefaultString()`. Use `sdk.SubContainer.withTemp()` to spin up a temporary container, exec the app's password-reset command with `sub.execFail()`, then return the password as a masked, copyable result. For multi-user apps, use `sdk.Action.withInput()` with `Value.dynamicSelect` to query the running app for admin users and let the user choose which to reset.
+Create an action with `sdk.Action.withoutInput()` that generates a new password using `utils.getDefaultString({ charset, len })`. Use `sdk.SubContainer.withTemp()` to spin up a temporary container, exec the app's password-reset command with `sub.execFail()`, then return the password as a masked, copyable result. For multi-user apps, use `sdk.Action.withInput()` with `Value.dynamicSelect` to query the running app for admin users and let the user choose which to reset.
 
 **Reference:** [Actions](actions.md)
 

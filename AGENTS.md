@@ -6,7 +6,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the layout and [CONTRIBUTING.md](CONT
 
 **Keep these docs current.** Every scope carries `AGENTS.md` / `ARCHITECTURE.md` / `CONTRIBUTING.md` / `README.md` (with `CLAUDE.md` a one-line `@AGENTS.md` import). When a change alters structure, conventions, the build/test/release flow, or product context, update the matching doc(s) in the **same change** — never defer. These docs are **hierarchical**: each scope's docs cover only what is specific to it and must not repeat anything already stated at a higher scope (e.g. commit/PR conventions live only in this root `CONTRIBUTING.md`).
 
-**A product's user docs and changelog ship with the code.** Any change that alters user-visible behavior **must** update that product's user-facing documentation book (its `docs/` directory — e.g. `projects/start-os/docs/`, `projects/start-tunnel/docs/`, `projects/start-sdk/docs/`) in the **same change**, and **must** add a `CHANGELOG.md` entry for that product (a version bump always pairs with its changelog). Don't land code and defer its docs or changelog to a follow-up.
+**A product's user docs and changelog ship with the code.** Any change that alters user-visible behavior **must** update that product's user-facing documentation book (its `docs/` directory — e.g. `projects/start-os/docs/`, `projects/start-tunnel/docs/`, `projects/start-sdk/docs/`) in the **same change**, and **must** add a `CHANGELOG.md` entry for that product (a version bump always pairs with its changelog). Don't land code and defer its docs or changelog to a follow-up. The conventions for authoring **any** of those books — mdBook versions, admonitions, tabs, `SUMMARY.md`, the shared `theme/` — live in [`projects/start-docs/AGENTS.md`](projects/start-docs/AGENTS.md) and its `CONTRIBUTING.md`. That project is a sibling, not an ancestor, so nothing loads it for you: read it before editing book pages anywhere in the repo.
 
 **Read [CONTRIBUTING.md](CONTRIBUTING.md) before making _any_ code changes.** It carries the build/test/format workflow and the commit/PR conventions every change must follow — read it first, before you touch code. This is hierarchical like `AGENTS.md`: if a subdirectory you touch carries its own `CONTRIBUTING.md`, read that one too — and any further nested `CONTRIBUTING.md` on the way down to the files you're editing — before changing anything there.
 
@@ -72,8 +72,8 @@ Already enforced or checked elsewhere (listed here for completeness; documented 
 - [`projects/start-registry/AGENTS.md`](projects/start-registry/AGENTS.md) — registry server wrapper
 - [`projects/start-tunnel/AGENTS.md`](projects/start-tunnel/AGENTS.md) — tunnel server + UI
 - [`projects/start-wrt/AGENTS.md`](projects/start-wrt/AGENTS.md) — OpenWrt-based router OS (Rust backend + Angular UI in the root workspace + pinned-upstream OpenWrt image build)
-- [`projects/start-sdk/AGENTS.md`](projects/start-sdk/AGENTS.md) — TypeScript service-packaging SDK (packaging mdbook: [`docs/AGENTS.md`](projects/start-sdk/docs/AGENTS.md))
+- [`projects/start-sdk/AGENTS.md`](projects/start-sdk/AGENTS.md) — TypeScript service-packaging SDK, plus the packaging mdbook in `docs/`
 - [`projects/brochure-marketplace/AGENTS.md`](projects/brochure-marketplace/AGENTS.md) — public marketplace site
-- [`projects/start-docs/AGENTS.md`](projects/start-docs/AGENTS.md) — documentation website
+- [`projects/start-docs/AGENTS.md`](projects/start-docs/AGENTS.md) — documentation website; also the authoring conventions for every product book
 - [`shared-libs/AGENTS.md`](shared-libs/AGENTS.md) — shared libs container: [`crates/start-core`](shared-libs/crates/start-core/AGENTS.md) (Rust backend), [`web`](shared-libs/ts-modules/AGENTS.md) (Angular workspace + UI/setup-wizard/shared libs)
 - `shared-libs/crates/patch-db/` — first-party crate (maintained in-tree; the standalone `Start9Labs/patch-db` repo is being retired)

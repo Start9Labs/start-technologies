@@ -18,7 +18,7 @@ start-cli s9pk init-package "Hello World"
 Your workspace now looks like:
 
 ```
-my-workspace/
+start9-workspace/
 ├── .startos/
 ├── AGENTS.md
 ├── AGENTS.local.md

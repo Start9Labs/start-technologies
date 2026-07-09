@@ -10,7 +10,7 @@ The TypeScript SDK (`@start9labs/start-sdk`) for building StartOS service packag
 - `dist/` — build output (generated; what publishes to npm). It bundles `@start9labs/start-core` (via npm `bundleDependencies`) so it stays self-contained. **Container-runtime consumes the built `dist/`, not the source.**
 - `Makefile` — build orchestration for the SDK itself.
 - `s9pk.mk`, `tsconfig.base.json` — build plumbing shipped _inside_ the published package for service packages to `include`/`extends`. Marked DO NOT EDIT in the consuming-package contract; edits here change the contract for every package.
-- `docs/` — the "Service Packaging" mdbook (`book.toml`), published at docs.start9.com/packaging. Has its own `docs/AGENTS.md`.
+- `docs/` — the "Service Packaging" mdbook (`book.toml`), published at docs.start9.com/packaging. Also carries `package-template/` and the workspace agent context. See [Docs](#the-docs-mdbook).
 - `CHANGELOG.md` — Keep a Changelog style, headings `## <sdk-version> — StartOS <os-version> (<date>)`.
 
 ## Build & test (run from `projects/start-sdk/`)
@@ -41,3 +41,12 @@ Tests are jest + ts-jest, Node only (no browser). Test files use `.test.ts`. The
 ## Docs
 
 `README.md` (overview + quickstart), `ARCHITECTURE.md` (modules + data flow), `CONTRIBUTING.md` (build/test/contribute), `CHANGELOG.md`, this file. The packaging mdbook in `docs/` is the developer-facing reference — update it when you change the SDK's developer surface. Keep all of these current in the same change that alters structure, conventions, build, or surface.
+
+### The `docs/` mdbook
+
+Authoring conventions shared by every book in the monorepo — mdBook/mdbook-tabs versions, admonitions, tabs, `SUMMARY.md`, the shared `theme/` symlink, cross-book links — live in [`projects/start-docs/AGENTS.md`](../start-docs/AGENTS.md) and its `CONTRIBUTING.md`. Read those before editing pages. What is specific to _this_ book:
+
+- **`docs/src/agent-context.md` ships to every packager.** `start-cli s9pk init-workspace` symlinks it in as each workspace's `AGENTS.md` (the `AGENTS_SYMLINK_TARGET` const in [`shared-libs/crates/start-core/src/s9pk/init.rs`](../../shared-libs/crates/start-core/src/s9pk/init.rs)), so an edit reaches every workspace on its next guide sync. It is an always-on context file first and a book page second: keep it a lean map that points at pages, never a place to inline detail. **Moving or renaming it breaks every existing workspace symlink** — update the const in the same change.
+- **`docs/package-template/` is live code, not an illustration.** `s9pk init-package` copies it verbatim, interpolating `{{id}}` and `{{name}}` (escaped for TypeScript string literals in `.ts` files) and skipping `node_modules/`, `.git/`, and `javascript/`. Keep it buildable; a broken template breaks every new package. Its `.github/workflows/` are a hand-maintained mirror — see the repo-root `AGENTS.md` § Coupled changes.
+- **Recipes name constructs; reference pages teach them.** Code examples belong on reference pages. A new `recipe-*.md` needs an entry in the intent table in `docs/src/recipes.md`, not just in `SUMMARY.md`.
+- **Verify SDK claims against `lib/`, not against the prose.** This guide has shipped confidently-worded semantics that were wrong. Before documenting what a call does, read it.

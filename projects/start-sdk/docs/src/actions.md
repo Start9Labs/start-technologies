@@ -128,7 +128,7 @@ Actions can be surfaced to users as tasks — notifications that prompt them to 
 
 ### Auto-Generate Passwords
 
-The standard shape for password actions: the handler generates the password with `utils.getDefaultString()`, writes it where the service reads it from, and returns it as a masked, copyable result. Server-side generation produces strong passwords and means the same action covers first-set and rotation. The primary example above (`setAdminPassword`) is the canonical shape — see also the [Reset a Password](./recipe-reset-password.md) recipe for variants that apply the new password through the upstream service's CLI or API.
+The standard shape for password actions: the handler generates the password with `utils.getDefaultString({ charset, len })`, writes it where the service reads it from, and returns it as a masked, copyable result. Server-side generation produces strong passwords and means the same action covers first-set and rotation. The primary example above (`setAdminPassword`) is the canonical shape — see also the [Reset a Password](./recipe-reset-password.md) recipe for variants that apply the new password through the upstream service's CLI or API.
 
 ### Registration-Gated Services
 
@@ -221,6 +221,25 @@ export const configure = sdk.Action.withInput(
 
 The five arguments to `withInput` are: action ID, metadata (static object or async function), input spec, prefill function, and handler.
 
+### Generating Values in a Form
+
+When a form field holds a secret, don't generate it in package code. `Value.text` accepts a `RandomString` spec — `{ charset, len }` — in two places, and StartOS does the generating:
+
+```typescript
+password: Value.text({
+  name: i18n('Password'),
+  description: i18n('Leave as generated, or choose your own'),
+  required: true,
+  masked: true,
+  // Pre-fill the field with a fresh random value each time the form opens
+  default: { charset: 'a-z,A-Z,0-9', len: 32 },
+  // …and/or render a "generate" button that refills it on demand
+  generate: { charset: 'a-z,A-Z,0-9', len: 32 },
+}),
+```
+
+`default` also takes a plain string when you want a fixed literal. The same `RandomString` shape is what [`utils.getDefaultString`](recipe-admin-credentials.md#never-roll-your-own-password-rng) resolves in a `withoutInput` handler — between the two, package code never needs its own random-string generator.
+
 ## Conventions
 
 ### Wrap User-Facing Strings in `i18n()`
@@ -228,6 +247,20 @@ The five arguments to `withInput` are: action ID, metadata (static object or asy
 Every string that a user will see — action `name`, `description`, `warning`, `reason` on tasks, messages on health checks and action results — must be wrapped in `i18n()`. Raw strings bypass translation and leak English into non-English locales. The existing examples on this page illustrate the pattern: `name: i18n('Configure SMTP')`, not `name: 'Configure SMTP'`.
 
 Thrown errors are the exception. `throw new Error(...)` messages are developer-facing diagnostics that surface in logs and stack traces, not translated UI copy — leave them as plain strings and do **not** wrap them in `i18n()`.
+
+### Don't `as const` What the SDK Already Types
+
+Action metadata and results are contextually typed by the SDK's own signatures — `version: '1'` is declared as the literal `'1'`, and `visibility`, `allowedStatuses`, `access`, and `type` are unions, not `string`. Write the literal and stop:
+
+```typescript
+// GOOD — the SDK narrows these for you
+return { version: '1', title: i18n('Login Credentials'), ... }
+
+// NOISE — asserts something the compiler already knows
+return { version: '1' as const, ... }
+```
+
+`tsc` passes either way, which is why the assertions spread by copy-paste. They aren't load-bearing anywhere in an action file; drop them when you see them. (Distinct from an `as` **cast**, which claims the compiler is wrong — reach for that only when it actually is.)
 
 ### Mirror File-Model Keys in InputSpec When Appropriate
 

@@ -4,7 +4,21 @@ Most services need admin credentials before the user can sign in. The standard p
 
 ## Solution
 
-In `setupOnInit`, read the file model where the admin password lives. When it is unset, call `sdk.action.createOwnTask()` with severity `'critical'` pointing to the `setAdminPassword` action. The action is `sdk.Action.withoutInput`, `visibility: 'enabled'` so users can reach it for rotation, and its handler calls `utils.getDefaultString()`, writes the result to the store, and returns it as a group result (username unmasked + copyable, password masked + copyable).
+In `setupOnInit`, read the file model where the admin password lives. When it is unset, call `sdk.action.createOwnTask()` with severity `'critical'` pointing to the `setAdminPassword` action. The action is `sdk.Action.withoutInput`, `visibility: 'enabled'` so users can reach it for rotation, and its handler generates the password, writes it to the store, and returns it as a group result (username unmasked + copyable, password masked + copyable).
+
+## Never roll your own password RNG
+
+The random string comes from the SDK, always. It is not a top-level export — it lives under the `utils` namespace, and it takes a spec:
+
+```typescript
+import { utils } from '@start9labs/start-sdk'
+
+const adminPassword = utils.getDefaultString({ charset: 'a-z,A-Z,0-9', len: 32 })
+```
+
+`getDefaultString()` with no argument **throws** — it resolves a `DefaultString`, which is either a literal string or a `RandomString` spec (`{ charset, len }`). If you find yourself reaching for `crypto.randomInt` and a hand-written alphabet, you are looking at the wrong name: it is `utils.getDefaultString`, not `getRandomString`.
+
+When the credential is a field on an action **form** rather than something the handler mints, don't generate it in package code at all — hand the spec to the OS. `Value.text` takes a `RandomString` on `default` (pre-filled) or on `generate` (adds a "generate" button); see [Actions](actions.md#generating-values-in-a-form).
 
 The shape gives you:
 

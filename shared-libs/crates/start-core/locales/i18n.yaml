@@ -142,11 +142,11 @@ bins.tunnel.error-updating-webserver-bind:
 
 # s9pk/init.rs
 s9pk.init.cloning-guide:
-  en_US: "Cloning the packaging guide…"
-  de_DE: "Paketierungsleitfaden wird geklont…"
-  es_ES: "Clonando la guía de empaquetado…"
-  fr_FR: "Clonage du guide d'empaquetage…"
-  pl_PL: "Klonowanie przewodnika pakowania…"
+  en_US: "Cloning the Start9 monorepo (packaging guide, SDK and OS source)…"
+  de_DE: "Start9-Monorepo wird geklont (Paketierungsleitfaden, SDK- und OS-Quellcode)…"
+  es_ES: "Clonando el monorepo de Start9 (guía de empaquetado, código fuente del SDK y del SO)…"
+  fr_FR: "Clonage du monorepo Start9 (guide d'empaquetage, sources du SDK et de l'OS)…"
+  pl_PL: "Klonowanie monorepo Start9 (przewodnik pakowania, kod źródłowy SDK i OS)…"
 
 s9pk.init.installing-deps:
   en_US: "Installing dependencies (npm install)…"

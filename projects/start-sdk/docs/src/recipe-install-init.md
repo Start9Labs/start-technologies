@@ -4,7 +4,7 @@ Fresh installs often need one-time bootstrapping — generating passwords, seedi
 
 ## Solution
 
-In `setupOnInit`, check `kind === 'install'` and run one-time setup: generate passwords with `utils.getDefaultString()`, seed config file defaults with `fileModel.merge(effects, {})` (empty merge applies all `.catch()` defaults), and create tasks for user actions. For setup that should run on both install and restore but not container rebuild, check `kind !== null`. The four init kinds are `'install'`, `'update'`, `'restore'`, and `null`.
+In `setupOnInit`, check `kind === 'install'` and run one-time setup: generate passwords with `utils.getDefaultString({ charset, len })`, seed config file defaults with `fileModel.merge(effects, {})` (an empty merge fills every missing field from its `.catch()` default), and create tasks for user actions. For setup that should run on both install and restore but not container rebuild, check `kind !== null`. The four init kinds are `'install'`, `'update'`, `'restore'`, and `null`.
 
 **Reference:** [Initialization](init.md) · [File Models](file-models.md)
 

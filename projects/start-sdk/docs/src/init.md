@@ -431,4 +431,4 @@ export const seedFiles = sdk.setupOnInit(async effects => {
 Reach for the `kind` check only when the body needs to behave differently between install / update / restore / rebuild.
 
 > [!NOTE]
-> Always use `merge()` (not `write()`) to seed file models, even on first install. With every key in your zod schema carrying a `.catch()`, `merge(effects, {})` is enough to create the file and populate every default. See [File Models — Prefer merge() Over write()](./file-models.md#prefer-merge-over-write).
+> Always use `merge()` (not `write()`) to seed file models, even on first install. With every key in your zod schema carrying a `.catch()`, `merge(effects, {})` is enough to create the file and fill in every missing default. See [File Models — Prefer merge() Over write()](./file-models.md#prefer-merge-over-write) and [What an Empty merge() Does](./file-models.md#what-an-empty-merge-does).

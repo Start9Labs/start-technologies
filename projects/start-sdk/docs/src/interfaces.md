@@ -2,6 +2,18 @@
 
 `setupInterfaces()` defines the network interfaces your service exposes and how they are made available to the user. This function runs on service install, update, and config save.
 
+## Network Reachability
+
+Your package declares _what_ it exposes. The **user** decides _where_ it is reachable. An interface is bound to the server's [gateways](/start-os/gateways.html), and the user enables or disables each resulting address individually from the service's **Interfaces** tab. LAN addresses (the `.local` hostname, the LAN IP) are enabled by default; public IPv4 addresses are **off** by default.
+
+Two consequences worth internalizing before you write any interface code:
+
+- **`type` is a label, not a control.** `'ui'`, `'api'`, and `'p2p'` tell the user what an interface is _for_. They do not select a transport, grant public access, or imply anything about how the interface is reached.
+- **Tor is opt-in and per-interface.** Tor is not part of StartOS. The user installs the **Tor** service from the marketplace, and then explicitly adds an onion address to each interface they want on Tor — see [Tor](/start-os/tor.html). Nothing your package does provisions one.
+
+> [!WARNING]
+> Never state — in `README.md`, `instructions.md`, a comment, or a plan — that a service "is exposed on Tor" or "is published to the internet." Your package cannot know: no binding type, and no value of `type`, causes an onion or a clearnet address to exist. Describe what the interface serves and let the user decide how to reach it.
+
 ## Single Interface
 
 For a service with one web interface:
