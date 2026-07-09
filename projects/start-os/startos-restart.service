@@ -2,8 +2,18 @@
 Description=StartOS graceful restart
 # Reboot/kexec counterpart of startos-shutdown.service (see its comment).
 DefaultDependencies=no
-After=startd.service
-Before=reboot.target kexec.target
+# Conflicts= selects reboot (not poweroff). The ExecStop graceful teardown
+# (start-cli server restart -> startd shutdown_all -> per-container Exit RPC +
+# lxc-stop) must run while startd and the containers are still up, exactly like a
+# manual `start-cli server restart`. A unit ordered After=X is stopped *before* X
+# on shutdown, so these two hold until the teardown has finished:
+#   startd.service                     - startd must be alive to service the RPC
+#   lxc.service / lxc-monitord.service  - lxc.service's ExecStop is `lxc-containers
+#                                        stop`; unordered, it kills the container
+#                                        before the Exit RPC ("ungracefully dropped")
+# Ordering only; Conflicts= stays the sole reboot-vs-poweroff selector.
+After=startd.service lxc.service lxc-monitord.service
+Before=shutdown.target reboot.target kexec.target
 Conflicts=reboot.target kexec.target
 
 [Service]

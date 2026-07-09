@@ -1,12 +1,18 @@
 [Unit]
 Description=StartOS graceful shutdown
-# DefaultDependencies=no ties this unit to poweroff/halt specifically rather
-# than the generic shutdown.target, so it (and its ExecStop) fire only on a
-# power-off, not on a reboot. After=startd.service makes it stop before startd,
-# so startd is still up to run the graceful teardown its ExecStop requests.
+# Poweroff/halt counterpart of startos-restart.service. Conflicts=poweroff/halt
+# selects power-off (not reboot). The ExecStop graceful teardown must run while
+# startd and the containers are still up, like a manual `start-cli server
+# shutdown`. A unit ordered After=X is stopped *before* X on shutdown, so these
+# two hold until the teardown has finished:
+#   startd.service                     - startd must be alive to service the RPC
+#   lxc.service / lxc-monitord.service  - lxc.service's ExecStop is `lxc-containers
+#                                        stop`; unordered, it kills the container
+#                                        before the Exit RPC ("ungracefully dropped")
+# Ordering only; Conflicts= stays the sole selector.
 DefaultDependencies=no
-After=startd.service
-Before=poweroff.target halt.target
+After=startd.service lxc.service lxc-monitord.service
+Before=shutdown.target poweroff.target halt.target
 Conflicts=poweroff.target halt.target
 
 [Service]
@@ -14,8 +20,8 @@ Type=oneshot
 RemainAfterExit=yes
 ExecStart=/bin/true
 # start-cli waits for graceful teardown by default; authenticates locally via
-# /run/startos/rpc.authcookie. startd then re-issues the matching poweroff,
-# which is idempotent since systemd is already powering off.
+# /run/startos/rpc.authcookie. startd's Shutdown::execute detects that systemd is
+# already stopping and leaves the final poweroff to systemd (see shutdown.rs).
 ExecStop=/usr/bin/start-cli server shutdown
 TimeoutStopSec=120
 
