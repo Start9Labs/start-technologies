@@ -97,16 +97,24 @@ static DIVERT_INFRA: OnceCell<()> = OnceCell::const_new();
 /// concurrent callers from racing the check-then-add commands (EEXIST).
 pub async fn ensure_divert_infra_once() -> Result<(), Error> {
     DIVERT_INFRA
-        .get_or_try_init(|| async { ensure_divert_infra().await })
+        .get_or_try_init(|| async { ensure_divert_infra().await.map(|_| ()) })
         .await
         .map(|_| ())
 }
 
+/// Serializes [`ensure_divert_infra`]'s check-then-add sequences: concurrent
+/// callers (listener startup vs the periodic re-assert) would otherwise race
+/// into EEXIST.
+static DIVERT_ASSERT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Install the reply-path divert (idempotent): the iproute2 half (rule + table)
 /// always, plus the nft `sni-divert` mark rule when absent — so hosts that run the
 /// SNI demux but not the gateway mangle reconcile (e.g. the tunnel) still mark and
-/// divert replies. Safe to call repeatedly.
-pub async fn ensure_divert_infra() -> Result<(), Error> {
+/// divert replies. Safe to call repeatedly; returns whether a missing piece had
+/// to be (re-)added, so periodic callers can surface external flushes.
+pub async fn ensure_divert_infra() -> Result<bool, Error> {
+    let _guard = DIVERT_ASSERT.lock().await;
+    let mut repaired = false;
     let table = DIVERT_TABLE.to_string();
 
     // Local-delivery default in the divert table: marked replies are delivered
@@ -146,6 +154,7 @@ pub async fn ensure_divert_infra() -> Result<(), Error> {
             ])
             .invoke(ErrorKind::Network)
             .await?;
+        repaired = true;
     }
 
     // nft `sni-divert` mark rule. The gateway reconcile owns (and re-adds) it on
@@ -179,10 +188,11 @@ pub async fn ensure_divert_infra() -> Result<(), Error> {
             ])
             .invoke(ErrorKind::Network)
             .await?;
+        repaired = true;
     }
 
     // rp_filter needs no loosening: a diverted reply's source is the backend,
     // routable via its own ingress interface, so even strict RPF (1) accepts it
     // (verified in a netns harness under both strict and loose).
-    Ok(())
+    Ok(repaired)
 }

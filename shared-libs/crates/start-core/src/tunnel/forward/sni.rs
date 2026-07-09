@@ -96,10 +96,34 @@ impl SniDemux {
         });
         let weak = Arc::downgrade(&this);
         tokio::spawn(async move {
+            let mut divert_ok = true;
             loop {
                 tokio::time::sleep(Duration::from_secs(30)).await;
                 let Some(this) = weak.upgrade() else { break };
                 this.prune();
+                // Re-assert the reply-path divert while any listener is active:
+                // heals external flushes (networkd restart, nft flush) that
+                // would otherwise silently hang all demuxed traffic.
+                if this.listeners.peek(|l| !l.is_empty()) {
+                    match crate::net::transparent::ensure_divert_infra().await {
+                        Ok(repaired) => {
+                            if repaired {
+                                tracing::warn!(
+                                    "SNI demux reply-path divert infra was missing; re-installed"
+                                );
+                            } else if !divert_ok {
+                                tracing::info!("SNI demux reply-path divert re-assert recovered");
+                            }
+                            divert_ok = true;
+                        }
+                        Err(e) => {
+                            if divert_ok {
+                                tracing::warn!("SNI demux reply-path divert re-assert failed: {e}");
+                            }
+                            divert_ok = false;
+                        }
+                    }
+                }
             }
         });
         this
