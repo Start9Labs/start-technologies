@@ -91,13 +91,15 @@ pub async fn transparent_connect(
 
 static DIVERT_INFRA: OnceCell<()> = OnceCell::const_new();
 
-/// [`ensure_divert_infra`] run at most once per process (cached only on success,
-/// so a transient failure is retried on the next call). Cheap to call per
-/// connection from the local passthrough path.
-pub async fn ensure_divert_infra_once() {
-    let _ = DIVERT_INFRA
+/// [`ensure_divert_infra`] serialized and run at most once per process (cached
+/// only on success, so a transient failure is retried on the next call). Cheap
+/// to call per connection from the local passthrough path. Serialization keeps
+/// concurrent callers from racing the check-then-add commands (EEXIST).
+pub async fn ensure_divert_infra_once() -> Result<(), Error> {
+    DIVERT_INFRA
         .get_or_try_init(|| async { ensure_divert_infra().await })
-        .await;
+        .await
+        .map(|_| ())
 }
 
 /// Install the reply-path divert (idempotent): the iproute2 half (rule + table)

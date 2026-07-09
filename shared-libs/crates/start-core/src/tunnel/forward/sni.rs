@@ -216,7 +216,7 @@ impl SniDemux {
 }
 
 async fn run_listener(key: PortKey, ports: Arc<SyncMutex<BTreeMap<PortKey, PortBindings>>>) {
-    if let Err(e) = crate::net::transparent::ensure_divert_infra().await {
+    if let Err(e) = crate::net::transparent::ensure_divert_infra_once().await {
         tracing::warn!(
             "SNI demux reply-path divert setup failed (source preservation may be degraded): {e}"
         );

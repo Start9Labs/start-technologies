@@ -845,7 +845,9 @@ where
             // peer (RFC §4.6). Non-passthrough/terminating targets keep the plain
             // connect — they don't preserve source IP.
             (true, Some(SocketAddr::V4(client)), SocketAddr::V4(target)) => {
-                crate::net::transparent::ensure_divert_infra_once().await;
+                crate::net::transparent::ensure_divert_infra_once()
+                    .await
+                    .log_err();
                 crate::net::transparent::transparent_connect(client, target)
                     .await
                     .with_ctx(|_| (ErrorKind::Network, self.addr))
