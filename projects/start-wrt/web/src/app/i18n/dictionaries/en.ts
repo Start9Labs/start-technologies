@@ -529,4 +529,7 @@ export const ENGLISH: Record<string, number> = {
   'IPv6 cannot be reserved — the rule follows the current IPv6 address of the device': 531,
   'Chosen by the device — IPv6 addresses cannot be reserved': 532,
   'Cannot disable: published port rules use device IPv6 addresses': 533,
+  'Refresh Needed': 545,
+  'The router firmware has been updated, but this page is still running the previous interface. Reload the page to get the latest version.': 546,
+  'Reload': 547,
 }

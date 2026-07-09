@@ -1,5 +1,6 @@
-import { Injectable } from '@angular/core'
+import { inject, Injectable } from '@angular/core'
 import { pauseFor } from '@start9labs/shared'
+import { GIT_HASH } from 'src/app/utils/workspace-config'
 import {
   ApiService,
   ExecReq,
@@ -237,6 +238,8 @@ export class MockApiService extends ApiService {
 
   private mockSystemInfo: SystemInfoRes = {
     version: '1.0.0',
+    // Echo the bundle's own stamp so mock mode never trips stale-UI detection.
+    gitHash: inject(GIT_HASH),
     language: 'en_US',
     date: new Date().toISOString(),
     theme: 'system',

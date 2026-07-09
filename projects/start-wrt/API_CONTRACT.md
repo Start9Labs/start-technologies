@@ -167,6 +167,9 @@ No auth required.
 #[serde(rename_all = "camelCase")]
 struct SystemInfoResponse {
     version: String,
+    git_hash: String,  // firmware build stamp (full git hash, "-modified" suffix on dirty builds);
+                       // the UI compares this against its baked-in config.json gitHash to detect
+                       // a stale cached bundle and prompt/perform a reload
     language: String,
     date: String,  // ISO 8601
     theme: Theme,

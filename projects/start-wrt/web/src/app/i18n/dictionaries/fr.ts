@@ -524,4 +524,7 @@ export default {
   531: 'IPv6 ne peut pas être réservée — la règle suit l’adresse IPv6 actuelle de l’appareil',
   532: 'Choisie par l’appareil — les adresses IPv6 ne peuvent pas être réservées',
   533: 'Désactivation impossible : des règles de ports publiés utilisent des adresses IPv6 d’appareils',
+  545: 'Actualisation requise',
+  546: "Le micrologiciel du routeur a été mis à jour, mais cette page exécute encore l'interface précédente. Rechargez la page pour obtenir la dernière version.",
+  547: 'Recharger',
 } satisfies i18n

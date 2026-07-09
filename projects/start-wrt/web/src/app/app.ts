@@ -14,6 +14,7 @@ import { TuiNavigation } from '@taiga-ui/layout'
 import { Aside } from 'src/app/components/aside'
 import { Header } from 'src/app/components/header'
 import { Nav } from 'src/app/components/nav'
+import { StaleUiAlert } from 'src/app/components/stale-ui-alert'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { i18nService } from 'src/app/i18n/i18n.service'
 import { SystemService } from 'src/app/services/system.service'
@@ -47,6 +48,7 @@ import { Language } from 'src/app/utils/languages'
       <tui-scrollbar><router-outlet /></tui-scrollbar>
     </main>
     <aside appAside inert></aside>
+    <stale-ui-alert />
   `,
   styles: `
     :host {
@@ -126,6 +128,7 @@ import { Language } from 'src/app/utils/languages'
     Nav,
     Aside,
     RouterOutlet,
+    StaleUiAlert,
     TuiScrollbar,
     TuiNavigation,
     i18nPipe,

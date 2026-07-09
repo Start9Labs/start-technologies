@@ -524,4 +524,7 @@ export default {
   531: 'IPv6 kann nicht reserviert werden — die Regel folgt der aktuellen IPv6-Adresse des Geräts',
   532: 'Vom Gerät gewählt — IPv6-Adressen können nicht reserviert werden',
   533: 'Deaktivieren nicht möglich: Veröffentlichte Port-Regeln verwenden IPv6-Adressen von Geräten',
+  545: 'Aktualisierung erforderlich',
+  546: 'Die Router-Firmware wurde aktualisiert, aber diese Seite verwendet noch die vorherige Oberfläche. Laden Sie die Seite neu, um die neueste Version zu erhalten.',
+  547: 'Neu laden',
 } satisfies i18n

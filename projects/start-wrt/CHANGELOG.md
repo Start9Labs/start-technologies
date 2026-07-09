@@ -5,7 +5,25 @@ All notable changes to StartWRT are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.2]
+## [1.1.0]
+
+### Added
+
+- The UI now detects when the running firmware ships a newer interface than
+  the page is displaying (`system.info` reports the firmware's build stamp and
+  the UI compares it to its own). An update installed from the current tab
+  reloads the page automatically once the router is back (the "Updated to
+  vX" confirmation follows after login); an update applied any other way — CLI
+  deploy, another device — shows a "Refresh Needed" dialog with a Reload
+  button rather than reloading out from under unsaved work.
+
+### Changed
+
+- The firmware build stamp is now identical everywhere it appears: the
+  `startwrt` binary (UI `ETag`, `system.info`, `startwrt verify`) now carries
+  the same full-hash `-modified`-suffixed stamp the Settings → General
+  **Build** field bakes in via `config.json`, instead of a separate
+  short-hash `-dirty` stamp.
 
 ### Removed
 
@@ -72,6 +90,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   privacy address that expired within days. The **Endpoints** column shows
   that same stable address, so the endpoint you copy always matches the rule.
 
+- Browsers could keep serving a stale, cached copy of the web UI after a
+  firmware update — the router previously sent no cache headers, leaving cache
+  behavior to per-browser heuristics (Firefox/Safari could silently run an old
+  UI against the new backend). The embedded UI is now served with explicit
+  headers: stable-named files (`index.html`, `assets/`) revalidate on every
+  load against a per-build `ETag` (a cheap `304 Not Modified` when unchanged),
+  while Angular's content-hashed bundles are cached as `immutable`. Requests
+  for assets from an older build now get a `404` instead of a mis-typed
+  `index.html` fallback.
+
 - **Documentation corrected against the code in a full docs-vs-code audit.** The
   user guide no longer misstates product behavior: backups _do_ preserve assigned
   device names and data-usage history; a Fresh Start reflash sets a new admin
@@ -128,18 +156,6 @@ port, WiFi password, or inbound VPN), with inbound/outbound WireGuard VPNs and
 VPN chaining, WiFi schedules, dynamic DNS, and published-port forwarding.
 Ships as a flashable image for the SpaceMiT K1 (BananaPi-F3), with OTA updates
 delivered through the Start9 registry.
-
-### Fixed
-
-- Browsers could keep serving a stale, cached copy of the web UI after a
-  firmware update — the router previously sent no cache headers, leaving cache
-  behavior to per-browser heuristics (Firefox/Safari could silently run an old
-  UI against the new backend). The embedded UI is now served with explicit
-  headers: stable-named files (`index.html`, `assets/`) revalidate on every
-  load against a per-build `ETag` (a cheap `304 Not Modified` when unchanged),
-  while Angular's content-hashed bundles are cached as `immutable`. Requests
-  for assets from an older build now get a `404` instead of a mis-typed
-  `index.html` fallback.
 
 ## [0.1.0-beta.4]
 

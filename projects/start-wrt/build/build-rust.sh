@@ -19,13 +19,12 @@ ARCH=${ARCH:-riscv64}
 RUST_ARCH=${RUST_ARCH:-riscv64gc}
 PROFILE=${PROFILE:-release}
 if [ -z "$STARTWRT_GIT_HASH" ]; then
-    STARTWRT_GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
-    # git status (not diff-index): the make run touches the tracked
-    # package-lock.json before this script runs, and stat-only diff-index
-    # misreads that as a dirty tree. status compares content.
-    if [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then
-        STARTWRT_GIT_HASH="${STARTWRT_GIT_HASH}-dirty"
-    fi
+    # Use the product GIT_HASH.txt stamp (full hash + -modified when dirty) so
+    # the binary's ETag / system.info gitHash, the UI's baked-in config.json
+    # gitHash, and CLI verify output all carry the identical string — the UI
+    # compares them to detect a stale cached bundle.
+    "$PROJECT_DIR/build/env/check-git-hash.sh" >/dev/null || true
+    STARTWRT_GIT_HASH=$(cat "$PROJECT_DIR/build/env/GIT_HASH.txt" 2>/dev/null || echo unknown)
 fi
 export STARTWRT_GIT_HASH
 
