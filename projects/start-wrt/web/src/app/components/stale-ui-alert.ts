@@ -20,7 +20,7 @@ import { StaleUiService } from 'src/app/services/stale-ui.service'
         label: i18n.transform('Refresh Needed'),
         size: 's',
       }"
-      (tuiResponsiveDialogChange)="dismissed.set(true)"
+      (tuiResponsiveDialogChange)="dismissedFor.set(staleHash())"
     >
       <p>
         {{
@@ -44,9 +44,15 @@ import { StaleUiService } from 'src/app/services/stale-ui.service'
 })
 export class StaleUiAlert {
   protected readonly i18n = inject(i18nPipe)
-  protected readonly dismissed = signal(false)
-  private readonly stale = inject(StaleUiService).stale
-  protected readonly show = computed(() => this.stale() && !this.dismissed())
+  protected readonly staleHash = inject(StaleUiService).staleHash
+  /**
+   * The build the user dismissed the prompt for — dismissal silences that
+   * build only, so yet another firmware update re-prompts.
+   */
+  protected readonly dismissedFor = signal<string | null>(null)
+  protected readonly show = computed(
+    () => this.staleHash() !== null && this.staleHash() !== this.dismissedFor(),
+  )
 
   protected reload(): void {
     window.location.reload()

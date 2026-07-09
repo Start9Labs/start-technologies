@@ -28,21 +28,23 @@ function base(hash: string): string {
  * all emit the same format, so divergence means this tab is running a bundle
  * from a previous firmware. Where the divergence is observed decides the UX:
  * the in-tab update flow reloads outright (SystemService), while passive
- * observers only raise `stale` and StaleUiAlert prompts for a reload — never
- * forcing one out from under unsaved work.
+ * observers only latch `staleHash` and StaleUiAlert prompts for a reload —
+ * never forcing one out from under unsaved work.
  */
 @Injectable({ providedIn: 'root' })
 export class StaleUiService {
   private readonly bundleHash = inject(GIT_HASH)
 
   /**
-   * Latches true once any response reports a different build than this
-   * bundle. Never resets — only a reload can un-stale the bundle.
+   * Base hash of the newer firmware build, latched once any response reports
+   * a different build than this bundle. Never clears — only a reload can
+   * un-stale the bundle — but a further update overwrites it, re-arming a
+   * dismissed StaleUiAlert.
    */
-  readonly stale = signal(false)
+  readonly staleHash = signal<string | null>(null)
 
   isStale(info: SystemInfoRes): boolean {
-    return this.differs(info.gitHash)
+    return this.newer(info.gitHash) !== null
   }
 
   check(info: SystemInfoRes): void {
@@ -59,16 +61,18 @@ export class StaleUiService {
    * SystemService's 30s system.info heartbeat.
    */
   checkHash(hash: string | null | undefined): void {
-    if (this.differs(hash ?? undefined)) {
-      this.stale.set(true)
+    const newer = this.newer(hash ?? undefined)
+    if (newer) {
+      this.staleHash.set(newer)
     }
   }
 
-  private differs(hash: string | undefined): boolean {
-    return (
-      comparable(this.bundleHash) &&
+  /** The base hash of `hash` when it names a different build, else null. */
+  private newer(hash: string | undefined): string | null {
+    return comparable(this.bundleHash) &&
       comparable(hash) &&
       base(this.bundleHash) !== base(hash)
-    )
+      ? base(hash)
+      : null
   }
 }
