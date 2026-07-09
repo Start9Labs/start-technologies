@@ -26,6 +26,19 @@ impl Shutdown {
             tracing::info!("{}", t!("shutdown.beginning-shutdown"));
         }
 
+        // When systemd is already driving the shutdown it stops journald, unmounts,
+        // and issues the power action itself. Doing that work here — the
+        // `systemctl stop systemd-journald` and volume-group export below — blocks
+        // mid-transaction and hangs startd until its ~90s stop timeout, so exit now
+        // and leave the rest to systemd. Exception: rpi poweroff must still
+        // self-drive its standby reboot below (systemd can't power the Pi off).
+        if systemd_is_stopping() && !(&*PLATFORM == "raspberrypi" && !self.restart) {
+            tracing::info!(
+                "systemd is already shutting down; exiting and leaving the power action to it"
+            );
+            std::process::exit(0);
+        }
+
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -72,6 +85,11 @@ impl Shutdown {
         });
         drop(rt);
         if &*PLATFORM == "raspberrypi" {
+            // rpi has no real power-off: "off" is emulated as a standby reboot
+            // (start_init parks on STANDBY_MODE_PATH on the way back up). A poweroff
+            // self-drives the marker + reboot even under systemd, since systemd's own
+            // poweroff would only halt the still-powered board. (A systemd-initiated
+            // reboot already exited at the top.)
             if !self.restart {
                 std::fs::write(STANDBY_MODE_PATH, "").unwrap();
                 Command::new("sync").spawn().unwrap().wait().unwrap();
@@ -88,6 +106,17 @@ impl Shutdown {
                 .unwrap();
         }
     }
+}
+
+/// True once systemd has entered its own shutdown transaction (`systemctl
+/// is-system-running` == `stopping`). In that state the final reboot/poweroff is
+/// systemd's to issue; [`Shutdown::execute`] must not race it with its own.
+fn systemd_is_stopping() -> bool {
+    std::process::Command::new("systemctl")
+        .arg("is-system-running")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "stopping")
+        .unwrap_or(false)
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
