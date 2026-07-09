@@ -57,9 +57,11 @@ StartWRT comes pre-installed on Start9 routers. If you need to reinstall or flas
 
 1. The setup wizard will guide you through the rest. If the router already has firmware installed, you can choose **Keep settings** or **Fresh Start** (full wipe). On a new device with no existing firmware, the welcome screen still appears, but **Fresh Start** is the only option offered. See [Factory Reset](factory-reset.md#reflash-microsd) for a full walkthrough of the reflash wizard.
 
-1. When the wizard completes, power off the router, remove the microSD card, and power it back on.
+1. When the wizard completes, power off the router, remove the microSD card, and power it back on. The router now boots StartWRT from its internal storage — the wizard installs everything needed for that, including the low-level boot firmware, so this works on any BananaPi BPI-F3 regardless of what (if anything) the factory installed.
 
 ## DIY and Unprogrammed Boards
+
+Flashing a bare BananaPi BPI-F3 works with the exact steps above: the setup wizard provisions the board's internal boot firmware (the eMMC boot partitions) as part of the flash, so the router boots from internal storage after the microSD card is removed even if the board arrived with no firmware at all. There is one difference on unprogrammed boards — the Wi-Fi password:
 
 Start9 routers ship with a unique Wi-Fi password programmed into the device's EEPROM and printed on a sticker on the bottom. A vendor-programmed board "just works": flash the image, boot, and connect to the `StartWRT` network with the sticker password.
 

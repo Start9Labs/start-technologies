@@ -6,6 +6,7 @@ pub mod activity;
 pub mod auth;
 pub mod backup;
 pub mod bins;
+pub mod boot0;
 pub mod captive;
 pub mod continuations;
 pub mod device_names;

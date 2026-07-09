@@ -568,7 +568,15 @@ async fn run_flash_core(
     ));
     run_cmd("mkfs.ext4", &["-L", "rootfs_data", "-F", &rootfs_data_dev]).await?;
 
-    // 13. Success
+    // 13. Provision the eMMC hardware boot partitions. The raw copy above
+    //     only wrote the user area; the K1 BootROM boots eMMC from boot0
+    //     (bootinfo + FSBL), which factory provisioning may have left empty
+    //     or stale on this board. Converge boot0/boot1 to the FSBL that just
+    //     booted this board from SD, so any board can boot from eMMC.
+    report("Provisioning eMMC boot firmware...");
+    crate::boot0::provision_emmc_boot(partitions, &emmc_dev, &report).await?;
+
+    // 14. Success
     report("Flash complete.");
 
     Ok(Some(FlashResult {
