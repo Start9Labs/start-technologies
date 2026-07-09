@@ -10,6 +10,7 @@ ExecStart=/usr/bin/start-tunneld
 Restart=always
 RestartSec=3
 ManagedOOMPreference=avoid
+LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target

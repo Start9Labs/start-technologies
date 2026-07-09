@@ -13,11 +13,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt, copy_bidirectional};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpStream;
 use tokio::time::timeout;
 
 use crate::net::port_map::pcp::hostname::RESULT_HOSTNAME_TAKEN;
-use crate::prelude::*;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::sync::SyncMutex;
 
@@ -26,6 +25,10 @@ type PortKey = (Ipv4Addr, u16);
 
 const CLIENTHELLO_CAP: usize = 16384;
 const CLIENTHELLO_TIMEOUT: Duration = Duration::from_secs(5);
+/// Backoff for bind/accept failures (e.g. fd exhaustion); the listener retries
+/// rather than giving up its port.
+const BIND_RETRY_DELAY: Duration = Duration::from_secs(5);
+const ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 #[derive(Clone)]
 struct Binding {
@@ -202,11 +205,7 @@ impl SniDemux {
             return;
         }
         let ports = self.ports.clone();
-        let handle = NonDetachingJoinHandle::from(tokio::spawn(async move {
-            if let Err(e) = run_listener(key, ports).await {
-                tracing::warn!("SNI demux listener on {}:{} exited: {e}", key.0, key.1);
-            }
-        }));
+        let handle = NonDetachingJoinHandle::from(tokio::spawn(run_listener(key, ports)));
         self.listeners.mutate(|l| {
             l.insert(key, handle);
         });
@@ -216,25 +215,40 @@ impl SniDemux {
     }
 }
 
-async fn run_listener(
-    key: PortKey,
-    ports: Arc<SyncMutex<BTreeMap<PortKey, PortBindings>>>,
-) -> Result<(), Error> {
+async fn run_listener(key: PortKey, ports: Arc<SyncMutex<BTreeMap<PortKey, PortBindings>>>) {
     if let Err(e) = crate::net::transparent::ensure_divert_infra().await {
         tracing::warn!(
             "SNI demux reply-path divert setup failed (source preservation may be degraded): {e}"
         );
     }
-    let listener = TcpListener::bind(SocketAddrV4::new(key.0, key.1))
-        .await
-        .with_kind(ErrorKind::Network)?;
+    let listener = loop {
+        match crate::net::utils::bind_tokio_listener(SocketAddrV4::new(key.0, key.1).into()) {
+            Ok(listener) => break listener,
+            Err(e) => {
+                tracing::warn!(
+                    "SNI demux bind on {}:{} failed (retrying): {e}",
+                    key.0,
+                    key.1
+                );
+                tokio::time::sleep(BIND_RETRY_DELAY).await;
+            }
+        }
+    };
     tracing::info!("SNI demux listening on {}:{}", key.0, key.1);
     loop {
-        let (conn, peer) = listener.accept().await.with_kind(ErrorKind::Network)?;
-        let ports = ports.clone();
-        tokio::spawn(async move {
-            handle_conn(conn, peer, key, ports).await;
-        });
+        match listener.accept().await {
+            Ok((conn, peer)) => {
+                let ports = ports.clone();
+                tokio::spawn(async move {
+                    handle_conn(conn, peer, key, ports).await;
+                });
+            }
+            // Transient (EMFILE, ECONNABORTED): never tear down the listener.
+            Err(e) => {
+                tracing::warn!("SNI demux accept on {}:{}: {e}", key.0, key.1);
+                tokio::time::sleep(ACCEPT_RETRY_DELAY).await;
+            }
+        }
     }
 }
 
@@ -244,6 +258,12 @@ async fn handle_conn(
     key: PortKey,
     ports: Arc<SyncMutex<BTreeMap<PortKey, PortBindings>>>,
 ) {
+    // Reap silently-vanished peers, else copy_bidirectional pins the fd pair forever.
+    if let Err(e) =
+        socket2::SockRef::from(&conn).set_tcp_keepalive(&crate::net::utils::default_keepalive())
+    {
+        tracing::error!("Failed to set tcp keepalive: {e}");
+    }
     let mut buf = Vec::new();
     let mut tmp = [0u8; 4096];
     let sni = loop {
