@@ -5,19 +5,22 @@ name: 0.3.5.1 Migration Image
 # rootfs, plus a boot-time rewire. See
 # projects/start-os/build/assemble-migration-payload.sh and PR #3399.
 #
-# This is a pure repackaging of already-built artifacts (no OS compile), so it
-# runs entirely on x86_64 for every platform:
-#   * the 0.4.0 base squashfs comes from a "Debian-based ISO and SquashFS" build
-#     (its per-platform `<platform>.squashfs` artifact), and
-#   * the legacy base comes from the 0.3.5.1 GitHub release ISO.
-# The resulting `*.migration.squashfs` artifact is what ops publishes to the
-# frozen registry as the version's OTA image.
+# Chains directly off "Debian-based ISO and SquashFS": when that workflow
+# finishes a non-PR run, this repackages each per-platform `<platform>.squashfs`
+# artifact it produced onto the 0.3.5.1 release ISO. Pure repackaging (no OS
+# compile), so it runs on x86_64 for every platform. `workflow_dispatch` can
+# re-run it for a past ISO build by id. The resulting
+# `<platform>.migration.squashfs` artifact is what ops publishes to the frozen
+# registry as the version's OTA image.
 
 on:
+  workflow_run:
+    workflows: ['Debian-based ISO and SquashFS']
+    types: [completed]
   workflow_dispatch:
     inputs:
       iso_run_id:
-        description: 'Run ID of the ISO/SquashFS build whose 0.4.0 squashfs to repackage'
+        description: 'Run ID of the ISO/SquashFS build to repackage'
         required: true
       from_version:
         description: 'Legacy source release tag to base the payload on'
@@ -35,15 +38,23 @@ permissions:
 jobs:
   migration-image:
     name: Migration Image
+    # Auto after a successful non-PR ISO build, or a manual dispatch.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.event != 'pull_request')
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         # Platforms that shipped in 0.3.5.1 (no nvidia/riscv). Raspberry Pi is a
         # different boot model (firmware-direct, no grub) tracked in #3443.
-        platform: ${{ fromJson(inputs.platform == 'ALL' && '["x86_64", "x86_64-nonfree", "aarch64", "aarch64-nonfree"]' || format('["{0}"]', inputs.platform)) }}
+        platform: ${{ fromJson((github.event.inputs.platform || 'ALL') == 'ALL' && '["x86_64", "x86_64-nonfree", "aarch64", "aarch64-nonfree"]' || format('["{0}"]', github.event.inputs.platform)) }}
     env:
       GH_TOKEN: ${{ github.token }}
+      # workflow_run -> the upstream ISO build's run id; dispatch -> the input.
+      RUN_ID: ${{ github.event.workflow_run.id || github.event.inputs.iso_run_id }}
+      FROM_VERSION: ${{ github.event.inputs.from_version || 'v0.3.5.1' }}
     steps:
       - uses: actions/checkout@v6
 
@@ -56,11 +67,11 @@ jobs:
         id: base
         run: |
           mkdir -p base-new
-          if gh run download "${{ inputs.iso_run_id }}" --repo "${{ github.repository }}" \
+          if gh run download "$RUN_ID" --repo "${{ github.repository }}" \
                -n "${{ matrix.platform }}.squashfs" -D base-new; then
             echo "found=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::No ${{ matrix.platform }}.squashfs artifact in run ${{ inputs.iso_run_id }} — skipping this platform."
+            echo "::warning::No ${{ matrix.platform }}.squashfs artifact in run $RUN_ID — skipping this platform."
             echo "found=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -68,7 +79,7 @@ jobs:
         if: steps.base.outputs.found == 'true'
         run: |
           mkdir -p base-old
-          gh release download "${{ inputs.from_version }}" --repo "${{ github.repository }}" \
+          gh release download "$FROM_VERSION" --repo "${{ github.repository }}" \
             --pattern "startos-*_${{ matrix.platform }}.iso" --dir base-old
 
       - name: Assemble migration payload
