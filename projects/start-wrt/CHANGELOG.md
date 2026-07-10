@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0]
+
+First stable release of StartWRT — Start9's OpenWrt-based router OS for home
+self-hosting, built around per-device Security Profiles (assigned by Ethernet
+port, WiFi password, or inbound VPN), with inbound/outbound WireGuard VPNs and
+VPN chaining, WiFi schedules, dynamic DNS, and published-port forwarding.
+Ships as a flashable image for the SpaceMiT K1 (BananaPi-F3), with OTA updates
+delivered through the Start9 registry.
+
 ## [0.1.0-beta.4]
 
 ### Added
