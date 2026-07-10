@@ -10,6 +10,7 @@ use ts_rs::TS;
 use crate::GatewayId;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::DatabaseModel;
+use crate::db::model::public::IpInfo;
 use crate::hostname::ServerHostname;
 use crate::net::acme::AcmeProvider;
 use crate::net::dns::QueryDnsRes;
@@ -17,6 +18,7 @@ use crate::net::gateway::{
     CheckDnsParams, CheckPortParams, CheckPortRes, CheckPortV6Res, check_dns, check_port,
     check_port_v6,
 };
+use crate::net::host::binding::DerivedAddressInfo;
 use crate::net::host::{HostApiKind, all_hosts};
 use crate::net::service_interface::HostnameMetadata;
 use crate::prelude::*;
@@ -232,6 +234,81 @@ pub struct AddPublicDomainRes {
     pub port_v6: Option<CheckPortV6Res>,
 }
 
+/// Enable a public domain across one binding-or-range address set. A public
+/// domain exposes the host as a whole, so `add_public_domain` runs this on every
+/// binding and every range. Domains are enabled-by-default, so "enabling" one is
+/// just clearing any `disabled` override. For a non-SSL row there is no SNI, so
+/// the domain shares the bare WAN IP's packets — the matching WAN IPv4 (and, when
+/// `ip_info` is supplied, the co-located IPv6 GUA) is force-enabled too, so the
+/// operator-facing toggle honestly reflects that the IP is now reachable. Port
+/// ranges are IPv4-only and pass `ip_info: None` (no GUA).
+fn enable_domain_on_addresses(
+    addresses: &mut DerivedAddressInfo,
+    fqdn: &InternedString,
+    gateway: &GatewayId,
+    ip_info: Option<&IpInfo>,
+) {
+    // A domain is served unless explicitly disabled — clear every domain row
+    // (SSL and non-SSL) for this fqdn+gateway from the disable set.
+    let domain_ports: BTreeSet<u16> = addresses
+        .available
+        .iter()
+        .filter_map(|a| match &a.metadata {
+            HostnameMetadata::PublicDomain { gateway: gw }
+                if &a.hostname == fqdn && gw == gateway =>
+            {
+                a.port
+            }
+            _ => None,
+        })
+        .collect();
+    for port in domain_ports {
+        addresses.disabled.remove(&(fqdn.clone(), port));
+    }
+
+    // The non-SSL domain resolves to `<wan-ip>:<port>` with no SNI, so exposing
+    // the domain necessarily exposes the bare WAN IP on that port. Find it.
+    let Some(dp) = addresses.available.iter().find_map(|a| match &a.metadata {
+        HostnameMetadata::PublicDomain { gateway: gw }
+            if !a.ssl && a.public && &a.hostname == fqdn && gw == gateway =>
+        {
+            a.port
+        }
+        _ => None,
+    }) else {
+        return;
+    };
+
+    for a in &addresses.available {
+        if a.ssl || !a.public {
+            continue;
+        }
+        if let HostnameMetadata::Ipv4 { gateway: gw } = &a.metadata {
+            if gw == gateway {
+                if let Some(sa) = a.to_socket_addr() {
+                    if sa.port() == dp {
+                        addresses.enabled.insert(sa);
+                    }
+                }
+            }
+        }
+    }
+
+    // No SNI on v6 either: the domain reaches v6 only via the bare GUA, which is
+    // directly routable (no NAT). Expose it like the WAN IPv4 above.
+    if let Some(ip_info) = ip_info {
+        for subnet in &ip_info.subnets {
+            if let IpAddr::V6(ip) = subnet.addr() {
+                if !crate::net::utils::ipv6_is_local(ip) {
+                    let gua = SocketAddrV6::new(ip, dp, 0, 0);
+                    addresses.gua_wan.insert(gua);
+                    addresses.enabled.insert(SocketAddr::V6(gua));
+                }
+            }
+        }
+    }
+}
+
 pub async fn add_public_domain<Kind: HostApiKind>(
     ctx: RpcContext,
     AddPublicDomainParams {
@@ -291,85 +368,22 @@ pub async fn add_public_domain<Kind: HostApiKind>(
                 .and_then(|a| a.port)
                 .ok_or_else(|| Error::new(eyre!("no public address found for {fqdn} on port {internal_port}"), ErrorKind::NotFound))?;
 
-            // On the target binding, enable the WAN IPv4 and all
-            // public domains on the same gateway+port (no SNI without SSL).
+            // A public domain exposes the host as a whole, so enable it on every
+            // binding *and* every range — each is reachable via the domain on its
+            // own external port. For non-SSL rows there is no SNI, so the domain
+            // shares the bare WAN IP's packets; `enable_domain_on_addresses`
+            // force-enables that IP too, keeping the operator-facing toggle honest.
+            let ip_info = gateways.get(&gateway).and_then(|g| g.ip_info.as_deref());
             host.as_bindings_mut().mutate(|b| {
-                if let Some(bind) = b.get_mut(&internal_port) {
-                    let non_ssl_port = bind.addresses.available.iter().find_map(|a| {
-                        if a.ssl || !a.public || a.hostname != fqdn {
-                            return None;
-                        }
-                        if let HostnameMetadata::PublicDomain { gateway: gw } = &a.metadata {
-                            if *gw == gateway {
-                                return a.port;
-                            }
-                        }
-                        None
-                    });
-                    if let Some(dp) = non_ssl_port {
-                        for a in &bind.addresses.available {
-                            if a.ssl || !a.public {
-                                continue;
-                            }
-                            if let HostnameMetadata::Ipv4 { gateway: gw } = &a.metadata {
-                                if *gw == gateway {
-                                    if let Some(sa) = a.to_socket_addr() {
-                                        if sa.port() == dp {
-                                            bind.addresses.enabled.insert(sa);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        // No SNI without SSL, so the domain reaches v6 only via
-                        // the bare GUA — expose it like the WAN IPv4 above (v6 has
-                        // no NAT; the GUA is directly routable).
-                        if let Some(ip_info) =
-                            gateways.get(&gateway).and_then(|g| g.ip_info.as_ref())
-                        {
-                            for subnet in &ip_info.subnets {
-                                if let IpAddr::V6(ip) = subnet.addr() {
-                                    if !crate::net::utils::ipv6_is_local(ip) {
-                                        let gua = SocketAddrV6::new(ip, dp, 0, 0);
-                                        bind.addresses.gua_wan.insert(gua);
-                                        bind.addresses.enabled.insert(SocketAddr::V6(gua));
-                                    }
-                                }
-                            }
-                        }
-                        for a in &bind.addresses.available {
-                            if a.ssl {
-                                continue;
-                            }
-                            if let HostnameMetadata::PublicDomain { gateway: gw } = &a.metadata {
-                                if *gw == gateway && a.port == Some(dp) {
-                                    bind.addresses.disabled.remove(&(a.hostname.clone(), dp));
-                                }
-                            }
-                        }
-                    }
+                for bind in b.values_mut() {
+                    enable_domain_on_addresses(&mut bind.addresses, &fqdn, &gateway, ip_info);
                 }
-
-                // Disable the domain on all other bindings
-                for (&port, bind) in b.iter_mut() {
-                    if port == internal_port {
-                        continue;
-                    }
-                    let has_addr = bind
-                        .addresses
-                        .available
-                        .iter()
-                        .any(|a| a.public && a.hostname == fqdn);
-                    if has_addr {
-                        let other_ext = bind
-                            .addresses
-                            .available
-                            .iter()
-                            .find(|a| a.public && a.hostname == fqdn)
-                            .and_then(|a| a.port)
-                            .unwrap_or(ext_port);
-                        bind.addresses.disabled.insert((fqdn.clone(), other_ext));
-                    }
+                Ok(())
+            })?;
+            // Ranges are IPv4-only and non-SSL, so they never carry a v6 GUA.
+            host.as_binding_ranges_mut().mutate(|ranges| {
+                for range in ranges.values_mut() {
+                    enable_domain_on_addresses(&mut range.addresses, &fqdn, &gateway, None);
                 }
                 Ok(())
             })?;
@@ -524,4 +538,104 @@ pub async fn list_addresses<Kind: HostApiKind>(
         .de()?
         .addresses()
         .collect())
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::net::service_interface::{HostnameInfo, HostnameMetadata};
+
+    const FQDN: &str = "turn.start9.dev";
+
+    fn gw() -> GatewayId {
+        GatewayId::from(InternedString::intern("wg1"))
+    }
+
+    fn domain(ssl: bool, port: u16) -> HostnameInfo {
+        HostnameInfo {
+            ssl,
+            public: true,
+            hostname: InternedString::intern(FQDN),
+            port: Some(port),
+            metadata: HostnameMetadata::PublicDomain { gateway: gw() },
+        }
+    }
+
+    fn wan_ip(ssl: bool, port: u16) -> HostnameInfo {
+        HostnameInfo {
+            ssl,
+            public: true,
+            hostname: InternedString::intern("64.23.194.12"),
+            port: Some(port),
+            metadata: HostnameMetadata::Ipv4 { gateway: gw() },
+        }
+    }
+
+    /// The core of the fix: enabling a non-SSL domain un-disables the domain row
+    /// and force-enables the bare WAN IP on the same port (no SNI on plain
+    /// ports). This is what makes a range's WAN toggle honest instead of lying.
+    #[test]
+    fn non_ssl_domain_exposes_and_reflects_the_wan_ip() {
+        let fqdn = InternedString::intern(FQDN);
+        let mut addrs = DerivedAddressInfo::default();
+        addrs.available.insert(domain(false, 42000));
+        addrs.available.insert(wan_ip(false, 42000));
+        // Pretend a prior "disable the domain on siblings" pass had turned it off.
+        addrs.disabled.insert((fqdn.clone(), 42000));
+
+        enable_domain_on_addresses(&mut addrs, &fqdn, &gw(), None);
+
+        assert!(
+            !addrs.disabled.contains(&(fqdn.clone(), 42000)),
+            "domain should be re-enabled (removed from `disabled`)"
+        );
+        assert!(
+            addrs.enabled.contains(&"64.23.194.12:42000".parse().unwrap()),
+            "bare WAN IP must be enabled so the toggle reflects the exposure"
+        );
+    }
+
+    /// An SSL binding carries its own SNI, so enabling its domain must NOT expose
+    /// the bare WAN IP — public IPs stay opt-in there.
+    #[test]
+    fn ssl_domain_does_not_expose_the_bare_ip() {
+        let fqdn = InternedString::intern(FQDN);
+        let mut addrs = DerivedAddressInfo::default();
+        addrs.available.insert(domain(true, 5349));
+        addrs.available.insert(wan_ip(true, 5349));
+
+        enable_domain_on_addresses(&mut addrs, &fqdn, &gw(), None);
+
+        assert!(
+            addrs.enabled.is_empty(),
+            "SSL row must not force-enable the bare WAN IP"
+        );
+    }
+
+    /// A binding unrelated to this domain/gateway is left untouched.
+    #[test]
+    fn unrelated_gateway_is_untouched() {
+        let fqdn = InternedString::intern(FQDN);
+        let other_gw = GatewayId::from(InternedString::intern("eth0"));
+        let mut addrs = DerivedAddressInfo::default();
+        addrs.available.insert(HostnameInfo {
+            metadata: HostnameMetadata::Ipv4 {
+                gateway: other_gw.clone(),
+            },
+            ..wan_ip(false, 42000)
+        });
+        addrs.available.insert(HostnameInfo {
+            metadata: HostnameMetadata::PublicDomain {
+                gateway: other_gw.clone(),
+            },
+            ..domain(false, 42000)
+        });
+
+        enable_domain_on_addresses(&mut addrs, &fqdn, &gw(), None);
+
+        assert!(
+            addrs.enabled.is_empty(),
+            "a domain on gateway wg1 must not enable an IP on gateway eth0"
+        );
+    }
 }
