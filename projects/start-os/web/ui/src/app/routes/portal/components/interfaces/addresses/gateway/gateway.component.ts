@@ -274,7 +274,6 @@ export class GatewayComponent {
       fqdn,
       gateway: gatewayId,
       acme: !authority || authority === 'local' ? null : authority,
-      internalPort: iface?.addressInfo.internalPort || 80,
     }
 
     return this.tasks.run(async () => {

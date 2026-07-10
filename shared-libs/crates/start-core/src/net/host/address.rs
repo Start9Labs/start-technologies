@@ -221,8 +221,6 @@ pub struct AddPublicDomainParams {
     pub acme: Option<AcmeProvider>,
     #[arg(help = "help.arg.gateway-id")]
     pub gateway: GatewayId,
-    #[arg(help = "help.arg.internal-port")]
-    pub internal_port: u16,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
@@ -315,7 +313,6 @@ pub async fn add_public_domain<Kind: HostApiKind>(
         fqdn,
         acme,
         gateway,
-        internal_port,
     }: AddPublicDomainParams,
     inheritance: Kind::Inheritance,
 ) -> Result<AddPublicDomainRes, Error> {
@@ -355,18 +352,20 @@ pub async fn add_public_domain<Kind: HostApiKind>(
             let host = Kind::host_for(&inheritance, db)?;
             host.update_addresses(&hostname, &gateways, &available_ports)?;
 
-            // Find the external port for the target binding
+            // The domain exposes the whole host; pick a representative external
+            // port for the reachability check — its port on any public binding.
             let bindings = host.as_bindings().de()?;
-            let target_bind = bindings
-                .get(&internal_port)
-                .ok_or_else(|| Error::new(eyre!("binding not found for internal port {internal_port}"), ErrorKind::NotFound))?;
-            let ext_port = target_bind
-                .addresses
-                .available
-                .iter()
+            let ext_port = bindings
+                .values()
+                .flat_map(|b| b.addresses.available.iter())
                 .find(|a| a.public && a.hostname == fqdn)
                 .and_then(|a| a.port)
-                .ok_or_else(|| Error::new(eyre!("no public address found for {fqdn} on port {internal_port}"), ErrorKind::NotFound))?;
+                .ok_or_else(|| {
+                    Error::new(
+                        eyre!("no public address found for {fqdn}"),
+                        ErrorKind::NotFound,
+                    )
+                })?;
 
             // A public domain exposes the host as a whole, so enable it on every
             // binding *and* every range — each is reachable via the domain on its

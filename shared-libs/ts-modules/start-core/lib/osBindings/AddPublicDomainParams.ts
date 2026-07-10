@@ -6,5 +6,4 @@ export type AddPublicDomainParams = {
   fqdn: string
   acme: AcmeProvider | null
   gateway: GatewayId
-  internalPort: number
 }
