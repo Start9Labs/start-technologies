@@ -24,10 +24,14 @@ fn main() {
                 .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
                 .unwrap_or_else(|| "unknown".into());
 
+            // git status (not diff-index): stat-only diff-index misreads a
+            // touched-but-unchanged tracked file as dirty. status compares content.
             let dirty = Command::new("git")
-                .args(["diff-index", "--quiet", "HEAD", "--"])
-                .status()
-                .map(|s| !s.success())
+                .args(["status", "--porcelain", "--untracked-files=no"])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| !o.stdout.is_empty())
                 .unwrap_or(false);
 
             if dirty {

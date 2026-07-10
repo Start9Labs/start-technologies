@@ -20,7 +20,12 @@ RUST_ARCH=${RUST_ARCH:-riscv64gc}
 PROFILE=${PROFILE:-release}
 if [ -z "$STARTWRT_GIT_HASH" ]; then
     STARTWRT_GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
-    git diff-index --quiet HEAD -- 2>/dev/null || STARTWRT_GIT_HASH="${STARTWRT_GIT_HASH}-dirty"
+    # git status (not diff-index): the make run touches the tracked
+    # package-lock.json before this script runs, and stat-only diff-index
+    # misreads that as a dirty tree. status compares content.
+    if [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+        STARTWRT_GIT_HASH="${STARTWRT_GIT_HASH}-dirty"
+    fi
 fi
 export STARTWRT_GIT_HASH
 

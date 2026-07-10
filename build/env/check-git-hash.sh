@@ -3,7 +3,10 @@
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 if [ "$GIT_BRANCH_AS_HASH" != 1 ]; then
-    GIT_HASH="$(git rev-parse HEAD)$(if ! git diff-index --quiet HEAD --; then echo '-modified'; fi)"
+    # git status (not diff-index): builds touch tracked files (e.g. the make
+    # recipe for package-lock.json) without changing content, and stat-only
+    # diff-index misreads that as a dirty tree. status compares content.
+    GIT_HASH="$(git rev-parse HEAD)$(if [ -n "$(git status --porcelain --untracked-files=no)" ]; then echo '-modified'; fi)"
 else
     GIT_HASH="@$(git rev-parse --abbrev-ref HEAD)"
 fi

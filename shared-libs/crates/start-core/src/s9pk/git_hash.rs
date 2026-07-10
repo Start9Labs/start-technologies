@@ -30,15 +30,16 @@ impl GitHash {
         while hash.ends_with(|c: char| c.is_whitespace()) {
             hash.pop();
         }
-        if Command::new("git")
-            .arg("diff-index")
-            .arg("--quiet")
-            .arg("HEAD")
-            .arg("--")
+        // git status (not diff-index): stat-only diff-index misreads a
+        // touched-but-unchanged tracked file as dirty. status compares content.
+        if !Command::new("git")
+            .arg("status")
+            .arg("--porcelain")
+            .arg("--untracked-files=no")
             .current_dir(&path)
             .invoke(ErrorKind::Git)
-            .await
-            .is_err()
+            .await?
+            .is_empty()
         {
             hash += "-modified";
         }
@@ -57,16 +58,13 @@ impl GitHash {
         while hash.ends_with(|c: char| c.is_whitespace()) {
             hash.pop();
         }
-        if !std::process::Command::new("git")
-            .arg("diff-index")
-            .arg("--quiet")
-            .arg("HEAD")
-            .arg("--")
+        let status = std::process::Command::new("git")
+            .arg("status")
+            .arg("--porcelain")
+            .arg("--untracked-files=no")
             .output()
-            .ok()?
-            .status
-            .success()
-        {
+            .ok()?;
+        if !status.status.success() || !status.stdout.is_empty() {
             hash += "-modified";
         }
 
