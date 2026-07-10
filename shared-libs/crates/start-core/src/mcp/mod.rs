@@ -15,26 +15,24 @@ use axum::routing::MethodRouter;
 use futures::future::ready;
 use http::header::{CONTENT_LENGTH, CONTENT_TYPE};
 use http::{HeaderValue, StatusCode};
+use imbl_value::InternedString;
 use patch_db::Dump;
 use pin_project::pin_project;
 use rpc_toolkit::Server;
 use serde_json::Value as JsonValue;
-use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt as _;
-
-use crate::context::RpcContext;
-use crate::middleware::auth::session::ValidSessionToken;
-use crate::net::static_server::unauthorized;
-use crate::prelude::*;
-use imbl_value::InternedString;
+use tokio_stream::wrappers::ReceiverStream;
 
 use self::protocol::*;
 use self::session::{
     SessionMap, create_session, remove_session, session_exists, sweep_stale_sessions_if_needed,
     take_notification_rx,
 };
-
 use self::tools::{ToolEntry, tool_registry};
+use crate::context::RpcContext;
+use crate::middleware::auth::session::ValidSessionToken;
+use crate::net::static_server::unauthorized;
+use crate::prelude::*;
 
 /// Maximum request body size (1 MiB).
 const MAX_BODY_SIZE: u64 = 1024 * 1024;
@@ -100,9 +98,8 @@ pub fn mcp_router(ctx: RpcContext) -> MethodRouter {
         })
     };
 
-    let options_handler = axum::routing::options(|request: Request| async move {
-        cors_preflight(&request)
-    });
+    let options_handler =
+        axum::routing::options(|request: Request| async move { cors_preflight(&request) });
 
     post_handler
         .merge(get_handler)
@@ -125,15 +122,13 @@ async fn handle_post(
     let origin = extract_origin(&request);
 
     // Auth check — preserve the session hash for tools that need __Auth_session
-    let session_hash = match ValidSessionToken::from_header(
-        request.headers().get(http::header::COOKIE),
-        &ctx,
-    )
-    .await
-    {
-        Ok(valid) => valid.0.hashed().clone(),
-        Err(e) => return unauthorized(e, "/mcp"),
-    };
+    let session_hash =
+        match ValidSessionToken::from_header(request.headers().get(http::header::COOKIE), &ctx)
+            .await
+        {
+            Ok(valid) => valid.0.hashed().clone(),
+            Err(e) => return unauthorized(e, "/mcp"),
+        };
 
     // Content-Type check
     if let Some(ct) = request.headers().get(CONTENT_TYPE) {
@@ -475,9 +470,7 @@ async fn handle_tools_call(
 ) -> McpResponse {
     let call_params: ToolsCallParams = match params.map(serde_json::from_value).transpose() {
         Ok(Some(p)) => p,
-        Ok(None) => {
-            return McpResponse::error(id, INVALID_PARAMS, "Missing params".into(), None)
-        }
+        Ok(None) => return McpResponse::error(id, INVALID_PARAMS, "Missing params".into(), None),
         Err(e) => return McpResponse::error(id, INVALID_PARAMS, format!("{e}"), None),
     };
 
@@ -489,7 +482,7 @@ async fn handle_tools_call(
                 INVALID_PARAMS,
                 format!("Unknown tool: {}", call_params.name),
                 None,
-            )
+            );
         }
     };
 
@@ -595,7 +588,7 @@ async fn handle_package_shell_exec(
                 INVALID_PARAMS,
                 "Missing required parameter: id".into(),
                 None,
-            )
+            );
         }
     };
 
@@ -607,7 +600,7 @@ async fn handle_package_shell_exec(
                 INVALID_PARAMS,
                 "Missing required parameter: command".into(),
                 None,
-            )
+            );
         }
     };
 
@@ -634,7 +627,7 @@ async fn handle_package_shell_exec(
                 INVALID_PARAMS,
                 format!("Invalid package ID: {e}"),
                 None,
-            )
+            );
         }
     };
 
@@ -653,7 +646,7 @@ async fn handle_package_shell_exec(
                         is_error: Some(true),
                     })
                     .unwrap(),
-                )
+                );
             }
         };
         match service_ref
@@ -671,7 +664,7 @@ async fn handle_package_shell_exec(
                         is_error: Some(true),
                     })
                     .unwrap(),
-                )
+                );
             }
         }
     };
@@ -806,9 +799,7 @@ async fn handle_resources_read(
 ) -> McpResponse {
     let read_params: ResourcesReadParams = match params.map(serde_json::from_value).transpose() {
         Ok(Some(p)) => p,
-        Ok(None) => {
-            return McpResponse::error(id, INVALID_PARAMS, "Missing params".into(), None)
-        }
+        Ok(None) => return McpResponse::error(id, INVALID_PARAMS, "Missing params".into(), None),
         Err(e) => return McpResponse::error(id, INVALID_PARAMS, format!("{e}"), None),
     };
 
@@ -845,7 +836,7 @@ async fn handle_resources_read(
                 INVALID_PARAMS,
                 format!("Invalid resource URI: {}", read_params.uri),
                 None,
-            )
+            );
         }
     };
 
@@ -881,27 +872,23 @@ async fn handle_resources_subscribe(
                 INVALID_REQUEST,
                 "Missing Mcp-Session-Id header".into(),
                 None,
-            )
+            );
         }
     };
 
-    let sub_params: ResourcesSubscribeParams =
-        match params.map(serde_json::from_value).transpose() {
-            Ok(Some(p)) => p,
-            Ok(None) => {
-                return McpResponse::error(id, INVALID_PARAMS, "Missing params".into(), None)
-            }
-            Err(e) => return McpResponse::error(id, INVALID_PARAMS, format!("{e}"), None),
-        };
+    let sub_params: ResourcesSubscribeParams = match params.map(serde_json::from_value).transpose()
+    {
+        Ok(Some(p)) => p,
+        Ok(None) => return McpResponse::error(id, INVALID_PARAMS, "Missing params".into(), None),
+        Err(e) => return McpResponse::error(id, INVALID_PARAMS, format!("{e}"), None),
+    };
 
     // Validate resource URI (N7)
     if let Err(msg) = validate_resource_uri(&sub_params.uri) {
         return McpResponse::error(id, INVALID_PARAMS, msg, None);
     }
 
-    if let Err(e) =
-        session::subscribe_resource(ctx, sessions, session_id, &sub_params.uri).await
-    {
+    if let Err(e) = session::subscribe_resource(ctx, sessions, session_id, &sub_params.uri).await {
         return McpResponse::error(id, INTERNAL_ERROR, format!("{e}"), None);
     }
 
@@ -929,18 +916,18 @@ fn handle_resources_unsubscribe(
                 INVALID_REQUEST,
                 "Missing Mcp-Session-Id header".into(),
                 None,
-            )
+            );
         }
     };
 
-    let unsub_params: ResourcesUnsubscribeParams =
-        match params.map(serde_json::from_value).transpose() {
-            Ok(Some(p)) => p,
-            Ok(None) => {
-                return McpResponse::error(id, INVALID_PARAMS, "Missing params".into(), None)
-            }
-            Err(e) => return McpResponse::error(id, INVALID_PARAMS, format!("{e}"), None),
-        };
+    let unsub_params: ResourcesUnsubscribeParams = match params
+        .map(serde_json::from_value)
+        .transpose()
+    {
+        Ok(Some(p)) => p,
+        Ok(None) => return McpResponse::error(id, INVALID_PARAMS, "Missing params".into(), None),
+        Err(e) => return McpResponse::error(id, INVALID_PARAMS, format!("{e}"), None),
+    };
 
     session::unsubscribe_resource(sessions, session_id, &unsub_params.uri);
 
@@ -989,10 +976,7 @@ fn validate_resource_uri(uri: &str) -> Result<(), String> {
 
 /// Build a curated system prompt for AI assistants (S-B).
 async fn build_system_prompt(ctx: &RpcContext) -> String {
-    let dump = ctx
-        .db
-        .dump(&"/public/serverInfo".parse().unwrap())
-        .await;
+    let dump = ctx.db.dump(&"/public/serverInfo".parse().unwrap()).await;
     let server_info = serde_json::to_string_pretty(&dump.value).unwrap_or_default();
     format!(
         "You are managing a StartOS server.\n\
@@ -1071,9 +1055,7 @@ fn cors_preflight(request: &Request) -> Response {
         .headers()
         .get("Access-Control-Request-Headers")
         .cloned()
-        .unwrap_or_else(|| {
-            HeaderValue::from_static("Content-Type, Mcp-Session-Id, Cookie")
-        });
+        .unwrap_or_else(|| HeaderValue::from_static("Content-Type, Mcp-Session-Id, Cookie"));
 
     Response::builder()
         .status(StatusCode::OK)

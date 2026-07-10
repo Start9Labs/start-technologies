@@ -735,6 +735,23 @@ pub fn tool_registry() -> HashMap<String, ToolEntry> {
         },
         ToolEntry {
             definition: ToolDefinition {
+                name: "backup.target.delete-legacy".into(),
+                description: "Delete this server's legacy old-format (V1) backup from a backup target, freeing space on the target. THIS IS DESTRUCTIVE: the old backup cannot be recovered after deletion. Always confirm with the user before calling this.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "targetId": { "type": "string", "description": "Backup target ID to delete legacy backups from" }
+                    },
+                    "required": ["targetId"],
+                    "additionalProperties": false
+                }),
+            },
+            rpc_method: "backup.target.delete-legacy",
+            sync_db: false,
+            needs_session: false,
+        },
+        ToolEntry {
+            definition: ToolDefinition {
                 name: "backup.target.cifs.add".into(),
                 description: "Add a new CIFS/SMB network backup target (e.g. a NAS share).".into(),
                 input_schema: json!({
@@ -849,6 +866,24 @@ pub fn tool_registry() -> HashMap<String, ToolEntry> {
                 }),
             },
             rpc_method: "net.gateway.check-port",
+            sync_db: false,
+            needs_session: false,
+        },
+        ToolEntry {
+            definition: ToolDefinition {
+                name: "net.gateway.check-port-v6".into(),
+                description: "Check if a port is reachable over IPv6 through a specific gateway, at the server's global (GUA) IPv6 address. Returns null if the gateway has no global IPv6 address. IPv6 is NAT-free, so unlike net.gateway.check-port there is no hairpinning result. Use alongside net.gateway.check-port to diagnose reachability independently per IP version.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "port": { "type": "integer", "description": "Port number to check" },
+                        "gateway": { "type": "string", "description": "Gateway ID to check the port through" }
+                    },
+                    "required": ["port", "gateway"],
+                    "additionalProperties": false
+                }),
+            },
+            rpc_method: "net.gateway.check-port-v6",
             sync_db: false,
             needs_session: false,
         },
@@ -981,6 +1016,42 @@ pub fn tool_registry() -> HashMap<String, ToolEntry> {
                 }),
             },
             rpc_method: "net.tunnel.remove",
+            sync_db: false,
+            needs_session: false,
+        },
+        ToolEntry {
+            definition: ToolDefinition {
+                name: "net.tunnel.update".into(),
+                description: "Replace the WireGuard config of an existing tunnel gateway in place. The gateway ID and everything keyed to it (port forwards, domains) are preserved, and the tunnel stays up during the update. Use this to apply a re-issued config to an existing tunnel; use net.tunnel.add for a new tunnel.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string", "description": "Gateway/tunnel ID to update" },
+                        "config": { "type": "string", "description": "New WireGuard configuration content" }
+                    },
+                    "required": ["id", "config"],
+                    "additionalProperties": false
+                }),
+            },
+            rpc_method: "net.tunnel.update",
+            sync_db: false,
+            needs_session: false,
+        },
+        ToolEntry {
+            definition: ToolDefinition {
+                name: "net.ssl.generate-certificate".into(),
+                description: "Generate an SSL/TLS certificate signed by this server's local Certificate Authority. Returns the private key and full certificate chain as PEM. Useful for securing external services on the network with certificates that devices trusting the server's root CA will accept. The hostnames list may contain DNS names and/or IP addresses.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "hostnames": { "type": "array", "items": { "type": "string" }, "description": "Hostnames (DNS names or IP addresses) the certificate should be valid for" },
+                        "ed25519": { "type": "boolean", "description": "Use an Ed25519 key instead of the default NIST P-256. Default: false" }
+                    },
+                    "required": ["hostnames"],
+                    "additionalProperties": false
+                }),
+            },
+            rpc_method: "net.ssl.generate-certificate",
             sync_db: false,
             needs_session: false,
         },

@@ -1,6 +1,6 @@
 # MCP Server Architecture
 
-The Model Context Protocol server embedded in StartOS (`core/src/mcp/`).
+The Model Context Protocol server embedded in StartOS (`shared-libs/crates/start-core/src/mcp/`).
 
 ## Transport: Streamable HTTP (MCP 2025-03-26)
 
@@ -35,11 +35,11 @@ Every HTTP method (POST, GET, DELETE) validates the caller's session cookie via 
 ## Module Structure
 
 ```
-core/src/mcp/
+shared-libs/crates/start-core/src/mcp/
 ├── mod.rs        — HTTP handlers, routing, MCP method dispatch, shell execution, CORS
 ├── protocol.rs   — JSON-RPC 2.0 types, MCP request/response structs, error codes
 ├── session.rs    — Session map, create/remove/sweep, resource subscriptions with debounce
-└── tools.rs      — Tool registry (89 tools), HashMap<String, ToolEntry> mapping names → RPC methods + schemas
+└── tools.rs      — Tool registry (93 tools), HashMap<String, ToolEntry> mapping names → RPC methods + schemas
 ```
 
 ## Tool Dispatch
@@ -89,7 +89,7 @@ Resource URIs are validated to only allow `/public/**` subtrees and the special 
 
 ## Excluded RPC Methods
 
-Of the ~195 RPC methods registered in the StartOS backend, 88 are exposed as MCP tools (plus 1 MCP-only tool: `package.shell`). The remaining 105 are excluded for the following reasons.
+Of the ~270 RPC methods registered in the StartOS backend, 92 are exposed as MCP tools (plus 1 MCP-only tool: `package.shell`). The remaining ~175 are excluded for the following reasons.
 
 ### Wrong context — Setup / Init / Diagnostic modes
 
@@ -97,9 +97,9 @@ These methods belong to the setup wizard, initial install, or diagnostic recover
 
 | Method | Reason |
 |--------|--------|
-| `setup.*` (15 methods) | Setup wizard only runs during initial OS configuration |
-| `init.*` (14 methods) | Initial disk/install flow, not reachable post-boot |
-| `diagnostic.*` (7 methods) | Diagnostic recovery mode, separate HTTP server |
+| `setup.*` (17 methods) | Setup wizard only runs during initial OS configuration |
+| `init.*` (3 methods) | Init-mode progress/log streaming, not reachable post-boot |
+| `diagnostic.*` (8 methods) | Diagnostic recovery mode, separate HTTP server |
 | `flash-os` | Bare-metal OS flashing |
 
 ### Wrong context — CLI / Developer tooling
@@ -108,7 +108,7 @@ These are developer-facing commands invoked via the CLI, not the web UI. They op
 
 | Method | Reason |
 |--------|--------|
-| `s9pk.*` (9 methods) | Package building/inspection — CLI tool for developers |
+| `s9pk.*` (13 methods) | Package building/inspection — CLI tool for developers |
 | `util.b3sum` | BLAKE3 checksum utility — CLI helper |
 | `init-key`, `pubkey` | Key management — CLI operations |
 
@@ -118,7 +118,7 @@ These manage the package registry (a separate server-side component), not the lo
 
 | Method | Reason |
 |--------|--------|
-| `registry.*` (20 methods) | Registry server administration, not local device management |
+| `registry.*` (54 methods) | Registry server administration, not local device management |
 
 ### Wrong context — Tunnel management
 
@@ -126,7 +126,7 @@ These configure the Start9 tunnel service, which has its own management interfac
 
 | Method | Reason |
 |--------|--------|
-| `tunnel.*` (12 methods) | Tunnel server management, separate from local OS control |
+| `tunnel.*` (47 methods) | Tunnel server management, separate from local OS control |
 
 ### Replaced by MCP-native functionality
 
@@ -134,6 +134,7 @@ These configure the Start9 tunnel service, which has its own management interfac
 |--------|--------|
 | `db.subscribe` | Replaced by MCP `resources/subscribe` which calls `ctx.db.dump_and_sub()` directly with 500ms debounce |
 | `server.metrics.follow` | WebSocket continuation for streaming metrics — use `server.metrics` (polling) instead |
+| `package.attach` | Interactive shell over a WebSocket continuation — use the `package.shell` MCP tool for non-interactive command execution inside the service container |
 
 ### Requires middleware injection not available via MCP dispatch
 
@@ -163,7 +164,7 @@ These configure the Start9 tunnel service, which has its own management interfac
 | `state` | Returns server state enum — available via DB resources |
 | `notification.create` | Internal: creates notifications from backend code, not user-facing |
 | `db.apply` | Bulk DB mutation — CLI-specific params (`apply_receipt`) not suitable for MCP |
-| `kiosk.set` | Kiosk mode toggle — physical display setting, not agent-relevant |
+| `kiosk.enable`, `kiosk.disable` | Kiosk mode toggle — physical display setting, not agent-relevant |
 
 ### Deep host/binding management — not yet exposed
 
@@ -176,6 +177,8 @@ These methods manage individual domain bindings and address assignments at a gra
 | `server.host.address.domain.private.add` | Granular domain management — deferred |
 | `server.host.address.domain.private.remove` | Granular domain management — deferred |
 | `server.host.binding.set-address-enabled` | Granular binding management — deferred |
+| `server.host.binding.set-range-address-enabled` | Granular binding management — deferred |
+| `server.host.binding.set-gua-wan` | Granular binding management — deferred |
 | `package.host.address.domain.public.add` | Granular domain management — deferred |
 | `package.host.address.domain.public.remove` | Granular domain management — deferred |
 | `package.host.address.domain.private.add` | Granular domain management — deferred |
@@ -183,6 +186,8 @@ These methods manage individual domain bindings and address assignments at a gra
 | `package.host.address.list` | Per-package address listing — deferred |
 | `package.host.binding.list` | Per-package binding listing — deferred |
 | `package.host.binding.set-address-enabled` | Granular binding management — deferred |
+| `package.host.binding.set-range-address-enabled` | Granular binding management — deferred |
+| `package.host.binding.set-gua-wan` | Granular binding management — deferred |
 | `net.gateway.set-default-outbound` | Gateway default route — deferred |
 
 ## Body Size Limits

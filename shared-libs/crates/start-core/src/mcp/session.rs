@@ -2,19 +2,18 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use patch_db::json_ptr::JsonPointer;
 use patch_db::DiffPatch;
+use patch_db::json_ptr::JsonPointer;
 use serde_json::Value as JsonValue;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
+use super::protocol::McpNotification;
 use crate::context::RpcContext;
 use crate::db::DbSubscriber;
 use crate::prelude::*;
 use crate::util::sync::SyncMutex;
-
-use super::protocol::McpNotification;
 
 pub(crate) type SessionMap = Arc<SyncMutex<HashMap<String, McpSession>>>;
 

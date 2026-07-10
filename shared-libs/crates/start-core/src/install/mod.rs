@@ -21,10 +21,10 @@ use tracing::instrument;
 use ts_rs::TS;
 
 use crate::context::{CliContext, RpcContext};
-use crate::registry::asset::BufferedHttpSource;
 use crate::db::model::package::{ManifestPreference, PackageStateMatchModelRef};
 use crate::prelude::*;
 use crate::progress::{FullProgress, FullProgressTracker, PhasedProgressBar};
+use crate::registry::asset::BufferedHttpSource;
 use crate::registry::context::{RegistryContext, RegistryUrlParams};
 use crate::registry::package::get::GetPackageResponse;
 use crate::rpc_continuations::{Guid, RpcContinuation};

@@ -106,7 +106,7 @@ The UI is therefore eventually consistent with the backend — after a mutating 
 
 StartOS includes an [MCP](https://modelcontextprotocol.io/) (Model Context Protocol) server at `/mcp`, enabling LLM agents to discover and invoke the same operations available through the UI and CLI. The MCP server runs inside the StartOS server process alongside the RPC API.
 
-- **Tools**: Every RPC method is exposed as an MCP tool with LLM-optimized descriptions and JSON Schema inputs. Agents call `tools/list` to discover what's available and `tools/call` to invoke operations.
+- **Tools**: The operationally relevant RPC methods are exposed as MCP tools with LLM-optimized descriptions and JSON Schema inputs (see the exclusion list in the MCP architecture doc). Agents call `tools/list` to discover what's available and `tools/call` to invoke operations.
 - **Resources**: System state is exposed via MCP resources backed by Patch-DB. Agents subscribe to `startos:///public` and receive debounced revision diffs over SSE, maintaining a local state cache without polling.
 - **Auth**: Same session cookie auth as the UI — no separate credentials.
 - **Transport**: MCP Streamable HTTP — POST for requests, GET for SSE notification stream, DELETE for session teardown.

@@ -785,9 +785,15 @@ impl Service {
             .map(|x| x.rootfs_dir().to_owned())
             .or_not_found(format!("container for {id}"))?;
 
-        let subcontainer_upper = subcontainer.as_ref().map(|x| AsRef::<str>::as_ref(x).to_uppercase());
-        let name_upper = name.as_ref().map(|x| AsRef::<str>::as_ref(x).to_uppercase());
-        let image_id_upper = image_id.as_ref().map(|x| AsRef::<Path>::as_ref(x).to_string_lossy().to_uppercase());
+        let subcontainer_upper = subcontainer
+            .as_ref()
+            .map(|x| AsRef::<str>::as_ref(x).to_uppercase());
+        let name_upper = name
+            .as_ref()
+            .map(|x| AsRef::<str>::as_ref(x).to_uppercase());
+        let image_id_upper = image_id
+            .as_ref()
+            .map(|x| AsRef::<Path>::as_ref(x).to_string_lossy().to_uppercase());
 
         let subcontainers = container.subcontainers.lock().await;
         let matches: Vec<_> = subcontainers
@@ -844,7 +850,10 @@ impl Service {
                 })
                 .collect::<Vec<_>>();
             return Err(Error::new(
-                eyre!("{}", t!("service.mod.multiple-subcontainers-found", id = id,)),
+                eyre!(
+                    "{}",
+                    t!("service.mod.multiple-subcontainers-found", id = id,)
+                ),
                 ErrorKind::InvalidRequest,
             )
             .with_info(to_value(&info)?));

@@ -42,7 +42,12 @@ impl McpResponse {
         }
     }
 
-    pub fn error(id: Option<JsonValue>, code: i32, message: String, data: Option<JsonValue>) -> Self {
+    pub fn error(
+        id: Option<JsonValue>,
+        code: i32,
+        message: String,
+        data: Option<JsonValue>,
+    ) -> Self {
         Self {
             jsonrpc: "2.0",
             id,
