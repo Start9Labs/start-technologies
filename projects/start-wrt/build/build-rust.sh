@@ -18,9 +18,21 @@ trap 'rust-zig-builder sh -c "chown -R $UID:$UID target /usr/local/cargo 2>/dev/
 ARCH=${ARCH:-riscv64}
 RUST_ARCH=${RUST_ARCH:-riscv64gc}
 PROFILE=${PROFILE:-release}
+# Embed the parse-time stamp (like start-core's include_str! of the root
+# GIT_HASH.txt) rather than re-checking git here: by binary-build time the make
+# run has already touched the tracked package-lock.json (shared-libs/ts-modules/
+# build.mk), which a fresh `git diff-index` misreads as a dirty tree. The stamp
+# still carries -modified for a checkout that was genuinely dirty at make parse.
 if [ -z "$STARTWRT_GIT_HASH" ]; then
-    STARTWRT_GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
-    git diff-index --quiet HEAD -- 2>/dev/null || STARTWRT_GIT_HASH="${STARTWRT_GIT_HASH}-dirty"
+    GIT_HASH_FILE="$PROJECT_DIR/build/env/GIT_HASH.txt"
+    if [ -f "$GIT_HASH_FILE" ] && [[ "$(cat "$GIT_HASH_FILE")" != @* ]]; then
+        STARTWRT_GIT_HASH=$(head -c 7 "$GIT_HASH_FILE")
+        case "$(cat "$GIT_HASH_FILE")" in *-modified) STARTWRT_GIT_HASH="${STARTWRT_GIT_HASH}-dirty" ;; esac
+    else
+        # No stamp (invoked outside make) or a GIT_BRANCH_AS_HASH dev stamp.
+        STARTWRT_GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+        git diff-index --quiet HEAD -- 2>/dev/null || STARTWRT_GIT_HASH="${STARTWRT_GIT_HASH}-dirty"
+    fi
 fi
 export STARTWRT_GIT_HASH
 
