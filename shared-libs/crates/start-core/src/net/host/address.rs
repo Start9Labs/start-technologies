@@ -374,6 +374,33 @@ pub async fn add_public_domain<Kind: HostApiKind>(
                 Ok(())
             })?;
 
+            // Parity with the sibling-binding cleanup above: a public domain
+            // targets one binding, so it must also stay disabled on every port
+            // range on the same host. Ranges are otherwise enabled-by-default
+            // (like domains), which would silently forward the whole range;
+            // instead a range is WAN-exposed only when the operator enables the
+            // range's own public address via set-range-address-enabled.
+            host.as_binding_ranges_mut().mutate(|ranges| {
+                for range in ranges.values_mut() {
+                    let has_addr = range
+                        .addresses
+                        .available
+                        .iter()
+                        .any(|a| a.public && a.hostname == fqdn);
+                    if has_addr {
+                        let ext = range
+                            .addresses
+                            .available
+                            .iter()
+                            .find(|a| a.public && a.hostname == fqdn)
+                            .and_then(|a| a.port)
+                            .unwrap_or(range.external_start_port);
+                        range.addresses.disabled.insert((fqdn.clone(), ext));
+                    }
+                }
+                Ok(())
+            })?;
+
             // Re-project: the gua_wan change above must flow into the GUA's
             // HostnameInfo.public so it is treated as WAN-exposed.
             Kind::host_for(&inheritance, db)?
