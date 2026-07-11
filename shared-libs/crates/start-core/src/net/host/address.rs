@@ -17,7 +17,7 @@ use crate::net::gateway::{
     CheckDnsParams, CheckPortParams, CheckPortRes, CheckPortV6Res, check_dns, check_port,
     check_port_v6,
 };
-use crate::net::host::binding::DerivedAddressInfo;
+use crate::net::host::binding::{DerivedAddressInfo, set_nonssl_wan_group};
 use crate::net::host::{HostApiKind, all_hosts};
 use crate::net::service_interface::HostnameMetadata;
 use crate::prelude::*;
@@ -235,18 +235,19 @@ pub struct AddPublicDomainRes {
 
 /// Reconcile a public domain on a *sibling* binding or range — one the domain
 /// was not directly added to. A public domain is scoped to its target binding,
-/// so by default it is disabled here (kept off the sibling). The exception is
-/// the non-SSL case: with no SNI, a non-SSL domain shares the bare WAN IP's
-/// packets, so if the co-located WAN IPv4 (same gateway + port) is already
-/// enabled on this sibling we honor that and enable the domain to match, keeping
-/// the two in lockstep. SSL rows carry their own SNI and are always isolated.
+/// so by default it is isolated here. The exception is the non-SSL case: with no
+/// SNI, the domain shares the bare WAN IP's packets, so if a co-located public
+/// WAN address (IPv4 or a WAN IPv6 GUA, same gateway + port) is already enabled
+/// we honor it and move the whole {domain, IPv4, GUA} group on together — a
+/// dual-stack domain links the v4 and v6 sides. SSL rows carry their own SNI and
+/// are always isolated.
 fn reconcile_domain_on_sibling(
     addresses: &mut DerivedAddressInfo,
     fqdn: &InternedString,
     gateway: &GatewayId,
 ) {
-    let mut enable = Vec::new();
-    let mut disable = Vec::new();
+    let mut ssl_ports = Vec::new();
+    let mut nonssl_ports = Vec::new();
     for a in &addresses.available {
         let HostnameMetadata::PublicDomain { gateway: gw } = &a.metadata else {
             continue;
@@ -256,12 +257,18 @@ fn reconcile_domain_on_sibling(
         }
         let Some(port) = a.port else { continue };
         if a.ssl {
-            disable.push(port);
-            continue;
+            ssl_ports.push(port);
+        } else if !nonssl_ports.contains(&port) {
+            nonssl_ports.push(port);
         }
-        // Non-SSL: honor an already-enabled co-located public WAN address on the
-        // same gateway + port — IPv4 or a WAN IPv6 GUA. Without SNI the domain
-        // and this bare IP are the same packets, so the two must stay in sync.
+    }
+    // SSL rows are isolated to the target (SNI distinguishes them from the IP).
+    for port in ssl_ports {
+        addresses.disabled.insert((fqdn.clone(), port));
+    }
+    // Non-SSL: honor an already-enabled co-located WAN address (IPv4 or GUA) and
+    // move the whole {domain, IPv4, GUA} group to match; otherwise isolate it.
+    for port in nonssl_ports {
         let wan_enabled = addresses.available.iter().any(|b| {
             !b.ssl
                 && b.public
@@ -275,17 +282,7 @@ fn reconcile_domain_on_sibling(
                     sa.port() == port && addresses.enabled.contains(&sa)
                 })
         });
-        if wan_enabled {
-            enable.push(port);
-        } else {
-            disable.push(port);
-        }
-    }
-    for port in enable {
-        addresses.disabled.remove(&(fqdn.clone(), port));
-    }
-    for port in disable {
-        addresses.disabled.insert((fqdn.clone(), port));
+        set_nonssl_wan_group(addresses, gateway, port, wan_enabled);
     }
 }
 
@@ -691,6 +688,32 @@ mod test {
             !domain_disabled(&a, 42000),
             "domain must be enabled to match the already-enabled public GUA"
         );
+    }
+
+    /// Transitive dual-stack link: enabling the WAN IPv4 on a non-SSL sibling
+    /// that has a domain also publishes the co-located GUA (the domain is
+    /// dual-stack, so v4 and v6 must move together).
+    #[test]
+    fn enabling_v4_with_domain_publishes_gua() {
+        let fqdn = InternedString::intern(FQDN);
+        let mut a = DerivedAddressInfo::default();
+        a.available.insert(domain(false, 42000, "wg1"));
+        a.available.insert(wan_ip(42000, "wg1"));
+        a.available.insert(gua(42000, "wg1")); // GUA present, not yet published
+        a.enabled.insert("64.23.194.12:42000".parse().unwrap()); // only v4 enabled
+
+        reconcile_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
+
+        let gua_v6: std::net::SocketAddrV6 = "[2001:db8::1]:42000".parse().unwrap();
+        assert!(
+            a.gua_wan.contains(&gua_v6),
+            "the GUA must be published to WAN (gua_wan) when v4 + a domain are on"
+        );
+        assert!(
+            a.enabled.contains(&"[2001:db8::1]:42000".parse().unwrap()),
+            "the GUA must be enabled"
+        );
+        assert!(!domain_disabled(&a, 42000), "domain enabled");
     }
 
     /// Default isolate behavior: WAN IP not enabled -> domain disabled.

@@ -20,7 +20,7 @@ use crate::net::vhost::AlpnInfo;
 use crate::prelude::*;
 use crate::util::FromStrParser;
 use crate::util::serde::{CliFromJsonString, HandlerExtSerde, display_serializable};
-use crate::{HostId, ServiceInterfaceId};
+use crate::{GatewayId, HostId, ServiceInterfaceId};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -541,10 +541,88 @@ pub struct BindingSetAddressEnabledParams {
     enabled: Option<bool>,
 }
 
+/// Is there a non-SSL public domain at this `gateway` + `port`? A public domain
+/// is what links the WAN IPv4 and IPv6 GUA at a non-SSL port (see
+/// [`set_nonssl_wan_group`]); without one they toggle independently.
+pub(crate) fn has_nonssl_domain(
+    addresses: &DerivedAddressInfo,
+    gateway: &GatewayId,
+    port: u16,
+) -> bool {
+    addresses.available.iter().any(|a| {
+        !a.ssl
+            && a.port == Some(port)
+            && matches!(&a.metadata, HostnameMetadata::PublicDomain { gateway: gw } if gw == gateway)
+    })
+}
+
+/// Set the whole non-SSL WAN group at `gateway` + `port` — the public domain(s),
+/// the bare WAN IPv4, and the WAN IPv6 GUA — to `enabled` together. On a non-SSL
+/// port there is no SNI, so all three share the same packets, and a public domain
+/// is assumed dual-stack, so it ties the v4 and v6 sides. They must move as one:
+/// enabling the IPv4 (or the domain) publishes the GUA, and vice versa. Callers
+/// gate this on a domain being present ([`has_nonssl_domain`]) — without one the
+/// v4 and GUA are independent.
+pub(crate) fn set_nonssl_wan_group(
+    addresses: &mut DerivedAddressInfo,
+    gateway: &GatewayId,
+    port: u16,
+    enabled: bool,
+) {
+    let mut domain_keys = Vec::new();
+    let mut ipv4 = Vec::new();
+    let mut guas = Vec::new();
+    for a in &addresses.available {
+        if a.ssl || a.port != Some(port) {
+            continue;
+        }
+        match &a.metadata {
+            HostnameMetadata::PublicDomain { gateway: gw } if gw == gateway => {
+                domain_keys.push((a.hostname.clone(), port));
+            }
+            HostnameMetadata::Ipv4 { gateway: gw } if a.public && gw == gateway => {
+                if let Some(sa) = a.to_socket_addr() {
+                    ipv4.push(sa);
+                }
+            }
+            HostnameMetadata::Ipv6 { gateway: gw, .. } if gw == gateway => {
+                if let Some(g) = a.gua() {
+                    guas.push(g);
+                }
+            }
+            _ => {}
+        }
+    }
+    for k in domain_keys {
+        if enabled {
+            addresses.disabled.remove(&k);
+        } else {
+            addresses.disabled.insert(k);
+        }
+    }
+    for sa in ipv4 {
+        if enabled {
+            addresses.enabled.insert(sa);
+        } else {
+            addresses.enabled.remove(&sa);
+        }
+    }
+    for g in guas {
+        if enabled {
+            addresses.gua_wan.insert(g);
+            addresses.enabled.insert(SocketAddr::V6(g));
+        } else {
+            addresses.gua_wan.remove(&g);
+            addresses.enabled.remove(&SocketAddr::V6(g));
+        }
+    }
+}
+
 /// Toggle one address on/off for a binding's `DerivedAddressInfo`. Public IPs
 /// live in the `enabled` set (keyed by `SocketAddr`); domains and private IPs
-/// live in the `disabled` set (keyed by `(hostname, port)`). Non-SSL Ipv4 ↔
-/// PublicDomain on the same gateway+port are cascaded so they toggle together.
+/// live in the `disabled` set (keyed by `(hostname, port)`). On a non-SSL port a
+/// dual-stack public domain links the WAN IPv4 and IPv6 GUA, so toggling any one
+/// of {IPv4, domain, GUA} moves the whole group ([`set_nonssl_wan_group`]).
 /// Shared by single-port bindings and port ranges (whose addresses all use
 /// `external_start_port` as their port, so the same keying applies).
 fn set_address_enabled_on(
@@ -565,24 +643,14 @@ fn set_address_enabled_on(
         } else {
             addresses.enabled.remove(&sa);
         }
-        // Non-SSL Ipv4: cascade to PublicDomains on same gateway
+        // Non-SSL Ipv4: a dual-stack public domain links this to the co-located
+        // GUA, so when one is present move the whole {IPv4, domain, GUA} group
+        // together (no domain => v4 and gua stay independent).
         if !address.ssl {
             if let HostnameMetadata::Ipv4 { gateway } = &address.metadata {
                 let port = sa.port();
-                for a in &addresses.available {
-                    if a.ssl {
-                        continue;
-                    }
-                    if let HostnameMetadata::PublicDomain { gateway: gw } = &a.metadata {
-                        if gw == gateway && a.port.unwrap_or(80) == port {
-                            let k = (a.hostname.clone(), a.port.unwrap_or(80));
-                            if enabled {
-                                addresses.disabled.remove(&k);
-                            } else {
-                                addresses.disabled.insert(k);
-                            }
-                        }
-                    }
+                if has_nonssl_domain(addresses, gateway, port) {
+                    set_nonssl_wan_group(addresses, gateway, port, enabled);
                 }
             }
         }
@@ -595,39 +663,11 @@ fn set_address_enabled_on(
         } else {
             addresses.disabled.insert(key);
         }
-        // Non-SSL PublicDomain: cascade to Ipv4 + other PublicDomains on same gateway
+        // Non-SSL PublicDomain: move the whole {IPv4, domain(s), GUA} group — a
+        // dual-stack domain ties the v4 and v6 sides together (no SNI here).
         if !address.ssl {
             if let HostnameMetadata::PublicDomain { gateway } = &address.metadata {
-                for a in &addresses.available {
-                    if a.ssl {
-                        continue;
-                    }
-                    match &a.metadata {
-                        HostnameMetadata::Ipv4 { gateway: gw } if a.public && gw == gateway => {
-                            if let Some(sa) = a.to_socket_addr() {
-                                if sa.port() == port {
-                                    if enabled {
-                                        addresses.enabled.insert(sa);
-                                    } else {
-                                        addresses.enabled.remove(&sa);
-                                    }
-                                }
-                            }
-                        }
-                        HostnameMetadata::PublicDomain { gateway: gw } if gw == gateway => {
-                            let dp = a.port.unwrap_or(80);
-                            if dp == port {
-                                let k = (a.hostname.clone(), dp);
-                                if enabled {
-                                    addresses.disabled.remove(&k);
-                                } else {
-                                    addresses.disabled.insert(k);
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
+                set_nonssl_wan_group(addresses, gateway, port, enabled);
             }
         }
     }
@@ -777,6 +817,16 @@ pub async fn set_gua_wan<Kind: HostApiKind>(
                         addrs.gua_wan.remove(&gua);
                         addrs.enabled.remove(&sa);
                     }
+                    // A dual-stack public domain links this GUA to the co-located
+                    // WAN IPv4 (non-SSL, no SNI): if one is present, move the whole
+                    // group so the domain and v4 follow the GUA.
+                    if !address.ssl {
+                        if let HostnameMetadata::Ipv6 { gateway, .. } = &address.metadata {
+                            if has_nonssl_domain(addrs, gateway, gua.port()) {
+                                set_nonssl_wan_group(addrs, gateway, gua.port(), wan);
+                            }
+                        }
+                    }
                     Ok(())
                 })?;
             let hostname = ServerHostname::load(db.as_public().as_server_info())?;
@@ -828,6 +878,65 @@ mod test {
             ..ipv6_addr("2001:db8::1", 443)
         };
         assert!(v4.gua().is_none());
+    }
+
+    #[test]
+    fn nonssl_wan_group_moves_domain_v4_gua_together() {
+        let gw = GatewayId::from(InternedString::intern("wg1"));
+        let mk = |ssl, public, host: &str, meta| HostnameInfo {
+            ssl,
+            public,
+            hostname: InternedString::intern(host),
+            port: Some(42000),
+            metadata: meta,
+        };
+        let mut info = DerivedAddressInfo::default();
+        info.available.insert(mk(
+            false,
+            true,
+            "turn.start9.dev",
+            HostnameMetadata::PublicDomain {
+                gateway: gw.clone(),
+            },
+        ));
+        info.available.insert(mk(
+            false,
+            true,
+            "64.23.194.12",
+            HostnameMetadata::Ipv4 {
+                gateway: gw.clone(),
+            },
+        ));
+        info.available.insert(mk(
+            false,
+            false,
+            "2001:db8::1",
+            HostnameMetadata::Ipv6 {
+                gateway: gw.clone(),
+                scope_id: 0,
+            },
+        ));
+
+        assert!(has_nonssl_domain(&info, &gw, 42000));
+        assert!(!has_nonssl_domain(&info, &gw, 9999));
+
+        let v4_sa: SocketAddr = "64.23.194.12:42000".parse().unwrap();
+        let gua_v6: SocketAddrV6 = "[2001:db8::1]:42000".parse().unwrap();
+        let dom_key = (InternedString::intern("turn.start9.dev"), 42000u16);
+
+        // Enable: domain un-disabled, v4 enabled, GUA published (gua_wan+enabled).
+        set_nonssl_wan_group(&mut info, &gw, 42000, true);
+        assert!(!info.disabled.contains(&dom_key));
+        assert!(info.enabled.contains(&v4_sa));
+        assert!(info.gua_wan.contains(&gua_v6));
+        assert!(info.enabled.contains(&SocketAddr::V6(gua_v6)));
+
+        // Disable: all three off together.
+        set_nonssl_wan_group(&mut info, &gw, 42000, false);
+        assert!(info.disabled.contains(&dom_key));
+        assert!(!info.enabled.contains(&v4_sa));
+        assert!(!info.gua_wan.contains(&gua_v6));
+        assert!(!info.enabled.contains(&SocketAddr::V6(gua_v6)));
     }
 
     #[test]
