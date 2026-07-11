@@ -18,7 +18,7 @@ use crate::net::gateway::{
     check_port_v6,
 };
 use crate::net::host::binding::{DerivedAddressInfo, set_nonssl_wan_group};
-use crate::net::host::{HostApiKind, all_hosts};
+use crate::net::host::{Host, HostApiKind, all_hosts};
 use crate::net::service_interface::HostnameMetadata;
 use crate::prelude::*;
 use crate::util::serde::{HandlerExtSerde, display_serializable};
@@ -283,6 +283,60 @@ fn reconcile_domain_on_sibling(
                 })
         });
         set_nonssl_wan_group(addresses, gateway, port, wan_enabled);
+    }
+}
+
+impl Model<Host> {
+    /// The host's public domains as `(fqdn, gateway)` pairs.
+    fn domain_gateways(&self) -> Result<Vec<(InternedString, GatewayId)>, Error> {
+        Ok(self
+            .as_public_domains()
+            .de()?
+            .into_iter()
+            .map(|(fqdn, cfg)| (fqdn, cfg.gateway))
+            .collect())
+    }
+
+    /// Reconcile a newly-bound single-port binding against the host's existing
+    /// public domains — a domain added earlier must not silently leak onto a
+    /// binding added afterwards. A fresh binding is always a sibling (never a
+    /// domain's target), so this isolates each domain unless the binding's own
+    /// WAN address is already enabled. Call after `update_addresses` has
+    /// synthesized the domain rows, then re-run `update_addresses` so the port
+    /// forwards reflect the isolation. Only run for a genuinely new binding —
+    /// re-running it on a re-bind would clobber a domain's target binding.
+    pub fn reconcile_domains_on_new_binding(&mut self, internal_port: u16) -> Result<(), Error> {
+        let domains = self.domain_gateways()?;
+        if domains.is_empty() {
+            return Ok(());
+        }
+        self.as_bindings_mut().mutate(|b| {
+            if let Some(bind) = b.get_mut(&internal_port) {
+                for (fqdn, gateway) in &domains {
+                    reconcile_domain_on_sibling(&mut bind.addresses, fqdn, gateway);
+                }
+            }
+            Ok(())
+        })
+    }
+
+    /// Range counterpart of [`Self::reconcile_domains_on_new_binding`].
+    pub fn reconcile_domains_on_new_range(
+        &mut self,
+        internal_start_port: u16,
+    ) -> Result<(), Error> {
+        let domains = self.domain_gateways()?;
+        if domains.is_empty() {
+            return Ok(());
+        }
+        self.as_binding_ranges_mut().mutate(|ranges| {
+            if let Some(range) = ranges.get_mut(&internal_start_port) {
+                for (fqdn, gateway) in &domains {
+                    reconcile_domain_on_sibling(&mut range.addresses, fqdn, gateway);
+                }
+            }
+            Ok(())
+        })
     }
 }
 

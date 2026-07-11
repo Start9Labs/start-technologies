@@ -1233,8 +1233,15 @@ impl NetService {
                 let hostname = ServerHostname::load(db.as_public().as_server_info())?;
                 let mut ports = db.as_private().as_available_ports().de()?;
                 let host = host_for(db, pkg_id.as_ref().unwrap_or(&PackageId::start_os()), &id)?;
+                let is_new = !host.as_bindings().contains_key(&internal_port)?;
                 host.add_binding(&mut ports, internal_port, options)?;
                 host.update_addresses(&hostname, &gateways, &ports)?;
+                // Isolate a newly-bound binding from any pre-existing public
+                // domain on this host, then re-derive so port forwards match.
+                if is_new {
+                    host.reconcile_domains_on_new_binding(internal_port)?;
+                    host.update_addresses(&hostname, &gateways, &ports)?;
+                }
                 db.as_private_mut().as_available_ports_mut().ser(&ports)?;
                 Ok(())
             })
@@ -1264,6 +1271,9 @@ impl NetService {
                 let hostname = ServerHostname::load(db.as_public().as_server_info())?;
                 let mut ports = db.as_private().as_available_ports().de()?;
                 let host = host_for(db, pkg_id.as_ref().unwrap_or(&PackageId::start_os()), &id)?;
+                let is_new = !host
+                    .as_binding_ranges()
+                    .contains_key(&internal_start_port)?;
                 host.add_binding_range(
                     &mut ports,
                     internal_start_port,
@@ -1271,6 +1281,12 @@ impl NetService {
                     number_of_ports,
                 )?;
                 host.update_addresses(&hostname, &gateways, &ports)?;
+                // Isolate a newly-bound range from any pre-existing public domain
+                // on this host, then re-derive so port forwards match.
+                if is_new {
+                    host.reconcile_domains_on_new_range(internal_start_port)?;
+                    host.update_addresses(&hostname, &gateways, &ports)?;
+                }
                 db.as_private_mut().as_available_ports_mut().ser(&ports)?;
                 Ok(())
             })
