@@ -212,13 +212,12 @@ start-os-clean:
 	rm -rf projects/start-os/build/lib/firmware projects/start-os/build/lib/migration-images
 	rm -rf projects/start-os/build/image-recipe/deb
 
-# OS bins + backup-fs (Rust) and the container-runtime (its own prettier config).
-# The ui/setup-wizard web apps are formatted by `web-format` (whole Angular workspace).
+# The ui/setup-wizard web apps and the container-runtime are formatted by
+# `web-format`/`web-format-check` (root prettier config, run from the repo root so
+# the root .prettierignore applies). This target is just the Rust crates.
 .PHONY: start-os-format start-os-format-check
 start-os-format:
 	$(FMT) cargo fmt -p start-os -p startos-backup-fs
-	npm --prefix projects/start-os/container-runtime run format
 
 start-os-format-check:
 	$(FMT) cargo fmt --check -p start-os -p startos-backup-fs
-	npm --prefix projects/start-os/container-runtime run format:check

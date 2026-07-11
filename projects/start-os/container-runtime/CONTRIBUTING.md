@@ -28,7 +28,7 @@ Run from the monorepo root:
 ```bash
 npm --prefix projects/start-os/container-runtime ci          # install deps
 npm --prefix projects/start-os/container-runtime run check     # type-check (tsc --noEmit)
-npm --prefix projects/start-os/container-runtime run build      # prettier + clean + tsc -> dist/
+npm --prefix projects/start-os/container-runtime run build      # clean + tsc -> dist/
 ```
 
 Or `cd projects/start-os/container-runtime` first and drop the `--prefix`.
@@ -46,15 +46,11 @@ Jest with `ts-jest` (`jest.config.js`, `rootDir: ./src`). The `mime` module is m
 
 ## Formatting
 
-Prettier config lives in `package.json`:
-
-- `trailingComma: "all"`, `tabWidth: 2`, `semi: false`, `singleQuote: false`.
-
-The runtime uses **double quotes**, unlike `start-sdk` and `shared-libs/ts-modules` (single quotes there) — do not normalize. `npm run build` runs Prettier `--write` before compiling, so formatting is applied automatically during a build.
-
-From the monorepo root, the canonical formatter is the top-level make target (container-runtime folds into the start-os product):
+The root prettier config (`.prettierrc.json` at the repo root) governs this directory — there is no local config or format script. Format from the monorepo root:
 
 ```bash
-make start-os-format          # write formatting
-make start-os-format-check    # CI read-only check
+make web-format               # prettier --write over the whole repo
+make web-format-check         # CI read-only check
 ```
+
+Never run prettier from inside this directory: the root `.prettierignore` only applies when prettier runs from the root cwd, and it must apply — it protects `__fixtures__/` (byte-exact test fixtures) from being reformatted.

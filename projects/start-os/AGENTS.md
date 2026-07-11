@@ -37,7 +37,9 @@ monorepo-wide rules, and [ARCHITECTURE.md](ARCHITECTURE.md) and
 - Type-check the runtime: `cd projects/start-os/container-runtime && npm run check`.
 - Build the UI: `make start-os-ui` (or `make start-os-uis` for ui + setup-wizard).
 - Tests: `make test` (Rust + SDK + container-runtime), or `make start-core-test`.
-- Format: `make start-os-format` / `make start-os-format-check`.
+- Format: `make start-os-format` / `make start-os-format-check` (Rust only);
+  TS/web/container-runtime formatting runs through `make web-format` (root
+  prettier config).
 - Regenerate `start-container` man pages (committed under `man/`):
   `cargo test -p start-core export_manpage_start_container`.
 
@@ -49,8 +51,10 @@ monorepo-wide rules, and [ARCHITECTURE.md](ARCHITECTURE.md) and
 - **`unshare-userns` must stay a multi-call applet**, not a CLI subcommand: it
   calls `unshare(CLONE_NEWUSER)`, which the kernel rejects on a multi-threaded
   process. See the comment in `src/bin/start-container.rs`.
-- **Don't normalize style across components.** The container-runtime uses double
-  quotes + no semicolons (its own prettier config); the SDK uses single quotes.
+- **One prettier config.** All TS (web, container-runtime) is governed by the
+  root `.prettierrc.json` + `.prettierignore`; run prettier from the repo root
+  so the ignore applies (`__fixtures__/` etc. must stay unformatted). Don't add
+  per-component prettier configs or scripts.
 - **Don't edit generated binding files** like
   `shared-libs/ts-modules/start-core/lib/osBindings/index.ts` or `projects/start-sdk/s9pk.mk`.
 - **Ask before destructive `make` recipes** — `update*`, `reflash`, `wormhole*`,

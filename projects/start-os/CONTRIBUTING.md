@@ -123,13 +123,14 @@ make test                      # Rust + SDK + container-runtime
 make start-core-test                 # backend only
 ```
 
-The container-runtime has its own test suite and prettier config (double quotes, no semicolons) — see [container-runtime/CONTRIBUTING.md](container-runtime/CONTRIBUTING.md). Note CI builds a multi-platform matrix (apple-darwin + aarch64/x86_64/riscv64 musl); local `cargo check` is linux-only, so consider platform-specific impact.
+The container-runtime has its own test suite — see [container-runtime/CONTRIBUTING.md](container-runtime/CONTRIBUTING.md). Note CI builds a multi-platform matrix (apple-darwin + aarch64/x86_64/riscv64 musl); local `cargo check` is linux-only, so consider platform-specific impact.
 
 ## Formatting
 
 ```sh
-make start-os-format            # format this product (core bins + web + container-runtime)
+make start-os-format            # format this product's Rust (core bins + backup-fs)
 make start-os-format-check      # CI-style check
+make web-format                 # prettier (root config) — covers web + container-runtime
 ```
 
 ## Cross-layer changes
