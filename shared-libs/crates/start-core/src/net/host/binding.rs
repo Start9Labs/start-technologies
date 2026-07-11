@@ -803,6 +803,20 @@ pub async fn set_gua_wan<Kind: HostApiKind>(
                     let bind = b.get_mut(&internal_port).or_not_found(internal_port)?;
                     let addrs = &mut bind.addresses;
                     let sa = SocketAddr::V6(gua);
+                    // A GUA mirrors two IPv4 addresses: public ~ the WAN IPv4,
+                    // local ~ the LAN IPv4. On a non-SSL port a dual-stack public
+                    // domain ties them together, so flipping the GUA moves the
+                    // whole {domain, WAN IPv4, GUA} group — but only when the GUA
+                    // ends up actually enabled (a public-but-off GUA mirrors a
+                    // disabled WAN IPv4, and cascades nothing).
+                    let linked_gw = match &address.metadata {
+                        HostnameMetadata::Ipv6 { gateway, .. }
+                            if !address.ssl && has_nonssl_domain(addrs, gateway, gua.port()) =>
+                        {
+                            Some(gateway.clone())
+                        }
+                        _ => None,
+                    };
                     if wan {
                         let on = !addrs
                             .disabled
@@ -810,21 +824,17 @@ pub async fn set_gua_wan<Kind: HostApiKind>(
                         addrs.gua_wan.insert(gua);
                         if on {
                             addrs.enabled.insert(sa);
+                            if let Some(g) = &linked_gw {
+                                set_nonssl_wan_group(addrs, g, gua.port(), true);
+                            }
                         } else {
                             addrs.enabled.remove(&sa);
                         }
                     } else {
                         addrs.gua_wan.remove(&gua);
                         addrs.enabled.remove(&sa);
-                    }
-                    // A dual-stack public domain links this GUA to the co-located
-                    // WAN IPv4 (non-SSL, no SNI): if one is present, move the whole
-                    // group so the domain and v4 follow the GUA.
-                    if !address.ssl {
-                        if let HostnameMetadata::Ipv6 { gateway, .. } = &address.metadata {
-                            if has_nonssl_domain(addrs, gateway, gua.port()) {
-                                set_nonssl_wan_group(addrs, gateway, gua.port(), wan);
-                            }
+                        if let Some(g) = &linked_gw {
+                            set_nonssl_wan_group(addrs, g, gua.port(), false);
                         }
                     }
                     Ok(())
