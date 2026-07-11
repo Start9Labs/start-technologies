@@ -17,7 +17,7 @@ use crate::net::gateway::{
     CheckDnsParams, CheckPortParams, CheckPortRes, CheckPortV6Res, check_dns, check_port,
     check_port_v6,
 };
-use crate::net::host::binding::{DerivedAddressInfo, set_nonssl_wan_group};
+use crate::net::host::binding::{DerivedAddressInfo, set_nonssl_lan_group, set_nonssl_wan_group};
 use crate::net::host::{Host, HostApiKind, all_hosts};
 use crate::net::service_interface::HostnameMetadata;
 use crate::prelude::*;
@@ -283,6 +283,45 @@ fn reconcile_public_domain_on_sibling(
                 })
         });
         set_nonssl_wan_group(addresses, gateway, port, wan_enabled);
+    }
+}
+
+/// Reconcile a private domain on a binding or range. Unlike a public domain, a
+/// private domain stays on by default — LAN is trusted, so it is not isolated.
+/// The exception: if the binding's own bare LAN IPv4 at this gateway+port has
+/// been disabled, honor that and take the whole {private domain, LAN IPv4,
+/// GUA-as-local} group down too. SSL private domains carry their own SNI and are
+/// left on.
+fn reconcile_private_domain_on_sibling(
+    addresses: &mut DerivedAddressInfo,
+    fqdn: &InternedString,
+    gateway: &GatewayId,
+) {
+    let mut nonssl_ports = Vec::new();
+    for a in &addresses.available {
+        if a.ssl || &a.hostname != fqdn {
+            continue;
+        }
+        let HostnameMetadata::PrivateDomain { gateways } = &a.metadata else {
+            continue;
+        };
+        if !gateways.contains(gateway) {
+            continue;
+        }
+        let Some(port) = a.port else { continue };
+        if !nonssl_ports.contains(&port) {
+            nonssl_ports.push(port);
+        }
+    }
+    for port in nonssl_ports {
+        // On unless the bare LAN IPv4 at this gateway+port is explicitly disabled.
+        let lan_disabled = addresses.available.iter().any(|b| {
+            !b.ssl
+                && b.port == Some(port)
+                && matches!(&b.metadata, HostnameMetadata::Ipv4 { gateway: gw2 } if !b.public && gw2 == gateway)
+                && addresses.disabled.contains(&(b.hostname.clone(), port))
+        });
+        set_nonssl_lan_group(addresses, gateway, port, !lan_disabled);
     }
 }
 
@@ -599,6 +638,11 @@ pub async fn add_private_domain<Kind: HostApiKind>(
 ) -> Result<bool, Error> {
     ctx.db
         .mutate(|db| {
+            let is_new = !Kind::host_for(&inheritance, db)?
+                .as_private_domains()
+                .de()?
+                .get(&fqdn)
+                .is_some_and(|gws| gws.contains(&gateway));
             Kind::host_for(&inheritance, db)?
                 .as_private_domains_mut()
                 .upsert(&fqdn, || Ok(BTreeSet::new()))?
@@ -612,7 +656,28 @@ pub async fn add_private_domain<Kind: HostApiKind>(
                 .as_gateways()
                 .de()?;
             let ports = db.as_private().as_available_ports().de()?;
-            Kind::host_for(&inheritance, db)?.update_addresses(&hostname, &gateways, &ports)
+            let host = Kind::host_for(&inheritance, db)?;
+            host.update_addresses(&hostname, &gateways, &ports)?;
+            // A private domain stays on by default, but honor it across the host:
+            // on every binding and range, take the private domain (and its LAN
+            // group) down where the operator has disabled that binding's private
+            // addresses. Only for a newly-added domain, so a re-add can't clobber.
+            if is_new {
+                host.as_bindings_mut().mutate(|b| {
+                    for bind in b.values_mut() {
+                        reconcile_private_domain_on_sibling(&mut bind.addresses, &fqdn, &gateway);
+                    }
+                    Ok(())
+                })?;
+                host.as_binding_ranges_mut().mutate(|ranges| {
+                    for range in ranges.values_mut() {
+                        reconcile_private_domain_on_sibling(&mut range.addresses, &fqdn, &gateway);
+                    }
+                    Ok(())
+                })?;
+                Kind::host_for(&inheritance, db)?.update_addresses(&hostname, &gateways, &ports)?;
+            }
+            Ok(())
         })
         .await
         .result?;
@@ -817,6 +882,45 @@ mod test {
         assert!(
             domain_disabled(&a, 42000),
             "an enabled IP on a different gateway must not honor the domain"
+        );
+    }
+
+    #[test]
+    fn private_domain_stays_on_but_honors_disabled_lan() {
+        let fqdn = InternedString::intern("priv.local");
+        let mut a = DerivedAddressInfo::default();
+        a.available.insert(HostnameInfo {
+            ssl: false,
+            public: false,
+            hostname: fqdn.clone(),
+            port: Some(42000),
+            metadata: HostnameMetadata::PrivateDomain {
+                gateways: BTreeSet::from([gw("wg1")]),
+            },
+        });
+        a.available.insert(HostnameInfo {
+            ssl: false,
+            public: false,
+            hostname: InternedString::intern("10.0.0.5"),
+            port: Some(42000),
+            metadata: HostnameMetadata::Ipv4 { gateway: gw("wg1") },
+        });
+        let priv_key = (fqdn.clone(), 42000u16);
+
+        // Default: the bare LAN IPv4 is on, so the private domain stays ON.
+        reconcile_private_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
+        assert!(
+            !a.disabled.contains(&priv_key),
+            "a private domain is on by default (LAN is not isolated)"
+        );
+
+        // Operator disables the bare LAN IPv4 -> the private domain is honored off.
+        a.disabled
+            .insert((InternedString::intern("10.0.0.5"), 42000));
+        reconcile_private_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
+        assert!(
+            a.disabled.contains(&priv_key),
+            "a disabled LAN IPv4 takes the private domain down too"
         );
     }
 }
