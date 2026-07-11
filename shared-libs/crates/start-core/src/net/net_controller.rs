@@ -1239,7 +1239,7 @@ impl NetService {
                 // Isolate a newly-bound binding from any pre-existing public
                 // domain on this host, then re-derive so port forwards match.
                 if is_new {
-                    host.reconcile_domains_on_new_binding(internal_port)?;
+                    host.reconcile_public_domains_on_new_binding(internal_port)?;
                     host.update_addresses(&hostname, &gateways, &ports)?;
                 }
                 db.as_private_mut().as_available_ports_mut().ser(&ports)?;
@@ -1284,7 +1284,7 @@ impl NetService {
                 // Isolate a newly-bound range from any pre-existing public domain
                 // on this host, then re-derive so port forwards match.
                 if is_new {
-                    host.reconcile_domains_on_new_range(internal_start_port)?;
+                    host.reconcile_public_domains_on_new_range(internal_start_port)?;
                     host.update_addresses(&hostname, &gateways, &ports)?;
                 }
                 db.as_private_mut().as_available_ports_mut().ser(&ports)?;

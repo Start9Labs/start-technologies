@@ -241,7 +241,7 @@ pub struct AddPublicDomainRes {
 /// we honor it and move the whole {domain, IPv4, GUA} group on together — a
 /// dual-stack domain links the v4 and v6 sides. SSL rows carry their own SNI and
 /// are always isolated.
-fn reconcile_domain_on_sibling(
+fn reconcile_public_domain_on_sibling(
     addresses: &mut DerivedAddressInfo,
     fqdn: &InternedString,
     gateway: &GatewayId,
@@ -288,7 +288,7 @@ fn reconcile_domain_on_sibling(
 
 impl Model<Host> {
     /// The host's public domains as `(fqdn, gateway)` pairs.
-    fn domain_gateways(&self) -> Result<Vec<(InternedString, GatewayId)>, Error> {
+    fn public_domain_gateways(&self) -> Result<Vec<(InternedString, GatewayId)>, Error> {
         Ok(self
             .as_public_domains()
             .de()?
@@ -305,34 +305,37 @@ impl Model<Host> {
     /// synthesized the domain rows, then re-run `update_addresses` so the port
     /// forwards reflect the isolation. Only run for a genuinely new binding —
     /// re-running it on a re-bind would clobber a domain's target binding.
-    pub fn reconcile_domains_on_new_binding(&mut self, internal_port: u16) -> Result<(), Error> {
-        let domains = self.domain_gateways()?;
-        if domains.is_empty() {
+    pub fn reconcile_public_domains_on_new_binding(
+        &mut self,
+        internal_port: u16,
+    ) -> Result<(), Error> {
+        let public_domains = self.public_domain_gateways()?;
+        if public_domains.is_empty() {
             return Ok(());
         }
         self.as_bindings_mut().mutate(|b| {
             if let Some(bind) = b.get_mut(&internal_port) {
-                for (fqdn, gateway) in &domains {
-                    reconcile_domain_on_sibling(&mut bind.addresses, fqdn, gateway);
+                for (fqdn, gateway) in &public_domains {
+                    reconcile_public_domain_on_sibling(&mut bind.addresses, fqdn, gateway);
                 }
             }
             Ok(())
         })
     }
 
-    /// Range counterpart of [`Self::reconcile_domains_on_new_binding`].
-    pub fn reconcile_domains_on_new_range(
+    /// Range counterpart of [`Self::reconcile_public_domains_on_new_binding`].
+    pub fn reconcile_public_domains_on_new_range(
         &mut self,
         internal_start_port: u16,
     ) -> Result<(), Error> {
-        let domains = self.domain_gateways()?;
-        if domains.is_empty() {
+        let public_domains = self.public_domain_gateways()?;
+        if public_domains.is_empty() {
             return Ok(());
         }
         self.as_binding_ranges_mut().mutate(|ranges| {
             if let Some(range) = ranges.get_mut(&internal_start_port) {
-                for (fqdn, gateway) in &domains {
-                    reconcile_domain_on_sibling(&mut range.addresses, fqdn, gateway);
+                for (fqdn, gateway) in &public_domains {
+                    reconcile_public_domain_on_sibling(&mut range.addresses, fqdn, gateway);
                 }
             }
             Ok(())
@@ -484,7 +487,7 @@ pub async fn add_public_domain<Kind: HostApiKind>(
                         if port == internal_port {
                             continue;
                         }
-                        reconcile_domain_on_sibling(&mut bind.addresses, &fqdn, &gateway);
+                        reconcile_public_domain_on_sibling(&mut bind.addresses, &fqdn, &gateway);
                     }
                     Ok(())
                 })?;
@@ -496,7 +499,7 @@ pub async fn add_public_domain<Kind: HostApiKind>(
                 // without SNI it is reachable via that same forward anyway.
                 host.as_binding_ranges_mut().mutate(|ranges| {
                     for range in ranges.values_mut() {
-                        reconcile_domain_on_sibling(&mut range.addresses, &fqdn, &gateway);
+                        reconcile_public_domain_on_sibling(&mut range.addresses, &fqdn, &gateway);
                     }
                     Ok(())
                 })?;
@@ -718,7 +721,7 @@ mod test {
         a.available.insert(wan_ip(42000, "wg1"));
         a.enabled.insert("64.23.194.12:42000".parse().unwrap());
 
-        reconcile_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
+        reconcile_public_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
 
         assert!(
             !domain_disabled(&a, 42000),
@@ -736,7 +739,7 @@ mod test {
         a.available.insert(gua(42000, "wg1"));
         a.enabled.insert("[2001:db8::1]:42000".parse().unwrap());
 
-        reconcile_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
+        reconcile_public_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
 
         assert!(
             !domain_disabled(&a, 42000),
@@ -756,7 +759,7 @@ mod test {
         a.available.insert(gua(42000, "wg1")); // GUA present, not yet published
         a.enabled.insert("64.23.194.12:42000".parse().unwrap()); // only v4 enabled
 
-        reconcile_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
+        reconcile_public_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
 
         let gua_v6: std::net::SocketAddrV6 = "[2001:db8::1]:42000".parse().unwrap();
         assert!(
@@ -778,7 +781,7 @@ mod test {
         a.available.insert(domain(false, 42000, "wg1"));
         a.available.insert(wan_ip(42000, "wg1"));
 
-        reconcile_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
+        reconcile_public_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
 
         assert!(
             domain_disabled(&a, 42000),
@@ -795,7 +798,7 @@ mod test {
         a.available.insert(wan_ip(5349, "wg1"));
         a.enabled.insert("64.23.194.12:5349".parse().unwrap());
 
-        reconcile_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
+        reconcile_public_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
 
         assert!(domain_disabled(&a, 5349), "SSL domain must stay isolated");
     }
@@ -809,7 +812,7 @@ mod test {
         a.available.insert(wan_ip(42000, "eth0"));
         a.enabled.insert("64.23.194.12:42000".parse().unwrap());
 
-        reconcile_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
+        reconcile_public_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
 
         assert!(
             domain_disabled(&a, 42000),

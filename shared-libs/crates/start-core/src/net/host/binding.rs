@@ -544,7 +544,7 @@ pub struct BindingSetAddressEnabledParams {
 /// Is there a non-SSL public domain at this `gateway` + `port`? A public domain
 /// is what links the WAN IPv4 and IPv6 GUA at a non-SSL port (see
 /// [`set_nonssl_wan_group`]); without one they toggle independently.
-pub(crate) fn has_nonssl_domain(
+pub(crate) fn has_nonssl_public_domain(
     addresses: &DerivedAddressInfo,
     gateway: &GatewayId,
     port: u16,
@@ -561,7 +561,7 @@ pub(crate) fn has_nonssl_domain(
 /// port there is no SNI, so all three share the same packets, and a public domain
 /// is assumed dual-stack, so it ties the v4 and v6 sides. They must move as one:
 /// enabling the IPv4 (or the domain) publishes the GUA, and vice versa. Callers
-/// gate this on a domain being present ([`has_nonssl_domain`]) — without one the
+/// gate this on a domain being present ([`has_nonssl_public_domain`]) — without one the
 /// v4 and GUA are independent.
 pub(crate) fn set_nonssl_wan_group(
     addresses: &mut DerivedAddressInfo,
@@ -649,7 +649,7 @@ fn set_address_enabled_on(
         if !address.ssl {
             if let HostnameMetadata::Ipv4 { gateway } = &address.metadata {
                 let port = sa.port();
-                if has_nonssl_domain(addresses, gateway, port) {
+                if has_nonssl_public_domain(addresses, gateway, port) {
                     set_nonssl_wan_group(addresses, gateway, port, enabled);
                 }
             }
@@ -811,7 +811,8 @@ pub async fn set_gua_wan<Kind: HostApiKind>(
                     // disabled WAN IPv4, and cascades nothing).
                     let linked_gw = match &address.metadata {
                         HostnameMetadata::Ipv6 { gateway, .. }
-                            if !address.ssl && has_nonssl_domain(addrs, gateway, gua.port()) =>
+                            if !address.ssl
+                                && has_nonssl_public_domain(addrs, gateway, gua.port()) =>
                         {
                             Some(gateway.clone())
                         }
@@ -927,8 +928,8 @@ mod test {
             },
         ));
 
-        assert!(has_nonssl_domain(&info, &gw, 42000));
-        assert!(!has_nonssl_domain(&info, &gw, 9999));
+        assert!(has_nonssl_public_domain(&info, &gw, 42000));
+        assert!(!has_nonssl_public_domain(&info, &gw, 9999));
 
         let v4_sa: SocketAddr = "64.23.194.12:42000".parse().unwrap();
         let gua_v6: SocketAddrV6 = "[2001:db8::1]:42000".parse().unwrap();
