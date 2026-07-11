@@ -17,6 +17,7 @@ use crate::net::gateway::{
     CheckDnsParams, CheckPortParams, CheckPortRes, CheckPortV6Res, check_dns, check_port,
     check_port_v6,
 };
+use crate::net::host::binding::DerivedAddressInfo;
 use crate::net::host::{HostApiKind, all_hosts};
 use crate::net::service_interface::HostnameMetadata;
 use crate::prelude::*;
@@ -232,6 +233,55 @@ pub struct AddPublicDomainRes {
     pub port_v6: Option<CheckPortV6Res>,
 }
 
+/// Reconcile a public domain on a *sibling* binding or range — one the domain
+/// was not directly added to. A public domain is scoped to its target binding,
+/// so by default it is disabled here (kept off the sibling). The exception is
+/// the non-SSL case: with no SNI, a non-SSL domain shares the bare WAN IP's
+/// packets, so if the co-located WAN IPv4 (same gateway + port) is already
+/// enabled on this sibling we honor that and enable the domain to match, keeping
+/// the two in lockstep. SSL rows carry their own SNI and are always isolated.
+fn reconcile_domain_on_sibling(
+    addresses: &mut DerivedAddressInfo,
+    fqdn: &InternedString,
+    gateway: &GatewayId,
+) {
+    let mut enable = Vec::new();
+    let mut disable = Vec::new();
+    for a in &addresses.available {
+        let HostnameMetadata::PublicDomain { gateway: gw } = &a.metadata else {
+            continue;
+        };
+        if gw != gateway || !a.public || &a.hostname != fqdn {
+            continue;
+        }
+        let Some(port) = a.port else { continue };
+        if a.ssl {
+            disable.push(port);
+            continue;
+        }
+        // Non-SSL: honor an already-enabled co-located WAN IPv4 (same gateway +
+        // port) — without SNI it is the same packets as the bare IP.
+        let wan_enabled = addresses.available.iter().any(|b| {
+            !b.ssl
+                && b.public
+                && matches!(&b.metadata, HostnameMetadata::Ipv4 { gateway: gw2 } if gw2 == gateway)
+                && b.to_socket_addr()
+                    .map_or(false, |sa| sa.port() == port && addresses.enabled.contains(&sa))
+        });
+        if wan_enabled {
+            enable.push(port);
+        } else {
+            disable.push(port);
+        }
+    }
+    for port in enable {
+        addresses.disabled.remove(&(fqdn.clone(), port));
+    }
+    for port in disable {
+        addresses.disabled.insert((fqdn.clone(), port));
+    }
+}
+
 pub async fn add_public_domain<Kind: HostApiKind>(
     ctx: RpcContext,
     AddPublicDomainParams {
@@ -350,53 +400,26 @@ pub async fn add_public_domain<Kind: HostApiKind>(
                     }
                 }
 
-                // Disable the domain on all other bindings
+                // Every other binding: isolate the domain by default, but honor
+                // an already-enabled non-SSL WAN IP by enabling the domain there
+                // to match (no SNI — the same packets as the bare IP).
                 for (&port, bind) in b.iter_mut() {
                     if port == internal_port {
                         continue;
                     }
-                    let has_addr = bind
-                        .addresses
-                        .available
-                        .iter()
-                        .any(|a| a.public && a.hostname == fqdn);
-                    if has_addr {
-                        let other_ext = bind
-                            .addresses
-                            .available
-                            .iter()
-                            .find(|a| a.public && a.hostname == fqdn)
-                            .and_then(|a| a.port)
-                            .unwrap_or(ext_port);
-                        bind.addresses.disabled.insert((fqdn.clone(), other_ext));
-                    }
+                    reconcile_domain_on_sibling(&mut bind.addresses, &fqdn, &gateway);
                 }
                 Ok(())
             })?;
 
-            // Parity with the sibling-binding cleanup above: a public domain
-            // targets one binding, so it must also stay disabled on every port
-            // range on the same host. Ranges are otherwise enabled-by-default
-            // (like domains), which would silently forward the whole range;
-            // instead a range is WAN-exposed only when the operator enables the
-            // range's own public address via set-range-address-enabled.
+            // Same reconciliation for every port range (parity with the sibling
+            // bindings above). Ranges are IPv4-only and non-SSL, so a domain is
+            // disabled on a range unless the range's own WAN IP is already
+            // enabled — in which case the domain is enabled to match, since
+            // without SNI it is reachable via that same forward anyway.
             host.as_binding_ranges_mut().mutate(|ranges| {
                 for range in ranges.values_mut() {
-                    let has_addr = range
-                        .addresses
-                        .available
-                        .iter()
-                        .any(|a| a.public && a.hostname == fqdn);
-                    if has_addr {
-                        let ext = range
-                            .addresses
-                            .available
-                            .iter()
-                            .find(|a| a.public && a.hostname == fqdn)
-                            .and_then(|a| a.port)
-                            .unwrap_or(range.external_start_port);
-                        range.addresses.disabled.insert((fqdn.clone(), ext));
-                    }
+                    reconcile_domain_on_sibling(&mut range.addresses, &fqdn, &gateway);
                 }
                 Ok(())
             })?;
@@ -551,4 +574,107 @@ pub async fn list_addresses<Kind: HostApiKind>(
         .de()?
         .addresses()
         .collect())
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::net::service_interface::{HostnameInfo, HostnameMetadata};
+
+    const FQDN: &str = "turn.start9.dev";
+
+    fn gw(name: &str) -> GatewayId {
+        GatewayId::from(InternedString::intern(name))
+    }
+
+    fn domain(ssl: bool, port: u16, gateway: &str) -> HostnameInfo {
+        HostnameInfo {
+            ssl,
+            public: true,
+            hostname: InternedString::intern(FQDN),
+            port: Some(port),
+            metadata: HostnameMetadata::PublicDomain {
+                gateway: gw(gateway),
+            },
+        }
+    }
+
+    fn wan_ip(port: u16, gateway: &str) -> HostnameInfo {
+        HostnameInfo {
+            ssl: false,
+            public: true,
+            hostname: InternedString::intern("64.23.194.12"),
+            port: Some(port),
+            metadata: HostnameMetadata::Ipv4 {
+                gateway: gw(gateway),
+            },
+        }
+    }
+
+    fn domain_disabled(a: &DerivedAddressInfo, port: u16) -> bool {
+        a.disabled.contains(&(InternedString::intern(FQDN), port))
+    }
+
+    /// The edge case that motivated this: a sibling whose non-SSL WAN IP is
+    /// already enabled must keep the domain ENABLED (in lockstep), not disable
+    /// it — otherwise the domain reads "disabled" while still reachable.
+    #[test]
+    fn non_ssl_domain_follows_enabled_wan_ip() {
+        let fqdn = InternedString::intern(FQDN);
+        let mut a = DerivedAddressInfo::default();
+        a.available.insert(domain(false, 42000, "wg1"));
+        a.available.insert(wan_ip(42000, "wg1"));
+        a.enabled.insert("64.23.194.12:42000".parse().unwrap());
+
+        reconcile_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
+
+        assert!(
+            !domain_disabled(&a, 42000),
+            "domain must be enabled to match the already-enabled WAN IP"
+        );
+    }
+
+    /// Default isolate behavior: WAN IP not enabled -> domain disabled.
+    #[test]
+    fn non_ssl_domain_disabled_when_wan_ip_off() {
+        let fqdn = InternedString::intern(FQDN);
+        let mut a = DerivedAddressInfo::default();
+        a.available.insert(domain(false, 42000, "wg1"));
+        a.available.insert(wan_ip(42000, "wg1"));
+
+        reconcile_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
+
+        assert!(domain_disabled(&a, 42000), "domain must be isolated by default");
+    }
+
+    /// SSL rows have their own SNI, so they are always isolated regardless of IP.
+    #[test]
+    fn ssl_domain_is_always_isolated() {
+        let fqdn = InternedString::intern(FQDN);
+        let mut a = DerivedAddressInfo::default();
+        a.available.insert(domain(true, 5349, "wg1"));
+        a.available.insert(wan_ip(5349, "wg1"));
+        a.enabled.insert("64.23.194.12:5349".parse().unwrap());
+
+        reconcile_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
+
+        assert!(domain_disabled(&a, 5349), "SSL domain must stay isolated");
+    }
+
+    /// An enabled WAN IP on a *different* gateway must not enable the domain.
+    #[test]
+    fn enabled_wan_ip_on_other_gateway_is_not_honored() {
+        let fqdn = InternedString::intern(FQDN);
+        let mut a = DerivedAddressInfo::default();
+        a.available.insert(domain(false, 42000, "wg1"));
+        a.available.insert(wan_ip(42000, "eth0"));
+        a.enabled.insert("64.23.194.12:42000".parse().unwrap());
+
+        reconcile_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
+
+        assert!(
+            domain_disabled(&a, 42000),
+            "an enabled IP on a different gateway must not honor the domain"
+        );
+    }
 }
