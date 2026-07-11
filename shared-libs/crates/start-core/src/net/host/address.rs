@@ -259,14 +259,21 @@ fn reconcile_domain_on_sibling(
             disable.push(port);
             continue;
         }
-        // Non-SSL: honor an already-enabled co-located WAN IPv4 (same gateway +
-        // port) — without SNI it is the same packets as the bare IP.
+        // Non-SSL: honor an already-enabled co-located public WAN address on the
+        // same gateway + port — IPv4 or a WAN IPv6 GUA. Without SNI the domain
+        // and this bare IP are the same packets, so the two must stay in sync.
         let wan_enabled = addresses.available.iter().any(|b| {
             !b.ssl
                 && b.public
-                && matches!(&b.metadata, HostnameMetadata::Ipv4 { gateway: gw2 } if gw2 == gateway)
-                && b.to_socket_addr()
-                    .map_or(false, |sa| sa.port() == port && addresses.enabled.contains(&sa))
+                && matches!(
+                    &b.metadata,
+                    HostnameMetadata::Ipv4 { gateway: gw2 }
+                        | HostnameMetadata::Ipv6 { gateway: gw2, .. }
+                    if gw2 == gateway
+                )
+                && b.to_socket_addr().map_or(false, |sa| {
+                    sa.port() == port && addresses.enabled.contains(&sa)
+                })
         });
         if wan_enabled {
             enable.push(port);
@@ -307,6 +314,17 @@ pub async fn add_public_domain<Kind: HostApiKind>(
                 }
             }
 
+            // Adding a domain that is already present is a no-op for exposure:
+            // we re-affirm the config below, but skip the target force-enable and
+            // the sibling/range reconcile so a re-add can't re-isolate a binding
+            // whose WAN IP the operator has since enabled, or clobber any other
+            // per-address choice. Enabling an existing domain on a binding is done
+            // through set-address-enabled, not by re-adding it.
+            let is_new = !Kind::host_for(&inheritance, db)?
+                .as_public_domains()
+                .keys()?
+                .contains(&fqdn);
+
             Kind::host_for(&inheritance, db)?
                 .as_public_domains_mut()
                 .insert(
@@ -328,7 +346,10 @@ pub async fn add_public_domain<Kind: HostApiKind>(
             let host = Kind::host_for(&inheritance, db)?;
             host.update_addresses(&hostname, &gateways, &available_ports)?;
 
-            // Find the external port for the target binding
+            // Find the external port for the target binding to health-check.
+            // Prefer the SSL (vhost) port over the plaintext one: a domain is
+            // normally reached over TLS, so that is the forward the operator
+            // wants validated.
             let bindings = host.as_bindings().de()?;
             let target_bind = bindings
                 .get(&internal_port)
@@ -337,92 +358,98 @@ pub async fn add_public_domain<Kind: HostApiKind>(
                 .addresses
                 .available
                 .iter()
-                .find(|a| a.public && a.hostname == fqdn)
+                .filter(|a| a.public && a.hostname == fqdn)
+                .max_by_key(|a| a.ssl)
                 .and_then(|a| a.port)
                 .ok_or_else(|| Error::new(eyre!("no public address found for {fqdn} on port {internal_port}"), ErrorKind::NotFound))?;
 
-            // On the target binding, enable the WAN IPv4 and all
-            // public domains on the same gateway+port (no SNI without SSL).
-            host.as_bindings_mut().mutate(|b| {
-                if let Some(bind) = b.get_mut(&internal_port) {
-                    let non_ssl_port = bind.addresses.available.iter().find_map(|a| {
-                        if a.ssl || !a.public || a.hostname != fqdn {
-                            return None;
-                        }
-                        if let HostnameMetadata::PublicDomain { gateway: gw } = &a.metadata {
-                            if *gw == gateway {
-                                return a.port;
+            // A NEW domain gets force-enabled on its target binding and
+            // reconciled across the rest of the host; re-adding an existing one
+            // leaves every binding's/range's exposure exactly as it is.
+            if is_new {
+                // On the target binding, enable the WAN IPv4 and all
+                // public domains on the same gateway+port (no SNI without SSL).
+                host.as_bindings_mut().mutate(|b| {
+                    if let Some(bind) = b.get_mut(&internal_port) {
+                        let non_ssl_port = bind.addresses.available.iter().find_map(|a| {
+                            if a.ssl || !a.public || a.hostname != fqdn {
+                                return None;
                             }
-                        }
-                        None
-                    });
-                    if let Some(dp) = non_ssl_port {
-                        for a in &bind.addresses.available {
-                            if a.ssl || !a.public {
-                                continue;
-                            }
-                            if let HostnameMetadata::Ipv4 { gateway: gw } = &a.metadata {
+                            if let HostnameMetadata::PublicDomain { gateway: gw } = &a.metadata {
                                 if *gw == gateway {
-                                    if let Some(sa) = a.to_socket_addr() {
-                                        if sa.port() == dp {
-                                            bind.addresses.enabled.insert(sa);
+                                    return a.port;
+                                }
+                            }
+                            None
+                        });
+                        if let Some(dp) = non_ssl_port {
+                            for a in &bind.addresses.available {
+                                if a.ssl || !a.public {
+                                    continue;
+                                }
+                                if let HostnameMetadata::Ipv4 { gateway: gw } = &a.metadata {
+                                    if *gw == gateway {
+                                        if let Some(sa) = a.to_socket_addr() {
+                                            if sa.port() == dp {
+                                                bind.addresses.enabled.insert(sa);
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
-                        // No SNI without SSL, so the domain reaches v6 only via
-                        // the bare GUA — expose it like the WAN IPv4 above (v6 has
-                        // no NAT; the GUA is directly routable).
-                        if let Some(ip_info) =
-                            gateways.get(&gateway).and_then(|g| g.ip_info.as_ref())
-                        {
-                            for subnet in &ip_info.subnets {
-                                if let IpAddr::V6(ip) = subnet.addr() {
-                                    if !crate::net::utils::ipv6_is_local(ip) {
-                                        let gua = SocketAddrV6::new(ip, dp, 0, 0);
-                                        bind.addresses.gua_wan.insert(gua);
-                                        bind.addresses.enabled.insert(SocketAddr::V6(gua));
+                            // No SNI without SSL, so the domain reaches v6 only via
+                            // the bare GUA — expose it like the WAN IPv4 above (v6 has
+                            // no NAT; the GUA is directly routable).
+                            if let Some(ip_info) =
+                                gateways.get(&gateway).and_then(|g| g.ip_info.as_ref())
+                            {
+                                for subnet in &ip_info.subnets {
+                                    if let IpAddr::V6(ip) = subnet.addr() {
+                                        if !crate::net::utils::ipv6_is_local(ip) {
+                                            let gua = SocketAddrV6::new(ip, dp, 0, 0);
+                                            bind.addresses.gua_wan.insert(gua);
+                                            bind.addresses.enabled.insert(SocketAddr::V6(gua));
+                                        }
+                                    }
+                                }
+                            }
+                            for a in &bind.addresses.available {
+                                if a.ssl {
+                                    continue;
+                                }
+                                if let HostnameMetadata::PublicDomain { gateway: gw } = &a.metadata {
+                                    if *gw == gateway && a.port == Some(dp) {
+                                        bind.addresses.disabled.remove(&(a.hostname.clone(), dp));
                                     }
                                 }
                             }
                         }
-                        for a in &bind.addresses.available {
-                            if a.ssl {
-                                continue;
-                            }
-                            if let HostnameMetadata::PublicDomain { gateway: gw } = &a.metadata {
-                                if *gw == gateway && a.port == Some(dp) {
-                                    bind.addresses.disabled.remove(&(a.hostname.clone(), dp));
-                                }
-                            }
+                    }
+
+                    // Every other binding: isolate the domain by default, but honor
+                    // an already-enabled non-SSL WAN IP by enabling the domain there
+                    // to match (no SNI — the same packets as the bare IP).
+                    for (&port, bind) in b.iter_mut() {
+                        if port == internal_port {
+                            continue;
                         }
+                        reconcile_domain_on_sibling(&mut bind.addresses, &fqdn, &gateway);
                     }
-                }
+                    Ok(())
+                })?;
 
-                // Every other binding: isolate the domain by default, but honor
-                // an already-enabled non-SSL WAN IP by enabling the domain there
-                // to match (no SNI — the same packets as the bare IP).
-                for (&port, bind) in b.iter_mut() {
-                    if port == internal_port {
-                        continue;
+                // Same reconciliation for every port range (parity with the sibling
+                // bindings above). Ranges are IPv4-only and non-SSL, so a domain is
+                // disabled on a range unless the range's own WAN IP is already
+                // enabled — in which case the domain is enabled to match, since
+                // without SNI it is reachable via that same forward anyway.
+                host.as_binding_ranges_mut().mutate(|ranges| {
+                    for range in ranges.values_mut() {
+                        reconcile_domain_on_sibling(&mut range.addresses, &fqdn, &gateway);
                     }
-                    reconcile_domain_on_sibling(&mut bind.addresses, &fqdn, &gateway);
-                }
-                Ok(())
-            })?;
-
-            // Same reconciliation for every port range (parity with the sibling
-            // bindings above). Ranges are IPv4-only and non-SSL, so a domain is
-            // disabled on a range unless the range's own WAN IP is already
-            // enabled — in which case the domain is enabled to match, since
-            // without SNI it is reachable via that same forward anyway.
-            host.as_binding_ranges_mut().mutate(|ranges| {
-                for range in ranges.values_mut() {
-                    reconcile_domain_on_sibling(&mut range.addresses, &fqdn, &gateway);
-                }
-                Ok(())
-            })?;
+                    Ok(())
+                })?;
+            }
 
             // Re-project: the gua_wan change above must flow into the GUA's
             // HostnameInfo.public so it is treated as WAN-exposed.
@@ -611,6 +638,20 @@ mod test {
         }
     }
 
+    // A WAN-exposed IPv6 GUA (public=true, projected from gua_wan).
+    fn gua(port: u16, gateway: &str) -> HostnameInfo {
+        HostnameInfo {
+            ssl: false,
+            public: true,
+            hostname: InternedString::intern("2001:db8::1"),
+            port: Some(port),
+            metadata: HostnameMetadata::Ipv6 {
+                gateway: gw(gateway),
+                scope_id: 0,
+            },
+        }
+    }
+
     fn domain_disabled(a: &DerivedAddressInfo, port: u16) -> bool {
         a.disabled.contains(&(InternedString::intern(FQDN), port))
     }
@@ -634,6 +675,24 @@ mod test {
         );
     }
 
+    /// The domain must equally follow an enabled WAN IPv6 GUA (no SNI over v6
+    /// either), not just an enabled IPv4 WAN address.
+    #[test]
+    fn non_ssl_domain_follows_enabled_gua() {
+        let fqdn = InternedString::intern(FQDN);
+        let mut a = DerivedAddressInfo::default();
+        a.available.insert(domain(false, 42000, "wg1"));
+        a.available.insert(gua(42000, "wg1"));
+        a.enabled.insert("[2001:db8::1]:42000".parse().unwrap());
+
+        reconcile_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
+
+        assert!(
+            !domain_disabled(&a, 42000),
+            "domain must be enabled to match the already-enabled public GUA"
+        );
+    }
+
     /// Default isolate behavior: WAN IP not enabled -> domain disabled.
     #[test]
     fn non_ssl_domain_disabled_when_wan_ip_off() {
@@ -644,7 +703,10 @@ mod test {
 
         reconcile_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
 
-        assert!(domain_disabled(&a, 42000), "domain must be isolated by default");
+        assert!(
+            domain_disabled(&a, 42000),
+            "domain must be isolated by default"
+        );
     }
 
     /// SSL rows have their own SNI, so they are always isolated regardless of IP.
