@@ -578,25 +578,6 @@ pub(crate) fn has_nonssl_private_domain(
     })
 }
 
-/// Is the WAN level (public domain or bare WAN IPv4) currently on at
-/// `gateway`+`port`? Excludes the shared GUA (which is resolved from this).
-fn nonssl_wan_on(addresses: &DerivedAddressInfo, gateway: &GatewayId, port: u16) -> bool {
-    addresses.available.iter().any(|a| {
-        if a.ssl || a.port != Some(port) {
-            return false;
-        }
-        match &a.metadata {
-            HostnameMetadata::PublicDomain { gateway: gw } if gw == gateway => {
-                !addresses.disabled.contains(&(a.hostname.clone(), port))
-            }
-            HostnameMetadata::Ipv4 { gateway: gw } if a.public && gw == gateway => a
-                .to_socket_addr()
-                .is_some_and(|sa| addresses.enabled.contains(&sa)),
-            _ => false,
-        }
-    })
-}
-
 /// Is the LAN level (private domain or bare LAN IPv4) currently on at
 /// `gateway`+`port`? LAN addresses are opt-out (on by default). Excludes the GUA.
 fn nonssl_lan_on(addresses: &DerivedAddressInfo, gateway: &GatewayId, port: u16) -> bool {
@@ -616,12 +597,14 @@ fn nonssl_lan_on(addresses: &DerivedAddressInfo, gateway: &GatewayId, port: u16)
     })
 }
 
-/// Recompute every GUA at `gateway`+`port` from the two levels: public if the WAN
-/// level is on (public is inclusive of LAN — it wins), else local if the LAN
-/// level is on, else off. Call after any level change so the shared GUA stays
-/// consistent.
+/// Re-derive every GUA's reachability at `gateway`+`port` from its stored WAN
+/// opt-in (`gua_wan`, projected to `HostnameInfo.public`) and the LAN level. The
+/// WAN opt-in is an operator preference — this only READS it, never clobbers it,
+/// so a LAN-level change can't un-publish a GUA. A public GUA (in `gua_wan`) is
+/// reachable on WAN and LAN (public wins); otherwise it is local (on while the
+/// LAN level is up, else off). Only [`set_nonssl_wan_group`]/`set_gua_wan` write
+/// `gua_wan`.
 fn resolve_nonssl_gua(addresses: &mut DerivedAddressInfo, gateway: &GatewayId, port: u16) {
-    let wan_on = nonssl_wan_on(addresses, gateway, port);
     let lan_on = nonssl_lan_on(addresses, gateway, port);
     let guas: Vec<(SocketAddrV6, InternedString)> = addresses
         .available
@@ -641,19 +624,16 @@ fn resolve_nonssl_gua(addresses: &mut DerivedAddressInfo, gateway: &GatewayId, p
     for (g, host) in guas {
         let key = (host, port);
         let sa = SocketAddr::V6(g);
-        if wan_on {
-            // Public: WAN-exposed (and reachable on LAN).
-            addresses.gua_wan.insert(g);
+        if addresses.gua_wan.contains(&g) {
+            // Public (operator WAN opt-in): reachable on WAN and LAN.
             addresses.enabled.insert(sa);
             addresses.disabled.remove(&key);
         } else if lan_on {
-            // Local: LAN-only, on.
-            addresses.gua_wan.remove(&g);
+            // Local: LAN-only, on (local GUAs are opt-out, tracked in `disabled`).
             addresses.enabled.remove(&sa);
             addresses.disabled.remove(&key);
         } else {
             // Off.
-            addresses.gua_wan.remove(&g);
             addresses.enabled.remove(&sa);
             addresses.disabled.insert(key);
         }
@@ -672,6 +652,7 @@ pub(crate) fn set_nonssl_wan_group(
 ) {
     let mut domain_keys = Vec::new();
     let mut ipv4 = Vec::new();
+    let mut guas = Vec::new();
     for a in &addresses.available {
         if a.ssl || a.port != Some(port) {
             continue;
@@ -683,6 +664,11 @@ pub(crate) fn set_nonssl_wan_group(
             HostnameMetadata::Ipv4 { gateway: gw } if a.public && gw == gateway => {
                 if let Some(sa) = a.to_socket_addr() {
                     ipv4.push(sa);
+                }
+            }
+            HostnameMetadata::Ipv6 { gateway: gw, .. } if gw == gateway => {
+                if let Some(g) = a.gua() {
+                    guas.push(g);
                 }
             }
             _ => {}
@@ -700,6 +686,15 @@ pub(crate) fn set_nonssl_wan_group(
             addresses.enabled.insert(sa);
         } else {
             addresses.enabled.remove(&sa);
+        }
+    }
+    // The public domain flips the GUA's WAN opt-in (the stored `gua_wan` /
+    // `public` flag) with it; `resolve_nonssl_gua` then derives its reachability.
+    for g in guas {
+        if enabled {
+            addresses.gua_wan.insert(g);
+        } else {
+            addresses.gua_wan.remove(&g);
         }
     }
     resolve_nonssl_gua(addresses, gateway, port);
@@ -940,42 +935,40 @@ pub async fn set_gua_wan<Kind: HostApiKind>(
                     let bind = b.get_mut(&internal_port).or_not_found(internal_port)?;
                     let addrs = &mut bind.addresses;
                     let sa = SocketAddr::V6(gua);
-                    // A GUA mirrors two IPv4 addresses: public ~ the WAN IPv4,
-                    // local ~ the LAN IPv4. On a non-SSL port a dual-stack public
-                    // domain ties them together, so flipping the GUA moves the
-                    // whole {domain, WAN IPv4, GUA} group — but only when the GUA
-                    // ends up actually enabled (a public-but-off GUA mirrors a
-                    // disabled WAN IPv4, and cascades nothing).
-                    let linked_gw = match &address.metadata {
-                        HostnameMetadata::Ipv6 { gateway, .. }
-                            if !address.ssl
-                                && has_nonssl_public_domain(addrs, gateway, gua.port()) =>
-                        {
+                    // A GUA's WAN opt-in is the stored `gua_wan` / `public` flag.
+                    // With a co-located public domain, flipping the GUA drives the
+                    // whole WAN level (the public domain and bare WAN IPv4 follow —
+                    // correct precisely because a public domain is present).
+                    // Otherwise it is a standalone opt-in; `resolve_nonssl_gua`
+                    // derives the GUA's reachability from `gua_wan` + the LAN level.
+                    let gua_gw = match &address.metadata {
+                        HostnameMetadata::Ipv6 { gateway, .. } if !address.ssl => {
                             Some(gateway.clone())
                         }
                         _ => None,
                     };
-                    if let Some(gateway) = &linked_gw {
-                        // A public domain links this GUA to the WAN level: flipping
-                        // it public turns the level on (GUA -> public via resolve),
-                        // flipping it local turns the WAN level off (GUA -> local
-                        // while the LAN level stays on).
-                        set_nonssl_wan_group(addrs, gateway, gua.port(), wan);
-                    } else if wan {
-                        // Standalone GUA: publish it, carrying its on/off state.
-                        let on = !addrs
-                            .disabled
-                            .contains(&(address.hostname.clone(), gua.port()));
-                        addrs.gua_wan.insert(gua);
-                        if on {
-                            addrs.enabled.insert(sa);
-                        } else {
-                            addrs.enabled.remove(&sa);
+                    match gua_gw {
+                        Some(gateway) if has_nonssl_public_domain(addrs, &gateway, gua.port()) => {
+                            set_nonssl_wan_group(addrs, &gateway, gua.port(), wan);
                         }
-                    } else {
-                        // Standalone GUA: back to local (on unless disabled).
-                        addrs.gua_wan.remove(&gua);
-                        addrs.enabled.remove(&sa);
+                        Some(gateway) => {
+                            if wan {
+                                addrs.gua_wan.insert(gua);
+                            } else {
+                                addrs.gua_wan.remove(&gua);
+                            }
+                            resolve_nonssl_gua(addrs, &gateway, gua.port());
+                        }
+                        None => {
+                            // SSL / non-linkable GUA: a plain WAN opt-in toggle.
+                            if wan {
+                                addrs.gua_wan.insert(gua);
+                                addrs.enabled.insert(sa);
+                            } else {
+                                addrs.gua_wan.remove(&gua);
+                                addrs.enabled.remove(&sa);
+                            }
+                        }
                     }
                     Ok(())
                 })?;
@@ -1212,6 +1205,55 @@ mod test {
                 .gua_wan
                 .contains(&"[2001:db8::1]:42000".parse().unwrap()),
             "GUA is local, not public"
+        );
+    }
+
+    #[test]
+    fn lan_change_preserves_a_stored_wan_gua() {
+        let gw = GatewayId::from(InternedString::intern("wg1"));
+        let mk = |host: &str, meta| HostnameInfo {
+            ssl: false,
+            public: false,
+            hostname: InternedString::intern(host),
+            port: Some(42000),
+            metadata: meta,
+        };
+        let mut info = DerivedAddressInfo::default();
+        info.available.insert(mk(
+            "priv.local",
+            HostnameMetadata::PrivateDomain {
+                gateways: BTreeSet::from([gw.clone()]),
+            },
+        ));
+        info.available.insert(mk(
+            "10.0.0.5",
+            HostnameMetadata::Ipv4 {
+                gateway: gw.clone(),
+            },
+        ));
+        info.available.insert(mk(
+            "2001:db8::1",
+            HostnameMetadata::Ipv6 {
+                gateway: gw.clone(),
+                scope_id: 0,
+            },
+        ));
+        let gua_v6: SocketAddrV6 = "[2001:db8::1]:42000".parse().unwrap();
+        // Operator opted this GUA into WAN directly (stored preference) — there is
+        // no public domain to link it.
+        info.gua_wan.insert(gua_v6);
+        info.enabled.insert(SocketAddr::V6(gua_v6));
+
+        // A LAN-level change must NOT un-publish the GUA's stored WAN opt-in.
+        set_nonssl_lan_group(&mut info, &gw, 42000, false);
+        assert!(
+            info.gua_wan.contains(&gua_v6),
+            "a LAN change must not clobber the GUA's stored WAN opt-in"
+        );
+        set_nonssl_lan_group(&mut info, &gw, 42000, true);
+        assert!(
+            info.gua_wan.contains(&gua_v6),
+            "still WAN after LAN re-enabled"
         );
     }
 
