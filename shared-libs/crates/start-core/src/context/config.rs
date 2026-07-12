@@ -62,11 +62,23 @@ pub struct ClientConfig {
     #[arg(short = 'c', long, help = "help.arg.config-file-path")]
     pub config: Option<PathBuf>,
     /// A `host` profile name from the workspace `.startos/config.yaml`, or a URL.
+    /// Command line only — a config file's `host` merges into [`Self::host_file`].
     #[arg(short = 'H', long, help = "help.arg.host-url")]
     pub host: Option<String>,
     /// A `registry` profile name from the workspace `.startos/config.yaml`, or a URL.
+    /// Command line only — a config file's `registry` merges into [`Self::registry_file`].
     #[arg(short = 'r', long, help = "help.arg.registry-url")]
     pub registry: Option<String>,
+    /// `host` as set by a config file, kept apart from the `-H` flag so it can rank
+    /// *below* the workspace config. Populated by [`ContextConfig::merge_with`], never
+    /// parsed from a file's `host-file` key or a flag.
+    #[arg(skip)]
+    #[serde(skip)]
+    pub host_file: Option<String>,
+    /// `registry` as set by a config file. See [`Self::host_file`].
+    #[arg(skip)]
+    #[serde(skip)]
+    pub registry_file: Option<String>,
     #[arg(long, help = "help.arg.registry-hostname")]
     pub registry_hostname: Option<Vec<InternedString>>,
     #[arg(skip)]
@@ -107,8 +119,12 @@ impl ContextConfig for ClientConfig {
         self.config.take()
     }
     fn merge_with(&mut self, other: Self) {
-        self.host = self.host.take().or(other.host);
-        self.registry = self.registry.take().or(other.registry);
+        // `self` starts as the parsed command line and `other` is always a config file
+        // (see `load_path_rec`), so a file's host/registry accumulates in the `*_file`
+        // fields rather than landing in the same field as `-H`/`-r`. Only an explicit
+        // flag may outrank the workspace config; a config file is a fallback beneath it.
+        self.host_file = self.host_file.take().or(other.host);
+        self.registry_file = self.registry_file.take().or(other.registry);
         self.registry_hostname = self.registry_hostname.take().or(other.registry_hostname);
         self.registry_listen = self.registry_listen.take().or(other.registry_listen);
         self.s9pk_s3base = self.s9pk_s3base.take().or(other.s9pk_s3base);
@@ -202,6 +218,24 @@ pub fn resolve_target(
     }
 }
 
+/// Resolve a `-H`/`-r` target across every layer, in precedence order: the command-line
+/// flag, then the workspace's `default` profile, then whatever a config file set, then
+/// nothing. A config file sits *below* the workspace deliberately — it's a machine-wide
+/// fallback (`~/.startos/config.yaml`, `/etc/startos/config.yaml`), not a per-invocation
+/// override, so it must not shadow the workspace the way an explicit flag does.
+pub fn resolve_target_layered(
+    flag: Option<&str>,
+    file: Option<&str>,
+    profiles: Option<&BTreeMap<String, Url>>,
+) -> Result<Option<Url>, Error> {
+    // `resolve_target(None, ..)` yields the `default` profile, so this arm covers both
+    // the flag and the workspace default before a config file gets a look in.
+    match resolve_target(flag, profiles)? {
+        Some(url) => Ok(Some(url)),
+        None => resolve_target(file, profiles),
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize, Parser)]
 #[group(skip)]
 #[serde(rename_all = "kebab-case")]
@@ -257,5 +291,133 @@ impl ServerConfig {
             .with_ctx(|_| (crate::ErrorKind::Filesystem, db_path.display().to_string()))?;
 
         Ok(db)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn profiles(pairs: &[(&str, &str)]) -> BTreeMap<String, Url> {
+        pairs
+            .iter()
+            .map(|(name, url)| (name.to_string(), url.parse().unwrap()))
+            .collect()
+    }
+
+    /// A config file as `load_path_rec` hands it to `merge_with`.
+    fn from_file(host: &str) -> ClientConfig {
+        ClientConfig {
+            host: Some(host.into()),
+            ..Default::default()
+        }
+    }
+
+    fn resolved(
+        flag: Option<&str>,
+        file: Option<&str>,
+        profiles: Option<&BTreeMap<String, Url>>,
+    ) -> Option<String> {
+        resolve_target_layered(flag, file, profiles)
+            .unwrap()
+            .map(|url| url.to_string())
+    }
+
+    #[test]
+    fn a_config_files_host_merges_into_host_file() {
+        let mut config = ClientConfig::default();
+        config.merge_with(from_file("https://global/"));
+        assert_eq!(config.host, None);
+        assert_eq!(config.host_file.as_deref(), Some("https://global/"));
+    }
+
+    #[test]
+    fn a_command_line_host_survives_a_config_file_merge() {
+        let mut config = ClientConfig {
+            host: Some("https://flag/".into()),
+            ..Default::default()
+        };
+        config.merge_with(from_file("https://global/"));
+        assert_eq!(config.host.as_deref(), Some("https://flag/"));
+        assert_eq!(config.host_file.as_deref(), Some("https://global/"));
+    }
+
+    /// Files merge nearest-first: `~/.startos/config.yaml` before `/etc/startos/config.yaml`.
+    #[test]
+    fn the_first_config_file_wins() {
+        let mut config = ClientConfig::default();
+        config.merge_with(from_file("https://home/"));
+        config.merge_with(from_file("https://etc/"));
+        assert_eq!(config.host_file.as_deref(), Some("https://home/"));
+    }
+
+    /// The regression this guards: a machine-wide config file used to shadow the
+    /// workspace's `default` profile, because a file and `-H` shared one field.
+    #[test]
+    fn the_workspace_default_outranks_a_config_file() {
+        let workspace = profiles(&[("default", "https://workspace/")]);
+        assert_eq!(
+            resolved(None, Some("https://global/"), Some(&workspace)),
+            Some("https://workspace/".into()),
+        );
+    }
+
+    #[test]
+    fn a_flag_outranks_the_workspace_default() {
+        let workspace = profiles(&[("default", "https://workspace/")]);
+        assert_eq!(
+            resolved(
+                Some("https://flag/"),
+                Some("https://global/"),
+                Some(&workspace)
+            ),
+            Some("https://flag/".into()),
+        );
+    }
+
+    #[test]
+    fn a_flag_may_name_a_workspace_profile() {
+        let workspace = profiles(&[
+            ("default", "https://workspace/"),
+            ("remote", "https://remote/"),
+        ]);
+        assert_eq!(
+            resolved(Some("remote"), None, Some(&workspace)),
+            Some("https://remote/".into()),
+        );
+    }
+
+    /// No workspace in scope — how `start-cli` runs outside a packaging workspace, and
+    /// on the server itself against `/etc/startos/config.yaml`.
+    #[test]
+    fn a_config_file_applies_with_no_workspace() {
+        assert_eq!(
+            resolved(None, Some("https://global/"), None),
+            Some("https://global/".into()),
+        );
+    }
+
+    #[test]
+    fn a_config_file_applies_when_the_workspace_has_no_default() {
+        let workspace = profiles(&[("remote", "https://remote/")]);
+        assert_eq!(
+            resolved(None, Some("https://global/"), Some(&workspace)),
+            Some("https://global/".into()),
+        );
+    }
+
+    /// An unknown profile name is an error, not a silent fall-through to the config file.
+    #[test]
+    fn an_unknown_profile_name_errors() {
+        let workspace = profiles(&[("default", "https://workspace/")]);
+        assert!(
+            resolve_target_layered(Some("nope"), Some("https://global/"), Some(&workspace))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn nothing_configured_resolves_to_nothing() {
+        assert_eq!(resolved(None, None, None), None);
     }
 }

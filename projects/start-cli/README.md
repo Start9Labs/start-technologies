@@ -51,9 +51,13 @@ defined in a workspace `.startos/config.yaml`. Common flags:
 | `--developer-key-path <path>` | Developer signing key location          |
 | `--insecure`                  | Skip TLS verification (testing only)    |
 
-Configuration is layered: explicit flags override `.startos/config.yaml` (local workspace),
-which overrides `/etc/startos/config.yaml`. See
-[`shared-libs/crates/start-core/src/context/config.rs`](../../shared-libs/crates/start-core/src/context/config.rs).
+Configuration is layered, highest precedence first: an explicit `-H`/`-r` flag, then the
+nearest workspace `.startos/config.yaml` (found by walking up from the current directory),
+then the machine-wide config files (`~/.startos/config.yaml`, then `/etc/startos/config.yaml`).
+
+A config file is a _fallback_, not an override: unlike a flag it cannot shadow a workspace
+profile, so a `host` in `~/.startos/config.yaml` will not hijack the workspace's `default`.
+See [`shared-libs/crates/start-core/src/context/config.rs`](../../shared-libs/crates/start-core/src/context/config.rs).
 
 ## Command surface
 

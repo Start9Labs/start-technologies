@@ -22,7 +22,9 @@ use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 use tracing::instrument;
 
 use super::setup::CURRENT_SECRET;
-use crate::context::config::{ClientConfig, WorkspaceConfig, local_config_path, resolve_target};
+use crate::context::config::{
+    ClientConfig, WorkspaceConfig, local_config_path, resolve_target_layered,
+};
 use crate::context::{DiagnosticContext, InitContext, RpcContext, SetupContext};
 use crate::developer::{OS_DEVELOPER_KEY_PATH, default_developer_key_path, load_signing_key};
 use crate::middleware::auth::local::LocalAuthContext;
@@ -123,17 +125,21 @@ impl CliContext {
     /// BLOCKING
     #[instrument(skip_all)]
     pub fn init(config: ClientConfig) -> Result<Self, Error> {
-        // Resolve -H/-r (profile name or URL) against the workspace config, falling
-        // back to a literal URL, then to localhost / no registry when unset.
+        // Resolve -H/-r (profile name or URL) against the workspace config, then a
+        // config file, then localhost / no registry when unset.
         let workspace = WorkspaceConfig::find()?;
-        let mut url =
-            match resolve_target(config.host.as_deref(), workspace.as_ref().map(|w| &w.host))? {
-                Some(url) => url,
-                None => "http://localhost".parse()?,
-            };
+        let mut url = match resolve_target_layered(
+            config.host.as_deref(),
+            config.host_file.as_deref(),
+            workspace.as_ref().map(|w| &w.host),
+        )? {
+            Some(url) => url,
+            None => "http://localhost".parse()?,
+        };
 
-        let registry = resolve_target(
+        let registry = resolve_target_layered(
             config.registry.as_deref(),
+            config.registry_file.as_deref(),
             workspace.as_ref().map(|w| &w.registry),
         )?;
 

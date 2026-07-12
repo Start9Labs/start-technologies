@@ -11,6 +11,15 @@ or the CLI's externally observable behavior.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A config file no longer shadows the workspace `.startos/config.yaml`.** `host`/`registry` set
+  in `~/.startos/config.yaml` or `/etc/startos/config.yaml` was merged into the same field as an
+  explicit `-H`/`-r`, so it silently outranked the workspace's `default` profile — the opposite of
+  the documented layering. A config file is now a fallback _beneath_ the workspace; only a flag on
+  the command line overrides it. A flag naming an unknown profile still errors rather than quietly
+  falling through to a config file.
+
 ## [1.0.2]
 
 ### Changed
