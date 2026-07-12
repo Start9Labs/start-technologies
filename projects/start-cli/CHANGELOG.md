@@ -11,6 +11,8 @@ or the CLI's externally observable behavior.
 
 ## [Unreleased]
 
+## [1.0.3]
+
 ### Fixed
 
 - **A config file no longer shadows the workspace `.startos/config.yaml`.** `host`/`registry` set
@@ -112,7 +114,8 @@ init-workspace`), so an existing package repo is one command away from building.
 - `ws_continuation` honors `--root-ca` / `--insecure` (#3274).
 - `choose` falls back to a generic non-tty prompt instead of failing when stdin isn't a terminal (#3265).
 
-[Unreleased]: https://github.com/Start9Labs/start-technologies/compare/start-cli/v1.0.2...HEAD
+[Unreleased]: https://github.com/Start9Labs/start-technologies/compare/start-cli/v1.0.3...HEAD
+[1.0.3]: https://github.com/Start9Labs/start-technologies/releases/tag/start-cli/v1.0.3
 [1.0.2]: https://github.com/Start9Labs/start-technologies/releases/tag/start-cli/v1.0.2
 [1.0.1]: https://github.com/Start9Labs/start-technologies/releases/tag/start-cli/v1.0.1
 [1.0.0]: https://github.com/Start9Labs/start-technologies/releases/tag/start-cli/v1.0.0

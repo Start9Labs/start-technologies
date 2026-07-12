@@ -3,7 +3,7 @@ edition = "2024"
 license = "MIT"
 name = "start-cli"
 repository = "https://github.com/Start9Labs/start-technologies"
-version = "1.0.2"                                               # VERSION_BUMP
+version = "1.0.3"                                               # VERSION_BUMP
 
 [[bin]]
 name = "start-cli"
