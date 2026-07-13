@@ -11,6 +11,35 @@ or the CLI's externally observable behavior.
 
 ## [Unreleased]
 
+## [1.0.3]
+
+### Added
+
+- **`host`/`registry` profiles work in every config file, not just the workspace.** A config
+  file's `host`/`registry` is a namespace of named profiles — `default`, `prod`, whatever you
+  like — and a bare URL is shorthand for the `default` profile, so a legacy flat
+  `host: https://box.local` still targets that URL. Profiles from a `-c` file, the workspace
+  `.startos/config.yaml`, `~/.startos/config.yaml`, and `/etc/startos/config.yaml` all **combine**
+  into one namespace, so you can keep reusable profiles in your home config and reach them from
+  anywhere — inside a packaging workspace or not. A profile's value can be a URL or the name of
+  another profile, and `-H`/`-r` just set the `default` profile for that invocation (`-H prod`
+  points `default` at your `prod` profile); resolution follows the chain to a URL. A value that
+  isn't a URL is reported only when it's the one resolved, so a stale ambient config never fails an
+  unrelated command.
+
+### Fixed
+
+- **An ambient config file no longer shadows the workspace `.startos/config.yaml`.** A `host`
+  set in `~/.startos/config.yaml` or `/etc/startos/config.yaml` was merged into the same field as
+  an explicit `-H`/`-r`, so it silently outranked the workspace's `default` profile — the opposite
+  of the documented layering, and a trap for anyone with a leftover pre-1.0 flat config in their
+  home directory. Profiles now layer in a strict order, highest precedence first: a command-line
+  flag (`-H`/`-r`), a config file named with `-c`, the workspace config, `~/.startos/config.yaml`,
+  then `/etc/startos/config.yaml`. Where the same profile name is defined at more than one level
+  the higher tier wins; what you name on the command line overrides the workspace, what you don't
+  is an ambient default beneath it. A `-H`/`-r` naming an unknown profile still errors rather than
+  quietly falling through to a lower tier.
+
 ## [1.0.2]
 
 ### Changed
@@ -103,7 +132,8 @@ init-workspace`), so an existing package repo is one command away from building.
 - `ws_continuation` honors `--root-ca` / `--insecure` (#3274).
 - `choose` falls back to a generic non-tty prompt instead of failing when stdin isn't a terminal (#3265).
 
-[Unreleased]: https://github.com/Start9Labs/start-technologies/compare/start-cli/v1.0.2...HEAD
+[Unreleased]: https://github.com/Start9Labs/start-technologies/compare/start-cli/v1.0.3...HEAD
+[1.0.3]: https://github.com/Start9Labs/start-technologies/releases/tag/start-cli/v1.0.3
 [1.0.2]: https://github.com/Start9Labs/start-technologies/releases/tag/start-cli/v1.0.2
 [1.0.1]: https://github.com/Start9Labs/start-technologies/releases/tag/start-cli/v1.0.1
 [1.0.0]: https://github.com/Start9Labs/start-technologies/releases/tag/start-cli/v1.0.0

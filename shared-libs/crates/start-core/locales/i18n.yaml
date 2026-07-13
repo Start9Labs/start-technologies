@@ -2491,6 +2491,12 @@ context.cli.unknown-profile-or-url:
   es_ES: "«%{value}» no es un perfil conocido ni una URL válida"
   fr_FR: "« %{value} » n'est pas un profil connu ni une URL valide"
   pl_PL: "„%{value}” nie jest znanym profilem ani prawidłowym adresem URL"
+context.cli.profile-cycle:
+  en_US: "'%{value}' is part of a profile reference cycle"
+  de_DE: "„%{value}“ ist Teil eines Profilverweis-Zyklus"
+  es_ES: "«%{value}» forma parte de un ciclo de referencias de perfil"
+  fr_FR: "« %{value} » fait partie d'un cycle de références de profil"
+  pl_PL: "„%{value}” jest częścią cyklu odwołań profili"
 
 # context/rpc.rs
 context.rpc.rpc-context-dropped:

@@ -497,16 +497,16 @@ mod test {
 
     #[test]
     fn scaffolded_config_parses_as_workspace() {
-        // the config init-workspace writes must load as a full WorkspaceConfig (typed
-        // host/registry URL maps), which is what the runtime actually reads — not
-        // merely as schema-tagged YAML.
-        assert!(
-            IoFormat::Yaml
-                .from_reader::<_, crate::context::config::WorkspaceConfig>(
-                    WORKSPACE_CONFIG_CONTENTS.as_bytes()
-                )
-                .is_ok()
-        );
+        // the config init-workspace writes must load as the unified ClientConfig (its
+        // schema marker + host/registry profile maps), which is what the runtime reads
+        // — not merely as schema-tagged YAML.
+        let config = IoFormat::Yaml
+            .from_reader::<_, crate::context::config::ClientConfig>(
+                WORKSPACE_CONFIG_CONTENTS.as_bytes(),
+            )
+            .unwrap();
+        assert!(config.schema.is_some());
+        assert!(config.host.is_some_and(|host| !host.0.is_empty()));
     }
 
     #[test]

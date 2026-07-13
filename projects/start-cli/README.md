@@ -40,7 +40,7 @@ target/debug/start-cli s9pk pack ...                # build a package
 ## Connecting to a server
 
 `-H/--host` accepts either a URL (`https://server.local`) or a `host` profile name
-defined in a workspace `.startos/config.yaml`. Common flags:
+defined in a config file (see [Profiles](#profiles) below). Common flags:
 
 | Flag                          | Purpose                                 |
 | ----------------------------- | --------------------------------------- |
@@ -51,8 +51,39 @@ defined in a workspace `.startos/config.yaml`. Common flags:
 | `--developer-key-path <path>` | Developer signing key location          |
 | `--insecure`                  | Skip TLS verification (testing only)    |
 
-Configuration is layered: explicit flags override `.startos/config.yaml` (local workspace),
-which overrides `/etc/startos/config.yaml`. See
+### Profiles
+
+Every config file carries named `host` and `registry` **profiles**:
+
+```yaml
+host:
+  default: https://dev-vm.local
+  prod: https://prodbox.local
+registry:
+  default: https://registry.start9.com
+```
+
+`-H prod` targets the `prod` profile; a command with no `-H` uses `default`. A bare URL is
+shorthand for the `default` profile, so `host: https://dev-vm.local` and
+`host: { default: https://dev-vm.local }` mean the same thing. `-H`/`-r` simply set the `default`
+profile for that one invocation, on top of whatever the config files provide.
+
+A profile's value is either a URL or the name of another profile, so `default: prod` (or `-H prod`)
+points `default` at `prod`, and resolution follows the chain until it reaches a URL.
+
+Profiles are read from these sources, highest precedence first:
+
+1. `-H`/`-r` on the command line (set the `default` profile)
+2. a config file named on the command line (`-c`)
+3. the nearest workspace `.startos/config.yaml` (found by walking up from the current directory)
+4. `~/.startos/config.yaml`
+5. `/etc/startos/config.yaml`
+
+The profiles from every source **combine** into one namespace, and a name defined at more than one
+level takes its value from the higher tier — so `-H`'s `default` outranks the workspace's, which
+outranks `~/.startos`'s. You can keep reusable profiles in `~/.startos/config.yaml` and reach them
+with `-H` from anywhere, while a workspace still overrides `default` for the box you're standing in,
+and a `host` left in `~/.startos/config.yaml` can't hijack the workspace's `default`. See
 [`shared-libs/crates/start-core/src/context/config.rs`](../../shared-libs/crates/start-core/src/context/config.rs).
 
 ## Command surface
