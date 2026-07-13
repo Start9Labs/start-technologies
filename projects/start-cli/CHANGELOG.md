@@ -15,12 +15,15 @@ or the CLI's externally observable behavior.
 
 ### Fixed
 
-- **A config file no longer shadows the workspace `.startos/config.yaml`.** `host`/`registry` set
-  in `~/.startos/config.yaml` or `/etc/startos/config.yaml` was merged into the same field as an
-  explicit `-H`/`-r`, so it silently outranked the workspace's `default` profile — the opposite of
-  the documented layering. A config file is now a fallback _beneath_ the workspace; only a flag on
-  the command line overrides it. A flag naming an unknown profile still errors rather than quietly
-  falling through to a config file.
+- **An ambient config file no longer shadows the workspace `.startos/config.yaml`.**
+  `host`/`registry` set in `~/.startos/config.yaml` or `/etc/startos/config.yaml` was merged into
+  the same field as an explicit `-H`/`-r`, so it silently outranked the workspace's `default`
+  profile — the opposite of the documented layering, and a trap for anyone with a leftover pre-1.0
+  flat config in their home directory. Resolution now follows a strict ladder: a command-line flag
+  (`-H`/`-r`), then a config file named on the command line (`-c`), then the workspace config, then
+  `~/.startos/config.yaml`, then `/etc/startos/config.yaml`. What you name on the command line
+  overrides the workspace; what you don't is an ambient default beneath it. A flag naming an
+  unknown profile still errors rather than quietly falling through to a lower tier.
 
 ## [1.0.2]
 

@@ -130,8 +130,9 @@ impl CliContext {
         let workspace = WorkspaceConfig::find()?;
         let mut url = match resolve_target_layered(
             config.host.as_deref(),
-            config.host_file.as_deref(),
+            config.host_cli_config.as_deref(),
             workspace.as_ref().map(|w| &w.host),
+            config.host_implicit_config.as_deref(),
         )? {
             Some(url) => url,
             None => "http://localhost".parse()?,
@@ -139,8 +140,9 @@ impl CliContext {
 
         let registry = resolve_target_layered(
             config.registry.as_deref(),
-            config.registry_file.as_deref(),
+            config.registry_cli_config.as_deref(),
             workspace.as_ref().map(|w| &w.registry),
+            config.registry_implicit_config.as_deref(),
         )?;
 
         let cookie_path = config.cookie_path.unwrap_or_else(|| {
