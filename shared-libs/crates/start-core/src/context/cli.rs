@@ -28,6 +28,7 @@ use crate::context::config::{
 use crate::context::{DiagnosticContext, InitContext, RpcContext, SetupContext};
 use crate::developer::{OS_DEVELOPER_KEY_PATH, default_developer_key_path, load_signing_key};
 use crate::middleware::auth::local::LocalAuthContext;
+use crate::net::mdns::pin_mdns_host;
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::s9pk::init::{BUILD_KEY_FILE, STARTOS_DIR};
@@ -137,6 +138,9 @@ impl CliContext {
             Some(url) => url,
             None => "http://localhost".parse()?,
         };
+        // Before anything derives a URL from this one: a `.local` host is unresolvable from a
+        // musl-static binary, so pin it to an address the system resolver found.
+        pin_mdns_host(&mut url)?;
 
         let registry = resolve_target_layered(
             config.registry.as_deref(),
@@ -176,6 +180,7 @@ impl CliContext {
             },
             registry_url: registry
                 .map(|mut registry| {
+                    pin_mdns_host(&mut registry)?;
                     registry
                         .path_segments_mut()
                         .map_err(|_| eyre!("Url cannot be base"))

@@ -15,6 +15,16 @@ or the CLI's externally observable behavior.
 
 ### Fixed
 
+- **`.local` (mDNS) hostnames resolve again.** Every command against a `.local` address — the
+  way most people reach their server — failed after ~5s with an opaque
+  `error sending request for url (...)`, while `curl` against the same URL succeeded instantly.
+  `start-cli` ships as a statically linked musl binary, and musl's `getaddrinfo` implements no
+  NSS: it ignores `/etc/nsswitch.conf`, so `mdns4_minimal` is never consulted and the lookup
+  falls through to unicast DNS, which dies on musl's hard-coded 5s timeout. A `.local` host is
+  now resolved through the system resolver (`getent`, the same path `curl` takes) when the
+  client context is built, so the HTTP client and the log/progress websockets alike are handed
+  an address. Linux only — macOS resolves `.local` natively. (#3469)
+
 - **An ambient config file no longer shadows the workspace `.startos/config.yaml`.**
   `host`/`registry` set in `~/.startos/config.yaml` or `/etc/startos/config.yaml` was merged into
   the same field as an explicit `-H`/`-r`, so it silently outranked the workspace's `default`
