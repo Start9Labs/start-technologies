@@ -47,8 +47,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Platforms that shipped in 0.3.5.1 (no nvidia/riscv). Raspberry Pi is a
-        # different boot model (firmware-direct, no grub) tracked in #3443.
+        # Platforms with an in-place 0.3.5.1 migration (no nvidia/riscv).
+        # Raspberry Pi has no in-place path — it requires a reflash (#3443).
         platform: ${{ fromJson((github.event.inputs.platform || 'ALL') == 'ALL' && '["x86_64", "x86_64-nonfree", "aarch64", "aarch64-nonfree"]' || format('["{0}"]', github.event.inputs.platform)) }}
     env:
       GH_TOKEN: ${{ github.token }}
