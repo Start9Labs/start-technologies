@@ -35,11 +35,12 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$ARCH" ] && [ -f "$NEW_SQUASHFS" ] && [ -f "$OLD_IMAGE" ] && [ -n "$OUT" ] || usage
 
-# Run as root so unsquashfs/mksquashfs can restore the rootfs's ownership and
-# device nodes (as non-root, unsquashfs can't and exits non-zero).
+# Must run as root so unsquashfs/mksquashfs can restore the rootfs's ownership and
+# device nodes (as non-root, unsquashfs can't and exits non-zero). Callers wrap
+# this in a container rather than using host sudo (see build.mk / CI).
 if [ "$(id -u)" -ne 0 ]; then
-    exec sudo -E OWNER_UID="$(id -u)" OWNER_GID="$(id -g)" "$0" \
-        --arch "$ARCH" --new-squashfs "$NEW_SQUASHFS" --old-image "$OLD_IMAGE" --out "$OUT"
+    >&2 echo "assemble-migration-payload: must run as root — wrap it in a container (the make target and CI do)"
+    exit 1
 fi
 
 WORK="$(mktemp -d)"
@@ -83,6 +84,7 @@ install -m0755 "$SOURCE_DIR/lib/scripts/migration-update-grub" "$WORK/payload/us
 # 5. Re-squash into the OTA payload the registry loop-mounts and serves.
 rm -f "$OUT"
 mksquashfs "$WORK/payload" "$OUT" -noappend -comp gzip -b 4096
-[ -n "$OWNER_UID" ] && chown "$OWNER_UID:${OWNER_GID:-$OWNER_UID}" "$OUT"
+# hand the container-created output back to the invoking user (OWNER_* passed in)
+if [ -n "${OWNER_UID:-}" ]; then chown "$OWNER_UID:${OWNER_GID:-$OWNER_UID}" "$OUT"; fi
 
 echo "migration payload for $ARCH -> $OUT (base image $B3SUM.rootfs)"

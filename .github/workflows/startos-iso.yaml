@@ -373,11 +373,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install repackaging tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y xorriso squashfs-tools b3sum
-
       - name: Fetch the 0.4.0 base squashfs (this run's image build)
         id: base
         continue-on-error: true
@@ -403,6 +398,9 @@ jobs:
           gh release download "$MIGRATION_FROM_TAG" --repo "${{ github.repository }}" \
             --pattern "startos-*_${{ matrix.platform }}.iso" --dir base-old
 
+      # Runs in a container (root, no host sudo) so unsquashfs/mksquashfs can
+      # restore the rootfs's ownership + device nodes. Not --privileged: creating
+      # device nodes needs only CAP_MKNOD, which is in docker's default caps.
       - name: Assemble migration payload
         if: steps.check.outputs.found == 'true'
         run: |
@@ -411,11 +409,15 @@ jobs:
           OLD=$(ls base-old/startos-*_${{ matrix.platform }}.iso | head -n1)
           mkdir -p results
           OUT="results/$(basename "${NEW%.squashfs}").migration.squashfs"
-          ./projects/start-os/build/assemble-migration-payload.sh \
-            --arch "$ARCH" \
-            --new-squashfs "$NEW" \
-            --old-image "$OLD" \
-            --out "$OUT"
+          docker run --rm -v "$PWD":/w -w /w \
+            -e ARCH="$ARCH" -e NEW="$NEW" -e OLD="$OLD" -e OUT="$OUT" \
+            -e OWNER_UID="$(id -u)" -e OWNER_GID="$(id -g)" \
+            debian:trixie-slim bash -euc '
+              apt-get update -qq
+              apt-get install -yq --no-install-recommends xorriso squashfs-tools b3sum
+              projects/start-os/build/assemble-migration-payload.sh \
+                --arch "$ARCH" --new-squashfs "$NEW" --old-image "$OLD" --out "$OUT"
+            '
           echo "Built $OUT"
 
       - uses: actions/upload-artifact@v7
