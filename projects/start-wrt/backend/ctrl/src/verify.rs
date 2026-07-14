@@ -19,17 +19,13 @@ pub async fn run_verify() -> Result<(), Error> {
     let mut passed = true;
 
     // Step 1: Firmware integrity
-    if !verify_firmware_integrity().await? {
-        passed = false;
-    }
+    passed &= verify_firmware_integrity().await?;
 
     // Step 2: EEPROM WiFi password
     passed &= verify_eeprom_password();
 
     // Step 3: WiFi SSID broadcast
-    if !verify_wifi_broadcast().await? {
-        passed = false;
-    }
+    passed &= verify_wifi_broadcast().await?;
 
     // Firmware version
     let version = env!("CARGO_PKG_VERSION");
