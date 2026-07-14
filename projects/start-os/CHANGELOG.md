@@ -8,27 +8,6 @@ Full per-release notes are published on the
 [GitHub releases page](https://github.com/Start9Labs/start-technologies/releases). This
 file tracks notable changes since the move to the monorepo.
 
-## [Unreleased]
-
-### Added
-
-- **In-place 0.3.5.1 → 0.4.0 update path.** Updating the OS from 0.3.5.1 no longer
-  requires syncing a whole root filesystem file-by-file — the step that grew
-  flakier the more files a device had. StartOS 0.3.5.1's existing over-the-air
-  updater instead receives a compact migration payload (the 0.4.0 base image plus
-  a boot-time rewire) and the 0.4.0 initramfs converts the on-disk layout to the
-  0.4.0 format on first boot. The data partition is preserved and the existing
-  package/database migration runs afterward as before.
-
-### Fixed
-
-- **A cancelled or failed package update now leaves the previous version
-  running.** When an update is interrupted, StartOS restores the service's data to
-  its pre-update state before restarting the old version, so the service comes back
-  on the version it had. Previously the old version was started against the
-  partially-migrated data and failed its downgrade migration with a "cannot
-  migrate" error, leaving the service stuck until its container was rebuilt.
-
 ## [0.4.0-beta.10]
 
 ### Added
@@ -82,6 +61,13 @@ file tracks notable changes since the move to the monorepo.
 - **iOS root-CA install via configuration profile (#3240).** A new endpoint serves an unsigned Apple Configuration Profile (`PayloadType com.apple.security.root`); iOS/iPadOS download links are UA-sniffed and routed to `.mobileconfig`, fixing the broken `.crt` install flow on iOS 26.5 Safari.
 - **`diagnose-hang` capture script (#3236).** Captures startd runtime state entirely via `/proc` and basic tools (per-thread kernel stacks, fds/sockets, journal tail, dmesg, disk health, lxc status) when startd is unresponsive and `start-cli` can't help.
 - **`lo` and `lxcbr0` treated as secure networks (#3297)** for insecure (plain-HTTP) traffic, since loopback and the container bridge never leave the host; an explicit secure setting still overrides the intrinsic default.
+- **In-place 0.3.5.1 → 0.4.0 update path.** Updating the OS from 0.3.5.1 no longer
+  requires syncing a whole root filesystem file-by-file — the step that grew
+  flakier the more files a device had. StartOS 0.3.5.1's existing over-the-air
+  updater instead receives a compact migration payload (the 0.4.0 base image plus
+  a boot-time rewire) and the 0.4.0 initramfs converts the on-disk layout to the
+  0.4.0 format on first boot. The data partition is preserved and the existing
+  package/database migration runs afterward as before.
 
 ### Changed
 
@@ -207,6 +193,12 @@ file tracks notable changes since the move to the monorepo.
   saw that submit and offered to save your backup encryption password as a
   saved credential. The setup wizard's **Unlock Backup** prompt gets the same
   `autocapitalize` treatment.
+- **A cancelled or failed package update now leaves the previous version
+  running.** When an update is interrupted, StartOS restores the service's data to
+  its pre-update state before restarting the old version, so the service comes back
+  on the version it had. Previously the old version was started against the
+  partially-migrated data and failed its downgrade migration with a "cannot
+  migrate" error, leaving the service stuck until its container was rebuilt.
 
 ### Removed
 
@@ -239,6 +231,5 @@ file tracks notable changes since the move to the monorepo.
 See the [GitHub releases page](https://github.com/Start9Labs/start-technologies/releases)
 for the full 0.4.0 beta and alpha history and all prior releases.
 
-[Unreleased]: https://github.com/Start9Labs/start-technologies/compare/v0.4.0-beta.10...HEAD
-[0.4.0-beta.10]: https://github.com/Start9Labs/start-technologies/compare/v0.4.0-beta.9...v0.4.0-beta.10
+[0.4.0-beta.10]: https://github.com/Start9Labs/start-technologies/compare/v0.4.0-beta.9...HEAD
 [0.4.0-beta.9]: https://github.com/Start9Labs/start-technologies/releases/tag/v0.4.0-beta.9
