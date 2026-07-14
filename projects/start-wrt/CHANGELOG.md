@@ -14,7 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`startwrt-cli verify` now checks the EEPROM WiFi password.** The factory
   QC utility reads EEPROM tag 0x2F, verifies it satisfies the password
   constraints (valid TLV, 12 characters from the non-ambiguous charset), and
-  prints the password for visual comparison against the device sticker.
+  prints the password for visual comparison against the device sticker. On
+  failure it reports the specific violation (invalid TLV, missing tag, wrong
+  length and/or bytes outside the charset).
 
 ### Changed
 

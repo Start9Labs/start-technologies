@@ -106,35 +106,34 @@ async fn verify_firmware_integrity() -> Result<bool, Error> {
 
 /// Verify the WiFi password provisioned in EEPROM tag 0x2F.
 ///
-/// `read_wifi_password` enforces the full constraint set (valid ONIE TLV +
-/// CRC, exactly `PMK_LEN` chars, all from `PASSWORD_CHARS`). The password is
-/// printed so the operator can compare it against the device sticker. An
-/// unreadable EEPROM is reported as a FAIL rather than aborting the run, so
-/// the remaining checks still execute.
+/// `wifi_password_from_blob` enforces the full constraint set (valid ONIE
+/// TLV + CRC, exactly `PMK_LEN` chars, all from `PASSWORD_CHARS`) and
+/// reports the specific violation on failure. The password is printed so
+/// the operator can compare it against the device sticker. An unreadable
+/// EEPROM is reported as a FAIL rather than aborting the run, so the
+/// remaining checks still execute.
 fn verify_eeprom_password() -> bool {
     print!("[2/3] EEPROM WiFi password... ");
     io::stdout().flush().ok();
 
-    match crate::eeprom::read_wifi_password() {
-        Ok(Some(password)) => {
+    let blob = match crate::eeprom::read_blob() {
+        Ok(blob) => blob,
+        Err(e) => {
+            println!("FAIL");
+            println!("  {e}");
+            return false;
+        }
+    };
+    match crate::eeprom::wifi_password_from_blob(&blob) {
+        Ok(password) => {
             println!("PASS");
             println!("  password: {password}");
             println!("  compare with the sticker on the device");
             true
         }
-        Ok(None) => {
+        Err(rejection) => {
             println!("FAIL");
-            println!(
-                "  no valid WiFi password in EEPROM tag 0x{:02X} (missing, malformed, \
-                 or not {} chars from the password charset)",
-                crate::eeprom::TLV_TAG_WIFI_PMK,
-                crate::eeprom::PMK_LEN,
-            );
-            false
-        }
-        Err(e) => {
-            println!("FAIL");
-            println!("  {e}");
+            println!("  {rejection}");
             false
         }
     }

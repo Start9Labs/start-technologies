@@ -96,7 +96,7 @@ mod tlv {
 
     /// Standard reflected CRC-32 (polynomial 0xEDB88320) — same algorithm as
     /// zlib and IEEE 802.3. Verified against the vendor's known-good blob.
-    fn crc32(data: &[u8]) -> u32 {
+    pub fn crc32(data: &[u8]) -> u32 {
         let mut crc: u32 = 0xFFFF_FFFF;
         for &byte in data {
             crc ^= byte as u32;
@@ -182,33 +182,192 @@ pub fn read_blob() -> Result<Vec<u8>, Error> {
     })
 }
 
+/// Why an EEPROM blob doesn't yield a usable WiFi password.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PmkRejection {
+    /// The blob isn't a valid ONIE TLV (unprogrammed or corrupt EEPROM).
+    InvalidTlv(&'static str),
+    /// The TLV parses but carries no `TLV_TAG_WIFI_PMK` record.
+    MissingTag,
+    /// The tag's value violates the password constraints. Length and charset
+    /// are independent checks, so a doubly-bad value reports both.
+    BadValue {
+        /// The actual length, when it isn't `PMK_LEN`.
+        wrong_length: Option<usize>,
+        /// Every byte of the value not in `PASSWORD_CHARS`, in order.
+        invalid_bytes: Vec<u8>,
+    },
+}
+
+impl std::fmt::Display for PmkRejection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidTlv(why) => write!(f, "not a valid ONIE TLV blob: {why}"),
+            Self::MissingTag => write!(f, "no tag 0x{TLV_TAG_WIFI_PMK:02X} record in TLV"),
+            Self::BadValue {
+                wrong_length,
+                invalid_bytes,
+            } => {
+                write!(f, "tag 0x{TLV_TAG_WIFI_PMK:02X} value ")?;
+                if let Some(len) = wrong_length {
+                    write!(f, "is {len} bytes (expected {PMK_LEN})")?;
+                }
+                if !invalid_bytes.is_empty() {
+                    if wrong_length.is_some() {
+                        write!(f, "; ")?;
+                    }
+                    write!(f, "has bytes outside the password charset: ")?;
+                    for (i, b) in invalid_bytes.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        if b.is_ascii_graphic() {
+                            write!(f, "'{}'", *b as char)?;
+                        } else {
+                            write!(f, "0x{b:02X}")?;
+                        }
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Extract and validate the WiFi PMK from a raw EEPROM blob, reporting the
+/// specific rejection on failure: valid ONIE TLV, tag `TLV_TAG_WIFI_PMK`
+/// present, value exactly `PMK_LEN` bytes, every byte in `PASSWORD_CHARS`.
+pub fn wifi_password_from_blob(blob: &[u8]) -> Result<String, PmkRejection> {
+    let records = tlv::parse(blob).map_err(|e| {
+        PmkRejection::InvalidTlv(match e {
+            tlv::TlvError::BadMagic => "bad magic (EEPROM likely unprogrammed)",
+            tlv::TlvError::TruncatedHeader => "truncated header",
+            tlv::TlvError::TruncatedRecord => "truncated record",
+            tlv::TlvError::BadCrc => "CRC mismatch",
+            tlv::TlvError::MissingCrcRecord => "missing trailing CRC record",
+        })
+    })?;
+    let value = tlv::find(&records, TLV_TAG_WIFI_PMK).ok_or(PmkRejection::MissingTag)?;
+
+    // PASSWORD_CHARS is pure ASCII, so a byte-level check is equivalent to
+    // the char-level constraint and needs no UTF-8 decode.
+    let wrong_length = (value.len() != PMK_LEN).then_some(value.len());
+    let invalid_bytes: Vec<u8> = value
+        .iter()
+        .copied()
+        .filter(|b| !PASSWORD_CHARS.as_bytes().contains(b))
+        .collect();
+    if wrong_length.is_some() || !invalid_bytes.is_empty() {
+        return Err(PmkRejection::BadValue {
+            wrong_length,
+            invalid_bytes,
+        });
+    }
+    Ok(value.iter().map(|&b| b as char).collect())
+}
+
 /// Read the WiFi PMK from EEPROM tag 0x2F.
 ///
-/// Returns `Ok(Some(password))` only when the blob is a valid ONIE TLV with
-/// a 12-byte ASCII value at tag 0x2F whose every character is in
-/// `PASSWORD_CHARS`. Returns `Ok(None)` for any kind of "EEPROM doesn't
-/// have a usable password" — uninitialized, corrupt, missing tag, wrong
-/// length, non-charset bytes — leaving the caller responsible for the
+/// Returns `Ok(Some(password))` only when the blob passes every check in
+/// [`wifi_password_from_blob`]. Returns `Ok(None)` for any kind of "EEPROM
+/// doesn't have a usable password" — uninitialized, corrupt, missing tag,
+/// wrong length, non-charset bytes — leaving the caller responsible for the
 /// "no AP comes up" path. Returns `Err` only on sysfs I/O failure.
 pub fn read_wifi_password() -> Result<Option<String>, Error> {
-    let blob = read_blob()?;
-    let records = match tlv::parse(&blob) {
-        Ok(r) => r,
-        Err(_) => return Ok(None),
-    };
-    let value = match tlv::find(&records, TLV_TAG_WIFI_PMK) {
-        Some(v) => v,
-        None => return Ok(None),
-    };
-    if value.len() != PMK_LEN {
-        return Ok(None);
+    Ok(wifi_password_from_blob(&read_blob()?).ok())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a valid ONIE TLV blob (correct magic + trailing CRC) carrying a
+    /// single record.
+    fn blob_with_record(tag: u8, value: &[u8]) -> Vec<u8> {
+        let mut blob = Vec::new();
+        blob.extend_from_slice(tlv::MAGIC);
+        blob.push(0x01); // version
+        let total_len = (2 + value.len() + 6) as u16;
+        blob.extend_from_slice(&total_len.to_be_bytes());
+        blob.push(tag);
+        blob.push(value.len() as u8);
+        blob.extend_from_slice(value);
+        blob.extend_from_slice(&[tlv::TAG_CRC, 4]);
+        let crc = tlv::crc32(&blob);
+        blob.extend_from_slice(&crc.to_be_bytes());
+        blob
     }
-    let password = match std::str::from_utf8(value) {
-        Ok(s) => s,
-        Err(_) => return Ok(None),
-    };
-    if !password.chars().all(|c| PASSWORD_CHARS.contains(c)) {
-        return Ok(None);
+
+    #[test]
+    fn accepts_valid_pmk() {
+        let blob = blob_with_record(TLV_TAG_WIFI_PMK, b"Kf?J%3uZg8dm");
+        assert_eq!(
+            wifi_password_from_blob(&blob).as_deref(),
+            Ok("Kf?J%3uZg8dm")
+        );
     }
-    Ok(Some(password.to_string()))
+
+    #[test]
+    fn rejects_unprogrammed_eeprom() {
+        assert_eq!(
+            wifi_password_from_blob(&[0xFF; 256]),
+            Err(PmkRejection::InvalidTlv(
+                "bad magic (EEPROM likely unprogrammed)"
+            ))
+        );
+    }
+
+    #[test]
+    fn rejects_missing_tag() {
+        let blob = blob_with_record(0x21, b"k1-x_deb1");
+        assert_eq!(
+            wifi_password_from_blob(&blob),
+            Err(PmkRejection::MissingTag)
+        );
+    }
+
+    #[test]
+    fn rejects_wrong_length() {
+        let blob = blob_with_record(TLV_TAG_WIFI_PMK, b"Kf?J%3uZg8d");
+        assert_eq!(
+            wifi_password_from_blob(&blob),
+            Err(PmkRejection::BadValue {
+                wrong_length: Some(11),
+                invalid_bytes: vec![],
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_bytes() {
+        // 'l' is excluded from the non-ambiguous charset
+        let blob = blob_with_record(TLV_TAG_WIFI_PMK, b"Kf?J%3uZg8dl");
+        assert_eq!(
+            wifi_password_from_blob(&blob),
+            Err(PmkRejection::BadValue {
+                wrong_length: None,
+                invalid_bytes: vec![b'l'],
+            })
+        );
+    }
+
+    #[test]
+    fn reports_length_and_charset_together() {
+        // 13 bytes, containing a space and a NUL — both checks must surface
+        let rejection =
+            wifi_password_from_blob(&blob_with_record(TLV_TAG_WIFI_PMK, b"bad password\0"))
+                .unwrap_err();
+        assert_eq!(
+            rejection,
+            PmkRejection::BadValue {
+                wrong_length: Some(13),
+                invalid_bytes: vec![b' ', 0x00],
+            }
+        );
+        let msg = rejection.to_string();
+        assert!(msg.contains("13 bytes"), "missing length in: {msg}");
+        // space isn't ascii-graphic, so it renders as hex like the NUL
+        assert!(msg.contains("0x20"), "missing space byte in: {msg}");
+        assert!(msg.contains("0x00"), "missing NUL byte in: {msg}");
+    }
 }
