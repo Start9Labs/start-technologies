@@ -24,9 +24,7 @@ pub async fn run_verify() -> Result<(), Error> {
     }
 
     // Step 2: EEPROM WiFi password
-    if !verify_eeprom_password() {
-        passed = false;
-    }
+    passed &= verify_eeprom_password();
 
     // Step 3: WiFi SSID broadcast
     if !verify_wifi_broadcast().await? {
