@@ -10,7 +10,7 @@
 # initramfs boots), the 0.4.0 kernel/initramfs, a migration sentinel, and our
 # deterministic bootloader updater. The old Haskell registry loop-mounts the
 # result and rsync-serves its tree unchanged.
-set -e
+set -eo pipefail
 
 SOURCE_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 
@@ -34,6 +34,13 @@ while [ $# -gt 0 ]; do
     esac
 done
 [ -n "$ARCH" ] && [ -f "$NEW_SQUASHFS" ] && [ -f "$OLD_IMAGE" ] && [ -n "$OUT" ] || usage
+
+# Run as root so unsquashfs/mksquashfs can restore the rootfs's ownership and
+# device nodes (as non-root, unsquashfs can't and exits non-zero).
+if [ "$(id -u)" -ne 0 ]; then
+    exec sudo -E OWNER_UID="$(id -u)" OWNER_GID="$(id -g)" "$0" \
+        --arch "$ARCH" --new-squashfs "$NEW_SQUASHFS" --old-image "$OLD_IMAGE" --out "$OUT"
+fi
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -76,5 +83,6 @@ install -m0755 "$SOURCE_DIR/lib/scripts/migration-update-grub" "$WORK/payload/us
 # 5. Re-squash into the OTA payload the registry loop-mounts and serves.
 rm -f "$OUT"
 mksquashfs "$WORK/payload" "$OUT" -noappend -comp gzip -b 4096
+[ -n "$OWNER_UID" ] && chown "$OWNER_UID:${OWNER_GID:-$OWNER_UID}" "$OUT"
 
 echo "migration payload for $ARCH -> $OUT (base image $B3SUM.rootfs)"
