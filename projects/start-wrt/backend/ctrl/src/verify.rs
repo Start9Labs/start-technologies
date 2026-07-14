@@ -23,7 +23,12 @@ pub async fn run_verify() -> Result<(), Error> {
         passed = false;
     }
 
-    // Step 2: WiFi SSID broadcast
+    // Step 2: EEPROM WiFi password
+    if !verify_eeprom_password() {
+        passed = false;
+    }
+
+    // Step 3: WiFi SSID broadcast
     if !verify_wifi_broadcast().await? {
         passed = false;
     }
@@ -58,7 +63,7 @@ pub async fn run_verify() -> Result<(), Error> {
 /// Validates that the squashfs magic is present and `bytes_used` is sane,
 /// confirming the image was not truncated during flash.
 async fn verify_firmware_integrity() -> Result<bool, Error> {
-    print!("[1/2] Firmware integrity... ");
+    print!("[1/3] Firmware integrity... ");
     io::stdout().flush().ok();
 
     // Find the eMMC device — works whether booted from eMMC or SD.
@@ -101,6 +106,42 @@ async fn verify_firmware_integrity() -> Result<bool, Error> {
     }
 }
 
+/// Verify the WiFi password provisioned in EEPROM tag 0x2F.
+///
+/// `read_wifi_password` enforces the full constraint set (valid ONIE TLV +
+/// CRC, exactly `PMK_LEN` chars, all from `PASSWORD_CHARS`). The password is
+/// printed so the operator can compare it against the device sticker. An
+/// unreadable EEPROM is reported as a FAIL rather than aborting the run, so
+/// the remaining checks still execute.
+fn verify_eeprom_password() -> bool {
+    print!("[2/3] EEPROM WiFi password... ");
+    io::stdout().flush().ok();
+
+    match crate::eeprom::read_wifi_password() {
+        Ok(Some(password)) => {
+            println!("PASS");
+            println!("  password: {password}");
+            println!("  compare with the sticker on the device");
+            true
+        }
+        Ok(None) => {
+            println!("FAIL");
+            println!(
+                "  no valid WiFi password in EEPROM tag 0x{:02X} (missing, malformed, \
+                 or not {} chars from the password charset)",
+                crate::eeprom::TLV_TAG_WIFI_PMK,
+                crate::eeprom::PMK_LEN,
+            );
+            false
+        }
+        Err(e) => {
+            println!("FAIL");
+            println!("  {e}");
+            false
+        }
+    }
+}
+
 /// Verify that the StartWRT WiFi SSID is actively broadcasting.
 ///
 /// Only runs when booted from eMMC — the WiFi stack on the SD card is not
@@ -111,7 +152,7 @@ async fn verify_firmware_integrity() -> Result<bool, Error> {
 /// Retries up to 3 times with a 2-second delay since hostapd may still be
 /// starting after init/manufacture.
 async fn verify_wifi_broadcast() -> Result<bool, Error> {
-    print!("[2/2] WiFi SSID broadcast... ");
+    print!("[3/3] WiFi SSID broadcast... ");
     io::stdout().flush().ok();
 
     // Only meaningful when booted from eMMC
