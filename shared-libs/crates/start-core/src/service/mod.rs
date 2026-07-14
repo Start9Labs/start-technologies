@@ -474,13 +474,6 @@ impl Service {
                         }
                     }
                 }
-                // Roll the filesystem back before reloading the old service, so its init
-                // sees old-version data instead of an impossible new->old migration.
-                if disposition == LoadDisposition::Undo {
-                    crate::volume::restore_volumes_from_install_backup(id)
-                        .await
-                        .log_err();
-                }
                 match async {
                     let s9pk = S9pk::open(s9pk_path, Some(id)).await?;
                     ctx.db
@@ -512,6 +505,11 @@ impl Service {
                         })
                         .await
                         .result?;
+                    // Roll the filesystem back before reloading the old service, so its
+                    // init sees old-version data instead of an impossible new->old migration.
+                    crate::volume::restore_volumes_from_install_backup(id)
+                        .await
+                        .log_err();
                     handle_installed(s9pk).await
                 }
                 .await
@@ -521,12 +519,7 @@ impl Service {
                         Ok(service)
                     }
                     Err(e) => {
-                        tracing::error!(
-                            "Update rollback failed for {id}, restoring volume snapshot: {e}"
-                        );
-                        crate::volume::restore_volumes_from_install_backup(id)
-                            .await
-                            .log_err();
+                        tracing::error!("Update rollback failed for {id}: {e}");
                         Err(e)
                     }
                 }
