@@ -474,6 +474,13 @@ impl Service {
                         }
                     }
                 }
+                // Roll the filesystem back before reloading the old service, so its init
+                // sees old-version data instead of an impossible new->old migration.
+                if disposition == LoadDisposition::Undo {
+                    crate::volume::restore_volumes_from_install_backup(id)
+                        .await
+                        .log_err();
+                }
                 match async {
                     let s9pk = S9pk::open(s9pk_path, Some(id)).await?;
                     ctx.db

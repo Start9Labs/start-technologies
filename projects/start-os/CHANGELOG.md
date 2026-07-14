@@ -20,6 +20,15 @@ file tracks notable changes since the move to the monorepo.
   0.4.0 format on first boot. The data partition is preserved and the existing
   package/database migration runs afterward as before.
 
+### Fixed
+
+- **A cancelled or failed package update now leaves the previous version
+  running.** When an update is interrupted, StartOS restores the service's data to
+  its pre-update state before restarting the old version, so the service comes back
+  on the version it had. Previously the old version was started against the
+  partially-migrated data and failed its downgrade migration with a "cannot
+  migrate" error, leaving the service stuck until its container was rebuilt.
+
 ## [0.4.0-beta.10]
 
 ### Added
