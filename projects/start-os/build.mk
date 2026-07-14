@@ -53,7 +53,7 @@ results/$(BASENAME).migration.squashfs: results/$(BASENAME).squashfs projects/st
 	mkdir -p results/migration-base
 	gh release download $(MIGRATION_FROM_TAG) --repo Start9Labs/start-technologies \
 		--pattern 'startos-*_$(PLATFORM).iso' --dir results/migration-base --clobber
-	docker run --rm -v "$(CURDIR)":/w -w /w -e OWNER_UID="$$(id -u)" -e OWNER_GID="$$(id -g)" debian:trixie-slim bash -euc 'apt-get update -qq && apt-get install -yq --no-install-recommends xorriso squashfs-tools b3sum && projects/start-os/build/assemble-migration-payload.sh --arch $(ARCH) --new-squashfs results/$(BASENAME).squashfs --old-image "$$(ls -1 results/migration-base/startos-*_$(PLATFORM).iso | head -n1)" --out $@'
+	docker run --rm -v "$(CURDIR)":/w -w /w -e OWNER_UID="$$(id -u)" -e OWNER_GID="$$(id -g)" start9/build-env bash -euc 'apt-get update -qq && apt-get install -yq --no-install-recommends xorriso && projects/start-os/build/assemble-migration-payload.sh --arch $(ARCH) --new-squashfs results/$(BASENAME).squashfs --old-image "$$(ls -1 results/migration-base/startos-*_$(PLATFORM).iso | head -n1)" --out $@'
 
 # For creating os images. DO NOT USE
 start-os-install: $(STARTOS_TARGETS)
