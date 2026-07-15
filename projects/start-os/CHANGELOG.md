@@ -92,9 +92,11 @@ file tracks notable changes since the move to the monorepo.
   re-points the tor package's persisted hidden-service identity for the admin
   UI (`STARTOS`/`startos-ui` → `start-os`/`admin`), preserving the server's
   existing `.onion` address across the identity change.
-- **SDK (breaking):** `PluginHostnameInfo.packageId` is required — url plugins
-  (e.g. tor) must export the StartOS UI's urls as `start-os`/`admin` instead of
-  `packageId: null`.
+- **SDK:** `PluginHostnameInfo.packageId` is required in the type — url plugins
+  (e.g. tor) should export the StartOS UI's urls as `start-os`/`admin` instead of
+  `packageId: null`. For backwards compatibility during the beta.10 transition,
+  the host still accepts the legacy `packageId: null` (or an absent field) over
+  the effects socket and maps it to `start-os`.
 - **OS Logs and Kernel Logs moved into System settings.** The top-level Logs tab
   is removed; OS Logs and Kernel Logs are now entries at the bottom of the System
   menu.

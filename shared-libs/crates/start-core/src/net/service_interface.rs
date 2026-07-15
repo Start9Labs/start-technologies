@@ -104,11 +104,23 @@ impl HostnameMetadata {
     }
 }
 
+// TEMPORARY beta.9 compat: `packageId` was `Option`, `null`/absent meant the OS UI — map to `start-os`. Remove after beta.10.
+fn deserialize_os_ui_package_id<'de, D>(deserializer: D) -> Result<PackageId, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<PackageId>::deserialize(deserializer)?.unwrap_or_else(PackageId::start_os))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginHostnameInfo {
     /// [`PackageId::start_os`] identifies the server's own host (the StartOS UI).
+    #[serde(
+        default = "PackageId::start_os",
+        deserialize_with = "deserialize_os_ui_package_id"
+    )]
     pub package_id: PackageId,
     pub host_id: HostId,
     pub internal_port: u16,
