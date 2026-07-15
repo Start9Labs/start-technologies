@@ -9,8 +9,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use chacha20::Key;
 use fuser::FileType;
-
-use crate::FUSE_ROOT_ID;
 use log::error;
 use rand::rand_core::UnwrapErr;
 use rand::RngExt;
@@ -23,7 +21,7 @@ use crate::inode::{Attributes, ContentId, FileData, Inode, InodeAttributes};
 use crate::seglog::{self, SegmentLog};
 use crate::superblock::{Constants, Superblock};
 use crate::vault::EccParams;
-use crate::{serde, BackupFSOptions};
+use crate::{serde, BackupFSOptions, FUSE_ROOT_ID};
 
 #[derive(Clone)]
 pub struct Controller(Arc<ControllerSeed>);

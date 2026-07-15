@@ -4,8 +4,6 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use fuser::{Request, TimeOrNow};
-
-use crate::FUSE_ROOT_ID;
 use imbl::{OrdMap, OrdSet};
 use log::debug;
 use serde::{Deserialize, Serialize};
@@ -14,6 +12,7 @@ use crate::ctrl::{Controller, Exists, Load, Save};
 use crate::directory::DirectoryContents;
 use crate::error::{BkfsResult, BkfsResultExt};
 use crate::handle::{FileHandleId, Handler};
+use crate::FUSE_ROOT_ID;
 
 pub const BLOCK_SIZE: u64 = 4096;
 
@@ -210,7 +209,6 @@ impl From<&InodeAttributes> for fuser::FileAttr {
         }
     }
 }
-
 
 impl<'a> Save for &'a InodeAttributes {
     fn save(self, ctrl: &Controller) -> BkfsResult<()> {

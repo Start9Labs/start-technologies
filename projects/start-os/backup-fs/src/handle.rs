@@ -1149,7 +1149,12 @@ impl Handler {
         Ok(())
     }
 
-    pub fn opendir(&mut self, _req: &Request, inode: Inode, _flags: i32) -> BkfsResult<FileHandleId> {
+    pub fn opendir(
+        &mut self,
+        _req: &Request,
+        inode: Inode,
+        _flags: i32,
+    ) -> BkfsResult<FileHandleId> {
         let inode = self.load_inode(inode)?;
         let entries = match &inode.attrs.contents {
             FileData::Directory(dir) => dir.snapshot(self.ctrl(), inode.inode)?,
