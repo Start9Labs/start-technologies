@@ -9,8 +9,11 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::SystemTime;
 
-use fuser::consts::FUSE_WRITE_KILL_PRIV;
-use fuser::{FileType, Request, TimeOrNow, FUSE_ROOT_ID};
+use fuser::{FileType, Request, TimeOrNow};
+
+use crate::FUSE_ROOT_ID;
+
+const FUSE_WRITE_KILL_PRIV: i32 = 1 << 2;
 use log::{debug, warn};
 
 use crate::contents::Contents;

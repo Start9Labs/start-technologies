@@ -25,10 +25,8 @@ crossbeam-channel = "0.5"
 ctrlc = "3.4.4"
 env_logger = { version = "0.11", optional = true }
 fd-lock-rs = "0.1.4"
-fuser = { git = "https://github.com/Start9Labs/fuser.git", rev = "b6f91ac", features = [
-  "abi-7-31",
+fuser = { git = "https://github.com/Start9Labs/fuser.git", rev = "4ef196b", features = [
   "serializable",
-  "clap",
 ] }
 generic-array = { version = "1", features = ["serde"] }
 imbl = { version = "3", features = ["serde"] }

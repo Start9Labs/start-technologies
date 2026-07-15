@@ -2,7 +2,7 @@ use std::backtrace::Backtrace;
 use std::fmt::{Debug, Display};
 use std::io;
 
-use fuser::ReplyEntry;
+use fuser::{Errno, ReplyEntry};
 use libc::c_int;
 use log::{debug, warn};
 
@@ -92,7 +92,7 @@ impl BkfsError {
     }
 
     pub fn reply(&self, entry: ReplyEntry) {
-        entry.error(self.to_errno_log());
+        entry.error(Errno::from_i32(self.to_errno_log()));
     }
 }
 

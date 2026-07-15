@@ -8,7 +8,9 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use chacha20::Key;
-use fuser::{FileType, FUSE_ROOT_ID};
+use fuser::FileType;
+
+use crate::FUSE_ROOT_ID;
 use log::error;
 use rand::rand_core::UnwrapErr;
 use rand::RngExt;

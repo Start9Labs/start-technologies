@@ -3,7 +3,9 @@ use std::io;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use fuser::{Request, TimeOrNow, FUSE_ROOT_ID};
+use fuser::{Request, TimeOrNow};
+
+use crate::FUSE_ROOT_ID;
 use imbl::{OrdMap, OrdSet};
 use log::debug;
 use serde::{Deserialize, Serialize};
@@ -194,7 +196,7 @@ pub fn time_from_system_time(system_time: &SystemTime) -> (i64, u32) {
 impl From<&InodeAttributes> for fuser::FileAttr {
     fn from(InodeAttributes { inode, attrs, .. }: &InodeAttributes) -> Self {
         fuser::FileAttr {
-            ino: inode.0,
+            ino: fuser::INodeNo(inode.0),
             size: attrs.size,
             // st_blocks is reported in 512-byte units per POSIX, independent of blksize
             blocks: attrs.size.div_ceil(512),
@@ -560,7 +562,7 @@ impl Attributes {
         idmap: &[IdMappedRoot],
         key: &[u8],
         value: Option<Option<&[u8]>>,
-        request: &Request<'_>,
+        request: &Request,
     ) -> BkfsResult<()> {
         match parse_xattr_namespace(key)? {
             XattrNamespace::Security => {

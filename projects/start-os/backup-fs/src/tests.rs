@@ -4,7 +4,7 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 
-use fuser::MountOption;
+use fuser::{Config, MountOption};
 use tempdir::TempDir;
 use tokio::task::JoinSet;
 
@@ -57,46 +57,34 @@ fn with_backupfs(
     func: impl FnOnce(&Path),
     file_size_padding: Option<f64>,
 ) {
-    struct Unmounter(fuser::SessionUnmounter);
-    impl Drop for Unmounter {
-        fn drop(&mut self) {
-            let _ = self.0.unmount();
-        }
-    }
-
     let mnt = tempdir::TempDir::new("backupfs_mnt").unwrap();
-    let opt = vec![
-        MountOption::FSName("backup-fs".to_string()),
-        MountOption::AutoUnmount,
-    ];
-    let data_dir = data.to_owned();
-    let mnt_dir = mnt.path().to_owned();
-    let (ready_sender, ready_reciever) = oneshot::channel();
-    let thread = std::thread::spawn(move || {
-        let fs = BackupFS::new(BackupFSOptions {
-            data_dir,
-            setuid_support: false,
-            password,
-            file_size_padding,
-            readonly: false,
-            idmapped_root: vec![],
-        })
-        .unwrap();
-        let mut fs = {
-            let _guard = mount_lock().lock().unwrap_or_else(|e| e.into_inner());
-            fuser::Session::new(fs, mnt_dir, &opt).unwrap()
-        };
-        ready_sender.send(Unmounter(fs.unmount_callable())).unwrap();
-        fs.run().unwrap();
-    });
-    if let Ok(umount) = ready_reciever.recv() {
-        func(mnt.path());
-        drop(umount);
-    }
-    match thread.join() {
-        Ok(()) => (),
-        Err(err) => std::panic::resume_unwind(err),
+    let mut config = Config::default();
+    // No AutoUnmount: with 0.17's spawn(), the auto-unmount helper deadlocks
+    // an explicit umount. umount_and_join (and BackgroundSession's Drop, which
+    // unmounts via Mount on a panic) tear the mount down cleanly instead.
+    config.mount_options = vec![MountOption::FSName("backup-fs".to_string())];
+    let fs = BackupFS::new(BackupFSOptions {
+        data_dir: data.to_owned(),
+        setuid_support: false,
+        password,
+        file_size_padding,
+        readonly: false,
+        idmapped_root: vec![],
+    })
+    .unwrap();
+    // 0.17's spawn() moves the mount into the BackgroundSession, so an
+    // unmounter taken from the Session beforehand is dead. Drive the whole
+    // lifecycle through the BackgroundSession: run in the background, then
+    // umount_and_join. (A panic in func drops `bg`, whose Mount unmounts.)
+    let bg = {
+        let _guard = mount_lock().lock().unwrap_or_else(|e| e.into_inner());
+        fuser::Session::new(fs, mnt.path(), &config)
+            .unwrap()
+            .spawn()
+            .unwrap()
     };
+    func(mnt.path());
+    bg.umount_and_join().unwrap();
 }
 
 fn with_backupfs_async<F: Future<Output = ()> + Send + 'static>(

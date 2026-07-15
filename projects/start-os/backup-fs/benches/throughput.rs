@@ -21,7 +21,7 @@ use std::time::{Duration, SystemTime};
 
 use backupfs::{BackupFS, BackupFSOptions};
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use fuser::{MountOption, Session};
+use fuser::{Config, MountOption, Session, SessionACL};
 
 const MIB: usize = 1024 * 1024;
 const SEQ_SIZE: usize = 64 * MIB;
@@ -58,9 +58,12 @@ impl Harness {
                 idmapped_root: vec![],
             })
             .unwrap();
-            let mut session = Session::new(fs, &mnt_dir, &opt).unwrap();
+            let mut config = Config::default();
+            config.mount_options = opt;
+            config.acl = SessionACL::All;
+            let mut session = Session::new(fs, &mnt_dir, &config).unwrap();
             tx.send(session.unmount_callable()).unwrap();
-            session.run().unwrap();
+            session.spawn().unwrap().join().unwrap();
         });
         let umount = rx.recv().unwrap();
         Harness {

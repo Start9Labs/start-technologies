@@ -9,16 +9,21 @@ use std::os::raw::c_int;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
 use fd_lock_rs::{FdLock, LockType};
-use fuser::consts::{FOPEN_DIRECT_IO, FUSE_HANDLE_KILLPRIV};
 use fuser::{
-    Filesystem, KernelConfig, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory,
-    ReplyDirectoryPlus, ReplyEmpty, ReplyEntry, ReplyOpen, ReplyStatfs, ReplyWrite, ReplyXattr,
-    Request, TimeOrNow, FUSE_ROOT_ID,
+    AccessFlags, BsdFileFlags, CopyFileRangeFlags, Errno, FileHandle, Filesystem, FopenFlags,
+    Generation, INodeNo, InitFlags, KernelConfig, LockOwner, OpenFlags, RenameFlags, ReplyAttr,
+    ReplyCreate, ReplyData, ReplyDirectory, ReplyDirectoryPlus, ReplyEmpty, ReplyEntry, ReplyOpen,
+    ReplyStatfs, ReplyWrite, ReplyXattr, Request, TimeOrNow, WriteFlags,
 };
 use log::{debug, error};
+
+fn errno(e: c_int) -> Errno {
+    Errno::from_i32(e)
+}
 
 use crate::ctrl::{Controller, StatFs};
 use crate::directory::DirectoryContents;
@@ -46,6 +51,8 @@ mod tests;
 #[allow(dead_code)]
 mod util;
 mod vault;
+
+pub const FUSE_ROOT_ID: u64 = INodeNo::ROOT.0;
 
 pub const MAX_NAME_LENGTH: u32 = 255;
 // const MAX_FILE_SIZE: u64 = 1024 * 1024 * 1024 * 1024;
@@ -119,7 +126,7 @@ impl FromStr for IdMappedRoot {
 // Directory data is stored in the file's contents, as a serialized DirectoryDescriptor
 pub struct BackupFS {
     lock: FdLock<File>,
-    handler: Handler,
+    handler: Mutex<Handler>,
 }
 
 // The master key and all format-affecting constants live in the versioned
@@ -153,22 +160,28 @@ impl BackupFS {
 
         Ok(BackupFS {
             lock,
-            handler: Handler::new(ctrl),
+            handler: Mutex::new(Handler::new(ctrl)),
         })
     }
 
     pub fn fsck(&mut self) -> BkfsResult<()> {
-        self.handler.ctrl().fsck(false)
+        self.handler.get_mut().unwrap().ctrl().fsck(false)
     }
 
     pub fn change_password(&mut self, password: &str) -> BkfsResult<()> {
-        self.handler.ctrl().change_password(password)
+        self.handler
+            .get_mut()
+            .unwrap()
+            .ctrl()
+            .change_password(password)
     }
 }
 
 impl Filesystem for BackupFS {
-    fn init(&mut self, _req: &Request, config: &mut KernelConfig) -> Result<(), c_int> {
-        config.add_capabilities(FUSE_HANDLE_KILLPRIV).unwrap();
+    fn init(&mut self, _req: &Request, config: &mut KernelConfig) -> io::Result<()> {
+        config
+            .add_capabilities(InitFlags::FUSE_HANDLE_KILLPRIV)
+            .unwrap();
 
         log::info!("filesystem initialized");
 
@@ -176,7 +189,7 @@ impl Filesystem for BackupFS {
     }
 
     fn destroy(&mut self) {
-        if let Err(e) = self.handler.close_all() {
+        if let Err(e) = self.handler.get_mut().unwrap().close_all() {
             error!("error closing FS: {e}");
         }
         // Every individual AtomicFile::save already calls sync_all
@@ -192,29 +205,28 @@ impl Filesystem for BackupFS {
         }
     }
 
-    fn lookup(&mut self, req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        match self.handler.lookup(req, Inode(parent), name) {
-            Ok(inode) => reply.entry(&ENTRY_TTL, &(&inode).into(), 0),
-            Err(e) => reply.error(e.to_errno_log()),
+    fn lookup(&self, req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
+        let mut h = self.handler.lock().unwrap();
+        match h.lookup(req, Inode(parent.into()), name) {
+            Ok(inode) => reply.entry(&ENTRY_TTL, &(&inode).into(), Generation(0)),
+            Err(e) => reply.error(errno(e.to_errno_log())),
         }
     }
 
-    fn forget(&mut self, _req: &Request, _inode: u64, _nlookup: u64) {}
+    fn forget(&self, _req: &Request, _ino: INodeNo, _nlookup: u64) {}
 
-    fn getattr(&mut self, _req: &Request<'_>, inode: u64, _fh: Option<u64>, reply: ReplyAttr) {
-        match self
-            .handler
-            .mutate_inode(Inode(inode), |_, inode| Ok((&*inode).into()))
-        {
+    fn getattr(&self, _req: &Request, ino: INodeNo, _fh: Option<FileHandle>, reply: ReplyAttr) {
+        let mut h = self.handler.lock().unwrap();
+        match h.mutate_inode(Inode(ino.into()), |_, inode| Ok((&*inode).into())) {
             Ok(attr) => reply.attr(&ENTRY_TTL, &attr),
-            Err(e) => reply.error(e.to_errno_log()),
+            Err(e) => reply.error(errno(e.to_errno_log())),
         }
     }
 
     fn setattr(
-        &mut self,
+        &self,
         req: &Request,
-        inode: u64,
+        ino: INodeNo,
         mode: Option<u32>,
         uid: Option<u32>,
         gid: Option<u32>,
@@ -222,16 +234,17 @@ impl Filesystem for BackupFS {
         atime: Option<TimeOrNow>,
         mtime: Option<TimeOrNow>,
         ctime: Option<SystemTime>,
-        fh: Option<u64>,
+        fh: Option<FileHandle>,
         crtime: Option<SystemTime>,
         chgtime: Option<SystemTime>,
         bkuptime: Option<SystemTime>,
-        flags: Option<u32>,
+        flags: Option<BsdFileFlags>,
         reply: ReplyAttr,
     ) {
-        match self.handler.setattr(
+        let mut h = self.handler.lock().unwrap();
+        match h.setattr(
             req,
-            Inode(inode),
+            Inode(ino.into()),
             mode,
             uid,
             gid,
@@ -239,52 +252,54 @@ impl Filesystem for BackupFS {
             atime,
             mtime,
             ctime,
-            fh.map(FileHandleId),
+            fh.map(|fh| FileHandleId(fh.into())),
             crtime,
             chgtime,
             bkuptime,
-            flags,
+            flags.map(|f| f.bits()),
         ) {
             Ok(inode) => reply.attr(&ENTRY_TTL, &(&inode).into()),
-            Err(e) => reply.error(e.to_errno_log()),
+            Err(e) => reply.error(errno(e.to_errno_log())),
         }
     }
 
-    fn readlink(&mut self, req: &Request, inode: u64, reply: ReplyData) {
-        match self.handler.readlink(req, Inode(inode)) {
+    fn readlink(&self, req: &Request, ino: INodeNo, reply: ReplyData) {
+        let mut h = self.handler.lock().unwrap();
+        match h.readlink(req, Inode(ino.into())) {
             Ok(path) => reply.data(path.as_os_str().as_bytes()),
-            Err(e) => reply.error(e.to_errno_log()),
+            Err(e) => reply.error(errno(e.to_errno_log())),
         }
     }
 
     fn mknod(
-        &mut self,
+        &self,
         req: &Request,
-        parent: u64,
+        parent: INodeNo,
         name: &OsStr,
         mode: u32,
         umask: u32,
         rdev: u32,
         reply: ReplyEntry,
     ) {
-        match self.handler.mknod(
+        let mut h = self.handler.lock().unwrap();
+        match h.mknod(
             req,
-            Inode(parent),
+            Inode(parent.into()),
             name,
             mode,
             umask,
             rdev,
             None::<fn(Inode) -> FileData>,
         ) {
-            Ok(inode) => reply.entry(&ENTRY_TTL, &(&inode).into(), 0),
-            Err(e) => reply.error(e.to_errno_log()),
+            Ok(inode) => reply.entry(&ENTRY_TTL, &(&inode).into(), Generation(0)),
+            Err(e) => reply.error(errno(e.to_errno_log())),
         }
     }
 
     fn mkdir(
-        &mut self,
+        &self,
         req: &Request,
-        parent: u64,
+        parent: INodeNo,
         name: &OsStr,
         mode: u32,
         umask: u32,
@@ -293,119 +308,127 @@ impl Filesystem for BackupFS {
         self.mknod(req, parent, name, mode | libc::S_IFDIR, umask, 0, reply)
     }
 
-    fn unlink(&mut self, req: &Request, parent: u64, name: &OsStr, reply: ReplyEmpty) {
-        match self.handler.unlink(req, Inode(parent), name) {
+    fn unlink(&self, req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEmpty) {
+        let mut h = self.handler.lock().unwrap();
+        match h.unlink(req, Inode(parent.into()), name) {
             Ok(()) => reply.ok(),
-            Err(e) => reply.error(e.to_errno_log()),
+            Err(e) => reply.error(errno(e.to_errno_log())),
         }
     }
 
-    fn rmdir(&mut self, req: &Request, parent: u64, name: &OsStr, reply: ReplyEmpty) {
-        match self.handler.unlink(req, Inode(parent), name) {
+    fn rmdir(&self, req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEmpty) {
+        let mut h = self.handler.lock().unwrap();
+        match h.unlink(req, Inode(parent.into()), name) {
             Ok(()) => reply.ok(),
-            Err(e) => reply.error(e.to_errno_log()),
+            Err(e) => reply.error(errno(e.to_errno_log())),
         }
     }
 
     fn symlink(
-        &mut self,
+        &self,
         req: &Request,
-        parent: u64,
+        parent: INodeNo,
         link_name: &OsStr,
         target: &Path,
         reply: ReplyEntry,
     ) {
-        match self.handler.mknod(
+        let mut h = self.handler.lock().unwrap();
+        match h.mknod(
             req,
-            Inode(parent),
+            Inode(parent.into()),
             link_name,
             libc::S_IFLNK | 0o777,
             0,
             0,
             Some(|_| FileData::Symlink(target.to_owned())),
         ) {
-            Ok(inode) => reply.entry(&ENTRY_TTL, &(&inode).into(), 0),
-            Err(e) => reply.error(e.to_errno_log()),
+            Ok(inode) => reply.entry(&ENTRY_TTL, &(&inode).into(), Generation(0)),
+            Err(e) => reply.error(errno(e.to_errno_log())),
         }
     }
 
     fn rename(
-        &mut self,
+        &self,
         req: &Request,
-        parent: u64,
+        parent: INodeNo,
         name: &OsStr,
-        new_parent: u64,
-        new_name: &OsStr,
-        flags: u32,
+        newparent: INodeNo,
+        newname: &OsStr,
+        flags: RenameFlags,
         reply: ReplyEmpty,
     ) {
-        match self.handler.rename(
+        let mut h = self.handler.lock().unwrap();
+        match h.rename(
             req,
-            Inode(parent),
+            Inode(parent.into()),
             name,
-            Inode(new_parent),
-            new_name,
-            flags & libc::RENAME_EXCHANGE != 0,
+            Inode(newparent.into()),
+            newname,
+            flags.contains(RenameFlags::RENAME_EXCHANGE),
         ) {
             Ok(()) => reply.ok(),
-            Err(e) => reply.error(e.to_errno_log()),
+            Err(e) => reply.error(errno(e.to_errno_log())),
         }
     }
 
     fn link(
-        &mut self,
+        &self,
         req: &Request,
-        inode: u64,
-        new_parent: u64,
-        new_name: &OsStr,
+        ino: INodeNo,
+        newparent: INodeNo,
+        newname: &OsStr,
         reply: ReplyEntry,
     ) {
-        debug!(
-            "link() called for {}, {}, {:?}",
-            inode, new_parent, new_name
-        );
-        match self
-            .handler
-            .link(req, Inode(inode), Inode(new_parent), new_name, None)
-        {
-            Ok(inode) => reply.entry(&ENTRY_TTL, &(&inode).into(), 0),
-            Err(e) => reply.error(e.to_errno_log()),
+        debug!("link() called for {}, {}, {:?}", ino, newparent, newname);
+        let mut h = self.handler.lock().unwrap();
+        match h.link(
+            req,
+            Inode(ino.into()),
+            Inode(newparent.into()),
+            newname,
+            None,
+        ) {
+            Ok(inode) => reply.entry(&ENTRY_TTL, &(&inode).into(), Generation(0)),
+            Err(e) => reply.error(errno(e.to_errno_log())),
         }
     }
 
-    fn open(&mut self, req: &Request, inode: u64, flags: i32, reply: ReplyOpen) {
-        debug!("open() called for {:?}", inode);
-        match self.handler.open(req, Inode(inode), flags) {
-            Ok(FileHandleId(fh)) => reply.opened(fh, FOPEN_DIRECT_IO),
-            Err(e) => reply.error(e.to_errno_log()),
+    fn open(&self, req: &Request, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
+        debug!("open() called for {:?}", ino);
+        let mut h = self.handler.lock().unwrap();
+        match h.open(req, Inode(ino.into()), flags.0) {
+            Ok(FileHandleId(fh)) => reply.opened(FileHandle(fh), FopenFlags::FOPEN_DIRECT_IO),
+            Err(e) => reply.error(errno(e.to_errno_log())),
         }
     }
 
     fn read(
-        &mut self,
+        &self,
         _req: &Request,
-        inode: u64,
-        fh: u64,
-        offset: i64,
+        ino: INodeNo,
+        fh: FileHandle,
+        offset: u64,
         size: u32,
-        _flags: i32,
-        _lock_owner: Option<u64>,
+        _flags: OpenFlags,
+        _lock_owner: Option<LockOwner>,
         reply: ReplyData,
     ) {
         debug!(
             "read() called on {:?} offset={:?} size={:?}",
-            inode, offset, size
+            ino, offset, size
         );
-        if offset < 0 {
-            reply.error(libc::EINVAL);
-            return;
-        }
-        let Some(handle) = self.handler.handle(FileHandleId(fh)).cloned() else {
-            reply.error(libc::EBADF);
+        let handle = self
+            .handler
+            .lock()
+            .unwrap()
+            .handle(FileHandleId(fh.into()))
+            .cloned();
+        let Some(handle) = handle else {
+            reply.error(errno(libc::EBADF));
             return;
         };
         if !handle.read {
-            reply.error(libc::EACCES);
+            reply.error(errno(libc::EACCES));
             return;
         }
         // Offload the actual disk I/O — a stuck CIFS read must not
@@ -414,38 +437,40 @@ impl Filesystem for BackupFS {
         let key = handle.inode.0;
         pool::global().submit_for(key, move || {
             let mut contents = handle.contents.lock().unwrap();
-            let available = contents.inode.attrs.size.saturating_sub(offset as u64) as usize;
+            let available = contents.inode.attrs.size.saturating_sub(offset) as usize;
             let size = (size as usize).min(available);
             let mut buf = vec![0_u8; size];
-            match contents.read_exact_at(&mut buf, offset as u64) {
+            match contents.read_exact_at(&mut buf, offset) {
                 Ok(()) => reply.data(&buf),
-                Err(e) => reply.error(e.to_errno_log()),
+                Err(e) => reply.error(errno(e.to_errno_log())),
             }
         });
     }
 
     fn write(
-        &mut self,
+        &self,
         _req: &Request,
-        _inode: u64,
-        fh: u64,
-        offset: i64,
+        _ino: INodeNo,
+        fh: FileHandle,
+        offset: u64,
         data: &[u8],
-        _write_flags: u32,
-        flags: i32,
-        _lock_owner: Option<u64>,
+        write_flags: WriteFlags,
+        _flags: OpenFlags,
+        _lock_owner: Option<LockOwner>,
         reply: ReplyWrite,
     ) {
-        if offset < 0 {
-            reply.error(libc::EINVAL);
-            return;
-        }
-        let Some(handle) = self.handler.handle(FileHandleId(fh)).cloned() else {
-            reply.error(libc::EBADF);
+        let handle = self
+            .handler
+            .lock()
+            .unwrap()
+            .handle(FileHandleId(fh.into()))
+            .cloned();
+        let Some(handle) = handle else {
+            reply.error(errno(libc::EBADF));
             return;
         };
         if !handle.write {
-            reply.error(libc::EACCES);
+            reply.error(errno(libc::EACCES));
             return;
         }
         // Copy the bytes now (the kernel's buffer is reused after
@@ -454,48 +479,62 @@ impl Filesystem for BackupFS {
         let key = handle.inode.0;
         pool::global().submit_for(key, move || {
             let mut contents = handle.contents.lock().unwrap();
-            match contents.write_all_at(&mut buf, offset as u64) {
+            match contents.write_all_at(&mut buf, offset) {
                 Ok(()) => {
-                    if flags & fuser::consts::FUSE_WRITE_KILL_PRIV as i32 != 0 {
+                    if write_flags.contains(WriteFlags::FUSE_WRITE_KILL_SUIDGID) {
                         contents.inode.attrs.clear_suid_sgid();
                     }
                     reply.written(buf.len() as u32);
                 }
-                Err(e) => reply.error(e.to_errno_log()),
+                Err(e) => reply.error(errno(e.to_errno_log())),
             }
         });
     }
 
     fn flush(
-        &mut self,
+        &self,
         _req: &Request,
-        _inode: u64,
-        _fh: u64,
-        _lock_owner: u64,
+        _ino: INodeNo,
+        _fh: FileHandle,
+        _lock_owner: LockOwner,
         reply: ReplyEmpty,
     ) {
         reply.ok()
     }
 
     fn release(
-        &mut self,
+        &self,
         _req: &Request,
-        _inode: u64,
-        fh: u64,
-        _flags: i32,
-        _lock_owner: Option<u64>,
+        _ino: INodeNo,
+        fh: FileHandle,
+        _flags: OpenFlags,
+        _lock_owner: Option<LockOwner>,
         _flush: bool,
         reply: ReplyEmpty,
     ) {
-        match self.handler.fclose(FileHandleId(fh)) {
+        let mut h = self.handler.lock().unwrap();
+        match h.fclose(FileHandleId(fh.into())) {
             Ok(()) => reply.ok(),
-            Err(e) => reply.error(e.to_errno_log()),
+            Err(e) => reply.error(errno(e.to_errno_log())),
         }
     }
 
-    fn fsync(&mut self, _req: &Request, _inode: u64, fh: u64, _datasync: bool, reply: ReplyEmpty) {
-        let Some(handle) = self.handler.handle(FileHandleId(fh)).cloned() else {
-            reply.error(libc::EBADF);
+    fn fsync(
+        &self,
+        _req: &Request,
+        _ino: INodeNo,
+        fh: FileHandle,
+        _datasync: bool,
+        reply: ReplyEmpty,
+    ) {
+        let handle = self
+            .handler
+            .lock()
+            .unwrap()
+            .handle(FileHandleId(fh.into()))
+            .cloned();
+        let Some(handle) = handle else {
+            reply.error(errno(libc::EBADF));
             return;
         };
         // fsync drives the content-file atomic save + inode save —
@@ -505,36 +544,36 @@ impl Filesystem for BackupFS {
         let key = handle.inode.0;
         pool::global().submit_for(key, move || match handle.contents.lock().unwrap().fsync() {
             Ok(()) => reply.ok(),
-            Err(e) => reply.error(e.to_errno_log()),
+            Err(e) => reply.error(errno(e.to_errno_log())),
         });
     }
 
-    fn opendir(&mut self, req: &Request, inode: u64, flags: i32, reply: ReplyOpen) {
-        debug!("opendir() called on {:?}", inode);
-        match self.handler.opendir(req, Inode(inode), flags) {
-            Ok(FileHandleId(fh)) => reply.opened(fh, FOPEN_DIRECT_IO),
-            Err(e) => reply.error(e.to_errno_log()),
+    fn opendir(&self, req: &Request, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
+        debug!("opendir() called on {:?}", ino);
+        let mut h = self.handler.lock().unwrap();
+        match h.opendir(req, Inode(ino.into()), flags.0) {
+            Ok(FileHandleId(fh)) => reply.opened(FileHandle(fh), FopenFlags::FOPEN_DIRECT_IO),
+            Err(e) => reply.error(errno(e.to_errno_log())),
         }
     }
 
     fn readdir(
-        &mut self,
+        &self,
         req: &Request,
-        inode: u64,
-        fh: u64,
-        offset: i64,
+        ino: INodeNo,
+        fh: FileHandle,
+        offset: u64,
         mut reply: ReplyDirectory,
     ) {
-        if offset < 0 {
-            reply.error(libc::EINVAL);
-            return;
-        }
-        match self.handler.readdir(
+        let mut h = self.handler.lock().unwrap();
+        match h.readdir(
             req,
-            Inode(inode),
-            FileHandleId(fh),
-            offset,
-            |_, name, entry, offset| Ok(reply.add(entry.inode.0, offset, entry.ty, name)),
+            Inode(ino.into()),
+            FileHandleId(fh.into()),
+            offset as i64,
+            |_, name, entry, offset| {
+                Ok(reply.add(INodeNo(entry.inode.0), offset as u64, entry.ty, name))
+            },
         ) {
             Ok(done) => {
                 if done {
@@ -542,36 +581,33 @@ impl Filesystem for BackupFS {
                 }
                 reply.ok()
             }
-            Err(e) => reply.error(e.to_errno_log()),
+            Err(e) => reply.error(errno(e.to_errno_log())),
         }
     }
 
     fn readdirplus(
-        &mut self,
-        req: &Request<'_>,
-        inode: u64,
-        fh: u64,
-        offset: i64,
+        &self,
+        req: &Request,
+        ino: INodeNo,
+        fh: FileHandle,
+        offset: u64,
         mut reply: ReplyDirectoryPlus,
     ) {
-        if offset < 0 {
-            reply.error(libc::EINVAL);
-            return;
-        }
-        match self.handler.readdir(
+        let mut h = self.handler.lock().unwrap();
+        match h.readdir(
             req,
-            Inode(inode),
-            FileHandleId(fh),
-            offset,
+            Inode(ino.into()),
+            FileHandleId(fh.into()),
+            offset as i64,
             |handler, name, entry, offset| {
                 match handler.mutate_inode(entry.inode, |_, inode| {
                     Ok(reply.add(
-                        inode.inode.0,
-                        offset,
+                        INodeNo(inode.inode.0),
+                        offset as u64,
                         name,
                         &ENTRY_TTL,
                         &(&*inode).into(),
-                        0,
+                        Generation(0),
                     ))
                 }) {
                     Ok(full) => Ok(full),
@@ -589,32 +625,30 @@ impl Filesystem for BackupFS {
                 }
                 reply.ok()
             }
-            Err(e) => reply.error(e.to_errno_log()),
+            Err(e) => reply.error(errno(e.to_errno_log())),
         }
     }
 
     fn releasedir(
-        &mut self,
-        req: &Request<'_>,
-        inode: u64,
-        fh: u64,
-        flags: i32,
+        &self,
+        req: &Request,
+        ino: INodeNo,
+        fh: FileHandle,
+        flags: OpenFlags,
         reply: ReplyEmpty,
     ) {
-        match self
-            .handler
-            .releasedir(req, Inode(inode), FileHandleId(fh), flags)
-        {
+        let mut h = self.handler.lock().unwrap();
+        match h.releasedir(req, Inode(ino.into()), FileHandleId(fh.into()), flags.0) {
             Ok(()) => reply.ok(),
-            Err(e) => reply.error(e.to_errno_log()),
+            Err(e) => reply.error(errno(e.to_errno_log())),
         }
     }
 
     fn fsyncdir(
-        &mut self,
+        &self,
         _req: &Request,
-        _inode: u64,
-        _fh: u64,
+        _ino: INodeNo,
+        _fh: FileHandle,
         _datasync: bool,
         reply: ReplyEmpty,
     ) {
@@ -629,13 +663,14 @@ impl Filesystem for BackupFS {
         // have a working checkpoint.
         #[cfg(test)]
         FSYNCDIR_CALL_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        match self.handler.flush_all_dirty() {
+        let mut h = self.handler.lock().unwrap();
+        match h.flush_all_dirty() {
             Ok(()) => reply.ok(),
-            Err(e) => reply.error(e.to_errno_log()),
+            Err(e) => reply.error(errno(e.to_errno_log())),
         }
     }
 
-    fn syncfs(&mut self, _req: &Request<'_>, reply: ReplyEmpty) {
+    fn syncfs(&self, _req: &Request, reply: ReplyEmpty) {
         // `sync -f <mountpoint>` / syncfs(2). flush_all_dirty drains
         // both the dirty inode cache and every open Contents with
         // per-file sync_all, so the checkpoint is on stable storage
@@ -643,14 +678,15 @@ impl Filesystem for BackupFS {
         // without losing anything that was written before sync -f.
         #[cfg(test)]
         SYNCFS_CALL_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        match self.handler.flush_all_dirty() {
+        let mut h = self.handler.lock().unwrap();
+        match h.flush_all_dirty() {
             Ok(()) => reply.ok(),
-            Err(e) => reply.error(e.to_errno_log()),
+            Err(e) => reply.error(errno(e.to_errno_log())),
         }
     }
 
-    fn statfs(&mut self, _req: &Request, _ino: u64, reply: ReplyStatfs) {
-        let StatFs { files, ffree } = self.handler.ctrl().statfs();
+    fn statfs(&self, _req: &Request, _ino: INodeNo, reply: ReplyStatfs) {
+        let StatFs { files, ffree } = self.handler.lock().unwrap().ctrl().statfs();
         // TODO: real implementation of this
         reply.statfs(
             10_000,
@@ -665,48 +701,48 @@ impl Filesystem for BackupFS {
     }
 
     fn setxattr(
-        &mut self,
-        request: &Request<'_>,
-        inode: u64,
-        key: &OsStr,
+        &self,
+        request: &Request,
+        ino: INodeNo,
+        name: &OsStr,
         value: &[u8],
         _flags: i32,
         _position: u32,
         reply: ReplyEmpty,
     ) {
-        match self
-            .handler
-            .setxattr(request, Inode(inode), key.as_bytes(), value)
-        {
+        let mut h = self.handler.lock().unwrap();
+        match h.setxattr(request, Inode(ino.into()), name.as_bytes(), value) {
             Ok(()) => reply.ok(),
-            Err(e) => reply.error(e.to_errno_log()),
+            Err(e) => reply.error(errno(e.to_errno_log())),
         }
     }
 
     fn getxattr(
-        &mut self,
-        request: &Request<'_>,
-        inode: u64,
-        key: &OsStr,
+        &self,
+        request: &Request,
+        ino: INodeNo,
+        name: &OsStr,
         size: u32,
         reply: ReplyXattr,
     ) {
-        match self.handler.getxattr(request, Inode(inode), key.as_bytes()) {
+        let h = self.handler.lock().unwrap();
+        match h.getxattr(request, Inode(ino.into()), name.as_bytes()) {
             Ok(data) => {
                 if size == 0 {
                     reply.size(data.len() as u32);
                 } else if data.len() <= size as usize {
                     reply.data(&data);
                 } else {
-                    reply.error(libc::ERANGE)
+                    reply.error(errno(libc::ERANGE))
                 }
             }
-            Err(e) => reply.error(e.to_errno()),
+            Err(e) => reply.error(errno(e.to_errno())),
         }
     }
 
-    fn listxattr(&mut self, request: &Request<'_>, inode: u64, size: u32, reply: ReplyXattr) {
-        match self.handler.listxattr(request, Inode(inode)) {
+    fn listxattr(&self, request: &Request, ino: INodeNo, size: u32, reply: ReplyXattr) {
+        let h = self.handler.lock().unwrap();
+        match h.listxattr(request, Inode(ino.into())) {
             Ok(attrs) => {
                 let mut bytes = vec![];
                 // Convert to concatenated null-terminated strings
@@ -719,113 +755,113 @@ impl Filesystem for BackupFS {
                 } else if bytes.len() <= size as usize {
                     reply.data(&bytes);
                 } else {
-                    reply.error(libc::ERANGE);
+                    reply.error(errno(libc::ERANGE));
                 }
             }
-            Err(_) => reply.error(libc::EBADF),
+            Err(_) => reply.error(errno(libc::EBADF)),
         }
     }
 
-    fn removexattr(&mut self, request: &Request<'_>, inode: u64, key: &OsStr, reply: ReplyEmpty) {
-        match self
-            .handler
-            .removexattr(request, Inode(inode), key.as_bytes())
-        {
+    fn removexattr(&self, request: &Request, ino: INodeNo, name: &OsStr, reply: ReplyEmpty) {
+        let mut h = self.handler.lock().unwrap();
+        match h.removexattr(request, Inode(ino.into()), name.as_bytes()) {
             Ok(_) => reply.ok(),
-            Err(e) => reply.error(e.to_errno_log()),
+            Err(e) => reply.error(errno(e.to_errno_log())),
         }
     }
 
-    fn access(&mut self, req: &Request, inode: u64, mask: i32, reply: ReplyEmpty) {
+    fn access(&self, req: &Request, ino: INodeNo, mask: AccessFlags, reply: ReplyEmpty) {
         // peek_inode consults open Contents and the dirty cache before
         // disk; ctrl.load alone returns ENOENT for inodes that have only
         // ever lived in the dirty cache (e.g. a just-mkdir'd directory),
         // which the kernel would then propagate to path-walk callers like
         // chdir — breaking rsync --mkpath into a fresh mount.
-        let idmap = self.handler.ctrl().config().idmapped_root.clone();
-        match self.handler.peek_inode(Inode(inode), |inode| {
-            inode.attrs.check_access(&idmap, req.uid(), req.gid(), mask)
+        let h = self.handler.lock().unwrap();
+        let idmap = h.ctrl().config().idmapped_root.clone();
+        match h.peek_inode(Inode(ino.into()), |inode| {
+            inode
+                .attrs
+                .check_access(&idmap, req.uid(), req.gid(), mask.bits())
         }) {
             Ok(_) => reply.ok(),
-            Err(e) => reply.error(e.to_errno()),
+            Err(e) => reply.error(errno(e.to_errno())),
         }
     }
 
     fn create(
-        &mut self,
+        &self,
         req: &Request,
-        parent: u64,
+        parent: INodeNo,
         name: &OsStr,
         mode: u32,
         umask: u32,
         flags: i32,
         reply: ReplyCreate,
     ) {
-        match self
-            .handler
-            .create(req, Inode(parent), name, mode, umask, flags)
-        {
-            Ok((attrs, handle)) => {
-                reply.created(&Duration::new(0, 0), &(&attrs).into(), 0, handle.0, 0)
-            }
-            Err(e) => reply.error(e.to_errno_log()),
+        let mut h = self.handler.lock().unwrap();
+        match h.create(req, Inode(parent.into()), name, mode, umask, flags) {
+            Ok((attrs, handle)) => reply.created(
+                &Duration::new(0, 0),
+                &(&attrs).into(),
+                Generation(0),
+                FileHandle(handle.0),
+                FopenFlags::empty(),
+            ),
+            Err(e) => reply.error(errno(e.to_errno_log())),
         }
     }
 
-    #[cfg(target_os = "linux")]
     fn fallocate(
-        &mut self,
-        req: &Request<'_>,
-        inode: u64,
-        fh: u64,
-        offset: i64,
-        length: i64,
+        &self,
+        req: &Request,
+        ino: INodeNo,
+        fh: FileHandle,
+        offset: u64,
+        length: u64,
         mode: i32,
         reply: ReplyEmpty,
     ) {
-        if offset < 0 || length < 0 {
-            reply.error(libc::EINVAL);
-            return;
-        }
-        match self.handler.fallocate(
+        let mut h = self.handler.lock().unwrap();
+        match h.fallocate(
             req,
-            Inode(inode),
-            FileHandleId(fh),
-            offset as u64,
-            length as u64,
+            Inode(ino.into()),
+            FileHandleId(fh.into()),
+            offset,
+            length,
             mode,
         ) {
             Ok(_) => reply.ok(),
-            Err(e) => reply.error(e.to_errno_log()),
+            Err(e) => reply.error(errno(e.to_errno_log())),
         }
     }
 
     fn copy_file_range(
-        &mut self,
-        req: &Request<'_>,
-        src_inode: u64,
-        src_fh: u64,
-        src_offset: i64,
-        dest_inode: u64,
-        dest_fh: u64,
-        dest_offset: i64,
-        size: u64,
-        flags: u32,
+        &self,
+        req: &Request,
+        ino_in: INodeNo,
+        fh_in: FileHandle,
+        offset_in: u64,
+        ino_out: INodeNo,
+        fh_out: FileHandle,
+        offset_out: u64,
+        len: u64,
+        flags: CopyFileRangeFlags,
         reply: ReplyWrite,
     ) {
-        match self.handler.copy_file_range(
+        let mut h = self.handler.lock().unwrap();
+        match h.copy_file_range(
             req,
-            Inode(src_inode),
-            FileHandleId(src_fh),
-            src_offset as u64,
-            Inode(dest_inode),
-            FileHandleId(dest_fh),
-            dest_offset as u64,
-            size as usize,
-            flags,
+            Inode(ino_in.into()),
+            FileHandleId(fh_in.into()),
+            offset_in,
+            Inode(ino_out.into()),
+            FileHandleId(fh_out.into()),
+            offset_out,
+            len as usize,
+            flags.bits() as u32,
         ) {
-            Ok(len) => reply.written(len as u32),
-            Err(e) => reply.error(e.to_errno_log()),
+            Ok(written) => reply.written(written as u32),
+            Err(e) => reply.error(errno(e.to_errno_log())),
         }
     }
 }

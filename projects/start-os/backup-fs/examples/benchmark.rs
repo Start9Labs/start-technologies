@@ -19,7 +19,7 @@ use std::path::Path;
 use std::time::{Instant, SystemTime};
 
 use backupfs::{BackupFS, BackupFSOptions};
-use fuser::{MountOption, Session};
+use fuser::{Config, MountOption, Session, SessionACL};
 
 const MIB: usize = 1024 * 1024;
 
@@ -42,9 +42,12 @@ fn with_mount(data: &Path, body: impl FnOnce(&Path)) {
             idmapped_root: vec![],
         })
         .unwrap();
-        let mut session = Session::new(fs, &mnt_dir, &opt).unwrap();
+        let mut config = Config::default();
+        config.mount_options = opt;
+        config.acl = SessionACL::All;
+        let mut session = Session::new(fs, &mnt_dir, &config).unwrap();
         tx.send(session.unmount_callable()).unwrap();
-        session.run().unwrap();
+        session.spawn().unwrap().join().unwrap();
     });
     let mut umount = rx.recv().unwrap();
     body(mnt.path());
