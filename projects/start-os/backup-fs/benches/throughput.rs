@@ -21,7 +21,7 @@ use std::time::{Duration, SystemTime};
 
 use backupfs::{BackupFS, BackupFSOptions};
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use fuser::{Config, MountOption, Session, SessionACL};
+use fuser::{Config, MountOption};
 
 const MIB: usize = 1024 * 1024;
 const SEQ_SIZE: usize = 64 * MIB;
@@ -33,44 +33,34 @@ const RANDOM_OPS: usize = 1000;
 struct Harness {
     mnt: tempdir::TempDir,
     data: tempdir::TempDir,
-    umount: Option<fuser::SessionUnmounter>,
-    thread: Option<std::thread::JoinHandle<()>>,
+    bg: Option<fuser::BackgroundSession>,
 }
 
 impl Harness {
     fn mount() -> Self {
         let data = tempdir::TempDir::new("bench_data").unwrap();
         let mnt = tempdir::TempDir::new("bench_mnt").unwrap();
-        let opt = vec![
-            MountOption::FSName("backup-fs".to_string()),
-            MountOption::AutoUnmount,
-        ];
-        let data_dir = data.path().to_owned();
-        let mnt_dir = mnt.path().to_owned();
-        let (tx, rx) = std::sync::mpsc::channel();
-        let thread = std::thread::spawn(move || {
-            let fs = BackupFS::new(BackupFSOptions {
-                data_dir,
-                setuid_support: false,
-                password: "benchmark".to_string(),
-                file_size_padding: None,
-                readonly: false,
-                idmapped: false,
-            })
+        let fs = BackupFS::new(BackupFSOptions {
+            data_dir: data.path().to_owned(),
+            setuid_support: false,
+            password: "benchmark".to_string(),
+            file_size_padding: None,
+            readonly: false,
+            idmapped: false,
+        })
+        .unwrap();
+        let mut config = Config::default();
+        config.mount_options = vec![MountOption::FSName("backup-fs".to_string())];
+        // 0.17: drive the BackgroundSession lifecycle; no AutoUnmount (its
+        // helper deadlocks an explicit umount under spawn()).
+        let bg = fuser::Session::new(fs, mnt.path(), &config)
+            .unwrap()
+            .spawn()
             .unwrap();
-            let mut config = Config::default();
-            config.mount_options = opt;
-            config.acl = SessionACL::All;
-            let mut session = Session::new(fs, &mnt_dir, &config).unwrap();
-            tx.send(session.unmount_callable()).unwrap();
-            session.spawn().unwrap().join().unwrap();
-        });
-        let umount = rx.recv().unwrap();
         Harness {
             mnt,
             data,
-            umount: Some(umount),
-            thread: Some(thread),
+            bg: Some(bg),
         }
     }
 
@@ -85,11 +75,8 @@ impl Harness {
 
 impl Drop for Harness {
     fn drop(&mut self) {
-        if let Some(mut u) = self.umount.take() {
-            let _ = u.unmount();
-        }
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
+        if let Some(bg) = self.bg.take() {
+            let _ = bg.umount_and_join();
         }
     }
 }
