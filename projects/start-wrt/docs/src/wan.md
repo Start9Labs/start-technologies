@@ -10,7 +10,7 @@ Configure the router's IPv4 Internet connection. The default is DHCP, which work
 
 - **Static** — Manually configure a fixed IP address assigned by your ISP:
   - **WAN IP** — The static IPv4 address.
-  - **Prefix Length** — The subnet prefix (e.g. `/24`). The equivalent subnet mask is displayed alongside (e.g. `255.255.255.0`).
+  - **Subnet Prefix** — The subnet prefix (e.g. `/24`). The equivalent subnet mask is displayed alongside (e.g. `255.255.255.0`).
   - **Gateway IP** — The default gateway provided by your ISP.
 
 - **PPPoE** — Used by some DSL providers. Enter the credentials provided by your ISP:
@@ -29,6 +29,9 @@ Configure IPv6 if your ISP supports it.
 - **Disabled** — No IPv6 on the WAN interface.
 
 For SLAAC and DHCPv6, an optional **IPv6 Prefix** field lets you request a specific prefix length from your ISP for prefix delegation (e.g. `/48`, `/56`, `/64`). Leave empty to let your ISP decide automatically.
+
+> [!NOTE]
+> IPv6 cannot be set to Disabled while any enabled [Published Ports](published-ports.md) rules use IPv6 — the option is grayed out with a hint. Remove or disable those rules first.
 
 The WAN summary shows an IPv6 status badge indicating whether IPv6 is Enabled or Disabled, along with its mode (SLAAC, DHCPv6, Static, or 6RD).
 

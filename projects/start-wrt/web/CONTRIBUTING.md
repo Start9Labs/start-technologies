@@ -4,12 +4,13 @@ For general setup, see the root [CONTRIBUTING.md](../CONTRIBUTING.md). For archi
 
 ## Documentation
 
-This sub-tree's docs split across four files:
+This sub-tree's docs split across five files:
 
 - `README.md` — what this is
 - `ARCHITECTURE.md` — how it's built
 - `CONTRIBUTING.md` — this file; how to contribute
-- `CLAUDE.md` — AI-developer operating rules (Taiga-first, form patterns)
+- `AGENTS.md` — AI-developer operating rules (Taiga-first, form patterns)
+- `CLAUDE.md` — a one-line `@AGENTS.md` import (do not edit)
 
 **These docs must be kept up to date.** When you change web's structure, conventions, build steps, or component patterns, update the relevant file(s) in the same change — do not defer.
 

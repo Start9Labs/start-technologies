@@ -21,7 +21,7 @@ CGNAT is common with:
 CGNAT blocks all inbound connections to your router. This significantly limits StartWRT's feature set:
 
 - **[Inbound VPNs](inbound-vpn.md)** — VPN servers need to accept connections from the Internet. Behind CGNAT, remote devices cannot reach your router.
-- **[Published Ports](published-ports.md)** — Port forwarding requires a public IP. Rules will show "Error" or "Partial" status behind CGNAT.
+- **[Published Ports](published-ports.md)** — IPv4 port forwarding requires a public IP and will not work behind CGNAT. The router has no way to detect CGNAT, so rules still show an "Active" status even though inbound IPv4 traffic never arrives. IPv6 forwarding may still work, since many CGNAT ISPs provide globally routable IPv6.
 - **[Dynamic DNS](ddns.md)** — DDNS maps a domain to your IP, but if that IP is behind CGNAT, the domain still cannot receive inbound connections.
 
 CGNAT does **not** affect:

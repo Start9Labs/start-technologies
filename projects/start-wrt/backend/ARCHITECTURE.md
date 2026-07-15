@@ -13,6 +13,8 @@ Additional routes:
 | `GET /api/logs`                           | WebSocket for live log streaming                                  |
 | `POST /api/setup/flash`                   | NDJSON streaming for setup wizard                                 |
 | `GET\|POST /rest/rpc/{guid}`              | Continuation endpoint for backup/restore/diagnostics (10MB limit) |
+| `GET /ws/rpc/{guid}`                      | WebSocket continuation endpoint (progress streaming for updates)  |
+| `GET /luci`                               | Convenience redirect to `/cgi-bin/luci`                           |
 | `GET /static/root-ca.crt`                 | Root CA certificate download (no auth)                            |
 | `/cgi-bin/*`, `/luci-static/*`, `/ubus/*` | LuCI reverse proxy (localhost:8080)                               |
 | Fallback                                  | Serves embedded web UI via `include_dir`                          |
@@ -47,7 +49,7 @@ These run directly without connecting to the server:
 
 - `startwrt set-wifi-password [--manual]` — Provision WiFi password into UCI when EEPROM tag 0x2F is missing
 - `startwrt flash` — Interactive firmware flash from microSD to eMMC
-- `startwrt verify` — Verification
+- `startwrt verify` — Factory QC checks: firmware integrity, EEPROM WiFi password, SSID broadcast
 
 ## RPC Method Tree
 
@@ -73,7 +75,7 @@ ethernet
   └─ edit               # Partial update
 
 wifi
-  ├─ get / set          # SSID, passwords, radio settings
+  ├─ get / set / edit   # SSID, passwords, radio settings
   ├─ blackout-get / blackout-set
   └─ generate-password
 
@@ -88,7 +90,8 @@ vpn-client              # Outbound WireGuard VPN
 setup
   └─ status             # Setup mode detection, disk state
 
-system                  # System settings, remote access, restart, factory reset
+system                  # System settings, remote access, restart, factory reset,
+                        # OTA update (newer-versions / update)
 
 devices                 # Device enumeration, rename, forget, data usage
 
@@ -106,9 +109,10 @@ backup                  # Backup create/restore (via continuations)
 
 diagnostics             # Diagnostic bundle creation
 
-uci                     # Generic UCI get/set (legacy, being replaced)
+uci                     # Generic UCI get/set/edit (legacy, being replaced)
   ├─ get
-  └─ set
+  ├─ set
+  └─ edit
 
 file                    # Generic file read/write (legacy)
   ├─ get / set
@@ -122,7 +126,7 @@ exec                    # Shell command execution (being phased out)
 
 ### profiles.rs — Security Profile CRUD
 
-The core module. Each profile creates a VLAN on the LAN bridge, a network interface, a firewall zone with forwarding rules, and a DHCP server. Orchestrates changes across four UCI configs: `startwrt`, `network`, `firewall`, `dhcp`. Uses retry loops (4 attempts) for conflict resolution.
+The core module. Each profile creates a VLAN on the LAN bridge, a network interface, a firewall zone with forwarding rules, and a DHCP server. Orchestrates changes across five UCI configs: `startwrt`, `network`, `firewall`, `dhcp`, `wireless`. Uses retry loops (4 attempts) for conflict resolution.
 
 Key types:
 
@@ -193,6 +197,15 @@ Low-level UCI, file, and shell access. These are vestigial — all features now 
 | `embedded_web.rs`                 | Serves the Angular SPA from `include_dir`                               |
 | `luci_proxy.rs`                   | Reverse proxy to LuCI on localhost:8080                                 |
 | `continuations.rs`                | Long-running operation handling (GUID-based, timeout, kill signals)     |
+| `update.rs`                       | OTA update engine — download/verify/flash, progress via continuations   |
+| `registry/`                       | Registry client (`device_info`, `asset`, `os`, `signer`)                |
+| `sign/`                           | ed25519 signature + commitment verification                             |
+| `progress.rs`                     | Progress reporting, wire-compatible with start-os                       |
+| `eeprom.rs`                       | EEPROM TLV read (ONIE blob; WiFi PMK in tag 0x2F)                       |
+| `wg.rs`                           | WireGuard key management types                                          |
+| `device_names.rs`                 | Persistent cache of auto-learned device hostnames                       |
+| `verify.rs`                       | Factory QC checks (firmware integrity, EEPROM password, SSID broadcast) |
+| `templates/`                      | `client.conf.template` — WireGuard peer client-config template          |
 | `error.rs`                        | `ErrorKind` enum and `Error` type                                       |
 
 ## UCI Library (uciedit)
@@ -203,8 +216,8 @@ Arena-based zero-copy parser. `Config::parse()` reads a UCI file into a tree of 
 
 ```rust
 let arena = Arena::new();
-let config = Config::parse("network", Path::new("/etc/config"), &arena)?;
-let cfgs = parse_all(Path::new("/etc/config"), &arena, &["network", "firewall"])?;
+let config = Config::parse(&arena, Path::new("/etc/config/network")).await?;
+let cfgs = parse_all(Path::new("/etc/config"), &arena, &["network", "firewall"]).await?;
 ```
 
 ### Writing
@@ -212,8 +225,8 @@ let cfgs = parse_all(Path::new("/etc/config"), &arena, &["network", "firewall"])
 Atomic writes via temp-file + rename. Conflict detection compares file mtime at parse vs write time — if the file changed since parsing, the write fails with `Error::Conflict`.
 
 ```rust
-config.dump()?;         // Single config
-dump_all(&mut cfgs)?;   // Multiple configs
+config.dump(Path::new("/etc/config/network")).await?;   // Single config
+dump_all(Path::new("/etc/config"), cfgs).await?;        // Multiple configs
 ```
 
 ### Typed Sections
@@ -241,7 +254,7 @@ Macro attributes:
 - `#[uci(default_value = expr)]` — custom default value
 - `#[uci(inpt)]` — use `inpt` parser instead of `FromStr`
 
-All typed sections live in `uciedit/src/openwrt.rs`:
+Shared, OpenWrt-native typed sections live in `uciedit/src/openwrt.rs`; feature-owned sections (`UciPreferences`, `UciWifiBlackout`, `UciProfile`, the VPN sections, …) are defined in `ctrl` beside their handlers. The sections in `openwrt.rs`:
 
 | Config       | Structs                                                                                 |
 | ------------ | --------------------------------------------------------------------------------------- |
@@ -249,9 +262,10 @@ All typed sections live in `uciedit/src/openwrt.rs`:
 | **network**  | `NetworkInterface`, `NetworkDevice`, `NetworkBridgeVlan`, `NetworkRoute`, `NetworkRule` |
 | **wireless** | `WifiDevice`, `WifiInterface`, `WifiVlan`, `WifiStation`                                |
 | **dhcp**     | `Dhcp`, `DhcpHost`, `ProfileDnsmasq`                                                    |
-| **system**   | `UciSystemDns`, `DdnsService`                                                           |
+| **startwrt** | `UciSystemDns` (the `system_dns` section)                                               |
+| **ddns**     | `DdnsService`                                                                           |
 
-`NetworkVlanPort` and `NetworkVlanPortTagging` are plain structs (not `TypedSection`) used as fields within `NetworkBridgeVlan`.
+`NetworkVlanPort` (a plain struct) and `NetworkVlanPortTagging` (an enum) are not `TypedSection`s — they are used as fields within `NetworkBridgeVlan`.
 
 ## Error Types
 
@@ -262,7 +276,8 @@ All typed sections live in `uciedit/src/openwrt.rs`:
 - Infrastructure errors: `MissingLanBridge`, `MissingWanInterface`, `MissingLanInterface`, `MissingFirewallZone`
 - WiFi errors: `CorruptedWifi`, `UnnamedWirelessInterface`, `UnnamedWirelessDevice`
 - VPN errors: `VpnHasDependents`, `VpnChainCycle`, `VpnPeersWouldBreak`, `MissingDeviceAddress`
-- Validation: `InvalidValue`, `WanPortWithProfile`
+- Validation: `InvalidValue`, `WanPortWithProfile`, `DhcpStaticHostsInSubnet`, `SubnetCollision`
+- UCI shell-out: `UciEdit` (failed `uci` CLI invocation)
 
 Auth-specific RPC error codes: 7 (incorrect password), 34 (authorization — triggers frontend logout), 40 (uninitialized).
 

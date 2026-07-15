@@ -6,7 +6,7 @@ A factory reset restores StartWRT to its default state at unboxing. There are tw
 
 A soft reset erases the overlay filesystem where all configuration changes are stored, then reboots the router. The base firmware (read-only squashfs) is untouched — only your customizations are removed. The Wi-Fi password survives because it is re-read from the router's EEPROM on boot.
 
-1. Navigate to `System > Settings`.
+1. Navigate to `System > Settings > Advanced`.
 
 1. Click "Factory Reset".
 
@@ -45,7 +45,7 @@ A microSD reflash boots the router from a StartWRT image and replaces the firmwa
 | Soft Reset                      | Keep settings (microSD)  | Fresh Start (microSD)           |
 | ------------------------------- | ------------------------ | ------------------------------- |
 | All settings and customizations | Settings preserved       | All settings and customizations |
-| Admin password cleared          | New admin password       | Admin password cleared          |
+| Admin password cleared          | New admin password       | New admin password              |
 | Firmware unchanged              | Firmware replaced        | Firmware replaced               |
 | Wi-Fi password preserved        | Wi-Fi password preserved | Wi-Fi password preserved        |
 

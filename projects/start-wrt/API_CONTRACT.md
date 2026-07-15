@@ -68,10 +68,22 @@ enum RemoteAccess {
 
 ```rust
 #[derive(Deserialize)]
-struct LoginRequest {
+#[serde(rename_all = "camelCase")]
+struct LoginParams {
     password: String,
+    /// Injected by the auth middleware from the HTTP User-Agent header —
+    /// clients don't send it.
+    user_agent: Option<String>,
 }
-// Response: null
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LoginRes {
+    session: String,
+}
+// Response: LoginRes. The middleware also sets the session cookie on the HTTP
+// response (`Set-Cookie: session=…; Path=/; SameSite=Strict; HttpOnly`).
+// Rate-limited: 3 attempts per 20 seconds.
 ```
 
 ### `auth.logout`
@@ -85,11 +97,59 @@ struct LoginRequest {
 
 ```rust
 #[derive(Deserialize)]
-struct SetPasswordRequest {
-    old_password: String,
-    new_password: String,
+#[serde(rename_all = "camelCase")]
+struct ResetPasswordParams {
+    old_password: String,  // wire: `oldPassword`
+    new_password: String,  // wire: `newPassword`
 }
 // Response: null
+```
+
+### `auth.verify-password`
+
+Verifies the admin password without creating a session (used internally by the
+CLI before prompting for a new one).
+
+```rust
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VerifyPasswordParams {
+    password: String,
+}
+// Response: null (Authorization error on a wrong password)
+```
+
+### `auth.check-initialized`
+
+No auth required — the UI calls this before login to decide whether to show
+first-time setup.
+
+```rust
+// Request: {}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CheckInitializedRes {
+    initialized: bool,
+}
+// Backend: true when root has a password hash in /etc/shadow
+```
+
+### `auth.set-initial-password`
+
+First-time setup: no session required (registered with login metadata, so it
+shares `auth.login`'s rate limiter). Rejected once a password is already set.
+
+```rust
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetInitialPasswordParams {
+    /// Minimum 12 characters (same rule as auth.set-password)
+    password: String,
+}
+// Response: LoginRes { session } — the caller is immediately authenticated
+// Backend: writes the root hash to /etc/shadow, disables the captive portal,
+// creates a login session
 ```
 
 ---
@@ -98,33 +158,37 @@ struct SetPasswordRequest {
 
 ### `system.info`
 
+No auth required.
+
 ```rust
 // Request: {}
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct SystemInfoResponse {
     version: String,
     language: String,
     date: String,  // ISO 8601
     theme: Theme,
-    remote_access: String,
+    remote_access: String,  // wire: `remoteAccess`
     timezone: String,  // IANA timezone name (e.g. "America/New_York")
 }
 ```
 
 ### `system.newer-versions`
 
-Queries the Start9 registry for OS versions newer than the running firmware.
-Registry URL defaults to `https://startwrt-registry.start9.com/` and can be overridden
-via UCI: `startwrt.system.registry`.
+No auth required. Queries the Start9 registry for OS versions newer than the running firmware.
+Registry URL defaults to `https://startwrt-registry.start9.com` (no trailing slash) and can be
+overridden via UCI: `startwrt.system.registry`.
 
 ```rust
 // Request: {}
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct VersionInfo {
     version: String,
-    release_notes: String,  // Markdown
+    release_notes: String,  // Markdown; wire: `releaseNotes`
 }
 // Response: Vec<VersionInfo>
 ```
@@ -137,12 +201,18 @@ Returns a GUID for WebSocket progress streaming.
 
 ```rust
 // Request:
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct UpdateSystemParams {
-    registry: String,              // Registry URL
-    target_version: Option<String>, // Specific version (default: latest)
+    /// Registry URL. Defaults to UCI `startwrt.system.registry`, then
+    /// `https://startwrt-registry.start9.com`.
+    registry: Option<String>,
+    target_version: Option<String>, // wire: `targetVersion` (default: latest)
 }
 
 // Response:
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct UpdateSystemRes {
     target: Option<String>,   // Version being installed
     progress: Option<String>, // GUID for /ws/rpc/{guid}
@@ -172,16 +242,40 @@ type Progress = null | boolean | { done: number; total: number | null; units: st
 // Backend: runs `reboot` internally
 ```
 
+### `system.factory-reset`
+
+```rust
+// Request: {}
+// Response: null
+// Backend: runs `firstboot -y` (wipes the overlay), then reboots after a short
+// delay so the response can reach the client
+```
+
 ### `system.set-preferences`
 
 ```rust
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct SetPreferencesRequest {
     language: Option<String>,
     theme: Option<Theme>,
-    remote_access: Option<RemoteAccess>,
+    remote_access: Option<RemoteAccess>,  // wire: `remoteAccess`
 }
 // Response: null
+```
+
+### `system.apply-remote-access`
+
+Internal endpoint (`no_auth`), **not called from the frontend**. Fired by the
+`/etc/hotplug.d/iface/99-startwrt-remote-access` hook (in `backend/hotplug/`)
+when a WAN interface comes up.
+
+```rust
+// Request: {}
+// Response: null
+// Backend: re-applies the remote-access preference to the firewall against the
+// current WAN IPs, reloads the firewall, and kills WAN-side dropbear (SSH)
+// sessions so they don't survive a rule change via conntrack ESTABLISHED state
 ```
 
 ### `system.set-timezone`
@@ -245,7 +339,7 @@ Live-streaming endpoint for the web UI.
 2. Server spawns `logread -f` (dumps historical entries then follows new ones)
 3. Each line is parsed into `LogEntry` and sent as a JSON text frame
 4. Connection closes when either side disconnects; child process is killed on drop
-5. **Session auth required** — the session cookie is validated before the WebSocket upgrade (returns 401 if invalid)
+5. **Auth required** — a valid session cookie, or the local auth cookie (`local`, checked against `/run/startwrt/rpc.authcookie`), is validated before the WebSocket upgrade (returns 401 if invalid)
 6. Each message is a single `LogEntry` JSON object (not wrapped in `LogsResponse`)
 7. Unparseable lines are silently dropped (same as the RPC endpoint)
 
@@ -328,9 +422,10 @@ struct WanIpv6Response {
     gateway: Option<String>,
     /// Static mode: LAN prefix pool for sub-delegation, e.g. "2001:db8::/48"
     lan_prefix: Option<String>,
-    /// 6RD mode
-    peer_ipv4: Option<String>,
-    mask: Option<String>,      // e.g. "/32"
+    /// 6RD mode (RFC 5969 parameters from the ISP)
+    ip6prefix: Option<String>,
+    ip6prefixlen: Option<String>,
+    ip4prefixlen: Option<String>,
     border_relay: Option<String>,
     /// Runtime: assigned WAN IPv6 address. GUA-preferred — when the WAN has a
     /// global address it is reported here (the only scope reachable for inbound
@@ -350,12 +445,14 @@ struct WanIpv6SetRequest {
     gateway: Option<String>,
     /// Static mode: LAN prefix pool, e.g. "2001:db8::/48"
     lan_prefix: Option<String>,
-    peer_ipv4: Option<String>,
-    mask: Option<String>,
+    /// 6RD mode
+    ip6prefix: Option<String>,
+    ip6prefixlen: Option<String>,
+    ip4prefixlen: Option<String>,
     border_relay: Option<String>,
 }
 // Response: null
-// Backend: updates UCI network.wan6, restarts network
+// Backend: updates UCI network.wan6, restarts network, then restarts odhcpd
 ```
 
 ### `wan.mac-get`
@@ -423,7 +520,11 @@ struct WanDnsSetRequest {
     servers: Option<Vec<DnsServer>>,
 }
 // Response: null
-// Backend: updates UCI network wan+wan6 DNS settings, restarts network
+// Backend: stores custom servers in the `startwrt` config (`system_dns`
+// section), sets `peerdns` on wan/wan6 (0 for Custom, 1 for Isp), rewrites
+// per-profile DNS forwarding (dnsmasq + firewall DNAT), regenerates the
+// SmartDNS config, then runs the full reload_system() (network + smartdns +
+// firewall + dnsmasq)
 ```
 
 ### `wan.ddns-get`
@@ -487,7 +588,7 @@ struct WanDdnsSetRequest {
 struct LanIpv4Response {
     /// Full router IP, e.g. "192.168.0.1"
     address: String,
-    /// Always /16, but include for completeness
+    /// Always /24 (255.255.255.0), but include for completeness
     netmask: String,
 }
 ```
@@ -616,6 +717,17 @@ struct EthernetSetResult {
 
 Note: `ProfileId` and `ProfileIdOpt` are shared types defined at the top of the contract.
 
+### `ethernet.edit`
+
+CLI editor flow — opens the current Ethernet config in `$EDITOR`, then calls
+`ethernet.set` with published-port deletion implicitly confirmed. Not called by
+the web UI.
+
+```rust
+// Request: {}
+// Response: null
+```
+
 ---
 
 ## 6. Devices
@@ -634,7 +746,7 @@ enum DeviceStatus {
 
 #[derive(Serialize)]
 struct Device {
-    mac: String,
+    mac: Option<String>,
     /// Fully-resolved display name: UCI static name → live DHCP hostname →
     /// remembered hostname (name cache) → `device-<mac>` placeholder. Always set.
     name: String,
@@ -648,6 +760,17 @@ struct Device {
     ipv4_static: bool,
     ipv6_static: bool,
     security_profile: Option<String>,
+    /// Live throughput (MB/s, 1 decimal), computed from conntrack byte deltas
+    /// between polls. Only set for online devices with a previous sample.
+    speed: Option<SpeedData>,
+    /// Total data used in the current nlbwmon period (GB, 1 decimal, rx+tx)
+    data_usage: Option<f64>,
+}
+
+#[derive(Serialize)]
+struct SpeedData {
+    up: f64,
+    down: f64,
 }
 // Response: Vec<Device>
 // Backend: reads DHCP hosts, firewall rules, ARP table, DHCP leases, and a
@@ -680,7 +803,12 @@ struct DeviceForgetRequest {
     mac: String,
 }
 // Response: null
-// Backend: removes DHCP host for mac, restarts dnsmasq
+// Backend: removes the DHCP host for the MAC and its remembered name, flushes
+// matching neighbor/ARP entries (`ip neigh del`), and rewrites every dnsmasq
+// lease file (the base file plus per-profile /tmp/dhcp.leases.dns_*) with
+// dnsmasq stopped (stop → edit → start), so the in-memory lease can't
+// resurrect the entry. A still-connected device reappears on its next
+// network activity.
 ```
 
 ### `devices.data-usage`
@@ -1110,21 +1238,25 @@ struct WifiSetResult {
 // Request: {}
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct BlackoutWindow {
-    start_time: String,  // "HH:MM"
-    end_time: String,    // "HH:MM"
+    start_time: String,  // "HH:MM"; wire: `startTime`
+    end_time: String,    // "HH:MM"; wire: `endTime`
     /// [Sun, Mon, Tue, Wed, Thu, Fri, Sat]
     days: [bool; 7],
 }
 // Response: Vec<BlackoutWindow>
 ```
 
-A window may cross midnight: when `end_time < start_time` (e.g. `22:00`–`06:00`) it runs
-from `start_time` on each selected day until `end_time` the _following_ day, and the
-backend shifts the closing cron edge forward one day. Equal `start_time`/`end_time` is
-rejected (ambiguous 0h/24h). On `*-set`, windows that overlap on the weekly timeline
-(wrap-aware) are also rejected with `InvalidValue`. The same wrap and overlap semantics
-apply to the profile `profiles.schedule-get` / `profiles.schedule-set` windows.
+A window may cross midnight: when `endTime < startTime` (e.g. `22:00`–`06:00`) it runs
+from `startTime` on each selected day until `endTime` the _following_ day, and the
+backend shifts the closing cron edge forward one day. Equal `startTime`/`endTime`
+denotes a full 24-hour window on the selected days and is allowed. On `*-set`, windows
+that overlap on the weekly timeline (wrap-aware) are rejected with `InvalidValue`, as is
+a schedule that covers the entire week with no gap (the deconflicted crontab projection
+would have zero edges — disable WiFi directly instead). The same wrap, overlap, and
+full-week semantics apply to the profile `profiles.schedule-get` /
+`profiles.schedule-set` windows.
 
 ### `wifi.blackout-set`
 
@@ -1134,6 +1266,24 @@ struct BlackoutSetRequest {
     windows: Vec<BlackoutWindow>,
 }
 // Response: null
+```
+
+### `wifi.edit`
+
+CLI editor flow — opens the current WiFi config in `$EDITOR`, then calls
+`wifi.set` with published-port deletion implicitly confirmed. Not called by the
+web UI.
+
+```rust
+// Request: {}
+// Response: null
+```
+
+### `wifi.generate-password`
+
+```rust
+// Request: {}
+// Response: String — a random 16-character alphanumeric password
 ```
 
 ---
@@ -1184,7 +1334,9 @@ struct SecurityProfile {
     wan_access: WanAccess,
     access_to_new_profiles: bool,
     owns_lan: bool,
-    dns_override: Option<Vec<DnsServer>>,
+    /// Always present in responses — an empty array when unset, never null
+    #[serde(default)]
+    dns_override: Vec<DnsServer>,
     /// "system", "custom", or "vpn"
     dns_source: String,
 }
@@ -1205,7 +1357,11 @@ struct ProfileCreateRequest {
     wan_access: WanAccess,
     access_to_new_profiles: bool,
     owns_lan: bool,
-    dns_override: Option<Vec<DnsServer>>,
+    #[serde(default)]
+    dns_override: Vec<DnsServer>,
+    /// "system", "custom", or "vpn"
+    #[serde(default)]
+    dns_source: String,
 }
 // Response: ProfileId
 // Validation: gateway_ip must stay inside the LAN network block (see
@@ -1216,20 +1372,16 @@ struct ProfileCreateRequest {
 ### `profiles.set`
 
 ```rust
+// Request: the same flattened profile shape as profiles.create — all three id
+// fields optional (they identify the profile to update, with profiles.get's
+// lookup semantics) — plus a force flag.
 #[derive(Deserialize)]
-struct ProfileUpdateRequest {
-    fullname: Option<String>,
-    /// Required — identifies the profile to update
-    interface: String,
-    /// Required — identifies the profile to update
-    vlan_tag: u16,
-    gateway_ip: String,
-    outbound: String,
-    lan_access: LanAccess,
-    wan_access: WanAccess,
-    access_to_new_profiles: bool,
-    owns_lan: bool,
-    dns_override: Option<Vec<DnsServer>>,
+struct ProfileSetRequest {
+    #[serde(flatten)]
+    profile: ProfileCreateRequest,
+    /// When true, forcibly delete VPN peers that would break due to the change.
+    #[serde(default)]
+    force: bool,
 }
 // Response: ProfileId
 // Validation: same gateway_ip block check as profiles.create.
@@ -1240,6 +1392,57 @@ struct ProfileUpdateRequest {
 ```rust
 // Request: ProfileIdOpt
 // Response: null
+```
+
+### `profiles.edit`
+
+CLI editor flow — opens the matched profile (or, with `create: true`, a fresh
+template) in `$EDITOR`, then calls `profiles.set` / `profiles.create`. Not
+called by the web UI.
+
+```rust
+#[derive(Deserialize)]
+struct EditArgs {
+    get: ProfileIdOpt,  // CLI: --fullname / --interface / --vlan-tag
+    create: bool,       // CLI: --create
+}
+// Response: ProfileId
+```
+
+### `profiles.schedule-get`
+
+```rust
+#[derive(Deserialize)]
+struct ScheduleGetParams {
+    interface: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ScheduleWindow {
+    start_time: String,  // "HH:MM"; wire: `startTime`
+    end_time: String,    // "HH:MM"; wire: `endTime`
+    /// [Sun, Mon, Tue, Wed, Thu, Fri, Sat]
+    days: [bool; 7],
+}
+// Response: Vec<ScheduleWindow>
+// Backend: reads the profile's wan_schedule list from UCI; errors with
+// MissingProfile for an unknown interface
+```
+
+### `profiles.schedule-set`
+
+```rust
+#[derive(Deserialize)]
+struct ScheduleWindows {
+    interface: String,
+    windows: Vec<ScheduleWindow>,
+}
+// Response: null
+// Backend: persists the windows to the profile's UCI wan_schedule, then
+// regenerates the crontab projection and firewall rules. Same wrap/overlap/
+// full-week validation as wifi.blackout-set (equal startTime/endTime = full
+// 24-hour window; InvalidValue on overlap or gapless full-week coverage).
 ```
 
 ---
@@ -1275,7 +1478,7 @@ struct SshKeyAddRequest {
 }
 // Response: SshKeyResponse (the newly added key)
 // Backend: validates with openssh_keys, checks for duplicates via fingerprint,
-//          appends to /root/.ssh/authorized_keys, creates ~/.ssh dir if needed
+//          appends to /etc/dropbear/authorized_keys, creates /etc/dropbear if needed
 ```
 
 ### `ssh-keys.delete`
@@ -1287,71 +1490,245 @@ struct SshKeyDeleteRequest {
     fingerprint: String,
 }
 // Response: null
-// Backend: removes line matching fingerprint from /root/.ssh/authorized_keys
+// Backend: removes line matching fingerprint from /etc/dropbear/authorized_keys
 ```
+
+---
+
+## 13. Setup
+
+### `setup.status`
+
+No auth required — polled by the setup wizard.
+
+```rust
+// Request: {}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SetupStatusRes {
+    /// True when booted from removable media (setup wizard mode); wire: `setupMode`
+    setup_mode: bool,
+    disk: DiskState,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiskState {
+    /// An eMMC device was found; wire: `emmcFound`
+    emmc_found: bool,
+    /// The eMMC has existing firmware (rootfs partition present); wire: `hasFirmware`
+    has_firmware: bool,
+}
+```
+
+---
+
+## 14. Activity
+
+### `activity.list`
+
+```rust
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ActivityListParams {
+    offset: Option<usize>,
+    limit: Option<usize>,
+}
+
+#[derive(Serialize)]
+struct ActivityEntry {
+    id: i64,
+    timestamp: String,
+    category: String,   // e.g. "auth", "wan", "backup"
+    action: String,     // e.g. "login", "dns-updated"
+    success: bool,
+    summary: String,
+    /// Omitted from the JSON when absent
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ActivityListResponse {
+    entries: Vec<ActivityEntry>,
+    total: usize,
+}
+// Backend: reads the SQLite activity log (/etc/startwrt/activity.db),
+// newest first
+```
+
+### `activity.delete`
+
+```rust
+#[derive(Deserialize)]
+struct ActivityDeleteParams {
+    id: i64,
+}
+// Response: null (NotFound if no such entry)
+```
+
+### `activity.clear`
+
+```rust
+// Request: {}
+// Response: null
+// Backend: deletes all activity entries
+```
+
+---
+
+## 15. Backup
+
+### `backup.create`
+
+```rust
+// Request: {}
+
+#[derive(Serialize)]
+struct BackupCreateRes {
+    /// Download the archive via GET /rest/rpc/{guid}
+    guid: String,
+    filename: String,  // "backup-<hostname>-<YYYY-MM-DD>.tar.gz"
+}
+// Backend: runs `sysupgrade --create-backup -`, buffers the archive, and
+// registers a one-shot download continuation at /rest/rpc/{guid}
+```
+
+### `backup.restore`
+
+```rust
+// Request: {}
+
+#[derive(Serialize)]
+struct BackupRestoreRes {
+    /// POST the .tar.gz to /rest/rpc/{guid} (10 MB body limit)
+    upload: String,
+}
+// Backend: the upload continuation validates the archive (`tar -tzf`), applies
+// it with `sysupgrade --restore-backup`, then reboots after a short delay
+```
+
+---
+
+## 16. Diagnostics
+
+### `diagnostics.create`
+
+```rust
+// Request: {}
+
+#[derive(Serialize)]
+struct DiagnosticsCreateRes {
+    /// Download the log via GET /rest/rpc/{guid}
+    guid: String,
+    filename: String,  // "diagnostics-startwrt-<YYYY-MM-DD>.log"
+}
+// Backend: captures `logread` output and registers a one-shot download
+// continuation at /rest/rpc/{guid}
+```
+
+---
+
+## HTTP Routes
+
+Every RPC method above is a JSON-RPC 2.0 call to a single endpoint: **`POST /rpc/v1`**.
+The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
+
+| Route                                              | Method    | Auth                       | Purpose                                                                                      |
+| -------------------------------------------------- | --------- | -------------------------- | -------------------------------------------------------------------------------------------- |
+| `/rpc/v1`                                          | POST      | Session (unless `no_auth`) | JSON-RPC 2.0 endpoint for all RPC methods                                                    |
+| `/rest/rpc/{guid}`                                 | GET/POST  | GUID capability (one-shot) | RPC continuation: binary download (backup, diagnostics) / upload (restore); 10 MB body limit |
+| `/ws/rpc/{guid}`                                   | WebSocket | GUID capability            | Progress streaming (`system.update`)                                                         |
+| `/api/logs`                                        | WebSocket | Session or local cookie    | Live log streaming (see § 2)                                                                 |
+| `/api/setup/flash`                                 | POST      | None (setup wizard)        | Streams NDJSON `SetupEvent` progress while flashing the eMMC; one flash at a time            |
+| `/static/root-ca.crt`                              | GET       | None                       | Root CA certificate download                                                                 |
+| `/cgi-bin/*`, `/luci-static/*`, `/ubus`, `/ubus/*` | any       | LuCI's own                 | Reverse proxy to uhttpd (LuCI) on localhost:8080; `/luci` redirects to `/cgi-bin/luci`       |
+| everything else                                    | any       | None                       | Embedded web UI                                                                              |
 
 ---
 
 ## Endpoint Summary
 
-| RPC Method                  | Status  | Category                            |
-| --------------------------- | ------- | ----------------------------------- |
-| `auth.login`                | Exists  | Auth                                |
-| `auth.logout`               | Exists  | Auth                                |
-| `auth.set-password`         | Exists  | Auth                                |
-| `system.info`               | Exists  | System                              |
-| `system.newer-versions`     | Exists  | System                              |
-| `system.restart`            | Exists  | System                              |
-| `system.set-preferences`    | Exists  | System                              |
-| `system.logs`               | Exists  | System                              |
-| `/api/logs` (WebSocket)     | Exists  | System                              |
-| `wan.ipv4-get`              | **New** | WAN                                 |
-| `wan.ipv4-set`              | **New** | WAN                                 |
-| `wan.ipv6-get`              | **New** | WAN                                 |
-| `wan.ipv6-set`              | **New** | WAN                                 |
-| `wan.mac-get`               | **New** | WAN                                 |
-| `wan.mac-set`               | **New** | WAN                                 |
-| `wan.dns-get`               | **New** | WAN                                 |
-| `wan.dns-set`               | **New** | WAN                                 |
-| `wan.ddns-get`              | **New** | WAN                                 |
-| `wan.ddns-set`              | **New** | WAN                                 |
-| `lan.ipv4-get`              | **New** | LAN                                 |
-| `lan.ipv4-set`              | **New** | LAN                                 |
-| `lan.ipv6-get`              | **New** | LAN                                 |
-| `lan.ipv6-set`              | **New** | LAN                                 |
-| `ethernet.get`              | **New** | Ethernet                            |
-| `ethernet.set`              | **New** | Ethernet                            |
-| `devices.list`              | **New** | Devices                             |
-| `devices.update`            | **New** | Devices                             |
-| `devices.forget`            | **New** | Devices                             |
-| `devices.data-usage`        | **New** | Devices                             |
-| `published-ports.list`      | **New** | Published Ports                     |
-| `published-ports.set`       | **New** | Published Ports                     |
-| `published-ports.reconcile` | **New** | Published Ports (internal, hotplug) |
-| `vpn-client.list`           | **New** | Outbound VPN                        |
-| `vpn-client.create`         | **New** | Outbound VPN                        |
-| `vpn-client.update`         | **New** | Outbound VPN                        |
-| `vpn-client.delete`         | **New** | Outbound VPN                        |
-| `vpn-client.set-enabled`    | **New** | Outbound VPN                        |
-| `vpn-server.list`           | Exists  | Inbound VPN                         |
-| `vpn-server.set`            | Exists  | Inbound VPN                         |
-| `vpn-server.delete`         | Exists  | Inbound VPN                         |
-| `vpn-server.peer-add`       | Exists  | Inbound VPN                         |
-| `vpn-server.peer-delete`    | Exists  | Inbound VPN                         |
-| `wifi.get`                  | Exists  | WiFi                                |
-| `wifi.set`                  | Exists  | WiFi                                |
-| `wifi.blackout-get`         | Exists  | WiFi                                |
-| `wifi.blackout-set`         | Exists  | WiFi                                |
-| `profiles.list`             | Exists  | Profiles                            |
-| `profiles.get`              | Exists  | Profiles                            |
-| `profiles.create`           | Exists  | Profiles                            |
-| `profiles.set`              | Exists  | Profiles                            |
-| `profiles.delete`           | Exists  | Profiles                            |
-| `ssh-keys.list`             | **New** | SSH Keys                            |
-| `ssh-keys.add`              | **New** | SSH Keys                            |
-| `ssh-keys.delete`           | **New** | SSH Keys                            |
+| RPC Method                   | Category        | Notes                      |
+| ---------------------------- | --------------- | -------------------------- |
+| `auth.login`                 | Auth            | Rate-limited               |
+| `auth.logout`                | Auth            |                            |
+| `auth.verify-password`       | Auth            |                            |
+| `auth.set-password`          | Auth            |                            |
+| `auth.check-initialized`     | Auth            | No auth                    |
+| `auth.set-initial-password`  | Auth            | No session; rate-limited   |
+| `system.info`                | System          | No auth                    |
+| `system.newer-versions`      | System          | No auth                    |
+| `system.update`              | System          |                            |
+| `system.restart`             | System          |                            |
+| `system.factory-reset`       | System          |                            |
+| `system.set-preferences`     | System          |                            |
+| `system.apply-remote-access` | System          | No auth; internal, hotplug |
+| `system.set-timezone`        | System          | No auth                    |
+| `system.get-timezones`       | System          | No auth                    |
+| `system.logs`                | System          |                            |
+| `setup.status`               | Setup           | No auth                    |
+| `wan.ipv4-get`               | WAN             |                            |
+| `wan.ipv4-set`               | WAN             |                            |
+| `wan.ipv6-get`               | WAN             |                            |
+| `wan.ipv6-set`               | WAN             |                            |
+| `wan.mac-get`                | WAN             |                            |
+| `wan.mac-set`                | WAN             |                            |
+| `wan.dns-get`                | WAN             |                            |
+| `wan.dns-set`                | WAN             |                            |
+| `wan.ddns-get`               | WAN             |                            |
+| `wan.ddns-set`               | WAN             |                            |
+| `lan.ipv4-get`               | LAN             |                            |
+| `lan.ipv4-set`               | LAN             |                            |
+| `lan.ipv6-get`               | LAN             |                            |
+| `lan.ipv6-set`               | LAN             |                            |
+| `ethernet.get`               | Ethernet        |                            |
+| `ethernet.set`               | Ethernet        |                            |
+| `ethernet.edit`              | Ethernet        | CLI editor                 |
+| `devices.list`               | Devices         |                            |
+| `devices.update`             | Devices         |                            |
+| `devices.forget`             | Devices         |                            |
+| `devices.data-usage`         | Devices         |                            |
+| `published-ports.list`       | Published Ports |                            |
+| `published-ports.set`        | Published Ports |                            |
+| `published-ports.reconcile`  | Published Ports | No auth; internal, hotplug |
+| `vpn-client.list`            | Outbound VPN    |                            |
+| `vpn-client.create`          | Outbound VPN    |                            |
+| `vpn-client.update`          | Outbound VPN    |                            |
+| `vpn-client.delete`          | Outbound VPN    |                            |
+| `vpn-client.set-enabled`     | Outbound VPN    |                            |
+| `vpn-server.list`            | Inbound VPN     |                            |
+| `vpn-server.set`             | Inbound VPN     |                            |
+| `vpn-server.delete`          | Inbound VPN     |                            |
+| `vpn-server.peer-add`        | Inbound VPN     |                            |
+| `vpn-server.peer-delete`     | Inbound VPN     |                            |
+| `wifi.get`                   | WiFi            |                            |
+| `wifi.set`                   | WiFi            |                            |
+| `wifi.edit`                  | WiFi            | CLI editor                 |
+| `wifi.blackout-get`          | WiFi            |                            |
+| `wifi.blackout-set`          | WiFi            |                            |
+| `wifi.generate-password`     | WiFi            |                            |
+| `profiles.list`              | Profiles        |                            |
+| `profiles.get`               | Profiles        |                            |
+| `profiles.create`            | Profiles        |                            |
+| `profiles.set`               | Profiles        |                            |
+| `profiles.delete`            | Profiles        |                            |
+| `profiles.edit`              | Profiles        | CLI editor                 |
+| `profiles.schedule-get`      | Profiles        |                            |
+| `profiles.schedule-set`      | Profiles        |                            |
+| `ssh-keys.list`              | SSH Keys        |                            |
+| `ssh-keys.add`               | SSH Keys        |                            |
+| `ssh-keys.delete`            | SSH Keys        |                            |
+| `activity.list`              | Activity        |                            |
+| `activity.delete`            | Activity        |                            |
+| `activity.clear`             | Activity        |                            |
+| `backup.create`              | Backup          |                            |
+| `backup.restore`             | Backup          |                            |
+| `diagnostics.create`         | Diagnostics     |                            |
 
-**Totals:** 51 endpoints (22 existing, 29 new)
+**Totals:** 74 RPC methods across 16 categories, plus the HTTP/WebSocket routes
+table above and the deprecated generic endpoints below.
 
 ---
 
@@ -1359,10 +1736,12 @@ struct SshKeyDeleteRequest {
 
 The following generic endpoints should be removed from the frontend once all smart endpoints are implemented:
 
-| Endpoint   | Replaced by                              |
-| ---------- | ---------------------------------------- |
-| `uci.get`  | All `*.get` endpoints above              |
-| `uci.set`  | All `*.set` endpoints above              |
-| `exec`     | Absorbed into smart endpoints internally |
-| `file.get` | `ssh-keys.list`                          |
-| `file.set` | `ssh-keys.add`, `ssh-keys.delete`        |
+| Endpoint   | Replaced by                                                                       |
+| ---------- | --------------------------------------------------------------------------------- |
+| `uci.get`  | All `*.get` endpoints above                                                       |
+| `uci.set`  | All `*.set` endpoints above                                                       |
+| `uci.edit` | The `*.edit` CLI editors above (editor over `uci.get` + `uci.set`)                |
+| `exec`     | Absorbed into smart endpoints internally                                          |
+| `file.get` | `ssh-keys.list`                                                                   |
+| `file.set` | `ssh-keys.add`, `ssh-keys.delete`                                                 |
+| `dir.get`  | Absorbed into smart endpoints internally (directory stat/listing; CLI/debug only) |

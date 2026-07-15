@@ -9,7 +9,7 @@ StartWRT routers use **two separate passwords** set at different times:
 | **WiFi password**  | Hardware vendor (during manufacture) | Programmed into EEPROM tag 0x2F                            | WPA2-PSK WiFi access  |
 | **Admin password** | End user                             | First GUI access after unboxing, factory reset, or reflash | Web UI authentication |
 
-The WiFi password is a unique **12-character** string from a 67-char unambiguous charset, printed on a sticker on the bottom of the device. It provides **~72.3 bits of entropy**, making rainbow table attacks infeasible even with a static SSID.
+The WiFi password is a unique **12-character** string from a 68-char unambiguous charset, printed on a sticker on the bottom of the device. It provides **~73 bits of entropy**, making rainbow table attacks infeasible even with a static SSID.
 
 The admin password is user-chosen (minimum 12 characters, any format) and stored in `/etc/shadow` on the overlay filesystem.
 
@@ -73,15 +73,15 @@ This means a vendor-programmed board "just works" out of the box — no on-devic
 
 ### Password Character Set
 
-| Category  | Characters                | Count  |
-| --------- | ------------------------- | ------ |
-| Uppercase | `A-Z` minus `I`, `O`      | 24     |
-| Lowercase | `a-z` minus `i`, `l`, `o` | 23     |
-| Digits    | `2-9`                     | 8      |
-| Special   | `! @ # $ % ^ & * - _ + =` | 12     |
-| **Total** |                           | **67** |
+| Category  | Characters              | Count  |
+| --------- | ----------------------- | ------ |
+| Uppercase | `A-Z` minus `I`, `O`    | 24     |
+| Lowercase | `a-z` minus `l`         | 25     |
+| Digits    | `2-9`                   | 8      |
+| Special   | `! @ # $ % ^ & * = + ?` | 11     |
+| **Total** |                         | **68** |
 
-12 chars × 67-char set ≈ **72.3 bits entropy**
+12 chars × 68-char set ≈ **73.0 bits entropy**
 
 The same charset is enforced by:
 
@@ -207,7 +207,7 @@ All packages required by StartWRT are included in the firmware image. Both Updat
 | **Backend**  | `startwrt-ctrld` in "setup mode"                     |
 | **Access**   | Captive portal (DNS hijack → any URL reaches wizard) |
 
-Setup mode is detected by `setup::is_setup_mode`: if the boot device is _not_ an eMMC, the daemon enters setup mode and exposes only the `setup::status` and `/api/setup/flash` endpoints (the latter consumed by the wizard).
+Setup mode is detected by `setup::is_setup_mode`: if the boot device is _not_ an eMMC, the daemon enters setup mode. The daemon mounts the same RPC surface and HTTP routes in both modes; what the wizard relies on is that `setup.status` requires no authentication and `/api/setup/flash` is reachable, while everything else remains behind session auth.
 
 ### Boot Detection
 
@@ -266,7 +266,6 @@ The WiFi passphrase is never displayed in the admin interface. The sticker is th
 | `backend/ctrl/src/bins/cli.rs`    | CLI dispatch — exposes `set-wifi-password`, `flash`, `verify`                                  |
 | `backend/ctrl/src/bins/daemon.rs` | Boot-time WiFi auto-restore, setup-mode detection, flash HTTP handler                          |
 | `build/stage-files.sh`            | Serial dispatcher (prints setup-mode hint, drops to login — no longer calls into startwrt-cli) |
-| `genkey.py`                       | Vendor-side password generator (matches `PASSWORD_CHARS`)                                      |
 | `web/` (setup wizard)             | Angular wizard UI                                                                              |
 
 ### Reusable Code
@@ -277,7 +276,7 @@ The WiFi passphrase is never displayed in the admin interface. The sticker is th
 | `start-os::util::io::AtomicFile`           | Atomic write pattern for `/etc/shadow`, conffiles |
 | `uciedit` crate                            | UCI config writing                                |
 | `wifi.rs`                                  | WiFi PSK + dynamic VLAN structure                 |
-| `start-os/web/projects/setup-wizard/`      | Angular wizard reference                          |
+| `projects/start-os/web/setup-wizard/`      | Angular wizard reference                          |
 
 ### New Dependencies
 

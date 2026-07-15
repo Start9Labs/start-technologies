@@ -6,10 +6,11 @@ Devices appear here even without an active DHCP lease: devices with static IPs, 
 
 ## Viewing Devices
 
-Navigate to `Network > Devices` to see the device list. Each entry shows:
+Navigate to `Network > Devices` to see the device list. A search box above the list filters it as you type. Each entry shows:
 
 - **Name** — The device's hostname or a custom name you have assigned. Click to open the device detail page.
 - **Connection** — How the device connects: Ethernet, Wi-Fi 2.4GHz, Wi-Fi 5GHz, or VPN.
+- **Security Profile** — The [Security Profile](security-profiles.md) the device is assigned to.
 - **MAC address** — The device's unique hardware identifier.
 - **IP address** — The device's IPv4 and IPv6 addresses. A lock icon indicates a reserved (static) IP address.
 - **Data and Speed** — Cumulative data usage and real-time upload/download speed for online devices.
@@ -24,7 +25,7 @@ Click a device name to open its detail page:
 
 - **Name** — Edit the custom display name for this device. If left empty, the device's hostname is used. Saving shows a brief spinner and a confirmation, then refreshes from the router so the displayed name always matches the saved state.
 
-- **Reserve** — Toggle on to assign a fixed IPv4 address that persists across reboots. Enter the desired IP address within the device's profile subnet. Useful for servers, printers, NAS devices, or any device that needs a consistent address.
+- **Reserve** — Toggle on to assign a fixed IP address that persists across reboots. Separate Reserve toggles are available for the device's IPv4 and IPv6 addresses. Enter the desired IP address within the device's profile subnet. Useful for servers, printers, NAS devices, or any device that needs a consistent address. If you change a reserved address, the device picks up the new one the next time it requests an address from the router — reconnecting or rebooting the device usually applies it right away; otherwise it can take up to 12 hours, and the interface reminds you of this when you save. While an enabled [Published Ports](published-ports.md) rule uses one of the device's addresses, the Reserve toggle for that address family is locked.
 
 - **Forget** — Remove an offline device from the list. Custom name, reserved IP settings, and the device's cached name are lost. If the device reconnects, it will appear as a new entry.
 

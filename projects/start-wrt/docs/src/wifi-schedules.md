@@ -13,9 +13,9 @@ Wi-Fi Blackout lets you disable the Wi-Fi radio on a recurring timetable. During
 
 ## Setting a Schedule
 
-The schedule is displayed as a 7-day visual timeline grid, with one row per day of the week. Blackout windows appear as shaded blocks on the timeline.
+The schedule is displayed as a 7-day visual timeline grid, with one column per day of the week (Monday through Sunday). Blackout windows appear as shaded blocks on the timeline.
 
-1. Navigate to `Points of Entry > Wi-Fi > Schedule`.
+1. Navigate to `Points of Entry > Wi-Fi > Blackout Schedule`.
 
 1. Click "Add" to create a blackout window.
 
@@ -37,4 +37,4 @@ Overlapping windows are rejected when you save. A schedule that covers the entir
 
 ## Removing a Schedule
 
-To remove a blackout window, click it and click "Delete". Removing all blackout windows effectively disables the schedule — Wi-Fi will remain on at all times.
+To remove a blackout window, click it and click "Remove". Removing all blackout windows effectively disables the schedule — Wi-Fi will remain on at all times.

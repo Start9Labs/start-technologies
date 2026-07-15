@@ -9,11 +9,11 @@ Access your router's command line over SSH for advanced troubleshooting, package
 
 1. Navigate to `System > Settings > SSH Keys`.
 
-1. Click "Add Key".
+1. Click "Add SSH key".
 
 1. Paste your public key (the contents of `~/.ssh/id_ed25519.pub` or `~/.ssh/id_rsa.pub`). The key is labeled automatically from the comment at the end of the public key (e.g. `user@hostname`).
 
-1. Click "Save".
+1. Click "Add Key".
 
 > [!TIP]
 > If you do not have an SSH key pair, generate one:

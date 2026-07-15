@@ -6,7 +6,7 @@ Back up your router's configuration so you can restore it after an update, facto
 
 1. Navigate to `System > Settings > Backup`.
 
-1. Click "Create Backup".
+1. Click "Download Backup".
 
 1. A backup file will be downloaded to your computer.
 
@@ -19,11 +19,11 @@ Store the backup file in a safe location, such as a password manager or encrypte
 
 1. Navigate to `System > Settings > Backup`.
 
-1. Click "Restore Backup".
-
-1. Select the backup file from your computer.
+1. Under "Restore Backup", click "Choose File" and select the backup file from your computer.
 
 1. Click "Restore".
+
+1. A confirmation dialog explains that all current settings will be overwritten and the router will reboot. Click "Restore & Reboot" to proceed.
 
 The router will apply the configuration and restart.
 
@@ -32,15 +32,17 @@ The router will apply the configuration and restart.
 
 ## What Is Included
 
-| Included                         | Not Included        |
-| -------------------------------- | ------------------- |
-| Security Profiles                | System logs         |
-| Wi-Fi passwords                  | Device history      |
-| Published Ports                  | Data usage counters |
-| Ethernet port assignments        |                     |
-| Inbound and Outbound VPN configs |                     |
-| SSH keys                         |                     |
-| DDNS settings                    |                     |
-| LAN/WAN settings                 |                     |
-| Admin password                   |                     |
-| Router name, timezone, language  |                     |
+| Included                         | Not Included |
+| -------------------------------- | ------------ |
+| Security Profiles                | System logs  |
+| Wi-Fi passwords                  |              |
+| Published Ports                  |              |
+| Ethernet port assignments        |              |
+| Inbound and Outbound VPN configs |              |
+| SSH keys                         |              |
+| DDNS settings                    |              |
+| LAN/WAN settings                 |              |
+| Admin password                   |              |
+| Router name, timezone, language  |              |
+| Device names you've assigned     |              |
+| Data usage history               |              |

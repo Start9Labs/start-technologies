@@ -16,9 +16,9 @@ One Ethernet port is designated as the WAN port, which connects to your ISP mode
 
 1. Navigate to `Points of Entry > Ethernet`.
 
-1. For each non-WAN port, select the desired Security Profile from the dropdown.
+1. For each non-WAN port, select the desired Security Profile from the dropdown. There is no separate save step — the change is applied as soon as you select a profile.
 
-1. Click "Save".
+1. If reassigning the port would break any [Published Ports](published-ports.md) rules (the devices on that port move to a new subnet), a confirmation dialog lists the affected rules first. Nothing is applied until you confirm; canceling leaves the port unchanged.
 
 > [!NOTE]
 > Changes take effect immediately. A device currently plugged into a port will be reassigned to the new profile without needing to unplug and replug.

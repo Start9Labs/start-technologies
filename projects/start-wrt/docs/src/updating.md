@@ -10,7 +10,7 @@ StartWRT never updates automatically — updating always requires explicit actio
 
 1. Click "Update now" and confirm.
 
-1. The download and apply progress is shown live. When it finishes, the router reboots and returns you to the app once it is back online.
+1. The download and apply progress is shown live. When it finishes, the router reboots. Once it is back online, you are taken to the login page with a confirmation of the new version — updating signs everyone out, so simply log back in with your admin password.
 
    > [!WARNING]
    > Do not unplug your router during the update or reboot. The update can take several minutes to apply. All network traffic — Wi-Fi, Ethernet, VPN connections, and port forwarding — will be interrupted until the router finishes restarting.

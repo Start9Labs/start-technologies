@@ -30,6 +30,10 @@ The Wi-Fi password printed on the sticker on the bottom of your router is the de
 
 Share this password with the people or devices that should receive that profile. They connect to the same network — the router handles the rest.
 
+## Editing a Wi-Fi Password
+
+Select "Edit" from a password's actions menu to change its label or move it to a different Security Profile. If moving the password to another profile would delete any [Published Ports](published-ports.md) rules (its devices move to a new subnet), a confirmation dialog lists them first.
+
 ## Removing a Wi-Fi Password
 
 1. Navigate to `Points of Entry > Wi-Fi > Passwords`.
@@ -53,7 +57,7 @@ Configure the Wi-Fi radio hardware under `Points of Entry > Wi-Fi > Settings`:
 
 - **Broadcast Separately** — Shown only when Band is "Both". When enabled, the 5 GHz band gets a separate SSID with a `-5G` suffix (e.g. `StartWRT` and `StartWRT-5G`). Useful if you want to control which band a device connects to.
 
-- **Channel** — Separate dropdowns for each band. **Auto** (recommended) lets the router select the least congested channel. You can also select a specific channel: 1–11 for 2.4 GHz, or 36–165 for 5 GHz.
+- **Channel** — Separate dropdowns for each band. **Auto** (recommended) lets the router select a channel automatically. You can also select a specific channel: 1–11 for 2.4 GHz, or 36–165 for 5 GHz.
 
 > [!WARNING]
 > Changing the SSID disconnects all Wi-Fi clients. You will be prompted to confirm before the change is applied.

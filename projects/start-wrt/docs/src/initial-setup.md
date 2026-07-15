@@ -14,9 +14,9 @@ After unboxing your Start9 router or completing a fresh install, follow these st
 
 1. Create an admin password (minimum 12 characters). This password protects the web interface and is separate from the Wi-Fi password.
 
-1. Confirm the password and click "Submit".
+1. Confirm the password and click "Set Password".
 
-1. Normal Internet access will resume and you will be logged in to the StartWRT web interface.
+1. The page will confirm "Setup complete. You can close this window." Normal Internet access will resume, and you can open the StartWRT web interface at `router.lan` — you are already logged in.
 
 > [!IMPORTANT]
 > All Internet access is blocked until you set an admin password. If you dismiss the captive portal popup, open any browser and navigate to `router.lan`.

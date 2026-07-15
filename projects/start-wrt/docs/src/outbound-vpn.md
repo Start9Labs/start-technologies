@@ -8,12 +8,10 @@ Route your network's Internet traffic through one or more WireGuard VPN provider
 
 1. Configure the VPN:
    - **Label** — A descriptive name (e.g. "Mullvad Sweden", "Proton US").
-   - **Config File** — Upload or paste a WireGuard `.conf` file from your VPN provider. Most providers (Mullvad, ProtonVPN, IVPN, etc.) offer WireGuard config file downloads from their account dashboard.
-   - **Target** — Where this VPN's traffic should be routed:
-     - **Internet** — Traffic exits directly to the Internet through this VPN.
-     - **Another VPN** — Chain through another VPN first for additional privacy. Select the target VPN from the dropdown. Only VPNs that would not create a circular chain are shown.
+   - **Config File** — Upload a WireGuard `.conf` file from your VPN provider — drop it into the dialog or click to browse. Most providers (Mullvad, ProtonVPN, IVPN, etc.) offer WireGuard config file downloads from their account dashboard.
+   - **Target** — Where this VPN's traffic should be routed. The dropdown lists **Internet** along with your existing VPNs. Select **Internet** to exit directly to the Internet through this VPN, or select another VPN to chain through it first for additional privacy.
 
-1. Click "Save".
+1. Click "Add VPN".
 
 > [!TIP]
 > Download a config file for a VPN server location near you for best performance.
@@ -52,12 +50,14 @@ A kill switch protects every VPN-routed profile: both IPv4 and IPv6 fail closed.
 
 Click a VPN label in the table to open its detail page, which shows:
 
+- **Status** — Whether the VPN is connected or disabled.
 - **Connection Path** — The full route traffic takes from this VPN to the Internet (e.g. "Mullvad → Proton → Internet").
 - **Used by** — Which [Security Profiles](security-profiles.md) currently route their traffic through this VPN. Check this before making changes to understand the impact.
 - **Label** — Edit the display name.
-- **Connects to** — Change the target (Internet or another VPN).
+- **Connects to** — Change the target (Internet or another VPN). Only targets that would not create a circular chain are offered.
+- **MTU** — The tunnel's packet size limit. Leave blank to use the default (~1420). Lower it — down to a minimum of 1280 — if the VPN connects but requests time out.
 
-To delete a VPN, click "Delete" on its detail page.
+To delete a VPN, click "Delete" on its detail page. If any Security Profiles route through the VPN, you will be asked to confirm — those profiles will switch to the regular WAN connection.
 
 > [!NOTE]
 > You cannot delete a VPN if other VPNs use it as a target. Change their target first.

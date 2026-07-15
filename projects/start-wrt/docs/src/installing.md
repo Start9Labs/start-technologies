@@ -55,7 +55,7 @@ StartWRT comes pre-installed on Start9 routers. If you need to reinstall or flas
 
 1. A captive portal will open automatically. If it does not, open a browser and navigate to `router.lan`.
 
-1. The setup wizard will guide you through the rest. If the router already has firmware installed, you can choose **Keep settings** or **Fresh Start** (full wipe). On a new device with no existing firmware, the wizard proceeds directly to Fresh Start setup. See [Factory Reset](factory-reset.md#reflash-microsd) for a full walkthrough of the reflash wizard.
+1. The setup wizard will guide you through the rest. If the router already has firmware installed, you can choose **Keep settings** or **Fresh Start** (full wipe). On a new device with no existing firmware, the welcome screen still appears, but **Fresh Start** is the only option offered. See [Factory Reset](factory-reset.md#reflash-microsd) for a full walkthrough of the reflash wizard.
 
 1. When the wizard completes, power off the router, remove the microSD card, and power it back on.
 

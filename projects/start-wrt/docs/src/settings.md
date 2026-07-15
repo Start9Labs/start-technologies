@@ -1,14 +1,16 @@
 # Settings
 
-The Settings page contains system preferences, account management, and advanced tools. Navigate to `System > Settings`. The page is organized into tabs: General, Password, SSH Keys, Backup, Logs, Activity, and Advanced. See also [SSH Access](ssh.md) and [Backups](backups.md) for dedicated documentation on those tabs.
+The Settings page contains system preferences, account management, and advanced tools. Navigate to `System > Settings`. The page is organized into tabs: General, Password, SSH Keys, Activity, Logs, Backup, and Advanced. See also [SSH Access](ssh.md) and [Backups](backups.md) for dedicated documentation on those tabs.
 
 ## General
 
 ### Preferences
 
 - **Theme** — System, Dark, or Light. System follows your browser or OS preference.
-- **Language** — A dropdown for the web interface language. Available languages are English, Spanish, German, French, and Polish (English is the fallback). The choice is saved per-router (server-side) and only takes effect when you click "Save" — there is no automatic browser-language detection.
+- **Language** — A dropdown for the web interface language. Available languages are English, Spanish, German, French, and Polish (English is the fallback). The choice is saved per-router (server-side) — there is no automatic browser-language detection.
 - **Timezone** — A searchable combo box populated from the device, listing hundreds of IANA time zones (e.g. labelled like "(GMT-6) America/Denver"). It's auto-detected from your browser during [initial setup](initial-setup.md) (falling back to UTC if detection fails). Changing the timezone restarts the schedule engine so that [WAN Blackout](security-profiles.md#wan-blackout) and [Wi-Fi Blackout](wifi-schedules.md) windows fire at the correct local time. It also affects activity timestamps and log timestamps.
+
+Theme and Language changes are previewed immediately when you select them, and saved when you click "Save". If you leave the page without saving, the preview reverts to your saved settings.
 
 ### About
 

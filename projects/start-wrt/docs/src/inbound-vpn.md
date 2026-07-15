@@ -19,7 +19,19 @@ An inbound VPN server listens for WireGuard connections from the Internet. When 
    - **Security Profile** — The [Security Profile](security-profiles.md) to assign to connecting clients.
    - **Port** — The WireGuard listen port (default: `51820`). Must be unique across all VPN servers. If the default is already in use, the next available port is suggested.
 
-1. Click "Save".
+1. Click "Add VPN". An "Add client device" dialog opens automatically so you can add your first client (see [Adding a Client](#adding-a-client)).
+
+> [!NOTE]
+> Each Security Profile can have at most one inbound VPN. Once every profile has one, the "Add" button is disabled.
+
+## Managing a VPN Server
+
+Each VPN server row has an actions menu:
+
+- **Enable** / **Disable** — Toggle the server without deleting it. While disabled, clients cannot connect.
+- **Manage clients** — Open the client management page (see below).
+- **Edit** — Change the label, endpoint, Security Profile, or port, then click "Save VPN".
+- **Delete** — Remove the server (see [Removing a VPN Server](#removing-a-vpn-server)).
 
 ## Managing Clients
 
@@ -31,27 +43,30 @@ Each VPN server has a client management page listing all peers. Navigate to a VP
 
 1. Configure the client:
    - **Label** — A name for the client (e.g. "My iPhone", "Work Laptop").
-   - **LAN IP Address** — The IP address assigned to this client on the VPN subnet.
+   - **LAN IP Address** — The IP address assigned to this client on the VPN subnet. The next available address is suggested; it must fall within the `.200`–`.253` host range of the subnet.
    - **Public Key** — (Optional) Enter an existing WireGuard public key if the device already has a keypair configured. Leave empty to auto-generate a keypair.
    - **Route all traffic through tunnel** — When enabled, all of the client's Internet traffic routes through the VPN (full tunnel). When disabled (the default), only LAN traffic uses the tunnel and the client uses its own Internet connection for everything else (split tunnel).
 
    > [!TIP]
    > "Route all traffic through tunnel" is especially useful when the VPN server's Security Profile uses an [Outbound VPN](outbound-vpn.md). Most devices only support one active VPN at a time, so a phone, for example, could either use WireGuard to access your LAN or use Mullvad/Proton directly — but not both. With full tunnel routing, the device connects to your router via WireGuard and its Internet traffic is then routed through the Outbound VPN automatically, giving you both LAN access and VPN protection in a single connection. If that Outbound VPN is IPv6-capable, the client's IPv6 traffic is tunneled through it as well; with an IPv4-only Outbound VPN, only IPv4 is tunneled and IPv6 is blocked so it cannot leak. This adds some latency since traffic passes through two tunnels.
 
-1. A WireGuard configuration is generated.
+1. Click "Save". The client's WireGuard configuration is generated and displayed.
 
 ### Viewing Client Configuration
 
-After creating a client, the configuration can be viewed in two formats:
+Right after a client is created, its full configuration is displayed in two formats:
 
 - **File** — Displays the configuration as text. Use the copy button to copy to clipboard, or the download button to save as a `.conf` file that WireGuard apps can import.
 - **QR** — Displays the configuration as a QR code. Scan with the WireGuard mobile app to configure the client without manual entry.
+
+> [!IMPORTANT]
+> This is the only time the full configuration is available. The auto-generated private key is never stored on the router, so download or copy the configuration (or scan the QR code) before closing the dialog. The "View Config" action on the client list later shows the configuration with a placeholder where the private key belongs. If you lose the configuration, delete the client and create a new one.
 
 ### Changing Client Routing
 
 You can switch between routing modes from the actions menu on the client list:
 
-- **Switch to All traffic** — Full tunnel. All Internet traffic routes through the VPN.
+- **Switch to all traffic** — Full tunnel. All Internet traffic routes through the VPN.
 - **Switch to LAN only** — Split tunnel. Only local network traffic uses the tunnel.
 
 > [!WARNING]

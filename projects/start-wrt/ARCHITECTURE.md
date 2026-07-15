@@ -5,7 +5,7 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 ## Tech Stack
 
 - **Backend:** Rust (async/Tokio, Axum web framework)
-- **Frontend:** Angular 22 + TypeScript 5.9 + Taiga UI v5
+- **Frontend:** Angular 22 + TypeScript 6 + Taiga UI v5
 - **Router OS:** OpenWrt (SpacemiT K1 / BananaPi F3 target)
 - **Config storage:** UCI files (`/etc/config/`) — no separate database
 - **API:** JSON-RPC 2.0 over HTTP POST at `/rpc/v1`
@@ -15,18 +15,23 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 
 ```
 /
-├── backend/             # Rust workspace (3 crates)
+├── backend/             # Rust crates (members of the root Cargo workspace)
 │   ├── ctrl/            # RPC server + CLI binary ("startwrt")
 │   ├── uciedit/         # UCI config parser/writer library
 │   ├── uciedit_macros/  # #[derive(TypedSection)] proc macro
-│   ├── firstboot_config/# Factory-default UCI configs (embedded in binary)
-│   └── config_experiments/ # Reference UCI configs for testing
+│   ├── firstboot_config/# Factory-default UCI configs (staged into the image)
+│   ├── hotplug/         # Interface hotplug scripts (shipped into the image)
+│   ├── nftables/        # fw4 include files (shipped into the image)
+│   ├── config_experiments/ # Reference UCI configs for testing
+│   └── notes/           # Research notes
 │
 ├── web/                 # Angular 22 SPA
 │   └── src/app/
-│       ├── services/    # API, auth, form, RPC, system
-│       ├── components/  # Shared UI (footer, masked, copy, etc.)
+│       ├── services/    # API, auth, form, RPC, connection, system
+│       ├── components/  # Shared UI (footer, masked, copy, schedule, etc.)
 │       ├── routes/      # Feature pages (wan, wifi, profiles, etc.)
+│       ├── help/        # Route-keyed contextual help (5 locales)
+│       ├── i18n/        # Translation pipe + locale dictionaries
 │       └── utils/       # Validators, masks, schedules
 │
 ├── openwrt/             # OpenWrt build workspace (gitignored, no git repo; rebuilt by build/openwrt-setup.sh)
@@ -84,7 +89,7 @@ Devices receive a profile based on how they join the network:
 | **Ethernet**    | Bridge VLAN port assignments — each physical port tagged to a profile's VLAN. OpenWrt maps UCI `bridge-vlan` config to DSA hardware tables or software bridge filtering depending on the board. |
 | **Inbound VPN** | Each WireGuard server interface bound to a profile.                                                                                                                                             |
 
-Profile orchestration spans four UCI configs: `startwrt`, `network`, `firewall`, `dhcp`.
+Profile orchestration spans five UCI configs: `startwrt`, `network`, `firewall`, `dhcp`, `wireless`.
 
 ## Build Pipeline
 
@@ -99,8 +104,8 @@ toolchain pinned to the SpaceMiT K1 ISA (`build/build-rust.sh` + `build/zigcc-k1
 1. npm run build:wrt               →  web/dist/startwrt/browser/ (Angular production build, embedded next)
 2. build/build-rust.sh             →  target/riscv64gc-unknown-linux-musl/release/startwrt
 3. build/stage-files.sh            →  openwrt/files/ (binary + configs + init scripts)
-4. make -C openwrt                 →  openwrt/bin/targets/spacemit/*.img
-5. cp to results/                  →  Final flashable image
+4. make -C openwrt                 →  openwrt/bin/targets/spacemit/ (sdcard .img + sysupgrade .img.gz)
+5. gzip/cp to results/             →  release-named startwrt-<ver>-<hash>_spacemit-k1-{sdcard,sysupgrade}.img.gz
 ```
 
 ### Key Make Targets

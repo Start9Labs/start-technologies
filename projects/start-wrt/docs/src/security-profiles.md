@@ -34,23 +34,23 @@ One SSID, multiple passwords. One router, multiple isolated networks. The profil
 1. On the **LAN** tab, configure local-network settings:
    - **Subnet** — Set the third octet of the profile's `/24` subnet. The first two octets are shown but locked; for example, a value of `2` creates the subnet `192.168.2.0/24`. They are locked because every profile must stay within the primary [LAN network block](lan.md)'s `/16` for cross-subnet routing to work — changing the LAN network block moves all profiles with it. Each profile must have a unique subnet. The gateway address is always `.1` within the subnet (e.g. `192.168.2.1`).
 
-   - **Access control** — Controls which other profiles this profile can communicate with on the local network:
+   - **Access** — Controls which other profiles this profile can communicate with on the local network:
      - **All** — Full access to devices on all profiles.
      - **Same profile** — Only communicate with devices on this same profile.
      - **Whitelist** — Select specific profiles from a list.
 
-   - **Auto whitelist new profiles** — A toggle shown in Whitelist mode. When enabled, newly created profiles are automatically added to this profile's whitelist. Useful for admin profiles that should maintain access to all network segments.
-
-   - **Outbound Routing** — Choose how traffic from this profile reaches the Internet. Select **Direct** for direct Internet access, or **VPN** to route all traffic through an outbound VPN. Choosing VPN reveals an [Outbound VPN](outbound-vpn.md) client picker (disabled if you have no outbound VPN clients).
+   - **Auto whitelist new profiles** — A checkbox shown in Whitelist mode. When checked, newly created profiles are automatically added to this profile's whitelist. Useful for admin profiles that should maintain access to all network segments.
 
 1. On the **WAN / Internet** tab, configure Internet access:
+   - **Outbound Routing** — Choose how traffic from this profile reaches the Internet. Select **Direct** for direct Internet access, or **VPN** to route all traffic through an outbound VPN. The VPN option cannot be selected if you have no [Outbound VPN](outbound-vpn.md) clients; choosing VPN reveals a VPN client picker.
+
    - **WAN Access** — Controls Internet access for devices on this profile:
      - **All** — Unrestricted Internet access.
      - **None** — No Internet access. Devices can only reach LAN resources permitted by the LAN access setting.
      - **Whitelist** — Allow connections only to specific destination IPs or CIDR ranges (e.g. `1.1.1.1, 8.8.8.0/24`).
      - **Blacklist** — Block connections to specific destination IPs or CIDR ranges, allow everything else.
 
-   - **WAN Blackout** — An inlined schedule editor for time-of-day Internet restrictions (see [WAN Blackout](#wan-blackout) below). It is disabled when WAN Access is None; any existing windows are retained.
+   - **Blackout Schedule** — A button that opens a schedule dialog for time-of-day Internet restrictions (see [WAN Blackout](#wan-blackout) below). It is disabled when WAN Access is None; any existing windows are retained.
 
 1. On the **DNS** tab, choose **Inherit from system** or **Custom**. Custom lets you specify up to three DNS servers, each with an optional **DoH** (DNS-over-HTTPS) toggle. When inheriting, the profile uses the outbound VPN's DNS (if routing through a VPN) or the system DNS from [WAN Settings](wan.md).
 
@@ -81,9 +81,9 @@ One SSID, multiple passwords. One router, multiple isolated networks. The profil
 
 Each profile can optionally restrict Internet access during specific time periods. WAN Blackout defines **block windows** — periods when WAN access is removed for devices on the profile. Wi-Fi connectivity and LAN access are unaffected. Outside of these windows, the profile's normal WAN access rules apply.
 
-WAN Blackout is edited inline on the **WAN / Internet** tab of the profile create/edit dialog (see [Creating a Profile](#creating-a-profile)).
+WAN Blackout is edited in its own dialog, opened with the **Blackout Schedule** button on the **WAN / Internet** tab of the profile create/edit dialog (see [Creating a Profile](#creating-a-profile)). The dialog has its own Cancel and Save buttons — save it to keep your windows, then save the profile to apply them.
 
-1. The schedule is displayed as a 7-day visual timeline grid, with one row per day of the week.
+1. The schedule is displayed as a 7-day visual timeline grid, with one column per day of the week (Monday through Sunday).
 
 1. Click "Add" to create a block window:
    - Set the **start** and **end** times. Times use a 12-hour `HH:MM AM/PM` format, with a 15-minute quick-pick dropdown. A window may cross midnight (e.g. 10:00 PM to 6:00 AM). Setting the start time equal to the end time creates a full 24-hour window.

@@ -54,7 +54,7 @@ StartWRT's multi-password Wi-Fi uses WPA2's identity PSK feature with dynamic VL
 
 ## TLS and Certificates
 
-Certificate generation is delegated to the StartOS SSL primitives. The trust chain uses a root CA with CN "StartWRT Local Root CA" and an intermediate CA with CN "StartWRT Local Intermediate CA" (both with Org/OU "StartWRT"), and the issued server certificate carries a default SAN of `router.lan`. The web server hot-reloads its TLS certificate when the LAN IP changes, so no restart is required. See [Trusting Your Root CA](trust-ca.md) for installation steps.
+Certificate generation is delegated to the StartOS SSL primitives. The trust chain uses a root CA whose CN is "StartWRT Local Root CA" followed by a short random hex token — unique to each freshly-minted CA, so a reflashed router gets a distinct trust anchor rather than colliding with a previously trusted one — and an intermediate CA with CN "StartWRT Local Intermediate CA" (both with Organization "Start9" and Organizational Unit "StartWRT"). The issued server certificate carries a default SAN of `router.lan`. The web server hot-reloads its TLS certificate when the LAN IP changes, so no restart is required. See [Trusting Your Root CA](trust-ca.md) for installation steps.
 
 ## IPv6
 

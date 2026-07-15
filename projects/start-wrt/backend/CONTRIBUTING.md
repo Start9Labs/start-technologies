@@ -1,23 +1,24 @@
 # Contributing to Backend
 
-For general setup and build system, see the root [CONTRIBUTING.md](../CONTRIBUTING.md). For architecture details, see [ARCHITECTURE.md](ARCHITECTURE.md).
+For general setup and build system, see the product-level [CONTRIBUTING.md](../CONTRIBUTING.md). For architecture details, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Documentation
 
-This sub-tree's docs split across four files:
+This sub-tree's docs split across five files:
 
 - `README.md` — what this is
 - `ARCHITECTURE.md` — how it's built
 - `CONTRIBUTING.md` — this file; how to contribute
-- `CLAUDE.md` — AI-developer operating rules (handler registration, effectful flag, retry, vestigial endpoints)
+- `AGENTS.md` — AI-developer operating rules (handler registration, effectful flag, retry, vestigial endpoints)
+- `CLAUDE.md` — a one-line `@AGENTS.md` import
 
 **These docs must be kept up to date.** When you change the backend's crate layout, handler conventions, UCI library API, or test surface, update the relevant file(s) in the same change — do not defer.
 
 ## Tech Stack
 
-- **Rust** (2021 edition) with a 3-crate workspace
-- **axum** + **axum-server** + **tokio** for the HTTP/HTTPS server
-- **[rpc-toolkit](https://github.com/Start9Labs/rpc-toolkit)** for JSON-RPC 2.0 (Start9Labs library)
+- **Rust** (2021 edition) — 3 crates, members of the root monorepo workspace
+- **axum** + **tokio**, served through start-core's `WebServer` (`startos::net::web_server`) for HTTP/HTTPS
+- **rpc-toolkit** for JSON-RPC 2.0 (vendored at `shared-libs/crates/rpc-toolkit`)
 - **uciedit** for parsing/writing OpenWrt UCI config files (workspace crate)
 - **clap** for CLI argument parsing
 - **serde** for serialization
@@ -35,7 +36,7 @@ cargo test  -p startwrt-core -p uciedit -p uciedit_macros  # Run all start-wrt u
 make start-wrt-test                                         # same tests, containerized (mirrors start-core-test)
 ```
 
-Cross-compilation for the router target (riscv64gc-unknown-linux-musl) is handled by `build/build-rust.sh`.
+Cross-compilation for the router target (riscv64gc-unknown-linux-musl) is handled by `../build/build-rust.sh` (`projects/start-wrt/build/build-rust.sh`).
 
 For dev authentication, set `STARTWRT_DEV_PASSWORD` to bypass `/etc/shadow` validation.
 
@@ -49,7 +50,7 @@ For dev authentication, set `STARTWRT_DEV_PASSWORD` to bypass `/etc/shadow` vali
 
 ### Other Directories
 
-- `firstboot_config/` — Factory-default UCI configs embedded in the binary via `include_dir`
+- `firstboot_config/` — Factory-default UCI configs, copied into the OpenWrt image's `/etc/config/` at image staging time (`../build/stage-files.sh`)
 - `config_experiments/` — Reference UCI configs for manual testing
 
 ## Adding a New RPC Endpoint
@@ -75,11 +76,11 @@ struct MyResponse {
 ```rust
 pub async fn my_handler<C: CtrlContext>(ctx: C, args: MyParams) -> Result<MyResponse, Error> {
     let arena = Arena::new();
-    let cfgs = parse_all(ctx.uci_root(), &arena, &["network"])?;
+    let mut cfgs = parse_all(ctx.uci_root(), &arena, &["network"]).await?;
     // ... read/modify UCI configs ...
-    dump_all(&mut cfgs)?;
+    dump_all(ctx.uci_root(), cfgs).await?;
     if ctx.effectful() {
-        run_quiet(Command::new("/etc/init.d/network").arg("reload"))?;
+        run_quiet_async(Command::new("/etc/init.d/network").arg("reload")).await?;
     }
     Ok(MyResponse { success: true })
 }
@@ -132,7 +133,7 @@ Macro attributes:
 
 ```rust
 let arena = Arena::new();
-let cfg = Config::parse("myconfig", ctx.uci_root(), &arena)?;
+let cfg = Config::parse(&arena, ctx.uci_root().join("myconfig")).await?;
 cfg.try_each(|section_name, section: MySection| {
     // process each section of this type
     Ok(())

@@ -58,7 +58,7 @@ use tokio::runtime::Runtime;
 
 /// Non-ambiguous character set for generated passwords.
 ///
-/// 67 chars: A-Z minus I,O (24) + a-z minus l (25) + 2-9 (8) + !@#$%^&*=+? (10)
+/// 68 chars: A-Z minus I,O (24) + a-z minus l (25) + 2-9 (8) + !@#$%^&*=+? (11)
 pub const PASSWORD_CHARS: &str =
     "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*=+?";
 

@@ -1,5 +1,7 @@
 # Dynamic VLAN Tagging for WiFi Access Points
 
+> **Caveat (2026-07):** This note predates the current pinned upstream OpenWrt tree — the `906-ath11k-add-support-for-dynamic-vlan.patch` referenced below no longer exists in it.
+
 ## 1. Introduction
 
 Dynamic VLAN tagging for WiFi Access Points (APs) allows for assigning different clients connecting to the same AP (often with the same SSID) to different VLANs. This is commonly done based on authentication attributes such as RADIUS server responses, MAC address mappings, or user certificate properties, rather than different passwords per VLAN.

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Documentation corrected against the code in a full docs-vs-code audit.** The
+  user guide no longer misstates product behavior: backups _do_ preserve assigned
+  device names and data-usage history; a Fresh Start reflash sets a new admin
+  password rather than clearing it; published-port statuses do not detect CGNAT;
+  Ethernet profile changes apply immediately (there is no Save button); inbound
+  VPN client configs must be captured when the client is created (the private
+  key is never stored). Also refreshed drifted UI labels throughout the guide,
+  corrected `API_CONTRACT.md` wire types and documented the previously missing
+  endpoints, and fixed stale paths, commands, and structure descriptions across
+  the developer docs.
+
 ## [1.0.1]
 
 ### Added
@@ -20,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **The inbound-rule dialog no longer steals focus when it opens**, which on
+- **The Inbound VPN dialog no longer steals focus when it opens**, which on
   mobile raised the keyboard the instant the dialog appeared.
 
 ## [1.0.0]
@@ -53,6 +66,52 @@ delivered through the Start9 registry.
   cloning no longer needs `--recursive`, and the `openwrt/` build workspace
   contains no git repo at all. The prepared tree is byte-identical to the
   former fork (verified by git tree hash), so image contents are unchanged.
+
+- Relocated into the `start-technologies` monorepo as the `start-wrt` product. The
+  three backend crates (`startwrt-core`/`ctrl`, `uciedit`, `uciedit_macros`) are now
+  members of the root Cargo workspace and build against the **shared** `start-core`
+  crate (`shared-libs/crates/start-core`, pulled in aliased as `startos`), the
+  vendored `rpc-toolkit`, and the vendored `imbl-value` — replacing the previously
+  embedded `start-os` submodule and the git/crates.io copies of those deps.
+- Build orchestration moved from the standalone product `Makefile` to
+  `projects/start-wrt/build.mk` (included by the root `Makefile`): `make start-wrt`,
+  `make start-wrt-image`, `make start-wrt-update`.
+- The Angular web UI is now a project (`start-wrt`) in the **root Angular workspace**
+  instead of a standalone app. It shares the root `package.json`/`node_modules`/
+  `tsconfig.json` and builds via `npm run build:wrt` (serve `npm run start:wrt`,
+  type-check `npm run check:wrt`) — and so upgrades in lockstep with the other Start9
+  Angular apps. `RELATIVE_URL`, `pauseFor`, and the markdown pipe now come from
+  `@start9labs/shared`. The HTTP/RPC/connection stack (its aborting-timeout, code-0
+  reconnect flow is deliberately different from shared's), the bespoke error surfacing,
+  `WorkspaceConfig`, the WebSocket progress types, and the i18n-routed `validation-errors`
+  provider stay local where the shared code would regress behavior or the shapes don't fit.
+- `@start9labs/shared` is now marked `sideEffects: false` so importing a few symbols from
+  its barrel tree-shakes cleanly (start-wrt's embedded UI bundle would otherwise pull in
+  ~875 kB of unused shared code). This also shrinks the other apps' bundles.
+- Restored the release CI that the monorepo migration had dropped, then folded StartWRT
+  into the monorepo-wide release tool: `start-wrt.yaml` again has a `deploy` job, but it
+  now _only_ uploads the built images to S3 (`s3://startwrt-images`) — the CDN the registry
+  serves from. To match `startos-iso.yaml`, it is `workflow_dispatch`-gated on a `deploy:
+release` input (rather than the old standalone workflow's `v*`-tag push) and reads the
+  version from `backend/ctrl/Cargo.toml` (the standalone workflow read the now-removed
+  `web/package.json`). Tagging, cutting the GitHub release, and the registry publishing are
+  now driven by the top-level `scripts/manage-release.sh` (a new `wrt` project kind alongside
+  os/cli/deb/npm), which replaces the standalone
+  `projects/start-wrt/scripts/manage-release.sh`. Registry publishing mirrors the OS's staged
+  flow: `register start-wrt` indexes a CI build into a beta registry, where beta routers
+  (UCI `startwrt.system.registry` pointed at it) soak the version as a normal OTA update, and
+  `release start-wrt` then promotes it into the production registry — both deliberate local,
+  developer-key-gated steps. Releases are cut on `Start9Labs/start-technologies` with the
+  monorepo's `<project>/v<version>` tag convention (`start-wrt/v<version>`), since the
+  monorepo hosts every product's releases on independent cadences. Release assets follow the
+  startos naming convention —
+  `startwrt-<version>-<git hash>_spacemit-k1-{sdcard.img.gz,sysupgrade.img.gz}` — instead
+  of the raw OpenWrt output names, which carried no product, version, or hash; the sdcard
+  image is now gzipped (it was previously published raw), and balenaEtcher flashes the
+  `.img.gz` directly.
+- Restored the OpenWrt download-cache keying the migration had narrowed: the `image` job's
+  cache key again includes `build/feeds.conf` (so changing the feed set busts the cache) and
+  carries a `restore-keys` fallback (so a partial older cache can seed a fresh run).
 
 ### Fixed
 
@@ -98,56 +157,6 @@ delivered through the Start9 registry.
   `cargo:rerun-if-changed` for the web `dist` directory. Previously a changed web
   bundle was silently ignored unless a `.rs` file also changed, shipping a stale
   UI.
-
-### Changed
-
-- Relocated into the `start-technologies` monorepo as the `start-wrt` product. The
-  three backend crates (`startwrt-core`/`ctrl`, `uciedit`, `uciedit_macros`) are now
-  members of the root Cargo workspace and build against the **shared** `start-core`
-  crate (`shared-libs/crates/start-core`, pulled in aliased as `startos`), the
-  vendored `rpc-toolkit`, and the vendored `imbl-value` — replacing the previously
-  embedded `start-os` submodule and the git/crates.io copies of those deps.
-- `openwrt` is now the monorepo's only git submodule; the embedded `start-os`
-  submodule was removed.
-- Build orchestration moved from the standalone product `Makefile` to
-  `projects/start-wrt/build.mk` (included by the root `Makefile`): `make start-wrt`,
-  `make start-wrt-image`, `make start-wrt-update`.
-- The Angular web UI is now a project (`start-wrt`) in the **root Angular workspace**
-  instead of a standalone app. It shares the root `package.json`/`node_modules`/
-  `tsconfig.json` and builds via `npm run build:wrt` (serve `npm run start:wrt`,
-  type-check `npm run check:wrt`) — and so upgrades in lockstep with the other Start9
-  Angular apps. `RELATIVE_URL`, `pauseFor`, and the markdown pipe now come from
-  `@start9labs/shared`. The HTTP/RPC/connection stack (its aborting-timeout, code-0
-  reconnect flow is deliberately different from shared's), the bespoke error surfacing,
-  `WorkspaceConfig`, the WebSocket progress types, and the i18n-routed `validation-errors`
-  provider stay local where the shared code would regress behavior or the shapes don't fit.
-- `@start9labs/shared` is now marked `sideEffects: false` so importing a few symbols from
-  its barrel tree-shakes cleanly (start-wrt's embedded UI bundle would otherwise pull in
-  ~875 kB of unused shared code). This also shrinks the other apps' bundles.
-- Restored the release CI that the monorepo migration had dropped, then folded StartWRT
-  into the monorepo-wide release tool: `start-wrt.yaml` again has a `deploy` job, but it
-  now _only_ uploads the built images to S3 (`s3://startwrt-images`) — the CDN the registry
-  serves from. To match `startos-iso.yaml`, it is `workflow_dispatch`-gated on a `deploy:
-release` input (rather than the old standalone workflow's `v*`-tag push) and reads the
-  version from `backend/ctrl/Cargo.toml` (the standalone workflow read the now-removed
-  `web/package.json`). Tagging, cutting the GitHub release, and the registry publishing are
-  now driven by the top-level `scripts/manage-release.sh` (a new `wrt` project kind alongside
-  os/cli/deb/npm), which replaces the standalone
-  `projects/start-wrt/scripts/manage-release.sh`. Registry publishing mirrors the OS's staged
-  flow: `register start-wrt` indexes a CI build into a beta registry, where beta routers
-  (UCI `startwrt.system.registry` pointed at it) soak the version as a normal OTA update, and
-  `release start-wrt` then promotes it into the production registry — both deliberate local,
-  developer-key-gated steps. Releases are cut on `Start9Labs/start-technologies` with the
-  monorepo's `<project>/v<version>` tag convention (`start-wrt/v<version>`), since the
-  monorepo hosts every product's releases on independent cadences. Release assets follow the
-  startos naming convention —
-  `startwrt-<version>-<git hash>_spacemit-k1-{sdcard.img.gz,sysupgrade.img.gz}` — instead
-  of the raw OpenWrt output names, which carried no product, version, or hash; the sdcard
-  image is now gzipped (it was previously published raw), and balenaEtcher flashes the
-  `.img.gz` directly.
-- Restored the OpenWrt download-cache keying the migration had narrowed: the `image` job's
-  cache key again includes `build/feeds.conf` (so changing the feed set busts the cache) and
-  carries a `restore-keys` fallback (so a partial older cache can seed a fresh run).
 
 ## [0.1.0-beta.3]
 

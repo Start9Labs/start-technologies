@@ -1,46 +1,56 @@
 # Frontend Architecture
 
-Angular 22 single-page application for the StartWRT admin UI. TypeScript 5.9, Taiga UI v5, zoneless change detection, signal-based state, standalone components. No NgModules.
+Angular 22 single-page application for the StartWRT admin UI. TypeScript 6, Taiga UI v5, zoneless change detection, signal-based state, standalone components. No NgModules.
 
 ## Project Structure
 
 ```
 src/app/
-├── app.ts                    # Root component (CSS Grid layout, TuiRoot host)
-├── app.config.ts             # Providers: Taiga, routing, API, HTTP
+├── app.ts                    # Authenticated shell (CSS Grid: header/nav/main/aside), mounted inside the router — TuiRoot is hosted by the bootstrap component in src/main.ts
+├── app.config.ts             # Providers: Taiga, routing, API, HTTP, i18n
+├── app.icons.ts              # Bundled Taiga icon set (tuiIconsProvider)
 ├── app.routes.ts             # Top-level routes (auth guard splits login/setup/home)
 │
 ├── components/               # Shared UI components
-│   ├── aside.ts              # Right help panel (route-driven content)
+│   ├── aside.ts              # Right help panel — renders HelpService content via `| markdown | dompurify`
 │   ├── ca-wizard.ts          # CA certificate install wizard
 │   ├── copy.ts               # Copy-to-clipboard directive
 │   ├── footer.ts             # Form footer (Cancel / Save buttons)
 │   ├── form.ts               # [formLoading] directive — TuiForm + TuiCardLarge + TuiSkeleton
-│   ├── header.ts             # Top bar: search, help toggle, system info
+│   ├── header.ts             # Top bar: search, help toggle (HELP_OPEN), system info
 │   ├── masked.ts             # Mask sensitive text with toggle + copy
 │   ├── nav.ts                # Left sidebar navigation
 │   ├── placeholder.ts        # Empty-state placeholder with icon
-│   ├── reconnecting-dialog.ts# Reconnecting overlay during network restarts
+│   ├── schedule.ts           # app-schedule — 7-day schedule-window grid
 │   ├── summary.ts            # Read-only display with copy button
-│   └── timeline.ts           # Timeline/activity display
+│   └── window.ts             # AddWindow dialog — schedule-window form
 │
-├── help/                     # Help panel directives
-│   ├── help.ts               # *help — projects content into the aside panel
-│   └── modal-help.ts         # *modalHelp — same but for dialogs
+├── help/                     # Contextual help (route-keyed markdown)
+│   ├── help.ts               # HelpService (content resolved to active language) + HELP_OPEN signal token
+│   ├── modal-help.ts         # ng-template[modalHelp] — help content for dialogs
+│   └── content/              # en/es/de/fr/pl — English eager, other locales lazy-loaded
+│
+├── i18n/                     # UI translation layer
+│   ├── i18n.pipe.ts          # {{ 'Key' | i18n }}
+│   ├── i18n.providers.ts     # I18N token + lazy dictionary loaders
+│   ├── i18n.service.ts       # Active language state
+│   ├── validation-errors.ts  # Translated form validation messages
+│   └── dictionaries/         # en/es/de/fr/pl — checked by `npm run check:i18n:wrt` (web/scripts/check-i18n.mjs)
 │
 ├── pipes/
-│   ├── markdown.pipe.ts      # {{ value | markdown }} via `marked`
 │   └── to-camel.pipe.ts      # {{ value | toCamel }}
 │
 ├── services/
 │   ├── action.service.ts     # Wraps async ops with loading/success/error toasts
 │   ├── auth.service.ts       # Signal-based auth state + localStorage
+│   ├── connection.service.ts # Reconnect indicator + probing (expectDisruption / reportUnreachable)
 │   ├── form.service.ts       # Abstract FormService<T> — load/save/refresh cycle
 │   ├── http.service.ts       # Low-level HttpClient.post wrapper
-│   ├── network-restart.service.ts # Network error suppression during restarts
+│   ├── network.service.ts    # Browser online/offline as an observable
+│   ├── published-port-deletion.ts # Confirm dialog: change would delete published ports
 │   ├── rpc.service.ts        # JSON-RPC 2.0 over HTTP (auto-logout on code 34)
-│   ├── sidebar.service.ts    # Sidebar visibility signals
 │   ├── system.service.ts     # System info, version, update check
+│   ├── vpn-exposed-port.ts   # Confirm dialog: published port bypasses VPN routing
 │   └── api/
 │       ├── api.service.ts    # Abstract API contract (all RPC methods)
 │       ├── live-api.service.ts
@@ -49,7 +59,6 @@ src/app/
 │
 ├── utils/
 │   ├── validators.ts         # Custom validators: ipv4, ipv6, prefix, mac, hostname, etc.
-│   ├── pauseFor.ts           # Promise-based delay
 │   ├── languages.ts          # Supported locales
 │   ├── timezones.ts          # Timezone list
 │   ├── schedule.ts           # Schedule window utilities
@@ -59,7 +68,7 @@ src/app/
 ├── login.ts                  # Login page
 │
 └── routes/
-    ├── setup.ts              # Initial password setup
+    ├── setup/                # Initial password setup
     ├── setup-wizard/         # First-time device setup (flash from microSD)
     ├── wan/                  # WAN config (ipv4, ipv6, mac, dns, ddns)
     ├── published-ports/      # Port forwarding — BEST example of table + dialog pattern
@@ -73,6 +82,8 @@ src/app/
     └── settings/             # General, advanced, password, SSH keys, logs, activity, backup
 ```
 
+The `markdown` pipe and `pauseFor` come from `@start9labs/shared` — they are not local files.
+
 ## Routing
 
 Four auth-based guards determine which view loads:
@@ -82,7 +93,7 @@ Four auth-based guards determine which view loads:
 3. **Authenticated** — `AuthService.authenticated()` is true → full app with nav/aside
 4. **Login** — fallback when not authenticated
 
-Authenticated routes are children of the root `App` component (CSS Grid with header, nav, main, aside). All routes are lazy-loaded via `loadComponent` / `loadChildren`.
+Authenticated routes are children of the `App` shell component (CSS Grid with header, nav, main, aside), itself mounted inside the router. All routes are lazy-loaded via `loadComponent` / `loadChildren`.
 
 ## Route Anatomy
 
@@ -96,7 +107,7 @@ Each route folder typically contains:
 | `dialog.ts`  | Dialog component for add/edit flows          |
 | `types.ts`   | Local types and interfaces                   |
 
-Multi-level routes (wan, wifi, settings, profiles) use tab layouts with child routes:
+Multi-level routes (wan, wifi, outbound, inbound, lan, devices, profiles, settings) use `loadChildren` with child-route folders:
 
 ```typescript
 export default [
@@ -273,6 +284,10 @@ For network-affecting actions (changing LAN IP, restarting services), `restart: 
 - **Auth:** RPC error code 34 triggers auto-logout. Session cookie with `withCredentials: true`.
 - **Mocks:** Toggle via `config.json` → `useMocks`. Dev server runs without a real router.
 
+## i18n
+
+User-facing strings go through the `i18n` pipe (`{{ 'Save' | i18n }}`), backed by five locale dictionaries (en/es/de/fr/pl) in `src/app/i18n/dictionaries/` — English eager, the rest lazy-loaded. `npm run check:i18n:wrt` (from the repo root) verifies the dictionaries stay in sync. Route-keyed help content in `help/content/` follows the same five-locale pattern.
+
 ## Styling Conventions
 
 **No Tailwind.** Uses Taiga CSS variables and global utility classes from `styles.scss`:
@@ -288,7 +303,7 @@ For network-affecting actions (changing LAN IP, restarting services), `restart: 
 | `g-accordion`                                                          | Accordion/details styling                          |
 | `g-primary` / `g-secondary` / `g-action` / `g-negative` / `g-positive` | Text color utilities                               |
 
-**Theming:** Dark/light via `tuiTheme` attribute. Custom `'start-9'` appearance for dropdowns and dialogs. All colors use `--tui-*` CSS variables.
+**Theming:** Dark/light via `tuiTheme` attribute. All colors use `--tui-*` CSS variables.
 
 **Component styles** are inline in `@Component`. Use SCSS. Keep them minimal — lean on Taiga's built-in styling.
 
@@ -297,8 +312,7 @@ For network-affecting actions (changing LAN IP, restarting services), `restart: 
 `app.config.ts` provides:
 
 - `provideZonelessChangeDetection()` — no zone.js
-- `provideRouter(routes, { onSameUrlNavigation: 'reload' })`
-- Taiga component size overrides: buttons `m`, textfields `m`, forms `m`, badges `m`, cards `compact`, radios `s`, checkboxes `s`
-- Custom appearances: `'start-9'` for dropdowns/dialogs, `'neutral'` default
+- `provideRouter(routes, withPreloading(PreloadAllModules), withRouterConfig({ onSameUrlNavigation: 'reload' }))` — `PreloadAllModules` is deliberate: every lazy chunk is preloaded while the connection is healthy, so an on-demand `import()` never fails against a dead connection during a network restart (which would cache an errored module and leave the route un-loadable until a hard refresh)
+- Taiga component option overrides: buttons `m`, badges `m`, tabs `m`, textfields `m`, forms `m`, radios `s`, checkboxes `s`; cards `compact` spacing with the `'floating'` appearance; dialogs size `'s'`
 - API service toggle: `MockApiService` or `LiveApiService` based on `config.json`
 - HTTP URL: `RELATIVE_URL` token → `/rpc/v1`
