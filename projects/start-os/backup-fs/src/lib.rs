@@ -4,11 +4,9 @@
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
-use std::num::ParseIntError;
 use std::os::raw::c_int;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
@@ -27,7 +25,7 @@ fn errno(e: c_int) -> Errno {
 
 use crate::ctrl::{Controller, StatFs};
 use crate::directory::DirectoryContents;
-use crate::error::{BkfsError, BkfsResult};
+use crate::error::BkfsResult;
 use crate::handle::{FileHandleId, Handler};
 use crate::inode::{FileData, Inode, InodeAttributes, BLOCK_SIZE};
 
@@ -66,8 +64,6 @@ pub(crate) static SYNCFS_CALL_COUNT: std::sync::atomic::AtomicU64 =
 pub(crate) static FSYNCDIR_CALL_COUNT: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
-const FMODE_EXEC: i32 = 0x20;
-
 pub(crate) fn open_direct(
     path: &Path,
     create: bool,
@@ -93,33 +89,12 @@ pub struct BackupFSOptions {
     pub file_size_padding: Option<f64>,
     #[cfg_attr(feature = "cli", arg(short, long))]
     pub readonly: bool,
-    #[cfg_attr(feature = "cli", arg(long))]
-    pub idmapped_root: Vec<IdMappedRoot>,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct IdMappedRoot {
-    root_uid: u32,
-    range: u32,
-}
-impl IdMappedRoot {
-    pub fn is_root_for(&self, uid: u32, uids: impl IntoIterator<Item = u32>) -> bool {
-        self.root_uid == uid
-            && uids
-                .into_iter()
-                .all(|uid| uid >= self.root_uid && uid < self.root_uid + self.range)
-    }
-}
-impl FromStr for IdMappedRoot {
-    type Err = BkfsError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (root_uid, range) = s
-            .split_once(":")
-            .map(|(uid, range)| Ok::<(u32, u32), ParseIntError>((uid.parse()?, range.parse()?)))
-            .ok_or_else(|| BkfsError::wrap(io::Error::other("invalid idmap")))?
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-        Ok(Self { root_uid, range })
-    }
+    /// True for the production mount, which start-core wraps in a kernel
+    /// idmapped mount and mounts with default_permissions. Gates the
+    /// FUSE_ALLOW_IDMAP request — asking for it on a plain mount (no
+    /// default_permissions) aborts the FUSE connection.
+    #[cfg_attr(feature = "cli", arg(skip))]
+    pub idmapped: bool,
 }
 
 // Stores inode metadata data in "$data_dir/inodes" and file contents in "$data_dir/contents"
@@ -182,6 +157,12 @@ impl Filesystem for BackupFS {
         config
             .add_capabilities(InitFlags::FUSE_HANDLE_KILLPRIV)
             .unwrap();
+        // Only request idmap support on the production (kernel-idmapped,
+        // default_permissions) mount — requesting it on a plain mount aborts
+        // the FUSE connection. Tolerant: pre-6.12 kernels lack the cap.
+        if self.handler.get_mut().unwrap().ctrl().config().idmapped {
+            let _ = config.add_capabilities(InitFlags::FUSE_ALLOW_IDMAP);
+        }
 
         log::info!("filesystem initialized");
 
@@ -770,22 +751,8 @@ impl Filesystem for BackupFS {
         }
     }
 
-    fn access(&self, req: &Request, ino: INodeNo, mask: AccessFlags, reply: ReplyEmpty) {
-        // peek_inode consults open Contents and the dirty cache before
-        // disk; ctrl.load alone returns ENOENT for inodes that have only
-        // ever lived in the dirty cache (e.g. a just-mkdir'd directory),
-        // which the kernel would then propagate to path-walk callers like
-        // chdir — breaking rsync --mkpath into a fresh mount.
-        let h = self.handler.lock().unwrap();
-        let idmap = h.ctrl().config().idmapped_root.clone();
-        match h.peek_inode(Inode(ino.into()), |inode| {
-            inode
-                .attrs
-                .check_access(&idmap, req.uid(), req.gid(), mask.bits())
-        }) {
-            Ok(_) => reply.ok(),
-            Err(e) => reply.error(errno(e.to_errno())),
-        }
+    fn access(&self, _req: &Request, _ino: INodeNo, _mask: AccessFlags, reply: ReplyEmpty) {
+        reply.ok()
     }
 
     fn create(
@@ -881,26 +848,6 @@ fn as_file_kind(mut mode: u32) -> FileKind {
     }
 }
 */
-
-pub fn get_groups(pid: u32) -> Vec<u32> {
-    #[cfg(not(target_os = "macos"))]
-    {
-        let path = format!("/proc/{pid}/task/{pid}/status");
-        let file = File::open(path).unwrap();
-        for line in BufReader::new(file).lines() {
-            let line = line.unwrap();
-            if line.starts_with("Groups:") {
-                return line["Groups: ".len()..]
-                    .split(' ')
-                    .filter(|x| !x.trim().is_empty())
-                    .map(|x| x.parse::<u32>().unwrap())
-                    .collect();
-            }
-        }
-    }
-
-    vec![]
-}
 
 pub fn fuse_allow_other_enabled() -> BkfsResult<bool> {
     let file = File::open("/etc/fuse.conf")?;

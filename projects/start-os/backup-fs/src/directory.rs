@@ -418,7 +418,7 @@ mod tests {
             password: "x".to_owned(),
             file_size_padding: None,
             readonly: false,
-            idmapped_root: vec![],
+            idmapped: false,
         })
         .unwrap()
     }

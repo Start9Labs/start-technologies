@@ -62,6 +62,12 @@ fn with_backupfs(
     // No AutoUnmount: with 0.17's spawn(), the auto-unmount helper deadlocks
     // an explicit umount. umount_and_join (and BackgroundSession's Drop, which
     // unmounts via Mount on a panic) tear the mount down cleanly instead.
+    //
+    // No default_permissions either: these tests run unprivileged against a
+    // non-idmapped mount whose root dir the fs owns as a different uid, so
+    // kernel-side permission checks would EACCES every op. Production
+    // (main.rs) sets default_permissions — its enforcement is covered by the
+    // VM backup/restore test, where the mount is kernel-idmapped.
     config.mount_options = vec![MountOption::FSName("backup-fs".to_string())];
     let fs = BackupFS::new(BackupFSOptions {
         data_dir: data.to_owned(),
@@ -69,7 +75,7 @@ fn with_backupfs(
         password,
         file_size_padding,
         readonly: false,
-        idmapped_root: vec![],
+        idmapped: false,
     })
     .unwrap();
     // 0.17's spawn() moves the mount into the BackgroundSession, so an
@@ -237,7 +243,7 @@ fn checksum() {
         password: "rtns".to_owned(),
         file_size_padding: None,
         readonly: false,
-        idmapped_root: vec![],
+        idmapped: false,
     });
     match res {
         Ok(_) => panic!(),
@@ -264,7 +270,7 @@ fn change_password() {
             password: "ohea".to_owned(),
             file_size_padding: None,
             readonly: false,
-            idmapped_root: vec![],
+            idmapped: false,
         })
         .unwrap();
         fs.change_password("rtns").unwrap();
@@ -1382,7 +1388,7 @@ fn opts(data: &Path, password: &str) -> BackupFSOptions {
         password: password.to_owned(),
         file_size_padding: None,
         readonly: false,
-        idmapped_root: vec![],
+        idmapped: false,
     }
 }
 

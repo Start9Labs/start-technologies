@@ -55,7 +55,7 @@ impl Harness {
                 password: "benchmark".to_string(),
                 file_size_padding: None,
                 readonly: false,
-                idmapped_root: vec![],
+                idmapped: false,
             })
             .unwrap();
             let mut config = Config::default();

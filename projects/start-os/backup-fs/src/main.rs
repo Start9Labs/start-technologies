@@ -151,6 +151,8 @@ fn mount(
     config
         .mount_options
         .push(MountOption::FSName("backup-fs".to_string()));
+    config.mount_options.push(MountOption::DefaultPermissions);
+    backup_opts.idmapped = true;
 
     if backup_opts.setuid_support {
         info!("setuid bit support enabled");

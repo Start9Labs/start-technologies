@@ -39,7 +39,7 @@ fn with_mount(data: &Path, body: impl FnOnce(&Path)) {
             password: "benchmark".to_string(),
             file_size_padding: None,
             readonly: false,
-            idmapped_root: vec![],
+            idmapped: false,
         })
         .unwrap();
         let mut config = Config::default();
