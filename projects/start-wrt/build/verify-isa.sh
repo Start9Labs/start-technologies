@@ -20,19 +20,20 @@ fi
 # uses (its llvm-objdump targets riscv64), so the host needs no riscv binutils.
 # Set RISCV_OBJDUMP to a native riscv64-capable objdump to skip docker.
 #
-# --mattr forces the banned extensions on in the decoder so their instructions
-# print as mnemonics (not <unknown>) even if the ELF arch attributes omit them.
-# zacas is spelled +experimental-zacas until LLVM 20; unrecognized names are
-# warn-ignored, so list both spellings.
-MATTR=+m,+a,+f,+d,+c,+v,+zicond,+zfa,+zacas,+experimental-zacas,+zfh,+zcmop,+zimop,+zcb
-
+# The decoder follows the binary's ELF arch attributes (like GNU objdump), so
+# this check catches exactly its target: compiler-emitted instructions from a
+# misconfigured RUSTFLAGS/-mcpu, which always carry matching attributes. Do
+# NOT force extensions on via --mattr to "see more": deps ship hand-written
+# runtime-dispatched asm (e.g. vendored OpenSSL's RVV routines) whose inline
+# constant tables then decode as banned mnemonics — false positives — while
+# the asm itself stays out of the attributes and out of this check's scope.
 disassemble() {
     if [ -n "${RISCV_OBJDUMP:-}" ]; then
         "$RISCV_OBJDUMP" -d -M no-aliases "$BINARY"
     else
         docker run --rm -v "$(realpath "$BINARY")":/verify/binary:ro \
             start9/cargo-zigbuild \
-            sh -c 'set -- /usr/lib/llvm-*/bin/llvm-objdump; exec "$1" -d -M no-aliases --mattr='"$MATTR"' /verify/binary'
+            sh -c 'set -- /usr/lib/llvm-*/bin/llvm-objdump; exec "$1" -d -M no-aliases /verify/binary'
     fi
 }
 
@@ -57,9 +58,9 @@ VSET_RE='\bvset(i?vli|vl)\b'
 
 echo "==> Verifying $(basename "$BINARY") against K1 ISA (via ${RISCV_OBJDUMP:-containerized llvm-objdump})..."
 
-# Disassemble once; scan the text for both failure classes. stderr (decoder
-# warnings, e.g. the ignored zacas spelling) is suppressed unless the
-# disassembly itself fails — then it's the docker/objdump error we need.
+# Disassemble once; scan the text for both failure classes. Decoder warnings
+# on stderr are suppressed unless the disassembly itself fails — then it's
+# the docker/objdump error we need.
 DISASM="$(mktemp)"
 trap 'rm -f "$DISASM" "$DISASM.err"' EXIT
 if ! disassemble 2>"$DISASM.err" > "$DISASM"; then
