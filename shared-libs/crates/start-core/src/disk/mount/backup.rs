@@ -118,7 +118,7 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
             })?;
         }
         let encrypted_guard = TmpMountGuard::mount(
-            &BackupFS::new(&crypt_path, &enc_key, vec![(100000, 65536)]),
+            &BackupFS::new(&crypt_path, &enc_key),
             ReadWrite,
         )
         .await?;

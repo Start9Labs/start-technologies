@@ -328,18 +328,19 @@ impl PersistentContainer {
             .rootfs_dir()
             .join("media/startos/backup");
         tokio::fs::create_dir_all(&mountpoint).await?;
-        Command::new("chown")
-            .arg("100000:100000")
-            .arg(mountpoint.as_os_str())
-            .invoke(ErrorKind::Filesystem)
-            .await?;
         tokio::fs::create_dir_all(backup_path).await?;
-        Command::new("chown")
-            .arg("100000:100000")
-            .arg(backup_path)
-            .invoke(ErrorKind::Filesystem)
-            .await?;
-        let bind = Bind::new(backup_path);
+        // Idmap the container's backup bind like a volume (on-disk 0-based
+        // <-> container userns 100000+), so backup-fs stores container-space
+        // ids and the container-root owns its backup tree. Replaces the old
+        // chown-to-100000 + backup-fs's FUSE-internal idmapped-root.
+        let bind = IdMapped::new(
+            Bind::new(backup_path),
+            vec![IdMap {
+                from_id: 0,
+                to_id: 100000,
+                range: 65536,
+            }],
+        );
         MountGuard::mount(&bind, &mountpoint, mount_type).await
     }
 

@@ -12,15 +12,10 @@ use crate::prelude::*;
 pub struct BackupFS<DataDir: AsRef<Path>, Password: fmt::Display> {
     data_dir: DataDir,
     password: Password,
-    idmapped_root: Vec<(u32, u32)>,
 }
 impl<DataDir: AsRef<Path>, Password: fmt::Display> BackupFS<DataDir, Password> {
-    pub fn new(data_dir: DataDir, password: Password, idmapped_root: Vec<(u32, u32)>) -> Self {
-        BackupFS {
-            data_dir,
-            password,
-            idmapped_root,
-        }
+    pub fn new(data_dir: DataDir, password: Password) -> Self {
+        BackupFS { data_dir, password }
     }
 }
 impl<DataDir: AsRef<Path> + Send + Sync, Password: fmt::Display + Send + Sync> FileSystem
@@ -30,17 +25,14 @@ impl<DataDir: AsRef<Path> + Send + Sync, Password: fmt::Display + Send + Sync> F
         Some("backup-fs")
     }
     fn mount_options(&self) -> impl IntoIterator<Item = impl Display> {
+        // default_permissions + FUSE_ALLOW_IDMAP (set by the mount.backup-fs
+        // binary) let the container's backup bind be a real kernel idmapped
+        // mount — replacing the old FUSE-internal idmapped-root translation.
         [
             Cow::Owned(format!("password={}", self.password)),
             Cow::Borrowed("file-size-padding=0.05"),
             Cow::Borrowed("allow_other"),
         ]
-        .into_iter()
-        .chain(
-            self.idmapped_root
-                .iter()
-                .map(|(root, range)| Cow::Owned(format!("idmapped-root={root}:{range}"))),
-        )
     }
     async fn source(&self) -> Result<Option<impl AsRef<Path>>, Error> {
         Ok(Some(&self.data_dir))
