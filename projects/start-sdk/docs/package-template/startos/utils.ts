@@ -1,5 +1,5 @@
 // Constants and helper functions shared across this package's startos/ code go
-// here (e.g. a port number referenced by both main.ts and interfaces.ts). Many
-// packages never need it — it's intentionally empty in the barebones template.
-
-export {}
+// here. `uiPort` is the port the example daemon serves on: main.ts health-checks
+// it, and you bind it from an interface in interfaces.ts once you add one. Change
+// it to whatever your service listens on.
+export const uiPort = 80

@@ -358,6 +358,30 @@ cmd_pre_check() {
         fi
     fi
 
+    # 1c. The `s9pk init-package` template pins the SDK version authors scaffold
+    # against; hold it at the version being released. The template ships no
+    # package-lock.json — `init-package` runs `npm install`, so each scaffold
+    # generates its own lock; a committed template lock is dead weight that only
+    # rots out of sync with the pin. See start-sdk AGENTS.md and root AGENTS.md
+    # "Coupled changes".
+    if [ "$PROJECT" = start-sdk ]; then
+        local tmpl tmpl_pin
+        tmpl="$REPO_ROOT/projects/start-sdk/docs/package-template"
+        tmpl_pin=$(jq -r '.dependencies["@start9labs/start-sdk"] // ""' "$tmpl/package.json" 2>/dev/null)
+        if [ "$tmpl_pin" != "$VERSION" ]; then
+            >&2 echo "  ✗ package-template pins @start9labs/start-sdk@${tmpl_pin:-<none>} — bump to ${VERSION} (make -C projects/start-sdk sync-template)"
+            errors=1
+        else
+            echo "  ✓ package-template pins @start9labs/start-sdk@${VERSION}"
+        fi
+        if [ -e "$tmpl/package-lock.json" ]; then
+            >&2 echo "  ✗ package-template must not commit package-lock.json (init-package regenerates it per scaffold; a committed one only rots out of sync with the SDK pin) — remove it"
+            errors=1
+        else
+            echo "  ✓ package-template ships no package-lock.json"
+        fi
+    fi
+
     # 2. Git tag must not already exist on the remote (idempotent: FORCE re-tags).
     if git ls-remote --tags origin "refs/tags/${TAG}" 2>/dev/null | grep -q .; then
         release_guard "tag ${TAG} already exists on origin" || errors=1

@@ -1,7 +1,7 @@
 # TODO — bring {{name}} from template to release-ready
 
 This package was scaffolded as a barebones clone — one daemon running the hello-world
-image, no interface, no health check, no dependencies. The arbitrary ids are named
+image with a port-listening health check, no interface yet, no dependencies. The arbitrary ids are named
 `example-*` (e.g. `example-volume`, `example-image`, `example-daemon`) to signal that you
 rename them freely; they are not required namings. Work the list top to bottom; it takes
 you from the clone to a release-ready package. Consult the packaging guide as you go
@@ -27,9 +27,10 @@ them, and add items when you defer work.
 - [ ] Replace the hello-world image with your service's image: set `images.*.source.dockerTag`
       (or add a `Dockerfile`) in `startos/manifest/index.ts`, and update the `exec.command` in
       `startos/main.ts`. (`UPDATING.md` should document how you track the version.)
-- [ ] `startos/main.ts`: define the daemon(s) and any oneshots. Enable the commented-out
-      `ready` health check (or add a standalone one), and add its strings to
-      `startos/i18n/dictionaries` — only the keys actually referenced should remain there.
+- [ ] `startos/main.ts`: define the daemon(s) and any oneshots. The example daemon ships a
+      `checkPortListening` health check on `uiPort` (`startos/utils.ts`) — point `uiPort` at the
+      port your service listens on, or swap in another check. Keep only the i18n keys in
+      `startos/i18n/dictionaries` that you actually reference.
 - [ ] Interfaces: `startos/interfaces.ts` ships wired into `startos/init/index.ts` but
       returns an empty list. If the service exposes a network interface, bind a port and
       export the interface there (see `start-technologies/projects/start-sdk/docs/src/interfaces.md`).

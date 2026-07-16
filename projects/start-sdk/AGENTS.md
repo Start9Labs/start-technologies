@@ -52,7 +52,7 @@ This symlinks the built `dist/` into your global `node_modules`, so the package 
 
 The SDK is a first-class project of the monorepo-wide release tool, [`scripts/manage-release.sh`](../../scripts/manage-release.sh) (the `npm` kind). The version is read from `package.json`; the git tag / GitHub release is `start-sdk/v<version>`. Only `dist/` ships to npm (compiled JavaScript, declarations, bundled dependencies, package metadata).
 
-1. Bump `package.json` and add the matching `CHANGELOG.md` entry (`pre-check` requires it), then land that on `master`.
+1. Bump `package.json`, add the matching `CHANGELOG.md` entry (`pre-check` requires it), and run `make sync-template` to move the [package template](docs/package-template)'s `@start9labs/start-sdk` pin to the new version (`pre-check` enforces the match). Land that on `master`.
 2. Cut the release from the repo root (needs `gh` and an npm login with publish rights):
 
    ```bash
@@ -85,6 +85,7 @@ If that commit never landed on `master` (e.g. the publish was cut from an unmerg
 - **SDK vs start-core:** types/ABI/OS-bindings/low-level → `@start9labs/start-core` (`shared-libs/ts-modules/start-core/`); developer-facing wrappers/runtime helpers → the SDK's `lib/`. A new start-core export must be re-exported from `lib/index.ts` or exposed via `StartSdk.build()`.
 - **OS bindings** (`shared-libs/ts-modules/start-core/lib/osBindings/`) mirror Rust types in `shared-libs/crates/start-core`; regenerate/update them when the Rust side changes.
 - **Editing `s9pk.mk` / `tsconfig.base.json` changes every package's build** — they ship in the published package. Treat as a public contract.
+- **The package template pins the SDK and ships no lockfile.** [`docs/package-template/`](docs/package-template)'s `package.json` declares the `@start9labs/start-sdk` version scaffolded packages build against; `make sync-template` moves that pin to the current version and `pre-check` holds it at the release being cut. It deliberately commits **no** `package-lock.json` — `s9pk init-package` runs `npm install`, so each scaffold generates its own lock (which the packager then commits); a committed template lock is a generated artifact that only rots out of sync with the pin. `pre-check` rejects a re-committed template lockfile.
 - Prettier config (single quotes, no semis, trailing commas, 2-space, `arrowParens: avoid`) lives in each sub-package's `package.json`.
 
 ## Docs

@@ -76,6 +76,7 @@ Already enforced or checked elsewhere (listed here for completeness; documented 
 - **`patchdb-ui-seed.json` ↔ `patchdb-ui-seed.beta.json`** — keep both seeds in sync (see [`projects/start-os/AGENTS.md`](projects/start-os/AGENTS.md)).
 - **A crate's `version` bump ↔ its `CHANGELOG.md`** — versions are read from each manifest; bump the changelog in the same change.
 - **StartOS install/update docs' GitHub release link ↔ the OS release.** `projects/start-os/docs/src/installing-startos.md` and `update-040.md` pin the release URL to the shipping version — a repo-wide `releases/latest` resolves to whichever product released most recently (e.g. StartTunnel), not StartOS. `manage-release.sh pre-check start-os` fails if a doc still links to `releases/latest` or pins a stale version, so bump these links with the release like the changelog.
+- **The package template's SDK pin ↔ the SDK version being released.** `projects/start-sdk/docs/package-template/package.json` pins the `@start9labs/start-sdk` version scaffolded packages build against. `manage-release.sh pre-check start-sdk` fails if it pins a different version than the release being cut, or if the template commits a `package-lock.json` (a generated artifact that only rots against the pin); run `make -C projects/start-sdk sync-template` to bump it with the release.
 - **User-facing changes ↔ that product's `docs/`** — docs are part of the change (see each product's AGENTS/CONTRIBUTING).
 
 ## Sub-scopes

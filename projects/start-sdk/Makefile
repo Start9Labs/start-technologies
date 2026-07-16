@@ -5,7 +5,7 @@ START_CORE_SRC := $(shell git ls-files $(START_CORE)/lib) $(START_CORE)/package.
 
 .DELETE_ON_ERROR:
 
-.PHONY: all test clean bundle fmt check-fmt check publish link
+.PHONY: all test clean bundle fmt check-fmt check publish link sync-template
 
 all: bundle
 
@@ -81,3 +81,10 @@ publish: bundle test check-fmt package.json README.md LICENSE CHANGELOG.md
 
 link: bundle
 	cd dist && npm link
+
+# Point the package template's @start9labs/start-sdk pin at this SDK version, so a
+# scaffolded package builds against the release being cut. The template ships no
+# lockfile (each scaffold's `npm install` generates its own), so the pin is the only
+# thing to sync; manage-release.sh pre-check enforces they match.
+sync-template:
+	npm --prefix docs/package-template pkg set dependencies.@start9labs/start-sdk=$(shell jq -r .version package.json)
