@@ -39,6 +39,14 @@ fn build_listen_socket(
         socket.set_reuse_port(true)?;
     }
     socket.set_nonblocking(true)?;
+    // Allow binding an address the kernel hasn't finished bringing up (e.g. an
+    // IPv6 GUA still tentative from DAD). Linux-only in socket2; the server only
+    // runs on Linux, and the darwin build (start-cli) never binds these.
+    #[cfg(target_os = "linux")]
+    match addr {
+        SocketAddr::V4(_) => socket.set_freebind_v4(true)?,
+        SocketAddr::V6(_) => socket.set_freebind_v6(true)?,
+    }
     socket.bind(&addr.into())?;
     socket.listen(LISTEN_BACKLOG)?;
     Ok(socket.into())

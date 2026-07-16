@@ -1,12 +1,13 @@
 use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
+use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV6};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 use std::task::{Poll, ready};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use async_acme::acme::ACME_TLS_ALPN_NAME;
 use clap::Parser;
@@ -324,6 +325,7 @@ impl VHostController {
             port,
             bind_reqs: bind_reqs.clone_unseen(),
             listeners: BTreeMap::new(),
+            retry: None,
         };
         VHostServer::new(
             listener,
@@ -496,6 +498,13 @@ fn compute_bind_reqs<A: Accept + 'static>(mapping: &Mapping<A>) -> VHostBindRequ
     reqs
 }
 
+/// Back off this long before re-attempting a bind that failed. `IP_FREEBIND`
+/// (set in `build_listen_socket`) already lets a not-yet-assignable address
+/// bind, so this backstops the rarer transient failures — e.g. a port briefly
+/// still held by a torn-down listener — instead of latching the hole until the
+/// next network change.
+const BIND_RETRY_BACKOFF: Duration = Duration::from_secs(2);
+
 /// Listener that manages its own TCP listeners with IP-level precision.
 /// Binds ALL IPs of public gateways and ONLY matching private IPs.
 pub struct VHostBindListener {
@@ -503,66 +512,71 @@ pub struct VHostBindListener {
     port: u16,
     bind_reqs: Watch<VHostBindRequirements>,
     listeners: BTreeMap<SocketAddr, (TcpListener, GatewayInfo)>,
+    /// Backoff timer armed after a failed bind; fires a retry reconcile.
+    retry: Option<Pin<Box<tokio::time::Sleep>>>,
 }
 
+/// The listeners `reqs` calls for: every IP of a required public gateway, plus
+/// each explicitly required private IP, bound on `port`.
+fn desired_listeners(
+    port: u16,
+    ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+    reqs: &VHostBindRequirements,
+) -> BTreeMap<SocketAddr, GatewayInfo> {
+    ip_info
+        .iter()
+        .filter_map(|(id, iface)| Some((id, iface, iface.ip_info.as_ref()?)))
+        .flat_map(|(id, iface, ip_info)| {
+            ip_info.subnets.iter().filter_map(move |subnet| {
+                let ip = subnet.addr();
+                let wanted = reqs.public_gateways.contains(id) || reqs.private_ips.contains(&ip);
+                wanted.then(|| {
+                    let addr = match ip {
+                        IpAddr::V6(v6) if ipv6_is_link_local(v6) => {
+                            SocketAddrV6::new(v6, port, 0, ip_info.scope_id).into()
+                        }
+                        ip => SocketAddr::new(ip, port),
+                    };
+                    let gateway = GatewayInfo {
+                        id: id.clone(),
+                        info: iface.clone(),
+                    };
+                    (addr, gateway)
+                })
+            })
+        })
+        .collect()
+}
+
+/// Reconcile the bound listeners to match `desired_listeners`. Best-effort: a
+/// bind that fails is logged and left unbound, and reported back (`true`) so the
+/// caller can retry — rather than aborting the pass and latching the hole until
+/// the next network change.
 fn update_vhost_listeners(
     listeners: &mut BTreeMap<SocketAddr, (TcpListener, GatewayInfo)>,
     port: u16,
     ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
     reqs: &VHostBindRequirements,
-) -> Result<(), Error> {
-    let mut keep = BTreeSet::<SocketAddr>::new();
-    for (gw_id, info) in ip_info {
-        if let Some(ip_info) = &info.ip_info {
-            for ipnet in &ip_info.subnets {
-                let ip = ipnet.addr();
-                let should_bind =
-                    reqs.public_gateways.contains(gw_id) || reqs.private_ips.contains(&ip);
-                if should_bind {
-                    let addr = match ip {
-                        IpAddr::V6(ip6) => SocketAddrV6::new(
-                            ip6,
-                            port,
-                            0,
-                            if ipv6_is_link_local(ip6) {
-                                ip_info.scope_id
-                            } else {
-                                0
-                            },
-                        )
-                        .into(),
-                        ip => SocketAddr::new(ip, port),
-                    };
-                    keep.insert(addr);
-                    if let Some((_, existing_info)) = listeners.get_mut(&addr) {
-                        *existing_info = GatewayInfo {
-                            id: gw_id.clone(),
-                            info: info.clone(),
-                        };
-                    } else {
-                        let tcp = TcpListener::from_std(
-                            bind_mio_listener(addr)
-                                .with_kind(ErrorKind::Network)?
-                                .into(),
-                        )
-                        .with_kind(ErrorKind::Network)?;
-                        listeners.insert(
-                            addr,
-                            (
-                                tcp,
-                                GatewayInfo {
-                                    id: gw_id.clone(),
-                                    info: info.clone(),
-                                },
-                            ),
-                        );
-                    }
+) -> bool {
+    let desired = desired_listeners(port, ip_info, reqs);
+    listeners.retain(|addr, _| desired.contains_key(addr));
+
+    let mut failed = false;
+    for (addr, gateway) in desired {
+        match listeners.get_mut(&addr) {
+            Some((_, current)) => *current = gateway,
+            None => match bind_mio_listener(addr).and_then(|l| TcpListener::from_std(l.into())) {
+                Ok(listener) => {
+                    listeners.insert(addr, (listener, gateway));
                 }
-            }
+                Err(e) => {
+                    tracing::warn!("failed to bind vhost listener on {addr}: {e}");
+                    failed = true;
+                }
+            },
         }
     }
-    listeners.retain(|key, _| keep.contains(key));
-    Ok(())
+    failed
 }
 
 impl Accept for VHostBindListener {
@@ -571,15 +585,33 @@ impl Accept for VHostBindListener {
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(Self::Metadata, AcceptStream), Error>> {
-        // Update listeners when ip_info or bind_reqs change
+        // Rebind when the interface set or bind requirements change, or when a
+        // pending retry (from an earlier failed bind) elapses.
+        let mut reconcile = false;
         while self.ip_info.poll_changed(cx).is_ready() || self.bind_reqs.poll_changed(cx).is_ready()
         {
+            reconcile = true;
+        }
+        if let Some(retry) = self.retry.as_mut() {
+            reconcile |= retry.as_mut().poll(cx).is_ready();
+        }
+        if reconcile {
             let reqs = self.bind_reqs.read_and_mark_seen();
             let listeners = &mut self.listeners;
             let port = self.port;
-            self.ip_info.peek_and_mark_seen(|ip_info| {
+            let failed = self.ip_info.peek_and_mark_seen(|ip_info| {
                 update_vhost_listeners(listeners, port, ip_info, &reqs)
-            })?;
+            });
+            // A failed bind arms a backoff to retry; a clean pass clears it.
+            // Reset unconditionally — a config change may have re-triggered us
+            // before the timer elapsed.
+            self.retry = failed.then(|| {
+                let mut backoff = Box::pin(tokio::time::sleep(BIND_RETRY_BACKOFF));
+                // Poll once to arm the timer against the current waker, so it
+                // wakes us to retry even if nothing else re-polls the listener.
+                let _ = backoff.as_mut().poll(cx);
+                backoff
+            });
         }
 
         // Poll each listener for incoming connections
