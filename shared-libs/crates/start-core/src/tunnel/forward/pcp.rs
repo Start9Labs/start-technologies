@@ -25,8 +25,8 @@ use crate::tunnel::forward::sni::SniDemux;
 use crate::tunnel::wg::WIREGUARD_INTERFACE_NAME;
 
 /// Run the PCP server (IPv4 DNAT forwards + IPv6 GUA pinholes) for the life of
-/// the tunnel, each family self-restarting on error and rebinding on
-/// [`TunnelContext::forward_rebind`] (an `Ok` return from the serve loop).
+/// the tunnel, each family self-restarting on error and rebinding when the wg
+/// interface's ifindex changes (an `Ok` return from the serve loop).
 pub async fn run(ctx: TunnelContext) {
     let started = Instant::now();
     let v4 = async {
@@ -90,17 +90,16 @@ fn socket6() -> Result<UdpSocket, Error> {
 
 async fn serve(ctx: &TunnelContext, started: Instant) -> Result<(), Error> {
     // Subscribe before binding so a bounce during setup still triggers a rebind.
-    let rebind = ctx.forward_rebind.notified();
-    tokio::pin!(rebind);
-    rebind.as_mut().enable();
+    let mut ifindex = ctx.forward_ifindex.subscribe();
+    ifindex.borrow_and_update();
     let socket = socket()?;
     tracing::info!("PCP server listening on {WIREGUARD_INTERFACE_NAME}:{PCP_PORT}");
     let mut buf = [0u8; 1100];
     loop {
         let (n, from) = tokio::select! {
             res = socket.recv_from(&mut buf) => res.with_kind(ErrorKind::Network)?,
-            _ = rebind.as_mut() => {
-                tracing::info!("{WIREGUARD_INTERFACE_NAME} recreated; rebinding PCP server");
+            _ = ifindex.changed() => {
+                tracing::info!("{WIREGUARD_INTERFACE_NAME} ifindex changed; rebinding PCP server");
                 return Ok(());
             }
         };
@@ -115,17 +114,16 @@ async fn serve(ctx: &TunnelContext, started: Instant) -> Result<(), Error> {
 }
 
 async fn serve6(ctx: &TunnelContext, started: Instant) -> Result<(), Error> {
-    let rebind = ctx.forward_rebind.notified();
-    tokio::pin!(rebind);
-    rebind.as_mut().enable();
+    let mut ifindex = ctx.forward_ifindex.subscribe();
+    ifindex.borrow_and_update();
     let socket = socket6()?;
     tracing::info!("PCP v6 server listening on {WIREGUARD_INTERFACE_NAME}:{PCP_PORT}");
     let mut buf = [0u8; 1100];
     loop {
         let (n, from) = tokio::select! {
             res = socket.recv_from(&mut buf) => res.with_kind(ErrorKind::Network)?,
-            _ = rebind.as_mut() => {
-                tracing::info!("{WIREGUARD_INTERFACE_NAME} recreated; rebinding PCP v6 server");
+            _ = ifindex.changed() => {
+                tracing::info!("{WIREGUARD_INTERFACE_NAME} ifindex changed; rebinding PCP v6 server");
                 return Ok(());
             }
         };

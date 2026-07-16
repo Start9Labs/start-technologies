@@ -87,17 +87,16 @@ fn ssdp_socket() -> Result<UdpSocket, Error> {
 
 async fn ssdp_loop(ctx: &TunnelContext, uuid: &str) -> Result<(), Error> {
     // Subscribe before binding so a bounce during setup still triggers a rebind.
-    let rebind = ctx.forward_rebind.notified();
-    tokio::pin!(rebind);
-    rebind.as_mut().enable();
+    let mut ifindex = ctx.forward_ifindex.subscribe();
+    ifindex.borrow_and_update();
     let socket = ssdp_socket()?;
     tracing::info!("UPnP IGD SSDP responder listening on {WIREGUARD_INTERFACE_NAME}");
     let mut buf = [0u8; 2048];
     loop {
         let (n, from) = tokio::select! {
             res = socket.recv_from(&mut buf) => res.with_kind(ErrorKind::Network)?,
-            _ = rebind.as_mut() => {
-                tracing::info!("{WIREGUARD_INTERFACE_NAME} recreated; rebinding SSDP responder");
+            _ = ifindex.changed() => {
+                tracing::info!("{WIREGUARD_INTERFACE_NAME} ifindex changed; rebinding SSDP responder");
                 return Ok(());
             }
         };
@@ -151,9 +150,8 @@ async fn http_server(ctx: TunnelContext, root_desc: Arc<str>) {
         .with_state(ctx.clone());
     loop {
         // Subscribe before binding so a bounce during setup still triggers a rebind.
-        let rebind = ctx.forward_rebind.notified();
-        tokio::pin!(rebind);
-        rebind.as_mut().enable();
+        let mut ifindex = ctx.forward_ifindex.subscribe();
+        ifindex.borrow_and_update();
         match igd_http_listener() {
             Ok(listener) => {
                 tracing::info!(
@@ -169,8 +167,8 @@ async fn http_server(ctx: TunnelContext, root_desc: Arc<str>) {
                             tracing::warn!("UPnP IGD control server exited, retrying: {e}");
                         }
                     }
-                    _ = rebind.as_mut() => {
-                        tracing::info!("{WIREGUARD_INTERFACE_NAME} recreated; rebinding IGD control server");
+                    _ = ifindex.changed() => {
+                        tracing::info!("{WIREGUARD_INTERFACE_NAME} ifindex changed; rebinding IGD control server");
                         continue;
                     }
                 }

@@ -16,6 +16,11 @@ use crate::util::serde::Base64;
 
 pub const WIREGUARD_INTERFACE_NAME: &str = "wg-start-tunnel";
 
+/// The WireGuard interface's current kernel ifindex, or `0` if it isn't up.
+pub fn current_ifindex() -> u32 {
+    nix::net::if_::if_nametoindex(WIREGUARD_INTERFACE_NAME).unwrap_or(0)
+}
+
 /// Brand token written into every StartTunnel client config's header (see
 /// client.conf.template, rendered as `# StartTunnel config for <name>`).
 /// `add_tunnel` looks for this token (case-insensitively) to classify a pasted

@@ -39,7 +39,7 @@ use crate::tunnel::api::tunnel_api;
 use crate::tunnel::db::{DnsRecordEntry, DnsRecords, PortForward, PortForwards, TunnelDatabase};
 use crate::tunnel::dns::DnsProxyController;
 use crate::tunnel::migrations::run_migrations;
-use crate::tunnel::wg::{WIREGUARD_INTERFACE_NAME, WgServer};
+use crate::tunnel::wg::{WIREGUARD_INTERFACE_NAME, WgServer, current_ifindex};
 use crate::util::Invoke;
 use crate::util::collections::OrdMapIterMut;
 use crate::util::io::read_file_to_string;
@@ -174,10 +174,13 @@ pub struct TunnelContextSeed {
     /// Wakes the lease reaper when a stamp may have moved the soonest expiry
     /// earlier, so it can pull its next wake-up forward.
     pub lease_wake: tokio::sync::Notify,
-    /// Notified after every `wg-quick` bounce: the PCP/IGD listeners are
-    /// `SO_BINDTODEVICE`-bound, which pins the ifindex at bind time, so a
-    /// recreated interface leaves them deaf until they rebind.
-    pub forward_rebind: tokio::sync::Notify,
+    /// The wg interface's current ifindex, republished after every `wg-quick`
+    /// bounce. The PCP/IGD listeners are `SO_BINDTODEVICE`-bound, which pins the
+    /// ifindex at bind time, so a recreated interface leaves them deaf until
+    /// they rebind. Level-triggered on the value (not an edge notify) so a
+    /// listener re-subscribing after a bounce still observes the new index, and
+    /// an unchanged index skips a needless rebind.
+    pub forward_ifindex: tokio::sync::watch::Sender<u32>,
     /// Serializes `resync_egress`; its read-DB → install → prune isn't atomic,
     /// so a concurrent reconcile could prune a rule another call just installed.
     pub egress_lock: tokio::sync::Mutex<()>,
@@ -367,7 +370,7 @@ impl TunnelContext {
             active_forwards: SyncMutex::new(active_forwards),
             leases: SyncMutex::new(BTreeMap::new()),
             lease_wake: tokio::sync::Notify::new(),
-            forward_rebind: tokio::sync::Notify::new(),
+            forward_ifindex: tokio::sync::watch::channel(current_ifindex()).0,
             egress_lock: tokio::sync::Mutex::new(()),
             v6_proxy: SyncMutex::new(BTreeMap::new()),
             v6_lock: tokio::sync::Mutex::new(()),
@@ -422,7 +425,12 @@ impl TunnelContext {
     /// must follow `server.sync()`.
     pub async fn sync_network(&self, server: &WgServer) -> Result<(), Error> {
         server.sync().await?;
-        self.forward_rebind.notify_waiters();
+        let ifindex = current_ifindex();
+        self.forward_ifindex.send_if_modified(|cur| {
+            let changed = *cur != ifindex;
+            *cur = ifindex;
+            changed
+        });
         self.dns_allowed.mutate(|s| *s = allowed_injectors(server));
         self.dns_keys.mutate(|m| *m = injector_keys(server));
         self.dns_proxy
