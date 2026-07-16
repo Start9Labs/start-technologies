@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   corrected `API_CONTRACT.md` wire types and documented the previously missing
   endpoints, and fixed stale paths, commands, and structure descriptions across
   the developer docs.
+- **Dynamic DNS now actually updates your provider.** The image was missing
+  the `ddns-scripts` update client (and its Cloudflare and No-IP extensions),
+  so DDNS settings were saved but no DNS record was ever updated. The FreeDNS
+  provider also pointed at a service name (`freedns.afraid.org`) that modern
+  `ddns-scripts` no longer recognizes; it now uses the afraid.org update-key
+  service (`afraid.org-keyauth`), and configurations saved with the old name
+  are still read back correctly.
 
 ## [1.0.1]
 

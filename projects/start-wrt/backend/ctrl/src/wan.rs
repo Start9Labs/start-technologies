@@ -187,7 +187,9 @@ fn provider_to_service(p: &DdnsProvider) -> &'static str {
         DdnsProvider::Noip => "no-ip.com",
         DdnsProvider::Cloudflare => "cloudflare.com-v4",
         DdnsProvider::Duckdns => "duckdns.org",
-        DdnsProvider::Freedns => "freedns.afraid.org",
+        // afraid.org's update-key flow; ddns-scripts dropped the old
+        // "freedns.afraid.org" service name when it moved to JSON definitions
+        DdnsProvider::Freedns => "afraid.org-keyauth",
     }
 }
 
@@ -197,7 +199,8 @@ fn service_to_provider(s: &str) -> DdnsProvider {
         "no-ip.com" => DdnsProvider::Noip,
         "cloudflare.com-v4" => DdnsProvider::Cloudflare,
         "duckdns.org" => DdnsProvider::Duckdns,
-        "freedns.afraid.org" => DdnsProvider::Freedns,
+        // "freedns.afraid.org" is the legacy name written by earlier builds
+        "afraid.org-keyauth" | "freedns.afraid.org" => DdnsProvider::Freedns,
         _ => DdnsProvider::Start9,
     }
 }
@@ -1458,6 +1461,60 @@ config zone
         assert_eq!(res.provider, DdnsProvider::Cloudflare);
         assert_eq!(res.token.as_deref(), Some("cf-api-token-123"));
         assert_eq!(res.hostname.as_deref(), Some("mysite.example.com"));
+    }
+
+    #[tokio::test]
+    async fn ddns_set_freedns_writes_keyauth_service() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("ddns"), "").unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        ddns_set(
+            ctx.clone(),
+            DeserializeStdin(WanDdnsSetRequest {
+                enabled: true,
+                provider: DdnsProvider::Freedns,
+                hostname: Some("myhost.mooo.com".to_string()),
+                username: None,
+                password: None,
+                token: Some("freedns-update-key".to_string()),
+                zone: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        let raw = std::fs::read_to_string(dir.path().join("ddns")).unwrap();
+        assert!(raw.contains("option service_name 'afraid.org-keyauth'"));
+
+        let res = ddns_get(ctx).await.unwrap();
+        assert!(res.enabled);
+        assert_eq!(res.provider, DdnsProvider::Freedns);
+        assert_eq!(res.token.as_deref(), Some("freedns-update-key"));
+        assert_eq!(res.hostname.as_deref(), Some("myhost.mooo.com"));
+    }
+
+    #[tokio::test]
+    async fn ddns_get_legacy_freedns_service_name() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("ddns"),
+            "\
+config service 'wan'
+\toption enabled '1'
+\toption service_name 'freedns.afraid.org'
+\toption lookup_host 'myhost.mooo.com'
+\toption password 'freedns-update-key'
+",
+        )
+        .unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        let res = ddns_get(ctx).await.unwrap();
+        assert!(res.enabled);
+        assert_eq!(res.provider, DdnsProvider::Freedns);
+        assert_eq!(res.token.as_deref(), Some("freedns-update-key"));
+        assert_eq!(res.hostname.as_deref(), Some("myhost.mooo.com"));
     }
 
     #[tokio::test]
