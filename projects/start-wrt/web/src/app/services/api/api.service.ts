@@ -483,8 +483,6 @@ export interface DeviceUpdateReq {
   name: string
   ipv4_static: boolean
   ipv4: string
-  ipv6_static: boolean
-  ipv6: string
 }
 
 export type DeviceDataUsagePeriod = 'week' | 'month' | '3months'

@@ -72,8 +72,6 @@ pub struct DeviceUpdateReq {
     pub name: String,
     pub ipv4_static: bool,
     pub ipv4: String,
-    pub ipv6_static: bool,
-    pub ipv6: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1482,11 +1480,10 @@ pub async fn update<C: CtrlContext>(
                     } else {
                         host.ip = None;
                     }
-                    if req.ipv6_static && !req.ipv6.is_empty() {
-                        host.hostid = Some(extract_ipv6_hostid(&req.ipv6));
-                    } else {
-                        host.hostid = None;
-                    }
+                    // `hostid` is deliberately left untouched: IPv6 addresses are
+                    // chosen by the device (SLAAC), so there is no user-facing IPv6
+                    // reservation. The suffix is backend bookkeeping, pinned by
+                    // published-ports for its prefix-rotation fallback.
                     section.set(&host)?;
                     found = true;
                     break;
@@ -1504,11 +1501,7 @@ pub async fn update<C: CtrlContext>(
                 } else {
                     None
                 },
-                hostid: if req.ipv6_static && !req.ipv6.is_empty() {
-                    Some(extract_ipv6_hostid(&req.ipv6))
-                } else {
-                    None
-                },
+                hostid: None,
                 dns: Some("1".to_string()),
             };
             let section_name = format!("host_{}", req.mac.replace(':', "").to_lowercase());
@@ -1521,43 +1514,25 @@ pub async fn update<C: CtrlContext>(
                 continue;
             }
             Err(err) => {
-                let mut details = Vec::new();
-                if req.ipv4_static && !req.ipv4.is_empty() {
-                    details.push(format!("static IPv4: {}", req.ipv4));
-                }
-                if req.ipv6_static && !req.ipv6.is_empty() {
-                    details.push(format!("static IPv6: {}", req.ipv6));
-                }
-                let summary = if details.is_empty() {
-                    format!("Failed to update device '{}' ({})", req.name, mac_upper)
-                } else {
+                let summary = if req.ipv4_static && !req.ipv4.is_empty() {
                     format!(
-                        "Failed to update device '{}' ({}) — {}",
-                        req.name,
-                        mac_upper,
-                        details.join(", ")
+                        "Failed to update device '{}' ({}) — static IPv4: {}",
+                        req.name, mac_upper, req.ipv4
                     )
+                } else {
+                    format!("Failed to update device '{}' ({})", req.name, mac_upper)
                 };
                 crate::activity::log("device", "updated", false, &summary, Some(&err.to_string()));
                 return Err(err.into());
             }
             Ok(()) => {
-                let mut details = Vec::new();
-                if req.ipv4_static && !req.ipv4.is_empty() {
-                    details.push(format!("static IPv4: {}", req.ipv4));
-                }
-                if req.ipv6_static && !req.ipv6.is_empty() {
-                    details.push(format!("static IPv6: {}", req.ipv6));
-                }
-                let summary = if details.is_empty() {
-                    format!("Updated device '{}' ({})", req.name, mac_upper)
-                } else {
+                let summary = if req.ipv4_static && !req.ipv4.is_empty() {
                     format!(
-                        "Updated device '{}' ({}) — {}",
-                        req.name,
-                        mac_upper,
-                        details.join(", ")
+                        "Updated device '{}' ({}) — static IPv4: {}",
+                        req.name, mac_upper, req.ipv4
                     )
+                } else {
+                    format!("Updated device '{}' ({})", req.name, mac_upper)
                 };
                 crate::activity::log("device", "updated", true, &summary, None);
                 if ctx.effectful() {

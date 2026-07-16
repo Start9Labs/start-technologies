@@ -30,7 +30,7 @@ Consulta la información del dispositivo y configura sus ajustes.
 
 ### Resumen
 
-Muestra el estado actual del dispositivo, el tipo de conexión, el perfil de seguridad y las direcciones IP. Un icono de candado indica una dirección IP reservada.
+Muestra el estado actual del dispositivo, el tipo de conexión, el perfil de seguridad y las direcciones IP. Un icono de candado indica una dirección IPv4 reservada.
 
 ### Uso de datos
 
@@ -42,7 +42,7 @@ Asigna un nombre personalizado para identificar fácilmente este dispositivo. Si
 
 ### IP reservada
 
-Reserva una dirección IP para asignar una dirección IPv4 fija que no cambiará entre reinicios. Útil para servidores, impresoras, dispositivos NAS o cualquier cosa a la que necesites acceder mediante una dirección IP constante.
+Reserva una dirección IP para asignar una dirección IPv4 fija que no cambiará entre reinicios. Útil para servidores, impresoras, dispositivos NAS o cualquier cosa a la que necesites acceder mediante una dirección IP constante. Las direcciones IPv6 no se pueden reservar: cada dispositivo elige su propia dirección IPv6, por lo que el router no interviene.
 
 ### Olvidar
 
@@ -334,7 +334,7 @@ Limita quién puede conectarse especificando una dirección IP o un rango CIDR. 
 
 ### Versión de IP
 
-Elige en qué versiones de IP publicar. IPv4 usa NAT para reenviar el tráfico, mientras que IPv6 abre el firewall directamente al dispositivo.
+Elige en qué versiones de IP publicar. IPv4 usa NAT para reenviar el tráfico, mientras que IPv6 abre el firewall directamente al dispositivo. Como cada dispositivo elige su propia dirección IPv6, una regla IPv6 sigue la dirección actual del dispositivo y se actualiza automáticamente cuando tu ISP rota el prefijo IPv6.
 
 ### Puerto externo
 

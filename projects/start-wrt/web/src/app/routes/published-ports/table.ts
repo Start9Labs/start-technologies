@@ -307,12 +307,8 @@ export class PublishedPortsTable {
       status: enabling ? 'active' : 'disabled',
     }
 
-    if (enabling && (updated.ipv4 || updated.ipv6)) {
-      this.service.reserveDeviceIps(
-        updated.deviceMac,
-        updated.ipv4,
-        updated.ipv6,
-      )
+    if (enabling && updated.ipv4) {
+      this.service.reserveDeviceIpv4(updated.deviceMac)
     }
 
     this.service.save(list.map(p => (p.id === item.id ? updated : p)))

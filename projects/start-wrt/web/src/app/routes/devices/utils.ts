@@ -27,15 +27,14 @@ export interface Device extends DeviceTableItem {
   ipv6Static: boolean
 }
 
-// Form for editing a device
+// Form for editing a device. IPv6 has no controls: the device chooses its own
+// IPv6 address (SLAAC) — the router cannot reserve one.
 export function getDeviceForm(builder: NonNullableFormBuilder) {
   return builder.group({
     name: builder.control('', [CustomValidators.hostname()]),
     ip: builder.group({
       ipv4Static: builder.control(false),
       ipv4: builder.control('', [CustomValidators.ipv4()]),
-      ipv6Static: builder.control(false),
-      ipv6: builder.control('', [CustomValidators.ipv6()]),
     }),
   })
 }
@@ -47,39 +46,26 @@ export interface DeviceUpdateData {
   name: string
   ipv4Static: boolean
   ipv4: string
-  ipv6Static: boolean
-  ipv6: string
 }
 
 export function updateDeviceValidators(
   form: ReturnType<typeof getDeviceForm>,
   ipv4Static: boolean,
-  ipv6Static: boolean,
 ): void {
-  const { ipv4, ipv6 } = form.controls.ip.controls
+  const { ipv4 } = form.controls.ip.controls
 
-  // IPv4 validators
   ipv4.clearValidators()
   ipv4.addValidators([CustomValidators.ipv4()])
   if (ipv4Static) {
     ipv4.addValidators([Validators.required])
   }
   ipv4.updateValueAndValidity()
-
-  // IPv6 validators
-  ipv6.clearValidators()
-  ipv6.addValidators([CustomValidators.ipv6()])
-  if (ipv6Static) {
-    ipv6.addValidators([Validators.required])
-  }
-  ipv6.updateValueAndValidity()
 }
 
 export const DEVICE_VALIDATION_ERRORS = {
   required: 'Required',
   hostname: 'Letters, digits, and hyphens only',
   ipv4: 'Invalid IPv4 address',
-  ipv6: 'Invalid IPv6 address',
 }
 
 export const DEVICE_LABELS = {

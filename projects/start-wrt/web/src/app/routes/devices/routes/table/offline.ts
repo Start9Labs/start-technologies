@@ -50,11 +50,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
               </div>
             }
             @if (item.ipv6) {
-              <div
-                tuiChip
-                size="xs"
-                [iconStart]="item.ipv6Static ? '@tui.lock' : ''"
-              >
+              <div tuiChip size="xs">
                 {{ item.ipv6 }}
               </div>
             }

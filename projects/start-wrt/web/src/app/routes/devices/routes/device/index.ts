@@ -100,15 +100,14 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
         <div>
           <tui-textfield>
             <label tuiLabel>{{ 'IPv6 address' | i18n }}</label>
-            <input tuiInput formControlName="ipv6" [readOnly]="!ipv6Static()" />
+            <input tuiInput [readOnly]="true" [value]="data()?.ipv6 ?? ''" />
           </tui-textfield>
-          <tui-error formControlName="ipv6" />
         </div>
-        <label tuiLabel>
-          <input tuiSwitch type="checkbox" formControlName="ipv6Static" />
-          {{ 'Reserve' | i18n }}
-          <i [tuiHint]="'Required by a published port rule' | i18n"></i>
-        </label>
+        <p class="ipv6-note">
+          {{
+            'Chosen by the device — IPv6 addresses cannot be reserved' | i18n
+          }}
+        </p>
       </section>
       @if (data()) {
         <footer appFooter></footer>
@@ -119,6 +118,12 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
     header[tuiHeader='h6'] {
       align-items: center;
       max-width: 50rem;
+    }
+
+    .ipv6-note {
+      margin: 0;
+      font: var(--tui-font-text-s);
+      color: var(--tui-text-secondary);
     }
   `,
   host: { class: 'g-page' },
@@ -163,13 +168,6 @@ export default class DeviceDetail {
     { requireSync: true },
   )
 
-  readonly ipv6Static = toSignal(
-    this.form.controls.ip.controls.ipv6Static.valueChanges.pipe(
-      startWith(this.form.controls.ip.controls.ipv6Static.value),
-    ),
-    { requireSync: true },
-  )
-
   constructor() {
     // Refresh device data to get latest info
     this.service.refresh()
@@ -186,17 +184,15 @@ export default class DeviceDetail {
           ip: {
             ipv4Static: data.ipv4Static,
             ipv4: data.ipv4 ?? '',
-            ipv6Static: data.ipv6Static,
-            ipv6: data.ipv6 ?? '',
           },
         })
-        updateDeviceValidators(this.form, data.ipv4Static, data.ipv6Static)
+        updateDeviceValidators(this.form, data.ipv4Static)
       }
     })
 
-    // Update validators when static toggles change
+    // Update validators when the static toggle changes
     effect(() => {
-      updateDeviceValidators(this.form, this.ipv4Static(), this.ipv6Static())
+      updateDeviceValidators(this.form, this.ipv4Static())
     })
   }
 
@@ -208,9 +204,6 @@ export default class DeviceDetail {
     )
     if (devicePorts.some(p => p.ipv4)) {
       this.form.controls.ip.controls.ipv4Static.disable()
-    }
-    if (devicePorts.some(p => p.ipv6)) {
-      this.form.controls.ip.controls.ipv6Static.disable()
     }
   }
 
@@ -229,8 +222,6 @@ export default class DeviceDetail {
       name: formValue.name,
       ipv4Static: formValue.ip.ipv4Static,
       ipv4: formValue.ip.ipv4,
-      ipv6Static: formValue.ip.ipv6Static,
-      ipv6: formValue.ip.ipv6,
     })
 
     if (success) {
@@ -261,8 +252,6 @@ export default class DeviceDetail {
         ip: {
           ipv4Static: data.ipv4Static,
           ipv4: data.ipv4 ?? '',
-          ipv6Static: data.ipv6Static,
-          ipv6: data.ipv6 ?? '',
         },
       })
     }

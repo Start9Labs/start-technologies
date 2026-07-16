@@ -30,7 +30,7 @@ Consultez les informations de l’appareil et configurez ses paramètres.
 
 ### Résumé
 
-Affiche l’état actuel de l’appareil, son type de connexion, son profil de sécurité et ses adresses IP. Une icône de cadenas indique une adresse IP réservée.
+Affiche l’état actuel de l’appareil, son type de connexion, son profil de sécurité et ses adresses IP. Une icône de cadenas indique une adresse IPv4 réservée.
 
 ### Utilisation des données
 
@@ -42,7 +42,7 @@ Attribuez un nom personnalisé pour identifier facilement cet appareil. Si le ch
 
 ### IP réservée
 
-Réservez une adresse IP pour attribuer une adresse IPv4 fixe qui ne changera pas entre les redémarrages. Utile pour les serveurs, imprimantes, appareils NAS ou tout ce que vous devez joindre par une adresse IP constante.
+Réservez une adresse IP pour attribuer une adresse IPv4 fixe qui ne changera pas entre les redémarrages. Utile pour les serveurs, imprimantes, appareils NAS ou tout ce que vous devez joindre par une adresse IP constante. Les adresses IPv6 ne peuvent pas être réservées : chaque appareil choisit lui-même son adresse IPv6, le routeur n’y a aucune influence.
 
 ### Oublier
 
@@ -334,7 +334,7 @@ Limitez qui peut se connecter en spécifiant une adresse IP ou une plage CIDR. U
 
 ### Version IP
 
-Choisissez sur quelles versions d’IP publier. IPv4 utilise le NAT pour transférer le trafic, tandis qu’IPv6 ouvre le pare-feu directement vers l’appareil.
+Choisissez sur quelles versions d’IP publier. IPv4 utilise le NAT pour transférer le trafic, tandis qu’IPv6 ouvre le pare-feu directement vers l’appareil. Comme chaque appareil choisit lui-même son adresse IPv6, une règle IPv6 suit l’adresse actuelle de l’appareil et est mise à jour automatiquement lorsque votre ISP change le préfixe IPv6.
 
 ### Port externe
 

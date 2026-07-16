@@ -187,15 +187,17 @@ const IP: Record<string, string> = {
         }
       </tui-elastic-container>
 
-      @if (reserveIpv4() || reserveIpv6()) {
+      @if (reserveIpv4()) {
         <div tuiNotification appearance="info">
-          @if (reserveIpv4() && reserveIpv6()) {
-            {{ 'Device IPv4 and IPv6 addresses will be reserved' | i18n }}
-          } @else if (reserveIpv4()) {
-            {{ 'Device IPv4 address will be reserved' | i18n }}
-          } @else {
-            {{ 'Device IPv6 address will be reserved' | i18n }}
-          }
+          {{ 'Device IPv4 address will be reserved' | i18n }}
+        </div>
+      }
+      @if (includesIpv6()) {
+        <div tuiNotification appearance="info">
+          {{
+            'IPv6 cannot be reserved — the rule follows the current IPv6 address of the device'
+              | i18n
+          }}
         </div>
       }
 
@@ -307,15 +309,11 @@ export class PublishPortDialog implements OnInit {
     return (ipVersion === 'ipv4' || ipVersion === 'both') && !device.ipv4Static
   })
 
-  // Compute if IPv6 reservation is needed
-  protected readonly reserveIpv6 = computed(() => {
-    const mac = this.selectedDeviceMac()
+  // Whether the rule includes IPv6 — shows the "cannot be reserved" note.
+  // The device chooses its own IPv6 address (SLAAC); the router cannot pin it.
+  protected readonly includesIpv6 = computed(() => {
     const ipVersion = this.selectedIpVersion()
-    const device = this.deviceMap().get(mac)
-
-    if (!device) return false
-
-    return (ipVersion === 'ipv6' || ipVersion === 'both') && !device.ipv6Static
+    return ipVersion === 'ipv6' || ipVersion === 'both'
   })
 
   protected readonly protocolValues: Protocol[] = ['tcp', 'udp', 'tcp+udp']
@@ -553,7 +551,6 @@ export class PublishPortDialog implements OnInit {
     const result: PublishedPortDialogResult = {
       port,
       reserveIpv4: this.reserveIpv4(),
-      reserveIpv6: this.reserveIpv6(),
     }
 
     this.context.completeWith(result)

@@ -803,11 +803,12 @@ struct DeviceUpdateRequest {
     name: String,
     ipv4_static: bool,
     ipv4: String,
-    ipv6_static: bool,
-    ipv6: String,
 }
 // Response: null
-// Backend: creates/updates DHCP host section, restarts dnsmasq
+// Backend: creates/updates DHCP host section, restarts dnsmasq.
+// No IPv6 fields: devices choose their own IPv6 addresses (SLAAC), so there is
+// no user-facing IPv6 reservation. The host section's `hostid` is backend
+// bookkeeping pinned by published-ports; this endpoint leaves it untouched.
 ```
 
 ### `devices.forget`

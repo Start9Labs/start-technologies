@@ -30,7 +30,7 @@ View device information and configure settings.
 
 ### Summary
 
-Displays the device's current status, connection type, security profile, and IP addresses. A lock icon indicates a reserved IP address.
+Displays the device's current status, connection type, security profile, and IP addresses. A lock icon indicates a reserved IPv4 address.
 
 ### Data Usage
 
@@ -42,7 +42,7 @@ Assign a custom name to easily identify this device. If left empty, the device's
 
 ### Reserved IP
 
-Reserve an IP address to assign a fixed IPv4 address that won't change between reboots. Useful for servers, printers, NAS devices, or anything you need to access by a consistent IP address.
+Reserve an IP address to assign a fixed IPv4 address that won't change between reboots. Useful for servers, printers, NAS devices, or anything you need to access by a consistent IP address. IPv6 addresses cannot be reserved: each device chooses its own IPv6 address, so the router has no say in it.
 
 ### Forget
 
@@ -334,7 +334,7 @@ Limit who can connect by specifying an IP address or CIDR range. Use "Any" to al
 
 ### IP Version
 
-Choose which IP versions to publish on. IPv4 uses NAT to forward traffic, while IPv6 opens the firewall directly to the device.
+Choose which IP versions to publish on. IPv4 uses NAT to forward traffic, while IPv6 opens the firewall directly to the device. Because each device chooses its own IPv6 address, an IPv6 rule follows the device's current address and is updated automatically when your ISP rotates the IPv6 prefix.
 
 ### External Port
 

@@ -16,7 +16,7 @@ export class PublishedPortsService extends FormService<PublishedPortDisplay[]> {
   private devices: Device[] = []
 
   async load(): Promise<PublishedPortDisplay[]> {
-    // Load devices (for reserveDeviceIps) and published ports in parallel
+    // Load devices (for reserveDeviceIpv4) and published ports in parallel
     const [devices, portsFromApi] = await Promise.all([
       this.devicesApi.get(),
       this.api.publishedPortsList(),
@@ -53,28 +53,23 @@ export class PublishedPortsService extends FormService<PublishedPortDisplay[]> {
   }
 
   /**
-   * Reserve static IP addresses for a device
+   * Reserve the device's current IPv4 address as a static lease. There is no
+   * IPv6 counterpart: the device chooses its own IPv6 address (SLAAC), so the
+   * router cannot reserve one.
    */
-  async reserveDeviceIps(
-    mac: string,
-    reserveIpv4: boolean,
-    reserveIpv6: boolean,
-  ): Promise<void> {
+  async reserveDeviceIpv4(mac: string): Promise<void> {
     const device = this.getDevice(mac)
     if (!device) return
 
     const updates: DeviceUpdateData = {
       name: device.name,
-      ipv4Static: reserveIpv4 ? true : device.ipv4Static,
+      ipv4Static: true,
       ipv4: device.ipv4 || '',
-      ipv6Static: reserveIpv6 ? true : device.ipv6Static,
-      ipv6: device.ipv6 || '',
     }
 
     await this.devicesApi.update(mac, updates)
 
-    if (reserveIpv4) device.ipv4Static = true
-    if (reserveIpv6) device.ipv6Static = true
+    device.ipv4Static = true
   }
 
   /**

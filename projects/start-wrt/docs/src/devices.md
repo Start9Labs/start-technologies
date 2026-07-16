@@ -12,7 +12,7 @@ Navigate to `Network > Devices` to see the device list. A search box above the l
 - **Connection** — How the device connects: Ethernet, Wi-Fi 2.4GHz, Wi-Fi 5GHz, or VPN.
 - **Security Profile** — The [Security Profile](security-profiles.md) the device is assigned to.
 - **MAC address** — The device's unique hardware identifier.
-- **IP address** — The device's IPv4 and IPv6 addresses. A lock icon indicates a reserved (static) IP address.
+- **IP address** — The device's IPv4 and IPv6 addresses. A lock icon indicates a reserved (static) IPv4 address.
 - **Data and Speed** — Cumulative data usage and real-time upload/download speed for online devices.
 
 ## Device Detail Page
@@ -25,12 +25,12 @@ Click a device name to open its detail page:
 
 - **Name** — Edit the custom display name for this device. If left empty, the device's hostname is used. Saving shows a brief spinner and a confirmation, then refreshes from the router so the displayed name always matches the saved state.
 
-- **Reserve** — Toggle on to assign a fixed IP address that persists across reboots. Separate Reserve toggles are available for the device's IPv4 and IPv6 addresses. Enter the desired IP address within the device's profile subnet. Useful for servers, printers, NAS devices, or any device that needs a consistent address. If you change a reserved address, the device picks up the new one the next time it requests an address from the router — reconnecting or rebooting the device usually applies it right away; otherwise it can take up to 12 hours, and the interface reminds you of this when you save. While an enabled [Published Ports](published-ports.md) rule uses one of the device's addresses, the Reserve toggle for that address family is locked.
+- **Reserve** — Toggle on to assign a fixed IPv4 address that persists across reboots. Enter the desired address within the device's profile subnet. Useful for servers, printers, NAS devices, or any device that needs a consistent address. If you change the reserved address, the device picks up the new one the next time it requests an address from the router — reconnecting or rebooting the device usually applies it right away; otherwise it can take up to 12 hours, and the interface reminds you of this when you save. While an enabled [Published Ports](published-ports.md) rule uses the device's IPv4 address, the Reserve toggle is locked. IPv6 addresses cannot be reserved: each device chooses its own IPv6 address (via SLAAC), so the router has no say in it — the IPv6 field is shown for reference only, and IPv6 published-port rules follow the device's current address instead.
 
 - **Forget** — Remove an offline device from the list. Custom name, reserved IP settings, and the device's cached name are lost. If the device reconnects, it will appear as a new entry.
 
 > [!TIP]
-> Reserve an IP for any device you plan to use with [Published Ports](published-ports.md). Port forwarding rules require a stable IP address to ensure traffic always reaches the correct device.
+> Reserve an IPv4 address for any device you plan to use with [Published Ports](published-ports.md). IPv4 port forwarding rules require a stable address to ensure traffic always reaches the correct device (publishing a port reserves one automatically).
 
 > [!NOTE]
 > Forgetting a device only removes it from the list. If the device reconnects, it will reappear. To prevent a device from accessing the network, delete the [Wi-Fi password](wifi.md) or [Inbound VPN client](inbound-vpn.md) it uses to connect.

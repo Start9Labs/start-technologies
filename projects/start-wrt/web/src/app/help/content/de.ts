@@ -30,7 +30,7 @@ Geräteinformationen anzeigen und Einstellungen konfigurieren.
 
 ### Übersicht
 
-Zeigt den aktuellen Status des Geräts, den Verbindungstyp, das Sicherheitsprofil und die IP-Adressen an. Ein Schloss-Symbol kennzeichnet eine reservierte IP-Adresse.
+Zeigt den aktuellen Status des Geräts, den Verbindungstyp, das Sicherheitsprofil und die IP-Adressen an. Ein Schloss-Symbol kennzeichnet eine reservierte IPv4-Adresse.
 
 ### Datennutzung
 
@@ -42,7 +42,7 @@ Vergeben Sie einen benutzerdefinierten Namen, um dieses Gerät einfach zu identi
 
 ### Reservierte IP
 
-Reservieren Sie eine IP-Adresse, um eine feste IPv4-Adresse zuzuweisen, die sich zwischen Neustarts nicht ändert. Nützlich für Server, Drucker, NAS-Geräte oder alles, was Sie über eine gleichbleibende IP-Adresse erreichen müssen.
+Reservieren Sie eine IP-Adresse, um eine feste IPv4-Adresse zuzuweisen, die sich zwischen Neustarts nicht ändert. Nützlich für Server, Drucker, NAS-Geräte oder alles, was Sie über eine gleichbleibende IP-Adresse erreichen müssen. IPv6-Adressen können nicht reserviert werden: Jedes Gerät wählt seine IPv6-Adresse selbst, der Router hat darauf keinen Einfluss.
 
 ### Entfernen
 
@@ -334,7 +334,7 @@ Beschränken Sie, wer sich verbinden darf, indem Sie eine IP-Adresse oder einen 
 
 ### IP-Version
 
-Wählen Sie, über welche IP-Versionen veröffentlicht werden soll. IPv4 verwendet NAT, um Datenverkehr weiterzuleiten, während IPv6 die Firewall direkt zum Gerät öffnet.
+Wählen Sie, über welche IP-Versionen veröffentlicht werden soll. IPv4 verwendet NAT, um Datenverkehr weiterzuleiten, während IPv6 die Firewall direkt zum Gerät öffnet. Da jedes Gerät seine IPv6-Adresse selbst wählt, folgt eine IPv6-Regel der aktuellen Adresse des Geräts und wird automatisch aktualisiert, wenn Ihr ISP das IPv6-Präfix wechselt.
 
 ### Externer Port
 

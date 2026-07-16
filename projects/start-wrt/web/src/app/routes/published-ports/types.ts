@@ -35,7 +35,6 @@ export interface PublishedPort {
 export interface PublishedPortDialogResult {
   port: PublishedPort
   reserveIpv4: boolean
-  reserveIpv6: boolean
 }
 
 export interface PublishedPortDisplay extends PublishedPort {

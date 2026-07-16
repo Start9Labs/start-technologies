@@ -957,9 +957,7 @@ export class MockApiService extends ApiService {
     if (existing) {
       existing.options.name = params.name
       existing.options.ip = params.ipv4_static ? params.ipv4 : undefined
-      existing.options.hostid = params.ipv6_static
-        ? `1::${parseInt(params.ipv6.split(':').pop() || '0', 16)}`
-        : undefined
+      // hostid untouched — backend bookkeeping, pinned by published-ports
     } else {
       this.mockDeviceHosts.push({
         type: 'host',
@@ -968,9 +966,6 @@ export class MockApiService extends ApiService {
           mac: params.mac,
           name: params.name,
           ip: params.ipv4_static ? params.ipv4 : undefined,
-          hostid: params.ipv6_static
-            ? `1::${parseInt(params.ipv6.split(':').pop() || '0', 16)}`
-            : undefined,
           dns: '1',
         },
         lists: {},

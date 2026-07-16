@@ -30,7 +30,7 @@ Wyświetl informacje o urządzeniu i skonfiguruj ustawienia.
 
 ### Podsumowanie
 
-Wyświetla bieżący stan urządzenia, typ połączenia, profil bezpieczeństwa oraz adresy IP. Ikona kłódki oznacza zarezerwowany adres IP.
+Wyświetla bieżący stan urządzenia, typ połączenia, profil bezpieczeństwa oraz adresy IP. Ikona kłódki oznacza zarezerwowany adres IPv4.
 
 ### Wykorzystanie danych
 
@@ -42,7 +42,7 @@ Przypisz niestandardową nazwę, aby łatwo zidentyfikować to urządzenie. Jeś
 
 ### Zarezerwowany IP
 
-Zarezerwuj adres IP, aby przypisać stały adres IPv4, który nie zmieni się między ponownymi uruchomieniami. Przydatne dla serwerów, drukarek, urządzeń NAS lub wszystkiego, do czego potrzebujesz dostępu pod spójnym adresem IP.
+Zarezerwuj adres IP, aby przypisać stały adres IPv4, który nie zmieni się między ponownymi uruchomieniami. Przydatne dla serwerów, drukarek, urządzeń NAS lub wszystkiego, do czego potrzebujesz dostępu pod spójnym adresem IP. Adresów IPv6 nie można rezerwować: każde urządzenie samo wybiera swój adres IPv6, więc router nie ma na to wpływu.
 
 ### Zapomnij
 
@@ -334,7 +334,7 @@ Ogranicz, kto może się łączyć, określając adres IP lub zakres CIDR. Użyj
 
 ### Wersja IP
 
-Wybierz, na których wersjach IP publikować. IPv4 używa NAT do przekierowywania ruchu, podczas gdy IPv6 otwiera zaporę bezpośrednio do urządzenia.
+Wybierz, na których wersjach IP publikować. IPv4 używa NAT do przekierowywania ruchu, podczas gdy IPv6 otwiera zaporę bezpośrednio do urządzenia. Ponieważ każde urządzenie samo wybiera swój adres IPv6, reguła IPv6 podąża za bieżącym adresem urządzenia i jest aktualizowana automatycznie, gdy ISP zmieni prefiks IPv6.
 
 ### Port zewnętrzny
 

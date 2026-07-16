@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **The IPv6 "Reserve" option has been removed — it never worked and never
+  could.** Devices choose their own IPv6 addresses via SLAAC, so a router
+  cannot reserve one; the toggle wrote a DHCPv6 hint that no mainstream
+  client ever requests. The device page now shows the IPv6 address read-only
+  with an explanation, publishing a port no longer claims the IPv6 address
+  "will be reserved" (the rule follows the device's current address, and is
+  re-resolved when the ISP rotates the delegated prefix), and the LAN IPv6
+  SLAAC toggle now locks while enabled published-port rules use IPv6 rather
+  than when "reserved" devices exist. The `devices.update` RPC no longer
+  accepts `ipv6_static`/`ipv6` fields. IPv4 reservations are unchanged.
+
 - **The Start9 DDNS provider option has been removed.** The Start9 DDNS
   service has not launched yet, so selecting it saved a configuration that
   could never update a DNS record. Configurations previously saved with the

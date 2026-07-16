@@ -56,7 +56,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
           <i
             [tuiHint]="
               slaacLocked()
-                ? ('Cannot disable: devices with static IPv6 reservations exist'
+                ? ('Cannot disable: published port rules use device IPv6 addresses'
                   | i18n)
                 : ''
             "
@@ -149,8 +149,11 @@ export default class LanIpv6 {
   }
 
   private async loadIpv6Dependencies() {
-    const devices = await this.api.devicesList()
-    if (devices.some(d => d.ipv6_static)) {
+    // Disabling SLAAC would break every IPv6 published-port rule (devices
+    // would lose their global addresses), so lock the toggle while any
+    // enabled rule forwards over IPv6.
+    const ports = await this.api.publishedPortsList()
+    if (ports.some(p => p.enabled && p.ipv6)) {
       this.slaacLocked.set(true)
       if (this.slaacEnabled()) {
         this.form.controls.strategy.controls.slaac.disable()
