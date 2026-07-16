@@ -22,9 +22,12 @@ To set up DDNS:
 
 1. Toggle **Enable Dynamic DNS** on and select your provider.
 
-1. Fill in the fields your provider requires: DynDNS and No-IP need a username and password; DuckDNS and FreeDNS need an API token; Cloudflare needs an API token and the Zone ID of your domain. Every provider also needs the hostname you have registered with it.
+1. Fill in the fields your provider requires: DynDNS and No-IP need a username and password; DuckDNS and FreeDNS need an API token; Cloudflare needs an API token and the zone — the domain registered with Cloudflare, e.g. `example.com`. Every provider also needs the hostname you have registered with it; for Cloudflare, the hostname must be the zone itself or a name under it, such as `router.example.com`.
 
 1. Click "Save".
+
+> [!NOTE]
+> For Cloudflare, the DNS record must already exist in your zone — StartWRT updates it but does not create it, so add the A record in the Cloudflare dashboard first. The API token needs **Zone → Read** and **DNS → Edit** permissions for the zone.
 
 ## Checking Your DDNS Status
 
