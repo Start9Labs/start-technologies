@@ -311,18 +311,25 @@ cmd_pre_check() {
     local errors=0
     echo "Pre-checking ${PROJECT} v${VERSION} (tag ${TAG})..."
 
-    # 1. Changelog must document this version explicitly (not just Unreleased).
-    local changelog ver_re
+    # 1. The TOP changelog heading must be this prospective version explicitly
+    #    (never `## [Unreleased]`) — see root AGENTS.md changelog rule. Testing the
+    #    first `## ` heading (not the whole file) rejects a stale `## [Unreleased]`
+    #    sitting above the version heading, which would also drop its entries from
+    #    the generated release notes (changelog_section reads from the heading down).
+    local changelog ver_re first_heading
     changelog=$(changelog_path "$PROJECT")
     ver_re=${VERSION//./\\.}
     if [ ! -f "$changelog" ]; then
         >&2 echo "  ✗ no CHANGELOG.md at $changelog"
         errors=1
-    elif ! grep -qE "^##[[:space:]]+\[?${ver_re}(]| |\$)" "$changelog"; then
-        >&2 echo "  ✗ CHANGELOG.md has no explicit heading for ${VERSION}"
-        errors=1
     else
-        echo "  ✓ changelog documents ${VERSION}"
+        first_heading=$(grep -m1 -E '^## ' "$changelog")
+        if printf '%s\n' "$first_heading" | grep -qE "^##[[:space:]]+\[?${ver_re}(]| |\$)"; then
+            echo "  ✓ top changelog heading is ${VERSION}"
+        else
+            >&2 echo "  ✗ top CHANGELOG.md heading must be ${VERSION} (found: ${first_heading:-none}); a bare '## [Unreleased]' top heading is not allowed — see root AGENTS.md"
+            errors=1
+        fi
     fi
 
     # 1b. StartOS install/update docs pin the GitHub release link to the version

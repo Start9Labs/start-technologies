@@ -7947,7 +7947,7 @@ dependencies = [
 
 [[package]]
 name = "startwrt-core"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "arc-swap",
  "async_cell",

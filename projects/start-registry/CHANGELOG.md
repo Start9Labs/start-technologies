@@ -2,8 +2,6 @@
 
 All notable changes to `start-registry` (the Start Registry server) are documented here. This project is versioned **independently** (starting at `1.0.0`); its version lives in `Cargo.toml`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
-
 ## [1.0.0]
 
 - **`--version` reports `start-registry`'s own version** (`1.0.0`), not the StartOS platform
@@ -40,5 +38,4 @@ The registry server as it ships in this monorepo. Built as the multi-call binary
 - Inherits the workspace-wide dependency and advisory cleanup shipped this release — resolved Dependabot alerts across the Rust workspace (#3301) and forked-dep RUSTSEC advisories in tokio-tar and async-acme (#3303).
 - Outbound fetches that route through the host SOCKS proxy now correctly handle `.onion` (Tor) and `.local` (mDNS) targets (b5dec33cf).
 
-[Unreleased]: https://github.com/Start9Labs/start-technologies
 [0.4.0-beta.10]: https://github.com/Start9Labs/start-technologies

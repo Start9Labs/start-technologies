@@ -1,7 +1,7 @@
 [package]
 edition = "2021"
 name = "startwrt-core"
-version = "1.0.1"
+version = "1.0.2"
 
 [lib]
 name = "startwrt"
