@@ -661,3 +661,23 @@ fn test_appended_section_readable_without_roundtrip() {
     let read_back: Bar = config.sections[0].get().unwrap();
     assert_eq!(read_back, section);
 }
+
+#[test]
+fn test_unknown_interface_proto_roundtrip() {
+    use crate::openwrt::{InterfaceProto, NetworkInterface};
+
+    // A proto startwrt doesn't manage (e.g. a hand-configured 6in4 tunnel)
+    // must parse instead of erroring, and write back verbatim.
+    let original = r"config interface 'wan6'
+    option device '@wan'
+    option proto '6in4'
+";
+
+    let arena = Arena::new();
+    let mut config = Config::parse_str(&arena, original).unwrap();
+    let iface: NetworkInterface = config.sections[0].get().unwrap();
+    assert_eq!(iface.proto, InterfaceProto::UNKNOWN("6in4".to_string()));
+
+    config.sections[0].set(&iface).unwrap();
+    assert!(config.dump_str().contains("option proto '6in4'"));
+}

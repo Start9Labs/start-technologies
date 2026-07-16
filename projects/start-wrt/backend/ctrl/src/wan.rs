@@ -1278,6 +1278,30 @@ config service 'wan'
     }
 
     #[tokio::test]
+    async fn ipv6_get_unmanaged_proto() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("network"),
+            "\
+config interface 'wan'
+\toption device 'eth1'
+\toption proto 'dhcp'
+
+config interface 'wan6'
+\toption device '@wan'
+\toption proto '6in4'
+",
+        )
+        .unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        // A hand-configured proto startwrt doesn't manage reads back as
+        // Disabled — it used to fail typed parsing and error the endpoint.
+        let res = ipv6_get(ctx).await.unwrap();
+        assert_eq!(res.mode, WanIpv6Mode::Disabled);
+    }
+
+    #[tokio::test]
     async fn ipv6_set_disabled() {
         let dir = tempfile::tempdir().unwrap();
         setup_network(dir.path());
