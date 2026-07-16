@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **The Start9 DDNS provider option has been removed.** The Start9 DDNS
+  service has not launched yet, so selecting it saved a configuration that
+  could never update a DNS record. Configurations previously saved with the
+  Start9 provider now read back as Dynamic DNS disabled; pick one of the
+  supported providers to re-enable. The option will return when the Start9
+  service goes live.
+
 ### Fixed
 
 - **Documentation corrected against the code in a full docs-vs-code audit.** The

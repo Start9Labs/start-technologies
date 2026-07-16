@@ -394,8 +394,7 @@ Włącz DNS over HTTPS (DoH) dla szyfrowanych zapytań DNS. Poprawia to prywatno
 
 DDNS mapuje Twój zmieniający się adres IP na stałą nazwę domeny, umożliwiając zdalny dostęp do Twojej sieci bez znajomości bieżącego adresu IP.
 
--   **Start9:** Darmowa usługa DDNS dostarczana przez Start9. Nie wymaga dodatkowej konfiguracji.
--   **Inni dostawcy:** Wymaga konta u dostawcy. Wprowadź dane uwierzytelniające i nazwę hosta od swojego dostawcy DDNS.`,
+Wymaga konta u obsługiwanego dostawcy. Wprowadź dane uwierzytelniające i nazwę hosta od swojego dostawcy DDNS.`,
   '/settings/activity': `## Ustawienia – Aktywność
 
 Wyświetl ostatnie próby logowania i zdarzenia bezpieczeństwa. Monitoruj podejrzaną aktywność i usuwaj stare wpisy w razie potrzeby.`,

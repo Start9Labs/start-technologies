@@ -394,8 +394,7 @@ Activez le DNS over HTTPS (DoH) pour des requêtes DNS chiffrées. Cela amélior
 
 Le DDNS associe votre adresse IP changeante à un nom de domaine fixe, vous permettant d’accéder à votre réseau à distance sans connaître votre adresse IP actuelle.
 
--   **Start9 :** Service DDNS gratuit fourni par Start9. Aucune configuration supplémentaire requise.
--   **Autres fournisseurs :** Nécessite un compte chez le fournisseur. Saisissez les identifiants et le nom d’hôte de votre fournisseur DDNS.`,
+Nécessite un compte chez un fournisseur pris en charge. Saisissez les identifiants et le nom d’hôte de votre fournisseur DDNS.`,
   '/settings/activity': `## Paramètres – Activité
 
 Consultez les tentatives de connexion récentes et les évènements de sécurité. Surveillez les activités suspectes et supprimez les anciennes entrées selon vos besoins.`,

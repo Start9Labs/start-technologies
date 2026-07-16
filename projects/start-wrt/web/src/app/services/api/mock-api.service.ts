@@ -143,15 +143,6 @@ export class MockApiService extends ApiService {
       }
     }
 
-    // Mock Start9 DDNS hostname file
-    if (params.command === 'cat' && params.args[0] === '/etc/start9/hostname') {
-      return {
-        exitCode: 0,
-        stdout: 'abc123xyz.start9.net',
-        stderr: '',
-      }
-    }
-
     // Handle service restart commands
     if (
       params.command === '/etc/init.d/firewall' ||
@@ -1221,7 +1212,6 @@ export class MockApiService extends ApiService {
     await pauseFor(250)
     // Only store fields relevant to the selected provider (matches real backend)
     const providerFields: Record<string, readonly string[]> = {
-      start9: [],
       dyndns: ['username', 'password', 'hostname'],
       noip: ['username', 'password', 'hostname'],
       cloudflare: ['token', 'zone', 'hostname'],

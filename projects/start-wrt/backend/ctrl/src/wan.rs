@@ -148,7 +148,6 @@ pub struct WanDnsSetRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum DdnsProvider {
-    Start9,
     Dyndns,
     Noip,
     Cloudflare,
@@ -182,7 +181,6 @@ pub struct WanDdnsSetRequest {
 
 fn provider_to_service(p: &DdnsProvider) -> &'static str {
     match p {
-        DdnsProvider::Start9 => "start9",
         DdnsProvider::Dyndns => "dyndns.org",
         DdnsProvider::Noip => "no-ip.com",
         DdnsProvider::Cloudflare => "cloudflare.com-v4",
@@ -193,15 +191,17 @@ fn provider_to_service(p: &DdnsProvider) -> &'static str {
     }
 }
 
-fn service_to_provider(s: &str) -> DdnsProvider {
+/// None for unknown service names (e.g. the never-launched "start9"),
+/// which read back as the disabled default.
+fn service_to_provider(s: &str) -> Option<DdnsProvider> {
     match s {
-        "dyndns.org" => DdnsProvider::Dyndns,
-        "no-ip.com" => DdnsProvider::Noip,
-        "cloudflare.com-v4" => DdnsProvider::Cloudflare,
-        "duckdns.org" => DdnsProvider::Duckdns,
+        "dyndns.org" => Some(DdnsProvider::Dyndns),
+        "no-ip.com" => Some(DdnsProvider::Noip),
+        "cloudflare.com-v4" => Some(DdnsProvider::Cloudflare),
+        "duckdns.org" => Some(DdnsProvider::Duckdns),
         // "freedns.afraid.org" is the legacy name written by earlier builds
-        "afraid.org-keyauth" | "freedns.afraid.org" => DdnsProvider::Freedns,
-        _ => DdnsProvider::Start9,
+        "afraid.org-keyauth" | "freedns.afraid.org" => Some(DdnsProvider::Freedns),
+        _ => None,
     }
 }
 
@@ -283,14 +283,6 @@ async fn get_default_mac(dev_name: &str) -> String {
         }
     }
     "00:00:00:00:00:00".to_string()
-}
-
-async fn get_start9_hostname() -> Option<String> {
-    tokio::fs::read_to_string("/etc/start9/hostname")
-        .await
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
 }
 
 async fn restart_network() {
@@ -968,18 +960,13 @@ pub async fn ddns_get<C: CtrlContext>(ctx: C) -> Result<WanDdnsResponse, Error> 
     for section in &cfgs["ddns"].sections {
         if section.name().as_deref() == Some(DDNS_SECTION) {
             if let Some(svc) = section.get_typed::<DdnsService>()? {
-                let provider = service_to_provider(svc.service_name.as_deref().unwrap_or("start9"));
-                let enabled = svc.enabled.as_deref() == Some("1");
-
-                let hostname = if provider == DdnsProvider::Start9 && enabled {
-                    if ctx.effectful() {
-                        get_start9_hostname().await
-                    } else {
-                        None
-                    }
-                } else {
-                    svc.domain.or(svc.lookup_host)
+                // Unknown service names fall through to the disabled default
+                let Some(provider) = svc.service_name.as_deref().and_then(service_to_provider)
+                else {
+                    break;
                 };
+                let enabled = svc.enabled.as_deref() == Some("1");
+                let hostname = svc.domain.or(svc.lookup_host);
 
                 // For token-based providers (Cloudflare, DuckDNS, FreeDNS),
                 // the password field stores the token
@@ -1005,7 +992,7 @@ pub async fn ddns_get<C: CtrlContext>(ctx: C) -> Result<WanDdnsResponse, Error> 
 
     Ok(WanDdnsResponse {
         enabled: false,
-        provider: DdnsProvider::Start9,
+        provider: DdnsProvider::Dyndns,
         hostname: None,
         username: None,
         password: None,
@@ -1034,23 +1021,23 @@ pub async fn ddns_set<C: CtrlContext>(
             service_name: Some(provider_to_service(&req.provider).to_string()),
             ip_source: Some("network".to_string()),
             ip_network: Some("wan".to_string()),
-            username: if req.enabled && req.provider != DdnsProvider::Start9 {
+            username: if req.enabled {
                 req.username.clone()
             } else {
                 None
             },
-            password: if req.enabled && req.provider != DdnsProvider::Start9 {
+            password: if req.enabled {
                 // Token-based providers use the password field
                 req.token.clone().or(req.password.clone())
             } else {
                 None
             },
-            domain: if req.enabled && req.provider != DdnsProvider::Start9 {
+            domain: if req.enabled {
                 req.hostname.clone()
             } else {
                 None
             },
-            lookup_host: if req.enabled && req.provider != DdnsProvider::Start9 {
+            lookup_host: if req.enabled {
                 req.hostname.clone()
             } else {
                 None
@@ -1432,7 +1419,51 @@ config zone
 
         let res = ddns_get(ctx).await.unwrap();
         assert!(!res.enabled);
-        assert_eq!(res.provider, DdnsProvider::Start9);
+        assert_eq!(res.provider, DdnsProvider::Dyndns);
+    }
+
+    #[tokio::test]
+    async fn ddns_get_stale_start9_reads_back_disabled() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("ddns"),
+            "\
+config service 'wan'
+\toption enabled '1'
+\toption service_name 'start9'
+\toption ip_source 'network'
+\toption ip_network 'wan'
+",
+        )
+        .unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        let res = ddns_get(ctx).await.unwrap();
+        assert!(!res.enabled);
+        assert_eq!(res.provider, DdnsProvider::Dyndns);
+        assert_eq!(res.hostname, None);
+        assert_eq!(res.username, None);
+        assert_eq!(res.password, None);
+        assert_eq!(res.token, None);
+    }
+
+    #[tokio::test]
+    async fn ddns_get_missing_service_name_reads_back_disabled() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("ddns"),
+            "\
+config service 'wan'
+\toption enabled '1'
+",
+        )
+        .unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        let res = ddns_get(ctx).await.unwrap();
+        assert!(!res.enabled);
+        assert_eq!(res.provider, DdnsProvider::Dyndns);
+        assert_eq!(res.hostname, None);
     }
 
     #[tokio::test]

@@ -394,8 +394,7 @@ Aktivieren Sie DNS over HTTPS (DoH) für verschlüsselte DNS-Abfragen. Dies verb
 
 DDNS ordnet Ihre wechselnde IP-Adresse einem festen Domänennamen zu, sodass Sie aus der Ferne auf Ihr Netzwerk zugreifen können, ohne Ihre aktuelle IP zu kennen.
 
--   **Start9:** Kostenloser DDNS-Dienst von Start9. Keine zusätzliche Einrichtung erforderlich.
--   **Andere Anbieter:** Erfordert ein Konto beim Anbieter. Geben Sie die Zugangsdaten und den Hostnamen Ihres DDNS-Anbieters ein.`,
+Erfordert ein Konto bei einem unterstützten Anbieter. Geben Sie die Zugangsdaten und den Hostnamen Ihres DDNS-Anbieters ein.`,
   '/settings/activity': `## Einstellungen – Aktivität
 
 Zeigt aktuelle Anmeldeversuche und Sicherheitsereignisse an. Überwachen Sie verdächtige Aktivitäten und entfernen Sie bei Bedarf alte Einträge.`,

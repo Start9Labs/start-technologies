@@ -394,8 +394,7 @@ Habilita DNS over HTTPS (DoH) para consultas DNS cifradas. Esto mejora la privac
 
 DDNS asigna tu dirección IP cambiante a un nombre de dominio fijo, permitiéndote acceder a tu red de forma remota sin conocer tu IP actual.
 
--   **Start9:** Servicio DDNS gratuito proporcionado por Start9. No requiere configuración adicional.
--   **Otros proveedores:** Requiere una cuenta con el proveedor. Introduce las credenciales y el nombre de host de tu proveedor de DDNS.`,
+Requiere una cuenta con un proveedor compatible. Introduce las credenciales y el nombre de host de tu proveedor de DDNS.`,
   '/settings/activity': `## Ajustes – Actividad
 
 Consulta los intentos de inicio de sesión recientes y los eventos de seguridad. Vigila la actividad sospechosa y elimina las entradas antiguas según sea necesario.`,

@@ -394,8 +394,7 @@ Enable DNS over HTTPS (DoH) for encrypted DNS queries. This improves privacy by 
 
 DDNS maps your changing IP address to a fixed domain name, allowing you to access your network remotely without knowing your current IP.
 
--   **Start9:** Free DDNS service provided by Start9. No additional setup required.
--   **Other providers:** Requires an account with the provider. Enter the credentials and hostname from your DDNS provider.`,
+Requires an account with a supported provider. Enter the credentials and hostname from your DDNS provider.`,
   '/settings/activity': `## Settings – Activity
 
 View recent login attempts and security events. Monitor for suspicious activity and remove old entries as needed.`,

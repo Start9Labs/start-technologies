@@ -583,7 +583,6 @@ export type WanDnsSetRequest = {
 }
 
 export type WanDdnsProvider =
-  | 'start9'
   | 'dyndns'
   | 'noip'
   | 'cloudflare'

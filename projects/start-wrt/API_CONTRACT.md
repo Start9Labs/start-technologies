@@ -535,7 +535,6 @@ struct WanDnsSetRequest {
 #[derive(Serialize)]
 #[serde(rename_all = "lowercase")]
 enum DdnsProvider {
-    Start9,
     Dyndns,
     Noip,
     Cloudflare,
@@ -547,7 +546,7 @@ enum DdnsProvider {
 struct WanDdnsResponse {
     enabled: bool,
     provider: DdnsProvider,
-    /// The resolved/active hostname (auto-detected for Start9, user-configured for others)
+    /// The hostname registered with the provider
     hostname: Option<String>,
     /// Provider-specific fields
     username: Option<String>,
@@ -556,6 +555,10 @@ struct WanDdnsResponse {
     zone: Option<String>,
 }
 ```
+
+A UCI section with an unknown or legacy `service_name` (e.g. `start9`, whose
+service never launched) reads back as the disabled default (`enabled: false`,
+`provider: dyndns`, all fields null).
 
 ### `wan.ddns-set`
 

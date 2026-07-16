@@ -3,10 +3,6 @@ import { FormRawValue } from 'src/app/services/form.service'
 
 // Provider configurations with their required fields
 export const DDNS_PROVIDERS = {
-  start9: {
-    label: 'Start9',
-    fields: [],
-  },
   dyndns: {
     label: 'DynDNS',
     fields: ['username', 'password', 'hostname'],
@@ -48,7 +44,7 @@ export const DDNS_VALIDATION_ERRORS = {
 export function getDdnsForm(builder: NonNullableFormBuilder) {
   return builder.group({
     enabled: builder.control(false),
-    provider: builder.control<DdnsProvider>('start9'),
+    provider: builder.control<DdnsProvider>('dyndns'),
     fields: builder.group({
       username: builder.control(''),
       password: builder.control(''),
