@@ -36,14 +36,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configurations must be re-saved with the zone filled in. Note that the
   DNS record must already exist in Cloudflare (the client updates records,
   it does not create them), and the API token needs Zone:Read and DNS:Edit
-  permissions.
+  permissions. Proxied (orange-cloud) records are supported: the client
+  reads the registered IP through the Cloudflare API rather than DNS, which
+  would only ever see the proxy's address.
 - **Dynamic DNS now actually updates your provider.** The image was missing
   the `ddns-scripts` update client (and its Cloudflare and No-IP extensions),
   so DDNS settings were saved but no DNS record was ever updated. The FreeDNS
   provider also pointed at a service name (`freedns.afraid.org`) that modern
   `ddns-scripts` no longer recognizes; it now uses the afraid.org update-key
   service (`afraid.org-keyauth`), and configurations saved with the old name
-  are still read back correctly.
+  are still read back correctly. DDNS configurations are also bound to the
+  WAN interface, so an update fires the moment the connection comes back up
+  (e.g. after a modem reboot or PPPoE reconnect) instead of waiting for the
+  next scheduled check.
 
 ## [1.0.1]
 

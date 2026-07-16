@@ -498,6 +498,14 @@ pub struct DdnsService {
     pub ip_source: Option<String>,
     #[uci(default)]
     pub ip_network: Option<String>,
+    /// Binds the section to hotplug ifup/ifdown events for this interface
+    #[uci(default)]
+    pub interface: Option<String>,
+    /// Read the registered IP via the provider's API instead of DNS —
+    /// required for proxied Cloudflare records, whose DNS answer is the
+    /// proxy IP and would otherwise trigger an update every check cycle
+    #[uci(default)]
+    pub use_api_check: Option<String>,
     #[uci(default)]
     pub username: Option<String>,
     #[uci(default)]

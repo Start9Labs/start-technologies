@@ -584,8 +584,11 @@ For Cloudflare, `zone` is required and must be the domain registered with
 Cloudflare (e.g. `example.com`), and `hostname` must be that zone itself
 (apex record) or a name under it; anything else is rejected with
 `InvalidRequest`. The backend translates to the shape ddns-scripts'
-cloudflare script expects: `username 'Bearer'` and `domain 'host@zone'`
-(`'@zone'` for the apex).
+cloudflare script expects: `username 'Bearer'`, `domain 'host@zone'`
+(`'@zone'` for the apex), and `use_api_check '1'` so proxied (orange-cloud)
+records compare against the record's real content instead of the proxy IP.
+Every provider's section also gets `interface 'wan'`, binding it to hotplug
+so updates fire immediately on WAN reconnect.
 
 ---
 

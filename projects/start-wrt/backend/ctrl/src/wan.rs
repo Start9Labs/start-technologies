@@ -1071,6 +1071,14 @@ pub async fn ddns_set<C: CtrlContext>(
             service_name: Some(provider_to_service(&req.provider).to_string()),
             ip_source: Some("network".to_string()),
             ip_network: Some("wan".to_string()),
+            // Hotplug binding: re-run the update as soon as the WAN bounces
+            // instead of waiting for the daemon's next check interval
+            interface: Some("wan".to_string()),
+            use_api_check: if req.provider == DdnsProvider::Cloudflare {
+                Some("1".to_string())
+            } else {
+                None
+            },
             username: if req.enabled { username.clone() } else { None },
             password: if req.enabled { password.clone() } else { None },
             domain: if req.enabled { domain.clone() } else { None },
@@ -1529,6 +1537,9 @@ config service 'wan'
         assert!(raw.contains("option username 'Bearer'"));
         assert!(raw.contains("option domain 'mysite@example.com'"));
         assert!(raw.contains("option lookup_host 'mysite.example.com'"));
+        assert!(raw.contains("option interface 'wan'"));
+        // Proxied records need the API check or every cycle looks stale
+        assert!(raw.contains("option use_api_check '1'"));
 
         let res = ddns_get(ctx).await.unwrap();
         assert!(res.enabled);
@@ -1665,6 +1676,9 @@ config service 'wan'
 
         let raw = std::fs::read_to_string(dir.path().join("ddns")).unwrap();
         assert!(raw.contains("option service_name 'afraid.org-keyauth'"));
+        assert!(raw.contains("option interface 'wan'"));
+        // The API check is Cloudflare-specific
+        assert!(!raw.contains("use_api_check"));
 
         let res = ddns_get(ctx).await.unwrap();
         assert!(res.enabled);
@@ -2388,5 +2402,47 @@ config service 'wan'
             res.username.is_none(),
             "username should not be set for token-based provider"
         );
+    }
+
+    #[tokio::test]
+    async fn ddns_switch_away_from_cloudflare_clears_api_check() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("ddns"), "").unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        ddns_set(
+            ctx.clone(),
+            DeserializeStdin(WanDdnsSetRequest {
+                enabled: true,
+                provider: DdnsProvider::Cloudflare,
+                hostname: Some("mysite.example.com".to_string()),
+                username: None,
+                password: None,
+                token: Some("cf-api-token-123".to_string()),
+                zone: Some("example.com".to_string()),
+            }),
+        )
+        .await
+        .unwrap();
+
+        ddns_set(
+            ctx.clone(),
+            DeserializeStdin(WanDdnsSetRequest {
+                enabled: true,
+                provider: DdnsProvider::Duckdns,
+                hostname: Some("myhost.duckdns.org".to_string()),
+                username: None,
+                password: None,
+                token: Some("duck-token".to_string()),
+                zone: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        let raw = std::fs::read_to_string(dir.path().join("ddns")).unwrap();
+        assert!(!raw.contains("use_api_check"));
+        assert!(!raw.contains("Bearer"));
+        assert!(raw.contains("option interface 'wan'"));
     }
 }
