@@ -552,6 +552,8 @@ struct WanDdnsResponse {
     username: Option<String>,
     password: Option<String>,
     token: Option<String>,
+    /// Cloudflare only: the zone's root domain (null for configs saved
+    /// before the zone was stored)
     zone: Option<String>,
 }
 ```
@@ -577,6 +579,13 @@ struct WanDdnsSetRequest {
 // Response: null
 // Backend: updates UCI ddns config, restarts/stops ddns service
 ```
+
+For Cloudflare, `zone` is required and must be the domain registered with
+Cloudflare (e.g. `example.com`), and `hostname` must be that zone itself
+(apex record) or a name under it; anything else is rejected with
+`InvalidRequest`. The backend translates to the shape ddns-scripts'
+cloudflare script expects: `username 'Bearer'` and `domain 'host@zone'`
+(`'@zone'` for the apex).
 
 ---
 

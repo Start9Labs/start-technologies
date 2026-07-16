@@ -225,7 +225,6 @@ export default {
   222: 'Terciario',
   223: 'Nombre de usuario',
   224: 'IP de WAN',
-  225: 'ID de zona',
   226: '6RD',
   227: 'IPv4',
   228: 'IPv6',
@@ -524,4 +523,5 @@ export default {
   527: 'El puerto publicado quedará expuesto',
   528: 'El perfil «{profile}» enruta el tráfico a través de una VPN ({vpn}), pero los puertos publicados se alcanzan a través de tu conexión a internet pública (WAN), no de la VPN. Los siguientes puertos permanecerán expuestos en tu dirección IP pública real: {list}.',
   529: 'Exponer y continuar',
+  530: 'Zona',
 } satisfies i18n

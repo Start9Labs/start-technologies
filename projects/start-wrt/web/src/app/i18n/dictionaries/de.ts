@@ -225,7 +225,6 @@ export default {
   222: 'Tertiär',
   223: 'Benutzername',
   224: 'WAN-IP',
-  225: 'Zonen-ID',
   226: '6RD',
   227: 'IPv4',
   228: 'IPv6',
@@ -524,4 +523,5 @@ export default {
   527: 'Veröffentlichter Port wird offengelegt',
   528: 'Das Profil „{profile}“ wird über ein VPN ({vpn}) geleitet, veröffentlichte Ports werden jedoch über Ihre öffentliche Internetverbindung (WAN) erreicht, nicht über das VPN. Die folgenden Ports bleiben unter Ihrer echten öffentlichen IP-Adresse erreichbar: {list}.',
   529: 'Offenlegen und fortfahren',
+  530: 'Zone',
 } satisfies i18n

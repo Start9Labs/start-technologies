@@ -34,7 +34,7 @@ export const DDNS_FIELD_LABELS: Record<string, string> = {
   password: 'Password',
   hostname: 'Hostname',
   token: 'API Token',
-  zone: 'Zone ID',
+  zone: 'Zone',
 }
 
 export const DDNS_VALIDATION_ERRORS = {

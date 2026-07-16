@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   corrected `API_CONTRACT.md` wire types and documented the previously missing
   endpoints, and fixed stale paths, commands, and structure descriptions across
   the developer docs.
+- **Cloudflare Dynamic DNS now saves a working configuration.** The saved
+  config was missing fields the update client requires (the Bearer-token
+  marker and the zone), so Cloudflare updates could never succeed. The form
+  now asks for the **Zone** — the domain registered with Cloudflare, e.g.
+  `example.com` — instead of a Zone ID. Previously saved Cloudflare
+  configurations must be re-saved with the zone filled in. Note that the
+  DNS record must already exist in Cloudflare (the client updates records,
+  it does not create them), and the API token needs Zone:Read and DNS:Edit
+  permissions.
 - **Dynamic DNS now actually updates your provider.** The image was missing
   the `ddns-scripts` update client (and its Cloudflare and No-IP extensions),
   so DDNS settings were saved but no DNS record was ever updated. The FreeDNS

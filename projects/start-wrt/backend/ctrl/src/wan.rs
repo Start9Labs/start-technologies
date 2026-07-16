@@ -966,7 +966,22 @@ pub async fn ddns_get<C: CtrlContext>(ctx: C) -> Result<WanDdnsResponse, Error> 
                     break;
                 };
                 let enabled = svc.enabled.as_deref() == Some("1");
-                let hostname = svc.domain.or(svc.lookup_host);
+
+                // For Cloudflare, domain holds the update script's `host@zone`
+                // composite, so the FQDN lives in lookup_host; configs saved
+                // before the composite existed stored the bare FQDN in domain
+                // (no '@'), which reads back with zone: None
+                let (hostname, zone) = match provider {
+                    DdnsProvider::Cloudflare => {
+                        let zone = svc
+                            .domain
+                            .as_deref()
+                            .and_then(|d| d.split_once('@'))
+                            .map(|(_, z)| z.to_string());
+                        (svc.lookup_host.or(svc.domain), zone)
+                    }
+                    _ => (svc.domain.or(svc.lookup_host), None),
+                };
 
                 // For token-based providers (Cloudflare, DuckDNS, FreeDNS),
                 // the password field stores the token
@@ -984,7 +999,7 @@ pub async fn ddns_get<C: CtrlContext>(ctx: C) -> Result<WanDdnsResponse, Error> 
                     username,
                     password,
                     token,
-                    zone: None, // Cloudflare zone stored differently in future
+                    zone,
                 });
             }
         }
@@ -1006,6 +1021,41 @@ pub async fn ddns_set<C: CtrlContext>(
     ctx: C,
     DeserializeStdin(req): DeserializeStdin<WanDdnsSetRequest>,
 ) -> Result<(), Error> {
+    // Token-based providers use ddns-scripts' password option for the token
+    let password = req.token.clone().or(req.password.clone());
+    let (username, domain) = match &req.provider {
+        // ddns-scripts' cloudflare script requires username to be the literal
+        // "Bearer" for API-token auth, and domain in `host@zone` form — the
+        // part after '@' feeds its `GET /zones?name=` lookup, so it must be
+        // the zone's root domain ("@zone" alone targets the apex record)
+        DdnsProvider::Cloudflare if req.enabled => {
+            let hostname = req.hostname.as_deref().unwrap_or_default();
+            let zone = req.zone.as_deref().unwrap_or_default();
+            if zone.is_empty() {
+                return Err(Error::new(
+                    eyre!("Cloudflare requires the zone (the domain registered with Cloudflare, e.g. example.com)"),
+                    ErrorKind::InvalidRequest,
+                ));
+            }
+            let host = if hostname == zone {
+                ""
+            } else {
+                hostname
+                    .strip_suffix(zone)
+                    .and_then(|h| h.strip_suffix('.'))
+                    .filter(|h| !h.is_empty())
+                    .ok_or_else(|| {
+                        Error::new(
+                            eyre!("hostname must be the zone itself or end with .{zone}"),
+                            ErrorKind::InvalidRequest,
+                        )
+                    })?
+            };
+            (Some("Bearer".to_string()), Some(format!("{host}@{zone}")))
+        }
+        _ => (req.username.clone(), req.hostname.clone()),
+    };
+
     let mut retries = 4;
     loop {
         let arena = Arena::new();
@@ -1021,22 +1071,9 @@ pub async fn ddns_set<C: CtrlContext>(
             service_name: Some(provider_to_service(&req.provider).to_string()),
             ip_source: Some("network".to_string()),
             ip_network: Some("wan".to_string()),
-            username: if req.enabled {
-                req.username.clone()
-            } else {
-                None
-            },
-            password: if req.enabled {
-                // Token-based providers use the password field
-                req.token.clone().or(req.password.clone())
-            } else {
-                None
-            },
-            domain: if req.enabled {
-                req.hostname.clone()
-            } else {
-                None
-            },
+            username: if req.enabled { username.clone() } else { None },
+            password: if req.enabled { password.clone() } else { None },
+            domain: if req.enabled { domain.clone() } else { None },
             lookup_host: if req.enabled {
                 req.hostname.clone()
             } else {
@@ -1481,17 +1518,128 @@ config service 'wan'
                 username: None,
                 password: None,
                 token: Some("cf-api-token-123".to_string()),
-                zone: None,
+                zone: Some("example.com".to_string()),
             }),
         )
         .await
         .unwrap();
 
+        // What ddns-scripts' cloudflare script requires on disk
+        let raw = std::fs::read_to_string(dir.path().join("ddns")).unwrap();
+        assert!(raw.contains("option username 'Bearer'"));
+        assert!(raw.contains("option domain 'mysite@example.com'"));
+        assert!(raw.contains("option lookup_host 'mysite.example.com'"));
+
         let res = ddns_get(ctx).await.unwrap();
         assert!(res.enabled);
         assert_eq!(res.provider, DdnsProvider::Cloudflare);
         assert_eq!(res.token.as_deref(), Some("cf-api-token-123"));
+        assert_eq!(res.username, None);
         assert_eq!(res.hostname.as_deref(), Some("mysite.example.com"));
+        assert_eq!(res.zone.as_deref(), Some("example.com"));
+    }
+
+    #[tokio::test]
+    async fn ddns_set_cloudflare_apex_record() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("ddns"), "").unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        ddns_set(
+            ctx.clone(),
+            DeserializeStdin(WanDdnsSetRequest {
+                enabled: true,
+                provider: DdnsProvider::Cloudflare,
+                hostname: Some("example.com".to_string()),
+                username: None,
+                password: None,
+                token: Some("cf-api-token-123".to_string()),
+                zone: Some("example.com".to_string()),
+            }),
+        )
+        .await
+        .unwrap();
+
+        let raw = std::fs::read_to_string(dir.path().join("ddns")).unwrap();
+        assert!(raw.contains("option domain '@example.com'"));
+
+        let res = ddns_get(ctx).await.unwrap();
+        assert_eq!(res.hostname.as_deref(), Some("example.com"));
+        assert_eq!(res.zone.as_deref(), Some("example.com"));
+    }
+
+    #[tokio::test]
+    async fn ddns_set_cloudflare_requires_zone() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("ddns"), "").unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        let err = ddns_set(
+            ctx,
+            DeserializeStdin(WanDdnsSetRequest {
+                enabled: true,
+                provider: DdnsProvider::Cloudflare,
+                hostname: Some("mysite.example.com".to_string()),
+                username: None,
+                password: None,
+                token: Some("cf-api-token-123".to_string()),
+                zone: None,
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("zone"));
+    }
+
+    #[tokio::test]
+    async fn ddns_set_cloudflare_hostname_outside_zone_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("ddns"), "").unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        for hostname in ["mysite.other.com", "fooexample.com", ".example.com"] {
+            let err = ddns_set(
+                ctx.clone(),
+                DeserializeStdin(WanDdnsSetRequest {
+                    enabled: true,
+                    provider: DdnsProvider::Cloudflare,
+                    hostname: Some(hostname.to_string()),
+                    username: None,
+                    password: None,
+                    token: Some("cf-api-token-123".to_string()),
+                    zone: Some("example.com".to_string()),
+                }),
+            )
+            .await
+            .unwrap_err();
+            assert!(err.to_string().contains("end with"), "{hostname}");
+        }
+    }
+
+    #[tokio::test]
+    async fn ddns_get_legacy_cloudflare_bare_fqdn() {
+        // Saved by builds that wrote the bare FQDN into domain (no '@')
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("ddns"),
+            "\
+config service 'wan'
+\toption enabled '1'
+\toption service_name 'cloudflare.com-v4'
+\toption domain 'home.example.com'
+\toption lookup_host 'home.example.com'
+\toption password 'cf-api-token-123'
+",
+        )
+        .unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        let res = ddns_get(ctx).await.unwrap();
+        assert!(res.enabled);
+        assert_eq!(res.provider, DdnsProvider::Cloudflare);
+        assert_eq!(res.hostname.as_deref(), Some("home.example.com"));
+        assert_eq!(res.token.as_deref(), Some("cf-api-token-123"));
+        assert_eq!(res.zone, None);
     }
 
     #[tokio::test]

@@ -225,7 +225,6 @@ export default {
   222: 'Trzeciorzędny',
   223: 'Nazwa użytkownika',
   224: 'Adres IP WAN',
-  225: 'Identyfikator strefy',
   226: '6RD',
   227: 'IPv4',
   228: 'IPv6',
@@ -524,4 +523,5 @@ export default {
   527: 'Opublikowany port zostanie ujawniony',
   528: 'Profil „{profile}” kieruje ruch przez VPN ({vpn}), ale opublikowane porty są osiągane przez publiczne połączenie internetowe (WAN), a nie przez VPN. Następujące porty pozostaną widoczne pod Twoim rzeczywistym publicznym adresem IP: {list}.',
   529: 'Ujawnij i kontynuuj',
+  530: 'Strefa',
 } satisfies i18n

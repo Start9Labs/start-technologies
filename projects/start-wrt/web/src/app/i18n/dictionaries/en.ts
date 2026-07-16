@@ -230,7 +230,6 @@ export const ENGLISH: Record<string, number> = {
   'Tertiary': 222,
   'Username': 223,
   'WAN IP': 224,
-  'Zone ID': 225,
   '6RD': 226,
   'IPv4': 227,
   'IPv6': 228,
@@ -529,4 +528,5 @@ export const ENGLISH: Record<string, number> = {
   'Published Port Will Be Exposed': 527,
   'The "{profile}" profile routes traffic through a VPN ({vpn}), but published ports are reached over your public internet (WAN) connection, not the VPN. The following port(s) will stay exposed on your real public IP address: {list}.': 528,
   'Expose & Continue': 529,
+  'Zone': 530,
 }
