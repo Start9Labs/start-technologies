@@ -71,12 +71,13 @@ file tracks notable changes since the move to the monorepo.
 
 ### Changed
 
-- **Stable IPv6 addresses (EUI64, privacy extensions off).** NetworkManager now
-  derives each interface's IPv6 address from a fixed EUI-64 interface identifier
-  and turns off RFC 4941 privacy extensions, so the server keeps one stable
-  global-unicast address (GUA) rather than rotating temporary ones. This gives
-  the GUA-based clearnet and public-domain features a predictable address to
-  advertise (`AAAA`) and pinhole.
+- **Stable IPv6 address across reboots.** NetworkManager is configured for
+  EUI-64 IPv6 addressing with RFC 4941 privacy extensions off, and its per-host
+  state — the stable-address seed and the DHCPv6 DUID — is now persisted to the
+  data partition instead of the tmpfs root overlay. The server therefore keeps
+  one predictable global-unicast address (GUA) across reboots rather than
+  drawing a new one each boot, giving the GUA-based clearnet and public-domain
+  features a stable address to advertise (`AAAA`) and pinhole.
 - **External ports 9050 and 9051 are no longer restricted (#3407).** The port
   allocator reserved 9050/9051 for the 0.3.x host Tor daemon, which no longer
   exists. Freeing 9050 lets the tor service bind its SOCKS proxy with

@@ -1057,6 +1057,15 @@ pub async fn synchronize_network_manager<P: AsRef<Path>>(
     crate::disk::mount::util::bind(&persistent, "/etc/NetworkManager/system-connections", false)
         .await?;
 
+    // Persist NM's per-host state — the stable-privacy address seed and the
+    // DHCPv6 DUID — so the box keeps the same IPv6 address across reboots; the
+    // root overlay's upper is tmpfs, so this dir would otherwise reset each boot.
+    let nm_state = main_datadir.as_ref().join("NetworkManager");
+    if tokio::fs::metadata(&nm_state).await.is_err() {
+        tokio::fs::create_dir_all(&nm_state).await?;
+    }
+    crate::disk::mount::util::bind(&nm_state, "/var/lib/NetworkManager", false).await?;
+
     if !wifi.enabled {
         Command::new("rfkill")
             .arg("block")
