@@ -6,6 +6,10 @@ This document explains how to bump the StartOS version across the entire codebas
 
 When bumping from version `X.Y.Z-alpha.N` to `X.Y.Z-alpha.N+1`, you need to update files in multiple locations across the repository. The `// VERSION_BUMP` comment markers indicate where changes are needed.
 
+## Changelog
+
+A version bump **pairs with a `CHANGELOG.md` entry** in the same change. Placement follows the repo-wide rule in the root [`AGENTS.md`](../../../AGENTS.md): freshly pull tags from origin first, keep the changelog's top heading at the prospective version (never `## [Unreleased]`), add your entry under it while that version is untagged, and cut a new heading only once it is a tagged release.
+
 ## Files to Update
 
 ### 1. Core Rust Crate Version

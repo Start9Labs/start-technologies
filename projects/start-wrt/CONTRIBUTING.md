@@ -71,8 +71,11 @@ StartWRT is a first-class project of the monorepo-wide release tool,
 read from `backend/ctrl/Cargo.toml`; the git tag / GitHub release is `start-wrt/v<version>`.
 Releases stage through a beta registry before promotion to production, mirroring the OS.
 
-1. Bump `backend/ctrl/Cargo.toml` and turn the changelog's `## [Unreleased]` into an explicit
-   `## [<version>]` heading (`pre-check` requires it), then land that on `master`.
+1. Ensure `backend/ctrl/Cargo.toml` and the top `CHANGELOG.md` heading both name the prospective
+   version being released — the changelog's top heading is that prospective version
+   (`## [<version>]`), never `## [Unreleased]`, and `pre-check` requires an explicit heading
+   matching the manifest (see the root [`AGENTS.md`](../../AGENTS.md) changelog rule). Land that
+   on `master`.
 2. Run the **start-wrt** workflow with `deploy: release`. It builds the OpenWrt image, uploads
    the images to `s3://startwrt-images`, and registers + indexes the version into the **beta
    registry** (signing with the `DEV_KEY` repo secret). Beta routers — any router whose UCI
