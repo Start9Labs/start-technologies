@@ -5,7 +5,7 @@ All notable changes to StartTunnel are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.1]
 
 ### Changed
 
@@ -107,5 +107,5 @@ StartOS provides the client side — see
 - **DNS injection is TSIG-authenticated** (see _Added_), closing a forgery vector where any service emitting from the server's tunnel IP could forge DNS injections into the gateway's resolver.
 - **Forward/DNS requests are honored only from devices that opted into gateway autoconfiguration** — the forward-authorization gate (`is_known_client`) and the DNS-injection authorizer each check their own per-device flag.
 
-[Unreleased]: https://github.com/Start9Labs/start-technologies/compare/v0.4.0-beta.10...HEAD
+[1.1.1]: https://github.com/Start9Labs/start-technologies/compare/start-tunnel/v1.1.0...HEAD
 [0.4.0-beta.10]: https://github.com/Start9Labs/start-technologies/releases/tag/v0.4.0-beta.10
