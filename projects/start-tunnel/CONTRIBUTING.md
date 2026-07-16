@@ -68,8 +68,13 @@ it rather than reimplementing cross-platform.
 
 ## Versioning
 
-The crate version lives in `Cargo.toml` (marked with `# VERSION_BUMP`). Record
-notable changes in [`CHANGELOG.md`](CHANGELOG.md) following Keep a Changelog.
+The crate version lives in `Cargo.toml` (marked with `# VERSION_BUMP`) and
+mirrors the top `CHANGELOG.md` heading, which is the **prospective next version**
+(`## [X.Y.Z]`), not `## [Unreleased]`. If that version has no `start-tunnel/v*`
+tag on origin yet, it is unreleased — add entries under it, and raise the number
+(and `Cargo.toml`) only for a larger semver tier; cut a new heading only once the
+current one is tagged. Follows Keep a Changelog; see the root
+[`AGENTS.md`](../../AGENTS.md) for the full rule.
 
 ## Making a change
 
@@ -79,4 +84,5 @@ notable changes in [`CHANGELOG.md`](CHANGELOG.md) following Keep a Changelog.
 - If you change the API, regenerate TS bindings: `make start-core-ts-bindings`.
 - For user-facing behavior (UI, CLI flags/output, install flow,
   subnets/devices/forwarding), the docs live in `docs/src/` and publish to
-  `start9.com/start-tunnel/`. Add a `CHANGELOG.md` entry under `## [Unreleased]`.
+  `start9.com/start-tunnel/`. Add a `CHANGELOG.md` entry under the changelog's
+  current top (prospective-version) heading — see Versioning above.
