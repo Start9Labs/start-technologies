@@ -334,7 +334,7 @@ Ogranicz, kto może się łączyć, określając adres IP lub zakres CIDR. Użyj
 
 ### Wersja IP
 
-Wybierz, na których wersjach IP publikować. IPv4 używa NAT do przekierowywania ruchu, podczas gdy IPv6 otwiera zaporę bezpośrednio do urządzenia. Ponieważ każde urządzenie samo wybiera swój adres IPv6, reguła IPv6 podąża za bieżącym adresem urządzenia i jest aktualizowana automatycznie, gdy ISP zmieni prefiks IPv6.
+Wybierz, na których wersjach IP publikować. IPv4 używa NAT do przekierowywania ruchu, podczas gdy IPv6 otwiera zaporę bezpośrednio do urządzenia. Ponieważ każde urządzenie samo wybiera swój adres IPv6, reguła IPv6 automatycznie podąża za bieżącym adresem urządzenia — router dostosowuje regułę, gdy urządzenie wybierze nowy adres lub ISP zmieni prefiks IPv6.
 
 ### Port zewnętrzny
 

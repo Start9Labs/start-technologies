@@ -334,7 +334,7 @@ Limita quién puede conectarse especificando una dirección IP o un rango CIDR. 
 
 ### Versión de IP
 
-Elige en qué versiones de IP publicar. IPv4 usa NAT para reenviar el tráfico, mientras que IPv6 abre el firewall directamente al dispositivo. Como cada dispositivo elige su propia dirección IPv6, una regla IPv6 sigue la dirección actual del dispositivo y se actualiza automáticamente cuando tu ISP rota el prefijo IPv6.
+Elige en qué versiones de IP publicar. IPv4 usa NAT para reenviar el tráfico, mientras que IPv6 abre el firewall directamente al dispositivo. Como cada dispositivo elige su propia dirección IPv6, una regla IPv6 sigue automáticamente la dirección actual del dispositivo — el router reajusta la regla cuando el dispositivo elige una nueva dirección o tu ISP rota el prefijo IPv6.
 
 ### Puerto externo
 

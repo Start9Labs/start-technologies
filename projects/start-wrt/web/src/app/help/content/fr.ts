@@ -334,7 +334,7 @@ Limitez qui peut se connecter en spécifiant une adresse IP ou une plage CIDR. U
 
 ### Version IP
 
-Choisissez sur quelles versions d’IP publier. IPv4 utilise le NAT pour transférer le trafic, tandis qu’IPv6 ouvre le pare-feu directement vers l’appareil. Comme chaque appareil choisit lui-même son adresse IPv6, une règle IPv6 suit l’adresse actuelle de l’appareil et est mise à jour automatiquement lorsque votre ISP change le préfixe IPv6.
+Choisissez sur quelles versions d’IP publier. IPv4 utilise le NAT pour transférer le trafic, tandis qu’IPv6 ouvre le pare-feu directement vers l’appareil. Comme chaque appareil choisit lui-même son adresse IPv6, une règle IPv6 suit automatiquement l’adresse actuelle de l’appareil — le routeur réajuste la règle lorsque l’appareil choisit une nouvelle adresse ou que votre ISP change le préfixe IPv6.
 
 ### Port externe
 

@@ -334,7 +334,7 @@ Limit who can connect by specifying an IP address or CIDR range. Use "Any" to al
 
 ### IP Version
 
-Choose which IP versions to publish on. IPv4 uses NAT to forward traffic, while IPv6 opens the firewall directly to the device. Because each device chooses its own IPv6 address, an IPv6 rule follows the device's current address and is updated automatically when your ISP rotates the IPv6 prefix.
+Choose which IP versions to publish on. IPv4 uses NAT to forward traffic, while IPv6 opens the firewall directly to the device. Because each device chooses its own IPv6 address, an IPv6 rule follows the device's current address automatically — the router retargets the rule when the device picks a new address or your ISP rotates the IPv6 prefix.
 
 ### External Port
 

@@ -308,6 +308,24 @@ async fn inner_main() -> Result<(), Error> {
             tracing::error!("captive portal setup failed: {e}");
         }
 
+        // Follow the LAN neighbor table so IPv6 published-port rules track
+        // device address changes (SLAAC devices renumber themselves). Runs for
+        // the daemon's lifetime; harmless when no IPv6 forwards exist. On its
+        // own single-threaded runtime because the reconcile it drives holds a
+        // uciedit `Arena` across awaits (!Send), which `tokio::spawn` rejects.
+        if let Err(e) = std::thread::Builder::new()
+            .name("ipv6-tracker".into())
+            .spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("ipv6-tracker runtime")
+                    .block_on(crate::ipv6_tracker::run());
+            })
+        {
+            tracing::error!("Failed to start IPv6 tracker: {e}");
+        }
+
         app_state = AppState {
             flash_in_progress: Arc::new(AtomicBool::new(false)),
         };

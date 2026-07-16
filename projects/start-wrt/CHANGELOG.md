@@ -14,8 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cannot reserve one; the toggle wrote a DHCPv6 hint that no mainstream
   client ever requests. The device page now shows the IPv6 address read-only
   with an explanation, publishing a port no longer claims the IPv6 address
-  "will be reserved" (the rule follows the device's current address, and is
-  re-resolved when the ISP rotates the delegated prefix), and the LAN IPv6
+  "will be reserved" (the rule follows the device's current address
+  automatically), and the LAN IPv6
   SLAAC toggle now locks while enabled published-port rules use IPv6 rather
   than when "reserved" devices exist. The `devices.update` RPC no longer
   accepts `ipv6_static`/`ipv6` fields. IPv4 reservations are unchanged.
@@ -28,6 +28,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   service goes live.
 
 ### Fixed
+
+- **IPv6 published-port rules now follow the target device when it changes
+  its address.** Devices assign their own IPv6 addresses and change them
+  routinely — privacy addresses rotate daily, and most operating systems
+  derive new addresses whenever the ISP rotates the delegated prefix — but
+  rules were only re-resolved on a prefix change, so a device-side change
+  silently broke the forward. The router now watches the network for
+  neighbor changes and retargets affected rules within seconds. Rules also
+  now pin the device's long-lived (stable) address instead of whichever
+  address happened to be observed first, which could be a short-lived
+  privacy address that expired within days.
 
 - **Documentation corrected against the code in a full docs-vs-code audit.** The
   user guide no longer misstates product behavior: backups _do_ preserve assigned

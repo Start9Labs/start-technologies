@@ -899,13 +899,12 @@ async fn resolve_mdns_names(targets: Vec<(String, String)>) -> HashMap<String, S
         .await
 }
 
-#[instrument(skip_all)]
-pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
-    // --- Phase 1: IPv6 multicast discovery (all pings concurrent, ~1s) ---
-    //
-    // Ping ff02::1 to populate the NDP neighbor table. SLAAC is stateless —
-    // the router never learns which addresses clients configured. All pings
-    // fire concurrently so wall-clock time is 1s regardless of interface count.
+/// Ping ff02::1 on every LAN interface to (re)populate the NDP neighbor table.
+/// SLAAC is stateless — the router never learns which addresses clients
+/// configured — so this multicast prod is how they become visible. All pings
+/// fire concurrently so wall-clock time is ~1s regardless of interface count.
+/// Shared by `list` (phase 1) and the `ipv6_tracker` periodic rescan.
+pub(crate) async fn prod_ipv6_neighbors() {
     {
         use std::process::Stdio;
 
@@ -970,6 +969,12 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             let _ = child.wait().await;
         }
     }
+}
+
+#[instrument(skip_all)]
+pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
+    // --- Phase 1: IPv6 multicast discovery (all pings concurrent, ~1s) ---
+    prod_ipv6_neighbors().await;
 
     // --- Phase 2a: Initial data gather (parallel) ---
     //

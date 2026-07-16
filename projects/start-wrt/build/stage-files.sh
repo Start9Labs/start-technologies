@@ -163,6 +163,9 @@ cat > "${FILES_DIR}/lib/upgrade/keep.d/startwrt" << 'KEEPEOF'
 # Persistent device-name cache. Written atomically (temp + rename), so a live
 # `sysupgrade --create-backup` always captures one complete JSON document.
 /etc/startwrt/device_names.json
+# Per-device IPv6 address history (same atomic-write pattern) — the stability
+# evidence the ipv6_tracker's election needs across reboots.
+/etc/startwrt/ipv6_neighbors.json
 KEEPEOF
 
 echo "==> Staging complete."

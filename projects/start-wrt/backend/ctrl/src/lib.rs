@@ -19,6 +19,7 @@ pub mod exec;
 pub mod files;
 pub mod flash;
 pub mod init;
+pub mod ipv6_tracker;
 pub mod lan;
 pub mod logs;
 pub mod luci_proxy;

@@ -241,10 +241,10 @@ pub async fn affected_wifi_ports_for_vacated_profiles<C: CtrlContext>(
 /// is responsible for `dump_all` and reloading services.
 ///
 /// DHCP cleanup is surgical: a user-named host (created via `devices.update`) is
-/// kept and only its stale `ip` is cleared — its `name` and any manual IPv6
-/// `hostid` (a prefix-independent suffix that's still valid under the new
-/// profile) survive. An *unnamed* host is a published-port auto-reservation with
-/// no user data, so it's removed outright.
+/// kept and only its stale `ip` is cleared — its `name` and any legacy IPv6
+/// `hostid` (written by older releases; still read by `reconcile` as a
+/// last-resort fallback) survive. An *unnamed* host is a published-port
+/// auto-reservation with no user data, so it's removed outright.
 pub fn remove_ports_for_macs(cfgs: &mut Configs, macs: &HashSet<String>) -> usize {
     let macs: HashSet<String> = macs.iter().map(|m| m.to_uppercase()).collect();
     let mut removed = 0usize;
@@ -819,15 +819,13 @@ pub async fn set<C: CtrlContext>(
         let arena = Arena::new();
         let mut cfgs = parse_all(ctx.uci_root(), &arena, &["firewall", "dhcp"]).await?;
 
-        // Auto-reserve stable addressing for enabled ports that lack it:
-        //   * IPv4 — a static DHCP lease (dest_ip of the DNAT redirect), and
-        //   * IPv6 — a hostid (the interface suffix), so the device's GUA is
-        //     `delegated_prefix ++ hostid`. Pinning the suffix lets `reconcile`
-        //     recompute the forward address after the ISP rotates the prefix,
-        //     and makes the address deterministic for DHCPv6 clients. odhcpd
-        //     consumes the hostid; we never clobber a hostid the user already
-        //     set manually (which may intentionally differ from a transient
-        //     privacy address).
+        // Auto-reserve a static DHCP IPv4 lease for enabled ports that lack
+        // one (the dest_ip of the DNAT redirect must stay put). There is no
+        // IPv6 counterpart: the device chooses its own IPv6 address (SLAAC),
+        // so the rule tracks it via `ipv6_tracker` + `reconcile` instead of a
+        // reservation. (Older releases pinned a `hostid` here; existing
+        // entries are left alone and still serve as a last-resort reconcile
+        // fallback.)
         let mut dhcp_modified = false;
         if ctx.effectful() {
             let mut host_indices: HashMap<String, usize> = HashMap::new();
@@ -838,58 +836,34 @@ pub async fn set<C: CtrlContext>(
             }
 
             for port in &req.ports {
-                if !port.enabled {
+                if !port.enabled || !port.ipv4 {
                     continue;
                 }
                 let mac = port.device_mac.to_uppercase();
                 let Some(info) = device_info.get(&mac) else {
                     continue;
                 };
-
-                // Desired IPv4 reservation (only when the device has a dynamic
-                // address and no existing static reservation).
-                let want_ip = if port.ipv4 && !info.has_static_ipv4 {
-                    info.ipv4.clone()
-                } else {
-                    None
-                };
-                // Desired IPv6 hostid, derived from the device's current GUA.
-                let want_hostid = if port.ipv6 {
-                    info.ipv6
-                        .as_deref()
-                        .filter(|a| is_gua(a))
-                        .map(crate::devices::extract_ipv6_hostid)
-                } else {
-                    None
-                };
-
-                if want_ip.is_none() && want_hostid.is_none() {
+                // Only when the device has a dynamic address and no existing
+                // static reservation.
+                if info.has_static_ipv4 {
                     continue;
                 }
+                let Some(want_ip) = info.ipv4.clone() else {
+                    continue;
+                };
 
                 if let Some(&idx) = host_indices.get(&mac) {
-                    // Existing host entry — fill in the missing fields only.
+                    // Existing host entry — fill in the missing IP only.
                     if let Ok(mut host) = cfgs["dhcp"].sections[idx].get::<DhcpHost>() {
-                        let mut changed = false;
-                        if let Some(ip) = want_ip {
-                            host.ip = Some(ip);
-                            changed = true;
-                        }
-                        if let (Some(hostid), true) = (want_hostid, host.hostid.is_none()) {
-                            host.hostid = Some(hostid);
-                            changed = true;
-                        }
-                        if changed {
-                            cfgs["dhcp"].sections[idx].set(&host)?;
-                            dhcp_modified = true;
-                        }
+                        host.ip = Some(want_ip);
+                        cfgs["dhcp"].sections[idx].set(&host)?;
+                        dhcp_modified = true;
                     }
                 } else {
                     // No host entry at all — create one.
                     let host = DhcpHost {
                         mac: mac.clone(),
-                        ip: want_ip,
-                        hostid: want_hostid,
+                        ip: Some(want_ip),
                         dns: Some("1".to_string()),
                         ..Default::default()
                     };
@@ -1020,9 +994,6 @@ pub async fn set<C: CtrlContext>(
                     restart_firewall();
                     if dhcp_modified {
                         reload_dnsmasq();
-                        // odhcpd owns DHCPv6/RA and the hostid → suffix mapping;
-                        // reload it so a newly-pinned hostid takes runtime effect.
-                        reload_odhcpd();
                     }
                 }
                 crate::activity::log(
@@ -1042,20 +1013,25 @@ pub async fn set<C: CtrlContext>(
 /// router's *current* delegated prefix, then reload the firewall if anything
 /// changed.
 ///
-/// An IPv6 forward's `dest_ip` is a full GUA — `delegated_prefix ++ host_suffix`.
-/// The suffix is stable (it's the device's interface identifier, pinned via the
-/// DHCP `hostid`), but the prefix is the ISP's and can rotate. When it does,
-/// every stored `dest_ip` points into a prefix the router no longer owns and the
-/// forward silently breaks. This routine fixes that and is fired by the
-/// `wan6` hotplug hook on `ifup`/`ifupdate`.
+/// An IPv6 forward's `dest_ip` is a full GUA and can go stale two ways: the ISP
+/// rotates the delegated prefix, or the device renumbers itself (SLAAC devices
+/// own their addresses). Fired by the `wan6` hotplug hook on `ifup`/`ifupdate`
+/// for the former, and by `ipv6_tracker`'s debounce for the latter.
 ///
 /// For each forward the new address is, in order of preference:
-///   1. the device's freshly-observed GUA from the neighbor table — authoritative
-///      for *any* addressing mode (DHCPv6, SLAAC EUI-64, privacy), used whenever
-///      the device is currently reachable; else
-///   2. `current_prefix ++ stored_hostid` — the offline fallback, exact for a
-///      stable suffix and best-effort otherwise.
-/// A forward whose device is offline and has no stored hostid is left untouched.
+///   1. the device's freshly-observed GUA from the neighbor table — the
+///      tracker-elected stable address when history exists (see
+///      `resolve_device_info_for_macs`), used whenever the device is currently
+///      reachable; else
+///   2. `current_prefix ++ suffix` — the offline fallback. The suffix comes
+///      from tracker history when the elected address is EUI-64 (the only
+///      class that provably survives a prefix rotation), else from a legacy
+///      stored `hostid`; recent history proving the device does *not* use
+///      EUI-64 suppresses the legacy hostid, since recombining a
+///      prefix-dependent (RFC 7217) suffix would target an address the device
+///      will never own.
+/// A forward whose device is offline with no usable suffix is left untouched —
+/// it heals on the device's next neighbor event.
 ///
 /// Fail-safe: if the router currently has no global prefix at all (a flap to
 /// "none"), nothing is rewritten — the next `ifup` with a real prefix re-runs us.
@@ -1076,13 +1052,26 @@ pub async fn reconcile<C: CtrlContext>(ctx: C) -> Result<Value, Error> {
         let arena = Arena::new();
         let mut cfgs = parse_all(ctx.uci_root(), &arena, &["firewall", "dhcp"]).await?;
 
-        // MAC → pinned hostid suffix (offline fallback source).
+        // MAC → offline-fallback suffix: legacy stored hostids, corrected by
+        // tracker history (EUI-64 elected → authoritative suffix; non-EUI-64
+        // elected → positive evidence no suffix survives rotation, drop it).
         let mut hostids: HashMap<String, String> = HashMap::new();
         cfgs["dhcp"].each::<DhcpHost, Error>(|_, host| {
             if let Some(hostid) = host.hostid.clone() {
                 hostids.insert(host.mac.to_uppercase(), hostid);
             }
         })?;
+        for (mac, suffix) in crate::ipv6_tracker::eui64_suffix_hints(chrono::Utc::now().timestamp())
+        {
+            match suffix {
+                Some(s) => {
+                    hostids.insert(mac, s);
+                }
+                None => {
+                    hostids.remove(&mac);
+                }
+            }
+        }
 
         // MACs targeted by IPv6 forwards, for live address resolution.
         let mut v6_macs: HashSet<String> = HashSet::new();
@@ -1312,6 +1301,7 @@ async fn resolve_device_info_for_macs(macs: HashSet<String>) -> HashMap<String, 
     }
 
     // Merge: prefer static > ARP > lease
+    let now = chrono::Utc::now().timestamp();
     for mac in &macs {
         let has_static_ipv4 = static_ips.get(mac).and_then(|ip| ip.as_ref()).is_some();
         let ipv4 = static_ips
@@ -1319,7 +1309,13 @@ async fn resolve_device_info_for_macs(macs: HashSet<String>) -> HashMap<String, 
             .and_then(|ip| ip.clone())
             .or_else(|| arp_ipv4.get(mac).cloned())
             .or_else(|| lease_ipv4.get(mac).cloned());
-        let ipv6 = arp_ipv6.get(mac).cloned();
+        // The tracker-elected stable GUA beats raw neighbor-table order: the
+        // table can surface a rotating RFC 4941 temporary address first, and a
+        // rule pinned to one breaks silently when it expires. Fall back to the
+        // direct pick when the tracker has no recent history for this MAC.
+        let ipv6 = crate::ipv6_tracker::elected_live(mac, now)
+            .map(|a| a.to_string())
+            .or_else(|| arp_ipv6.get(mac).cloned());
         // No usable (GUA/ULA) address picked, but the neighbor table did have
         // IPv6 candidates for this MAC → they were all link-local. The device
         // is online with only an unreachable address, not merely offline.

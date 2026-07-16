@@ -334,7 +334,7 @@ Beschränken Sie, wer sich verbinden darf, indem Sie eine IP-Adresse oder einen 
 
 ### IP-Version
 
-Wählen Sie, über welche IP-Versionen veröffentlicht werden soll. IPv4 verwendet NAT, um Datenverkehr weiterzuleiten, während IPv6 die Firewall direkt zum Gerät öffnet. Da jedes Gerät seine IPv6-Adresse selbst wählt, folgt eine IPv6-Regel der aktuellen Adresse des Geräts und wird automatisch aktualisiert, wenn Ihr ISP das IPv6-Präfix wechselt.
+Wählen Sie, über welche IP-Versionen veröffentlicht werden soll. IPv4 verwendet NAT, um Datenverkehr weiterzuleiten, während IPv6 die Firewall direkt zum Gerät öffnet. Da jedes Gerät seine IPv6-Adresse selbst wählt, folgt eine IPv6-Regel automatisch der aktuellen Adresse des Geräts — der Router passt die Regel an, wenn das Gerät eine neue Adresse wählt oder Ihr ISP das IPv6-Präfix wechselt.
 
 ### Externer Port
 
