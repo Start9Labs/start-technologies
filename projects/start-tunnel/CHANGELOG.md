@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and Change Password dialogs no longer autofocus their first field, which on
   mobile raised the keyboard the instant the dialog appeared.
 
+### Fixed
+
+- **Automatic port forwarding survives a network change.** Adding or removing a
+  device or subnet no longer interrupts the port forwarding that connected
+  devices set up automatically — their forwards, SNI routes, and IPv6 pinholes
+  keep being renewed instead of silently lapsing until the tunnel is next
+  restarted.
+
 ## [1.1.0]
 
 ### Added
