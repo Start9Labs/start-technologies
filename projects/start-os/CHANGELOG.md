@@ -71,13 +71,14 @@ file tracks notable changes since the move to the monorepo.
 
 ### Changed
 
-- **Stable IPv6 address across reboots.** NetworkManager is configured for
-  EUI-64 IPv6 addressing with RFC 4941 privacy extensions off, and its per-host
-  state — the stable-address seed and the DHCPv6 DUID — is now persisted to the
-  data partition instead of the tmpfs root overlay. The server therefore keeps
-  one predictable global-unicast address (GUA) across reboots rather than
-  drawing a new one each boot, giving the GUA-based clearnet and public-domain
-  features a stable address to advertise (`AAAA`) and pinhole.
+- **Stable, predictable IPv6 address (EUI-64).** NetworkManager is set to derive
+  each interface's IPv6 address from its MAC (modified EUI-64) with RFC 4941
+  privacy extensions off. StartOS applies this to existing network connections
+  on every boot, not just newly-created ones, so upgraded servers pick it up too.
+  The server therefore keeps one stable global-unicast address (GUA) across
+  reboots instead of the default rotating stable-privacy address, giving the
+  GUA-based clearnet and public-domain features a predictable address to
+  advertise (`AAAA`) and pinhole.
 - **External ports 9050 and 9051 are no longer restricted (#3407).** The port
   allocator reserved 9050/9051 for the 0.3.x host Tor daemon, which no longer
   exists. Freeing 9050 lets the tor service bind its SOCKS proxy with

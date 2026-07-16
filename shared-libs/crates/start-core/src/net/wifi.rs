@@ -1057,15 +1057,6 @@ pub async fn synchronize_network_manager<P: AsRef<Path>>(
     crate::disk::mount::util::bind(&persistent, "/etc/NetworkManager/system-connections", false)
         .await?;
 
-    // Persist NM's per-host state — the stable-privacy address seed and the
-    // DHCPv6 DUID — so the box keeps the same IPv6 address across reboots; the
-    // root overlay's upper is tmpfs, so this dir would otherwise reset each boot.
-    let nm_state = main_datadir.as_ref().join("NetworkManager");
-    if tokio::fs::metadata(&nm_state).await.is_err() {
-        tokio::fs::create_dir_all(&nm_state).await?;
-    }
-    crate::disk::mount::util::bind(&nm_state, "/var/lib/NetworkManager", false).await?;
-
     if !wifi.enabled {
         Command::new("rfkill")
             .arg("block")
@@ -1143,6 +1134,8 @@ pub async fn synchronize_network_manager<P: AsRef<Path>>(
         .await
         .log_err();
 
+    force_ipv6_addr_gen_eui64().await;
+
     Command::new("systemctl")
         .arg("restart")
         .arg("NetworkManager")
@@ -1176,6 +1169,43 @@ pub async fn synchronize_network_manager<P: AsRef<Path>>(
             .await?;
     }
     Ok(())
+}
+
+/// Force EUI-64 IPv6 addressing (privacy extensions off) onto existing physical
+/// NetworkManager connections. Connection defaults in NetworkManager.conf only
+/// fill in unset properties, so a profile created before those defaults existed
+/// keeps its stable-privacy addressing and draws a new address every boot.
+async fn force_ipv6_addr_gen_eui64() {
+    let Ok(out) = Command::new("nmcli")
+        .arg("-t")
+        .arg("-f")
+        .arg("UUID,TYPE")
+        .arg("connection")
+        .arg("show")
+        .invoke(ErrorKind::Network)
+        .await
+    else {
+        return;
+    };
+    for line in String::from_utf8_lossy(&out).lines() {
+        let mut fields = split_nmcli_terse_line(line).into_iter();
+        let (Some(uuid), Some(kind)) = (fields.next(), fields.next()) else {
+            continue;
+        };
+        if kind == "802-3-ethernet" || kind == "802-11-wireless" {
+            Command::new("nmcli")
+                .arg("connection")
+                .arg("modify")
+                .arg(&uuid)
+                .arg("ipv6.addr-gen-mode")
+                .arg("eui64")
+                .arg("ipv6.ip6-privacy")
+                .arg("0")
+                .invoke(ErrorKind::Network)
+                .await
+                .log_err();
+        }
+    }
 }
 
 #[cfg(test)]
