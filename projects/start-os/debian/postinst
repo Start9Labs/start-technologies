@@ -142,6 +142,10 @@ dns=systemd-resolved
 
 [ifupdown]
 managed=true
+
+[connection]
+ipv6.addr-gen-mode=eui64
+ipv6.ip6-privacy=0
 EOF
 $SYSTEMCTL enable startd.service
 $SYSTEMCTL enable startos-shutdown.service
