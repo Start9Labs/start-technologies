@@ -135,6 +135,13 @@ file tracks notable changes since the move to the monorepo.
 
 ### Fixed
 
+- **Enabling a public IPv4 address on an SSL service interface now opens the
+  gateway port automatically.** Only a public _domain_ on an SSL-terminated port
+  used to trigger automatic port forwarding (PCP/NAT-PMP/UPnP); turning on the
+  bare public IPv4 left the port closed until it was forwarded by hand. StartOS
+  now requests the pinhole for the SSL port the same way it already did for
+  public domains and IPv6 GUAs, so a public IPv4 on an `addSsl` interface (the
+  StartOS UI included) is reachable from the Internet without a manual forward.
 - **IPv6 services exposed through a tunnel are now reachable, and outbound IPv6 no longer leaks around a gateway.** StartOS now applies the full IPv4 policy-routing layer to IPv6, including CONNMARK reply-routing: a reply to an inbound IPv6 connection that arrived over a tunnel — whether terminated on the host or DNAT'd to a service container — is pinned back out the interface it arrived on, so exposing a service over a StartTunnel's delegated IPv6 actually works. Previously those replies had no route back and were blackholed, so inbound IPv6 over a tunnel was dead. Outbound, the server's IPv6 default is now chosen by route metric exactly like IPv4, and leak prevention is per-gateway: an outbound gateway that is explicitly selected but can't carry IPv6 drops the server's IPv6 via a blackhole in that gateway's own routing table — so your real address never leaks out the ISP link — without blackholing the reply traffic that keeps inbound tunnel services working.
 - **Updating a WireGuard gateway's config no longer drops its preshared key.** The in-place update path (`net tunnel update` / the **Update config** UI action, NetworkManager `Update2` + `Reapply`) persisted the interface private key but silently dropped each peer's preshared key, so a re-issued PSK-using tunnel failed its handshake and went dead (taking tunnel-routed DNS down with it). The peer secret is now flagged system-owned so the update persists it, and the settings (peer secrets inline) are passed to `Reapply` explicitly — an empty-dict `Reapply` still stripped the PSK from the _running_ device even with the profile persisted correctly, hanging all traffic through the tunnel (e.g. forwarded ports) until the next reboot.
 - **Dev builds bricked by an empty persisted host id (#3387).** Builds between

@@ -300,6 +300,14 @@ struct HostBinds {
     /// PortMapController pinhole. Tracked so it is withdrawn when a GUA leaves
     /// LAN+WAN or its binding goes away.
     gua_pinholes: BTreeSet<(Ipv6Addr, u16)>,
+    /// `(box LAN IPv4, ssl listener port)` upstream pinholes for a bare public
+    /// IPv4 exposed on an `add_ssl` binding. The host's TLS `*` vhost is the
+    /// listener (no DNAT), so this is a pure PortMapController pinhole — the IPv4
+    /// analogue of `gua_pinholes`. A co-located public domain requests its own
+    /// SNI-keyed mapping, so the two coexist (the bare-IP forward is the SNI
+    /// fallback on a StartTunnel gateway). Tracked so it is withdrawn when the
+    /// operator disables the WAN IP or the binding goes away.
+    ssl_ip_pinholes: BTreeSet<(Ipv4Addr, u16)>,
     /// GUAs we asked the gateway for an 80->443 redirect pinhole on. Tracked so
     /// the redirect is withdrawn when 443 stops being exposed on that GUA, or 80
     /// becomes a real pinhole. There is no IPv4 analogue: over IPv4 the upstream
@@ -337,6 +345,7 @@ impl NetServiceData {
         let mut vhosts: BTreeMap<(Option<InternedString>, u16), ProxyTarget> = BTreeMap::new();
         let mut private_dns: BTreeMap<InternedString, BTreeSet<GatewayId>> = BTreeMap::new();
         let mut gua_pinholes: BTreeSet<(Ipv6Addr, u16)> = BTreeSet::new();
+        let mut ssl_ip_pinholes: BTreeSet<(Ipv4Addr, u16)> = BTreeSet::new();
         // Candidate v6 gateways per GUA, so the post-loop 80->443 redirect can
         // reach the same gateways the GUA's pinholes used.
         let mut gua_gateways: BTreeMap<Ipv6Addr, Vec<(IpAddr, Option<u32>)>> = BTreeMap::new();
@@ -463,6 +472,42 @@ impl NetServiceData {
                                 passthrough: false,
                             },
                         );
+                    }
+
+                    // A bare public IPv4 (WAN IP) enabled on this add_ssl port has
+                    // no SNI to demux, so — like a GUA pinhole — ask the upstream
+                    // gateway(s) to forward the ssl port to the box's own LAN IPv4
+                    // (the `*` vhost is the listener; there is no local DNAT). A
+                    // public domain requests its own SNI-keyed mapping separately;
+                    // on a StartTunnel gateway the two share the port with this
+                    // bare-IP forward acting as the SNI fallback.
+                    for a in enabled_addresses.iter().filter(|a| a.public && a.ssl) {
+                        let HostnameMetadata::Ipv4 { gateway } = &a.metadata else {
+                            continue;
+                        };
+                        let Some(info) = net_ifaces.get(gateway) else {
+                            continue;
+                        };
+                        let Some(ip_info) = &info.ip_info else {
+                            continue;
+                        };
+                        let gateways = candidate_gateways(info);
+                        if gateways.is_empty() {
+                            continue;
+                        }
+                        for subnet in &ip_info.subnets {
+                            let IpAddr::V4(local_ip) = subnet.addr() else {
+                                continue;
+                            };
+                            if ssl_ip_pinholes.insert((local_ip, assigned_ssl_port)) {
+                                ctrl.port_map.ensure(
+                                    IpAddr::V4(local_ip),
+                                    assigned_ssl_port,
+                                    assigned_ssl_port,
+                                    gateways.clone(),
+                                );
+                            }
+                        }
                     }
                 }
 
@@ -811,6 +856,18 @@ impl NetServiceData {
             ctrl.port_map.remove(IpAddr::V6(ip), port);
         }
         binds.gua_pinholes = gua_pinholes;
+
+        // Withdraw bare-IPv4 SSL-port pinholes that no longer apply (WAN IP
+        // disabled, or the binding went away).
+        let stale_ssl_ips: Vec<(Ipv4Addr, u16)> = binds
+            .ssl_ip_pinholes
+            .difference(&ssl_ip_pinholes)
+            .copied()
+            .collect();
+        for (ip, port) in stale_ssl_ips {
+            ctrl.port_map.remove(IpAddr::V4(ip), port);
+        }
+        binds.ssl_ip_pinholes = ssl_ip_pinholes;
 
         // Reconcile non-SSL v6 forwards: tear down any that changed or went
         // away, then install new/changed ones. Best-effort — a nft failure on
