@@ -40,6 +40,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   get local (ULA) IPv6 addresses while internet-bound IPv6 remains blocked
   by the VPN kill switch, so nothing leaks around the tunnel.
 
+- **Published ports no longer reshuffle their order on every refresh.** The
+  list is auto-refreshed every few seconds, and each refresh returned the
+  rows in an arbitrary order, so the table visibly jumped around. Published
+  ports now appear in a stable order, sorted by label.
+
 - **IPv6 published-port rules now follow the target device when it changes
   its address.** Devices assign their own IPv6 addresses and change them
   routinely — privacy addresses rotate daily, and most operating systems

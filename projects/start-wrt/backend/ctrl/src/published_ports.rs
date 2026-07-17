@@ -715,7 +715,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<PublishedPort>, Error> {
     // Current delegated LAN prefix, so the reported address is scoped to it
     // exactly as `reconcile` scopes the rule target (below).
     let lan_prefix = crate::ssl::read_lan_gua_prefix().await;
-    let ports = raw_ports
+    let mut ports: Vec<PublishedPort> = raw_ports
         .iter()
         .map(|raw| {
             let mac = raw.device_mac.to_uppercase();
@@ -763,6 +763,17 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<PublishedPort>, Error> {
             }
         })
         .collect();
+
+    // Stable order for the UI and CLI: `extract_ports` builds the list from
+    // `HashMap`s (randomized iteration), so without this the rows reshuffle on
+    // every poll. Sort by label (the user-meaningful column), tie-broken by the
+    // stable id.
+    ports.sort_by(|a, b| {
+        a.label
+            .to_lowercase()
+            .cmp(&b.label.to_lowercase())
+            .then_with(|| a.id.cmp(&b.id))
+    });
 
     Ok(ports)
 }
