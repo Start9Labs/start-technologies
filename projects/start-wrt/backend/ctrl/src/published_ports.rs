@@ -712,6 +712,9 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<PublishedPort>, Error> {
         .collect();
 
     let now = chrono::Utc::now().timestamp();
+    // Current delegated LAN prefix, so the reported address is scoped to it
+    // exactly as `reconcile` scopes the rule target (below).
+    let lan_prefix = crate::ssl::read_lan_gua_prefix().await;
     let ports = raw_ports
         .iter()
         .map(|raw| {
@@ -721,12 +724,19 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<PublishedPort>, Error> {
             // neighbor-table-order address in `Device::ipv6`. Otherwise the
             // Endpoints column (and the stale-prefix status) can name a
             // different address than the open firewall pinhole, e.g. a rotating
-            // RFC 4941 privacy address. Falls back to the direct pick when the
-            // tracker has no live history for this MAC (one-shot CLI, or a
-            // device the daemon has not yet observed).
+            // RFC 4941 privacy address, or an old-prefix address the rule no
+            // longer targets. Scope to the current prefix like the rule does;
+            // fall back to the direct pick when the tracker has no live history
+            // (one-shot CLI, or a device the daemon has not yet observed).
             let device_owned = devices_by_mac.get(&mac).copied().map(|d| {
                 let mut d = d.clone();
-                if let Some(elected) = crate::ipv6_tracker::elected_live(&mac, now) {
+                let elected = match lan_prefix {
+                    Some((p, plen)) => {
+                        crate::ipv6_tracker::elected_live_in_prefix(&mac, now, p, plen)
+                    }
+                    None => crate::ipv6_tracker::elected_live(&mac, now),
+                };
+                if let Some(elected) = elected {
                     d.ipv6 = Some(elected.to_string());
                 }
                 d
@@ -784,6 +794,14 @@ pub async fn set<C: CtrlContext>(
         } else {
             HashMap::new()
         };
+        // Current delegated LAN prefix, to scope a v6 rule's initial dest_ip to
+        // a routable address (see the IPv6 rule write below).
+        let lan_prefix = if ctx.effectful() {
+            crate::ssl::read_lan_gua_prefix().await
+        } else {
+            None
+        };
+        let now = chrono::Utc::now().timestamp();
 
         // Validate that enabled ports have the required device addresses
         if ctx.effectful() {
@@ -967,13 +985,23 @@ pub async fn set<C: CtrlContext>(
 
             // IPv6 rule (ACCEPT) — only for globally routable addresses
             if port.ipv6 && ipv6_addr.as_ref().map_or(false, |a| is_gua(a)) {
+                // Pin the tracker-elected stable GUA in the current prefix when
+                // known, so a rule created mid-rotation doesn't latch the
+                // device's outgoing (old-prefix) address; else the validated
+                // address. `reconcile` maintains it thereafter.
+                let dest_v6 = lan_prefix
+                    .and_then(|(p, plen)| {
+                        crate::ipv6_tracker::elected_live_in_prefix(&mac_upper, now, p, plen)
+                    })
+                    .map(|a| a.to_string())
+                    .or_else(|| ipv6_addr.clone());
                 let rule = FirewallRule {
                     name: port.label.clone(),
                     src: "wan".into(),
                     dest: Some(dest_zone.clone()),
                     target: FirewallTarget::ACCEPT,
                     proto: proto.clone(),
-                    dest_ip: ipv6_addr,
+                    dest_ip: dest_v6,
                     dest_port: Some(port.ports.clone()),
                     family: Some("ipv6".into()),
                     src_ip: if port.source != "any" {
@@ -1068,6 +1096,7 @@ pub async fn reconcile<C: CtrlContext>(ctx: C) -> Result<Value, Error> {
     loop {
         let arena = Arena::new();
         let mut cfgs = parse_all(ctx.uci_root(), &arena, &["firewall", "dhcp"]).await?;
+        let now = chrono::Utc::now().timestamp();
 
         // MAC → offline-fallback suffix: legacy stored hostids, corrected by
         // tracker history (EUI-64 elected → authoritative suffix; non-EUI-64
@@ -1078,8 +1107,7 @@ pub async fn reconcile<C: CtrlContext>(ctx: C) -> Result<Value, Error> {
                 hostids.insert(host.mac.to_uppercase(), hostid);
             }
         })?;
-        for (mac, suffix) in crate::ipv6_tracker::eui64_suffix_hints(chrono::Utc::now().timestamp())
-        {
+        for (mac, suffix) in crate::ipv6_tracker::eui64_suffix_hints(now) {
             match suffix {
                 Some(s) => {
                     hostids.insert(mac, s);
@@ -1105,11 +1133,19 @@ pub async fn reconcile<C: CtrlContext>(ctx: C) -> Result<Value, Error> {
             return Ok(Value::Null);
         }
 
-        // mac → live GUA from the neighbor table (authoritative when present).
-        let device_ipv6: HashMap<String, String> = resolve_device_info_for_macs(v6_macs)
-            .await
-            .into_iter()
-            .filter_map(|(mac, info)| info.ipv6.filter(|a| is_gua(a)).map(|gua| (mac, gua)))
+        // mac → tracker-elected stable GUA *within the current delegated
+        // prefix*. Restricting to the live prefix is what keeps a rule off an
+        // address the device no longer routes on: an old-prefix address
+        // lingering after an ISP rotation outranks the new one on age, so an
+        // unscoped election would retarget the rule onto the dead prefix. A MAC
+        // with no in-prefix live address drops out here and is handled by the
+        // `prefix ++ suffix` fallback in `rewrite_v6_dest_ips`.
+        let device_ipv6: HashMap<String, String> = v6_macs
+            .iter()
+            .filter_map(|mac| {
+                crate::ipv6_tracker::elected_live_in_prefix(mac, now, prefix, prefix_len)
+                    .map(|gua| (mac.clone(), gua.to_string()))
+            })
             .collect();
 
         let changed = rewrite_v6_dest_ips(&mut cfgs, prefix, prefix_len, &device_ipv6, &hostids)?;

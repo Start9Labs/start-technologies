@@ -21,8 +21,8 @@
 //!   and a leased address would pass the persistence tier anyway.
 //! * When the elected address of a MAC referenced by a `pp_*_v6` rule
 //!   changes, the task debounces briefly and re-runs
-//!   `published_ports::reconcile`, which (via the elected-address override in
-//!   `resolve_device_info_for_macs`) rewrites the rule.
+//!   `published_ports::reconcile`, which retargets the rule to the elected
+//!   address within the current delegated prefix ([`elected_live_in_prefix`]).
 //!
 //! The module is deliberately self-contained — MAC in, elected GUA out — with
 //! `published_ports` as its only consumer, so a future device-driven pinhole
@@ -91,6 +91,25 @@ pub(crate) fn elected_live(mac: &str, now: i64) -> Option<Ipv6Addr> {
     let store = STORE.lock().ok()?;
     let addrs = store.get(&mac.to_uppercase())?;
     elect(mac, addrs, now, LIVE_SECS)
+}
+
+/// Like [`elected_live`], but only among the device's addresses within
+/// `prefix`/`prefix_len`. `None` when it holds no live address there.
+///
+/// This is the selector for a *published-port rule target*: an address outside
+/// the currently delegated prefix isn't routable, so it must never win — yet
+/// [`elect`] ranks purely on stability/age and would otherwise keep preferring
+/// an old-prefix address lingering after an ISP rotation. Narrowing the
+/// candidate set here leaves [`elect`] itself prefix-agnostic.
+pub(crate) fn elected_live_in_prefix(
+    mac: &str,
+    now: i64,
+    prefix: Ipv6Addr,
+    prefix_len: u8,
+) -> Option<Ipv6Addr> {
+    let store = STORE.lock().ok()?;
+    let addrs = store.get(&mac.to_uppercase())?;
+    elect_in_prefix(mac, addrs, now, LIVE_SECS, prefix, prefix_len)
 }
 
 /// `MAC -> hostid-style suffix` for every device whose elected address (seen
@@ -353,6 +372,29 @@ fn elect(
     .map(|(addr, _)| addr)
 }
 
+/// [`elect`] restricted to the candidates within `prefix`/`prefix_len`. Filters
+/// the set first, then defers to the prefix-agnostic [`elect`] unchanged, so
+/// prefix-currency (routability) gates eligibility while stability/age still
+/// picks the winner among the survivors.
+fn elect_in_prefix(
+    mac: &str,
+    addrs: &HashMap<String, AddrRecord>,
+    now: i64,
+    live_secs: i64,
+    prefix: Ipv6Addr,
+    prefix_len: u8,
+) -> Option<Ipv6Addr> {
+    let in_prefix: HashMap<String, AddrRecord> = addrs
+        .iter()
+        .filter(|(addr, _)| {
+            addr.parse::<Ipv6Addr>()
+                .is_ok_and(|a| crate::system::addr_in_prefix(a, prefix, prefix_len))
+        })
+        .map(|(addr, rec)| (addr.clone(), rec.clone()))
+        .collect();
+    elect(mac, &in_prefix, now, live_secs)
+}
+
 /// Whether the address's interface identifier is the modified-EUI-64 form of
 /// `mac`: `mac[0]^0x02, mac[1], mac[2], 0xff, 0xfe, mac[3], mac[4], mac[5]`.
 pub(crate) fn is_eui64_of(addr: &Ipv6Addr, mac: &str) -> bool {
@@ -518,6 +560,40 @@ mod tests {
         assert_eq!(
             elect(MAC, &addrs, now, LIVE_SECS),
             Some(EUI64.parse().unwrap())
+        );
+    }
+
+    #[test]
+    fn elect_in_prefix_excludes_out_of_prefix_winner() {
+        // A device straddling an ISP prefix rotation: the old-prefix address is
+        // older (and persistent) so the prefix-agnostic election prefers it,
+        // but it is no longer routable. Scoping to the current /64 must pick the
+        // fresh in-prefix address instead.
+        let now = 100 * 24 * 60 * 60;
+        let old = "2001:db8:1::50"; // older + persistent, old (dead) prefix
+        let new = "2001:db8:2::99"; // fresh, current prefix
+        let mut addrs = HashMap::new();
+        addrs.insert(old.into(), rec(0, now));
+        addrs.insert(new.into(), rec(now - 60, now));
+
+        // Unscoped: the stale old-prefix address wins on age — the bug.
+        assert_eq!(
+            elect(MAC, &addrs, now, LIVE_SECS),
+            Some(old.parse().unwrap())
+        );
+
+        // Scoped to the live /64: only the in-prefix address is eligible.
+        let cur: Ipv6Addr = "2001:db8:2::".parse().unwrap();
+        assert_eq!(
+            elect_in_prefix(MAC, &addrs, now, LIVE_SECS, cur, 64),
+            Some(new.parse().unwrap())
+        );
+
+        // No address in an unrelated prefix → None (reconcile then recombines).
+        let other: Ipv6Addr = "2001:db8:9::".parse().unwrap();
+        assert_eq!(
+            elect_in_prefix(MAC, &addrs, now, LIVE_SECS, other, 64),
+            None
         );
     }
 

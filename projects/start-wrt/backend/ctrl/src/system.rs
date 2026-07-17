@@ -209,6 +209,20 @@ pub(crate) fn has_global_ipv6(addrs: &[Ipv6Addr]) -> bool {
     })
 }
 
+/// Whether `addr` falls within the `prefix_len`-bit network `prefix` (their top
+/// `prefix_len` bits match). `prefix_len == 0` matches everything; `> 128`
+/// matches nothing.
+pub(crate) fn addr_in_prefix(addr: Ipv6Addr, prefix: Ipv6Addr, prefix_len: u8) -> bool {
+    if prefix_len == 0 {
+        return true;
+    }
+    if prefix_len > 128 {
+        return false;
+    }
+    let mask = u128::MAX << (128 - prefix_len);
+    (u128::from(addr) & mask) == (u128::from(prefix) & mask)
+}
+
 async fn get_wan_ipv4() -> Result<Option<Ipv4Addr>, Error> {
     let stdout = match tokio::process::Command::new("ubus")
         .args(["call", "network.interface.wan", "status"])
