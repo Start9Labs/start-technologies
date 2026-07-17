@@ -711,10 +711,27 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<PublishedPort>, Error> {
         .filter_map(|d| Some((d.mac.as_ref()?.to_uppercase(), d)))
         .collect();
 
+    let now = chrono::Utc::now().timestamp();
     let ports = raw_ports
         .iter()
         .map(|raw| {
-            let device = devices_by_mac.get(&raw.device_mac.to_uppercase()).copied();
+            let mac = raw.device_mac.to_uppercase();
+            // Report the tracker-elected stable GUA — the same address
+            // `reconcile` writes into the `pp_*_v6` rule — rather than the
+            // neighbor-table-order address in `Device::ipv6`. Otherwise the
+            // Endpoints column (and the stale-prefix status) can name a
+            // different address than the open firewall pinhole, e.g. a rotating
+            // RFC 4941 privacy address. Falls back to the direct pick when the
+            // tracker has no live history for this MAC (one-shot CLI, or a
+            // device the daemon has not yet observed).
+            let device_owned = devices_by_mac.get(&mac).copied().map(|d| {
+                let mut d = d.clone();
+                if let Some(elected) = crate::ipv6_tracker::elected_live(&mac, now) {
+                    d.ipv6 = Some(elected.to_string());
+                }
+                d
+            });
+            let device = device_owned.as_ref();
             let (status, status_reason) = compute_status(raw, device);
 
             PublishedPort {

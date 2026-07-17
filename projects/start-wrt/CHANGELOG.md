@@ -49,7 +49,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   neighbor changes and retargets affected rules within seconds. Rules also
   now pin the device's long-lived (stable) address instead of whichever
   address happened to be observed first, which could be a short-lived
-  privacy address that expired within days.
+  privacy address that expired within days. The **Endpoints** column shows
+  that same stable address, so the endpoint you copy always matches the rule.
 
 - **Documentation corrected against the code in a full docs-vs-code audit.** The
   user guide no longer misstates product behavior: backups _do_ preserve assigned
