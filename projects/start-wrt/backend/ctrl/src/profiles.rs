@@ -2156,8 +2156,15 @@ pub fn rewrite_dhcp(
         };
         if dhcp.interface == profile.id.interface {
             let mut changed = false;
-            if dhcp.ra.as_deref() != Some(&ra_value)
-                || dhcp.dhcpv6.as_deref() != Some(&dhcpv6_value)
+            // The admin LAN's RA/DHCPv6 are owned by lan::ipv6_set (the LAN
+            // IPv6 page) — never re-gate them on the outbound here, or editing
+            // the admin profile onto a v4-only VPN silently disables LAN IPv6
+            // (and, because is_ipv6_enabled reads this very option, keeps it
+            // off even after switching back). A VPN-routed admin fails v6
+            // closed via the kill-switch route in rewrite_routing.
+            if !profile.owns_lan
+                && (dhcp.ra.as_deref() != Some(&ra_value)
+                    || dhcp.dhcpv6.as_deref() != Some(&dhcpv6_value))
             {
                 dhcp.ra = Some(ra_value.clone());
                 dhcp.dhcpv6 = Some(dhcpv6_value.clone());
@@ -6528,6 +6535,116 @@ config dhcp 'guest'
             .unwrap();
         assert_eq!(ks.kind.as_deref(), Some("unreachable"));
         assert_eq!(ks.interface, "loopback");
+    }
+
+    #[tokio::test]
+    async fn rewrite_dhcp_preserves_admin_lan_ra_on_v4_only_outbound() {
+        // Regression: editing the LAN-owning (admin) profile onto a v4-only
+        // VPN used to re-gate dhcp.lan.ra/dhcpv6 on the outbound, silently
+        // disabling LAN IPv6 — and keeping it off, since is_ipv6_enabled reads
+        // that very option. Non-admin profiles must still be gated.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("network"),
+            "\
+config interface 'lan'
+\toption device 'br-lan'
+\toption proto 'static'
+\toption ipaddr '192.168.1.1'
+
+config interface 'wg0'
+\toption proto 'wireguard'
+\toption private_key 'testkey'
+\tlist addresses '10.69.119.218/32'
+",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("dhcp"),
+            "\
+config dhcp 'lan'
+\toption interface 'lan'
+\toption start '100'
+\toption limit '150'
+\toption leasetime '12h'
+\toption ra 'server'
+\toption dhcpv6 'server'
+
+config dhcp 'guest'
+\toption interface 'guest'
+\toption start '2'
+\toption limit '198'
+\toption leasetime '12h'
+\toption ra 'server'
+\toption dhcpv6 'server'
+",
+        )
+        .unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        let arena = Arena::new();
+        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["network", "dhcp"])
+            .await
+            .unwrap();
+
+        let admin = Profile {
+            id: ProfileId {
+                fullname: "Admin".into(),
+                interface: "lan".into(),
+                vlan_tag: 1,
+            },
+            gateway_ip: Ipv4Addr::new(192, 168, 1, 1),
+            outbound: "wg0".into(),
+            lan_access: LanAccess::All,
+            wan_access: WanAccess::All,
+            dns_override: Vec::new(),
+            dns_source: String::new(),
+            access_to_new_profiles: true,
+            owns_lan: true,
+        };
+        rewrite_dhcp(&ctx, &mut cfgs, &admin).unwrap();
+
+        let guest = Profile {
+            id: ProfileId {
+                fullname: "Guest".into(),
+                interface: "guest".into(),
+                vlan_tag: 101,
+            },
+            gateway_ip: Ipv4Addr::new(192, 168, 101, 1),
+            outbound: "wg0".into(),
+            lan_access: LanAccess::SameProfile,
+            wan_access: WanAccess::All,
+            dns_override: Vec::new(),
+            dns_source: String::new(),
+            access_to_new_profiles: false,
+            owns_lan: false,
+        };
+        rewrite_dhcp(&ctx, &mut cfgs, &guest).unwrap();
+
+        let dhcp_of = |name: &str| -> Dhcp {
+            cfgs["dhcp"]
+                .sections
+                .iter()
+                .find(|s| s.name().as_deref() == Some(name))
+                .unwrap()
+                .get::<Dhcp>()
+                .unwrap()
+        };
+        let lan = dhcp_of("lan");
+        assert_eq!(
+            lan.ra.as_deref(),
+            Some("server"),
+            "admin LAN RA is owned by lan::ipv6_set, not the outbound gate"
+        );
+        assert_eq!(lan.dhcpv6.as_deref(), Some("server"));
+        // The rest of rewrite_dhcp still applies to the admin LAN.
+        assert_eq!((lan.start, lan.limit), (2, 198));
+        let guest = dhcp_of("guest");
+        assert_eq!(
+            guest.ra.as_deref(),
+            Some("disabled"),
+            "non-admin profiles are still gated on the outbound"
+        );
+        assert_eq!(guest.dhcpv6.as_deref(), Some("disabled"));
     }
 
     // === Interface id allocation ===

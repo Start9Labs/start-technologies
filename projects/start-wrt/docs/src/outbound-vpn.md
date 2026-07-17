@@ -39,7 +39,7 @@ For example, if "Mullvad" targets "Proton" and "Proton" targets "Internet":
 How IPv6 traffic is handled depends on whether the VPN's WireGuard tunnel supports it:
 
 - **IPv6-capable VPN** — If the imported config includes an IPv6 address for the tunnel interface, profiles routed through the VPN send their IPv6 traffic (`::/0`) through the tunnel, just like IPv4.
-- **IPv4-only VPN** — If the tunnel has no IPv6 address, profiles routed through it get no IPv6. IPv6 is blocked (it "fails closed") so it cannot leak around the tunnel and out your WAN.
+- **IPv4-only VPN** — If the tunnel has no IPv6 address, no IPv6 flows through it: IPv6 internet traffic is blocked (it "fails closed") so it cannot leak around the tunnel and out your WAN. Non-admin profiles routed through the VPN get no IPv6 addressing at all; the Admin profile's [LAN IPv6](lan.md) setting stays under your control, so its devices still receive IPv6 addresses — just without IPv6 internet.
 
 A kill switch protects every VPN-routed profile: both IPv4 and IPv6 fail closed. If the tunnel goes down, traffic is blocked rather than leaking out the WAN.
 

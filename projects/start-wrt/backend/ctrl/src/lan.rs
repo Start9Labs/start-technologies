@@ -490,8 +490,16 @@ pub async fn ipv6_set<C: CtrlContext>(
             }
         }
 
+        // Skip the admin LAN here like the network loop above: its RA/DHCPv6
+        // were just set from the request, and the admin LAN is itself a profile
+        // (interface 'lan'), so re-gating it on its outbound would silently
+        // revert an enable whenever the admin routes through a v4-only VPN. A
+        // VPN-routed admin fails v6 closed via the kill-switch route instead.
         for section in &mut cfgs["dhcp"].sections {
             if let Some(name) = section.name() {
+                if name.as_ref() == LAN_INTERFACE {
+                    continue;
+                }
                 if let Some(&profile_ipv6) = profile_ipv6_map.get(name.as_ref()) {
                     if let Some(mut dhcp) = section.get_typed::<Dhcp>()? {
                         dhcp.ra = Some(
@@ -1412,6 +1420,78 @@ config profile guest
 
         let res = ipv6_get(ctx).await.unwrap();
         assert!(!res.slaac);
+        assert!(!res.dhcpv6);
+        assert_eq!(res.prefix, 64);
+    }
+
+    #[tokio::test]
+    async fn ipv6_set_enable_survives_v4_only_vpn_admin_outbound() {
+        // Regression: the admin LAN is itself a profile, so the profile sync
+        // used to re-gate dhcp.lan.ra on the admin outbound and silently
+        // revert an enable whenever that outbound was a v4-only VPN.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("network"),
+            "\
+config interface 'lan'
+\toption device 'br-lan'
+\toption proto 'static'
+\toption ipaddr '192.168.1.1'
+\toption netmask '255.255.0.0'
+
+config interface 'wan6'
+\toption device '@wan'
+\toption proto 'dhcpv6'
+
+config interface 'wg0'
+\toption proto 'wireguard'
+\toption private_key 'testkey'
+\tlist addresses '10.69.119.218/32'
+",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("dhcp"),
+            "\
+config dhcp 'lan'
+\toption interface 'lan'
+\toption start '100'
+\toption limit '150'
+\toption leasetime '12h'
+\toption ra 'disabled'
+\toption dhcpv6 'disabled'
+",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("startwrt"),
+            "\
+config profile lan
+\toption fullname 'Admin'
+\toption interface 'lan'
+\toption vlan_tag '1'
+\toption outbound 'wg0'
+",
+        )
+        .unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        ipv6_set(
+            ctx.clone(),
+            DeserializeStdin(LanIpv6SetRequest {
+                slaac: true,
+                dhcpv6: false,
+                prefix: 64,
+            }),
+        )
+        .await
+        .unwrap();
+
+        let res = ipv6_get(ctx).await.unwrap();
+        assert!(
+            res.slaac,
+            "enable must not be reverted by the admin outbound"
+        );
         assert!(!res.dhcpv6);
         assert_eq!(res.prefix, 64);
     }

@@ -29,6 +29,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Enabling LAN IPv6 no longer silently fails when the Admin profile routes
+  through an IPv4-only VPN.** Saving the LAN IPv6 settings reported success
+  but immediately reverted to disabled: the save re-derived the admin LAN's
+  router advertisements from whether its outbound VPN carries IPv6, undoing
+  the change in the same write. Editing the Admin profile onto an IPv4-only
+  VPN likewise switched LAN IPv6 off behind your back — and kept it off even
+  after switching the outbound back. The LAN IPv6 toggle is now the sole
+  owner of that setting; with an IPv4-only VPN outbound, LAN devices still
+  get local (ULA) IPv6 addresses while internet-bound IPv6 remains blocked
+  by the VPN kill switch, so nothing leaks around the tunnel.
+
 - **IPv6 published-port rules now follow the target device when it changes
   its address.** Devices assign their own IPv6 addresses and change them
   routinely — privacy addresses rotate daily, and most operating systems

@@ -33,4 +33,7 @@ Configure IPv6 addressing on the LAN.
 - **Prefix Length** — Shown when IPv6 is enabled. The LAN IPv6 prefix length must be larger (a higher number) than your WAN prefix to create a valid subnet. For example, if your ISP assigns you a `/48` prefix, you can use `/56`, `/60`, or `/64` for the LAN. A `/64` is recommended for most home networks.
 
 > [!NOTE]
-> If any device has a static IPv6 reservation, IPv6 cannot be disabled until those reservations are removed.
+> While any enabled [Published Ports](published-ports.md) rule forwards over IPv6, IPv6 cannot be disabled — devices would lose the addresses those rules depend on. Disable or delete those rules first.
+
+> [!NOTE]
+> If the Admin profile routes through an IPv4-only [Outbound VPN](outbound-vpn.md), LAN devices still receive their IPv6 addresses, but IPv6 internet traffic is blocked by the kill switch so it cannot leak around the tunnel. IPv6 connectivity resumes when the profile routes through an IPv6-capable VPN or directly to the Internet.
