@@ -104,7 +104,7 @@ async fn unmount_slot(
     lazy: bool,
     delete_mountpoint: bool,
 ) -> Result<(), Error> {
-    let _occupancy = match slot {
+    let occupancy = match slot {
         Some(slot) => {
             let slot = slot.lock().await;
             if slot.1.strong_count() != 0 {
@@ -127,6 +127,7 @@ async fn unmount_slot(
             )
         })?;
     }
+    drop(occupancy);
     Ok(())
 }
 impl Drop for MountGuard {
