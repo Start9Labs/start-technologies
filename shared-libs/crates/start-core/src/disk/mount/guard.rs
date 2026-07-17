@@ -43,10 +43,15 @@ where
     }
 }
 
+type MountSlot = Arc<Mutex<(MountType, Weak<MountGuard>)>>;
+
 #[derive(Debug)]
 pub struct MountGuard {
     mountpoint: PathBuf,
     pub(super) mounted: bool,
+    // `TmpMountGuard`-managed mounts carry their shared slot so teardown can
+    // skip the umount once the slot's been re-occupied (see `unmount_slot`).
+    slot: Option<MountSlot>,
 }
 impl MountGuard {
     pub async fn mount(
@@ -59,12 +64,14 @@ impl MountGuard {
         Ok(MountGuard {
             mountpoint,
             mounted: true,
+            slot: None,
         })
     }
     fn as_unmounted(&self) -> Self {
         Self {
             mountpoint: self.mountpoint.clone(),
             mounted: false,
+            slot: self.slot.clone(),
         }
     }
     pub fn take(&mut self) -> Self {
@@ -73,29 +80,64 @@ impl MountGuard {
     }
     pub async fn unmount(mut self, delete_mountpoint: bool) -> Result<(), Error> {
         if self.mounted {
-            unmount(&self.mountpoint, !cfg!(feature = "unstable")).await?;
-            if delete_mountpoint {
-                match tokio::fs::remove_dir(&self.mountpoint).await {
-                    Err(e) if e.raw_os_error() == Some(39) => Ok(()), // directory not empty
-                    a => a,
-                }
-                .with_ctx(|_| {
-                    (
-                        crate::ErrorKind::Filesystem,
-                        format!("rm {}", self.mountpoint.display()),
-                    )
-                })?;
-            }
+            unmount_slot(
+                &self.slot,
+                &self.mountpoint,
+                !cfg!(feature = "unstable"),
+                delete_mountpoint,
+            )
+            .await?;
             self.mounted = false;
         }
         Ok(())
     }
 }
+/// Unmount `mountpoint`, but for a slot-managed mount only while the slot has
+/// no live guard. A remount records itself as the slot's `Weak`, so a nonzero
+/// `strong_count` means another mount now owns this path and will tear itself
+/// down — the slot lock is held across the umount so no remount slips in
+/// between the check and the umount.
+async fn unmount_slot(
+    slot: &Option<MountSlot>,
+    mountpoint: &Path,
+    lazy: bool,
+    delete_mountpoint: bool,
+) -> Result<(), Error> {
+    let _occupancy = match slot {
+        Some(slot) => {
+            let slot = slot.lock().await;
+            if slot.1.strong_count() != 0 {
+                return Ok(());
+            }
+            Some(slot)
+        }
+        None => None,
+    };
+    unmount(mountpoint, lazy).await?;
+    if delete_mountpoint {
+        match tokio::fs::remove_dir(mountpoint).await {
+            Err(e) if e.raw_os_error() == Some(39) => Ok(()), // directory not empty
+            a => a,
+        }
+        .with_ctx(|_| {
+            (
+                crate::ErrorKind::Filesystem,
+                format!("rm {}", mountpoint.display()),
+            )
+        })?;
+    }
+    Ok(())
+}
 impl Drop for MountGuard {
     fn drop(&mut self) {
         if self.mounted {
             let mountpoint = std::mem::take(&mut self.mountpoint);
-            tokio::spawn(async move { unmount(mountpoint, true).await.log_err() });
+            let slot = self.slot.take();
+            tokio::spawn(async move {
+                unmount_slot(&slot, &mountpoint, true, false)
+                    .await
+                    .log_err()
+            });
         }
     }
 }
@@ -118,8 +160,7 @@ async fn tmp_mountpoint(source: &impl FileSystem) -> Result<PathBuf, Error> {
 lazy_static! {
     // Maps each tmp mountpoint to its own lock. The outer map lock is held only
     // while fetching/creating a slot — never across the mount itself.
-    static ref TMP_MOUNTS: Mutex<BTreeMap<PathBuf, Arc<Mutex<(MountType, Weak<MountGuard>)>>>> =
-        Mutex::new(BTreeMap::new());
+    static ref TMP_MOUNTS: Mutex<BTreeMap<PathBuf, MountSlot>> = Mutex::new(BTreeMap::new());
 }
 
 #[derive(Debug, Clone)]
@@ -135,13 +176,13 @@ impl TmpMountGuard {
         // mounting. Holding the global lock across the mount self-deadlocks:
         // `IdMapped::mount` re-enters `TmpMountGuard::mount` to stage its inner
         // filesystem, which needs the same lock.
-        let slot = TMP_MOUNTS
+        let slot_handle = TMP_MOUNTS
             .lock()
             .await
             .entry(mountpoint.clone())
             .or_insert_with(|| Arc::new(Mutex::new((mount_type, Weak::new()))))
             .clone();
-        let mut slot = slot.lock().await;
+        let mut slot = slot_handle.lock().await;
         let (prev_mt, weak_slot) = &mut *slot;
         if let Some(guard) = weak_slot.upgrade() {
             // upgrade to rw
@@ -163,7 +204,9 @@ impl TmpMountGuard {
             if is_mountpoint(&mountpoint).await? {
                 unmount(&mountpoint, true).await?;
             }
-            let guard = Arc::new(MountGuard::mount(filesystem, &mountpoint, mount_type).await?);
+            let mut mount_guard = MountGuard::mount(filesystem, &mountpoint, mount_type).await?;
+            mount_guard.slot = Some(slot_handle.clone());
+            let guard = Arc::new(mount_guard);
             *weak_slot = Arc::downgrade(&guard);
             *prev_mt = mount_type;
             Ok(TmpMountGuard { guard })
