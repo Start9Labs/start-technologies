@@ -24,3 +24,18 @@ macro_rules! dbg {
         ),+)
     }
 }
+
+/// Emit a tracing event only in `dev` builds (the `dev` cargo feature). For
+/// best-effort/expected failures — e.g. PCP/UPnP/NAT-PMP port-mapping attempts
+/// against gateways that don't support them — which are pure noise in
+/// production but useful when developing. `$level` is a tracing level macro
+/// name (`debug`/`warn`/`error`/…); `if cfg!` keeps the arguments type-checked
+/// while release builds drop the branch.
+#[macro_export]
+macro_rules! dev_log {
+    ($level:ident, $($arg:tt)*) => {
+        if cfg!(feature = "dev") {
+            tracing::$level!($($arg)*);
+        }
+    };
+}

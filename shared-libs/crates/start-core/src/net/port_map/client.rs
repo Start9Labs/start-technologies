@@ -384,7 +384,10 @@ impl State {
                     if renew_due(std::time::Instant::now(), m.expiration(), m.lifetime()) =>
                 {
                     if let Err(e) = m.renew().await {
-                        tracing::debug!("PCP/NAT-PMP renew for {key:?} failed, re-mapping: {e}");
+                        crate::dev_log!(
+                            debug,
+                            "PCP/NAT-PMP renew for {key:?} failed, re-mapping: {e}"
+                        );
                         self.teardown(key.clone()).await;
                         self.apply(key).await;
                     }
@@ -417,7 +420,7 @@ impl State {
         match self.active.remove(&key) {
             Some(Active::Pcp(m)) => {
                 if let Err((e, _)) = m.try_drop().await {
-                    tracing::debug!("PCP/NAT-PMP unmap for {key:?} failed: {e}");
+                    crate::dev_log!(debug, "PCP/NAT-PMP unmap for {key:?} failed: {e}");
                 }
             }
             Some(Active::Upnp { .. }) => {
@@ -464,7 +467,10 @@ impl State {
                     .gateway_supports_hostname(local_ip, *gw, *scope_id)
                     .await
                 {
-                    tracing::debug!("PCP HOSTNAME skip {gw}: no ANNOUNCE confirmation of support");
+                    crate::dev_log!(
+                        debug,
+                        "PCP HOSTNAME skip {gw}: no ANNOUNCE confirmation of support"
+                    );
                     continue;
                 }
                 match pcp::port_mapping(
@@ -499,7 +505,8 @@ impl State {
                     Ok(m) => {
                         let _ = m.try_drop().await;
                     }
-                    Err(e) => tracing::debug!(
+                    Err(e) => crate::dev_log!(
+                        debug,
                         "PCP HOSTNAME map {local_ip}:{external_port} {hostname} via {gw} failed: {e}"
                     ),
                 }
@@ -554,7 +561,8 @@ impl State {
                             self.active.insert(key, Active::Pcp(m));
                             return;
                         }
-                        tracing::debug!(
+                        crate::dev_log!(
+                            debug,
                             "gateway {gw} granted {granted}/{range_size} PORT_SET ports for {local_ip}:{external_port}; skipping range"
                         );
                         let _ = m.try_drop().await;
@@ -562,7 +570,8 @@ impl State {
                     Ok(m) => {
                         let _ = m.try_drop().await;
                     }
-                    Err(e) => tracing::debug!(
+                    Err(e) => crate::dev_log!(
+                        debug,
                         "PCP PORT_SET map {local_ip}:{external_port} via {gw} failed: {e}"
                     ),
                 }
@@ -603,7 +612,8 @@ impl State {
                     let _ = m.try_drop().await;
                 }
                 Err(e) => {
-                    tracing::debug!(
+                    crate::dev_log!(
+                        debug,
                         "PCP/NAT-PMP map {local_ip}:{external_port} via {gw} failed: {e}"
                     )
                 }
@@ -623,7 +633,10 @@ impl State {
                             true
                         }
                         Err(e) => {
-                            tracing::debug!("UPnP map {local_v4}:{external_port} failed: {e}");
+                            crate::dev_log!(
+                                debug,
+                                "UPnP map {local_v4}:{external_port} failed: {e}"
+                            );
                             false
                         }
                     }
@@ -653,7 +666,7 @@ impl State {
                     self.upnp_cache.insert(local_ip, (g, Instant::now()));
                 }
                 Err(e) => {
-                    tracing::debug!("no UPnP gateway on {local_ip}: {e}");
+                    crate::dev_log!(debug, "no UPnP gateway on {local_ip}: {e}");
                     self.upnp_cache.remove(&local_ip);
                     return None;
                 }
