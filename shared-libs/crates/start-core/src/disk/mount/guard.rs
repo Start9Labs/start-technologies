@@ -9,6 +9,7 @@ use tracing::instrument;
 
 use super::filesystem::{FileSystem, MountType, ReadOnly, ReadWrite};
 use super::util::{is_mountpoint, unmount};
+use crate::util::sync::SyncMutex;
 use crate::util::{Invoke, Never};
 use crate::{Error, ResultExt};
 
@@ -160,7 +161,8 @@ async fn tmp_mountpoint(source: &impl FileSystem) -> Result<PathBuf, Error> {
 lazy_static! {
     // Maps each tmp mountpoint to its own lock. The outer map lock is held only
     // while fetching/creating a slot — never across the mount itself.
-    static ref TMP_MOUNTS: Mutex<BTreeMap<PathBuf, MountSlot>> = Mutex::new(BTreeMap::new());
+    static ref TMP_MOUNTS: SyncMutex<BTreeMap<PathBuf, MountSlot>> =
+        SyncMutex::new(BTreeMap::new());
 }
 
 #[derive(Debug, Clone)]
@@ -172,16 +174,11 @@ impl TmpMountGuard {
     #[instrument(skip_all)]
     pub async fn mount(filesystem: &impl FileSystem, mount_type: MountType) -> Result<Self, Error> {
         let mountpoint = tmp_mountpoint(filesystem).await?;
-        // Grab the per-mountpoint slot, then drop the outer map lock before
-        // mounting. Holding the global lock across the mount self-deadlocks:
-        // `IdMapped::mount` re-enters `TmpMountGuard::mount` to stage its inner
-        // filesystem, which needs the same lock.
-        let slot_handle = TMP_MOUNTS
-            .lock()
-            .await
-            .entry(mountpoint.clone())
-            .or_insert_with(|| Arc::new(Mutex::new((mount_type, Weak::new()))))
-            .clone();
+        let slot_handle = TMP_MOUNTS.mutate(|m| {
+            m.entry(mountpoint.clone())
+                .or_insert_with(|| Arc::new(Mutex::new((mount_type, Weak::new()))))
+                .clone()
+        });
         let mut slot = slot_handle.lock().await;
         let (prev_mt, weak_slot) = &mut *slot;
         if let Some(guard) = weak_slot.upgrade() {
