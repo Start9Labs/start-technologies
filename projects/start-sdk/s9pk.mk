@@ -6,7 +6,12 @@ INGREDIENTS := $(shell start-cli s9pk list-ingredients 2>/dev/null)
 # Resolve the actual git dir so this works inside git worktrees, where .git
 # is a file pointing at <main>/.git/worktrees/<name> rather than a directory.
 GIT_DIR := $(shell git rev-parse --git-dir 2>/dev/null)
-GIT_DEPS := $(if $(GIT_DIR),$(GIT_DIR)/HEAD $(GIT_DIR)/index)
+# These are rebuild triggers (the manifest embeds the commit hash), not build
+# requirements — pack degrades to a null gitHash on its own. $(wildcard) drops
+# whichever don't exist: a freshly `git init`ed repo has no index until the
+# first `git add`, and a hard prerequisite on it halts make with "No rule to
+# make target".
+GIT_DEPS := $(if $(GIT_DIR),$(wildcard $(GIT_DIR)/HEAD $(GIT_DIR)/index))
 ARCHES ?= x86 arm riscv
 # TARGETS is the list of leaf make-targets the build matrix fans out over.
 # Defaults to the arches; variant packages override (e.g. immich, ollama, vllm
