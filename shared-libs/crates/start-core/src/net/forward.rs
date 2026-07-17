@@ -918,6 +918,10 @@ enum InterfaceForwardCommand {
 
 pub struct InterfacePortForwardController {
     req: mpsc::UnboundedSender<InterfaceForwardCommand>,
+    /// A clone of the shared `PortMapController`, so this controller owns the
+    /// upstream pinhole of a v6 GUA DNAT ([`Self::forward6`]) the same way the v4
+    /// path does inside [`InterfaceForwardEntry::update`].
+    pmap: PortMapController,
     _thread: NonDetachingJoinHandle<()>,
 }
 
@@ -927,6 +931,7 @@ impl InterfacePortForwardController {
         pmap: PortMapController,
     ) -> Self {
         let port_forward = PortForwardController::new();
+        let v6_pmap = pmap.clone();
 
         let (req_send, mut req_recv) = mpsc::unbounded_channel::<InterfaceForwardCommand>();
         let thread = NonDetachingJoinHandle::from(tokio::spawn(async move {
@@ -961,8 +966,50 @@ impl InterfacePortForwardController {
 
         Self {
             req: req_send,
+            pmap: v6_pmap,
             _thread: thread,
         }
+    }
+
+    /// DNAT a host GUA to a container ULA (v6 counterpart of a v4 forward) and, for
+    /// a WAN forward (`src_filter == None`), open its upstream firewall pinhole —
+    /// so the DNAT and its pinhole are owned together, as in the v4 path.
+    /// `gateways` are the PCP candidates for the pinhole (ignored for a LAN-only
+    /// forward). Best-effort pinhole: it is a fire-and-forget port-map request.
+    pub async fn forward6(
+        &self,
+        source: SocketAddrV6,
+        target: SocketAddrV6,
+        target_prefix: u8,
+        src_filter: Option<IpNet>,
+        gateways: Vec<(IpAddr, Option<u32>)>,
+    ) -> Result<(), Error> {
+        forward6(source, target, target_prefix, src_filter.as_ref()).await?;
+        if src_filter.is_none() && !gateways.is_empty() {
+            self.pmap.ensure(
+                IpAddr::V6(*source.ip()),
+                source.port(),
+                source.port(),
+                gateways,
+            );
+        }
+        Ok(())
+    }
+
+    /// Tear down a [`Self::forward6`] — the nft DNAT and, for a WAN forward, its
+    /// upstream pinhole.
+    pub async fn unforward6(
+        &self,
+        source: SocketAddrV6,
+        target: SocketAddrV6,
+        target_prefix: u8,
+        src_filter: Option<IpNet>,
+    ) -> Result<(), Error> {
+        unforward6(source, target, target_prefix, src_filter.as_ref()).await?;
+        if src_filter.is_none() {
+            self.pmap.remove(IpAddr::V6(*source.ip()), source.port());
+        }
+        Ok(())
     }
 
     pub async fn add(

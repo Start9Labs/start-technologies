@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::Path;
 use std::time::Duration;
@@ -7,6 +7,7 @@ use async_stream::try_stream;
 use color_eyre::eyre::eyre;
 use futures::stream::BoxStream;
 use futures::{StreamExt, TryStreamExt};
+use imbl::OrdMap;
 use imbl_value::InternedString;
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use nix::net::if_::if_nametoindex;
@@ -14,7 +15,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::process::Command;
 
 use crate::GatewayId;
-use crate::db::model::public::{IpInfo, NetworkInterfaceType};
+use crate::db::model::public::{IpInfo, NetworkInterfaceInfo, NetworkInterfaceType};
 use crate::prelude::*;
 use crate::util::Invoke;
 
@@ -144,6 +145,24 @@ pub fn is_private_ip(addr: IpAddr) -> bool {
         IpAddr::V4(v4) => v4.is_private() || v4.is_loopback() || v4.is_link_local(),
         IpAddr::V6(v6) => ipv6_is_local(v6),
     }
+}
+
+/// The box's own IPv6 global-unicast addresses (GUAs) on `gateways` — the
+/// non-link-local, non-ULA v6 subnet addresses. Used to populate a vhost's
+/// per-IP `public_v6`, since one gateway may carry several GUAs.
+pub fn gua_ips(
+    ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+    gateways: &BTreeSet<GatewayId>,
+) -> BTreeSet<Ipv6Addr> {
+    gateways
+        .iter()
+        .filter_map(|gw| ip_info.get(gw).and_then(|i| i.ip_info.as_ref()))
+        .flat_map(|info| info.subnets.iter())
+        .filter_map(|s| match s.addr() {
+            IpAddr::V6(v6) if !ipv6_is_local(v6) => Some(v6),
+            _ => None,
+        })
+        .collect()
 }
 
 fn parse_iface_ip(output: &str) -> Result<Vec<&str>, Error> {
