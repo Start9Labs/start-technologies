@@ -148,15 +148,10 @@ impl GatewayBackend for TunnelContext {
         _peer: Ipv4Addr,
         lifetime: Option<u32>,
     ) -> Result<(), u16> {
-        let res = apply_peer_forward_range(self, source, target, count, "PCP").await;
-        // Stamp the lease on the renewal (idempotent re-assert) path too, so a
-        // still-renewing client is never reaped.
-        if res.is_ok() {
-            if let Some(lt) = lifetime {
-                lease::stamp(self, LeaseKey::Dnat(source), lt);
-            }
-        }
-        res
+        // `apply_peer_forward_range` stamps the lease itself (Dnat on the DNAT
+        // path, SniFallback when the port is SNI-demuxed and this becomes its
+        // fallback), so a still-renewing client is never reaped whichever it is.
+        apply_peer_forward_range(self, source, target, count, "PCP", lifetime).await
     }
 
     async fn remove_forward(&self, peer: Ipv4Addr, internal_port: u16) {
@@ -278,9 +273,9 @@ impl GatewayBackend for TunnelContext {
                 db.as_port_forwards_mut().mutate(|pf| {
                     use crate::tunnel::db::PortForward;
                     let mut now_empty = false;
-                    if let Some(PortForward::Sni { routes }) = pf.0.get_mut(&source) {
+                    if let Some(PortForward::Sni { routes, fallback }) = pf.0.get_mut(&source) {
                         routes.retain(|h, r| !(r.target == target && hostnames.contains(h)));
-                        now_empty = routes.is_empty();
+                        now_empty = routes.is_empty() && fallback.is_none();
                     }
                     if now_empty {
                         pf.0.remove(&source);
@@ -328,11 +323,41 @@ impl TunnelContext {
                             ErrorKind::InvalidRequest,
                         ));
                     }
+                    // A lone same-owner hostname-less DNAT on this exact port is
+                    // promoted to this shared SNI port's fallback, so a bare public
+                    // IP and named domains can coexist. A range or another client's
+                    // DNAT is rejected (see `plan_dnat_conversion`).
+                    let mut converted = None;
+                    if plan_dnat_conversion(pf.0.get(&source), source, target)? {
+                        if let Some(PortForward::Dnat {
+                            target: dt,
+                            label,
+                            enabled,
+                            auto,
+                            ..
+                        }) = pf.0.remove(&source)
+                        {
+                            converted = Some(dt);
+                            pf.0.insert(
+                                source,
+                                PortForward::Sni {
+                                    routes: std::collections::BTreeMap::new(),
+                                    fallback: Some(SniRoute {
+                                        target: dt,
+                                        label,
+                                        enabled,
+                                        auto,
+                                    }),
+                                },
+                            );
+                        }
+                    }
                     let entry = pf.0.entry(source).or_insert_with(|| PortForward::Sni {
                         routes: std::collections::BTreeMap::new(),
+                        fallback: None,
                     });
                     match entry {
-                        PortForward::Sni { routes } => {
+                        PortForward::Sni { routes, .. } => {
                             for h in &hostnames_owned {
                                 if routes.get(h).is_some_and(|r| r.target != target) {
                                     return Err(Error::new(
@@ -356,9 +381,9 @@ impl TunnelContext {
                                     },
                                 );
                             }
-                            Ok(())
+                            Ok(converted)
                         }
-                        // external port already used by a DNAT forward
+                        // Unreachable: a lone DNAT was converted to Sni just above.
                         PortForward::Dnat { .. } => Err(Error::new(
                             eyre!("{source} is already a DNAT forward"),
                             ErrorKind::InvalidRequest,
@@ -368,8 +393,31 @@ impl TunnelContext {
             })
             .await
             .result;
-        if persisted.is_err() {
-            return Err(crate::net::port_map::pcp::hostname::RESULT_HOSTNAME_TAKEN);
+        let converted = match persisted {
+            Ok(c) => c,
+            Err(_) => return Err(crate::net::port_map::pcp::hostname::RESULT_HOSTNAME_TAKEN),
+        };
+        // If a lone DNAT was promoted to this port's fallback, bind the fallback in
+        // the demux, tear down the now-superseded kernel DNAT (the SNI listener
+        // takes over the port), and carry its lease to the fallback so a still-
+        // renewing bare-IP client isn't reaped before its next MAP.
+        if let Some(dnat_target) = converted {
+            if let Err(code) =
+                self.sni()
+                    .register_fallback(*source.ip(), source.port(), dnat_target)
+            {
+                tracing::warn!("failed to register fallback converting DNAT on {source}: {code}");
+            }
+            if let Some(rc) = self.active_forwards.mutate(|m| m.remove(&source)) {
+                drop(rc);
+                self.forward.gc().await.log_err();
+            }
+            let carried = self.leases.mutate(|l| l.remove(&LeaseKey::Dnat(source)));
+            if let Some(exp) = carried {
+                self.leases.mutate(|l| {
+                    l.insert(LeaseKey::SniFallback(source), exp);
+                });
+            }
         }
         // Mirror into the dataplane; on the unexpected register failure undo the
         // DB routes we just added.
@@ -394,6 +442,129 @@ impl TunnelContext {
             }
         }
         Ok(())
+    }
+
+    /// Persist + register the hostname-less fallback on `source -> target`. The
+    /// port must already be SNI-demuxed (a lone hostname-less forward stays a
+    /// kernel DNAT); on a StartTunnel this is how a bare public IP shares a port
+    /// with named domains. `auto`/`label` mirror [`persist_sni_forward`]; the
+    /// same target reclaims, a different one is rejected (one fallback per port).
+    pub async fn persist_fallback_forward(
+        &self,
+        source: SocketAddrV4,
+        target: SocketAddrV4,
+        lifetime: Option<u32>,
+        auto: bool,
+        label: Option<String>,
+    ) -> Result<(), u8> {
+        let default_label = if auto { Some("PCP".to_string()) } else { label };
+        let persisted = self
+            .db
+            .mutate(|db| {
+                db.as_port_forwards_mut().mutate(|pf| {
+                    use crate::tunnel::db::{PortForward, SniRoute};
+                    match pf.0.get_mut(&source) {
+                        Some(PortForward::Sni { fallback, .. }) => {
+                            if fallback.as_ref().is_some_and(|f| f.target != target) {
+                                return Err(Error::new(
+                                    eyre!("fallback on {source} is held by another client"),
+                                    ErrorKind::InvalidRequest,
+                                ));
+                            }
+                            let (label, enabled, auto) =
+                                sni_route_fields(fallback.as_ref(), auto, &default_label);
+                            *fallback = Some(SniRoute {
+                                target,
+                                label,
+                                enabled,
+                                auto,
+                            });
+                            Ok(())
+                        }
+                        _ => Err(Error::new(
+                            eyre!("{source} is not an SNI-demuxed port"),
+                            ErrorKind::InvalidRequest,
+                        )),
+                    }
+                })
+            })
+            .await
+            .result;
+        if persisted.is_err() {
+            return Err(crate::net::port_map::pcp::hostname::RESULT_HOSTNAME_TAKEN);
+        }
+        if self
+            .sni()
+            .register_fallback(*source.ip(), source.port(), target)
+            .is_err()
+        {
+            self.remove_sni_fallback(source, target).await;
+            return Err(crate::net::port_map::pcp::hostname::RESULT_HOSTNAME_TAKEN);
+        }
+        if let Some(lt) = lifetime {
+            lease::stamp(self, LeaseKey::SniFallback(source), lt);
+        }
+        Ok(())
+    }
+
+    /// Remove the hostname-less fallback on `source`, only if held by `target`.
+    /// Drops the shared port entirely if no SNI routes remain either.
+    pub async fn remove_sni_fallback(&self, source: SocketAddrV4, target: SocketAddrV4) {
+        self.sni()
+            .unregister_fallback(*source.ip(), source.port(), target);
+        lease::forget(self, &LeaseKey::SniFallback(source));
+        self.db
+            .mutate(|db| {
+                db.as_port_forwards_mut().mutate(|pf| {
+                    use crate::tunnel::db::PortForward;
+                    let mut now_empty = false;
+                    if let Some(PortForward::Sni { routes, fallback }) = pf.0.get_mut(&source) {
+                        if fallback.as_ref().is_some_and(|f| f.target == target) {
+                            *fallback = None;
+                        }
+                        now_empty = routes.is_empty() && fallback.is_none();
+                    }
+                    if now_empty {
+                        pf.0.remove(&source);
+                    }
+                    Ok(())
+                })
+            })
+            .await
+            .result
+            .log_err();
+    }
+}
+
+/// Whether a hostname MAP arriving on `source` may promote an existing
+/// hostname-less DNAT there into this SNI port's fallback. `Ok(true)` converts (a
+/// lone, same-owner DNAT); `Ok(false)` means nothing to convert (empty or already
+/// SNI). `Err` rejects an incompatible claim: a DNAT range (can't host SNI) or a
+/// *different* client's DNAT — a whole-port claim another peer must not carve up.
+/// Each peer's forward target is forced to its own tunnel IP, so the target IP
+/// identifies the owner.
+fn plan_dnat_conversion(
+    existing: Option<&PortForward>,
+    source: SocketAddrV4,
+    new_target: SocketAddrV4,
+) -> Result<bool, Error> {
+    match existing {
+        Some(PortForward::Dnat { count, target, .. }) => {
+            if *count != 1 {
+                return Err(Error::new(
+                    eyre!("{source} is already a DNAT range forward"),
+                    ErrorKind::InvalidRequest,
+                ));
+            }
+            if target.ip() != new_target.ip() {
+                return Err(Error::new(
+                    eyre!("{source} is already a DNAT forward for another client"),
+                    ErrorKind::InvalidRequest,
+                ));
+            }
+            Ok(true)
+        }
+        _ => Ok(false),
     }
 }
 
@@ -453,8 +624,8 @@ async fn remove_peer_forward(ctx: &TunnelContext, peer: Ipv4Addr, internal_port:
 mod tests {
     use std::net::SocketAddrV4;
 
-    use super::sni_route_fields;
-    use crate::tunnel::db::SniRoute;
+    use super::{plan_dnat_conversion, sni_route_fields};
+    use crate::tunnel::db::{PortForward, SniRoute};
 
     fn route(label: Option<&str>, enabled: bool, auto: bool) -> SniRoute {
         SniRoute {
@@ -463,6 +634,40 @@ mod tests {
             enabled,
             auto,
         }
+    }
+
+    fn dnat(target: &str, count: u16) -> PortForward {
+        PortForward::Dnat {
+            target: target.parse().unwrap(),
+            label: None,
+            enabled: true,
+            count,
+            auto: true,
+        }
+    }
+
+    // A hostname MAP may promote *its own* client's lone DNAT to the port's
+    // fallback, but must not carve up another client's whole-port DNAT, a DNAT
+    // range, and does nothing on an empty or already-SNI port.
+    #[test]
+    fn dnat_conversion_is_owner_scoped() {
+        let src: SocketAddrV4 = "1.2.3.4:443".parse().unwrap();
+        let mine: SocketAddrV4 = "10.59.0.2:443".parse().unwrap();
+        let theirs: SocketAddrV4 = "10.59.0.3:443".parse().unwrap();
+
+        // Same owner's lone DNAT -> convert.
+        assert!(plan_dnat_conversion(Some(&dnat("10.59.0.2:443", 1)), src, mine).unwrap());
+        // A different client's DNAT is an exclusive whole-port claim -> reject.
+        assert!(plan_dnat_conversion(Some(&dnat("10.59.0.3:443", 1)), src, mine).is_err());
+        // Even the owner can't fold a DNAT *range* into a single SNI port.
+        assert!(plan_dnat_conversion(Some(&dnat("10.59.0.2:443", 4)), src, mine).is_err());
+        // Nothing to convert on an empty port or one already SNI.
+        assert!(!plan_dnat_conversion(None, src, mine).unwrap());
+        let sni = PortForward::Sni {
+            routes: std::collections::BTreeMap::new(),
+            fallback: None,
+        };
+        assert!(!plan_dnat_conversion(Some(&sni), src, theirs).unwrap());
     }
 
     // A manually-added hostname on a fresh source is stored as manual, with the

@@ -34,6 +34,9 @@ pub enum LeaseKey {
         source: SocketAddrV4,
         hostname: String,
     },
+    /// The hostname-less fallback on an SNI-demuxed port, keyed by its single
+    /// external address (there is at most one fallback per port).
+    SniFallback(SocketAddrV4),
     Pinhole(SocketAddrV6),
 }
 
@@ -67,11 +70,14 @@ pub async fn seed_from_db(ctx: &TunnelContext) -> Result<(), Error> {
     for (source, entry) in peek.as_port_forwards().de()?.0 {
         match entry {
             PortForward::Dnat { auto: true, .. } => seed.push(LeaseKey::Dnat(source)),
-            PortForward::Sni { routes } => {
+            PortForward::Sni { routes, fallback } => {
                 for (hostname, route) in routes {
                     if route.auto {
                         seed.push(LeaseKey::Sni { source, hostname });
                     }
+                }
+                if fallback.is_some_and(|f| f.auto) {
+                    seed.push(LeaseKey::SniFallback(source));
                 }
             }
             PortForward::Dnat { .. } => {}
@@ -134,6 +140,7 @@ async fn reap_expired(ctx: &TunnelContext) -> Option<Instant> {
         match &key {
             LeaseKey::Dnat(source) => reap_dnat(ctx, *source).await,
             LeaseKey::Sni { source, hostname } => reap_sni(ctx, *source, hostname).await,
+            LeaseKey::SniFallback(source) => reap_sni_fallback(ctx, *source).await,
             LeaseKey::Pinhole(k) => reap_pinhole(ctx, *k).await,
         }
         // Drop the lease unless a renewal extended it while we reaped.
@@ -184,7 +191,7 @@ async fn reap_sni(ctx: &TunnelContext, source: SocketAddrV4, hostname: &str) {
         .de()
         .ok()
         .and_then(|pf| match pf.0.get(&source) {
-            Some(PortForward::Sni { routes }) => {
+            Some(PortForward::Sni { routes, .. }) => {
                 routes.get(hostname).filter(|r| r.auto).map(|r| r.target)
             }
             _ => None,
@@ -195,6 +202,27 @@ async fn reap_sni(ctx: &TunnelContext, source: SocketAddrV4, hostname: &str) {
     ctx.remove_sni_forward(source, target, &[hostname.to_string()])
         .await;
     tracing::info!("PCP lease lapsed: removed auto SNI route {hostname} on {source}");
+}
+
+async fn reap_sni_fallback(ctx: &TunnelContext, source: SocketAddrV4) {
+    let target = ctx
+        .db
+        .peek()
+        .await
+        .as_port_forwards()
+        .de()
+        .ok()
+        .and_then(|pf| match pf.0.get(&source) {
+            Some(PortForward::Sni { fallback, .. }) => {
+                fallback.as_ref().filter(|f| f.auto).map(|f| f.target)
+            }
+            _ => None,
+        });
+    let Some(target) = target else {
+        return;
+    };
+    ctx.remove_sni_fallback(source, target).await;
+    tracing::info!("PCP lease lapsed: removed auto SNI fallback on {source}");
 }
 
 async fn reap_pinhole(ctx: &TunnelContext, key: SocketAddrV6) {

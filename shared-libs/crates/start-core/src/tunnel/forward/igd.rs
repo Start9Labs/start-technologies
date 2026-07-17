@@ -31,6 +31,7 @@ use crate::net::port_map::server::igd::{
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::db::PortForward;
+use crate::tunnel::forward::lease::{self, LeaseKey};
 use crate::tunnel::wg::WIREGUARD_INTERFACE_NAME;
 
 /// Run the IGD server (SSDP responder + HTTP control server) for the life of
@@ -256,6 +257,7 @@ pub(super) async fn apply_peer_forward_range(
     target: SocketAddrV4,
     count: u16,
     protocol_label: &str,
+    lifetime: Option<u32>,
 ) -> Result<(), u16> {
     // Port 80 is reserved for the tunnel's HTTP→HTTPS redirect; never
     // automatically create a forward that would take it (PCP/UPnP alike).
@@ -271,9 +273,18 @@ pub(super) async fn apply_peer_forward_range(
         }) if t != target || c != count => {
             return Err(718); // ConflictInMappingEntry
         }
-        // The external port is held by an SNI-demuxed forward.
+        // The external port is SNI-demuxed. A single hostname-less MAP becomes the
+        // port's fallback (a bare public IP sharing the port with named domains);
+        // `persist_fallback_forward` stamps its own SniFallback lease. A range
+        // can't be a single-port fallback, so it still conflicts.
         Some(PortForward::Sni { .. }) => {
-            return Err(718); // ConflictInMappingEntry
+            if count != 1 {
+                return Err(718); // ConflictInMappingEntry
+            }
+            return ctx
+                .persist_fallback_forward(source, target, lifetime, true, None)
+                .await
+                .map_err(|_| 718u16);
         }
         Some(PortForward::Dnat { .. }) => {
             // Idempotent re-assert from the client's periodic refresh: ensure the
@@ -289,6 +300,9 @@ pub(super) async fn apply_peer_forward_range(
                 ctx.active_forwards.mutate(|m| {
                     m.insert(source, rc);
                 });
+            }
+            if let Some(lt) = lifetime {
+                lease::stamp(ctx, LeaseKey::Dnat(source), lt);
             }
             return Ok(());
         }
@@ -350,6 +364,9 @@ pub(super) async fn apply_peer_forward_range(
     ctx.active_forwards.mutate(|m| {
         m.insert(source, rc);
     });
+    if let Some(lt) = lifetime {
+        lease::stamp(ctx, LeaseKey::Dnat(source), lt);
+    }
     Ok(())
 }
 

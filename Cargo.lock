@@ -7899,7 +7899,7 @@ dependencies = [
 
 [[package]]
 name = "start-tunnel"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "include_dir",
  "start-core",

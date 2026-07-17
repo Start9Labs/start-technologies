@@ -5,6 +5,18 @@ All notable changes to StartTunnel are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2]
+
+### Fixed
+
+- **A bare public IP and named domains can now share one external port.** When a
+  connected device publishes both a hostname-less forward and one or more SNI
+  hostnames on the same external port, the hostname-less forward now acts as the
+  fallback: a connection whose TLS SNI matches a named route reaches that route's
+  device, and everything else — a bare-IP client, or an unmatched or absent SNI —
+  reaches the fallback device. The two used to conflict, so whichever was
+  requested second was rejected.
+
 ## [1.1.1]
 
 ### Changed

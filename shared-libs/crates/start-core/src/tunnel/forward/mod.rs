@@ -30,12 +30,16 @@ pub async fn clear_for_peer(
 ) -> Result<(), Error> {
     // v4 DNAT + SNI live in port_forwards, matched by their target (the device).
     let forwards = ctx.db.peek().await.as_port_forwards().de()?;
-    let (dnat_sources, sni_routes) = select_peer_forwards(&forwards.0, peer, auto_only);
+    let (dnat_sources, sni_routes, sni_fallbacks) =
+        select_peer_forwards(&forwards.0, peer, auto_only);
     for source in dnat_sources {
         ctx.remove_forward_by_source(source, peer).await;
     }
     for (source, target, host) in sni_routes {
         ctx.remove_sni_forward(source, target, &[host]).await;
+    }
+    for (source, target) in sni_fallbacks {
+        ctx.remove_sni_fallback(source, target).await;
     }
 
     // v6 pinholes are keyed by the device's own GUA, derivable from each subnet's
@@ -72,15 +76,21 @@ pub async fn clear_for_peer(
     Ok(())
 }
 
-/// The DNAT sources and SNI routes (`source`, `target`, `hostname`) held by
-/// `peer` — everything, or just the automatic entries when `auto_only`.
+/// The DNAT sources, SNI routes (`source`, `target`, `hostname`), and SNI
+/// fallbacks (`source`, `target`) held by `peer` — everything, or just the
+/// automatic entries when `auto_only`.
 fn select_peer_forwards(
     forwards: &std::collections::BTreeMap<SocketAddrV4, PortForward>,
     peer: Ipv4Addr,
     auto_only: bool,
-) -> (Vec<SocketAddrV4>, Vec<(SocketAddrV4, SocketAddrV4, String)>) {
+) -> (
+    Vec<SocketAddrV4>,
+    Vec<(SocketAddrV4, SocketAddrV4, String)>,
+    Vec<(SocketAddrV4, SocketAddrV4)>,
+) {
     let mut dnat_sources = Vec::new();
     let mut sni_routes = Vec::new();
+    let mut sni_fallbacks = Vec::new();
     for (source, entry) in forwards {
         match entry {
             PortForward::Dnat { target, auto, .. }
@@ -88,17 +98,22 @@ fn select_peer_forwards(
             {
                 dnat_sources.push(*source);
             }
-            PortForward::Sni { routes } => {
+            PortForward::Sni { routes, fallback } => {
                 for (host, route) in routes {
                     if route.target.ip() == &peer && (!auto_only || route.auto) {
                         sni_routes.push((*source, route.target, host.clone()));
+                    }
+                }
+                if let Some(f) = fallback {
+                    if f.target.ip() == &peer && (!auto_only || f.auto) {
+                        sni_fallbacks.push((*source, f.target));
                     }
                 }
             }
             _ => {}
         }
     }
-    (dnat_sources, sni_routes)
+    (dnat_sources, sni_routes, sni_fallbacks)
 }
 
 #[cfg(test)]
@@ -153,19 +168,40 @@ mod tests {
                 auto: false,
             },
         );
-        fwds.insert("5.6.7.8:443".parse().unwrap(), PortForward::Sni { routes });
+        fwds.insert(
+            "5.6.7.8:443".parse().unwrap(),
+            PortForward::Sni {
+                routes,
+                fallback: Some(SniRoute {
+                    target: "10.59.0.2:443".parse().unwrap(),
+                    label: None,
+                    enabled: true,
+                    auto: true,
+                }),
+            },
+        );
 
-        let (auto_dnat, auto_sni) = select_peer_forwards(&fwds, peer, true);
+        let (auto_dnat, auto_sni, auto_fb) = select_peer_forwards(&fwds, peer, true);
         assert_eq!(auto_dnat, vec!["1.2.3.4:443".parse().unwrap()], "auto only");
         assert_eq!(auto_sni.len(), 1);
         assert_eq!(auto_sni[0].2, "auto.example.com");
+        // The auto fallback to this peer is swept too.
+        assert_eq!(
+            auto_fb,
+            vec![(
+                "5.6.7.8:443".parse().unwrap(),
+                "10.59.0.2:443".parse().unwrap()
+            )]
+        );
 
-        let (all_dnat, all_sni) = select_peer_forwards(&fwds, peer, false);
+        let (all_dnat, all_sni, all_fb) = select_peer_forwards(&fwds, peer, false);
         assert_eq!(all_dnat.len(), 2, "manual + auto for peer");
         assert_eq!(all_sni.len(), 2);
+        assert_eq!(all_fb.len(), 1);
 
         // A different device's forward is never swept.
-        let (other_dnat, _) = select_peer_forwards(&fwds, other, false);
+        let (other_dnat, _, other_fb) = select_peer_forwards(&fwds, other, false);
         assert_eq!(other_dnat, vec!["1.2.3.4:9000".parse().unwrap()]);
+        assert!(other_fb.is_empty());
     }
 }

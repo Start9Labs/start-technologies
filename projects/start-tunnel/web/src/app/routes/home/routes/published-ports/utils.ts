@@ -41,17 +41,34 @@ export function mapForwards(
 ): MappedForward[] {
   return Object.entries(portForwards).flatMap(([source, forward]) =>
     forward.kind === 'sni'
-      ? Object.entries(forward.routes).map(([hostname, route]) =>
-          toRow(
-            source,
-            route.target,
-            route.label,
-            route.enabled,
-            route.auto,
-            hostname,
-            1,
+      ? [
+          ...Object.entries(forward.routes).map(([hostname, route]) =>
+            toRow(
+              source,
+              route.target,
+              route.label,
+              route.enabled,
+              route.auto,
+              hostname,
+              1,
+            ),
           ),
-        )
+          // The hostname-less fallback: a catch-all row on the shared port,
+          // reachable by a bare IP or any SNI that matches no named route.
+          ...(forward.fallback
+            ? [
+                toRow(
+                  source,
+                  forward.fallback.target,
+                  forward.fallback.label,
+                  forward.fallback.enabled,
+                  forward.fallback.auto,
+                  null,
+                  1,
+                ),
+              ]
+            : []),
+        ]
       : [
           toRow(
             source,

@@ -189,6 +189,42 @@ impl SniDemux {
         self.reap_if_empty(key);
     }
 
+    /// Set the hostname-less fallback for `(ext_ip, ext_port) -> target` and
+    /// ensure the listener runs. Traffic matching no hostname route (or sending
+    /// no SNI) is spliced here. `Err(RESULT_HOSTNAME_TAKEN)` if a different
+    /// target already holds the fallback; the same target reclaims (idempotent).
+    pub fn register_fallback(
+        self: &Arc<Self>,
+        ext_ip: Ipv4Addr,
+        ext_port: u16,
+        target: SocketAddrV4,
+    ) -> Result<(), u8> {
+        let key = (ext_ip, ext_port);
+        self.ports.mutate(|ports| {
+            let entry = ports.entry(key).or_default();
+            if entry.fallback.is_some_and(|t| t != target) {
+                return Err(RESULT_HOSTNAME_TAKEN);
+            }
+            entry.fallback = Some(target);
+            Ok(())
+        })?;
+        self.ensure_listener(key);
+        Ok(())
+    }
+
+    /// Clear the fallback on `(ext_ip, ext_port)`, only if held by `target`.
+    pub fn unregister_fallback(&self, ext_ip: Ipv4Addr, ext_port: u16, target: SocketAddrV4) {
+        let key = (ext_ip, ext_port);
+        self.ports.mutate(|ports| {
+            if let Some(entry) = ports.get_mut(&key) {
+                if entry.fallback == Some(target) {
+                    entry.fallback = None;
+                }
+            }
+        });
+        self.reap_if_empty(key);
+    }
+
     fn prune(&self) {
         let now = Instant::now();
         let empty: Vec<PortKey> = self.ports.mutate(|ports| {
@@ -393,6 +429,50 @@ mod tests {
     #[test]
     fn non_tls_is_none() {
         assert_eq!(extract_sni(b"GET / HTTP/1.1\r\n"), None);
+    }
+
+    #[tokio::test]
+    async fn fallback_register_ownership_and_coexistence() {
+        let demux = SniDemux::new();
+        let ip: Ipv4Addr = Ipv4Addr::LOCALHOST;
+        let port = 44300u16;
+        let fb = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 9), 443);
+        let host_target = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 443);
+
+        // A fallback can be set; a different target can't steal it, same reclaims.
+        demux.register_fallback(ip, port, fb).unwrap();
+        assert!(
+            demux
+                .register_fallback(ip, port, SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 8), 443))
+                .is_err()
+        );
+        assert!(demux.register_fallback(ip, port, fb).is_ok());
+
+        // A named route coexists with the fallback: exact SNI hits the route,
+        // no/unmatched SNI hits the fallback.
+        demux
+            .register(ip, port, &["a.example.com".to_string()], host_target, None)
+            .unwrap();
+        demux.ports.peek(|p| {
+            let pb = p.get(&(ip, port)).unwrap();
+            assert_eq!(pb.select(Some("a.example.com")), Some(host_target));
+            assert_eq!(pb.select(Some("nope.example.com")), Some(fb));
+            assert_eq!(pb.select(None), Some(fb));
+        });
+
+        // Unregister with the wrong target is a no-op; the right target clears it,
+        // leaving the named route intact.
+        demux.unregister_fallback(ip, port, SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 8), 443));
+        demux.ports.peek(|p| {
+            assert_eq!(p.get(&(ip, port)).unwrap().fallback, Some(fb));
+        });
+        demux.unregister_fallback(ip, port, fb);
+        demux.ports.peek(|p| {
+            let pb = p.get(&(ip, port)).unwrap();
+            assert_eq!(pb.fallback, None);
+            assert_eq!(pb.select(None), None);
+            assert_eq!(pb.select(Some("a.example.com")), Some(host_target));
+        });
     }
 
     #[test]

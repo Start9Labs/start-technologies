@@ -80,19 +80,12 @@ impl TunnelDatabase {
 
 impl Model<TunnelDatabase> {
     /// Prune forwards whose target is no longer a known client. Returns the
-    /// surviving sources and the dropped SNI routes, which the caller must
-    /// unregister from the in-memory demux dataplane.
-    pub fn gc_forwards(
-        &mut self,
-    ) -> Result<
-        (
-            BTreeSet<SocketAddrV4>,
-            Vec<(SocketAddrV4, String, SocketAddrV4)>,
-        ),
-        Error,
-    > {
+    /// surviving sources, the dropped SNI routes, and the dropped SNI fallbacks,
+    /// which the caller must unregister from the in-memory demux dataplane.
+    pub fn gc_forwards(&mut self) -> Result<GcForwards, Error> {
         let mut keep_sources = BTreeSet::new();
         let mut dropped_sni: Vec<(SocketAddrV4, String, SocketAddrV4)> = Vec::new();
+        let mut dropped_fallbacks: Vec<(SocketAddrV4, SocketAddrV4)> = Vec::new();
         let mut keep_targets = BTreeSet::new();
         for (_, cfg) in self.as_wg().as_subnets().as_entries()? {
             keep_targets.extend(cfg.as_clients().keys()?);
@@ -101,14 +94,20 @@ impl Model<TunnelDatabase> {
             Ok(pf.0.retain(|k, v| {
                 let keep = match v {
                     PortForward::Dnat { target, .. } => keep_targets.contains(target.ip()),
-                    PortForward::Sni { routes } => {
+                    PortForward::Sni { routes, fallback } => {
                         for (h, r) in routes.iter() {
                             if !keep_targets.contains(r.target.ip()) {
                                 dropped_sni.push((*k, h.clone(), r.target));
                             }
                         }
                         routes.retain(|_, r| keep_targets.contains(r.target.ip()));
-                        !routes.is_empty()
+                        if let Some(f) = fallback {
+                            if !keep_targets.contains(f.target.ip()) {
+                                dropped_fallbacks.push((*k, f.target));
+                                *fallback = None;
+                            }
+                        }
+                        !routes.is_empty() || fallback.is_some()
                     }
                 };
                 if keep {
@@ -117,8 +116,21 @@ impl Model<TunnelDatabase> {
                 keep
             }))
         })?;
-        Ok((keep_sources, dropped_sni))
+        Ok(GcForwards {
+            keep_sources,
+            dropped_sni,
+            dropped_fallbacks,
+        })
     }
+}
+
+/// The result of [`Model::<TunnelDatabase>::gc_forwards`]: surviving sources plus
+/// the dataplane demux entries (SNI routes and hostname-less fallbacks) whose
+/// target is no longer a known client and so must be unregistered.
+pub struct GcForwards {
+    pub keep_sources: BTreeSet<SocketAddrV4>,
+    pub dropped_sni: Vec<(SocketAddrV4, String, SocketAddrV4)>,
+    pub dropped_fallbacks: Vec<(SocketAddrV4, SocketAddrV4)>,
 }
 
 #[test]
@@ -179,6 +191,13 @@ pub enum PortForward {
     Sni {
         /// hostname (lowercase; may be `*.suffix`) -> route.
         routes: BTreeMap<String, SniRoute>,
+        /// Hostname-less catch-all for this shared external port. Traffic whose
+        /// SNI matches no `routes` entry — or that carries no SNI (bare-IP TLS,
+        /// non-TLS) — is spliced here instead of being dropped. `None` closes the
+        /// port to unmatched traffic. This lets a bare public IP and named
+        /// domains share one external port, the bare IP acting as the fallback.
+        #[serde(default)]
+        fallback: Option<SniRoute>,
     },
 }
 
@@ -627,14 +646,17 @@ fn sni_and_dnat_persistence_round_trip() {
     };
     let mut routes = BTreeMap::new();
     routes.insert("id.example.com".to_string(), route);
-    let sni = PortForward::Sni { routes };
+    let sni = PortForward::Sni {
+        routes,
+        fallback: None,
+    };
 
     let sni_json = serde_json::to_value(&sni).unwrap();
     eprintln!("SNI serialized: {sni_json}");
     assert_eq!(sni_json["kind"], serde_json::json!("sni"));
     let sni_back: PortForward = serde_json::from_value(sni_json).unwrap();
     match &sni_back {
-        PortForward::Sni { routes } => {
+        PortForward::Sni { routes, .. } => {
             let r = routes.get("id.example.com").expect("route present");
             assert_eq!(r.target, "10.59.0.2:443".parse().unwrap());
             assert_eq!(r.label, None);
@@ -703,11 +725,49 @@ fn sni_and_dnat_persistence_round_trip() {
     assert!(matches!(dnat_e, PortForward::Dnat { .. }));
     let sni_e = map.0.get(&"5.6.7.8:443".parse().unwrap()).unwrap();
     match sni_e {
-        PortForward::Sni { routes } => {
+        PortForward::Sni { routes, .. } => {
             let r = routes.get("id.example.com").unwrap();
             assert!(r.enabled);
         }
         other => panic!("expected Sni, got {other:?}"),
+    }
+}
+
+#[test]
+fn sni_fallback_serde_backward_compat() {
+    // Legacy SNI JSON (written before the `fallback` field existed) must
+    // deserialize with `fallback: None` — this is why no migration is needed.
+    let legacy = serde_json::json!({
+        "kind": "sni",
+        "routes": {
+            "id.example.com": {
+                "target": "10.59.0.2:443", "label": null, "enabled": true, "auto": true
+            }
+        }
+    });
+    let pf: PortForward = serde_json::from_value(legacy).unwrap();
+    match pf {
+        PortForward::Sni { fallback, .. } => assert!(fallback.is_none()),
+        other => panic!("expected Sni, got {other:?}"),
+    }
+
+    // A fallback round-trips through serde.
+    let with_fb = PortForward::Sni {
+        routes: BTreeMap::new(),
+        fallback: Some(SniRoute {
+            target: "10.59.0.3:443".parse().unwrap(),
+            label: Some("PCP".to_string()),
+            enabled: true,
+            auto: true,
+        }),
+    };
+    let back: PortForward =
+        serde_json::from_value(serde_json::to_value(&with_fb).unwrap()).unwrap();
+    match back {
+        PortForward::Sni {
+            fallback: Some(f), ..
+        } => assert_eq!(f.target, "10.59.0.3:443".parse().unwrap()),
+        other => panic!("expected Sni with fallback, got {other:?}"),
     }
 }
 
@@ -730,6 +790,7 @@ fn port_forward_overlap_detection() {
         src("1.2.3.4:443"),
         PortForward::Sni {
             routes: BTreeMap::new(),
+            fallback: None,
         },
     );
     let forwards = PortForwards(map);
@@ -774,6 +835,7 @@ fn port_forward_occupied_gates_http_redirect() {
         src("5.6.7.8:443"),
         PortForward::Sni {
             routes: BTreeMap::new(),
+            fallback: None,
         },
     );
     // A range on 9.9.9.9 spanning 78..=82, which swallows port 80.

@@ -26,4 +26,12 @@ export type PortForward =
        * hostname (lowercase; may be `*.suffix`) -> route.
        */
       routes: { [key: string]: SniRoute }
+      /**
+       * Hostname-less catch-all for this shared external port. Traffic whose
+       * SNI matches no `routes` entry — or that carries no SNI (bare-IP TLS,
+       * non-TLS) — is spliced here instead of being dropped. `None` closes the
+       * port to unmatched traffic. This lets a bare public IP and named
+       * domains share one external port, the bare IP acting as the fallback.
+       */
+      fallback: SniRoute | null
     }

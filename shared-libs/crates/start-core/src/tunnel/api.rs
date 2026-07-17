@@ -632,7 +632,7 @@ pub async fn remove_subnet(
     _: Empty,
     SubnetParams { subnet }: SubnetParams,
 ) -> Result<(), Error> {
-    let (server, (keep, dropped_sni)) = ctx
+    let (server, gc) = ctx
         .db
         .mutate(|db| {
             db.as_wg_mut().as_subnets_mut().remove(&subnet)?;
@@ -641,7 +641,8 @@ pub async fn remove_subnet(
         .await
         .result?;
     ctx.sync_network(&server).await?;
-    ctx.gc_forwards(&keep, &dropped_sni).await?;
+    ctx.gc_forwards(&gc.keep_sources, &gc.dropped_sni, &gc.dropped_fallbacks)
+        .await?;
 
     for iface in ctx.net_iface.peek(|i| {
         i.iter()
@@ -1091,7 +1092,7 @@ pub async fn remove_device(
     // their leases) before it's gone. `gc_forwards` below reclaims v4/SNI for any
     // departed client, but not v6 pinholes, so clear them here.
     crate::tunnel::forward::clear_for_peer(&ctx, ip, false).await?;
-    let (server, (keep, dropped_sni)) = ctx
+    let (server, gc) = ctx
         .db
         .mutate(|db| {
             db.as_wg_mut()
@@ -1106,7 +1107,8 @@ pub async fn remove_device(
         .await
         .result?;
     ctx.sync_network(&server).await?;
-    ctx.gc_forwards(&keep, &dropped_sni).await
+    ctx.gc_forwards(&gc.keep_sources, &gc.dropped_sni, &gc.dropped_fallbacks)
+        .await
 }
 
 #[derive(Deserialize, Serialize, Parser, TS)]
@@ -1398,7 +1400,7 @@ pub async fn remove_forward(
         .get(&source)
         .cloned();
     match entry {
-        Some(PortForward::Sni { routes }) => {
+        Some(PortForward::Sni { routes, fallback }) => {
             let to_remove: Vec<(String, SocketAddrV4)> = match &hostname {
                 Some(h) => routes
                     .get(h)
@@ -1408,6 +1410,12 @@ pub async fn remove_forward(
             };
             for (h, route_target) in to_remove {
                 ctx.remove_sni_forward(source, route_target, &[h]).await;
+            }
+            // Removing the whole forward (no hostname) also drops its fallback.
+            if hostname.is_none() {
+                if let Some(f) = fallback {
+                    ctx.remove_sni_fallback(source, f.target).await;
+                }
             }
             Ok(())
         }
@@ -1461,7 +1469,7 @@ pub async fn update_forward_label(
                         *l = label;
                         Ok(())
                     }
-                    PortForward::Sni { routes } => {
+                    PortForward::Sni { routes, .. } => {
                         let hostname = hostname.ok_or_else(|| {
                             Error::new(
                                 eyre!("--hostname is required to label an SNI route"),
@@ -1532,7 +1540,7 @@ pub async fn set_forward_enabled(
                         *e = enabled;
                         Ok(ForwardToggle::Dnat(*target))
                     }
-                    PortForward::Sni { routes } => {
+                    PortForward::Sni { routes, .. } => {
                         let hostname = hostname.clone().ok_or_else(|| {
                             Error::new(
                                 eyre!("--hostname is required to toggle an SNI route"),

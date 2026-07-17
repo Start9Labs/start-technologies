@@ -332,7 +332,7 @@ impl TunnelContext {
                             .await?,
                     );
                 }
-                PortForward::Sni { routes } => {
+                PortForward::Sni { routes, fallback } => {
                     for (hostname, route) in routes {
                         if !route.enabled {
                             continue;
@@ -347,6 +347,12 @@ impl TunnelContext {
                             tracing::warn!(
                                 "failed to restore SNI route {hostname} on {from}: code {code}"
                             );
+                        }
+                    }
+                    if let Some(f) = fallback.filter(|f| f.enabled) {
+                        if let Err(code) = sni.register_fallback(*from.ip(), from.port(), f.target)
+                        {
+                            tracing::warn!("failed to restore SNI fallback on {from}: code {code}");
                         }
                     }
                 }
@@ -398,6 +404,7 @@ impl TunnelContext {
         &self,
         keep: &BTreeSet<SocketAddrV4>,
         dropped_sni: &[(SocketAddrV4, String, SocketAddrV4)],
+        dropped_fallbacks: &[(SocketAddrV4, SocketAddrV4)],
     ) -> Result<(), Error> {
         for (source, hostname, target) in dropped_sni {
             self.sni.unregister(
@@ -407,13 +414,19 @@ impl TunnelContext {
                 *target,
             );
         }
+        for (source, target) in dropped_fallbacks {
+            self.sni
+                .unregister_fallback(*source.ip(), source.port(), *target);
+        }
         self.active_forwards
             .mutate(|pf| pf.retain(|k, _| keep.contains(k)));
         // Drop leases for forwards whose target is no longer a known client.
         use crate::tunnel::forward::lease::LeaseKey;
         self.leases.mutate(|l| {
             l.retain(|k, _| match k {
-                LeaseKey::Dnat(s) | LeaseKey::Sni { source: s, .. } => keep.contains(s),
+                LeaseKey::Dnat(s) | LeaseKey::Sni { source: s, .. } | LeaseKey::SniFallback(s) => {
+                    keep.contains(s)
+                }
                 LeaseKey::Pinhole(_) => true,
             })
         });
@@ -599,7 +612,7 @@ impl TunnelContext {
                         },
                     );
                 }
-                PortForward::Sni { routes } => {
+                PortForward::Sni { routes, fallback } => {
                     for (host, route) in routes {
                         let ip =
                             crate::tunnel::forward::igd::external_ipv4(self, *route.target.ip())
@@ -608,13 +621,33 @@ impl TunnelContext {
                         let key = SocketAddrV4::new(ip, src.port());
                         match want.entry(key).or_insert_with(|| PortForward::Sni {
                             routes: BTreeMap::new(),
+                            fallback: None,
                         }) {
-                            PortForward::Sni { routes } => {
+                            PortForward::Sni { routes, .. } => {
                                 routes.insert(host.clone(), route.clone());
                             }
                             PortForward::Dnat { .. } => {
                                 tracing::warn!(
                                     "dropping SNI route {host} on {key}: external IP now collides with a DNAT forward"
+                                );
+                            }
+                        }
+                    }
+                    if let Some(f) = fallback {
+                        let ip = crate::tunnel::forward::igd::external_ipv4(self, *f.target.ip())
+                            .await
+                            .unwrap_or(*src.ip());
+                        let key = SocketAddrV4::new(ip, src.port());
+                        match want.entry(key).or_insert_with(|| PortForward::Sni {
+                            routes: BTreeMap::new(),
+                            fallback: None,
+                        }) {
+                            PortForward::Sni { fallback: fb, .. } => {
+                                *fb = Some(f.clone());
+                            }
+                            PortForward::Dnat { .. } => {
+                                tracing::warn!(
+                                    "dropping SNI fallback on {key}: external IP now collides with a DNAT forward"
                                 );
                             }
                         }
@@ -626,7 +659,7 @@ impl TunnelContext {
         let sni_routes = |map: &BTreeMap<SocketAddrV4, PortForward>| {
             let mut out: BTreeMap<(SocketAddrV4, String), SocketAddrV4> = BTreeMap::new();
             for (src, entry) in map {
-                if let PortForward::Sni { routes } = entry {
+                if let PortForward::Sni { routes, .. } = entry {
                     for (host, route) in routes {
                         out.insert((*src, host.clone()), route.target);
                     }
@@ -652,6 +685,33 @@ impl TunnelContext {
                     None,
                 ) {
                     tracing::warn!("failed to register SNI route {host} on {src}: code {code}");
+                }
+            }
+        }
+
+        let sni_fallbacks = |map: &BTreeMap<SocketAddrV4, PortForward>| {
+            let mut out: BTreeMap<SocketAddrV4, SocketAddrV4> = BTreeMap::new();
+            for (src, entry) in map {
+                if let PortForward::Sni {
+                    fallback: Some(f), ..
+                } = entry
+                {
+                    out.insert(*src, f.target);
+                }
+            }
+            out
+        };
+        let old_fb = sni_fallbacks(&old);
+        let new_fb = sni_fallbacks(&want);
+        for (src, target) in &old_fb {
+            if new_fb.get(src) != Some(target) {
+                self.sni.unregister_fallback(*src.ip(), src.port(), *target);
+            }
+        }
+        for (src, target) in &new_fb {
+            if old_fb.get(src) != Some(target) {
+                if let Err(code) = self.sni.register_fallback(*src.ip(), src.port(), *target) {
+                    tracing::warn!("failed to register SNI fallback on {src}: code {code}");
                 }
             }
         }
