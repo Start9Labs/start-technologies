@@ -2309,7 +2309,7 @@ async fn poll_ip_info(
             match crate::net::port_map::upnp::get_external_ipv4(local_ipv4).await {
                 Ok(Some(ip)) => wan_ip = Some(ip),
                 Ok(None) => (),
-                Err(e) => tracing::debug!("UPnP WAN IP probe on {iface} failed: {e}"),
+                Err(e) => crate::dev_log!(debug, "UPnP WAN IP probe on {iface} failed: {e}"),
             }
         }
     }

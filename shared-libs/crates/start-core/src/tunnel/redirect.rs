@@ -87,7 +87,7 @@ fn spawn_listener(addr: SocketAddr, listener: TcpListener) -> NonDetachingJoinHa
                 Ok((stream, _)) => {
                     tokio::spawn(async move {
                         if let Err(e) = crate::net::http::handle_http_on_https(stream).await {
-                            tracing::debug!("http redirect on {addr} closed: {e}");
+                            crate::dev_log!(debug, "http redirect on {addr} closed: {e}");
                         }
                     });
                 }

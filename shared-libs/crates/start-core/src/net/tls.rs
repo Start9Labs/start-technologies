@@ -184,7 +184,7 @@ where
                                 }
                             }
                             Err(_) => {
-                                tracing::debug!("TLS ClientHello timed out");
+                                crate::dev_log!(debug, "TLS ClientHello timed out");
                                 return Ok(None);
                             }
                         };
@@ -230,8 +230,11 @@ where
                                         ))
                                     }
                                     Err(e) => {
-                                        tracing::trace!("Error completing TLS handshake: {e}");
-                                        tracing::trace!("{e:?}");
+                                        crate::dev_log!(
+                                            trace,
+                                            "Error completing TLS handshake: {e}"
+                                        );
+                                        crate::dev_log!(trace, "{e:?}");
                                         None
                                     }
                                 },
@@ -254,7 +257,7 @@ where
                             )));
                         }
                         None => {
-                            tracing::debug!("no certificate for SNI {:?}", sni);
+                            crate::dev_log!(debug, "no certificate for SNI {:?}", sni);
                             let _ = mid
                                 .io
                                 .write_all(&[

@@ -302,7 +302,7 @@ async fn apply(fqdn: &Name, server: IpAddr, ip: IpAddr, signer: Option<&TSigner>
     let add = append(rrset, zone, false, false);
     for msg in [delete, add] {
         if let Err(e) = send(server, ip, &msg, signer).await {
-            tracing::debug!("RFC 2136 update of {fqdn} on {server} failed: {e}");
+            crate::dev_log!(debug, "RFC 2136 update of {fqdn} on {server} failed: {e}");
             return;
         }
     }
@@ -316,7 +316,7 @@ async fn withdraw(fqdn: &Name, server: IpAddr, ip: IpAddr, signer: Option<&TSign
         false,
     );
     if let Err(e) = send(server, ip, &msg, signer).await {
-        tracing::debug!("RFC 2136 delete of {fqdn} on {server} failed: {e}");
+        crate::dev_log!(debug, "RFC 2136 delete of {fqdn} on {server} failed: {e}");
     }
 }
 
