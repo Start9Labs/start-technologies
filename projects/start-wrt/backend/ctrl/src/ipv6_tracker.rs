@@ -11,7 +11,12 @@
 //! * A daemon task follows `ip -6 monitor neigh` (plus a periodic ff02::1
 //!   prod for quiet devices — the kernel GCs neighbor entries within
 //!   minutes, so polling alone misses addresses) and records per-(MAC, GUA)
-//!   first/last-seen history, persisted across reboots.
+//!   first/last-seen history, persisted across reboots. Only *verified*
+//!   sightings (REACHABLE neighbor state) refresh an address's liveness: the
+//!   kernel keeps STALE entries around indefinitely below its GC threshold,
+//!   so counting them as "still held" would keep a dropped address electable
+//!   forever. Rule-relevant addresses are unicast-pinged each rescan so a
+//!   present-but-idle device's addresses stay verified.
 //! * [`elect`] ranks a device's currently-held GUAs: an EUI-64 interface ID
 //!   (provably derived from the MAC, prefix-independent) beats an address
 //!   observed for longer than a temporary can live (RFC 8981
@@ -19,16 +24,22 @@
 //!   first-seen fallback. There is no DHCPv6-lease tier: no client solicits
 //!   a stateful address on this LAN (our RAs never set the managed flag),
 //!   and a leased address would pass the persistence tier anyway.
-//! * When the elected address of a MAC referenced by a `pp_*_v6` rule
-//!   changes, the task debounces briefly and re-runs
+//! * When the set of live addresses (or the election) of a MAC referenced by
+//!   a `pp_*_v6` rule changes, the task debounces briefly and re-runs
 //!   `published_ports::reconcile`, which retargets the rule to the elected
-//!   address within the current delegated prefix ([`elected_live_in_prefix`]).
+//!   address within a currently-assigned prefix
+//!   ([`elected_live_in_prefixes`]). The trigger is deliberately wider than
+//!   "the unscoped election changed": rules target the *prefix-scoped*
+//!   election, whose changes (a new-prefix address appearing while an
+//!   old-prefix one still wins on age, or a live address aging out) are
+//!   invisible to the unscoped winner. Any live-set change of a relevant MAC
+//!   schedules a reconcile; reconcile itself is cheap when nothing moved.
 //!
 //! The module is deliberately self-contained — MAC in, elected GUA out — with
 //! `published_ports` as its only consumer, so a future device-driven pinhole
 //! feature (PCP/UPnP) lands beside it without touching it.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::net::Ipv6Addr;
 use std::process::Stdio;
 use std::sync::{LazyLock, Mutex};
@@ -69,6 +80,13 @@ const DEBOUNCE_SECS: u64 = 20;
 struct AddrRecord {
     first_seen: i64,
     last_seen: i64,
+    /// L3 device the address was last seen on (e.g. "br-lan.101") — identifies
+    /// the /64 the device's addresses belong to, so reconcile's offline
+    /// `prefix ++ suffix` fallback recombines with the device's *own* bridge
+    /// assignment, not the admin LAN's. Absent in pre-existing persisted
+    /// records; those fall back to the single-prefix case.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    iface: Option<String>,
 }
 
 type AddrMap = HashMap<String, HashMap<String, AddrRecord>>;
@@ -93,23 +111,39 @@ pub(crate) fn elected_live(mac: &str, now: i64) -> Option<Ipv6Addr> {
     elect(mac, addrs, now, LIVE_SECS)
 }
 
-/// Like [`elected_live`], but only among the device's addresses within
-/// `prefix`/`prefix_len`. `None` when it holds no live address there.
+/// Like [`elected_live`], but only among the device's addresses within any of
+/// `prefixes`. `None` when it holds no live address in any of them.
 ///
 /// This is the selector for a *published-port rule target*: an address outside
-/// the currently delegated prefix isn't routable, so it must never win — yet
+/// every currently-assigned prefix isn't routable, so it must never win — yet
 /// [`elect`] ranks purely on stability/age and would otherwise keep preferring
 /// an old-prefix address lingering after an ISP rotation. Narrowing the
-/// candidate set here leaves [`elect`] itself prefix-agnostic.
-pub(crate) fn elected_live_in_prefix(
+/// candidate set here leaves [`elect`] itself prefix-agnostic. Callers pass
+/// *all* LAN-side GUA assignments (see `ssl::read_gua_prefix_assignments`):
+/// devices on non-admin profiles hold addresses in their own bridge's /64, not
+/// the admin LAN's.
+pub(crate) fn elected_live_in_prefixes(
     mac: &str,
     now: i64,
-    prefix: Ipv6Addr,
-    prefix_len: u8,
+    prefixes: &[(Ipv6Addr, u8)],
 ) -> Option<Ipv6Addr> {
     let store = STORE.lock().ok()?;
     let addrs = store.get(&mac.to_uppercase())?;
-    elect_in_prefix(mac, addrs, now, LIVE_SECS, prefix, prefix_len)
+    elect_in_prefixes(mac, addrs, now, LIVE_SECS, prefixes)
+}
+
+/// The L3 device (e.g. "br-lan.101") of the MAC's most recently seen address,
+/// if recorded. Identifies which bridge — and therefore which GUA /64
+/// assignment — the device lives on.
+pub(crate) fn last_seen_iface(mac: &str) -> Option<String> {
+    let store = STORE.lock().ok()?;
+    store
+        .get(&mac.to_uppercase())?
+        .values()
+        .filter(|rec| rec.iface.is_some())
+        .max_by_key(|rec| rec.last_seen)?
+        .iface
+        .clone()
 }
 
 /// `MAC -> hostid-style suffix` for every device whose elected address (seen
@@ -192,7 +226,17 @@ pub async fn run() {
                 }
                 _ = prod.tick() => {
                     crate::devices::prod_ipv6_neighbors().await;
-                    if record_neigh_dump().await {
+                    // Unicast-verify the addresses rules depend on: the
+                    // multicast prod only elicits link-local replies, so
+                    // without this a present-but-idle device's GUA entries
+                    // sit STALE forever and would age out of the live window.
+                    verify_relevant_addrs().await;
+                    let mut changed = record_neigh_dump().await;
+                    // Catch live-set changes no single sighting reports: an
+                    // address aging out of LIVE_SECS flips the (scoped)
+                    // election between record() calls, invisibly to each one.
+                    changed |= live_sets_changed(chrono::Utc::now().timestamp());
+                    if changed {
                         pending.get_or_insert(
                             tokio::time::Instant::now()
                                 + std::time::Duration::from_secs(DEBOUNCE_SECS),
@@ -201,8 +245,9 @@ pub async fn run() {
                 }
                 _ = tokio::time::sleep_until(deadline), if pending.is_some() => {
                     pending = None;
-                    // reconcile prefers the tracker's elected addresses via
-                    // resolve_device_info_for_macs; a no-op change writes
+                    // reconcile retargets each rule to the tracker's elected
+                    // address within the device's currently-assigned prefixes
+                    // (elected_live_in_prefixes); a no-op change writes
                     // nothing and skips the firewall restart.
                     if let Err(e) =
                         crate::published_ports::reconcile(crate::ServerContext::default()).await
@@ -220,17 +265,32 @@ pub async fn run() {
 
 // ── Observation ──
 
-/// Record one neighbor line. Returns true when a tracked device's *elected*
-/// address changed (the caller's cue to schedule a reconcile).
+/// One accepted neighbor-table sighting.
+#[derive(Debug, PartialEq)]
+struct Sighting {
+    /// Uppercase MAC.
+    mac: String,
+    addr: Ipv6Addr,
+    /// L3 device the entry was seen on (e.g. "br-lan.101").
+    iface: String,
+    /// Whether the kernel has *verified* the device currently answers on this
+    /// address (REACHABLE/PERMANENT). STALE entries linger indefinitely below
+    /// the kernel's GC threshold, so they prove history, not possession.
+    verified: bool,
+}
+
+/// Record one neighbor line. Returns true when a rule-relevant device's live
+/// address set or elected address changed (the caller's cue to schedule a
+/// reconcile).
 async fn record_line(line: &str) -> bool {
-    let Some((mac, addr)) = parse_neigh_line(line) else {
+    let Some(s) = parse_neigh_line(line) else {
         return false;
     };
-    record(&mac, addr, chrono::Utc::now().timestamp()).await
+    record(&s, chrono::Utc::now().timestamp()).await
 }
 
 /// Scan `ip -6 neigh show` once, recording every entry. Returns true when any
-/// elected address changed.
+/// rule-relevant live set or election changed.
 async fn record_neigh_dump() -> bool {
     let output = tokio::process::Command::new("ip")
         .args(["-6", "neigh", "show"])
@@ -245,19 +305,24 @@ async fn record_neigh_dump() -> bool {
     let now = chrono::Utc::now().timestamp();
     let mut changed = false;
     for line in String::from_utf8_lossy(&output.stdout).lines() {
-        if let Some((mac, addr)) = parse_neigh_line(line) {
-            changed |= record(&mac, addr, now).await;
+        if let Some(s) = parse_neigh_line(line) {
+            changed |= record(&s, now).await;
         }
     }
     changed
 }
 
 /// Fold one sighting into the store; persist (rate-limited) when the map
-/// changed. Returns true when the MAC's elected address changed.
-async fn record(mac: &str, addr: Ipv6Addr, now: i64) -> bool {
+/// changed. Returns true when the sighting should schedule a reconcile: the
+/// MAC is (possibly) referenced by a `pp_*_v6` rule and either a new address
+/// appeared or the elected address changed. A new address matters even when
+/// the unscoped election is unmoved — after a prefix rotation the still-live
+/// old-prefix address keeps winning on age, but the *scoped* election that
+/// rules target just changed.
+async fn record(s: &Sighting, now: i64) -> bool {
     static LAST_PERSIST: Mutex<i64> = Mutex::new(0);
 
-    let (elected_changed, snapshot) = {
+    let (trigger, snapshot) = {
         let mut store = match STORE.lock() {
             Ok(s) => s,
             Err(e) => {
@@ -265,29 +330,10 @@ async fn record(mac: &str, addr: Ipv6Addr, now: i64) -> bool {
                 return false;
             }
         };
-        let addrs = store.entry(mac.to_string()).or_default();
-        let before = elect(mac, addrs, now, LIVE_SECS);
-
-        let mut dirty = false;
-        match addrs.get_mut(&addr.to_string()) {
-            Some(rec) => {
-                if now - rec.last_seen >= TOUCH_INTERVAL_SECS {
-                    dirty = true;
-                }
-                rec.last_seen = now;
-            }
-            None => {
-                addrs.insert(
-                    addr.to_string(),
-                    AddrRecord {
-                        first_seen: now,
-                        last_seen: now,
-                    },
-                );
-                dirty = true;
-            }
-        }
-        let after = elect(mac, store.get(mac).unwrap(), now, LIVE_SECS);
+        let addrs = store.entry(s.mac.clone()).or_default();
+        let before = elect(&s.mac, addrs, now, LIVE_SECS);
+        let (mut dirty, inserted) = fold_sighting(addrs, s, now);
+        let after = elect(&s.mac, store.get(&s.mac).unwrap(), now, LIVE_SECS);
         dirty |= prune(&mut store, now);
 
         let snapshot = if dirty {
@@ -299,7 +345,9 @@ async fn record(mac: &str, addr: Ipv6Addr, now: i64) -> bool {
         } else {
             None
         };
-        (before != after, snapshot)
+        let trigger =
+            (inserted || before != after) && crate::published_ports::may_affect_v6_rules(&s.mac);
+        (trigger, snapshot)
     };
 
     if let Some(snapshot) = snapshot {
@@ -307,14 +355,129 @@ async fn record(mac: &str, addr: Ipv6Addr, now: i64) -> bool {
             tracing::warn!("ipv6-tracker: persist failed: {e}");
         }
     }
-    elected_changed
+    trigger
 }
 
-/// Parse one `ip -6 neigh show` / `ip -6 monitor neigh` line into
-/// `(uppercase MAC, GUA)`. Rejects deletions, unreachable states, non-GUA
-/// addresses, and non-LAN interfaces; unrecognized lines are ignored.
+/// Fold one sighting into a device's address map. Returns `(dirty, inserted)`:
+/// whether the persisted form changed, and whether the address is new.
+fn fold_sighting(addrs: &mut HashMap<String, AddrRecord>, s: &Sighting, now: i64) -> (bool, bool) {
+    let mut dirty = false;
+    let mut inserted = false;
+    match addrs.get_mut(&s.addr.to_string()) {
+        Some(rec) => {
+            // Only a verified sighting proves the device still holds the
+            // address; refreshing liveness from a lingering STALE entry
+            // would keep a dropped address electable forever.
+            if s.verified {
+                if now - rec.last_seen >= TOUCH_INTERVAL_SECS {
+                    dirty = true;
+                }
+                rec.last_seen = now;
+            }
+            if rec.iface.as_deref() != Some(&s.iface) {
+                rec.iface = Some(s.iface.clone());
+                dirty = true;
+            }
+        }
+        None => {
+            // First sighting of an address is recorded as live regardless
+            // of state: a STALE entry for an address we've never seen is
+            // still evidence the device configured it recently, and the
+            // next rescan's unicast verification confirms or ages it.
+            addrs.insert(
+                s.addr.to_string(),
+                AddrRecord {
+                    first_seen: now,
+                    last_seen: now,
+                    iface: Some(s.iface.clone()),
+                },
+            );
+            dirty = true;
+            inserted = true;
+        }
+    }
+    (dirty, inserted)
+}
+
+/// Compare each rule-relevant MAC's current live-address set against the last
+/// sweep and remember the new state. Returns true when any changed — the only
+/// way an *age-out* (an address leaving [`LIVE_SECS`] with no new sighting)
+/// becomes visible, since `record` compares before/after at a single `now`.
+fn live_sets_changed(now: i64) -> bool {
+    static SWEEP: Mutex<Option<HashMap<String, BTreeSet<String>>>> = Mutex::new(None);
+
+    let Ok(store) = STORE.lock() else {
+        return false;
+    };
+    let current: HashMap<String, BTreeSet<String>> = store
+        .iter()
+        .filter(|(mac, _)| crate::published_ports::may_affect_v6_rules(mac))
+        .map(|(mac, addrs)| {
+            let live = addrs
+                .iter()
+                .filter(|(_, rec)| now - rec.last_seen <= LIVE_SECS)
+                .map(|(addr, _)| addr.clone())
+                .collect();
+            (mac.clone(), live)
+        })
+        .collect();
+    drop(store);
+
+    let mut sweep = SWEEP.lock().unwrap_or_else(|e| e.into_inner());
+    // The first sweep has nothing to compare against — the startup reconcile
+    // already covers whatever happened while the daemon was down.
+    let changed = sweep.as_ref().is_some_and(|prev| *prev != current);
+    *sweep = Some(current);
+    changed
+}
+
+/// Unicast-ping every live address of every rule-relevant MAC so the kernel
+/// re-verifies (REACHABLE) the entries the next dump reads. The multicast prod
+/// elicits replies from link-local sources only, so on its own it never
+/// freshens a GUA entry for an idle device.
+async fn verify_relevant_addrs() {
+    let addrs: Vec<String> = {
+        let Ok(store) = STORE.lock() else {
+            return;
+        };
+        let now = chrono::Utc::now().timestamp();
+        store
+            .iter()
+            .filter(|(mac, _)| crate::published_ports::may_affect_v6_rules(mac))
+            .flat_map(|(_, addrs)| {
+                addrs
+                    .iter()
+                    .filter(|(_, rec)| now - rec.last_seen <= LIVE_SECS)
+                    .map(|(addr, _)| addr.clone())
+            })
+            .collect()
+    };
+    if addrs.is_empty() {
+        return;
+    }
+    let mut children = Vec::new();
+    for addr in &addrs {
+        if let Ok(child) = tokio::process::Command::new("ping6")
+            .args(["-c", "1", "-W", "1", addr.as_str()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+        {
+            children.push(child);
+        }
+    }
+    for mut child in children {
+        let _ = child.wait().await;
+    }
+}
+
+/// Parse one `ip -6 neigh show` / `ip -6 monitor neigh` line into a
+/// [`Sighting`]. Rejects deletions, failed probes, non-GUA addresses, and
+/// non-LAN interfaces; unrecognized lines are ignored.
 /// Format: `<addr> dev <iface> lladdr <mac> [flags] <STATE>`.
-pub(crate) fn parse_neigh_line(line: &str) -> Option<(String, Ipv6Addr)> {
+fn parse_neigh_line(line: &str) -> Option<Sighting> {
     // "Deleted" entries and FAILED/INCOMPLETE probes say the kernel lost the
     // entry, not that the device lost the address — record neither.
     if line.starts_with("Deleted") {
@@ -333,7 +496,18 @@ pub(crate) fn parse_neigh_line(line: &str) -> Option<(String, Ipv6Addr)> {
     if rest.contains("FAILED") || rest.contains("INCOMPLETE") {
         return None;
     }
-    Some((mac.to_uppercase(), addr))
+    // The neighbor state is the last token; only REACHABLE (or a static
+    // PERMANENT/NOARP entry) proves the device answered on this address.
+    let verified = matches!(
+        rest.split_whitespace().last(),
+        Some("REACHABLE" | "PERMANENT" | "NOARP")
+    );
+    Some(Sighting {
+        mac: mac.to_uppercase(),
+        addr,
+        iface: iface.trim().to_string(),
+        verified,
+    })
 }
 
 // ── Election (pure) ──
@@ -372,23 +546,25 @@ fn elect(
     .map(|(addr, _)| addr)
 }
 
-/// [`elect`] restricted to the candidates within `prefix`/`prefix_len`. Filters
+/// [`elect`] restricted to the candidates within any of `prefixes`. Filters
 /// the set first, then defers to the prefix-agnostic [`elect`] unchanged, so
 /// prefix-currency (routability) gates eligibility while stability/age still
 /// picks the winner among the survivors.
-fn elect_in_prefix(
+fn elect_in_prefixes(
     mac: &str,
     addrs: &HashMap<String, AddrRecord>,
     now: i64,
     live_secs: i64,
-    prefix: Ipv6Addr,
-    prefix_len: u8,
+    prefixes: &[(Ipv6Addr, u8)],
 ) -> Option<Ipv6Addr> {
     let in_prefix: HashMap<String, AddrRecord> = addrs
         .iter()
         .filter(|(addr, _)| {
-            addr.parse::<Ipv6Addr>()
-                .is_ok_and(|a| crate::system::addr_in_prefix(a, prefix, prefix_len))
+            addr.parse::<Ipv6Addr>().is_ok_and(|a| {
+                prefixes
+                    .iter()
+                    .any(|&(p, plen)| crate::system::addr_in_prefix(a, p, plen))
+            })
         })
         .map(|(addr, rec)| (addr.clone(), rec.clone()))
         .collect();
@@ -486,6 +662,7 @@ mod tests {
         AddrRecord {
             first_seen,
             last_seen,
+            iface: None,
         }
     }
 
@@ -498,14 +675,26 @@ mod tests {
         let line = "2001:db8::1 dev br-lan.1 lladdr aa:bb:cc:dd:ee:ff REACHABLE";
         assert_eq!(
             parse_neigh_line(line),
-            Some((MAC.to_string(), "2001:db8::1".parse().unwrap()))
+            Some(Sighting {
+                mac: MAC.to_string(),
+                addr: "2001:db8::1".parse().unwrap(),
+                iface: "br-lan.1".to_string(),
+                verified: true,
+            })
         );
     }
 
     #[test]
-    fn parse_accepts_stale_on_plain_br_lan() {
+    fn parse_accepts_stale_on_plain_br_lan_as_unverified() {
         let line = "2001:db8::2 dev br-lan lladdr aa:bb:cc:dd:ee:ff STALE";
-        assert!(parse_neigh_line(line).is_some());
+        let s = parse_neigh_line(line).unwrap();
+        assert_eq!(s.iface, "br-lan");
+        // STALE is history, not possession: the kernel keeps such entries
+        // around indefinitely below its GC threshold.
+        assert!(!s.verified);
+        // Flags between lladdr and the state must not confuse verification.
+        let line = "2001:db8::2 dev br-lan lladdr aa:bb:cc:dd:ee:ff router REACHABLE";
+        assert!(parse_neigh_line(line).unwrap().verified);
     }
 
     #[test]
@@ -583,17 +772,24 @@ mod tests {
         );
 
         // Scoped to the live /64: only the in-prefix address is eligible.
-        let cur: Ipv6Addr = "2001:db8:2::".parse().unwrap();
+        let cur: (Ipv6Addr, u8) = ("2001:db8:2::".parse().unwrap(), 64);
         assert_eq!(
-            elect_in_prefix(MAC, &addrs, now, LIVE_SECS, cur, 64),
+            elect_in_prefixes(MAC, &addrs, now, LIVE_SECS, &[cur]),
             Some(new.parse().unwrap())
         );
 
         // No address in an unrelated prefix → None (reconcile then recombines).
-        let other: Ipv6Addr = "2001:db8:9::".parse().unwrap();
+        let other: (Ipv6Addr, u8) = ("2001:db8:9::".parse().unwrap(), 64);
         assert_eq!(
-            elect_in_prefix(MAC, &addrs, now, LIVE_SECS, other, 64),
+            elect_in_prefixes(MAC, &addrs, now, LIVE_SECS, &[other]),
             None
+        );
+
+        // Multiple assignments (guest profiles own their own /64): an address
+        // in *any* currently-assigned prefix is eligible.
+        assert_eq!(
+            elect_in_prefixes(MAC, &addrs, now, LIVE_SECS, &[other, cur]),
+            Some(new.parse().unwrap())
         );
     }
 
@@ -675,5 +871,53 @@ mod tests {
         let back: AddrMap = serde_json::from_str(&json).unwrap();
         assert_eq!(back[MAC][EUI64].first_seen, 1);
         assert!(serde_json::from_str::<AddrMap>("not json").is_err());
+        // Records persisted before `iface` existed still parse (field defaults).
+        let legacy = format!(r#"{{"{MAC}":{{"{EUI64}":{{"firstSeen":1,"lastSeen":2}}}}}}"#);
+        let back: AddrMap = serde_json::from_str(&legacy).unwrap();
+        assert_eq!(back[MAC][EUI64].iface, None);
+    }
+
+    fn sighting(addr: &str, verified: bool) -> Sighting {
+        Sighting {
+            mac: MAC.to_string(),
+            addr: addr.parse().unwrap(),
+            iface: "br-lan".to_string(),
+            verified,
+        }
+    }
+
+    #[test]
+    fn unverified_resighting_does_not_refresh_liveness() {
+        // A lingering STALE entry, re-seen by every dump, must not keep a
+        // dropped address inside the live window forever.
+        let now = 100 * 24 * 60 * 60;
+        let mut addrs = HashMap::new();
+        let dropped = now - 2 * LIVE_SECS;
+        addrs.insert("2001:db8::1".to_string(), rec(0, dropped));
+
+        let (_, inserted) = fold_sighting(&mut addrs, &sighting("2001:db8::1", false), now);
+        assert!(!inserted);
+        assert_eq!(
+            addrs["2001:db8::1"].last_seen, dropped,
+            "STALE must not bump"
+        );
+        assert_eq!(elect(MAC, &addrs, now, LIVE_SECS), None);
+
+        // A verified sighting does refresh it.
+        fold_sighting(&mut addrs, &sighting("2001:db8::1", true), now);
+        assert_eq!(addrs["2001:db8::1"].last_seen, now);
+        assert!(elect(MAC, &addrs, now, LIVE_SECS).is_some());
+    }
+
+    #[test]
+    fn first_sighting_is_live_even_unverified_and_records_iface() {
+        // A never-seen address in STALE state is still evidence the device
+        // configured it recently — inserted live, verified on the next rescan.
+        let now = 1_000_000;
+        let mut addrs = HashMap::new();
+        let (dirty, inserted) = fold_sighting(&mut addrs, &sighting("2001:db8::2", false), now);
+        assert!(dirty && inserted);
+        assert_eq!(addrs["2001:db8::2"].last_seen, now);
+        assert_eq!(addrs["2001:db8::2"].iface.as_deref(), Some("br-lan"));
     }
 }

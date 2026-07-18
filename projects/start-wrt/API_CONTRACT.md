@@ -662,7 +662,11 @@ struct LanIpv6SetRequest {
     prefix: u8,
 }
 // Response: null
-// Backend: updates UCI dhcp.lan + network.lan, restarts network + odhcpd
+// Backend: updates UCI dhcp.lan + network.lan, restarts network + odhcpd.
+// Disabling SLAAC while any *enabled* IPv6 published-port rule exists is
+// rejected (`PublishedPortsUseIpv6`): it would strand every pp_*_v6 pinhole on
+// an address no device will hold. The UI locks the toggle for the same reason;
+// this backend check is the authoritative one.
 ```
 
 ---
@@ -773,7 +777,6 @@ struct Device {
     ipv4: Option<String>,
     ipv6: Option<String>,
     ipv4_static: bool,
-    ipv6_static: bool,
     security_profile: Option<String>,
     /// Live throughput (MB/s, 1 decimal), computed from conntrack byte deltas
     /// between polls. Only set for online devices with a previous sample.
@@ -881,8 +884,8 @@ enum PublishedPortStatus {
     Paused,
     /// Failed to apply rule, no usable address, or (IPv6-only) the forward is
     /// stranded on an old delegated prefix ("IPv6 address out of date" — the
-    /// device's current GUA is in a different /64; normally repaired by the wan6
-    /// reconcile hotplug).
+    /// device's current GUA is in a different /64; normally repaired by the
+    /// ipv6_tracker-triggered reconcile, or the wan6 hotplug's).
     Error,
     Disabled,
 }
@@ -952,10 +955,14 @@ Validation (errors with `MissingDeviceAddress`, rejecting the whole request):
   by the rule-creation GUA guard so a briefly-offline device doesn't fail an
   otherwise-valid save.
 
-On save, an enabled `ipv6` port also pins the target device's interface suffix as
-a DHCP `hostid` (so its GUA is `delegated_prefix ++ hostid` and is stable across
-ISP prefix rotations), mirroring the IPv4 static-lease reservation. odhcpd is
-reloaded so the hostid takes runtime effect.
+An `ipv6` port's rule pins the tracker-elected stable GUA the device holds
+within a currently-assigned prefix; with none (e.g. saved mid-prefix-rotation),
+the resolved address is used as-is and the tracker's reconcile retargets the
+rule within seconds of the device acquiring an in-prefix address. There is no
+DHCP `hostid` pinning (devices choose their own IPv6 addresses; odhcpd also
+misparses colon-separated hostids) — `reconcile` keeps the rule current
+instead. Legacy hostids written by older releases are left in place and still
+serve as a last-resort reconcile fallback.
 
 ### `published-ports.reconcile`
 
@@ -964,12 +971,19 @@ reloaded so the hostid takes runtime effect.
 // Response: null
 ```
 
-Internal endpoint (`no_auth`), **not called from the frontend**. Fired by the
-`/etc/hotplug.d/iface/99-startwrt-published-ports` hook on `wan6` `ifup`/`ifupdate`
-(i.e. when the ISP-delegated IPv6 prefix changes). Recomputes the `dest_ip` of
-every `pp_*_v6` forward against the router's current global prefix — using the
-device's live neighbor-table GUA when reachable, otherwise `current_prefix ++
-stored_hostid` — and reloads the firewall only if something changed. No-ops when
+Internal endpoint (`no_auth`), **not called from the frontend**. Fired two
+ways: by the `/etc/hotplug.d/iface/99-startwrt-published-ports` hook on `wan6`
+`ifup`/`ifupdate` (i.e. when the ISP-delegated IPv6 prefix changes) — the CLI
+forwards the call to the daemon (`with_call_remote`), where the `ipv6_tracker`'s
+live history lives — and by the `ipv6_tracker`'s own debounce whenever a
+rule-relevant device's live address set or election changes. Recomputes the
+`dest_ip` of every `pp_*_v6` forward: the tracker-elected stable GUA the device
+currently holds within any currently-assigned LAN-side prefix (admin LAN or
+profile bridge /64s), otherwise `bridge_prefix ++ suffix` recombined with the
+/64 of the device's own bridge — the suffix from tracker history when the
+elected address is EUI-64, else a legacy stored `hostid` (suppressed when
+history proves the device does not use EUI-64). A forward with neither source
+is left untouched. Reloads the firewall only if something changed. No-ops when
 the router currently has no global prefix (a flap to "none" never wipes rules).
 
 ---
@@ -991,9 +1005,12 @@ struct OutboundVpn {
     enabled: bool,
     /// Which security profiles route through this VPN
     used_by: Vec<String>,
-    /// True when the WG config supplied at least one IPv6 `Address`. Profiles
-    /// pointed at an outbound VPN with `supports_ipv6 == false` get IPv6
-    /// disabled (RA/DHCPv6) to avoid leaking around the tunnel.
+    /// True when the WG config supplied at least one IPv6 `Address`. Non-admin
+    /// profiles pointed at an outbound VPN with `supports_ipv6 == false` get
+    /// IPv6 disabled (RA/DHCPv6) to avoid leaking around the tunnel. The admin
+    /// (LAN-owning) profile is exempt: its RA/DHCPv6 are owned solely by the
+    /// LAN IPv6 settings, and a v4-only VPN outbound fails IPv6 closed via the
+    /// kill-switch route instead (LAN devices keep local ULA IPv6).
     supports_ipv6: bool,
     /// Interface MTU if explicitly set, else null (kernel default ~1420).
     mtu: Option<u16>,

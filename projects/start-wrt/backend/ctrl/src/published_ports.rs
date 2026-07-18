@@ -29,10 +29,38 @@ pub fn published_ports<C: CtrlContext>() -> ParentHandler<C> {
         .subcommand("set", from_fn_async_local(set::<C>).no_display())
         .subcommand(
             "reconcile",
-            from_fn_async_local(reconcile::<C>)
+            // Forwarded to the daemon: reconcile depends on the ipv6_tracker's
+            // live in-memory history, which a one-shot CLI process (the wan6
+            // hotplug hook) does not have — it would see only the disk
+            // snapshot, stale by up to PERSIST_MIN_INTERVAL_SECS or absent on
+            // first boot, and reconcile against a fiction.
+            from_fn_async_local(reconcile)
                 .with_metadata("no_auth", Value::Bool(true))
-                .no_display(),
+                .no_display()
+                .with_call_remote::<CliContext>(),
         )
+}
+
+/// Uppercase MACs referenced by `pp_*_v6` rules, kept current by [`set`] and
+/// [`reconcile`] so the `ipv6_tracker` can cheaply skip neighbor churn from
+/// devices no rule targets (every guest that joins the network would otherwise
+/// schedule a reconcile). `None` until first populated — treated as "any MAC
+/// may be relevant" so nothing is missed before the startup reconcile runs.
+static V6_RULE_MACS: std::sync::RwLock<Option<HashSet<String>>> = std::sync::RwLock::new(None);
+
+fn note_v6_rule_macs(macs: HashSet<String>) {
+    if let Ok(mut guard) = V6_RULE_MACS.write() {
+        *guard = Some(macs);
+    }
+}
+
+/// Whether a tracker event for `mac` (uppercase) could affect a `pp_*_v6`
+/// rule, i.e. is worth scheduling a reconcile for.
+pub(crate) fn may_affect_v6_rules(mac: &str) -> bool {
+    match V6_RULE_MACS.read() {
+        Ok(guard) => guard.as_ref().is_none_or(|macs| macs.contains(mac)),
+        Err(_) => true,
+    }
 }
 
 // ── Types ──────────────────────────────────────────────
@@ -342,8 +370,9 @@ fn recombine_gua(prefix: Ipv6Addr, prefix_len: u8, suffix: &str) -> Option<Ipv6A
 }
 
 /// Whether a firewall rule is a published-port IPv6 ACCEPT rule (a `pp_*_v6`
-/// forward), as written by `set`. Shared by `set`'s clear pass and `reconcile`.
-fn is_pp_v6_rule(rule: &FirewallRule) -> bool {
+/// forward), as written by `set`. Shared by `set`'s clear pass, `reconcile`,
+/// and `lan::ipv6_set`'s disable guard.
+pub(crate) fn is_pp_v6_rule(rule: &FirewallRule) -> bool {
     rule._pp_id.is_some()
         && rule.family.as_deref() == Some("ipv6")
         && matches!(rule.target, FirewallTarget::ACCEPT)
@@ -712,9 +741,11 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<PublishedPort>, Error> {
         .collect();
 
     let now = chrono::Utc::now().timestamp();
-    // Current delegated LAN prefix, so the reported address is scoped to it
-    // exactly as `reconcile` scopes the rule target (below).
-    let lan_prefix = crate::ssl::read_lan_gua_prefix().await;
+    // Every currently-assigned LAN-side GUA prefix (admin LAN *and* profile
+    // bridges), so the reported address is scoped exactly as `reconcile`
+    // scopes the rule target (below).
+    let assignments = crate::ssl::read_gua_prefix_assignments().await;
+    let prefixes: Vec<(Ipv6Addr, u8)> = assignments.iter().map(|&(_, p, l)| (p, l)).collect();
     let mut ports: Vec<PublishedPort> = raw_ports
         .iter()
         .map(|raw| {
@@ -725,16 +756,15 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<PublishedPort>, Error> {
             // Endpoints column (and the stale-prefix status) can name a
             // different address than the open firewall pinhole, e.g. a rotating
             // RFC 4941 privacy address, or an old-prefix address the rule no
-            // longer targets. Scope to the current prefix like the rule does;
+            // longer targets. Scope to the current prefixes like the rule does;
             // fall back to the direct pick when the tracker has no live history
             // (one-shot CLI, or a device the daemon has not yet observed).
             let device_owned = devices_by_mac.get(&mac).copied().map(|d| {
                 let mut d = d.clone();
-                let elected = match lan_prefix {
-                    Some((p, plen)) => {
-                        crate::ipv6_tracker::elected_live_in_prefix(&mac, now, p, plen)
-                    }
-                    None => crate::ipv6_tracker::elected_live(&mac, now),
+                let elected = if prefixes.is_empty() {
+                    crate::ipv6_tracker::elected_live(&mac, now)
+                } else {
+                    crate::ipv6_tracker::elected_live_in_prefixes(&mac, now, &prefixes)
                 };
                 if let Some(elected) = elected {
                     d.ipv6 = Some(elected.to_string());
@@ -805,12 +835,17 @@ pub async fn set<C: CtrlContext>(
         } else {
             HashMap::new()
         };
-        // Current delegated LAN prefix, to scope a v6 rule's initial dest_ip to
-        // a routable address (see the IPv6 rule write below).
-        let lan_prefix = if ctx.effectful() {
-            crate::ssl::read_lan_gua_prefix().await
+        // Currently-assigned LAN-side GUA prefixes, to scope a v6 rule's
+        // initial dest_ip to a routable address (see the IPv6 rule write
+        // below). Empty in configs-only mode or when the router has none.
+        let prefixes: Vec<(Ipv6Addr, u8)> = if ctx.effectful() {
+            crate::ssl::read_gua_prefix_assignments()
+                .await
+                .iter()
+                .map(|&(_, p, l)| (p, l))
+                .collect()
         } else {
-            None
+            Vec::new()
         };
         let now = chrono::Utc::now().timestamp();
 
@@ -994,25 +1029,32 @@ pub async fn set<C: CtrlContext>(
                 cfgs["firewall"].append(&redirect, Some(&section_name))?;
             }
 
-            // IPv6 rule (ACCEPT) — only for globally routable addresses
-            if port.ipv6 && ipv6_addr.as_ref().map_or(false, |a| is_gua(a)) {
-                // Pin the tracker-elected stable GUA in the current prefix when
-                // known, so a rule created mid-rotation doesn't latch the
-                // device's outgoing (old-prefix) address; else the validated
-                // address. `reconcile` maintains it thereafter.
-                let dest_v6 = lan_prefix
-                    .and_then(|(p, plen)| {
-                        crate::ipv6_tracker::elected_live_in_prefix(&mac_upper, now, p, plen)
-                    })
+            // IPv6 rule (ACCEPT) — only for globally routable addresses.
+            // Pin the tracker-elected stable GUA within a currently-assigned
+            // prefix when known, so a rule created mid-rotation doesn't latch
+            // the device's outgoing (old-prefix) address; else the validated
+            // address, even when it lies outside every current prefix — a
+            // deprecated prefix often stays routable for a while, and the
+            // tracker retargets the rule within seconds of the device
+            // acquiring an in-prefix address (a new-address sighting always
+            // schedules a reconcile). Deferring instead would leave a gap
+            // nothing closes: reconcile rewrites existing rules, it never
+            // creates missing ones. `reconcile` maintains it thereafter.
+            let dest_v6 = if port.ipv6 {
+                crate::ipv6_tracker::elected_live_in_prefixes(&mac_upper, now, &prefixes)
                     .map(|a| a.to_string())
-                    .or_else(|| ipv6_addr.clone());
+                    .or_else(|| ipv6_addr.clone().filter(|a| is_gua(a)))
+            } else {
+                None
+            };
+            if let Some(dest_v6) = dest_v6 {
                 let rule = FirewallRule {
                     name: port.label.clone(),
                     src: "wan".into(),
                     dest: Some(dest_zone.clone()),
                     target: FirewallTarget::ACCEPT,
                     proto: proto.clone(),
-                    dest_ip: dest_v6,
+                    dest_ip: Some(dest_v6),
                     dest_port: Some(port.ports.clone()),
                     family: Some("ipv6".into()),
                     src_ip: if port.source != "any" {
@@ -1052,6 +1094,16 @@ pub async fn set<C: CtrlContext>(
                         reload_dnsmasq();
                     }
                 }
+                // Keep the tracker's relevance filter current (superset: also
+                // MACs whose v6 rule was deferred for lack of an in-prefix
+                // address).
+                note_v6_rule_macs(
+                    req.ports
+                        .iter()
+                        .filter(|p| p.ipv6 && !p.device_mac.is_empty())
+                        .map(|p| p.device_mac.to_uppercase())
+                        .collect(),
+                );
                 crate::activity::log(
                     "published-ports",
                     "updated",
@@ -1072,14 +1124,16 @@ pub async fn set<C: CtrlContext>(
 /// An IPv6 forward's `dest_ip` is a full GUA and can go stale two ways: the ISP
 /// rotates the delegated prefix, or the device renumbers itself (SLAAC devices
 /// own their addresses). Fired by the `wan6` hotplug hook on `ifup`/`ifupdate`
-/// for the former, and by `ipv6_tracker`'s debounce for the latter.
+/// (forwarded from the CLI to the daemon, where the tracker's live history
+/// is) for the former, and by `ipv6_tracker`'s debounce for the latter.
 ///
 /// For each forward the new address is, in order of preference:
-///   1. the device's freshly-observed GUA from the neighbor table — the
-///      tracker-elected stable address when history exists (see
-///      `resolve_device_info_for_macs`), used whenever the device is currently
-///      reachable; else
-///   2. `current_prefix ++ suffix` — the offline fallback. The suffix comes
+///   1. the tracker-elected stable GUA among the addresses the device
+///      currently holds *within a currently-assigned prefix*
+///      (`elected_live_in_prefixes`); else
+///   2. `prefix ++ suffix` — the offline fallback, recombining with the /64
+///      of the device's own bridge (a guest-profile device's addresses live
+///      in that profile's assignment, not the admin LAN's). The suffix comes
 ///      from tracker history when the elected address is EUI-64 (the only
 ///      class that provably survives a prefix rotation), else from a legacy
 ///      stored `hostid`; recent history proving the device does *not* use
@@ -1092,16 +1146,18 @@ pub async fn set<C: CtrlContext>(
 /// Fail-safe: if the router currently has no global prefix at all (a flap to
 /// "none"), nothing is rewritten — the next `ifup` with a real prefix re-runs us.
 #[instrument(skip_all)]
-pub async fn reconcile<C: CtrlContext>(ctx: C) -> Result<Value, Error> {
-    // Configs-only/CLI mode can't probe the WAN; there's nothing to reconcile.
+pub async fn reconcile(ctx: ServerContext) -> Result<Value, Error> {
+    // Configs-only mode can't probe the WAN; there's nothing to reconcile.
     if !ctx.effectful() {
         return Ok(Value::Null);
     }
 
-    let Some((prefix, prefix_len)) = crate::ssl::read_lan_gua_prefix().await else {
+    let assignments = crate::ssl::read_gua_prefix_assignments().await;
+    if assignments.is_empty() {
         tracing::debug!("published-ports reconcile: no global IPv6 prefix; skipping");
         return Ok(Value::Null);
-    };
+    }
+    let prefixes: Vec<(Ipv6Addr, u8)> = assignments.iter().map(|&(_, p, l)| (p, l)).collect();
 
     let mut retries = 4;
     loop {
@@ -1140,26 +1196,52 @@ pub async fn reconcile<C: CtrlContext>(ctx: C) -> Result<Value, Error> {
                 }
             }
         }
+        // Tell the tracker which MACs matter before any early return, so its
+        // relevance filter stays honest even when no rules exist.
+        note_v6_rule_macs(v6_macs.clone());
         if v6_macs.is_empty() {
             return Ok(Value::Null);
         }
 
-        // mac → tracker-elected stable GUA *within the current delegated
-        // prefix*. Restricting to the live prefix is what keeps a rule off an
-        // address the device no longer routes on: an old-prefix address
+        // mac → tracker-elected stable GUA *within a currently-assigned
+        // prefix*. Restricting to the live prefixes is what keeps a rule off
+        // an address the device no longer routes on: an old-prefix address
         // lingering after an ISP rotation outranks the new one on age, so an
-        // unscoped election would retarget the rule onto the dead prefix. A MAC
-        // with no in-prefix live address drops out here and is handled by the
+        // unscoped election would retarget the rule onto the dead prefix. All
+        // LAN-side assignments count, not just the admin LAN's — a device on
+        // a guest profile holds its GUA in that profile's own /64. A MAC with
+        // no in-prefix live address drops out here and is handled by the
         // `prefix ++ suffix` fallback in `rewrite_v6_dest_ips`.
         let device_ipv6: HashMap<String, String> = v6_macs
             .iter()
             .filter_map(|mac| {
-                crate::ipv6_tracker::elected_live_in_prefix(mac, now, prefix, prefix_len)
+                crate::ipv6_tracker::elected_live_in_prefixes(mac, now, &prefixes)
                     .map(|gua| (mac.clone(), gua.to_string()))
             })
             .collect();
 
-        let changed = rewrite_v6_dest_ips(&mut cfgs, prefix, prefix_len, &device_ipv6, &hostids)?;
+        // mac → the /64 to recombine an offline device's suffix with: the
+        // assignment of the bridge the device was last seen on. Recombining
+        // with the wrong bridge's /64 would rewrite a working rule to an
+        // address the device never owns, so a device whose bridge is unknown
+        // only falls back to the sole assignment when there is exactly one.
+        let iface_prefix: HashMap<&str, (Ipv6Addr, u8)> = assignments
+            .iter()
+            .map(|(ifc, p, l)| (ifc.as_str(), (*p, *l)))
+            .collect();
+        let recombine: HashMap<String, (Ipv6Addr, u8)> = v6_macs
+            .iter()
+            .filter(|mac| !device_ipv6.contains_key(*mac))
+            .filter_map(|mac| {
+                let prefix = match crate::ipv6_tracker::last_seen_iface(mac) {
+                    Some(ifc) => iface_prefix.get(ifc.as_str()).copied(),
+                    None => (assignments.len() == 1).then(|| prefixes[0]),
+                };
+                prefix.map(|p| (mac.clone(), p))
+            })
+            .collect();
+
+        let changed = rewrite_v6_dest_ips(&mut cfgs, &device_ipv6, &hostids, &recombine)?;
         if changed == 0 {
             return Ok(Value::Null);
         }
@@ -1197,14 +1279,14 @@ pub async fn reconcile<C: CtrlContext>(ctx: C) -> Result<Value, Error> {
 /// In-memory core of [`reconcile`]: rewrite each `pp_*_v6` rule's `dest_ip` to the
 /// device's current GUA, returning how many rules changed. Pure (no I/O) so it's
 /// unit-testable. For each rule the new address is the device's live GUA
-/// (`device_ipv6`) when known, else `prefix ++ stored_hostid` (`hostids`); a rule
-/// with neither is left untouched.
+/// (`device_ipv6`) when known, else `recombine[mac] ++ stored_hostid` (`hostids`,
+/// recombined with the /64 of the device's own bridge); a rule with neither is
+/// left untouched.
 fn rewrite_v6_dest_ips(
     cfgs: &mut Configs,
-    prefix: Ipv6Addr,
-    prefix_len: u8,
     device_ipv6: &HashMap<String, String>,
     hostids: &HashMap<String, String>,
+    recombine: &HashMap<String, (Ipv6Addr, u8)>,
 ) -> Result<usize, Error> {
     let mut changed = 0usize;
     for section in &mut cfgs["firewall"].sections {
@@ -1219,8 +1301,11 @@ fn rewrite_v6_dest_ips(
         };
         let mac = mac.to_uppercase();
 
-        // Live address wins; otherwise reconstruct from the pinned suffix.
+        // Live address wins; otherwise reconstruct from the pinned suffix in
+        // the device's own bridge's /64 (absent from `recombine` when that
+        // bridge is unknown or lost its assignment — leave the rule alone).
         let new_ip = device_ipv6.get(&mac).cloned().or_else(|| {
+            let &(prefix, prefix_len) = recombine.get(&mac)?;
             hostids
                 .get(&mac)
                 .and_then(|suffix| recombine_gua(prefix, prefix_len, suffix))
@@ -1624,6 +1709,18 @@ config rule 'pp_a_v6'
         device_ipv6: &[(&str, &str)],
         hostids: &[(&str, &str)],
     ) -> (usize, String) {
+        // Single-prefix router: every hostid MAC recombines with that prefix,
+        // mirroring reconcile's sole-assignment fallback.
+        let recombine: Vec<(&str, &str)> = hostids.iter().map(|&(m, _)| (m, prefix)).collect();
+        rewrite_fixture_multi(fw, device_ipv6, hostids, &recombine).await
+    }
+
+    async fn rewrite_fixture_multi(
+        fw: &str,
+        device_ipv6: &[(&str, &str)],
+        hostids: &[(&str, &str)],
+        recombine: &[(&str, &str)],
+    ) -> (usize, String) {
         let dir = tempfile::tempdir().unwrap();
         setup_firewall(dir.path(), fw);
         let arena = Arena::new();
@@ -1638,8 +1735,11 @@ config rule 'pp_a_v6'
             .iter()
             .map(|(m, s)| (m.to_string(), s.to_string()))
             .collect();
-        let changed =
-            rewrite_v6_dest_ips(&mut cfgs, prefix.parse().unwrap(), 64, &dev, &hid).unwrap();
+        let rec: HashMap<String, (Ipv6Addr, u8)> = recombine
+            .iter()
+            .map(|(m, p)| (m.to_string(), (p.parse().unwrap(), 64)))
+            .collect();
+        let changed = rewrite_v6_dest_ips(&mut cfgs, &dev, &hid, &rec).unwrap();
         dump_all(dir.path(), cfgs).await.unwrap();
         let content = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
         (changed, content)
@@ -1703,6 +1803,23 @@ config rule 'pp_a_v6'
         assert!(content.contains("option dest_ip '2001:db8:abcd:0:dead:beef:0:50'"));
     }
 
+    #[tokio::test]
+    async fn reconcile_leaves_rule_when_device_bridge_unknown() {
+        // A hostid exists but the device's bridge (and so its /64) can't be
+        // determined on a multi-prefix router: recombining with some other
+        // bridge's /64 would target an address the device never owns, so the
+        // rule must be left untouched instead.
+        let (changed, content) = rewrite_fixture_multi(
+            V6_FW,
+            &[],
+            &[("AA:AA:AA:AA:AA:AA", "dead:beef:0:50")],
+            &[], // no recombine prefix resolved for this MAC
+        )
+        .await;
+        assert_eq!(changed, 0);
+        assert!(content.contains("option dest_ip '2001:db8:abcd:0:dead:beef:0:50'"));
+    }
+
     // ── compute_status stale-prefix tests ──
 
     fn raw_v6_port(ipv4: bool, dest_ipv6: Option<&str>) -> RawPort {
@@ -1731,7 +1848,6 @@ config rule 'pp_a_v6'
             ipv4: ipv4.map(str::to_string),
             ipv6: ipv6.map(str::to_string),
             ipv4_static: false,
-            ipv6_static: false,
             security_profile: None,
             speed: None,
             data_usage: None,

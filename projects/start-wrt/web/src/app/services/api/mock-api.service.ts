@@ -940,7 +940,6 @@ export class MockApiService extends ApiService {
         ipv4: device.ipv4,
         ipv6: device.ipv6,
         ipv4_static: !!host?.options.ip,
-        ipv6_static: !!host?.options.hostid,
         security_profile: profile?.fullname ?? null,
         speed: def.status === 'online' ? def.speed : null,
         data_usage: def.dataUsage,

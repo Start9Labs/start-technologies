@@ -54,7 +54,6 @@ pub struct Device {
     pub ipv4: Option<String>,
     pub ipv6: Option<String>,
     pub ipv4_static: bool,
-    pub ipv6_static: bool,
     pub security_profile: Option<String>,
     pub speed: Option<SpeedData>,
     pub data_usage: Option<f64>,
@@ -1351,7 +1350,6 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             ipv4,
             ipv6,
             ipv4_static: host.map(|h| h.ip.is_some()).unwrap_or(false),
-            ipv6_static: host.map(|h| h.hostid.is_some()).unwrap_or(false),
             security_profile,
             speed,
             data_usage,
@@ -1453,7 +1451,6 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
                 ipv4: peer_cfg.ip.clone(),
                 ipv6: None,
                 ipv4_static: true,
-                ipv6_static: false,
                 security_profile: Some(server.profile_fullname.clone()),
                 speed,
                 data_usage,
@@ -1775,13 +1772,20 @@ pub fn pick_ipv6<'a>(candidates: impl Iterator<Item = &'a str>) -> Option<String
     ula_fallback.map(|ip| ip.to_string())
 }
 
-/// Extract the last 4 hextets from an IPv6 address for use as hostid.
+/// Extract the interface identifier (low 64 bits, as 4 hextets) from an IPv6
+/// address for use as hostid. Computed from the parsed segments, never the
+/// `Display` string: zero-compression can span the prefix/IID boundary
+/// (`2001:db8::11ff:fe22:3344` has IID `0:11ff:fe22:3344`), so slicing the
+/// last 4 colon-separated parts of the text yields a malformed suffix that
+/// `recombine_gua` cannot parse. Unparseable input passes through unchanged
+/// (legacy hostids are used verbatim).
 pub(crate) fn extract_ipv6_hostid(ipv6: &str) -> String {
-    let parts: Vec<&str> = ipv6.split(':').collect();
-    if parts.len() >= 4 {
-        parts[parts.len() - 4..].join(":")
-    } else {
-        ipv6.to_string()
+    match ipv6.parse::<std::net::Ipv6Addr>() {
+        Ok(addr) => {
+            let s = addr.segments();
+            format!("{:x}:{:x}:{:x}:{:x}", s[4], s[5], s[6], s[7])
+        }
+        Err(_) => ipv6.to_string(),
     }
 }
 
@@ -1804,6 +1808,25 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extract_ipv6_hostid_survives_zero_compression() {
+        // Straightforward IID.
+        assert_eq!(
+            extract_ipv6_hostid("2001:db8:abcd:0:dead:beef:0:50"),
+            "dead:beef:0:50"
+        );
+        // Zero-compression spanning the prefix/IID boundary: the EUI-64 IID of
+        // MAC 02:00:11:22:33:44 starts with a zero hextet, and Display renders
+        // the address as 2001:db8::11ff:fe22:3344 — slicing its last 4 text
+        // parts used to yield ":11ff:fe22:3344", which recombine_gua could not
+        // parse (silently killing that device's offline fallback).
+        let hostid = extract_ipv6_hostid("2001:db8::11ff:fe22:3344");
+        assert_eq!(hostid, "0:11ff:fe22:3344");
+        assert!(format!("::{hostid}").parse::<std::net::Ipv6Addr>().is_ok());
+        // Legacy/unparseable values pass through untouched.
+        assert_eq!(extract_ipv6_hostid("dead:beef:0:50"), "dead:beef:0:50");
+    }
 
     #[test]
     fn test_pick_ipv6() {

@@ -327,37 +327,63 @@ pub async fn read_lan_ipv6_from_ubus() -> Option<Ipv6Addr> {
         .copied()
 }
 
-/// Read the LAN's current delegated *global* IPv6 prefix (base address + length)
-/// from ubus. Unlike [`read_lan_ipv6_from_ubus`] (which prefers the ULA for cert
-/// SANs), this returns the GUA prefix (2000::/3) so the published-ports reconcile
-/// can recompute a device's forward address as `prefix ++ hostid` after the ISP
-/// rotates the delegation. Returns `None` when the router currently has no global
-/// prefix.
-pub async fn read_lan_gua_prefix() -> Option<(Ipv6Addr, u8)> {
-    let output = tokio::process::Command::new("ubus")
-        .args(["call", "network.interface.lan", "status"])
+/// Every LAN-side interface's currently-assigned *global* IPv6 prefix, as
+/// `(l3_device, prefix, mask)` — e.g. `("br-lan.101", 2001:db8:0:1::, 64)` —
+/// read from `ubus call network.interface dump`. Unlike
+/// [`read_lan_ipv6_from_ubus`] (which prefers the ULA for cert SANs), this
+/// returns GUA prefixes (2000::/3) only.
+///
+/// The admin LAN is not the only bridge with a GUA /64: when the ISP delegates
+/// more than a /64, every v6-capable profile interface gets its own slice, and
+/// a published-port target on such a profile holds its address in *that* /64.
+/// So election scoping must accept an address in any of these prefixes, and
+/// suffix recombination must use the /64 of the device's own bridge — scoping
+/// to `lan`'s assignment alone would rewrite a guest-profile rule into a /64
+/// the device never owns. Empty when the router currently has no global prefix.
+pub async fn read_gua_prefix_assignments() -> Vec<(String, Ipv6Addr, u8)> {
+    let Ok(output) = tokio::process::Command::new("ubus")
+        .args(["call", "network.interface", "dump"])
         .invoke(ErrorKind::Network.into())
         .await
-        .ok()?;
-    let json: serde_json::Value = serde_json::from_slice(&output).ok()?;
+    else {
+        return Vec::new();
+    };
+    let Ok(json) = serde_json::from_slice::<serde_json::Value>(&output) else {
+        return Vec::new();
+    };
 
-    let arr = json.get("ipv6-prefix-assignment")?.as_array()?;
-    for entry in arr {
-        let Some(addr) = entry
-            .get("address")
-            .and_then(|v| v.as_str())
-            .and_then(|s| s.parse::<Ipv6Addr>().ok())
-        else {
-            // A malformed entry shouldn't mask a valid GUA later in the list.
+    let mut assignments = Vec::new();
+    for iface in json
+        .get("interface")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+    {
+        let Some(l3_device) = iface.get("l3_device").and_then(|v| v.as_str()) else {
             continue;
         };
-        // Global Unicast (2000::/3) is the only WAN-reachable delegation.
-        if crate::system::has_global_ipv6(std::slice::from_ref(&addr)) {
-            let mask = entry.get("mask").and_then(|v| v.as_u64()).unwrap_or(64) as u8;
-            return Some((addr, mask));
+        for entry in iface
+            .get("ipv6-prefix-assignment")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+        {
+            let Some(addr) = entry
+                .get("address")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<Ipv6Addr>().ok())
+            else {
+                // A malformed entry shouldn't mask a valid GUA later in the list.
+                continue;
+            };
+            // Global Unicast (2000::/3) is the only WAN-reachable delegation.
+            if crate::system::has_global_ipv6(std::slice::from_ref(&addr)) {
+                let mask = entry.get("mask").and_then(|v| v.as_u64()).unwrap_or(64) as u8;
+                assignments.push((l3_device.to_string(), addr, mask));
+            }
         }
     }
-    None
+    assignments
 }
 
 /// Check whether the server cert should be renewed (missing, corrupt, not

@@ -62,12 +62,9 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
       @if (parent.data()?.ipv6) {
         <div appSummary>
           {{ 'IPv6 Address' | i18n }}
-          <span tuiSubtitle>
-            @if (parent.data()?.ipv6Static) {
-              <tui-icon icon="@tui.lock" />
-            }
-            {{ parent.data()?.ipv6 }}
-          </span>
+          <!-- No lock icon: IPv6 addresses are chosen by the device (SLAAC)
+               and cannot be reserved, unlike IPv4 above. -->
+          <span tuiSubtitle>{{ parent.data()?.ipv6 }}</span>
         </div>
       }
       <div appSummary>

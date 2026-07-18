@@ -16,7 +16,6 @@ export interface DeviceTableItem {
   ipv4?: string
   ipv6?: string
   ipv4Static?: boolean
-  ipv6Static?: boolean
   dataUsage?: number // GB
   speed?: { up: number; down: number } // MB/s (only for online)
 }
@@ -24,7 +23,6 @@ export interface DeviceTableItem {
 // Full device data for detail view
 export interface Device extends DeviceTableItem {
   ipv4Static: boolean
-  ipv6Static: boolean
 }
 
 // Form for editing a device. IPv6 has no controls: the device chooses its own

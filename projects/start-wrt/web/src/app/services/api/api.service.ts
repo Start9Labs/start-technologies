@@ -472,7 +472,6 @@ export interface DeviceFromApi {
   ipv4: string | null
   ipv6: string | null
   ipv4_static: boolean
-  ipv6_static: boolean
   security_profile: string | null
   speed: { up: number; down: number } | null
   data_usage: number | null

@@ -4,7 +4,8 @@ use std::net::Ipv4Addr;
 use rpc_toolkit::{from_fn_async_local, ParentHandler};
 use serde::{Deserialize, Serialize};
 use uciedit::openwrt::{
-    Dhcp, DhcpHost, FirewallRedirect, NetworkInterface, NetworkRoute, NetworkRule, ProfileDnsmasq,
+    Dhcp, DhcpHost, FirewallRedirect, FirewallRule, NetworkInterface, NetworkRoute, NetworkRule,
+    ProfileDnsmasq,
 };
 use uciedit::{dump_all, parse_all, Arena, Configs};
 
@@ -404,7 +405,39 @@ pub async fn ipv6_set<C: CtrlContext>(
     let mut retries = 4;
     loop {
         let arena = Arena::new();
-        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["network", "dhcp", "startwrt"]).await?;
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["network", "dhcp", "startwrt", "firewall"],
+        )
+        .await?;
+
+        // Disabling SLAAC strands every IPv6 published-port pinhole on an
+        // address no device will hold, so refuse while any enabled `pp_*_v6`
+        // rule exists. The UI locks the toggle for the same reason, but a
+        // point-in-time page or a CLI/RPC caller bypasses that lock — this is
+        // the authoritative check (mirroring the IPv4 static-reservation
+        // guard on subnet changes).
+        if !req.slaac {
+            let blocking: Vec<String> = cfgs["firewall"]
+                .sections
+                .iter()
+                .filter_map(|section| section.get::<FirewallRule>().ok())
+                .filter(|rule| {
+                    crate::published_ports::is_pp_v6_rule(rule)
+                        && rule.enabled.as_deref() != Some("0")
+                })
+                .map(|rule| rule.name.clone())
+                .collect();
+            if !blocking.is_empty() {
+                return Err(Error::new(
+                    eyre!(
+                        "cannot disable IPv6 (SLAAC) while published ports use IPv6: {blocking:?}; disable IPv6 on those published ports first"
+                    ),
+                    ErrorKind::PublishedPortsUseIpv6,
+                ));
+            }
+        }
 
         // Update LAN network interface ip6assign
         let mut found_network = false;

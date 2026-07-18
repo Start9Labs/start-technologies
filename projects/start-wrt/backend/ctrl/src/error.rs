@@ -60,6 +60,7 @@ pub enum ErrorKind {
     UciEdit = 1022,
     DhcpStaticHostsInSubnet = 1023,
     SubnetCollision = 1024,
+    PublishedPortsUseIpv6 = 1025,
 }
 
 impl From<ErrorKind> for startos::ErrorKind {
@@ -120,6 +121,7 @@ impl ErrorKind {
             UciEdit => "UCI Edit Error",
             DhcpStaticHostsInSubnet => "DHCP Static Hosts in Subnet",
             SubnetCollision => "Subnet Collision",
+            PublishedPortsUseIpv6 => "Published Ports Use IPv6",
         }
     }
 }
