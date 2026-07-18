@@ -339,7 +339,11 @@ export class MockApiService extends ApiService {
         }
       }
 
-      const value: T.Tunnel.PortForward = { kind: 'sni', routes }
+      const value: T.Tunnel.PortForward = {
+        kind: 'sni',
+        routes,
+        fallback: null,
+      }
       forwards[source] = value
       this.mockRevision([
         {

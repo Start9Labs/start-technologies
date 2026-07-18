@@ -85,6 +85,14 @@ export const mockTunnelData: TunnelData = {
           auto: false,
         },
       },
+      // Hostname-less fallback: catches bare-IP / non-matching-SNI traffic on
+      // this shared port.
+      fallback: {
+        target: '10.59.0.2:443',
+        label: 'App (fallback)',
+        enabled: true,
+        auto: false,
+      },
     },
   },
   pinholes6: {
