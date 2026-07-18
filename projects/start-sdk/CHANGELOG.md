@@ -6,6 +6,8 @@
 
 - **`make` no longer fails in a git repository that has no index yet.** `s9pk.mk` listed `$(GIT_DIR)/index` as an unconditional prerequisite of the s9pk targets, but `git init` does not create an index until the first `git add` — so make aborted with `No rule to make target '.git/index', needed by '<id>_x86_64.s9pk'` before the pack step ever ran. This hit every freshly scaffolded package: `s9pk init-package` runs `git init` and stages nothing, and the generated `TODO.md` sends the packager straight to `make` as their first build, while the workflow guide tells them to iterate with a dirty tree and commit once at the end. The existing `$(if $(GIT_DIR),…)` guard asked only whether a repo exists, not whether these files do. `GIT_DEPS` now filters through `$(wildcard …)`, so a missing `HEAD` or `index` drops out of the prerequisite list instead of halting the build. Nothing else needed to change: `s9pk pack` already handles a commit-less repo, reporting `No git commit found in . — building without a commit hash in the manifest` and packing with a null `gitHash`. These entries are rebuild triggers, not build requirements
 
+## 2.0.5 — StartOS 0.4.0-beta.10 (2026-07-13)
+
 ### Fixed
 
 - **ExVer range operations no longer ignore the downstream revision.** `compareVersionRangePoints` and `adjacentVersionRangePoints` compared the upstream version twice instead of comparing the downstream on the second pass, so two points that shared an upstream but differed in downstream (`1.0.0:3` vs `1.0.0:15`) collapsed into a single point. Everything built on the truth tables inherited the error — `normalize()` silently dropped the lower of the two, and `intersects()` / `satisfiable()` could answer on a merged point. `=1.0.0:0 || =1.0.0:1` normalized to `=1.0.0:1`.
