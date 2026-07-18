@@ -461,9 +461,18 @@ impl VHostController {
         targets: &BTreeMap<(Option<InternedString>, u16), ProxyTarget>,
     ) {
         let ip_info = self.interfaces.watcher.ip_info();
+        // `(box IP, ext port) -> (internal port, ordered PCP gateway candidates,
+        // hostnames)`. Gateways stay an ordered Vec (the port-mapper tries them in
+        // preference order and takes the first that binds); hostnames are a set —
+        // `None` is the bare-IP/GUA pinhole, `Some(h)` an SNI route, and neither
+        // repeats nor cares about order.
         let mut desired: BTreeMap<
             (IpAddr, u16),
-            (u16, Vec<(IpAddr, Option<u32>)>, Vec<Option<InternedString>>),
+            (
+                u16,
+                Vec<(IpAddr, Option<u32>)>,
+                BTreeSet<Option<InternedString>>,
+            ),
         > = BTreeMap::new();
         for ((maybe_host, external), target) in targets {
             // IPv4: forward the port to the box's LAN IPv4 — a PCP HOSTNAME mapping
@@ -483,13 +492,11 @@ impl VHostController {
                     let IpAddr::V4(local_ip) = subnet.addr() else {
                         continue;
                     };
-                    let entry = desired
+                    desired
                         .entry((IpAddr::V4(local_ip), *external))
-                        .or_insert_with(|| (*external, gateways.clone(), Vec::new()));
-                    let name = maybe_host.clone();
-                    if !entry.2.contains(&name) {
-                        entry.2.push(name);
-                    }
+                        .or_insert_with(|| (*external, gateways.clone(), BTreeSet::new()))
+                        .2
+                        .insert(maybe_host.clone());
                 }
             }
             // IPv6: the box's own GUA is the listener (no NAT), so open a firewall
@@ -510,12 +517,11 @@ impl VHostController {
                 if v6_gateways.is_empty() {
                     continue;
                 }
-                let entry = desired
+                desired
                     .entry((IpAddr::V6(*gua), *external))
-                    .or_insert_with(|| (*external, v6_gateways, Vec::new()));
-                if !entry.2.contains(&None) {
-                    entry.2.push(None);
-                }
+                    .or_insert_with(|| (*external, v6_gateways, BTreeSet::new()))
+                    .2
+                    .insert(None);
             }
         }
         // v6 HTTP->HTTPS redirect: for a GUA exposing 443, ask the gateway for an
@@ -532,7 +538,7 @@ impl VHostController {
         for (gua, gateways) in redirects {
             desired
                 .entry((IpAddr::V6(gua), 80))
-                .or_insert((443, gateways, vec![None]));
+                .or_insert((443, gateways, BTreeSet::from([None])));
         }
         self.sync_port_maps(owner, desired);
     }
@@ -542,7 +548,11 @@ impl VHostController {
         owner: HostMapOwner,
         desired: BTreeMap<
             (IpAddr, u16),
-            (u16, Vec<(IpAddr, Option<u32>)>, Vec<Option<InternedString>>),
+            (
+                u16,
+                Vec<(IpAddr, Option<u32>)>,
+                BTreeSet<Option<InternedString>>,
+            ),
         >,
     ) {
         let want: BTreeSet<(IpAddr, u16, Option<InternedString>)> = desired
