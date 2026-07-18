@@ -1165,6 +1165,29 @@ os-install.no-free-space-for-os-root:
   fr_FR: "Plus d'espace libre sur le périphérique pour la partition racine du système"
   pl_PL: "Brak wolnego miejsca na urządzeniu dla partycji głównej systemu"
 
+# os_install/mod.rs
+os-install.no-startos-data-to-preserve:
+  en_US: "\"Preserve\" was selected, but no StartOS data was found on %{disk}. If your data is on a different drive, select that drive instead. To erase %{disk} and start fresh, go back and choose \"Overwrite\"."
+  de_DE: "\"Beibehalten\" wurde ausgewählt, aber auf %{disk} wurden keine StartOS-Daten gefunden. Wenn sich Ihre Daten auf einem anderen Laufwerk befinden, wählen Sie stattdessen dieses Laufwerk. Um %{disk} zu löschen und neu zu beginnen, gehen Sie zurück und wählen Sie \"Überschreiben\"."
+  es_ES: "Se seleccionó \"Conservar\", pero no se encontraron datos de StartOS en %{disk}. Si sus datos están en otra unidad, seleccione esa unidad. Para borrar %{disk} y empezar de nuevo, vuelva atrás y elija \"Sobrescribir\"."
+  fr_FR: "« Conserver » a été sélectionné, mais aucune donnée StartOS n'a été trouvée sur %{disk}. Si vos données se trouvent sur un autre disque, sélectionnez ce disque. Pour effacer %{disk} et repartir à zéro, revenez en arrière et choisissez « Écraser »."
+  pl_PL: "Wybrano „Zachowaj”, ale na %{disk} nie znaleziono danych StartOS. Jeśli Twoje dane znajdują się na innym dysku, wybierz tamten dysk. Aby wymazać %{disk} i zacząć od nowa, wróć i wybierz „Nadpisz”."
+
+os-install.partitioned-pool-needs-same-drive:
+  en_US: "The StartOS data on %{disk} is stored on partition %{partition} alongside an older OS installation, and cannot be preserved while the OS is installed to a different drive. To keep your data, select %{disk} for both the OS drive and the data drive. To erase it instead, go back and choose \"Overwrite\"."
+  de_DE: "Die StartOS-Daten auf %{disk} befinden sich auf der Partition %{partition} neben einer älteren OS-Installation und können nicht beibehalten werden, wenn das OS auf einem anderen Laufwerk installiert wird. Um Ihre Daten zu behalten, wählen Sie %{disk} sowohl als OS- als auch als Datenlaufwerk. Um sie stattdessen zu löschen, gehen Sie zurück und wählen Sie \"Überschreiben\"."
+  es_ES: "Los datos de StartOS en %{disk} están en la partición %{partition} junto a una instalación de SO anterior, y no pueden conservarse si el SO se instala en otra unidad. Para conservar sus datos, seleccione %{disk} tanto para la unidad del SO como para la unidad de datos. Para borrarlos, vuelva atrás y elija \"Sobrescribir\"."
+  fr_FR: "Les données StartOS de %{disk} se trouvent sur la partition %{partition} aux côtés d'une ancienne installation de l'OS et ne peuvent pas être conservées si l'OS est installé sur un autre disque. Pour garder vos données, sélectionnez %{disk} à la fois comme disque OS et comme disque de données. Pour les effacer, revenez en arrière et choisissez « Écraser »."
+  pl_PL: "Dane StartOS na %{disk} znajdują się na partycji %{partition} obok starszej instalacji systemu i nie można ich zachować, gdy system jest instalowany na innym dysku. Aby zachować dane, wybierz %{disk} zarówno jako dysk systemowy, jak i dysk danych. Aby je wymazać, wróć i wybierz „Nadpisz”."
+
+os-install.partitioned-pool-unsupported-layout:
+  en_US: "The StartOS data on %{disk} is stored on partition %{partition} alongside an older OS installation, and cannot be preserved on this device. To erase the drive and start fresh, choose \"Overwrite\"."
+  de_DE: "Die StartOS-Daten auf %{disk} befinden sich auf der Partition %{partition} neben einer älteren OS-Installation und können auf diesem Gerät nicht beibehalten werden. Um das Laufwerk zu löschen und neu zu beginnen, wählen Sie \"Überschreiben\"."
+  es_ES: "Los datos de StartOS en %{disk} están en la partición %{partition} junto a una instalación de SO anterior, y no pueden conservarse en este dispositivo. Para borrar la unidad y empezar de nuevo, elija \"Sobrescribir\"."
+  fr_FR: "Les données StartOS de %{disk} se trouvent sur la partition %{partition} aux côtés d'une ancienne installation de l'OS et ne peuvent pas être conservées sur cet appareil. Pour effacer le disque et repartir à zéro, choisissez « Écraser »."
+  pl_PL: "Dane StartOS na %{disk} znajdują się na partycji %{partition} obok starszej instalacji systemu i nie można ich zachować na tym urządzeniu. Aby wymazać dysk i zacząć od nowa, wybierz „Nadpisz”."
+
+# os_install/gpt.rs
 os-install.protected-partition-overlaps-os-root-bytes:
   en_US: "Protected partition %{path} starts at sector %{first_lba}, leaving only %{available_bytes} bytes for the OS root partition (minimum is %{min_bytes} bytes)"
   de_DE: "Geschützte Partition %{path} beginnt bei Sektor %{first_lba} und lässt nur %{available_bytes} Bytes für die OS-Root-Partition übrig (Minimum ist %{min_bytes} Bytes)"
@@ -1179,6 +1202,14 @@ os-install.protected-partition-overlaps-os-root-sectors:
   es_ES: "La partición protegida %{path} comienza en el sector %{first_lba}, dejando menos del espacio mínimo para la partición raíz del sistema operativo (debe terminar en o antes del sector %{first_lba}, sector final mínimo es %{min_end_sector})"
   fr_FR: "La partition protégée %{path} commence au secteur %{first_lba}, laissant moins que la place minimale pour la partition racine du système (doit se terminer au plus tard au secteur %{first_lba}, secteur de fin minimum %{min_end_sector})"
   pl_PL: "Chroniona partycja %{path} zaczyna się w sektorze %{first_lba}, pozostawiając mniej niż minimalne miejsce na partycję główną systemu (musi kończyć się w sektorze %{first_lba} lub wcześniej, minimalny sektor końcowy to %{min_end_sector})"
+
+# os_install/mod.rs
+os-install.whole-disk-pool-cannot-share-drive:
+  en_US: "The StartOS data on %{disk} spans the entire drive, so the OS cannot be installed to the same drive without erasing it. To preserve your data, select a different OS drive. To erase it, go back and choose \"Overwrite\"."
+  de_DE: "Die StartOS-Daten auf %{disk} erstrecken sich über das gesamte Laufwerk, sodass das OS nicht auf demselben Laufwerk installiert werden kann, ohne sie zu löschen. Um Ihre Daten zu behalten, wählen Sie ein anderes OS-Laufwerk. Um sie zu löschen, gehen Sie zurück und wählen Sie \"Überschreiben\"."
+  es_ES: "Los datos de StartOS en %{disk} ocupan toda la unidad, por lo que el SO no puede instalarse en la misma unidad sin borrarlos. Para conservar sus datos, seleccione otra unidad para el SO. Para borrarlos, vuelva atrás y elija \"Sobrescribir\"."
+  fr_FR: "Les données StartOS de %{disk} occupent l'intégralité du disque : l'OS ne peut donc pas être installé sur le même disque sans les effacer. Pour conserver vos données, sélectionnez un autre disque pour l'OS. Pour les effacer, revenez en arrière et choisissez « Écraser »."
+  pl_PL: "Dane StartOS na %{disk} zajmują cały dysk, więc system nie może zostać zainstalowany na tym samym dysku bez ich wymazania. Aby zachować dane, wybierz inny dysk systemowy. Aby je wymazać, wróć i wybierz „Nadpisz”."
 
 hostname.empty:
   en_US: "Hostname cannot be empty"

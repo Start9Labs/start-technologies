@@ -18,7 +18,7 @@ use crate::disk::mount::filesystem::efivarfs::EfiVarFs;
 use crate::disk::mount::filesystem::overlayfs::OverlayFs;
 use crate::disk::mount::filesystem::{MountType, ReadWrite};
 use crate::disk::mount::guard::{GenericMountGuard, MountGuard, TmpMountGuard};
-use crate::disk::util::PartitionTable;
+use crate::disk::util::{DiskInfo, PartitionTable};
 use crate::prelude::*;
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use crate::setup::SetupInfo;
@@ -126,6 +126,101 @@ struct DataDrive {
     logicalname: PathBuf,
     #[arg(long, help = "help.arg.wipe-drive")]
     wipe: bool,
+}
+
+fn is_startos_pool_guid(guid: &str) -> bool {
+    guid.starts_with("EMBASSY_") || guid.starts_with("STARTOS_")
+}
+
+/// What install-os will do with the data drive, decided before any disk is
+/// written to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DataDrivePlan {
+    /// Provision a fresh pool (the user chose "Overwrite").
+    Create,
+    /// Attach the existing pool with this VG guid (the user chose "Preserve").
+    Attach(InternedString),
+}
+
+/// Resolve a "Preserve" selection to the pool it will attach, or fail fast.
+///
+/// The drive pickers only offer whole disks, but a 0.3.x single-drive install
+/// keeps its pool on a *partition* of the disk, which the installer can only
+/// preserve when the OS shares the drive (it rewrites the OS partitions around
+/// the protected data partition). The old behavior fell through to creating a
+/// fresh pool whenever the lookup missed — silently reformatting the very
+/// drive the user asked to preserve.
+fn plan_data_drive(
+    disks: &[DiskInfo],
+    os_drive: Option<&Path>,
+    data_drive: &DataDrive,
+) -> Result<DataDrivePlan, Error> {
+    if data_drive.wipe {
+        return Ok(DataDrivePlan::Create);
+    }
+    let target = data_drive.logicalname.as_path();
+    let disk = disks.iter().find(|d| d.logicalname == target);
+    let disk_pool = disk.and_then(|d| d.guid.as_ref().filter(|g| is_startos_pool_guid(g)).cloned());
+    let partition_pool = disk.and_then(|d| {
+        d.partitions.iter().find_map(|p| {
+            p.guid
+                .as_ref()
+                .filter(|g| is_startos_pool_guid(g))
+                .cloned()
+                .map(|g| (p.logicalname.clone(), g))
+        })
+    });
+    let same_drive = os_drive == Some(target);
+    match (same_drive, disk_pool, partition_pool) {
+        // Pool spans the whole data drive: preservable only if the OS goes
+        // elsewhere — OS partitions can't be carved out of a whole-disk PV.
+        (false, Some(guid), _) => Ok(DataDrivePlan::Attach(guid)),
+        (true, Some(_), _) => Err(Error::new(
+            eyre!(
+                "{}",
+                t!(
+                    "os-install.whole-disk-pool-cannot-share-drive",
+                    disk = target.display()
+                )
+            ),
+            ErrorKind::InvalidRequest,
+        )),
+        // Pool on a partition of the data drive: preservable only if the OS
+        // shares the drive, where that partition gets protected.
+        (true, None, Some((_, guid))) => Ok(DataDrivePlan::Attach(guid)),
+        (false, None, Some((partition, _))) if os_drive.is_some() => Err(Error::new(
+            eyre!(
+                "{}",
+                t!(
+                    "os-install.partitioned-pool-needs-same-drive",
+                    disk = target.display(),
+                    partition = partition.display()
+                )
+            ),
+            ErrorKind::InvalidRequest,
+        )),
+        (false, None, Some((partition, _))) => Err(Error::new(
+            eyre!(
+                "{}",
+                t!(
+                    "os-install.partitioned-pool-unsupported-layout",
+                    disk = target.display(),
+                    partition = partition.display()
+                )
+            ),
+            ErrorKind::InvalidRequest,
+        )),
+        (_, None, None) => Err(Error::new(
+            eyre!(
+                "{}",
+                t!(
+                    "os-install.no-startos-data-to-preserve",
+                    disk = target.display()
+                )
+            ),
+            ErrorKind::InvalidRequest,
+        )),
+    }
 }
 
 pub struct InstallOsResult {
@@ -460,6 +555,14 @@ async fn install_os_inner(
 ) -> Result<SetupInfo, Error> {
     let disks = crate::disk::util::list(&Default::default(), None).await?;
 
+    // Decide the data-drive plan before any disk is written: if "Preserve"
+    // can't resolve to an existing pool, fail here — never fall through to
+    // reformatting a drive the user asked to keep.
+    let data_plan = match &data_drive {
+        Some(dd) => Some(plan_data_drive(&disks, os_drive.as_deref(), dd)?),
+        None => None,
+    };
+
     // With an os_drive we install StartOS onto it; without one we're already
     // booted from the installed OS, so we load the running setup.json and just
     // provision the data drive into it. `data_part` is the data partition the
@@ -491,19 +594,17 @@ async fn install_os_inner(
             if dd.wipe {
                 return None;
             }
-            if disk.guid.as_ref().map_or(false, |g| {
-                g.starts_with("EMBASSY_") || g.starts_with("STARTOS_")
-            }) && disk.logicalname == dd.logicalname
+            if disk
+                .guid
+                .as_ref()
+                .map_or(false, |g| is_startos_pool_guid(g))
+                && disk.logicalname == dd.logicalname
             {
                 return Some(disk.logicalname.clone());
             }
             disk.partitions
                 .iter()
-                .find(|p| {
-                    p.guid.as_ref().map_or(false, |g| {
-                        g.starts_with("EMBASSY_") || g.starts_with("STARTOS_")
-                    })
-                })
+                .find(|p| p.guid.as_ref().map_or(false, |g| is_startos_pool_guid(g)))
                 .map(|p| p.logicalname.clone())
         });
 
@@ -548,39 +649,26 @@ async fn install_os_inner(
     };
 
     if let Some(data_drive) = data_drive {
-        let mut logicalname = &*data_drive.logicalname;
-        if Some(logicalname) == os_drive.as_deref() {
-            logicalname = data_part.as_deref().ok_or_else(|| {
-                Error::new(
-                    eyre!("not enough room on OS drive for data"),
-                    ErrorKind::InvalidRequest,
-                )
-            })?;
-        }
-        if let Some(guid) = (!data_drive.wipe)
-            .then(|| disks.iter())
-            .into_iter()
-            .flatten()
-            .find_map(|d| {
-                d.guid
-                    .as_ref()
-                    .filter(|_| &d.logicalname == logicalname)
-                    .cloned()
-                    .or_else(|| {
-                        d.partitions.iter().find_map(|p| {
-                            p.guid
-                                .as_ref()
-                                .filter(|_| &p.logicalname == logicalname)
-                                .cloned()
-                        })
-                    })
-            })
-        {
-            setup_info.guid = Some(guid);
-            setup_info.attach = true;
-        } else {
-            let guid = crate::setup::setup_data_drive(&ctx, logicalname).await?;
-            setup_info.guid = Some(guid);
+        match data_plan {
+            // Validated pre-install: the pool this resolves to was protected
+            // during the install (same-drive) or on a drive left untouched.
+            Some(DataDrivePlan::Attach(guid)) => {
+                setup_info.guid = Some(guid);
+                setup_info.attach = true;
+            }
+            _ => {
+                let mut logicalname = &*data_drive.logicalname;
+                if Some(logicalname) == os_drive.as_deref() {
+                    logicalname = data_part.as_deref().ok_or_else(|| {
+                        Error::new(
+                            eyre!("not enough room on OS drive for data"),
+                            ErrorKind::InvalidRequest,
+                        )
+                    })?;
+                }
+                let guid = crate::setup::setup_data_drive(&ctx, logicalname).await?;
+                setup_info.guid = Some(guid);
+            }
         }
     }
 
@@ -639,4 +727,158 @@ pub async fn cli_install_os(
     rootfs.unmount().await?;
 
     Ok(part_info)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+    use crate::disk::util::PartitionInfo;
+
+    fn partition(logicalname: &str, guid: Option<&str>) -> PartitionInfo {
+        PartitionInfo {
+            logicalname: PathBuf::from(logicalname),
+            label: None,
+            capacity: 0,
+            used: None,
+            available: None,
+            start_os: BTreeMap::new(),
+            legacy_backup: false,
+            guid: guid.map(Into::into),
+            filesystem: None,
+        }
+    }
+
+    fn disk(logicalname: &str, guid: Option<&str>, partitions: Vec<PartitionInfo>) -> DiskInfo {
+        DiskInfo {
+            logicalname: PathBuf::from(logicalname),
+            partition_table: None,
+            vendor: None,
+            model: None,
+            partitions,
+            capacity: 0,
+            guid: guid.map(Into::into),
+            filesystem: None,
+        }
+    }
+
+    fn preserve(logicalname: &str) -> DataDrive {
+        DataDrive {
+            logicalname: PathBuf::from(logicalname),
+            wipe: false,
+        }
+    }
+
+    /// 0.3.x single-drive layout: OS partitions, then the data partition
+    /// holding the pool.
+    fn single_drive_035() -> DiskInfo {
+        disk(
+            "/dev/sda",
+            None,
+            vec![
+                partition("/dev/sda1", None),
+                partition("/dev/sda2", None),
+                partition("/dev/sda3", None),
+                partition("/dev/sda4", Some("EMBASSY_AAAA")),
+            ],
+        )
+    }
+
+    #[test]
+    fn preserve_single_drive_same_selection_attaches() {
+        let disks = vec![single_drive_035()];
+        let plan =
+            plan_data_drive(&disks, Some(Path::new("/dev/sda")), &preserve("/dev/sda")).unwrap();
+        assert_eq!(plan, DataDrivePlan::Attach("EMBASSY_AAAA".into()));
+    }
+
+    /// The data-loss case: the pool lives on a partition of the selected data
+    /// drive while the OS goes elsewhere — must refuse, not reformat.
+    #[test]
+    fn preserve_single_drive_split_selection_errors() {
+        let disks = vec![single_drive_035(), disk("/dev/sdb", None, vec![])];
+        let err = plan_data_drive(&disks, Some(Path::new("/dev/sdb")), &preserve("/dev/sda"))
+            .unwrap_err();
+        assert!(matches!(err.kind, ErrorKind::InvalidRequest));
+    }
+
+    #[test]
+    fn preserve_whole_disk_pool_split_attaches() {
+        let disks = vec![
+            disk("/dev/sda", Some("EMBASSY_AAAA"), vec![]),
+            disk("/dev/sdb", None, vec![]),
+        ];
+        let plan =
+            plan_data_drive(&disks, Some(Path::new("/dev/sdb")), &preserve("/dev/sda")).unwrap();
+        assert_eq!(plan, DataDrivePlan::Attach("EMBASSY_AAAA".into()));
+    }
+
+    #[test]
+    fn preserve_whole_disk_pool_same_selection_errors() {
+        let disks = vec![disk("/dev/sda", Some("EMBASSY_AAAA"), vec![])];
+        let err = plan_data_drive(&disks, Some(Path::new("/dev/sda")), &preserve("/dev/sda"))
+            .unwrap_err();
+        assert!(matches!(err.kind, ErrorKind::InvalidRequest));
+    }
+
+    #[test]
+    fn preserve_blank_drive_errors() {
+        let disks = vec![disk("/dev/sda", None, vec![])];
+        for os_drive in [
+            Some(Path::new("/dev/sda")),
+            Some(Path::new("/dev/sdb")),
+            None,
+        ] {
+            let err = plan_data_drive(&disks, os_drive, &preserve("/dev/sda")).unwrap_err();
+            assert!(matches!(err.kind, ErrorKind::InvalidRequest));
+        }
+    }
+
+    #[test]
+    fn wipe_always_creates() {
+        let disks = vec![
+            single_drive_035(),
+            disk("/dev/sdb", Some("EMBASSY_AAAA"), vec![]),
+        ];
+        for (os_drive, target) in [
+            (Some(Path::new("/dev/sda")), "/dev/sda"),
+            (Some(Path::new("/dev/sdb")), "/dev/sdb"),
+            (None, "/dev/sda"),
+        ] {
+            let dd = DataDrive {
+                logicalname: PathBuf::from(target),
+                wipe: true,
+            };
+            assert_eq!(
+                plan_data_drive(&disks, os_drive, &dd).unwrap(),
+                DataDrivePlan::Create
+            );
+        }
+    }
+
+    /// No os_drive (pre-installed OS): whole-disk pools attach; partitioned
+    /// pools are refused since the OS can't share the drive.
+    #[test]
+    fn preinstalled_device_attach_rules() {
+        let disks = vec![disk("/dev/sda", Some("EMBASSY_AAAA"), vec![])];
+        let plan = plan_data_drive(&disks, None, &preserve("/dev/sda")).unwrap();
+        assert_eq!(plan, DataDrivePlan::Attach("EMBASSY_AAAA".into()));
+
+        let disks = vec![single_drive_035()];
+        let err = plan_data_drive(&disks, None, &preserve("/dev/sda")).unwrap_err();
+        assert!(matches!(err.kind, ErrorKind::InvalidRequest));
+    }
+
+    #[test]
+    fn non_startos_vg_is_not_preservable() {
+        let disks = vec![disk(
+            "/dev/sda",
+            None,
+            vec![partition("/dev/sda1", Some("randomvg"))],
+        )];
+        let err = plan_data_drive(&disks, Some(Path::new("/dev/sda")), &preserve("/dev/sda"))
+            .unwrap_err();
+        assert!(matches!(err.kind, ErrorKind::InvalidRequest));
+    }
 }

@@ -95,6 +95,9 @@ Shut down the server through the StartOS UI.
 
 1. Select the **OS drive** and the **data drive**. These can be the same drive if your server only has one. Double-check that you have selected the correct drive for each.
 
+   > [!WARNING]
+   > You must select the **same drive layout** you had on 0.3.5.1. If 0.3.5.1 (OS and data) lived on a single drive, select **that same drive for both** the OS drive and the data drive. If your 0.3.5.1 data was on a separate drive, select a different drive for the OS. Choosing a different layout than your existing install cannot preserve your data, and the installer will refuse rather than erase the drive.
+
 1. When prompted, select **Preserve** to keep your existing data.
 
    > [!WARNING]
