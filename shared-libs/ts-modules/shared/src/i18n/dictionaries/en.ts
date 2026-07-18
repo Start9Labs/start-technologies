@@ -803,4 +803,9 @@ export const ENGLISH: Record<string, number> = {
   'Internal': 897, // as in, internal socket address
   'Address': 898, // as in, a socket address (ip:port)
   'IPv6 has no port forwarding — your server is reachable directly at its global address. Your gateway firewall must allow inbound connections to it, or enable automatic firewall configuration (PCP) on the gateway.': 899,
+  'Cannot Preserve Data': 909,
+  '"Preserve" was selected, but no StartOS data was found on the selected data drive. If your data is on a different drive, select that drive instead. To erase this drive and start fresh, choose "Overwrite".': 910,
+  'The StartOS data on the selected data drive is stored on a partition alongside an older OS installation, and cannot be preserved while the OS is installed to a different drive. To keep your data, select this same drive for both the OS drive and the data drive. To erase it instead, choose "Overwrite".': 911,
+  'The StartOS data on the selected data drive is stored on a partition alongside an older OS installation, and cannot be preserved on this device. To erase the drive and start fresh, choose "Overwrite".': 912,
+  'The StartOS data on the selected data drive spans the entire drive, so the OS cannot be installed to the same drive without erasing it. To preserve your data, select a different OS drive. To erase it, choose "Overwrite".': 913,
 }

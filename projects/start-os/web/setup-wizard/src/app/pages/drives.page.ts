@@ -328,6 +328,21 @@ export default class DrivesPage {
     const dataDrive = this.form.controls.dataDrive.value
     if (!osDrive || !dataDrive) return
 
+    // Refuse "Preserve" selections the backend would reject before it touches a
+    // disk, so a doomed install can never be submitted.
+    if (this.preserveData()) {
+      const reason = this.preserveBlockedReason(
+        dataDrive,
+        this.stateService.osDrive ? null : osDrive.logicalname,
+      )
+      if (reason) {
+        this.dialogs
+          .openAlert(reason, { label: 'Cannot Preserve Data' })
+          .subscribe()
+        return
+      }
+    }
+
     // Pre-installed: OS drive is fixed and never touched; warn only about the
     // data drive being overwritten (unless we're preserving existing data).
     if (this.stateService.osDrive) {
@@ -369,6 +384,38 @@ export default class DrivesPage {
 
     // Scenario 3: All other cases → warn about overwriting
     this.showFullWarning(sameDevice)
+  }
+
+  private readonly isStartOsPoolGuid = (guid: string | null): boolean =>
+    !!guid && (guid.startsWith('EMBASSY_') || guid.startsWith('STARTOS_'))
+
+  // Mirror of the backend plan_data_drive (os_install/mod.rs): why a "Preserve"
+  // selection cannot keep the data, or null when the pool can be attached.
+  private preserveBlockedReason(
+    dataDrive: DiskInfo,
+    osDrive: string | null,
+  ): i18nKey | null {
+    const wholeDiskPool = this.isStartOsPoolGuid(dataDrive.guid)
+    const partitionPool = dataDrive.partitions.some(p =>
+      this.isStartOsPoolGuid(p.guid),
+    )
+    const sameDrive = osDrive === dataDrive.logicalname
+
+    if (wholeDiskPool) {
+      return sameDrive
+        ? 'The StartOS data on the selected data drive spans the entire drive, so the OS cannot be installed to the same drive without erasing it. To preserve your data, select a different OS drive. To erase it, choose "Overwrite".'
+        : null
+    }
+
+    if (partitionPool) {
+      if (sameDrive) return null
+
+      return osDrive
+        ? 'The StartOS data on the selected data drive is stored on a partition alongside an older OS installation, and cannot be preserved while the OS is installed to a different drive. To keep your data, select this same drive for both the OS drive and the data drive. To erase it instead, choose "Overwrite".'
+        : 'The StartOS data on the selected data drive is stored on a partition alongside an older OS installation, and cannot be preserved on this device. To erase the drive and start fresh, choose "Overwrite".'
+    }
+
+    return '"Preserve" was selected, but no StartOS data was found on the selected data drive. If your data is on a different drive, select that drive instead. To erase this drive and start fresh, choose "Overwrite".'
   }
 
   private showPreserveOverwriteDialog() {
