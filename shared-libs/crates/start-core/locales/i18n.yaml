@@ -1839,13 +1839,6 @@ net.gateway.no-configured-echoip-urls:
   pl_PL: "Brak skonfigurowanych adresów URL echoip"
 
 # net/dns.rs
-net.dns.timeout-updating-catalog:
-  en_US: "timed out waiting to update dns catalog"
-  de_DE: "Zeitüberschreitung beim Warten auf Aktualisierung des DNS-Katalogs"
-  es_ES: "tiempo de espera agotado esperando actualizar catálogo DNS"
-  fr_FR: "délai d'attente dépassé pour la mise à jour du catalogue DNS"
-  pl_PL: "przekroczono limit czasu oczekiwania na aktualizację katalogu DNS"
-
 net.dns.could-not-determine-source-interface:
   en_US: "Could not determine source interface of %{src}"
   de_DE: "Quellschnittstelle von %{src} konnte nicht ermittelt werden"

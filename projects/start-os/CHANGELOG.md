@@ -135,6 +135,22 @@ file tracks notable changes since the move to the monorepo.
 
 ### Fixed
 
+- **DNS forwarder no longer wedges box-wide after an upstream blip (#3473).**
+  After a WAN, tunnel, or DHCP event degraded the currently-configured upstream
+  resolvers, container DNS could go dark for every service on the box — external
+  lookups failing with `Temporary failure in name resolution` — until the
+  upstreams recovered or the box was rebooted. The forwarder held a read lock on
+  its upstream catalog across each upstream query (up to 30s) while the task
+  installing new upstreams gave up after 10s and retried, starving the very
+  update that would have replaced the dead upstreams. The resolver now snapshots
+  the catalog and releases the lock before forwarding, and installs new upstreams
+  by atomic swap — no lock wait, no timeout, no retry — so a pending upstream
+  change always applies immediately. Forward queries also use a 5-second
+  per-attempt upstream timeout (matching what container clients wait) rather than
+  30 seconds, and names in the private `.startos`/`.embassy` zones that no
+  running service claims are answered
+  authoritatively (`NXDOMAIN`) instead of being forwarded to — and leaked at —
+  upstream resolvers.
 - **Enabling a public IPv4 address on an SSL service interface now opens the
   gateway port automatically.** Only a public _domain_ on an SSL-terminated port
   used to trigger automatic port forwarding (PCP/NAT-PMP/UPnP); turning on the

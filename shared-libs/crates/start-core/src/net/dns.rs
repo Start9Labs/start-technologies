@@ -26,7 +26,6 @@ use rpc_toolkit::{
 };
 use serde::{Deserialize, Serialize};
 use tokio::net::UdpSocket;
-use tokio::sync::RwLock;
 use tracing::instrument;
 use ts_rs::TS;
 
@@ -303,7 +302,7 @@ enum PrivateScope {
 }
 
 struct Resolver {
-    catalog: Arc<RwLock<Catalog>>,
+    catalog: Arc<SyncRwLock<Arc<Catalog>>>,
     resolve: Arc<SyncRwLock<ResolveMap>>,
     net_iface: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
     scope: PrivateScope,
@@ -313,7 +312,7 @@ struct Resolver {
 /// user's static upstream servers.
 fn spawn_forwarder(
     db: TypedPatchDb<Database>,
-    catalog: Arc<RwLock<Catalog>>,
+    catalog: Arc<SyncRwLock<Arc<Catalog>>>,
 ) -> NonDetachingJoinHandle<()> {
     tokio::spawn(async move {
         let mut prev = crate::util::serde::hash_serializable::<sha2::Sha256, _>(&(
@@ -344,7 +343,10 @@ fn spawn_forwarder(
                                     ErrorKind::Network,
                                 ))?;
                             let (config, mut opts) = parse_resolv_conf(conf)?;
-                            opts.timeout = Duration::from_secs(30);
+                            // Per-attempt upstream timeout. Container stub
+                            // resolvers give up around 5s, so a longer forward
+                            // serves nobody; keep the default retry count.
+                            opts.timeout = Duration::from_secs(5);
                             last_config = Some((config, opts));
                             true
                         }
@@ -408,19 +410,9 @@ fn spawn_forwarder(
                         .build()
                         .map_err(|e| Error::new(eyre!("{e}"), ErrorKind::Network))?,
                     )];
-                    {
-                        let mut guard =
-                            tokio::time::timeout(Duration::from_secs(10), catalog.write())
-                                .await
-                                .map_err(|_| {
-                                    Error::new(
-                                        eyre!("{}", t!("net.dns.timeout-updating-catalog")),
-                                        ErrorKind::Timeout,
-                                    )
-                                })?;
-                        guard.upsert(Name::root().into(), auth);
-                        drop(guard);
-                    }
+                    let mut next = Catalog::new();
+                    next.upsert(Name::root().into(), auth);
+                    catalog.mutate(|c| *c = Arc::new(next));
                     prev = hash;
                 }
             }
@@ -434,10 +426,27 @@ fn spawn_forwarder(
     })
     .into()
 }
+/// How a query should be answered.
+enum Resolution {
+    /// Answer these addresses locally (an empty vec for the queried family is a
+    /// NODATA answer, as before).
+    Answer(Vec<IpAddr>),
+    /// The name is in a private StartOS zone but no service claims it — answer
+    /// authoritatively with NXDOMAIN instead of forwarding it upstream (which
+    /// would both leak internal hostnames and, during an upstream outage, pile
+    /// restarting-service lookups onto the slow forwarder).
+    NxDomain,
+    /// Not ours — forward upstream.
+    Forward,
+}
+
 impl Resolver {
-    fn resolve(&self, name: &Name, mut src: IpAddr) -> Option<Vec<IpAddr>> {
+    fn resolve(&self, name: &Name, mut src: IpAddr) -> Resolution {
         if name.zone_of(&*LOCALHOST) {
-            return Some(vec![Ipv4Addr::LOCALHOST.into(), Ipv6Addr::LOCALHOST.into()]);
+            return Resolution::Answer(vec![
+                Ipv4Addr::LOCALHOST.into(),
+                Ipv6Addr::LOCALHOST.into(),
+            ]);
         }
         src = match src {
             IpAddr::V6(v6) => {
@@ -470,7 +479,7 @@ impl Resolver {
                                     res.into_iter().map(|s| s.addr()).collect()
                                 })
                         }) {
-                            return Some(res);
+                            return Resolution::Answer(res);
                         }
                     }
                 }
@@ -479,7 +488,7 @@ impl Resolver {
                         .get(domain)
                         .map_or(false, |(_, rc)| rc.strong_count() > 0)
                     {
-                        return Some(addrs.clone());
+                        return Resolution::Answer(addrs.clone());
                     }
                 }
             }
@@ -494,23 +503,23 @@ impl Resolver {
                     .map_err(|_| ())
                     .and_then(|s| s.map(PackageId::from_str).transpose().map_err(|_| ()))
                 else {
-                    return None;
+                    return Resolution::NxDomain;
                 };
                 // the server's own services are registered under `None`;
                 // `start-os.startos` is the server, same as bare `startos`
                 let pkg = pkg.filter(|p| !p.is_start_os());
                 if let Some(ip) = r.services.get(&pkg) {
-                    Some(
+                    Resolution::Answer(
                         ip.iter()
                             .filter(|(_, rc)| rc.strong_count() > 0)
                             .map(|(ip, _)| (*ip).into())
                             .collect(),
                     )
                 } else {
-                    None
+                    Resolution::NxDomain
                 }
             } else {
-                None
+                Resolution::Forward
             }
         })
     }
@@ -530,8 +539,27 @@ impl RequestHandler for Resolver {
             let query = req.query;
             let name = query.name();
 
-            if let Some(ip) = self.resolve(name, req.src.ip()) {
-                match query.query_type() {
+            match self.resolve(name, req.src.ip()) {
+                Resolution::Forward => Ok(None),
+                Resolution::NxDomain => {
+                    let mut header = Metadata::response_from_request(&request.metadata);
+                    header.recursion_available = true;
+                    header.authoritative = true;
+                    header.response_code = ResponseCode::NXDomain;
+                    response_handle
+                        .send_response(
+                            MessageResponseBuilder::from_message_request(&*request).build(
+                                header,
+                                [],
+                                [],
+                                [],
+                                [],
+                            ),
+                        )
+                        .await
+                        .map(Some)
+                }
+                Resolution::Answer(ip) => match query.query_type() {
                     RecordType::A => {
                         let mut header = Metadata::response_from_request(&request.metadata);
                         header.recursion_available = true;
@@ -602,9 +630,7 @@ impl RequestHandler for Resolver {
                             .await
                             .map(Some)
                     }
-                }
-            } else {
-                Ok(None)
+                },
             }
         }
         .await
@@ -640,9 +666,8 @@ impl RequestHandler for Resolver {
                     });
             }
         }
-        self.catalog
-            .read()
-            .await
+        let catalog = self.catalog.peek(|c| c.clone());
+        catalog
             .handle_request::<R, T>(request, response_handle)
             .await
     }
@@ -690,7 +715,7 @@ fn dns_server_on(resolver: Resolver, addr: SocketAddr) -> Result<Server<Resolver
 /// every private domain locally; the wildcard answers none.
 async fn run_dns_servers(
     db: TypedPatchDb<Database>,
-    catalog: Arc<RwLock<Catalog>>,
+    catalog: Arc<SyncRwLock<Arc<Catalog>>>,
     resolve: Arc<SyncRwLock<ResolveMap>>,
     mut net_iface: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
 ) -> Result<(), Error> {
@@ -773,7 +798,7 @@ impl DnsController {
         watcher: &NetworkInterfaceWatcher,
     ) -> Result<Self, Error> {
         let resolve = Arc::new(SyncRwLock::new(ResolveMap::default()));
-        let catalog = Arc::new(RwLock::new(Catalog::new()));
+        let catalog = Arc::new(SyncRwLock::new(Arc::new(Catalog::new())));
         let weak = Arc::downgrade(&resolve);
         let net_iface = watcher.subscribe();
 
