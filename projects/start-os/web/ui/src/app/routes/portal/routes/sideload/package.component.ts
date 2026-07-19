@@ -40,7 +40,7 @@ import { MarketplacePkgSideload } from './sideload.utils'
     :host {
       display: grid;
       gap: 1rem;
-      inline-size: min(100%, 30rem);
+      inline-size: min(100%, 42rem);
       margin: auto;
     }
 
