@@ -1,6 +1,6 @@
 import { Component } from '@angular/core'
 import { FormsModule } from '@angular/forms'
-import { i18nPipe } from '@start9labs/shared'
+import { i18nKey, i18nPipe } from '@start9labs/shared'
 import {
   TuiButton,
   TuiCell,
@@ -14,6 +14,8 @@ import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 
 export interface PreserveOverwriteData {
   isExt4: boolean
+  // Why the data cannot be preserved, or null when it can
+  blockedReason: i18nKey | null
 }
 
 @Component({
@@ -34,6 +36,14 @@ export interface PreserveOverwriteData {
         <p>{{ 'This drive contains existing StartOS data.' | i18n }}</p>
       </hgroup>
     </header>
+    @if (context.data.blockedReason; as reason) {
+      <div tuiNotification appearance="negative" size="m">
+        <span tuiTitle>
+          <strong>{{ 'Cannot Preserve Data' | i18n }}</strong>
+          <span tuiSubtitle>{{ reason | i18n }}</span>
+        </span>
+      </div>
+    }
     <ul>
       <li>
         <strong class="g-positive">{{ 'Preserve' | i18n }}</strong>
@@ -68,7 +78,9 @@ export interface PreserveOverwriteData {
         tuiButton
         appearance=""
         [style.background]="'var(--tui-status-positive)'"
-        [disabled]="context.data.isExt4 && !backupAck"
+        [disabled]="
+          !!context.data.blockedReason || (context.data.isExt4 && !backupAck)
+        "
         (click)="context.completeWith(true)"
       >
         {{ 'Preserve' | i18n }}

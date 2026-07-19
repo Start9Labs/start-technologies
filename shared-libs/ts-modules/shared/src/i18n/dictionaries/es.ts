@@ -803,7 +803,7 @@ export default {
   907: 'Eliminar de todos modos',
   908: 'El servicio debe estar en ejecución para realizar esta prueba. Estado actual:',
   909: 'No se pueden conservar los datos',
-  910: 'Se seleccionó "Conservar", pero no se encontraron datos de StartOS en la unidad de datos seleccionada. Si sus datos están en otra unidad, seleccione esa unidad. Para borrar esta unidad y empezar de nuevo, elija "Sobrescribir".',
+  910: 'No se encontraron datos de StartOS en la unidad de datos seleccionada. Si sus datos están en otra unidad, seleccione esa unidad. Para borrar esta unidad y empezar de nuevo, elija "Sobrescribir".',
   911: 'Los datos de StartOS en la unidad de datos seleccionada están en una partición junto a una instalación de SO anterior, y no pueden conservarse si el SO se instala en otra unidad. Para conservar sus datos, seleccione esta misma unidad tanto para la unidad del SO como para la unidad de datos. Para borrarlos, elija "Sobrescribir".',
   912: 'Los datos de StartOS en la unidad de datos seleccionada están en una partición junto a una instalación de SO anterior, y no pueden conservarse en este dispositivo. Para borrar la unidad y empezar de nuevo, elija "Sobrescribir".',
   913: 'Los datos de StartOS en la unidad de datos seleccionada ocupan toda la unidad, por lo que el SO no puede instalarse en la misma unidad sin borrarlos. Para conservar sus datos, seleccione otra unidad para el SO. Para borrarlos, elija "Sobrescribir".',

@@ -803,7 +803,7 @@ export default {
   907: 'Usuń mimo to',
   908: 'Serwis musi być uruchomiony, aby wykonać ten test. Aktualny status:',
   909: 'Nie można zachować danych',
-  910: 'Wybrano „Zachowaj”, ale na wybranym dysku danych nie znaleziono danych StartOS. Jeśli Twoje dane znajdują się na innym dysku, wybierz tamten dysk. Aby wymazać ten dysk i zacząć od nowa, wybierz „Nadpisz”.',
+  910: 'Na wybranym dysku danych nie znaleziono danych StartOS. Jeśli Twoje dane znajdują się na innym dysku, wybierz tamten dysk. Aby wymazać ten dysk i zacząć od nowa, wybierz „Nadpisz”.',
   911: 'Dane StartOS na wybranym dysku danych znajdują się na partycji obok starszej instalacji systemu i nie można ich zachować, gdy system jest instalowany na innym dysku. Aby zachować dane, wybierz ten sam dysk zarówno jako dysk systemowy, jak i dysk danych. Aby je wymazać, wybierz „Nadpisz”.',
   912: 'Dane StartOS na wybranym dysku danych znajdują się na partycji obok starszej instalacji systemu i nie można ich zachować na tym urządzeniu. Aby wymazać dysk i zacząć od nowa, wybierz „Nadpisz”.',
   913: 'Dane StartOS na wybranym dysku danych zajmują cały dysk, więc systemu nie można zainstalować na tym samym dysku bez ich wymazania. Aby zachować dane, wybierz inny dysk systemowy. Aby je wymazać, wybierz „Nadpisz”.',

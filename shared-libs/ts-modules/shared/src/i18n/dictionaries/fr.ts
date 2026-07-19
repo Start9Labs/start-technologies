@@ -803,7 +803,7 @@ export default {
   907: 'Supprimer quand même',
   908: 'Le service doit être en fonctionnement pour effectuer ce test. Statut actuel :',
   909: 'Impossible de conserver les données',
-  910: '« Conserver » a été sélectionné, mais aucune donnée StartOS n’a été trouvée sur le disque de données sélectionné. Si vos données se trouvent sur un autre disque, sélectionnez ce disque. Pour effacer ce disque et repartir à zéro, choisissez « Écraser ».',
+  910: 'Aucune donnée StartOS n’a été trouvée sur le disque de données sélectionné. Si vos données se trouvent sur un autre disque, sélectionnez ce disque. Pour effacer ce disque et repartir à zéro, choisissez « Écraser ».',
   911: 'Les données StartOS du disque de données sélectionné se trouvent sur une partition aux côtés d’une ancienne installation de l’OS et ne peuvent pas être conservées si l’OS est installé sur un autre disque. Pour garder vos données, sélectionnez ce même disque à la fois comme disque OS et comme disque de données. Pour les effacer, choisissez « Écraser ».',
   912: 'Les données StartOS du disque de données sélectionné se trouvent sur une partition aux côtés d’une ancienne installation de l’OS et ne peuvent pas être conservées sur cet appareil. Pour effacer le disque et repartir à zéro, choisissez « Écraser ».',
   913: 'Les données StartOS du disque de données sélectionné occupent l’intégralité du disque : l’OS ne peut donc pas être installé sur le même disque sans les effacer. Pour conserver vos données, sélectionnez un autre disque pour l’OS. Pour les effacer, choisissez « Écraser ».',
