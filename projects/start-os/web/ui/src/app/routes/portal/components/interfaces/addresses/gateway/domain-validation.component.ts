@@ -14,7 +14,7 @@ import { CheckIconComponent } from 'src/app/routes/portal/components/check-icon.
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { formatPortRange } from 'src/app/utils/format-port-range'
-import { dnsAllPass, getGua, getLanIpv4, portAllPass } from 'src/app/utils/gua'
+import { dnsAllPass, getGua, portAllPass } from 'src/app/utils/gua'
 import { parse } from 'tldts'
 import {
   PortCheckField,
@@ -255,7 +255,6 @@ export class DomainValidationComponent {
     parse(this.context.data.fqdn).domain || this.context.data.fqdn
 
   private readonly wanIp = this.context.data.gateway.ipInfo.wanIp
-  private readonly lanIpv4 = getLanIpv4(this.context.data.gateway.ipInfo)
   // The gateway's IPv6 GUA (the AAAA target), if it has one. When present the
   // domain is DualStack and the modal verifies both families.
   readonly gua = getGua(this.context.data.gateway.ipInfo)
@@ -268,20 +267,16 @@ export class DomainValidationComponent {
     this.context.data.count,
   )
 
-  // Full socket addresses make the boxes self-distinguishing: the IPv4 forward
-  // (external WAN -> internal LAN) vs the IPv6 firewall (the server's own GUA).
-  readonly externalAddr = this.socketAddr(this.wanIp)
-  readonly internalAddr = this.socketAddr(this.lanIpv4)
   readonly ipv6Addr = this.gua ? `[${this.gua}]:${this.portDisplay}` : ''
 
   readonly portFields: readonly PortCheckField[] = this.isRange
     ? [
-        { label: 'External Range', value: this.externalAddr },
-        { label: 'Internal Range', value: this.internalAddr },
+        { label: 'External Range', value: this.portDisplay },
+        { label: 'Internal Range', value: this.portDisplay },
       ]
     : [
-        { label: 'External', value: this.externalAddr },
-        { label: 'Internal', value: this.internalAddr },
+        { label: 'External Port', value: this.portDisplay },
+        { label: 'Internal Port', value: this.portDisplay },
       ]
   readonly firewallFields: readonly PortCheckField[] = [
     { label: 'Address', value: this.ipv6Addr },
@@ -369,10 +364,6 @@ export class DomainValidationComponent {
     } finally {
       this.portV6Loading.set(false)
     }
-  }
-
-  private socketAddr(ip: string | null): string {
-    return ip ? `${ip}:${this.portDisplay}` : this.portDisplay
   }
 }
 

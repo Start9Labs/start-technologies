@@ -789,8 +789,6 @@ export default {
   893: 'Tu interfaz web personal de StartOS.',
   894: 'cree estos registros DNS',
   895: 'Firewall IPv6',
-  896: 'Externo',
-  897: 'Interno',
   898: 'Dirección',
   899: 'IPv6 no usa reenvío de puertos: tu servidor es accesible directamente en su dirección global. El firewall de tu gateway debe permitir las conexiones entrantes hacia él, o habilita la configuración automática del firewall (PCP) en el gateway.',
   900: 'Comprueba el espacio disponible',

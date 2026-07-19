@@ -789,8 +789,6 @@ export default {
   893: 'Votre interface web personnelle StartOS.',
   894: 'créez ces enregistrements DNS',
   895: 'Pare-feu IPv6',
-  896: 'Externe',
-  897: 'Interne',
   898: 'Adresse',
   899: "IPv6 n'utilise pas de redirection de port — votre serveur est accessible directement à son adresse globale. Le pare-feu de votre passerelle doit autoriser les connexions entrantes vers celui-ci, ou activez la configuration automatique du pare-feu (PCP) sur la passerelle.",
   900: 'Vérifiez votre espace disponible',

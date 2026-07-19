@@ -789,8 +789,6 @@ export default {
   893: 'Twój osobisty interfejs webowy StartOS.',
   894: 'utwórz te rekordy DNS',
   895: 'Zapora IPv6',
-  896: 'Zewnętrzny',
-  897: 'Wewnętrzny',
   898: 'Adres',
   899: 'IPv6 nie używa przekierowania portów — Twój serwer jest dostępny bezpośrednio pod swoim adresem globalnym. Zapora bramy musi zezwalać na połączenia przychodzące do niego lub włącz automatyczną konfigurację zapory (PCP) na bramie.',
   900: 'Sprawdź dostępne miejsce',

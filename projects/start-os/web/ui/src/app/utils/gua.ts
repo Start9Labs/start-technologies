@@ -16,20 +16,6 @@ export function getGua(ipInfo: T.IpInfo): string | null {
 }
 
 /**
- * The server's own LAN IPv4 (the internal side of an IPv4 port-forward rule), or
- * null when it has none. `subnets` holds the server's own addresses on each link.
- */
-export function getLanIpv4(ipInfo: T.IpInfo): string | null {
-  for (const cidr of ipInfo.subnets) {
-    try {
-      const net = utils.IpNet.parse(cidr)
-      if (net.isIpv4()) return net.address
-    } catch {}
-  }
-  return null
-}
-
-/**
  * Whether the domain's DNS resolves correctly for every family the gateway
  * offers: the `A` record must match the WAN IPv4 (if any) and the `AAAA` must
  * match the GUA (if any).

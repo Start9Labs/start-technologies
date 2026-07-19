@@ -799,8 +799,6 @@ export const ENGLISH: Record<string, number> = {
   'Your personal StartOS web user interface.': 893,
   'create these DNS records': 894,
   'IPv6 Firewall': 895,
-  'External': 896, // as in, external socket address
-  'Internal': 897, // as in, internal socket address
   'Address': 898, // as in, a socket address (ip:port)
   'IPv6 has no port forwarding — your server is reachable directly at its global address. Your gateway firewall must allow inbound connections to it, or enable automatic firewall configuration (PCP) on the gateway.': 899,
   'Cannot Preserve Data': 909,
