@@ -460,6 +460,7 @@ pub async fn delete_legacy(
 ) -> Result<(), Error> {
     let peek = ctx.db.peek().await;
     let server_id = peek.as_public().as_server_info().as_id().de()?;
+    let target = target_id.to_string();
     let guard = TmpMountGuard::mount(&target_id.load(&peek)?, ReadWrite).await?;
     let legacy_dir = guard
         .path()
@@ -472,7 +473,6 @@ pub async fn delete_legacy(
         return guard.unmount().await;
     }
     let db = ctx.db.clone();
-    let target = target_id.to_string();
     tokio::task::spawn(async move {
         let result = trash::sweep_until_clear(&guard).await;
         guard.unmount().await.log_err();

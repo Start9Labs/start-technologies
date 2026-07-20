@@ -85,23 +85,7 @@ fn ensure_sweep(guard: TmpMountGuard) -> SweepFuture {
 
 async fn sweep(guard: TmpMountGuard) -> Result<(), Error> {
     let trash = trash_dir(guard.path());
-    let mut dir = match tokio::fs::read_dir(&trash).await {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        res => res.with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("read dir {:?}", &trash)))?,
-    };
-    while let Some(entry) = dir
-        .next_entry()
-        .await
-        .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("read dir {:?}", &trash)))?
-    {
-        if entry.file_type().await.map_or(false, |t| t.is_dir()) {
-            crate::util::io::delete_dir(entry.path()).await?;
-        } else {
-            crate::util::io::delete_file(entry.path()).await?;
-        }
-    }
-    drop(dir);
-    match tokio::fs::remove_dir(&trash).await {
+    match tokio::fs::remove_dir_all(&trash).await {
         // 39 = directory not empty: something was trashed mid-sweep; the sweep
         // that follows it (see `sweep_until_clear`) takes care of it
         Err(e) if e.kind() == std::io::ErrorKind::NotFound || e.raw_os_error() == Some(39) => {
@@ -109,7 +93,7 @@ async fn sweep(guard: TmpMountGuard) -> Result<(), Error> {
         }
         res => res,
     }
-    .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("rmdir {:?}", &trash)))?;
+    .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("rm -rf {trash:?}")))?;
     // v1 backups are trashed out of `StartOSBackups`; once the last server's is
     // gone, remove the then-empty dir too (fails harmlessly if non-empty)
     let _ = tokio::fs::remove_dir(guard.path().join(crate::disk::LEGACY_BACKUP_DIR_NAME)).await;
