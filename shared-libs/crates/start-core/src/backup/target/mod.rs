@@ -16,6 +16,7 @@ use ts_rs::TS;
 
 use self::cifs::CifsBackupTarget;
 use crate::PackageId;
+use crate::backup::trash;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::DatabaseModel;
 use crate::disk::mount::backup::BackupMountGuard;
@@ -24,6 +25,7 @@ use crate::disk::mount::filesystem::cifs::Cifs;
 use crate::disk::mount::filesystem::{FileSystem, MountType, ReadWrite};
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::disk::util::PartitionInfo;
+use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
 use crate::util::serde::{
     HandlerExtSerde, WithIoFormat, deserialize_from_str, display_serializable, serialize_display,
@@ -446,6 +448,11 @@ pub struct DeleteLegacyParams {
 /// Delete this server's pre-V2 `StartOSBackups/<server_id>` backup from a target,
 /// freeing the space it occupied. Other servers' legacy backups and the current
 /// `StartOSBackupsV2` data are untouched. No-op if absent.
+///
+/// Unlinking a large backup can take hours, so the backup is only atomically
+/// renamed into the target's trash before this returns — gone from the target
+/// as far as detection is concerned — and a background sweep reclaims the
+/// space, posting a notification when it finishes.
 #[instrument(skip_all)]
 pub async fn delete_legacy(
     ctx: RpcContext,
@@ -454,13 +461,47 @@ pub async fn delete_legacy(
     let peek = ctx.db.peek().await;
     let server_id = peek.as_public().as_server_info().as_id().de()?;
     let guard = TmpMountGuard::mount(&target_id.load(&peek)?, ReadWrite).await?;
-    crate::util::io::delete_dir(
-        guard
-            .path()
-            .join(crate::disk::LEGACY_BACKUP_DIR_NAME)
-            .join(&server_id),
-    )
-    .await?;
-    guard.unmount().await?;
+    let legacy_dir = guard
+        .path()
+        .join(crate::disk::LEGACY_BACKUP_DIR_NAME)
+        .join(&server_id);
+    if tokio::fs::metadata(&legacy_dir).await.is_ok() {
+        trash::move_to_trash(guard.path(), &legacy_dir).await?;
+    }
+    if !trash::has_trash(guard.path()).await {
+        return guard.unmount().await;
+    }
+    let db = ctx.db.clone();
+    let target = target_id.to_string();
+    tokio::task::spawn(async move {
+        let result = trash::sweep_until_clear(&guard).await;
+        guard.unmount().await.log_err();
+        db.mutate(|db| match &result {
+            Ok(()) => notify(
+                db,
+                None,
+                NotificationLevel::Success,
+                t!("backup.trash.reclaimed-title").to_string(),
+                t!("backup.trash.reclaimed-message", target = target).to_string(),
+                (),
+            ),
+            Err(e) => notify(
+                db,
+                None,
+                NotificationLevel::Warning,
+                t!("backup.trash.reclaim-failed-title").to_string(),
+                t!(
+                    "backup.trash.reclaim-failed-message",
+                    target = target,
+                    error = e
+                )
+                .to_string(),
+                (),
+            ),
+        })
+        .await
+        .result
+        .log_err();
+    });
     Ok(())
 }

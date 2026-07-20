@@ -378,6 +378,12 @@ Mount a backup target.
 
 Unmount a backup target.
 
+### `start-cli backup target delete-legacy <TARGET_ID>`
+
+Delete this server's legacy (V1) backup from a target. The backup is removed
+immediately; its space is reclaimed in the background, with a notification
+when it finishes.
+
 ### `start-cli backup target cifs add <HOSTNAME> <PATH> <USERNAME> [PASSWORD]`
 
 Add a new CIFS/SMB network share as a backup target.

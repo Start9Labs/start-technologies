@@ -781,7 +781,7 @@ export default {
   884: 'Interner Portbereich',
   885: 'Oder aktivieren Sie die automatische Portweiterleitung (PCP) auf dem Gateway. UPnP und NAT-PMP unterstützen keine Portbereiche.',
   887: 'Alte Sicherung löschen',
-  888: 'Alte Sicherung gelöscht',
+  888: 'Alte Sicherung gelöscht. Der Speicherplatz wird im Hintergrund freigegeben.',
   889: 'Alte Sicherung löschen?',
   890: 'Die alte (V1) Sicherung dauerhaft von diesem Ziel löschen? Dies kann nicht rückgängig gemacht werden. Ihre aktuelle (V2) Sicherung ist nicht betroffen.',
   891: 'Beenden',

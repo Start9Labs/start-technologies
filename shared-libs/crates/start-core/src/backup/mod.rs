@@ -13,6 +13,7 @@ pub mod backup_bulk;
 pub mod os;
 pub mod restore;
 pub mod target;
+pub mod trash;
 
 #[derive(Debug, Deserialize, Serialize, TS)]
 #[ts(export)]

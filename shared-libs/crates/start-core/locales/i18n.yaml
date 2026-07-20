@@ -1500,6 +1500,49 @@ backup.bulk.service-not-ready:
   fr_FR: "Impossible de créer une sauvegarde d'un service encore en cours d'initialisation ou en état d'erreur"
   pl_PL: "Nie można utworzyć kopii zapasowej usługi, która jest jeszcze inicjalizowana lub znajduje się w stanie błędu"
 
+backup.bulk.reclaim-failed:
+  en_US: "Failed to reclaim old-backup space: %{error}"
+  de_DE: "Speicherplatz der alten Sicherung konnte nicht freigegeben werden: %{error}"
+  es_ES: "No se pudo recuperar el espacio de la copia de seguridad antigua: %{error}"
+  fr_FR: "Impossible de récupérer l'espace de l'ancienne sauvegarde : %{error}"
+  pl_PL: "Nie udało się odzyskać miejsca po starej kopii zapasowej: %{error}"
+
+backup.bulk.reclaiming-space:
+  en_US: "Reclaiming Space"
+  de_DE: "Speicherplatz wird freigegeben"
+  es_ES: "Recuperando espacio"
+  fr_FR: "Récupération de l'espace"
+  pl_PL: "Odzyskiwanie miejsca"
+
+# backup/trash.rs
+backup.trash.reclaim-failed-message:
+  en_US: "Deleting the old backup on %{target} did not finish: %{error}. The remaining space will be reclaimed automatically the next time this target is used for a backup."
+  de_DE: "Das Löschen der alten Sicherung auf %{target} wurde nicht abgeschlossen: %{error}. Der verbleibende Speicherplatz wird automatisch freigegeben, wenn dieses Ziel das nächste Mal für eine Sicherung verwendet wird."
+  es_ES: "La eliminación de la copia de seguridad antigua en %{target} no finalizó: %{error}. El espacio restante se recuperará automáticamente la próxima vez que este destino se use para una copia de seguridad."
+  fr_FR: "La suppression de l'ancienne sauvegarde sur %{target} ne s'est pas terminée : %{error}. L'espace restant sera récupéré automatiquement la prochaine fois que cette cible sera utilisée pour une sauvegarde."
+  pl_PL: "Usuwanie starej kopii zapasowej na %{target} nie zostało zakończone: %{error}. Pozostałe miejsce zostanie odzyskane automatycznie przy następnej kopii zapasowej na ten cel."
+
+backup.trash.reclaim-failed-title:
+  en_US: "Space Reclamation Incomplete"
+  de_DE: "Speicherfreigabe unvollständig"
+  es_ES: "Recuperación de espacio incompleta"
+  fr_FR: "Récupération d'espace incomplète"
+  pl_PL: "Odzyskiwanie miejsca niezakończone"
+
+backup.trash.reclaimed-message:
+  en_US: "The old (V1) backup on %{target} has been fully deleted, and the space it occupied is now available."
+  de_DE: "Die alte (V1) Sicherung auf %{target} wurde vollständig gelöscht und der von ihr belegte Speicherplatz ist jetzt verfügbar."
+  es_ES: "La copia de seguridad antigua (V1) en %{target} se ha eliminado por completo y el espacio que ocupaba ya está disponible."
+  fr_FR: "L'ancienne sauvegarde (V1) sur %{target} a été entièrement supprimée et l'espace qu'elle occupait est désormais disponible."
+  pl_PL: "Stara kopia zapasowa (V1) na %{target} została całkowicie usunięta, a zajmowane przez nią miejsce jest teraz dostępne."
+
+backup.trash.reclaimed-title:
+  en_US: "Backup Space Reclaimed"
+  de_DE: "Sicherungsspeicher freigegeben"
+  es_ES: "Espacio de copia de seguridad recuperado"
+  fr_FR: "Espace de sauvegarde récupéré"
+  pl_PL: "Odzyskano miejsce po kopii zapasowej"
+
 # backup/restore.rs
 backup.restore.package-error:
   en_US: "Error restoring package %{id}: %{error}"
@@ -5099,11 +5142,11 @@ about.create-developer-key:
   pl_PL: "Utwórz nowy klucz deweloperski"
 
 about.delete-legacy-backup:
-  en_US: "Delete the legacy (V1) backup from a backup target"
-  de_DE: "Die alte (V1) Sicherung von einem Sicherungsziel löschen"
-  es_ES: "Eliminar la copia de seguridad heredada (V1) de un destino de copia de seguridad"
-  fr_FR: "Supprimer la sauvegarde héritée (V1) d'une cible de sauvegarde"
-  pl_PL: "Usuń starą kopię zapasową (V1) z celu kopii zapasowej"
+  en_US: "Delete the legacy (V1) backup from a backup target; its space is reclaimed in the background"
+  de_DE: "Die alte (V1) Sicherung von einem Sicherungsziel löschen; ihr Speicherplatz wird im Hintergrund freigegeben"
+  es_ES: "Eliminar la copia de seguridad heredada (V1) de un destino de copia de seguridad; su espacio se recupera en segundo plano"
+  fr_FR: "Supprimer la sauvegarde héritée (V1) d'une cible de sauvegarde ; son espace est récupéré en arrière-plan"
+  pl_PL: "Usuń starą kopię zapasową (V1) z celu kopii zapasowej; jej miejsce jest odzyskiwane w tle"
 
 about.disable-kiosk-mode:
   en_US: "Disable kiosk mode"
