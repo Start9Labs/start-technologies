@@ -227,22 +227,20 @@ pub async fn backup_all(
     // password here can only mean the target's existing backup was encrypted with a
     // different one. Distinguish it so the client can ask for that password instead of
     // reporting the master password as wrong.
-    let mut backup_guard = BackupMountGuard::mount(
-        TmpMountGuard::mount(&fs, BackupWrite).await?,
-        &server_id,
-        &old_password_decrypted,
-    )
-    .await
-    .map_err(|e| {
-        if e.kind == ErrorKind::IncorrectPassword {
-            Error::new(
-                eyre!("{}", t!("backup.bulk.password-mismatch")),
-                ErrorKind::BackupPasswordMismatch,
-            )
-        } else {
-            e
-        }
-    })?;
+    let disk_guard = TmpMountGuard::mount(&fs, BackupWrite).await?;
+    let mut backup_guard =
+        BackupMountGuard::mount(disk_guard.clone(), &server_id, &old_password_decrypted)
+            .await
+            .map_err(|e| {
+                if e.kind == ErrorKind::IncorrectPassword {
+                    Error::new(
+                        eyre!("{}", t!("backup.bulk.password-mismatch")),
+                        ErrorKind::BackupPasswordMismatch,
+                    )
+                } else {
+                    e
+                }
+            })?;
     if old_password.is_some() {
         backup_guard.change_password(&password)?;
     }
@@ -252,7 +250,7 @@ pub async fn backup_all(
         status_guard
             .handle_result(
                 legacy_present,
-                perform_backup(&ctx, backup_guard, &package_ids).await,
+                perform_backup(&ctx, backup_guard, disk_guard, &package_ids).await,
             )
             .await
             .unwrap();
@@ -281,10 +279,11 @@ fn assure_backing_up<'a>(
     Ok(())
 }
 
-#[instrument(skip(ctx, backup_guard))]
+#[instrument(skip(ctx, backup_guard, disk_guard))]
 async fn perform_backup(
     ctx: &RpcContext,
     backup_guard: BackupMountGuard<TmpMountGuard>,
+    disk_guard: TmpMountGuard,
     package_ids: &OrdSet<PackageId>,
 ) -> Result<BTreeMap<PackageId, PackageBackupReport>, Error> {
     let db = ctx.db.peek().await;
@@ -294,6 +293,14 @@ async fn perform_backup(
         backup_guard.metadata.package_backups.clone();
 
     let progress = FullProgressTracker::new();
+    let mut reclaim_phase = if crate::backup::trash::has_trash(disk_guard.path()).await {
+        Some(progress.add_phase(
+            InternedString::intern(&*t!("backup.bulk.reclaiming-space")),
+            Some(1),
+        ))
+    } else {
+        None
+    };
     let mut phase_handles: BTreeMap<PackageId, _> = package_ids
         .iter()
         .map(|id| {
@@ -316,6 +323,20 @@ async fn perform_backup(
             },
             Some(Duration::from_millis(300)),
         )));
+
+    if let Some(phase) = &mut reclaim_phase {
+        phase.start();
+        // pending trash is space freed by a backup deletion but not yet
+        // reclaimed — space this backup may be counting on, so finish (or join)
+        // the sweep before writing. Failure isn't fatal: the backup itself will
+        // surface any real space problem.
+        if let Err(e) = crate::backup::trash::sweep_until_clear(&disk_guard).await {
+            tracing::warn!("{}", t!("backup.bulk.reclaim-failed", error = &e));
+            tracing::debug!("{e:?}");
+        }
+        phase.complete();
+    }
+    drop(disk_guard);
 
     for id in package_ids {
         let mut phase = phase_handles.remove(id).expect("phase exists");

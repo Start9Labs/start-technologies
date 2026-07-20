@@ -73,9 +73,12 @@ export class BackupLegacyWarningComponent {
           await this.api.deleteLegacyBackup({ targetId: this.id() })
           this.service.clearLegacy(this.id())
           this.alerts
-            .open(this.i18n.transform('Old backup deleted'), {
-              appearance: 'positive',
-            })
+            .open(
+              this.i18n.transform(
+                'Old backup deleted. Space will be reclaimed in the background.',
+              ),
+              { appearance: 'positive' },
+            )
             .subscribe()
         }, 'Deleting old backup'),
       )
