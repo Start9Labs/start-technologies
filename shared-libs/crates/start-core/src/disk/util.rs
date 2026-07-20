@@ -116,6 +116,9 @@ pub struct StartOsRecoveryInfo {
 
 const DISK_PATH: &str = "/dev/disk/by-path";
 const SYS_BLOCK_PATH: &str = "/sys/block";
+/// EFI System Partition type ids as reported by `lsblk -no PARTTYPE`: the GPT
+/// partition type GUID and the MBR partition type.
+const ESP_PART_TYPES: [&str; 2] = ["c12a7328-f81f-11d2-ba4b-00a0c93ec93b", "0xef"];
 
 lazy_static::lazy_static! {
     static ref PARTITION_REGEX: Regex = Regex::new("-part[0-9]+$").unwrap();
@@ -207,6 +210,25 @@ pub async fn get_label<P: AsRef<Path>>(path: P) -> Result<Option<String>, Error>
     .trim()
     .to_owned();
     Ok(if label.is_empty() { None } else { Some(label) })
+}
+
+#[instrument(skip_all)]
+pub async fn get_part_type<P: AsRef<Path>>(path: P) -> Result<Option<String>, Error> {
+    let part_type = String::from_utf8(
+        Command::new("lsblk")
+            .arg("-no")
+            .arg("parttype")
+            .arg(path.as_ref())
+            .invoke(crate::ErrorKind::BlockDevice)
+            .await?,
+    )?
+    .trim()
+    .to_owned();
+    Ok(if part_type.is_empty() {
+        None
+    } else {
+        Some(part_type)
+    })
 }
 
 #[instrument(skip_all)]
@@ -567,6 +589,30 @@ async fn lvm_pv_part_info(part: PathBuf, guid: Option<InternedString>) -> Partit
 }
 
 async fn part_info(part: PathBuf, server_id: Option<&str>) -> Option<PartitionInfo> {
+    let part_type = get_part_type(&part)
+        .await
+        .map_err(|e| {
+            tracing::warn!(
+                "{}",
+                t!(
+                    "disk.util.could-not-get-part-type",
+                    part = part.display(),
+                    error = e.source
+                )
+            )
+        })
+        .unwrap_or_default();
+    if part_type
+        .as_deref()
+        .is_some_and(|t| ESP_PART_TYPES.contains(&t))
+    {
+        tracing::debug!(
+            "{}",
+            t!("disk.util.skipping-efi-partition", part = part.display())
+        );
+        return None;
+    }
+
     let label = get_label(&part)
         .await
         .map_err(|e| {

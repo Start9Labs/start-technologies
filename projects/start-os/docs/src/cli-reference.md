@@ -628,7 +628,8 @@ List and repair storage devices.
 
 ### `start-cli disk list`
 
-List all disks and partitions.
+List all disks and partitions. Unmountable partitions and EFI system
+partitions are omitted.
 
 - `--format` — Output format
 

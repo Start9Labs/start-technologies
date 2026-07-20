@@ -1064,6 +1064,20 @@ disk.util.could-not-get-capacity:
   fr_FR: "Impossible d'obtenir la capacité de %{disk} : %{error}"
   pl_PL: "Nie można pobrać pojemności %{disk}: %{error}"
 
+disk.util.could-not-get-part-type:
+  en_US: "Could not get partition type of %{part}: %{error}"
+  de_DE: "Konnte Partitionstyp von %{part} nicht abrufen: %{error}"
+  es_ES: "No se pudo obtener el tipo de partición de %{part}: %{error}"
+  fr_FR: "Impossible d'obtenir le type de partition de %{part} : %{error}"
+  pl_PL: "Nie można pobrać typu partycji %{part}: %{error}"
+
+disk.util.skipping-efi-partition:
+  en_US: "Skipping EFI system partition %{part}"
+  de_DE: "Überspringe EFI-Systempartition %{part}"
+  es_ES: "Omitiendo partición del sistema EFI %{part}"
+  fr_FR: "Partition système EFI %{part} ignorée"
+  pl_PL: "Pomijanie partycji systemowej EFI %{part}"
+
 disk.util.could-not-get-label:
   en_US: "Could not get label of %{part}: %{error}"
   de_DE: "Konnte Bezeichnung von %{part} nicht abrufen: %{error}"

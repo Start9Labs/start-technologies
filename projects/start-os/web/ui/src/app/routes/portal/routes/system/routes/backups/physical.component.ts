@@ -149,6 +149,9 @@ export class BackupPhysicalComponent {
     if (gb >= 1000) {
       return `${(gb / 1000).toFixed(1)} TB`
     }
+    if (gb < 1) {
+      return `${(bytes / 1e6).toFixed(0)} MB`
+    }
     return `${gb.toFixed(0)} GB`
   }
 

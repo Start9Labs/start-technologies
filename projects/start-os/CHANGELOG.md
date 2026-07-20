@@ -234,6 +234,15 @@ file tracks notable changes since the move to the monorepo.
   on the version it had. Previously the old version was started against the
   partially-migrated data and failed its downgrade migration with a "cannot
   migrate" error, leaving the service stuck until its container was rebuilt.
+- **EFI system partitions are no longer listed as backup drives.** A GPT drive
+  formatted on macOS or Windows (or a former boot drive) carries a small hidden
+  EFI System Partition alongside its data partition, so the backup drive list
+  showed the same physical drive twice — the second entry an unusable ~200 MB
+  partition displayed as "0 GB". Partitions whose partition type marks them as
+  an EFI System Partition are now skipped everywhere drives are listed (backup
+  targets, setup-wizard drive lists, `start-cli disk list`), and a sub-gigabyte
+  partition that does remain shows its capacity in MB instead of rounding down
+  to "0 GB".
 
 ### Removed
 
