@@ -1380,6 +1380,13 @@ init.setting-cpu-governor:
   fr_FR: 'Configuration du gouverneur CPU à "%{governor}"'
   pl_PL: 'Ustawianie governora CPU na "%{governor}"'
 
+init.clock-sync-check-failed:
+  en_US: "Failed to check clock synchronization status: %{error}"
+  de_DE: "Prüfung des Systemzeitsynchronisierungsstatus fehlgeschlagen: %{error}"
+  es_ES: "Error al comprobar el estado de sincronización de la hora del sistema: %{error}"
+  fr_FR: "Échec de la vérification de l'état de synchronisation de l'heure système : %{error}"
+  pl_PL: "Nie udało się sprawdzić stanu synchronizacji czasu systemowego: %{error}"
+
 init.clock-sync-timeout:
   en_US: "Timed out waiting for system time to synchronize"
   de_DE: "Zeitüberschreitung beim Warten auf Systemzeitsynchronisierung"
@@ -2670,6 +2677,13 @@ context.rpc.error-in-session-cleanup-cron:
   es_ES: "Error en el cron de limpieza de sesión: %{error}"
   fr_FR: "Erreur dans le cron de nettoyage de session : %{error}"
   pl_PL: "Błąd w cronie czyszczenia sesji: %{error}"
+
+context.rpc.clock-sync-check-failed:
+  en_US: "Failed to check clock synchronization status: %{error}"
+  de_DE: "Prüfung des Systemzeitsynchronisierungsstatus fehlgeschlagen: %{error}"
+  es_ES: "Error al comprobar el estado de sincronización de la hora del sistema: %{error}"
+  fr_FR: "Échec de la vérification de l'état de synchronisation de l'heure système : %{error}"
+  pl_PL: "Nie udało się sprawdzić stanu synchronizacji czasu systemowego: %{error}"
 
 # middleware/auth/local.rs
 middleware.auth.unauthorized:

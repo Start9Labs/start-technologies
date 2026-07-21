@@ -243,6 +243,16 @@ file tracks notable changes since the move to the monorepo.
   targets, setup-wizard drive lists, `start-cli disk list`), and a sub-gigabyte
   partition that does remain shows its capacity in MB instead of rounding down
   to "0 GB".
+- **A transient failure querying clock-sync status no longer aborts boot or
+  strands the clock-sync warning.** StartOS asks systemd (`timedatectl`) whether
+  NTP has synchronized — once per second during the boot-time sync wait, then
+  every 30 seconds in the background until the first sync lands. Both callers
+  treated a failed query as fatal: during init it aborted boot into Diagnostic
+  Mode, and in the background poller it silently killed the polling task,
+  leaving the "Clock sync failure" warning up for the rest of the boot even
+  after time synchronized. A failed query (e.g. a D-Bus activation timeout
+  under boot load) is now treated as "not synchronized yet" — logged and
+  retried on the existing cadence.
 
 ### Removed
 

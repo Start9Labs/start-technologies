@@ -312,7 +312,23 @@ impl RpcContext {
                 c.insert(
                     Guid::new(),
                     tokio::spawn(async move {
-                        while !check_time_is_synchronized().await.unwrap() {
+                        loop {
+                            // a failed query must not kill this task — the sync
+                            // warning would stick for the rest of the boot
+                            match check_time_is_synchronized().await {
+                                Ok(true) => break,
+                                Ok(false) => (),
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "{}",
+                                        t!(
+                                            "context.rpc.clock-sync-check-failed",
+                                            error = e.to_string()
+                                        )
+                                    );
+                                    tracing::debug!("{e:?}");
+                                }
+                            }
                             tokio::time::sleep(Duration::from_secs(30)).await;
                         }
                         db.mutate(|v| {
