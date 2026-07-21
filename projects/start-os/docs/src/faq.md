@@ -43,6 +43,8 @@ If you encounter Diagnostic Mode, your best bet is stop clicking and [contact su
 
 1. First, try [these steps](#during-initial-setup-i-am-unable-to-connect-to-startlocal). If none resolve the issue, continue below.
 
+1. If your phone/computer is connected to a VPN (including WireGuard/StartTunnel), try disconnecting it. `.local` addresses may not resolve while a VPN is connected — in particular, Android [excludes VPN connections from mDNS resolution](https://source.android.com/docs/core/ota/modular-system/dns-resolver), so a VPN that supplies DNS breaks `.local` even on your home network. If the VPN is StartTunnel, see [this FAQ entry](/start-tunnel/faq.html#why-cant-my-android-phone-resolve-local-addresses-while-the-tunnel-is-on) for the permanent fix: a manual DNS record for your server's `.local` name.
+
 1. Hard refresh the browser:
    - Linux/Windows: `ctrl+shift+R`
    - macOS Firefox: `cmd+shift+R`

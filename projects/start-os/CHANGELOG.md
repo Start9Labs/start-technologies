@@ -271,6 +271,16 @@ file tracks notable changes since the move to the monorepo.
   servers are cleaned up automatically: startup deserializes the database
   through the typed model, which drops the removed key.
 
+### Documentation
+
+- **`.local` while a VPN is connected (FAQ + mDNS page).** The "unable to
+  connect to server-name.local" FAQ entry gains an early step — disconnect any
+  VPN on the client device — and the mDNS page's Limitations section now notes
+  that on Android, `.local` can stop working even on the home LAN while a VPN
+  that supplies DNS is connected (Android excludes VPN connections from mDNS
+  resolution). Both link the StartTunnel FAQ's permanent fix: a manual DNS
+  record for the `.local` hostname.
+
 ## [0.4.0-beta.9] and earlier
 
 See the [GitHub releases page](https://github.com/Start9Labs/start-technologies/releases)
