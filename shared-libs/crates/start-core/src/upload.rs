@@ -499,6 +499,15 @@ pub struct DownloadHandle {
     progress: watch::Sender<Progress>,
 }
 impl DownloadHandle {
+    async fn set_expected_size(&mut self, total: u64) {
+        self.progress.send_modify(|p| {
+            p.expected_size = Some(total);
+            p.tracker.set_total(total);
+        });
+        writeback::preallocate(self.file.as_raw_fd(), total)
+            .await
+            .log_err();
+    }
     pub async fn download_from<F, Fut>(&mut self, mut next_response: F)
     where
         F: FnMut(DownloadAttemptContext) -> Fut,
@@ -529,14 +538,10 @@ impl DownloadHandle {
             };
 
             if response.status() == StatusCode::PARTIAL_CONTENT {
+                // Resume in place: the write head and pacer offsets already sit
+                // past bytes_written, so no truncate, seek, or pacer reset.
                 if let Some(total) = parse_content_range_total(response.headers()) {
-                    self.progress.send_modify(|p| {
-                        p.expected_size = Some(total);
-                        p.tracker.set_total(total);
-                    });
-                    writeback::preallocate(self.file.as_raw_fd(), total)
-                        .await
-                        .log_err();
+                    self.set_expected_size(total).await;
                 }
             } else {
                 if let Err(e) = self.file.set_len(0).await {
@@ -556,13 +561,7 @@ impl DownloadHandle {
                     .and_then(|a| a.to_str().log_err())
                     .and_then(|a| a.parse::<u64>().log_err())
                 {
-                    self.progress.send_modify(|p| {
-                        p.expected_size = Some(content_length);
-                        p.tracker.set_total(content_length);
-                    });
-                    writeback::preallocate(self.file.as_raw_fd(), content_length)
-                        .await
-                        .log_err();
+                    self.set_expected_size(content_length).await;
                 }
             }
 

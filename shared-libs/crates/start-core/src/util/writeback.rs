@@ -7,21 +7,26 @@
 //! final `fdatasync` that locks up the box. Paired with [`preallocate`] and
 //! [`set_no_cow`] to keep the file contiguous on CoW btrfs.
 //!
-//! Linux-only mechanics; on other targets (start-cli on macOS) pacing and
-//! preallocation are no-ops and the kernel's own writeback throttling bounds
-//! dirty memory.
+//! Linux-only mechanics; on other targets (start-cli on macOS) pacing,
+//! preallocation, and the nodatacow hint are no-ops and the kernel's own
+//! writeback throttling bounds dirty memory.
 
 use std::os::fd::RawFd;
 use std::path::Path;
 
+#[cfg(target_os = "linux")]
 use tokio::process::Command;
 
+#[cfg(target_os = "linux")]
 use crate::prelude::*;
+#[cfg(target_os = "linux")]
 use crate::util::Invoke;
 
 /// Issue asynchronous writeback once this many bytes have piled up unkicked.
+#[cfg(target_os = "linux")]
 const KICK_EVERY: u64 = 16 << 20;
 /// Cap on bytes left un-durable behind the write head (bounds the final fsync).
+#[cfg(target_os = "linux")]
 const DIRTY_WINDOW: u64 = 64 << 20;
 
 /// Paces page-cache writeback for a buffered file being streamed to.
@@ -134,13 +139,21 @@ pub async fn preallocate(_fd: RawFd, _len: u64) -> std::io::Result<()> {
 }
 
 /// Mark a path `nodatacow` (`chattr +C`) so writes don't fragment via CoW on
-/// btrfs. Applied to a directory, newly created files inherit it. Best-effort:
-/// no-ops (with a log line) on filesystems that don't support the flag.
+/// btrfs. Set it on an empty file/dir (files created inside a `+C` dir inherit
+/// it) — the flag has no effect once extents exist. Best-effort: off btrfs the
+/// flag is unsupported, an expected miss logged at debug rather than as an error.
+#[cfg(target_os = "linux")]
 pub async fn set_no_cow(path: impl AsRef<Path>) {
-    Command::new("chattr")
+    let path = path.as_ref();
+    if let Err(e) = Command::new("chattr")
         .arg("+C")
-        .arg(path.as_ref())
+        .arg(path)
         .invoke(ErrorKind::Filesystem)
         .await
-        .log_err();
+    {
+        tracing::debug!("nodatacow unavailable for {}: {e}", path.display());
+    }
 }
+
+#[cfg(not(target_os = "linux"))]
+pub async fn set_no_cow(_path: impl AsRef<Path>) {}
