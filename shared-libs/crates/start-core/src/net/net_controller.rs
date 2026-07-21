@@ -26,7 +26,7 @@ use crate::net::host::binding::{AddSslOptions, BindId, BindOptions, UpstreamCert
 use crate::net::host::{Host, Hosts, host_for};
 use crate::net::port_map::{PortMapController, candidate_gateways};
 use crate::net::service_interface::{
-    AddressInfo, HostnameMetadata, ServiceInterface, ServiceInterfaceType,
+    AddressInfo, HostnameInfo, HostnameMetadata, ServiceInterface, ServiceInterfaceType,
 };
 use crate::net::socks::SocksController;
 use crate::net::vhost::{AlpnInfo, DynVHostTarget, ProxyTarget, VHostController};
@@ -287,6 +287,20 @@ impl NetController {
     }
 }
 
+/// Public bare-IPv4 gateways for a binding's SSL `*` vhost: only SSL-port
+/// addresses count — a bare IP enabled on the *plain* port must not mark the
+/// SSL vhost public (that would request a pinhole for a port the operator
+/// never exposed). Its v6 twin is scoped the same way (`a.ssl`).
+fn ssl_vhost_public_v4<'a>(
+    enabled_addresses: impl IntoIterator<Item = &'a HostnameInfo>,
+) -> BTreeSet<GatewayId> {
+    enabled_addresses
+        .into_iter()
+        .filter(|a| a.public && a.ssl && matches!(a.metadata, HostnameMetadata::Ipv4 { .. }))
+        .flat_map(|a| a.metadata.gateways().cloned())
+        .collect()
+}
+
 #[derive(Default, Debug)]
 struct HostBinds {
     /// `(internal-target, count, requirements, rc)` keyed by external start
@@ -399,12 +413,7 @@ impl NetServiceData {
                     // is actually public — so a GUA-only-public gateway never
                     // accepts or forwards bare IPv4. The controller derives the IPv4
                     // `*` pinhole from `public_v4`; the GUA needs no NAT.
-                    let server_public_v4: BTreeSet<GatewayId> = enabled_addresses
-                        .iter()
-                        .filter(|a| a.public && matches!(a.metadata, HostnameMetadata::Ipv4 { .. }))
-                        .flat_map(|a| a.metadata.gateways())
-                        .cloned()
-                        .collect();
+                    let server_public_v4 = ssl_vhost_public_v4(enabled_addresses.iter().copied());
                     // Per-IP (per-GUA), not per-gateway: one gateway can carry
                     // several GUAs that are independently Local vs Public, so only
                     // the specific enabled-public GUAs accept WAN. Scoped to the SSL
@@ -1344,5 +1353,45 @@ impl Drop for NetService {
             let svc = std::mem::replace(self, Self::dummy());
             tokio::spawn(async move { svc.remove_all().await.log_err() });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use imbl_value::InternedString;
+
+    use super::*;
+
+    fn bare_v4(ssl: bool, port: u16, gateway: &GatewayId) -> HostnameInfo {
+        HostnameInfo {
+            ssl,
+            public: true,
+            hostname: InternedString::intern("203.0.113.10"),
+            port: Some(port),
+            metadata: HostnameMetadata::Ipv4 {
+                gateway: gateway.clone(),
+            },
+        }
+    }
+
+    // Regression for the coturn/`—`-fallback bug: enabling the bare WAN IP on a
+    // binding's *plain* port marked the SSL `*` vhost public, requesting a bare
+    // pinhole for the SSL port the operator never enabled. Only SSL-port
+    // addresses may make the SSL vhost public.
+    #[test]
+    fn plain_port_bare_ip_does_not_publicize_ssl_vhost() {
+        let wg = GatewayId::from(InternedString::intern("wg0"));
+        let addrs = [bare_v4(false, 57551, &wg)];
+        assert!(
+            ssl_vhost_public_v4(addrs.iter()).is_empty(),
+            "a plain-port bare IP must not mark the SSL vhost public"
+        );
+
+        let addrs = [bare_v4(false, 57551, &wg), bare_v4(true, 5349, &wg)];
+        assert_eq!(
+            ssl_vhost_public_v4(addrs.iter()),
+            BTreeSet::from([wg.clone()]),
+            "an SSL-port bare IP does mark it public"
+        );
     }
 }
