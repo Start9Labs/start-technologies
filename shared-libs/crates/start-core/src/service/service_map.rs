@@ -161,7 +161,6 @@ impl ServiceMap {
     {
         let progress = progress.unwrap_or_else(|| FullProgressTracker::new());
         let mut validate_progress = progress.add_phase("Validating Headers".into(), Some(1));
-        let mut reserve_progress = progress.add_phase("Reserving Space".into(), Some(1));
         let mut unpack_progress = progress.add_phase("Unpacking".into(), Some(100));
 
         let mut s9pk = s9pk().await?;
@@ -190,9 +189,6 @@ impl ServiceMap {
         let developer_key = s9pk.as_archive().signer();
         let mut service = self.get_mut(&id).await;
         let size = s9pk.size();
-        if let Some(size) = size {
-            unpack_progress.set_total(size);
-        }
         let op_name = if recovery_source.is_none() {
             if service.is_none() {
                 "Installing"
@@ -297,16 +293,15 @@ impl ServiceMap {
                     let out = crate::util::io::create_file(&download_path).await?;
                     // `+C` before any extents exist, so fallocate lands nodatacow.
                     crate::util::writeback::set_no_cow(&download_path).await;
-                    // fallocate can stall for seconds on fragmented btrfs — give it its
-                    // own indeterminate phase instead of a frozen "Unpacking" bar.
-                    reserve_progress.start();
+                    // Reserve while the phase is still indeterminate, so it shows a spinner
+                    // during the reserve (which can stall on fragmented btrfs) not a frozen 0%.
+                    unpack_progress.start();
                     if let Some(size) = size {
                         crate::util::writeback::preallocate(out.as_raw_fd(), size)
                             .await
                             .log_err();
+                        unpack_progress.set_total(size);
                     }
-                    reserve_progress.complete();
-                    unpack_progress.start();
                     let mut progress_writer = ProgressTrackerWriter::new(out, unpack_progress);
                     s9pk.serialize(&mut progress_writer, true).await?;
                     let (file, mut unpack_progress) = progress_writer.into_inner();
