@@ -19,7 +19,7 @@ Devices connected to the tunnel use StartTunnel as their DNS resolver. When a de
 Records come from two places: you add them **by hand**, or a trusted device **injects** them automatically over [RFC 2136](https://www.rfc-editor.org/rfc/rfc2136).
 
 > [!NOTE]
-> A StartOS server using this tunnel injects the records for its private domains **automatically**, as long as its device is a Server with DNS injection enabled (which it is by default — see below). You normally won't need to add records by hand.
+> A StartOS server using this tunnel injects the records for its private domains — and for its own `.local` name — **automatically**, as long as its device is a Server with DNS injection enabled (which it is by default — see below). You normally won't need to add records by hand.
 
 ## Allowing a device to inject records
 

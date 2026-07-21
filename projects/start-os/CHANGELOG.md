@@ -12,6 +12,16 @@ file tracks notable changes since the move to the monorepo.
 
 ### Added
 
+- **Automatic `.local` resolution over WireGuard gateways.** StartOS now injects
+  a DNS record for its own `<hostname>.local` name into every connected WireGuard
+  gateway (e.g. StartTunnel) — and only those gateways — via RFC 2136. Clients on
+  the tunnel can't resolve `.local` by mDNS (Android and others exclude VPN
+  connections from mDNS), so without this a `.local` lookup goes to the tunnel's
+  resolver and fails; now the tunnel answers it, and the name resolves from
+  anywhere the tunnel reaches. The gateway's own DNS-injection policy still
+  applies — a gateway with injection disabled refuses the record, and `.local`
+  there falls back to a manual DNS record — and plain LAN gateways are left
+  untouched, since mDNS already works on the LAN.
 - **IPv6 GUA exposure control.** On a service interface, an IPv6 global-unicast
   address (GUA) keeps the usual on/off toggle and adds a **Local / Public**
   dropdown in the access column. **Local** (the default) keeps it reachable on

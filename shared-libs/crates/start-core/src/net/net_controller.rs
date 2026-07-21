@@ -17,7 +17,7 @@ use tracing::instrument;
 use crate::db::model::Database;
 use crate::hostname::ServerHostname;
 use crate::net::dns::DnsController;
-use crate::net::dns_update::DnsUpdateController;
+use crate::net::dns_update::{DnsUpdateController, spawn_server_mdns_injection};
 use crate::net::forward::{
     ForwardRequirements, InterfacePortForwardController, START9_BRIDGE_IFACE, nft_rule, nft_rule_v6,
 };
@@ -33,6 +33,7 @@ use crate::net::vhost::{AlpnInfo, DynVHostTarget, ProxyTarget, VHostController};
 use crate::prelude::*;
 use crate::service::effects::callbacks::ServiceCallbacks;
 use crate::util::Invoke;
+use crate::util::future::NonDetachingJoinHandle;
 use crate::util::serde::MaybeUtf8String;
 use crate::util::sync::{SyncMutex, Watch};
 use crate::{GatewayId, HOST_IP, HostId, Id, OptionExt, PackageId, ServiceInterfaceId};
@@ -52,6 +53,8 @@ pub struct NetController {
     pub(crate) net_iface: Arc<NetworkInterfaceController>,
     pub(super) dns: DnsController,
     pub(super) dns_update: DnsUpdateController,
+    /// Publishes the server's `<hostname>.local` name over WireGuard gateways.
+    _mdns_injection: NonDetachingJoinHandle<()>,
     pub(super) forward: InterfacePortForwardController,
     pub(crate) port_map: PortMapController,
     pub(super) _socks: SocksController,
@@ -111,6 +114,25 @@ impl NetController {
         // One PortMapController shared by the forward and vhost controllers so a
         // single query answers "is this port automatically forwarded?".
         let port_map = PortMapController::new(net_iface.watcher.subscribe());
+        let dns_update = DnsUpdateController::new(
+            net_iface.watcher.subscribe(),
+            Arc::new(
+                |gw: GatewayId| -> std::pin::Pin<
+                    Box<dyn std::future::Future<Output = Result<Option<[u8; 32]>, ()>> + Send>,
+                > {
+                    Box::pin(async move {
+                        crate::net::gateway::wireguard_psk(gw.as_str())
+                            .await
+                            .map_err(|_| ())
+                    })
+                },
+            ),
+        );
+        let mdns_injection = spawn_server_mdns_injection(
+            db.clone(),
+            net_iface.watcher.subscribe(),
+            dns_update.clone(),
+        );
         Ok(Self {
             db: db.clone(),
             vhost: VHostController::new(
@@ -127,20 +149,8 @@ impl NetController {
             tls_client_config_no_verify,
             upstream_cert_configs: SyncMutex::new(BTreeMap::new()),
             dns: DnsController::init(db, &net_iface.watcher).await?,
-            dns_update: DnsUpdateController::new(
-                net_iface.watcher.subscribe(),
-                Arc::new(
-                    |gw: GatewayId| -> std::pin::Pin<
-                        Box<dyn std::future::Future<Output = Result<Option<[u8; 32]>, ()>> + Send>,
-                    > {
-                        Box::pin(async move {
-                            crate::net::gateway::wireguard_psk(gw.as_str())
-                                .await
-                                .map_err(|_| ())
-                        })
-                    },
-                ),
-            ),
+            dns_update,
+            _mdns_injection: mdns_injection,
             forward: InterfacePortForwardController::new(
                 net_iface.watcher.subscribe(),
                 port_map.clone(),

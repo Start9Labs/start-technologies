@@ -15,4 +15,4 @@ mDNS resolves your server's `.local` address to its LAN IP address without relyi
 
 ## Limitations
 
-mDNS only works on the local network. It does not work over [VPN](inbound-vpn.md) or the Internet. For remote access using a custom domain, see [Private Domains](private-domains.md).
+mDNS only works on the local network. It does not work over [VPN](inbound-vpn.md) or the Internet — and on Android, `.local` can stop resolving even on your home network while a VPN that supplies DNS is connected, because Android [excludes VPN connections from mDNS resolution](https://source.android.com/docs/core/ota/modular-system/dns-resolver). Over StartTunnel, a connected StartOS server works around this by automatically injecting a DNS record for its `.local` name over the tunnel (see [this StartTunnel FAQ entry](/start-tunnel/faq.html#why-cant-my-android-phone-resolve-local-addresses-while-the-tunnel-is-on)). For remote access using a custom domain, see [Private Domains](private-domains.md).

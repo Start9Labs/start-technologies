@@ -32,10 +32,13 @@ use tokio::sync::mpsc;
 use tokio::time::{interval, timeout};
 
 use crate::GatewayId;
+use crate::db::model::Database;
 use crate::db::model::public::NetworkInterfaceInfo;
+use crate::hostname::ServerHostname;
 use crate::net::port_map::candidate_gateways;
 use crate::net::utils::ipv6_is_link_local;
 use crate::prelude::*;
+use crate::util::future::NonDetachingJoinHandle;
 use crate::util::sync::Watch;
 
 const DNS_PORT: u16 = 53;
@@ -174,6 +177,75 @@ impl DnsUpdateController {
             self.req.send(Command::Gc { rm }).ok();
         }
     }
+}
+
+/// The live WireGuard gateways among `ifaces`. A `.local` record makes sense to
+/// inject only here: over a plain LAN gateway a client resolves `.local` by mDNS
+/// multicast, but a WireGuard client (e.g. on StartTunnel) can't — Android in
+/// particular excludes VPN connections from mDNS — so the tunnel's resolver must
+/// answer it instead.
+fn wireguard_gateways(ifaces: &OrdMap<GatewayId, NetworkInterfaceInfo>) -> BTreeSet<GatewayId> {
+    ifaces
+        .iter()
+        .filter(|(_, info)| info.is_wireguard())
+        .map(|(gw, _)| gw.clone())
+        .collect()
+}
+
+/// Continuously inject the server's mDNS `.local` name over every WireGuard
+/// gateway — and only those — via RFC 2136, so clients on the tunnel (which
+/// can't do mDNS over a VPN) still resolve `<hostname>.local` to the server's
+/// address on that tunnel. The gateway's own per-device policy still applies: an
+/// UPDATE to a gateway with DNS injection disabled is refused, and the `.local`
+/// name falls back to a manual record there. Re-derives the target gateways on
+/// every network change and the name on every hostname change.
+pub fn spawn_server_mdns_injection(
+    db: TypedPatchDb<Database>,
+    mut net_iface: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
+    dns_update: DnsUpdateController,
+) -> NonDetachingJoinHandle<()> {
+    tokio::spawn(async move {
+        let mut hostname_sub = db
+            .subscribe(
+                "/public/serverInfo/hostname"
+                    .parse()
+                    .expect("valid pointer"),
+            )
+            .await;
+        // The name currently asserted as desired, so a hostname change withdraws
+        // the old one instead of leaving it to be re-asserted forever.
+        let mut current: Option<InternedString> = None;
+        loop {
+            // A failed hostname read just skips this pass; we still wait on both
+            // signals below, so a network change is never missed while it's unset.
+            match ServerHostname::load(db.peek().await.as_public().as_server_info()) {
+                Ok(h) => {
+                    let name = h.local_domain_name();
+                    let gateways = net_iface.peek(wireguard_gateways);
+                    if let Some(prev) = &current {
+                        if *prev != name || gateways.is_empty() {
+                            dns_update.gc(std::iter::once(prev.clone()).collect());
+                            current = None;
+                        }
+                    }
+                    if !gateways.is_empty() {
+                        // Idempotent; also picks up a gateway added to / removed from the set.
+                        dns_update.add(name.clone(), gateways);
+                        current = Some(name);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("mDNS injection: could not read server hostname: {e}");
+                    tracing::debug!("{e:?}");
+                }
+            }
+            tokio::select! {
+                _ = net_iface.changed() => {}
+                _ = hostname_sub.recv() => {}
+            }
+        }
+    })
+    .into()
 }
 
 /// The (resolver, our-ip) pairs for a private domain on one gateway: one per
@@ -365,5 +437,61 @@ async fn send(
             eyre!("DNS UPDATE refused: {other}"),
             ErrorKind::Network,
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use imbl::OrdMap;
+    use imbl_value::InternedString;
+
+    use super::wireguard_gateways;
+    use crate::GatewayId;
+    use crate::db::model::public::{IpInfo, NetworkInterfaceInfo, NetworkInterfaceType};
+
+    fn iface(device_type: Option<NetworkInterfaceType>) -> NetworkInterfaceInfo {
+        NetworkInterfaceInfo {
+            ip_info: device_type.map(|device_type| {
+                Arc::new(IpInfo {
+                    device_type: Some(device_type),
+                    ..Default::default()
+                })
+            }),
+            ..Default::default()
+        }
+    }
+
+    fn gw(id: &str) -> GatewayId {
+        GatewayId::from(InternedString::intern(id))
+    }
+
+    #[test]
+    fn only_wireguard_gateways_are_selected() {
+        let ifaces: OrdMap<GatewayId, NetworkInterfaceInfo> = [
+            (gw("wg0"), iface(Some(NetworkInterfaceType::Wireguard))),
+            (gw("eth0"), iface(Some(NetworkInterfaceType::Ethernet))),
+            (gw("wlan0"), iface(Some(NetworkInterfaceType::Wireless))),
+            (gw("wg1"), iface(Some(NetworkInterfaceType::Wireguard))),
+            // A gateway with no ip_info (down) is never WireGuard.
+            (gw("down"), iface(None)),
+        ]
+        .into_iter()
+        .collect();
+
+        assert_eq!(
+            wireguard_gateways(&ifaces),
+            [gw("wg0"), gw("wg1")].into_iter().collect()
+        );
+    }
+
+    #[test]
+    fn no_wireguard_gateways_selects_nothing() {
+        let ifaces: OrdMap<GatewayId, NetworkInterfaceInfo> =
+            [(gw("eth0"), iface(Some(NetworkInterfaceType::Ethernet)))]
+                .into_iter()
+                .collect();
+        assert!(wireguard_gateways(&ifaces).is_empty());
     }
 }

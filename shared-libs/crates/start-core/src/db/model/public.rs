@@ -332,6 +332,14 @@ impl NetworkInterfaceInfo {
             .unwrap_or_else(|| self.is_intrinsically_secure())
     }
 
+    /// A WireGuard tunnel interface (e.g. a StartTunnel or StartWRT gateway).
+    pub fn is_wireguard(&self) -> bool {
+        matches!(
+            self.ip_info.as_ref().and_then(|i| i.device_type),
+            Some(NetworkInterfaceType::Wireguard)
+        )
+    }
+
     // lo and lxcbr0 (the only Loopback/Bridge interfaces on StartOS) never leave the
     // host, so insecure traffic such as plain HTTP defaults to permitted over them.
     fn is_intrinsically_secure(&self) -> bool {
