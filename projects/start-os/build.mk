@@ -43,7 +43,8 @@ results/$(BASENAME).$(IMAGE_TYPE) results/$(BASENAME).squashfs: $(IMAGE_RECIPE_S
 
 # The OTA payload legacy (0.3.5.1) boxes pull via their frozen rsync updater: the
 # 0.4.0 base squashfs repackaged onto the published 0.3.5.1 rootfs. See
-# projects/start-os/build/assemble-migration-payload.sh.
+# projects/start-os/build/assemble-migration-payload.sh; deploy the result with
+# scripts/deploy-migration-payload.sh.
 MIGRATION_FROM_TAG := v0.3.5.1
 
 start-os-migration-squashfs: results/$(BASENAME).migration.squashfs
