@@ -8,6 +8,7 @@ use exver::VersionRange;
 use futures::future::{BoxFuture, Fuse};
 use futures::{Future, FutureExt, StreamExt, TryFutureExt, stream};
 use imbl::OrdMap;
+use tokio::io::AsyncSeekExt;
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock, oneshot};
 use tracing::instrument;
 use url::Url;
@@ -302,9 +303,21 @@ impl ServiceMap {
                             .log_err();
                         unpack_progress.set_total(size);
                     }
-                    let mut progress_writer = ProgressTrackerWriter::new(out, unpack_progress);
+                    let mut progress_writer = ProgressTrackerWriter::new(
+                        crate::util::writeback::PacedWriter::new(out),
+                        unpack_progress,
+                    );
                     s9pk.serialize(&mut progress_writer, true).await?;
-                    let (file, mut unpack_progress) = progress_writer.into_inner();
+                    let (paced_writer, mut unpack_progress) = progress_writer.into_inner();
+                    let mut file = paced_writer.into_inner();
+                    // `size` is the pre-filter source size; free the reserved tail that
+                    // arch-filtering didn't use.
+                    let written = file.stream_position().await?;
+                    if let Some(size) = size {
+                        crate::util::writeback::release_beyond(file.as_raw_fd(), written, size)
+                            .await
+                            .log_err();
+                    }
                     file.sync_all().await?;
 
                     crate::util::io::rename(&download_path, &installed_path).await?;

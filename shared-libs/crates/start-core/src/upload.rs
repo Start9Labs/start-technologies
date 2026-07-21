@@ -187,7 +187,8 @@ impl UploadingFile {
             error: None,
             complete: false,
         });
-        let file = create_file(path).await?;
+        let file = create_file(&path).await?;
+        writeback::set_no_cow(&path).await;
         let multi_cursor = MultiCursorFile::open(&file).await?;
         let pacer = WritebackPacer::new(file.as_raw_fd());
         let uploading = Self {
@@ -224,7 +225,8 @@ impl UploadingFile {
             error: None,
             complete: false,
         });
-        let file = create_file(path).await?;
+        let file = create_file(&path).await?;
+        writeback::set_no_cow(&path).await;
         let multi_cursor = MultiCursorFile::open(&file).await?;
         let pacer = WritebackPacer::new(file.as_raw_fd());
         let uploading = Self {
@@ -400,7 +402,7 @@ impl AsyncSeek for UploadingFileReader {
                             (this.progress.borrow().expected_size.ok_or_else(|| {
                                 std::io::Error::new(
                                     std::io::ErrorKind::Other,
-                                    eyre!("upload maked complete without expected size"),
+                                    eyre!("upload marked complete without expected size"),
                                 )
                             })? as i64
                                 + n) as u64
@@ -449,8 +451,7 @@ impl UploadHandle {
     ) {
         let expected = self.progress.borrow().expected_size;
         if let Some(total) = expected {
-            // Reserve before setting the total so the phase spins during the reserve
-            // (which can stall on fragmented btrfs) rather than showing a frozen 0%.
+            // See set_expected_size: reserve before set_total so the phase spins.
             writeback::preallocate(self.file.as_raw_fd(), total)
                 .await
                 .log_err();
@@ -511,6 +512,23 @@ impl DownloadHandle {
             p.tracker.set_total(total);
         });
     }
+    async fn restart(&mut self) -> Result<(), Error> {
+        self.file
+            .set_len(0)
+            .await
+            .map_err(|e| Error::new(e, ErrorKind::Filesystem))?;
+        self.file
+            .seek(SeekFrom::Start(0))
+            .await
+            .map_err(|e| Error::new(e, ErrorKind::Filesystem))?;
+        self.pacer.reset();
+        self.progress.send_modify(|p| {
+            p.written = 0;
+            p.expected_size = None;
+            p.tracker.set_done(0);
+        });
+        Ok(())
+    }
     pub async fn download_from<F, Fut>(&mut self, mut next_response: F)
     where
         F: FnMut(DownloadAttemptContext) -> Fut,
@@ -540,32 +558,36 @@ impl DownloadHandle {
                 }
             };
 
-            if response.status() == StatusCode::PARTIAL_CONTENT {
-                // Resume in place: the write head and pacer offsets already sit
-                // past bytes_written, so no truncate, seek, or pacer reset.
-                if let Some(total) = parse_content_range_total(response.headers()) {
-                    self.set_expected_size(total).await;
+            let new_size = if response.status() == StatusCode::PARTIAL_CONTENT {
+                // Re-sync the write head: a failed write may have committed
+                // bytes past `bytes_written` before erroring.
+                if let Err(e) = self.file.seek(SeekFrom::Start(bytes_written)).await {
+                    break Err(Error::new(e, ErrorKind::Filesystem));
                 }
+                parse_content_range_total(response.headers())
             } else {
-                if let Err(e) = self.file.set_len(0).await {
-                    break Err(Error::new(e, ErrorKind::Filesystem));
-                }
-                if let Err(e) = self.file.seek(SeekFrom::Start(0)).await {
-                    break Err(Error::new(e, ErrorKind::Filesystem));
-                }
-                self.pacer.reset();
-                self.progress.send_modify(|p| {
-                    p.written = 0;
-                    p.tracker.set_done(0);
-                });
-                if let Some(content_length) = response
+                let content_length = response
                     .headers()
                     .get(CONTENT_LENGTH)
                     .and_then(|a| a.to_str().log_err())
-                    .and_then(|a| a.parse::<u64>().log_err())
-                {
-                    self.set_expected_size(content_length).await;
+                    .and_then(|a| a.parse::<u64>().log_err());
+                if let Err(e) = self.restart().await {
+                    break Err(e);
                 }
+                content_length
+            };
+            // A size change between attempts means the mirror's file changed
+            // mid-download. Already-consumed bytes (here and in concurrent
+            // readers) may be from another generation, so fail rather than
+            // splice them together.
+            if matches!((expected_size, new_size), (Some(prev), Some(new)) if prev != new) {
+                break Err(Error::new(
+                    eyre!("file changed on mirror mid-download"),
+                    ErrorKind::Network,
+                ));
+            }
+            if let Some(size) = new_size {
+                self.set_expected_size(size).await;
             }
 
             let stream_result: Result<(), Error> = async {

@@ -353,19 +353,23 @@ mod tests {
     struct TestServer {
         url: Url,
         complete_hits: Arc<AtomicUsize>,
+        changes_full_hits: Arc<AtomicUsize>,
     }
 
     async fn spawn_test_server() -> Result<TestServer, Error> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let addr = listener.local_addr()?;
         let complete_hits = Arc::new(AtomicUsize::new(0));
+        let changes_full_hits = Arc::new(AtomicUsize::new(0));
         let server_complete_hits = complete_hits.clone();
+        let server_changes_full_hits = changes_full_hits.clone();
         tokio::spawn(async move {
             loop {
                 let Ok((mut stream, _)) = listener.accept().await else {
                     break;
                 };
                 let complete_hits = server_complete_hits.clone();
+                let changes_full_hits = server_changes_full_hits.clone();
                 tokio::spawn(async move {
                     let mut buf = [0; 1024];
                     let Ok(n) = stream.read(&mut buf).await else {
@@ -403,6 +407,30 @@ mod tests {
                                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\nhello")
                                 .await;
                         }
+                        "/changes" if request_lower.contains("range: bytes=5-") => {
+                            // The file was replaced mid-download: the resume total
+                            // (13) no longer matches the first response's (11).
+                            let _ = stream
+                                .write_all(
+                                    b"HTTP/1.1 206 Partial Content\r\nContent-Length: 8\r\nContent-Range: bytes 5-12/13\r\n\r\nED WORLD",
+                                )
+                                .await;
+                        }
+                        "/changes" => {
+                            if changes_full_hits.fetch_add(1, Ordering::SeqCst) == 0 {
+                                let _ = stream
+                                    .write_all(
+                                        b"HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\nhello",
+                                    )
+                                    .await;
+                            } else {
+                                let _ = stream
+                                    .write_all(
+                                        b"HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\nCHANGED WORLD",
+                                    )
+                                    .await;
+                            }
+                        }
                         "/always-truncated" => {
                             let _ = stream
                                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\nhello")
@@ -436,6 +464,7 @@ mod tests {
         Ok(TestServer {
             url: Url::parse(&format!("http://{addr}")).with_kind(ErrorKind::ParseUrl)?,
             complete_hits,
+            changes_full_hits,
         })
     }
 
@@ -502,6 +531,24 @@ mod tests {
 
         assert_eq!(buffered_contents(asset).await?, b"hello world");
         assert_eq!(server.complete_hits.load(Ordering::SeqCst), 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn buffered_download_fails_when_mirror_file_changes() -> Result<(), Error> {
+        let server = spawn_test_server().await?;
+        let asset = RegistryAsset {
+            published_at: Utc::now(),
+            urls: vec![server.url.join("changes")?, server.url.join("complete")?],
+            commitment: (),
+            signatures: HashMap::new(),
+        };
+
+        // Splicing the two generations would corrupt the archive, so the
+        // download fails rather than recover.
+        assert!(buffered_contents(asset).await.is_err());
+        assert_eq!(server.complete_hits.load(Ordering::SeqCst), 0);
+        assert_eq!(server.changes_full_hits.load(Ordering::SeqCst), 1);
         Ok(())
     }
 

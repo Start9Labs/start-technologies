@@ -901,7 +901,6 @@ impl TmpDir {
             ));
         }
         tokio::fs::create_dir_all(&path).await?;
-        crate::util::writeback::set_no_cow(&path).await;
         Ok(Self { path })
     }
 
