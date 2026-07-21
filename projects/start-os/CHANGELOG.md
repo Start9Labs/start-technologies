@@ -135,6 +135,14 @@ file tracks notable changes since the move to the monorepo.
 
 ### Fixed
 
+- **Login rate limiter no longer degrades logins to one per 20 seconds (#3512).**
+  The password-login throttle used a single process-wide counter that only ever
+  incremented and never reset, so after three logins since boot the entire box
+  was capped at one login per 20 seconds across all clients (UI, CLI, API) for
+  the rest of uptime. The counter now resets once 20 seconds pass without a
+  further accepted login attempt — and a rejected attempt no longer advances the
+  window — so the limit is a genuine three-attempts-per-20-seconds window rather
+  than a permanent cap.
 - **DNS forwarder no longer wedges box-wide after an upstream blip (#3473).**
   After a WAN, tunnel, or DHCP event degraded the currently-configured upstream
   resolvers, container DNS could go dark for every service on the box — external

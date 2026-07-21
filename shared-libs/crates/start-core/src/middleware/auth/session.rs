@@ -266,6 +266,9 @@ pub struct Metadata {
     get_session: bool,
 }
 
+const LOGIN_RATE_LIMIT_WINDOW: Duration = Duration::from_secs(20);
+const LOGIN_RATE_LIMIT_MAX_ATTEMPTS: usize = 3;
+
 #[derive(Clone)]
 pub struct SessionAuth {
     rate_limiter: Arc<SyncMutex<(usize, Instant)>>,
@@ -303,7 +306,10 @@ impl<C: SessionAuthContext> Middleware<C> for SessionAuth {
             if metadata.login {
                 self.is_login = true;
                 self.rate_limiter.mutate(|(count, time)| {
-                    if time.elapsed() < Duration::from_secs(20) && *count >= 3 {
+                    if time.elapsed() >= LOGIN_RATE_LIMIT_WINDOW {
+                        *count = 0;
+                    }
+                    if *count >= LOGIN_RATE_LIMIT_MAX_ATTEMPTS {
                         Err(Error::new(
                             eyre!("{}", t!("middleware.auth.rate-limited-login")),
                             crate::ErrorKind::RateLimited,
