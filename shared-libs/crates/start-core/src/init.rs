@@ -344,19 +344,13 @@ pub async fn init(
     for _ in 0..1800 {
         // a failed query is "don't know yet", not a boot failure — an Err escaping
         // this loop drops the server into Diagnostic Mode
-        match check_time_is_synchronized().await {
-            Ok(true) => {
-                ntp_synced = true;
-                break;
-            }
-            Ok(false) => (),
-            Err(e) => {
-                tracing::warn!(
-                    "{}",
-                    t!("init.clock-sync-check-failed", error = e.to_string())
-                );
-                tracing::debug!("{e:?}");
-            }
+        if check_time_is_synchronized()
+            .await
+            .log_err()
+            .unwrap_or(false)
+        {
+            ntp_synced = true;
+            break;
         }
         let t = SystemTime::now();
         tokio::time::sleep(Duration::from_secs(1)).await;
