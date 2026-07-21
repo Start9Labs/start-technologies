@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lapsed (up to an hour). Both delete paths now clear the fallback immediately;
   named SNI routes on the port are unaffected.
 
+### Documentation
+
+- **FAQ: `.local` on Android.** New entry explaining why `.local` addresses stop
+  resolving on Android once a WireGuard config carries the `DNS =` line (Android
+  excludes VPN connections from mDNS resolution, so the lookup goes to the
+  tunnel's resolver instead — breaking `.local` even on the home LAN), and how
+  to restore them with a manual DNS record for the `.local` hostname — or a
+  private domain, which needs no setup.
+
 ## [1.1.2]
 
 ### Fixed
