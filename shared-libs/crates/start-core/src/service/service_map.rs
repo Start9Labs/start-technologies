@@ -1,3 +1,4 @@
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -293,10 +294,14 @@ impl ServiceMap {
                         )));
 
                     unpack_progress.start();
-                    let mut progress_writer = ProgressTrackerWriter::new(
-                        crate::util::io::create_file(&download_path).await?,
-                        unpack_progress,
-                    );
+                    let out = crate::util::io::create_file(&download_path).await?;
+                    if let Some(size) = size {
+                        crate::util::writeback::preallocate(out.as_raw_fd(), size)
+                            .await
+                            .log_err();
+                    }
+                    crate::util::writeback::set_no_cow(&download_path).await;
+                    let mut progress_writer = ProgressTrackerWriter::new(out, unpack_progress);
                     s9pk.serialize(&mut progress_writer, true).await?;
                     let (file, mut unpack_progress) = progress_writer.into_inner();
                     file.sync_all().await?;

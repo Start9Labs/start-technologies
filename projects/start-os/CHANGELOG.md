@@ -144,6 +144,16 @@ file tracks notable changes since the move to the monorepo.
   further accepted login attempt — and a rejected attempt no longer advances the
   window — so the limit is a genuine three-attempts-per-20-seconds window rather
   than a permanent cap.
+- **Large package installs no longer stall or freeze the box.** Downloading and
+  unpacking a big s9pk streamed through the page cache with no writeback pacing,
+  so on a fragmented copy-on-write btrfs filesystem the temporary and installed
+  archives scattered across thousands of extents and their accumulated dirty
+  pages flushed in one enormous final `fdatasync` — a stall lasting seconds to
+  minutes whose victim varied by package size and each box's on-disk layout.
+  Package transfers now reserve their space up front (`fallocate`), write to
+  `nodatacow` files so they stay contiguous on btrfs, and pace writeback
+  (`sync_file_range`) so only a bounded amount is ever left unsynced — keeping
+  memory use flat and the final flush cheap.
 - **DNS forwarder no longer wedges box-wide after an upstream blip (#3473).**
   After a WAN, tunnel, or DHCP event degraded the currently-configured upstream
   resolvers, container DNS could go dark for every service on the box — external

@@ -1,5 +1,6 @@
 use std::future::Future;
 use std::io::SeekFrom;
+use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -14,7 +15,7 @@ use futures::{Stream, StreamExt, ready};
 use http::header::{CONTENT_LENGTH, CONTENT_RANGE};
 use http::{HeaderMap, StatusCode};
 use imbl_value::InternedString;
-use tokio::io::{AsyncRead, AsyncSeek, AsyncSeekExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncSeek, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::watch;
 
 use crate::context::RpcContext;
@@ -23,8 +24,8 @@ use crate::progress::{PhaseProgressTrackerHandle, ProgressUnits};
 use crate::rpc_continuations::{Guid, RpcContinuation};
 use crate::s9pk::merkle_archive::source::ArchiveSource;
 use crate::s9pk::merkle_archive::source::multi_cursor_file::{FileCursor, MultiCursorFile};
-use crate::util::direct_io::DirectIoFile;
 use crate::util::io::{TmpDir, create_file};
+use crate::util::writeback::{self, WritebackPacer};
 
 pub async fn upload(
     ctx: &RpcContext,
@@ -188,7 +189,7 @@ impl UploadingFile {
         });
         let file = create_file(path).await?;
         let multi_cursor = MultiCursorFile::open(&file).await?;
-        let direct_file = DirectIoFile::from_tokio_file(file).await?;
+        let pacer = WritebackPacer::new(file.as_raw_fd());
         let uploading = Self {
             tmp_dir: None,
             file: multi_cursor,
@@ -197,9 +198,9 @@ impl UploadingFile {
         Ok((
             UploadHandle {
                 tmp_dir: None,
-                file: direct_file,
+                file,
+                pacer,
                 progress: progress.0,
-                last_synced: 0,
             },
             uploading,
         ))
@@ -225,6 +226,7 @@ impl UploadingFile {
         });
         let file = create_file(path).await?;
         let multi_cursor = MultiCursorFile::open(&file).await?;
+        let pacer = WritebackPacer::new(file.as_raw_fd());
         let uploading = Self {
             tmp_dir: None,
             file: multi_cursor,
@@ -234,6 +236,7 @@ impl UploadingFile {
             DownloadHandle {
                 tmp_dir: None,
                 file,
+                pacer,
                 progress: progress.0,
             },
             uploading,
@@ -417,13 +420,11 @@ impl AsyncSeek for UploadingFileReader {
     }
 }
 
-#[pin_project::pin_project(PinnedDrop)]
 pub struct UploadHandle {
     tmp_dir: Option<Arc<TmpDir>>,
-    #[pin]
-    file: DirectIoFile,
+    file: tokio::fs::File,
+    pacer: WritebackPacer,
     progress: watch::Sender<Progress>,
-    last_synced: u64,
 }
 impl UploadHandle {
     pub async fn upload(&mut self, request: Request) {
@@ -448,95 +449,40 @@ impl UploadHandle {
         &mut self,
         mut body: impl Stream<Item = Result<Bytes, E>> + Unpin,
     ) {
+        let expected = self.progress.borrow().expected_size;
+        if let Some(total) = expected {
+            writeback::preallocate(self.file.as_raw_fd(), total)
+                .await
+                .log_err();
+        }
         while let Some(next) = body.next().await {
-            if let Err(e) = async {
-                self.write_all(&next.map_err(std::io::Error::other)?)
-                    .await?;
-                Ok(())
-            }
-            .await
-            {
+            let chunk = match next.map_err(std::io::Error::other) {
+                Ok(chunk) => chunk,
+                Err(e) => {
+                    self.progress.send_if_modified(|p| p.handle_error(&e));
+                    break;
+                }
+            };
+            if let Err(e) = self.file.write_all(&chunk).await {
                 self.progress.send_if_modified(|p| p.handle_error(&e));
                 break;
             }
+            let len = chunk.len() as u64;
+            self.progress.send_modify(|p| {
+                p.written += len;
+                p.tracker += len;
+            });
+            let written = self.progress.borrow().written;
+            self.pacer.pace(written).await.log_err();
         }
         if let Err(e) = self.file.sync_all().await {
             self.progress.send_if_modified(|p| p.handle_error(&e));
         }
-        self.update_sync_progress();
-    }
-    fn update_sync_progress(&mut self) {
-        let synced = self.file.bytes_synced();
-        let delta = synced - self.last_synced;
-        if delta > 0 {
-            self.last_synced = synced;
-            self.progress.send_modify(|p| {
-                p.written += delta;
-                p.tracker += delta;
-            });
-        }
     }
 }
-#[pin_project::pinned_drop]
-impl PinnedDrop for UploadHandle {
-    fn drop(self: Pin<&mut Self>) {
-        let this = self.project();
-        this.progress.send_if_modified(|p| p.complete());
-    }
-}
-impl AsyncWrite for UploadHandle {
-    fn poll_write(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &[u8],
-    ) -> Poll<Result<usize, std::io::Error>> {
-        let this = self.project();
-        // Update progress based on bytes actually flushed to disk
-        let synced = this.file.bytes_synced();
-        let delta = synced - *this.last_synced;
-        if delta > 0 {
-            *this.last_synced = synced;
-            this.progress.send_modify(|p| {
-                p.written += delta;
-                p.tracker += delta;
-            });
-        }
-        match this.file.poll_write(cx, buf) {
-            Poll::Ready(Err(e)) => {
-                this.progress
-                    .send_if_modified(|progress| progress.handle_error(&e));
-                Poll::Ready(Err(e))
-            }
-            a => a,
-        }
-    }
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Result<(), std::io::Error>> {
-        let this = self.project();
-        match this.file.poll_flush(cx) {
-            Poll::Ready(Err(e)) => {
-                this.progress
-                    .send_if_modified(|progress| progress.handle_error(&e));
-                Poll::Ready(Err(e))
-            }
-            a => a,
-        }
-    }
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Result<(), std::io::Error>> {
-        let this = self.project();
-        match this.file.poll_shutdown(cx) {
-            Poll::Ready(Err(e)) => {
-                this.progress
-                    .send_if_modified(|progress| progress.handle_error(&e));
-                Poll::Ready(Err(e))
-            }
-            a => a,
-        }
+impl Drop for UploadHandle {
+    fn drop(&mut self) {
+        self.progress.send_if_modified(|p| p.complete());
     }
 }
 
@@ -549,6 +495,7 @@ pub struct DownloadAttemptContext {
 pub struct DownloadHandle {
     tmp_dir: Option<Arc<TmpDir>>,
     file: tokio::fs::File,
+    pacer: WritebackPacer,
     progress: watch::Sender<Progress>,
 }
 impl DownloadHandle {
@@ -587,6 +534,9 @@ impl DownloadHandle {
                         p.expected_size = Some(total);
                         p.tracker.set_total(total);
                     });
+                    writeback::preallocate(self.file.as_raw_fd(), total)
+                        .await
+                        .log_err();
                 }
             } else {
                 if let Err(e) = self.file.set_len(0).await {
@@ -595,6 +545,7 @@ impl DownloadHandle {
                 if let Err(e) = self.file.seek(SeekFrom::Start(0)).await {
                     break Err(Error::new(e, ErrorKind::Filesystem));
                 }
+                self.pacer.reset();
                 self.progress.send_modify(|p| {
                     p.written = 0;
                     p.tracker.set_done(0);
@@ -609,6 +560,9 @@ impl DownloadHandle {
                         p.expected_size = Some(content_length);
                         p.tracker.set_total(content_length);
                     });
+                    writeback::preallocate(self.file.as_raw_fd(), content_length)
+                        .await
+                        .log_err();
                 }
             }
 
@@ -625,6 +579,8 @@ impl DownloadHandle {
                         p.written += len;
                         p.tracker += len;
                     });
+                    let written = self.progress.borrow().written;
+                    self.pacer.pace(written).await.log_err();
                 }
                 Ok(())
             }
