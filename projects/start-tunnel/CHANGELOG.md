@@ -5,6 +5,17 @@ All notable changes to StartTunnel are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.3]
+
+### Fixed
+
+- **Deleting a fallback forward now actually deletes it.** A PCP delete
+  (lifetime 0) or UPnP `DeletePortMapping` for a hostname-less forward that had
+  become an SNI port's fallback reported success but silently left the fallback
+  in place, so the port stayed open to the fallback device until its lease
+  lapsed (up to an hour). Both delete paths now clear the fallback immediately;
+  named SNI routes on the port are unaffected.
+
 ## [1.1.2]
 
 ### Fixed

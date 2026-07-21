@@ -159,27 +159,35 @@ impl GatewayBackend for TunnelContext {
     }
 
     async fn remove_forward_by_source(&self, source: SocketAddrV4, peer: Ipv4Addr) -> bool {
-        let owned = crate::tunnel::forward::igd::current_forward(self, source)
-            .await
-            .is_some_and(|e| matches!(e, PortForward::Dnat { target, .. } if *target.ip() == peer));
-        if !owned {
-            return false;
+        match crate::tunnel::forward::igd::current_forward(self, source).await {
+            Some(PortForward::Dnat { target, .. }) if *target.ip() == peer => {
+                if self
+                    .db
+                    .mutate(|db| db.as_port_forwards_mut().remove(&source).map(|_| ()))
+                    .await
+                    .result
+                    .is_err()
+                {
+                    return false;
+                }
+                if let Some(rc) = self.active_forwards.mutate(|m| m.remove(&source)) {
+                    drop(rc);
+                    self.forward.gc().await.log_err();
+                }
+                lease::forget(self, &LeaseKey::Dnat(source));
+                true
+            }
+            // A bare UPnP map on an SNI port became the port's fallback; its
+            // delete clears the fallback (routes belong to hostnames, not UPnP).
+            Some(PortForward::Sni {
+                fallback: Some(fallback),
+                ..
+            }) if *fallback.target.ip() == peer => {
+                self.remove_sni_fallback(source, fallback.target).await;
+                true
+            }
+            _ => false,
         }
-        if self
-            .db
-            .mutate(|db| db.as_port_forwards_mut().remove(&source).map(|_| ()))
-            .await
-            .result
-            .is_err()
-        {
-            return false;
-        }
-        if let Some(rc) = self.active_forwards.mutate(|m| m.remove(&source)) {
-            drop(rc);
-            self.forward.gc().await.log_err();
-        }
-        lease::forget(self, &LeaseKey::Dnat(source));
-        true
     }
 
     async fn external_ipv4(&self, peer: Ipv4Addr) -> Option<Ipv4Addr> {
@@ -587,6 +595,17 @@ fn sni_route_fields(
     }
 }
 
+/// What a peer's lifetime-0 delete targets: the DNAT to `(peer, internal_port)`,
+/// or the SNI fallback to it — that's what the peer's bare MAP created, so the
+/// delete must clear it too (previously a delete of a fallback was a SUCCESS
+/// no-op, leaving the exposure up until lease lapse).
+fn peer_forward_matches(entry: &PortForward, target: &SocketAddrV4) -> bool {
+    match entry {
+        PortForward::Dnat { target: t, .. } => t == target,
+        PortForward::Sni { fallback, .. } => fallback.as_ref().is_some_and(|f| &f.target == target),
+    }
+}
+
 /// Remove the peer's forward to `(peer, internal_port)`, if any. We forward both
 /// protocols on one entry, so match by target rather than PCP's (proto, port, client).
 async fn remove_peer_forward(ctx: &TunnelContext, peer: Ipv4Addr, internal_port: u16) {
@@ -600,14 +619,16 @@ async fn remove_peer_forward(ctx: &TunnelContext, peer: Ipv4Addr, internal_port:
         .ok()
         .and_then(|pf| {
             pf.0.iter()
-                .find(|(_, entry)| {
-                    matches!(entry, PortForward::Dnat { target: t, .. } if *t == target)
-                })
-                .map(|(source, _)| *source)
+                .find(|(_, entry)| peer_forward_matches(entry, &target))
+                .map(|(source, entry)| (*source, matches!(entry, PortForward::Sni { .. })))
         });
-    let Some(source) = source else {
+    let Some((source, is_sni)) = source else {
         return;
     };
+    if is_sni {
+        ctx.remove_sni_fallback(source, target).await;
+        return;
+    }
     ctx.db
         .mutate(|db| db.as_port_forwards_mut().remove(&source).map(|_| ()))
         .await
@@ -624,7 +645,7 @@ async fn remove_peer_forward(ctx: &TunnelContext, peer: Ipv4Addr, internal_port:
 mod tests {
     use std::net::SocketAddrV4;
 
-    use super::{plan_dnat_conversion, sni_route_fields};
+    use super::{peer_forward_matches, plan_dnat_conversion, sni_route_fields};
     use crate::tunnel::db::{PortForward, SniRoute};
 
     fn route(label: Option<&str>, enabled: bool, auto: bool) -> SniRoute {
@@ -644,6 +665,40 @@ mod tests {
             count,
             auto: true,
         }
+    }
+
+    // A lifetime-0 delete matches the peer's own SNI fallback (what its bare
+    // MAP created) as well as its DNAT — never another client's fallback, and
+    // not a route-only SNI port.
+    #[test]
+    fn peer_delete_matches_dnat_and_own_fallback() {
+        let mine: SocketAddrV4 = "10.59.217.2:5349".parse().unwrap();
+        let sni = |target: SocketAddrV4| PortForward::Sni {
+            routes: Default::default(),
+            fallback: Some(SniRoute {
+                target,
+                label: None,
+                enabled: true,
+                auto: true,
+            }),
+        };
+        assert!(peer_forward_matches(&sni(mine), &mine));
+        assert!(
+            !peer_forward_matches(&sni("10.59.217.9:5349".parse().unwrap()), &mine),
+            "another client's fallback must not match"
+        );
+        assert!(
+            !peer_forward_matches(
+                &PortForward::Sni {
+                    routes: Default::default(),
+                    fallback: None,
+                },
+                &mine
+            ),
+            "a route-only SNI port has nothing for a bare delete"
+        );
+        assert!(peer_forward_matches(&dnat("10.59.217.2:5349", 1), &mine));
+        assert!(!peer_forward_matches(&dnat("10.59.217.9:5349", 1), &mine));
     }
 
     // A hostname MAP may promote *its own* client's lone DNAT to the port's
