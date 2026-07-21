@@ -760,7 +760,8 @@ async fn previous_ssh_keys(pg: &sqlx::Pool<sqlx::Postgres>) -> Result<SshKeys, E
 }
 
 /// Returns deduplicated map of `(package_id, host_id) -> expanded_key`.
-/// Server key uses `("STARTOS", "STARTOS")`.
+/// Server key uses `("start-os", "admin")` — the StartOS UI's service-model
+/// identity (see `PackageId::start_os` / `HostId::admin`).
 /// When the same (package, interface) exists in both the `network_keys` and
 /// `tor` tables, the `tor` table entry wins because it contains the actual
 /// expanded key that was used by tor.
@@ -779,12 +780,12 @@ async fn previous_tor_keys(
         .with_kind(ErrorKind::Database)?;
     if let Ok(tor_key) = row.try_get::<Vec<u8>, _>("tor_key") {
         if let Ok(key) = <[u8; 64]>::try_from(tor_key) {
-            keys.insert(("STARTOS".to_owned(), "STARTOS".to_owned()), key);
+            keys.insert(("start-os".to_owned(), "admin".to_owned()), key);
         }
     } else if let Ok(net_key) = row.try_get::<Vec<u8>, _>("network_key") {
         if let Ok(seed) = <[u8; 32]>::try_from(net_key) {
             keys.insert(
-                ("STARTOS".to_owned(), "STARTOS".to_owned()),
+                ("start-os".to_owned(), "admin".to_owned()),
                 crate::util::crypto::ed25519_expand_key(&seed),
             );
         }

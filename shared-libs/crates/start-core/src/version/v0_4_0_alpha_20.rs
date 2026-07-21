@@ -44,8 +44,12 @@ impl VersionT for Version {
             .and_then(|p| p.get("torMigration"))
             .and_then(|t| t.as_array())
         {
+            let mut addresses = tor_migration.clone();
+            for entry in addresses.iter_mut() {
+                normalize_legacy_service_identity(entry);
+            }
             json!({
-                "addresses": tor_migration.clone(),
+                "addresses": addresses,
             })
         } else {
             // Fallback for fresh installs or installs that didn't go through
@@ -81,8 +85,8 @@ impl VersionT for Version {
                             })?;
                         addresses.push_back(json!({
                             "hostname": hostname,
-                            "packageId": "STARTOS",
-                            "hostId": "startos-ui",
+                            "packageId": "start-os",
+                            "hostId": "admin",
                             "key": key,
                         }));
                     }
@@ -297,6 +301,17 @@ impl VersionT for Version {
     }
 }
 
+/// The server UI's onion entries were keyed by the legacy `STARTOS` sentinel
+/// (with host id `STARTOS` or `startos-ui`) before the StartOS UI became an
+/// ordinary service interface (`start-os`/`admin`). Dev builds that already ran
+/// v0_3_6_alpha_0 have the legacy form persisted in `private.torMigration`.
+fn normalize_legacy_service_identity(entry: &mut Value) {
+    if entry.get("packageId").and_then(|p| p.as_str()) == Some("STARTOS") {
+        entry["packageId"] = json!("start-os");
+        entry["hostId"] = json!("admin");
+    }
+}
+
 fn collect_ports_from_host(host: Option<&Value>, ports: &mut Value) {
     let Some(bindings) = host
         .and_then(|h| h.get("bindings"))
@@ -438,5 +453,35 @@ fn migrate_host(host: Option<&mut Value>) {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn normalizes_legacy_startos_sentinel() {
+        let mut legacy = json!({
+            "hostname": "abcdef",
+            "packageId": "STARTOS",
+            "hostId": "STARTOS",
+            "key": "a2V5",
+        });
+        normalize_legacy_service_identity(&mut legacy);
+        assert_eq!(legacy["packageId"].as_str(), Some("start-os"));
+        assert_eq!(legacy["hostId"].as_str(), Some("admin"));
+        assert_eq!(legacy["hostname"].as_str(), Some("abcdef"));
+        assert_eq!(legacy["key"].as_str(), Some("a2V5"));
+
+        let mut package_entry = json!({
+            "hostname": "abcdef",
+            "packageId": "bitcoind",
+            "hostId": "main",
+            "key": "a2V5",
+        });
+        normalize_legacy_service_identity(&mut package_entry);
+        assert_eq!(package_entry["packageId"].as_str(), Some("bitcoind"));
+        assert_eq!(package_entry["hostId"].as_str(), Some("main"));
     }
 }

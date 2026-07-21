@@ -99,8 +99,9 @@ file tracks notable changes since the move to the monorepo.
   hostname, and the UI passes `start-os` wherever a package id is expected.
   Installing a package with the id `start-os` is rejected. The migration
   re-points the tor package's persisted hidden-service identity for the admin
-  UI (`STARTOS`/`startos-ui` → `start-os`/`admin`), preserving the server's
-  existing `.onion` address across the identity change.
+  UI (`STARTOS`/`startos-ui` → `start-os`/`admin`) — including the onion-address
+  import handoff written into tor's volume before tor is installed — preserving
+  the server's existing `.onion` address across the identity change.
 - **SDK:** `PluginHostnameInfo.packageId` is required in the type — url plugins
   (e.g. tor) should export the StartOS UI's urls as `start-os`/`admin` instead of
   `packageId: null`. For backwards compatibility during the beta.10 transition,
