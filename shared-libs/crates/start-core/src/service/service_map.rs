@@ -161,6 +161,7 @@ impl ServiceMap {
     {
         let progress = progress.unwrap_or_else(|| FullProgressTracker::new());
         let mut validate_progress = progress.add_phase("Validating Headers".into(), Some(1));
+        let mut reserve_progress = progress.add_phase("Reserving Space".into(), Some(1));
         let mut unpack_progress = progress.add_phase("Unpacking".into(), Some(100));
 
         let mut s9pk = s9pk().await?;
@@ -293,15 +294,19 @@ impl ServiceMap {
                             Some(Duration::from_millis(100)),
                         )));
 
-                    unpack_progress.start();
                     let out = crate::util::io::create_file(&download_path).await?;
                     // `+C` before any extents exist, so fallocate lands nodatacow.
                     crate::util::writeback::set_no_cow(&download_path).await;
+                    // fallocate can stall for seconds on fragmented btrfs — give it its
+                    // own indeterminate phase instead of a frozen "Unpacking" bar.
+                    reserve_progress.start();
                     if let Some(size) = size {
                         crate::util::writeback::preallocate(out.as_raw_fd(), size)
                             .await
                             .log_err();
                     }
+                    reserve_progress.complete();
+                    unpack_progress.start();
                     let mut progress_writer = ProgressTrackerWriter::new(out, unpack_progress);
                     s9pk.serialize(&mut progress_writer, true).await?;
                     let (file, mut unpack_progress) = progress_writer.into_inner();

@@ -439,10 +439,8 @@ impl UploadHandle {
             .and_then(|a| a.to_str().log_err())
             .and_then(|a| a.parse::<u64>().log_err())
         {
-            self.progress.send_modify(|p| {
-                p.expected_size = Some(content_length);
-                p.tracker.set_total(content_length);
-            });
+            self.progress
+                .send_modify(|p| p.expected_size = Some(content_length));
         }
     }
     async fn process_body<E: Into<Box<dyn std::error::Error + Send + Sync + 'static>>>(
@@ -451,9 +449,12 @@ impl UploadHandle {
     ) {
         let expected = self.progress.borrow().expected_size;
         if let Some(total) = expected {
+            // Reserve before setting the total so the phase spins during the reserve
+            // (which can stall on fragmented btrfs) rather than showing a frozen 0%.
             writeback::preallocate(self.file.as_raw_fd(), total)
                 .await
                 .log_err();
+            self.progress.send_modify(|p| p.tracker.set_total(total));
         }
         while let Some(next) = body.next().await {
             let chunk = match next.map_err(std::io::Error::other) {
@@ -500,13 +501,15 @@ pub struct DownloadHandle {
 }
 impl DownloadHandle {
     async fn set_expected_size(&mut self, total: u64) {
+        // Reserve before setting the total so the phase shows a spinner during
+        // the reserve (which can stall on fragmented btrfs) rather than a frozen 0%.
+        writeback::preallocate(self.file.as_raw_fd(), total)
+            .await
+            .log_err();
         self.progress.send_modify(|p| {
             p.expected_size = Some(total);
             p.tracker.set_total(total);
         });
-        writeback::preallocate(self.file.as_raw_fd(), total)
-            .await
-            .log_err();
     }
     pub async fn download_from<F, Fut>(&mut self, mut next_response: F)
     where
