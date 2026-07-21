@@ -2584,7 +2584,7 @@ impl NetworkInterfaceController {
         db: &TypedPatchDb<Database>,
         info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
     ) -> Result<(), Error> {
-        tracing::debug!("syncronizing {info:?} to db");
+        crate::dev_log!(debug, "syncronizing {info:?} to db");
 
         let wifi_iface = find_wifi_iface()
             .await
