@@ -19,7 +19,10 @@ or the CLI's externally observable behavior.
   The signature is bound to the host identity from the configured URL — on Linux, where a `.local`
   host is pinned to its resolved address to work around musl's lack of mDNS, the signature still
   commits to the `.local` name, not the pinned IP. Requires a server with key-based auth
-  (StartOS ≥ 0.4.0-beta.10, StartTunnel ≥ 1.2.0).
+  (StartOS ≥ 0.4.0-beta.10, StartTunnel ≥ 1.2.0). Cookies are gone from the client entirely:
+  when run on the server itself, the CLI presents the server's local authcookie as an
+  `Authorization: Bearer` header (only ever to a loopback address) instead of a `Cookie`, and
+  the `--cookie-path` flag and `.cookies.json` cache are removed.
 - **Key files renamed: `developer.key.pem` → `id.key.pem` and `.startos/build-key` →
   `.startos/build.key.pem`.** The first is the CLI's identity for login and registry auth, not a
   developer-only feature, and the build key gains a conventional extension. Existing files are

@@ -10,8 +10,7 @@ The `start-tunnel` CLI manages a StartTunnel server — a WireGuard-based gatewa
 - `--registry-hostname <HOST>` — Registry server hostname
 - `-t, --tunnel <URL>` — Tunnel server address
 - `-p, --proxy <URL>` — HTTP/SOCKS proxy
-- `--cookie-path <PATH>` — Cookie file path
-- `--developer-key-path <PATH>` — Developer signing key path
+- `--id-key-path <PATH>` — Identity signing key path (`--developer-key-path` is accepted as an alias)
 
 ## Authentication
 

@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use clap::Parser;
-use cookie::{Cookie, Expiration, SameSite};
 use http::HeaderMap;
+use http::header::AUTHORIZATION;
 use imbl::OrdMap;
 use imbl_value::InternedString;
 use include_dir::Dir;
@@ -26,7 +26,7 @@ use crate::context::config::ContextConfig;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::public::{NetworkInterfaceInfo, NetworkInterfaceType};
 use crate::middleware::auth::Auth;
-use crate::middleware::auth::local::LocalAuthContext;
+use crate::middleware::auth::local::{LocalAuthContext, local_auth_header};
 use crate::middleware::auth::signature::{NonceCache, url_host_str};
 use crate::middleware::cors::Cors;
 use crate::net::dns_update::rfc2136::{DnsInjector, InjectedRecord};
@@ -42,7 +42,6 @@ use crate::tunnel::migrations::run_migrations;
 use crate::tunnel::wg::{WIREGUARD_INTERFACE_NAME, WgServer, current_ifindex};
 use crate::util::Invoke;
 use crate::util::collections::OrdMapIterMut;
-use crate::util::io::read_file_to_string;
 use crate::util::sync::{SyncMutex, Watch};
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, Parser)]
@@ -814,26 +813,15 @@ impl CallRemote<TunnelContext> for CliContext {
             (TUNNEL_DEFAULT_LISTEN, false)
         };
 
-        let local =
-            if let Ok(local) = read_file_to_string(TunnelContext::LOCAL_AUTH_COOKIE_PATH).await {
-                self.cookie_store
-                    .lock()
-                    .unwrap()
-                    .insert_raw(
-                        &Cookie::build(("local", local))
-                            .domain(&tunnel_addr.ip().to_string())
-                            .expires(Expiration::Session)
-                            .same_site(SameSite::Strict)
-                            .build(),
-                        &format!("http://{tunnel_addr}").parse()?,
-                    )
-                    .with_kind(crate::ErrorKind::Network)?;
-                true
-            } else {
-                false
-            };
+        let local_auth = if tunnel_addr.ip().is_loopback() {
+            local_auth_header::<TunnelContext>().await
+        } else {
+            None
+        };
 
-        let (url, sig_ctx) = if local && tunnel_addr.ip().is_loopback() {
+        let mut headers = HeaderMap::new();
+        let (url, sig_ctx) = if let Some(auth) = local_auth {
+            headers.insert(AUTHORIZATION, auth);
             (format!("http://{tunnel_addr}/rpc/v0").parse()?, None)
         } else if addr_from_config {
             (
@@ -849,7 +837,7 @@ impl CallRemote<TunnelContext> for CliContext {
         crate::middleware::auth::signature::call_remote(
             self,
             url,
-            HeaderMap::new(),
+            headers,
             sig_ctx.as_deref(),
             method,
             params,

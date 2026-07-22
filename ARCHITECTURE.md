@@ -9,7 +9,7 @@ This repo is the **monorepo for all Start9 products**. Each product is a thin to
 - Container runtime: Node.js/TypeScript with LXC
 - Database/State: Patch-DB (in-repo at `shared-libs/crates/patch-db`) — diff-based store with reactive frontend sync
 - API: JSON-RPC via rpc-toolkit (see `shared-libs/crates/start-core/rpc-toolkit.md`)
-- Auth: password + session cookie, public/private key signatures, local authcookie (see `shared-libs/crates/start-core/src/middleware/auth/`)
+- Auth: password login enrolling per-device signing keys, signed requests (`X-Start-Auth-Sig`), local authcookie sent as `Authorization: Bearer` (see `shared-libs/crates/start-core/src/middleware/auth/`)
 
 ## Repository layout
 

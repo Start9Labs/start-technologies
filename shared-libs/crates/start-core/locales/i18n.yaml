@@ -3171,13 +3171,6 @@ help.arg.container-name:
   fr_FR: "Nom du conteneur"
   pl_PL: "Nazwa kontenera"
 
-help.arg.cookie-path:
-  en_US: "Path to cookie file"
-  de_DE: "Pfad zur Cookie-Datei"
-  es_ES: "Ruta al archivo de cookies"
-  fr_FR: "Chemin vers le fichier de cookies"
-  pl_PL: "Ścieżka do pliku cookie"
-
 help.arg.data-directory:
   en_US: "Path to data directory"
   de_DE: "Pfad zum Datenverzeichnis"

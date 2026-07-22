@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use clap::Parser;
-use cookie::{Cookie, Expiration, SameSite};
 use http::HeaderMap;
+use http::header::AUTHORIZATION;
 use imbl::OrdMap;
 use imbl_value::InternedString;
 use patch_db::PatchDb;
@@ -25,7 +25,7 @@ use url::Url;
 use crate::context::config::{CONFIG_PATH, ContextConfig};
 use crate::context::{CliContext, RpcContext};
 use crate::middleware::auth::DbContext;
-use crate::middleware::auth::local::LocalAuthContext;
+use crate::middleware::auth::local::{LocalAuthContext, is_loopback, local_auth_header};
 use crate::middleware::auth::signature::{NonceCache, SignatureAuthContext};
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
@@ -34,7 +34,7 @@ use crate::registry::migrations::run_migrations;
 use crate::registry::signer::SignerInfo;
 use crate::rpc_continuations::{OpenAuthedContinuations, RpcContinuations};
 use crate::sign::AnyVerifyingKey;
-use crate::util::io::{append_file, read_file_to_string};
+use crate::util::io::append_file;
 use crate::util::sync::SyncMutex;
 
 const DEFAULT_REGISTRY_LISTEN: SocketAddr =
@@ -203,11 +203,11 @@ impl CallRemote<RegistryContext> for CliContext {
         params: Value,
         _: Empty,
     ) -> Result<Value, RpcError> {
-        let cookie = read_file_to_string(RegistryContext::LOCAL_AUTH_COOKIE_PATH).await;
+        let local_auth = local_auth_header::<RegistryContext>().await;
 
         let url = if let Some(url) = self.registry_url.clone() {
             url
-        } else if cookie.is_ok() || !self.registry_hostname.is_empty() {
+        } else if local_auth.is_some() || !self.registry_hostname.is_empty() {
             let mut url: Url = format!(
                 "http://{}",
                 self.registry_listen.unwrap_or(DEFAULT_REGISTRY_LISTEN)
@@ -228,24 +228,11 @@ impl CallRemote<RegistryContext> for CliContext {
             .into());
         };
 
-        if let Ok(local) = cookie {
-            let cookie_url = match url.host() {
-                Some(url::Host::Ipv4(ip)) if ip.is_loopback() => url.clone(),
-                Some(url::Host::Ipv6(ip)) if ip.is_loopback() => url.clone(),
-                _ => format!("http://{DEFAULT_REGISTRY_LISTEN}").parse()?,
-            };
-            self.cookie_store
-                .lock()
-                .unwrap()
-                .insert_raw(
-                    &Cookie::build(("local", local))
-                        .domain(cookie_url.host_str().unwrap_or("localhost"))
-                        .expires(Expiration::Session)
-                        .same_site(SameSite::Strict)
-                        .build(),
-                    &cookie_url,
-                )
-                .with_kind(crate::ErrorKind::Network)?;
+        let mut headers = HeaderMap::new();
+        if is_loopback(&url) {
+            if let Some(auth) = local_auth {
+                headers.insert(AUTHORIZATION, auth);
+            }
         }
 
         method = method.strip_prefix("registry.").unwrap_or(method);
@@ -258,7 +245,7 @@ impl CallRemote<RegistryContext> for CliContext {
         crate::middleware::auth::signature::call_remote(
             self,
             url,
-            HeaderMap::new(),
+            headers,
             sig_context.as_deref(),
             method,
             params,

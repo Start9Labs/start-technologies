@@ -4,7 +4,7 @@
 .SH NAME
 start\-cli
 .SH SYNOPSIS
-\fBstart\-cli\fR [\fB\-c\fR|\fB\-\-config\fR] [\fB\-H\fR|\fB\-\-host\fR] [\fB\-r\fR|\fB\-\-registry\fR] [\fB\-\-registry\-hostname\fR] [\fB\-\-s9pk\-s3base\fR] [\fB\-\-s9pk\-s3bucket\fR] [\fB\-t\fR|\fB\-\-tunnel\fR] [\fB\-p\fR|\fB\-\-proxy\fR] [\fB\-\-cookie\-path\fR] [\fB\-\-developer\-key\-path\fR] [\fB\-\-root\-ca\fR] [\fB\-\-insecure\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] [\fIsubcommands\fR]
+\fBstart\-cli\fR [\fB\-c\fR|\fB\-\-config\fR] [\fB\-H\fR|\fB\-\-host\fR] [\fB\-r\fR|\fB\-\-registry\fR] [\fB\-\-registry\-hostname\fR] [\fB\-\-s9pk\-s3base\fR] [\fB\-\-s9pk\-s3bucket\fR] [\fB\-t\fR|\fB\-\-tunnel\fR] [\fB\-p\fR|\fB\-\-proxy\fR] [\fB\-\-id\-key\-path\fR] [\fB\-\-root\-ca\fR] [\fB\-\-insecure\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] [\fIsubcommands\fR]
 .SH DESCRIPTION
 .SH OPTIONS
 .TP
@@ -32,11 +32,8 @@ Tunnel server address
 \fB\-p\fR, \fB\-\-proxy\fR \fI<PROXY>\fR
 HTTP/SOCKS proxy URL
 .TP
-\fB\-\-cookie\-path\fR \fI<COOKIE_PATH>\fR
-Path to cookie file
-.TP
-\fB\-\-developer\-key\-path\fR \fI<DEVELOPER_KEY_PATH>\fR
-Path to developer signing key
+\fB\-\-id\-key\-path\fR \fI<ID_KEY_PATH>\fR
+Path to identity signing key
 .TP
 \fB\-\-root\-ca\fR \fI<PEM_PATH>\fR
 PEM\-encoded root CA certificate(s) to trust when talking to a StartOS server with a self\-signed cert (e.g. immediately after `setup complete`, before the device\*(Aqs CA has been imported into the local trust store). Repeatable
@@ -79,7 +76,7 @@ start\-cli\-init(1)
 Commands for initialization
 .TP
 start\-cli\-init\-key(1)
-Create a new developer key
+Create a new identity key
 .TP
 start\-cli\-kiosk(1)
 Commands for kiosk mode
@@ -94,7 +91,7 @@ start\-cli\-package(1)
 Commands related to packages
 .TP
 start\-cli\-pubkey(1)
-Get the developer public key
+Get the identity public key
 .TP
 start\-cli\-registry(1)
 Commands related to the registry

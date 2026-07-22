@@ -16,8 +16,7 @@ These apply to all subcommands.
 - `--s9pk-s3bucket <BUCKET>` — S3 bucket for publishing
 - `-t, --tunnel <URL>` — Tunnel server address
 - `-p, --proxy <URL>` — HTTP/SOCKS proxy
-- `--cookie-path <PATH>` — Cookie file path
-- `--developer-key-path <PATH>` — Developer signing key path
+- `--id-key-path <PATH>` — Identity signing key path (`--developer-key-path` is accepted as an alias)
 
 ## Authentication
 

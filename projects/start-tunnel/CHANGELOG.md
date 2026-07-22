@@ -17,7 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   enrolled keys. All existing sessions are signed out on upgrade — sign in
   again on each device. Request signatures are bound to a server identity;
   IPv6 addresses from the TLS certificate's SANs count in their URL form
-  (`[...]`), matching how clients actually address the server.
+  (`[...]`), matching how clients actually address the server. HTTP cookies
+  are gone from the API entirely: the server no longer sets or reads any
+  cookie, and the `start-tunnel` CLI run on the server itself presents the
+  local authcookie as an `Authorization: Bearer` header instead of a `Cookie`
+  (its `--cookie-path` flag is removed).
 
 ### Added
 

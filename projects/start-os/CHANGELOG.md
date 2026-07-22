@@ -95,6 +95,13 @@ file tracks notable changes since the move to the monorepo.
   All existing sessions are signed out on upgrade — sign in again on each
   device. Resolves #3511.
 
+  HTTP cookies are gone from the API entirely: the server no longer sets or
+  reads any cookie, so cookies planted by services co-hosted on other ports of
+  the same hostname can no longer collide with StartOS auth. `start-cli` run on
+  the server itself now presents the local authcookie as an
+  `Authorization: Bearer` header instead of a `Cookie`, and its `--cookie-path`
+  flag and on-disk cookie cache are removed.
+
   Each request signature is bound to a server identity — a hostname, domain,
   or IP address the server recognizes as itself — so a signature captured on
   one server can't be replayed to another. Those identities are the server's

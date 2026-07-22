@@ -183,8 +183,6 @@ pub struct ClientConfig {
     pub proxy: Option<Url>,
     #[arg(skip)]
     pub socks_listen: Option<SocketAddr>,
-    #[arg(long, help = "help.arg.cookie-path")]
-    pub cookie_path: Option<PathBuf>,
     #[serde(alias = "developer-key-path")]
     #[arg(long, alias = "developer-key-path", help = "help.arg.id-key-path")]
     pub id_key_path: Option<PathBuf>,
@@ -220,7 +218,6 @@ impl ContextConfig for ClientConfig {
         self.tunnel_listen = self.tunnel_listen.take().or(other.tunnel_listen);
         self.proxy = self.proxy.take().or(other.proxy);
         self.socks_listen = self.socks_listen.take().or(other.socks_listen);
-        self.cookie_path = self.cookie_path.take().or(other.cookie_path);
         self.id_key_path = self.id_key_path.take().or(other.id_key_path);
         self.root_ca = self.root_ca.take().or(other.root_ca);
         self.insecure = self.insecure || other.insecure;
@@ -236,7 +233,7 @@ impl ClientConfig {
         self.load_path_rec(path)?;
         if let Some(workspace) = find_workspace_config()? {
             // Only its `host`/`registry` profiles — a workspace found by walking up from
-            // cwd must not reach into TLS, proxy, signing-key or cookie settings just
+            // cwd must not reach into TLS, proxy or signing-key settings just
             // because you `cd`'d into its tree (unlike the fixed-path files below, which
             // you own and which `merge_with` folds in whole).
             merge_profiles(&mut self.host, workspace.host);

@@ -57,7 +57,6 @@ export class HttpService {
 
     const options: HttpAngularOptions = {
       observe: 'response',
-      withCredentials: true,
       headers,
       params,
       responseType: responseType || 'json',

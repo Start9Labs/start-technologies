@@ -49,7 +49,8 @@ are unwrapped from the RPC envelope and printed to stderr; the process exits wit
 
 `main_api()` (in [`shared-libs/crates/start-core/src/lib.rs`](../../shared-libs/crates/start-core/src/lib.rs))
 registers every subcommand once with `with_call_remote::<CliContext>()` — those are dispatched
-over the network to a server's RPC endpoint, authenticated with the session cookie. Commands
+over the network to a server's RPC endpoint, authenticated by signing each request with the
+enrolled identity key (or, on the server itself, the local authcookie sent as a Bearer token). Commands
 without a remote handler (`s9pk`, `init-key`, `pubkey`, `util`) execute locally. The `registry`
 and `tunnel` groups can target a separate registry/tunnel host via `--registry`/`--tunnel`.
 
@@ -66,7 +67,7 @@ then `/etc/startos`. A bare URL is shorthand for `default`, and the layers combi
 namespace — a union of aliases where a name defined at more than one level takes the higher tier's
 value. `resolve_target` follows the `default` profile, chasing a value that names another profile
 until it reaches a URL, which it parses only then. `ClientConfig` also carries tunnel, proxy,
-cookie path, developer key path, root CAs, and the `--insecure` toggle. The loaded config becomes a
+identity key path, root CAs, and the `--insecure` toggle. The loaded config becomes a
 `CliContext` that the RPC handlers use.
 
 ## Man pages

@@ -20,7 +20,6 @@ export interface HttpOptions {
 
 export interface HttpAngularOptions {
   observe: 'response'
-  withCredentials: true
   headers?:
     | HttpHeaders
     | {

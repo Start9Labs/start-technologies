@@ -42,14 +42,13 @@ target/debug/start-cli s9pk pack ...                # build a package
 `-H/--host` accepts either a URL (`https://server.local`) or a `host` profile name
 defined in a config file (see [Profiles](#profiles) below). Common flags:
 
-| Flag                          | Purpose                                 |
-| ----------------------------- | --------------------------------------- |
-| `-H, --host <url\|profile>`   | Target server URL or config profile     |
-| `--registry <url\|profile>`   | Target registry for `registry` commands |
-| `--proxy <url>`               | HTTP/SOCKS proxy for outbound requests  |
-| `--cookie-path <path>`        | Where the session cookie is stored      |
-| `--developer-key-path <path>` | Developer signing key location          |
-| `--insecure`                  | Skip TLS verification (testing only)    |
+| Flag                        | Purpose                                 |
+| --------------------------- | --------------------------------------- |
+| `-H, --host <url\|profile>` | Target server URL or config profile     |
+| `--registry <url\|profile>` | Target registry for `registry` commands |
+| `--proxy <url>`             | HTTP/SOCKS proxy for outbound requests  |
+| `--id-key-path <path>`      | Identity signing key location           |
+| `--insecure`                | Skip TLS verification (testing only)    |
 
 ### Profiles
 
