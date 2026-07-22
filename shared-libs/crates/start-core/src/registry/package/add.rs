@@ -188,7 +188,7 @@ pub async fn cli_add_package_impl(
 
     sign_phase.start();
     let commitment = s9pk.as_archive().commitment().await?;
-    let signature = Ed25519.sign_commitment(ctx.developer_key()?, &commitment, SIG_CONTEXT)?;
+    let signature = Ed25519.sign_commitment(ctx.id_key()?, &commitment, SIG_CONTEXT)?;
     sign_phase.complete();
 
     for (url, mut phase) in verify {
@@ -467,7 +467,7 @@ pub async fn cli_add_mirror(
 
     sign_phase.start();
     let commitment = s9pk.as_archive().commitment().await?;
-    let signature = Ed25519.sign_commitment(ctx.developer_key()?, &commitment, SIG_CONTEXT)?;
+    let signature = Ed25519.sign_commitment(ctx.id_key()?, &commitment, SIG_CONTEXT)?;
     sign_phase.complete();
 
     for (url, mut phase) in verify {

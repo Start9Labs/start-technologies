@@ -198,11 +198,8 @@ pub async fn cli_sign_asset(
         hash: Base64(*blake3.as_bytes()),
         size,
     };
-    let signature = AnySignature::Ed25519(Ed25519.sign_commitment(
-        ctx.developer_key()?,
-        &commitment,
-        SIG_CONTEXT,
-    )?);
+    let signature =
+        AnySignature::Ed25519(Ed25519.sign_commitment(ctx.id_key()?, &commitment, SIG_CONTEXT)?);
     sign_phase.complete();
 
     index_phase.start();

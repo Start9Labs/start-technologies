@@ -9,7 +9,7 @@ use tokio::process::Command;
 
 use crate::PackageId;
 use crate::context::CliContext;
-use crate::developer::write_developer_key;
+use crate::developer::write_signing_key;
 use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::serde::IoFormat;
@@ -20,7 +20,10 @@ use crate::util::serde::IoFormat;
 pub const STARTOS_DIR: &str = ".startos";
 /// Workspace-scoped ed25519 signing key (PKCS#8 PEM). Generated once and never
 /// overwritten — it signs the packages built in this workspace.
-pub const BUILD_KEY_FILE: &str = "build-key";
+pub const BUILD_KEY_FILE: &str = "build.key.pem";
+/// Pre-1.1.0 name of [`BUILD_KEY_FILE`], still recognized on load.
+// TODO: remove this legacy-filename support after a few releases.
+pub const LEGACY_BUILD_KEY_FILE: &str = "build-key";
 /// Workspace config: named host and registry targets the packager switches
 /// between. Scaffolded with defaults; the `host` entries are placeholders to
 /// point at your own StartOS boxes.
@@ -164,13 +167,13 @@ pub async fn init_workspace(
         .await
         .with_ctx(|_| (ErrorKind::Filesystem, startos.display().to_string()))?;
     write_if_absent(&startos.join(CONFIG_FILE), WORKSPACE_CONFIG_CONTENTS).await?;
-    // Generated once and never regenerated — overwriting the build-key would change
+    // Generated once and never regenerated — overwriting the build key would change
     // the workspace's signing identity.
     let build_key = startos.join(BUILD_KEY_FILE);
     if tokio::fs::symlink_metadata(&build_key).await.is_err() {
         // bind before the await so the !Send ThreadRng isn't held across it
         let key = SigningKey::generate(&mut crate::util::crypto::os_rng());
-        write_developer_key(&key, &build_key).await?;
+        write_signing_key(&key, &build_key).await?;
     }
 
     println!(
@@ -274,9 +277,9 @@ pub async fn init_package(
 }
 
 /// Walk up from `start` (inclusive) for the nearest workspace — a directory whose
-/// `.startos` is a provisioned marker (`build-key` or a schema config). `init-package`
+/// `.startos` is a provisioned marker (`build.key.pem` or a schema config). `init-package`
 /// scaffolds into whatever this returns, so with nested workspaces it targets the
-/// innermost one. A bare/legacy `.startos` (no build-key, no schema) isn't a marker.
+/// innermost one. A bare/legacy `.startos` (no build key, no schema) isn't a marker.
 fn find_workspace_root(start: &Path) -> Result<Option<PathBuf>, Error> {
     let mut dir = start.to_path_buf();
     loop {
@@ -307,10 +310,11 @@ struct SchemaProbe {
     schema: u64,
 }
 
-/// A `.startos` dir counts as a provisioned workspace once it holds a build-key or a
+/// A `.startos` dir counts as a provisioned workspace once it holds a build key or a
 /// schema-tagged config.
 fn startos_dir_is_marker(startos: &Path) -> bool {
-    if startos.join(BUILD_KEY_FILE).exists() {
+    // TODO: remove the legacy-filename check after a few releases.
+    if startos.join(BUILD_KEY_FILE).exists() || startos.join(LEGACY_BUILD_KEY_FILE).exists() {
         return true;
     }
     std::fs::File::open(startos.join(CONFIG_FILE))
@@ -525,7 +529,7 @@ mod test {
         std::fs::write(startos.join(CONFIG_FILE), WORKSPACE_CONFIG_CONTENTS).unwrap();
         assert!(startos_dir_is_marker(&startos));
 
-        // build-key alone — marker (even with a flat config)
+        // build key alone — marker (even with a flat config)
         let d2 = tmp();
         let s2 = d2.join(STARTOS_DIR);
         std::fs::create_dir_all(&s2).unwrap();

@@ -222,7 +222,7 @@ This clones the Start9 monorepo into `start-technologies/`, sets up the agent-co
 
 ```
 start9-workspace/
-├── .startos/              ← workspace marker: build-key (signs your packages) + config.yaml (hosts, registries)
+├── .startos/              ← workspace marker: build.key.pem (signs your packages) + config.yaml (hosts, registries)
 ├── AGENTS.md              ← agent context (symlink to the guide's Agent Context page), read by AI assistants
 ├── AGENTS.local.md        ← your own notes, kept across guide updates
 ├── CLAUDE.md              ← loads AGENTS.md + AGENTS.local.md (Claude Code)
@@ -254,10 +254,10 @@ Workspaces can be nested — running `init-workspace` inside another workspace i
 
 The one thing `init-workspace` refuses is running **inside a package repo**: a workspace is the directory that _holds_ package repos, not a package itself. If you already have package repos, run `init-workspace` in the directory that contains them (their parent); building, signing, and publishing then walk up to find the workspace. Starting fresh, run it in a new directory, then `start-cli s9pk init-package` inside it.
 
-Until a workspace exists, `make` / `s9pk pack` / `s9pk publish` fail with a message pointing you to `init-workspace` — packaging is designed around the workspace (and its AI guide), so there is no build-key to sign with until you create one.
+Until a workspace exists, `make` / `s9pk pack` / `s9pk publish` fail with a message pointing you to `init-workspace` — packaging is designed around the workspace (and its AI guide), so there is no build key to sign with until you create one.
 
 > [!NOTE]
-> There's no automatic migration from an older global `~/.startos`. To reuse a previous signing key, copy it into a workspace yourself: `cp ~/.startos/developer.key.pem <workspace>/.startos/build-key`.
+> There's no automatic migration from an older global `~/.startos`. To reuse a previous signing key, copy it into a workspace yourself: `cp ~/.startos/id.key.pem <workspace>/.startos/build.key.pem`.
 
 ### Hosts and registries
 

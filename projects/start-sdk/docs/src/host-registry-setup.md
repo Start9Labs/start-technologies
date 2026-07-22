@@ -25,7 +25,7 @@ start-cli init-key
 start-cli pubkey
 ```
 
-`init-key` creates an Ed25519 keypair at `~/.startos/developer.key.pem` (or `/run/startos/developer.key.pem` if running on a StartOS device). `pubkey` prints the public half — that's what you paste into the **Public Key** field of the Add Administrator action.
+`init-key` creates an Ed25519 keypair at `~/.startos/id.key.pem` (or `/run/startos/id.key.pem` if running on a StartOS device). `pubkey` prints the public half — that's what you paste into the **Public Key** field of the Add Administrator action.
 
 Treat the private key like an SSH key: it authenticates every admin and publish action you take against the registry. Back it up.
 
@@ -55,6 +55,6 @@ start-cli registry index
 start-cli registry admin list
 ```
 
-The first lists registry metadata and packages (empty on a fresh install). The second should show the administrator you added in step 3. If either fails, check that the service is running, the API interface is reachable from your workstation, and your developer key matches the public key you registered.
+The first lists registry metadata and packages (empty on a fresh install). The second should show the administrator you added in step 3. If either fails, check that the service is running, the API interface is reachable from your workstation, and your identity key matches the public key you registered.
 
 You're now ready to add signers, publish packages, and register StartOS versions. See [Administration](host-registry-administration.md).

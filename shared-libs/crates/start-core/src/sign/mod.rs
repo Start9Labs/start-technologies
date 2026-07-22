@@ -210,6 +210,29 @@ impl AnyVerifyingKey {
     pub fn interned_pem(&self) -> InternedString {
         InternedString::intern(self.to_string())
     }
+    /// Compact wire form: unpadded base64url of the DER (SPKI) encoding, no
+    /// PEM armor — url-safe so it survives a form-urlencoded container
+    /// without percent-escaping.
+    pub fn to_base64_der(&self) -> Result<String, Error> {
+        use base64::Engine;
+        use pkcs8::EncodePublicKey;
+        Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+            self.to_public_key_der()
+                .with_kind(ErrorKind::Serialization)?
+                .as_bytes(),
+        ))
+    }
+    /// Parse the compact wire form produced by [`Self::to_base64_der`].
+    pub fn from_base64_der(s: &str) -> Result<Self, Error> {
+        use base64::Engine;
+        use pkcs8::DecodePublicKey;
+        Self::from_public_key_der(
+            &base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(s)
+                .with_kind(ErrorKind::Deserialization)?,
+        )
+        .with_kind(ErrorKind::Deserialization)
+    }
 }
 impl<'a> TryFrom<SubjectPublicKeyInfo<AnyRef<'a>, BitStringRef<'a>>> for AnyVerifyingKey {
     type Error = pkcs8::spki::Error;
@@ -291,21 +314,20 @@ impl digest::Update for AnyDigest {
 pub enum AnySignature {
     Ed25519(<Ed25519 as SignatureScheme>::Signature),
 }
-impl FromStr for AnySignature {
-    type Err = Error;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use der::DecodePem;
-
-        #[derive(der::Sequence)]
-        struct AnySignatureDer {
-            alg: pkcs8::spki::AlgorithmIdentifierOwned,
-            sig: der::asn1::OctetString,
-        }
-        impl der::pem::PemLabel for AnySignatureDer {
-            const PEM_LABEL: &'static str = "SIGNATURE";
-        }
-
-        let der = AnySignatureDer::from_pem(s.as_bytes()).with_kind(ErrorKind::Deserialization)?;
+/// The DER document wrapping an [`AnySignature`]: the scheme's algorithm
+/// identifier plus the raw signature bytes. PEM-armored ("SIGNATURE") in the
+/// legacy wire form, bare base64 in the compact one.
+#[derive(der::Sequence)]
+struct AnySignatureDer {
+    alg: pkcs8::spki::AlgorithmIdentifierOwned,
+    sig: der::asn1::OctetString,
+}
+impl der::pem::PemLabel for AnySignatureDer {
+    const PEM_LABEL: &'static str = "SIGNATURE";
+}
+impl TryFrom<AnySignatureDer> for AnySignature {
+    type Error = Error;
+    fn try_from(der: AnySignatureDer) -> Result<Self, Error> {
         if der.alg.oid == ed25519_dalek::pkcs8::ALGORITHM_ID.oid
             && der.alg.parameters.owned_to_ref() == ed25519_dalek::pkcs8::ALGORITHM_ID.parameters
         {
@@ -319,27 +341,63 @@ impl FromStr for AnySignature {
         }
     }
 }
+
+impl AnySignature {
+    /// Compact wire form: unpadded base64url of the DER encoding, no PEM
+    /// armor — url-safe so it survives a form-urlencoded container without
+    /// percent-escaping.
+    pub fn to_base64_der(&self) -> Result<String, Error> {
+        use base64::Engine;
+        use der::Encode;
+        Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+            self.to_der_struct()
+                .to_der()
+                .with_kind(ErrorKind::Serialization)?,
+        ))
+    }
+    /// Parse the compact wire form produced by [`Self::to_base64_der`].
+    pub fn from_base64_der(s: &str) -> Result<Self, Error> {
+        use base64::Engine;
+        use der::Decode;
+        AnySignatureDer::from_der(
+            &base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(s)
+                .with_kind(ErrorKind::Deserialization)?,
+        )
+        .with_kind(ErrorKind::Deserialization)?
+        .try_into()
+    }
+    fn to_der_struct(&self) -> AnySignatureDer {
+        match self {
+            Self::Ed25519(s) => AnySignatureDer {
+                alg: pkcs8::spki::AlgorithmIdentifierOwned {
+                    oid: ed25519_dalek::pkcs8::ALGORITHM_ID.oid,
+                    parameters: None,
+                },
+                sig: der::asn1::OctetString::new(s.to_bytes())
+                    .expect("64-byte signature encodes as OCTET STRING"),
+            },
+        }
+    }
+}
+
+impl FromStr for AnySignature {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use der::DecodePem;
+        AnySignatureDer::from_pem(s.as_bytes())
+            .with_kind(ErrorKind::Deserialization)?
+            .try_into()
+    }
+}
 impl Display for AnySignature {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use der::EncodePem;
-
-        #[derive(der::Sequence)]
-        struct AnySignatureDer<'a> {
-            alg: pkcs8::AlgorithmIdentifierRef<'a>,
-            sig: der::asn1::OctetString,
-        }
-        impl<'a> der::pem::PemLabel for AnySignatureDer<'a> {
-            const PEM_LABEL: &'static str = "SIGNATURE";
-        }
         f.write_str(
-            &match self {
-                Self::Ed25519(s) => AnySignatureDer {
-                    alg: ed25519_dalek::pkcs8::ALGORITHM_ID,
-                    sig: der::asn1::OctetString::new(s.to_bytes()).map_err(|_| std::fmt::Error)?,
-                },
-            }
-            .to_pem(der::pem::LineEnding::LF)
-            .map_err(|_| std::fmt::Error)?,
+            &self
+                .to_der_struct()
+                .to_pem(der::pem::LineEnding::LF)
+                .map_err(|_| std::fmt::Error)?,
         )
     }
 }

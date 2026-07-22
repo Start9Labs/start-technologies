@@ -30,6 +30,18 @@ impl DbContext for TunnelContext {
 impl SignatureAuthContext for TunnelContext {
     type AdditionalMetadata = LoginMetadata;
     type CheckPubkeyRes = Option<InternedString>;
+    fn mutate_nonce_cache<
+        F: FnOnce(&mut crate::middleware::auth::signature::NonceCache) -> T,
+        T,
+    >(
+        &self,
+        f: F,
+    ) -> T {
+        self.auth_sig_nonce_cache.mutate(f)
+    }
+    async fn clock_synced(&self) -> bool {
+        true // Assume. Validating VPS clock sync out of scope for now,
+    }
     fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>> {
         &self.open_authed_continuations
     }

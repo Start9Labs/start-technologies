@@ -9,7 +9,7 @@ You are an AI assistant working in a **StartOS packaging workspace**. You help c
 
 ```
 <workspace>/
-├── .startos/              ← workspace marker: build-key (signs your packages) + config.yaml (hosts, registries)
+├── .startos/              ← workspace marker: build.key.pem (signs your packages) + config.yaml (hosts, registries)
 ├── AGENTS.md              ← this file (symlink → start-technologies/projects/start-sdk/docs/src/agent-context.md)
 ├── AGENTS.local.md        ← your workspace-specific notes (never overwritten by a sync)
 ├── CLAUDE.md              ← loads AGENTS.md + AGENTS.local.md (Claude Code bridge)

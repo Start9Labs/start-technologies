@@ -26,7 +26,7 @@ use crate::context::config::{CONFIG_PATH, ContextConfig};
 use crate::context::{CliContext, RpcContext};
 use crate::middleware::auth::DbContext;
 use crate::middleware::auth::local::LocalAuthContext;
-use crate::middleware::auth::signature::SignatureAuthContext;
+use crate::middleware::auth::signature::{NonceCache, SignatureAuthContext};
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::device_info::{DEVICE_INFO_HEADER, DeviceInfo};
@@ -88,6 +88,7 @@ pub struct RegistryContextSeed {
     pub datadir: PathBuf,
     pub rpc_continuations: RpcContinuations,
     pub open_authed_continuations: OpenAuthedContinuations<Option<InternedString>>,
+    pub auth_sig_nonce_cache: SyncMutex<NonceCache>,
     pub client: Client,
     pub shutdown: Sender<()>,
     pub metrics_db: SyncMutex<Connection>,
@@ -157,6 +158,7 @@ impl RegistryContext {
             datadir,
             rpc_continuations: RpcContinuations::new(),
             open_authed_continuations: OpenAuthedContinuations::new(),
+            auth_sig_nonce_cache: SyncMutex::new(Default::default()),
             client: Client::builder()
                 .proxy(Proxy::custom(move |url| {
                     if url.host_str().map_or(false, |h| h.ends_with(".onion")) {
@@ -367,6 +369,12 @@ impl LocalAuthContext for RegistryContext {
 impl SignatureAuthContext for RegistryContext {
     type AdditionalMetadata = RegistryAuthMetadata;
     type CheckPubkeyRes = Option<(AnyVerifyingKey, SignerInfo)>;
+    fn mutate_nonce_cache<F: FnOnce(&mut NonceCache) -> T, T>(&self, f: F) -> T {
+        self.auth_sig_nonce_cache.mutate(f)
+    }
+    async fn clock_synced(&self) -> bool {
+        true // Assume. Validating registry clock sync out of scope for now,
+    }
     fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>> {
         &self.open_authed_continuations
     }

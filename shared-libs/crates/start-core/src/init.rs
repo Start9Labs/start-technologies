@@ -17,7 +17,7 @@ use crate::context::config::ServerConfig;
 use crate::context::{CliContext, InitContext, RpcContext};
 use crate::db::model::Database;
 use crate::db::model::public::ServerStatus;
-use crate::developer::OS_DEVELOPER_KEY_PATH;
+use crate::developer::OS_ID_KEY_PATH;
 use crate::hostname::ServerHostname;
 use crate::middleware::auth::local::LocalAuthContext;
 use crate::net::gateway::WildcardListener;
@@ -187,14 +187,14 @@ pub async fn init(
     load_database.complete();
 
     load_ssh_keys.start();
-    crate::developer::write_developer_key(
+    crate::developer::write_signing_key(
         &peek.as_private().as_developer_key().de()?.0,
-        OS_DEVELOPER_KEY_PATH,
+        OS_ID_KEY_PATH,
     )
     .await?;
     Command::new("chown")
         .arg("root:startos")
-        .arg(OS_DEVELOPER_KEY_PATH)
+        .arg(OS_ID_KEY_PATH)
         .invoke(ErrorKind::Filesystem)
         .await?;
     let hostname = ServerHostname::load(peek.as_public().as_server_info())?;

@@ -8,15 +8,15 @@ import { concatBytes, hexToBytes } from '@noble/hashes/utils'
  * A request is authorized by signing, with an enrolled Ed25519 key (pure
  * Ed25519, WebCrypto-compatible), a message of:
  *
- *   "StartOS RPC Auth v1\0" || timestamp || nonce || size || blake3(body) || context
+ *   "Start-Auth-Sig v1\0" || timestamp || nonce || size || blake3(body) || context
  *
  * — a fixed protocol tag (cross-protocol separation), the request commitment,
  * and the server identity (hostname/IP/domain) the signature is bound to. The
- * header value is the query-encoded commitment plus the signer's PEM public
- * key and the PEM-wrapped signature.
+ * header value is the query-encoded commitment plus the signer's public key
+ * and the signature, each as bare base64 DER (no PEM armor).
  */
 
-const REQUEST_AUTH_TAG = new TextEncoder().encode('StartOS RPC Auth v1\0')
+const REQUEST_AUTH_TAG = new TextEncoder().encode('Start-Auth-Sig v1\0')
 
 export const AUTH_SIG_HEADER = 'X-Start-Auth-Sig'
 
@@ -28,7 +28,7 @@ const SIGNATURE_PREFIX = hexToBytes('3049300506032b65700440')
 export interface AuthKey {
   /** Raw 32-byte Ed25519 secret key. */
   secretKey: Uint8Array
-  /** PEM-encoded public key, as sent in `LoginParams.pubkey` and the header. */
+  /** PEM-encoded public key, as sent in `LoginParams.pubkey`. */
   pubkeyPem: string
 }
 
@@ -66,11 +66,16 @@ export function signRequest(
   params.set('timestamp', timestamp.toString())
   params.set('nonce', nonce.toString())
   params.set('size', size.toString())
-  params.set('blake3', base64Encode(hash))
-  params.set('signer', key.pubkeyPem)
+  params.set('blake3', base64UrlEncode(hash))
+  params.set(
+    'signer',
+    base64UrlEncode(
+      concatBytes(SPKI_PREFIX, ed25519.getPublicKey(key.secretKey)),
+    ),
+  )
   params.set(
     'signature',
-    derToPem('SIGNATURE', concatBytes(SIGNATURE_PREFIX, signature)),
+    base64UrlEncode(concatBytes(SIGNATURE_PREFIX, signature)),
   )
   return params.toString()
 }
@@ -84,8 +89,12 @@ function derToPem(label: string, der: Uint8Array): string {
   return `-----BEGIN ${label}-----\n${lines.join('\n')}\n-----END ${label}-----\n`
 }
 
-function base64Encode(bytes: Uint8Array): string {
-  return bytesToBase64(bytes).replace(/=+$/, '')
+/** Unpadded base64url: survives a form-urlencoded container unescaped. */
+function base64UrlEncode(bytes: Uint8Array): string {
+  return bytesToBase64(bytes)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')
 }
 
 export function bytesToBase64(bytes: Uint8Array): string {

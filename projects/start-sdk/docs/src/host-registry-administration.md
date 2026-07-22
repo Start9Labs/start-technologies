@@ -44,7 +44,7 @@ start-cli s9pk publish \
   myservice_1.2.0_x86_64.s9pk
 ```
 
-`publish` signs the `.s9pk` with the local developer key, uploads it to the registry, and registers it in the index. If your registry already has the same `(package id, version, sighash)` indexed, the upload is a no-op except for any new signatures merging in.
+`publish` signs the `.s9pk` with the local identity key, uploads it to the registry, and registers it in the index. If your registry already has the same `(package id, version, sighash)` indexed, the upload is a no-op except for any new signatures merging in.
 
 ### Removing a package
 

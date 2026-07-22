@@ -12,18 +12,34 @@ use crate::prelude::*;
 use crate::util::io::create_file_mod;
 use crate::util::serde::Pem;
 
-pub const OS_DEVELOPER_KEY_PATH: &str = "/run/startos/developer.key.pem";
+pub const OS_ID_KEY_PATH: &str = "/run/startos/id.key.pem";
 
-pub fn default_developer_key_path() -> PathBuf {
+pub fn default_id_key_path() -> PathBuf {
     local_config_path()
         .as_deref()
         .unwrap_or_else(|| Path::new(crate::context::config::CONFIG_PATH))
         .parent()
         .unwrap_or(Path::new("/"))
-        .join("developer.key.pem")
+        .join("id.key.pem")
 }
 
-pub async fn write_developer_key(
+/// Move a key file from its pre-1.1.0 name to `new`, if `new` doesn't exist
+/// yet (`developer.key.pem` → `id.key.pem`, `build-key` → `build.key.pem`).
+// TODO: remove this legacy-filename migration after a few releases.
+pub fn migrate_legacy_key_file(new: &Path, legacy: &Path) {
+    if matches!(new.try_exists(), Ok(false)) && matches!(legacy.try_exists(), Ok(true)) {
+        match std::fs::rename(legacy, new) {
+            Ok(()) => tracing::info!(
+                "Renamed legacy key file {} -> {}",
+                legacy.display(),
+                new.display()
+            ),
+            Err(e) => tracing::warn!("Failed to rename legacy key file {}: {e}", legacy.display()),
+        }
+    }
+}
+
+pub async fn write_signing_key(
     secret: &ed25519_dalek::SigningKey,
     path: impl AsRef<Path>,
 ) -> Result<(), Error> {
@@ -43,8 +59,8 @@ pub async fn write_developer_key(
     Ok(())
 }
 
-/// Read counterpart to [`write_developer_key`]: load a PKCS#8 PEM ed25519 key
-/// (e.g. a workspace `.startos/build-key`) into a `SigningKey`.
+/// Read counterpart to [`write_signing_key`]: load a PKCS#8 PEM ed25519 key
+/// (e.g. a workspace `.startos/build.key.pem`) into a `SigningKey`.
 pub fn load_signing_key(path: impl AsRef<Path>) -> Result<SigningKey, Error> {
     let path = path.as_ref();
     let pair = <ed25519::KeypairBytes as ed25519::pkcs8::DecodePrivateKey>::from_pkcs8_pem(
@@ -62,26 +78,26 @@ pub fn load_signing_key(path: impl AsRef<Path>) -> Result<SigningKey, Error> {
 
 #[instrument(skip_all)]
 pub async fn init(ctx: CliContext) -> Result<(), Error> {
-    if tokio::fs::metadata(OS_DEVELOPER_KEY_PATH).await.is_ok() {
-        println!("Developer key already exists at {}", OS_DEVELOPER_KEY_PATH);
-    } else if tokio::fs::metadata(&ctx.developer_key_path).await.is_err() {
-        tracing::info!("Generating new developer key...");
+    if tokio::fs::metadata(OS_ID_KEY_PATH).await.is_ok() {
+        println!("Identity key already exists at {}", OS_ID_KEY_PATH);
+    } else if tokio::fs::metadata(&ctx.id_key_path).await.is_err() {
+        tracing::info!("Generating new identity key...");
         let secret = SigningKey::generate(&mut crate::util::crypto::os_rng());
-        tracing::info!("Writing key to {}", ctx.developer_key_path.display());
-        write_developer_key(&secret, &ctx.developer_key_path).await?;
+        tracing::info!("Writing key to {}", ctx.id_key_path.display());
+        write_signing_key(&secret, &ctx.id_key_path).await?;
         println!(
-            "New developer key generated at {}",
-            ctx.developer_key_path.display()
+            "New identity key generated at {}",
+            ctx.id_key_path.display()
         );
     } else {
         println!(
-            "Developer key already exists at {}",
-            ctx.developer_key_path.display()
+            "Identity key already exists at {}",
+            ctx.id_key_path.display()
         );
     }
     Ok(())
 }
 
 pub fn pubkey(ctx: CliContext) -> Result<Pem<ed25519_dalek::VerifyingKey>, Error> {
-    Ok(Pem(ctx.developer_key()?.verifying_key()))
+    Ok(Pem(ctx.id_key()?.verifying_key()))
 }

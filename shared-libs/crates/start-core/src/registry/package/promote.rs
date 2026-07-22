@@ -125,7 +125,7 @@ pub async fn cli_promote(
     // Promote each s9pk variant to the target registry
     for (_, asset) in &version_info.s9pks {
         let commitment = &asset.commitment;
-        let signature = Ed25519.sign_commitment(ctx.developer_key()?, commitment, SIG_CONTEXT)?;
+        let signature = Ed25519.sign_commitment(ctx.id_key()?, commitment, SIG_CONTEXT)?;
 
         call_registry(
             &ctx,

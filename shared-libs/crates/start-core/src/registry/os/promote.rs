@@ -111,7 +111,7 @@ async fn promote_assets(
     for (platform, asset) in assets {
         let commitment = &asset.commitment;
         let signature = AnySignature::Ed25519(Ed25519.sign_commitment(
-            ctx.developer_key()?,
+            ctx.id_key()?,
             commitment,
             SIG_CONTEXT,
         )?);

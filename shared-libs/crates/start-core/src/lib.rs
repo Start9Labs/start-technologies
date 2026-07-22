@@ -227,11 +227,11 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
             "init-key",
             from_fn_async(developer::init)
                 .no_display()
-                .with_about("about.create-developer-key"),
+                .with_about("about.create-id-key"),
         )
         .subcommand(
             "pubkey",
-            from_fn_blocking(developer::pubkey).with_about("about.get-developer-pubkey"),
+            from_fn_blocking(developer::pubkey).with_about("about.get-id-pubkey"),
         )
         .subcommand(
             "diagnostic",

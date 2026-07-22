@@ -1,8 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::future::Future;
 use std::net::IpAddr;
-use std::sync::LazyLock;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::extract::Request;
@@ -14,7 +13,6 @@ use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{Middleware, RpcRequest, RpcResponse};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
 use url::Url;
 
 use crate::auth::AuthKeys;
@@ -24,24 +22,12 @@ use crate::prelude::*;
 use crate::rpc_continuations::OpenAuthedContinuations;
 use crate::sign::commitment::Commitment;
 use crate::sign::commitment::request::RequestCommitment;
-use crate::sign::{AnySignature, AnySigningKey, AnyVerifyingKey, SignatureScheme};
+use crate::sign::{AnySignature, AnySigningKey, AnyVerifyingKey};
 use crate::util::iter::TransposeResultIterExt;
 use crate::util::serde::Base64;
 use crate::util::sync::SyncMutex;
 
 pub const AUTH_SIG_HEADER: &str = "X-Start-Auth-Sig";
-/// The header's name before it was renamed (the auth scheme is not
-/// OS-specific). Still accepted on reads so deployed clients keep working —
-/// the same fleet [`verify_request_legacy`] exists for; requests are sent
-/// under [`AUTH_SIG_HEADER`].
-pub const AUTH_SIG_HEADER_LEGACY: &str = "X-StartOS-Auth-Sig";
-
-/// The request's auth-sig header, under either the current or the legacy name.
-pub fn auth_sig_header(headers: &HeaderMap) -> Option<&HeaderValue> {
-    headers
-        .get(AUTH_SIG_HEADER)
-        .or_else(|| headers.get(AUTH_SIG_HEADER_LEGACY))
-}
 
 /// Upper bound on how much we pre-reserve for a request body from the
 /// attacker-controlled `commitment.size`. A forged self-signature can carry any
@@ -92,6 +78,9 @@ pub(crate) fn check_enrolled(
 pub trait SignatureAuthContext: DbContext {
     type AdditionalMetadata: DeserializeOwned + Send;
     type CheckPubkeyRes: Send;
+    fn mutate_nonce_cache<F: FnOnce(&mut NonceCache) -> T, T>(&self, f: F) -> T;
+    /// Whether the clock can be trusted - otherwise nonces are LRU evicted
+    fn clock_synced(&self) -> impl Future<Output = bool> + Send + Sync;
     /// Live continuations (REST/WS) registered under the signer that opened
     /// them, so revoking a signer kills anything it left open. Keyed by the
     /// signer's PEM (`None` for continuations opened without one).
@@ -187,6 +176,19 @@ impl HasUnenrolledKeys {
 impl SignatureAuthContext for RpcContext {
     type AdditionalMetadata = LoginMetadata;
     type CheckPubkeyRes = Option<InternedString>;
+    fn mutate_nonce_cache<F: FnOnce(&mut NonceCache) -> T, T>(&self, f: F) -> T {
+        self.auth_sig_nonce_cache.mutate(f)
+    }
+    async fn clock_synced(&self) -> bool {
+        self.db
+            .peek()
+            .await
+            .as_public()
+            .as_server_info()
+            .as_ntp_synced()
+            .de()
+            .unwrap_or(false)
+    }
     fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>> {
         &self.open_authed_continuations
     }
@@ -318,7 +320,7 @@ pub trait SigningContext {
 
 impl SigningContext for CliContext {
     fn signing_key(&self) -> Result<AnySigningKey, Error> {
-        Ok(AnySigningKey::Ed25519(self.developer_key()?.clone()))
+        Ok(AnySigningKey::Ed25519(self.id_key()?.clone()))
     }
 }
 
@@ -354,35 +356,43 @@ impl SignatureAuth {
     }
 }
 
+const SIG_TIME_GRACE_PERIOD_SECS: u64 = 60;
+
 /// Replay cache for the last 60s of nonces. `seen` gives O(1) membership;
 /// `order` drives eviction, keyed by `(seen_at, nonce)` so two nonces recorded
 /// at the same `Instant` can't collide and silently evict each other.
+///
+/// BEST EFFORT: security degrades when clock is not synced
 #[derive(Default)]
-struct NonceCache {
+pub struct NonceCache {
     seen: HashSet<u64>,
-    order: BTreeSet<(Instant, u64)>,
+    order: BTreeSet<(i64, u64)>,
 }
-static NONCE_CACHE: LazyLock<Mutex<NonceCache>> =
-    LazyLock::new(|| Mutex::new(NonceCache::default()));
-
-async fn handle_nonce(nonce: u64) -> Result<(), Error> {
-    let mut cache = NONCE_CACHE.lock().await;
-    while let Some(&(seen_at, n)) = cache.order.iter().next() {
-        if seen_at.elapsed() > Duration::from_secs(60) {
-            cache.order.remove(&(seen_at, n));
-            cache.seen.remove(&n);
+impl NonceCache {
+    fn handle_nonce(&mut self, nonce: u64, timestamp: i64, now: Option<i64>) -> Result<(), Error> {
+        if let Some(now) = now {
+            while let Some(&(timestamp, n)) = self.order.iter().next() {
+                if now.saturating_sub(timestamp) > SIG_TIME_GRACE_PERIOD_SECS as i64 {
+                    self.order.remove(&(timestamp, n));
+                    self.seen.remove(&n);
+                } else {
+                    break;
+                }
+            }
         } else {
-            break;
+            while self.order.len() > 1024 * 1024 {
+                self.order.pop_first();
+            }
         }
+        if !self.seen.insert(nonce) {
+            return Err(Error::new(
+                eyre!("{}", t!("middleware.auth.replay-attack-detected")),
+                ErrorKind::Authorization,
+            ));
+        }
+        self.order.insert((timestamp, nonce));
+        Ok(())
     }
-    if !cache.seen.insert(nonce) {
-        return Err(Error::new(
-            eyre!("{}", t!("middleware.auth.replay-attack-detected")),
-            ErrorKind::Authorization,
-        ));
-    }
-    cache.order.insert((Instant::now(), nonce));
-    Ok(())
 }
 
 /// Verify the [`AUTH_SIG_HEADER`] on an incoming request: signature against
@@ -398,7 +408,9 @@ pub async fn verify_request_signature<C: SignatureAuthContext>(
         signer,
         signature,
     } = SignatureHeader::from_header(
-        auth_sig_header(request.headers())
+        request
+            .headers()
+            .get(AUTH_SIG_HEADER)
             .or_not_found(AUTH_SIG_HEADER)
             .with_kind(ErrorKind::InvalidRequest)?,
     )?;
@@ -406,9 +418,7 @@ pub async fn verify_request_signature<C: SignatureAuthContext>(
     let mut verified = false;
     for sig_context in context.sig_context().await {
         let sig_context = sig_context?;
-        if verify_request(&signer, &commitment, sig_context.as_ref(), &signature).is_ok()
-            || verify_request_legacy(&signer, &commitment, sig_context.as_ref(), &signature).is_ok()
-        {
+        if verify_request(&signer, &commitment, sig_context.as_ref(), &signature).is_ok() {
             verified = true;
             break;
         }
@@ -420,17 +430,22 @@ pub async fn verify_request_signature<C: SignatureAuthContext>(
         ));
     }
 
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or_else(|e| e.duration().as_secs() as i64 * -1);
-    if now.abs_diff(commitment.timestamp) > 30 {
-        return Err(Error::new(
-            eyre!("{}", t!("middleware.auth.timestamp-not-within-30s")),
-            ErrorKind::InvalidSignature,
-        ));
-    }
-    handle_nonce(commitment.nonce).await?;
+    let now = if context.clock_synced().await {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or_else(|e| e.duration().as_secs() as i64 * -1);
+        if now.abs_diff(commitment.timestamp) > SIG_TIME_GRACE_PERIOD_SECS / 2 {
+            return Err(Error::new(
+                eyre!("{}", t!("middleware.auth.timestamp-not-within-30s")),
+                ErrorKind::InvalidSignature,
+            ));
+        }
+        Some(now)
+    } else {
+        None
+    };
+    context.mutate_nonce_cache(|n| n.handle_nonce(commitment.nonce, commitment.timestamp, now))?;
 
     let mut body = Vec::with_capacity(commitment.size.min(MAX_BODY_PREALLOC) as usize);
     commitment.copy_to(request, &mut body).await?;
@@ -448,18 +463,24 @@ impl SignatureHeader {
     pub fn to_header(&self) -> HeaderValue {
         let mut url: Url = "http://localhost".parse().unwrap();
         self.commitment.append_query(&mut url);
-        url.query_pairs_mut()
-            .append_pair("signer", &self.signer.to_string());
-        url.query_pairs_mut()
-            .append_pair("signature", &self.signature.to_string());
+        url.query_pairs_mut().append_pair(
+            "signer",
+            &self.signer.to_base64_der().expect("encode verifying key"),
+        );
+        url.query_pairs_mut().append_pair(
+            "signature",
+            &self.signature.to_base64_der().expect("encode signature"),
+        );
         HeaderValue::from_str(url.query().unwrap_or_default()).unwrap()
     }
     pub fn from_header(header: &HeaderValue) -> Result<Self, Error> {
         let query: BTreeMap<_, _> = form_urlencoded::parse(header.as_bytes()).collect();
         Ok(Self {
             commitment: RequestCommitment::from_query(&header)?,
-            signer: query.get("signer").or_not_found("signer")?.parse()?,
-            signature: query.get("signature").or_not_found("signature")?.parse()?,
+            signer: AnyVerifyingKey::from_base64_der(query.get("signer").or_not_found("signer")?)?,
+            signature: AnySignature::from_base64_der(
+                query.get("signature").or_not_found("signature")?,
+            )?,
         })
     }
     pub fn sign(signer: &AnySigningKey, body: &[u8], context: &str) -> Result<Self, Error> {
@@ -486,7 +507,7 @@ impl SignatureHeader {
 /// Protocol tag prefixed to request-auth signing messages: cross-protocol
 /// separation so an RPC signature can never collide with a package/registry
 /// signature (which use the Ed25519ph context parameter for the same job).
-const REQUEST_AUTH_TAG: &[u8] = b"StartOS RPC Auth v1\0";
+const REQUEST_AUTH_TAG: &[u8] = b"Start-Auth-Sig v1\0";
 
 /// The message a request signature commits to: a fixed protocol tag, the
 /// commitment, then the server identity (hostname/IP/domain) in the signed
@@ -536,19 +557,6 @@ pub fn verify_request(
     }
 }
 
-/// Pre-0.4.0-beta.11 request signatures: Ed25519ph with the server identity
-/// carried in the dom2 context parameter. Still accepted so deployed CLI and
-/// tunnel-device clients keep working; new signatures use [`verify_request`].
-fn verify_request_legacy(
-    key: &AnyVerifyingKey,
-    commitment: &RequestCommitment,
-    context: &str,
-    signature: &AnySignature,
-) -> Result<(), Error> {
-    key.scheme()
-        .verify_commitment(key, commitment, context, signature)
-}
-
 impl<C: SignatureAuthContext> Middleware<C> for SignatureAuth {
     type Metadata = Metadata<C::AdditionalMetadata>;
     async fn process_http_request(
@@ -557,7 +565,7 @@ impl<C: SignatureAuthContext> Middleware<C> for SignatureAuth {
         request: &mut Request,
     ) -> Result<(), axum::response::Response> {
         self.user_agent = request.headers().get(USER_AGENT).cloned();
-        if auth_sig_header(request.headers()).is_some() {
+        if request.headers().contains_key(AUTH_SIG_HEADER) {
             self.signer = Some(
                 verify_request_signature(context, request)
                     .await
@@ -669,9 +677,7 @@ mod tests {
     /// Ed25519 via @noble/curves) for secret key 0102…1f20, context
     /// "start-9.local", and the JSON body below. Guards the byte-level
     /// contract between the browser signer and this verifier.
-    const JS_PRODUCED_HEADER: &str = "timestamp=1784678775&nonce=15138308865896296388&size=59&blake3=95o3MZRDgMasjyEKb6h2qMb1JFOs45lZdiY2qeXDRQY&signer=-----BEGIN+PUBLIC+KEY-----%0AMCowBQYDK2VwAyEAebVWLo%2FmVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ%3D%0A-----END+PUBLIC+KEY-----%0A&signature=-----BEGIN+SIGNATURE-----%0AMEkwBQYDK2VwBEACcEsaI6InKoVf%2BBB27cXMtYw1DxZIgnGaYmfIM%2BWucOEcCfxl%0Asld0e7pTCSqxhKMmTSdP9QmNOSxwjSgUyHgK%0A-----END+SIGNATURE-----%0A";
-    /// Same key/body/context, signed with the legacy Ed25519ph scheme.
-    const JS_LEGACY_HEADER: &str = "timestamp=1784677724&nonce=934644805336935159&size=59&blake3=95o3MZRDgMasjyEKb6h2qMb1JFOs45lZdiY2qeXDRQY&signer=-----BEGIN+PUBLIC+KEY-----%0AMCowBQYDK2VwAyEAebVWLo%2FmVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ%3D%0A-----END+PUBLIC+KEY-----%0A&signature=-----BEGIN+SIGNATURE-----%0AMEkwBQYDK2VwBEAbL92MluAwidhMHo1HE49s3U7tcVwo%2FdaHPrmP2WryD4pvXNAR%0AJ4y94b%2BSDYXgBa5PVoOqcXRisLORxl0lFpMB%0A-----END+SIGNATURE-----%0A";
+    const JS_PRODUCED_HEADER: &str = "timestamp=1784746349&nonce=5184603501117103523&size=59&blake3=95o3MZRDgMasjyEKb6h2qMb1JFOs45lZdiY2qeXDRQY&signer=MCowBQYDK2VwAyEAebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ&signature=MEkwBQYDK2VwBEA0QgkL7GFycl72l-Bt076252XjpFG7aLngdxeIs-hNXpCkcJUtq9Xsfm_YV68U0JtK2qLMG2KPSfAVTcg8ntMH";
     const BODY: &[u8] = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"server.echo\",\"params\":{}}";
 
     #[test]
@@ -696,23 +702,24 @@ mod tests {
         .expect_err("signature does not verify under a different context");
     }
 
+    /// The compact wire form (bare base64 DER, no PEM armor) round-trips and
+    /// verifies.
     #[test]
-    fn legacy_scheme_still_accepted() {
-        let header = SignatureHeader::from_header(&HeaderValue::from_static(JS_LEGACY_HEADER))
-            .expect("header parses");
-        verify_request_legacy(
-            &header.signer,
-            &header.commitment,
-            "start-9.local",
-            &header.signature,
-        )
-        .expect("legacy signature verifies");
+    fn compact_header_round_trip() {
+        let key = AnySigningKey::Ed25519(ed25519_dalek::SigningKey::from_bytes(&[7; 32]));
+        let header = SignatureHeader::sign(&key, BODY, "start-9.local").expect("signs");
+        let value = header.to_header();
+        assert!(
+            !value.to_str().unwrap().contains("BEGIN"),
+            "compact form must not be PEM-armored"
+        );
+        let parsed = SignatureHeader::from_header(&value).expect("compact header parses");
         verify_request(
-            &header.signer,
-            &header.commitment,
+            &parsed.signer,
+            &parsed.commitment,
             "start-9.local",
-            &header.signature,
+            &parsed.signature,
         )
-        .expect_err("legacy signature is not valid under the new scheme");
+        .expect("compact round trip verifies");
     }
 }

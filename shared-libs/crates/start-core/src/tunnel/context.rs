@@ -27,6 +27,7 @@ use crate::context::{CliContext, RpcContext};
 use crate::db::model::public::{NetworkInterfaceInfo, NetworkInterfaceType};
 use crate::middleware::auth::Auth;
 use crate::middleware::auth::local::LocalAuthContext;
+use crate::middleware::auth::signature::NonceCache;
 use crate::middleware::cors::Cors;
 use crate::net::dns_update::rfc2136::{DnsInjector, InjectedRecord};
 use crate::net::forward::{PortForwardController, nft_comments_with_prefix, nft_rule, nft_rule_v6};
@@ -161,6 +162,7 @@ pub struct TunnelContextSeed {
     pub datadir: PathBuf,
     pub rpc_continuations: RpcContinuations,
     pub open_authed_continuations: OpenAuthedContinuations<Option<InternedString>>,
+    pub auth_sig_nonce_cache: SyncMutex<NonceCache>,
     pub net_iface: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
     pub forward: PortForwardController,
     pub dns_proxy: DnsProxyController,
@@ -369,6 +371,7 @@ impl TunnelContext {
             datadir,
             rpc_continuations: RpcContinuations::new(),
             open_authed_continuations: OpenAuthedContinuations::new(),
+            auth_sig_nonce_cache: SyncMutex::new(Default::default()),
             net_iface,
             forward,
             dns_proxy,

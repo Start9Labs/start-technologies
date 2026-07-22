@@ -2559,12 +2559,12 @@ context.cli.pkcs8-key-incorrect-length:
   fr_FR: "la clé pkcs8 a une longueur incorrecte"
   pl_PL: "klucz pkcs8 ma nieprawidłową długość"
 
-context.cli.developer-key-does-not-exist:
-  en_US: "Developer Key does not exist! Please run `start-cli init-key` before running this command."
-  de_DE: "Entwicklerschlüssel existiert nicht! Bitte führen Sie `start-cli init-key` aus, bevor Sie diesen Befehl ausführen."
-  es_ES: "¡La clave de desarrollador no existe! Por favor ejecute `start-cli init-key` antes de ejecutar este comando."
-  fr_FR: "La clé développeur n'existe pas ! Veuillez exécuter `start-cli init-key` avant d'exécuter cette commande."
-  pl_PL: "Klucz programisty nie istnieje! Proszę uruchomić `start-cli init-key` przed wykonaniem tego polecenia."
+context.cli.id-key-does-not-exist:
+  en_US: "Identity key does not exist! Please run `start-cli init-key` before running this command."
+  de_DE: "Identitätsschlüssel existiert nicht! Bitte führen Sie `start-cli init-key` aus, bevor Sie diesen Befehl ausführen."
+  es_ES: "¡La clave de identidad no existe! Por favor ejecute `start-cli init-key` antes de ejecutar este comando."
+  fr_FR: "La clé d'identité n'existe pas ! Veuillez exécuter `start-cli init-key` avant d'exécuter cette commande."
+  pl_PL: "Klucz tożsamości nie istnieje! Proszę uruchomić `start-cli init-key` przed wykonaniem tego polecenia."
 
 context.cli.cannot-parse-scheme-from-base-url:
   en_US: "Cannot parse scheme from base URL"
@@ -3206,12 +3206,12 @@ help.arg.destination-path:
   fr_FR: "Chemin de destination pour le téléchargement"
   pl_PL: "Ścieżka docelowa do pobrania"
 
-help.arg.developer-key-path:
-  en_US: "Path to developer signing key"
-  de_DE: "Pfad zum Entwickler-Signaturschlüssel"
-  es_ES: "Ruta a la clave de firma del desarrollador"
-  fr_FR: "Chemin vers la clé de signature du développeur"
-  pl_PL: "Ścieżka do klucza podpisu dewelopera"
+help.arg.id-key-path:
+  en_US: "Path to identity signing key"
+  de_DE: "Pfad zum Identitäts-Signaturschlüssel"
+  es_ES: "Ruta a la clave de firma de identidad"
+  fr_FR: "Chemin vers la clé de signature d'identité"
+  pl_PL: "Ścieżka do klucza podpisu tożsamości"
 
 help.arg.disable-encryption:
   en_US: "Disable trivial LUKS encryption"
@@ -5148,12 +5148,12 @@ about.create-backup-all-packages:
   fr_FR: "Créer une sauvegarde de tous les packages"
   pl_PL: "Utwórz kopię zapasową wszystkich pakietów"
 
-about.create-developer-key:
-  en_US: "Create a new developer key"
-  de_DE: "Erstelle einen neuen Entwicklerschlüssel"
-  es_ES: "Crear una nueva clave de desarrollador"
-  fr_FR: "Créer une nouvelle clé de développeur"
-  pl_PL: "Utwórz nowy klucz deweloperski"
+about.create-id-key:
+  en_US: "Create a new identity key"
+  de_DE: "Erstelle einen neuen Identitätsschlüssel"
+  es_ES: "Crear una nueva clave de identidad"
+  fr_FR: "Créer une nouvelle clé d'identité"
+  pl_PL: "Utwórz nowy klucz tożsamości"
 
 about.delete-legacy-backup:
   en_US: "Delete the legacy (V1) backup from a backup target; its space is reclaimed in the background"
@@ -5484,19 +5484,19 @@ about.get-certificate-for-webserver:
   fr_FR: "Obtenir le certificat du serveur web"
   pl_PL: "Pobierz certyfikat dla serwera internetowego"
 
-about.get-developer-pubkey:
-  en_US: "Get the developer public key"
-  de_DE: "Öffentlichen Entwicklerschlüssel abrufen"
-  es_ES: "Obtener la clave pública del desarrollador"
-  fr_FR: "Obtenir la clé publique du développeur"
-  pl_PL: "Pobierz klucz publiczny dewelopera"
-
 about.get-device-info:
   en_US: "Display device information"
   de_DE: "Geräteinformationen anzeigen"
   es_ES: "Mostrar información del dispositivo"
   fr_FR: "Afficher les informations de l'appareil"
   pl_PL: "Wyświetl informacje o urządzeniu"
+
+about.get-id-pubkey:
+  en_US: "Get the identity public key"
+  de_DE: "Öffentlichen Identitätsschlüssel abrufen"
+  es_ES: "Obtener la clave pública de identidad"
+  fr_FR: "Obtenir la clé publique d'identité"
+  pl_PL: "Pobierz klucz publiczny tożsamości"
 
 about.get-initialization-progress:
   en_US: "Get initialization progress"

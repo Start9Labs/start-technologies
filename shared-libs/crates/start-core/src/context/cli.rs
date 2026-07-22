@@ -24,12 +24,14 @@ use tracing::instrument;
 use super::setup::CURRENT_SECRET;
 use crate::context::config::{ClientConfig, local_config_path, resolve_target};
 use crate::context::{DiagnosticContext, InitContext, RpcContext, SetupContext};
-use crate::developer::{OS_DEVELOPER_KEY_PATH, default_developer_key_path, load_signing_key};
+use crate::developer::{
+    OS_ID_KEY_PATH, default_id_key_path, load_signing_key, migrate_legacy_key_file,
+};
 use crate::middleware::auth::local::LocalAuthContext;
 use crate::net::mdns::pin_mdns_host;
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
-use crate::s9pk::init::{BUILD_KEY_FILE, STARTOS_DIR};
+use crate::s9pk::init::{BUILD_KEY_FILE, LEGACY_BUILD_KEY_FILE, STARTOS_DIR};
 use crate::util::io::read_file_to_string;
 
 #[derive(Debug)]
@@ -47,8 +49,8 @@ pub struct CliContextSeed {
     pub client: Client,
     pub cookie_store: Arc<CookieStoreMutex>,
     pub cookie_path: PathBuf,
-    pub developer_key_path: PathBuf,
-    pub developer_key: OnceCell<ed25519_dalek::SigningKey>,
+    pub id_key_path: PathBuf,
+    pub id_key: OnceCell<ed25519_dalek::SigningKey>,
     pub root_ca: Vec<PathBuf>,
     pub insecure: bool,
 }
@@ -208,10 +210,8 @@ impl CliContext {
             },
             cookie_store,
             cookie_path,
-            developer_key_path: config
-                .developer_key_path
-                .unwrap_or_else(default_developer_key_path),
-            developer_key: OnceCell::new(),
+            id_key_path: config.id_key_path.unwrap_or_else(default_id_key_path),
+            id_key: OnceCell::new(),
             root_ca: config.root_ca.unwrap_or_default(),
             insecure: config.insecure,
         })))
@@ -239,9 +239,13 @@ impl CliContext {
 
     /// BLOCKING
     #[instrument(skip_all)]
-    pub fn developer_key(&self) -> Result<&ed25519_dalek::SigningKey, Error> {
-        self.developer_key.get_or_try_init(|| {
-            for path in [Path::new(OS_DEVELOPER_KEY_PATH), &self.developer_key_path] {
+    pub fn id_key(&self) -> Result<&ed25519_dalek::SigningKey, Error> {
+        self.id_key.get_or_try_init(|| {
+            migrate_legacy_key_file(
+                &self.id_key_path,
+                &self.id_key_path.with_file_name("developer.key.pem"),
+            );
+            for path in [Path::new(OS_ID_KEY_PATH), &self.id_key_path] {
                 if !path.exists() {
                     continue;
                 }
@@ -260,20 +264,25 @@ impl CliContext {
                 return Ok(secret.into());
             }
             Err(Error::new(
-                eyre!("{}", t!("context.cli.developer-key-does-not-exist")),
+                eyre!("{}", t!("context.cli.id-key-does-not-exist")),
                 crate::ErrorKind::Uninitialized,
             ))
         })
     }
 
-    /// The workspace's s9pk signing key. Walks up from cwd for `.startos/build-key`
-    /// (created by `s9pk init-workspace`) and errors if there's no workspace, since
-    /// s9pk signing is workspace-scoped. Distinct from [`Self::developer_key`], which
-    /// stays the global identity for registry/server auth.
+    /// The workspace's s9pk signing key. Walks up from cwd for
+    /// `.startos/build.key.pem` (created by `s9pk init-workspace`) and errors if
+    /// there's no workspace, since s9pk signing is workspace-scoped. Distinct
+    /// from [`Self::id_key`], which stays the global identity for
+    /// registry/server auth.
     pub fn build_key(&self) -> Result<ed25519_dalek::SigningKey, Error> {
         let mut dir = std::env::current_dir().with_kind(ErrorKind::Filesystem)?;
         loop {
             let candidate = dir.join(STARTOS_DIR).join(BUILD_KEY_FILE);
+            migrate_legacy_key_file(
+                &candidate,
+                &dir.join(STARTOS_DIR).join(LEGACY_BUILD_KEY_FILE),
+            );
             // EACCES on an inaccessible ancestor (or any other IO error) is treated
             // as "no accessible workspace here" — stop walking rather than either
             // silently stepping past it (`exists()`) or surfacing the error

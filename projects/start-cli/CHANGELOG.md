@@ -9,6 +9,21 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
+## [1.1.0]
+
+### Changed
+
+- **Authentication moved from session cookies to per-device signing keys.** `auth login` now
+  enrolls the CLI's identity key with the server instead of opening a cookie session, and every
+  request is signed with that key (`X-Start-Auth-Sig`; unpadded base64url DER key and signature).
+  Requires a server with key-based auth (StartOS ≥ 0.4.0-beta.10, StartTunnel ≥ 1.2.0).
+- **Key files renamed: `developer.key.pem` → `id.key.pem` and `.startos/build-key` →
+  `.startos/build.key.pem`.** The first is the CLI's identity for login and registry auth, not a
+  developer-only feature, and the build key gains a conventional extension. Existing files are
+  renamed automatically the first time the CLI loads them; `--developer-key-path` and the
+  `developer-key-path` config field remain accepted as aliases of `--id-key-path` /
+  `id-key-path`.
+
 ## [1.0.3]
 
 ### Added

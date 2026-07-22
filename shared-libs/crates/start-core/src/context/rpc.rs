@@ -32,7 +32,7 @@ use crate::disk::mount::guard::MountGuard;
 use crate::init::{InitResult, check_time_is_synchronized};
 use crate::install::PKG_ARCHIVE_DIR;
 use crate::lxc::LxcManager;
-use crate::middleware::auth::signature::HasUnenrolledKeys;
+use crate::middleware::auth::signature::{HasUnenrolledKeys, NonceCache};
 use crate::net::gateway::WildcardListener;
 use crate::net::net_controller::{NetController, NetService};
 use crate::net::socks::DEFAULT_SOCKS_LISTEN;
@@ -58,6 +58,7 @@ pub struct RpcContextSeed {
     pub os_partitions: OsPartitionInfo,
     pub disk_guid: InternedString,
     pub ephemeral_auth_keys: SyncMutex<AuthKeys>,
+    pub auth_sig_nonce_cache: SyncMutex<NonceCache>,
     pub db: TypedPatchDb<Database>,
     pub sync_db: watch::Sender<u64>,
     pub account: SyncRwLock<AccountInfo>,
@@ -370,6 +371,7 @@ impl RpcContext {
             os_partitions: OsPartitionInfo::from_fstab().await?,
             disk_guid,
             ephemeral_auth_keys: SyncMutex::new(AuthKeys::new()),
+            auth_sig_nonce_cache: SyncMutex::new(Default::default()),
             sync_db: watch::Sender::new(db.sequence().await),
             db,
             account: SyncRwLock::new(account),

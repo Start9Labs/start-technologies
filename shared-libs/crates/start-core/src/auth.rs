@@ -232,12 +232,12 @@ where
         rpassword::prompt_password("Password: ")?
     };
 
-    if ctx.developer_key().is_err() {
+    if ctx.id_key().is_err() {
         let secret = ed25519_dalek::SigningKey::generate(&mut crate::util::crypto::os_rng());
-        crate::developer::write_developer_key(&secret, &ctx.developer_key_path).await?;
+        crate::developer::write_signing_key(&secret, &ctx.id_key_path).await?;
     }
     let pubkey = ctx
-        .developer_key()
+        .id_key()
         .map(|k| AnyVerifyingKey::Ed25519(k.into()).to_string())?;
 
     ctx.call_remote::<C>(

@@ -32,19 +32,33 @@ pub struct RequestCommitment {
 }
 impl RequestCommitment {
     pub fn append_query(&self, url: &mut Url) {
+        use base64::Engine;
         url.query_pairs_mut()
             .append_pair("timestamp", &self.timestamp.to_string())
             .append_pair("nonce", &self.nonce.to_string())
             .append_pair("size", &self.size.to_string())
-            .append_pair("blake3", &self.blake3.to_string());
+            .append_pair(
+                "blake3",
+                // unpadded base64url, like every binary param in the header
+                &base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&*self.blake3),
+            );
     }
     pub fn from_query(query: &HeaderValue) -> Result<Self, Error> {
+        use base64::Engine;
         let query: BTreeMap<_, _> = form_urlencoded::parse(query.as_bytes()).collect();
         Ok(Self {
             timestamp: query.get("timestamp").or_not_found("timestamp")?.parse()?,
             nonce: query.get("nonce").or_not_found("nonce")?.parse()?,
             size: query.get("size").or_not_found("size")?.parse()?,
-            blake3: query.get("blake3").or_not_found("blake3")?.parse()?,
+            blake3: Base64(
+                base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .decode(&**query.get("blake3").or_not_found("blake3")?)
+                    .with_kind(ErrorKind::Deserialization)?
+                    .try_into()
+                    .map_err(|_| {
+                        Error::new(eyre!("blake3 hash must be 32 bytes"), ErrorKind::ParseUrl)
+                    })?,
+            ),
         })
     }
 }
