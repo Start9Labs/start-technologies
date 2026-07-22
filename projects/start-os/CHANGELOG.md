@@ -95,6 +95,11 @@ file tracks notable changes since the move to the monorepo.
   All existing sessions are signed out on upgrade — sign in again on each
   device. Resolves #3511.
 
+  The device key is a non-extractable WebCrypto key held in IndexedDB: page
+  scripts can sign with it while the page is open, but can never read the key
+  material out. Logging in requires a browser with Ed25519 WebCrypto support —
+  any evergreen browser (Safari 17, Firefox 130, Chrome/Edge 137, or newer).
+
   HTTP cookies are gone from the API entirely: the server no longer sets or
   reads any cookie, so cookies planted by services co-hosted on other ports of
   the same hostname can no longer collide with StartOS auth. `start-cli` run on
@@ -327,6 +332,12 @@ file tracks notable changes since the move to the monorepo.
 
 ### Security
 
+- **The web UIs ship a strict Content-Security-Policy.** Every response from
+  the UI origin — the main UI, setup wizard, and diagnostic/init pages — now
+  carries a CSP restricting scripts and network connections to the server's
+  own origin (no framing, no plugin content), plus
+  `X-Content-Type-Options: nosniff`. A script injection that slips into the
+  page can no longer pull in outside code or exfiltrate to a foreign host.
 - **TSIG-authenticated DNS UPDATE (#3306).** RFC 2136 injections are authenticated with TSIG (RFC 8945, HMAC-SHA256) keyed off a per-device key derived (HKDF-SHA256) from that device's WireGuard PSK, closing a forgery vector where any co-located service emitting from the server's tunnel IP could inject DNS.
 - **Packages are blocked from port-mapping the gateway (#3306).** Only startd may send UPnP/NAT-PMP/PCP upstream; a dedicated nftables guard table drops these protocols when forwarded from any interface (LXC), so a service can't open ports on the upstream gateway.
 - **Packages are blocked from talking DNS straight to the gateway.** The same guard table now drops DNS (udp/tcp 53) forwarded off the container bridge, so a service can't query a gateway or public resolver directly — its DNS goes through the OS resolver at `10.0.3.1:53`, same as every other lookup.

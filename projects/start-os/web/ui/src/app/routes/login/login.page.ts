@@ -120,7 +120,7 @@ export default class LoginPage {
         this.error.set('Password must be less than 65 characters')
         return
       }
-      const key = this.authKeys.create()
+      const key = await this.authKeys.create()
       try {
         await this.api.login({
           password: this.password(),
@@ -129,7 +129,7 @@ export default class LoginPage {
           ephemeral: window.location.host === 'localhost',
         })
       } catch (e) {
-        this.authKeys.rollback()
+        await this.authKeys.rollback()
         throw e
       }
 

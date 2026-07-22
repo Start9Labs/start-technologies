@@ -79,7 +79,7 @@ export default class Login {
   protected async login() {
     this.loading.set(true)
     try {
-      const key = this.authKeys.create()
+      const key = await this.authKeys.create()
       try {
         await this.api.login({
           password: this.password,
@@ -87,7 +87,7 @@ export default class Login {
           ephemeral: false,
         })
       } catch (e) {
-        this.authKeys.rollback()
+        await this.authKeys.rollback()
         throw e
       }
       this.auth.authenticated.set(true)

@@ -760,7 +760,7 @@ export class LiveApiService extends ApiService {
             ...options,
             headers: {
               ...options.headers,
-              ...this.authKeys.signRpcHeaders(options),
+              ...(await this.authKeys.signRpcHeaders(options)),
             },
           },
       urlOverride,
@@ -792,7 +792,7 @@ export class LiveApiService extends ApiService {
         ...opts,
         headers: {
           ...opts.headers,
-          ...this.authKeys.signHeader(new Uint8Array(0)),
+          ...(await this.authKeys.signHeader(new Uint8Array(0))),
         },
       }
     }

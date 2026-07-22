@@ -135,7 +135,10 @@
             },
             "index": "projects/start-os/web/setup-wizard/src/index.html",
             "browser": "projects/start-os/web/setup-wizard/src/main.ts",
-            "polyfills": ["zone.js"],
+            "polyfills": [
+              "zone.js",
+              "projects/start-os/web/setup-wizard/src/polyfills.ts"
+            ],
             "tsConfig": "projects/start-os/web/setup-wizard/tsconfig.json",
             "inlineStyleLanguage": "scss",
             "assets": [

@@ -28,8 +28,9 @@ export class AuthService {
     distinctUntilChanged(),
   )
 
-  init(): void {
-    if (this.authKeys.get()) {
+  /** Resolves before initial navigation — routing waits on the key check. */
+  async init(): Promise<void> {
+    if (await this.authKeys.get()) {
       this.setVerified()
     } else {
       this.setUnverified(true)
@@ -57,6 +58,8 @@ export class AuthService {
     }
     this.freshLoginAt = 0
     this.authState$.next(AuthState.UNVERIFIED)
+    // The key lives in IndexedDB, out of reach of `storage.clear()`.
+    this.authKeys.clear()
     this.storage.clear()
 
     if (!skipNavigation) {

@@ -225,7 +225,7 @@ export class LiveApiService extends ApiService {
             ...options,
             headers: {
               ...options.headers,
-              ...this.authKeys.signRpcHeaders(options),
+              ...(await this.authKeys.signRpcHeaders(options)),
             },
           },
       urlOverride,

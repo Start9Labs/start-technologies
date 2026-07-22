@@ -7,7 +7,12 @@ export class AuthService {
   private readonly authKeys = inject(AuthKeyService)
   private readonly router = inject(Router)
 
-  readonly authenticated = signal(Boolean(this.authKeys.get()))
+  readonly authenticated = signal(false)
+
+  /** Resolves before initial navigation — the route guards read this signal. */
+  async init(): Promise<void> {
+    this.authenticated.set(Boolean(await this.authKeys.get()))
+  }
 
   deauthenticate(): void {
     this.authKeys.clear()

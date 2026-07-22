@@ -203,6 +203,28 @@ fn serve_ui<C: UiContext>(req: Request) -> Result<Response, Error> {
     }
 }
 
+/// Hardening headers on every UI-origin response. The CSP is the backstop
+/// that keeps an XSS from exfiltrating or persistently abusing the enrolled
+/// signing key: same-origin scripts and connections only, no framing, no
+/// plugin content. `'unsafe-inline'` styles are required by the `<style>`
+/// tags Angular injects at runtime.
+async fn add_security_headers(mut res: Response) -> Response {
+    let headers = res.headers_mut();
+    headers.insert(
+        http::header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
+             img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; \
+             object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+        ),
+    );
+    headers.insert(
+        http::header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    res
+}
+
 pub fn ui_router<C: UiContext>(ctx: C) -> Router {
     ctx.clone()
         .extend_router(rpc_router(
@@ -212,6 +234,7 @@ pub fn ui_router<C: UiContext>(ctx: C) -> Router {
         .fallback(any(|request: Request| async move {
             serve_ui::<C>(request).unwrap_or_else(server_error)
         }))
+        .layer(axum::middleware::map_response(add_security_headers))
 }
 
 pub fn refresher() -> Router {

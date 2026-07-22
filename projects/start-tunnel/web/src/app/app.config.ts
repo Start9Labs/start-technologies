@@ -32,6 +32,7 @@ import {
 import { AppTitleStrategy } from 'src/app/services/title.service'
 import { routes } from './app.routes'
 import { ApiService } from './services/api/api.service'
+import { AuthService } from './services/auth.service'
 import { LiveApiService } from './services/api/live-api.service'
 import { MockApiService } from './services/api/mock-api.service'
 
@@ -53,6 +54,9 @@ export const appConfig: ApplicationConfig = {
         (localStorage.getItem(LANG_STORAGE_KEY) as Languages) || 'en_US',
       )
     }),
+    // Await the (IndexedDB) key check so the route guards see the right auth
+    // state on the very first navigation.
+    provideAppInitializer(() => inject(AuthService).init()),
     tuiHintOptionsProvider({ appearance: 'primary-grayscale' }),
     tuiDialogOptionsProvider({ size: 's' }),
     {

@@ -136,12 +136,18 @@ export const APP_CONFIG: ApplicationConfig = {
     tuiProvide(MARKETPLACE_REGISTRY_ALERTS, MarketplaceAlertsService),
     provideAppInitializer(() => {
       const i18n = inject(i18nService)
+      const clientStorage = inject(ClientStorageService)
+      const router = inject(Router)
+      const auth = inject(AuthService)
 
       inject(StorageService).migrate036()
-      inject(AuthService).init()
-      inject(ClientStorageService).init()
-      inject(Router).initialNavigation()
-      i18n.setLanguage(i18n.language || 'english')
+      // Await the (IndexedDB) key check so the guards see the right auth
+      // state on the very first navigation.
+      return auth.init().then(() => {
+        clientStorage.init()
+        router.initialNavigation()
+        i18n.setLanguage(i18n.language || 'english')
+      })
     }),
     {
       provide: RELATIVE_URL,

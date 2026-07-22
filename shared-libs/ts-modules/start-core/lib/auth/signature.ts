@@ -1,12 +1,11 @@
-import { ed25519 } from '@noble/curves/ed25519'
 import { blake3 } from '@noble/hashes/blake3'
 import { concatBytes, hexToBytes } from '@noble/hashes/utils'
 
 /**
  * Client side of the server's signature auth (`X-Start-Auth-Sig`).
  *
- * A request is authorized by signing, with an enrolled Ed25519 key (pure
- * Ed25519, WebCrypto-compatible), a message of:
+ * A request is authorized by signing, with an enrolled Ed25519 key, a
+ * message of:
  *
  *   "Start-Auth-Sig v1\0" || timestamp || nonce || size || blake3(body) || context
  *
@@ -14,38 +13,41 @@ import { concatBytes, hexToBytes } from '@noble/hashes/utils'
  * and the server identity (hostname/IP/domain) the signature is bound to. The
  * header value is the query-encoded commitment plus the signer's public key
  * and the signature, each as bare base64 DER (no PEM armor).
+ *
+ * Keys are WebCrypto and non-extractable: a compromised page can sign while
+ * it lives, but can never read the key out for offline use. Requires a
+ * secure context and Ed25519 WebCrypto support (all evergreen browsers).
  */
 
 const REQUEST_AUTH_TAG = new TextEncoder().encode('Start-Auth-Sig v1\0')
 
 export const AUTH_SIG_HEADER = 'X-Start-Auth-Sig'
 
-// DER prefix of an Ed25519 SubjectPublicKeyInfo: SEQUENCE(SEQUENCE(OID 1.3.101.112), BIT STRING)
-const SPKI_PREFIX = hexToBytes('302a300506032b6570032100')
 // DER prefix of the server's SIGNATURE document: SEQUENCE(SEQUENCE(OID 1.3.101.112), OCTET STRING)
 const SIGNATURE_PREFIX = hexToBytes('3049300506032b65700440')
 
 export interface AuthKey {
-  /** Raw 32-byte Ed25519 secret key. */
-  secretKey: Uint8Array
+  /** Non-extractable Ed25519 signing key. */
+  privateKey: CryptoKey
   /** PEM-encoded public key, as sent in `LoginParams.pubkey`. */
   pubkeyPem: string
 }
 
-export function generateAuthKey(): AuthKey {
-  const secretKey = ed25519.utils.randomSecretKey()
-  return { secretKey, pubkeyPem: pubkeyToPem(ed25519.getPublicKey(secretKey)) }
+export async function generateAuthKey(): Promise<AuthKey> {
+  const { privateKey, publicKey } = (await crypto.subtle.generateKey(
+    'Ed25519',
+    false,
+    ['sign', 'verify'],
+  )) as CryptoKeyPair
+  const spki = new Uint8Array(await crypto.subtle.exportKey('spki', publicKey))
+  return { privateKey, pubkeyPem: derToPem('PUBLIC KEY', spki) }
 }
 
-export function pubkeyToPem(publicKey: Uint8Array): string {
-  return derToPem('PUBLIC KEY', concatBytes(SPKI_PREFIX, publicKey))
-}
-
-export function signRequest(
+export async function signRequest(
   key: AuthKey,
   context: string,
   body: Uint8Array,
-): string {
+): Promise<string> {
   const timestamp = BigInt(Math.floor(Date.now() / 1000))
   const nonce = crypto.getRandomValues(new BigUint64Array(1))[0]
   const size = BigInt(body.length)
@@ -63,19 +65,16 @@ export function signRequest(
   message.set(hash, REQUEST_AUTH_TAG.length + 24)
   message.set(contextBytes, REQUEST_AUTH_TAG.length + 56)
 
-  const signature = ed25519.sign(message, key.secretKey)
+  const signature = new Uint8Array(
+    await crypto.subtle.sign('Ed25519', key.privateKey, message),
+  )
 
   const params = new URLSearchParams()
   params.set('timestamp', timestamp.toString())
   params.set('nonce', nonce.toString())
   params.set('size', size.toString())
   params.set('blake3', base64UrlEncode(hash))
-  params.set(
-    'signer',
-    base64UrlEncode(
-      concatBytes(SPKI_PREFIX, ed25519.getPublicKey(key.secretKey)),
-    ),
-  )
+  params.set('signer', base64UrlEncode(pemToDer(key.pubkeyPem)))
   params.set(
     'signature',
     base64UrlEncode(concatBytes(SIGNATURE_PREFIX, signature)),
@@ -90,6 +89,10 @@ function derToPem(label: string, der: Uint8Array): string {
     lines.push(body.slice(i, i + 64))
   }
   return `-----BEGIN ${label}-----\n${lines.join('\n')}\n-----END ${label}-----\n`
+}
+
+function pemToDer(pem: string): Uint8Array {
+  return base64ToBytes(pem.replace(/-----[^-]*-----|\s/g, ''))
 }
 
 /** Unpadded base64url: survives a form-urlencoded container unescaped. */
