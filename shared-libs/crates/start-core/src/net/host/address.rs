@@ -392,6 +392,9 @@ pub async fn add_public_domain<Kind: HostApiKind>(
     }: AddPublicDomainParams,
     inheritance: Kind::Inheritance,
 ) -> Result<AddPublicDomainRes, Error> {
+    // Domains are matched byte-for-byte against the browser's lowercased
+    // `location.hostname` — normalize at the boundary (covers UI and CLI).
+    let fqdn = InternedString::intern(fqdn.to_ascii_lowercase());
     let ext_port = ctx
         .db
         .mutate(|db| {
@@ -601,6 +604,7 @@ pub async fn remove_public_domain<Kind: HostApiKind>(
     RemoveDomainParams { fqdn }: RemoveDomainParams,
     inheritance: Kind::Inheritance,
 ) -> Result<(), Error> {
+    let fqdn = InternedString::intern(fqdn.to_ascii_lowercase());
     ctx.db
         .mutate(|db| {
             Kind::host_for(&inheritance, db)?
@@ -636,6 +640,7 @@ pub async fn add_private_domain<Kind: HostApiKind>(
     AddPrivateDomainParams { fqdn, gateway }: AddPrivateDomainParams,
     inheritance: Kind::Inheritance,
 ) -> Result<bool, Error> {
+    let fqdn = InternedString::intern(fqdn.to_ascii_lowercase());
     ctx.db
         .mutate(|db| {
             let is_new = !Kind::host_for(&inheritance, db)?
@@ -690,6 +695,7 @@ pub async fn remove_private_domain<Kind: HostApiKind>(
     RemoveDomainParams { fqdn: domain }: RemoveDomainParams,
     inheritance: Kind::Inheritance,
 ) -> Result<(), Error> {
+    let domain = InternedString::intern(domain.to_ascii_lowercase());
     ctx.db
         .mutate(|db| {
             Kind::host_for(&inheritance, db)?

@@ -158,7 +158,7 @@ export class GatewayComponent {
               required: true,
               default: null,
               patterns: [utils.Patterns.domain],
-            }),
+            }).map(f => f.toLowerCase()),
           }),
         ),
         note: this.getSharedHostNote(),
@@ -200,7 +200,7 @@ export class GatewayComponent {
         required: true,
         default: null,
         patterns: [utils.Patterns.domain],
-      }).map(f => f.toLocaleLowerCase()),
+      }).map(f => f.toLowerCase()),
       ...(iface.anyAddSsl
         ? {
             authority: ISB.Value.select({

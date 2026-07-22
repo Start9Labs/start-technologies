@@ -188,6 +188,6 @@ export class HeaderMenuComponent {
 
   logout() {
     this.api.logout({}).catch(e => console.error('Failed to log out', e))
-    this.auth.setUnverified()
+    this.auth.logout()
   }
 }

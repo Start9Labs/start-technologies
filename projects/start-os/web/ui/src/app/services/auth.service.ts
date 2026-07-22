@@ -43,6 +43,12 @@ export class AuthService {
     this.authState$.next(AuthState.VERIFIED)
   }
 
+  /** An explicit, user-requested logout — never an error. */
+  logout(): void {
+    this.freshLoginAt = 0
+    this.setUnverified()
+  }
+
   setUnverified(skipNavigation = false): void {
     if (Date.now() - this.freshLoginAt < 10_000) {
       this.loginError.set(

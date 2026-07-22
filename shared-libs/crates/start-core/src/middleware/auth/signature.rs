@@ -390,10 +390,12 @@ impl NonceCache {
                 self.order.pop_first();
             }
         }
+        // Not `Authorization`: clients treat 34 as key revocation and log out,
+        // but a replay can be an innocent transport retransmit.
         if !self.seen.insert(nonce) {
             return Err(Error::new(
                 eyre!("{}", t!("middleware.auth.replay-attack-detected")),
-                ErrorKind::Authorization,
+                ErrorKind::InvalidSignature,
             ));
         }
         self.order.insert((timestamp, nonce));

@@ -50,15 +50,18 @@ export function signRequest(
   const nonce = crypto.getRandomValues(new BigUint64Array(1))[0]
   const size = BigInt(body.length)
   const hash = blake3(body)
+  const contextBytes = new TextEncoder().encode(context)
 
-  const message = new Uint8Array(REQUEST_AUTH_TAG.length + 56 + context.length)
+  const message = new Uint8Array(
+    REQUEST_AUTH_TAG.length + 56 + contextBytes.length,
+  )
   message.set(REQUEST_AUTH_TAG, 0)
   const view = new DataView(message.buffer, REQUEST_AUTH_TAG.length, 24)
   view.setBigInt64(0, timestamp, false)
   view.setBigUint64(8, nonce, false)
   view.setBigUint64(16, size, false)
   message.set(hash, REQUEST_AUTH_TAG.length + 24)
-  message.set(new TextEncoder().encode(context), REQUEST_AUTH_TAG.length + 56)
+  message.set(contextBytes, REQUEST_AUTH_TAG.length + 56)
 
   const signature = ed25519.sign(message, key.secretKey)
 

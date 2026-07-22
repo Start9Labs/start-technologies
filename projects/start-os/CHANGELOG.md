@@ -176,6 +176,10 @@ file tracks notable changes since the move to the monorepo.
 
 ### Fixed
 
+- **Mixed-case domains now match the browser.** Domain names are lowercased
+  when added or removed (UI and CLI alike), so a domain entered with capital
+  letters can no longer end up unreachable against the browser's lowercased
+  address bar.
 - **Login rate limiter no longer degrades logins to one per 20 seconds (#3512).**
   The password-login throttle used a single process-wide counter that only ever
   incremented and never reset, so after three logins since boot the entire box

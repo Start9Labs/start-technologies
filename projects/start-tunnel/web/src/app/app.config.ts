@@ -12,6 +12,7 @@ import {
 } from '@angular/core'
 import { provideRouter, TitleStrategy, withRouterConfig } from '@angular/router'
 import {
+  AUTH_KEY_STORAGE_KEY,
   i18nService,
   Languages,
   RELATIVE_URL,
@@ -66,6 +67,12 @@ export const appConfig: ApplicationConfig = {
     {
       provide: RELATIVE_URL,
       useValue: `/${api.url}/${api.version}`,
+    },
+    // Own slot so a start-os UI served from the same origin (dev servers, a
+    // re-pointed forward) can't clobber this app's enrolled key.
+    {
+      provide: AUTH_KEY_STORAGE_KEY,
+      useValue: '_startTunnel/authKey',
     },
     {
       provide: TitleStrategy,

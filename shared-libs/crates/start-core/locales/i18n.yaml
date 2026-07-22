@@ -2724,11 +2724,11 @@ middleware.auth.invalid-request-signature:
   pl_PL: "nieprawidłowy podpis żądania: nieważny dla żadnej tożsamości rozpoznawanej przez ten serwer (nazwa hosta, domena lub adres IP); żądanie zostało prawdopodobnie podpisane dla innej tożsamości serwera lub przez niezgodnego klienta"
 
 middleware.auth.timestamp-not-within-30s:
-  en_US: "timestamp not within 30s of now"
-  de_DE: "Zeitstempel nicht innerhalb von 30s der aktuellen Zeit"
-  es_ES: "la marca de tiempo no está dentro de 30s del momento actual"
-  fr_FR: "l'horodatage n'est pas dans les 30s de maintenant"
-  pl_PL: "znacznik czasu nie mieści się w 30s od teraz"
+  en_US: "timestamp not within 30s of now; check this device's clock and the server's clock"
+  de_DE: "Zeitstempel nicht innerhalb von 30s der aktuellen Zeit; prüfen Sie die Uhr dieses Geräts und die des Servers"
+  es_ES: "la marca de tiempo no está dentro de 30s del momento actual; compruebe el reloj de este dispositivo y el del servidor"
+  fr_FR: "l'horodatage n'est pas dans les 30s de maintenant ; vérifiez l'horloge de cet appareil et celle du serveur"
+  pl_PL: "znacznik czasu nie mieści się w 30s od teraz; sprawdź zegar tego urządzenia i serwera"
 
 middleware.auth.unknown-content-type:
   en_US: "unknown content type"

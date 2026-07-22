@@ -216,13 +216,18 @@ export class LiveApiService extends ApiService {
     options: RPCOptions,
     urlOverride?: string,
   ): Promise<T> {
-    // Signed with the enrolled device key.
-    const headers = {
-      ...options.headers,
-      ...this.authKeys.signRpcHeaders(options),
-    }
+    // A foreign origin must never receive our signature (or a signed message
+    // valid at home).
     const res = await this.http.rpcRequest<T>(
-      { ...options, headers },
+      urlOverride
+        ? options
+        : {
+            ...options,
+            headers: {
+              ...options.headers,
+              ...this.authKeys.signRpcHeaders(options),
+            },
+          },
       urlOverride,
     )
     const body = res.body

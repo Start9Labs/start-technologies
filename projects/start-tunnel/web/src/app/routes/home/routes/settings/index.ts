@@ -1,7 +1,6 @@
 import { Component, computed, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { FormsModule } from '@angular/forms'
-import { Router } from '@angular/router'
 import { WA_IS_MOBILE } from '@ng-web-apis/platform'
 import {
   ErrorService,
@@ -205,7 +204,6 @@ export default class Settings {
   private readonly errorService = inject(ErrorService)
   private readonly api = inject(ApiService)
   private readonly auth = inject(AuthService)
-  private readonly router = inject(Router)
   private readonly tasks = inject(TaskService)
   private readonly patch = inject<PatchDB<TunnelData>>(PatchDB)
   private readonly i18n = inject(i18nPipe)
@@ -331,9 +329,9 @@ export default class Settings {
 
   protected async onLogout() {
     this.tasks.run(async () => {
-      await this.api.logout()
+      // Best-effort revoke — logout must still work offline.
+      await this.api.logout().catch(e => console.error('Failed to log out', e))
       this.auth.deauthenticate()
-      this.router.navigate(['/'])
     })
   }
 }

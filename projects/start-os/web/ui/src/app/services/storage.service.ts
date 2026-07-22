@@ -26,7 +26,6 @@ export class StorageService {
     if (this.storage?.getItem(`${oldPrefix}loggedInKey`)) {
       const cache = this.storage.getItem(`${oldPrefix}patch-db-cache`)
       this.clear()
-      this.set('loggedIn', true)
       this.set('patchDB', cache)
     }
   }

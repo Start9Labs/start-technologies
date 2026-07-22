@@ -38,7 +38,7 @@ import { ConfigService } from 'src/app/services/config.service'
             />
             <tui-icon tuiPassword />
           </tui-textfield>
-          <tui-error [error]="error() || authError()" />
+          <tui-error [error]="error() || authError() | i18n" />
           <button tuiButton size="m" [loading]="loading()">
             {{ 'Login' | i18n }}
           </button>
@@ -129,7 +129,7 @@ export default class LoginPage {
           ephemeral: window.location.host === 'localhost',
         })
       } catch (e) {
-        this.authKeys.discard()
+        this.authKeys.rollback()
         throw e
       }
 
