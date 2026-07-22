@@ -38,7 +38,10 @@ pub struct TunnelDatabase {
     pub migrations: BTreeSet<InternedString>,
     pub webserver: WebserverInfo,
     pub password: Option<String>,
-    pub auth_pubkeys: AuthKeys,
+    /// Same key as the StartOS private db, so a 1.1.x db upgrades by serde
+    /// default (empty — everyone signs in again) with no migration.
+    #[serde(default)]
+    pub session_pubkeys: AuthKeys,
     #[ts(as = "std::collections::BTreeMap::<GatewayId, NetworkInterfaceInfo>")]
     pub gateways: OrdMap<GatewayId, NetworkInterfaceInfo>,
     pub wg: WgServer,

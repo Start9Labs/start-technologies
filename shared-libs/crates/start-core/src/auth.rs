@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
@@ -16,9 +16,8 @@ use tracing::instrument;
 use ts_rs::TS;
 
 use crate::context::{CliContext, RpcContext};
-use crate::middleware::auth::DbContext;
+use crate::middleware::auth::signature::{HasUnenrolledKeys, SignatureAuthContext};
 use crate::prelude::*;
-use crate::rpc_continuations::OpenAuthedContinuations;
 use crate::sign::AnyVerifyingKey;
 use crate::util::crypto::EncryptedWire;
 use crate::util::io::create_file_mod;
@@ -47,27 +46,21 @@ impl Map for AuthKeys {
     }
 }
 
-pub trait AuthKeyContext: DbContext {
-    fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>>;
+/// Contexts where a password can enroll an auth key (login), plus access to
+/// the enrolled-key store that login writes and the session list reads.
+pub trait LoginContext: SignatureAuthContext {
+    /// The persisted enrolled-key store. Enrollment happens via login; never
+    /// remove a key directly — unenrollment goes through
+    /// [`SignatureAuthContext::unenroll`] so a revoked key's open
+    /// continuations die with it.
     fn access_auth_keys(db: &mut Model<Self::Database>) -> &mut Model<AuthKeys>;
-    /// In-memory enrolled keys that are never persisted (kiosk mode), if the
-    /// context supports them.
-    fn ephemeral_auth_keys(&self) -> Option<&SyncMutex<AuthKeys>> {
-        None
-    }
     fn check_password(db: &Model<Self::Database>, password: &str) -> Result<(), Error>;
     #[allow(unused_variables)]
     fn post_login_hook(&self, password: &str) -> impl Future<Output = Result<(), Error>> + Send {
         async { Ok(()) }
     }
 }
-impl AuthKeyContext for RpcContext {
-    fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>> {
-        &self.open_authed_continuations
-    }
-    fn ephemeral_auth_keys(&self) -> Option<&SyncMutex<AuthKeys>> {
-        Some(&self.ephemeral_auth_keys)
-    }
+impl LoginContext for RpcContext {
     fn access_auth_keys(db: &mut Model<Self::Database>) -> &mut Model<AuthKeys> {
         db.as_private_mut().as_session_pubkeys_mut()
     }
@@ -82,39 +75,6 @@ impl AuthKeyContext for RpcContext {
             write_shadow(&password).await?;
         }
         Ok(())
-    }
-}
-
-/// Removes enrolled keys and kills any continuations they opened.
-#[derive(Serialize, Deserialize)]
-pub struct HasLoggedOutKeys(());
-impl HasLoggedOutKeys {
-    pub async fn new<C: AuthKeyContext>(
-        keys: impl IntoIterator<Item = InternedString>,
-        ctx: &C,
-    ) -> Result<Self, Error> {
-        let keys: BTreeSet<_> = keys.into_iter().collect();
-        for key in &keys {
-            ctx.open_authed_continuations().kill(&Some(key.clone()))
-        }
-        if let Some(ephemeral) = ctx.ephemeral_auth_keys() {
-            ephemeral.mutate(|map| {
-                for key in &keys {
-                    map.0.remove(&**key);
-                }
-            });
-        }
-        ctx.db()
-            .mutate(|db| {
-                let auth_keys = C::access_auth_keys(db);
-                for key in &keys {
-                    auth_keys.remove(key)?;
-                }
-                Ok(())
-            })
-            .await
-            .result?;
-        Ok(HasLoggedOutKeys(()))
     }
 }
 
@@ -190,7 +150,7 @@ impl std::str::FromStr for PasswordType {
         })
     }
 }
-pub fn auth<C: Context, AC: AuthKeyContext>() -> ParentHandler<C>
+pub fn auth<C: Context, AC: LoginContext>() -> ParentHandler<C>
 where
     CliContext: CallRemote<AC>,
 {
@@ -255,7 +215,7 @@ fn gen_pwd() {
 }
 
 #[instrument(skip_all)]
-async fn cli_login<C: AuthKeyContext>(
+async fn cli_login<C: LoginContext>(
     HandlerArgs {
         context: ctx,
         parent_method,
@@ -339,7 +299,7 @@ static LOGIN_RATE_LIMITER: LazyLock<SyncMutex<(usize, Instant)>> =
     LazyLock::new(|| SyncMutex::new((0, Instant::now())));
 
 #[instrument(skip_all)]
-pub async fn login_impl<C: AuthKeyContext>(
+pub async fn login_impl<C: LoginContext>(
     ctx: C,
     LoginParams {
         password,
@@ -417,11 +377,11 @@ pub struct LogoutParams {
     signer: InternedString,
 }
 
-pub async fn logout<C: AuthKeyContext>(
+pub async fn logout<C: SignatureAuthContext>(
     ctx: C,
     LogoutParams { signer }: LogoutParams,
-) -> Result<Option<HasLoggedOutKeys>, Error> {
-    Ok(Some(HasLoggedOutKeys::new(vec![signer], &ctx).await?))
+) -> Result<Option<HasUnenrolledKeys>, Error> {
+    Ok(Some(ctx.unenroll([signer]).await?))
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, TS)]
@@ -451,7 +411,7 @@ pub struct SessionList {
     sessions: AuthKeys,
 }
 
-pub fn session<C: Context, AC: AuthKeyContext>() -> ParentHandler<C>
+pub fn session<C: Context, AC: LoginContext>() -> ParentHandler<C>
 where
     CliContext: CallRemote<AC>,
 {
@@ -519,7 +479,7 @@ pub struct ListParams {
 
 // #[command(display(display_sessions))]
 #[instrument(skip_all)]
-pub async fn list<C: AuthKeyContext>(
+pub async fn list<C: LoginContext>(
     ctx: C,
     ListParams { signer }: ListParams,
 ) -> Result<SessionList, Error> {
@@ -548,8 +508,12 @@ pub struct KillParams {
 }
 
 #[instrument(skip_all)]
-pub async fn kill<C: AuthKeyContext>(ctx: C, KillParams { ids }: KillParams) -> Result<(), Error> {
-    HasLoggedOutKeys::new(ids.into_iter().map(InternedString::from), &ctx).await?;
+pub async fn kill<C: SignatureAuthContext>(
+    ctx: C,
+    KillParams { ids }: KillParams,
+) -> Result<(), Error> {
+    ctx.unenroll(ids.into_iter().map(InternedString::from))
+        .await?;
     Ok(())
 }
 

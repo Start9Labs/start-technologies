@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
@@ -31,7 +32,7 @@ use crate::registry::RegistryDatabase;
 use crate::registry::device_info::{DEVICE_INFO_HEADER, DeviceInfo};
 use crate::registry::migrations::run_migrations;
 use crate::registry::signer::SignerInfo;
-use crate::rpc_continuations::RpcContinuations;
+use crate::rpc_continuations::{OpenAuthedContinuations, RpcContinuations};
 use crate::sign::AnyVerifyingKey;
 use crate::util::io::{append_file, read_file_to_string};
 use crate::util::sync::SyncMutex;
@@ -86,6 +87,7 @@ pub struct RegistryContextSeed {
     pub db: TypedPatchDb<RegistryDatabase>,
     pub datadir: PathBuf,
     pub rpc_continuations: RpcContinuations,
+    pub open_authed_continuations: OpenAuthedContinuations<Option<InternedString>>,
     pub client: Client,
     pub shutdown: Sender<()>,
     pub metrics_db: SyncMutex<Connection>,
@@ -154,6 +156,7 @@ impl RegistryContext {
             db,
             datadir,
             rpc_continuations: RpcContinuations::new(),
+            open_authed_continuations: OpenAuthedContinuations::new(),
             client: Client::builder()
                 .proxy(Proxy::custom(move |url| {
                     if url.host_str().map_or(false, |h| h.ends_with(".onion")) {
@@ -364,6 +367,21 @@ impl LocalAuthContext for RegistryContext {
 impl SignatureAuthContext for RegistryContext {
     type AdditionalMetadata = RegistryAuthMetadata;
     type CheckPubkeyRes = Option<(AnyVerifyingKey, SignerInfo)>;
+    fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>> {
+        &self.open_authed_continuations
+    }
+    fn remove_enrolled_keys(
+        db: &mut Model<Self::Database>,
+        keys: &BTreeSet<InternedString>,
+    ) -> Result<(), Error> {
+        for (_, signer) in db.as_index_mut().as_signers_mut().as_entries_mut()? {
+            signer.as_keys_mut().mutate(|signer_keys| {
+                signer_keys.retain(|k| !keys.contains(&*k.interned_pem()));
+                Ok(())
+            })?;
+        }
+        Ok(())
+    }
     async fn sig_context(
         &self,
     ) -> impl IntoIterator<Item = Result<impl AsRef<str> + Send, Error>> + Send {

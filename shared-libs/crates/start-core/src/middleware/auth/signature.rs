@@ -12,19 +12,22 @@ use http::{HeaderMap, HeaderValue};
 use reqwest::Client;
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{Middleware, RpcRequest, RpcResponse};
-use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use url::Url;
 
+use crate::auth::AuthKeys;
 use crate::context::{CliContext, RpcContext};
 use crate::middleware::auth::DbContext;
 use crate::prelude::*;
+use crate::rpc_continuations::OpenAuthedContinuations;
 use crate::sign::commitment::Commitment;
 use crate::sign::commitment::request::RequestCommitment;
 use crate::sign::{AnySignature, AnySigningKey, AnyVerifyingKey, SignatureScheme};
 use crate::util::iter::TransposeResultIterExt;
 use crate::util::serde::Base64;
+use crate::util::sync::SyncMutex;
 
 pub const AUTH_SIG_HEADER: &str = "X-StartOS-Auth-Sig";
 
@@ -77,6 +80,23 @@ pub(crate) fn check_enrolled(
 pub trait SignatureAuthContext: DbContext {
     type AdditionalMetadata: DeserializeOwned + Send;
     type CheckPubkeyRes: Send;
+    /// Live continuations (REST/WS) registered under the signer that opened
+    /// them, so revoking a signer kills anything it left open. Keyed by the
+    /// signer's PEM (`None` for continuations opened without one).
+    fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>>;
+    /// In-memory enrolled keys that are never persisted (kiosk mode), if the
+    /// context supports them.
+    fn ephemeral_auth_keys(&self) -> Option<&SyncMutex<AuthKeys>> {
+        None
+    }
+    /// Remove `keys` from this context's persisted signer store. Store
+    /// removal only — never call directly: unenrollment goes through
+    /// [`Self::unenroll`] or [`HasUnenrolledKeys::unenroll`] so the keys'
+    /// open continuations die with them.
+    fn remove_enrolled_keys(
+        db: &mut Model<Self::Database>,
+        keys: &BTreeSet<InternedString>,
+    ) -> Result<(), Error>;
     fn sig_context(
         &self,
     ) -> impl Future<Output = impl IntoIterator<Item = Result<impl AsRef<str> + Send, Error>> + Send>
@@ -92,11 +112,85 @@ pub trait SignatureAuthContext: DbContext {
         check_pubkey_res: Self::CheckPubkeyRes,
         request: &RpcRequest,
     ) -> impl Future<Output = Result<(), Error>> + Send;
+    /// Unenroll `keys`, however they were enrolled: kills their open
+    /// continuations and removes them from the ephemeral and persisted
+    /// signer stores. Not meant to be overridden — call sites already inside
+    /// a db transaction use [`HasUnenrolledKeys::unenroll`] directly.
+    fn unenroll(
+        &self,
+        keys: impl IntoIterator<Item = InternedString>,
+    ) -> impl Future<Output = Result<HasUnenrolledKeys, Error>> + Send
+    where
+        Self: Sized,
+    {
+        let keys: BTreeSet<_> = keys.into_iter().collect();
+        async move {
+            let continuations = self.open_authed_continuations();
+            let ephemeral = self.ephemeral_auth_keys();
+            self.db()
+                .mutate(|db| {
+                    HasUnenrolledKeys::unenroll::<Self>(continuations, ephemeral, db, keys)
+                })
+                .await
+                .result
+        }
+    }
+}
+
+/// Proof that a set of auth keys was unenrolled — removed from the persisted
+/// and ephemeral signer stores with any continuations they opened killed.
+/// Obtained via [`SignatureAuthContext::unenroll`], or [`Self::unenroll`]
+/// from inside a db transaction.
+#[derive(Serialize, Deserialize)]
+pub struct HasUnenrolledKeys(());
+impl HasUnenrolledKeys {
+    /// For call sites already inside a db transaction. Taking the
+    /// continuations map as a parameter is the point: unenrollment cannot be
+    /// expressed without handing over the kill handle. The kills are not
+    /// transactional: if the mutation is later discarded, the keys stay
+    /// enrolled but their continuations are already dead — erring on the
+    /// side of dropping a reconnectable session, never the reverse.
+    pub fn unenroll<C: SignatureAuthContext>(
+        continuations: &OpenAuthedContinuations<Option<InternedString>>,
+        ephemeral: Option<&SyncMutex<AuthKeys>>,
+        db: &mut Model<C::Database>,
+        keys: impl IntoIterator<Item = InternedString>,
+    ) -> Result<Self, Error> {
+        let keys: BTreeSet<_> = keys.into_iter().collect();
+        for key in &keys {
+            continuations.kill(&Some(key.clone()))
+        }
+        if let Some(ephemeral) = ephemeral {
+            ephemeral.mutate(|map| {
+                for key in &keys {
+                    map.0.remove(&**key);
+                }
+            });
+        }
+        C::remove_enrolled_keys(db, &keys)?;
+        Ok(HasUnenrolledKeys(()))
+    }
 }
 
 impl SignatureAuthContext for RpcContext {
     type AdditionalMetadata = LoginMetadata;
     type CheckPubkeyRes = Option<InternedString>;
+    fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>> {
+        &self.open_authed_continuations
+    }
+    fn ephemeral_auth_keys(&self) -> Option<&SyncMutex<AuthKeys>> {
+        Some(&self.ephemeral_auth_keys)
+    }
+    fn remove_enrolled_keys(
+        db: &mut Model<Self::Database>,
+        keys: &BTreeSet<InternedString>,
+    ) -> Result<(), Error> {
+        let auth_keys = db.as_private_mut().as_session_pubkeys_mut();
+        for key in keys {
+            auth_keys.remove(key)?;
+        }
+        Ok(())
+    }
     async fn sig_context(
         &self,
     ) -> impl IntoIterator<Item = Result<impl AsRef<str> + Send, Error>> + Send {

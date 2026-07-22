@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::context::CliContext;
+use crate::middleware::auth::signature::{HasUnenrolledKeys, SignatureAuthContext};
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::context::RegistryContext;
@@ -254,8 +255,11 @@ pub async fn edit_signer(
         remove_key,
     }: EditSignerParams,
 ) -> Result<(), Error> {
+    let continuations = ctx.open_authed_continuations();
+    let ephemeral = ctx.ephemeral_auth_keys();
     ctx.db
         .mutate(|db| {
+            let mut removed = Vec::new();
             db.as_index_mut()
                 .as_signers_mut()
                 .as_idx_mut(&id)
@@ -275,10 +279,14 @@ pub async fn edit_signer(
 
                     s.keys.extend(add_key);
                     for rm in remove_key {
-                        s.keys.remove(&rm);
+                        if s.keys.remove(&rm) {
+                            removed.push(rm.interned_pem());
+                        }
                     }
                     Ok(())
-                })
+                })?;
+            HasUnenrolledKeys::unenroll::<RegistryContext>(continuations, ephemeral, db, removed)?;
+            Ok(())
         })
         .await
         .result
@@ -298,14 +306,22 @@ pub async fn remove_signer(
     ctx: RegistryContext,
     RemoveSignerParams { id }: RemoveSignerParams,
 ) -> Result<(), Error> {
+    let continuations = ctx.open_authed_continuations();
+    let ephemeral = ctx.ephemeral_auth_keys();
     ctx.db
         .mutate(|db| {
-            if db.as_index_mut().as_signers_mut().remove(&id)?.is_none() {
+            let Some(signer) = db.as_index_mut().as_signers_mut().remove(&id)? else {
                 return Err(Error::new(
                     eyre!("{}", t!("registry.admin.unknown-signer")),
                     ErrorKind::NotFound,
                 ));
-            }
+            };
+            HasUnenrolledKeys::unenroll::<RegistryContext>(
+                continuations,
+                ephemeral,
+                db,
+                signer.de()?.keys.iter().map(|k| k.interned_pem()),
+            )?;
 
             for (_, pkg) in db
                 .as_index_mut()

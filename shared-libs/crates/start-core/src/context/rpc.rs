@@ -32,6 +32,7 @@ use crate::disk::mount::guard::MountGuard;
 use crate::init::{InitResult, check_time_is_synchronized};
 use crate::install::PKG_ARCHIVE_DIR;
 use crate::lxc::LxcManager;
+use crate::middleware::auth::signature::HasUnenrolledKeys;
 use crate::net::gateway::WildcardListener;
 use crate::net::net_controller::{NetController, NetService};
 use crate::net::socks::DEFAULT_SOCKS_LISTEN;
@@ -125,7 +126,11 @@ pub struct RpcContext(Arc<RpcContextSeed>);
 
 /// Drop enrolled keys idle for more than 30 days. No-op until the clock is
 /// NTP-synced, so a wrong boot-time clock can't reap live sessions.
-fn reap_idle_sessions(db: &mut Model<Database>) -> Result<(), Error> {
+fn reap_idle_sessions(
+    continuations: &OpenAuthedContinuations<Option<InternedString>>,
+    ephemeral: &SyncMutex<AuthKeys>,
+    db: &mut Model<Database>,
+) -> Result<(), Error> {
     if !db.as_public().as_server_info().as_ntp_synced().de()? {
         return Ok(());
     }
@@ -141,9 +146,7 @@ fn reap_idle_sessions(db: &mut Model<Database>) -> Result<(), Error> {
         .filter(|(_, last_active)| now - *last_active > TimeDelta::days(30))
         .map(|(id, _)| id)
         .collect::<Vec<_>>();
-    for id in expired {
-        db.as_private_mut().as_session_pubkeys_mut().remove(&id)?;
-    }
+    HasUnenrolledKeys::unenroll::<RpcContext>(continuations, Some(ephemeral), db, expired)?;
     Ok(())
 }
 
@@ -449,12 +452,26 @@ impl RpcContext {
         }: CleanupInitPhases,
     ) -> Result<(), Error> {
         cleanup_sessions.start();
-        self.db.mutate(reap_idle_sessions).await.result?;
-        let db = self.db.clone();
+        let continuations = &self.open_authed_continuations;
+        let ephemeral = &self.ephemeral_auth_keys;
+        self.db
+            .mutate(|db| reap_idle_sessions(continuations, ephemeral, db))
+            .await
+            .result?;
+        // Weak, so the cron doesn't hold the context that owns it alive.
+        let weak = Arc::downgrade(&self.0);
         self.add_cron(async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(86400)).await;
-                if let Err(e) = db.mutate(reap_idle_sessions).await.result {
+                let Some(seed) = weak.upgrade() else { break };
+                let continuations = &seed.open_authed_continuations;
+                let ephemeral = &seed.ephemeral_auth_keys;
+                if let Err(e) = seed
+                    .db
+                    .mutate(|db| reap_idle_sessions(continuations, ephemeral, db))
+                    .await
+                    .result
+                {
                     tracing::error!(
                         "{}",
                         t!("context.rpc.error-in-session-cleanup-cron", error = e)

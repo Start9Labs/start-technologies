@@ -12,7 +12,11 @@ import type { WgServer } from './WgServer'
 export type TunnelDatabase = {
   webserver: WebserverInfo
   password: string | null
-  authPubkeys: AuthKeys
+  /**
+   * Same key as the StartOS private db, so a 1.1.x db upgrades by serde
+   * default (empty — everyone signs in again) with no migration.
+   */
+  sessionPubkeys: AuthKeys
   gateways: { [key: GatewayId]: NetworkInterfaceInfo }
   wg: WgServer
   portForwards: PortForwards
