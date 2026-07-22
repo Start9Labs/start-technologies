@@ -4,6 +4,11 @@ All notable changes to `start-registry` (the Start Registry server) are document
 
 ## [1.0.0]
 
+- **Signer/admin authentication moved to the new request-signature scheme.** Every authenticated
+  request is signed with the client's identity key and carried in the `X-Start-Auth-Sig` header,
+  bound to the registry hostname; on the registry host itself, the local authcookie is presented
+  as an `Authorization: Bearer` token instead of a `Cookie`. Requires `start-cli` ≥ 1.1.0.
+
 - **`--version` reports `start-registry`'s own version** (`1.0.0`), not the StartOS platform
   version.
 
