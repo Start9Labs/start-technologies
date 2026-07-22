@@ -26,6 +26,7 @@ export * from './pipes/convert-bytes.pipe'
 export * from './pipes/markdown.pipe'
 export * from './pipes/leaf-progress.pipe'
 
+export * from './services/auth-key.service'
 export * from './services/copy.service'
 export * from './services/dialog.service'
 export * from './services/download-html.service'

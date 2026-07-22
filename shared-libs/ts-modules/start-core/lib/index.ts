@@ -11,3 +11,4 @@ export * as inits from './inits'
 export { z } from './zExport'
 
 export * as utils from './util'
+export * as auth from './auth/signature'
