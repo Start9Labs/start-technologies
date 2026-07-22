@@ -49,16 +49,21 @@ where
     }) {
         panic!("lock {id} is already locked on this thread");
     }
-    let tracer: crate::util::future::NonDetachingJoinHandle<()> = {
-        let bt = std::backtrace::Backtrace::force_capture();
-        tokio::spawn(async move {
-            use std::time::Duration;
+    let tracer: Option<crate::util::future::NonDetachingJoinHandle<()>> =
+        if tokio::runtime::Handle::try_current().is_ok() {
+            let bt = std::backtrace::Backtrace::force_capture();
+            Some(
+                tokio::spawn(async move {
+                    use std::time::Duration;
 
-            tokio::time::sleep(Duration::from_secs(10)).await;
-            tracing::error!("waited on lock {id} more than 10s:\n{bt}");
-        })
-        .into()
-    };
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                    tracing::error!("waited on lock {id} more than 10s:\n{bt}");
+                })
+                .into(),
+            )
+        } else {
+            None
+        };
     let res = f();
     drop(tracer);
     LOCK_CTX.with_borrow_mut(|ctx| {
