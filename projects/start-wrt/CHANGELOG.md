@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.0.2]
 
+### Added
+
+- **The firmware image now ships MediaTek MT7915 Wi-Fi firmware alongside the
+  MT7916 firmware.** MT7915-based mini PCIe modules (such as the AsiaRF
+  AW7915-NP1) previously failed to initialize on DIY builds: the driver was
+  present but the firmware files were not, so no Wi-Fi radio ever appeared.
+  Note that MT7915 band-selectable cards operate one band at a time — with the
+  stock configuration the 2.4 GHz network comes up — unlike the
+  dual-band-concurrent AW7916-NPD module shipped in Start9 routers.
+
 ### Removed
 
 - **The IPv6 "Reserve" option has been removed — it never worked and never
