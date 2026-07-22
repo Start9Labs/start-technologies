@@ -352,15 +352,19 @@ async fn if_authorized<
     let path = request.uri().path().to_owned();
     match async {
         let signer = verify_request_signature(ctx, &mut request).await?;
+        let key = InternedString::intern(signer.to_string());
         let enrolled = ctx
-            .db
-            .peek()
-            .await
-            .as_private()
-            .as_session_pubkeys()
-            .de()?
-            .0
-            .contains_key(&*InternedString::intern(signer.to_string()));
+            .ephemeral_auth_keys
+            .peek(|keys| keys.0.contains_key(&*key))
+            || ctx
+                .db
+                .peek()
+                .await
+                .as_private()
+                .as_session_pubkeys()
+                .de()?
+                .0
+                .contains_key(&*key);
         if !enrolled {
             return Err(Error::new(
                 eyre!("{}", t!("middleware.auth.unauthorized")),

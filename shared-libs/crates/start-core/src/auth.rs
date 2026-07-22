@@ -199,6 +199,8 @@ where
             "login",
             from_fn_async(login_impl::<AC>)
                 .with_metadata("login", Value::Bool(true))
+                .with_metadata("get_signer", Value::Bool(true))
+                .with_metadata("get_user_agent", Value::Bool(true))
                 .no_cli(),
         )
         .subcommand(
@@ -319,6 +321,12 @@ pub struct LoginParams {
     /// request itself is signed with the matching secret key, so enrollment
     /// proves possession.
     pubkey: AnyVerifyingKey,
+    /// The key the request was actually signed with, injected by the auth
+    /// middleware. Enforced to equal `pubkey`, so a login can only enroll the
+    /// key that proved possession.
+    #[ts(skip)]
+    #[serde(rename = "__Auth_signer")] // from Auth middleware
+    signer: AnyVerifyingKey,
     /// Enroll in memory only, never persisted (kiosk mode, which re-enrolls
     /// on every browser restart and would otherwise accumulate keys).
     #[serde(default)]
@@ -337,9 +345,17 @@ pub async fn login_impl<C: AuthKeyContext>(
         password,
         user_agent,
         pubkey,
+        signer,
         ephemeral,
     }: LoginParams,
 ) -> Result<(), Error> {
+    if signer != pubkey {
+        return Err(Error::new(
+            eyre!("{}", t!("middleware.auth.enrolled-key-mismatch")),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+
     LOGIN_RATE_LIMITER.mutate(|(count, time)| {
         if time.elapsed() >= LOGIN_RATE_LIMIT_WINDOW {
             *count = 0;

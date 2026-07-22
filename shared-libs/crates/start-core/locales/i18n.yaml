@@ -2694,6 +2694,13 @@ middleware.auth.ephemeral-unsupported:
   fr_FR: "La connexion éphémère n'est pas prise en charge par ce serveur."
   pl_PL: "Logowanie efemeryczne nie jest obsługiwane przez ten serwer."
 
+middleware.auth.enrolled-key-mismatch:
+  en_US: "The enrolled key must match the key the login request was signed with."
+  de_DE: "Der registrierte Schlüssel muss mit dem Schlüssel übereinstimmen, mit dem die Anmeldeanfrage signiert wurde."
+  es_ES: "La clave inscrita debe coincidir con la clave con la que se firmó la solicitud de inicio de sesión."
+  fr_FR: "La clé enregistrée doit correspondre à la clé avec laquelle la demande de connexion a été signée."
+  pl_PL: "Zarejestrowany klucz musi być zgodny z kluczem, którym podpisano żądanie logowania."
+
 # middleware/auth/signature.rs
 middleware.auth.key-not-authorized:
   en_US: "Key is not authorized"

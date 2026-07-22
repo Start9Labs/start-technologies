@@ -17,8 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   enrolled keys. All existing sessions are signed out on upgrade — sign in
   again on each device.
 
-## [1.1.3]
-
 ### Added
 
 - **DNS over the tunnel's IPv6.** Each subnet's DNS proxy now also listens on

@@ -7,6 +7,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use axum::body::Body;
 use axum::extract::Request;
 use chrono::Utc;
+use http::header::USER_AGENT;
 use http::{HeaderMap, HeaderValue};
 use reqwest::Client;
 use rpc_toolkit::yajrc::RpcError;
@@ -26,6 +27,13 @@ use crate::util::iter::TransposeResultIterExt;
 use crate::util::serde::Base64;
 
 pub const AUTH_SIG_HEADER: &str = "X-StartOS-Auth-Sig";
+
+/// Upper bound on how much we pre-reserve for a request body from the
+/// attacker-controlled `commitment.size`. A forged self-signature can carry any
+/// size, so an unbounded `with_capacity` would let one tiny request drive a huge
+/// allocation before enrollment is ever checked; the verifier still enforces the
+/// true size/hash as the body streams in, so a larger legitimate body just grows.
+const MAX_BODY_PREALLOC: u64 = 16 * 1024 * 1024;
 
 /// RPC-metadata fields understood by [`SignatureAuth`] when layered over an
 /// [`RpcContext`]. `login` marks the enrollment endpoint: the request must
@@ -213,15 +221,21 @@ pub struct Metadata<Additional> {
     additional: Additional,
     #[serde(default)]
     get_signer: bool,
+    #[serde(default)]
+    get_user_agent: bool,
 }
 
 #[derive(Clone)]
 pub struct SignatureAuth {
     signer: Option<Result<AnyVerifyingKey, RpcError>>,
+    user_agent: Option<HeaderValue>,
 }
 impl SignatureAuth {
     pub fn new() -> Self {
-        Self { signer: None }
+        Self {
+            signer: None,
+            user_agent: None,
+        }
     }
 }
 
@@ -296,7 +310,7 @@ pub async fn verify_request_signature<C: SignatureAuthContext>(
     }
     handle_nonce(commitment.nonce).await?;
 
-    let mut body = Vec::with_capacity(commitment.size as usize);
+    let mut body = Vec::with_capacity(commitment.size.min(MAX_BODY_PREALLOC) as usize);
     commitment.copy_to(request, &mut body).await?;
     *request.body_mut() = Body::from(body);
 
@@ -420,6 +434,7 @@ impl<C: SignatureAuthContext> Middleware<C> for SignatureAuth {
         context: &C,
         request: &mut Request,
     ) -> Result<(), axum::response::Response> {
+        self.user_agent = request.headers().get(USER_AGENT).cloned();
         if request.headers().contains_key(AUTH_SIG_HEADER) {
             self.signer = Some(
                 verify_request_signature(context, request)
@@ -440,6 +455,11 @@ impl<C: SignatureAuthContext> Middleware<C> for SignatureAuth {
             if metadata.get_signer {
                 if let Some(signer) = &signer {
                     request.params["__Auth_signer"] = to_value(signer)?;
+                }
+            }
+            if metadata.get_user_agent {
+                if let Some(user_agent) = self.user_agent.as_ref().and_then(|h| h.to_str().ok()) {
+                    request.params["__Auth_userAgent"] = to_value(&user_agent)?;
                 }
             }
             let db = context.db().peek().await;
