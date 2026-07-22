@@ -27,7 +27,7 @@ use crate::context::{CliContext, RpcContext};
 use crate::db::model::public::{NetworkInterfaceInfo, NetworkInterfaceType};
 use crate::middleware::auth::Auth;
 use crate::middleware::auth::local::LocalAuthContext;
-use crate::middleware::auth::signature::NonceCache;
+use crate::middleware::auth::signature::{NonceCache, url_host_str};
 use crate::middleware::cors::Cors;
 use crate::net::dns_update::rfc2136::{DnsInjector, InjectedRecord};
 use crate::net::forward::{PortForwardController, nft_comments_with_prefix, nft_rule, nft_rule_v6};
@@ -838,7 +838,7 @@ impl CallRemote<TunnelContext> for CliContext {
         } else if addr_from_config {
             (
                 format!("https://{tunnel_addr}/rpc/v0").parse()?,
-                Some(InternedString::from_display(&tunnel_addr.ip())),
+                Some(url_host_str(tunnel_addr.ip())),
             )
         } else {
             return Err(Error::new(eyre!("`--tunnel` required"), ErrorKind::InvalidRequest).into());

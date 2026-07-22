@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   carrying a session cookie. Enrolled keys appear in the key list with their
   user agent and last-active time, and `auth session` commands now manage
   enrolled keys. All existing sessions are signed out on upgrade — sign in
-  again on each device.
+  again on each device. Request signatures are bound to a server identity;
+  IPv6 addresses from the TLS certificate's SANs count in their URL form
+  (`[...]`), matching how clients actually address the server.
 
 ### Added
 

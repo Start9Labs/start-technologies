@@ -2716,12 +2716,12 @@ middleware.auth.replay-attack-detected:
   fr_FR: "attaque par rejeu détectée"
   pl_PL: "wykryto atak powtórzeniowy"
 
-middleware.auth.no-valid-sig-context:
-  en_US: "no valid signature context available to verify"
-  de_DE: "kein gültiger Signaturkontext zur Verifizierung verfügbar"
-  es_ES: "no hay contexto de firma válido disponible para verificar"
-  fr_FR: "aucun contexte de signature valide disponible pour vérifier"
-  pl_PL: "brak prawidłowego kontekstu podpisu do weryfikacji"
+middleware.auth.invalid-request-signature:
+  en_US: "invalid request signature: not valid for any identity this server recognizes (hostname, domain, or IP address); the request was likely signed for a different server identity or by an incompatible client"
+  de_DE: "ungültige Anfragesignatur: für keine Identität gültig, die dieser Server kennt (Hostname, Domain oder IP-Adresse); die Anfrage wurde wahrscheinlich für eine andere Serveridentität oder von einem inkompatiblen Client signiert"
+  es_ES: "firma de solicitud no válida: no es válida para ninguna identidad que este servidor reconozca (nombre de host, dominio o dirección IP); probablemente la solicitud se firmó para una identidad de servidor diferente o con un cliente incompatible"
+  fr_FR: "signature de requête invalide : invalide pour toute identité reconnue par ce serveur (nom d'hôte, domaine ou adresse IP) ; la requête a probablement été signée pour une identité de serveur différente ou par un client incompatible"
+  pl_PL: "nieprawidłowy podpis żądania: nieważny dla żadnej tożsamości rozpoznawanej przez ten serwer (nazwa hosta, domena lub adres IP); żądanie zostało prawdopodobnie podpisane dla innej tożsamości serwera lub przez niezgodnego klienta"
 
 middleware.auth.timestamp-not-within-30s:
   en_US: "timestamp not within 30s of now"

@@ -94,6 +94,16 @@ file tracks notable changes since the move to the monorepo.
   last-active time and can revoke it, and keys idle for 30 days are removed.
   All existing sessions are signed out on upgrade — sign in again on each
   device. Resolves #3511.
+
+  Each request signature is bound to a server identity — a hostname, domain,
+  or IP address the server recognizes as itself — so a signature captured on
+  one server can't be replayed to another. Those identities are the server's
+  hostnames, its public and private domains, `localhost`, and its own
+  interface addresses (including loopback and the public IP, for clients
+  reaching it through a port forward). A signature that matches none of them
+  is rejected with an error that says so, instead of the previous opaque
+  "no valid signature context available to verify".
+
 - **Stable, predictable IPv6 address (EUI-64).** NetworkManager is set to derive
   each interface's IPv6 address from its MAC (modified EUI-64) with RFC 4941
   privacy extensions off. StartOS applies this to existing network connections

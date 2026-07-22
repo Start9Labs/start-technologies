@@ -221,11 +221,14 @@ impl SignatureAuthContext for RpcContext {
                     .values()
                     .filter_map(|g| g.ip_info.clone())
                     .flat_map(|info| {
-                        info.lan_ip
+                        // The interface's own addresses (subnets), not its
+                        // gateway (`lan_ip`), plus the public IP for clients
+                        // reaching the server through a port forward.
+                        info.subnets
                             .iter()
-                            .copied()
+                            .map(|net| net.addr())
                             .chain(info.wan_ip.map(IpAddr::V4))
-                            .map(|ip| InternedString::intern(url_host_str(ip)))
+                            .map(|ip| url_host_str(ip))
                             .collect::<Vec<_>>()
                     })
                     .map(Ok)
@@ -256,6 +259,9 @@ impl SignatureAuthContext for RpcContext {
                         .transpose(),
                 )
                 .chain(ips)
+                // The loopback name, alongside the 127.0.0.1 / [::1] addresses
+                // the loopback interface's subnets already contribute.
+                .chain(std::iter::once(Ok(InternedString::intern("localhost"))))
                 .collect::<Vec<_>>()
         })
     }
@@ -307,10 +313,10 @@ impl SignatureAuthContext for RpcContext {
 
 /// Format an IP the way `url::Url::host_str` (and `location.hostname`) renders
 /// it, so signature contexts match regardless of how the server was addressed.
-fn url_host_str(ip: IpAddr) -> String {
+pub(crate) fn url_host_str(ip: IpAddr) -> InternedString {
     match ip {
-        IpAddr::V4(ip) => ip.to_string(),
-        IpAddr::V6(ip) => format!("[{ip}]"),
+        IpAddr::V4(ip) => InternedString::from_display(&ip),
+        IpAddr::V6(ip) => InternedString::from_display(&lazy_format!("[{ip}]")),
     }
 }
 
@@ -415,17 +421,22 @@ pub async fn verify_request_signature<C: SignatureAuthContext>(
             .with_kind(ErrorKind::InvalidRequest)?,
     )?;
 
-    let mut verified = false;
-    for sig_context in context.sig_context().await {
-        let sig_context = sig_context?;
-        if verify_request(&signer, &commitment, sig_context.as_ref(), &signature).is_ok() {
-            verified = true;
-            break;
-        }
-    }
+    let sig_contexts = context
+        .sig_context()
+        .await
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()?;
+    let verified = sig_contexts.iter().any(|sig_context| {
+        verify_request(&signer, &commitment, sig_context.as_ref(), &signature).is_ok()
+    });
     if !verified {
+        tracing::debug!(
+            ?signer,
+            contexts = ?sig_contexts.iter().map(|c| c.as_ref()).collect::<Vec<_>>(),
+            "request signature failed verification for every known server identity"
+        );
         return Err(Error::new(
-            eyre!("{}", t!("middleware.auth.no-valid-sig-context")),
+            eyre!("{}", t!("middleware.auth.invalid-request-signature")),
             ErrorKind::Authorization,
         ));
     }

@@ -38,6 +38,11 @@ use crate::util::io::read_file_to_string;
 pub struct CliContextSeed {
     pub runtime: OnceCell<Arc<Runtime>>,
     pub base_url: Url,
+    /// The host the user named the server by, captured before `pin_mdns_host`
+    /// rewrites a `.local` host to an address. Request signatures are bound to
+    /// this identity — one of the server's sig contexts — not to the pinned
+    /// transport address, which the server does not necessarily recognize.
+    pub host_identity: Option<InternedString>,
     pub rpc_url: Url,
     pub registry_url: Option<Url>,
     pub registry_hostname: Vec<InternedString>,
@@ -135,6 +140,7 @@ impl CliContext {
         };
         // Before anything derives a URL from this one: a `.local` host is unresolvable from a
         // musl-static binary, so pin it to an address the system resolver found.
+        let host_identity = url.host_str().map(InternedString::intern);
         pin_mdns_host(&mut url)?;
 
         let registry = resolve_target(config.registry.as_ref())?;
@@ -186,6 +192,7 @@ impl CliContext {
             s9pk_s3bucket: config.s9pk_s3bucket,
             tunnel_addr: config.tunnel,
             tunnel_listen: config.tunnel_listen,
+            host_identity,
             client: {
                 let mut builder = Client::builder().cookie_provider(cookie_store.clone());
                 if let Some(proxy) = config.proxy.or_else(|| {
@@ -456,7 +463,7 @@ impl CallRemote<RpcContext> for CliContext {
             self,
             self.rpc_url.clone(),
             HeaderMap::new(),
-            self.rpc_url.host_str(),
+            self.host_identity.as_deref(),
             method,
             params,
         )
@@ -475,7 +482,7 @@ impl CallRemote<DiagnosticContext> for CliContext {
             self,
             self.rpc_url.clone(),
             HeaderMap::new(),
-            self.rpc_url.host_str(),
+            self.host_identity.as_deref(),
             method,
             params,
         )
@@ -494,7 +501,7 @@ impl CallRemote<InitContext> for CliContext {
             self,
             self.rpc_url.clone(),
             HeaderMap::new(),
-            self.rpc_url.host_str(),
+            self.host_identity.as_deref(),
             method,
             params,
         )
@@ -513,7 +520,7 @@ impl CallRemote<SetupContext> for CliContext {
             self,
             self.rpc_url.clone(),
             HeaderMap::new(),
-            self.rpc_url.host_str(),
+            self.host_identity.as_deref(),
             method,
             params,
         )

@@ -16,7 +16,10 @@ or the CLI's externally observable behavior.
 - **Authentication moved from session cookies to per-device signing keys.** `auth login` now
   enrolls the CLI's identity key with the server instead of opening a cookie session, and every
   request is signed with that key (`X-Start-Auth-Sig`; unpadded base64url DER key and signature).
-  Requires a server with key-based auth (StartOS ≥ 0.4.0-beta.10, StartTunnel ≥ 1.2.0).
+  The signature is bound to the host identity from the configured URL — on Linux, where a `.local`
+  host is pinned to its resolved address to work around musl's lack of mDNS, the signature still
+  commits to the `.local` name, not the pinned IP. Requires a server with key-based auth
+  (StartOS ≥ 0.4.0-beta.10, StartTunnel ≥ 1.2.0).
 - **Key files renamed: `developer.key.pem` → `id.key.pem` and `.startos/build-key` →
   `.startos/build.key.pem`.** The first is the CLI's identity for login and registry auth, not a
   developer-only feature, and the build key gains a conventional extension. Existing files are

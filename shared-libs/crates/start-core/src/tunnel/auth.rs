@@ -13,7 +13,9 @@ use crate::auth::{AuthKeys, LoginContext, Session, check_password};
 use crate::context::CliContext;
 use crate::middleware::auth::DbContext;
 use crate::middleware::auth::local::LocalAuthContext;
-use crate::middleware::auth::signature::{LoginMetadata, SignatureAuthContext, check_enrolled};
+use crate::middleware::auth::signature::{
+    LoginMetadata, SignatureAuthContext, check_enrolled, url_host_str,
+};
 use crate::prelude::*;
 use crate::rpc_continuations::OpenAuthedContinuations;
 use crate::sign::AnyVerifyingKey;
@@ -62,7 +64,7 @@ impl SignatureAuthContext for TunnelContext {
         peek.as_webserver()
             .as_listen()
             .de()
-            .map(|a| a.as_ref().map(InternedString::from_display))
+            .map(|a| a.as_ref().map(|a| url_host_str(a.ip())))
             .transpose()
             .into_iter()
             .chain(
@@ -88,7 +90,7 @@ impl SignatureAuthContext for TunnelContext {
                                         )),
                                         _ => return None,
                                     };
-                                    Some(InternedString::from_display(&ip))
+                                    Some(url_host_str(ip))
                                 })
                             })
                         })
