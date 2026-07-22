@@ -453,6 +453,7 @@ impl NetServiceData {
                                 auth: ssl.auth.clone(),
                                 connect_ssl: connect_ssl.clone(),
                                 passthrough: false,
+                                preserve_source_ip: false,
                             },
                         );
                     }
@@ -487,6 +488,7 @@ impl NetServiceData {
                         auth: ssl.auth.clone(),
                         connect_ssl: connect_ssl.clone(),
                         passthrough: false,
+                        preserve_source_ip: false,
                     });
                     if addr_info.public {
                         // A public domain is dual-stack (A + AAAA): public on its
@@ -639,6 +641,9 @@ impl NetServiceData {
                         auth: None,
                         connect_ssl: Err(AlpnInfo::Reflect),
                         passthrough: true,
+                        // Container handles its own TLS and the box is its
+                        // gateway, so preserve the client source IP.
+                        preserve_source_ip: true,
                     });
                     if addr_info.public {
                         // Passthrough domain is dual-stack, like the SSL domain vhost.

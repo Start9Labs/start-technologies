@@ -362,6 +362,9 @@ impl VHostController {
             auth: None,
             connect_ssl: Err(AlpnInfo::Reflect),
             passthrough: true,
+            // Manual SNI demux to a LAN host: the box isn't its gateway, so
+            // source-preserving egress would strand the backend's replies.
+            preserve_source_ip: false,
         };
         let rc = self.add(Some(hostname.clone()), port, DynVHostTarget::new(target))?;
         self.passthrough_handles.mutate(|h| {
@@ -926,6 +929,11 @@ pub struct ProxyTarget {
     pub auth: Option<crate::net::host::binding::ProxyAuth>,
     pub connect_ssl: Result<Arc<ClientConfig>, AlpnInfo>, // Ok: yes, connect using ssl, pass through alpn; Err: connect tcp, use provided strategy for alpn
     pub passthrough: bool,
+    /// Open the internal leg with the client's source IP (`IP_TRANSPARENT`).
+    /// Only for targets the box gateways — service containers — whose replies
+    /// transit the box; a manual LAN passthrough's replies don't, so it connects
+    /// plainly and the backend sees the box IP.
+    pub preserve_source_ip: bool,
 }
 impl PartialEq for ProxyTarget {
     fn eq(&self, other: &Self) -> bool {
@@ -937,6 +945,7 @@ impl PartialEq for ProxyTarget {
             && self.add_x_forwarded_headers == other.add_x_forwarded_headers
             && self.auth == other.auth
             && self.passthrough == other.passthrough
+            && self.preserve_source_ip == other.preserve_source_ip
             && self.connect_ssl.as_ref().map(Arc::as_ptr)
                 == other.connect_ssl.as_ref().map(Arc::as_ptr)
     }
@@ -954,6 +963,7 @@ impl fmt::Debug for ProxyTarget {
             .field("auth", &self.auth.as_ref().map(|_| "<redacted>"))
             .field("connect_ssl", &self.connect_ssl.as_ref().map(|_| ()))
             .field("passthrough", &self.passthrough)
+            .field("preserve_source_ip", &self.preserve_source_ip)
             .finish()
     }
 }
@@ -1030,11 +1040,12 @@ where
         metadata: &'a <A as Accept>::Metadata,
     ) -> Option<(ServerConfig, Self::PreprocessRes)> {
         let peer = extract::<TcpMetadata, _>(metadata).map(|m| m.peer_addr);
-        let tcp_stream = match (self.passthrough, peer, self.addr) {
-            // Passthrough (service handles its own TLS): open the internal leg
-            // from the client's own source address so the backend sees the real
-            // peer (RFC §4.6). Non-passthrough/terminating targets keep the plain
-            // connect — they don't preserve source IP.
+        let tcp_stream = match (self.preserve_source_ip, peer, self.addr) {
+            // Source-preserving passthrough (container): open the internal leg
+            // from the client's own address so the backend sees the real peer
+            // (RFC §4.6). The box gateways the container, so replies transit it
+            // and the divert routes them back. Manual LAN passthroughs and
+            // terminating targets connect plainly — the box isn't their gateway.
             (true, Some(SocketAddr::V4(client)), SocketAddr::V4(target)) => {
                 crate::net::transparent::ensure_divert_infra_once()
                     .await
@@ -1850,6 +1861,7 @@ mod accept_filter_tests {
             auth: None,
             connect_ssl: Err(AlpnInfo::Reflect),
             passthrough: false,
+            preserve_source_ip: false,
         }
     }
 
