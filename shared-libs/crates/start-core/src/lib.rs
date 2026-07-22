@@ -63,6 +63,7 @@ pub mod init;
 pub mod install;
 pub mod logs;
 pub mod lxc;
+pub mod mcp;
 pub mod middleware;
 pub mod net;
 pub mod notifications;
@@ -439,6 +440,12 @@ pub fn package<C: Context>() -> ParentHandler<C> {
             "sideload",
             from_fn_async(install::sideload)
                 .with_metadata("get_session", Value::Bool(true))
+                .no_cli(),
+        )
+        .subcommand(
+            "sideload-url",
+            from_fn_async(install::sideload_url)
+                .with_metadata("sync_db", Value::Bool(true))
                 .no_cli(),
         )
         .subcommand(

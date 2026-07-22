@@ -164,13 +164,13 @@ pub struct SubscribeRes {
     pub guid: Guid,
 }
 
-struct DbSubscriber {
-    rev: u64,
-    sub: UnboundedReceiver<Revision>,
-    sync_db: watch::Receiver<u64>,
+pub(crate) struct DbSubscriber {
+    pub(crate) rev: u64,
+    pub(crate) sub: UnboundedReceiver<Revision>,
+    pub(crate) sync_db: watch::Receiver<u64>,
 }
 impl DbSubscriber {
-    async fn recv(&mut self) -> Option<Revision> {
+    pub(crate) async fn recv(&mut self) -> Option<Revision> {
         loop {
             tokio::select! {
                 rev = self.sub.recv() => {

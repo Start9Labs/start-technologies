@@ -95,7 +95,17 @@ pub async fn get_data_version(id: &PackageId) -> Result<Option<String>, Error> {
     Ok(s.map(|s| s.trim().to_string()))
 }
 
-struct RootCommand(pub String);
+pub(crate) struct RootCommand(pub String);
+
+/// Resolved subcontainer info, ready for command construction.
+pub(crate) struct ResolvedSubcontainer {
+    pub container_id: ContainerId,
+    pub subcontainer_id: Guid,
+    pub image_id: ImageId,
+    pub user: InternedString,
+    pub workdir: Option<String>,
+    pub root_command: RootCommand,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default, TS)]
 pub struct MiB(pub u64);
@@ -756,6 +766,167 @@ impl Service {
             .clone();
         Ok(container_id)
     }
+
+    /// Resolve a subcontainer by optional filters (guid, name, or imageId).
+    /// If no filter is provided and there is exactly one subcontainer, it is returned.
+    /// Errors if no match found or multiple matches found (with the list in error info).
+    pub(crate) async fn resolve_subcontainer(
+        &self,
+        subcontainer: Option<InternedString>,
+        name: Option<InternedString>,
+        image_id: Option<ImageId>,
+        user: Option<InternedString>,
+    ) -> Result<ResolvedSubcontainer, Error> {
+        let id = &self.seed.id;
+        let container = &self.seed.persistent_container;
+        let root_dir = container
+            .lxc_container
+            .get()
+            .map(|x| x.rootfs_dir().to_owned())
+            .or_not_found(format!("container for {id}"))?;
+
+        let subcontainer_upper = subcontainer
+            .as_ref()
+            .map(|x| AsRef::<str>::as_ref(x).to_uppercase());
+        let name_upper = name
+            .as_ref()
+            .map(|x| AsRef::<str>::as_ref(x).to_uppercase());
+        let image_id_upper = image_id
+            .as_ref()
+            .map(|x| AsRef::<Path>::as_ref(x).to_string_lossy().to_uppercase());
+
+        let subcontainers = container.subcontainers.lock().await;
+        let matches: Vec<_> = subcontainers
+            .iter()
+            .filter(|(x, wrapper)| {
+                if let Some(sc) = subcontainer_upper.as_ref() {
+                    AsRef::<str>::as_ref(x).contains(sc.as_str())
+                } else if let Some(n) = name_upper.as_ref() {
+                    AsRef::<str>::as_ref(&wrapper.name)
+                        .to_uppercase()
+                        .contains(n.as_str())
+                } else if let Some(img) = image_id_upper.as_ref() {
+                    let Some(wrapper_image_id) = AsRef::<Path>::as_ref(&wrapper.image_id).to_str()
+                    else {
+                        return false;
+                    };
+                    wrapper_image_id.to_uppercase().contains(img.as_str())
+                } else {
+                    true
+                }
+            })
+            .collect();
+
+        let Some((subcontainer_id, matched_image_id)) = matches
+            .first()
+            .map::<(Guid, ImageId), _>(|&x| (x.0.clone(), x.1.image_id.clone()))
+        else {
+            drop(subcontainers);
+            let info = container
+                .subcontainers
+                .lock()
+                .await
+                .iter()
+                .map(|(g, s)| SubcontainerInfo {
+                    id: g.clone(),
+                    name: s.name.clone(),
+                    image_id: s.image_id.clone(),
+                })
+                .collect::<Vec<_>>();
+            return Err(Error::new(
+                eyre!("{}", t!("service.mod.no-matching-subcontainers", id = id)),
+                ErrorKind::NotFound,
+            )
+            .with_info(to_value(&info)?));
+        };
+
+        if matches.len() > 1 {
+            let info = matches
+                .into_iter()
+                .map(|(g, s)| SubcontainerInfo {
+                    id: g.clone(),
+                    name: s.name.clone(),
+                    image_id: s.image_id.clone(),
+                })
+                .collect::<Vec<_>>();
+            return Err(Error::new(
+                eyre!(
+                    "{}",
+                    t!("service.mod.multiple-subcontainers-found", id = id,)
+                ),
+                ErrorKind::InvalidRequest,
+            )
+            .with_info(to_value(&info)?));
+        }
+
+        let passwd = root_dir
+            .join("media/startos/subcontainers")
+            .join(subcontainer_id.as_ref())
+            .join("etc")
+            .join("passwd");
+
+        let image_meta = serde_json::from_str::<Value>(
+            &tokio::fs::read_to_string(
+                root_dir
+                    .join("media/startos/images/")
+                    .join(&matched_image_id)
+                    .with_extension("json"),
+            )
+            .await?,
+        )
+        .with_kind(ErrorKind::Deserialization)?;
+
+        let resolved_user = user
+            .or_else(|| image_meta["user"].as_str().map(InternedString::intern))
+            .unwrap_or_else(|| InternedString::intern("root"));
+
+        let root_command = get_passwd_command(passwd, &*resolved_user).await;
+        let workdir = image_meta["workdir"].as_str().map(|s| s.to_owned());
+
+        Ok(ResolvedSubcontainer {
+            container_id: self.container_id()?,
+            subcontainer_id,
+            image_id: matched_image_id,
+            user: resolved_user,
+            workdir,
+            root_command,
+        })
+    }
+
+    /// Build a `Command` for executing inside a resolved subcontainer (non-interactive).
+    pub(crate) fn build_subcontainer_command(
+        resolved: &ResolvedSubcontainer,
+        command: &[&str],
+    ) -> Command {
+        let root_path =
+            Path::new("/media/startos/subcontainers").join(resolved.subcontainer_id.as_ref());
+        let mut cmd = Command::new("lxc-attach");
+        cmd.kill_on_drop(true);
+        cmd.arg(&*resolved.container_id)
+            .arg("--")
+            .arg("start-container")
+            .arg("subcontainer")
+            .arg("exec")
+            .arg("--env-file")
+            .arg(
+                Path::new("/media/startos/images")
+                    .join(&resolved.image_id)
+                    .with_extension("env"),
+            )
+            .arg("--user")
+            .arg(&*resolved.user);
+        if let Some(ref workdir) = resolved.workdir {
+            cmd.arg("--workdir").arg(workdir);
+        }
+        cmd.arg(&root_path).arg("--");
+        if command.is_empty() {
+            cmd.arg(&resolved.root_command.0);
+        } else {
+            cmd.args(command);
+        }
+        cmd
+    }
+
     #[instrument(skip_all)]
     pub async fn stats(&self) -> Result<ServiceStats, Error> {
         let container = &self.seed.persistent_container;
@@ -857,124 +1028,26 @@ pub async fn attach(
         user,
     }: AttachParams,
 ) -> Result<Guid, Error> {
-    let (container_id, subcontainer_id, image_id, user, workdir, root_command) = {
-        let id = &id;
-
-        let service = ctx.services.get(id).await;
-
-        let service_ref = service.as_ref().or_not_found(id)?;
-
-        let container = &service_ref.seed.persistent_container;
-        let root_dir = container
-            .lxc_container
-            .get()
-            .map(|x| x.rootfs_dir().to_owned())
-            .or_not_found(format!("container for {id}"))?;
-
-        let subcontainer = subcontainer.map(|x| AsRef::<str>::as_ref(&x).to_uppercase());
-        let name = name.map(|x| AsRef::<str>::as_ref(&x).to_uppercase());
-        let image_id = image_id.map(|x| AsRef::<Path>::as_ref(&x).to_string_lossy().to_uppercase());
-
-        let subcontainers = container.subcontainers.lock().await;
-        let subcontainer_ids: Vec<_> = subcontainers
-            .iter()
-            .filter(|(x, wrapper)| {
-                if let Some(subcontainer) = subcontainer.as_ref() {
-                    AsRef::<str>::as_ref(x).contains(AsRef::<str>::as_ref(subcontainer))
-                } else if let Some(name) = name.as_ref() {
-                    AsRef::<str>::as_ref(&wrapper.name)
-                        .to_uppercase()
-                        .contains(AsRef::<str>::as_ref(name))
-                } else if let Some(image_id) = image_id.as_ref() {
-                    let Some(wrapper_image_id) = AsRef::<Path>::as_ref(&wrapper.image_id).to_str()
-                    else {
-                        return false;
-                    };
-                    wrapper_image_id
-                        .to_uppercase()
-                        .contains(AsRef::<str>::as_ref(&image_id))
-                } else {
-                    true
-                }
-            })
-            .collect();
-        let Some((subcontainer_id, image_id)) = subcontainer_ids
-            .first()
-            .map::<(Guid, ImageId), _>(|&x| (x.0.clone(), x.1.image_id.clone()))
-        else {
-            drop(subcontainers);
-            let subcontainers = container
-                .subcontainers
-                .lock()
-                .await
-                .iter()
-                .map(|(g, s)| SubcontainerInfo {
-                    id: g.clone(),
-                    name: s.name.clone(),
-                    image_id: s.image_id.clone(),
-                })
-                .collect::<Vec<_>>();
-            return Err(Error::new(
-                eyre!("{}", t!("service.mod.no-matching-subcontainers", id = id)),
-                ErrorKind::NotFound,
+    let resolved = {
+        let service = ctx.services.get(&id).await;
+        let service_ref = service.as_ref().or_not_found(&id)?;
+        service_ref
+            .resolve_subcontainer(
+                subcontainer.map(|g| InternedString::intern(g.as_ref())),
+                name,
+                image_id,
+                user,
             )
-            .with_info(to_value(&subcontainers)?));
-        };
-
-        let passwd = root_dir
-            .join("media/startos/subcontainers")
-            .join(subcontainer_id.as_ref())
-            .join("etc")
-            .join("passwd");
-
-        let image_meta = serde_json::from_str::<Value>(
-            &tokio::fs::read_to_string(
-                root_dir
-                    .join("media/startos/images/")
-                    .join(&image_id)
-                    .with_extension("json"),
-            )
-            .await?,
-        )
-        .with_kind(ErrorKind::Deserialization)?;
-
-        let user = user
-            .clone()
-            .or_else(|| image_meta["user"].as_str().map(InternedString::intern))
-            .unwrap_or_else(|| InternedString::intern("root"));
-
-        let root_command = get_passwd_command(passwd, &*user).await;
-
-        let workdir = image_meta["workdir"].as_str().map(|s| s.to_owned());
-
-        if subcontainer_ids.len() > 1 {
-            let subcontainers = subcontainer_ids
-                .into_iter()
-                .map(|(g, s)| SubcontainerInfo {
-                    id: g.clone(),
-                    name: s.name.clone(),
-                    image_id: s.image_id.clone(),
-                })
-                .collect::<Vec<_>>();
-            return Err(Error::new(
-                eyre!(
-                    "{}",
-                    t!("service.mod.multiple-subcontainers-found", id = id,)
-                ),
-                ErrorKind::InvalidRequest,
-            )
-            .with_info(to_value(&subcontainers)?));
-        }
-
-        (
-            service_ref.container_id()?,
-            subcontainer_id,
-            image_id,
-            user.into(),
-            workdir,
-            root_command,
-        )
+            .await?
     };
+    let ResolvedSubcontainer {
+        container_id,
+        subcontainer_id,
+        image_id,
+        user,
+        workdir,
+        root_command,
+    } = resolved;
 
     let guid = Guid::new();
     async fn handler(

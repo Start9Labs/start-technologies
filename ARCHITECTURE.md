@@ -8,7 +8,7 @@ This repo is the **monorepo for all Start9 products**. Each product is a thin to
 - Frontend: Angular 22 + TypeScript + Taiga UI 5 — one workspace rooted at the repo root (`angular.json`, `package.json` at root) with shared source libraries in `shared-libs/ts-modules`
 - Container runtime: Node.js/TypeScript with LXC
 - Database/State: Patch-DB (in-repo at `shared-libs/crates/patch-db`) — diff-based store with reactive frontend sync
-- API: JSON-RPC via rpc-toolkit (see `shared-libs/crates/start-core/rpc-toolkit.md`)
+- API: JSON-RPC via rpc-toolkit (see `shared-libs/crates/start-core/rpc-toolkit.md`), MCP for LLM agents (see `shared-libs/crates/start-core/src/mcp/ARCHITECTURE.md`)
 - Auth: password + session cookie, public/private key signatures, local authcookie (see `shared-libs/crates/start-core/src/middleware/auth/`)
 
 ## Repository layout
@@ -45,7 +45,7 @@ start-technologies/                # repo root (monorepo)
 
 ## Components
 
-- **`shared-libs/crates/start-core/`** — the entire Rust backend, one library crate. Modules: `bins`, `registry`, `tunnel`, `service`, `s9pk`, `net`, `db`, `install`, `update`, `lxc`, `os_install`, `backup`, `sign`, `version`, … Handles RPC API, service lifecycle, networking (DNS, ACME, WiFi, Tor, WireGuard), backups, and database state. All product bins depend on it. See [shared-libs/crates/start-core/ARCHITECTURE.md](shared-libs/crates/start-core/ARCHITECTURE.md).
+- **`shared-libs/crates/start-core/`** — the entire Rust backend, one library crate. Modules: `bins`, `registry`, `tunnel`, `service`, `s9pk`, `net`, `db`, `install`, `update`, `lxc`, `os_install`, `backup`, `sign`, `version`, `mcp`, … Handles RPC API, MCP server for LLM agents, service lifecycle, networking (DNS, ACME, WiFi, Tor, WireGuard), backups, and database state. All product bins depend on it. See [shared-libs/crates/start-core/ARCHITECTURE.md](shared-libs/crates/start-core/ARCHITECTURE.md).
 
 - **Product bins** — thin wrappers (feature toggles + `include_dir!` UI embed) over `start-core`:
   - `start-os` package → `startbox` (main daemon `startd`) and `start-container` (runs inside LXC containers)
@@ -102,12 +102,24 @@ StartOS uses Patch-DB for reactive state sync:
 
 The UI is therefore eventually consistent with the backend — after a mutating API call, the frontend waits for the corresponding PatchDB diff before resolving, so the UI reflects the result immediately.
 
+## MCP server (LLM agent interface)
+
+StartOS includes an [MCP](https://modelcontextprotocol.io/) (Model Context Protocol) server at `/mcp`, enabling LLM agents to discover and invoke the same operations available through the UI and CLI. The MCP server runs inside the StartOS server process alongside the RPC API.
+
+- **Tools**: The operationally relevant RPC methods are exposed as MCP tools with LLM-optimized descriptions and JSON Schema inputs (see the exclusion list in the MCP architecture doc). Agents call `tools/list` to discover what's available and `tools/call` to invoke operations.
+- **Resources**: System state is exposed via MCP resources backed by Patch-DB. Agents subscribe to `startos:///public` and receive debounced revision diffs over SSE, maintaining a local state cache without polling.
+- **Auth**: Same session cookie auth as the UI — no separate credentials.
+- **Transport**: MCP Streamable HTTP — POST for requests, GET for SSE notification stream, DELETE for session teardown.
+
+See [shared-libs/crates/start-core/src/mcp/ARCHITECTURE.md](shared-libs/crates/start-core/src/mcp/ARCHITECTURE.md) for implementation details.
+
 ## Further reading
 
 - [shared-libs/crates/start-core/ARCHITECTURE.md](shared-libs/crates/start-core/ARCHITECTURE.md) — Rust backend
 - [shared-libs/ts-modules/ARCHITECTURE.md](shared-libs/ts-modules/ARCHITECTURE.md) — Angular frontend
 - [projects/start-os/container-runtime/AGENTS.md](projects/start-os/container-runtime/AGENTS.md) — container runtime
 - [shared-libs/crates/start-core/rpc-toolkit.md](shared-libs/crates/start-core/rpc-toolkit.md) — JSON-RPC handler patterns
+- [shared-libs/crates/start-core/src/mcp/ARCHITECTURE.md](shared-libs/crates/start-core/src/mcp/ARCHITECTURE.md) — MCP server
 - [shared-libs/crates/start-core/s9pk-structure.md](shared-libs/crates/start-core/s9pk-structure.md) — S9PK package format
 - [shared-libs/crates/start-core/exver.md](shared-libs/crates/start-core/exver.md) — extended versioning format
 - [shared-libs/crates/start-core/VERSION_BUMP.md](shared-libs/crates/start-core/VERSION_BUMP.md) — version bumping guide
