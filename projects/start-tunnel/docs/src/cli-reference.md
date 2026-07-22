@@ -15,15 +15,15 @@ The `start-tunnel` CLI manages a StartTunnel server — a WireGuard-based gatewa
 
 ## Authentication
 
-Manage passwords, sessions, and authorized SSH keys for remote access.
+Manage passwords, enrolled device keys, and authorized SSH keys for remote access.
 
 ### `start-tunnel auth login`
 
-Log in and create an authenticated session.
+Log in and enroll this device's signing key.
 
 ### `start-tunnel auth logout <SESSION>`
 
-End an authentication session.
+Remove an enrolled device key.
 
 ### `start-tunnel auth set-password`
 
@@ -39,13 +39,13 @@ Retrieve the server's public key.
 
 ### `start-tunnel auth session list`
 
-List active sessions.
+List enrolled device keys.
 
 - `--format` — Output format
 
 ### `start-tunnel auth session kill [IDS...]`
 
-Terminate sessions.
+Remove enrolled device keys.
 
 ### `start-tunnel auth key add <NAME> <KEY>`
 

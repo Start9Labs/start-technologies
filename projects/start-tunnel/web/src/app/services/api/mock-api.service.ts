@@ -49,7 +49,7 @@ export class MockApiService extends ApiService {
     }
   }
 
-  async login(params: T.Tunnel.SetPasswordParams): Promise<null> {
+  async login(params: T.LoginParams): Promise<null> {
     await pauseFor(1000)
     return null
   }

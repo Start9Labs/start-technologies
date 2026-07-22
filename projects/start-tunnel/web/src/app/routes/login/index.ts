@@ -1,6 +1,7 @@
 import { Component, inject, signal } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { Router } from '@angular/router'
+import { AuthKeyService } from '@start9labs/shared'
 import { TuiButton, TuiError, TuiInput } from '@taiga-ui/core'
 import { TuiButtonLoading } from '@taiga-ui/kit'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
@@ -66,6 +67,7 @@ import { AuthService } from 'src/app/services/auth.service'
 export default class Login {
   private readonly auth = inject(AuthService)
   private readonly router = inject(Router)
+  private readonly authKeys = inject(AuthKeyService)
   private readonly api = inject(ApiService)
 
   protected readonly error = signal(false)
@@ -76,7 +78,17 @@ export default class Login {
   protected async login() {
     this.loading.set(true)
     try {
-      await this.api.login({ password: this.password })
+      const key = this.authKeys.create()
+      try {
+        await this.api.login({
+          password: this.password,
+          pubkey: key.pubkeyPem,
+          ephemeral: false,
+        })
+      } catch (e) {
+        this.authKeys.discard()
+        throw e
+      }
       this.auth.authenticated.set(true)
       this.router.navigate(['.'])
     } catch (e) {

@@ -332,7 +332,7 @@ export default class Settings {
   protected async onLogout() {
     this.tasks.run(async () => {
       await this.api.logout()
-      this.auth.authenticated.set(false)
+      this.auth.deauthenticate()
       this.router.navigate(['/'])
     })
   }

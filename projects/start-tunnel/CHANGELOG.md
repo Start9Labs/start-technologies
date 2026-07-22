@@ -5,6 +5,18 @@ All notable changes to StartTunnel are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0]
+
+### Changed
+
+- **Web UI and CLI authentication moved from session cookies to per-device
+  signing keys.** Logging in now enrolls an Ed25519 public key with the
+  server, and every API request is signed with the matching key instead of
+  carrying a session cookie. Enrolled keys appear in the key list with their
+  user agent and last-active time, and `auth session` commands now manage
+  enrolled keys. All existing sessions are signed out on upgrade — sign in
+  again on each device.
+
 ## [1.1.3]
 
 ### Added

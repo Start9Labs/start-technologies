@@ -11,7 +11,7 @@ export abstract class ApiService {
   abstract openWebsocket$<T>(guid: string): Observable<T>
   abstract subscribe(): Promise<SubscribeRes> // db.subscribe
   // auth
-  abstract login(params: T.Tunnel.SetPasswordParams): Promise<null> // auth.login
+  abstract login(params: T.LoginParams): Promise<null> // auth.login
   abstract logout(): Promise<null> // auth.logout
   abstract setPassword(params: T.Tunnel.SetPasswordParams): Promise<null> // auth.set-password
   // subnets

@@ -1,20 +1,16 @@
-import { effect, inject, Injectable, signal } from '@angular/core'
-import { WA_LOCAL_STORAGE } from '@ng-web-apis/common'
-
-const KEY = '_startos/tunnel-loggedIn'
+import { inject, Injectable, signal } from '@angular/core'
+import { AuthKeyService } from '@start9labs/shared'
 
 @Injectable({
   providedIn: 'root',
 })
 export class AuthService {
-  private readonly storage = inject(WA_LOCAL_STORAGE)
-  private readonly effect = effect(() => {
-    if (this.authenticated()) {
-      this.storage?.setItem(KEY, JSON.stringify(true))
-    } else {
-      this.storage?.removeItem(KEY)
-    }
-  })
+  private readonly authKeys = inject(AuthKeyService)
 
-  readonly authenticated = signal(Boolean(this.storage?.getItem(KEY)))
+  readonly authenticated = signal(Boolean(this.authKeys.get()))
+
+  deauthenticate(): void {
+    this.authKeys.discard()
+    this.authenticated.set(false)
+  }
 }
