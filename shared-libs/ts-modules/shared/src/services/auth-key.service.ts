@@ -21,12 +21,11 @@ export class AuthKeyService {
   private readonly storage = inject(WA_LOCAL_STORAGE)
 
   get(): auth.AuthKey | null {
-    const stored: StoredAuthKey | null = JSON.parse(
-      String(this.storage?.getItem(STORAGE_KEY) || null),
-    )
-    if (!stored) return null
+    const raw = this.storage?.getItem(STORAGE_KEY)
+    if (!raw) return null
+    const stored: StoredAuthKey = JSON.parse(raw)
     return {
-      secretKey: fromBase64(stored.secretKey),
+      secretKey: auth.base64ToBytes(stored.secretKey),
       pubkeyPem: stored.pubkeyPem,
     }
   }
@@ -34,7 +33,7 @@ export class AuthKeyService {
   create(): auth.AuthKey {
     const key = auth.generateAuthKey()
     const stored: StoredAuthKey = {
-      secretKey: toBase64(key.secretKey),
+      secretKey: auth.bytesToBase64(key.secretKey),
       pubkeyPem: key.pubkeyPem,
     }
     this.storage?.setItem(STORAGE_KEY, JSON.stringify(stored))
@@ -58,21 +57,15 @@ export class AuthKeyService {
       ),
     }
   }
-}
 
-function toBase64(bytes: Uint8Array): string {
-  let binary = ''
-  for (const b of bytes) {
-    binary += String.fromCharCode(b)
+  /** Sign an RPC request. The signed bytes must match the body `HttpService`
+   *  serializes — `{ method, params }`, in this order, via `JSON.stringify`. */
+  signRpcHeaders(options: {
+    method: string
+    params: unknown
+  }): Record<string, string> {
+    return this.signHeader(
+      JSON.stringify({ method: options.method, params: options.params }),
+    )
   }
-  return btoa(binary)
-}
-
-function fromBase64(b64: string): Uint8Array {
-  const binary = atob(b64)
-  const out = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) {
-    out[i] = binary.charCodeAt(i)
-  }
-  return out
 }

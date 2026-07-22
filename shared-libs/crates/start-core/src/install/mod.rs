@@ -182,7 +182,7 @@ pub async fn install(
 pub struct SideloadParams {
     #[ts(skip)]
     #[serde(rename = "__Auth_signer")]
-    session: Option<InternedString>,
+    signer: Option<InternedString>,
 }
 
 #[derive(Deserialize, Serialize, TS)]
@@ -196,7 +196,7 @@ pub struct SideloadResponse {
 #[instrument(skip_all)]
 pub async fn sideload(
     ctx: RpcContext,
-    SideloadParams { session }: SideloadParams,
+    SideloadParams { signer }: SideloadParams,
 ) -> Result<SideloadResponse, Error> {
     let (err_send, err_recv) = oneshot::channel::<Error>();
     // fused: the select! loop below re-polls this, which panics on a bare oneshot once resolved
@@ -205,7 +205,7 @@ pub async fn sideload(
     let progress_tracker = FullProgressTracker::new();
     let (upload, file) = upload(
         &ctx,
-        session.clone(),
+        signer.clone(),
         progress_tracker.add_phase("Uploading".into(), Some(100)),
     )
     .await?;
@@ -215,7 +215,7 @@ pub async fn sideload(
             progress.clone(),
             RpcContinuation::ws_authed(
                 &ctx,
-                session,
+                signer,
                 |mut ws| async move {
                     if let Err(e) = async {
                         loop {

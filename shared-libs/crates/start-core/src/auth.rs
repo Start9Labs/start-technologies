@@ -521,7 +521,7 @@ pub struct ListParams {
 #[instrument(skip_all)]
 pub async fn list<C: AuthKeyContext>(
     ctx: C,
-    ListParams { signer, .. }: ListParams,
+    ListParams { signer }: ListParams,
 ) -> Result<SessionList, Error> {
     let mut sessions = C::access_auth_keys(&mut ctx.db().peek().await).de()?;
     if let Some(ephemeral) = ctx.ephemeral_auth_keys() {

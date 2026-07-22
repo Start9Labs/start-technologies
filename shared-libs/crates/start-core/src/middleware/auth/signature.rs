@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::future::Future;
 use std::net::IpAddr;
 use std::sync::LazyLock;
@@ -45,6 +45,35 @@ pub struct LoginMetadata {
     pub login: bool,
 }
 
+/// Shared body of the [`SignatureAuthContext::check_pubkey`] impls: reject an
+/// unsigned request, let an as-yet-unenrolled key through the login endpoint,
+/// and otherwise require the key to be enrolled per the context's `is_enrolled`
+/// lookup. Returns the enrolled key so `post_auth_hook` needn't re-encode it.
+pub(crate) fn check_enrolled(
+    pubkey: Option<&AnyVerifyingKey>,
+    login: bool,
+    is_enrolled: impl FnOnce(&InternedString) -> Result<bool, Error>,
+) -> Result<Option<InternedString>, Error> {
+    let Some(pubkey) = pubkey else {
+        return Err(Error::new(
+            eyre!("{}", t!("middleware.auth.unauthorized")),
+            ErrorKind::Authorization,
+        ));
+    };
+    if login {
+        return Ok(None);
+    }
+    let key = pubkey.interned_pem();
+    if is_enrolled(&key)? {
+        Ok(Some(key))
+    } else {
+        Err(Error::new(
+            eyre!("{}", t!("middleware.auth.key-not-authorized")),
+            ErrorKind::Authorization,
+        ))
+    }
+}
+
 pub trait SignatureAuthContext: DbContext {
     type AdditionalMetadata: DeserializeOwned + Send;
     type CheckPubkeyRes: Send;
@@ -67,7 +96,7 @@ pub trait SignatureAuthContext: DbContext {
 
 impl SignatureAuthContext for RpcContext {
     type AdditionalMetadata = LoginMetadata;
-    type CheckPubkeyRes = Option<AnyVerifyingKey>;
+    type CheckPubkeyRes = Option<InternedString>;
     async fn sig_context(
         &self,
     ) -> impl IntoIterator<Item = Result<impl AsRef<str> + Send, Error>> + Send {
@@ -128,40 +157,20 @@ impl SignatureAuthContext for RpcContext {
         pubkey: Option<&AnyVerifyingKey>,
         metadata: Self::AdditionalMetadata,
     ) -> Result<Self::CheckPubkeyRes, Error> {
-        let Some(pubkey) = pubkey else {
-            return Err(Error::new(
-                eyre!("{}", t!("middleware.auth.unauthorized")),
-                ErrorKind::Authorization,
-            ));
-        };
-        if metadata.login {
-            return Ok(None);
-        }
-        let key = InternedString::intern(pubkey.to_string());
-        if self
-            .ephemeral_auth_keys
-            .peek(|keys| keys.0.contains_key(&*key))
-        {
-            return Ok(Some(pubkey.clone()));
-        }
-        if db
-            .as_private()
-            .as_session_pubkeys()
-            .de()?
-            .0
-            .contains_key(&*key)
-        {
-            return Ok(Some(pubkey.clone()));
-        }
-
-        Err(Error::new(
-            eyre!("{}", t!("middleware.auth.key-not-authorized")),
-            ErrorKind::Authorization,
-        ))
+        check_enrolled(pubkey, metadata.login, |key| {
+            Ok(self
+                .ephemeral_auth_keys
+                .peek(|keys| keys.0.contains_key(&**key))
+                || db
+                    .as_private()
+                    .as_session_pubkeys()
+                    .de()?
+                    .0
+                    .contains_key(&**key))
+        })
     }
     async fn post_auth_hook(&self, key: Self::CheckPubkeyRes, _: &RpcRequest) -> Result<(), Error> {
         if let Some(key) = key {
-            let key = InternedString::intern(key.to_string());
             let ephemeral = self.ephemeral_auth_keys.mutate(|keys| {
                 if let Some(entry) = keys.0.get_mut(&*key) {
                     entry.last_active = Utc::now();
@@ -239,25 +248,34 @@ impl SignatureAuth {
     }
 }
 
-static NONCE_CACHE: LazyLock<Mutex<BTreeMap<Instant, u64>>> =
-    LazyLock::new(|| Mutex::new(BTreeMap::new()));
+/// Replay cache for the last 60s of nonces. `seen` gives O(1) membership;
+/// `order` drives eviction, keyed by `(seen_at, nonce)` so two nonces recorded
+/// at the same `Instant` can't collide and silently evict each other.
+#[derive(Default)]
+struct NonceCache {
+    seen: HashSet<u64>,
+    order: BTreeSet<(Instant, u64)>,
+}
+static NONCE_CACHE: LazyLock<Mutex<NonceCache>> =
+    LazyLock::new(|| Mutex::new(NonceCache::default()));
 
 async fn handle_nonce(nonce: u64) -> Result<(), Error> {
     let mut cache = NONCE_CACHE.lock().await;
-    if cache.values().any(|n| *n == nonce) {
+    while let Some(&(seen_at, n)) = cache.order.iter().next() {
+        if seen_at.elapsed() > Duration::from_secs(60) {
+            cache.order.remove(&(seen_at, n));
+            cache.seen.remove(&n);
+        } else {
+            break;
+        }
+    }
+    if !cache.seen.insert(nonce) {
         return Err(Error::new(
             eyre!("{}", t!("middleware.auth.replay-attack-detected")),
             ErrorKind::Authorization,
         ));
     }
-    while let Some(entry) = cache.first_entry() {
-        if entry.key().elapsed() > Duration::from_secs(60) {
-            entry.remove_entry();
-        } else {
-            break;
-        }
-    }
-    cache.insert(Instant::now(), nonce);
+    cache.order.insert((Instant::now(), nonce));
     Ok(())
 }
 
@@ -302,7 +320,7 @@ pub async fn verify_request_signature<C: SignatureAuthContext>(
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or_else(|e| e.duration().as_secs() as i64 * -1);
-    if (now - commitment.timestamp).abs() > 30 {
+    if now.abs_diff(commitment.timestamp) > 30 {
         return Err(Error::new(
             eyre!("{}", t!("middleware.auth.timestamp-not-within-30s")),
             ErrorKind::InvalidSignature,

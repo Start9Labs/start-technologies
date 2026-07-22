@@ -352,7 +352,7 @@ async fn if_authorized<
     let path = request.uri().path().to_owned();
     match async {
         let signer = verify_request_signature(ctx, &mut request).await?;
-        let key = InternedString::intern(signer.to_string());
+        let key = signer.interned_pem();
         let enrolled = ctx
             .ephemeral_auth_keys
             .peek(|keys| keys.0.contains_key(&*key))

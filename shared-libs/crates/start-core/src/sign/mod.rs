@@ -205,6 +205,11 @@ impl AnyVerifyingKey {
             Self::Ed25519(_) => AnyScheme::Ed25519(Ed25519),
         }
     }
+    /// The key used to look this verifying key up in an `AuthKeys` map: its
+    /// canonical PEM encoding, interned.
+    pub fn interned_pem(&self) -> InternedString {
+        InternedString::intern(self.to_string())
+    }
 }
 impl<'a> TryFrom<SubjectPublicKeyInfo<AnyRef<'a>, BitStringRef<'a>>> for AnyVerifyingKey {
     type Error = pkcs8::spki::Error;

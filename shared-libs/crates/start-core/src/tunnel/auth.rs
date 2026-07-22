@@ -11,7 +11,7 @@ use crate::auth::{AuthKeyContext, AuthKeys, Session, check_password};
 use crate::context::CliContext;
 use crate::middleware::auth::DbContext;
 use crate::middleware::auth::local::LocalAuthContext;
-use crate::middleware::auth::signature::{LoginMetadata, SignatureAuthContext};
+use crate::middleware::auth::signature::{LoginMetadata, SignatureAuthContext, check_enrolled};
 use crate::prelude::*;
 use crate::rpc_continuations::OpenAuthedContinuations;
 use crate::sign::AnyVerifyingKey;
@@ -27,7 +27,7 @@ impl DbContext for TunnelContext {
 }
 impl SignatureAuthContext for TunnelContext {
     type AdditionalMetadata = LoginMetadata;
-    type CheckPubkeyRes = Option<AnyVerifyingKey>;
+    type CheckPubkeyRes = Option<InternedString>;
     async fn sig_context(
         &self,
     ) -> impl IntoIterator<Item = Result<impl AsRef<str> + Send, Error>> + Send {
@@ -77,24 +77,9 @@ impl SignatureAuthContext for TunnelContext {
         pubkey: Option<&crate::sign::AnyVerifyingKey>,
         metadata: Self::AdditionalMetadata,
     ) -> Result<Self::CheckPubkeyRes, Error> {
-        let Some(pubkey) = pubkey else {
-            return Err(Error::new(
-                eyre!("{}", t!("middleware.auth.unauthorized")),
-                ErrorKind::Authorization,
-            ));
-        };
-        if metadata.login {
-            return Ok(None);
-        }
-        let key = InternedString::intern(pubkey.to_string());
-        if db.as_auth_pubkeys().de()?.0.contains_key(&*key) {
-            return Ok(Some(pubkey.clone()));
-        }
-
-        Err(Error::new(
-            eyre!("{}", t!("middleware.auth.key-not-authorized")),
-            ErrorKind::Authorization,
-        ))
+        check_enrolled(pubkey, metadata.login, |key| {
+            Ok(db.as_auth_pubkeys().de()?.0.contains_key(&**key))
+        })
     }
     async fn post_auth_hook(
         &self,
@@ -102,7 +87,6 @@ impl SignatureAuthContext for TunnelContext {
         _: &rpc_toolkit::RpcRequest,
     ) -> Result<(), Error> {
         if let Some(key) = key {
-            let key = InternedString::intern(key.to_string());
             self.db
                 .mutate(|db| {
                     db.as_auth_pubkeys_mut().mutate(|keys| {
@@ -217,7 +201,7 @@ pub async fn add_key(
         .mutate(|db| {
             db.as_auth_pubkeys_mut().mutate(|auth_pubkeys| {
                 auth_pubkeys.0.insert(
-                    InternedString::intern(key.to_string()),
+                    key.interned_pem(),
                     Session {
                         name: Some(name),
                         ..Default::default()
@@ -244,9 +228,7 @@ pub async fn remove_key(
     ctx.db
         .mutate(|db| {
             db.as_auth_pubkeys_mut().mutate(|auth_pubkeys| {
-                auth_pubkeys
-                    .0
-                    .remove(&*InternedString::intern(key.to_string()));
+                auth_pubkeys.0.remove(&*key.interned_pem());
                 Ok(())
             })
         })

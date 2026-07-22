@@ -122,6 +122,31 @@ impl CleanupInitPhases {
 
 #[derive(Clone)]
 pub struct RpcContext(Arc<RpcContextSeed>);
+
+/// Drop enrolled keys idle for more than 30 days. No-op until the clock is
+/// NTP-synced, so a wrong boot-time clock can't reap live sessions.
+fn reap_idle_sessions(db: &mut Model<Database>) -> Result<(), Error> {
+    if !db.as_public().as_server_info().as_ntp_synced().de()? {
+        return Ok(());
+    }
+    let now = Utc::now();
+    let expired = db
+        .as_private()
+        .as_session_pubkeys()
+        .as_entries()?
+        .into_iter()
+        .map(|(id, session)| Ok::<_, Error>((id, session.de()?.last_active)))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter(|(_, last_active)| now - *last_active > TimeDelta::days(30))
+        .map(|(id, _)| id)
+        .collect::<Vec<_>>();
+    for id in expired {
+        db.as_private_mut().as_session_pubkeys_mut().remove(&id)?;
+    }
+    Ok(())
+}
+
 impl RpcContext {
     #[instrument(skip_all)]
     pub async fn init(
@@ -424,53 +449,12 @@ impl RpcContext {
         }: CleanupInitPhases,
     ) -> Result<(), Error> {
         cleanup_sessions.start();
-        self.db
-            .mutate(|db| {
-                if db.as_public().as_server_info().as_ntp_synced().de()? {
-                    for id in db.as_private().as_session_pubkeys().keys()? {
-                        if Utc::now()
-                            - db.as_private()
-                                .as_session_pubkeys()
-                                .as_idx(&id)
-                                .unwrap()
-                                .de()?
-                                .last_active
-                            > TimeDelta::days(30)
-                        {
-                            db.as_private_mut().as_session_pubkeys_mut().remove(&id)?;
-                        }
-                    }
-                }
-                Ok(())
-            })
-            .await
-            .result?;
+        self.db.mutate(reap_idle_sessions).await.result?;
         let db = self.db.clone();
         self.add_cron(async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(86400)).await;
-                if let Err(e) = db
-                    .mutate(|db| {
-                        if db.as_public().as_server_info().as_ntp_synced().de()? {
-                            for id in db.as_private().as_session_pubkeys().keys()? {
-                                if Utc::now()
-                                    - db.as_private()
-                                        .as_session_pubkeys()
-                                        .as_idx(&id)
-                                        .unwrap()
-                                        .de()?
-                                        .last_active
-                                    > TimeDelta::days(30)
-                                {
-                                    db.as_private_mut().as_session_pubkeys_mut().remove(&id)?;
-                                }
-                            }
-                        }
-                        Ok(())
-                    })
-                    .await
-                    .result
-                {
+                if let Err(e) = db.mutate(reap_idle_sessions).await.result {
                     tracing::error!(
                         "{}",
                         t!("context.rpc.error-in-session-cleanup-cron", error = e)

@@ -563,7 +563,7 @@ pub struct SubscribeParams {
     pointer: Option<JsonPointer>,
     #[ts(skip)]
     #[serde(rename = "__Auth_signer")]
-    session: Option<InternedString>,
+    signer: Option<InternedString>,
 }
 
 #[derive(Deserialize, Serialize, TS)]
@@ -576,7 +576,7 @@ pub struct SubscribeRes {
 
 pub async fn subscribe(
     ctx: TunnelContext,
-    SubscribeParams { pointer, session }: SubscribeParams,
+    SubscribeParams { pointer, signer }: SubscribeParams,
 ) -> Result<SubscribeRes, Error> {
     let (dump, mut sub) = ctx
         .db
@@ -588,7 +588,7 @@ pub async fn subscribe(
             guid.clone(),
             RpcContinuation::ws_authed(
                 &ctx,
-                session,
+                signer,
                 |mut ws| async move {
                     if let Err(e) = async {
                         loop {

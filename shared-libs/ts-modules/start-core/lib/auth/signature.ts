@@ -1,5 +1,6 @@
 import { ed25519 } from '@noble/curves/ed25519'
 import { blake3 } from '@noble/hashes/blake3'
+import { concatBytes, hexToBytes } from '@noble/hashes/utils'
 
 /**
  * Client side of the server's signature auth (`X-StartOS-Auth-Sig`).
@@ -75,7 +76,7 @@ export function signRequest(
 }
 
 function derToPem(label: string, der: Uint8Array): string {
-  const body = base64EncodePadded(der)
+  const body = bytesToBase64(der)
   const lines: string[] = []
   for (let i = 0; i < body.length; i += 64) {
     lines.push(body.slice(i, i + 64))
@@ -84,10 +85,10 @@ function derToPem(label: string, der: Uint8Array): string {
 }
 
 function base64Encode(bytes: Uint8Array): string {
-  return base64EncodePadded(bytes).replace(/=+$/, '')
+  return bytesToBase64(bytes).replace(/=+$/, '')
 }
 
-function base64EncodePadded(bytes: Uint8Array): string {
+export function bytesToBase64(bytes: Uint8Array): string {
   let binary = ''
   for (const b of bytes) {
     binary += String.fromCharCode(b)
@@ -95,17 +96,11 @@ function base64EncodePadded(bytes: Uint8Array): string {
   return btoa(binary)
 }
 
-function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
-  const out = new Uint8Array(a.length + b.length)
-  out.set(a, 0)
-  out.set(b, a.length)
-  return out
-}
-
-function hexToBytes(hex: string): Uint8Array {
-  const out = new Uint8Array(hex.length / 2)
-  for (let i = 0; i < out.length; i++) {
-    out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16)
+export function base64ToBytes(b64: string): Uint8Array {
+  const binary = atob(b64)
+  const out = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    out[i] = binary.charCodeAt(i)
   }
   return out
 }

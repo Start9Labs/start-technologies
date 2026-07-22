@@ -751,13 +751,10 @@ export class LiveApiService extends ApiService {
     options: RPCOptions,
     urlOverride?: string,
   ): Promise<T> {
-    // Signed with the enrolled device key; must match the bytes HttpService
-    // serializes (`{ method, params }` in this order, JSON.stringify).
+    // Signed with the enrolled device key.
     const headers = {
       ...options.headers,
-      ...this.authKeys.signHeader(
-        JSON.stringify({ method: options.method, params: options.params }),
-      ),
+      ...this.authKeys.signRpcHeaders(options),
     }
     const res = await this.http.rpcRequest<T>(
       { ...options, headers },
