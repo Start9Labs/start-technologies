@@ -29,7 +29,19 @@ use crate::util::iter::TransposeResultIterExt;
 use crate::util::serde::Base64;
 use crate::util::sync::SyncMutex;
 
-pub const AUTH_SIG_HEADER: &str = "X-StartOS-Auth-Sig";
+pub const AUTH_SIG_HEADER: &str = "X-Start-Auth-Sig";
+/// The header's name before it was renamed (the auth scheme is not
+/// OS-specific). Still accepted on reads so deployed clients keep working —
+/// the same fleet [`verify_request_legacy`] exists for; requests are sent
+/// under [`AUTH_SIG_HEADER`].
+pub const AUTH_SIG_HEADER_LEGACY: &str = "X-StartOS-Auth-Sig";
+
+/// The request's auth-sig header, under either the current or the legacy name.
+pub fn auth_sig_header(headers: &HeaderMap) -> Option<&HeaderValue> {
+    headers
+        .get(AUTH_SIG_HEADER)
+        .or_else(|| headers.get(AUTH_SIG_HEADER_LEGACY))
+}
 
 /// Upper bound on how much we pre-reserve for a request body from the
 /// attacker-controlled `commitment.size`. A forged self-signature can carry any
@@ -386,9 +398,7 @@ pub async fn verify_request_signature<C: SignatureAuthContext>(
         signer,
         signature,
     } = SignatureHeader::from_header(
-        request
-            .headers()
-            .get(AUTH_SIG_HEADER)
+        auth_sig_header(request.headers())
             .or_not_found(AUTH_SIG_HEADER)
             .with_kind(ErrorKind::InvalidRequest)?,
     )?;
@@ -547,7 +557,7 @@ impl<C: SignatureAuthContext> Middleware<C> for SignatureAuth {
         request: &mut Request,
     ) -> Result<(), axum::response::Response> {
         self.user_agent = request.headers().get(USER_AGENT).cloned();
-        if request.headers().contains_key(AUTH_SIG_HEADER) {
+        if auth_sig_header(request.headers()).is_some() {
             self.signer = Some(
                 verify_request_signature(context, request)
                     .await

@@ -3,7 +3,7 @@ import { blake3 } from '@noble/hashes/blake3'
 import { concatBytes, hexToBytes } from '@noble/hashes/utils'
 
 /**
- * Client side of the server's signature auth (`X-StartOS-Auth-Sig`).
+ * Client side of the server's signature auth (`X-Start-Auth-Sig`).
  *
  * A request is authorized by signing, with an enrolled Ed25519 key (pure
  * Ed25519, WebCrypto-compatible), a message of:
@@ -18,7 +18,7 @@ import { concatBytes, hexToBytes } from '@noble/hashes/utils'
 
 const REQUEST_AUTH_TAG = new TextEncoder().encode('StartOS RPC Auth v1\0')
 
-export const AUTH_SIG_HEADER = 'X-StartOS-Auth-Sig'
+export const AUTH_SIG_HEADER = 'X-Start-Auth-Sig'
 
 // DER prefix of an Ed25519 SubjectPublicKeyInfo: SEQUENCE(SEQUENCE(OID 1.3.101.112), BIT STRING)
 const SPKI_PREFIX = hexToBytes('302a300506032b6570032100')
