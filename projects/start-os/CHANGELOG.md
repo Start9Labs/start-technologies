@@ -97,10 +97,8 @@ file tracks notable changes since the move to the monorepo.
 
   The device key is a non-extractable WebCrypto key held in IndexedDB: page
   scripts can sign with it while the page is open, but can never read the key
-  material out. In a private tab, where IndexedDB may be unavailable, the key
-  is held in memory and the session lasts until the tab closes. Logging in
-  requires a browser with Ed25519 WebCrypto support — any evergreen browser
-  (Safari 17, Firefox 130, Chrome/Edge 137, or newer).
+  material out. Logging in requires a browser with Ed25519 WebCrypto support —
+  any evergreen browser (Safari 17, Firefox 130, Chrome/Edge 137, or newer).
 
   HTTP cookies are gone from the API entirely: the server no longer sets or
   reads any cookie, so cookies planted by services co-hosted on other ports of
