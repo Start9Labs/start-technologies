@@ -21,15 +21,15 @@ These apply to all subcommands.
 
 ## Authentication
 
-Log in, log out, manage sessions, and reset the master password.
+Log in, log out, manage enrolled device keys, and reset the master password.
 
 ### `start-cli auth login`
 
-Log in and create an authenticated session. Required before running any commands against a remote server.
+Log in and enroll this device's signing key. Required before running any commands against a remote server.
 
 ### `start-cli auth logout <SESSION>`
 
-End a specific authentication session.
+Remove an enrolled device key.
 
 ### `start-cli auth reset-password`
 
@@ -41,13 +41,13 @@ Retrieve the server's public key.
 
 ### `start-cli auth session list`
 
-List all active sessions.
+List all enrolled device keys.
 
 - `--format` — Output format
 
 ### `start-cli auth session kill [IDS...]`
 
-Terminate one or more sessions.
+Remove one or more enrolled device keys.
 
 ## Server
 

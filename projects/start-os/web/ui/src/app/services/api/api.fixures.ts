@@ -1215,16 +1215,19 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
     current: 'b7b1a9cef4284f00af9e9dda6e676177',
     sessions: {
       '9513226517c54ddd8107d6d7b9d8aed7': {
+        name: null,
         loggedIn: '2021-07-14T20:49:17.774Z',
         lastActive: '2021-07-14T20:49:17.774Z',
         userAgent: 'AppleWebKit/{WebKit Rev} (KHTML, like Gecko)',
       },
       klndsfjhbwsajkdnaksj: {
+        name: null,
         loggedIn: '2021-07-14T20:49:17.774Z',
         lastActive: '2019-07-14T20:49:17.774Z',
         userAgent: 'AppleWebKit/{WebKit Rev} (KHTML, like Gecko)',
       },
       b7b1a9cef4284f00af9e9dda6e676177: {
+        name: null,
         loggedIn: '2021-07-14T20:49:17.774Z',
         lastActive: '2021-06-14T20:49:17.774Z',
         userAgent:

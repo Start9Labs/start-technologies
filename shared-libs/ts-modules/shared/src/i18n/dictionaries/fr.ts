@@ -805,4 +805,5 @@ export default {
   911: 'Les données StartOS du disque de données sélectionné se trouvent sur une partition aux côtés d’une ancienne installation de l’OS et ne peuvent pas être conservées si l’OS est installé sur un autre disque. Pour garder vos données, sélectionnez ce même disque à la fois comme disque OS et comme disque de données. Pour les effacer, choisissez « Écraser ».',
   912: 'Les données StartOS du disque de données sélectionné se trouvent sur une partition aux côtés d’une ancienne installation de l’OS et ne peuvent pas être conservées sur cet appareil. Pour effacer le disque et repartir à zéro, choisissez « Écraser ».',
   913: 'Les données StartOS du disque de données sélectionné occupent l’intégralité du disque : l’OS ne peut donc pas être installé sur le même disque sans les effacer. Pour conserver vos données, sélectionnez un autre disque pour l’OS. Pour les effacer, choisissez « Écraser ».',
+  914: 'Connexion réussie, mais le serveur a rejeté la nouvelle clé de l’appareil. Réessayez.',
 } satisfies i18n

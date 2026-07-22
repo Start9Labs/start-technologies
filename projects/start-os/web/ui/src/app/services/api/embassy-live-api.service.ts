@@ -2,6 +2,7 @@ import { DOCUMENT, inject, Injectable } from '@angular/core'
 import { blake3 } from '@noble/hashes/blake3'
 import { GetPackageRes, GetPackagesRes } from '@start9labs/marketplace'
 import {
+  AuthKeyService,
   FullKeyboard,
   HttpOptions,
   HttpService,
@@ -46,6 +47,7 @@ export class LiveApiService extends ApiService {
   private readonly document = inject(DOCUMENT)
   private readonly http = inject(HttpService)
   private readonly auth = inject(AuthService)
+  private readonly authKeys = inject(AuthKeyService)
   private readonly cache$ = inject<Observable<Dump<DataModel>>>(PATCH_CACHE)
 
   constructor() {
@@ -749,7 +751,18 @@ export class LiveApiService extends ApiService {
     options: RPCOptions,
     urlOverride?: string,
   ): Promise<T> {
-    const res = await this.http.rpcRequest<T>(options, urlOverride)
+    // Signed with the enrolled device key; must match the bytes HttpService
+    // serializes (`{ method, params }` in this order, JSON.stringify).
+    const headers = {
+      ...options.headers,
+      ...this.authKeys.signHeader(
+        JSON.stringify({ method: options.method, params: options.params }),
+      ),
+    }
+    const res = await this.http.rpcRequest<T>(
+      { ...options, headers },
+      urlOverride,
+    )
     const body = res.body
 
     if (isRpcError(body)) {
@@ -770,6 +783,17 @@ export class LiveApiService extends ApiService {
   }
 
   private async httpRequest<T>(opts: HttpOptions): Promise<T> {
+    // Static package assets are authorized; continuation endpoints (uploads,
+    // websockets) authenticate by capability URL and need no signature.
+    if (opts.url.startsWith('/s9pk')) {
+      opts = {
+        ...opts,
+        headers: {
+          ...opts.headers,
+          ...this.authKeys.signHeader(new Uint8Array(0)),
+        },
+      }
+    }
     const res = await this.http.httpRequest<T>(opts)
     if (res.headers.get('Repr-Digest')) {
       // verify

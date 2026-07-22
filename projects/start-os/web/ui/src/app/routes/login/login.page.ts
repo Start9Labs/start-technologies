@@ -1,14 +1,8 @@
 import { CommonModule } from '@angular/common'
-import {
-  Component,
-  DOCUMENT,
-  inject,
-  linkedSignal,
-  signal,
-} from '@angular/core'
+import { Component, inject, linkedSignal, signal } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { Router } from '@angular/router'
-import { i18nKey, i18nPipe } from '@start9labs/shared'
+import { AuthKeyService, i18nKey, i18nPipe } from '@start9labs/shared'
 import {
   TuiButton,
   TuiError,
@@ -44,7 +38,7 @@ import { ConfigService } from 'src/app/services/config.service'
             />
             <tui-icon tuiPassword />
           </tui-textfield>
-          <tui-error [error]="error() || null" />
+          <tui-error [error]="error() || authError()" />
           <button tuiButton size="m" [loading]="loading()">
             {{ 'Login' | i18n }}
           </button>
@@ -103,10 +97,11 @@ import { ConfigService } from 'src/app/services/config.service'
 export default class LoginPage {
   private readonly router = inject(Router)
   private readonly authService = inject(AuthService)
+  private readonly authKeys = inject(AuthKeyService)
   private readonly api = inject(ApiService)
 
   protected readonly config = inject(ConfigService)
-  protected readonly document = inject(DOCUMENT)
+  protected readonly authError = this.authService.loginError
 
   readonly password = signal('')
   readonly loading = signal(false)
@@ -117,21 +112,29 @@ export default class LoginPage {
 
   async submit() {
     this.error.set(null)
+    this.authService.loginError.set(null)
     this.loading.set(true)
 
     try {
-      this.document.cookie = ''
       if (this.password().length > 64) {
         this.error.set('Password must be less than 65 characters')
         return
       }
-      await this.api.login({
-        password: this.password(),
-        ephemeral: window.location.host === 'localhost',
-      })
+      const key = this.authKeys.create()
+      try {
+        await this.api.login({
+          password: this.password(),
+          pubkey: key.pubkeyPem,
+          // kiosk mode re-enrolls on every browser restart; don't persist
+          ephemeral: window.location.host === 'localhost',
+        })
+      } catch (e) {
+        this.authKeys.discard()
+        throw e
+      }
 
       this.password.set('')
-      this.authService.setVerified()
+      this.authService.setVerified(true)
       // Await navigation so the button keeps loading until the route actually
       // changes — otherwise `finally` clears it the moment navigate() is called.
       await this.router.navigate([''], { replaceUrl: true })

@@ -96,7 +96,7 @@ StartOS uses **Patch-DB**, a custom diff-based database, to manage system state.
 The database has two layers:
 
 - **Public model** — Synced to the frontend. Contains everything the UI needs: service status, installed packages, system settings, network configuration, notifications.
-- **Private model** — Backend-only. Contains internal state like cryptographic keys, session tokens, and operational data that should never leave the server.
+- **Private model** — Backend-only. Contains internal state like cryptographic keys, enrolled device keys, and operational data that should never leave the server.
 
 ## Security
 
@@ -115,7 +115,7 @@ All backups are encrypted using the user's master password. Backups can be store
 
 ### Authentication
 
-The web UI is protected by password authentication with session cookies. The API uses JSON-RPC with session-based auth. SSH access is available for advanced users but is not required for normal operation.
+The web UI is protected by password authentication, with each device enrolling a signing key at login. The API uses JSON-RPC authenticated by per-request signatures. SSH access is available for advanced users but is not required for normal operation.
 
 ### Package Signing
 

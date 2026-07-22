@@ -806,4 +806,5 @@ export const ENGLISH: Record<string, number> = {
   'The StartOS data on the selected data drive is stored on a partition alongside an older OS installation, and cannot be preserved while the OS is installed to a different drive. To keep your data, select this same drive for both the OS drive and the data drive. To erase it instead, choose "Overwrite".': 911,
   'The StartOS data on the selected data drive is stored on a partition alongside an older OS installation, and cannot be preserved on this device. To erase the drive and start fresh, choose "Overwrite".': 912,
   'The StartOS data on the selected data drive spans the entire drive, so the OS cannot be installed to the same drive without erasing it. To preserve your data, select a different OS drive. To erase it, choose "Overwrite".': 913,
+  'Login succeeded, but the server rejected the new device key. Try again.': 914,
 }

@@ -86,6 +86,14 @@ file tracks notable changes since the move to the monorepo.
 
 ### Changed
 
+- **Web UI and CLI authentication moved from session cookies to per-device
+  signing keys.** Logging in now enrolls an Ed25519 public key with the
+  server, and every API request is signed with the matching key instead of
+  carrying a session cookie. Enrolled keys are tracked and managed the way
+  sessions were: System → Active Sessions shows each key's user agent and
+  last-active time and can revoke it, and keys idle for 30 days are removed.
+  All existing sessions are signed out on upgrade — sign in again on each
+  device. Resolves #3511.
 - **Stable, predictable IPv6 address (EUI-64).** NetworkManager is set to derive
   each interface's IPv6 address from its MAC (modified EUI-64) with RFC 4941
   privacy extensions off. StartOS applies this to existing network connections
@@ -290,6 +298,9 @@ file tracks notable changes since the move to the monorepo.
 
 ### Removed
 
+- **`/proxy` HTTP route.** The authenticated reverse-proxy endpoint was unused
+  (registry data flows over RPC and package assets are served from local
+  archives), so it has been removed.
 - **Package `alerts` manifest field (BREAKING, #3333).** Packages can no longer define install / update / uninstall / restore / start / stop confirmation messages. StartOS stops reading and showing them; existing installs and old s9pks are unaffected (the field is ignored on load). Built-in confirmations for destructive actions are unchanged.
 - **`nestedRuntime` manifest flag** — replaced by `userspaceFilesystems` / `virtualNetworking` (see _Changed_), with no compatibility alias.
 

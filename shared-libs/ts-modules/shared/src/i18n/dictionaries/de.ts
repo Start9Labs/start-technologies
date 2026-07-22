@@ -805,4 +805,5 @@ export default {
   911: 'Die StartOS-Daten auf dem ausgewählten Datenlaufwerk befinden sich auf einer Partition neben einer älteren OS-Installation und können nicht beibehalten werden, wenn das OS auf einem anderen Laufwerk installiert wird. Um Ihre Daten zu behalten, wählen Sie dasselbe Laufwerk sowohl als OS- als auch als Datenlaufwerk. Um sie stattdessen zu löschen, wählen Sie "Überschreiben".',
   912: 'Die StartOS-Daten auf dem ausgewählten Datenlaufwerk befinden sich auf einer Partition neben einer älteren OS-Installation und können auf diesem Gerät nicht beibehalten werden. Um das Laufwerk zu löschen und neu zu beginnen, wählen Sie "Überschreiben".',
   913: 'Die StartOS-Daten auf dem ausgewählten Datenlaufwerk erstrecken sich über das gesamte Laufwerk, sodass das OS nicht auf demselben Laufwerk installiert werden kann, ohne sie zu löschen. Um Ihre Daten zu behalten, wählen Sie ein anderes OS-Laufwerk. Um sie zu löschen, wählen Sie "Überschreiben".',
+  914: 'Anmeldung erfolgreich, aber der Server hat den neuen Geräteschlüssel abgelehnt. Versuchen Sie es erneut.',
 } satisfies i18n
