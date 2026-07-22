@@ -2687,6 +2687,13 @@ middleware.auth.rate-limited-login:
   fr_FR: "Veuillez limiter les tentatives de connexion à 3 par 20 secondes."
   pl_PL: "Proszę ograniczyć próby logowania do 3 na 20 sekund."
 
+middleware.auth.ephemeral-unsupported:
+  en_US: "Ephemeral sign-in is not supported by this server."
+  de_DE: "Flüchtige Anmeldung wird von diesem Server nicht unterstützt."
+  es_ES: "El inicio de sesión efímero no es compatible con este servidor."
+  fr_FR: "La connexion éphémère n'est pas prise en charge par ce serveur."
+  pl_PL: "Logowanie efemeryczne nie jest obsługiwane przez ten serwer."
+
 # middleware/auth/signature.rs
 middleware.auth.key-not-authorized:
   en_US: "Key is not authorized"

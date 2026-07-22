@@ -831,7 +831,7 @@ pub struct AttachParams {
     pub stderr_tty: bool,
     pub pty_size: Option<TermSize>,
     #[ts(skip)]
-    #[serde(rename = "__Auth_session")]
+    #[serde(rename = "__Auth_signer")]
     session: Option<InternedString>,
     #[ts(type = "string | null")]
     subcontainer: Option<Guid>,

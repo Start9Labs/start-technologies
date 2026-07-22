@@ -60,7 +60,7 @@ pub fn db<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "subscribe",
             from_fn_async(subscribe)
-                .with_metadata("get_session", Value::Bool(true))
+                .with_metadata("get_signer", Value::Bool(true))
                 .no_cli(),
         )
         .subcommand(
@@ -152,7 +152,7 @@ pub struct SubscribeParams {
     #[ts(type = "string | null")]
     pointer: Option<JsonPointer>,
     #[ts(skip)]
-    #[serde(rename = "__Auth_session")]
+    #[serde(rename = "__Auth_signer")]
     session: Option<InternedString>,
 }
 

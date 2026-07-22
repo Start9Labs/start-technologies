@@ -1,10 +1,12 @@
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::sync::Arc;
+use std::net::IpAddr;
+use std::sync::LazyLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::extract::Request;
+use chrono::Utc;
 use http::{HeaderMap, HeaderValue};
 use reqwest::Client;
 use rpc_toolkit::yajrc::RpcError;
@@ -25,6 +27,16 @@ use crate::util::serde::Base64;
 
 pub const AUTH_SIG_HEADER: &str = "X-StartOS-Auth-Sig";
 
+/// RPC-metadata fields understood by [`SignatureAuth`] when layered over an
+/// [`RpcContext`]. `login` marks the enrollment endpoint: the request must
+/// still be signed (proving possession of the key being enrolled), but the
+/// key need not be registered yet.
+#[derive(Deserialize)]
+pub struct LoginMetadata {
+    #[serde(default)]
+    pub login: bool,
+}
+
 pub trait SignatureAuthContext: DbContext {
     type AdditionalMetadata: DeserializeOwned + Send;
     type CheckPubkeyRes: Send;
@@ -33,6 +45,7 @@ pub trait SignatureAuthContext: DbContext {
     ) -> impl Future<Output = impl IntoIterator<Item = Result<impl AsRef<str> + Send, Error>> + Send>
     + Send;
     fn check_pubkey(
+        &self,
         db: &Model<Self::Database>,
         pubkey: Option<&AnyVerifyingKey>,
         metadata: Self::AdditionalMetadata,
@@ -45,13 +58,35 @@ pub trait SignatureAuthContext: DbContext {
 }
 
 impl SignatureAuthContext for RpcContext {
-    type AdditionalMetadata = ();
-    type CheckPubkeyRes = ();
+    type AdditionalMetadata = LoginMetadata;
+    type CheckPubkeyRes = Option<AnyVerifyingKey>;
     async fn sig_context(
         &self,
     ) -> impl IntoIterator<Item = Result<impl AsRef<str> + Send, Error>> + Send {
         let peek = self.db.peek().await;
         self.account.peek(|a| {
+            let ips: Vec<Result<InternedString, Error>> = match peek
+                .as_public()
+                .as_server_info()
+                .as_network()
+                .as_gateways()
+                .de()
+            {
+                Ok(gateways) => gateways
+                    .values()
+                    .filter_map(|g| g.ip_info.clone())
+                    .flat_map(|info| {
+                        info.lan_ip
+                            .iter()
+                            .copied()
+                            .chain(info.wan_ip.map(IpAddr::V4))
+                            .map(|ip| InternedString::intern(url_host_str(ip)))
+                            .collect::<Vec<_>>()
+                    })
+                    .map(Ok)
+                    .collect(),
+                Err(e) => vec![Err(e)],
+            };
             a.hostnames()
                 .into_iter()
                 .map(Ok)
@@ -75,27 +110,82 @@ impl SignatureAuthContext for RpcContext {
                         .map(|k| k.into_iter())
                         .transpose(),
                 )
+                .chain(ips)
                 .collect::<Vec<_>>()
         })
     }
     fn check_pubkey(
+        &self,
         db: &Model<Self::Database>,
         pubkey: Option<&AnyVerifyingKey>,
-        _: Self::AdditionalMetadata,
+        metadata: Self::AdditionalMetadata,
     ) -> Result<Self::CheckPubkeyRes, Error> {
-        if let Some(pubkey) = pubkey {
-            if db.as_private().as_auth_pubkeys().de()?.contains(pubkey) {
-                return Ok(());
-            }
+        let Some(pubkey) = pubkey else {
+            return Err(Error::new(
+                eyre!("{}", t!("middleware.auth.unauthorized")),
+                ErrorKind::Authorization,
+            ));
+        };
+        if metadata.login {
+            return Ok(None);
+        }
+        let key = InternedString::intern(pubkey.to_string());
+        if self
+            .ephemeral_auth_keys
+            .peek(|keys| keys.0.contains_key(&*key))
+        {
+            return Ok(Some(pubkey.clone()));
+        }
+        if db
+            .as_private()
+            .as_session_pubkeys()
+            .de()?
+            .0
+            .contains_key(&*key)
+        {
+            return Ok(Some(pubkey.clone()));
         }
 
         Err(Error::new(
             eyre!("{}", t!("middleware.auth.key-not-authorized")),
-            ErrorKind::IncorrectPassword,
+            ErrorKind::Authorization,
         ))
     }
-    async fn post_auth_hook(&self, _: Self::CheckPubkeyRes, _: &RpcRequest) -> Result<(), Error> {
+    async fn post_auth_hook(&self, key: Self::CheckPubkeyRes, _: &RpcRequest) -> Result<(), Error> {
+        if let Some(key) = key {
+            let key = InternedString::intern(key.to_string());
+            let ephemeral = self.ephemeral_auth_keys.mutate(|keys| {
+                if let Some(entry) = keys.0.get_mut(&*key) {
+                    entry.last_active = Utc::now();
+                    true
+                } else {
+                    false
+                }
+            });
+            if !ephemeral {
+                self.db
+                    .mutate(|db| {
+                        db.as_private_mut().as_session_pubkeys_mut().mutate(|keys| {
+                            if let Some(entry) = keys.0.get_mut(&*key) {
+                                entry.last_active = Utc::now();
+                            }
+                            Ok(())
+                        })
+                    })
+                    .await
+                    .result?;
+            }
+        }
         Ok(())
+    }
+}
+
+/// Format an IP the way `url::Url::host_str` (and `location.hostname`) renders
+/// it, so signature contexts match regardless of how the server was addressed.
+fn url_host_str(ip: IpAddr) -> String {
+    match ip {
+        IpAddr::V4(ip) => ip.to_string(),
+        IpAddr::V6(ip) => format!("[{ip}]"),
     }
 }
 
@@ -127,33 +217,90 @@ pub struct Metadata<Additional> {
 
 #[derive(Clone)]
 pub struct SignatureAuth {
-    nonce_cache: Arc<Mutex<BTreeMap<Instant, u64>>>, // for replay protection
     signer: Option<Result<AnyVerifyingKey, RpcError>>,
 }
 impl SignatureAuth {
     pub fn new() -> Self {
-        Self {
-            nonce_cache: Arc::new(Mutex::new(BTreeMap::new())),
-            signer: None,
+        Self { signer: None }
+    }
+}
+
+static NONCE_CACHE: LazyLock<Mutex<BTreeMap<Instant, u64>>> =
+    LazyLock::new(|| Mutex::new(BTreeMap::new()));
+
+async fn handle_nonce(nonce: u64) -> Result<(), Error> {
+    let mut cache = NONCE_CACHE.lock().await;
+    if cache.values().any(|n| *n == nonce) {
+        return Err(Error::new(
+            eyre!("{}", t!("middleware.auth.replay-attack-detected")),
+            ErrorKind::Authorization,
+        ));
+    }
+    while let Some(entry) = cache.first_entry() {
+        if entry.key().elapsed() > Duration::from_secs(60) {
+            entry.remove_entry();
+        } else {
+            break;
         }
     }
-    async fn handle_nonce(&mut self, nonce: u64) -> Result<(), Error> {
-        let mut cache = self.nonce_cache.lock().await;
-        if cache.values().any(|n| *n == nonce) {
-            return Err(Error::new(
-                eyre!("{}", t!("middleware.auth.replay-attack-detected")),
-                ErrorKind::Authorization,
-            ));
+    cache.insert(Instant::now(), nonce);
+    Ok(())
+}
+
+/// Verify the [`AUTH_SIG_HEADER`] on an incoming request: signature against
+/// each of the context's sig-context strings, timestamp within 30s, nonce not
+/// replayed, and the body hash matching the commitment (the body is buffered
+/// back into the request). Returns the verified signer.
+pub async fn verify_request_signature<C: SignatureAuthContext>(
+    context: &C,
+    request: &mut Request,
+) -> Result<AnyVerifyingKey, Error> {
+    let SignatureHeader {
+        commitment,
+        signer,
+        signature,
+    } = SignatureHeader::from_header(
+        request
+            .headers()
+            .get(AUTH_SIG_HEADER)
+            .or_not_found(AUTH_SIG_HEADER)
+            .with_kind(ErrorKind::InvalidRequest)?,
+    )?;
+
+    let mut verified = false;
+    for sig_context in context.sig_context().await {
+        let sig_context = sig_context?;
+        if verify_request(&signer, &commitment, sig_context.as_ref(), &signature).is_ok()
+            || verify_request_legacy(&signer, &commitment, sig_context.as_ref(), &signature).is_ok()
+        {
+            verified = true;
+            break;
         }
-        while let Some(entry) = cache.first_entry() {
-            if entry.key().elapsed() > Duration::from_secs(60) {
-                entry.remove_entry();
-            } else {
-                break;
-            }
-        }
-        Ok(())
     }
+    if !verified {
+        return Err(Error::new(
+            eyre!("{}", t!("middleware.auth.no-valid-sig-context")),
+            ErrorKind::Authorization,
+        ));
+    }
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or_else(|e| e.duration().as_secs() as i64 * -1);
+    if (now - commitment.timestamp).abs() > 30 {
+        return Err(Error::new(
+            eyre!("{}", t!("middleware.auth.timestamp-not-within-30s")),
+            ErrorKind::InvalidSignature,
+        ));
+    }
+    handle_nonce(commitment.nonce).await?;
+
+    let mut body = Vec::with_capacity(commitment.size as usize);
+    commitment.copy_to(request, &mut body).await?;
+    *request.body_mut() = Body::from(body);
+
+    Ok(signer)
 }
 
 pub struct SignatureHeader {
@@ -191,15 +338,79 @@ impl SignatureHeader {
             size: body.len() as u64,
             blake3: Base64(*blake3::hash(body).as_bytes()),
         };
-        let signature = signer
-            .scheme()
-            .sign_commitment(&signer, &commitment, context)?;
+        let signature = sign_request(signer, &commitment, context)?;
         Ok(Self {
             commitment,
             signer: signer.verifying_key(),
             signature,
         })
     }
+}
+
+/// Protocol tag prefixed to request-auth signing messages: cross-protocol
+/// separation so an RPC signature can never collide with a package/registry
+/// signature (which use the Ed25519ph context parameter for the same job).
+const REQUEST_AUTH_TAG: &[u8] = b"StartOS RPC Auth v1\0";
+
+/// The message a request signature commits to: a fixed protocol tag, the
+/// commitment, then the server identity (hostname/IP/domain) in the signed
+/// bytes. Signed with pure Ed25519, so any WebCrypto client can produce it.
+fn request_signing_message(commitment: &RequestCommitment, context: &str) -> Vec<u8> {
+    use crate::sign::commitment::Digestable;
+
+    struct Sink<'a>(&'a mut Vec<u8>);
+    impl digest::Update for Sink<'_> {
+        fn update(&mut self, data: &[u8]) {
+            self.0.extend_from_slice(data);
+        }
+    }
+
+    let mut msg = Vec::with_capacity(REQUEST_AUTH_TAG.len() + 56 + context.len());
+    msg.extend_from_slice(REQUEST_AUTH_TAG);
+    commitment.update(&mut Sink(&mut msg));
+    msg.extend_from_slice(context.as_bytes());
+    msg
+}
+
+pub fn sign_request(
+    key: &AnySigningKey,
+    commitment: &RequestCommitment,
+    context: &str,
+) -> Result<AnySignature, Error> {
+    use ed25519_dalek::Signer;
+
+    let msg = request_signing_message(commitment, context);
+    match key {
+        AnySigningKey::Ed25519(key) => Ok(AnySignature::Ed25519(key.sign(&msg))),
+    }
+}
+
+pub fn verify_request(
+    key: &AnyVerifyingKey,
+    commitment: &RequestCommitment,
+    context: &str,
+    signature: &AnySignature,
+) -> Result<(), Error> {
+    let msg = request_signing_message(commitment, context);
+    match (key, signature) {
+        (AnyVerifyingKey::Ed25519(key), AnySignature::Ed25519(signature)) => {
+            key.verify_strict(&msg, signature)?;
+            Ok(())
+        }
+    }
+}
+
+/// Pre-0.4.0-beta.11 request signatures: Ed25519ph with the server identity
+/// carried in the dom2 context parameter. Still accepted so deployed CLI and
+/// tunnel-device clients keep working; new signatures use [`verify_request`].
+fn verify_request_legacy(
+    key: &AnyVerifyingKey,
+    commitment: &RequestCommitment,
+    context: &str,
+    signature: &AnySignature,
+) -> Result<(), Error> {
+    key.scheme()
+        .verify_commitment(key, commitment, context, signature)
 }
 
 impl<C: SignatureAuthContext> Middleware<C> for SignatureAuth {
@@ -211,58 +422,9 @@ impl<C: SignatureAuthContext> Middleware<C> for SignatureAuth {
     ) -> Result<(), axum::response::Response> {
         if request.headers().contains_key(AUTH_SIG_HEADER) {
             self.signer = Some(
-                async {
-                    let SignatureHeader {
-                        commitment,
-                        signer,
-                        signature,
-                    } = SignatureHeader::from_header(
-                        request
-                            .headers()
-                            .get(AUTH_SIG_HEADER)
-                            .or_not_found(AUTH_SIG_HEADER)
-                            .with_kind(ErrorKind::InvalidRequest)?,
-                    )?;
-
-                    context.sig_context().await.into_iter().fold(
-                        Err(Error::new(
-                            eyre!("{}", t!("middleware.auth.no-valid-sig-context")),
-                            ErrorKind::Authorization,
-                        )),
-                        |acc, x| {
-                            if acc.is_ok() {
-                                acc
-                            } else {
-                                signer.scheme().verify_commitment(
-                                    &signer,
-                                    &commitment,
-                                    x?.as_ref(),
-                                    &signature,
-                                )
-                            }
-                        },
-                    )?;
-
-                    let now = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .map(|d| d.as_secs() as i64)
-                        .unwrap_or_else(|e| e.duration().as_secs() as i64 * -1);
-                    if (now - commitment.timestamp).abs() > 30 {
-                        return Err(Error::new(
-                            eyre!("{}", t!("middleware.auth.timestamp-not-within-30s")),
-                            ErrorKind::InvalidSignature,
-                        ));
-                    }
-                    self.handle_nonce(commitment.nonce).await?;
-
-                    let mut body = Vec::with_capacity(commitment.size as usize);
-                    commitment.copy_to(request, &mut body).await?;
-                    *request.body_mut() = Body::from(body);
-
-                    Ok(signer)
-                }
-                .await
-                .map_err(RpcError::from),
+                verify_request_signature(context, request)
+                    .await
+                    .map_err(RpcError::from),
             );
         }
         Ok(())
@@ -281,7 +443,7 @@ impl<C: SignatureAuthContext> Middleware<C> for SignatureAuth {
                 }
             }
             let db = context.db().peek().await;
-            let res = C::check_pubkey(&db, signer.as_ref(), metadata.additional)?;
+            let res = context.check_pubkey(&db, signer.as_ref(), metadata.additional)?;
             context.post_auth_hook(res, request).await?;
             Ok(())
         }
@@ -352,5 +514,63 @@ pub async fn call_remote<Ctx: SigningContext + AsRef<Client>>(
             ErrorKind::Network,
         )
         .into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use http::HeaderValue;
+
+    use super::*;
+
+    /// Generated by the TypeScript client (`lib/auth/signature.ts`, pure
+    /// Ed25519 via @noble/curves) for secret key 0102…1f20, context
+    /// "start-9.local", and the JSON body below. Guards the byte-level
+    /// contract between the browser signer and this verifier.
+    const JS_PRODUCED_HEADER: &str = "timestamp=1784678775&nonce=15138308865896296388&size=59&blake3=95o3MZRDgMasjyEKb6h2qMb1JFOs45lZdiY2qeXDRQY&signer=-----BEGIN+PUBLIC+KEY-----%0AMCowBQYDK2VwAyEAebVWLo%2FmVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ%3D%0A-----END+PUBLIC+KEY-----%0A&signature=-----BEGIN+SIGNATURE-----%0AMEkwBQYDK2VwBEACcEsaI6InKoVf%2BBB27cXMtYw1DxZIgnGaYmfIM%2BWucOEcCfxl%0Asld0e7pTCSqxhKMmTSdP9QmNOSxwjSgUyHgK%0A-----END+SIGNATURE-----%0A";
+    /// Same key/body/context, signed with the legacy Ed25519ph scheme.
+    const JS_LEGACY_HEADER: &str = "timestamp=1784677724&nonce=934644805336935159&size=59&blake3=95o3MZRDgMasjyEKb6h2qMb1JFOs45lZdiY2qeXDRQY&signer=-----BEGIN+PUBLIC+KEY-----%0AMCowBQYDK2VwAyEAebVWLo%2FmVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ%3D%0A-----END+PUBLIC+KEY-----%0A&signature=-----BEGIN+SIGNATURE-----%0AMEkwBQYDK2VwBEAbL92MluAwidhMHo1HE49s3U7tcVwo%2FdaHPrmP2WryD4pvXNAR%0AJ4y94b%2BSDYXgBa5PVoOqcXRisLORxl0lFpMB%0A-----END+SIGNATURE-----%0A";
+    const BODY: &[u8] = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"server.echo\",\"params\":{}}";
+
+    #[test]
+    fn verifies_js_produced_signature_header() {
+        let header = SignatureHeader::from_header(&HeaderValue::from_static(JS_PRODUCED_HEADER))
+            .expect("header parses");
+        assert_eq!(header.commitment.size, BODY.len() as u64);
+        assert_eq!(header.commitment.blake3.0, *blake3::hash(BODY).as_bytes());
+        verify_request(
+            &header.signer,
+            &header.commitment,
+            "start-9.local",
+            &header.signature,
+        )
+        .expect("signature verifies with the signing context");
+        verify_request(
+            &header.signer,
+            &header.commitment,
+            "other-host.local",
+            &header.signature,
+        )
+        .expect_err("signature does not verify under a different context");
+    }
+
+    #[test]
+    fn legacy_scheme_still_accepted() {
+        let header = SignatureHeader::from_header(&HeaderValue::from_static(JS_LEGACY_HEADER))
+            .expect("header parses");
+        verify_request_legacy(
+            &header.signer,
+            &header.commitment,
+            "start-9.local",
+            &header.signature,
+        )
+        .expect("legacy signature verifies");
+        verify_request(
+            &header.signer,
+            &header.commitment,
+            "start-9.local",
+            &header.signature,
+        )
+        .expect_err("legacy signature is not valid under the new scheme");
     }
 }

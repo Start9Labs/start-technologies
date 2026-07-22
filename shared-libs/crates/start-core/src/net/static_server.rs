@@ -34,7 +34,7 @@ use url::Url;
 use crate::context::{DiagnosticContext, InitContext, RpcContext, SetupContext};
 use crate::hostname::ServerHostname;
 use crate::middleware::auth::Auth;
-use crate::middleware::auth::session::ValidSessionToken;
+use crate::middleware::auth::signature::verify_request_signature;
 use crate::middleware::cors::Cors;
 use crate::middleware::db::SyncDb;
 use crate::prelude::*;
@@ -45,7 +45,6 @@ use crate::s9pk::merkle_archive::source::http::HttpSource;
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::util::io::open_file;
-use crate::util::net::SyncBody;
 use crate::util::serde::BASE64;
 use crate::{PackageId, main_api};
 
@@ -53,8 +52,6 @@ const NOT_FOUND: &[u8] = b"Not Found";
 const METHOD_NOT_ALLOWED: &[u8] = b"Method Not Allowed";
 const NOT_AUTHORIZED: &[u8] = b"Not Authorized";
 const INTERNAL_SERVER_ERROR: &[u8] = b"Internal Server Error";
-
-const PROXY_STRIP_HEADERS: &[&str] = &["cookie", "host", "origin", "referer", "user-agent"];
 
 pub const EMPTY_DIR: Dir<'_> = Dir::new("", &[]);
 
@@ -79,27 +76,11 @@ impl UiContext for RpcContext {
     fn middleware(server: Server<Self>) -> HttpServer<Self> {
         server
             .middleware(Cors::new())
-            .middleware(
-                Auth::new()
-                    .with_local_auth()
-                    .with_signature_auth()
-                    .with_session_auth(),
-            )
+            .middleware(Auth::new().with_local_auth().with_signature_auth())
             .middleware(SyncDb::new())
     }
     fn extend_router(self, router: Router) -> Router {
         router
-            .route("/proxy/{url}", {
-                let ctx = self.clone();
-                any(move |x::Path(url): x::Path<String>, request: Request| {
-                    let ctx = ctx.clone();
-                    async move {
-                        proxy_request(ctx, request, url)
-                            .await
-                            .unwrap_or_else(server_error)
-                    }
-                })
-            })
             .nest("/s9pk", s9pk_router(self.clone()))
             .route("/static/local-root-ca.crt", {
                 let ctx = self.clone();
@@ -250,19 +231,6 @@ pub fn refresher() -> Router {
     }))
 }
 
-async fn proxy_request(ctx: RpcContext, request: Request, url: String) -> Result<Response, Error> {
-    if_authorized(&ctx, request, |mut request| async {
-        for header in PROXY_STRIP_HEADERS {
-            request.headers_mut().remove(*header);
-        }
-        *request.uri_mut() = url.parse()?;
-        let request = request.map(|b| reqwest::Body::wrap_stream(SyncBody::from(b)));
-        let response = ctx.client.execute(request.try_into()?).await?;
-        Ok(Response::from(response).map(|b| Body::new(b)))
-    })
-    .await
-}
-
 fn s9pk_router(ctx: RpcContext) -> Router {
     Router::new()
         .route("/installed/{s9pk}", {
@@ -378,16 +346,33 @@ async fn if_authorized<
     Fut: Future<Output = Result<Response, Error>> + Send,
 >(
     ctx: &RpcContext,
-    request: Request,
+    mut request: Request,
     f: F,
 ) -> Result<Response, Error> {
-    if let Err(e) =
-        ValidSessionToken::from_header(request.headers().get(http::header::COOKIE), ctx).await
+    let path = request.uri().path().to_owned();
+    match async {
+        let signer = verify_request_signature(ctx, &mut request).await?;
+        let enrolled = ctx
+            .db
+            .peek()
+            .await
+            .as_private()
+            .as_session_pubkeys()
+            .de()?
+            .0
+            .contains_key(&*InternedString::intern(signer.to_string()));
+        if !enrolled {
+            return Err(Error::new(
+                eyre!("{}", t!("middleware.auth.unauthorized")),
+                ErrorKind::Authorization,
+            ));
+        }
+        Ok(signer)
+    }
+    .await
     {
-        // TODO: other auth methods
-        Ok(unauthorized(e, request.uri().path()))
-    } else {
-        f(request).await
+        Err(e) => Ok(unauthorized(e, &path)),
+        Ok(_) => f(request).await,
     }
 }
 

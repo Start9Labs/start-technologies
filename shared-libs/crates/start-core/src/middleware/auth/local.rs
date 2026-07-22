@@ -1,5 +1,4 @@
 use base64::Engine;
-use basic_cookies::Cookie;
 use http::HeaderValue;
 use http::header::COOKIE;
 use rand::random;
@@ -9,6 +8,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 use crate::context::RpcContext;
+use crate::middleware::auth::cookie_values;
 use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::io::{create_file_mod, read_file_to_string};
@@ -48,26 +48,12 @@ fn unauthorized() -> Error {
 
 async fn check_from_header<C: LocalAuthContext>(header: Option<&HeaderValue>) -> Result<(), Error> {
     if let Some(cookie_header) = header {
-        let cookies = Cookie::parse(
-            cookie_header
-                .to_str()
-                .with_kind(crate::ErrorKind::Authorization)?,
-        )
-        .with_kind(crate::ErrorKind::Authorization)?;
-        if let Some(cookie) = cookies.iter().find(|c| c.get_name() == "local") {
-            return check_cookie::<C>(cookie).await;
+        if let Ok(token) = read_file_to_string(C::LOCAL_AUTH_COOKIE_PATH).await {
+            if cookie_values(cookie_header, "local").any(|v| v == &*token) {
+                return Ok(());
+            }
         }
     }
-    Err(unauthorized())
-}
-
-async fn check_cookie<C: LocalAuthContext>(local: &Cookie<'_>) -> Result<(), Error> {
-    if let Ok(token) = read_file_to_string(C::LOCAL_AUTH_COOKIE_PATH).await {
-        if local.get_value() == &*token {
-            return Ok(());
-        }
-    }
-
     Err(unauthorized())
 }
 

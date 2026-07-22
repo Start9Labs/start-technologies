@@ -620,7 +620,7 @@ pub struct MetricsFollowResponse {
 #[command(rename_all = "kebab-case")]
 pub struct MetricsFollowParams {
     #[ts(skip)]
-    #[serde(rename = "__auth_session")] // from Auth middleware
+    #[serde(rename = "__Auth_signer")] // from Auth middleware
     session: Option<InternedString>,
 }
 

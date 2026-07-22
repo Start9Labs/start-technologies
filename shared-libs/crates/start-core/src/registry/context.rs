@@ -370,6 +370,7 @@ impl SignatureAuthContext for RegistryContext {
         self.hostnames.iter().map(Ok)
     }
     fn check_pubkey(
+        &self,
         db: &Model<Self::Database>,
         pubkey: Option<&AnyVerifyingKey>,
         metadata: Self::AdditionalMetadata,

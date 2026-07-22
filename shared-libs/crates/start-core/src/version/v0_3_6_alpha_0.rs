@@ -18,7 +18,6 @@ use tokio::process::Command;
 use super::v0_3_5::V0_3_0_COMPAT;
 use super::{VersionT, v0_3_5_2};
 use crate::account::AccountInfo;
-use crate::auth::Sessions;
 use crate::backup::target::cifs::CifsTargets;
 use crate::context::RpcContext;
 use crate::disk::mount::filesystem::cifs::Cifs;
@@ -322,7 +321,7 @@ impl VersionT for Version {
             value["sshPrivkey"] = to_value(Pem::new_ref(&account.ssh_key))?;
             value["sshPubkeys"] = to_value(&ssh_keys)?;
             value["availablePorts"] = to_value(&AvailablePorts::new())?;
-            value["sessions"] = to_value(&Sessions::new())?;
+            value["sessions"] = json!({});
             value["notifications"] = to_value(&Notifications::new())?;
             value["cifs"] = to_value(&cifs)?;
             value["packageStores"] = json!({});

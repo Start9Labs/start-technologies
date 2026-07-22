@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use axum::extract::ws;
 use clap::Parser;
-use imbl::{HashMap, OrdMap};
+use imbl::OrdMap;
 use imbl_value::InternedString;
 use ipnet::Ipv4Net;
 use itertools::Itertools;
@@ -18,13 +18,11 @@ use tracing::instrument;
 use ts_rs::TS;
 
 use crate::GatewayId;
-use crate::auth::Sessions;
+use crate::auth::AuthKeys;
 use crate::context::CliContext;
 use crate::db::model::public::NetworkInterfaceInfo;
 use crate::prelude::*;
 use crate::rpc_continuations::{Guid, RpcContinuation};
-use crate::sign::AnyVerifyingKey;
-use crate::tunnel::auth::SignerInfo;
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::migrations;
 use crate::tunnel::web::WebserverInfo;
@@ -39,10 +37,8 @@ pub struct TunnelDatabase {
     #[ts(skip)]
     pub migrations: BTreeSet<InternedString>,
     pub webserver: WebserverInfo,
-    pub sessions: Sessions,
     pub password: Option<String>,
-    #[ts(as = "std::collections::HashMap::<AnyVerifyingKey, SignerInfo>")]
-    pub auth_pubkeys: HashMap<AnyVerifyingKey, SignerInfo>,
+    pub auth_pubkeys: AuthKeys,
     #[ts(as = "std::collections::BTreeMap::<GatewayId, NetworkInterfaceInfo>")]
     pub gateways: OrdMap<GatewayId, NetworkInterfaceInfo>,
     pub wg: WgServer,

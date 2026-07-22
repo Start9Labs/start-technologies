@@ -16,6 +16,7 @@ use ts_rs::TS;
 use super::PackageBackupReport;
 use super::target::{BackupTargetId, PackageBackupInfo};
 use crate::PackageId;
+use crate::auth::AuthKeyContext;
 use crate::backup::os::OsBackup;
 use crate::backup::{BackupReport, ServerBackupReport};
 use crate::context::RpcContext;
@@ -23,7 +24,6 @@ use crate::db::model::{Database, DatabaseModel};
 use crate::disk::mount::backup::BackupMountGuard;
 use crate::disk::mount::filesystem::BackupWrite;
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
-use crate::middleware::auth::session::SessionAuthContext;
 use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
 use crate::progress::{FullProgress, FullProgressTracker};
@@ -198,7 +198,7 @@ pub async fn backup_all(
     let ((fs, package_ids, server_id), status_guard) = (
         ctx.db
             .mutate(|db| {
-                RpcContext::check_password(db, &password)?;
+                <RpcContext as AuthKeyContext>::check_password(db, &password)?;
                 let fs = target_id.load(db)?;
                 let package_ids = if let Some(ids) = package_ids {
                     ids.into_iter().collect()

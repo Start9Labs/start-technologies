@@ -48,7 +48,6 @@ backtrace-on-stack-overflow = { version = "0.3.0", optional = true }
 base32 = "0.5.0"
 base64 = "0.22.1"
 base64ct = "1.6.0"
-basic-cookies = "0.1.4"
 blake3 = { version = "1.5.0", features = ["mmap", "rayon"] }
 bytes = "1"
 chrono = { version = "0.4.31", features = ["serde"] }

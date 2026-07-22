@@ -21,7 +21,7 @@ use tracing::instrument;
 
 use super::setup::CURRENT_SECRET;
 use crate::account::AccountInfo;
-use crate::auth::Sessions;
+use crate::auth::AuthKeys;
 use crate::context::config::ServerConfig;
 use crate::db::model::Database;
 use crate::disk::OsPartitionInfo;
@@ -56,7 +56,7 @@ pub struct RpcContextSeed {
     closed: watch::Sender<bool>,
     pub os_partitions: OsPartitionInfo,
     pub disk_guid: InternedString,
-    pub ephemeral_sessions: SyncMutex<Sessions>,
+    pub ephemeral_auth_keys: SyncMutex<AuthKeys>,
     pub db: TypedPatchDb<Database>,
     pub sync_db: watch::Sender<u64>,
     pub account: SyncRwLock<AccountInfo>,
@@ -341,7 +341,7 @@ impl RpcContext {
             closed: watch::Sender::new(false),
             os_partitions: OsPartitionInfo::from_fstab().await?,
             disk_guid,
-            ephemeral_sessions: SyncMutex::new(Sessions::new()),
+            ephemeral_auth_keys: SyncMutex::new(AuthKeys::new()),
             sync_db: watch::Sender::new(db.sequence().await),
             db,
             account: SyncRwLock::new(account),
@@ -427,17 +427,17 @@ impl RpcContext {
         self.db
             .mutate(|db| {
                 if db.as_public().as_server_info().as_ntp_synced().de()? {
-                    for id in db.as_private().as_sessions().keys()? {
+                    for id in db.as_private().as_session_pubkeys().keys()? {
                         if Utc::now()
                             - db.as_private()
-                                .as_sessions()
+                                .as_session_pubkeys()
                                 .as_idx(&id)
                                 .unwrap()
                                 .de()?
                                 .last_active
                             > TimeDelta::days(30)
                         {
-                            db.as_private_mut().as_sessions_mut().remove(&id)?;
+                            db.as_private_mut().as_session_pubkeys_mut().remove(&id)?;
                         }
                     }
                 }
@@ -452,17 +452,17 @@ impl RpcContext {
                 if let Err(e) = db
                     .mutate(|db| {
                         if db.as_public().as_server_info().as_ntp_synced().de()? {
-                            for id in db.as_private().as_sessions().keys()? {
+                            for id in db.as_private().as_session_pubkeys().keys()? {
                                 if Utc::now()
                                     - db.as_private()
-                                        .as_sessions()
+                                        .as_session_pubkeys()
                                         .as_idx(&id)
                                         .unwrap()
                                         .de()?
                                         .last_active
                                     > TimeDelta::days(30)
                                 {
-                                    db.as_private_mut().as_sessions_mut().remove(&id)?;
+                                    db.as_private_mut().as_session_pubkeys_mut().remove(&id)?;
                                 }
                             }
                         }

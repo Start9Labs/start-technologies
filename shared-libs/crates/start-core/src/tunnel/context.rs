@@ -22,7 +22,6 @@ use tracing::instrument;
 use url::Url;
 
 use crate::GatewayId;
-use crate::auth::Sessions;
 use crate::context::config::ContextConfig;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::public::{NetworkInterfaceInfo, NetworkInterfaceType};
@@ -162,7 +161,6 @@ pub struct TunnelContextSeed {
     pub datadir: PathBuf,
     pub rpc_continuations: RpcContinuations,
     pub open_authed_continuations: OpenAuthedContinuations<Option<InternedString>>,
-    pub ephemeral_sessions: SyncMutex<Sessions>,
     pub net_iface: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
     pub forward: PortForwardController,
     pub dns_proxy: DnsProxyController,
@@ -371,7 +369,6 @@ impl TunnelContext {
             datadir,
             rpc_continuations: RpcContinuations::new(),
             open_authed_continuations: OpenAuthedContinuations::new(),
-            ephemeral_sessions: SyncMutex::new(Sessions::new()),
             net_iface,
             forward,
             dns_proxy,
@@ -901,12 +898,9 @@ impl UiContext for TunnelContext {
         tunnel_api()
     }
     fn middleware(server: rpc_toolkit::Server<Self>) -> rpc_toolkit::HttpServer<Self> {
-        server.middleware(Cors::new()).middleware(
-            Auth::new()
-                .with_local_auth()
-                .with_signature_auth()
-                .with_session_auth(),
-        )
+        server
+            .middleware(Cors::new())
+            .middleware(Auth::new().with_local_auth().with_signature_auth())
     }
 }
 
