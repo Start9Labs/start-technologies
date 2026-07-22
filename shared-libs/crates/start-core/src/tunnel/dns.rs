@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -82,7 +82,13 @@ impl DnsProxyController {
                 tracing::warn!("no DNS upstreams for subnet {subnet}; proxy not started");
                 continue;
             }
-            match bind_proxy(subnet.addr(), upstreams, injector.clone()).await {
+            // The server's v6 on the subnet's delegated prefix, so v6-sourced
+            // queries and RFC 2136 UPDATEs are served too. Best-effort: a v6
+            // bind failure degrades to v4-only rather than killing the proxy.
+            let server_v6 = config
+                .ipv6
+                .map(|prefix| crate::tunnel::wg6::host_v6(prefix, subnet.addr()));
+            match bind_proxy(subnet.addr(), server_v6, upstreams, injector.clone()).await {
                 Ok(handle) => {
                     listeners.insert(*subnet, handle);
                 }
@@ -145,10 +151,12 @@ fn resolv_conf_upstreams(config: &ResolverConfig) -> Vec<SocketAddr> {
         .collect()
 }
 
-/// Bind UDP + TCP on `addr:53` and spawn a `ServerFuture` forwarding to `upstreams`.
-/// Binds before spawning so bind failures surface to the caller.
+/// Bind UDP + TCP on `addr:53` (and `addr_v6:53` when the subnet carries a
+/// prefix) and spawn a `ServerFuture` forwarding to `upstreams`. Binds before
+/// spawning so bind failures surface to the caller.
 async fn bind_proxy(
     addr: Ipv4Addr,
+    addr_v6: Option<Ipv6Addr>,
     upstreams: Vec<SocketAddr>,
     injector: Arc<DnsInjector>,
 ) -> Result<ProxyHandle, Error> {
@@ -166,6 +174,22 @@ async fn bind_proxy(
     ));
     server.register_socket(udp);
     server.register_listener(tcp, FORWARD_TIMEOUT, DNS_RESPONSE_BUFFER_SIZE);
+
+    if let Some(v6) = addr_v6 {
+        let listen_v6 = SocketAddrV6::new(v6, DNS_PORT, 0, 0);
+        match UdpSocket::bind(listen_v6).await {
+            Ok(udp_v6) => match TcpListener::bind(listen_v6).await {
+                Ok(tcp_v6) => {
+                    server.register_socket(udp_v6);
+                    server.register_listener(tcp_v6, FORWARD_TIMEOUT, DNS_RESPONSE_BUFFER_SIZE);
+                }
+                Err(e) => {
+                    tracing::warn!("DNS proxy v6 TCP bind on {listen_v6} failed (v4-only): {e}")
+                }
+            },
+            Err(e) => tracing::warn!("DNS proxy v6 UDP bind on {listen_v6} failed (v4-only): {e}"),
+        }
+    }
 
     let shutdown = server.shutdown_token().clone();
     let task = tokio::spawn(async move {

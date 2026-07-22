@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.1.3]
 
+### Added
+
+- **DNS over the tunnel's IPv6.** Each subnet's DNS proxy now also listens on
+  the server's IPv6 address out of the subnet's delegated prefix, and RFC 2136
+  injection is authorized for a device's tunnel IPv6 on the same terms as its
+  IPv4 — so a StartOS server can publish (and refresh) its automatic records,
+  including the `AAAA` record for its `.local` name, over either family.
+
 ### Fixed
 
 - **Deleting a fallback forward now actually deletes it.** A PCP delete

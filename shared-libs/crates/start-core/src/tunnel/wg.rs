@@ -336,9 +336,10 @@ impl std::fmt::Display for ClientConfig {
             Some(v6) => format!("{v4_addr}, {v6}"),
             None => v4_addr.to_string(),
         };
-        // Only the subnet's IPv4 `.1` is advertised for DNS — the proxy binds
-        // IPv4 only, and AAAA resolution works fine over it. No v6 DNS address
-        // is advertised until the proxy also listens on the tunnel's v6.
+        // Only the subnet's IPv4 `.1` is advertised for DNS — the proxy also
+        // listens on the tunnel's v6 (for v6-sourced queries and RFC 2136
+        // UPDATEs), but AAAA resolution works fine over the v4 address, so a
+        // second advertised resolver buys nothing.
         let dns = self.subnet.addr().to_string();
         // IPv6 is full-tunnel (`::/0`): replies sourced from the VPS-delegated
         // global address must return through the tunnel, and a plain WireGuard

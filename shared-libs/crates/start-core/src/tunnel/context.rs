@@ -83,6 +83,11 @@ fn allowed_injectors(server: &WgServer) -> BTreeSet<IpAddr> {
         for (ip, client) in &subnet.clients.0 {
             if client.allow_dns_injection {
                 out.insert(IpAddr::V4(*ip));
+                // The client's v6 under the subnet's delegated prefix is the
+                // same device — a v6-sourced UPDATE is equally authorized.
+                if let Some(prefix) = subnet.ipv6 {
+                    out.insert(IpAddr::V6(crate::tunnel::wg6::host_v6(prefix, *ip)));
+                }
             }
         }
     }
@@ -96,10 +101,11 @@ fn injector_keys(server: &WgServer) -> BTreeMap<IpAddr, [u8; 32]> {
     for (_, subnet) in &server.subnets.0 {
         for (ip, client) in &subnet.clients.0 {
             if client.allow_dns_injection {
-                out.insert(
-                    IpAddr::V4(*ip),
-                    crate::net::dns_update::derive_tsig_key(&client.psk.0),
-                );
+                let key = crate::net::dns_update::derive_tsig_key(&client.psk.0);
+                out.insert(IpAddr::V4(*ip), key);
+                if let Some(prefix) = subnet.ipv6 {
+                    out.insert(IpAddr::V6(crate::tunnel::wg6::host_v6(prefix, *ip)), key);
+                }
             }
         }
     }
@@ -901,5 +907,57 @@ impl UiContext for TunnelContext {
                 .with_signature_auth()
                 .with_session_auth(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tunnel::wg::{WgClientKind, WgConfig, WgSubnetClients, WgSubnetConfig, WgSubnetMap};
+
+    fn server_with_client(ipv6: Option<Ipv6Net>) -> WgServer {
+        let mut server = WgServer::default();
+        server.subnets = WgSubnetMap::default();
+        server.subnets.0.insert(
+            "10.59.0.1/24".parse().unwrap(),
+            WgSubnetConfig {
+                name: "net".into(),
+                clients: {
+                    let mut c = WgSubnetClients::default();
+                    // A Server-kind client gets gateway-autoconfig (incl. DNS
+                    // injection) on by default.
+                    c.0.insert(
+                        "10.59.0.2".parse().unwrap(),
+                        WgConfig::generate("box".into(), WgClientKind::Server),
+                    );
+                    c
+                },
+                ipv6,
+                ..Default::default()
+            },
+        );
+        server
+    }
+
+    #[test]
+    fn v6_injector_shares_the_clients_authorization_and_key() {
+        let server = server_with_client(Some("2001:db8:abcd::/64".parse().unwrap()));
+        let v4 = IpAddr::V4(Ipv4Addr::new(10, 59, 0, 2));
+        let v6 = IpAddr::V6("2001:db8:abcd::a3b:2".parse().unwrap());
+
+        let allowed = allowed_injectors(&server);
+        assert!(allowed.contains(&v4));
+        assert!(allowed.contains(&v6));
+
+        let keys = injector_keys(&server);
+        assert!(keys.contains_key(&v4));
+        assert_eq!(keys.get(&v4), keys.get(&v6), "same device, same TSIG key");
+    }
+
+    #[test]
+    fn no_delegated_prefix_means_no_v6_injector() {
+        let server = server_with_client(None);
+        assert_eq!(allowed_injectors(&server).len(), 1);
+        assert_eq!(injector_keys(&server).len(), 1);
     }
 }

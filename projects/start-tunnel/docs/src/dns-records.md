@@ -32,7 +32,7 @@ DNS injection is a **Server** capability: a device added as a Server has it **on
 
 1. In the Servers table, the **DNS injection** toggle controls the capability — leave it on to allow injection, or turn it off to withhold it.
 
-An enabled device may add, update, and remove records via RFC 2136 DNS UPDATE. StartTunnel authorizes each request by the device's tunnel IP, so only that device's allowance is in effect.
+An enabled device may add, update, and remove records via RFC 2136 DNS UPDATE. StartTunnel authorizes each request by the device's tunnel IP — IPv4 or IPv6 — so only that device's allowance is in effect.
 
 ## Viewing and managing records
 

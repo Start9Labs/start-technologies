@@ -86,7 +86,8 @@ subnet is routed).
 
 ## DNS
 
-Devices keep using the tunnel's IPv4 DNS resolver, which serves `AAAA` records
-too. A device that is allowed to inject DNS records can publish an `AAAA` record
-for its global address, so other devices on the tunnel can reach it by name. See
-[DNS Records](dns-records.md).
+Devices keep using the tunnel's IPv4 DNS resolver (the resolver also listens
+on the tunnel's IPv6, but only the IPv4 resolver is advertised — one is enough),
+which serves `AAAA` records too. A device that is allowed to inject DNS records
+can publish an `AAAA` record for its global address, so other devices on the
+tunnel can reach it by name. See [DNS Records](dns-records.md).
