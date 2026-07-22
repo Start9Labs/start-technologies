@@ -89,6 +89,7 @@ pub async fn add_tunnel(
                         ip_info: None,
                         gateway_type,
                         port_map: Default::default(),
+                        dns_update: Default::default(),
                     },
                 );
                 return true;

@@ -93,6 +93,23 @@ impl Host {
             )
     }
 }
+/// Gateways over which `<hostname>.local` is resolvable: a LAN interface
+/// serves it by mDNS multicast; a WireGuard interface only once its resolver
+/// has accepted the injected record (`net::dns_update`), tracked as its
+/// `dns_update` capability.
+fn mdns_gateways(gateways: &OrdMap<GatewayId, NetworkInterfaceInfo>) -> BTreeSet<GatewayId> {
+    gateways
+        .iter()
+        .filter(|(_, g)| {
+            matches!(
+                g.ip_info.as_ref().and_then(|i| i.device_type),
+                Some(NetworkInterfaceType::Ethernet | NetworkInterfaceType::Wireless)
+            ) || (g.is_wireguard() && g.dns_update.supported == Some(true))
+        })
+        .map(|(id, _)| id.clone())
+        .collect()
+}
+
 impl Model<Host> {
     pub fn update_addresses(
         &mut self,
@@ -192,16 +209,7 @@ impl Model<Host> {
 
             // mdns
             let mdns_host = mdns.local_domain_name();
-            let mdns_gateways: BTreeSet<GatewayId> = gateways
-                .iter()
-                .filter(|(_, g)| {
-                    matches!(
-                        g.ip_info.as_ref().and_then(|i| i.device_type),
-                        Some(NetworkInterfaceType::Ethernet | NetworkInterfaceType::Wireless)
-                    )
-                })
-                .map(|(id, _)| id.clone())
-                .collect();
+            let mdns_gateways = mdns_gateways(gateways);
             if let Some(port) = net.assigned_port.filter(|_| {
                 opt.secure
                     .map_or(true, |s| !(s.ssl && opt.add_ssl.is_some()))
@@ -357,16 +365,7 @@ impl Model<Host> {
         // `external_start_port` as its port so the single-port
         // enabled/disabled + forward machinery applies unchanged.
         let mdns_host = mdns.local_domain_name();
-        let mdns_gateways: BTreeSet<GatewayId> = gateways
-            .iter()
-            .filter(|(_, g)| {
-                matches!(
-                    g.ip_info.as_ref().and_then(|i| i.device_type),
-                    Some(NetworkInterfaceType::Ethernet | NetworkInterfaceType::Wireless)
-                )
-            })
-            .map(|(id, _)| id.clone())
-            .collect();
+        let mdns_gateways = mdns_gateways(gateways);
         for (_, range) in this.binding_ranges.as_entries_mut()? {
             let port = range.as_external_start_port().de()?;
 
@@ -809,4 +808,65 @@ pub async fn list_hosts(
         .or_not_found(&package)?
         .into_hosts()
         .keys()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use imbl::OrdMap;
+    use imbl_value::InternedString;
+
+    use super::mdns_gateways;
+    use crate::GatewayId;
+    use crate::db::model::public::{
+        CapabilityVerdict, IpInfo, NetworkInterfaceInfo, NetworkInterfaceType,
+    };
+
+    fn iface(
+        device_type: NetworkInterfaceType,
+        dns_update_supported: Option<bool>,
+    ) -> NetworkInterfaceInfo {
+        NetworkInterfaceInfo {
+            ip_info: Some(Arc::new(IpInfo {
+                device_type: Some(device_type),
+                ..Default::default()
+            })),
+            dns_update: CapabilityVerdict {
+                supported: dns_update_supported,
+                at: dns_update_supported.map(|_| chrono::Utc::now()),
+            },
+            ..Default::default()
+        }
+    }
+
+    fn gw(id: &str) -> GatewayId {
+        GatewayId::from(InternedString::intern(id))
+    }
+
+    #[test]
+    fn mdns_gateways_lan_always_wireguard_only_when_injection_confirmed() {
+        let ifaces: OrdMap<GatewayId, NetworkInterfaceInfo> = [
+            (gw("eth0"), iface(NetworkInterfaceType::Ethernet, None)),
+            (gw("wlan0"), iface(NetworkInterfaceType::Wireless, None)),
+            // Accepted the injected record: list `.local` on it.
+            (
+                gw("wg-ok"),
+                iface(NetworkInterfaceType::Wireguard, Some(true)),
+            ),
+            // Refused / never attempted: hide it.
+            (
+                gw("wg-no"),
+                iface(NetworkInterfaceType::Wireguard, Some(false)),
+            ),
+            (gw("wg-new"), iface(NetworkInterfaceType::Wireguard, None)),
+        ]
+        .into_iter()
+        .collect();
+
+        assert_eq!(
+            mdns_gateways(&ifaces),
+            [gw("eth0"), gw("wlan0"), gw("wg-ok")].into_iter().collect()
+        );
+    }
 }

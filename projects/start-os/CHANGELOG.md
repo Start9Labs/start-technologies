@@ -18,10 +18,14 @@ file tracks notable changes since the move to the monorepo.
   the tunnel can't resolve `.local` by mDNS (Android and others exclude VPN
   connections from mDNS), so without this a `.local` lookup goes to the tunnel's
   resolver and fails; now the tunnel answers it, and the name resolves from
-  anywhere the tunnel reaches. The gateway's own DNS-injection policy still
-  applies — a gateway with injection disabled refuses the record, and `.local`
-  there falls back to a manual DNS record — and plain LAN gateways are left
-  untouched, since mDNS already works on the LAN.
+  anywhere the tunnel reaches. Once a gateway's resolver accepts the record,
+  `.local` is listed among that gateway's addresses in the UI, like on the LAN.
+  The gateway's own DNS-injection policy still applies — a gateway with
+  injection disabled refuses the record, is not listed, and `.local` there
+  falls back to a manual DNS record — and plain LAN gateways are left
+  untouched, since mDNS already works on the LAN. A gateway whose resolver
+  refuses or times out is backed off on the same trust-window cadence as
+  port-mapping probes, not retried every few minutes.
 - **IPv6 GUA exposure control.** On a service interface, an IPv6 global-unicast
   address (GUA) keeps the usual on/off toggle and adds a **Local / Public**
   dropdown in the access column. **Local** (the default) keeps it reachable on

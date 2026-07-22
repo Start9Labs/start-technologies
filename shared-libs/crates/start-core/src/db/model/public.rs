@@ -266,6 +266,12 @@ pub struct NetworkInterfaceInfo {
     pub gateway_type: GatewayType,
     #[serde(default)]
     pub port_map: GatewayPortMapCapabilities,
+    /// The gateway's resolver accepted our last RFC 2136 DNS UPDATE — evidence
+    /// from the update client (`net::dns_update`). A WireGuard gateway only
+    /// serves the injected `<hostname>.local` while this is `supported`, so
+    /// only then is the name listed on it.
+    #[serde(default)]
+    pub dns_update: CapabilityVerdict,
 }
 
 /// Whether the gateway reachable via this interface speaks each port-mapping

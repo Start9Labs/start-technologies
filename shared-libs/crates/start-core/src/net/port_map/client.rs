@@ -442,7 +442,7 @@ fn report_local(
     });
 }
 
-fn set_verdict(v: &mut CapabilityVerdict, supported: bool, now: DateTime<Utc>) -> bool {
+pub(crate) fn set_verdict(v: &mut CapabilityVerdict, supported: bool, now: DateTime<Utc>) -> bool {
     if v.fresh(now) == Some(supported) {
         false
     } else {

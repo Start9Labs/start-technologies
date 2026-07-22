@@ -134,13 +134,13 @@ impl DnsUpdateController {
                             let changed = desired.get(&fqdn) != Some(&gateways);
                             desired.insert(fqdn.clone(), gateways);
                             if changed {
-                                reconcile_one(&fqdn, &desired, &mut active, &ifaces, &psk, &mut signers).await;
+                                reconcile_one(&fqdn, &desired, &mut active, &net_iface, &ifaces, &psk, &mut signers).await;
                             }
                         }
                         Some(Command::Gc { rm }) => {
                             for fqdn in rm {
                                 desired.remove(&fqdn);
-                                reconcile_one(&fqdn, &desired, &mut active, &ifaces, &psk, &mut signers).await;
+                                reconcile_one(&fqdn, &desired, &mut active, &net_iface, &ifaces, &psk, &mut signers).await;
                             }
                         }
                         None => break,
@@ -149,15 +149,23 @@ impl DnsUpdateController {
                         ifaces = net_iface.read();
                         signers.clear();
                         for fqdn in desired.keys().cloned().collect::<Vec<_>>() {
-                            reconcile_one(&fqdn, &desired, &mut active, &ifaces, &psk, &mut signers).await;
+                            reconcile_one(&fqdn, &desired, &mut active, &net_iface, &ifaces, &psk, &mut signers).await;
                         }
                     }
                     _ = refresh.tick() => {
                         for (fqdn, targets) in &active {
                             if let Ok(name) = fqdn_to_name(fqdn) {
+                                let mut outcomes: BTreeMap<&GatewayId, bool> = BTreeMap::new();
                                 for (gw, server, ip) in targets {
+                                    if recently_failed(&net_iface, gw) {
+                                        continue;
+                                    }
                                     let signer = signer_for(gw, &psk, &mut signers).await;
-                                    apply(&name, *server, *ip, signer.as_ref()).await;
+                                    let ok = apply(&name, *server, *ip, signer.as_ref()).await;
+                                    *outcomes.entry(gw).or_default() |= ok;
+                                }
+                                for (gw, ok) in outcomes {
+                                    report(&net_iface, gw, ok);
                                 }
                             }
                         }
@@ -303,10 +311,46 @@ async fn signer_for(
     }
 }
 
+/// Feed a round's UPDATE outcomes back as the gateway's `dns_update`
+/// capability verdict: supported if any of the gateway's resolvers accepted
+/// the update (a gateway can have a resolver per address family, and e.g.
+/// StartTunnel only accepts v4-sourced updates). Aggregating per round keeps
+/// a per-target report from flapping the verdict — which would rewrite the
+/// watch, retrigger a reconcile, and spin. `set_verdict`'s trust windows then
+/// make a repeat of the same verdict a no-op, so a steady state doesn't
+/// retrigger the `net_iface` watch on every refresh tick.
+/// A gateway whose last UPDATE failed inside the negative trust window — the
+/// same dead-gateway skip the port-map client applies, so a refusing resolver
+/// is retried on the verdict's staleness cadence, not every refresh tick.
+fn recently_failed(
+    interfaces: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
+    gw: &GatewayId,
+) -> bool {
+    let now = chrono::Utc::now();
+    interfaces
+        .read()
+        .get(gw)
+        .map_or(false, |i| i.dns_update.fresh(now) == Some(false))
+}
+
+fn report(
+    interfaces: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
+    gw: &GatewayId,
+    supported: bool,
+) {
+    let now = chrono::Utc::now();
+    interfaces.send_if_modified(|m| {
+        m.get_mut(gw).map_or(false, |info| {
+            crate::net::port_map::set_verdict(&mut info.dns_update, supported, now)
+        })
+    });
+}
+
 async fn reconcile_one(
     fqdn: &InternedString,
     desired: &BTreeMap<InternedString, BTreeSet<GatewayId>>,
     active: &mut BTreeMap<InternedString, BTreeSet<Target>>,
+    interfaces: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
     ifaces: &OrdMap<GatewayId, NetworkInterfaceInfo>,
     psk: &PskLookup,
     signers: &mut BTreeMap<GatewayId, Option<TSigner>>,
@@ -330,9 +374,17 @@ async fn reconcile_one(
         let signer = signer_for(gw, psk, signers).await;
         withdraw(&name, *server, *ip, signer.as_ref()).await;
     }
+    let mut outcomes: BTreeMap<&GatewayId, bool> = BTreeMap::new();
     for (gw, server, ip) in &want {
+        if recently_failed(interfaces, gw) {
+            continue;
+        }
         let signer = signer_for(gw, psk, signers).await;
-        apply(&name, *server, *ip, signer.as_ref()).await;
+        let ok = apply(&name, *server, *ip, signer.as_ref()).await;
+        *outcomes.entry(gw).or_default() |= ok;
+    }
+    for (gw, ok) in outcomes {
+        report(interfaces, gw, ok);
     }
     if !want.is_empty() {
         active.insert(fqdn.clone(), want);
@@ -360,7 +412,8 @@ fn record_type_for(ip: IpAddr) -> RecordType {
     }
 }
 
-async fn apply(fqdn: &Name, server: IpAddr, ip: IpAddr, signer: Option<&TSigner>) {
+/// Whether both messages of the replace (delete + add) were accepted.
+async fn apply(fqdn: &Name, server: IpAddr, ip: IpAddr, signer: Option<&TSigner>) -> bool {
     let zone = zone_of(fqdn);
     let rtype = record_type_for(ip);
     let rdata = match ip {
@@ -375,10 +428,11 @@ async fn apply(fqdn: &Name, server: IpAddr, ip: IpAddr, signer: Option<&TSigner>
     for msg in [delete, add] {
         if let Err(e) = send(server, ip, &msg, signer).await {
             crate::dev_log!(debug, "RFC 2136 update of {fqdn} on {server} failed: {e}");
-            return;
+            return false;
         }
     }
     tracing::debug!("published {fqdn} -> {ip} via RFC 2136 on {server}");
+    true
 }
 
 async fn withdraw(fqdn: &Name, server: IpAddr, ip: IpAddr, signer: Option<&TSigner>) {
@@ -447,9 +501,12 @@ mod tests {
     use imbl::OrdMap;
     use imbl_value::InternedString;
 
-    use super::wireguard_gateways;
+    use super::{recently_failed, wireguard_gateways};
     use crate::GatewayId;
-    use crate::db::model::public::{IpInfo, NetworkInterfaceInfo, NetworkInterfaceType};
+    use crate::db::model::public::{
+        CapabilityVerdict, IpInfo, NetworkInterfaceInfo, NetworkInterfaceType,
+    };
+    use crate::util::sync::Watch;
 
     fn iface(device_type: Option<NetworkInterfaceType>) -> NetworkInterfaceInfo {
         NetworkInterfaceInfo {
@@ -484,6 +541,40 @@ mod tests {
             wireguard_gateways(&ifaces),
             [gw("wg0"), gw("wg1")].into_iter().collect()
         );
+    }
+
+    #[test]
+    fn recent_failure_gates_retries() {
+        let ifaces = Watch::new(OrdMap::from_iter([(
+            gw("wg0"),
+            iface(Some(NetworkInterfaceType::Wireguard)),
+        )]));
+        let set = |v: CapabilityVerdict| {
+            ifaces.send_if_modified(|m| {
+                m.get_mut(&gw("wg0"))
+                    .map_or(false, |i: &mut NetworkInterfaceInfo| {
+                        let changed = i.dns_update != v;
+                        i.dns_update = v;
+                        changed
+                    })
+            });
+        };
+
+        // Never probed: attempt.
+        assert!(!recently_failed(&ifaces, &gw("wg0")));
+        assert!(!recently_failed(&ifaces, &gw("missing")));
+        // Fresh success: attempt.
+        set(CapabilityVerdict::supported(true));
+        assert!(!recently_failed(&ifaces, &gw("wg0")));
+        // Fresh failure: skip.
+        set(CapabilityVerdict::supported(false));
+        assert!(recently_failed(&ifaces, &gw("wg0")));
+        // Stale failure (past the 5-minute negative window): retry.
+        set(CapabilityVerdict {
+            supported: Some(false),
+            at: Some(chrono::Utc::now() - chrono::TimeDelta::minutes(6)),
+        });
+        assert!(!recently_failed(&ifaces, &gw("wg0")));
     }
 
     #[test]

@@ -132,6 +132,7 @@ export const mockTunnelData: TunnelData = {
         upnp: { supported: null, at: null },
         pcpHostname: { supported: null, at: null },
       },
+      dnsUpdate: { supported: null, at: null },
       ipInfo: {
         name: 'Wired Connection 1',
         scopeId: 1,

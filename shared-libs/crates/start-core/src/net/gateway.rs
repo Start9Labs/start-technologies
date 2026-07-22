@@ -2255,8 +2255,15 @@ async fn poll_ip_info(
     };
 
     write_to.send_if_modified(|m: &mut OrdMap<GatewayId, NetworkInterfaceInfo>| {
-        let (name, secure, gateway_type, prev_wan_ip, port_map) = m.get(iface).map_or(
-            (None, None, Default::default(), None, Default::default()),
+        let (name, secure, gateway_type, prev_wan_ip, port_map, dns_update) = m.get(iface).map_or(
+            (
+                None,
+                None,
+                Default::default(),
+                None,
+                Default::default(),
+                Default::default(),
+            ),
             |i| {
                 (
                     i.name.clone(),
@@ -2264,6 +2271,7 @@ async fn poll_ip_info(
                     i.gateway_type,
                     i.ip_info.as_ref().and_then(|i| i.wan_ip),
                     i.port_map,
+                    i.dns_update,
                 )
             },
         );
@@ -2277,6 +2285,7 @@ async fn poll_ip_info(
                 ip_info: Some(ip_info.clone()),
                 gateway_type,
                 port_map,
+                dns_update,
             },
         )
         .filter(|old| &old.ip_info == &Some(ip_info))
