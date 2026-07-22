@@ -24,6 +24,11 @@
               "zone.js",
               "projects/start-os/web/ui/src/polyfills.ts"
             ],
+            "optimization": {
+              "scripts": true,
+              "fonts": true,
+              "styles": { "minify": true, "inlineCritical": false }
+            },
             "tsConfig": "projects/start-os/web/ui/tsconfig.json",
             "inlineStyleLanguage": "scss",
             "assets": [
@@ -139,6 +144,11 @@
               "zone.js",
               "projects/start-os/web/setup-wizard/src/polyfills.ts"
             ],
+            "optimization": {
+              "scripts": true,
+              "fonts": true,
+              "styles": { "minify": true, "inlineCritical": false }
+            },
             "tsConfig": "projects/start-os/web/setup-wizard/tsconfig.json",
             "inlineStyleLanguage": "scss",
             "assets": [
@@ -239,6 +249,11 @@
             "index": "projects/start-tunnel/web/src/index.html",
             "browser": "projects/start-tunnel/web/src/main.ts",
             "polyfills": [],
+            "optimization": {
+              "scripts": true,
+              "fonts": true,
+              "styles": { "minify": true, "inlineCritical": false }
+            },
             "tsConfig": "projects/start-tunnel/web/tsconfig.json",
             "inlineStyleLanguage": "scss",
             "assets": [

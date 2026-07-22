@@ -18,6 +18,7 @@ import {
   RELATIVE_URL,
   WorkspaceConfig,
 } from '@start9labs/shared'
+import { z } from '@start9labs/start-core'
 import { LANG_STORAGE_KEY, TUNNEL_I18N_PROVIDERS } from './i18n/i18n.providers'
 import {
   provideTaiga,
@@ -40,6 +41,10 @@ const {
   useMocks,
   ui: { api },
 } = require('../../../../../config.json') as WorkspaceConfig
+
+// The UI is served under a CSP without 'unsafe-eval': make zod take its
+// interpreted path instead of probing `new Function()` against the policy.
+z.config({ jitless: true })
 
 export const appConfig: ApplicationConfig = {
   providers: [
