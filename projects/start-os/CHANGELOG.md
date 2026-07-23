@@ -190,6 +190,11 @@ file tracks notable changes since the move to the monorepo.
 
 ### Fixed
 
+- **Migrating a 0.3.5.1 package that lacks instructions no longer fails.**
+  Converting a legacy (Embassy) package to the new s9pk format now carries over
+  its instructions when present and falls back to a placeholder when absent, so a
+  package with no `instructions.md` can no longer break the 0.3.5.1 → 0.4.0
+  upgrade. Previously the converted package omitted the file entirely.
 - **URL-plugin services no longer accumulate duplicate exported addresses.**
   `export_url` now dedupes a binding's `available` set by the same address
   identity `clear_urls` retains on (ignoring the row-action fields), so
