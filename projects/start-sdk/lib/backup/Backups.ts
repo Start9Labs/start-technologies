@@ -93,6 +93,13 @@ export const DEFAULT_OPTIONS: T.SyncOptions = {
   delete: true,
   exclude: [],
 }
+/**
+ * Default progress weight of each rsync sync phase. rsync dominates a backup's
+ * runtime, so it dominates the progress bar relative to the pre/post hooks.
+ */
+export const DEFAULT_SYNC_WEIGHT = 80
+/** Default progress weight of a pre/post backup or restore hook phase. */
+export const DEFAULT_HOOK_WEIGHT = 10
 /** A single source-to-destination sync pair for backup and restore */
 export type BackupSync<Volumes extends string> = {
   dataPath: `/media/startos/volumes/${Volumes}/${string}`
@@ -100,10 +107,18 @@ export type BackupSync<Volumes extends string> = {
   options?: Partial<T.SyncOptions>
   backupOptions?: Partial<T.SyncOptions>
   restoreOptions?: Partial<T.SyncOptions>
+  /** Progress weight of this sync's phase (default {@link DEFAULT_SYNC_WEIGHT}). */
+  weight?: number
 }
 
 /** Effects type narrowed for backup/restore contexts, preventing reuse outside that scope */
 export type BackupEffects = T.Effects & Affine<'Backups'>
+
+/** A pre/post backup or restore hook, given a progress tracker for its phase. */
+export type BackupHook = (
+  effects: BackupEffects,
+  progress: FullProgressTracker,
+) => Promise<void>
 
 /**
  * Configures backup and restore operations using rsync.
@@ -120,23 +135,16 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
     private restoreOptions: Partial<T.SyncOptions> = {},
     private backupOptions: Partial<T.SyncOptions> = {},
     private backupSet = [] as BackupSync<M['volumes'][number]>[],
-    private preBackup = async (
-      effects: BackupEffects,
-      progress: FullProgressTracker,
-    ) => {},
-    private postBackup = async (
-      effects: BackupEffects,
-      progress: FullProgressTracker,
-    ) => {},
-    private preRestore = async (
-      effects: BackupEffects,
-      progress: FullProgressTracker,
-    ) => {},
-    private postRestore = async (
-      effects: BackupEffects,
-      progress: FullProgressTracker,
-    ) => {},
   ) {}
+
+  private preBackup?: BackupHook
+  private postBackup?: BackupHook
+  private preRestore?: BackupHook
+  private postRestore?: BackupHook
+  private preBackupWeight = DEFAULT_HOOK_WEIGHT
+  private postBackupWeight = DEFAULT_HOOK_WEIGHT
+  private preRestoreWeight = DEFAULT_HOOK_WEIGHT
+  private postRestoreWeight = DEFAULT_HOOK_WEIGHT
 
   /**
    * Create a Backups configuration that backs up entire volumes by name.
@@ -635,13 +643,9 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
    * Register a hook to run before backup rsync begins (e.g. dump a database).
    * @param fn - Async function receiving backup-scoped effects and a progress tracker for this hook
    */
-  setPreBackup(
-    fn: (
-      effects: BackupEffects,
-      progress: FullProgressTracker,
-    ) => Promise<void>,
-  ) {
+  setPreBackup(fn: BackupHook, weight: number = DEFAULT_HOOK_WEIGHT) {
     this.preBackup = fn
+    this.preBackupWeight = weight
     return this
   }
 
@@ -649,13 +653,9 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
    * Register a hook to run after backup rsync completes.
    * @param fn - Async function receiving backup-scoped effects and a progress tracker for this hook
    */
-  setPostBackup(
-    fn: (
-      effects: BackupEffects,
-      progress: FullProgressTracker,
-    ) => Promise<void>,
-  ) {
+  setPostBackup(fn: BackupHook, weight: number = DEFAULT_HOOK_WEIGHT) {
     this.postBackup = fn
+    this.postBackupWeight = weight
     return this
   }
 
@@ -663,13 +663,9 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
    * Register a hook to run before restore rsync begins.
    * @param fn - Async function receiving backup-scoped effects and a progress tracker for this hook
    */
-  setPreRestore(
-    fn: (
-      effects: BackupEffects,
-      progress: FullProgressTracker,
-    ) => Promise<void>,
-  ) {
+  setPreRestore(fn: BackupHook, weight: number = DEFAULT_HOOK_WEIGHT) {
     this.preRestore = fn
+    this.preRestoreWeight = weight
     return this
   }
 
@@ -677,13 +673,9 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
    * Register a hook to run after restore rsync completes.
    * @param fn - Async function receiving backup-scoped effects and a progress tracker for this hook
    */
-  setPostRestore(
-    fn: (
-      effects: BackupEffects,
-      progress: FullProgressTracker,
-    ) => Promise<void>,
-  ) {
+  setPostRestore(fn: BackupHook, weight: number = DEFAULT_HOOK_WEIGHT) {
     this.postRestore = fn
+    this.postRestoreWeight = weight
     return this
   }
 
@@ -698,6 +690,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
       options: T.SyncOptions
       backupOptions: T.SyncOptions
       restoreOptions: T.SyncOptions
+      weight: number
     }>,
   ) {
     return this.addSync({
@@ -727,14 +720,23 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
     const tracker = new FullProgressTracker(progress =>
       effects.setBackupProgress({ progress }),
     )
-    const preHook = tracker.addNestedPhase('pre-backup', 1)
-    const syncs = this.backupSet.map((s, i) =>
-      tracker.addPhase(`rsync:${s.backupPath}`, 1),
+    const preHook = this.preBackup
+      ? tracker.addNestedPhase('pre-backup', this.preBackupWeight)
+      : undefined
+    const syncs = this.backupSet.map(s =>
+      tracker.addPhase(
+        `rsync:${s.backupPath}`,
+        s.weight ?? DEFAULT_SYNC_WEIGHT,
+      ),
     )
-    const postHook = tracker.addNestedPhase('post-backup', 1)
+    const postHook = this.postBackup
+      ? tracker.addNestedPhase('post-backup', this.postBackupWeight)
+      : undefined
 
-    await this.preBackup(effects as BackupEffects, preHook)
-    preHook.complete()
+    if (preHook) {
+      await this.preBackup!(effects as BackupEffects, preHook)
+      preHook.complete()
+    }
 
     for (let i = 0; i < this.backupSet.length; i++) {
       const item = this.backupSet[i]!
@@ -772,9 +774,13 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
       await fs.writeFile('/media/startos/backup/dataVersion.txt', dataVersion, {
         encoding: 'utf-8',
       })
-    await this.postBackup(effects as BackupEffects, postHook)
-    postHook.complete()
-    tracker.complete()
+    if (postHook) {
+      await this.postBackup!(effects as BackupEffects, postHook)
+      postHook.complete()
+    }
+    // Don't mark the tracker complete: the OS backup harness holds this
+    // package's phase open until the s9pk image finishes writing, so it reports
+    // 100%, not "done".
     await tracker.sync()
     return
   }
@@ -802,14 +808,23 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
     const tracker =
       progress ??
       new FullProgressTracker(p => effects.setInitProgress({ progress: p }))
-    const preHook = tracker.addNestedPhase('pre-restore', 1)
+    const preHook = this.preRestore
+      ? tracker.addNestedPhase('pre-restore', this.preRestoreWeight)
+      : undefined
     const syncs = this.backupSet.map(s =>
-      tracker.addPhase(`restore:${s.dataPath}`, 1),
+      tracker.addPhase(
+        `restore:${s.dataPath}`,
+        s.weight ?? DEFAULT_SYNC_WEIGHT,
+      ),
     )
-    const postHook = tracker.addNestedPhase('post-restore', 1)
+    const postHook = this.postRestore
+      ? tracker.addNestedPhase('post-restore', this.postRestoreWeight)
+      : undefined
 
-    await this.preRestore(effects as BackupEffects, preHook)
-    preHook.complete()
+    if (preHook) {
+      await this.preRestore!(effects as BackupEffects, preHook)
+      preHook.complete()
+    }
 
     for (let i = 0; i < this.backupSet.length; i++) {
       const item = this.backupSet[i]!
@@ -845,8 +860,10 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
       })
       .catch(_ => null)
     if (dataVersion) await effects.setDataVersion({ version: dataVersion })
-    await this.postRestore(effects as BackupEffects, postHook)
-    postHook.complete()
+    if (postHook) {
+      await this.postRestore!(effects as BackupEffects, postHook)
+      postHook.complete()
+    }
     await tracker.sync()
     return
   }

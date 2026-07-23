@@ -9,6 +9,9 @@ Use `sdk.setupBackups()` with the appropriate builder. `sdk.Backups.ofVolumes('m
 > [!NOTE]
 > Because the service is stopped for the duration of the backup, your backup logic runs against a quiescent volume — nothing is writing to the data while it is copied or dumped. StartOS restarts the service automatically once the backup finishes, but only if it was running when the backup began; a service that was already stopped stays stopped.
 
+> [!NOTE]
+> Progress is reported per phase, weighted so the rsync copy — the slow part — dominates the bar (`DEFAULT_SYNC_WEIGHT` = 80 per sync, `DEFAULT_HOOK_WEIGHT` = 10 per pre/post hook). A pre/post phase appears only when you set that hook. Override any phase's weight with the optional `weight` argument to `setPreBackup` / `setPostBackup` / `setPreRestore` / `setPostRestore`, or the `weight` field on a sync (`addSync` / `addVolume`).
+
 **Reference:** [Main](main.md) · [File Models](file-models.md)
 
 ## Examples

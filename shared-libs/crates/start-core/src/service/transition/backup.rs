@@ -31,9 +31,6 @@ impl ServiceActorSeed {
                     ))
                 };
                 let id = &self.id;
-                if let Some(mut handle) = self.backup_phase.replace(None) {
-                    handle.complete();
-                }
                 self.ctx
                     .db
                     .mutate(|db| {

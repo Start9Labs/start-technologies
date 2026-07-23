@@ -1,5 +1,30 @@
 # Changelog
 
+## 2.0.7 — StartOS 0.4.0-beta.10 (2026-07-23)
+
+### Changed
+
+- **Backup and restore progress now weights the rsync transfer far above the
+  pre/post hooks, so the bar tracks the copy.** Every progress phase — the
+  optional pre/post hooks and each rsync sync — previously carried equal weight,
+  so on a typical single-volume package the instant pre-backup hook alone
+  accounted for a third of the bar while the rsync (the part that actually takes
+  time) was squeezed into a band too narrow for its fractional progress to move
+  the rounded total: it sat at 33% for the whole transfer and then jumped. Each
+  rsync sync phase now defaults to weight `80` (`DEFAULT_SYNC_WEIGHT`) and each
+  pre/post hook phase to `10` (`DEFAULT_HOOK_WEIGHT`), and a pre/post phase is
+  added only when that hook is actually set — so a hook-less backup is just its
+  rsync phase(s) and tracks the copy directly. All weights are overridable:
+  `setPreBackup` / `setPostBackup` / `setPreRestore` / `setPostRestore` take an
+  optional second `weight` argument, and a sync's weight is set via the new
+  `BackupSync.weight` field (or the `weight` key on `addVolume`'s options).
+- **`createBackup` no longer marks its own progress tracker complete.** The
+  StartOS backup harness owns per-package completion and holds the phase open
+  until the package's `.s9pk` image has finished writing to the backup target,
+  so a package reports 100% and "still working" during the image write rather
+  than a premature "done". Restore is driven by the init harness and was already
+  finalized externally, so it is unchanged in this respect.
+
 ## 2.0.6 — StartOS 0.4.0-beta.10 (2026-07-17)
 
 ### Fixed

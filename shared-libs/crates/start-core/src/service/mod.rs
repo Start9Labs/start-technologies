@@ -740,7 +740,15 @@ impl Service {
         }
         .await;
 
-        backup.await?;
+        let backup_res = backup.await;
+
+        // Complete the phase only now — after the s9pk write — so a package
+        // isn't reported done while its image is still streaming to the target.
+        if let Some(mut handle) = self.seed.backup_phase.replace(None) {
+            handle.complete();
+        }
+
+        backup_res?;
         s9pk_res
     }
 

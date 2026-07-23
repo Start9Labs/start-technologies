@@ -1,6 +1,6 @@
 {
   "name": "@start9labs/start-sdk",
-  "version": "2.0.6",
+  "version": "2.0.7",
   "description": "Software development kit to facilitate packaging services for StartOS",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
