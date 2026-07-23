@@ -138,6 +138,22 @@ fn dns_entry(r: &InjectedRecord) -> DnsRecordEntry {
     }
 }
 
+/// Install a client's /128 host route over the wg interface. Best-effort like
+/// [`neigh_proxy`]. `replace`-ing every client is a full reconcile — the
+/// `wg-quick` bounce preceding every resync cleared the interface's routes.
+async fn client_route(addr: Ipv6Addr) {
+    Command::new("ip")
+        .arg("-6")
+        .arg("route")
+        .arg("replace")
+        .arg(format!("{addr}/128"))
+        .arg("dev")
+        .arg(WIREGUARD_INTERFACE_NAME)
+        .invoke(ErrorKind::Network)
+        .await
+        .log_err();
+}
+
 /// Add or remove a proxy-NDP entry so the tunnel host answers Neighbor
 /// Discovery for a client's on-link IPv6 on the WAN interface. Best-effort:
 /// failures are logged, not fatal (reconciled on the next resync).
@@ -458,12 +474,14 @@ impl TunnelContext {
         self.resync_v6().await
     }
 
-    /// Reconcile proxy-NDP for client IPv6 addresses. When a client's /128 sits
-    /// inside a /64 that a WAN interface holds *on-link* (Hetzner, Vultr), the
-    /// VPS gateway resolves that address via Neighbor Discovery on the WAN link,
-    /// so the tunnel host must answer for it (`proxy_ndp`) and then forward to
-    /// the client over WireGuard. A routed prefix is delivered to the host
-    /// without ND, so it needs no proxy entry.
+    /// Reconcile IPv6 delivery for client addresses. Every client /128 gets an
+    /// explicit route over the wg interface: wg-quick installs none (its
+    /// Address-derived route covers them), and that interface route ties with —
+    /// and loses to — a WAN that holds the delegated prefix on-link at the same
+    /// length (DigitalOcean configures its /124 this way), sending return
+    /// traffic out the WAN. Clients inside an on-link prefix additionally get
+    /// proxy-NDP on the WAN (Hetzner, Vultr, DO) so the VPS gateway's Neighbor
+    /// Discovery resolves them here; a routed prefix needs no proxy entry.
     pub async fn resync_v6(&self) -> Result<(), Error> {
         let _guard = self.v6_lock.lock().await;
         let server = self.db.peek().await.as_wg().de()?;
@@ -496,15 +514,16 @@ impl TunnelContext {
                 }
                 v
             });
-            // For each subnet with a prefix, proxy-NDP every client's /128 that
-            // falls inside a WAN interface's on-link /64 (the delivery path for
-            // an on-link prefix; a routed prefix reaches the host without ND).
+            // For each subnet with a prefix: route every client's /128 over wg,
+            // and proxy-NDP those inside a WAN interface's on-link prefix (the
+            // delivery path for an on-link prefix; a routed one needs no ND).
             for (_, cfg) in &server.subnets.0 {
                 let Some(prefix) = cfg.ipv6 else {
                     continue;
                 };
                 for (client_v4, _) in &cfg.clients.0 {
                     let addr = crate::tunnel::wg6::host_v6(prefix, *client_v4);
+                    client_route(addr).await;
                     if let Some((iface, _)) = onlink.iter().find(|(_, n)| n.contains(&addr)) {
                         desired.insert(addr, iface.clone());
                     }

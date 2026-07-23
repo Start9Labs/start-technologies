@@ -106,8 +106,10 @@ the next hop for the subnet's IPv6 traffic.
 When the prefix is delivered **on-link** (the common single-/64 case), the
 tunnel answers Neighbor Discovery for each device's address on your VPS's
 network, so traffic to it — including the replies to connections it opens — is
-delivered over the tunnel. A **routed** prefix reaches the host without that
-step. A `/64` is the natural size (its 64 host bits hold the whole tunnel IPv4);
+delivered over the tunnel. The tunnel also routes each device's address over
+its own interface explicitly, so this works even when your provider configures
+the delegated block directly on the WAN interface. A **routed** prefix reaches
+the host without the Neighbor Discovery step. A `/64` is the natural size (its 64 host bits hold the whole tunnel IPv4);
 a smaller block works too but keeps only its low host bits of the IPv4. Every
 host must get a distinct address, so if a block is too small — or two devices'
 low IP bits would collide — StartTunnel rejects adding the device or setting the

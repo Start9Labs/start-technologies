@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **IPv6 delegation now works when the WAN interface holds the delegated block
+  itself.** Some providers configure the delegated range directly on the WAN
+  interface at its exact size (DigitalOcean assigns its /124 this way), which
+  left the kernel with two equally-specific routes for the block — WAN and
+  tunnel — and the WAN won. Traffic toward device addresses, including replies
+  to connections devices opened, exited the WAN and was lost, so devices had
+  IPv6 addresses but no connectivity. The tunnel now installs an explicit host
+  route per device address, which always takes precedence. Routed prefixes,
+  and on-link blocks configured at a shorter length than the delegated prefix,
+  were unaffected.
 - **Port 80 is the HTTP→HTTPS redirect on every public IPv4.** Upgrading
   re-enables the redirect on every public IPv4 (clearing any per-address
   opt-outs) and removes any published forward that occupies port 80, so a plain
