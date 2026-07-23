@@ -376,6 +376,7 @@ impl Service {
         let handle_installed = {
             let ctx = ctx.clone();
             move |s9pk: S9pk| async move {
+                crate::volume::ensure_volume_root(&s9pk.as_manifest().id).await?;
                 for volume_id in &s9pk.as_manifest().volumes {
                     let path = data_dir(DATA_DIR, &s9pk.as_manifest().id, volume_id);
                     if tokio::fs::metadata(&path).await.is_err() {
@@ -617,6 +618,7 @@ impl Service {
         progress: Option<InstallProgressHandles>,
     ) -> Result<ServiceRef, Error> {
         let manifest = s9pk.as_manifest().clone();
+        crate::volume::ensure_volume_root(&manifest.id).await?;
         let developer_key = s9pk.as_archive().signer();
         let icon = s9pk.icon_data_url().await?;
         let procedure_id = Guid::new();

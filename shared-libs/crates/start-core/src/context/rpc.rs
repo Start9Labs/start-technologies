@@ -24,6 +24,7 @@ use crate::account::AccountInfo;
 use crate::auth::AuthKeys;
 use crate::context::config::ServerConfig;
 use crate::db::model::Database;
+use crate::db::model::package::PackageStateMatchModelRef;
 use crate::disk::OsPartitionInfo;
 use crate::disk::mount::filesystem::bind::Bind;
 use crate::disk::mount::filesystem::block_dev::BlockDev;
@@ -109,6 +110,7 @@ impl InitRpcContextPhases {
 
 pub struct CleanupInitPhases {
     cleanup_sessions: PhaseProgressTrackerHandle,
+    optimize_storage: PhaseProgressTrackerHandle,
     init_services: PhaseProgressTrackerHandle,
     prune_s9pks: PhaseProgressTrackerHandle,
 }
@@ -116,6 +118,7 @@ impl CleanupInitPhases {
     pub fn new(handle: &FullProgressTracker) -> Self {
         Self {
             cleanup_sessions: handle.add_phase("Cleaning up sessions".into(), Some(1)),
+            optimize_storage: handle.add_phase("Optimizing storage".into(), Some(5)),
             init_services: handle.add_phase("Initializing services".into(), Some(10)),
             prune_s9pks: handle.add_phase("Pruning S9PKs".into(), Some(1)),
         }
@@ -449,6 +452,7 @@ impl RpcContext {
         &self,
         CleanupInitPhases {
             mut cleanup_sessions,
+            mut optimize_storage,
             mut init_services,
             mut prune_s9pks,
         }: CleanupInitPhases,
@@ -483,6 +487,29 @@ impl RpcContext {
             }
         });
         cleanup_sessions.complete();
+
+        // Must run before services init: volume conversion requires that no
+        // container hold a mount on a package volume.
+        optimize_storage.start();
+        let peek = self.db.peek().await;
+        let mut installed = BTreeSet::new();
+        let mut all = BTreeSet::new();
+        for (id, pde) in peek.as_public().as_package_data().as_entries()? {
+            if matches!(
+                pde.as_state_info().as_match(),
+                PackageStateMatchModelRef::Installed(_)
+            ) {
+                installed.insert(id.clone());
+            }
+            all.insert(id);
+        }
+        if let Err(e) =
+            crate::volume::boot_volume_maintenance(&installed, &all, &mut optimize_storage).await
+        {
+            tracing::warn!("{}", t!("context.rpc.volume-maintenance-failed", error = e));
+            tracing::debug!("{e:?}");
+        }
+        optimize_storage.complete();
 
         init_services.start();
         self.services.init(&self).await?;

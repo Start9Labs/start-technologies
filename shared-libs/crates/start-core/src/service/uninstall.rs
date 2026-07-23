@@ -106,7 +106,7 @@ pub async fn cleanup(ctx: &RpcContext, id: &PackageId, soft: bool) -> Result<(),
             };
             if !soft {
                 let path = Path::new(DATA_DIR).join(PKG_VOLUME_DIR).join(&manifest.id);
-                crate::util::io::delete_dir(&path).await?;
+                crate::util::btrfs::delete_tree(&path).await?;
                 #[cfg(not(feature = "dev"))]
                 {
                     let logs_dir = Path::new(PACKAGE_DATA).join("logs").join(&manifest.id);

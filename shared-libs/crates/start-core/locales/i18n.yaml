@@ -2678,6 +2678,13 @@ context.rpc.error-in-session-cleanup-cron:
   fr_FR: "Erreur dans le cron de nettoyage de session : %{error}"
   pl_PL: "Błąd w cronie czyszczenia sesji: %{error}"
 
+context.rpc.volume-maintenance-failed:
+  en_US: "Volume maintenance failed: %{error}"
+  de_DE: "Volume-Wartung fehlgeschlagen: %{error}"
+  es_ES: "Falló el mantenimiento de volúmenes: %{error}"
+  fr_FR: "Échec de la maintenance des volumes : %{error}"
+  pl_PL: "Konserwacja wolumenów nie powiodła się: %{error}"
+
 # middleware/auth/local.rs
 middleware.auth.unauthorized:
   en_US: "UNAUTHORIZED"

@@ -219,6 +219,19 @@ last released beta.
 - **Release welcome.** The post-update welcome notification and its "What's
   new" highlights land with 0.4.0, so servers updating from any 0.4.0 beta see
   them on arrival at the stable release.
+- **Service install backups are now constant-time btrfs snapshots.** The
+  rollback backup taken before every service install/update used to be a
+  file-by-file reflink copy whose cost grows with the volume's extent count —
+  on a large, aged database volume (e.g. a 263 GB Monero LMDB fragmented into
+  47 million extents) it pinned the update at ~80% for 19 minutes with no
+  feedback. Package volume roots are now btrfs subvolumes, so the backup is an
+  atomic `btrfs subvolume snapshot`: milliseconds regardless of size or
+  fragmentation, and still zero data copied. Existing volumes are converted
+  once, at the first boot after upgrading, under a new "Optimizing storage"
+  boot phase with byte-accurate progress — expect that one boot to take
+  longer on boxes with large service volumes. Volumes that still aren't
+  subvolumes (e.g. on a non-btrfs dev data dir) fall back to the old clone,
+  which now reports byte progress in the update bar instead of freezing it.
 
 ### Fixed
 
@@ -420,6 +433,16 @@ last released beta.
   after time synchronized. A failed query (e.g. a D-Bus activation timeout
   under boot load) is now treated as "not synchronized yet" — logged and
   retried on the existing cadence.
+- **Install backups no longer silently fail for services using `nodatacow`.**
+  btrfs refuses reflink clones between `nodatacow` (`chattr +C`) and normal
+  files, so any service that marks its data directory `+C` — Bitcoin Core
+  does — never actually got an install backup; the failure was only a log
+  line. The backup path now mirrors the source's `+C` flag on the destination
+  before cloning, and the subvolume snapshot path is immune entirely. Boot now
+  also repairs interrupted backup restores (completing the rename so the
+  backup's data comes back as the live volume) and sweeps backups orphaned by
+  a package's removal; a backup left beside a healthy installed package is
+  cleaned up on that package's next update.
 
 ### Removed
 
