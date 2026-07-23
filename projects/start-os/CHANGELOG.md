@@ -190,6 +190,14 @@ file tracks notable changes since the move to the monorepo.
 
 ### Fixed
 
+- **Backups wait for the service to fully stop before its data is copied.** A
+  package's data is now captured only after its service has completely stopped,
+  and the package isn't reported finished until it has left the backing-up
+  state. Previously the backup could begin as soon as the package's `.s9pk`
+  image finished serializing — often before the graceful shutdown had
+  completed — so a slow-to-stop service could still be writing while its files
+  were read, risking a torn or inconsistent snapshot of databases and other
+  stateful data.
 - **URL-plugin services no longer accumulate duplicate exported addresses.**
   `export_url` now dedupes a binding's `available` set by the same address
   identity `clear_urls` retains on (ignoring the row-action fields), so

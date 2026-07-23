@@ -18,7 +18,6 @@ use itertools::Itertools;
 use nix::sys::signal::Signal;
 use persistent_container::PersistentContainer;
 use rpc_toolkit::HandlerArgs;
-use rpc_toolkit::yajrc::RpcError;
 use serde::{Deserialize, Serialize};
 use service_actor::ServiceActor;
 use termion::raw::IntoRawMode;
@@ -740,6 +739,11 @@ impl Service {
         }
         .await;
 
+        // Awaiting the handle reads the backup result but does not drive it —
+        // the actor drives the backup once the service has stopped, and the
+        // handle doesn't resolve until the service has left the backing-up
+        // state. So the backup never starts before the service is stopped, and
+        // this call doesn't return until the backing-up transition is complete.
         let backup_res = backup.await;
 
         // Complete the phase only now — after the s9pk write — so a package
@@ -794,7 +798,11 @@ struct ServiceActorSeed {
     id: PackageId,
     /// Needed to interact with the container for the service
     persistent_container: PersistentContainer,
-    backup: SyncMutex<Option<BoxFuture<'static, Result<(), RpcError>>>>,
+    /// The backup work, stored for the actor to drive once the service has
+    /// stopped. Its result is delivered to the caller through the paired
+    /// `RemoteHandle` (see `transition::backup`), so this half only needs to be
+    /// driven to completion.
+    backup: SyncMutex<Option<BoxFuture<'static, ()>>>,
     /// Set while a backup procedure is running so the service container can
     /// stream progress updates back via the `setBackupProgress` effect.
     backup_phase: SyncMutex<Option<crate::progress::PhaseProgressTrackerHandle>>,

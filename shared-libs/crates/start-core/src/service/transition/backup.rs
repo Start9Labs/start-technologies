@@ -1,8 +1,7 @@
 use std::path::PathBuf;
 
+use futures::FutureExt;
 use futures::future::BoxFuture;
-use futures::{FutureExt, TryFutureExt};
-use rpc_toolkit::yajrc::RpcError;
 
 use crate::disk::mount::filesystem::ReadWrite;
 use crate::prelude::*;
@@ -18,44 +17,51 @@ use crate::util::actor::{ConflictBuilder, Handler};
 use crate::util::serde::NoOutput;
 
 impl ServiceActorSeed {
+    async fn leave_backing_up(&self) -> Result<(), Error> {
+        let id = &self.id;
+        self.ctx
+            .db
+            .mutate(|db| {
+                db.as_public_mut()
+                    .as_package_data_mut()
+                    .as_idx_mut(id)
+                    .or_not_found(id)?
+                    .as_status_info_mut()
+                    .as_desired_mut()
+                    .map_mutate(|s| {
+                        Ok(match s {
+                            DesiredStatus::BackingUp {
+                                on_complete: StartStop::Start,
+                            } => DesiredStatus::Running,
+                            DesiredStatus::BackingUp {
+                                on_complete: StartStop::Stop,
+                            } => DesiredStatus::Stopped,
+                            x => x,
+                        })
+                    })?;
+                Ok(())
+            })
+            .await
+            .result
+    }
+
     pub fn backup(&self) -> Transition<'_> {
         Transition {
             kind: TransitionKind::BackingUp,
             future: async {
-                let res = if let Some(fut) = self.backup.replace(None) {
-                    fut.await.map_err(Error::from)
+                // The backup future clears BackingUp itself when it finishes, so
+                // here we just drive it to completion. If there's nothing to
+                // resume, recover the state so it can't get stuck, then report.
+                if let Some(backup) = self.backup.replace(None) {
+                    backup.await;
+                    Ok(())
                 } else {
+                    self.leave_backing_up().await?;
                     Err(Error::new(
                         eyre!("{}", t!("service.transition.backup.no-backup-to-resume")),
                         ErrorKind::Cancelled,
                     ))
-                };
-                let id = &self.id;
-                self.ctx
-                    .db
-                    .mutate(|db| {
-                        db.as_public_mut()
-                            .as_package_data_mut()
-                            .as_idx_mut(id)
-                            .or_not_found(id)?
-                            .as_status_info_mut()
-                            .as_desired_mut()
-                            .map_mutate(|s| {
-                                Ok(match s {
-                                    DesiredStatus::BackingUp {
-                                        on_complete: StartStop::Start,
-                                    } => DesiredStatus::Running,
-                                    DesiredStatus::BackingUp {
-                                        on_complete: StartStop::Stop,
-                                    } => DesiredStatus::Stopped,
-                                    x => x,
-                                })
-                            })?;
-                        Ok(())
-                    })
-                    .await
-                    .result?;
-                res
+                }
             }
             .boxed(),
         }
@@ -80,8 +86,13 @@ impl Handler<Backup> for ServiceActor {
         let seed = self.0.clone();
         seed.backup_phase.replace(Some(progress));
 
-        let transition = async move {
-            async {
+        // Split the backup into a driver (`remote`, stored for the actor to run
+        // once the service has stopped) and a handle (returned to the caller).
+        // Awaiting the handle only reads the result — it never drives the work —
+        // so the backup can't start before the actor runs it, and the handle
+        // doesn't resolve until the service has left the backing-up state.
+        let (remote, handle) = async move {
+            let res = async {
                 let backup_guard = seed
                     .persistent_container
                     .mount_backup(path, ReadWrite)
@@ -93,13 +104,14 @@ impl Handler<Backup> for ServiceActor {
 
                 Ok::<_, Error>(())
             }
-            .await
-            .map_err(RpcError::from)
+            .await;
+            seed.leave_backing_up().await?;
+            res
         }
-        .shared();
+        .remote_handle();
 
-        self.0.backup.replace(Some(transition.clone().boxed()));
+        self.0.backup.replace(Some(remote.boxed()));
 
-        Ok(transition.map_err(Error::from).boxed())
+        Ok(handle.boxed())
     }
 }
