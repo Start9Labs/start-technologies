@@ -109,6 +109,11 @@ pub async fn export_url(
                 .as_addresses_mut()
                 .as_available_mut()
                 .mutate(|available: &mut BTreeSet<_>| {
+                    // Dedupe by the same address identity `clear_urls` retains
+                    // on (row-action fields excluded). Without this, re-exporting
+                    // a URL whose actions changed inserts a second `Ord`-distinct
+                    // entry that `clear_urls` also keeps, accumulating duplicates.
+                    available.retain(|h| !hostname_info.matches_hostname_info(h, &plugin_id));
                     available.insert(entry);
                     Ok(())
                 })?;

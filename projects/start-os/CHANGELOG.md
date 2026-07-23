@@ -190,6 +190,12 @@ file tracks notable changes since the move to the monorepo.
 
 ### Fixed
 
+- **URL-plugin services no longer accumulate duplicate exported addresses.**
+  `export_url` now dedupes a binding's `available` set by the same address
+  identity `clear_urls` retains on (ignoring the row-action fields), so
+  re-exporting a URL whose `remove_action`/`overflow_actions` changed updates
+  the existing entry instead of inserting a second, `Ord`-distinct copy that
+  `clear_urls` would also keep.
 - **Each package's backup progress stays open until its image finishes
   writing.** A package's backup phase now completes only once the whole package
   backup — including streaming its `.s9pk` image to the backup target — is done,
