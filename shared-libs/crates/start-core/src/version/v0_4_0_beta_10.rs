@@ -5,9 +5,8 @@ use imbl_value::json;
 use tokio::process::Command;
 
 use super::v0_3_5::V0_3_0_COMPAT;
-use super::{Current, VersionT, v0_4_0_alpha_0, v0_4_0_beta_9};
+use super::{VersionT, v0_4_0_beta_9};
 use crate::context::RpcContext;
-use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
 use crate::util::Invoke;
 
@@ -69,10 +68,9 @@ impl VersionT for Version {
             .join(":");
         server_info.insert("caFingerprint".into(), json!(repaired));
         heal_empty_server_host_id(db);
-        // Stashed for `post_up`'s welcome routing, which lacks the mid-migration db.
-        Ok(Value::Bool(migrated_from_pre_0_4_0(db)))
+        Ok(Value::Null)
     }
-    async fn post_up(self, ctx: &RpcContext, input: Value) -> Result<(), Error> {
+    async fn post_up(self, _ctx: &RpcContext, _input: Value) -> Result<(), Error> {
         // Older installs copied /media/startos into the persistent config overlay as
         // root:root, shadowing the squashfs's root:startos on every boot. Fix the
         // persisted entry so migrated nodes match fresh installs (#3311).
@@ -90,51 +88,11 @@ impl VersionT for Version {
                 .await?;
         }
         migrate_tor_service_identity().await?;
-
-        // `input` is `up`'s came-from-pre-0.4.0 flag.
-        if should_welcome_to_release(self, input.as_bool().unwrap_or(true)) {
-            let highlights = include_str!("update_details/v0_4_0_beta_10.md").to_string();
-            ctx.db
-                .mutate(|db| {
-                    notify(
-                        db,
-                        None,
-                        NotificationLevel::Success,
-                        "Welcome to StartOS 0.4.0-beta.10!".to_string(),
-                        "Click \"View Details\" for the highlights — including an important change to backups.".to_string(),
-                        highlights,
-                    )?;
-                    Ok(())
-                })
-                .await
-                .result?;
-        }
         Ok(())
     }
     fn down(self, _db: &mut Value) -> Result<(), Error> {
         Ok(())
     }
-}
-
-/// True when this run has migrated a version <= `0.4.0-alpha.0`, i.e. the server came
-/// from a pre-0.4.0 release. Reads `postInitMigrationTodos`, which `commit` fills as the
-/// run progresses, so it must be called from `up` (before `post_init` drains it).
-fn migrated_from_pre_0_4_0(db: &Value) -> bool {
-    let floor = v0_4_0_alpha_0::Version.semver();
-    db["public"]["serverInfo"]["postInitMigrationTodos"]
-        .as_object()
-        .into_iter()
-        .flat_map(|todos| todos.iter())
-        .filter_map(|(k, _)| (&**k).parse::<exver::Version>().ok())
-        .any(|v| v <= floor)
-}
-
-/// beta.10's welcome fires only when beta.10 is the release being landed on (the current
-/// head, so an intermediate hop in a multi-version jump stays silent) and the server was
-/// already on the 0.4.0 line — pre-0.4.0 arrivals get `v0_4_0_alpha_0`'s welcome instead.
-/// `from_pre_0_4_0` is `migrated_from_pre_0_4_0`, threaded through `up`'s output.
-fn should_welcome_to_release(version: impl VersionT, from_pre_0_4_0: bool) -> bool {
-    version.semver() == Current::default().semver() && !from_pre_0_4_0
 }
 
 /// Dev builds between #3366 and #3387 persisted the server host's
@@ -324,31 +282,5 @@ mod test {
         assert!(migrated.contains("HiddenServicePort 8332 bitcoind.startos:8332"));
         // idempotent
         assert_eq!(migrate_torrc(&migrated), migrated);
-    }
-
-    #[test]
-    fn welcome_routing() {
-        let todos = |v| json!({ "public": { "serverInfo": { "postInitMigrationTodos": v } } });
-
-        assert!(!migrated_from_pre_0_4_0(&todos(json!({})))); // empty at up() time
-        assert!(!migrated_from_pre_0_4_0(
-            &json!({ "public": { "serverInfo": {} } })
-        ));
-        assert!(!migrated_from_pre_0_4_0(&todos(
-            json!({ "0.4.0-alpha.6": null, "0.4.0-beta.9": null })
-        )));
-        assert!(migrated_from_pre_0_4_0(&todos(
-            json!({ "0.3.5.2": null, "0.4.0-alpha.0": null })
-        )));
-        // boundary: the last 0.3.x release still commits the alpha.0 key
-        assert!(migrated_from_pre_0_4_0(&todos(
-            json!({ "0.4.0-alpha.0": null, "0.4.0-alpha.1": null })
-        )));
-
-        // beta.10 is the landing release: welcome unless the server came from 0.3.x.
-        assert!(should_welcome_to_release(Version, false));
-        assert!(!should_welcome_to_release(Version, true));
-        // an intermediate (non-landing) release stays silent, even from the 0.4.0 line
-        assert!(!should_welcome_to_release(v0_4_0_beta_9::Version, false));
     }
 }

@@ -1,15 +1,18 @@
 # Update to StartOS 0.4.0
 
-StartOS 0.4.0 is a completely new operating system. It will eventually be available as a normal over-the-air update, but for early access it requires a USB flash install. This guide walks you through the process step by step.
+StartOS 0.4.0 is a completely new operating system. The update is delivered **over the air**: your server updates itself in place through **System → Software Update**, preserving your services and data.
+
+> [!NOTE]
+> **Raspberry Pi cannot update over the air.** Updating a Raspberry Pi means reflashing its microSD card with the 0.4.0 Raspberry Pi image. Complete [Prepare Your Server](#prepare-your-server) below, then follow the [Raspberry Pi flashing instructions](installing-startos.md#raspberry-pi).
+
+The preparation steps are **not optional**: complete [Prepare Your Server](#prepare-your-server) before updating.
 
 > [!WARNING]
-> This is early-access software. Bugs are still possible. Follow every step carefully — skipping the service update or backup steps can result in **permanent data loss**.
+> Follow every step carefully — skipping the service update or backup steps can result in **permanent data loss**.
 >
 > Backups from StartOS 0.3.5.1 **cannot** be restored onto 0.4.0, and vice versa. The 0.3.5.1 backup you create before migrating can only be used to roll back to 0.3.5.1.
 
 ## Before You Begin
-
-StartOS 0.4.0 is currently in beta. The latest beta release is available on the [GitHub releases page](https://github.com/Start9Labs/start-technologies/releases/tag/v0.4.0-beta.9).
 
 ### Services with special handling
 
@@ -32,99 +35,73 @@ If you use a password manager, before updating, make sure your saved passwords h
 > [!TIP]
 > This change is a big improvement for Windows users — per-service `.local` addresses required Bonjour and other workarounds that are no longer needed.
 
-## Step 1: Flash the USB Drive
+## Prepare Your Server
 
-Download the 0.4.0-beta ISO for your platform from the [GitHub releases page](https://github.com/Start9Labs/start-technologies/releases/tag/v0.4.0-beta.9). Under "ISO Downloads" at the top of the release notes, select the ISO for your hardware:
+Complete all of these steps before updating. They apply to every platform, Raspberry Pi included.
 
-- **Server One (2023)** or other x86_64 hardware — download the **x86_64 (AMD64)** ISO
-- **Server Pure** — download the **x86_64 (AMD64) Slim (FOSS-only)** ISO
-- **Raspberry Pi** — not yet available for 0.4.0, but support is coming soon
+### Step 1: Update to StartOS 0.3.5.1
 
-Flash the ISO to a USB drive following the [Download](installing-startos.md#download) and [Flash](installing-startos.md#flash) sections of the install guide.
+You must be running **StartOS 0.3.5.1** before updating to 0.4.0. If you are on an older version, update to 0.3.5.1 first using the normal [0.3.x update mechanism](/0.3.5.x/user-manual/updating.html).
 
-## Step 2: Update to StartOS 0.3.5.1
-
-You must be running **StartOS 0.3.5.1** before updating to 0.4.0. If you are on an older version, update to 0.3.5.1 first using the normal [update mechanism](updating-startos.md).
-
-## Step 3: Update All Services
+### Step 2: Update All Services
 
 On StartOS 0.3.5.1, update **all installed services** to their latest available versions. Start with services at the base of the dependency tree and work upward — for example, update Bitcoin before LND, and LND before RTL.
 
 > [!WARNING]
 > This step is **required**. If you do not update services before migrating, they may fail to migrate on 0.4.0, potentially requiring you to roll back to 0.3.5.1 or lose data entirely.
 
-The one exception is **Bitcoin**, which can safely remain at version 28.x or 29.x. All other services must be on their latest version.
+Bitcoin may safely remain at 28.x or 29.x, but you MUST update to the latest **minor** version of your selected major version. All other services must be on their latest version.
 
-## Step 4 (Optional): Add an SSH Key
+### Step 3 (Optional): Add an SSH Key
 
 If you haven't already, [add an SSH key](ssh.md) to your server. If something goes wrong during the migration, SSH access makes it much easier to debug.
 
-## Step 5: Uninstall Unneeded Services
+### Step 4: Uninstall Unneeded Services
 
 Every installed service must be migrated, and each one adds to the total migration time. If there are services you don't actually use, it is much faster to uninstall them now and install fresh on 0.4.0 afterward.
 
-## Step 6: Stop All Services
+### Step 5: Stop All Services
 
 Stop all remaining services and wait for each one to fully stop before proceeding. This ensures no new data is written before the backup.
 
-## Step 7: Create a Full System Backup
+### Step 6: Create a Full System Backup
 
 With all services stopped, create a [full system backup](/0.3.5.x/user-manual/backups/backup-create.html). Back up every service.
 
 > [!WARNING]
-> Do **not** skip this step. Migration failures are a real possibility during beta, and without a backup your data could be lost permanently.
+> Do **not** skip this step. Migration failures are possible, and without a backup your data could be lost permanently.
 
-## Step 8: Shut Down the Server
+## Update Over the Air
 
-Shut down the server through the StartOS UI.
+Once StartOS 0.4.0 is available for your server, it is offered under **System → Software Update**. If it is not offered yet, check again later. (Raspberry Pi is not offered the update — follow the [Raspberry Pi flashing instructions](installing-startos.md#raspberry-pi) instead.)
 
-## Step 9: Boot from USB
+### Step 7: Begin the Update
 
-1. Insert the flashed USB drive into your server.
+Go to **System → Software Update**, review the release notes, and click **Begin Update**. The download (~3 GB) runs in the background while your server continues running.
 
-1. Power on the server.
+### Step 8: Restart to Apply
 
-1. The installer should boot from the USB drive and become available at `http://start.local`.
+When the download completes, the System page shows **Update Complete. Restart to apply changes**. Restart your server through the StartOS UI.
 
-> [!TIP]
-> If the installer fails to boot and instead your normal StartOS boots, it means you will need to attach a monitor and keyboard (Kiosk mode) in order to enter the BIOS settings to change the boot priorities. The Server Pure should always boot from USB if present. For the Server One, this is done by hitting the ESC key repeatedly at boot time until the BIOS appears. Arrow over to the boot tab, and change Boot Option #1 to your inserted USB thumb drive, then restart.
+### Step 9: Wait
 
-## Step 10: Run the Installer
+On this restart, StartOS converts your system to the 0.4.0 format and then migrates every installed service. Your server will be unreachable while the disk layout is converted; once StartOS 0.4.0 boots, an initialization screen at your server's address (`https://adjective-noun.local`) shows migration progress.
 
-1. Select your language.
+The migration can take **hours**, depending on how much data you have. Be patient and do not power off or unplug your server.
 
-1. Select the **OS drive** and the **data drive**. These can be the same drive if your server only has one. Double-check that you have selected the correct drive for each.
+When the migration completes, the login page becomes available at the same address. Continue with [After the Update](#after-the-update).
 
-   > [!WARNING]
-   > You must select the **same drive layout** you had on 0.3.5.1. If 0.3.5.1 (OS and data) lived on a single drive, select **that same drive for both** the OS drive and the data drive. If your 0.3.5.1 data was on a separate drive, select a different drive for the OS. Choosing a different layout than your existing install cannot preserve your data, and the installer will refuse rather than erase the drive.
+## After the Update
 
-1. When prompted, select **Preserve** to keep your existing data.
+### Step 10: Update All Services
 
-   > [!WARNING]
-   > If you do not select "Preserve", all data on the drive will be erased.
+Every installed service will have an update available for the 0.4.0 marketplace. Update **all** of them — including Bitcoin (again, to the latest **minor** of your selected **major** version) — before doing anything else. The 0.4.0 versions are repackaged for the new system, even if the underlying software version is the same.
 
-1. Optionally set a new password, or skip to keep your current password.
-
-## Step 11: Wait
-
-The migration process can take **hours**, depending on how much data you have. Be patient and do not power off or unplug your server.
-
-> [!TIP]
-> Expect progress to sit at **85%** for a long time — potentially hours. This is when your installed packages are being migrated to the 0.4.0 format, and the time scales with how many packages you have and how much data each one contains. The installer is not stuck.
-
-## Step 12: Reboot
-
-When the update is complete, follow the on-screen instructions to remove the USB drive and reboot.
-
-## Step 13: Update All Services
-
-Every installed service will have an update available for the 0.4.0 marketplace. Update **all** of them — including Bitcoin — before doing anything else. The 0.4.0 versions are repackaged for the new system, even if the underlying software version is the same.
-
-## Step 14: Start All Services
+### Step 11: Start All Services
 
 Once all services are updated, you can start them. Wait for all services to fully start and confirm they are running correctly.
 
-## Step 15: Create a Backup!
+### Step 12: Create a Backup!
 
 Create a [full system backup](backup-create.md). Ideally this is to a separate drive (or network folder) than 0.3.5.
 

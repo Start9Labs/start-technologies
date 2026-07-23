@@ -40,6 +40,8 @@ options:
                        version with any prerelease suffix stripped)
   --headline TEXT      os_version headline (default: "StartOS <version>")
   --notes TEXT         os_version release notes shown in the update prompt
+                       (markdown; default: the pre-update steps of the 0.4.0
+                       migration guide)
   --hostname HOST      registry public hostname (default: REGISTRY_HOSTNAME
                        from registry.service on the target)
   --resources DIR      resources dir on the target (default: RESOURCES_PATH
@@ -109,7 +111,56 @@ done
 [[ "$ADVERTISED" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] \
     || { >&2 echo "advertised version '$ADVERTISED' is not plain emver (0.3.5.1 cannot parse prerelease tags); pass --version"; exit 1; }
 HEADLINE="${HEADLINE:-StartOS $ADVERTISED}"
-NOTES="${NOTES:-Major StartOS release. Updates your server in place from 0.3.5.1: the OS is replaced and your services and data are preserved. Downloads ~3 GB and reboots when complete.}"
+# 0.3.5.1's OS-update modal renders these notes as markdown (marked + DOMPurify;
+# GitHub-style `> [!WARNING]` admonitions are NOT supported) directly above its
+# "Begin Update" button. The default carries the pre-update portion of the 0.4.0
+# migration guide (projects/start-os/docs/src/update-040.md), adapted to the OTA
+# path (no USB steps) — keep the two in sync.
+if [ -z "$NOTES" ]; then
+    NOTES="$(cat <<'EOF'
+StartOS 0.4.0 is a completely new operating system. This update replaces StartOS in place: it downloads ~3 GB, reboots your server, and migrates your services and data to the new format. It requires StartOS 0.3.5.1.
+
+**This is a major migration, not a routine update.** Complete every preparation step below before tapping "Begin Update". Skipping the service-update or backup steps can result in **permanent data loss**.
+
+**1. Review services that need special handling**
+
+- **Embassy Pages** — retired and replaced by **Start9 Pages**. Embassy Pages will survive the update but will no longer receive updates. Uninstall it, then after the update install Start9 Pages from the marketplace and re-add your content.
+- **Ghost** — completely redesigned for 0.4.0 and incompatible with the old version. Before updating, open your Ghost admin UI and use Ghost's built-in **Export** tool to download your content. After the update, install the new Ghost and use its **Import** tool to restore your content.
+- **Synapse** — the old Synapse was Tor-only; the new Synapse is clearnet-only. These are different services now, with no migration path.
+- **Jam** — Jam's backend (JoinMarket) is being replaced, and Jam is unavailable on 0.4.0 until its new backend matures. Back up your seed, move out any spendable funds (fidelity-bond funds stay locked until expiry), and uninstall Jam before updating.
+
+**2. Prepare for new service addresses**
+
+On 0.4.0, each service no longer has its own `.local` address (e.g. `longexamplepublickey.local`); services are reached on unique ports of your server's main `.local` address (e.g. `adjective-noun.local:4545`). Your old per-service `.local` addresses will no longer exist after the update. If you use a password manager, give your saved passwords clear names now — not just the old `.local` URLs — so you can identify them later and save the new URLs.
+
+**3. Update ALL services**
+
+Update every installed service to its latest version, starting at the base of the dependency tree and working upward — Bitcoin before LND, LND before RTL. Bitcoin may safely remain at 28.x or 29.x, but you MUST update to the latest **minor** version of your selected major version. **This step is required:** services that are not on their latest version may fail to migrate, potentially requiring a rollback to 0.3.5.1 or losing data entirely.
+
+**4. (Recommended) Add an SSH key**
+
+If you haven't already, add an SSH key to your server. If something goes wrong during the migration, SSH access makes it much easier to debug.
+
+**5. Uninstall services you don't use**
+
+Every installed service must be migrated, and each adds to the total migration time. Uninstalling unused services now is much faster than migrating them; you can reinstall fresh on 0.4.0.
+
+**6. Stop all services**
+
+Stop every remaining service and wait for each to fully stop, so no new data is written before your backup.
+
+**7. Create a full system backup**
+
+With all services stopped, create a full system backup covering every service. **Do not skip this step.** Backups made on 0.3.5.1 cannot be restored onto 0.4.0 — this backup is your safety net for returning to 0.3.5.1 if the migration fails.
+
+**What to expect**
+
+After you begin, the update downloads (~3 GB), your server reboots, and the migration runs. It can take **hours**, depending on how much data you have — be patient, and do not power off or unplug your server. When it completes: sign in, update **all** of your services from the marketplace before doing anything else (the 0.4.0 versions are repackaged for the new system even when the app version looks the same), start them, and create a fresh backup.
+
+Full guide: https://docs.start9.com/start-os/update-040.html
+EOF
+)"
+fi
 
 echo "== target: $TARGET   advertised version: $ADVERTISED   platforms: ${PLATFORMS[*]}"
 

@@ -7737,7 +7737,7 @@ dependencies = [
 
 [[package]]
 name = "start-core"
-version = "0.4.0-beta.10"
+version = "0.4.0"
 dependencies = [
  "aes",
  "astral-tokio-tar",
@@ -7880,7 +7880,7 @@ dependencies = [
 
 [[package]]
 name = "start-os"
-version = "0.4.0-beta.10"
+version = "0.4.0"
 dependencies = [
  "include_dir",
  "start-core",

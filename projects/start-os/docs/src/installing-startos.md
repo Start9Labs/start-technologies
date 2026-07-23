@@ -1,6 +1,6 @@
 # Installing StartOS
 
-This guide is for flashing StartOS to a USB drive, then installing it onto a desktop, laptop, or mini PC. For an up-to-date list of known-good hardware, please check out this [forum post](https://community.start9.com/t/known-good-hardware-master-list-hardware-capable-of-running-startos/).
+This guide is for flashing StartOS to a USB drive, then installing it onto a desktop, laptop, or mini PC. For an up-to-date list of known-good hardware, please check out this [forum post](https://community.start9.com/t/known-good-hardware-master-list-hardware-capable-of-running-startos/). For Raspberry Pi, which does not use the USB installer, see [Raspberry Pi](#raspberry-pi) below.
 
 ## Watch The Video
 
@@ -38,7 +38,7 @@ This guide is for flashing StartOS to a USB drive, then installing it onto a des
 
 1. Click "Select Image" and select the `.iso` image you just downloaded.
 
-1. Click "Select Target" and select your microSD card.
+1. Click "Select Target" and select your USB drive.
 
    > [!WARNING]
    > BE ABSOLUTELY CERTAIN you have selected the correct target USB flash drive. Whatever target you select will be **COMPLETELY ERASED**!!
@@ -66,3 +66,25 @@ This guide is for flashing StartOS to a USB drive, then installing it onto a des
 1. At the Select Drives dialog, select the disk(s) you want to use as your OS and data drives.
 
 1. If a previous StartOS install is detected, it will ask whether you want to Overwrite or Preserve the existing StartOS data. Select Overwrite to start fresh, or Preserve to flash the OS on the booted USB thumb drive over the old installation, while preserving your data. After install is complete, you will be prompted to Continue to Setup.
+
+## Raspberry Pi
+
+> [!IMPORTANT]
+> StartOS 0.4.0 supports the **Raspberry Pi 4 ONLY**. Other Raspberry Pi models are not supported.
+
+A Raspberry Pi does not use the USB installer above. Instead, you flash the StartOS image directly to the Pi's microSD card. This is also how a Raspberry Pi is updated to a new major version of StartOS — it cannot update over the air. If you are updating an existing 0.3.5.1 server, complete the [preparation steps in the update guide](update-040.md#prepare-your-server) before flashing.
+
+1. Visit the [Github release page](https://github.com/Start9Labs/start-technologies/releases/tag/v0.4.0-beta.9) and, from the downloads list, download the **Raspberry Pi `.img`** file.
+
+1. Verify the SHA256 checksum against the one listed on GitHub (optional but recommended) — see [Download](#download) for the command for your computer.
+
+1. Insert your Raspberry Pi's microSD card into your computer, using a microSD card reader if needed.
+
+1. Open balenaEtcher (see [Flash](#flash)), click "Select Image" and select the `.img` file you downloaded, then click "Select Target" and select your microSD card.
+
+   > [!WARNING]
+   > BE ABSOLUTELY CERTAIN you have selected the correct target microSD card. Whatever target you select will be **COMPLETELY ERASED**!!
+
+1. Click "Flash!". When flashing completes, re-insert the microSD card into your Raspberry Pi and power it on.
+
+1. From a computer on the same network, visit [http://start.local](http://start.local) and continue with [Initial Setup](initial-setup.md).

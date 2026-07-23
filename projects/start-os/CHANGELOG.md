@@ -8,6 +8,28 @@ Full per-release notes are published on the
 [GitHub releases page](https://github.com/Start9Labs/start-technologies/releases). This
 file tracks notable changes since the move to the monorepo.
 
+## [0.4.0]
+
+The stable release of StartOS 0.4.0, ending the 0.4.0 early-access program.
+Identical to 0.4.0-beta.10 in code and functionality — this release declares
+the version stable and prepares the material around it:
+
+### Changed
+
+- **Docs prepared for general availability.** The _Update to StartOS 0.4.0_
+  guide now documents the over-the-air update as the standard (and only
+  documented) path — the USB-install walkthrough is removed — and the
+  early-access warnings are gone. _Installing StartOS_ gains Raspberry Pi
+  microSD flashing instructions (**Raspberry Pi 4 only**), which the update
+  guide points Raspberry Pi users to, since a Raspberry Pi cannot update in
+  place.
+- **0.3.5.1 update prompt.** The release notes served with the 0.3.5.1 → 0.4.0
+  migration OTA payload now carry the migration guide's full pre-update
+  checklist instead of a one-line summary.
+- **Release welcome.** The post-update welcome notification and its "What's
+  new" highlights now land with 0.4.0 rather than beta.10, so servers updating
+  from any 0.4.0 beta see them on arrival at the stable release.
+
 ## [0.4.0-beta.10]
 
 ### Added
