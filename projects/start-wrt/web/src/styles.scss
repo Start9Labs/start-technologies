@@ -361,3 +361,19 @@ tui-data-list [tuiOption]:disabled {
     }
   }
 }
+
+// Password managers (Bitwarden & co.) anchor their injected autofill icon to
+// the input's border-box, which spans the full textfield — landing the icon on
+// top of the field's trailing control (reveal eye, in-field button) and
+// swallowing its clicks. Trading the end padding for margin keeps the text box
+// identical while ending the input's box before that control, so injected icons
+// sit beside it instead of on top. Matching tuiPassword and not only the type
+// keeps this stable while the password is revealed, when the directive swaps
+// the input's type to text.
+tui-textfield:has(tui-icon[tuiPassword], input[type='password'])
+  input[tuiInput] {
+  padding-inline-end: 0;
+  margin-inline-end: calc(
+    var(--t-end) + var(--t-side) + var(--t-padding) + var(--t-space)
+  );
+}

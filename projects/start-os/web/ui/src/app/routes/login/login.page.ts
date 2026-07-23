@@ -68,7 +68,7 @@ import { ConfigService } from 'src/app/services/config.service'
 
     [tuiCardLarge] {
       overflow: visible;
-      width: max(33%, 22rem);
+      width: min(30rem, 100%);
       background: var(--start9-base-1);
     }
 
