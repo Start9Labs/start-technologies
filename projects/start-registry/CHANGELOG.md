@@ -2,6 +2,13 @@
 
 All notable changes to `start-registry` (the Start Registry server) are documented here. This project is versioned **independently** (starting at `1.0.0`); its version lives in `Cargo.toml`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.0.1]
+
+- **Registry responses stay compatible with pre-beta.10 clients.** `package.get` re-adds a
+  stubbed (empty-object) manifest `alerts` field for clients older than StartOS `0.4.0-beta.10`,
+  which require it present (`alerts` was removed from the manifest in beta.10). Removed the
+  long-dead `0.4.0-alpha.17`/`alpha.18` client-compatibility shims.
+
 ## [1.0.0]
 
 - **Signer/admin authentication moved to the new request-signature scheme.** Every authenticated

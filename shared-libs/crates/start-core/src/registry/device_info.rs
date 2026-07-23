@@ -73,14 +73,7 @@ impl DeviceInfo {
                 language: query
                     .get("os.language")
                     .map(|v| v.deref())
-                    .map(InternedString::intern)
-                    .or_else(|| {
-                        if version < "0.4.0-alpha.18".parse().ok()? {
-                            Some(rust_i18n::locale().deref().into())
-                        } else {
-                            None
-                        }
-                    }),
+                    .map(InternedString::intern),
                 version,
             },
             hardware: has_hw_info
@@ -138,20 +131,14 @@ impl DeviceInfo {
         &self,
         versions: &mut Model<BTreeMap<VersionString, PackageVersionInfo>>,
     ) -> Result<(), Error> {
-        let alpha_17: Version = "0.4.0-alpha.17".parse()?;
+        let beta_10: Version = "0.4.0-beta.10".parse()?;
 
-        // Filter package versions using for_device
         versions.retain(|_, info| info.for_device(self))?;
 
-        // Alpha.17 compatibility: add legacy fields
-        if self.os.version <= alpha_17 {
+        // beta.10 dropped the manifest `alerts` field; older clients require it present.
+        if self.os.version < beta_10 {
             for (_, info) in versions.as_entries_mut()? {
-                let v = info.as_value_mut();
-                if let Some(mut tup) = v["s9pks"].get(0).cloned() {
-                    v["s9pk"] = tup[1].take();
-                    v["hardwareRequirements"] = tup[0].take();
-                    v["s9pk"]["url"] = v["s9pk"]["urls"][0].clone();
-                }
+                info.as_value_mut()["alerts"] = imbl_value::json!({});
             }
         }
 
@@ -171,31 +158,10 @@ impl DeviceInfo {
     }
 
     fn filter_os_version(&self, res: &mut Model<OsVersionInfoMap>) -> Result<(), Error> {
-        let alpha_17: Version = "0.4.0-alpha.17".parse()?;
-
-        // Filter OS versions based on source_version compatibility
         res.retain(|_, info| {
             let source_version = info.as_source_version().de()?;
             Ok(self.os.version.satisfies(&source_version))
-        })?;
-
-        // Alpha.17 compatibility: add url field from urls array
-        if self.os.version <= alpha_17 {
-            for (_, info) in res.as_entries_mut()? {
-                let v = info.as_value_mut();
-                for asset_ty in ["iso", "squashfs", "img"] {
-                    for (_, asset) in v[asset_ty]
-                        .as_object_mut()
-                        .into_iter()
-                        .flat_map(|o| o.iter_mut())
-                    {
-                        asset["url"] = asset["urls"][0].clone();
-                    }
-                }
-            }
-        }
-
-        Ok(())
+        })
     }
 }
 
