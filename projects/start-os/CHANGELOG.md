@@ -200,6 +200,12 @@ file tracks notable changes since the move to the monorepo.
   package finishing early, with a visible pause before the next one began. Older
   packages built against start-sdk ≤ 2.0.6 still self-report completion and see
   the early "complete" until rebuilt against start-sdk ≥ 2.0.7.
+- **The overall backup progress bar advances with each package's progress.**
+  Every package now contributes equal weight (100) to the overall bar, with the
+  OS-data step a small tail (10), so the top-level percentage climbs as each
+  package's data copies rather than jumping only when a package finishes.
+  Intra-package movement comes from the package's own reported progress, which
+  packages built against start-sdk ≥ 2.0.7 report continuously.
 - **Mixed-case domains now match the browser.** Domain names are lowercased
   when added or removed (UI and CLI alike), so a domain entered with capital
   letters can no longer end up unreachable against the browser's lowercased

@@ -306,11 +306,11 @@ async fn perform_backup(
         .map(|id| {
             (
                 id.clone(),
-                progress.add_phase(InternedString::from(id.clone()), Some(1)),
+                progress.add_phase(InternedString::from(id.clone()), Some(100)),
             )
         })
         .collect();
-    let mut os_data_phase = progress.add_phase("OS Data".into(), Some(1));
+    let mut os_data_phase = progress.add_phase("OS Data".into(), Some(10));
     let _progress_db_sync =
         NonDetachingJoinHandle::from(tokio::spawn(progress.clone().sync_to_db(
             ctx.db.clone(),
