@@ -204,23 +204,25 @@ export class MarketplacePreviewComponent {
     ),
   )
 
-  readonly versions$ = combineLatest([
-    this.pkg$.pipe(filter(Boolean)),
-    this.flavor$,
-  ]).pipe(
-    map(([pkg, flavor]) => {
-      const range = this.targetRange()
-      const others = Object.keys(pkg.otherVersions).filter(
-        v => this.exver.getFlavor(v) === flavor,
-      )
-      return [pkg.version, ...others]
-        .filter(v =>
-          v === pkg.version
-            ? !range || this.satisfiesWithAliases(pkg, range)
-            : !range || this.exver.satisfies(v, range),
-        )
-        .sort((a, b) => -1 * (this.exver.compareExver(a, b) || 0))
-    }),
+  readonly versions$ = this.flavor$.pipe(
+    switchMap(flavor =>
+      this.marketplaceService.getPackage$(this.pkgId(), null, flavor).pipe(
+        filter(Boolean),
+        map(pkg => {
+          const range = this.targetRange()
+          const others = Object.keys(pkg.otherVersions).filter(
+            v => this.exver.getFlavor(v) === flavor,
+          )
+          return [pkg.version, ...others]
+            .filter(v =>
+              v === pkg.version
+                ? !range || this.satisfiesWithAliases(pkg, range)
+                : !range || this.exver.satisfies(v, range),
+            )
+            .sort((a, b) => -1 * (this.exver.compareExver(a, b) || 0))
+        }),
+      ),
+    ),
   )
 
   onStatic() {
