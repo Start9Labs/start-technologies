@@ -96,6 +96,40 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
         }
         Ok((unencrypted_metadata, enc_key))
     }
+
+    /// Cheap up-front check that `password` matches the target's existing
+    /// backup, reading only `unencrypted-metadata.json` — no encrypted mount or
+    /// segment-log replay. `Ok` when the target has no backup yet (nothing to
+    /// match against).
+    #[instrument(skip_all)]
+    pub async fn validate_password(
+        backup_disk_path: &Path,
+        server_id: &str,
+        password: &str,
+    ) -> Result<(), Error> {
+        let unencrypted_metadata_path = backup_disk_path
+            .join(BACKUP_DIR_NAME)
+            .join(server_id)
+            .join("unencrypted-metadata.json");
+        let bytes = match tokio::fs::read(&unencrypted_metadata_path).await {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => {
+                return Err(e).with_ctx(|_| {
+                    (
+                        crate::ErrorKind::Filesystem,
+                        unencrypted_metadata_path.display().to_string(),
+                    )
+                });
+            }
+        };
+        let unencrypted_metadata: BackupUnencryptedMetadata = IoFormat::Json.from_slice(&bytes)?;
+        if let Some(hash) = unencrypted_metadata.password_hash.as_ref() {
+            check_password(hash, password)?;
+        }
+        Ok(())
+    }
+
     #[instrument(skip_all)]
     pub async fn mount(
         backup_disk_mount_guard: G,

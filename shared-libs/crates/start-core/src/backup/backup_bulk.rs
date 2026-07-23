@@ -223,30 +223,46 @@ pub async fn backup_all(
         BackupStatusGuard::new(ctx.db.clone()),
     );
 
+    let disk_guard = TmpMountGuard::mount(&fs, BackupWrite).await?;
+
     // `check_password` above already validated the master password, so a rejected
     // password here can only mean the target's existing backup was encrypted with a
     // different one. Distinguish it so the client can ask for that password instead of
-    // reporting the master password as wrong.
-    let disk_guard = TmpMountGuard::mount(&fs, BackupWrite).await?;
-    let mut backup_guard =
-        BackupMountGuard::mount(disk_guard.clone(), &server_id, &old_password_decrypted)
-            .await
-            .map_err(|e| {
-                if e.kind == ErrorKind::IncorrectPassword {
-                    Error::new(
-                        eyre!("{}", t!("backup.bulk.password-mismatch")),
-                        ErrorKind::BackupPasswordMismatch,
-                    )
-                } else {
-                    e
-                }
-            })?;
-    if old_password.is_some() {
-        backup_guard.change_password(&password)?;
-    }
-    let legacy_present =
-        crate::disk::util::has_legacy_backup(backup_guard.backup_disk_path(), &server_id).await;
+    // reporting the master password as wrong. This reads only unencrypted-metadata.json;
+    // the encrypted mount (which replays the whole segment log and can be slow on large
+    // or slow targets) runs in the background task below rather than blocking the request.
+    BackupMountGuard::<TmpMountGuard>::validate_password(
+        disk_guard.path(),
+        &server_id,
+        &old_password_decrypted,
+    )
+    .await
+    .map_err(|e| {
+        if e.kind == ErrorKind::IncorrectPassword {
+            Error::new(
+                eyre!("{}", t!("backup.bulk.password-mismatch")),
+                ErrorKind::BackupPasswordMismatch,
+            )
+        } else {
+            e
+        }
+    })?;
+
     tokio::task::spawn(async move {
+        let mut backup_guard =
+            match BackupMountGuard::mount(disk_guard.clone(), &server_id, &old_password_decrypted)
+                .await
+            {
+                Ok(guard) => guard,
+                Err(e) => return status_guard.handle_result(false, Err(e)).await.unwrap(),
+            };
+        if old_password.is_some() {
+            if let Err(e) = backup_guard.change_password(&password) {
+                return status_guard.handle_result(false, Err(e)).await.unwrap();
+            }
+        }
+        let legacy_present =
+            crate::disk::util::has_legacy_backup(backup_guard.backup_disk_path(), &server_id).await;
         status_guard
             .handle_result(
                 legacy_present,

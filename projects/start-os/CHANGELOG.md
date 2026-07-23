@@ -206,6 +206,14 @@ file tracks notable changes since the move to the monorepo.
   package's data copies rather than jumping only when a package finishes.
   Intra-package movement comes from the package's own reported progress, which
   packages built against start-sdk ≥ 2.0.7 report continuously.
+- **Starting a backup returns as soon as the job is queued.** The "create
+  backup" request now validates the backup password against the target and then
+  hands the rest to the background job, so the initial call returns promptly.
+  Previously it also opened the target's encrypted store on the request thread —
+  which, for a large backup or a slow drive, could read for a minute or more
+  before returning — so a slow target looked like the request itself had timed
+  out. Opening the store, and any failure doing so, now happens in the
+  background and is reported through the usual backup progress and notifications.
 - **Mixed-case domains now match the browser.** Domain names are lowercased
   when added or removed (UI and CLI alike), so a domain entered with capital
   letters can no longer end up unreachable against the browser's lowercased
