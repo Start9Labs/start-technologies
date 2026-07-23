@@ -18,6 +18,8 @@
   `setPreBackup` / `setPostBackup` / `setPreRestore` / `setPostRestore` take an
   optional second `weight` argument, and a sync's weight is set via the new
   `BackupSync.weight` field (or the `weight` key on `addVolume`'s options).
+  Pre/post hooks now receive a `PhaseHandle` for their own phase rather than a
+  full sub-tracker.
 - **`createBackup` no longer marks its own progress tracker complete.** The
   StartOS backup harness owns per-package completion and holds the phase open
   until the package's `.s9pk` image has finished writing to the backup target,

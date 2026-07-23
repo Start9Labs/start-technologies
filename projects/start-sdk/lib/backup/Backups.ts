@@ -5,7 +5,10 @@ import { Affine, asError } from '../util'
 import { InitKind, InitScript } from '@start9labs/start-core/inits'
 import { SubContainer, execFile } from '../util/SubContainer'
 import { Mounts } from '../mainFn/Mounts'
-import { FullProgressTracker } from '@start9labs/start-core/util/FullProgressTracker'
+import {
+  FullProgressTracker,
+  PhaseHandle,
+} from '@start9labs/start-core/util/FullProgressTracker'
 
 const BACKUP_HOST_PATH = '/media/startos/backup'
 const BACKUP_CONTAINER_MOUNT = '/backup-target'
@@ -114,10 +117,10 @@ export type BackupSync<Volumes extends string> = {
 /** Effects type narrowed for backup/restore contexts, preventing reuse outside that scope */
 export type BackupEffects = T.Effects & Affine<'Backups'>
 
-/** A pre/post backup or restore hook, given a progress tracker for its phase. */
+/** A pre/post backup or restore hook, given a handle to its own progress phase. */
 export type BackupHook = (
   effects: BackupEffects,
-  progress: FullProgressTracker,
+  progress: PhaseHandle,
 ) => Promise<void>
 
 /**
@@ -721,7 +724,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
       effects.setBackupProgress({ progress }),
     )
     const preHook = this.preBackup
-      ? tracker.addNestedPhase('pre-backup', this.preBackupWeight)
+      ? tracker.addPhase('pre-backup', this.preBackupWeight)
       : undefined
     const syncs = this.backupSet.map(s =>
       tracker.addPhase(
@@ -730,7 +733,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
       ),
     )
     const postHook = this.postBackup
-      ? tracker.addNestedPhase('post-backup', this.postBackupWeight)
+      ? tracker.addPhase('post-backup', this.postBackupWeight)
       : undefined
 
     if (preHook) {
@@ -809,7 +812,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
       progress ??
       new FullProgressTracker(p => effects.setInitProgress({ progress: p }))
     const preHook = this.preRestore
-      ? tracker.addNestedPhase('pre-restore', this.preRestoreWeight)
+      ? tracker.addPhase('pre-restore', this.preRestoreWeight)
       : undefined
     const syncs = this.backupSet.map(s =>
       tracker.addPhase(
@@ -818,7 +821,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
       ),
     )
     const postHook = this.postRestore
-      ? tracker.addNestedPhase('post-restore', this.postRestoreWeight)
+      ? tracker.addPhase('post-restore', this.postRestoreWeight)
       : undefined
 
     if (preHook) {
