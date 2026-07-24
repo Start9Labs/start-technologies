@@ -141,7 +141,10 @@ impl S9pk<TmpSource<PackSource>> {
         // assets
         let asset_dir = tmp_dir.join("assets");
         tokio::fs::create_dir_all(&asset_dir).await?;
-        tokio_tar::Archive::new(reader.assets().await?)
+        // preserve file modes — the default drops them, stripping +x off executable assets
+        tokio_tar::ArchiveBuilder::new(reader.assets().await?)
+            .set_preserve_permissions(true)
+            .build()
             .unpack(&asset_dir)
             .await?;
         let sqfs_path = asset_dir.with_extension("squashfs");

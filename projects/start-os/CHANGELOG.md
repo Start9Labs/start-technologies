@@ -203,6 +203,12 @@ file tracks notable changes since the move to the monorepo.
   its instructions when present and falls back to a placeholder when absent, so a
   package with no `instructions.md` can no longer break the 0.3.5.1 → 0.4.0
   upgrade. Previously the converted package omitted the file entirely.
+- **Migrated 0.3.5.1 packages keep their asset file permissions.** Converting a
+  legacy (Embassy) package to the new s9pk format now preserves the mode bits of
+  files in the package's assets, so an executable asset (a script or bundled
+  binary) stays executable in the migrated package. Previously the assets were
+  unpacked without their permissions and re-packed at the default mode, dropping
+  the executable bit and breaking any asset the service ran directly.
 - **URL-plugin services no longer accumulate duplicate exported addresses.**
   `export_url` now dedupes a binding's `available` set by the same address
   identity `clear_urls` retains on (ignoring the row-action fields), so
