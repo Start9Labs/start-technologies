@@ -170,6 +170,22 @@ fn plan_data_drive(
                 .map(|g| (p.logicalname.clone(), g))
         })
     });
+
+    // A pre-installed device (e.g. a Raspberry Pi) offers its data partition as
+    // its own drive, so `target` can be a partition path that this enumeration
+    // lists only nested under its disk, not as a top-level DiskInfo. Resolve the
+    // pool on that exact partition directly so Preserve attaches it.
+    if disk.is_none() {
+        if let Some(guid) = disks.iter().find_map(|d| {
+            d.partitions
+                .iter()
+                .find(|p| p.logicalname == target)
+                .and_then(|p| p.guid.as_ref().filter(|g| is_startos_pool_guid(g)).cloned())
+        }) {
+            return Ok(DataDrivePlan::Attach(guid));
+        }
+    }
+
     let same_drive = os_drive == Some(target);
     match (same_drive, disk_pool, partition_pool) {
         // Pool spans the whole data drive: preservable only if the OS goes
@@ -868,6 +884,25 @@ mod tests {
         let disks = vec![single_drive_035()];
         let err = plan_data_drive(&disks, None, &preserve("/dev/sda")).unwrap_err();
         assert!(matches!(err.kind, ErrorKind::InvalidRequest));
+    }
+
+    /// Pre-installed device (e.g. Raspberry Pi): the data partition is selected
+    /// by its own partition path, and this enumeration lists it only nested
+    /// under the OS disk. The pool (here an unencrypted `_UNENC` VG) must still
+    /// resolve and attach.
+    #[test]
+    fn preserve_data_partition_by_path_attaches() {
+        let disks = vec![disk(
+            "/dev/mmcblk0",
+            None,
+            vec![
+                partition("/dev/mmcblk0p1", None),
+                partition("/dev/mmcblk0p4", None),
+                partition("/dev/mmcblk0p5", Some("EMBASSY_AAAA_UNENC")),
+            ],
+        )];
+        let plan = plan_data_drive(&disks, None, &preserve("/dev/mmcblk0p5")).unwrap();
+        assert_eq!(plan, DataDrivePlan::Attach("EMBASSY_AAAA_UNENC".into()));
     }
 
     #[test]
