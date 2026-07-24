@@ -345,11 +345,6 @@ async fn perform_backup(
     let mut package_backups: BTreeMap<PackageId, PackageBackupInfo> =
         backup_guard.metadata.package_backups.clone();
 
-    // The target is mounted and its store is open; close out the Initializing
-    // phase before the reclaim/per-package/OS phases take over. The db-sync task
-    // (spawned in backup_all) keeps streaming as these phases are added.
-    init_phase.complete();
-
     let mut reclaim_phase = if crate::backup::trash::has_trash(disk_guard.path()).await {
         Some(progress.add_phase(
             InternedString::intern(&*t!("backup.bulk.reclaiming-space")),
@@ -368,6 +363,12 @@ async fn perform_backup(
         })
         .collect();
     let mut os_data_phase = progress.add_phase("OS Data".into(), Some(10));
+
+    // The target is mounted and its store is open; close out the Initializing
+    // phase now that the reclaim/per-package/OS phases exist, so the phase list
+    // is already populated when it flips to complete. The db-sync task (spawned
+    // in backup_all) keeps streaming these phases.
+    init_phase.complete();
 
     if let Some(phase) = &mut reclaim_phase {
         phase.start();
