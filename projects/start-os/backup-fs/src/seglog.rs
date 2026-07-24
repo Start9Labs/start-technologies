@@ -329,6 +329,7 @@ impl SegmentLog {
         if let Some(log) = Self::try_open_from_checkpoint(&dir, &key, segment_size) {
             return Ok(log);
         }
+        let replay_start = std::time::Instant::now();
         let mut segment_ids = Vec::new();
         for entry in std::fs::read_dir(&dir)? {
             let entry = entry?;
@@ -443,6 +444,12 @@ impl SegmentLog {
             .open(segment_path(&dir, active_id))?;
         let active_offset = active.metadata()?.len();
 
+        log::info!(
+            "replayed {} segment(s), {} bytes, in {:?}",
+            segment_ids.len(),
+            seg_meta.values().map(|m| m.total).sum::<u64>(),
+            replay_start.elapsed()
+        );
         Ok(Self {
             dir,
             key,
@@ -467,6 +474,7 @@ impl SegmentLog {
         let sealed = std::fs::read(dir.join(INDEX_CACHE_NAME)).ok()?;
         let cp: Checkpoint = decode(&vault::open(&sealed, key).ok()?, data_config()).ok()?;
         if cp.version != CHECKPOINT_VERSION || list_segments(dir).ok()? != cp.segments {
+            log::info!("index checkpoint present but stale — replaying");
             return None;
         }
         let active_id = cp.segments.last().map(|&(id, _)| id).unwrap_or(0);
@@ -477,6 +485,10 @@ impl SegmentLog {
             .open(segment_path(dir, active_id))
             .ok()?;
         let active_offset = active.metadata().ok()?.len();
+        log::info!(
+            "loaded index from checkpoint ({} segments) — skipping replay",
+            cp.segments.len()
+        );
         Some(Self {
             dir: dir.to_path_buf(),
             key: *key,
@@ -517,6 +529,7 @@ impl SegmentLog {
         f.write_all(&sealed)?;
         drop(f);
         std::fs::rename(&tmp, self.dir.join(INDEX_CACHE_NAME))?;
+        log::info!("wrote index checkpoint ({} segments)", cp.segments.len());
         Ok(())
     }
 
