@@ -13,7 +13,7 @@ fn app() -> CliApp<CliContext, ClientConfig> {
         crate::main_api(),
     )
     .mutate_command(super::translate_cli)
-    .mutate_command(|cmd| cmd.name("start-cli").version(super::product_version()))
+    .mutate_command(|cmd| cmd.name("start-cli").version(super::cli_version()))
 }
 
 pub fn main(args: impl IntoIterator<Item = OsString>) {

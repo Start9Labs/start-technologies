@@ -26,6 +26,14 @@ pub fn product_version() -> &'static str {
         .unwrap_or(env!("CARGO_PKG_VERSION"))
 }
 
+/// The start-cli crate version, baked in by `build.rs` from `projects/start-cli/Cargo.toml`. The
+/// start-cli applet reports this rather than [`product_version`] so it shows the CLI version even
+/// when bundled in `startbox` (the OS's `start-cli` is a symlink to `startbox`, which otherwise
+/// carries the OS version). start-core hosts the applet, so it owns the applet's version.
+pub fn cli_version() -> &'static str {
+    env!("START_CLI_VERSION")
+}
+
 pub fn set_locale_from_env() {
     let lang = std::env::var("LANG").ok();
     let lang = lang

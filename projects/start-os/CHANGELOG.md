@@ -190,6 +190,11 @@ file tracks notable changes since the move to the monorepo.
 
 ### Fixed
 
+- **`start-cli --version` on StartOS reports the CLI version.** On the server,
+  `start-cli` is a symlink to the `startbox` multi-call binary, which advertised
+  the OS platform version for every applet — so `start-cli --version` printed the
+  OS version instead of the independently-versioned start-cli version. It now
+  reports the start-cli version, matching the standalone `start-cli` binary.
 - **Backups wait for the service to fully stop before its data is copied.** A
   package's data is now captured only after its service has completely stopped,
   and the package isn't reported finished until it has left the backing-up

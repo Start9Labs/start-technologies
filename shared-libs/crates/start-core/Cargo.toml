@@ -1,5 +1,6 @@
 [package]
 authors = ["Aiden McClelland <me@drbonez.dev>"]
+build = "build.rs"
 description = "The core of StartOS"
 documentation = "https://docs.rs/start-os"
 edition = "2024"
@@ -219,6 +220,9 @@ visit-rs = "0.1.1"
 x25519-dalek = { version = "3.0.0-rc.1", features = ["static_secrets"] }
 xmltree = "0.10"
 zbus = "5.1.1"
+
+[build-dependencies]
+serde_toml = { package = "toml", version = "0.9" }
 
 [dev-dependencies]
 clap_mangen = "0.2.33"
