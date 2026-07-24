@@ -18,6 +18,8 @@ use url::Url;
 use crate::auth::AuthKeys;
 use crate::context::{CliContext, RpcContext};
 use crate::middleware::auth::DbContext;
+use crate::net::host::Host;
+use crate::net::service_interface::HostnameMetadata;
 use crate::prelude::*;
 use crate::rpc_continuations::OpenAuthedContinuations;
 use crate::sign::commitment::Commitment;
@@ -259,6 +261,11 @@ impl SignatureAuthContext for RpcContext {
                         .transpose(),
                 )
                 .chain(ips)
+                .chain(
+                    plugin_hostnames(peek.as_public().as_server_info().as_network().as_host())
+                        .map(|h| h.into_iter())
+                        .transpose(),
+                )
                 // The loopback name, alongside the 127.0.0.1 / [::1] addresses
                 // the loopback interface's subnets already contribute.
                 .chain(std::iter::once(Ok(InternedString::intern("localhost"))))
@@ -309,6 +316,24 @@ impl SignatureAuthContext for RpcContext {
         }
         Ok(())
     }
+}
+
+/// The hostnames url plugins have exported for a host. The OS UI is reachable
+/// at the ones on the server's own host, so a client that loaded it there signs
+/// against one of them.
+fn plugin_hostnames(host: &Model<Host>) -> Result<BTreeSet<InternedString>, Error> {
+    let mut hostnames = BTreeSet::new();
+    for (_, bind) in host.as_bindings().as_entries()? {
+        hostnames.extend(
+            bind.as_addresses()
+                .as_available()
+                .de()?
+                .into_iter()
+                .filter(|h| matches!(h.metadata, HostnameMetadata::Plugin { .. }))
+                .map(|h| h.hostname),
+        );
+    }
+    Ok(hostnames)
 }
 
 /// Format an IP the way `url::Url::host_str` (and `location.hostname`) renders
@@ -683,8 +708,56 @@ pub async fn call_remote<Ctx: SigningContext + AsRef<Client>>(
 #[cfg(test)]
 mod tests {
     use http::HeaderValue;
+    use imbl_value::json;
 
     use super::*;
+
+    #[test]
+    fn plugin_hostnames_from_server_host() {
+        let host = Model::<Host>::from(json!({
+            "bindings": {
+                "80": { "addresses": { "available": [
+                    {
+                        "ssl": true,
+                        "public": true,
+                        "hostname": "abcd.tunnel.start9.com",
+                        "port": 443,
+                        "metadata": {
+                            "kind": "plugin",
+                            "packageId": "start-tunnel",
+                            "removeAction": null,
+                            "overflowActions": [],
+                        },
+                    },
+                    {
+                        "ssl": false,
+                        "public": false,
+                        "hostname": "192.168.1.5",
+                        "port": 80,
+                        "metadata": { "kind": "ipv4", "gateway": "eth0" },
+                    },
+                ] } },
+                "443": { "addresses": { "available": [
+                    {
+                        "ssl": true,
+                        "public": true,
+                        "hostname": "abcd.tunnel.start9.com",
+                        "port": 443,
+                        "metadata": {
+                            "kind": "plugin",
+                            "packageId": "start-tunnel",
+                            "removeAction": null,
+                            "overflowActions": [],
+                        },
+                    },
+                ] } },
+            },
+        }));
+        assert_eq!(
+            plugin_hostnames(&host).expect("collects"),
+            BTreeSet::from([InternedString::intern("abcd.tunnel.start9.com")]),
+        );
+    }
 
     /// Generated with the TypeScript client's message layout
     /// (`lib/auth/signature.ts`) for secret key 0102…1f20, context
