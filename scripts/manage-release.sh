@@ -344,8 +344,10 @@ cmd_pre_check() {
             >&2 echo "  ✗ start-os docs still link to releases/latest — pin to https://github.com/${REPO}/releases/tag/${TAG}"
             errors=1
         fi
-        total=$(grep -rohF "${REPO}/releases/tag/" "$docs_src" 2>/dev/null | wc -l | tr -d ' ')
-        good=$(grep -rohF "${REPO}/releases/tag/${TAG}" "$docs_src" 2>/dev/null | wc -l | tr -d ' ')
+        # `|| true`: zero grep matches must reach the ✗ report below, not trip
+        # errexit via pipefail on the assignment.
+        total=$(grep -rohF "${REPO}/releases/tag/" "$docs_src" 2>/dev/null | wc -l | tr -d ' ' || true)
+        good=$(grep -rohF "${REPO}/releases/tag/${TAG}" "$docs_src" 2>/dev/null | wc -l | tr -d ' ' || true)
         if [ "$good" -eq 0 ]; then
             >&2 echo "  ✗ start-os docs link to no ${TAG} release — pin to https://github.com/${REPO}/releases/tag/${TAG}"
             errors=1
@@ -445,11 +447,12 @@ cmd_pre_check() {
             else
                 echo "  ✓ not yet in production registry"
             fi
-            # promoting re-signs registry commitments with the developer key.
-            if [ -f "$HOME/.startos/developer.key.pem" ]; then
+            # promoting re-signs registry commitments with the developer key;
+            # start-cli reads id.key.pem (auto-migrating a legacy developer.key.pem).
+            if [ -f "$HOME/.startos/id.key.pem" ] || [ -f "$HOME/.startos/developer.key.pem" ]; then
                 echo "  ✓ developer key present"
             else
-                >&2 echo "  ✗ ~/.startos/developer.key.pem missing (needed to promote to the registry)"
+                >&2 echo "  ✗ ~/.startos/id.key.pem missing (needed to promote to the registry)"
                 errors=1
             fi
             ;;
@@ -491,11 +494,12 @@ cmd_pre_check() {
             else
                 echo "  ✓ not yet in production registry"
             fi
-            # promoting re-signs registry commitments with the developer key.
-            if [ -f "$HOME/.startos/developer.key.pem" ]; then
+            # promoting re-signs registry commitments with the developer key;
+            # start-cli reads id.key.pem (auto-migrating a legacy developer.key.pem).
+            if [ -f "$HOME/.startos/id.key.pem" ] || [ -f "$HOME/.startos/developer.key.pem" ]; then
                 echo "  ✓ developer key present"
             else
-                >&2 echo "  ✗ ~/.startos/developer.key.pem missing (needed to promote to the registry)"
+                >&2 echo "  ✗ ~/.startos/id.key.pem missing (needed to promote to the registry)"
                 errors=1
             fi
             ;;
