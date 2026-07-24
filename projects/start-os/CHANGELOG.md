@@ -190,6 +190,11 @@ file tracks notable changes since the move to the monorepo.
 
 ### Fixed
 
+- **`start-cli --version` on StartOS reports the CLI version.** On the server,
+  `start-cli` is a symlink to the `startbox` multi-call binary, which advertised
+  the OS platform version for every applet — so `start-cli --version` printed the
+  OS version instead of the independently-versioned start-cli version. It now
+  reports the start-cli version, matching the standalone `start-cli` binary.
 - **Backups wait for the service to fully stop before its data is copied.** A
   package's data is now captured only after its service has completely stopped,
   and the package isn't reported finished until it has left the backing-up
@@ -203,6 +208,12 @@ file tracks notable changes since the move to the monorepo.
   its instructions when present and falls back to a placeholder when absent, so a
   package with no `instructions.md` can no longer break the 0.3.5.1 → 0.4.0
   upgrade. Previously the converted package omitted the file entirely.
+- **Migrated 0.3.5.1 packages keep their asset file permissions.** Converting a
+  legacy (Embassy) package to the new s9pk format now preserves the mode bits of
+  files in the package's assets, so an executable asset (a script or bundled
+  binary) stays executable in the migrated package. Previously the assets were
+  unpacked without their permissions and re-packed at the default mode, dropping
+  the executable bit and breaking any asset the service ran directly.
 - **URL-plugin services no longer accumulate duplicate exported addresses.**
   `export_url` now dedupes a binding's `available` set by the same address
   identity `clear_urls` retains on (ignoring the row-action fields), so
@@ -233,15 +244,10 @@ file tracks notable changes since the move to the monorepo.
   before returning — so a slow target looked like the request itself had timed
   out. Opening the store, and any failure doing so, now happens in the
   background and is reported through the usual backup progress and notifications.
-- **Backups open faster by caching their index.** The encrypted backup
-  filesystem now writes a sealed index checkpoint onto the target when a backup
-  finishes, so opening that backup again — including for a restore — reconstructs
-  its index from the checkpoint instead of re-reading and decrypting the whole
-  log. Large backups, which could previously take long enough to open that a
-  restore appeared to time out, now open quickly. The checkpoint is a pure cache
-  refreshed on every backup: if it is absent or does not match the target's
-  current contents, StartOS falls back to the full scan, so an existing backup
-  becomes fast once it has been backed up to again from this version.
+- **Backup progress shows an "Initializing" phase while the target is prepared.**
+  Backup progress now displays a labeled "Initializing" phase while StartOS
+  mounts the target and opens its encrypted store, instead of a bare 0% with no
+  phases; the per-package and OS-data phases appear once that work finishes.
 - **Mixed-case domains now match the browser.** Domain names are lowercased
   when added or removed (UI and CLI alike), so a domain entered with capital
   letters can no longer end up unreachable against the browser's lowercased
