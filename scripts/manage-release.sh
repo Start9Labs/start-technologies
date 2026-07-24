@@ -37,6 +37,10 @@ S3_BUCKET="s3://startos-images"
 S3_CDN="https://startos-images.nyc3.cdn.digitaloceanspaces.com"
 START9_GPG_KEY="2D63C217"
 SDK_NPM_PACKAGE="@start9labs/start-sdk"
+# The first heading release_notes() emits. cmd_create_gh_release splits an
+# existing release body on it to keep hand-written notes above it, so the two
+# must agree — hence one constant rather than the string in both places.
+NOTES_MARKER="## What's Changed"
 
 APT_BASE_URL="https://start9-debs.nyc3.digitaloceanspaces.com"
 APT_SUITE="stable"
@@ -155,6 +159,33 @@ os_image_exts() {
 
 # --- Helpers ---
 
+# Load a registry's OS index into $_INDEX_JSON, refetching only when asked for a
+# different registry than the one held — a release reads a dozen asset URLs off
+# it and each fetch is a round trip. Call it once at the top of a scope that
+# loops over assets: asset_url runs inside $(...), so a fetch it does itself is
+# discarded with that subshell, while one the caller did is inherited.
+_INDEX_REGISTRY=""
+_INDEX_JSON=""
+load_registry_index() {
+    if [ "$1" != "$_INDEX_REGISTRY" ]; then
+        _INDEX_JSON=$(start-cli --registry="$1" registry os index 2>/dev/null || echo '{}')
+        _INDEX_REGISTRY=$1
+    fi
+}
+
+# The published URL of an indexed asset: <registry> <slot> <platform>. Empty if
+# that registry carries no such asset for $VERSION.
+#
+# This — never a URL rebuilt from the bucket layout plus a local filename — is
+# what a download link must point at. The published basename carries the build's
+# commit hash (startos-0.4.0-514af0c_x86_64.iso), which nothing local
+# reproduces, so a reconstructed URL 403s.
+asset_url() {
+    load_registry_index "$1"
+    jq -r --arg v "$VERSION" --arg s "$2" --arg p "$3" \
+        '.versions[$v][$s][$p].urls[0] // empty' <<< "$_INDEX_JSON"
+}
+
 parse_run_id() {
     local val="$1"
     if [[ "$val" =~ /actions/runs/([0-9]+) ]]; then
@@ -208,11 +239,34 @@ deb_files() {
     for f in *.deb; do [ -f "$f" ] && echo "$f"; done
 }
 
+# Compress every raw .img in the release dir beside itself.
+#
+# The registry keeps indexing the image bare: an installer streams it and the
+# signed commitment is over the raw bytes. But a raw card image is mostly
+# zeroes, and the release notes hand it to a human on a browser — so the notes
+# link the .gz, and it is hashed and signed alongside the bare image.
+#
+# Idempotent: skips a .gz already newer than its source, and stages through a
+# temp file so an interrupted run can't leave a truncated one looking current.
+# A no-op outside the os kind — nothing else ships a raw .img.
+ensure_img_gz() {
+    local img
+    for img in *.img; do
+        [ -f "$img" ] || continue
+        if [ -f "${img}.gz" ] && [ ! "$img" -nt "${img}.gz" ]; then
+            continue
+        fi
+        >&2 echo "  compressing ${img} -> ${img}.gz"
+        gzip -c "$img" > "${img}.gz.tmp"
+        mv -f "${img}.gz.tmp" "${img}.gz"
+    done
+}
+
 # List every file the project ships (for signing / checksums), one per line.
 release_files() {
     local f
     case "$KIND" in
-        os) for f in *.iso *.img *.squashfs; do [ -f "$f" ] && echo "$f"; done ;;
+        os) for f in *.iso *.img *.img.gz *.squashfs; do [ -f "$f" ] && echo "$f"; done ;;
         cli) cli_binaries; deb_files ;;
         deb) deb_files ;;
         wrt) for f in *-sdcard.img.gz *-sysupgrade.img.gz; do [ -f "$f" ] && echo "$f"; done ;;
@@ -420,16 +474,16 @@ cmd_pre_check() {
         os)
             # `release` pulls the images from the source registry and promotes
             # them into prod, so every expected asset must already be in source.
-            local idx missing platform ext
-            idx=$(start-cli --registry="$STARTOS_SOURCE_REGISTRY" registry os index 2>/dev/null || echo '{}')
-            if ! echo "$idx" | jq -e ".versions[\"$VERSION\"]" >/dev/null 2>&1; then
+            local missing platform ext
+            load_registry_index "$STARTOS_SOURCE_REGISTRY"
+            if ! jq -e --arg v "$VERSION" '.versions[$v]' <<< "$_INDEX_JSON" >/dev/null 2>&1; then
                 >&2 echo "  ✗ OS ${VERSION} not in source registry ${STARTOS_SOURCE_REGISTRY} — promote it there first"
                 errors=1
             else
                 missing=""
                 for platform in $OS_PLATFORMS; do
                     for ext in $(os_image_exts "$platform"); do
-                        echo "$idx" | jq -e ".versions[\"$VERSION\"].${ext}[\"$platform\"].urls[0]" >/dev/null 2>&1 \
+                        [ -n "$(asset_url "$STARTOS_SOURCE_REGISTRY" "$ext" "$platform")" ] \
                             || missing="${missing} ${platform}.${ext}"
                     done
                 done
@@ -469,15 +523,15 @@ cmd_pre_check() {
             # promotes them into production, so both assets must already be
             # registered there (the CI deploy does that; `register` is the
             # manual fallback).
-            local wrt_idx slot wrt_missing
-            wrt_idx=$(start-cli --registry="$STARTWRT_SOURCE_REGISTRY" registry os index 2>/dev/null || echo '{}')
-            if ! echo "$wrt_idx" | jq -e ".versions[\"$VERSION\"]" >/dev/null 2>&1; then
+            local slot wrt_missing
+            load_registry_index "$STARTWRT_SOURCE_REGISTRY"
+            if ! jq -e --arg v "$VERSION" '.versions[$v]' <<< "$_INDEX_JSON" >/dev/null 2>&1; then
                 >&2 echo "  ✗ StartWRT ${VERSION} not in source registry ${STARTWRT_SOURCE_REGISTRY} — run the start-wrt deploy workflow (or 'register') first"
                 errors=1
             else
                 wrt_missing=""
                 for slot in img squashfs; do
-                    echo "$wrt_idx" | jq -e ".versions[\"$VERSION\"].${slot}[\"$STARTWRT_PLATFORM\"].urls[0]" >/dev/null 2>&1 \
+                    [ -n "$(asset_url "$STARTWRT_SOURCE_REGISTRY" "$slot" "$STARTWRT_PLATFORM")" ] \
                         || wrt_missing="${wrt_missing} ${slot}"
                 done
                 if [ -n "$wrt_missing" ]; then
@@ -536,18 +590,19 @@ cmd_pre_check() {
         fi
     fi
 
-    # cli/deb also publish debs to the apt repo, which needs s3cmd + credentials.
-    if [ "$KIND" = cli ] || [ "$KIND" = deb ]; then
+    # cli/deb publish debs to the apt repo and os pushes the compressed images
+    # (push-gz) — all three upload to S3, which needs s3cmd + credentials.
+    if [ "$KIND" = cli ] || [ "$KIND" = deb ] || [ "$KIND" = os ]; then
         if command -v s3cmd >/dev/null 2>&1; then
             echo "  ✓ s3cmd available"
         else
-            >&2 echo "  ✗ s3cmd not installed (needed to publish debs to apt)"
+            >&2 echo "  ✗ s3cmd not installed (needed to upload to S3/apt)"
             errors=1
         fi
         if [ -f "$HOME/.s3cfg" ] || { [ -n "${S3_ACCESS_KEY:-}" ] && [ -n "${S3_SECRET_KEY:-}" ]; }; then
             echo "  ✓ s3 credentials configured"
         else
-            >&2 echo "  ! no ~/.s3cfg and S3_ACCESS_KEY/S3_SECRET_KEY unset — apt publish may fail"
+            >&2 echo "  ! no ~/.s3cfg and S3_ACCESS_KEY/S3_SECRET_KEY unset — S3 upload may fail"
         fi
     fi
 
@@ -593,6 +648,7 @@ cmd_pull_gha() {
                     gh run download -R "$REPO" "$RUN_ID" -n "${platform}.${ext}" -D "$(pwd)"
                 done
             done
+            ensure_img_gz
             ;;
         cli)
             for triple in $CLI_TRIPLES; do
@@ -622,12 +678,40 @@ cmd_pull() {
 
     case "$KIND" in
         os)
+            # start-cli names its output startos-<ver>_<platform>.<ext>, which
+            # drops the commit hash the published basename carries. Land each
+            # asset under its published name instead, so checksums, signatures,
+            # and the .gz key all agree with what is actually on S3.
+            local platform ext url published tmp stale expected=()
+            load_registry_index "$STARTOS_SOURCE_REGISTRY"
             for platform in $OS_PLATFORMS; do
                 for ext in $(os_image_exts "$platform"); do
-                    echo "  ${ext} ${platform}"
-                    start-cli --registry="$STARTOS_SOURCE_REGISTRY" registry os asset get "$ext" "$VERSION" "$platform" -d "$(pwd)"
+                    url=$(asset_url "$STARTOS_SOURCE_REGISTRY" "$ext" "$platform")
+                    if [ -z "$url" ]; then
+                        >&2 echo "  (no '$ext' asset indexed for $platform, skipping)"
+                        continue
+                    fi
+                    published=$(basename "$url")
+                    echo "  ${ext} ${platform} -> ${published}"
+                    tmp=$(mktemp -d "$(pwd)/.get-${platform}-${ext}.XXXXXX")
+                    start-cli --registry="$STARTOS_SOURCE_REGISTRY" registry os asset get "$ext" "$VERSION" "$platform" -d "$tmp"
+                    mv -f "$tmp"/* "$published"
+                    rmdir "$tmp"
+                    expected+=("$published")
+                    [ "$ext" != img ] || expected+=("${published}.gz")
                 done
             done
+            ensure_img_gz
+            # Everything the notes hash and sign must be named for the S3 object
+            # it links. Anything else the dir has collected — a pull from before
+            # assets were renamed to their published basename, or another build
+            # of the same version — would be hashed under a name that is on no
+            # URL we publish.
+            stale=$(comm -23 <(release_files | sort -u) <(printf '%s\n' "${expected[@]}" | sort -u))
+            if [ -n "$stale" ]; then
+                >&2 echo "  ! not published ${VERSION} assets, but release_files would still hash and sign them — re-run with CLEAN=1 to drop them:"
+                printf '      %s\n' $stale >&2
+            fi
             ;;
         cli)
             gh release download -R "$REPO" "$TAG" -p 'start-cli_*' -D "$(pwd)" --clobber
@@ -648,10 +732,10 @@ cmd_pull() {
             # published basename (the basename of the indexed URL) to match
             # release_files().
             local slot url published tmp
+            load_registry_index "$STARTWRT_SOURCE_REGISTRY"
             for slot in img squashfs; do
-                url=$(start-cli --registry="$STARTWRT_SOURCE_REGISTRY" registry os index 2>/dev/null \
-                    | jq -r ".versions[\"$VERSION\"].${slot}[\"$STARTWRT_PLATFORM\"].urls[0]")
-                if [ -z "$url" ] || [ "$url" = null ]; then
+                url=$(asset_url "$STARTWRT_SOURCE_REGISTRY" "$slot" "$STARTWRT_PLATFORM")
+                if [ -z "$url" ]; then
                     >&2 echo "  (no '$slot' asset indexed for v$VERSION, skipping)"
                     continue
                 fi
@@ -690,11 +774,32 @@ cmd_create_gh_release() {
     require_kind os cli deb npm wrt
     # os/cli/deb/wrt reference their pulled artifacts in the notes; npm (the SDK)
     # ships to npm and its notes are just the changelog, so it needs no release dir.
-    [ "$KIND" = npm ] || enter_release_dir
-    local notes
+    if [ "$KIND" != npm ]; then
+        enter_release_dir
+        ensure_img_gz
+    fi
+    local notes body preamble
     notes=$(release_notes)
     echo "Creating GitHub release ${TAG}..."
     if gh release view -R "$REPO" "$TAG" >/dev/null 2>&1; then
+        # release_notes() starts at $NOTES_MARKER and can regenerate nothing
+        # above it, but a body may carry hand-written material there that exists
+        # nowhere else — 0.4.0's "Before You Update" warning and highlights, for
+        # one. `gh release edit --notes` replaces the whole body, so lift that
+        # block off the live release and put it back on top. GitHub stores
+        # bodies with CRLF; strip it or the splice reintroduces \r.
+        body=$(gh release view -R "$REPO" "$TAG" --json body -q .body 2>/dev/null | tr -d '\r')
+        preamble=$(printf '%s\n' "$body" | awk -v marker="$NOTES_MARKER" 'index($0, marker) == 1 { exit } { print }')
+        if [ -n "$preamble" ]; then
+            # No marker at all means the whole body is hand-written; keeping it
+            # can duplicate what the generated sections say, but dropping it
+            # loses the only copy, so keep and say so.
+            if ! printf '%s\n' "$body" | grep -qF "$NOTES_MARKER"; then
+                >&2 echo "  ! existing ${TAG} notes have no \"${NOTES_MARKER}\" heading — keeping the whole body above the generated sections; review the result"
+            fi
+            echo "  preserving $(printf '%s\n' "$preamble" | wc -l | tr -d ' ') hand-written line(s) above \"${NOTES_MARKER}\""
+            notes="${preamble}"$'\n\n'"${notes}"
+        fi
         gh release edit -R "$REPO" "$TAG" --notes "$notes"
     else
         gh release create -R "$REPO" "$TAG" --title "${PROJECT} v${VERSION}" --notes "$notes"
@@ -744,6 +849,42 @@ cmd_push() {
             done
             ;;
     esac
+}
+
+# Put the compressed copy of each raw .img beside the bare image on S3.
+#
+# This adds an object rather than replacing one: the registry keeps pointing at
+# the bare .img (see ensure_img_gz), and only the release-notes download link
+# moves to the .gz. That link is the indexed URL + ".gz", so the key has to be
+# the indexed basename + ".gz" — both guards below exist because any other name
+# yields notes that link to nothing.
+cmd_push_gz() {
+    require_kind os
+    enter_release_dir
+    ensure_img_gz
+    echo "Uploading compressed OS images to ${S3_BUCKET}/v${VERSION}/ ..."
+    local platform ext url published
+    for platform in $OS_PLATFORMS; do
+        for ext in $(os_image_exts "$platform"); do
+            [ "$ext" = img ] || continue
+            url=$(asset_url "$STARTOS_SOURCE_REGISTRY" img "$platform")
+            if [ -z "$url" ]; then
+                >&2 echo "  ✗ no ${platform} img indexed in ${STARTOS_SOURCE_REGISTRY}"
+                exit 1
+            fi
+            published=$(basename "$url")
+            if [ "$url" != "${S3_CDN}/v${VERSION}/${published}" ]; then
+                >&2 echo "  ✗ ${platform} img is indexed at ${url}, outside ${S3_CDN}/v${VERSION}/ — a .gz uploaded to ${S3_BUCKET} would not be reachable at that URL + .gz"
+                exit 1
+            fi
+            if [ ! -f "${published}.gz" ]; then
+                >&2 echo "  ✗ ${published} not in $(release_dir) — run 'pull' (or 'pull-gha') first"
+                exit 1
+            fi
+            echo "  ${published}.gz"
+            s3cmd put -P "${published}.gz" "${S3_BUCKET}/v${VERSION}/${published}.gz"
+        done
+    done
 }
 
 cmd_index() {
@@ -807,6 +948,7 @@ cmd_register() {
 cmd_sign() {
     require_kind os cli deb wrt
     enter_release_dir
+    ensure_img_gz
     resolve_gh_user
 
     local files file
@@ -833,6 +975,7 @@ cmd_sign() {
 cmd_cosign() {
     require_kind os cli deb wrt
     enter_release_dir
+    ensure_img_gz
     resolve_gh_user
 
     if [ -z "$GH_USER" ] || [ -z "$GH_GPG_KEY" ]; then
@@ -861,20 +1004,29 @@ cmd_cosign() {
 
 # Compose the release-notes body for the current project.
 release_notes() {
-    echo "## What's Changed"
+    echo "$NOTES_MARKER"
     echo
     changelog_section
     echo
 
-    local platform file
+    local platform
     case "$KIND" in
         os)
             echo "## Image Downloads"
             echo
+            local ext url
+            load_registry_index "$STARTOS_SOURCE_REGISTRY"
             for platform in $OS_PLATFORMS; do
-                for file in *_"$platform".iso *_"$platform".img; do
-                    [ -f "$file" ] || continue
-                    echo "- [$(os_platform_label "$platform")]($S3_CDN/v$VERSION/$file)"
+                for ext in $(os_image_exts "$platform"); do
+                    # squashfs is the over-the-air update asset, not a download.
+                    [ "$ext" != squashfs ] || continue
+                    url=$(asset_url "$STARTOS_SOURCE_REGISTRY" "$ext" "$platform")
+                    [ -n "$url" ] || continue
+                    if [ "$ext" = img ]; then
+                        echo "- [$(os_platform_label "$platform")](${url}.gz \"gzip-compressed — Raspberry Pi Imager and balenaEtcher flash it without unpacking\")"
+                    else
+                        echo "- [$(os_platform_label "$platform")]($url)"
+                    fi
                 done
             done
             echo
@@ -898,10 +1050,15 @@ release_notes() {
             echo "## Image Downloads"
             echo
             local sdcard sysupgrade imgs
-            sdcard=$(release_files | grep -E -- '-sdcard\.img\.gz$' | head -1)
-            sysupgrade=$(release_files | grep -E -- '-sysupgrade\.img\.gz$' | head -1)
-            [ -n "$sdcard" ] && echo "- [SD card image (fresh install)]($STARTWRT_S3_CDN/v$VERSION/$sdcard \"Write to microSD/eMMC to flash a new device\")"
-            [ -n "$sysupgrade" ] && echo "- [Sysupgrade image (OTA update)]($STARTWRT_S3_CDN/v$VERSION/$sysupgrade \"In-place upgrade via OpenWrt sysupgrade\")"
+            load_registry_index "$STARTWRT_SOURCE_REGISTRY"
+            sdcard=$(asset_url "$STARTWRT_SOURCE_REGISTRY" img "$STARTWRT_PLATFORM")
+            sysupgrade=$(asset_url "$STARTWRT_SOURCE_REGISTRY" squashfs "$STARTWRT_PLATFORM")
+            if [ -n "$sdcard" ]; then
+                echo "- [SD card image (fresh install)]($sdcard \"Write to microSD/eMMC to flash a new device\")"
+            fi
+            if [ -n "$sysupgrade" ]; then
+                echo "- [Sysupgrade image (OTA update)]($sysupgrade \"In-place upgrade via OpenWrt sysupgrade\")"
+            fi
             echo
             mapfile -t imgs < <(release_files)
             checksum_block "StartWRT" "${imgs[@]}"
@@ -933,7 +1090,10 @@ checksum_block() {
 
 cmd_notes() {
     require_kind os cli deb npm wrt
-    [ "$KIND" = npm ] || enter_release_dir
+    if [ "$KIND" != npm ]; then
+        enter_release_dir
+        ensure_img_gz
+    fi
     release_notes
 }
 
@@ -944,8 +1104,11 @@ cmd_release() {
             # them into alpha (and alpha->beta was promoted manually), so there's
             # no push here. Pull the promoted images to build the release notes +
             # sign them, and `index` promotes them from source into production.
+            # push-gz is the one upload left: the compressed .img the notes link,
+            # which has to be on S3 before the notes reference it.
             cmd_pre_check
             cmd_pull
+            cmd_push_gz
             cmd_tag
             cmd_create_gh_release
             cmd_index
@@ -989,7 +1152,8 @@ usage() {
 Usage: manage-release.sh <subcommand> <project>
 
 Projects:
-  start-os        OS images (iso/squashfs) -> S3 + registry OS index
+  start-os        OS images (iso/squashfs, raspberrypi img) -> S3 + registry
+                  OS index; the raw img also gets a .gz on S3 for the notes
   start-cli       per-triple binaries -> GitHub release; per-arch .deb -> apt + GitHub
   start-tunnel    per-arch .deb -> apt repo + GitHub release
   start-registry  per-arch .deb -> apt repo + GitHub release
@@ -1018,6 +1182,10 @@ Subcommands:
   push               Upload artifacts to their destination (S3 for os, GitHub
                      release + apt for cli/deb, npm publish for sdk). For os this
                      normally runs in CI; use it for a manual re-publish.
+  push-gz            os only: compress each raw .img and upload the .gz beside
+                     the bare image on S3 — the registry keeps indexing the bare
+                     image; only the release-notes download link uses the .gz.
+                     Run 'pull' (or 'pull-gha') first.
   index              Promote the version from the source (beta) registry into
                      the production registry. (os: CI indexes alpha; alpha->beta
                      is promoted manually. wrt: CI indexes into beta.)
@@ -1088,6 +1256,7 @@ case "$SUBCOMMAND" in
     tag) cmd_tag ;;
     create-gh-release) cmd_create_gh_release ;;
     push) cmd_push ;;
+    push-gz) cmd_push_gz ;;
     index) cmd_index ;;
     register) cmd_register ;;
     sign) cmd_sign ;;
