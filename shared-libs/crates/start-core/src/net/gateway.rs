@@ -1621,6 +1621,102 @@ async fn reconcile_outbound_rules(
     }
 }
 
+/// Whether a gateway can carry IPv6 egress: it has a v6 next-hop (any v6 in
+/// `lan_ip`, including a link-local RA gateway) or holds a global v6 address of
+/// its own (the delegated-GUA tunnel case).
+fn gateway_carries_v6(lan_ip: &OrdSet<IpAddr>, subnets: &OrdSet<IpNet>) -> bool {
+    lan_ip.iter().any(|a| matches!(a, IpAddr::V6(_)))
+        || subnets
+            .iter()
+            .any(|n| matches!(n, IpNet::V6(v6n) if !ipv6_is_local(v6n.addr())))
+}
+
+/// The `dev` of the current IPv6 default route in `main`, if any.
+async fn ipv6_main_default_dev() -> Option<String> {
+    let out = Command::new("ip")
+        .arg("-6")
+        .arg("route")
+        .arg("show")
+        .arg("default")
+        .arg("table")
+        .arg("main")
+        .invoke(ErrorKind::Network)
+        .await
+        .ok()?;
+    String::from_utf8(out).ok()?.lines().find_map(|line| {
+        let mut it = line.split_whitespace();
+        while let Some(tok) = it.next() {
+            if tok == "dev" {
+                return it.next().map(str::to_owned);
+            }
+        }
+        None
+    })
+}
+
+/// The per-gateway table id (`1000 + ifindex`) to pin v6 to under "auto": prefer
+/// whatever `main` already routes v6 through (respecting NetworkManager's
+/// metric), else the first v6-capable connected gateway. `None` when no gateway
+/// carries v6.
+async fn auto_v6_gateway(ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>) -> Option<u32> {
+    let table_of = |id: &GatewayId| -> Option<u32> {
+        let ip = ip_info.get(id)?.ip_info.as_ref()?;
+        gateway_carries_v6(&ip.lan_ip, &ip.subnets)
+            .then(|| if_nametoindex(id.as_str()).ok().map(|idx| 1000 + idx))
+            .flatten()
+    };
+    if let Some(dev) = ipv6_main_default_dev().await {
+        if let Some(table_id) = table_of(&GatewayId::from(InternedString::intern(&dev))) {
+            return Some(table_id);
+        }
+    }
+    ip_info.keys().find_map(table_of)
+}
+
+/// Fwmarks of all active WireGuard interfaces' encapsulation packets, so a
+/// priority-75 catch-all can exempt them (else it swallows encap before NM's
+/// fwmark rules at priority 31610 route it).
+async fn active_wg_fwmarks(ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>) -> BTreeSet<u32> {
+    let mut marks = BTreeSet::new();
+    for (iface_id, iface_info) in ip_info {
+        let Some(ref ip) = iface_info.ip_info else {
+            continue;
+        };
+        if ip.device_type != Some(NetworkInterfaceType::Wireguard) {
+            continue;
+        }
+        match Command::new("wg")
+            .arg("show")
+            .arg(iface_id.as_str())
+            .arg("fwmark")
+            .invoke(ErrorKind::Network)
+            .await
+        {
+            Ok(output) => {
+                let fwmark_hex = String::from_utf8_lossy(&output).trim().to_owned();
+                if fwmark_hex.is_empty() || fwmark_hex == "off" {
+                    continue;
+                }
+                match u32::from_str_radix(fwmark_hex.strip_prefix("0x").unwrap_or(&fwmark_hex), 16)
+                {
+                    Ok(v) => {
+                        marks.insert(v);
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "failed to parse WireGuard fwmark '{fwmark_hex}' for {iface_id}: {e}"
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!("failed to read WireGuard fwmark for {iface_id}: {e}");
+            }
+        }
+    }
+    marks
+}
+
 /// Map a NetworkManager device-type id to our [`NetworkInterfaceType`].
 fn device_type_of(raw: u32) -> Option<NetworkInterfaceType> {
     match raw {
@@ -2021,11 +2117,7 @@ async fn apply_policy_routing_v6(
     // The interface can carry v6 if it has a v6 gateway, or holds a global
     // (non-link-local, non-ULA) v6 address of its own — the delegated-GUA case,
     // where a point-to-point wg tunnel has no gateway but still routes v6.
-    let v6_capable = ipv6_gateway.is_some()
-        || subnets.iter().any(|n| match n {
-            IpNet::V6(v6n) => !ipv6_is_local(v6n.addr()),
-            _ => false,
-        });
+    let v6_capable = gateway_carries_v6(lan_ip, subnets);
 
     // Mirror main's non-default v6 routes into the per-interface table, so the
     // priority-75 catch-all does not send on-link/local v6 through the gateway.
@@ -2697,52 +2789,10 @@ impl NetworkInterfaceController {
                     Ok(idx) => {
                         let table_id = 1000 + idx;
                         desired_75.insert(table_id);
-
-                        // Exempt ALL active WireGuard interfaces' encapsulation packets.
-                        // Our priority-75 catch-all would otherwise swallow their encap
-                        // traffic before NM's fwmark rules at priority 31610 can route
-                        // it correctly.
-                        for (iface_id, iface_info) in ip_info {
-                            let Some(ref ip) = iface_info.ip_info else {
-                                continue;
-                            };
-                            if ip.device_type != Some(NetworkInterfaceType::Wireguard) {
-                                continue;
-                            }
-                            match Command::new("wg")
-                                .arg("show")
-                                .arg(iface_id.as_str())
-                                .arg("fwmark")
-                                .invoke(ErrorKind::Network)
-                                .await
-                            {
-                                Ok(output) => {
-                                    let fwmark_hex =
-                                        String::from_utf8_lossy(&output).trim().to_owned();
-                                    if fwmark_hex.is_empty() || fwmark_hex == "off" {
-                                        continue;
-                                    }
-                                    match u32::from_str_radix(
-                                        fwmark_hex.strip_prefix("0x").unwrap_or(&fwmark_hex),
-                                        16,
-                                    ) {
-                                        Ok(v) => {
-                                            desired_74.insert(v);
-                                        }
-                                        Err(e) => {
-                                            tracing::error!(
-                                                "failed to parse WireGuard fwmark '{fwmark_hex}' for {iface_id}: {e}"
-                                            );
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    tracing::error!(
-                                        "failed to read WireGuard fwmark for {iface_id}: {e}"
-                                    );
-                                }
-                            }
-                        }
+                        // Exempt active WireGuard encap from the priority-75
+                        // catch-all, else it swallows encap traffic before NM's
+                        // fwmark rules at priority 31610 can route it.
+                        desired_74.extend(active_wg_fwmarks(ip_info).await);
                     }
                     Err(e) => {
                         tracing::error!("failed to get ifindex for {gw_id}: {e}");
@@ -2751,19 +2801,33 @@ impl NetworkInterfaceController {
             }
         }
 
-        // 3. Reconcile each family toward the desired set. Both use the same
-        //    desired fwmarks/tables but separate rule tables; v6 carries no NAT,
-        //    so this is the only v6 default-outbound machinery — the per-gateway
-        //    v6 table it points at is populated by `apply_policy_routing_v6`
-        //    (a real default when the gateway carries v6, else a blackhole so a
-        //    non-v6 default outbound drops v6 instead of leaking it).
+        // Under "auto" (no explicit default outbound) v6 gets no priority-75 pin,
+        // so host v6 falls through to `main`. When a gateway's only working v6
+        // default lives in its own table (e.g. a WireGuard full-tunnel whose
+        // delegated GUA is valid only on that dev), `main` has no usable route and
+        // the GUA-sourced SYN is silently dropped. Pin v6 to a v6-capable gateway
+        // so auto egresses a real path ("use best available"), mirroring what an
+        // explicit selection of that gateway installs (the pin plus wg exemption).
+        let mut desired_74_v6 = desired_74.clone();
+        let mut desired_75_v6 = desired_75.clone();
+        if default_outbound.is_none() {
+            if let Some(table_id) = auto_v6_gateway(ip_info).await {
+                desired_75_v6.insert(table_id);
+                desired_74_v6.extend(active_wg_fwmarks(ip_info).await);
+            }
+        }
+
+        // 3. Reconcile each family toward its desired set. v4 and v6 use separate
+        //    rule tables; the per-gateway v6 table a pin points at is populated by
+        //    `apply_policy_routing_v6` (a real default when the gateway carries v6,
+        //    else a blackhole so a non-v6 default outbound drops v6, not leaks it).
         reconcile_outbound_rules(false, &existing_74, &desired_74, &existing_75, &desired_75).await;
         reconcile_outbound_rules(
             true,
             &existing_74_v6,
-            &desired_74,
+            &desired_74_v6,
             &existing_75_v6,
-            &desired_75,
+            &desired_75_v6,
         )
         .await;
     }
@@ -3196,5 +3260,43 @@ mod wg_config_tests {
         assert!(!parsed.to_nm_settings("wg0", None).unwrap()["connection"].contains_key("uuid"));
         let updated = parsed.to_nm_settings("wg0", Some("uuid-x")).unwrap();
         assert_eq!(as_str(&updated["connection"]["uuid"]), "uuid-x");
+    }
+}
+
+#[cfg(test)]
+mod v6_capability_tests {
+    use super::*;
+
+    fn addrs(v: &[&str]) -> OrdSet<IpAddr> {
+        v.iter().map(|s| s.parse::<IpAddr>().unwrap()).collect()
+    }
+    fn nets(v: &[&str]) -> OrdSet<IpNet> {
+        v.iter().map(|s| s.parse::<IpNet>().unwrap()).collect()
+    }
+
+    #[test]
+    fn v6_next_hop_counts_incl_link_local_ra_gateway() {
+        assert!(gateway_carries_v6(&addrs(&["fe80::1"]), &nets(&[])));
+        assert!(gateway_carries_v6(
+            &addrs(&["192.168.1.1", "fe80::1"]),
+            &nets(&[])
+        ));
+    }
+
+    #[test]
+    fn global_v6_subnet_counts_delegated_gua_tunnel() {
+        // No v6 next-hop, but a global v6 of its own (wg full-tunnel delegated GUA).
+        assert!(gateway_carries_v6(&addrs(&[]), &nets(&["2001:db8::2/64"])));
+    }
+
+    #[test]
+    fn v4_only_or_local_v6_do_not_count() {
+        assert!(!gateway_carries_v6(
+            &addrs(&["192.168.1.1"]),
+            &nets(&["192.168.1.2/24"])
+        ));
+        // Link-local and ULA are not global egress.
+        assert!(!gateway_carries_v6(&addrs(&[]), &nets(&["fe80::2/64"])));
+        assert!(!gateway_carries_v6(&addrs(&[]), &nets(&["fd00::2/64"])));
     }
 }

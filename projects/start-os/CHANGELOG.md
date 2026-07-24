@@ -201,6 +201,12 @@ file tracks notable changes since the move to the monorepo.
   re-exporting a URL whose `remove_action`/`overflow_actions` changed updates
   the existing entry instead of inserting a second, `Ord`-distinct copy that
   `clear_urls` would also keep.
+- **Outbound IPv6 under "automatic" gateway selection.** With the outbound
+  gateway set to automatic, StartOS now pins the host's outbound IPv6 to a
+  gateway that can carry it (e.g. a WireGuard tunnel with a delegated IPv6
+  prefix). This fixes outbound IPv6 connections — such as ACME/Let's Encrypt
+  certificate acquisition — timing out under automatic mode when the only
+  usable IPv6 path lives on a non-default gateway.
 - **Each package's backup progress stays open until its image finishes
   writing.** A package's backup phase now completes only once the whole package
   backup — including streaming its `.s9pk` image to the backup target — is done,
