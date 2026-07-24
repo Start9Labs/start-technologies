@@ -24,6 +24,8 @@ use crate::{ImageId, VolumeId};
 
 pub const MAGIC_AND_VERSION: &[u8] = &[0x3b, 0x3b, 0x01];
 
+const STUB_INSTRUCTIONS: &[u8] = b"# Instructions\n\nThis package was migrated from an earlier version of StartOS and did not include instructions. See the service's website or upstream documentation for setup and usage.\n";
+
 impl S9pk<TmpSource<PackSource>> {
     #[instrument(skip_all)]
     pub async fn from_v1<R: AsyncRead + AsyncSeek + Unpin + Send + Sync>(
@@ -66,6 +68,28 @@ impl S9pk<TmpSource<PackSource>> {
             Entry::file(TmpSource::new(
                 tmp_dir.clone(),
                 PackSource::Buffered(license.into()),
+            )),
+        )?;
+
+        // instructions.md — v1 packages may lack instructions; stub a placeholder so a
+        // missing file never breaks migration.
+        let instructions = match reader.instructions().await {
+            Ok(handle) => handle.to_vec().await.unwrap_or_default(),
+            Err(e) => {
+                tracing::warn!("could not read instructions from v1 s9pk, using placeholder: {e}");
+                Vec::new()
+            }
+        };
+        let instructions: Arc<[u8]> = if instructions.is_empty() {
+            Arc::from(STUB_INSTRUCTIONS)
+        } else {
+            Arc::from(instructions)
+        };
+        archive.insert_path(
+            "instructions.md",
+            Entry::file(TmpSource::new(
+                tmp_dir.clone(),
+                PackSource::Buffered(instructions),
             )),
         )?;
 
