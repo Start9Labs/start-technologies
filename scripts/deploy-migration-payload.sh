@@ -30,6 +30,13 @@
 # superseded payload files for that platform are pruned, and the os_version
 # row's headline/notes are updated in place.
 #
+# Staging and go-live can also be split across two runs: --skip-publish stages
+# and verifies but stops before the os_version insert; a later --publish-only
+# skips straight to that insert against the already-staged payloads, so the
+# squashfs files need not still be on local disk (only their names are read, for
+# the version and platform). The external pull is re-verified either way, so
+# --publish-only still proves the staging is live before flipping the switch.
+#
 # Assumes the standard legacy registry droplet: root ssh, the Haskell app as
 # registry.service (its Environment supplies RESOURCES_PATH / PG_DATABASE /
 # REGISTRY_HOSTNAME), postgres peer auth, and Debian/Ubuntu's rsync.service.
@@ -54,6 +61,10 @@ options:
   --skip-publish       stage + verify everything but skip the os_version DB
                        insert (the go-live switch); rerun without this to
                        publish
+  --publish-only       skip staging (upload/mount) and go straight to the
+                       go-live insert against payloads a prior --skip-publish
+                       run already staged; the squashfs files need not exist
+                       locally (only their names are read for version/platform)
   --replace            allow redeploying a version that is already published:
                        swap the payload under the live mount and update the
                        existing os_version row's headline/notes
@@ -68,6 +79,7 @@ NOTES=
 HOSTNAME_OVERRIDE=
 RESOURCES_OVERRIDE=
 SKIP_PUBLISH=
+PUBLISH_ONLY=
 REPLACE=
 TARGET=
 PAYLOADS=()
@@ -80,6 +92,7 @@ while [ $# -gt 0 ]; do
         --hostname)     HOSTNAME_OVERRIDE="$2"; shift 2 ;;
         --resources)    RESOURCES_OVERRIDE="$2"; shift 2 ;;
         --skip-publish) SKIP_PUBLISH=1; shift ;;
+        --publish-only) PUBLISH_ONLY=1; shift ;;
         --replace)      REPLACE=1; shift ;;
         -*)             usage ;;
         *)
@@ -88,11 +101,16 @@ while [ $# -gt 0 ]; do
     esac
 done
 [ -n "$TARGET" ] && [ "${#PAYLOADS[@]}" -gt 0 ] || usage
+# One skips the go-live switch, the other skips everything but it.
+[ -z "$SKIP_PUBLISH" ] || [ -z "$PUBLISH_ONLY" ] \
+    || { >&2 echo "--skip-publish and --publish-only are contradictory"; exit 1; }
 
 # startos-<version>-<hash>[~env]_<platform>.migration.squashfs
 PLATFORMS=()
 for payload in "${PAYLOADS[@]}"; do
-    [ -f "$payload" ] || { >&2 echo "no such file: $payload"; exit 1; }
+    # --publish-only stages nothing, so the squashfs need not still be on disk;
+    # only its name is parsed below, for the version and platform.
+    [ -n "$PUBLISH_ONLY" ] || [ -f "$payload" ] || { >&2 echo "no such file: $payload"; exit 1; }
     base="$(basename "$payload")"
     stem="${base%.migration.squashfs}"
     [ "$stem" != "$base" ] || { >&2 echo "$base: not a .migration.squashfs"; exit 1; }
@@ -196,7 +214,14 @@ for platform in "${PLATFORMS[@]}"; do
     fi
 done
 
+# --publish-only trusts a prior --skip-publish run for everything below, which is
+# the whole of what touches the local squashfs files; the external pull further
+# down re-proves the staging is live before the go-live switch.
+if [ -n "$PUBLISH_ONLY" ]; then
+    echo "== skipping upload/mount (--publish-only); re-verifying the staged payloads instead"
+fi
 for i in "${!PAYLOADS[@]}"; do
+    [ -z "$PUBLISH_ONLY" ] || break
     payload="${PAYLOADS[$i]}" platform="${PLATFORMS[$i]}"
     base="$(basename "$payload")"
 
