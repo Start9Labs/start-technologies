@@ -239,6 +239,10 @@ file tracks notable changes since the move to the monorepo.
   before returning — so a slow target looked like the request itself had timed
   out. Opening the store, and any failure doing so, now happens in the
   background and is reported through the usual backup progress and notifications.
+- **Backup progress shows an "Initializing" phase while the target is prepared.**
+  Backup progress now displays a labeled "Initializing" phase while StartOS
+  mounts the target and opens its encrypted store, instead of a bare 0% with no
+  phases; the per-package and OS-data phases appear once that work finishes.
 - **Mixed-case domains now match the browser.** Domain names are lowercased
   when added or removed (UI and CLI alike), so a domain entered with capital
   letters can no longer end up unreachable against the browser's lowercased

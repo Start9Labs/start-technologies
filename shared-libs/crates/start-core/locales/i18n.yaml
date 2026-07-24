@@ -1507,6 +1507,13 @@ backup.bulk.reclaim-failed:
   fr_FR: "Impossible de récupérer l'espace de l'ancienne sauvegarde : %{error}"
   pl_PL: "Nie udało się odzyskać miejsca po starej kopii zapasowej: %{error}"
 
+backup.bulk.initializing:
+  en_US: "Initializing"
+  de_DE: "Initialisierung"
+  es_ES: "Inicializando"
+  fr_FR: "Initialisation"
+  pl_PL: "Inicjalizacja"
+
 backup.bulk.reclaiming-space:
   en_US: "Reclaiming Space"
   de_DE: "Speicherplatz wird freigegeben"
