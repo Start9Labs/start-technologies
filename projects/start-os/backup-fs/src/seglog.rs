@@ -50,7 +50,7 @@
 
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::Read;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
@@ -265,6 +265,13 @@ pub struct SegmentLog {
     /// at open (from `segment_size()`) so it can't shift under us — and so a
     /// test can pin it without racing the process-global env cache.
     segment_size: u64,
+    /// Held write handle for the index checkpoint, opened at mount. The
+    /// checkpoint is written from `Filesystem::destroy`, which runs *after*
+    /// start-core's lazy `umount -l` has detached the backing store from the
+    /// namespace — so a fresh path open (`File::create`) would resolve to the
+    /// empty mountpoint and fail. Writing through this held fd (as the active
+    /// segment and the unmount `syncfs` do) reaches the real backing store.
+    checkpoint_fd: File,
 }
 
 fn segment_path(dir: &std::path::Path, id: u64) -> PathBuf {
@@ -450,6 +457,11 @@ impl SegmentLog {
             seg_meta.values().map(|m| m.total).sum::<u64>(),
             replay_start.elapsed()
         );
+        let checkpoint_fd = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(dir.join(INDEX_CACHE_NAME))?;
         Ok(Self {
             dir,
             key,
@@ -462,6 +474,7 @@ impl SegmentLog {
             seg_meta,
             max_inode,
             segment_size,
+            checkpoint_fd,
         })
     }
 
@@ -489,6 +502,12 @@ impl SegmentLog {
             "loaded index from checkpoint ({} segments) — skipping replay",
             cp.segments.len()
         );
+        let checkpoint_fd = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(dir.join(INDEX_CACHE_NAME))
+            .ok()?;
         Some(Self {
             dir: dir.to_path_buf(),
             key: *key,
@@ -501,15 +520,28 @@ impl SegmentLog {
             seg_meta: cp.seg_meta,
             max_inode: cp.max_inode,
             segment_size,
+            checkpoint_fd,
         })
     }
 
     /// Persist the in-RAM index as a sealed checkpoint so the next mount can
-    /// skip replaying the log. Written atomically via tmp + rename; not fsynced,
-    /// because it is a rebuildable cache — a torn, stale, or lost checkpoint is
-    /// safely ignored on load (the mount falls back to a full replay), so paying
-    /// an fsync (costly on a slow backup target) on every unmount isn't worth it.
+    /// skip replaying the log.
+    ///
+    /// This runs from `Filesystem::destroy`, which fires *after* start-core's
+    /// lazy `umount -l` has detached the backing store from the mount namespace.
+    /// So it must not do any fresh path lookup (they'd resolve to the now-empty
+    /// mountpoint and fail — the same reason the unmount `syncfs` and segment
+    /// appends use held fds): the fingerprint is taken from the in-RAM
+    /// `seg_meta` (whose `total` tracks each segment's on-disk size) instead of
+    /// re-reading the directory, and the bytes are written through the held
+    /// `checkpoint_fd`. Not fsynced or tmp+renamed — a torn, stale, or lost
+    /// checkpoint is safely ignored on load (the mount falls back to a full
+    /// replay), so it's a pure rebuildable cache.
     pub fn save_checkpoint(&self) -> BkfsResult<()> {
+        let mut segments: Vec<(u64, u64)> =
+            self.seg_meta.iter().map(|(&id, m)| (id, m.total)).collect();
+        segments.sort_unstable();
+        let n = segments.len();
         let cp = Checkpoint {
             version: CHECKPOINT_VERSION,
             next_seq: self.next_seq,
@@ -517,19 +549,16 @@ impl SegmentLog {
             index: self.index.clone(),
             content: self.content.clone(),
             seg_meta: self.seg_meta.clone(),
-            segments: list_segments(&self.dir)?,
+            segments,
         };
         let sealed = vault::seal(
             &encode(&cp, data_config())?,
             &self.key,
             EccParams::default(),
         );
-        let tmp = self.dir.join(format!("{INDEX_CACHE_NAME}.tmp"));
-        let mut f = File::create(&tmp)?;
-        f.write_all(&sealed)?;
-        drop(f);
-        std::fs::rename(&tmp, self.dir.join(INDEX_CACHE_NAME))?;
-        log::info!("wrote index checkpoint ({} segments)", cp.segments.len());
+        self.checkpoint_fd.set_len(0)?;
+        self.checkpoint_fd.write_all_at(&sealed, 0)?;
+        log::info!("wrote index checkpoint ({n} segments)");
         Ok(())
     }
 
