@@ -184,6 +184,10 @@ impl Filesystem for BackupFS {
         if unsafe { libc::syncfs(fd) } != 0 {
             error!("syncfs on unmount failed: {}", io::Error::last_os_error());
         }
+        // Persist the index checkpoint so the next mount skips the log replay.
+        // After compaction (in close_all) + syncfs above, the on-disk segments
+        // are final and durable, so the checkpoint matches them. Best-effort.
+        self.handler.get_mut().unwrap().ctrl().save_checkpoint();
     }
 
     fn lookup(&self, req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {

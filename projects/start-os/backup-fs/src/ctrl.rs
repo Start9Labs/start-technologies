@@ -253,6 +253,18 @@ impl Controller {
         self.0.log.lock().unwrap().compact(ratio)
     }
 
+    /// Persist the in-RAM index checkpoint so the next mount can skip the log
+    /// replay. Best-effort and skipped on a read-only mount; a failure just
+    /// means the next mount replays as before.
+    pub fn save_checkpoint(&self) {
+        if self.0.config.readonly {
+            return;
+        }
+        if let Err(e) = self.0.log.lock().unwrap().save_checkpoint() {
+            log::warn!("failed to write backup index checkpoint (non-fatal): {e}");
+        }
+    }
+
     pub fn fsck(&self, find_orphans: bool) -> BkfsResult<()> {
         self.fsck_inode(Inode(FUSE_ROOT_ID), None)?;
         if find_orphans {

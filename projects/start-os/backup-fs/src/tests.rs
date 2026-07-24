@@ -43,9 +43,9 @@ fn pattern_check(offset: u64, buf: &[u8]) {
 
 /// Serializes the fusermount3 invocation across parallel tests.
 /// The helper talks to a per-user control socket and races with itself
-/// under `cargo test -j N`, yielding sporadic EPERM from Session::new.
-/// Holding the lock only through mount keeps the test bodies
-/// themselves parallel.
+/// under `cargo test -j N`, yielding sporadic errors from both the mount
+/// (Session::new) and the unmount (umount_and_join). Held across mount and
+/// unmount, but not the test body, so the bodies themselves stay parallel.
 fn mount_lock() -> &'static std::sync::Mutex<()> {
     static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
     LOCK.get_or_init(|| std::sync::Mutex::new(()))
@@ -90,6 +90,8 @@ fn with_backupfs(
             .unwrap()
     };
     func(mnt.path());
+    // The same fusermount3 self-race applies to unmount, not just mount.
+    let _guard = mount_lock().lock().unwrap_or_else(|e| e.into_inner());
     bg.umount_and_join().unwrap();
 }
 

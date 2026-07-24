@@ -233,6 +233,15 @@ file tracks notable changes since the move to the monorepo.
   before returning — so a slow target looked like the request itself had timed
   out. Opening the store, and any failure doing so, now happens in the
   background and is reported through the usual backup progress and notifications.
+- **Backups open faster by caching their index.** The encrypted backup
+  filesystem now writes a sealed index checkpoint onto the target when a backup
+  finishes, so opening that backup again — including for a restore — reconstructs
+  its index from the checkpoint instead of re-reading and decrypting the whole
+  log. Large backups, which could previously take long enough to open that a
+  restore appeared to time out, now open quickly. The checkpoint is a pure cache
+  refreshed on every backup: if it is absent or does not match the target's
+  current contents, StartOS falls back to the full scan, so an existing backup
+  becomes fast once it has been backed up to again from this version.
 - **Mixed-case domains now match the browser.** Domain names are lowercased
   when added or removed (UI and CLI alike), so a domain entered with capital
   letters can no longer end up unreachable against the browser's lowercased
