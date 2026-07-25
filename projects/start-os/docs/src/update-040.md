@@ -125,7 +125,7 @@ Once StartOS 0.4.0 is available for your server, it is offered under **System �
 
 1. When the download completes, the System page shows **Update Complete. Restart to apply changes**. Restart your server through the StartOS UI.
 
-1. **Your server does not come back at its old address on this restart.** Wait a few minutes for it to reboot, then go to `http://start.local` — the same address the USB installer uses. The migration begins — continue with [Step 8](#step-8-wait-for-the-migration).
+1. **Your server does not immediately come back at its old address on this restart.** Wait a few minutes for it to reboot, then go to `http://start.local` — the same address the USB installer uses. The migration begins — continue with [Step 8](#step-8-wait-for-the-migration).
 
 {{#endtab}}
 {{#endtabs}}
