@@ -8,6 +8,14 @@ Full per-release notes are published on the
 [GitHub releases page](https://github.com/Start9Labs/start-technologies/releases). This
 file tracks notable changes since the move to the monorepo.
 
+## [0.4.0.1]
+
+### Fixed
+
+- **Installing onto a pre-installed Raspberry Pi keeps the data pool you pick.**
+  Selecting the data pool by partition path now preserves that choice through
+  installation.
+
 ## [0.4.0]
 
 The stable release of StartOS 0.4.0, ending the 0.4.0 early-access program. No

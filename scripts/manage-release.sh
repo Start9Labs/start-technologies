@@ -97,6 +97,13 @@ derive_version() {
         jq -r .version "$REPO_ROOT/projects/$project/package.json"
         return
     fi
+    # StartOS versions carry a revision segment (0.4.0.1) that SemVer, and so Cargo, cannot
+    # express; root package.json holds it and projects/start-os/Cargo.toml carries only a
+    # `-rev.N` label (kept honest by cmd_pre_check). Mirrors build/env/version.sh.
+    if [ "$(project_kind "$project")" = os ]; then
+        jq -r .version "$REPO_ROOT/package.json"
+        return
+    fi
     # start-wrt has no top-level crate; its canonical version lives in the ctrl
     # crate manifest (mirrors the top CHANGELOG.md entry and start-wrt.yaml's
     # "Determine version" step).
@@ -411,6 +418,22 @@ cmd_pre_check() {
             errors=1
         else
             echo "  ✓ start-os docs pin the release link to ${TAG}"
+        fi
+
+        # The crate manifest can't hold the OS version, so it carries a label
+        # (0.4.0.1 -> 0.4.0-rev.1). Nothing reads it; a stale one just misleads.
+        local expect_label crate_label
+        case "$VERSION" in
+            *.*.*.*) expect_label="${VERSION%.*}-rev.${VERSION##*.}" ;;
+            *) expect_label="$VERSION" ;;
+        esac
+        crate_label=$(sed -nE '/^\[package\]/,/^\[/{s/^version *= *"([^"]+)".*/\1/p}' \
+            "$REPO_ROOT/projects/start-os/Cargo.toml" | head -1)
+        if [ "$crate_label" = "$expect_label" ]; then
+            echo "  ✓ start-os crate label is ${expect_label}"
+        else
+            >&2 echo "  ✗ projects/start-os/Cargo.toml version must be ${expect_label} for OS ${VERSION} (found: ${crate_label:-none})"
+            errors=1
         fi
     fi
 

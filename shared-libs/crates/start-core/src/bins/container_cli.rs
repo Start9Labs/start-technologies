@@ -12,9 +12,12 @@ fn app() -> CliApp<ContainerCliContext, ContainerClientConfig> {
         crate::service::effects::handler(),
     )
     .mutate_command(super::translate_cli)
+    // start-container ships only in start-os, so it reports the OS version directly rather
+    // than PRODUCT_VERSION — which is unset in the `export_manpage_` test, leaving the
+    // generated page on start-core's crate version. Same reasoning as `cli_version`.
     .mutate_command(|cmd| {
         cmd.name("start-container")
-            .version(super::product_version())
+            .version(super::startos_version())
     })
 }
 

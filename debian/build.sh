@@ -13,7 +13,7 @@ else
     PROJECT_DIR="projects/${PROJECT}"
 fi
 BASENAME=${BASENAME:-"$(./build/env/basename.sh)"}
-VERSION=${VERSION:-$(grep -m1 '^version' "${PROJECT_DIR}/Cargo.toml" | sed -E 's/^version *= *"([^"]*)".*/\1/')}
+VERSION=${VERSION:-$(./build/env/version.sh "$PROJECT")}
 if [ "$PLATFORM" = "x86_64" ] || [ "$PLATFORM" = "x86_64-nonfree" ] || [ "$PLATFORM" = "x86_64-nvidia" ]; then
     DEB_ARCH=amd64
 elif [ "$PLATFORM" = "aarch64" ] || [ "$PLATFORM" = "aarch64-nonfree" ] || [ "$PLATFORM" = "aarch64-nvidia" ] || [ "$PLATFORM" = "raspberrypi" ] || [ "$PLATFORM" = "rockchip64" ]; then

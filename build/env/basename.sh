@@ -5,12 +5,7 @@ PROJECT=${PROJECT:-"startos"}
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 PLATFORM="$(if [ -f ./PLATFORM.txt ]; then cat ./PLATFORM.txt; else echo unknown; fi)"
-# Per-project version from each project's Cargo.toml (startos -> start-os).
-case "$PROJECT" in
-  startos) MANIFEST="../../projects/start-os/Cargo.toml" ;;
-  *) MANIFEST="../../projects/${PROJECT}/Cargo.toml" ;;
-esac
-VERSION="$(grep -m1 '^version' "$MANIFEST" | sed -E 's/^version *= *"([^"]*)".*/\1/')"
+VERSION="$(./version.sh "$PROJECT")"
 GIT_HASH="$(cat ./GIT_HASH.txt)"
 if [[ "$GIT_HASH" =~ ^@ ]]; then
   GIT_HASH=unknown

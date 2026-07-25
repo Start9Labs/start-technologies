@@ -34,6 +34,13 @@ pub fn cli_version() -> &'static str {
     env!("START_CLI_VERSION")
 }
 
+/// The StartOS release version, baked in by `build.rs` from root `package.json`. That manifest,
+/// not any `Cargo.toml`, is the source of truth: the OS version carries a revision segment
+/// (0.4.0.1) that SemVer — and so Cargo — cannot express.
+pub fn startos_version() -> &'static str {
+    env!("STARTOS_VERSION")
+}
+
 pub fn set_locale_from_env() {
     let lang = std::env::var("LANG").ok();
     let lang = lang

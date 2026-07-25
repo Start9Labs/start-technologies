@@ -87,14 +87,22 @@ fn migrated_through_beta_10(db: &Value) -> bool {
         .any(|v| v == beta_10)
 }
 
-/// 0.4.0's welcome fires only when 0.4.0 is the release being landed on (the current
-/// head, so an intermediate hop in a multi-version jump stays silent) and the server
-/// came from a 0.4.0 pre-release below beta.10: pre-0.4.0 arrivals get
-/// `v0_4_0_alpha_0`'s welcome (`update_details/v0_4_0.md`) instead, and a beta.10
-/// server already has everything `update_details/v0_4_0_highlights.md` describes.
-/// `from_0_4_0_beta` is the flag threaded through `up`'s output.
+/// 0.4.0's welcome fires only when 0.4.0 is the release being landed on (so an intermediate
+/// hop in a multi-version jump stays silent) and the server came from a 0.4.0 pre-release
+/// below beta.10: pre-0.4.0 arrivals get `v0_4_0_alpha_0`'s welcome
+/// (`update_details/v0_4_0.md`) instead, and a beta.10 server already has everything
+/// `update_details/v0_4_0_highlights.md` describes. `from_0_4_0_beta` is the flag threaded
+/// through `up`'s output.
+///
+/// A revision release still counts as landing on 0.4.0 — once 0.4.0.1 is `Current`, 0.4.0 is
+/// necessarily an intermediate hop, and these highlights are new to every beta arrival either
+/// way. A prerelease never counts: its digits alias the release it precedes.
 fn should_welcome_to_release(version: impl VersionT, from_0_4_0_beta: bool) -> bool {
-    version.semver() == Current::default().semver() && from_0_4_0_beta
+    let landing = Current::default().semver();
+    let version = version.semver();
+    version.prerelease().is_empty()
+        && landing.number().starts_with(version.number())
+        && from_0_4_0_beta
 }
 
 #[cfg(test)]

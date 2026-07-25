@@ -2,7 +2,7 @@ use start_core::bins::MultiExecutable;
 
 fn main() {
     start_core::bins::PRODUCT_VERSION
-        .set(env!("CARGO_PKG_VERSION"))
+        .set(start_core::bins::startos_version())
         .ok();
     // unshare-userns must be a multi-call applet, not a CLI subcommand: it
     // runs `unshare(CLONE_NEWUSER)`, which the kernel rejects (EINVAL) on a

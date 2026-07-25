@@ -2,7 +2,7 @@ use start_core::bins::MultiExecutable;
 
 fn main() {
     start_core::bins::PRODUCT_VERSION
-        .set(env!("CARGO_PKG_VERSION"))
+        .set(start_core::bins::startos_version())
         .ok();
     start_core::net::static_server::UI_CELL
         .set(include_dir::include_dir!(
