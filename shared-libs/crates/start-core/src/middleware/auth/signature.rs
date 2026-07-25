@@ -8,6 +8,7 @@ use axum::extract::Request;
 use chrono::Utc;
 use http::header::USER_AGENT;
 use http::{HeaderMap, HeaderValue};
+use itertools::Itertools;
 use reqwest::Client;
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{Middleware, RpcRequest, RpcResponse};
@@ -208,62 +209,24 @@ impl SignatureAuthContext for RpcContext {
     async fn sig_context(
         &self,
     ) -> impl IntoIterator<Item = Result<impl AsRef<str> + Send, Error>> + Send {
-        let peek = self.db.peek().await;
-        self.account.peek(|a| {
-            let ips: Vec<Result<InternedString, Error>> = match peek
-                .as_public()
-                .as_server_info()
-                .as_network()
-                .as_gateways()
-                .de()
-            {
-                Ok(gateways) => gateways
-                    .values()
-                    .filter_map(|g| g.ip_info.clone())
-                    .flat_map(|info| {
-                        // The interface's own addresses (subnets), not its
-                        // gateway (`lan_ip`), plus the public IP for clients
-                        // reaching the server through a port forward.
-                        info.subnets
-                            .iter()
-                            .map(|net| net.addr())
-                            .chain(info.wan_ip.map(IpAddr::V4))
-                            .map(|ip| url_host_str(ip))
-                            .collect::<Vec<_>>()
-                    })
-                    .map(Ok)
-                    .collect(),
-                Err(e) => vec![Err(e)],
-            };
-            a.hostnames()
-                .into_iter()
-                .map(Ok)
-                .chain(
-                    peek.as_public()
-                        .as_server_info()
-                        .as_network()
-                        .as_host()
-                        .as_public_domains()
-                        .keys()
-                        .map(|k| k.into_iter())
-                        .transpose(),
-                )
-                .chain(
-                    peek.as_public()
-                        .as_server_info()
-                        .as_network()
-                        .as_host()
-                        .as_private_domains()
-                        .keys()
-                        .map(|k| k.into_iter())
-                        .transpose(),
-                )
-                .chain(ips)
-                // The loopback name, alongside the 127.0.0.1 / [::1] addresses
-                // the loopback interface's subnets already contribute.
-                .chain(std::iter::once(Ok(InternedString::intern("localhost"))))
-                .collect::<Vec<_>>()
-        })
+        self.db
+            .peek()
+            .await
+            .into_public()
+            .into_server_info()
+            .into_network()
+            .into_host()
+            .into_bindings()
+            .into_idx(&80)
+            .into_iter()
+            .map(|b| b.as_addresses().de())
+            .map_ok(|a| {
+                a.enabled()
+                    .into_iter()
+                    .map(|a| a.hostname.clone())
+                    .collect::<BTreeSet<_>>()
+            })
+            .flatten_ok()
     }
     fn check_pubkey(
         &self,

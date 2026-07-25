@@ -193,6 +193,22 @@ asset_url() {
         '.versions[$v][$s][$p].urls[0] // empty' <<< "$_INDEX_JSON"
 }
 
+# The signed blake3 commitment of an indexed asset, as hex (b3sum's output
+# format): <registry> <slot> <platform>. Empty if the asset is not indexed.
+asset_commitment_b3() {
+    load_registry_index "$1"
+    local b64
+    b64=$(jq -r --arg v "$VERSION" --arg s "$2" --arg p "$3" \
+        '.versions[$v][$s][$p].commitment.hash // empty' <<< "$_INDEX_JSON")
+    [ -n "$b64" ] || return 0
+    # The index stores the hash unpadded-base64; base64 -d wants the padding.
+    case $((${#b64} % 4)) in
+        2) b64="${b64}==" ;;
+        3) b64="${b64}=" ;;
+    esac
+    printf '%s' "$b64" | base64 -d | od -An -v -tx1 | tr -d ' \n'
+}
+
 parse_run_id() {
     local val="$1"
     if [[ "$val" =~ /actions/runs/([0-9]+) ]]; then
@@ -879,14 +895,21 @@ cmd_push() {
 # This adds an object rather than replacing one: the registry keeps pointing at
 # the bare .img (see ensure_img_gz), and only the release-notes download link
 # moves to the .gz. That link is the indexed URL + ".gz", so the key has to be
-# the indexed basename + ".gz" — both guards below exist because any other name
+# the indexed basename + ".gz" — the guards below exist because any other name
 # yields notes that link to nothing.
+#
+# The local img is picked by content, not name: one platform can be hotfixed
+# and re-indexed at a different commit than the rest of the release, and a
+# start-cli download drops the hash entirely, so the git hash a basename embeds
+# proves nothing. The registry's signed blake3 commitment is what the .gz must
+# decompress to; match against that, then rename to the indexed basename so
+# checksums and signatures agree with the object the notes link.
 cmd_push_gz() {
     require_kind os
     enter_release_dir
     ensure_img_gz
     echo "Uploading compressed OS images to ${S3_BUCKET}/v${VERSION}/ ..."
-    local platform ext url published
+    local platform ext url published expected img f
     for platform in $OS_PLATFORMS; do
         for ext in $(os_image_exts "$platform"); do
             [ "$ext" = img ] || continue
@@ -900,9 +923,28 @@ cmd_push_gz() {
                 >&2 echo "  ✗ ${platform} img is indexed at ${url}, outside ${S3_CDN}/v${VERSION}/ — a .gz uploaded to ${S3_BUCKET} would not be reachable at that URL + .gz"
                 exit 1
             fi
-            if [ ! -f "${published}.gz" ]; then
-                >&2 echo "  ✗ ${published} not in $(release_dir) — run 'pull' (or 'pull-gha') first"
+            expected=$(asset_commitment_b3 "$STARTOS_SOURCE_REGISTRY" img "$platform")
+            if [ -z "$expected" ]; then
+                >&2 echo "  ✗ ${published} has no blake3 commitment in ${STARTOS_SOURCE_REGISTRY}"
                 exit 1
+            fi
+            img=
+            for f in "$published" *.img; do
+                [ -f "$f" ] || continue
+                if [ "$(b3sum --no-names "$f")" = "$expected" ]; then
+                    img=$f
+                    break
+                fi
+            done
+            if [ -z "$img" ]; then
+                >&2 echo "  ✗ no img in $(release_dir) matches the blake3 ${STARTOS_SOURCE_REGISTRY} commits to for ${published} — run 'pull' (or 'pull-gha' with the run that built the indexed img) first"
+                exit 1
+            fi
+            if [ "$img" != "$published" ]; then
+                echo "  ${img} -> ${published} (renaming to the indexed basename)"
+                mv -f "$img" "$published"
+                [ ! -f "${img}.gz" ] || mv -f "${img}.gz" "${published}.gz"
+                ensure_img_gz
             fi
             echo "  ${published}.gz"
             s3cmd put -P "${published}.gz" "${S3_BUCKET}/v${VERSION}/${published}.gz"
