@@ -33,8 +33,10 @@ const EPHEMERAL_PORT_START: u16 = 49152;
 // 10.0.3.1:9050 on the bridge — do not re-restrict them.
 const RESTRICTED_PORTS: &[u16] = &[5353, 5355, 5432, 6010];
 
-fn is_restricted(port: u16) -> bool {
-    port <= 1024 || RESTRICTED_PORTS.contains(&port)
+/// Only a privileged claimant — StartOS itself, which runs as root — may take a
+/// port below 1024. A host daemon already holds RESTRICTED_PORTS, whoever asks.
+fn may_claim(port: u16, privileged: bool) -> bool {
+    !RESTRICTED_PORTS.contains(&port) && (privileged || port > 1024)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -77,19 +79,24 @@ impl AvailablePorts {
             ErrorKind::Network,
         ))
     }
-    /// Allocate a specific port; `None` if taken or restricted.
-    pub fn try_alloc(&mut self, port: u16, ssl: bool) -> Option<u16> {
-        if is_restricted(port) || self.0.contains_key(&port) {
+    /// Allocate a specific port; `None` if taken or not the caller's to claim.
+    pub fn try_alloc(&mut self, port: u16, ssl: bool, privileged: bool) -> Option<u16> {
+        if !may_claim(port, privileged) || self.0.contains_key(&port) {
             return None;
         }
         self.0.insert(port, ssl);
         Some(port)
     }
 
-    /// Allocate `count` contiguous non-ssl ports from `start`. All-or-nothing:
-    /// if any port is taken or restricted, allocates none and `Err`s on the
-    /// first offender.
-    pub fn try_alloc_range(&mut self, start: u16, count: u16) -> Result<(), Error> {
+    /// Allocate `count` contiguous non-ssl ports from `start`. All-or-nothing: if
+    /// any port is taken or not the caller's to claim, allocates none and `Err`s
+    /// on the first offender.
+    pub fn try_alloc_range(
+        &mut self,
+        start: u16,
+        count: u16,
+        privileged: bool,
+    ) -> Result<(), Error> {
         if count == 0 {
             return Err(Error::new(
                 eyre!("port range must contain at least one port"),
@@ -103,7 +110,7 @@ impl AvailablePorts {
             )
         })?;
         for port in start..=end {
-            if is_restricted(port) {
+            if !may_claim(port, privileged) {
                 return Err(Error::new(
                     eyre!("port {port} in range {start}-{end} is restricted"),
                     ErrorKind::InvalidRequest,
@@ -1180,43 +1187,43 @@ mod tests {
     #[test]
     fn try_alloc_range_basic() {
         let mut ports = AvailablePorts::new();
-        assert!(ports.try_alloc_range(40000, 100).is_ok());
+        assert!(ports.try_alloc_range(40000, 100, false).is_ok());
         // All 100 ports should now be allocated
         for p in 40000..40100 {
             assert!(
-                ports.try_alloc(p, false).is_none(),
+                ports.try_alloc(p, false, false).is_none(),
                 "port {p} should be taken"
             );
         }
-        assert!(ports.try_alloc(40100, false).is_some());
+        assert!(ports.try_alloc(40100, false, false).is_some());
     }
 
     #[test]
     fn try_alloc_range_zero_count_is_error() {
         let mut ports = AvailablePorts::new();
-        assert!(ports.try_alloc_range(40000, 0).is_err());
+        assert!(ports.try_alloc_range(40000, 0, false).is_err());
     }
 
     #[test]
     fn try_alloc_range_overflow_is_error() {
         let mut ports = AvailablePorts::new();
-        assert!(ports.try_alloc_range(65500, 100).is_err());
+        assert!(ports.try_alloc_range(65500, 100, false).is_err());
     }
 
     #[test]
     fn try_alloc_range_restricted_port_is_error_and_atomic() {
         let mut ports = AvailablePorts::new();
         // Range straddling a restricted port (1024 and below) hard-fails…
-        assert!(ports.try_alloc_range(1020, 10).is_err());
+        assert!(ports.try_alloc_range(1020, 10, false).is_err());
         // …and nothing was allocated.
-        assert!(ports.try_alloc(2000, false).is_some());
+        assert!(ports.try_alloc(2000, false, false).is_some());
         ports.free([2000]);
-        assert!(ports.try_alloc_range(1020, 10).is_err());
+        assert!(ports.try_alloc_range(1020, 10, false).is_err());
         for p in 1020..1030 {
             // None of them are reserved either
-            if !is_restricted(p) {
+            if may_claim(p, false) {
                 assert!(
-                    ports.try_alloc(p, false).is_some(),
+                    ports.try_alloc(p, false, false).is_some(),
                     "port {p} unexpectedly taken"
                 );
             }
@@ -1226,10 +1233,24 @@ mod tests {
     #[test]
     fn try_alloc_range_collision_is_error_and_atomic() {
         let mut ports = AvailablePorts::new();
-        ports.try_alloc(40050, false).unwrap();
-        assert!(ports.try_alloc_range(40000, 100).is_err());
+        ports.try_alloc(40050, false, false).unwrap();
+        assert!(ports.try_alloc_range(40000, 100, false).is_err());
         // Other ports in the requested range were NOT allocated as a side effect.
-        assert!(ports.try_alloc(40000, false).is_some());
-        assert!(ports.try_alloc(40099, false).is_some());
+        assert!(ports.try_alloc(40000, false, false).is_some());
+        assert!(ports.try_alloc(40099, false, false).is_some());
+    }
+
+    #[test]
+    fn only_the_os_may_claim_privileged_ports() {
+        let mut ports = AvailablePorts::new();
+        assert!(ports.try_alloc(443, true, false).is_none());
+        assert_eq!(ports.try_alloc(443, true, true), Some(443));
+        assert_eq!(ports.try_alloc(80, false, true), Some(80));
+        // …but a claim is still a claim: the OS holds it against everyone.
+        assert!(ports.try_alloc(443, true, true).is_none());
+
+        // A host daemon's port is nobody's to take, root or not.
+        assert!(ports.try_alloc(5432, false, true).is_none());
+        assert!(ports.try_alloc_range(1020, 10, true).is_ok());
     }
 }

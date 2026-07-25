@@ -267,17 +267,21 @@ impl BindInfo {
         }
     }
 
-    pub fn new(available_ports: &mut AvailablePorts, options: BindOptions) -> Result<Self, Error> {
+    pub fn new(
+        available_ports: &mut AvailablePorts,
+        options: BindOptions,
+        privileged: bool,
+    ) -> Result<Self, Error> {
         let mut assigned_port = None;
         let mut assigned_ssl_port = None;
         if let Some(preferred) = options.preferred_ssl_port() {
             assigned_ssl_port = available_ports
-                .try_alloc(preferred, true)
+                .try_alloc(preferred, true, privileged)
                 .or_else(|| Some(available_ports.alloc(true).ok()?));
         }
         if options.wants_plain_port() {
             assigned_port = available_ports
-                .try_alloc(options.preferred_external_port, false)
+                .try_alloc(options.preferred_external_port, false, privileged)
                 .or_else(|| Some(available_ports.alloc(false).ok()?));
         }
 
@@ -296,6 +300,7 @@ impl BindInfo {
         self,
         available_ports: &mut AvailablePorts,
         options: BindOptions,
+        privileged: bool,
     ) -> Result<Self, Error> {
         let Self {
             net: held,
@@ -315,8 +320,8 @@ impl BindInfo {
         let mut reclaim = |held: Option<u16>, preferred: u16, ssl: bool| {
             let want = held.or(carried).unwrap_or(preferred);
             available_ports
-                .try_alloc(want, ssl)
-                .or_else(|| available_ports.try_alloc(preferred, ssl))
+                .try_alloc(want, ssl, privileged)
+                .or_else(|| available_ports.try_alloc(preferred, ssl, privileged))
                 .map_or_else(|| available_ports.alloc(ssl), Ok)
         };
 
@@ -1043,27 +1048,29 @@ mod test {
     #[test]
     fn tls_carrying_ports_are_ssl_ports() {
         let mut ports = AvailablePorts::new();
+        let privileged = false;
 
         // plaintext: one forwarded port
-        let plain = BindInfo::new(&mut ports, opts(8080, None, Some(false))).unwrap();
+        let plain = BindInfo::new(&mut ports, opts(8080, None, Some(false)), privileged).unwrap();
         assert_eq!(plain.net.assigned_port, Some(8080));
         assert_eq!(plain.net.assigned_ssl_port, None);
         assert!(!ports.is_ssl(8080));
 
         // we terminate TLS in front of a plaintext container: both ports
-        let add_ssl = BindInfo::new(&mut ports, opts(8081, Some(8444), None)).unwrap();
+        let add_ssl = BindInfo::new(&mut ports, opts(8081, Some(8444), None), privileged).unwrap();
         assert_eq!(add_ssl.net.assigned_port, Some(8081));
         assert_eq!(add_ssl.net.assigned_ssl_port, Some(8444));
         assert!(ports.is_ssl(8444));
 
         // we rewrap the container's TLS: the ssl port only
-        let rewrap = BindInfo::new(&mut ports, opts(8082, Some(8445), Some(true))).unwrap();
+        let rewrap =
+            BindInfo::new(&mut ports, opts(8082, Some(8445), Some(true)), privileged).unwrap();
         assert_eq!(rewrap.net.assigned_port, None);
         assert_eq!(rewrap.net.assigned_ssl_port, Some(8445));
 
         // the container serves its own TLS: the ssl port only, fronted by
         // our SNI-passthrough listener
-        let own_tls = BindInfo::new(&mut ports, opts(8083, None, Some(true))).unwrap();
+        let own_tls = BindInfo::new(&mut ports, opts(8083, None, Some(true)), privileged).unwrap();
         assert_eq!(own_tls.net.assigned_port, None);
         assert_eq!(own_tls.net.assigned_ssl_port, Some(8083));
         assert!(ports.is_ssl(8083));
@@ -1072,11 +1079,12 @@ mod test {
     #[test]
     fn changing_how_a_port_is_served_keeps_its_number() {
         let mut ports = AvailablePorts::new();
-        let plain = BindInfo::new(&mut ports, opts(8080, None, Some(false))).unwrap();
+        let privileged = false;
+        let plain = BindInfo::new(&mut ports, opts(8080, None, Some(false)), privileged).unwrap();
         assert_eq!(plain.net.assigned_port, Some(8080));
 
         let own_tls = plain
-            .update(&mut ports, opts(8080, None, Some(true)))
+            .update(&mut ports, opts(8080, None, Some(true)), privileged)
             .unwrap();
         assert_eq!(own_tls.net.assigned_port, None);
         assert_eq!(own_tls.net.assigned_ssl_port, Some(8080));
@@ -1084,14 +1092,14 @@ mod test {
 
         // handing termination to us keeps the port
         let add_ssl = own_tls
-            .update(&mut ports, opts(8080, Some(8080), Some(true)))
+            .update(&mut ports, opts(8080, Some(8080), Some(true)), privileged)
             .unwrap();
         assert_eq!(add_ssl.net.assigned_ssl_port, Some(8080));
         assert!(ports.is_ssl(8080));
 
         // and back down to plaintext
         let plain = add_ssl
-            .update(&mut ports, opts(8080, None, Some(false)))
+            .update(&mut ports, opts(8080, None, Some(false)), privileged)
             .unwrap();
         assert_eq!(plain.net.assigned_port, Some(8080));
         assert_eq!(plain.net.assigned_ssl_port, None);
@@ -1101,17 +1109,38 @@ mod test {
     #[test]
     fn a_rebind_does_not_migrate_onto_a_freed_preferred_port() {
         let mut ports = AvailablePorts::new();
+        let privileged = false;
         // someone else holds 8080, so this binding lands elsewhere
-        assert_eq!(ports.try_alloc(8080, false), Some(8080));
-        let squatted = BindInfo::new(&mut ports, opts(8080, None, Some(false))).unwrap();
+        assert_eq!(ports.try_alloc(8080, false, privileged), Some(8080));
+        let squatted =
+            BindInfo::new(&mut ports, opts(8080, None, Some(false)), privileged).unwrap();
         let assigned = squatted.net.assigned_port.unwrap();
         assert_ne!(assigned, 8080);
 
         ports.free([8080]);
         let again = squatted
-            .update(&mut ports, opts(8080, None, Some(false)))
+            .update(&mut ports, opts(8080, None, Some(false)), privileged)
             .unwrap();
         assert_eq!(again.net.assigned_port, Some(assigned));
+    }
+
+    /// The admin UI rebinds on every boot, so `update` is what hands 443 back.
+    #[test]
+    fn the_os_ui_keeps_its_well_known_ports_across_rebinds() {
+        let mut ports = AvailablePorts::new();
+        let privileged = true;
+        // exactly what `NetController::os_bindings` asks for
+        let admin = opts(80, Some(443), None);
+
+        let ui = BindInfo::new(&mut ports, admin.clone(), privileged).unwrap();
+        assert_eq!(ui.net.assigned_port, Some(80));
+        assert_eq!(ui.net.assigned_ssl_port, Some(443));
+        assert!(ports.is_ssl(443));
+
+        let ui = ui.update(&mut ports, admin, privileged).unwrap();
+        assert_eq!(ui.net.assigned_port, Some(80));
+        assert_eq!(ui.net.assigned_ssl_port, Some(443));
+        assert!(ports.is_ssl(443));
     }
 
     #[test]

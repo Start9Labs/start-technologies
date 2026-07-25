@@ -1115,8 +1115,13 @@ impl NetService {
     ) -> Result<(), Error> {
         let (ctrl, pkg_id) = {
             let data = self.data.lock().await;
-            (data.net_controller()?, data.id.clone())
+            (
+                data.net_controller()?,
+                data.id.clone().unwrap_or_else(PackageId::start_os),
+            )
         };
+        // StartOS runs as root, so the admin UI may claim 80 and 443.
+        let privileged = pkg_id.is_start_os();
         ctrl.db
             .mutate(|db| {
                 let gateways = db
@@ -1127,9 +1132,9 @@ impl NetService {
                     .de()?;
                 let hostname = ServerHostname::load(db.as_public().as_server_info())?;
                 let mut ports = db.as_private().as_available_ports().de()?;
-                let host = host_for(db, pkg_id.as_ref().unwrap_or(&PackageId::start_os()), &id)?;
+                let host = host_for(db, &pkg_id, &id)?;
                 let is_new = !host.as_bindings().contains_key(&internal_port)?;
-                host.add_binding(&mut ports, internal_port, options)?;
+                host.add_binding(&mut ports, internal_port, options, privileged)?;
                 host.update_addresses(&hostname, &gateways, &ports)?;
                 // Isolate a newly-bound binding from any pre-existing public
                 // domain on this host, then re-derive so port forwards match.
@@ -1153,8 +1158,13 @@ impl NetService {
     ) -> Result<(), Error> {
         let (ctrl, pkg_id) = {
             let data = self.data.lock().await;
-            (data.net_controller()?, data.id.clone())
+            (
+                data.net_controller()?,
+                data.id.clone().unwrap_or_else(PackageId::start_os),
+            )
         };
+        // StartOS runs as root, so the admin UI may claim 80 and 443.
+        let privileged = pkg_id.is_start_os();
         ctrl.db
             .mutate(|db| {
                 let gateways = db
@@ -1165,7 +1175,7 @@ impl NetService {
                     .de()?;
                 let hostname = ServerHostname::load(db.as_public().as_server_info())?;
                 let mut ports = db.as_private().as_available_ports().de()?;
-                let host = host_for(db, pkg_id.as_ref().unwrap_or(&PackageId::start_os()), &id)?;
+                let host = host_for(db, &pkg_id, &id)?;
                 let is_new = !host
                     .as_binding_ranges()
                     .contains_key(&internal_start_port)?;
@@ -1174,6 +1184,7 @@ impl NetService {
                     internal_start_port,
                     external_start_port,
                     number_of_ports,
+                    privileged,
                 )?;
                 host.update_addresses(&hostname, &gateways, &ports)?;
                 // Isolate a newly-bound range from any pre-existing public domain

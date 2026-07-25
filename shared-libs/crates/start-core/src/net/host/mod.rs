@@ -584,12 +584,13 @@ impl Model<Host> {
         available_ports: &mut AvailablePorts,
         internal_port: u16,
         options: BindOptions,
+        privileged: bool,
     ) -> Result<(), Error> {
         self.as_bindings_mut().mutate(|b| {
             let info = if let Some(info) = b.remove(&internal_port) {
-                info.update(available_ports, options)?
+                info.update(available_ports, options, privileged)?
             } else {
-                BindInfo::new(available_ports, options)?
+                BindInfo::new(available_ports, options, privileged)?
             };
             b.insert(internal_port, info);
             Ok(())
@@ -607,6 +608,7 @@ impl Model<Host> {
         internal_start_port: u16,
         external_start_port: u16,
         number_of_ports: u16,
+        privileged: bool,
     ) -> Result<(), Error> {
         if number_of_ports < 2 {
             return Err(Error::new(
@@ -650,7 +652,11 @@ impl Model<Host> {
                         e.external_start_port..=e.external_start_port + (e.number_of_ports - 1),
                     );
                 }
-                available_ports.try_alloc_range(external_start_port, number_of_ports)?;
+                available_ports.try_alloc_range(
+                    external_start_port,
+                    number_of_ports,
+                    privileged,
+                )?;
             }
             ranges.insert(
                 internal_start_port,

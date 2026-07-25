@@ -42,12 +42,8 @@ impl Database {
                 session_pubkeys: AuthKeys::new(),
                 ssh_privkey: Pem(account.ssh_key.clone()),
                 ssh_pubkeys: SshKeys::new(),
-                available_ports: {
-                    let mut ports = AvailablePorts::new();
-                    ports.set_ssl(80, false);
-                    ports.set_ssl(443, true);
-                    ports
-                },
+                // Empty: `os_bindings` claims the admin UI's 80/443 as a privileged bind.
+                available_ports: AvailablePorts::new(),
                 notifications: Notifications::new(),
                 cifs: CifsTargets::new(),
                 package_stores: BTreeMap::new(),

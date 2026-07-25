@@ -28,6 +28,12 @@ file tracks notable changes since the move to the monorepo.
   `sdk.host.getBridgeAddress`, which is correct under either arrangement; see
   [Service-to-Service Networking](https://docs.start9.com/packaging/service-to-service.html).
 
+- **The StartOS web interface holds ports 80 and 443.** StartOS runs as root, so
+  its own interface is the one binding that may claim the privileged range, and
+  it now does so through the same port allocator every service uses. HTTPS was
+  already served on 443; the plaintext address — offered only over loopback and
+  the service bridge — moves from a random high port to 80.
+
 ### Fixed
 
 - **The over-the-air update to 0.4.0 boots on the Server Pure.** The Server
