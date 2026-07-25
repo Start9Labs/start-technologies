@@ -52,8 +52,12 @@ This symlinks the built `dist/` into your global `node_modules`, so the package 
 
 The SDK is a first-class project of the monorepo-wide release tool, [`scripts/manage-release.sh`](../../scripts/manage-release.sh) (the `npm` kind). The version is read from `package.json`; the git tag / GitHub release is `start-sdk/v<version>`. Only `dist/` ships to npm (compiled JavaScript, declarations, bundled dependencies, package metadata).
 
-1. Bump `package.json`, add the matching `CHANGELOG.md` entry (`pre-check` requires it), and run `make sync-template` to move the [package template](docs/package-template)'s `@start9labs/start-sdk` pin to the new version (`pre-check` enforces the match). Land that on `master`.
-2. Cut the release from the repo root (needs `gh` and an npm login with publish rights):
+1. Bump `package.json` and add the matching `CHANGELOG.md` entry (`pre-check` requires it). Land that on `master`.
+2. Run `make sync-template` to move the [package template](docs/package-template)'s `@start9labs/start-sdk` pin to the version being cut, and land it. `pre-check` enforces the match, so a stale pin fails the release before anything is tagged or published.
+
+   **Sync the pin with the release, not with the bump.** `s9pk init-package` scaffolds from the checkout's template rather than from npm, so a pin ahead of what npm has breaks `npm install` for anyone scaffolding a package in the meantime. When the bump and the release happen in one sitting, steps 1 and 2 collapse into one commit and the distinction doesn't matter. When a version accumulates on `master` first, it does.
+
+3. Cut the release from the repo root (needs `gh` and an npm login with publish rights):
 
    ```bash
    ./scripts/manage-release.sh release start-sdk
