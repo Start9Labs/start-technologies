@@ -351,8 +351,15 @@ async fn handle_conn(
         return; // IPv4-only listener; should not occur
     };
     // Open the internal leg from the client's own source address (RFC §4.6).
-    let Ok(mut upstream) = crate::net::transparent::transparent_connect(peer, target).await else {
-        return;
+    // No plain-connect fallback: the backend gates LAN-only addresses on the
+    // source being private, and this server's own wg address is private — a
+    // fallback would present every WAN client as LAN-local.
+    let mut upstream = match crate::net::transparent::transparent_connect(peer, target).await {
+        Ok(upstream) => upstream,
+        Err(e) => {
+            tracing::warn!("SNI demux transparent egress to {target} for {peer} failed: {e}");
+            return;
+        }
     };
     if upstream.write_all(&buf).await.is_err() {
         return;

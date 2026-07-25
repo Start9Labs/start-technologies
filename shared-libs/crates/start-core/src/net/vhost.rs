@@ -2,7 +2,7 @@ use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::future::Future;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
@@ -991,6 +991,14 @@ impl ProxyTarget {
         wan || (self.private.contains(&dst)
             && (subnets.iter().any(|s| s.contains(&src)) || is_private_ip(src)))
     }
+
+    /// Whether `client` is an address of this box, i.e. the connection came from
+    /// a process here rather than from something the box gateways. `private`
+    /// holds the box's own address on each LAN/bridge subnet, which with
+    /// loopback is every address an on-box client connects from in practice.
+    fn client_is_on_box(&self, client: Ipv4Addr) -> bool {
+        client.is_loopback() || self.private.contains(&IpAddr::V4(client))
+    }
 }
 
 impl<A> VHostTarget<A> for ProxyTarget
@@ -1040,25 +1048,40 @@ where
         metadata: &'a <A as Accept>::Metadata,
     ) -> Option<(ServerConfig, Self::PreprocessRes)> {
         let peer = extract::<TcpMetadata, _>(metadata).map(|m| m.peer_addr);
+        let plain_connect = || async {
+            TcpStream::connect(self.addr)
+                .await
+                .with_ctx(|_| (ErrorKind::Network, self.addr))
+                .log_err()
+        };
         let tcp_stream = match (self.preserve_source_ip, peer, self.addr) {
             // Source-preserving passthrough (container): open the internal leg
             // from the client's own address so the backend sees the real peer
             // (RFC §4.6). The box gateways the container, so replies transit it
             // and the divert routes them back. Manual LAN passthroughs and
             // terminating targets connect plainly — the box isn't their gateway.
-            (true, Some(SocketAddr::V4(client)), SocketAddr::V4(target)) => {
+            // Nor is it a client on the box itself, which is its own peer: its
+            // (ip, port) is already bound to its own socket, and a container
+            // can't route a reply back to a loopback source.
+            (true, Some(SocketAddr::V4(client)), SocketAddr::V4(target))
+                if !self.client_is_on_box(*client.ip()) =>
+            {
                 crate::net::transparent::ensure_divert_infra_once()
                     .await
                     .log_err();
-                crate::net::transparent::transparent_connect(client, target)
-                    .await
-                    .with_ctx(|_| (ErrorKind::Network, self.addr))
-                    .log_err()?
+                match crate::net::transparent::transparent_connect(client, target).await {
+                    Ok(stream) => stream,
+                    // Degraded, not fatal: the backend sees this host rather than
+                    // the client. Better than dropping a working connection.
+                    Err(e) => {
+                        tracing::warn!(
+                            "transparent egress to {target} for {client} failed ({e}); connecting plainly, so the backend will see this host as the peer"
+                        );
+                        plain_connect().await?
+                    }
+                }
             }
-            _ => TcpStream::connect(self.addr)
-                .await
-                .with_ctx(|_| (ErrorKind::Network, self.addr))
-                .log_err()?,
+            _ => plain_connect().await?,
         };
         if let Err(e) = socket2::SockRef::from(&tcp_stream)
             .set_tcp_keepalive(&crate::net::utils::default_keepalive())
