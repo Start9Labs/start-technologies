@@ -109,7 +109,7 @@ export type ExecCommandOptions = {
    * How long (ms) to wait for the process to exit after sending SIGTERM
    * before force-killing it.
    *
-   * @default 30_000
+   * @default 60_000
    */
   sigtermTimeout?: number
   /** Run the command as PID 1 inside the container (init process) */
@@ -139,7 +139,7 @@ export type ExecFnOptions<
     subcontainer: C,
     abort: AbortSignal,
   ) => Promise<C extends null ? null : ExecCommandOptions | null>
-  // Defaults to the DEFAULT_SIGTERM_TIMEOUT = 30_000ms
+  // Defaults to the DEFAULT_SIGTERM_TIMEOUT = 60_000ms
   sigtermTimeout?: number
 }
 
