@@ -21,13 +21,6 @@ file tracks notable changes since the move to the monorepo.
 - **Installing onto a pre-installed Raspberry Pi keeps the data pool you pick.**
   Selecting the data pool by partition path now preserves that choice through
   installation.
-- **The UI now works when reached at an address a plugin provides.** Request
-  signatures are bound to a server identity, and the set the server recognizes
-  as itself covered its hostnames, domains, `localhost`, and interface
-  addresses — but not the addresses plugins add for it, which appear under
-  **Plugin** in the server's address list. Loading the UI at one of those
-  addresses left every request unauthorized. They now count as server
-  identities like the rest.
 
 ## [0.4.0]
 
