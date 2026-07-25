@@ -26,15 +26,21 @@ impl VersionT for Version {
     }
     #[instrument(skip_all)]
     fn up(self, db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
+        let mut ssl_ports = Vec::new();
         for_each_host(db, |host| {
-            move_port(host, "assignedPort", "assignedSslPort")
+            move_port(host, "assignedPort", "assignedSslPort");
+            collect_self_tls_ports(host, &mut ssl_ports);
         });
+        set_port_ssl_flags(db, &ssl_ports, true);
         Ok(Value::Null)
     }
     fn down(self, db: &mut Value) -> Result<(), Error> {
+        let mut ssl_ports = Vec::new();
         for_each_host(db, |host| {
-            move_port(host, "assignedSslPort", "assignedPort")
+            collect_self_tls_ports(host, &mut ssl_ports);
+            move_port(host, "assignedSslPort", "assignedPort");
         });
+        set_port_ssl_flags(db, &ssl_ports, false);
         Ok(())
     }
 }
@@ -92,6 +98,38 @@ fn move_port(host: &mut Value, from: &str, to: &str) {
     }
 }
 
+/// A self-TLS binding's port is now answered by our SNI-passthrough listener,
+/// so its `availablePorts` ssl flag flips with the move.
+fn collect_self_tls_ports(host: &Value, ports: &mut Vec<u64>) {
+    let Some(bindings) = host.get("bindings").and_then(|b| b.as_object()) else {
+        return;
+    };
+    for (_, binding) in bindings.iter() {
+        let serves_own_tls = binding.get("options").map_or(false, |o| {
+            o["secure"]["ssl"].as_bool().unwrap_or(false) && o["addSsl"].is_null()
+        });
+        if !serves_own_tls {
+            continue;
+        }
+        if let Some(port) = binding["net"]["assignedSslPort"].as_u64() {
+            ports.push(port);
+        }
+    }
+}
+
+fn set_port_ssl_flags(db: &mut Value, ports: &[u64], ssl: bool) {
+    let Some(available) = db
+        .get_mut("private")
+        .and_then(|p| p.get_mut("availablePorts"))
+        .and_then(|a| a.as_object_mut())
+    else {
+        return;
+    };
+    for port in ports {
+        available.insert(InternedString::from_display(port), Value::Bool(ssl));
+    }
+}
+
 #[cfg(test)]
 mod test {
     use imbl_value::json;
@@ -108,12 +146,17 @@ mod test {
                         "net": net,
                     } } } } }
                 }
-            }
+            },
+            "private": { "availablePorts": { "8080": false } }
         })
     }
 
     fn net_of(db: &Value) -> &Value {
         &db["public"]["packageData"]["pkg"]["hosts"]["main"]["bindings"]["8080"]["net"]
+    }
+
+    fn port_ssl(db: &Value, port: &str) -> Option<bool> {
+        db["private"]["availablePorts"][port].as_bool()
     }
 
     #[test]
@@ -127,14 +170,18 @@ mod test {
         Version.up(&mut d, ()).unwrap();
         assert_eq!(net_of(&d)["assignedSslPort"].as_u64(), Some(8080));
         assert!(net_of(&d)["assignedPort"].is_null());
+        // the port is now one of our SNI-passthrough listeners' ports
+        assert_eq!(port_ssl(&d, "8080"), Some(true));
 
         // idempotent
         Version.up(&mut d, ()).unwrap();
         assert_eq!(net_of(&d)["assignedSslPort"].as_u64(), Some(8080));
+        assert_eq!(port_ssl(&d, "8080"), Some(true));
 
         Version.down(&mut d).unwrap();
         assert_eq!(net_of(&d)["assignedPort"].as_u64(), Some(8080));
         assert!(net_of(&d)["assignedSslPort"].is_null());
+        assert_eq!(port_ssl(&d, "8080"), Some(false));
 
         // the OS terminates TLS here: both ports already mean what they say
         let add_ssl = json!({
@@ -149,6 +196,7 @@ mod test {
         Version.up(&mut d, ()).unwrap();
         assert_eq!(net_of(&d)["assignedPort"].as_u64(), Some(8080));
         assert_eq!(net_of(&d)["assignedSslPort"].as_u64(), Some(8443));
+        assert_eq!(port_ssl(&d, "8080"), Some(false));
 
         // plaintext binding is untouched
         let plain =
@@ -160,5 +208,6 @@ mod test {
         Version.up(&mut d, ()).unwrap();
         assert_eq!(net_of(&d)["assignedPort"].as_u64(), Some(8080));
         assert!(net_of(&d)["assignedSslPort"].is_null());
+        assert_eq!(port_ssl(&d, "8080"), Some(false));
     }
 }

@@ -13,13 +13,19 @@ file tracks notable changes since the move to the monorepo.
 ### Changed
 
 - **A service that serves its own TLS certificate now reports its external port
-  as an SSL port.** Every interface whose external port speaks TLS — whether
-  StartOS terminates it or the service presents its own certificate — now
-  carries that port in `assignedSslPort`, and `assignedPort` means a plaintext
-  port. The port number itself is unchanged, so existing addresses, bookmarks
-  and router port-forwards keep working. Packages resolve a dependency's address
-  with `sdk.host.getBridgeAddress`, which is correct under either arrangement;
-  see
+  as an SSL port, and StartOS serves it like one.** Every interface whose
+  external port speaks TLS — whether StartOS terminates it or the service
+  presents its own certificate — now carries that port in `assignedSslPort`,
+  and `assignedPort` means a plaintext port. A self-TLS port is now answered by
+  the StartOS SNI router, which pipes the raw TLS stream to the service with
+  the client's address preserved, instead of a kernel port-forward — so every
+  TLS-carrying port behaves uniformly, and a self-TLS service's domains are
+  advertised on its preferred port (e.g. 443) exactly as when StartOS
+  terminates TLS. This also means such a port accepts TLS connections only,
+  and no longer relays UDP. The port number itself is
+  unchanged, so existing addresses, bookmarks and router port-forwards keep
+  working. Packages resolve a dependency's address with
+  `sdk.host.getBridgeAddress`, which is correct under either arrangement; see
   [Service-to-Service Networking](https://docs.start9.com/packaging/service-to-service.html).
 
 ### Fixed

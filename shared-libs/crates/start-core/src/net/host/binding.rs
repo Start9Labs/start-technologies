@@ -271,10 +271,9 @@ impl BindInfo {
         let mut assigned_port = None;
         let mut assigned_ssl_port = None;
         if let Some(preferred) = options.preferred_ssl_port() {
-            let proxied = options.add_ssl.is_some();
             assigned_ssl_port = available_ports
-                .try_alloc(preferred, proxied)
-                .or_else(|| Some(available_ports.alloc(proxied).ok()?));
+                .try_alloc(preferred, true)
+                .or_else(|| Some(available_ports.alloc(true).ok()?));
         }
         if options.wants_plain_port() {
             assigned_port = available_ports
@@ -323,7 +322,7 @@ impl BindInfo {
 
         let assigned_ssl_port = options
             .preferred_ssl_port()
-            .map(|preferred| reclaim(held.assigned_ssl_port, preferred, options.add_ssl.is_some()))
+            .map(|preferred| reclaim(held.assigned_ssl_port, preferred, true))
             .transpose()?;
         let assigned_port = options
             .wants_plain_port()
@@ -363,8 +362,8 @@ pub struct BindOptions {
 }
 
 impl BindOptions {
-    /// The container terminates TLS itself, so the OS forwards its port
-    /// untouched rather than putting a listener of its own in front.
+    /// The container terminates TLS itself; the OS fronts its port with an
+    /// SNI-passthrough listener that pipes the raw TLS stream through.
     pub fn serves_own_tls(&self) -> bool {
         self.secure.map_or(false, |s| s.ssl) && self.add_ssl.is_none()
     }
@@ -1062,12 +1061,12 @@ mod test {
         assert_eq!(rewrap.net.assigned_port, None);
         assert_eq!(rewrap.net.assigned_ssl_port, Some(8445));
 
-        // the container serves its own TLS: the ssl port only, forwarded
-        // straight through, so it is not one of our listeners' ports
+        // the container serves its own TLS: the ssl port only, fronted by
+        // our SNI-passthrough listener
         let own_tls = BindInfo::new(&mut ports, opts(8083, None, Some(true))).unwrap();
         assert_eq!(own_tls.net.assigned_port, None);
         assert_eq!(own_tls.net.assigned_ssl_port, Some(8083));
-        assert!(!ports.is_ssl(8083));
+        assert!(ports.is_ssl(8083));
     }
 
     #[test]
@@ -1081,8 +1080,9 @@ mod test {
             .unwrap();
         assert_eq!(own_tls.net.assigned_port, None);
         assert_eq!(own_tls.net.assigned_ssl_port, Some(8080));
+        assert!(ports.is_ssl(8080));
 
-        // handing termination to us keeps the port and marks it ours
+        // handing termination to us keeps the port
         let add_ssl = own_tls
             .update(&mut ports, opts(8080, Some(8080), Some(true)))
             .unwrap();

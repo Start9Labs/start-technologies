@@ -395,71 +395,88 @@ impl NetServiceData {
                 }
             }
 
-            // SSL vhosts
-            if let Some(ssl) = &bind.options.add_ssl {
-                let connect_ssl: Result<Arc<TlsClientConfig>, AlpnInfo> =
+            // How our listener dials the container when it terminates TLS
+            // (add_ssl); a self-TLS passthrough never dials TLS — it pipes raw.
+            let connect_ssl: Result<Arc<TlsClientConfig>, AlpnInfo> =
+                if let Some(ssl) = &bind.options.add_ssl {
                     if let Some(alpn) = ssl.alpn.clone() {
                         Err(alpn)
                     } else if bind.options.secure.as_ref().map_or(false, |s| s.ssl) {
                         Ok(ctrl.upstream_client_config(&ssl.upstream_cert_validation))
                     } else {
                         Err(AlpnInfo::Reflect)
-                    };
-
-                if let Some(assigned_ssl_port) = bind.net.assigned_ssl_port {
-                    // Collect private IPs from enabled LAN-only addresses' gateways
-                    // (a GUA set to LAN+WAN is WAN, so it lands in the public set).
-                    let server_private_ips: BTreeSet<IpAddr> = enabled_addresses
-                        .iter()
-                        .filter(|a| !a.public)
-                        .flat_map(|a| a.metadata.gateways())
-                        .filter_map(|gw| net_ifaces.get(gw).and_then(|info| info.ip_info.as_ref()))
-                        .flat_map(|ip_info| ip_info.subnets.iter().map(|s| s.addr()))
-                        .collect();
-
-                    // Public gateways, split by family: a bare public IPv4 (WAN IP)
-                    // and a LAN+WAN GUA are independently toggleable, and the vhost
-                    // must accept (and forward) each family only where that family
-                    // is actually public — so a GUA-only-public gateway never
-                    // accepts or forwards bare IPv4. The controller derives the IPv4
-                    // `*` pinhole from `public_v4`; the GUA needs no NAT.
-                    let server_public_v4 = ssl_vhost_public_v4(enabled_addresses.iter().copied());
-                    // Per-IP (per-GUA), not per-gateway: one gateway can carry
-                    // several GUAs that are independently Local vs Public, so only
-                    // the specific enabled-public GUAs accept WAN. Scoped to the SSL
-                    // exposure (`a.ssl`), since this `*` vhost terminates TLS on the
-                    // ssl port — a GUA public only on a non-SSL port is served by the
-                    // v6 DNAT forward, not this vhost.
-                    let server_public_v6: BTreeSet<Ipv6Addr> = enabled_addresses
-                        .iter()
-                        .filter(|a| a.public && a.ssl)
-                        .filter_map(|a| a.gua().map(|g| *g.ip()))
-                        .collect();
-
-                    // * vhost (on assigned_ssl_port)
-                    if !server_private_ips.is_empty()
-                        || !server_public_v4.is_empty()
-                        || !server_public_v6.is_empty()
-                    {
-                        vhosts.insert(
-                            (None, assigned_ssl_port),
-                            ProxyTarget {
-                                public_v4: server_public_v4,
-                                public_v6: server_public_v6,
-                                private: server_private_ips.clone(),
-                                acme: None,
-                                addr,
-                                add_x_forwarded_headers: ssl.add_x_forwarded_headers,
-                                auth: ssl.auth.clone(),
-                                connect_ssl: connect_ssl.clone(),
-                                passthrough: false,
-                                preserve_source_ip: false,
-                            },
-                        );
                     }
+                } else {
+                    Err(AlpnInfo::Reflect)
+                };
+
+            // `*` vhost: every assigned_ssl_port is answered by a listener of
+            // ours — terminating (add_ssl), or an SNI-agnostic passthrough when
+            // the container serves its own TLS.
+            if let Some(assigned_ssl_port) = bind.net.assigned_ssl_port {
+                // Collect private IPs from enabled LAN-only addresses' gateways
+                // (a GUA set to LAN+WAN is WAN, so it lands in the public set).
+                let server_private_ips: BTreeSet<IpAddr> = enabled_addresses
+                    .iter()
+                    .filter(|a| !a.public)
+                    .flat_map(|a| a.metadata.gateways())
+                    .filter_map(|gw| net_ifaces.get(gw).and_then(|info| info.ip_info.as_ref()))
+                    .flat_map(|ip_info| ip_info.subnets.iter().map(|s| s.addr()))
+                    .collect();
+
+                // Public gateways, split by family: a bare public IPv4 (WAN IP)
+                // and a LAN+WAN GUA are independently toggleable, and the vhost
+                // must accept (and forward) each family only where that family
+                // is actually public — so a GUA-only-public gateway never
+                // accepts or forwards bare IPv4. The controller derives the IPv4
+                // `*` pinhole from `public_v4`; the GUA needs no NAT.
+                let server_public_v4 = ssl_vhost_public_v4(enabled_addresses.iter().copied());
+                // Per-IP (per-GUA), not per-gateway: one gateway can carry
+                // several GUAs that are independently Local vs Public, so only
+                // the specific enabled-public GUAs accept WAN. Scoped to the SSL
+                // exposure (`a.ssl`), since this `*` vhost answers TLS on the
+                // ssl port — a GUA public only on a non-SSL port is served by the
+                // v6 DNAT forward, not this vhost.
+                let server_public_v6: BTreeSet<Ipv6Addr> = enabled_addresses
+                    .iter()
+                    .filter(|a| a.public && a.ssl)
+                    .filter_map(|a| a.gua().map(|g| *g.ip()))
+                    .collect();
+
+                if !server_private_ips.is_empty()
+                    || !server_public_v4.is_empty()
+                    || !server_public_v6.is_empty()
+                {
+                    let passthrough = bind.options.add_ssl.is_none();
+                    vhosts.insert(
+                        (None, assigned_ssl_port),
+                        ProxyTarget {
+                            public_v4: server_public_v4,
+                            public_v6: server_public_v6,
+                            private: server_private_ips,
+                            acme: None,
+                            addr,
+                            add_x_forwarded_headers: bind
+                                .options
+                                .add_ssl
+                                .as_ref()
+                                .map_or(false, |s| s.add_x_forwarded_headers),
+                            auth: bind.options.add_ssl.as_ref().and_then(|s| s.auth.clone()),
+                            connect_ssl: connect_ssl.clone(),
+                            passthrough,
+                            // The container handles its own TLS and the box is
+                            // its gateway, so preserve the client source IP.
+                            preserve_source_ip: passthrough,
+                        },
+                    );
                 }
 
-                // Domain vhosts: group by (domain, ssl_port), merge public/private sets
+                // Domain vhosts: group by (domain, ssl_port), merge public/private
+                // sets. Terminating when we hold the TLS (add_ssl); an SNI
+                // passthrough to the container's own TLS otherwise. Either way the
+                // domain entry carries its own gateways, so a public domain accepts
+                // WAN even where the bare IP is disabled.
+                let passthrough = bind.options.add_ssl.is_none();
                 for addr_info in &enabled_addresses {
                     if !addr_info.ssl {
                         continue;
@@ -478,17 +495,27 @@ impl NetServiceData {
                         public_v4: BTreeSet::new(),
                         public_v6: BTreeSet::new(),
                         private: BTreeSet::new(),
-                        acme: host_addresses
-                            .iter()
-                            .find(|a| a.address == *domain)
-                            .and_then(|a| a.public.as_ref())
-                            .and_then(|p| p.acme.clone()),
+                        // A passthrough never intermediates ACME — the backend
+                        // is the ACME client and holds the challenge cert.
+                        acme: if passthrough {
+                            None
+                        } else {
+                            host_addresses
+                                .iter()
+                                .find(|a| a.address == *domain)
+                                .and_then(|a| a.public.as_ref())
+                                .and_then(|p| p.acme.clone())
+                        },
                         addr,
-                        add_x_forwarded_headers: ssl.add_x_forwarded_headers,
-                        auth: ssl.auth.clone(),
+                        add_x_forwarded_headers: bind
+                            .options
+                            .add_ssl
+                            .as_ref()
+                            .map_or(false, |s| s.add_x_forwarded_headers),
+                        auth: bind.options.add_ssl.as_ref().and_then(|s| s.auth.clone()),
                         connect_ssl: connect_ssl.clone(),
-                        passthrough: false,
-                        preserve_source_ip: false,
+                        passthrough,
+                        preserve_source_ip: passthrough,
                     });
                     if addr_info.public {
                         // A public domain is dual-stack (A + AAAA): public on its
@@ -513,15 +540,9 @@ impl NetServiceData {
                 }
             }
 
-            // Direct forwards — every external port we put no listener of our
-            // own in front of: the plaintext port, and a self-TLS binding's
-            // port, which carries TLS the container terminates itself.
-            let direct = if bind.options.add_ssl.is_some() {
-                bind.net.assigned_port
-            } else {
-                bind.net.assigned_port.or(bind.net.assigned_ssl_port)
-            };
-            if let Some(external) = direct {
+            // Direct forward — the plaintext port, the only external port with
+            // no listener of ours in front (every TLS port is a vhost above).
+            if let Some(external) = bind.net.assigned_port {
                 // Only addresses at this port drive its forward (a vhost's port has its own).
                 let fwd_public: BTreeSet<GatewayId> = enabled_addresses
                     .iter()
@@ -573,10 +594,11 @@ impl NetServiceData {
                         let Some(gua) = a.gua().filter(|g| g.port() == external) else {
                             continue;
                         };
-                        // Secure when StartOS terminates TLS (add_ssl → a.ssl) or the
-                        // underlying protocol is itself secure. The WAN is never secure, so an
-                        // insecure exposure that requested public serves the LAN instead.
-                        let secure_exposure = a.ssl || bind.options.secure.is_some();
+                        // Secure only when the underlying protocol is itself secure —
+                        // this is the plaintext port, so we never terminate TLS here.
+                        // The WAN is never secure, so an insecure exposure that
+                        // requested public serves the LAN instead.
+                        let secure_exposure = bind.options.secure.is_some();
                         let src_filter = if a.public && secure_exposure {
                             None
                         } else {
@@ -603,68 +625,12 @@ impl NetServiceData {
                                 None => continue,
                             }
                         };
-                        // A public bare GUA is DNAT'd to the container, but no vhost
-                        // owns it (add_ssl builds the `*` vhost; passthroughs are
-                        // domain-only). The forward controller opens its upstream
-                        // pinhole together with the DNAT (see the reconcile below).
+                        // A public bare GUA on a non-TLS port is DNAT'd to the
+                        // container — no vhost owns a non-TLS port. The forward
+                        // controller opens its upstream pinhole together with the
+                        // DNAT (see the reconcile below).
                         gua_forwards
                             .insert((*gua.ip(), gua.port()), (container_v6, *port, src_filter));
-                    }
-                }
-            }
-
-            // Passthrough vhosts: if the service handles its own TLS and a
-            // domain address is enabled on a port other than the one we forward
-            // directly, add a passthrough vhost so the service's TLS endpoint is
-            // reachable there too.
-            if bind.options.serves_own_tls() {
-                let assigned = bind.net.assigned_ssl_port;
-                for addr_info in &enabled_addresses {
-                    if !addr_info.ssl {
-                        continue;
-                    }
-                    let Some(pt_port) = addr_info.port.filter(|p| assigned != Some(*p)) else {
-                        continue;
-                    };
-                    match &addr_info.metadata {
-                        HostnameMetadata::PublicDomain { .. }
-                        | HostnameMetadata::PrivateDomain { .. } => {}
-                        _ => continue,
-                    }
-                    let domain = &addr_info.hostname;
-                    let key = (Some(domain.clone()), pt_port);
-                    let target = vhosts.entry(key).or_insert_with(|| ProxyTarget {
-                        public_v4: BTreeSet::new(),
-                        public_v6: BTreeSet::new(),
-                        private: BTreeSet::new(),
-                        acme: None,
-                        addr,
-                        add_x_forwarded_headers: false,
-                        auth: None,
-                        connect_ssl: Err(AlpnInfo::Reflect),
-                        passthrough: true,
-                        // Container handles its own TLS and the box is its
-                        // gateway, so preserve the client source IP.
-                        preserve_source_ip: true,
-                    });
-                    if addr_info.public {
-                        // Passthrough domain is dual-stack, like the SSL domain vhost.
-                        let gws: BTreeSet<GatewayId> =
-                            addr_info.metadata.gateways().cloned().collect();
-                        target.public_v4.extend(gws.iter().cloned());
-                        target
-                            .public_v6
-                            .extend(crate::net::utils::gua_ips(&net_ifaces, &gws));
-                    } else {
-                        for gw in addr_info.metadata.gateways() {
-                            if let Some(info) = net_ifaces.get(gw) {
-                                if let Some(ip_info) = &info.ip_info {
-                                    for subnet in &ip_info.subnets {
-                                        target.private.insert(subnet.addr());
-                                    }
-                                }
-                            }
-                        }
                     }
                 }
             }

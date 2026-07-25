@@ -55,9 +55,8 @@ impl std::fmt::Display for ForwardRequirements {
 }
 
 /// Allocated external ports. The flag marks the ports one of our own TLS
-/// listeners answers on, so a domain can be advertised there and SNI-routed —
-/// not merely "carries TLS": a self-TLS binding's port is forwarded straight to
-/// the container and has no listener of ours to route it.
+/// listeners answers on — terminating (`add_ssl`) or SNI-passthrough (self-TLS)
+/// — so a domain can be advertised there and SNI-routed.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct AvailablePorts(BTreeMap<u16, bool>);
 impl AvailablePorts {

@@ -267,10 +267,11 @@ impl Model<Host> {
                     });
                 }
                 if let Some(mut port) = net.assigned_ssl_port {
+                    // The domain rides the preferred port whenever one of our
+                    // TLS listeners answers there — SNI routes it, terminating
+                    // (add_ssl) or passthrough (self-TLS) alike.
                     if let Some(preferred) = opt
-                        .add_ssl
-                        .as_ref()
-                        .map(|s| s.preferred_external_port)
+                        .preferred_ssl_port()
                         .filter(|p| available_ports.is_ssl(*p))
                     {
                         port = preferred;
@@ -278,22 +279,8 @@ impl Model<Host> {
                     available.insert(HostnameInfo {
                         ssl: true,
                         public: true,
-                        hostname: domain.clone(),
-                        port: Some(port),
-                        metadata: metadata.clone(),
-                    });
-                }
-                if opt.serves_own_tls()
-                    && available_ports.is_ssl(opt.preferred_external_port)
-                    && net.assigned_ssl_port != Some(opt.preferred_external_port)
-                {
-                    // One of our listeners holds the preferred port, so it can
-                    // SNI-passthrough to the service's own TLS as well.
-                    available.insert(HostnameInfo {
-                        ssl: true,
-                        public: true,
                         hostname: domain,
-                        port: Some(opt.preferred_external_port),
+                        port: Some(port),
                         metadata,
                     });
                 }
@@ -324,9 +311,7 @@ impl Model<Host> {
                 }
                 if let Some(mut port) = net.assigned_ssl_port {
                     if let Some(preferred) = opt
-                        .add_ssl
-                        .as_ref()
-                        .map(|s| s.preferred_external_port)
+                        .preferred_ssl_port()
                         .filter(|p| available_ports.is_ssl(*p))
                     {
                         port = preferred;
@@ -334,22 +319,8 @@ impl Model<Host> {
                     available.insert(HostnameInfo {
                         ssl: true,
                         public: false,
-                        hostname: domain.clone(),
-                        port: Some(port),
-                        metadata: HostnameMetadata::PrivateDomain {
-                            gateways: domain_gateways.clone(),
-                        },
-                    });
-                }
-                if opt.serves_own_tls()
-                    && available_ports.is_ssl(opt.preferred_external_port)
-                    && net.assigned_ssl_port != Some(opt.preferred_external_port)
-                {
-                    available.insert(HostnameInfo {
-                        ssl: true,
-                        public: false,
                         hostname: domain,
-                        port: Some(opt.preferred_external_port),
+                        port: Some(port),
                         metadata: HostnameMetadata::PrivateDomain {
                             gateways: domain_gateways,
                         },
