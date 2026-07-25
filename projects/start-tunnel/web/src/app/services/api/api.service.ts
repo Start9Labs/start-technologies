@@ -25,7 +25,9 @@ export abstract class ApiService {
   abstract setSubnetDns(
     params: T.Tunnel.SubnetParams & T.Tunnel.SetSubnetDnsParams,
   ): Promise<null> // subnet.set-dns
-  abstract setSubnetWan(params: T.Tunnel.SetSubnetWanParams): Promise<null> // subnet.set-wan
+  abstract setSubnetWan(
+    params: T.Tunnel.SubnetParams & T.Tunnel.SetSubnetWanParams,
+  ): Promise<null> // subnet.set-wan
   // devices
   abstract addDevice(params: T.Tunnel.AddDeviceParams): Promise<null> // device.add
   abstract editDevice(params: T.Tunnel.AddDeviceParams): Promise<null> // device.edit
@@ -72,7 +74,9 @@ export abstract class ApiService {
     params: T.Tunnel.SetHttpRedirectEnabledParams,
   ): Promise<null> // http-redirect.set-enabled
   // ipv6
-  abstract setSubnetIpv6(params: T.Tunnel.SetSubnetIpv6Params): Promise<null> // subnet.set-ipv6
+  abstract setSubnetIpv6(
+    params: T.Tunnel.SubnetParams & T.Tunnel.SetSubnetIpv6Params,
+  ): Promise<null> // subnet.set-ipv6
   // system
   abstract restart(): Promise<null> // restart
   // update

@@ -80,6 +80,14 @@ subnet is assigned a globally-routable `/128` out of it. See [IPv6](ipv6.md).
 - `--prefix <PREFIX>` — The routed prefix (e.g. `2001:db8:abcd::/64`). Omit to
   disable IPv6 on the subnet.
 
+### `start-tunnel subnet <SUBNET> set-wan`
+
+Pin the public IPv4 the subnet's devices egress from, on a server that holds
+more than one. Devices published ports also take their external IP from it.
+Individual devices can override it with `device set-wan`.
+
+- `--wan-ip <IP>` — The address to pin. Omit to go back to the server default.
+
 ## Devices
 
 Manage devices within a subnet. Each device gets a unique WireGuard configuration.

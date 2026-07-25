@@ -5,6 +5,18 @@ All notable changes to StartTunnel are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2]
+
+### Fixed
+
+- **`subnet <SUBNET> set-wan` and `subnet <SUBNET> set-ipv6` take the subnet
+  once, from the parent `subnet` command.** Both asked for it a second time
+  after the subcommand name, and no invocation satisfied that — giving the
+  subnet once failed argument parsing, giving it twice was rejected as a
+  duplicate key — so neither command could be run at all. They now inherit the
+  subnet the way `add`, `remove` and `set-dns` already did, matching the syntax
+  the documentation shows.
+
 ## [1.2.1]
 
 ### Fixed

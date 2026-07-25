@@ -218,6 +218,7 @@ pub fn subnet_api<C: Context>() -> ParentHandler<C, SubnetParams> {
             "set-wan",
             from_fn_async(set_subnet_wan)
                 .with_metadata("sync_db", Value::Bool(true))
+                .with_inherited(|a, _| a)
                 .no_display()
                 .with_about("about.set-subnet-wan")
                 .with_call_remote::<CliContext>(),
@@ -226,6 +227,7 @@ pub fn subnet_api<C: Context>() -> ParentHandler<C, SubnetParams> {
             "set-ipv6",
             from_fn_async(set_subnet_ipv6)
                 .with_metadata("sync_db", Value::Bool(true))
+                .with_inherited(|a, _| a)
                 .no_display()
                 .with_about("about.set-subnet-ipv6")
                 .with_call_remote::<CliContext>(),
@@ -775,8 +777,6 @@ pub async fn set_subnet_dns(
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct SetSubnetWanParams {
-    #[ts(type = "string")]
-    subnet: Ipv4Net,
     #[arg(long)]
     #[ts(type = "string | null")]
     wan_ip: Option<Ipv4Addr>,
@@ -786,7 +786,8 @@ pub struct SetSubnetWanParams {
 /// Per-device overrides still take precedence.
 pub async fn set_subnet_wan(
     ctx: TunnelContext,
-    SetSubnetWanParams { subnet, wan_ip }: SetSubnetWanParams,
+    SetSubnetWanParams { wan_ip }: SetSubnetWanParams,
+    SubnetParams { subnet }: SubnetParams,
 ) -> Result<(), Error> {
     ctx.db
         .mutate(|db| {
@@ -807,8 +808,6 @@ pub async fn set_subnet_wan(
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct SetSubnetIpv6Params {
-    #[ts(type = "string")]
-    subnet: Ipv4Net,
     /// The routed IPv6 prefix delegated to this subnet (e.g. a /64 from Hetzner,
     /// a /56 from Linode). `null` disables IPv6 on the subnet.
     #[arg(long)]
@@ -822,7 +821,8 @@ pub struct SetSubnetIpv6Params {
 /// Validates that the server can actually route the prefix before persisting.
 pub async fn set_subnet_ipv6(
     ctx: TunnelContext,
-    SetSubnetIpv6Params { subnet, prefix }: SetSubnetIpv6Params,
+    SetSubnetIpv6Params { prefix }: SetSubnetIpv6Params,
+    SubnetParams { subnet }: SubnetParams,
 ) -> Result<(), Error> {
     let prefix = prefix
         .map(|p| {
