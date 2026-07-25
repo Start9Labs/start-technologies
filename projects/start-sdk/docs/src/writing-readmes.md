@@ -70,7 +70,7 @@ Write for two audiences:
 
 ## Dependencies
 
-[Required and optional dependencies — version constraints, health checks, mounted volumes, purpose]
+[Required and optional dependencies — health checks, mounted volumes, purpose]
 
 ## Limitations and Differences
 
@@ -191,10 +191,11 @@ For each interface:
 For each dependency, document:
 
 - **Service name** and whether it is required or optional
-- **Version constraint** (e.g. `>= 28.3`)
 - **Health checks** that must pass before this service starts
 - **Mounted volumes** — if a dependency volume is mounted, note the mount point and whether it is read-only
 - **Purpose** — why this dependency is needed (e.g. "blockchain data via RPC", "Electrum lookups")
+
+Do **not** restate the version range. `setupDependencies()` declares it, and a copy in the README goes stale the first time you raise the floor — point the reader at that code if the minimum is worth mentioning at all.
 
 If the service has no dependencies, state "None" explicitly.
 
