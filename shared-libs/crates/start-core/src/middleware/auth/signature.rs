@@ -227,6 +227,7 @@ impl SignatureAuthContext for RpcContext {
                     .collect::<BTreeSet<_>>()
             })
             .flatten_ok()
+            .chain([Ok("localhost".into())])
     }
     fn check_pubkey(
         &self,
