@@ -2,7 +2,7 @@
 # of .github/workflows/startos-iso.yaml (see root AGENTS.md "Coupled changes").
 
 IMAGE_TYPE=$(shell if [ "$(PLATFORM)" = raspberrypi ]; then echo img; else echo iso; fi)
-FIRMWARE_ROMS := projects/start-os/build/lib/firmware/$(PLATFORM) $(shell jq --raw-output '.[] | select(.platform[] | contains("$(PLATFORM)")) | "./projects/start-os/build/lib/firmware/$(PLATFORM)/" + .id + ".rom.gz"' projects/start-os/build/lib/firmware.json)
+FIRMWARE_ROMS := projects/start-os/build/firmware/$(PLATFORM) $(shell jq --raw-output '.[] | select(.platform[] | contains("$(PLATFORM)")) | "./projects/start-os/build/firmware/$(PLATFORM)/" + .id + ".rom.gz"' projects/start-os/build/lib/firmware.json)
 BUILD_SRC := $(call ls-files, projects/start-os/build/lib) build/lib/scripts/forward-port build/lib/scripts/forward-port6 projects/start-os/build/lib/depends projects/start-os/build/lib/conflicts $(FIRMWARE_ROMS) projects/start-os/build/lib/migration-images/.done
 IMAGE_RECIPE_SRC := $(call ls-files, projects/start-os/build/image-recipe/)
 STARTD_SRC := projects/start-os/startd.service projects/start-os/services.slice projects/start-os/startos-shutdown.service projects/start-os/startos-restart.service $(BUILD_SRC)
@@ -85,6 +85,7 @@ start-os-install: $(STARTOS_TARGETS)
 	$(call mkdir,$(DESTDIR)/usr/lib)
 	$(call rm,$(DESTDIR)/usr/lib/startos)
 	$(call cp,projects/start-os/build/lib,$(DESTDIR)/usr/lib/startos)
+	$(call cp,projects/start-os/build/firmware/$(PLATFORM),$(DESTDIR)/usr/lib/startos/firmware)
 	$(call cp,build/lib/scripts/forward-port,$(DESTDIR)/usr/lib/startos/scripts/forward-port)
 	$(call cp,build/lib/scripts/forward-port6,$(DESTDIR)/usr/lib/startos/scripts/forward-port6)
 	$(call mkdir,$(DESTDIR)/usr/lib/startos/container-runtime)
@@ -224,7 +225,7 @@ start-os-clean:
 	rm -rf projects/start-os/web/dist projects/start-os/docs/book
 	rm -rf projects/start-os/container-runtime/dist projects/start-os/container-runtime/node_modules
 	rm -f projects/start-os/container-runtime/*.squashfs
-	rm -rf projects/start-os/build/lib/firmware projects/start-os/build/lib/migration-images
+	rm -rf projects/start-os/build/firmware projects/start-os/build/lib/firmware projects/start-os/build/lib/migration-images
 	rm -rf projects/start-os/build/image-recipe/deb
 
 # The ui/setup-wizard web apps and the container-runtime are formatted by

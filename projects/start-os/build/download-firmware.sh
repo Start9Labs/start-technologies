@@ -11,13 +11,13 @@ if [ -z "$PLATFORM" ]; then
 	exit 1
 fi
 
-rm -rf ./lib/firmware/$PLATFORM
-mkdir -p ./lib/firmware/$PLATFORM
+rm -rf ./firmware/$PLATFORM
+mkdir -p ./firmware/$PLATFORM
 
-cd ./lib/firmware/$PLATFORM
+cd ./firmware/$PLATFORM
 
 firmwares=()
-while IFS= read -r line; do firmwares+=("$line"); done < <(jq -c ".[] | select(.platform[] | contains(\"$PLATFORM\"))" ../../firmware.json)
+while IFS= read -r line; do firmwares+=("$line"); done < <(jq -c ".[] | select(.platform[] | contains(\"$PLATFORM\"))" ../../lib/firmware.json)
 for firmware in "${firmwares[@]}"; do
 	if [ -n "$firmware" ]; then
 		id=$(echo "$firmware" | jq --raw-output '.id')

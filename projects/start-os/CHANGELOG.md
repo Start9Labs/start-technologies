@@ -18,6 +18,10 @@ file tracks notable changes since the move to the monorepo.
   update now writes those paths in the plain form PureBoot expects, so the
   server boots into 0.4.0 on the restart that applies the update.
 
+- **A Server Pure applies its PureBoot firmware update.** StartOS installs the
+  firmware image at the path it reads it from, so a Server Pure on an older
+  PureBoot release updates its firmware on the next start.
+
 - **Installing onto a pre-installed Raspberry Pi keeps the data pool you pick.**
   Selecting the data pool by partition path now preserves that choice through
   installation.

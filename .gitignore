@@ -18,6 +18,7 @@ secrets.db
 /dpkg-workdir
 /compiled.tar
 /compiled-*.tar
+/projects/start-os/build/firmware
 /projects/start-os/build/lib/firmware
 tmp
 /.i18n-checked
