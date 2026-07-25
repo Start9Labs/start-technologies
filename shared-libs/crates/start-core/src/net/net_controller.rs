@@ -319,9 +319,9 @@ struct HostBinds {
     forwards: BTreeMap<u16, (SocketAddrV4, u16, ForwardRequirements, Arc<()>)>,
     vhosts: BTreeMap<(Option<InternedString>, u16), (ProxyTarget, Arc<()>)>,
     private_dns: BTreeMap<InternedString, Arc<()>>,
-    /// Non-SSL v6 forwards: `(host GUA, external port) -> (container v6, internal
-    /// port, LAN source filter)`. A non-SSL GUA has no host terminator, so its
-    /// port is DNAT'd to the container (see `forward6`); tracked so a stale
+    /// Directly-forwarded v6: `(host GUA, external port) -> (container v6,
+    /// internal port, LAN source filter)`. A GUA on a port no listener of ours
+    /// answers is DNAT'd to the container (see `forward6`); tracked so a stale
     /// forward is torn down when the GUA's exposure or target changes.
     gua_forwards: BTreeMap<(Ipv6Addr, u16), (Ipv6Addr, u16, Option<IpNet>)>,
 }
@@ -513,14 +513,16 @@ impl NetServiceData {
                 }
             }
 
-            // Non-SSL forwards
-            if bind
-                .options
-                .secure
-                .map_or(true, |s| !(s.ssl && bind.options.add_ssl.is_some()))
-            {
-                let external = bind.net.assigned_port.or_not_found("assigned lan port")?;
-                // Only addresses at this port drive its forward (ssl-port entries are the vhost's).
+            // Direct forwards — every external port we put no listener of our
+            // own in front of: the plaintext port, and a self-TLS binding's
+            // port, which carries TLS the container terminates itself.
+            let direct = if bind.options.add_ssl.is_some() {
+                bind.net.assigned_port
+            } else {
+                bind.net.assigned_port.or(bind.net.assigned_ssl_port)
+            };
+            if let Some(external) = direct {
+                // Only addresses at this port drive its forward (a vhost's port has its own).
                 let fwd_public: BTreeSet<GatewayId> = enabled_addresses
                     .iter()
                     .filter(|a| a.public && a.port == Some(external))
@@ -560,14 +562,14 @@ impl NetServiceData {
                     ),
                 );
 
-                // Non-SSL GUAs have no host terminator, so DNAT the host's
+                // No listener of ours answers here, so DNAT the host's
                 // GUA:external to the container's v6:internal. A LAN-only GUA is
                 // source-restricted to its on-link subnet; a LAN+WAN GUA is
                 // unrestricted. Fail closed: skip a LAN-only GUA whose subnet we
                 // can't determine rather than expose it unrestricted.
                 if let Some(container_v6) = self.ipv6 {
                     for a in enabled_addresses.iter() {
-                        // SSL-port GUAs are the vhost listener's; DNAT only the non-SSL port.
+                        // A vhost's port is its listener's; DNAT only this one.
                         let Some(gua) = a.gua().filter(|g| g.port() == external) else {
                             continue;
                         };
@@ -611,12 +613,12 @@ impl NetServiceData {
                 }
             }
 
-            // Passthrough vhosts: if the service handles its own TLS
-            // (secure.ssl && no add_ssl) and a domain address is enabled on
-            // an SSL port different from assigned_port, add a passthrough
-            // vhost so the service's TLS endpoint is reachable on that port.
-            if bind.options.secure.map_or(false, |s| s.ssl) && bind.options.add_ssl.is_none() {
-                let assigned = bind.net.assigned_port;
+            // Passthrough vhosts: if the service handles its own TLS and a
+            // domain address is enabled on a port other than the one we forward
+            // directly, add a passthrough vhost so the service's TLS endpoint is
+            // reachable there too.
+            if bind.options.serves_own_tls() {
+                let assigned = bind.net.assigned_ssl_port;
                 for addr_info in &enabled_addresses {
                     if !addr_info.ssl {
                         continue;

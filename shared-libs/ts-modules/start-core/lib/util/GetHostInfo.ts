@@ -94,11 +94,12 @@ export function getHost<Mapped>(
  *
  * Resolves the binding's own derived address rather than `net.assignedPort` /
  * `net.assignedSslPort`: which of those are populated is a property of how the
- * *dependency* bound the port — a binding with `addSsl` and `secure.ssl`
- * carries only `assignedSslPort`, a passthrough binding only `assignedPort`,
- * and an `http`/`ws` binding (`secure: null` plus a generated `addSsl`) carries
- * *both*. Reading either directly asserts how a dependency terminates TLS and
- * resolves `null` the day that changes.
+ * *dependency* bound the port — `assignedSslPort` carries a port that speaks
+ * TLS, whether StartOS terminates it (`addSsl`) or the container serves its own
+ * certificate, `assignedPort` a plaintext one, and an `http`/`ws` binding
+ * (`secure: null` plus a generated `addSsl`) carries *both*. Reading either
+ * directly asserts whether a dependency's port speaks TLS and resolves `null`
+ * the day that changes.
  *
  * Works for a binding with no exported interface, so it also resolves
  * bridge-only ports such as tor's SOCKS proxy.
@@ -107,10 +108,9 @@ export function getHost<Mapped>(
  * a TLS address (`protocol: 'http'`/`'ws'`, or `secure: null` with `addSsl`).
  * The filter is a no-op when omitted, so the lookup takes whichever leg sorts
  * first rather than the one you meant. Omit it for a single-leg binding, where
- * passing the wrong value resolves `null` — note that a TLS-passthrough binding
+ * passing the wrong value resolves `null` — a TLS-passthrough binding
  * (`secure: {ssl: true}` with `addSsl: null`, e.g. LND's gRPC) publishes its one
- * address on `assignedPort` yet flagged `ssl: true`, so `ssl: false` there
- * resolves nothing.
+ * address flagged `ssl: true`, so `ssl: false` there resolves nothing.
  * @param opts.fallbackPort - Resolve to `<osIp>:<fallbackPort>` instead of
  * `null` while the dependency is absent. Only for a flag that should be passed
  * unconditionally against an allocator-guaranteed port, such as tor's 9050.

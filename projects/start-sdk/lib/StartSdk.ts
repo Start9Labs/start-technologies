@@ -328,9 +328,9 @@ export class StartSdk<Manifest extends T.SDKManifest> {
          * strategies as `get`/`getOwn`.
          *
          * Prefer this over reading `net.assignedPort` / `net.assignedSslPort`:
-         * only one of those is ever populated, and which one is a property of
-         * how the *dependency* bound the port, so reading either directly
-         * resolves `null` the day the dependency changes how it serves TLS. It
+         * which of those are populated is a property of how the *dependency*
+         * bound the port, so reading either directly resolves `null` the day
+         * the dependency changes how it serves TLS. It
          * also resolves bindings with no exported interface, such as tor's
          * SOCKS proxy.
          *

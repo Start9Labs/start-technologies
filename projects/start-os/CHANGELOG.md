@@ -10,6 +10,18 @@ file tracks notable changes since the move to the monorepo.
 
 ## [0.4.0.1]
 
+### Changed
+
+- **A service that serves its own TLS certificate now reports its external port
+  as an SSL port.** Every interface whose external port speaks TLS — whether
+  StartOS terminates it or the service presents its own certificate — now
+  carries that port in `assignedSslPort`, and `assignedPort` means a plaintext
+  port. The port number itself is unchanged, so existing addresses, bookmarks
+  and router port-forwards keep working. Packages resolve a dependency's address
+  with `sdk.host.getBridgeAddress`, which is correct under either arrangement;
+  see
+  [Service-to-Service Networking](https://docs.start9.com/packaging/service-to-service.html).
+
 ### Fixed
 
 - **The over-the-air update to 0.4.0 boots on the Server Pure.** The Server

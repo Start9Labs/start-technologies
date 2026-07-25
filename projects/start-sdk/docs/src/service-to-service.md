@@ -36,7 +36,7 @@ const rpcAddr = await sdk.host
 
 Three things make this correct, and each matters:
 
-1. **Read the binding's bridge address, keyed by the dependency's internal port — never `net.assignedPort` or `net.assignedSslPort`.** Those two fields are raw metadata, and _which_ of them is populated depends on how the dependency bound the port. A binding with `addSsl` and `secure.ssl` frees `assignedPort` entirely and carries only `assignedSslPort`; a passthrough binding is the reverse. So a caller reading either field directly is asserting how its dependency terminates TLS — and silently resolves `null` the day that changes. This is not hypothetical: it is exactly what broke every LND dependent when LND moved REST behind the OS proxy.
+1. **Read the binding's bridge address, keyed by the dependency's internal port — never `net.assignedPort` or `net.assignedSslPort`.** Those two fields are raw metadata, and _which_ of them is populated depends on how the dependency bound the port. `assignedSslPort` carries a port that speaks TLS — whether StartOS terminates it or the container serves its own certificate — and `assignedPort` a plaintext one, so a binding with `addSsl` and `secure.ssl` carries only `assignedSslPort` while an `http`/`ws` binding carries both. So a caller reading either field directly is asserting whether its dependency's port speaks TLS — and silently resolves `null` the day that changes. This is not hypothetical: it is exactly what broke every LND dependent when LND moved REST behind the OS proxy.
 
    `getBridgeAddress` keys off the binding rather than an exported interface, so it also resolves **bridge-only bindings** — tor's SOCKS proxy resolves through it — and it narrows reactivity to that one address, so `.const()` is unaffected by the box's LAN IP changing or a Tor/clearnet address being added. Don't hand-roll it by matching `metadata.gateway === 'lxcbr0'`.
 
@@ -126,7 +126,7 @@ Three patterns that older packages used are being removed. Do not introduce them
 
 - **`<package-id>.startos` DNS names** (`http://bitcoind.startos:8332`). The overlay DNS that resolved these is deprecated and will be removed. Resolve the bridge address instead.
 - **Cross-package container IPs** (`sdk.getContainerIp(effects, { packageId })`). A dependency's container IP is not stable across its restarts/updates and reading it reactively restarts your service on every dependency churn. Use the bridge. (`getContainerIp` with **no** `packageId` — your _own_ container IP — remains fine.)
-- **Reading `net.assignedPort` / `net.assignedSslPort` directly, or matching `metadata.gateway === 'lxcbr0'` by hand.** Only one of the two is ever populated, and which one is a property of how the dependency bound the port — not something a caller may assume. Read the binding's bridge address, which is correct either way.
+- **Reading `net.assignedPort` / `net.assignedSslPort` directly, or matching `metadata.gateway === 'lxcbr0'` by hand.** Which of the two is populated is a property of how the dependency bound the port — not something a caller may assume. Read the binding's bridge address, which is correct either way.
 
 ## Reference implementations
 

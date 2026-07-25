@@ -2255,7 +2255,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
           80: {
             enabled: true,
             net: {
-              assignedPort: 80,
+              assignedPort: null,
               assignedSslPort: 443,
             },
             addresses: {

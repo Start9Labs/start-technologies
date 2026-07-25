@@ -270,15 +270,13 @@ impl BindInfo {
     pub fn new(available_ports: &mut AvailablePorts, options: BindOptions) -> Result<Self, Error> {
         let mut assigned_port = None;
         let mut assigned_ssl_port = None;
-        if let Some(ssl) = &options.add_ssl {
+        if let Some(preferred) = options.preferred_ssl_port() {
+            let proxied = options.add_ssl.is_some();
             assigned_ssl_port = available_ports
-                .try_alloc(ssl.preferred_external_port, true)
-                .or_else(|| Some(available_ports.alloc(true).ok()?));
+                .try_alloc(preferred, proxied)
+                .or_else(|| Some(available_ports.alloc(proxied).ok()?));
         }
-        if options
-            .secure
-            .map_or(true, |s| !(s.ssl && options.add_ssl.is_some()))
-        {
+        if options.wants_plain_port() {
             assigned_port = available_ports
                 .try_alloc(options.preferred_external_port, false)
                 .or_else(|| Some(available_ports.alloc(false).ok()?));
@@ -301,48 +299,44 @@ impl BindInfo {
         options: BindOptions,
     ) -> Result<Self, Error> {
         let Self {
-            net: mut lan,
+            net: held,
             addresses,
             interfaces,
             ..
         } = self;
-        if options
-            .secure
-            .map_or(true, |s| !(s.ssl && options.add_ssl.is_some()))
-        // doesn't make sense to have 2 listening ports, both with ssl
-        {
-            lan.assigned_port = if let Some(port) = lan.assigned_port.take() {
-                Some(port)
-            } else if let Some(port) =
-                available_ports.try_alloc(options.preferred_external_port, false)
-            {
-                Some(port)
-            } else {
-                Some(available_ports.alloc(false)?)
-            };
-        } else {
-            if let Some(port) = lan.assigned_port.take() {
-                available_ports.free([port]);
-            }
-        }
-        if let Some(ssl) = &options.add_ssl {
-            lan.assigned_ssl_port = if let Some(port) = lan.assigned_ssl_port.take() {
-                Some(port)
-            } else if let Some(port) = available_ports.try_alloc(ssl.preferred_external_port, true)
-            {
-                Some(port)
-            } else {
-                Some(available_ports.alloc(true)?)
-            };
-        } else {
-            if let Some(port) = lan.assigned_ssl_port.take() {
-                available_ports.free([port]);
-            }
-        }
+        // Release both ports up front so the numbers below can be reclaimed. The
+        // external port is in the user's address book and keys their per-address
+        // overrides, so a binding that changes how its port is served keeps the
+        // same number — carrying it to the other field when it holds just one.
+        available_ports.free(held.assigned_port.into_iter().chain(held.assigned_ssl_port));
+        let carried = match (held.assigned_port, held.assigned_ssl_port) {
+            (Some(port), None) | (None, Some(port)) => Some(port),
+            _ => None,
+        };
+        let mut reclaim = |held: Option<u16>, preferred: u16, ssl: bool| {
+            let want = held.or(carried).unwrap_or(preferred);
+            available_ports
+                .try_alloc(want, ssl)
+                .or_else(|| available_ports.try_alloc(preferred, ssl))
+                .map_or_else(|| available_ports.alloc(ssl), Ok)
+        };
+
+        let assigned_ssl_port = options
+            .preferred_ssl_port()
+            .map(|preferred| reclaim(held.assigned_ssl_port, preferred, options.add_ssl.is_some()))
+            .transpose()?;
+        let assigned_port = options
+            .wants_plain_port()
+            .then(|| reclaim(held.assigned_port, options.preferred_external_port, false))
+            .transpose()?;
+
         Ok(Self {
             enabled: true,
             options,
-            net: lan,
+            net: NetInfo {
+                assigned_port,
+                assigned_ssl_port,
+            },
             addresses,
             interfaces,
         })
@@ -366,6 +360,33 @@ pub struct BindOptions {
     pub preferred_external_port: u16,
     pub add_ssl: Option<AddSslOptions>,
     pub secure: Option<Security>,
+}
+
+impl BindOptions {
+    /// The container terminates TLS itself, so the OS forwards its port
+    /// untouched rather than putting a listener of its own in front.
+    pub fn serves_own_tls(&self) -> bool {
+        self.secure.map_or(false, |s| s.ssl) && self.add_ssl.is_none()
+    }
+
+    /// Preferred external port for the TLS-carrying listener: the OS's own when
+    /// it terminates (`add_ssl`), otherwise the binding's, since a self-TLS
+    /// binding has no second port to take one from.
+    pub fn preferred_ssl_port(&self) -> Option<u16> {
+        self.add_ssl
+            .as_ref()
+            .map(|s| s.preferred_external_port)
+            .or_else(|| {
+                self.serves_own_tls()
+                    .then_some(self.preferred_external_port)
+            })
+    }
+
+    /// A plaintext external port exists unless the container itself speaks TLS
+    /// — two listening ports both carrying TLS makes no sense.
+    pub fn wants_plain_port(&self) -> bool {
+        !self.secure.map_or(false, |s| s.ssl)
+    }
 }
 
 /// How the OS reverse proxy validates the container's TLS certificate when it
@@ -1004,6 +1025,93 @@ mod test {
                 scope_id: 0,
             },
         }
+    }
+
+    fn opts(preferred: u16, add_ssl: Option<u16>, ssl: Option<bool>) -> BindOptions {
+        BindOptions {
+            preferred_external_port: preferred,
+            add_ssl: add_ssl.map(|preferred_external_port| AddSslOptions {
+                preferred_external_port,
+                add_x_forwarded_headers: false,
+                alpn: None,
+                upstream_cert_validation: None,
+                auth: None,
+            }),
+            secure: ssl.map(|ssl| Security { ssl }),
+        }
+    }
+
+    #[test]
+    fn tls_carrying_ports_are_ssl_ports() {
+        let mut ports = AvailablePorts::new();
+
+        // plaintext: one forwarded port
+        let plain = BindInfo::new(&mut ports, opts(8080, None, Some(false))).unwrap();
+        assert_eq!(plain.net.assigned_port, Some(8080));
+        assert_eq!(plain.net.assigned_ssl_port, None);
+        assert!(!ports.is_ssl(8080));
+
+        // we terminate TLS in front of a plaintext container: both ports
+        let add_ssl = BindInfo::new(&mut ports, opts(8081, Some(8444), None)).unwrap();
+        assert_eq!(add_ssl.net.assigned_port, Some(8081));
+        assert_eq!(add_ssl.net.assigned_ssl_port, Some(8444));
+        assert!(ports.is_ssl(8444));
+
+        // we rewrap the container's TLS: the ssl port only
+        let rewrap = BindInfo::new(&mut ports, opts(8082, Some(8445), Some(true))).unwrap();
+        assert_eq!(rewrap.net.assigned_port, None);
+        assert_eq!(rewrap.net.assigned_ssl_port, Some(8445));
+
+        // the container serves its own TLS: the ssl port only, forwarded
+        // straight through, so it is not one of our listeners' ports
+        let own_tls = BindInfo::new(&mut ports, opts(8083, None, Some(true))).unwrap();
+        assert_eq!(own_tls.net.assigned_port, None);
+        assert_eq!(own_tls.net.assigned_ssl_port, Some(8083));
+        assert!(!ports.is_ssl(8083));
+    }
+
+    #[test]
+    fn changing_how_a_port_is_served_keeps_its_number() {
+        let mut ports = AvailablePorts::new();
+        let plain = BindInfo::new(&mut ports, opts(8080, None, Some(false))).unwrap();
+        assert_eq!(plain.net.assigned_port, Some(8080));
+
+        let own_tls = plain
+            .update(&mut ports, opts(8080, None, Some(true)))
+            .unwrap();
+        assert_eq!(own_tls.net.assigned_port, None);
+        assert_eq!(own_tls.net.assigned_ssl_port, Some(8080));
+
+        // handing termination to us keeps the port and marks it ours
+        let add_ssl = own_tls
+            .update(&mut ports, opts(8080, Some(8080), Some(true)))
+            .unwrap();
+        assert_eq!(add_ssl.net.assigned_ssl_port, Some(8080));
+        assert!(ports.is_ssl(8080));
+
+        // and back down to plaintext
+        let plain = add_ssl
+            .update(&mut ports, opts(8080, None, Some(false)))
+            .unwrap();
+        assert_eq!(plain.net.assigned_port, Some(8080));
+        assert_eq!(plain.net.assigned_ssl_port, None);
+        assert!(!ports.is_ssl(8080));
+    }
+
+    #[test]
+    fn a_rebind_does_not_migrate_onto_a_freed_preferred_port() {
+        let mut ports = AvailablePorts::new();
+        // someone else holds 8080, so this binding lands elsewhere
+        assert_eq!(ports.try_alloc(8080, false), Some(8080));
+        let squatted = BindInfo::new(&mut ports, opts(8080, None, Some(false))).unwrap();
+        let assigned = squatted.net.assigned_port.unwrap();
+        assert_ne!(assigned, 8080);
+
+        ports.free([8080]);
+        let again = squatted
+            .update(&mut ports, opts(8080, None, Some(false)))
+            .unwrap();
+        assert_eq!(again.net.assigned_port, Some(assigned));
     }
 
     #[test]
