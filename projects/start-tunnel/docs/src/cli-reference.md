@@ -72,6 +72,14 @@ Create a new subnet with the given name.
 
 Remove a subnet and all its devices.
 
+### `start-tunnel subnet <SUBNET> set-wan`
+
+Pin the VPS address the subnet's traffic egresses from, and that its published
+ports answer on. See [Outbound IP](subnets.md#outbound-ip).
+
+- `--wan-ip <WAN_IP>` — The address to pin. Omit to clear the pin and let
+  StartTunnel choose.
+
 ### `start-tunnel subnet <SUBNET> set-ipv6`
 
 Set (or clear) the routed IPv6 prefix delegated to the subnet. Each host on the

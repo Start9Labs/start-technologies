@@ -76,7 +76,9 @@ export class LiveApiService extends ApiService {
     return this.rpcRequest({ method: 'subnet.set-dns', params })
   }
 
-  async setSubnetWan(params: T.Tunnel.SetSubnetWanParams): Promise<null> {
+  async setSubnetWan(
+    params: T.Tunnel.SubnetParams & T.Tunnel.SetSubnetWanParams,
+  ): Promise<null> {
     return this.rpcRequest({ method: 'subnet.set-wan', params })
   }
 
@@ -180,7 +182,9 @@ export class LiveApiService extends ApiService {
 
   // ipv6
 
-  async setSubnetIpv6(params: T.Tunnel.SetSubnetIpv6Params): Promise<null> {
+  async setSubnetIpv6(
+    params: T.Tunnel.SubnetParams & T.Tunnel.SetSubnetIpv6Params,
+  ): Promise<null> {
     return this.rpcRequest({ method: 'subnet.set-ipv6', params })
   }
 

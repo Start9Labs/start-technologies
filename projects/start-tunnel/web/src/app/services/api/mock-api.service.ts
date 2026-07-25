@@ -111,7 +111,9 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async setSubnetWan(params: T.Tunnel.SetSubnetWanParams): Promise<null> {
+  async setSubnetWan(
+    params: T.Tunnel.SubnetParams & T.Tunnel.SetSubnetWanParams,
+  ): Promise<null> {
     await pauseFor(1000)
 
     const patch: ReplaceOperation<string | null>[] = [
@@ -588,7 +590,9 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async setSubnetIpv6(params: T.Tunnel.SetSubnetIpv6Params): Promise<null> {
+  async setSubnetIpv6(
+    params: T.Tunnel.SubnetParams & T.Tunnel.SetSubnetIpv6Params,
+  ): Promise<null> {
     await pauseFor(1000)
 
     const patch: ReplaceOperation<string | null>[] = [

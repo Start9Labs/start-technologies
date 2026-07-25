@@ -30,7 +30,7 @@ Rent a cheap VPS with a dedicated public IP. Minimum CPU/RAM/disk is fine. For b
 > StartTunnel is designed to be the sole application on your VPS. The installer disables UFW and manages its own firewall rules via iptables. Do not run other Internet-facing services on the same VPS.
 
 > [!WARNING]
-> Publishing ports requires a **dedicated public IPv4 address** assigned to your VPS. Shared IPv4 addresses (CGNAT, shared NAT, or load-balanced IPs) will not work. IPv6-only VPSes will not work for clearnet hosting either — see [Can I use an IPv6-only VPS?](faq.md#does-starttunnel-work-on-an-ipv6-only-vps) in the FAQ. Confirm with your VPS provider that the IPv4 address is dedicated to your VM before purchasing.
+> Publishing ports requires a **dedicated public IPv4 address** assigned to your VPS. Shared IPv4 addresses (CGNAT, shared NAT, or load-balanced IPs) will not work. It is fine if the address lives at your provider's edge and the server holds a private one instead (AWS, Google Cloud, Azure, Oracle Cloud) — as long as the public address is yours alone and its traffic reaches this VPS. IPv6-only VPSes will not work for clearnet hosting either — see [Can I use an IPv6-only VPS?](faq.md#does-starttunnel-work-on-an-ipv6-only-vps) in the FAQ. Confirm with your VPS provider that the IPv4 address is dedicated to your VM before purchasing.
 
 > [!TIP]
 > Thinking about IPv6? It's optional, and you configure it per subnet after installing (see [IPv6](ipv6.md)) — but the easiest time to arrange it is server creation: enable IPv6 if your provider offers it as an option, and note the size of the block they route to your VPS. Adding it to an existing server often takes extra host-side configuration.

@@ -3,7 +3,8 @@ import { TunnelData } from 'src/app/services/patch-db/data-model'
 
 type Gateways = TunnelData['gateways']
 
-// Ranges core's is_wan_candidate (core/src/net/upnp.rs) rejects: 0/8 +
+// Ranges core's is_wan_candidate
+// (shared-libs/crates/start-core/src/net/port_map/upnp.rs) rejects: 0/8 +
 // unspecified, loopback, RFC1918, link-local, the TEST-NET docs ranges, and
 // broadcast. CGNAT (100.64/10) is intentionally absent — the backend accepts it
 // as a valid WAN, so the UI must too. Keep this list in sync with that fn.
@@ -20,32 +21,43 @@ const NON_WAN_RANGES = [
   '255.255.255.255/32',
 ].map(r => utils.IpNet.parse(r))
 
-function isWanCandidate(address: string): boolean {
+// Addresses no host ever receives traffic on, so never a WAN.
+const UNUSABLE_RANGES = [
+  '0.0.0.0/8',
+  '127.0.0.0/8',
+  '169.254.0.0/16',
+  '255.255.255.255/32',
+].map(r => utils.IpNet.parse(r))
+
+function inNone(ranges: readonly utils.IpNet[], address: string): boolean {
   const ip = utils.IpAddress.parse(address)
-  return ip.isIpv4() && !NON_WAN_RANGES.some(r => r.contains(ip))
+  return ip.isIpv4() && !ranges.some(r => r.contains(ip))
 }
 
-// Public WAN IPv4 addresses the gateway can egress from — the explicit choices.
+const isWanCandidate = (address: string) => inNone(NON_WAN_RANGES, address)
+
+// The IPv4 addresses a subnet or device can egress from. Public ones wherever
+// the host holds any; otherwise every address it holds, because a provider that
+// translates the public address at its edge (AWS, Google Cloud, Azure, Oracle)
+// leaves the host with only a private one — the address its traffic actually
+// arrives on, and so the only one a published port can use. Mirrors core's
+// default_wan_of (shared-libs/crates/start-core/src/tunnel/forward/igd.rs).
 export function wanOptions(gateways: Gateways): readonly string[] {
-  return Object.values(gateways)
-    .flatMap(
-      g => g.ipInfo?.subnets.map(s => utils.IpNet.parse(s).address) ?? [],
-    )
-    .filter(isWanCandidate)
+  const held = Object.values(gateways).flatMap(
+    g => g.ipInfo?.subnets.map(s => utils.IpNet.parse(s).address) ?? [],
+  )
+  const publicIps = held.filter(isWanCandidate)
+  return publicIps.length
+    ? publicIps
+    : held.filter(ip => inNone(UNUSABLE_RANGES, ip))
 }
 
-// Mirrors core's default_wan (core/src/tunnel/igd.rs): the first gateway's
-// detected WAN IP if it is a candidate, else its first candidate subnet address.
+// The address core resolves when a subnet or device pins none.
 export function defaultWanIp(gateways: Gateways): string | null {
   for (const { ipInfo } of Object.values(gateways)) {
-    if (!ipInfo) continue
-    if (ipInfo.wanIp && isWanCandidate(ipInfo.wanIp)) return ipInfo.wanIp
-    const subnet = ipInfo.subnets
-      .map(s => utils.IpNet.parse(s).address)
-      .find(isWanCandidate)
-    if (subnet) return subnet
+    if (ipInfo?.wanIp && isWanCandidate(ipInfo.wanIp)) return ipInfo.wanIp
   }
-  return null
+  return wanOptions(gateways)[0] ?? null
 }
 
 // tuiSelect skips a bare `null` item, so the "default" choice is wrapped in an
