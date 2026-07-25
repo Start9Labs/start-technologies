@@ -75,19 +75,14 @@ pub async fn ensure_volume_root(pkg_id: &PackageId) -> Result<(), Error> {
 }
 
 /// Creates a CoW snapshot of the package volume directory before an
-/// install/update modifies it. When the volume root is a btrfs subvolume
-/// (every package after boot conversion), this is a constant-time, atomic
-/// `btrfs subvolume snapshot`. Plain directories fall back to a reflink clone
-/// — O(extents), reported byte-for-byte through `phase` since it can take
-/// minutes on a large fragmented volume. Neither path ever byte-copies data.
-/// Returns `true` if a backup was created, `false` if no data existed or the
-/// filesystem doesn't support reflinks.
-pub async fn snapshot_volumes_for_install(
-    pkg_id: &PackageId,
-    phase: &mut PhaseProgressTrackerHandle,
-) -> Result<bool, Error> {
+/// install/update modifies it. Volume roots are btrfs subvolumes (enforced at
+/// boot and at install), so this is a constant-time, atomic `btrfs subvolume
+/// snapshot`. Anything else — a volume the boot conversion could not handle,
+/// or a non-btrfs data dir — degrades to no backup.
+/// Returns `true` if a backup was created, `false` otherwise.
+pub async fn snapshot_volumes_for_install(pkg_id: &PackageId) -> Result<bool, Error> {
     let src = pkg_volume_dir(pkg_id);
-    if tokio::fs::metadata(&src).await.is_err() {
+    if !btrfs::is_subvolume(&src).await {
         return Ok(false);
     }
     let dst = install_backup_path(pkg_id);
@@ -96,51 +91,17 @@ pub async fn snapshot_volumes_for_install(
         tracing::warn!("Could not remove stale install backup for {pkg_id}: {e}");
         return Ok(false);
     }
-    let res = if btrfs::is_subvolume(&src).await
-        // nested subvolumes would appear in a snapshot as empty dirs; the
-        // clone walker flattens them instead, preserving their contents
-        && matches!(btrfs::nested_subvolumes(&src).await.as_deref(), Ok([]))
-    {
-        btrfs::snapshot_subvolume(&src, &dst).await
-    } else {
-        legacy_clone_backup(&src, &dst, phase).await
-    };
-    match res {
+    match btrfs::snapshot_subvolume(&src, &dst).await {
         Ok(()) => {
             tracing::info!("Created install backup for {pkg_id} at {dst:?}");
             Ok(true)
         }
         Err(e) => {
-            tracing::warn!(
-                "Could not create install backup for {pkg_id} \
-                 (filesystem may not support reflinks): {e}"
-            );
-            // Clean up partial copy if any
+            tracing::warn!("Could not create install backup for {pkg_id}: {e}");
             btrfs::delete_tree(&dst).await.log_err();
             Ok(false)
         }
     }
-}
-
-async fn legacy_clone_backup(
-    src: &Path,
-    dst: &Path,
-    phase: &mut PhaseProgressTrackerHandle,
-) -> Result<(), Error> {
-    // A subvolume backup makes the rollback rename promote the volume root to
-    // a subvolume for free.
-    if btrfs::is_btrfs(src).await {
-        btrfs::create_subvolume(dst).await?;
-    }
-    let total = crate::util::io::dir_size(src, None)
-        .await
-        .with_kind(ErrorKind::Filesystem)?;
-    phase.set_units(Some(ProgressUnits::Bytes));
-    phase.set_total(total);
-    let ctr = Arc::new(Counter::new(0, std::sync::atomic::Ordering::Relaxed));
-    with_byte_progress(phase, 0, &ctr, clone_tree(src, dst, ctr.clone())).await?;
-    phase.set_done(total);
-    Ok(())
 }
 
 async fn with_byte_progress(

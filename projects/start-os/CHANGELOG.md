@@ -229,9 +229,9 @@ last released beta.
   fragmentation, and still zero data copied. Existing volumes are converted
   once, at the first boot after upgrading, under a new "Optimizing storage"
   boot phase with byte-accurate progress — expect that one boot to take
-  longer on boxes with large service volumes. Volumes that still aren't
-  subvolumes (e.g. on a non-btrfs dev data dir) fall back to the old clone,
-  which now reports byte progress in the update bar instead of freezing it.
+  longer on boxes with large service volumes. A volume root that still isn't
+  a subvolume afterwards (e.g. on a non-btrfs dev data dir) simply skips the
+  backup, as non-btrfs systems always have.
 
 ### Fixed
 
@@ -437,11 +437,11 @@ last released beta.
   btrfs refuses reflink clones between `nodatacow` (`chattr +C`) and normal
   files, so any service that marks its data directory `+C` — Bitcoin Core
   does — never actually got an install backup; the failure was only a log
-  line. The backup path now mirrors the source's `+C` flag on the destination
-  before cloning, and the subvolume snapshot path is immune entirely. Boot now
-  also repairs interrupted backup restores (completing the rename so the
-  backup's data comes back as the live volume) and sweeps backups orphaned by
-  a package's removal; a backup left beside a healthy installed package is
+  line. Subvolume snapshots are immune entirely, and the one-time boot
+  conversion mirrors each file's `+C` flag before cloning it. Boot now also
+  repairs interrupted backup restores (completing the rename so the backup's
+  data comes back as the live volume) and sweeps backups orphaned by a
+  package's removal; a backup left beside a healthy installed package is
   cleaned up on that package's next update.
 
 ### Removed

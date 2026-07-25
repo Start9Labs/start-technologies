@@ -351,4 +351,233 @@ mod linux {
         buf.truncate(n as usize);
         Ok(buf)
     }
+
+    #[cfg(test)]
+    mod tests {
+        use std::io::Write;
+
+        use super::super::clone_tree;
+        use super::*;
+
+        struct TestDir(PathBuf);
+        impl TestDir {
+            fn new(name: &str) -> Self {
+                let path = std::env::temp_dir()
+                    .join(format!("clone-tree-test-{}-{name}", std::process::id()));
+                std::fs::create_dir(&path).unwrap();
+                Self(path)
+            }
+        }
+        impl Drop for TestDir {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+
+        fn ctr() -> Arc<Counter> {
+            Arc::new(Counter::new(0, std::sync::atomic::Ordering::Relaxed))
+        }
+
+        /// Trees without regular files make no FICLONERANGE calls; trees with
+        /// them skip on filesystems without reflink support.
+        fn reflink_supported(dir: &Path) -> bool {
+            let src_path = dir.join("probe-src");
+            let dst_path = dir.join("probe-dst");
+            std::fs::write(&src_path, b"x").unwrap();
+            let src = File::open(&src_path).unwrap();
+            let dst = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&dst_path)
+                .unwrap();
+            let supported = clone_range(&src, &dst, 0, 1).is_ok();
+            if !supported {
+                eprintln!("skipping: no reflink support on this filesystem");
+            }
+            supported
+        }
+
+        fn xattr(path: &Path, name: &str) -> Option<Vec<u8>> {
+            let path = cpath(path).unwrap();
+            let name = std::ffi::CString::new(name).unwrap();
+            let len =
+                unsafe { libc::getxattr(path.as_ptr(), name.as_ptr(), std::ptr::null_mut(), 0) };
+            if len < 0 {
+                return None;
+            }
+            let mut buf = vec![0u8; len as usize];
+            let n = unsafe {
+                libc::getxattr(
+                    path.as_ptr(),
+                    name.as_ptr(),
+                    buf.as_mut_ptr() as *mut libc::c_void,
+                    buf.len(),
+                )
+            };
+            assert_eq!(n as usize, buf.len());
+            Some(buf)
+        }
+
+        #[tokio::test]
+        async fn clones_tree_preserving_data_and_metadata() {
+            let tmp = TestDir::new("tree");
+            let src = tmp.0.join("src");
+            let dst = tmp.0.join("dst");
+            std::fs::create_dir(&src).unwrap();
+            std::fs::create_dir(src.join("sub")).unwrap();
+            std::fs::write(src.join("file"), b"hello").unwrap();
+            std::fs::write(src.join("sub").join("empty"), b"").unwrap();
+            std::fs::set_permissions(src.join("file"), PermissionsExt::from_mode(0o640)).unwrap();
+            std::fs::set_permissions(src.join("sub"), PermissionsExt::from_mode(0o750)).unwrap();
+            let set_xattr = |path: &Path| {
+                let path_c = cpath(path).unwrap();
+                let name = std::ffi::CString::new("user.clone-test").unwrap();
+                let value = b"present";
+                assert_eq!(
+                    unsafe {
+                        libc::setxattr(
+                            path_c.as_ptr(),
+                            name.as_ptr(),
+                            value.as_ptr() as *const libc::c_void,
+                            value.len(),
+                            0,
+                        )
+                    },
+                    0
+                );
+            };
+            set_xattr(&src.join("file"));
+            set_xattr(&src.join("sub"));
+            let mtime = std::fs::metadata(src.join("file")).unwrap().mtime();
+
+            if !reflink_supported(&tmp.0) {
+                return;
+            }
+            let progress = ctr();
+            clone_tree(&src, &dst, progress.clone()).await.unwrap();
+
+            assert_eq!(std::fs::read(dst.join("file")).unwrap(), b"hello");
+            assert_eq!(std::fs::read(dst.join("sub").join("empty")).unwrap(), b"");
+            assert_eq!(
+                std::fs::metadata(dst.join("file")).unwrap().mode() & 0o777,
+                0o640
+            );
+            assert_eq!(
+                std::fs::metadata(dst.join("sub")).unwrap().mode() & 0o777,
+                0o750
+            );
+            assert_eq!(std::fs::metadata(dst.join("file")).unwrap().mtime(), mtime);
+            assert_eq!(
+                xattr(&dst.join("file"), "user.clone-test").as_deref(),
+                Some(&b"present"[..])
+            );
+            assert_eq!(
+                xattr(&dst.join("sub"), "user.clone-test").as_deref(),
+                Some(&b"present"[..])
+            );
+            assert_eq!(progress.load(), 5);
+        }
+
+        #[tokio::test]
+        async fn clones_symlinks_and_fifos() {
+            let tmp = TestDir::new("special");
+            let src = tmp.0.join("src");
+            let dst = tmp.0.join("dst");
+            std::fs::create_dir(&src).unwrap();
+            std::os::unix::fs::symlink("file", src.join("link")).unwrap();
+            std::os::unix::fs::symlink("missing", src.join("dangling")).unwrap();
+            let fifo_c = cpath(&src.join("fifo")).unwrap();
+            assert_eq!(unsafe { libc::mkfifo(fifo_c.as_ptr(), 0o644) }, 0);
+
+            clone_tree(&src, &dst, ctr()).await.unwrap();
+
+            let meta = std::fs::symlink_metadata(dst.join("link")).unwrap();
+            assert!(meta.file_type().is_symlink());
+            assert_eq!(
+                std::fs::read_link(dst.join("link")).unwrap(),
+                Path::new("file")
+            );
+            assert_eq!(
+                std::fs::read_link(dst.join("dangling")).unwrap(),
+                Path::new("missing")
+            );
+            assert!(
+                std::fs::symlink_metadata(dst.join("fifo"))
+                    .unwrap()
+                    .file_type()
+                    .is_fifo()
+            );
+        }
+
+        #[tokio::test]
+        async fn preserves_hardlinks() {
+            let tmp = TestDir::new("hardlinks");
+            let src = tmp.0.join("src");
+            let dst = tmp.0.join("dst");
+            std::fs::create_dir(&src).unwrap();
+            std::fs::write(src.join("a"), b"shared").unwrap();
+            std::fs::hard_link(src.join("a"), src.join("b")).unwrap();
+            std::fs::write(src.join("c"), b"shared").unwrap();
+
+            if !reflink_supported(&tmp.0) {
+                return;
+            }
+            clone_tree(&src, &dst, ctr()).await.unwrap();
+
+            let a = std::fs::metadata(dst.join("a")).unwrap();
+            let b = std::fs::metadata(dst.join("b")).unwrap();
+            let c = std::fs::metadata(dst.join("c")).unwrap();
+            assert_eq!(a.ino(), b.ino());
+            assert_eq!(a.nlink(), 2);
+            assert_ne!(a.ino(), c.ino());
+            assert_eq!(std::fs::read(dst.join("b")).unwrap(), b"shared");
+        }
+
+        #[tokio::test]
+        async fn mirrors_nodatacow() {
+            let tmp = TestDir::new("nodatacow");
+            let src = tmp.0.join("src");
+            let dst = tmp.0.join("dst");
+            std::fs::create_dir(&src).unwrap();
+            let mut nocow = File::create(src.join("nocow")).unwrap();
+            // +C only sticks while the file has no extents
+            let flags = FS_NOCOW_FL;
+            if unsafe { libc::ioctl(nocow.as_raw_fd(), libc::FS_IOC_SETFLAGS as _, &flags) } != 0 {
+                eprintln!("skipping: FS_IOC_SETFLAGS unsupported here");
+                return;
+            }
+            nocow.write_all(b"cowed-out").unwrap();
+            drop(nocow);
+
+            if !reflink_supported(&tmp.0) {
+                return;
+            }
+            clone_tree(&src, &dst, ctr()).await.unwrap();
+
+            let cloned = File::open(dst.join("nocow")).unwrap();
+            assert_ne!(get_fs_flags(&cloned).unwrap() & FS_NOCOW_FL, 0);
+            assert_eq!(std::fs::read(dst.join("nocow")).unwrap(), b"cowed-out");
+        }
+
+        #[tokio::test]
+        async fn clones_across_chunk_boundaries() {
+            let tmp = TestDir::new("chunked");
+            let src = tmp.0.join("src");
+            let dst = tmp.0.join("dst");
+            std::fs::create_dir(&src).unwrap();
+            let size = CHUNK + 4096;
+            let mut big = File::create(src.join("big")).unwrap();
+            big.write_all(b"start").unwrap();
+            big.set_len(size).unwrap();
+
+            if !reflink_supported(&tmp.0) {
+                return;
+            }
+            let progress = ctr();
+            clone_tree(&src, &dst, progress.clone()).await.unwrap();
+
+            assert_eq!(std::fs::metadata(dst.join("big")).unwrap().len(), size);
+            assert_eq!(progress.load(), size);
+        }
+    }
 }

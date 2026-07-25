@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use tokio::process::Command;
 
@@ -56,57 +56,23 @@ pub async fn snapshot_subvolume(src: impl AsRef<Path>, dst: impl AsRef<Path>) ->
     Ok(())
 }
 
-/// Lists subvolumes nested anywhere below `path` (exclusive), deepest first.
-pub async fn nested_subvolumes(path: &Path) -> Result<Vec<PathBuf>, Error> {
-    use std::os::unix::fs::MetadataExt;
-    let mut found = Vec::new();
-    let mut stack = vec![path.to_owned()];
-    while let Some(dir) = stack.pop() {
-        let mut entries = tokio::fs::read_dir(&dir)
-            .await
-            .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("read dir {dir:?}")))?;
-        while let Some(entry) = entries.next_entry().await? {
-            let m = match entry.metadata().await {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-            if m.is_dir() {
-                if m.ino() == SUBVOL_INO {
-                    found.push(entry.path());
-                }
-                stack.push(entry.path());
-            }
-        }
-    }
-    found.sort_by_key(|p| std::cmp::Reverse(p.components().count()));
-    Ok(found)
-}
-
-async fn delete_subvolume(path: &Path) -> Result<(), Error> {
-    for nested in nested_subvolumes(path).await? {
-        Command::new("btrfs")
-            .args(["subvolume", "delete"])
-            .arg(&nested)
-            .timeout(Some(std::time::Duration::from_secs(60)))
-            .invoke(ErrorKind::Filesystem)
-            .await?;
-    }
-    Command::new("btrfs")
-        .args(["subvolume", "delete"])
-        .arg(path)
-        .timeout(Some(std::time::Duration::from_secs(60)))
-        .invoke(ErrorKind::Filesystem)
-        .await?;
-    Ok(())
-}
-
-/// Deletes `path` whether it is a subvolume (freed asynchronously by the btrfs
-/// cleaner), a plain directory, or absent.
+/// Deletes `path` whether it is a subvolume (freed asynchronously by the
+/// btrfs cleaner), a plain directory, or absent. `btrfs subvolume delete`
+/// refuses a subvolume containing nested ones; rather than walk the tree we
+/// fall back to a plain recursive remove, accepting that nested subvolume
+/// roots (which package volumes should never contain) may survive it.
 pub async fn delete_tree(path: impl AsRef<Path>) -> Result<(), Error> {
     let path = path.as_ref();
-    if is_subvolume(path).await {
-        delete_subvolume(path).await
-    } else {
-        crate::util::io::delete_dir(path).await
+    if is_subvolume(path).await
+        && Command::new("btrfs")
+            .args(["subvolume", "delete"])
+            .arg(path)
+            .timeout(Some(std::time::Duration::from_secs(60)))
+            .invoke(ErrorKind::Filesystem)
+            .await
+            .is_ok()
+    {
+        return Ok(());
     }
+    crate::util::io::delete_dir(path).await
 }
