@@ -42,7 +42,7 @@ Use a device's actions menu to **Change to Server** or **Change to Client**. Cha
 
 ## Outbound IP
 
-By default a device's outbound traffic leaves from its subnet's [outbound IP](/start-tunnel/subnets.html#outbound-ip). On a VPS with more than one public IPv4 address, you can override this per device with the **WAN IP** field in the device's Add/Edit dialog — choose **Subnet default** to inherit the subnet's setting (the address it resolves to is shown in parentheses), or a specific address to pin this device's egress. On a single-IP VPS there is only one choice, so leave it on **Subnet default**. To add another public IPv4 address to your VPS, see [IPv4](/start-tunnel/ipv4.html).
+By default a device's outbound traffic leaves from its subnet's [outbound IP](/start-tunnel/subnets.html#outbound-ip). On a VPS holding more than one IPv4 address, you can override this per device with the **WAN IP** field in the device's Add/Edit dialog — choose **Subnet default** to inherit the subnet's setting (the address it resolves to is shown in parentheses), or a specific address to pin this device's egress. On a single-address VPS there is only one choice, so leave it on **Subnet default**. To add another public IPv4 address to your VPS, see [IPv4](/start-tunnel/ipv4.html).
 
 ## IPv6
 

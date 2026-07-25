@@ -18,11 +18,13 @@ use axum::extract::{ConnectInfo, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
+use imbl::OrdMap;
 use nix::net::if_::if_nametoindex;
 use socket2::{Domain, InterfaceIndexOrAddress, Protocol, SockAddr, Socket, Type};
 use tokio::net::{TcpListener, UdpSocket};
 
-use crate::db::model::public::NetworkInterfaceType;
+use crate::GatewayId;
+use crate::db::model::public::{IpInfo, NetworkInterfaceInfo, NetworkInterfaceType};
 use crate::net::port_map::server::igd::{
     CONTROL_PATH, IGD_HTTP_PORT, ROOT_DESC_PATH, SCPD, SCPD_PATH, SSDP_MULTICAST, SSDP_PORT,
     format_uuid, handle_control, header_value, render_root_desc, serve_static, ssdp_response,
@@ -409,30 +411,46 @@ pub(in crate::tunnel) async fn external_ipv4(
         .or_else(|| default_wan(ctx))
 }
 
-/// First usable WAN candidate across the gateway's non-loopback, non-wg
-/// interfaces — the egress when no `wan_ip` is pinned for the peer or its subnet.
+/// The egress when no `wan_ip` is pinned for the peer or its subnet.
 fn default_wan(ctx: &TunnelContext) -> Option<Ipv4Addr> {
-    ctx.net_iface.peek(|ifaces| {
-        ifaces.iter().find_map(|(id, info)| {
-            if id.as_str() == WIREGUARD_INTERFACE_NAME {
-                return None;
-            }
-            let ip_info = info.ip_info.as_ref()?;
-            if ip_info.device_type == Some(NetworkInterfaceType::Loopback) {
-                return None;
-            }
+    ctx.net_iface.peek(default_wan_of)
+}
+
+/// A public address wins wherever the host holds one. Failing that, any address
+/// the host holds will do: a provider that translates the public address at its
+/// edge (AWS, Google Cloud, Azure, Oracle) leaves the host holding only a
+/// private one, and that private address is what inbound packets carry by the
+/// time they arrive — so it is what a forward has to match on.
+pub(in crate::tunnel) fn default_wan_of(
+    ifaces: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+) -> Option<Ipv4Addr> {
+    let egress = || {
+        ifaces
+            .iter()
+            .filter(|(id, _)| id.as_str() != WIREGUARD_INTERFACE_NAME)
+            .filter_map(|(_, info)| info.ip_info.as_ref())
+            .filter(|ip_info| ip_info.device_type != Some(NetworkInterfaceType::Loopback))
+    };
+    egress()
+        .find_map(|ip_info| {
             ip_info
                 .wan_ip
-                .filter(|v4| crate::net::port_map::upnp::is_wan_candidate(*v4))
-                .or_else(|| {
-                    ip_info.subnets.iter().find_map(|s| match s.addr() {
-                        IpAddr::V4(v4) if crate::net::port_map::upnp::is_wan_candidate(v4) => {
-                            Some(v4)
-                        }
-                        _ => None,
-                    })
-                })
+                .into_iter()
+                .chain(held_v4(ip_info))
+                .find(|v4| crate::net::port_map::upnp::is_wan_candidate(*v4))
         })
+        .or_else(|| {
+            egress().find_map(|ip_info| {
+                held_v4(ip_info)
+                    .find(|v4| !v4.is_loopback() && !v4.is_link_local() && !v4.is_unspecified())
+            })
+        })
+}
+
+fn held_v4(ip_info: &IpInfo) -> impl Iterator<Item = Ipv4Addr> + '_ {
+    ip_info.subnets.iter().filter_map(|s| match s.addr() {
+        IpAddr::V4(v4) => Some(v4),
+        _ => None,
     })
 }
 
@@ -458,4 +476,107 @@ pub(in crate::tunnel) async fn prefix_for(ctx: &TunnelContext, target_ip: &Ipv4A
             })
         })
         .unwrap_or(32)
+}
+
+#[cfg(test)]
+mod tests {
+    use imbl_value::InternedString;
+    use ipnet::IpNet;
+
+    use super::*;
+
+    fn iface(
+        name: &str,
+        device_type: NetworkInterfaceType,
+        addrs: &[&str],
+    ) -> NetworkInterfaceInfo {
+        NetworkInterfaceInfo {
+            name: Some(InternedString::from(name)),
+            ip_info: Some(Arc::new(IpInfo {
+                name: InternedString::from(name),
+                device_type: Some(device_type),
+                subnets: addrs.iter().map(|a| a.parse::<IpNet>().unwrap()).collect(),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+    }
+
+    fn ifaces(entries: &[(&str, NetworkInterfaceInfo)]) -> OrdMap<GatewayId, NetworkInterfaceInfo> {
+        entries
+            .iter()
+            .map(|(id, info)| (GatewayId::from(InternedString::from(*id)), info.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn public_address_wins_over_every_private_one() {
+        let map = ifaces(&[
+            (
+                "lo",
+                iface("lo", NetworkInterfaceType::Loopback, &["127.0.0.1/8"]),
+            ),
+            (
+                "ens3",
+                iface("ens3", NetworkInterfaceType::Ethernet, &["10.8.0.4/24"]),
+            ),
+            (
+                "ens4",
+                iface("ens4", NetworkInterfaceType::Ethernet, &["5.6.7.8/24"]),
+            ),
+        ]);
+        assert_eq!(default_wan_of(&map), Some("5.6.7.8".parse().unwrap()));
+    }
+
+    // A provider that NATs the public address at its edge (AWS, GCE, Azure,
+    // Oracle) leaves the host holding only a private address; inbound packets
+    // arrive addressed to it, so it is the only address a forward can match.
+    #[test]
+    fn private_address_is_used_when_the_host_holds_no_public_one() {
+        let map = ifaces(&[
+            (
+                "lo",
+                iface("lo", NetworkInterfaceType::Loopback, &["127.0.0.1/8"]),
+            ),
+            (
+                "ens3",
+                iface("ens3", NetworkInterfaceType::Ethernet, &["172.16.0.12/20"]),
+            ),
+        ]);
+        assert_eq!(default_wan_of(&map), Some("172.16.0.12".parse().unwrap()));
+    }
+
+    #[test]
+    fn the_wireguard_interface_is_never_the_wan() {
+        let map = ifaces(&[
+            (
+                WIREGUARD_INTERFACE_NAME,
+                iface(
+                    WIREGUARD_INTERFACE_NAME,
+                    NetworkInterfaceType::Ethernet,
+                    &["10.59.203.1/24"],
+                ),
+            ),
+            (
+                "ens3",
+                iface("ens3", NetworkInterfaceType::Ethernet, &["172.16.0.12/20"]),
+            ),
+        ]);
+        assert_eq!(default_wan_of(&map), Some("172.16.0.12".parse().unwrap()));
+    }
+
+    #[test]
+    fn loopback_and_link_local_are_not_addresses_traffic_arrives_on() {
+        let map = ifaces(&[
+            (
+                "lo",
+                iface("lo", NetworkInterfaceType::Loopback, &["127.0.0.1/8"]),
+            ),
+            (
+                "ens3",
+                iface("ens3", NetworkInterfaceType::Ethernet, &["169.254.7.9/16"]),
+            ),
+        ]);
+        assert_eq!(default_wan_of(&map), None);
+    }
 }

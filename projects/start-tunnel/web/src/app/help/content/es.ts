@@ -45,7 +45,7 @@ Este es el resolutor ascendente de la subred, distinto de los registros DNS que 
 
 ### IP de WAN
 
-Desde cuál de las direcciones IPv4 públicas del VPS sale el tráfico saliente de esta subred. **Predeterminado del sistema** deja que StartTunnel elija (la dirección se muestra entre paréntesis). Solo importa si tu VPS tiene más de una IP pública.
+Desde cuál de las direcciones IPv4 del VPS sale el tráfico saliente de esta subred, y la dirección en la que responden sus puertos publicados. **Predeterminado del sistema** deja que StartTunnel elija (la dirección se muestra entre paréntesis), que es lo que quieres salvo que tu VPS tenga más de una dirección.
 
 ### Prefijo IPv6
 

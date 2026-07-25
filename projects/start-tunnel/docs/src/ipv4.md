@@ -25,6 +25,15 @@ for both steps — ordering the address, and configuring it on an existing
 Debian server. `ip addr` on the VPS shows what the host holds; the new address
 must appear there.
 
+> [!NOTE]
+> This is about **additional** addresses. Providers that assign your primary
+> address at their edge and give the server a private one (AWS, Google Cloud,
+> Azure, Oracle Cloud) are a different arrangement: that address is yours, but
+> the server never holds it. StartTunnel egresses and publishes on the address
+> the server does hold — the one inbound traffic carries once your provider has
+> translated it — so the **WAN IP** selectors and the **External IP** column
+> show that address rather than the one you dial.
+
 ## Using it in StartTunnel
 
 StartTunnel picks up the host's public IPv4 addresses automatically — no

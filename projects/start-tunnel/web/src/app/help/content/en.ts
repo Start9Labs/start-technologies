@@ -57,7 +57,7 @@ This is the subnet's upstream resolver, separate from the DNS records StartTunne
 
 ### WAN IP
 
-Which of the VPS's public IPv4 addresses this subnet's outbound traffic leaves from. **System default** lets StartTunnel choose (the address is shown in parentheses). Only matters if your VPS has more than one public IP.
+Which of the VPS's IPv4 addresses this subnet's outbound traffic leaves from, and the address its published ports answer on. **System default** lets StartTunnel choose (the address is shown in parentheses), which is what you want unless your VPS holds more than one address.
 
 ### IPv6 Prefix
 

@@ -23,12 +23,12 @@ This chooses the _upstream_ resolver the subnet uses. It is separate from the pr
 
 ## Outbound IP
 
-If your VPS has more than one public IPv4 address, you can choose which one a subnet's outbound traffic leaves from — its egress (SNAT) address — with the **WAN IP** field:
+If your VPS holds more than one IPv4 address, you can choose which one a subnet's outbound traffic leaves from — its egress (SNAT) address — with the **WAN IP** field:
 
 - **System default** — let StartTunnel choose (masquerade through the server's primary address). When the address it resolves to is known, it's shown in parentheses, e.g. `System default (203.0.113.10)`.
-- A specific address — pin egress to one of the VPS's detected public IPv4 addresses.
+- A specific address — pin egress to one of the addresses StartTunnel detects on the VPS.
 
-A single-IP VPS has only one choice, so you can leave this on **System default**. Individual devices can override their subnet's choice — see [Devices › Outbound IP](/start-tunnel/devices.html#outbound-ip). To add another public IPv4 address to your VPS, see [IPv4](/start-tunnel/ipv4.html).
+A single-address VPS has only one choice, so you can leave this on **System default**. Individual devices can override their subnet's choice — see [Devices › Outbound IP](/start-tunnel/devices.html#outbound-ip). To add another public IPv4 address to your VPS, see [IPv4](/start-tunnel/ipv4.html).
 
 ## IPv6
 

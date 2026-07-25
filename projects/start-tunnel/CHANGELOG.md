@@ -5,6 +5,30 @@ All notable changes to StartTunnel are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2]
+
+### Fixed
+
+- **Published ports work on a VPS whose public address lives at the provider's
+  edge.** AWS, Google Cloud, Azure and Oracle Cloud hand the server a private
+  address and translate your dedicated public one in front of it. StartTunnel
+  looked for a public address on the server itself, found none, and refused to
+  publish a port — `no WAN IP available for device` — while ports published
+  before the upgrade kept working. It now publishes on the address the server
+  holds, which is the address inbound traffic carries by the time it arrives.
+  Automatic publishing (PCP/UPnP) from a StartOS server on such a tunnel works
+  again for the same reason. Where the VPS does hold a public address, that
+  address is still the one used.
+- **`start-tunnel subnet <SUBNET> set-wan` and `set-ipv6` can be run.** Both
+  asked for the subnet a second time, so every invocation failed with either
+  `the following required arguments were not provided: <SUBNET>` or
+  `Serialization Error: duplicate key: subnet`. They now take the subnet from
+  the parent command, as their `--help` and the CLI reference describe. The web
+  UI was unaffected.
+- **The WAN IP selectors list the addresses a server without a public one can
+  actually use.** They offered only public addresses, so on a provider-NAT'd
+  VPS the menu was empty and the setting was unreachable from the web UI.
+
 ## [1.2.1]
 
 ### Fixed
