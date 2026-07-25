@@ -35,6 +35,8 @@ fi
 # never runs. The rest matches 0.4.0's GRUB_CMDLINE_LINUX (debian/postinst).
 CMDLINE="$root boot=startos console=ttyS0,115200n8 console=tty0"
 
+# Paths stay unquoted: the Server Pure's PureBoot parses this file itself rather
+# than running GRUB, and takes the path verbatim, so a quote drops the entry.
 mkdir -p "$BOOT/grub"
 cat > "$BOOT/grub/grub.cfg" <<EOF
 set timeout=1
@@ -46,8 +48,8 @@ menuentry "StartOS" {
     insmod btrfs
     insmod ext2
     insmod fat
-    search --no-floppy --set=root --file "/$kernel"
-    linux "/$kernel" $CMDLINE
-    initrd "/$initrd"
+    search --no-floppy --set=root --file /$kernel
+    linux /$kernel $CMDLINE
+    initrd /$initrd
 }
 EOF

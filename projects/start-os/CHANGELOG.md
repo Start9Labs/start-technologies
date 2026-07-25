@@ -12,6 +12,12 @@ file tracks notable changes since the move to the monorepo.
 
 ### Fixed
 
+- **The over-the-air update to 0.4.0 boots on the Server Pure.** The Server
+  Pure's PureBoot firmware reads the boot configuration itself rather than
+  running GRUB, and it takes the kernel and initramfs paths literally. The
+  update now writes those paths in the plain form PureBoot expects, so the
+  server boots into 0.4.0 on the restart that applies the update.
+
 - **Installing onto a pre-installed Raspberry Pi keeps the data pool you pick.**
   Selecting the data pool by partition path now preserves that choice through
   installation.
