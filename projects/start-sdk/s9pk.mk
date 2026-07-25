@@ -115,10 +115,7 @@ check-deps:
 		(echo "Error: jq not found. Install jq. See https://docs.start9.com/packaging/environment-setup.html" && exit 1)
 
 check-init:
-	@if [ ! -f ~/.startos/developer.key.pem ]; then \
-		echo "Initializing StartOS developer environment..."; \
-		start-cli init-key; \
-	fi
+	@start-cli init-key
 
 javascript/index.js: $(shell find startos -type f) tsconfig.json node_modules
 	npm run check

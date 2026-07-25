@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.0.10 — StartOS 0.4.0-beta.10
+
+### Fixed
+
+- **`make install` no longer announces "Initializing StartOS developer
+  environment…" on every run.** `check-init` guarded on
+  `~/.startos/developer.key.pem`, which start-cli 1.1.0 renamed to
+  `id.key.pem`, so the guard stopped matching and ran `start-cli init-key`
+  unconditionally. The condition is removed rather than repointed at the new
+  name: `init-key` already checks for an existing key and prints that it found
+  one, so the guard only duplicated that check while giving the filename a
+  second place to go stale. Cosmetic — no build ever failed over it
+
 ## 2.0.9 — StartOS 0.4.0-beta.10 (2026-07-25)
 
 ### Fixed
