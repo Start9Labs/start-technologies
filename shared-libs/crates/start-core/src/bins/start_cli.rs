@@ -39,6 +39,11 @@ pub fn main(args: impl IntoIterator<Item = OsString>) {
 }
 
 #[test]
+fn no_shadowed_args_start_cli() {
+    super::assert_no_shadowed_args(app().into_command());
+}
+
+#[test]
 fn export_manpage_start_cli() {
     // Pages live with the start-cli product; anchored to start-core's crate dir.
     let dir = concat!(

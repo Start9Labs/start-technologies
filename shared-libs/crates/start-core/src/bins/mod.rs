@@ -235,3 +235,60 @@ impl MultiExecutable {
         std::process::exit(1);
     }
 }
+
+/// Assert that no subcommand of `root` redeclares an argument an ancestor owns.
+///
+/// `ParentHandler<_, P>` renders `P` as the parent command's arguments and each
+/// subcommand's own `Params` beneath it, then merges the two serialized objects
+/// with `combine`, which rejects a duplicate key. A subcommand that redeclares
+/// one is therefore uninvokable both ways: pass the value once and the ancestor
+/// consumes it, leaving the subcommand's copy missing; pass it twice and the
+/// merge fails. Clap sees two separate commands, so nothing catches it until the
+/// command is run. Inherit with `.with_inherited(...)` and take the ancestor's
+/// params as the handler's last argument instead.
+#[cfg(test)]
+pub(crate) fn assert_no_shadowed_args(root: clap::Command) {
+    use std::collections::BTreeSet;
+
+    fn declared(cmd: &clap::Command) -> BTreeSet<String> {
+        cmd.get_arguments()
+            .filter(|a| !a.is_global_set())
+            .map(|a| a.get_id().to_string())
+            .filter(|id| id != "help" && id != "version")
+            .collect()
+    }
+
+    fn walk(
+        cmd: &clap::Command,
+        path: &str,
+        ancestors: &BTreeSet<String>,
+        found: &mut Vec<String>,
+    ) {
+        let own = declared(cmd);
+        for id in own.intersection(ancestors) {
+            found.push(format!("{path} <{id}>"));
+        }
+        let ancestors: BTreeSet<String> = ancestors.union(&own).cloned().collect();
+        for sub in cmd.get_subcommands() {
+            walk(
+                sub,
+                &format!("{path} {}", sub.get_name()),
+                &ancestors,
+                found,
+            );
+        }
+    }
+
+    // The root's own arguments are the CLI's config (`--host`, `--config`, …),
+    // which is parsed separately and never merged into params, so the walk
+    // starts fresh at each top-level subcommand.
+    let mut found = Vec::new();
+    for sub in root.get_subcommands() {
+        walk(sub, sub.get_name(), &BTreeSet::new(), &mut found);
+    }
+    assert!(
+        found.is_empty(),
+        "these subcommands redeclare an ancestor's argument and cannot be invoked:\n  {}",
+        found.join("\n  ")
+    );
+}

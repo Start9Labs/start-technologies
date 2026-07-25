@@ -125,6 +125,11 @@ pub fn cli(args: impl IntoIterator<Item = OsString>) {
 }
 
 #[test]
+fn no_shadowed_args_start_registry() {
+    super::assert_no_shadowed_args(app().into_command());
+}
+
+#[test]
 fn export_manpage_start_registry() {
     // Pages live with the start-registry product; anchored to start-core's crate dir.
     let dir = concat!(

@@ -43,6 +43,11 @@ pub fn main(args: impl IntoIterator<Item = OsString>) {
 }
 
 #[test]
+fn no_shadowed_args_start_container() {
+    super::assert_no_shadowed_args(app().into_command());
+}
+
+#[test]
 fn export_manpage_start_container() {
     // start-container is part of the start-os product; anchored to start-core's crate dir.
     let dir = concat!(
