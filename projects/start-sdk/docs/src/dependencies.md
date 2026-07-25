@@ -119,7 +119,7 @@ sdk.action.createTask(
 
 A dependency is reached over the internal host bridge, by resolving its live bridge address (`10.0.3.1:<assigned port>`) with `sdk.host.get(...).const()`.
 
-The mechanics — reading `net.assignedPort`, the `.const()` restart matrix, the `bridgeAddress`, the Tor `fallbackPort` case, and where a backend-_selection_ value belongs — are all in **[Service-to-Service Networking](service-to-service.md)**. Read that page before dialing any dependency.
+The mechanics — resolving a binding’s bridge address, the `.const()` restart matrix, the `bridgeAddress`, the Tor `fallbackPort` case, and where a backend-_selection_ value belongs — are all in **[Service-to-Service Networking](service-to-service.md)**. Read that page before dialing any dependency.
 
 ## Mounting Dependency Volumes
 
