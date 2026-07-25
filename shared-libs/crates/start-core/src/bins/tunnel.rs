@@ -241,6 +241,21 @@ pub fn cli(args: impl IntoIterator<Item = OsString>) {
     }
 }
 
+/// A subnet subcommand that declares its own `<SUBNET>` instead of inheriting the
+/// parent's is uninvokable: one subnet fails clap, two fail the params merge.
+#[test]
+fn subnet_subcommands_inherit_the_subnet_argument() {
+    let command = app().into_command();
+    let subnet = command.find_subcommand("subnet").unwrap();
+    for sub in subnet.get_subcommands() {
+        assert!(
+            !sub.get_positionals().any(|a| a.get_id() == "subnet"),
+            "`subnet {}` redeclares the parent's <SUBNET> positional",
+            sub.get_name()
+        );
+    }
+}
+
 #[test]
 fn export_manpage_start_tunnel() {
     // Pages live with the start-tunnel product; anchored to start-core's crate dir.
