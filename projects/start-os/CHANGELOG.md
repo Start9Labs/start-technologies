@@ -36,6 +36,10 @@ file tracks notable changes since the move to the monorepo.
 
 ### Fixed
 
+- **Updating from 0.3.5.1 starts the Tor service it installs.** Your existing
+  onion addresses come across with it and answer as soon as the update
+  finishes, with nothing to start by hand.
+
 - **The over-the-air update to 0.4.0 boots on the Server Pure.** The Server
   Pure's PureBoot firmware reads the boot configuration itself rather than
   running GRUB, and it takes the kernel and initramfs paths literally. The

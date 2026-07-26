@@ -182,7 +182,7 @@ Depending on the speed of your drive, plan on 3-5 minutes per GB of backup data.
 
 ### Tor Cleanup
 
-During migration, the **Tor** service is automatically installed with all your existing onion addresses intact. However, Tor is rarely needed in StartOS 0.4.0 — most users will be better served by other networking options.
+During migration, the **Tor** service is automatically installed and started, with all your existing onion addresses intact and reachable as soon as the update finishes. However, Tor is rarely needed in StartOS 0.4.0 — most users will be better served by other networking options.
 
 You are encouraged to review your service interfaces and delete any Tor addresses you do not intend to use.
 

@@ -285,11 +285,21 @@ impl VersionT for Version {
                     .await
                     .result?;
 
+                // The onion addresses it carries over only answer while tor runs.
+                crate::control::start(
+                    ctx.clone(),
+                    crate::control::StartParams {
+                        id: tor_id,
+                        force: false,
+                    },
+                )
+                .await?;
+
                 Ok::<_, Error>(())
             }
             .await
             {
-                tracing::error!("Error installing tor package: {e}");
+                tracing::error!("Error installing and starting tor package: {e}");
                 tracing::debug!("{e:?}");
             }
         }
