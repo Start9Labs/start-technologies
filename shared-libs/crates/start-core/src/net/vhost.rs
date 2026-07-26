@@ -1113,9 +1113,18 @@ where
                     // Degraded, not fatal: the backend sees this host rather than
                     // the client. Better than dropping a working connection.
                     Err(e) => {
-                        tracing::warn!(
-                            "transparent egress to {target} for {client} failed ({e}); connecting plainly, so the backend will see this host as the peer"
-                        );
+                        // A service bound to `0.0.0.0` refuses the v6 leg, which is
+                        // the common case and not worth warning about per
+                        // connection; anything else is a real misconfiguration.
+                        if e.kind() == std::io::ErrorKind::ConnectionRefused {
+                            tracing::debug!(
+                                "{target} has no listener for {client}'s family; connecting plainly"
+                            );
+                        } else {
+                            tracing::warn!(
+                                "transparent egress to {target} for {client} failed ({e}); connecting plainly, so the backend will see this host as the peer"
+                            );
+                        }
                         plain_connect().await?
                     }
                 }
