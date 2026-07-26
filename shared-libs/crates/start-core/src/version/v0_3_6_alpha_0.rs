@@ -436,7 +436,8 @@ impl VersionT for Version {
             }
         }
 
-        let mut failures = BTreeMap::new();
+        // title, plus the error when nothing else has reported it
+        let mut failures: BTreeMap<PackageId, (String, Option<String>)> = BTreeMap::new();
 
         // Should be the name of the package
         let current_package: std::sync::Arc<tokio::sync::watch::Sender<Option<PackageId>>> =
@@ -462,6 +463,7 @@ impl VersionT for Version {
             let Ok(id) = path.file_name().to_string_lossy().parse::<PackageId>() else {
                 continue;
             };
+            let new_id = migrated_id(&id)?;
             let path = path.path();
             if !path.is_dir() {
                 continue;
@@ -509,7 +511,7 @@ impl VersionT for Version {
                     // DB stores versions in emver format (e.g. `0.21.1.0`),
                     // but callers parse `.version` as `exver::ExtendedVersion`
                     // (e.g. `0.21.1:0`), so convert before writing — and also
-                    // apply the same package-specific flavor/prerelease/id
+                    // apply the same package-specific flavor/prerelease
                     // rewrites that the v1→v2 s9pk conversion in
                     // `s9pk::v2::compat` applies, so the on-disk version and
                     // volume path match what the install will look up.
@@ -542,17 +544,9 @@ impl VersionT for Version {
                             // The rename pass at the top of post_up has
                             // already moved the volume dirs to their new
                             // names, so we must write under the new id.
-                            let new_package_id: &str = match &*id {
-                                "nostr" => "nostr-rs-relay",
-                                "ghost" => "ghost-legacy",
-                                "synapse" => "synapse-legacy",
-                                "monerod" => "monerod-legacy",
-                                "fedimintd" => "fedimint-guardian",
-                                other => other,
-                            };
                             let version_path = Path::new(DATA_DIR)
                                 .join(PKG_VOLUME_DIR)
-                                .join(new_package_id)
+                                .join(&*new_id)
                                 .join("data")
                                 .join(".version");
                             write_file_atomic(&version_path, version.to_string().as_bytes())
@@ -560,15 +554,37 @@ impl VersionT for Version {
                         }
                     }
 
-                    if let Err(e) = async {
+                    let title = installed_manifest
+                        .and_then(|m| m.get("title"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(&new_id)
+                        .to_owned();
+
+                    // `install` raises its own per-package notification, but only
+                    // once its reload guard is armed — the v1→v2 conversion ahead
+                    // of that, and this bookkeeping after it, report themselves.
+                    let converted = async {
                         let package_s9pk = tokio::fs::File::open(path).await?;
                         let file = MultiCursorFile::open(&package_s9pk).await?;
-
                         let key = ctx.db.peek().await.into_private().into_developer_key();
+                        crate::s9pk::load(file, || Ok(key.de()?.0), None).await
+                    }
+                    .await;
+                    let s9pk = match converted {
+                        Ok(s9pk) => s9pk,
+                        Err(e) => {
+                            tracing::error!("Error converting {id}: {e}");
+                            tracing::debug!("{e:?}");
+                            failures.insert(new_id.clone(), (title, Some(e.to_string())));
+                            continue;
+                        }
+                    };
+
+                    if let Err(e) = async {
                         ctx.services
                             .install(
                                 ctx.clone(),
-                                || crate::s9pk::load(file.clone(), || Ok(key.de()?.0), None),
+                                move || async move { Ok(s9pk) },
                                 None,
                                 None::<crate::util::Never>,
                                 None,
@@ -576,39 +592,42 @@ impl VersionT for Version {
                             .await?
                             .await?
                             .await?;
-
-                        ctx.db
-                            .mutate(|db| {
-                                let package = db
-                                    .as_public_mut()
-                                    .as_package_data_mut()
-                                    .as_idx_mut(&id)
-                                    .or_not_found(&id)?;
-                                if configured {
-                                    package
-                                        .as_tasks_mut()
-                                        .remove(&ReplayId::from("needs-config"))?;
-                                }
-                                Ok(())
-                            })
-                            .await
-                            .result?;
-
                         Ok::<_, Error>(())
                     }
                     .await
                     {
-                        failures.insert(
-                            id.clone(),
-                            input
-                                .get(&*id)
-                                .and_then(|pde| pde.get("installed"))
-                                .and_then(|i| i.get("manifest"))
-                                .and_then(|m| m.get("title"))
-                                .and_then(|v| v.as_str()),
-                        );
                         tracing::error!("Error reinstalling {id}: {e}");
                         tracing::debug!("{e:?}");
+                        failures.insert(new_id.clone(), (title, None));
+                        continue;
+                    }
+
+                    match ctx
+                        .db
+                        .mutate(|db| {
+                            let package = db
+                                .as_public_mut()
+                                .as_package_data_mut()
+                                .as_idx_mut(&new_id)
+                                .or_not_found(&new_id)?;
+                            if configured {
+                                package
+                                    .as_tasks_mut()
+                                    .remove(&ReplayId::from("needs-config"))?;
+                            }
+                            Ok(())
+                        })
+                        .await
+                        .result
+                    {
+                        Ok(()) => {
+                            failures.remove(&new_id);
+                        }
+                        Err(e) => {
+                            tracing::error!("Error recording {new_id} as migrated: {e}");
+                            tracing::debug!("{e:?}");
+                            failures.insert(new_id.clone(), (title, Some(e.to_string())));
+                        }
                     }
                 }
             }
@@ -617,10 +636,20 @@ impl VersionT for Version {
         if !failures.is_empty() {
             ctx.db
                 .mutate(|db| {
-                    let services = failures
+                    for (id, error) in failures
                         .iter()
-                        .map(|(id, title)| title.as_ref().copied().unwrap_or(id))
-                        .join(", ");
+                        .filter_map(|(id, (_, error))| Some((id, error.as_ref()?)))
+                    {
+                        notify(
+                            db,
+                            Some(id.clone()),
+                            NotificationLevel::Error,
+                            t!("migration.service-failed-title").to_string(),
+                            error.clone(),
+                            (),
+                        )?;
+                    }
+                    let services = failures.values().map(|(title, _)| title).join(", ");
                     notify(
                         db,
                         None,
@@ -637,6 +666,20 @@ impl VersionT for Version {
         progress_logger.abort();
         Ok(())
     }
+}
+
+/// Mirrors the id rewrites `s9pk::v2::compat` applies during the v1→v2
+/// conversion — the installed package lands under the new id, not the one the
+/// 0.3.5.1 archive directory is named after.
+fn migrated_id(id: &PackageId) -> Result<PackageId, Error> {
+    Ok(match &**id {
+        "nostr" => "nostr-rs-relay".parse()?,
+        "ghost" => "ghost-legacy".parse()?,
+        "synapse" => "synapse-legacy".parse()?,
+        "monerod" => "monerod-legacy".parse()?,
+        "fedimintd" => "fedimint-guardian".parse()?,
+        _ => id.clone(),
+    })
 }
 
 #[tracing::instrument(skip_all)]

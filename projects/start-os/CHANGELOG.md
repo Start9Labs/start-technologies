@@ -40,6 +40,20 @@ file tracks notable changes since the move to the monorepo.
   onion addresses come across with it and answer as soon as the update
   finishes, with nothing to start by hand.
 
+- **A service that fails to convert while migrating from 0.3.5.1 reports the
+  reason.** The v1→v2 package conversion raises a notification against that
+  service carrying the error that stopped it, in the same form as an install
+  failure — alongside the summary notification listing every service to
+  re-install.
+
+- **A service that is renamed during migration is recorded as migrated.** Ghost,
+  Synapse, Monero, Nostr and Fedimint are installed under new ids on 0.4.0
+  (`ghost-legacy`, `synapse-legacy`, `monerod-legacy`, `nostr-rs-relay` and
+  `fedimint-guardian`), and the migration looks each one up under the id it was
+  installed as. These services complete their migration without appearing among
+  the failures, and the failure list names services by ids that exist in the
+  marketplace.
+
 - **The over-the-air update to 0.4.0 boots on the Server Pure.** The Server
   Pure's PureBoot firmware reads the boot configuration itself rather than
   running GRUB, and it takes the kernel and initramfs paths literally. The

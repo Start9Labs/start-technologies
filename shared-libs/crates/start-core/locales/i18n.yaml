@@ -1996,6 +1996,13 @@ migration.migrating-package:
   fr_FR: "Migration du paquet %{package}..."
   pl_PL: "Migracja pakietu %{package}..."
 
+migration.service-failed-title:
+  en_US: "Migration Failed"
+  de_DE: "Migration fehlgeschlagen"
+  es_ES: "Migración fallida"
+  fr_FR: "Échec de la migration"
+  pl_PL: "Migracja nie powiodła się"
+
 migration.services-failed-title:
   en_US: "Services Failed To Migrate"
   de_DE: "Dienste konnten nicht migriert werden"

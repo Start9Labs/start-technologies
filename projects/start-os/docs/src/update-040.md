@@ -180,6 +180,12 @@ Depending on the speed of your drive, plan on 3-5 minutes per GB of backup data.
 
 ## Post-Migration Notes
 
+### If a Service Fails to Migrate
+
+Check your notifications. A service that fails to migrate raises a notification naming the service and the reason it failed, and a summary notification lists everything that needs re-installing.
+
+Your data is safe — it stays on disk where the service left it. Install the service again from the marketplace and it will pick that data back up.
+
 ### Tor Cleanup
 
 During migration, the **Tor** service is automatically installed and started, with all your existing onion addresses intact and reachable as soon as the update finishes. However, Tor is rarely needed in StartOS 0.4.0 — most users will be better served by other networking options.
