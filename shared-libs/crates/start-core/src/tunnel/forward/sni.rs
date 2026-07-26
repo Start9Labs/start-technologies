@@ -354,7 +354,12 @@ async fn handle_conn(
     // No plain-connect fallback: the backend gates LAN-only addresses on the
     // source being private, and this server's own wg address is private — a
     // fallback would present every WAN client as LAN-local.
-    let mut upstream = match crate::net::transparent::transparent_connect(peer, target).await {
+    let mut upstream = match crate::net::transparent::transparent_connect(
+        SocketAddr::V4(peer),
+        SocketAddr::V4(target),
+    )
+    .await
+    {
         Ok(upstream) => upstream,
         Err(e) => {
             tracing::warn!("SNI demux transparent egress to {target} for {peer} failed: {e}");

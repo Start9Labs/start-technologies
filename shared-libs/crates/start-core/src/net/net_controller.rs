@@ -372,6 +372,8 @@ impl NetServiceData {
             // to lo / lxcbr0 but never to a gateway (see `enabled_addresses`).
             let enabled_addresses = bind.enabled_addresses();
             let addr: SocketAddr = (self.ip, *port).into();
+            // The container's bridge v6, for the source-preserving leg of a v6 client.
+            let addr_v6 = self.ipv6.map(|ip| SocketAddrV6::new(ip, *port, 0, 0));
 
             // Key private DNS by its live gateways so the resolver only answers
             // locally over those gateways — works even when also public (split DNS).
@@ -456,6 +458,7 @@ impl NetServiceData {
                             private: server_private_ips,
                             acme: None,
                             addr,
+                            addr_v6,
                             add_x_forwarded_headers: bind
                                 .options
                                 .add_ssl
@@ -507,6 +510,7 @@ impl NetServiceData {
                                 .and_then(|p| p.acme.clone())
                         },
                         addr,
+                        addr_v6,
                         add_x_forwarded_headers: bind
                             .options
                             .add_ssl

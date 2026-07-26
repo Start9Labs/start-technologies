@@ -7,19 +7,19 @@
 //! client, transiting this host as the backend's gateway) are diverted back into
 //! the proxy socket by policy routing.
 //!
-//! Datapath (all in `table ip startos` / iproute2):
-//! - egress socket: `IP_TRANSPARENT`, bound to the client's `(ip, port)`.
+//! Datapath (`table ip`/`ip6 startos` + iproute2, mirrored per family):
+//! - egress socket: `IP_TRANSPARENT`/`IPV6_TRANSPARENT`, bound to the client's
+//!   `(ip, port)`; the client and backend legs are necessarily one family.
 //! - `mangle_prerouting` `sni-divert`: an inbound packet matching a local
 //!   `IP_TRANSPARENT` socket (i.e. a reply to such an egress) is marked with
 //!   [`DIVERT_MARK`]. Only the inbound/reply direction is touched, so the
 //!   proxy's own egress packets route to the backend normally.
-//! - `ip rule fwmark DIVERT_MARK lookup DIVERT_TABLE priority 49` + `ip route add
-//!   local 0.0.0.0/0 dev lo table DIVERT_TABLE`: deliver the marked replies
-//!   locally, into the transparent socket.
+//! - `ip [-6] rule fwmark DIVERT_MARK lookup DIVERT_TABLE priority 49` + `ip [-6]
+//!   route add local 0.0.0.0/0`|`::/0` `dev lo table DIVERT_TABLE`: deliver the
+//!   marked replies locally, into the transparent socket. v4 and v6 keep
+//!   separate rule/route tables, so one number serves both.
 
-#[cfg(target_os = "linux")]
 use std::net::SocketAddr;
-use std::net::SocketAddrV4;
 
 #[cfg(target_os = "linux")]
 use tokio::net::TcpSocket;
@@ -48,31 +48,57 @@ pub const DIVERT_TABLE: u32 = 1344;
 /// gateway mangle reconcile so it survives that chain's flush; on hosts without
 /// that reconcile (e.g. the tunnel) [`ensure_divert_infra`] adds it directly.
 pub fn divert_mark_rule() -> String {
+    [
+        divert_mark_rule_family("ip"),
+        divert_mark_rule_family("ip6"),
+    ]
+    .concat()
+}
+
+fn divert_mark_rule_family(family: &str) -> String {
     format!(
-        "add rule ip startos mangle_prerouting meta l4proto tcp socket transparent 1 meta mark set {DIVERT_MARK:#010x} comment \"sni-divert\"\n"
+        "add rule {family} startos mangle_prerouting meta l4proto tcp socket transparent 1 meta mark set {DIVERT_MARK:#010x} comment \"sni-divert\"\n"
     )
 }
 
 /// Open the internal leg of a demuxed connection from the client's own source
 /// address, so the backend sees the real peer. Requires `CAP_NET_ADMIN` (startd
-/// runs as root). The reply path is set up by [`ensure_divert_infra`].
+/// runs as root). The reply path is set up by [`ensure_divert_infra`]. `client`
+/// and `target` must be the same family — the source address is bound on the
+/// socket that dials the target.
 #[cfg(target_os = "linux")]
 pub async fn transparent_connect(
-    client: SocketAddrV4,
-    target: SocketAddrV4,
+    client: SocketAddr,
+    target: SocketAddr,
 ) -> std::io::Result<TcpStream> {
-    let sock = TcpSocket::new_v4()?;
+    let sock = match (client, target) {
+        (SocketAddr::V4(_), SocketAddr::V4(_)) => {
+            let sock = TcpSocket::new_v4()?;
+            // Must precede bind: permits binding a non-local (client) address.
+            socket2::SockRef::from(&sock).set_ip_transparent_v4(true)?;
+            sock
+        }
+        (SocketAddr::V6(_), SocketAddr::V6(_)) => {
+            let sock = TcpSocket::new_v6()?;
+            socket2::SockRef::from(&sock).set_ip_transparent_v6(true)?;
+            sock
+        }
+        _ => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("transparent egress needs one family: client {client}, target {target}"),
+            ));
+        }
+    };
     {
         let sref = socket2::SockRef::from(&sock);
-        // Must precede bind: permits binding a non-local (client) address.
-        sref.set_ip_transparent_v4(true)?;
         sref.set_reuse_address(true)?;
         if let Err(e) = sref.set_tcp_keepalive(&default_keepalive()) {
             tracing::debug!("transparent egress keepalive: {e}");
         }
     }
-    sock.bind(SocketAddr::V4(client))?;
-    sock.connect(SocketAddr::V4(target)).await
+    sock.bind(client)?;
+    sock.connect(target).await
 }
 
 /// `IP_TRANSPARENT` is Linux-only and the SNI demux runs only on the Linux
@@ -80,8 +106,8 @@ pub async fn transparent_connect(
 /// cross-platform build (apple-darwin) compiling.
 #[cfg(not(target_os = "linux"))]
 pub async fn transparent_connect(
-    _client: SocketAddrV4,
-    _target: SocketAddrV4,
+    _client: SocketAddr,
+    _target: SocketAddr,
 ) -> std::io::Result<TcpStream> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
@@ -117,78 +143,84 @@ pub async fn ensure_divert_infra() -> Result<bool, Error> {
     let mut repaired = false;
     let table = DIVERT_TABLE.to_string();
 
-    // Local-delivery default in the divert table: marked replies are delivered
-    // to the local transparent socket instead of being forwarded back out.
-    Command::new("ip")
-        .args([
-            "route",
-            "replace",
-            "local",
-            "0.0.0.0/0",
-            "dev",
-            "lo",
-            "table",
-            &table,
-        ])
-        .invoke(ErrorKind::Network)
-        .await?;
-
-    // Policy rule at priority 49 — above the gateway's per-interface symmetric
-    // -return rules at 50 — so diverted replies win.
-    let rules = Command::new("ip")
-        .args(["rule", "list"])
-        .invoke(ErrorKind::Network)
-        .await
-        .unwrap_or_default();
-    if !String::from_utf8_lossy(&rules).contains(&format!("lookup {table}")) {
+    // Both families, and independently: `ip` and `ip -6` keep separate rule and
+    // route tables, so the same DIVERT_TABLE/DIVERT_MARK numbers serve each.
+    for (flag, default_route, family) in [("-4", "0.0.0.0/0", "ip"), ("-6", "::/0", "ip6")] {
+        // Local-delivery default in the divert table: marked replies are delivered
+        // to the local transparent socket instead of being forwarded back out.
         Command::new("ip")
             .args([
-                "rule",
-                "add",
-                "fwmark",
-                &format!("{DIVERT_MARK:#x}"),
-                "lookup",
+                flag,
+                "route",
+                "replace",
+                "local",
+                default_route,
+                "dev",
+                "lo",
+                "table",
                 &table,
-                "priority",
-                "49",
             ])
             .invoke(ErrorKind::Network)
             .await?;
-        repaired = true;
-    }
 
-    // nft `sni-divert` mark rule. The gateway reconcile owns (and re-adds) it on
-    // hosts that run it; install it directly where nothing else does (the tunnel),
-    // skipping if already present so we never duplicate or fight the reconcile.
-    let chain = Command::new("nft")
-        .args(["list", "chain", "ip", "startos", "mangle_prerouting"])
-        .invoke(ErrorKind::Network)
-        .await
-        .unwrap_or_default();
-    if !String::from_utf8_lossy(&chain).contains("sni-divert") {
-        Command::new("nft")
-            .args([
-                "add",
-                "rule",
-                "ip",
-                "startos",
-                "mangle_prerouting",
-                "meta",
-                "l4proto",
-                "tcp",
-                "socket",
-                "transparent",
-                "1",
-                "meta",
-                "mark",
-                "set",
-                &format!("{DIVERT_MARK:#010x}"),
-                "comment",
-                "sni-divert",
-            ])
+        // Policy rule at priority 49 — above the gateway's per-interface symmetric
+        // -return rules at 50 — so diverted replies win.
+        let rules = Command::new("ip")
+            .args([flag, "rule", "list"])
             .invoke(ErrorKind::Network)
-            .await?;
-        repaired = true;
+            .await
+            .unwrap_or_default();
+        if !String::from_utf8_lossy(&rules).contains(&format!("lookup {table}")) {
+            Command::new("ip")
+                .args([
+                    flag,
+                    "rule",
+                    "add",
+                    "fwmark",
+                    &format!("{DIVERT_MARK:#x}"),
+                    "lookup",
+                    &table,
+                    "priority",
+                    "49",
+                ])
+                .invoke(ErrorKind::Network)
+                .await?;
+            repaired = true;
+        }
+
+        // nft `sni-divert` mark rule. The gateway reconcile owns (and re-adds) it on
+        // hosts that run it; install it directly where nothing else does (the tunnel),
+        // skipping if already present so we never duplicate or fight the reconcile.
+        let chain = Command::new("nft")
+            .args(["list", "chain", family, "startos", "mangle_prerouting"])
+            .invoke(ErrorKind::Network)
+            .await
+            .unwrap_or_default();
+        if !String::from_utf8_lossy(&chain).contains("sni-divert") {
+            Command::new("nft")
+                .args([
+                    "add",
+                    "rule",
+                    family,
+                    "startos",
+                    "mangle_prerouting",
+                    "meta",
+                    "l4proto",
+                    "tcp",
+                    "socket",
+                    "transparent",
+                    "1",
+                    "meta",
+                    "mark",
+                    "set",
+                    &format!("{DIVERT_MARK:#010x}"),
+                    "comment",
+                    "sni-divert",
+                ])
+                .invoke(ErrorKind::Network)
+                .await?;
+            repaired = true;
+        }
     }
 
     // rp_filter needs no loosening: a diverted reply's source is the backend,

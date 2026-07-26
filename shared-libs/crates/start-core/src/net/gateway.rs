@@ -1661,7 +1661,7 @@ fn policy_table_for(device_type: Option<NetworkInterfaceType>, iface: &GatewayId
 /// IPv4 and IPv6 carry the same CONNMARK reply-routing layer, rebuilt together
 /// so a reply to a v6 connection that arrived on a tunnel (host-terminated or
 /// DNAT'd to a container) routes back out it via the priority-50 fwmark rule,
-/// exactly like v4. `sni-divert` is IPv4-only (IP_TRANSPARENT egress is v4).
+/// exactly like v4. `sni-divert` is emitted for both families.
 async fn reconcile_mangle_rules(policy_ifaces: &BTreeMap<GatewayId, u32>) -> Result<(), Error> {
     nft_ensure_base().await?;
     let mut script = String::new();
