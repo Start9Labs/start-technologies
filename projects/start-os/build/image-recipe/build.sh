@@ -306,8 +306,10 @@ if [ "${NVIDIA}" = "1" ]; then
 
     echo "[nvidia-hook] Running NVIDIA installer for kernel \${KVER}" >&2
 
+    # Otherwise the installer picks the flavour from the build host's own GPUs.
     if ! sh "\${RUN_PATH}" \
         --silent \
+        --kernel-module-type=proprietary \
         --kernel-name="\${KVER}" \
         --no-x-check \
         --no-nouveau-check \
