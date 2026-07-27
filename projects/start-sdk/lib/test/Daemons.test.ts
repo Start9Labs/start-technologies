@@ -1,4 +1,5 @@
 import { Daemons, DaemonsReconciler, configHash } from '../mainFn/Daemons'
+import { cooldownTrigger } from '../trigger'
 import { Daemon } from '../mainFn/Daemon'
 import { Mounts } from '../mainFn/Mounts'
 import { setupMain } from '../mainFn'
@@ -443,5 +444,76 @@ describe('setupMain composition', () => {
     )
     const built = await main({ effects: e } as any)
     expect(built).toBeInstanceOf(DaemonsReconciler)
+  })
+})
+
+describe('runUntilSuccess timeout diagnostics', () => {
+  /**
+   * A daemon that never becomes ready, whose ready check reports `loading` on
+   * every poll.
+   */
+  const stuckChain = (e: T.Effects) =>
+    Daemons.of<Manifest>({ effects: e }).addDaemon('stuck', {
+      subcontainer: null,
+      exec: {
+        // Runs until the chain's teardown aborts it, so the `finally`'s
+        // term() after the timeout doesn't sit out the sigterm budget.
+        fn: (_sub, abort) =>
+          new Promise<null>(resolve =>
+            abort.addEventListener('abort', () => resolve(null), {
+              once: true,
+            }),
+          ),
+      },
+      ready: {
+        display: null,
+        // Poll fast so the first result lands well inside the test's budget;
+        // defaultTrigger's 1s lead-in would leave health on `starting`.
+        trigger: cooldownTrigger(5),
+        fn: () => ({ result: 'loading' as const, message: 'still warming up' }),
+      },
+      requires: [],
+    })
+
+  it('names the un-ready daemon with its health result and message', async () => {
+    await expect(
+      stuckChain(fakeEffects()).runUntilSuccess(200),
+    ).rejects.toThrow(/stuck \(loading; still warming up\)/)
+  })
+
+  it('omits the internal sentinel from the message', async () => {
+    await expect(stuckChain(fakeEffects()).runUntilSuccess(50)).rejects.toThrow(
+      expect.objectContaining({
+        message: expect.not.stringContaining('__RUN_UNTIL_SUCCESS'),
+      }),
+    )
+  })
+
+  it('reports the elapsed budget', async () => {
+    await expect(stuckChain(fakeEffects()).runUntilSuccess(50)).rejects.toThrow(
+      /Timed out after 50ms/,
+    )
+  })
+
+  it('surfaces the exit cause of a crash-looping daemon', async () => {
+    // The Nextcloud shape: the process dies on every start, but the ready
+    // check reports `loading` on a failed probe and so keeps overwriting the
+    // crash back to `loading`. Current health alone therefore says nothing —
+    // only the retained exit error identifies the fault.
+    const chain = Daemons.of<Manifest>({
+      effects: fakeEffects(),
+    }).addDaemon('crasher', {
+      subcontainer: null,
+      exec: { fn: async () => Promise.reject(new Error('exited with code 1')) },
+      ready: {
+        display: null,
+        trigger: cooldownTrigger(5),
+        fn: () => ({ result: 'loading' as const, message: null }),
+      },
+      requires: [],
+    })
+    await expect(chain.runUntilSuccess(200)).rejects.toThrow(
+      /crasher \(loading; \d+ failed exit\(s\), last: exited with code 1\)/,
+    )
   })
 })

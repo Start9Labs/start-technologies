@@ -250,6 +250,21 @@ await sdk.Daemons.of(effects)
 3. When the oneshot completes successfully, `runUntilSuccess` returns
 4. All processes are cleaned up automatically
 
+### When it times out
+
+If the timeout elapses before everything is ready, `runUntilSuccess` throws, which fails init: StartOS restores the package's volumes from the backup it took beforehand, then reverts an update to the previous version or removes a failed install. The error names every daemon that never became ready, with its current health result and message, and — for one whose process kept dying — how many times it exited and the error from the last exit:
+
+```
+Timed out after 120000ms waiting for server (loading; 12 failed exit(s), last: node exited with code 1), bootstrap (waiting)
+```
+
+Read it as: `server` never came up, and its process has been crash-looping rather than merely starting slowly; `bootstrap` never ran, because `waiting` means its `requires` are not all ready — here, `server`. A daemon reported as `loading` or `starting` with **no** failed exits is running but not passing its ready check — look at the check, not the process.
+
+A `waiting` daemon's message lists the `display` names of the dependencies still holding it up, which is why there is none above: the chain declares `display: null` on `server`. Give a daemon a `display` and its dependents name it.
+
+> [!TIP]
+> A `ready` function that returns `loading` on a failed probe (rather than `failure`) makes a dead process look identical to a slow one in the UI. The exit count above is what distinguishes them, but the daemon's own logs are still the place to find out why it died — a daemon's stdout and stderr go to the service logs.
+
 ### Making HTTP Calls Without curl
 
 Many slim Docker images do not have curl. Use the runtime's built-in HTTP capabilities instead.

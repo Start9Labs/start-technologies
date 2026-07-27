@@ -4,10 +4,38 @@
 
 ### Fixed
 
+- **A `runUntilSuccess` timeout now says which daemon failed and why.** It
+  reported a bare list of ids, which cannot distinguish a daemon that is slow to
+  start from one that is crash-looping, and leaked the internal sentinel
+  daemon's id as if it were a component — a package whose Postgres died on every
+  start reported only this, after burning its full thirty-minute budget:
+
+  ```
+  Timed out waiting for postgres,upgrade,__RUN_UNTIL_SUCCESS
+  ```
+
+  The message now carries each un-ready daemon's health result and message, the
+  count and cause of any abnormal exits, and the budget that elapsed:
+
+  ```
+  Timed out after 1800000ms waiting for postgres (loading; 47 failed exit(s), last: docker-entrypoint.sh exited with code 1), upgrade (waiting; postgres)
+  ```
+
+  The sentinel is excluded — it depends on every other daemon, so it is never
+  ready when anything else isn't. A crash-looping daemon's exit error was
+  previously swallowed by the restart loop, so this is the only place it reaches
+  the caller: `Daemon` now retains it as `lastExitError` alongside a
+  `failedExits` count, and `HealthDaemon` appends the cause to its
+  `<id> daemon crashed` health message. Reporting the exit count next to the
+  current health matters because they disagree in exactly the case that hurts —
+  a `ready` check that returns `loading` on a failed probe keeps overwriting the
+  crash back to `loading` between restarts
+
 - **Package template cleanup.** Dropped the `alerts` manifest block, removed in
   2.0.0, that the template still scaffolded, and the `hello-world` guard job
   from `release.yml` / `tagAndRelease.yml`. Its workflows are now identical to
   a real package's
+
 - **`make install` no longer announces "Initializing StartOS developer
   environment…" on every run.** `check-init` guarded on
   `~/.startos/developer.key.pem`, which start-cli 1.1.0 renamed to
