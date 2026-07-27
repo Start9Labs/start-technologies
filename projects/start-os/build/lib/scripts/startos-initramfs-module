@@ -47,6 +47,11 @@ local_mount_root()
 			image=$(readlink -f /startos/config/current.rootfs)
 		else
 			image="$(ls -t1 /startos/images/*.rootfs | head -n1)"
+			# Repair the pointer for boxes whose 0.4.0 migration never created it
+			if [ -f "$image" ]; then
+				mkdir -p /startos/config
+				ln -sf "../images/$(basename "$image")" /startos/config/current.rootfs
+			fi
 		fi
 		if ! [ -f "$image" ]; then
 			>&2 echo "image $image not available to boot"
@@ -83,7 +88,8 @@ local_mount_root()
 			>&2 echo 'migration payload missing 0.4.0 base image'
 			exit 1
 		fi
-		ln -rsf "$image" /startos/config/current.rootfs
+		# busybox ln has no -r; write the relative target explicitly
+		ln -sf "../images/$(basename "$image")" /startos/config/current.rootfs
 
 		rm -rf /startos/next /startos/current /startos/prev /startos/config/upgrade
 	fi

@@ -32,6 +32,16 @@ fi
 MARGIN=${MARGIN:-1073741824}
 target=$((needed + MARGIN))
 
+# A missing pointer means the box booted the newest image via the initramfs
+# fallback (0.4.0's migration never created one), so relinking it is safe.
+if ! [ -h /media/startos/config/current.rootfs ] || ! [ -e /media/startos/config/current.rootfs ]; then
+    newest="$(ls -t1 /media/startos/images/*.rootfs 2> /dev/null | head -n1)"
+    if [ -f "$newest" ]; then
+        echo "Recreating missing current.rootfs -> $newest"
+        ln -rsf "$newest" /media/startos/config/current.rootfs
+    fi
+fi
+
 if [ -h /media/startos/config/current.rootfs ] && [ -e /media/startos/config/current.rootfs ]; then
     echo 'Pruning...'
     current="$(readlink -f /media/startos/config/current.rootfs)"
