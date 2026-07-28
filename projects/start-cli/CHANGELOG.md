@@ -9,6 +9,22 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
+## [1.1.1]
+
+### Fixed
+
+- **The local authcookie now reaches a registry or tunnel daemon that listens on a
+  non-loopback address.** Run on the server itself, the CLI presents the daemon's local
+  authcookie as an `Authorization: Bearer` header — but it attached that header only when
+  the URL was literally loopback. With no `--registry`/`--tunnel` the CLI derives the URL
+  from the daemon's own `registry-listen`/`tunnel-listen`, which is commonly the wildcard
+  `0.0.0.0:5959`; that is not loopback, so the request went out unauthenticated and came
+  back `Unauthorized`. `start-cli registry admin list` on the registry host failed this way.
+  A wildcard listen address is now dialled over loopback — binding every interface is not a
+  destination — and an address derived from the daemon's own listen configuration counts as
+  naming this machine, so the token is attached. An explicit `--registry`/`--tunnel` target
+  is unchanged: the token still goes only to a loopback URL.
+
 ## [1.1.0]
 
 ### Changed

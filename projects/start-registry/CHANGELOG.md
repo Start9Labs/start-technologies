@@ -2,6 +2,17 @@
 
 All notable changes to `start-registry` (the Start Registry server) are documented here. This project is versioned **independently** (starting at `1.0.0`); its version lives in `Cargo.toml`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.0.2]
+
+- **`start-registry` works on a registry host that listens on a non-loopback address.** With no
+  `--registry`, the CLI derives the registry's address from `registry-listen` and authenticates
+  with the local authcookie — but it only sent that token when the derived URL was literally
+  loopback. A registry reachable from anywhere but the host itself listens on `0.0.0.0:5959`, so
+  every local command went out unauthenticated and came back `Unauthorized`. A wildcard listen
+  address is now dialled over loopback, and an address derived from the registry's own listen
+  configuration counts as naming this machine. An explicit `--registry` URL is unchanged: the
+  token still goes only to a loopback URL.
+
 ## [1.0.1]
 
 - **Registry responses stay compatible with pre-beta.10 clients.** `package.get` re-adds a

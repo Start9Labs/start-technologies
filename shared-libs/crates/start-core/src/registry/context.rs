@@ -25,7 +25,7 @@ use url::Url;
 use crate::context::config::{CONFIG_PATH, ContextConfig};
 use crate::context::{CliContext, RpcContext};
 use crate::middleware::auth::DbContext;
-use crate::middleware::auth::local::{LocalAuthContext, is_loopback, local_auth_header};
+use crate::middleware::auth::local::{LocalAuthContext, dial_addr, is_loopback, local_auth_header};
 use crate::middleware::auth::signature::{NonceCache, SignatureAuthContext};
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
@@ -205,12 +205,13 @@ impl CallRemote<RegistryContext> for CliContext {
     ) -> Result<Value, RpcError> {
         let local_auth = local_auth_header::<RegistryContext>().await;
 
-        let url = if let Some(url) = self.registry_url.clone() {
-            url
+        let (url, is_local) = if let Some(url) = self.registry_url.clone() {
+            let is_local = is_loopback(&url);
+            (url, is_local)
         } else if local_auth.is_some() || !self.registry_hostname.is_empty() {
             let mut url: Url = format!(
                 "http://{}",
-                self.registry_listen.unwrap_or(DEFAULT_REGISTRY_LISTEN)
+                dial_addr(self.registry_listen.unwrap_or(DEFAULT_REGISTRY_LISTEN))
             )
             .parse()
             .map_err(Error::from)?;
@@ -219,7 +220,9 @@ impl CallRemote<RegistryContext> for CliContext {
                 .with_kind(crate::ErrorKind::ParseUrl)?
                 .push("rpc")
                 .push("v0");
-            url
+            // Derived from the registry's own listen address, so it names this
+            // machine even when that address isn't loopback.
+            (url, true)
         } else {
             return Err(Error::new(
                 eyre!("{}", t!("registry.context.registry-required")),
@@ -229,7 +232,7 @@ impl CallRemote<RegistryContext> for CliContext {
         };
 
         let mut headers = HeaderMap::new();
-        if is_loopback(&url) {
+        if is_local {
             if let Some(auth) = local_auth {
                 headers.insert(AUTHORIZATION, auth);
             }
