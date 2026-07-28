@@ -81,7 +81,9 @@ impl Model<StatusInfo> {
                 DesiredStatus::BackingUp {
                     on_complete: StartStop::Stop,
                 } => DesiredStatus::Stopped,
-                DesiredStatus::Restarting { .. } => DesiredStatus::Running,
+                DesiredStatus::Restarting { .. } | DesiredStatus::Updating => {
+                    DesiredStatus::Running
+                }
                 x => x,
             })
         })?;
@@ -104,6 +106,7 @@ pub enum DesiredStatus {
     BackingUp {
         on_complete: StartStop,
     },
+    Updating,
 }
 impl Default for DesiredStatus {
     fn default() -> Self {
@@ -115,6 +118,7 @@ impl DesiredStatus {
         match self {
             Self::Running
             | Self::Restarting { .. }
+            | Self::Updating
             | Self::BackingUp {
                 on_complete: StartStop::Start,
             } => true,

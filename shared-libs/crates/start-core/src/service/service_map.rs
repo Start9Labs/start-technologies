@@ -331,15 +331,19 @@ impl ServiceMap {
                 .handle_last(async move {
                     finalization_progress.start();
                     let s9pk = S9pk::open(&installed_path, Some(&id)).await?;
-                    let data_version = get_data_version(&id).await?;
-                    // Snapshot existing volumes before install/update modifies them
-                    crate::volume::snapshot_volumes_for_install(&id).await?;
+                    let mut data_version = get_data_version(&id).await?;
                     let prev = if let Some(service) = service.take() {
                         ensure_code!(
                             recovery_source.is_none(),
                             ErrorKind::InvalidRequest,
                             "cannot restore over existing package"
                         );
+                        // Snapshot the quiesced tree: the rollback point should be the state
+                        // the user had when they pressed update.
+                        service.quiesce().await?;
+                        crate::volume::InstallBackup::of(&id).snapshot().await?;
+                        // A `.const()` re-run can move the data version while the container comes down.
+                        data_version = get_data_version(&id).await?;
                         let uninit = if let Some(ref data_ver) = data_version {
                             let prev_can_migrate_to = &service
                                 .seed
@@ -376,6 +380,7 @@ impl ServiceMap {
                         let cleanup = service.uninstall(uninit, false, false).await?;
                         Some(cleanup)
                     } else {
+                        crate::volume::InstallBackup::of(&id).snapshot().await?;
                         None
                     };
                     let new_service = Service::install(
@@ -403,7 +408,10 @@ impl ServiceMap {
                         cleanup.await?;
                     }
 
-                    crate::volume::remove_install_backup(&id).await.log_err();
+                    crate::volume::InstallBackup::of(&id)
+                        .remove()
+                        .await
+                        .log_err();
 
                     drop(service);
 

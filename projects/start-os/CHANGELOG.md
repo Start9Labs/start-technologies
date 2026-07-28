@@ -18,6 +18,18 @@ file tracks notable changes since the move to the monorepo.
   could not write it and the banner fell back to `Services: Unknown`,
   `WAN: N/A` and `NTP: Unknown`. It now uses a private temporary file and
   removes it on every exit path.
+- **A failed or cancelled service update can no longer lose that service's data.**
+  Rolling an update back replaces the service's data with the copy taken before the
+  update started. That replacement used to delete the current data before putting the
+  copy in place, so an interruption in between — a restart, a power loss, or a second
+  failure — could leave the service with neither, and the next update attempt would
+  discard the surviving copy as stale. The rollback now moves the current data aside
+  and only drops it once the copy is fully in place, so an interruption at any point
+  leaves a state StartOS can finish on the next boot, and a rollback that cannot be
+  completed is reported instead of passing silently. A failed first-time install over
+  data that was already there no longer deletes that data either.
+- **The copy taken before an update is now made with the service stopped**, so it can
+  no longer capture a database mid-write.
 
 - **Notification selection checkboxes no longer cover text on phones.** When
   notification selection is active, each checkbox replaces its notification

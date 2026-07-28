@@ -2282,6 +2282,20 @@ service.mod.service-actor-seed-held-after-shutdown:
   fr_FR: "ServiceActorSeed détenu quelque part après l'arrêt de l'acteur"
   pl_PL: "ServiceActorSeed przetrzymywany gdzieś po zamknięciu aktora"
 
+service.mod.rollback-failed-title:
+  en_US: "Rollback Failed"
+  de_DE: "Zurücksetzen fehlgeschlagen"
+  es_ES: "Reversión fallida"
+  fr_FR: "Échec de la restauration"
+  pl_PL: "Wycofanie nie powiodło się"
+
+service.mod.rollback-failed-message:
+  en_US: "This service's data could not be returned to its state before the update: %{error}. Do not uninstall or update it again until this is resolved."
+  de_DE: "Die Daten dieses Dienstes konnten nicht in den Zustand vor der Aktualisierung zurückversetzt werden: %{error}. Deinstallieren oder aktualisieren Sie ihn nicht erneut, bis dies behoben ist."
+  es_ES: "No se pudieron devolver los datos de este servicio a su estado anterior a la actualización: %{error}. No lo desinstale ni lo vuelva a actualizar hasta que se resuelva."
+  fr_FR: "Les données de ce service n'ont pas pu être ramenées à leur état d'avant la mise à jour : %{error}. Ne le désinstallez pas et ne le mettez pas à jour de nouveau avant résolution."
+  pl_PL: "Nie udało się przywrócić danych tej usługi do stanu przed aktualizacją: %{error}. Nie odinstalowuj jej ani nie aktualizuj ponownie, dopóki problem nie zostanie rozwiązany."
+
 service.mod.race-condition-detected:
   en_US: "Race condition detected - package state changed during load"
   de_DE: "Race Condition erkannt - Paketstatus hat sich während des Ladens geändert"
@@ -6611,3 +6625,11 @@ about.view-or-edit-injected-dns-records:
   es_ES: "Ver o editar registros DNS inyectados"
   fr_FR: "Voir ou modifier les enregistrements DNS injectés"
   pl_PL: "Wyświetl lub edytuj wstrzyknięte rekordy DNS"
+
+# volume.rs
+volume.restore-conflict:
+  en_US: "Cannot roll back %{id}: both the backup and the live data contain files, so it is not clear which is current. Resolve this manually before retrying."
+  de_DE: "%{id} kann nicht zurückgesetzt werden: Sowohl das Backup als auch die aktiven Daten enthalten Dateien, sodass unklar ist, welche aktuell sind. Bitte manuell klären, bevor Sie es erneut versuchen."
+  es_ES: "No se puede revertir %{id}: tanto la copia de seguridad como los datos activos contienen archivos, por lo que no está claro cuál es el actual. Resuélvalo manualmente antes de volver a intentarlo."
+  fr_FR: "Impossible de restaurer %{id} : la sauvegarde et les données actives contiennent toutes deux des fichiers, on ne sait donc pas laquelle est à jour. Résolvez ce point manuellement avant de réessayer."
+  pl_PL: "Nie można wycofać %{id}: zarówno kopia zapasowa, jak i dane bieżące zawierają pliki, więc nie jest jasne, które są aktualne. Rozwiąż to ręcznie przed ponowną próbą."
