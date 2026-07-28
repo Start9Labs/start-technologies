@@ -12,7 +12,7 @@ Navigate to `Network > Devices` to see the device list. A search box above the l
 - **Connection** — How the device connects: Ethernet, Wi-Fi 2.4GHz, Wi-Fi 5GHz, or VPN.
 - **Security Profile** — The [Security Profile](security-profiles.md) the device is assigned to.
 - **MAC address** — The device's unique hardware identifier.
-- **IP address** — The device's IPv4 and IPv6 addresses. A lock icon indicates a reserved (static) IPv4 address.
+- **IP address** — The device's IPv4 and IPv6 addresses. A lock icon indicates a reserved (static) IPv4 address. The IPv6 address is shown only while the device is confirmed to still be using it, so the field is empty for a device that has dropped its IPv6 address or has none.
 - **Data and Speed** — Cumulative data usage and real-time upload/download speed for online devices.
 
 ## Device Detail Page

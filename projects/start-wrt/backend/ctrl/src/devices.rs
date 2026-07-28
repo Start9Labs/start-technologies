@@ -800,6 +800,129 @@ async fn ping_unreachable_macs(
     (unreachable, live_ipv4s)
 }
 
+/// GUA (`2000::/3`) or ULA (`fc00::/7`) — the two address classes [`pick_ipv6`]
+/// can return. Link-local and every other scope is filtered out downstream, so
+/// probing one would only cost a second for an address that is never displayed.
+fn is_displayable_ipv6(ip: &str) -> bool {
+    let Ok(addr) = ip.parse::<std::net::Ipv6Addr>() else {
+        return false;
+    };
+    crate::system::has_global_ipv6(std::slice::from_ref(&addr))
+        || matches!(addr.octets()[0], 0xfc | 0xfd)
+}
+
+/// IPv6 neighbor entries worth verifying: `(address, interface)` pairs whose
+/// liveness the kernel has not just confirmed.
+///
+/// The kernel keeps a `STALE` entry indefinitely while it sits below the GC
+/// threshold, so "present in the neighbor table" is not evidence the device
+/// still holds the address — it may have been dropped hours ago when a prefix
+/// went away. Anything already `REACHABLE` needs no probe (the kernel verified
+/// it within the last ~30 s), and neither does any MAC that has a `REACHABLE`
+/// entry for the same address family, since it is demonstrably answering NDP.
+///
+/// Unlike [`non_wifi_probe_candidates`] this does *not* skip WiFi clients:
+/// hostapd is authoritative for a station's presence, but says nothing about
+/// which IPv6 addresses it still owns.
+fn ipv6_probe_candidates(arp_entries: &[ArpEntry]) -> Vec<(String, String)> {
+    let reachable_macs: std::collections::HashSet<&str> = arp_entries
+        .iter()
+        .filter(|e| e.state == "REACHABLE" && e.ip.contains(':'))
+        .map(|e| e.mac.as_str())
+        .collect();
+
+    let mut seen = std::collections::HashSet::new();
+    let mut targets = Vec::new();
+    for entry in arp_entries {
+        if !entry.ip.contains(':') || !is_displayable_ipv6(&entry.ip) {
+            continue;
+        }
+        if entry.state == "REACHABLE" || reachable_macs.contains(entry.mac.as_str()) {
+            continue;
+        }
+        if !matches!(entry.state.as_str(), "STALE" | "DELAY" | "PROBE") {
+            continue;
+        }
+        if seen.insert(entry.ip.clone()) {
+            targets.push((entry.ip.clone(), entry.interface.clone()));
+        }
+    }
+    targets
+}
+
+/// Unicast-probe `targets`, then re-read the neighbor table and return every
+/// IPv6 address the kernel now reports as `REACHABLE`.
+///
+/// The verdict deliberately comes from the NUD state rather than the ping's
+/// exit code (the way [`ping_unreachable_macs`] judges IPv4). Sending to the
+/// address forces the kernel through neighbor discovery, and a device that
+/// still owns it answers the solicitation even when its firewall drops the
+/// echo request — which is the default on Windows for anything but a private
+/// network profile. Judging on echo replies would hide addresses devices
+/// genuinely hold. This is the same standard [`crate::ipv6_tracker`] applies.
+///
+/// Returns `None` when the neighbor table could not be re-read, which the
+/// caller treats as "no verification available" and fails open.
+async fn verify_ipv6_neighbors(
+    targets: Vec<(String, String)>,
+) -> Option<std::collections::HashSet<String>> {
+    use std::process::Stdio;
+
+    let mut children = Vec::new();
+    for (ip, iface) in &targets {
+        if let Ok(child) = tokio::process::Command::new("ping6")
+            .args(["-c", "1", "-W", "1", "-I", iface.as_str(), ip.as_str()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+        {
+            children.push(child);
+        }
+    }
+    for mut child in children {
+        let _ = child.wait().await;
+    }
+
+    let output = tokio::process::Command::new("ip")
+        .args(["-6", "neigh", "show"])
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(
+        parse_arp_output(&String::from_utf8_lossy(&output.stdout))
+            .into_iter()
+            .filter(|e| e.state == "REACHABLE")
+            .map(|e| e.ip)
+            .collect(),
+    )
+}
+
+/// The IPv6 addresses of a MAC that survive verification, in neighbor-table
+/// order so [`pick_ipv6`]'s GUA-over-ULA preference is unaffected.
+///
+/// An address is kept when the kernel confirmed it either in the initial
+/// snapshot or in the post-probe re-read. `verified == None` means verification
+/// was unavailable, in which case every candidate is kept — showing a possibly
+/// stale address beats blanking the field on a transient failure.
+fn live_ipv6_candidates<'a>(
+    arp_list: &[&'a ArpEntry],
+    verified: Option<&std::collections::HashSet<String>>,
+) -> Vec<&'a str> {
+    arp_list
+        .iter()
+        .filter(|e| e.ip.contains(':'))
+        .filter(|e| match verified {
+            None => true,
+            Some(live) => e.state == "REACHABLE" || live.contains(&e.ip),
+        })
+        .map(|e| e.ip.as_str())
+        .collect()
+}
+
 /// Among a MAC's IPv4 neighbor entries, pick the one most likely to be the
 /// device's current address. A device that just roamed to another VLAN leaves a
 /// stale entry on its old bridge; both entries share the MAC, so the list must
@@ -1027,6 +1150,10 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
     // probe) are treated as unreachable. Runs concurrently with nlbw,
     // conntrack, and lease reads so it adds zero net latency.
     let (probe_targets, ipv6_only_macs) = non_wifi_probe_candidates(&initial_arp, &wifi_clients);
+    // IPv6 addresses get their own verification pass: a STALE NDP entry can
+    // outlive the address itself by hours, so the neighbor table alone is not
+    // evidence the device still holds what we are about to display.
+    let ipv6_probe_targets = ipv6_probe_candidates(&initial_arp);
 
     // Collect WireGuard interface names for querying active peers.
     // We need to extract this before the uci_result is consumed, but uci_result
@@ -1044,12 +1171,14 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
 
     let (
         (unreachable_macs, live_ipv4s),
+        live_ipv6s,
         leases_output,
         nlbw_output,
         conntrack_output,
         wg_active_peers,
     ) = tokio::join!(
         ping_unreachable_macs(probe_targets),
+        verify_ipv6_neighbors(ipv6_probe_targets),
         read_all_dhcp_leases(),
         run_cmd("nlbw", &["-c", "json", "-g", "mac"]),
         run_cmd("conntrack", &["-L", "-o", "extended"]),
@@ -1261,12 +1390,10 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             .and_then(|h| h.ip.clone())
             .or_else(|| chosen_arp.map(|e| e.ip.clone()))
             .or_else(|| lease.map(|l| l.ip.clone()));
-        let ipv6 = pick_ipv6(
-            arp_list
-                .iter()
-                .filter(|e| e.ip.contains(':'))
-                .map(|e| e.ip.as_str()),
-        );
+        // Only addresses the device demonstrably still answers for — see
+        // live_ipv6_candidates. Unlike the IPv4 field there is no reservation or
+        // lease to fall back on, so an unverified address would be pure fiction.
+        let ipv6 = pick_ipv6(live_ipv6_candidates(&arp_list, live_ipv6s.as_ref()).into_iter());
 
         // Profile from VLAN tag, derived from the same chosen entry as the IPv4
         // address. Fall back to the first entry (e.g. an IPv6-only device with no
@@ -1871,6 +1998,99 @@ mod tests {
 
         // Empty → None.
         assert_eq!(pick_ipv6(std::iter::empty()), None);
+    }
+
+    fn arp_mac(ip: &str, mac: &str, state: &str) -> ArpEntry {
+        ArpEntry {
+            ip: ip.to_string(),
+            mac: mac.to_string(),
+            interface: "br-lan.101".to_string(),
+            state: state.to_string(),
+        }
+    }
+
+    #[test]
+    fn ipv6_probe_candidates_targets_only_unconfirmed_displayable_addresses() {
+        let entries = vec![
+            // Probed: a stale GUA and a stale ULA are exactly the addresses that
+            // can outlive the device's ownership of them.
+            arp_mac("2001:db8::5", "AA:AA:AA:00:00:01", "STALE"),
+            arp_mac("fd00::5", "AA:AA:AA:00:00:02", "STALE"),
+            // Not probed: the kernel confirmed this one within the last ~30 s.
+            arp_mac("2001:db8::6", "AA:AA:AA:00:00:03", "REACHABLE"),
+            // Not probed: same MAC as the REACHABLE entry above, so the device is
+            // demonstrably answering NDP — a second probe would tell us nothing.
+            arp_mac("2001:db8::7", "AA:AA:AA:00:00:03", "STALE"),
+            // Not probed: never displayed, so verifying it would be wasted time.
+            arp_mac("fe80::1", "AA:AA:AA:00:00:04", "STALE"),
+            arp_mac("fec0::1", "AA:AA:AA:00:00:05", "STALE"),
+            // Not probed: IPv4 has its own probe path.
+            arp_mac("192.168.10.5", "AA:AA:AA:00:00:06", "STALE"),
+            // Not probed: FAILED is not an "alive" state.
+            arp_mac("2001:db8::8", "AA:AA:AA:00:00:07", "FAILED"),
+        ];
+
+        let targets = ipv6_probe_candidates(&entries);
+        assert_eq!(
+            targets,
+            vec![
+                ("2001:db8::5".to_string(), "br-lan.101".to_string()),
+                ("fd00::5".to_string(), "br-lan.101".to_string()),
+            ],
+        );
+    }
+
+    #[test]
+    fn ipv6_probe_candidates_deduplicates_repeated_addresses() {
+        // The same address can appear on two bridges after a device roams; one
+        // probe settles it.
+        let a = arp_mac("2001:db8::5", "AA:AA:AA:00:00:01", "STALE");
+        let mut b = arp_mac("2001:db8::5", "AA:AA:AA:00:00:01", "STALE");
+        b.interface = "br-lan.102".to_string();
+        assert_eq!(ipv6_probe_candidates(&[a, b]).len(), 1);
+    }
+
+    #[test]
+    fn live_ipv6_candidates_drops_unverified_addresses() {
+        let stale_gua = arp_mac("2001:db8::5", "AA:AA:AA:00:00:01", "STALE");
+        let stale_ula = arp_mac("fd00::5", "AA:AA:AA:00:00:01", "STALE");
+        let v4 = arp_mac("192.168.10.5", "AA:AA:AA:00:00:01", "REACHABLE");
+        let list = vec![&stale_gua, &stale_ula, &v4];
+
+        // The GUA answered the probe, the ULA did not: the device dropped the
+        // ULA when its prefix went away, and the UI must stop claiming it.
+        let verified = ["2001:db8::5".to_string()].into_iter().collect();
+        assert_eq!(
+            live_ipv6_candidates(&list, Some(&verified)),
+            vec!["2001:db8::5"],
+        );
+
+        // Nothing verified → no IPv6 shown at all, rather than a fabricated one.
+        let none_verified = std::collections::HashSet::new();
+        assert!(live_ipv6_candidates(&list, Some(&none_verified)).is_empty());
+    }
+
+    #[test]
+    fn live_ipv6_candidates_keeps_initially_reachable_and_fails_open() {
+        let reachable = arp_mac("2001:db8::5", "AA:AA:AA:00:00:01", "REACHABLE");
+        let stale = arp_mac("fd00::5", "AA:AA:AA:00:00:01", "STALE");
+        let list = vec![&reachable, &stale];
+
+        // An entry the initial snapshot already confirmed is never probed, so it
+        // is absent from the verified set — it must survive on its own state.
+        let verified = std::collections::HashSet::new();
+        assert_eq!(
+            live_ipv6_candidates(&list, Some(&verified)),
+            vec!["2001:db8::5"],
+        );
+
+        // Verification unavailable (the re-read failed): keep everything, so a
+        // transient error blanks nobody's address. Order is preserved, so
+        // pick_ipv6 still prefers the GUA.
+        assert_eq!(
+            live_ipv6_candidates(&list, None),
+            vec!["2001:db8::5", "fd00::5"],
+        );
     }
 
     #[tokio::test]
