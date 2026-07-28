@@ -672,6 +672,10 @@ pub async fn ipv6_set<C: CtrlContext>(
                     None,
                 );
                 if ctx.effectful() {
+                    // Disabling WAN IPv6 (or switching mode) drops the delegated
+                    // prefix the LAN was subnetting; withdraw it from clients
+                    // while it still exists. See deprecate_odhcpd_prefixes.
+                    crate::deprecate_odhcpd_prefixes().await;
                     restart_network().await;
                     let _ = crate::run_quiet_async(
                         tokio::process::Command::new("/etc/init.d/odhcpd").arg("restart"),

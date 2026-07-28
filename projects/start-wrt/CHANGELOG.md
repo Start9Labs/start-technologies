@@ -55,6 +55,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   get local (ULA) IPv6 addresses while internet-bound IPv6 remains blocked
   by the VPN kill switch, so nothing leaks around the tunnel.
 
+- **Turning IPv6 off now tells your devices to drop their IPv6 addresses.**
+  Devices choose their own IPv6 addresses from a prefix the router advertises,
+  and the only way to take one back is to advertise it one last time as
+  expired. The router was restarting its advertisement service instead of
+  reloading it, which skips that goodbye entirely — so after disabling IPv6
+  (on the LAN, on a Security Profile, or on the WAN) devices carried on using
+  addresses that no longer worked, for up to 90 minutes, until the addresses
+  timed out on their own. The notice is now sent while the prefix is still
+  live. A device that is asleep or misses the notice still falls back to the
+  timeout.
+
+- **The Devices list no longer shows IPv6 addresses a device has given up.**
+  The router remembers a neighbouring address long after the device stops
+  using it, so a device could keep displaying an IPv6 address for hours after
+  it dropped it — most visibly after turning IPv6 off, where the address on
+  screen suggested nothing had changed. The router now confirms the device
+  still answers on an address before showing it, and leaves the field empty
+  when it does not.
+
 - **Published ports no longer reshuffle their order on every refresh.** The
   list is auto-refreshed every few seconds, and each refresh returned the
   rows in an arbitrary order, so the table visibly jumped around. Published

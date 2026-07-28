@@ -870,6 +870,12 @@ pub async fn reload_system_full() -> Result<(), Error> {
 }
 
 async fn reload_system_inner(restart_network: bool) -> Result<(), Error> {
+    // Before the network is touched: if this edit turned a profile's RA off
+    // (moved it onto an IPv4-only VPN, say), this is the only moment its clients
+    // can be told to drop the prefix — once netifd removes it there is nothing
+    // left to withdraw. See deprecate_odhcpd_prefixes. A no-op when nothing
+    // about IPv6 changed, beyond one extra RA.
+    crate::deprecate_odhcpd_prefixes().await;
     let network_action = if restart_network { "restart" } else { "reload" };
     let _ = crate::run_quiet_async(
         tokio::process::Command::new("/etc/init.d/network").arg(network_action),

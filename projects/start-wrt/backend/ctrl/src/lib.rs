@@ -475,6 +475,36 @@ pub async fn run_quiet_async(
         .await
 }
 
+/// Make odhcpd re-read its config, and give it a moment to act on the change,
+/// **before** the network is torn down or reconfigured.
+///
+/// This is the only way to revoke an IPv6 prefix from LAN clients. SLAAC has no
+/// lease to expire, so a prefix is withdrawn by advertising it one last time
+/// with zero lifetimes (RFC 9096 §3.5). odhcpd emits that RA from
+/// `router_setup_interface(iface, false)`, which it reaches when a config reload
+/// finds RA newly disabled on an interface — i.e. on **SIGHUP**, which is what
+/// `/etc/init.d/odhcpd reload` sends. A `restart` does not: odhcpd's exit path
+/// tears down the process without touching the interfaces, so the old process
+/// dies silently and the new one starts with RA already off, having never told
+/// anyone. Clients then keep the address for the rest of its advertised valid
+/// lifetime (odhcpd caps this at 5400 s), which is why "IPv6 disabled" used to
+/// leave devices holding addresses for up to 90 minutes.
+///
+/// Two ordering constraints make this a helper rather than a one-line call:
+///
+/// * The UCI change must already be on disk — the reload is what reads it.
+/// * The prefix must still be on the interface, so this has to run *before*
+///   `network restart`/`reload`. There is nothing to wait on (`procd_send_signal`
+///   returns as soon as the signal is delivered, while the RA goes out later
+///   from odhcpd's event loop), so we settle for a fixed pause.
+///
+/// Best-effort by nature: odhcpd sends exactly one final RA, and a client that
+/// misses it — or is asleep — falls back to waiting out the valid lifetime.
+pub async fn deprecate_odhcpd_prefixes() {
+    let _ = run_quiet_async(tokio::process::Command::new("/etc/init.d/odhcpd").arg("reload")).await;
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+}
+
 pub fn init_logging(name: &str) {
     use std::ffi::CString;
 
