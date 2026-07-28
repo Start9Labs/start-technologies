@@ -272,6 +272,11 @@ async fn inner_main() -> Result<(), Error> {
         if let Err(e) = crate::profiles::bootstrap_admin_profile("/etc/config").await {
             tracing::error!("Admin profile bootstrap failed: {e}");
         }
+        // Must follow bootstrap_admin_profile: the heal enumerates profiles from
+        // the `startwrt` config, so the admin profile has to be registered first.
+        if let Err(e) = crate::profiles::heal_ipv6_state("/etc/config").await {
+            tracing::error!("IPv6 state repair failed: {e}");
+        }
         if let Err(e) = crate::system::apply_remote_access(ServerContext::default()).await {
             tracing::error!("Remote access rule apply failed: {e}");
         }

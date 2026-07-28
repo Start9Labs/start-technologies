@@ -5,7 +5,7 @@ All notable changes to StartWRT are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.2]
+## [1.1.0]
 
 ### Removed
 
@@ -53,7 +53,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after switching the outbound back. The LAN IPv6 toggle is now the sole
   owner of that setting; with an IPv4-only VPN outbound, LAN devices still
   get local (ULA) IPv6 addresses while internet-bound IPv6 remains blocked
-  by the VPN kill switch, so nothing leaks around the tunnel.
+  by the VPN kill switch, so nothing leaks around the tunnel. That same
+  fault could also leave a router where the LAN IPv6 page read "Disabled"
+  while individual Security Profiles carried on handing out IPv6 addresses —
+  the page and the network disagreeing, with no way to bring them back into
+  line. Routers left in that state are now repaired automatically on the
+  first start after updating, which turns IPv6 off for those profiles too;
+  turn it back on from the LAN IPv6 page if you want it, and this time it
+  applies everywhere at once.
 
 - **Turning IPv6 off now tells your devices to drop their IPv6 addresses.**
   Devices choose their own IPv6 addresses from a prefix the router advertises,
