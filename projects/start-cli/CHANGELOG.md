@@ -9,6 +9,19 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
+## [1.1.1]
+
+### Fixed
+
+- **A configured `.local` host no longer breaks commands that never use it.** Resolving that
+  host to an address happened while the client context was built, before the subcommand was
+  dispatched, so whenever the named box was off the LAN _every_ invocation died with
+  `Network Error: Failed to resolve hostname: <name>` — including the registry, s9pk, and
+  tunnel commands that contact no StartOS host at all. Resolution is now deferred to the first
+  request that actually needs the address: unrelated commands are unaffected, commands against
+  the host still fail with the same message, and a box that comes up mid-session resolves on
+  the next attempt rather than needing a new invocation.
+
 ## [1.1.0]
 
 ### Changed

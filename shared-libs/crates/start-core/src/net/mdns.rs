@@ -1,11 +1,44 @@
 use std::net::Ipv4Addr;
 
 use color_eyre::eyre::eyre;
+use once_cell::sync::OnceCell;
 use reqwest::Url;
 use tokio::process::Command;
 
 use crate::prelude::*;
 use crate::util::Invoke;
+
+/// A URL whose `.local` host is resolved on first use rather than when the context is built.
+///
+/// Resolution needs the named box to be answering mDNS, so doing it up front fails *every*
+/// subcommand the moment that box is off — including the registry, s9pk, and tunnel commands
+/// that never contact a StartOS host at all. Deferring it puts the failure on the request that
+/// actually needs an address, and leaves the rest working.
+///
+/// The resolved URL is memoized, and a failure is not: like [`OnceCell::get_or_try_init`], a
+/// later call retries, so a box that comes up mid-session resolves on the next attempt.
+#[derive(Debug)]
+pub struct LazyPinnedUrl {
+    raw: Url,
+    pinned: OnceCell<Url>,
+}
+impl LazyPinnedUrl {
+    pub fn new(raw: Url) -> Self {
+        Self {
+            raw,
+            pinned: OnceCell::new(),
+        }
+    }
+
+    /// BLOCKING on the call that populates it.
+    pub fn get(&self) -> Result<&Url, Error> {
+        self.pinned.get_or_try_init(|| {
+            let mut url = self.raw.clone();
+            pin_mdns_host(&mut url)?;
+            Ok(url)
+        })
+    }
+}
 
 /// BLOCKING. Point a `*.local` URL at its resolved address, leaving every other URL alone.
 ///

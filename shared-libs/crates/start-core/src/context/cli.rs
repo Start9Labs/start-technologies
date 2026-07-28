@@ -24,7 +24,7 @@ use crate::developer::{
     OS_ID_KEY_PATH, default_id_key_path, load_signing_key, migrate_legacy_key_file,
 };
 use crate::middleware::auth::local::{is_loopback, local_auth_header};
-use crate::net::mdns::pin_mdns_host;
+use crate::net::mdns::LazyPinnedUrl;
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::s9pk::init::{BUILD_KEY_FILE, LEGACY_BUILD_KEY_FILE, STARTOS_DIR};
@@ -32,14 +32,12 @@ use crate::s9pk::init::{BUILD_KEY_FILE, LEGACY_BUILD_KEY_FILE, STARTOS_DIR};
 #[derive(Debug)]
 pub struct CliContextSeed {
     pub runtime: OnceCell<Arc<Runtime>>,
-    pub base_url: Url,
-    /// The host the user named the server by, captured before `pin_mdns_host`
-    /// rewrites a `.local` host to an address. Request signatures are bound to
-    /// this identity — one of the server's sig contexts — not to the pinned
-    /// transport address, which the server does not necessarily recognize.
+    pub base_url: LazyPinnedUrl,
+    /// The host the user named the server by, taken from the unresolved URL. Request
+    /// signatures are bound to this identity — one of the server's sig contexts — not to
+    /// the pinned transport address, which the server does not necessarily recognize.
     pub host_identity: Option<InternedString>,
-    pub rpc_url: Url,
-    pub registry_url: Option<Url>,
+    pub registry_base_url: Option<LazyPinnedUrl>,
     pub registry_hostname: Vec<InternedString>,
     pub registry_listen: Option<SocketAddr>,
     pub s9pk_s3base: Option<Url>,
@@ -71,40 +69,16 @@ impl CliContext {
         // Follow each namespace's `default` profile to a URL (`load` already seeded
         // -H/-r as `default` and layered every config file in), then localhost / no
         // registry when unset.
-        let mut url = match resolve_target(config.host.as_ref())? {
+        let url = match resolve_target(config.host.as_ref())? {
             Some(url) => url,
             None => "http://localhost".parse()?,
         };
-        // Before anything derives a URL from this one: a `.local` host is unresolvable from a
-        // musl-static binary, so pin it to an address the system resolver found.
         let host_identity = url.host_str().map(InternedString::intern);
-        pin_mdns_host(&mut url)?;
-
-        let registry = resolve_target(config.registry.as_ref())?;
 
         Ok(CliContext(Arc::new(CliContextSeed {
             runtime: OnceCell::new(),
-            base_url: url.clone(),
-            rpc_url: {
-                url.path_segments_mut()
-                    .map_err(|_| eyre!("Url cannot be base"))
-                    .with_kind(crate::ErrorKind::ParseUrl)?
-                    .push("rpc")
-                    .push("v1");
-                url
-            },
-            registry_url: registry
-                .map(|mut registry| {
-                    pin_mdns_host(&mut registry)?;
-                    registry
-                        .path_segments_mut()
-                        .map_err(|_| eyre!("Url cannot be base"))
-                        .with_kind(crate::ErrorKind::ParseUrl)?
-                        .push("rpc")
-                        .push("v0");
-                    Ok::<_, Error>(registry)
-                })
-                .transpose()?,
+            base_url: LazyPinnedUrl::new(url),
+            registry_base_url: resolve_target(config.registry.as_ref())?.map(LazyPinnedUrl::new),
             registry_hostname: config.registry_hostname.unwrap_or_default(),
             registry_listen: config.registry_listen,
             s9pk_s3base: config.s9pk_s3base,
@@ -139,6 +113,34 @@ impl CliContext {
             root_ca: config.root_ca.unwrap_or_default(),
             insecure: config.insecure,
         })))
+    }
+
+    /// The host's JSON-RPC endpoint. BLOCKING when it resolves a `.local` host.
+    pub fn rpc_url(&self) -> Result<Url, Error> {
+        let mut url = self.base_url.get()?.clone();
+        url.path_segments_mut()
+            .map_err(|_| eyre!("Url cannot be base"))
+            .with_kind(crate::ErrorKind::ParseUrl)?
+            .push("rpc")
+            .push("v1");
+        Ok(url)
+    }
+
+    /// The configured registry's JSON-RPC endpoint, or `None` when no registry is set.
+    /// BLOCKING when it resolves a `.local` host.
+    pub fn registry_url(&self) -> Result<Option<Url>, Error> {
+        self.registry_base_url
+            .as_ref()
+            .map(|registry| {
+                let mut url = registry.get()?.clone();
+                url.path_segments_mut()
+                    .map_err(|_| eyre!("Url cannot be base"))
+                    .with_kind(crate::ErrorKind::ParseUrl)?
+                    .push("rpc")
+                    .push("v0");
+                Ok(url)
+            })
+            .transpose()
     }
 
     fn ws_tls_connector(&self) -> Result<Option<Connector>, Error> {
@@ -227,7 +229,7 @@ impl CliContext {
         &self,
         guid: Guid,
     ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, Error> {
-        let mut url = self.base_url.clone();
+        let mut url = self.base_url.get()?.clone();
         let ws_scheme = match url.scheme() {
             "https" => "wss",
             "http" => "ws",
@@ -265,7 +267,7 @@ impl CliContext {
         body: reqwest::Body,
         headers: reqwest::header::HeaderMap,
     ) -> Result<reqwest::Response, Error> {
-        let mut url = self.base_url.clone();
+        let mut url = self.base_url.get()?.clone();
         url.path_segments_mut()
             .map_err(|_| eyre!("Url cannot be base"))
             .with_kind(crate::ErrorKind::ParseUrl)?
@@ -362,15 +364,16 @@ impl CallRemote<RpcContext> for CliContext {
         params: Value,
         _: Empty,
     ) -> Result<Value, RpcError> {
+        let rpc_url = self.rpc_url()?;
         let mut headers = HeaderMap::new();
-        if is_loopback(&self.rpc_url) {
+        if is_loopback(&rpc_url) {
             if let Some(auth) = local_auth_header::<RpcContext>().await {
                 headers.insert(AUTHORIZATION, auth);
             }
         }
         crate::middleware::auth::signature::call_remote(
             self,
-            self.rpc_url.clone(),
+            rpc_url,
             headers,
             self.host_identity.as_deref(),
             method,
@@ -389,7 +392,7 @@ impl CallRemote<DiagnosticContext> for CliContext {
     ) -> Result<Value, RpcError> {
         crate::middleware::auth::signature::call_remote(
             self,
-            self.rpc_url.clone(),
+            self.rpc_url()?,
             HeaderMap::new(),
             self.host_identity.as_deref(),
             method,
@@ -408,7 +411,7 @@ impl CallRemote<InitContext> for CliContext {
     ) -> Result<Value, RpcError> {
         crate::middleware::auth::signature::call_remote(
             self,
-            self.rpc_url.clone(),
+            self.rpc_url()?,
             HeaderMap::new(),
             self.host_identity.as_deref(),
             method,
@@ -427,7 +430,7 @@ impl CallRemote<SetupContext> for CliContext {
     ) -> Result<Value, RpcError> {
         crate::middleware::auth::signature::call_remote(
             self,
-            self.rpc_url.clone(),
+            self.rpc_url()?,
             HeaderMap::new(),
             self.host_identity.as_deref(),
             method,
