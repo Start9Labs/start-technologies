@@ -9,6 +9,17 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
+## [1.1.1]
+
+### Fixed
+
+- **`s9pk pack` no longer embeds inaccessible JavaScript under a restrictive umask.** The v2
+  packer now adds read access to files and read/search access to directories (`ugo+rX`) while
+  creating `javascript.squashfs`, without modifying the source tree or stripping executable bits.
+  Previously, a build such as `ncc build` under umask `077` could produce a `0700` directory and
+  `0600` `index.js`; those modes survived packing and caused StartOS to report
+  `/usr/lib/startos/package/index.js not found` when installing an otherwise valid package.
+
 ## [1.1.0]
 
 ### Changed

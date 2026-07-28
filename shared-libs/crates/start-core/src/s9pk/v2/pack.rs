@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, LazyLock, OnceLock};
@@ -64,6 +65,7 @@ pub static CONTAINER_DATADIR: LazyLock<&'static str> = LazyLock::new(|| {
 pub struct SqfsDir {
     path: PathBuf,
     tmpdir: Arc<TmpDir>,
+    permission_action: Option<&'static str>,
     sqfs: OnceCell<MultiCursorFile>,
 }
 impl SqfsDir {
@@ -71,6 +73,15 @@ impl SqfsDir {
         Self {
             path,
             tmpdir,
+            permission_action: None,
+            sqfs: OnceCell::new(),
+        }
+    }
+    fn world_readable(path: PathBuf, tmpdir: Arc<TmpDir>) -> Self {
+        Self {
+            path,
+            tmpdir,
+            permission_action: Some("chmod(ugo+rX)@true"),
             sqfs: OnceCell::new(),
         }
     }
@@ -85,12 +96,23 @@ impl SqfsDir {
                         .invoke(ErrorKind::Filesystem)
                         .await?;
                 } else {
-                    Command::new("mksquashfs")
-                        .arg(&self.path)
-                        .arg(&path)
-                        .arg("-quiet")
-                        .invoke(ErrorKind::Filesystem)
-                        .await?;
+                    let mut command = Command::new("mksquashfs");
+                    command.arg(&self.path).arg(&path).arg("-quiet");
+                    if let Some(action) = self.permission_action {
+                        let source_mode = tokio::fs::metadata(&self.path)
+                            .await
+                            .with_ctx(|_| (ErrorKind::Filesystem, self.path.display()))?
+                            .permissions()
+                            .mode()
+                            & 0o7777;
+                        let root_mode = source_mode | 0o555;
+                        command
+                            .arg("-root-mode")
+                            .arg(format!("{root_mode:o}"))
+                            .arg("-action")
+                            .arg(action);
+                    }
+                    command.invoke(ErrorKind::Filesystem).await?;
                 }
 
                 Ok(MultiCursorFile::from(
@@ -702,7 +724,7 @@ pub async fn pack(ctx: CliContext, params: PackParams) -> Result<(), Error> {
         "javascript.squashfs".into(),
         Entry::file(TmpSource::new(
             tmp_dir.clone(),
-            PackSource::Squashfs(Arc::new(SqfsDir::new(js_dir, tmp_dir.clone()))),
+            PackSource::Squashfs(Arc::new(SqfsDir::world_readable(js_dir, tmp_dir.clone()))),
         )),
     );
 
@@ -944,4 +966,66 @@ pub async fn list_ingredients(_: CliContext, params: PackParams) -> Result<Vec<P
     }
 
     Ok(ingredients)
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
+    use super::*;
+
+    fn mode(path: impl AsRef<Path>) -> u32 {
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    #[tokio::test]
+    async fn javascript_squashfs_is_readable_after_restrictive_umask() {
+        let tmp_dir = Arc::new(TmpDir::new().await.unwrap());
+        let javascript = tmp_dir.join("javascript");
+
+        Command::new("sh")
+            .arg("-c")
+            .arg(
+                r#"umask 077
+mkdir -p "$1/nested"
+printf 'module.exports = {}\n' > "$1/index.js"
+printf '#!/bin/sh\n' > "$1/nested/helper"
+chmod u+x "$1/nested/helper"
+chmod 0770 "$1"
+"#,
+            )
+            .arg("sh")
+            .arg(&javascript)
+            .invoke(ErrorKind::Filesystem)
+            .await
+            .unwrap();
+
+        assert_eq!(mode(&javascript), 0o770);
+        assert_eq!(mode(javascript.join("index.js")), 0o600);
+        assert_eq!(mode(javascript.join("nested/helper")), 0o700);
+
+        let squashfs = SqfsDir::world_readable(javascript.clone(), tmp_dir.clone());
+        let squashfs_path = tokio::fs::read_link(squashfs.file().await.unwrap().path().unwrap())
+            .await
+            .unwrap();
+        let extracted = tmp_dir.join("extracted");
+        Command::new("sh")
+            .arg("-c")
+            .arg(r#"umask 000; exec unsquashfs -quiet -dest "$1" "$2""#)
+            .arg("sh")
+            .arg(&extracted)
+            .arg(squashfs_path)
+            .invoke(ErrorKind::Filesystem)
+            .await
+            .unwrap();
+
+        assert_eq!(mode(&extracted), 0o775);
+        assert_eq!(mode(extracted.join("nested")), 0o755);
+        assert_eq!(mode(extracted.join("index.js")), 0o644);
+        assert_eq!(mode(extracted.join("nested/helper")), 0o755);
+
+        assert_eq!(mode(&javascript), 0o770);
+        assert_eq!(mode(javascript.join("index.js")), 0o600);
+        assert_eq!(mode(javascript.join("nested/helper")), 0o700);
+    }
 }
