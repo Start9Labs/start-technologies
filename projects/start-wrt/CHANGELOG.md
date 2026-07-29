@@ -9,18 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **eMMC boot firmware provisioning.** The flash wizard and in-app updates now
-  converge the eMMC hardware boot partitions (boot0/boot1) to the release's own
-  `bootinfo` + FSBL (u-boot SPL, built from the pinned
-  `spacemit-com/uboot-2022.10` source). Previously only vendor factory tooling
-  ever wrote boot0, so a DIY BananaPi BPI-F3 whose factory left it empty (or
-  carrying an incompatible bootloader vintage) completed the setup wizard but
-  could not boot from eMMC once the microSD card was removed. Writes are
-  idempotent (byte-compared, skipped when already current), read-back
+- **eMMC boot firmware provisioning.** The flash wizard, in-app updates, and a
+  check on every boot now converge the eMMC hardware boot partitions
+  (boot0/boot1) to the release's own `bootinfo` + FSBL (u-boot SPL, built from
+  the pinned `spacemit-com/uboot-2022.10` source). Previously only vendor
+  factory tooling ever wrote boot0, so a DIY BananaPi BPI-F3 whose factory left
+  it empty (or carrying an incompatible bootloader vintage) completed the setup
+  wizard but could not boot from eMMC once the microSD card was removed. Writes
+  are idempotent (byte-compared, skipped when already current), read-back
   verified, and ordered for power-cut safety (boot1 mirror first, the
   single-sector bootinfo header last); boards already carrying the current
-  firmware are not touched. The `bootinfo_emmc.bin` blob now ships in the
-  image's bootfs partition to support this.
+  firmware are not touched. The boot-time check makes provisioning effective
+  from the first boot after installing this release and self-heals damaged or
+  interrupted boot firmware thereafter. The `bootinfo_emmc.bin` blob now ships
+  in the image's bootfs partition to support this.
 - **The firmware image now ships MediaTek MT7915 Wi-Fi firmware alongside the
   MT7916 firmware.** MT7915-based mini PCIe modules (such as the AsiaRF
   AW7915-NP1) previously failed to initialize on DIY builds: the driver was

@@ -15,6 +15,11 @@
 # are logged but never abort the upgrade — the user area is already written,
 # and a board with a valid old boot0 still boots.
 #
+# Two callers: sysupgrade stage2 (both subtargets' platform_do_upgrade) and
+# every boot (/lib/preinit/80_provision_boot0). Both impose the same contract:
+# never fail hard, scratch space in /tmp only, busybox-only tools — and the
+# stage2 ramfs binary list additionally lacks cmp, hence md5sum comparisons.
+#
 # Mirrors the Rust implementation in backend/ctrl/src/boot0.rs (wizard flash
 # path); keep the two in sync.
 

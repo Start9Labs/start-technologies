@@ -17,7 +17,7 @@ StartWRT never updates automatically — updating always requires explicit actio
 
 Firmware integrity is enforced cryptographically (a Blake3 commitment plus ed25519 release signatures), so only properly signed StartWRT releases will install. A tampered or unsigned image is rejected.
 
-Updates also keep the router's low-level boot firmware (the eMMC boot partitions) in sync with the release, so every part of the boot chain ships and updates together. This is automatic; if it is already current, nothing is rewritten.
+Updates also keep the router's low-level boot firmware (the eMMC boot partitions) in sync with the release — verified during the update and again on every boot — so every part of the boot chain ships and updates together. This is automatic; if it is already current, nothing is rewritten.
 
 ## Update by Reflashing (Fallback)
 
