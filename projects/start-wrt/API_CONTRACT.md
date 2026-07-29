@@ -1045,6 +1045,14 @@ struct OutboundVpnCreateResponse {
 // OpenVPN configs (no INI headers) are rejected with an OpenVPN-specific
 // message. The web UI mirrors this with an async file-content check before
 // submit, but the backend is the authoritative gate.
+//
+// `target` must be "Internet" or an existing VPN's label (else InvalidValue),
+// must not close a chain cycle (VpnChainCycle), and must not name a VPN that
+// is disabled (VpnDisabled) — a disabled interface is never registered with
+// netifd, so the vcr_<iface> chain route is dropped and this VPN's endpoint
+// traffic silently falls back to the WAN. `vpn-client.set-enabled` holds the
+// other half of that invariant, refusing to disable a VPN that something
+// already chains through.
 ```
 
 ### `vpn-client.update`
@@ -1064,6 +1072,11 @@ struct OutboundVpnUpdateRequest {
 // Response: null
 // Backend: updates label+target metadata and the interface `mtu` option.
 // Bounces the WG interface only when the MTU actually changed.
+//
+// Validation: same `target` rules as vpn-client.create, except the disabled
+// check runs ONLY when `target` differs from the stored one — mirroring
+// guard_subnet_collision, so an unrelated edit (label, MTU) isn't blocked by a
+// broken chain already present in the config.
 ```
 
 ### `vpn-client.delete`

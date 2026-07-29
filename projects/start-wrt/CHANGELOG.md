@@ -37,6 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at a disabled — or nonexistent — VPN, so the command line can't create the
   same dead end.
 
+  The same applied to VPN chaining, where it was quieter and worse: a disabled
+  VPN could be picked as another VPN's **Connects to** target, and the chain
+  then silently collapsed to a single hop. The downstream VPN connected
+  normally — straight out your Internet connection instead of through the VPN
+  you chained it to — and every screen reported success. Disabled VPNs are no
+  longer offered as chain targets, and the router rejects one outright.
+
 - **Enabling LAN IPv6 no longer silently fails when the Admin profile routes
   through an IPv4-only VPN.** Saving the LAN IPv6 settings reported success
   but immediately reverted to disabled: the save re-derived the admin LAN's

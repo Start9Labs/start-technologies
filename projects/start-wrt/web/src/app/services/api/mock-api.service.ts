@@ -1393,7 +1393,11 @@ export class MockApiService extends ApiService {
       id: 'wg_mullvad',
       label: 'Mullvad',
       target: 'Proton',
-      enabled: true,
+      // Disabled by default so the mock exercises the enabled-only filters on
+      // the profile outbound picker and both chain-target pickers. Nothing
+      // targets Mullvad and no mock profile routes through it, so this is a
+      // consistent state.
+      enabled: false,
       used_by: [],
       supports_ipv6: false,
       mtu: 1280,
