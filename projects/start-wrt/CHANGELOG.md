@@ -29,6 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Disabled outbound VPNs are no longer offered as a Security Profile's
+  outbound route.** The VPN picker on the profile's WAN / Internet tab listed
+  every VPN, including disabled ones — and picking one silently cut that
+  profile off the Internet, since a disabled VPN's tunnel never comes up. The
+  picker now lists only enabled VPNs.
+
 - **Enabling LAN IPv6 no longer silently fails when the Admin profile routes
   through an IPv4-only VPN.** Saving the LAN IPv6 settings reported success
   but immediately reverted to disabled: the save re-derived the admin LAN's
