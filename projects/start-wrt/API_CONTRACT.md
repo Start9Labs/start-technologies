@@ -1400,6 +1400,11 @@ struct ProfileCreateRequest {
 // Validation: gateway_ip must stay inside the LAN network block (see
 //   lan.ipv4-set). owns_lan profiles must be a valid RFC 1918 selection;
 //   others must share the admin LAN's first two octets, else InvalidRequest.
+//   outbound must be "wan" or an outbound VPN that vpn-client.list reports as
+//   enabled: an unknown interface (or one that is a VPN server rather than a
+//   client) is ErrorKind::NotFound, a disabled one ErrorKind::VpnDisabled.
+//   A disabled VPN's tunnel never comes up, so routing a profile through it
+//   would blackhole that profile.
 ```
 
 ### `profiles.set`
@@ -1417,7 +1422,7 @@ struct ProfileSetRequest {
     force: bool,
 }
 // Response: ProfileId
-// Validation: same gateway_ip block check as profiles.create.
+// Validation: same gateway_ip and outbound checks as profiles.create.
 ```
 
 ### `profiles.delete`

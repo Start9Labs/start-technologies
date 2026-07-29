@@ -33,7 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   outbound route.** The VPN picker on the profile's WAN / Internet tab listed
   every VPN, including disabled ones — and picking one silently cut that
   profile off the Internet, since a disabled VPN's tunnel never comes up. The
-  picker now lists only enabled VPNs.
+  picker now lists only enabled VPNs, and the router refuses a profile pointed
+  at a disabled — or nonexistent — VPN, so the command line can't create the
+  same dead end.
 
 - **Enabling LAN IPv6 no longer silently fails when the Admin profile routes
   through an IPv4-only VPN.** Saving the LAN IPv6 settings reported success

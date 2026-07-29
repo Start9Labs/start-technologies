@@ -179,6 +179,59 @@ fn get_vpn_server_interfaces(cfgs: &Configs) -> std::collections::BTreeSet<Strin
         .collect()
 }
 
+/// Reject a profile outbound that isn't a usable outbound VPN client.
+///
+/// `"wan"` (direct) always passes. Anything else must be an interface `list`
+/// reports as `enabled`, so the RPC/CLI can't select an outbound the UI never
+/// offers. Both failures blackhole the profile silently otherwise: an unknown
+/// interface still gets a `vpn_<X>` zone and a policy route pointing at
+/// nothing, and a disabled VPN's WireGuard interface never comes up.
+///
+/// A VPN server's interface fails the metadata lookup — servers carry
+/// `vpn_server`, not `vpn_client` — and `create` keeps the two namespaces
+/// disjoint via `InterfaceNameConflict`, so no separate check is needed.
+pub(crate) fn guard_outbound_available(cfgs: &Configs, outbound: &str) -> Result<(), Error> {
+    if outbound == crate::profiles::DEFAULT_WAN_ZONE {
+        return Ok(());
+    }
+
+    let meta = cfgs["startwrt"]
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<UciVpnClient>().ok())
+        .find(|meta| meta.interface == outbound);
+    let Some(meta) = meta else {
+        return Err(Error::new(
+            eyre!("no outbound VPN client named {outbound}"),
+            ErrorKind::NotFound,
+        ));
+    };
+
+    let wg = cfgs["network"]
+        .sections
+        .iter()
+        .find(|s| s.name().as_deref() == Some(outbound))
+        .and_then(|s| s.get::<WgInterface>().ok())
+        .filter(|wg| wg.is_wireguard());
+    let Some(wg) = wg else {
+        return Err(Error::new(
+            eyre!("outbound VPN '{}' has no WireGuard interface", meta.label),
+            ErrorKind::NotFound,
+        ));
+    };
+    if wg.disabled() {
+        return Err(Error::new(
+            eyre!(
+                "outbound VPN '{}' is disabled — enable it before routing a profile through it",
+                meta.label
+            ),
+            ErrorKind::VpnDisabled,
+        ));
+    }
+
+    Ok(())
+}
+
 /// Compute which profiles use a given WireGuard interface as their outbound route.
 /// Reads UciProfile sections directly from startwrt config.
 fn get_used_by_profiles(cfgs: &Configs, wg_interface_name: &str) -> Vec<String> {
@@ -2207,6 +2260,59 @@ MIID...snip...
             used_by.is_empty(),
             "no profiles should reference wg_proton after reset"
         );
+    }
+
+    // === guard_outbound_available ===
+
+    #[tokio::test]
+    async fn test_guard_outbound_accepts_wan_and_enabled_vpn() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_with_vpn_client(dir.path());
+
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+
+        guard_outbound_available(&cfgs, "wan").expect("direct WAN is always available");
+        guard_outbound_available(&cfgs, "wg_proton").expect("an enabled VPN client is available");
+    }
+
+    #[tokio::test]
+    async fn test_guard_outbound_rejects_disabled_vpn() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_with_vpn_client(dir.path());
+        let network = std::fs::read_to_string(dir.path().join("network"))
+            .unwrap()
+            .replace("\toption disabled '0'", "\toption disabled '1'");
+        std::fs::write(dir.path().join("network"), network).unwrap();
+
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+
+        let err = guard_outbound_available(&cfgs, "wg_proton").unwrap_err();
+        assert_eq!(err.kind, ErrorKind::VpnDisabled);
+    }
+
+    #[tokio::test]
+    async fn test_guard_outbound_rejects_unknown_and_server_interfaces() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_with_vpn_client(dir.path());
+
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+
+        let err = guard_outbound_available(&cfgs, "wg_nonexistent").unwrap_err();
+        assert_eq!(err.kind, ErrorKind::NotFound);
+
+        // wg_guest is a real WireGuard interface, but an inbound VPN server —
+        // it carries no vpn_client metadata, so it is not an egress path.
+        let err = guard_outbound_available(&cfgs, "wg_guest").unwrap_err();
+        assert_eq!(err.kind, ErrorKind::NotFound);
     }
 
     #[tokio::test]

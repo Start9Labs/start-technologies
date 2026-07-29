@@ -1310,6 +1310,7 @@ fn set_config<C: CtrlContext>(
     profile: &Profile<ProfileIdOpt>,
 ) -> Result<(ProfileId, Option<OldProfileState>), Error> {
     validate_profile_block(cfgs, profile)?;
+    crate::vpn_client::guard_outbound_available(cfgs, &profile.outbound)?;
     let ipv6 = is_ipv6_enabled(cfgs) && outbound_supports_ipv6(cfgs, &profile.outbound);
     // Check fullname uniqueness before renaming
     if let Some(given_fullname) = &profile.id.fullname {
@@ -1590,6 +1591,7 @@ fn create_config(
     pre_allocated_interface: Option<String>,
 ) -> Result<ProfileId, Error> {
     validate_profile_block(cfgs, profile)?;
+    crate::vpn_client::guard_outbound_available(cfgs, &profile.outbound)?;
     // The new interface isn't in the config yet, so no self-exclusion is needed:
     // reject if the requested /24 already belongs to any existing profile.
     guard_subnet_collision(cfgs, profile.gateway_ip, None)?;
@@ -3561,6 +3563,11 @@ config profile guest
 \toption fullname 'Guest'
 \toption interface 'guest'
 \toption vlan_tag '101'
+
+config vpn_client
+\toption interface 'wg_test'
+\toption label 'Test VPN'
+\toption target 'Internet'
 ",
         )
         .unwrap();
@@ -3592,6 +3599,14 @@ config bridge-vlan
 config bridge-vlan
 \toption device 'br-lan'
 \toption vlan '101'
+
+config interface 'wg_test'
+\toption proto 'wireguard'
+\toption private_key 'aGkmAm6PEDDjyZx/Lwc8AfwlVWuJOaKB6E5Hp+JqgVc='
+\toption disabled '0'
+\toption defaultroute '0'
+\toption peerdns '0'
+\tlist addresses '10.1.0.2/32'
 ",
         )
         .unwrap();
@@ -4545,7 +4560,7 @@ config profile guest
                 vlan_tag: Some(101),
             },
             gateway_ip: Ipv4Addr::new(192, 168, 101, 1),
-            outbound: "wg0".into(),
+            outbound: "wg_test".into(),
             lan_access: LanAccess::SameProfile,
             wan_access: WanAccess::All,
             dns_override: Vec::new(),
@@ -4579,7 +4594,7 @@ config profile guest
         .unwrap();
 
         assert_eq!(
-            result.outbound, "wg0",
+            result.outbound, "wg_test",
             "outbound should persist through set_config"
         );
     }
@@ -5103,7 +5118,7 @@ config profile guest
                 vlan_tag: Some(101),
             },
             gateway_ip: Ipv4Addr::new(192, 168, 101, 1),
-            outbound: "wg_mullvad".into(),
+            outbound: "wg_test".into(),
             lan_access: LanAccess::SameProfile,
             wan_access: WanAccess::All,
             dns_override: Vec::new(),
@@ -5121,9 +5136,9 @@ config profile guest
             .sections
             .iter()
             .filter_map(|s| s.get::<FirewallZone>().ok())
-            .find(|z| z.name == "vpn_wg_mullvad")
-            .expect("vpn_wg_mullvad zone should exist");
-        assert_eq!(vpn_zone.network, vec!["wg_mullvad".to_string()]);
+            .find(|z| z.name == "vpn_wg_test")
+            .expect("vpn_wg_test zone should exist");
+        assert_eq!(vpn_zone.network, vec!["wg_test".to_string()]);
         assert_eq!(vpn_zone.masq, Some(true));
         assert_eq!(vpn_zone.masq6, Some(true));
 
@@ -5135,9 +5150,58 @@ config profile guest
             .find(|z| z.name == DEFAULT_WAN_ZONE)
             .expect("WAN zone should exist");
         assert!(
-            !wan_zone.network.contains(&"wg_mullvad".to_string()),
+            !wan_zone.network.contains(&"wg_test".to_string()),
             "VPN interface must not be in the WAN zone, got: {:?}",
             wan_zone.network
+        );
+    }
+
+    #[tokio::test]
+    async fn set_config_rejects_disabled_outbound_vpn() {
+        // A disabled VPN's WireGuard interface never comes up, so routing a
+        // profile through it blackholes the profile. The UI only offers enabled
+        // VPNs; the RPC/CLI must refuse the rest rather than write the config.
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        let network = std::fs::read_to_string(dir.path().join("network"))
+            .unwrap()
+            .replace("\toption disabled '0'", "\toption disabled '1'");
+        std::fs::write(dir.path().join("network"), network).unwrap();
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp"],
+        )
+        .await
+        .unwrap();
+
+        let profile = Profile {
+            id: ProfileIdOpt {
+                fullname: Some("Guest".into()),
+                interface: Some("guest".into()),
+                vlan_tag: Some(101),
+            },
+            gateway_ip: Ipv4Addr::new(192, 168, 101, 1),
+            outbound: "wg_test".into(),
+            lan_access: LanAccess::SameProfile,
+            wan_access: WanAccess::All,
+            dns_override: Vec::new(),
+            dns_source: String::new(),
+            access_to_new_profiles: false,
+            owns_lan: false,
+        };
+
+        let err = set_config(ctx, &mut cfgs, &profile).unwrap_err();
+        assert_eq!(err.kind, ErrorKind::VpnDisabled);
+        assert!(
+            !cfgs["network"]
+                .sections
+                .iter()
+                .any(|s| s.name().as_deref() == Some("prt_guest")),
+            "a rejected outbound must not leave policy routing behind"
         );
     }
 
@@ -5918,6 +5982,24 @@ config zone
     fn setup_configs_with_ipv6_vpn(dir: &std::path::Path) {
         setup_configs(dir);
 
+        // Register both tunnels as outbound VPN clients — a profile may only
+        // route through an interface that has vpn_client metadata.
+        let mut startwrt = std::fs::read_to_string(dir.join("startwrt")).unwrap();
+        startwrt.push_str(
+            "\n\
+config vpn_client
+\toption interface 'wg_v6'
+\toption label 'V6 VPN'
+\toption target 'Internet'
+
+config vpn_client
+\toption interface 'wg_v4'
+\toption label 'V4 VPN'
+\toption target 'Internet'
+",
+        );
+        std::fs::write(dir.join("startwrt"), startwrt).unwrap();
+
         // Append WG interfaces to network config
         let mut network = std::fs::read_to_string(dir.join("network")).unwrap();
         network.push_str(
@@ -6392,6 +6474,15 @@ config dhcp 'guest'
 ",
         );
         std::fs::write(dir.path().join("network"), network).unwrap();
+        let mut startwrt = std::fs::read_to_string(dir.path().join("startwrt")).unwrap();
+        startwrt.push_str(
+            "\nconfig vpn_client
+\toption interface 'wg_v6'
+\toption label 'V6 VPN'
+\toption target 'Internet'
+",
+        );
+        std::fs::write(dir.path().join("startwrt"), startwrt).unwrap();
 
         let arena = Arena::new();
         let mut cfgs = parse_all(
