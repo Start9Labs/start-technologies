@@ -112,6 +112,17 @@ const isDevBuild = (process.env.STARTOS_ENVIRONMENT ?? '')
 
 const jsonParse = (x: string) => JSON.parse(x)
 
+/**
+ * The `message` of a JSON-RPC error object, per the spec: a short description of
+ * what went wrong. Both error paths below used to send `typeof error` here,
+ * which is the literal string `"object"` for every `Error` ever thrown — so the
+ * one field a caller reads first carried no information, and the real text was
+ * reachable only by digging into `data`. That is how a package whose `main`
+ * rejects presents as a service restarting on a timer for no stated reason.
+ */
+const errorMessage = (error: any): string =>
+  (typeof error?.message === 'string' && error.message) || String(error)
+
 const handleRpc = (id: IdType, result: Promise<RpcResult>) =>
   result
     .then(result => {
@@ -134,7 +145,7 @@ const handleRpc = (id: IdType, result: Promise<RpcResult>) =>
       id,
       error: {
         code: 0,
-        message: typeof error,
+        message: errorMessage(error),
         data: { details: '' + error, debug: error?.stack },
       },
     }))
@@ -181,7 +192,7 @@ export class RpcListener {
         jsonrpc,
         id,
         error: {
-          message: typeof error,
+          message: errorMessage(error),
           data: {
             details: error?.message ?? String(error),
             debug: error?.stack,
