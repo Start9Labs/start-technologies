@@ -8,6 +8,17 @@ Full per-release notes are published on the
 [GitHub releases page](https://github.com/Start9Labs/start-technologies/releases). This
 file tracks notable changes since the move to the monorepo.
 
+## [0.4.0.2]
+
+### Fixed
+
+- **The login banner reports system status for every user, not just the first
+  one to log in.** It staged its database snapshot at a fixed path in `/tmp`,
+  which `pam_motd` created as root at login — so any subsequent non-root run
+  could not write it and the banner fell back to `Services: Unknown`,
+  `WAN: N/A` and `NTP: Unknown`. It now uses a private temporary file and
+  removes it on every exit path.
+
 ## [0.4.0.1]
 
 ### Changed
