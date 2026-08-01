@@ -19,6 +19,10 @@ file tracks notable changes since the move to the monorepo.
   `WAN: N/A` and `NTP: Unknown`. It now uses a private temporary file and
   removes it on every exit path.
 
+- **Notification selection checkboxes no longer cover text on phones.** When
+  notification selection is active, each checkbox replaces its notification
+  icon while preserving the title's spacing.
+
 ## [0.4.0.1]
 
 ### Changed

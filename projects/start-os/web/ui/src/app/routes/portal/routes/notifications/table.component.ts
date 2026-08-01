@@ -98,9 +98,9 @@ import { NotificationItemComponent } from './item.component'
 
     :host-context(tui-root._mobile) {
       input {
-        position: absolute;
-        top: 2.875rem;
-        left: 0;
+        inset-block-start: 0.75rem;
+        inset-inline-start: 0;
+        transform: none;
         z-index: 1;
         pointer-events: none;
       }
