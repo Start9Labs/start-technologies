@@ -22,6 +22,19 @@
   nothing while looking correct. `getRootCa` returns the root directly. See
   [Trusting this server's certificates](https://docs.start9.com/packaging/service-to-service.html#trusting-this-servers-certificates)
 
+### Added
+
+- **`sdk.getRootCa(effects)` returns this server's root CA certificate.** A
+  service that dials an address the _user_ supplies — a monitor target, a
+  notification endpoint, a webhook — gets whatever address StartOS showed them,
+  which on the LAN is always HTTPS with a certificate chaining to this server's
+  root CA. No container trusts that root, so the dial fails verification, and
+  the only way to obtain the root was to mint a certificate you didn't want and
+  take the last link of the chain. Packages doing that by hand have taken the
+  wrong link: installing `[0]`, the leaf, as a trust anchor silently trusts
+  nothing while looking correct. `getRootCa` returns the root directly. See
+  [Trusting this server's certificates](https://docs.start9.com/packaging/service-to-service.html#trusting-this-servers-certificates)
+
 ### Fixed
 
 - **`hardwareRequirements.ram` is documented in bytes, which is what StartOS

@@ -23,7 +23,11 @@ export { Watchable } from './Watchable'
 export { GetContainerIp } from './GetContainerIp'
 export { GetHostInfo, GetBridgeAddress } from './GetHostInfo'
 export { GetOutboundGateway } from './GetOutboundGateway'
+<<<<<<< HEAD
 export { getRootCa } from './getRootCa'
+=======
+export { GetRootCa } from './GetRootCa'
+>>>>>>> 579752784 (feat(sdk): add sdk.getRootCa for this server's root CA)
 export { GetServiceManifest, getServiceManifest } from './GetServiceManifest'
 export { GetSslCertificate } from './GetSslCertificate'
 export { GetStatus } from './GetStatus'

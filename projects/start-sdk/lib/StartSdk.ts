@@ -59,6 +59,7 @@ import { cooldownTrigger, statusTrigger } from './trigger'
 import { defaultTrigger } from './trigger/defaultTrigger'
 import {
   GetOutboundGateway,
+  GetRootCa,
   GetSslCertificate,
   GetSystemSmtp,
   getRootCa,
@@ -622,10 +623,19 @@ export class StartSdk<Manifest extends T.SDKManifest> {
         algorithm?: T.Algorithm,
       ) => new GetSslCertificate(effects, { hostnames, algorithm }),
       /**
+<<<<<<< HEAD
        * Get this server's root CA certificate (PEM). Install it in your
        * container to reach other services on this server over HTTPS.
        */
       getRootCa,
+=======
+       * Get this server's root CA certificate (PEM) with reactive subscription
+       * support. Install it in your container to reach other services on this
+       * server over HTTPS.
+       * @param effects - The effects context
+       */
+      getRootCa: <E extends Effects>(effects: E) => new GetRootCa(effects),
+>>>>>>> 579752784 (feat(sdk): add sdk.getRootCa for this server's root CA)
       /** Retrieve the manifest of any installed service package by its ID */
       getServiceManifest,
       /**
