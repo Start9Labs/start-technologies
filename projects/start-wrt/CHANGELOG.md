@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.0.2]
 
+### Added
+
+- **ChromeOS instructions for trusting the Root CA.** The "Trusting Your Root
+  CA" guide now includes a ChromeOS tab covering Chrome's certificate manager,
+  alongside the existing Mac, Windows, iOS, Android, and Linux instructions.
+  ChromeOS has no system keychain or terminal trust store, so none of the
+  existing platforms' steps applied to Chromebooks.
+
 ### Removed
 
 - **The IPv6 "Reserve" option has been removed — it never worked and never
