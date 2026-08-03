@@ -4,6 +4,16 @@
 
 ### Fixed
 
+- **`hardwareRequirements.ram` is documented in bytes, which is what StartOS
+  actually compares it against.** Its TSDoc claimed megabytes and its
+  `@example` showed `ram: 8192`, so packages following it declared an 8 KiB
+  floor that every machine satisfies and that therefore gated nothing. The
+  example now writes the value as `8 * 1024 ** 3`, and the packaging guide's
+  manifest page gained a Minimum RAM section covering the unit and the fact
+  that raising a floor on a published package cuts smaller hosts off from
+  updates. The same example's device filter is corrected too — it still showed
+  the `devices` / `pattern` / `patternDescription` shape replaced by `device`
+  and `DeviceFilter` in 2.0.0
 - **Package template cleanup.** Dropped the `alerts` manifest block, removed in
   2.0.0, that the template still scaffolded, and the `hello-world` guard job
   from `release.yml` / `tagAndRelease.yml`. Its workflows are now identical to
