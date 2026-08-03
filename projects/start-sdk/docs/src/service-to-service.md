@@ -128,10 +128,14 @@ Everything above assumes you know who you are dialing — a dependency you decla
 
 ```typescript
 <<<<<<< HEAD
+<<<<<<< HEAD
 const rootCa = await sdk.getRootCa(effects) // a plain Promise, not reactive
 =======
 const rootCa = await sdk.getRootCa(effects).const()
 >>>>>>> 579752784 (feat(sdk): add sdk.getRootCa for this server's root CA)
+=======
+const rootCa = await sdk.getRootCa(effects) // a plain Promise, not reactive
+>>>>>>> 97b0bf4e0 (refactor(sdk): make getRootCa a plain function over an empty hostname set)
 await appSub.writeFile('/app/startos-root-ca.crt', rootCa)
 ```
 

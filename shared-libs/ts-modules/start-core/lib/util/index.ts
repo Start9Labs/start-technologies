@@ -24,10 +24,14 @@ export { GetContainerIp } from './GetContainerIp'
 export { GetHostInfo, GetBridgeAddress } from './GetHostInfo'
 export { GetOutboundGateway } from './GetOutboundGateway'
 <<<<<<< HEAD
+<<<<<<< HEAD
 export { getRootCa } from './getRootCa'
 =======
 export { GetRootCa } from './GetRootCa'
 >>>>>>> 579752784 (feat(sdk): add sdk.getRootCa for this server's root CA)
+=======
+export { getRootCa } from './getRootCa'
+>>>>>>> 97b0bf4e0 (refactor(sdk): make getRootCa a plain function over an empty hostname set)
 export { GetServiceManifest, getServiceManifest } from './GetServiceManifest'
 export { GetSslCertificate } from './GetSslCertificate'
 export { GetStatus } from './GetStatus'
