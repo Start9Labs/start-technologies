@@ -13,7 +13,7 @@ From the user's perspective, everyone connects to the same network name — the 
 The Wi-Fi password printed on the sticker on the bottom of your router is the default password. It maps to the default Security Profile (typically "Admin" with full access). This password is set during manufacturing and stored in the router's EEPROM. The EEPROM value is only authoritative on a [factory reset](factory-reset.md), when it is re-read to restore the default password. During normal operation the active password is whatever is in the router's running configuration: you can delete the **Default** entry and create a new one, and that new password is respected regardless of the EEPROM value. It also appears on the `Points of Entry > Wi-Fi > Passwords` page as the **Default** entry (mapped to the Admin profile), where you can reveal or copy it.
 
 > [!NOTE]
-> Keep the sticker password safe. On a DIY or unprogrammed board with no EEPROM Wi-Fi password, set one in the GUI (if connected via ethernet) or with `startwrt-cli set-wifi-password`. See [Installing StartWRT](installing.md#diy-and-unprogrammed-boards).
+> Keep the sticker password safe. On a DIY or unprogrammed board with no EEPROM Wi-Fi password, connect via Ethernet and set one in the web interface. See [Installing StartWRT](installing.md#diy-and-unprogrammed-boards).
 
 ## Adding a Wi-Fi Password
 

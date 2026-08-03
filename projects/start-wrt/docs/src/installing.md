@@ -65,20 +65,20 @@ Start9 routers ship with a unique Wi-Fi password programmed into the device's EE
 
 If you are flashing a bare BananaPi BPI-F3 that was never programmed with a Wi-Fi password, the Wi-Fi access point will **not** come up after boot. To bring it online:
 
-1.  Connect to the router over Ethernet (or serial console).
+1. Connect a computer to one of the router's LAN ports with an Ethernet cable.
 
-1.  Set a Wi-Fi password:
-    - **Random** — Generates a random 12-character password and prints it:
+1. Complete [initial setup](initial-setup.md): a captive portal opens automatically (if it does not, navigate to `router.lan`) and prompts you to create your admin password. When it finishes, you are logged in to the web interface.
 
-          startwrt-cli set-wifi-password
+1. Navigate to `Points of Entry > Wi-Fi > Passwords` and click "Add".
 
-    - **Manual** — Prompts you to enter your own password:
+1. Configure the password:
+   - **Label** — A descriptive name (e.g. "Default").
+   - **Password** — Click "Generate" to create a strong random password, or enter your own (8–63 characters).
+   - **Security Profile** — Select **Admin**. Adding the first Admin password switches the Wi-Fi radios on automatically. A first password mapped to another profile is also valid — the radios just aren't switched on for you; enable them under `Points of Entry > Wi-Fi > Settings` with the "Enable Wi-Fi" toggle.
 
-          startwrt-cli set-wifi-password --manual
+1. Click "Save". The `StartWRT` Wi-Fi network comes up — connect to it with your new password, and record the password somewhere safe.
 
-1.  Record the printed (or entered) password — this becomes your Wi-Fi password.
-
-The password lives in the router's configuration. A factory reset re-reads the EEPROM, so on an unprogrammed board you will need to run `startwrt-cli set-wifi-password` again after a reset.
+The password lives in the router's configuration, not the EEPROM. A soft [factory reset](factory-reset.md) re-reads the (empty) EEPROM, so on an unprogrammed board Wi-Fi is down again after a reset — repeat the steps above over Ethernet to bring it back.
 
 ## Next Steps
 

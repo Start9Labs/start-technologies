@@ -15,6 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ChromeOS has no system keychain or terminal trust store, so none of the
   existing platforms' steps applied to Chromebooks.
 
+### Changed
+
+- **The DIY Wi-Fi password instructions now use the web interface.** Bringing
+  up Wi-Fi on a board with no EEPROM password no longer routes through the
+  command line: connect over Ethernet, complete initial setup, and add an
+  Admin-profile password on the Wi-Fi Passwords page — the first Admin
+  password switches the radios on. The `startwrt-cli set-wifi-password`
+  utility still exists for headless provisioning.
+
 ### Removed
 
 - **The IPv6 "Reserve" option has been removed — it never worked and never

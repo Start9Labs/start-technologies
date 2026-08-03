@@ -38,7 +38,7 @@ A microSD reflash boots the router from a StartWRT image and replaces the firmwa
 1. When the wizard completes, power off the router, remove the microSD card, and power it back on.
 
 > [!NOTE]
-> On a DIY or unprogrammed board with no Wi-Fi password in the EEPROM, the wizard is reachable over Ethernet only, and the reflashed router boots with no Wi-Fi until you run `startwrt-cli set-wifi-password`. See [Installing StartWRT](installing.md#diy-and-unprogrammed-boards).
+> On a DIY or unprogrammed board with no Wi-Fi password in the EEPROM, the wizard is reachable over Ethernet only, and the reflashed router boots with no Wi-Fi until you add a Wi-Fi password in the web interface. See [Installing StartWRT](installing.md#diy-and-unprogrammed-boards).
 
 ## What Gets Wiped
 
@@ -53,4 +53,4 @@ The Wi-Fi password survives in every case. For Soft Reset and Fresh Start — wh
 
 ## Lost Wi-Fi Password
 
-The Wi-Fi password is printed on the sticker on the bottom of your router and stored in the router's EEPROM. The EEPROM value is the password restored by a factory reset; during normal operation the active password is whatever is in the running configuration, so if you have replaced the **Default** entry with your own, that password is what's in effect. If you are still logged in, you can also reveal or copy it on the `Points of Entry > Wi-Fi > Passwords` page (the **Default** entry). On a DIY or unprogrammed board that has no EEPROM Wi-Fi password, set one via the GUI (if connected via ethernet) or with `startwrt-cli set-wifi-password`. See [Installing StartWRT](installing.md#diy-and-unprogrammed-boards) for details.
+The Wi-Fi password is printed on the sticker on the bottom of your router and stored in the router's EEPROM. The EEPROM value is the password restored by a factory reset; during normal operation the active password is whatever is in the running configuration, so if you have replaced the **Default** entry with your own, that password is what's in effect. If you are still logged in, you can also reveal or copy it on the `Points of Entry > Wi-Fi > Passwords` page (the **Default** entry). On a DIY or unprogrammed board that has no EEPROM Wi-Fi password, connect via Ethernet and set one in the web interface. See [Installing StartWRT](installing.md#diy-and-unprogrammed-boards) for details.
