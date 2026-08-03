@@ -5,7 +5,18 @@ All notable changes to StartWRT are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.2]
+## [1.1.0]
+
+### Added
+
+- **Devices that never share a hostname are now identified by hardware vendor
+  instead of a meaningless placeholder.** Some devices deliberately withhold
+  their name from the router — Chromebooks never send one, and many IoT
+  gadgets can't — and previously showed up as an opaque `device-3af2b1`. The
+  device list now falls back to the vendor behind the device's MAC address,
+  e.g. `Apple device (3af2b1)`, keeping the short suffix so identical unnamed
+  devices stay distinguishable. A real hostname, when one ever appears, still
+  takes over automatically, and names you assign always win.
 
 ### Removed
 

@@ -133,13 +133,11 @@ struct DhcpLease {
     hostname: String,
 }
 
-/// Placeholder name for a device with no UCI name, DHCP hostname, or cached
-/// hostname. Strips colons, takes the last 6 hex chars, lowercases →
-/// `device-<suffix>` (kept identical to the frontend's prior name generator).
+/// Placeholder name for a device no source could name at all — not even a
+/// vendor label. `device-<last 6 hex chars>` (kept identical to the frontend's
+/// prior name generator; suffix shared with `device_ident`'s labels).
 fn fallback_name(mac: &str) -> String {
-    let hex: String = mac.chars().filter(|c| *c != ':').collect();
-    let start = hex.len().saturating_sub(6);
-    format!("device-{}", hex[start..].to_lowercase())
+    format!("device-{}", crate::device_ident::mac_suffix(mac))
 }
 
 /// Parse a 32-char hex IPv6 address from /proc/net/if_inet6 into standard notation.
@@ -1284,10 +1282,13 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
 
         // Fully-resolved display name. UCI static host (user-assigned) wins,
         // then the live DHCP-lease hostname, then a live mDNS `.local` name,
-        // then the remembered hostname from the cache, then a `device-<mac>`
-        // placeholder. A fresh DHCP name always overrides a remembered one
-        // because the cache sits below it. An mDNS name is learned once for an
-        // otherwise-unnamed device and thereafter served from the cache. The
+        // then the remembered hostname from the cache, then a derived vendor
+        // label from the MAC's OUI ("Apple device (b2c3d4)"), then a
+        // `device-<mac>` placeholder. A fresh DHCP name always overrides a
+        // remembered one because the cache sits below it. An mDNS name is
+        // learned once for an otherwise-unnamed device and thereafter served
+        // from the cache. The vendor label is derived, not learned — computed
+        // each poll and never cached, so any real name outranks it. The
         // reverse-resolve above queries each MAC at most once per daemon run: a
         // cached (named) device is gated out by the cache check, and a device
         // that stays silent is gated out by MDNS_ATTEMPTED.
@@ -1304,6 +1305,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             .or_else(|| dhcp_hostname.clone())
             .or_else(|| mdns_hostname.clone())
             .or_else(|| name_cache.get(mac).cloned())
+            .or_else(|| crate::device_ident::device_label(mac))
             .unwrap_or_else(|| fallback_name(mac));
         let hostname = lease.map(|l| l.hostname.clone());
 

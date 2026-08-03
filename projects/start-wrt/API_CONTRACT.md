@@ -767,7 +767,9 @@ enum DeviceStatus {
 struct Device {
     mac: Option<String>,
     /// Fully-resolved display name: UCI static name → live DHCP hostname →
-    /// remembered hostname (name cache) → `device-<mac>` placeholder. Always set.
+    /// live mDNS name → remembered hostname (name cache) → vendor label from
+    /// the MAC's OUI (`Apple device (b2c3d4)`) → `device-<mac>` placeholder.
+    /// Always set.
     name: String,
     /// Raw DHCP lease hostname ("*" when unset); a hint for the rename form.
     hostname: Option<String>,
@@ -791,10 +793,12 @@ struct SpeedData {
     down: f64,
 }
 // Response: Vec<Device>
-// Backend: reads DHCP hosts, firewall rules, ARP table, DHCP leases, and a
+// Backend: reads DHCP hosts, firewall rules, ARP table, DHCP leases, a
 // persistent name cache (/etc/startwrt/device_names.json) that remembers
-// DHCP-advertised hostnames per MAC. The backend resolves the full name
-// fallback chain server-side and returns a single `name`.
+// DHCP/mDNS-advertised hostnames per MAC, and an embedded IEEE OUI registry
+// snapshot (vendor labels for devices that never advertise a name). The
+// backend resolves the full name fallback chain server-side and returns a
+// single `name`.
 ```
 
 ### `devices.update`

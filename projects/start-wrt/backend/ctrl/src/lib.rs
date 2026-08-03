@@ -8,6 +8,7 @@ pub mod backup;
 pub mod bins;
 pub mod captive;
 pub mod continuations;
+pub mod device_ident;
 pub mod device_names;
 pub mod devices;
 pub mod diagnostics;
