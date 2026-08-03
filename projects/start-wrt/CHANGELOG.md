@@ -9,14 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Devices that never share a hostname are now identified by hardware vendor
-  instead of a meaningless placeholder.** Some devices deliberately withhold
-  their name from the router — Chromebooks never send one, and many IoT
-  gadgets can't — and previously showed up as an opaque `device-3af2b1`. The
-  device list now falls back to the vendor behind the device's MAC address,
-  e.g. `Apple device (3af2b1)`, keeping the short suffix so identical unnamed
-  devices stay distinguishable. A real hostname, when one ever appears, still
-  takes over automatically, and names you assign always win.
+- **Devices that never share a hostname are now identified by operating
+  system or hardware vendor instead of a meaningless placeholder.** Some
+  devices deliberately withhold their name from the router — Chromebooks
+  never send one, and many IoT gadgets can't — and previously showed up as an
+  opaque `device-3af2b1`. The device list now recognizes the operating system
+  from how the device requests a network address (its DHCP fingerprint), e.g.
+  `Windows device (3af2b1)`, or failing that the vendor behind its MAC
+  address, e.g. `Apple device (3af2b1)` — keeping the short suffix so
+  identical unnamed devices stay distinguishable. OS recognition works even
+  for devices using randomized Wi-Fi addresses, survives reboots, and a real
+  hostname, when one ever appears, still takes over automatically; names you
+  assign always win.
 
 ### Removed
 

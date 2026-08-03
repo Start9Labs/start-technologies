@@ -924,11 +924,13 @@ export class MockApiService extends ApiService {
       )
 
       // Mirror the backend's server-side name resolution chain:
-      // UCI name → DHCP hostname → device-<mac>.
+      // UCI name → DHCP hostname → derived label (fingerprint/OUI) →
+      // device-<mac>.
       const dhcpHostname = def.hostname !== '*' ? def.hostname : null
       const name =
         device.name ||
         dhcpHostname ||
+        def.identLabel ||
         `device-${mac.replace(/:/g, '').slice(-6).toLowerCase()}`
 
       return {

@@ -1046,12 +1046,14 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
         nlbw_output,
         conntrack_output,
         wg_active_peers,
+        fp_by_mac,
     ) = tokio::join!(
         ping_unreachable_macs(probe_targets),
         read_all_dhcp_leases(),
         run_cmd("nlbw", &["-c", "json", "-g", "mac"]),
         run_cmd("conntrack", &["-L", "-o", "extended"]),
         query_wg_active_peers(&wg_interfaces),
+        crate::device_ident::load_live_fingerprints(),
     );
 
     let mut unreachable_macs = unreachable_macs;
@@ -1157,11 +1159,13 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
 
     // --- Phase 4: Build device list ---
     //
-    // Load the persistent name cache once. It backfills a remembered hostname
-    // for any MAC the live sources (UCI host, DHCP lease) can't name this poll,
-    // so a recognized device never reverts to a `device-<mac>` placeholder just
-    // because dnsmasq's volatile lease state dropped its name. Observations
-    // gathered in the loop are committed back to the cache afterwards.
+    // Load the persistent identity cache once. It backfills a remembered
+    // hostname for any MAC the live sources (UCI host, DHCP lease) can't name
+    // this poll, so a recognized device never reverts to a `device-<mac>`
+    // placeholder just because dnsmasq's volatile lease state dropped its
+    // name — and a remembered DHCP fingerprint, so an OS label survives
+    // reboots (the live capture file is tmpfs). Observations gathered in the
+    // loop are committed back to the cache afterwards.
     let cache_now = chrono::Utc::now().timestamp();
     let name_cache = crate::device_names::load_all();
     let mut name_observations: Vec<crate::device_names::Observation> = Vec::new();
@@ -1193,7 +1197,11 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
                     .get(mac)
                     .map(|l| l.hostname != "*" && !l.hostname.is_empty())
                     .unwrap_or(false)
-                || name_cache.contains_key(mac);
+                // A fingerprint-only cache entry (e.g. a Chromebook) is not a
+                // name — such a device still deserves its one mDNS attempt.
+                || name_cache
+                    .get(mac)
+                    .map_or(false, |e| e.hostname.is_some());
             if already_named {
                 continue;
             }
@@ -1282,16 +1290,18 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
 
         // Fully-resolved display name. UCI static host (user-assigned) wins,
         // then the live DHCP-lease hostname, then a live mDNS `.local` name,
-        // then the remembered hostname from the cache, then a derived vendor
-        // label from the MAC's OUI ("Apple device (b2c3d4)"), then a
+        // then the remembered hostname from the cache, then a derived label —
+        // OS from the DHCP fingerprint ("Windows device (b2c3d4)"), else
+        // vendor from the MAC's OUI ("Apple device (b2c3d4)") — then a
         // `device-<mac>` placeholder. A fresh DHCP name always overrides a
         // remembered one because the cache sits below it. An mDNS name is
         // learned once for an otherwise-unnamed device and thereafter served
-        // from the cache. The vendor label is derived, not learned — computed
-        // each poll and never cached, so any real name outranks it. The
-        // reverse-resolve above queries each MAC at most once per daemon run: a
-        // cached (named) device is gated out by the cache check, and a device
-        // that stays silent is gated out by MDNS_ATTEMPTED.
+        // from the cache. Labels are derived, not learned — computed each poll
+        // from the fingerprint/OUI and never cached as names, so any real name
+        // outranks them (the raw fingerprint IS cached, so the label survives
+        // reboots). The reverse-resolve above queries each MAC at most once
+        // per daemon run: a cached (named) device is gated out by the cache
+        // check, and a device that stays silent is gated out by MDNS_ATTEMPTED.
         let dhcp_hostname = lease.and_then(|l| {
             if l.hostname != "*" && !l.hostname.is_empty() {
                 Some(l.hostname.clone())
@@ -1300,20 +1310,24 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             }
         });
         let mdns_hostname = mdns_by_mac.get(mac).cloned();
+        let fingerprint = fp_by_mac
+            .get(mac)
+            .or_else(|| name_cache.get(mac).and_then(|e| e.fingerprint.as_ref()));
         let name = host
             .and_then(|h| h.name.clone())
             .or_else(|| dhcp_hostname.clone())
             .or_else(|| mdns_hostname.clone())
-            .or_else(|| name_cache.get(mac).cloned())
-            .or_else(|| crate::device_ident::device_label(mac))
+            .or_else(|| name_cache.get(mac).and_then(|e| e.hostname.clone()))
+            .or_else(|| crate::device_ident::device_label(mac, fingerprint))
             .unwrap_or_else(|| fallback_name(mac));
         let hostname = lease.map(|l| l.hostname.clone());
 
-        // Remember the live-learned name (DHCP, else mDNS), or keep an existing
-        // entry alive against prune.
+        // Remember the live-learned name (DHCP, else mDNS) and fingerprint, or
+        // keep an existing entry alive against prune.
         name_observations.push(crate::device_names::Observation {
             mac: mac.clone(),
             hostname: dhcp_hostname.or(mdns_hostname),
+            fingerprint: fp_by_mac.get(mac).cloned(),
         });
 
         // Connection type — only label as "Ethernet" when the bridge FDB
@@ -1358,9 +1372,12 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
         });
     }
 
-    // Persist this poll's observations (learn/refresh names, keep visible
-    // entries alive, opportunistic prune). Best-effort — never fails the list.
+    // Persist this poll's observations (learn/refresh names and fingerprints,
+    // keep visible entries alive, opportunistic prune). Best-effort — never
+    // fails the list. Then bound the append-only fingerprint capture file,
+    // safe now that its contents are persisted.
     crate::device_names::commit(&name_observations, cache_now).await;
+    crate::device_ident::compact_fingerprint_file().await;
 
     // --- Phase 5: Add VPN-connected peers ---
     //

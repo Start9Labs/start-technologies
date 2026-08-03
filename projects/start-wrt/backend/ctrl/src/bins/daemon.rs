@@ -272,6 +272,12 @@ async fn inner_main() -> Result<(), Error> {
         if let Err(e) = crate::profiles::bootstrap_admin_profile("/etc/config").await {
             tracing::error!("Admin profile bootstrap failed: {e}");
         }
+        // Install the DHCP-fingerprint hook (script + `dhcpscript` on every
+        // dnsmasq section) — daemon-side so OTA-updated routers converge on
+        // first boot. Reloads dnsmasq only when something actually changed.
+        if let Err(e) = crate::device_ident::ensure_dhcp_fingerprint_hook().await {
+            tracing::error!("DHCP fingerprint hook setup failed: {e}");
+        }
         if let Err(e) = crate::system::apply_remote_access(ServerContext::default()).await {
             tracing::error!("Remote access rule apply failed: {e}");
         }

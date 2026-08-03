@@ -767,9 +767,10 @@ enum DeviceStatus {
 struct Device {
     mac: Option<String>,
     /// Fully-resolved display name: UCI static name → live DHCP hostname →
-    /// live mDNS name → remembered hostname (name cache) → vendor label from
-    /// the MAC's OUI (`Apple device (b2c3d4)`) → `device-<mac>` placeholder.
-    /// Always set.
+    /// live mDNS name → remembered hostname (name cache) → derived label
+    /// (OS from the DHCP fingerprint, e.g. `Windows device (b2c3d4)`, else
+    /// vendor from the MAC's OUI, e.g. `Apple device (b2c3d4)`) →
+    /// `device-<mac>` placeholder. Always set.
     name: String,
     /// Raw DHCP lease hostname ("*" when unset); a hint for the rename form.
     hostname: Option<String>,
@@ -794,9 +795,11 @@ struct SpeedData {
 }
 // Response: Vec<Device>
 // Backend: reads DHCP hosts, firewall rules, ARP table, DHCP leases, a
-// persistent name cache (/etc/startwrt/device_names.json) that remembers
-// DHCP/mDNS-advertised hostnames per MAC, and an embedded IEEE OUI registry
-// snapshot (vendor labels for devices that never advertise a name). The
+// persistent identity cache (/etc/startwrt/device_names.json) that remembers
+// DHCP/mDNS-advertised hostnames and DHCP fingerprints per MAC, live DHCP
+// fingerprints captured by a dnsmasq dhcp-script hook
+// (/var/run/dnsmasq/dhcp.fingerprints), and an embedded IEEE OUI registry
+// snapshot — the last two label devices that never advertise a name. The
 // backend resolves the full name fallback chain server-side and returns a
 // single `name`.
 ```
