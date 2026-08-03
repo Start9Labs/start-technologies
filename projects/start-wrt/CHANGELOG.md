@@ -44,6 +44,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A device that missed its one chance to share its name over mDNS/Bonjour is
+  no longer stuck with a generic label until the router reboots.** The name
+  lookup was attempted exactly once per device, and it usually fired at the
+  worst moment — the instant the device first appeared (before its Bonjour
+  service finished starting), or during the reconnection rush right after a
+  router reboot — and sleeping phones and laptops don't answer at all. The
+  router now retries silent devices on a backoff schedule (about a minute
+  after the first miss, stretching to a day) before concluding the device has
+  no name to share; a device that answers is remembered permanently.
+
 - **Enabling LAN IPv6 no longer silently fails when the Admin profile routes
   through an IPv4-only VPN.** Saving the LAN IPv6 settings reported success
   but immediately reverted to disabled: the save re-derived the admin LAN's

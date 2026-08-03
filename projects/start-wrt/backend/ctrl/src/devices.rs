@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use rpc_toolkit::{from_fn_async, from_fn_async_local, HandlerExt as _, ParentHandler};
 use serde::{Deserialize, Serialize};
@@ -111,12 +111,48 @@ struct TrafficSnapshot {
 
 static TRAFFIC_CACHE: Mutex<Option<HashMap<String, TrafficSnapshot>>> = Mutex::new(None);
 
-/// MACs already attempted over mDNS this daemon run. A device that answers is
-/// also persisted to the name cache; one that stays silent is recorded here so
-/// it is reverse-resolved at most once per daemon run instead of on every poll.
-/// Cleared only by daemon restart (acceptable: a device that later starts
-/// answering Bonjour is then picked up on the next restart).
-static MDNS_ATTEMPTED: Mutex<Option<std::collections::HashSet<String>>> = Mutex::new(None);
+/// Per-MAC mDNS attempt history for this daemon run. A device that answers is
+/// persisted to the name cache and never re-attempted (the `already_named`
+/// gate); one that stays silent is retried on the [`MDNS_BACKOFF`] schedule —
+/// [`MDNS_MAX_ATTEMPTS`] attempts total — then left alone until daemon
+/// restart. A single attempt is a bad sampler: it usually fires the moment
+/// the device first appears (its mDNS responder may not be up yet) or in the
+/// reassociation chaos right after a router reboot, and sleeping devices
+/// don't answer at all; the schedule's early rungs cover startup lag, the
+/// late ones cover sleepers. `Instant`, not wall time: routers boot with a
+/// wrong clock and NTP-jump minutes later, which would garble the backoff.
+static MDNS_ATTEMPTS: Mutex<Option<HashMap<String, MdnsAttempts>>> = Mutex::new(None);
+
+#[derive(Clone, Copy)]
+struct MdnsAttempts {
+    count: u8,
+    last: Instant,
+}
+
+/// Backoff before the next attempt, indexed by attempts already made (so
+/// `MDNS_BACKOFF[0]` gates attempt 2). RFC 6762 §5.2-style doubling — the
+/// mDNS spec's own retry shape for an unanswered standing query — stretched
+/// across ~31 h; unlike a standing query we cap total attempts, because many
+/// devices simply have no responder and each attempt spawns `avahi-resolve`.
+const MDNS_BACKOFF: [Duration; 5] = [
+    Duration::from_secs(60),
+    Duration::from_secs(10 * 60),
+    Duration::from_secs(60 * 60),
+    Duration::from_secs(6 * 60 * 60),
+    Duration::from_secs(24 * 60 * 60),
+];
+const MDNS_MAX_ATTEMPTS: u8 = MDNS_BACKOFF.len() as u8 + 1;
+
+/// Whether a still-unnamed device is due another mDNS attempt, given how many
+/// attempts it has had and how long ago the last one was.
+fn mdns_retry_eligible(prior: Option<(u8, Duration)>) -> bool {
+    match prior {
+        None => true,
+        Some((count, _)) if count >= MDNS_MAX_ATTEMPTS => false,
+        // count >= 1 here: an entry only exists once an attempt has been made.
+        Some((count, elapsed)) => elapsed >= MDNS_BACKOFF[usize::from(count) - 1],
+    }
+}
 
 // --- Helpers ---
 
@@ -1174,19 +1210,24 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
     // (UCI host, DHCP lease) or the cache can name, reverse-resolve its IPv4
     // over mDNS — recovers a name for any device that suppresses DHCP option 12
     // but still answers Bonjour. A device that answers is persisted to the name
-    // cache below; one that stays silent is recorded in MDNS_ATTEMPTED. Either
-    // way a MAC is queried at most once per daemon run, so on a steady-state
-    // network there are no targets and this is a no-op. The lock is held only
+    // cache below; one that stays silent is retried on the MDNS_BACKOFF
+    // schedule (MDNS_ATTEMPTS), so on a steady-state network there are no
+    // targets and this is a no-op. Retries ride these polls — nothing fires
+    // while no client is polling the device list. The lock is held only
     // across this synchronous selection loop (no `.await` inside).
     let mut mdns_targets: Vec<(String, String)> = Vec::new();
     {
-        let mut guard = MDNS_ATTEMPTED.lock().unwrap();
-        let attempted = guard.get_or_insert_with(std::collections::HashSet::new);
+        let mut guard = MDNS_ATTEMPTS.lock().unwrap();
+        let attempts = guard.get_or_insert_with(HashMap::new);
+        let now = Instant::now();
         for mac in &all_macs {
             if unreachable_macs.contains(mac) {
                 continue;
             }
-            if attempted.contains(mac) {
+            let prior = attempts
+                .get(mac)
+                .map(|a| (a.count, now.duration_since(a.last)));
+            if !mdns_retry_eligible(prior) {
                 continue;
             }
             let already_named = hosts_by_mac
@@ -1198,7 +1239,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
                     .map(|l| l.hostname != "*" && !l.hostname.is_empty())
                     .unwrap_or(false)
                 // A fingerprint-only cache entry (e.g. a Chromebook) is not a
-                // name — such a device still deserves its one mDNS attempt.
+                // name — such a device still deserves its mDNS attempts.
                 || name_cache
                     .get(mac)
                     .map_or(false, |e| e.hostname.is_some());
@@ -1213,7 +1254,8 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
                 .and_then(|l| choose_ipv4_entry(l, &live_ipv4s).map(|e| e.ip.clone()))
                 .or_else(|| lease_by_mac.get(mac).map(|l| l.ip.clone()));
             if let Some(ip) = ipv4 {
-                attempted.insert(mac.clone());
+                let count = prior.map_or(0, |(c, _)| c) + 1;
+                attempts.insert(mac.clone(), MdnsAttempts { count, last: now });
                 mdns_targets.push((mac.clone(), ip));
             }
         }
@@ -1301,7 +1343,8 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
         // outranks them (the raw fingerprint IS cached, so the label survives
         // reboots). The reverse-resolve above queries each MAC at most once
         // per daemon run: a cached (named) device is gated out by the cache
-        // check, and a device that stays silent is gated out by MDNS_ATTEMPTED.
+        // check, and a device that stays silent is retried on the bounded
+        // MDNS_BACKOFF schedule, then left alone (MDNS_ATTEMPTS).
         let dhcp_hostname = lease.and_then(|l| {
             if l.hostname != "*" && !l.hostname.is_empty() {
                 Some(l.hostname.clone())
@@ -1610,6 +1653,14 @@ pub async fn forget<C: CtrlContext>(
                     None,
                 );
                 crate::device_names::forget(&mac_upper).await;
+                // Drop the mDNS attempt history too: a forgotten device that
+                // reconnects "appears as a new entry" (per the user docs), so
+                // it starts a fresh retry schedule.
+                if let Ok(mut guard) = MDNS_ATTEMPTS.lock() {
+                    if let Some(attempts) = guard.as_mut() {
+                        attempts.remove(&mac_upper);
+                    }
+                }
                 if ctx.effectful() {
                     flush_device_from_network(&mac_upper).await;
                 }
@@ -1827,6 +1878,29 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mdns_retry_schedule() {
+        // Never attempted: eligible immediately.
+        assert!(mdns_retry_eligible(None));
+        // Each rung: not eligible just below the backoff, eligible at it.
+        for (i, backoff) in MDNS_BACKOFF.iter().enumerate() {
+            let count = i as u8 + 1;
+            assert!(
+                !mdns_retry_eligible(Some((count, *backoff - Duration::from_secs(1)))),
+                "attempt {count} eligible too early"
+            );
+            assert!(
+                mdns_retry_eligible(Some((count, *backoff))),
+                "attempt {count} not eligible at its backoff"
+            );
+        }
+        // Capped after MDNS_MAX_ATTEMPTS, no matter how much time passes.
+        assert!(!mdns_retry_eligible(Some((
+            MDNS_MAX_ATTEMPTS,
+            Duration::from_secs(365 * 24 * 60 * 60)
+        ))));
+    }
 
     #[test]
     fn extract_ipv6_hostid_survives_zero_compression() {
