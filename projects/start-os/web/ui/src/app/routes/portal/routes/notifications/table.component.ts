@@ -89,7 +89,7 @@ import { NotificationItemComponent } from './item.component'
     </table>
   `,
   styles: `
-    input {
+    :host-context(tui-root:not(._mobile)) input {
       position: absolute;
       top: 50%;
       left: 0.75rem;
@@ -98,15 +98,11 @@ import { NotificationItemComponent } from './item.component'
 
     :host-context(tui-root._mobile) {
       input {
-        position: absolute;
-        top: 2.875rem;
-        left: 0;
-        z-index: 1;
         pointer-events: none;
       }
 
       :host:not(:has(:checked)) input {
-        opacity: 0;
+        display: none;
       }
     }
   `,
