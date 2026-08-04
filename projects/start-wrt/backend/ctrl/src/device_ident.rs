@@ -157,6 +157,9 @@ pub fn fingerprint_os(fp: &Fingerprint) -> Option<&'static str> {
         // Canonical Windows 10/11 list — redundant with the MSFT vendor class,
         // but catches clients configured to omit option 60.
         "1,3,6,15,31,33,43,44,46,47,119,121,249,252" => Some("Windows"),
+        // NetworkManager's internal client (Ubuntu/Fedora desktop default):
+        // sends no vendor class. Bench-captured 2026-08-03 (Ubuntu).
+        "1,2,6,12,15,26,28,121,3,33,40,41,42,119,249,252,17" => Some("Linux"),
         _ => None,
     }
 }
@@ -475,6 +478,10 @@ mod tests {
         assert_eq!(
             fingerprint_os(&fp("1,3,6,15,31,33,43,44,46,47,119,121,249,252", "")),
             Some("Windows")
+        );
+        assert_eq!(
+            fingerprint_os(&fp("1,2,6,12,15,26,28,121,3,33,40,41,42,119,249,252,17", "")),
+            Some("Linux")
         );
         // Vendor class outranks the option list.
         assert_eq!(
