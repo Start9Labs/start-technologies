@@ -480,7 +480,10 @@ mod tests {
             Some("Windows")
         );
         assert_eq!(
-            fingerprint_os(&fp("1,2,6,12,15,26,28,121,3,33,40,41,42,119,249,252,17", "")),
+            fingerprint_os(&fp(
+                "1,2,6,12,15,26,28,121,3,33,40,41,42,119,249,252,17",
+                ""
+            )),
             Some("Linux")
         );
         // Vendor class outranks the option list.
