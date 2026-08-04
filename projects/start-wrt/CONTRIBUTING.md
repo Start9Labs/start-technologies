@@ -113,11 +113,13 @@ rebuilds. Every setup run:
 2. Applies [`openwrt-patches/`](openwrt-patches/) with `patch -p1` — the Start9 modifications
    to upstream files (currently 3 small build-infra patches for the git-cloned vendor kernel
    - a 6.18 module rename).
-3. Rsyncs [`openwrt-overlay/`](openwrt-overlay/) over the tree — the Start9 _additions_
+3. Rsyncs [`openwrt-overlay/`](openwrt-overlay/) over the tree — the _added_ files
    (mirroring upstream layout): `target/linux/spacemit/` (the K1 target, including its
    `patches-6.18/` kernel patches), `package/boot/{opensbi,uboot}-spacemit/`, the generic
    6.18 kernel stubs, and one mac80211 build patch. Additions live as plain files, not
-   patches, so upstream bumps can never conflict with them.
+   patches, so upstream bumps can never conflict with them. Most of this tree comes from
+   SpaceMiT's BSP and from OpenWrt, and it is GPL-2.0-only rather than MIT — see
+   [`openwrt-overlay/README.md`](openwrt-overlay/README.md) before editing it.
 
 `./projects/start-wrt/build/openwrt-setup.sh --tree-only` (from the repo root) runs only the
 tree rebuild — useful offline (once the tarball is cached) and for testing.
