@@ -26,6 +26,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   subnet the way `add`, `remove` and `set-dns` already did, matching the syntax
   the documentation shows.
 
+- **An automatic port forward that asks for a time limit now expires when that
+  time runs out.** A device requesting a timed UPnP mapping had it kept as
+  though it were permanent, so a forward could outlive the app that asked for
+  it — staying open until the tunnel was next restarted. Automatic ports are
+  now lease-based as documented: one that stops being renewed is removed on its
+  own. Devices that ask for a permanent mapping, which is what StartOS does,
+  are unaffected.
+
+### Security
+
+- **Reading the tunnel's public IP address over UPnP now requires an authorized
+  device.** The `GetExternalIPAddress` action answered any device that could
+  reach the tunnel's UPnP control endpoint, including one whose **Auto-publish**
+  permission was off. It now answers only devices allowed to create automatic
+  forwards — the same permission `AddPortMapping` already required.
+
 ## [1.2.1]
 
 ### Fixed
@@ -132,12 +148,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   devices set up automatically — their forwards, SNI routes, and IPv6 pinholes
   keep being renewed instead of silently lapsing until the tunnel is next
   restarted.
-
-### Fixed
-
-- The UPnP IGD `GetExternalIPAddress` action now requires the requester to be a
-  known tunnel device, matching `AddPortMapping` — previously any host that
-  could reach the control endpoint could read the public IP.
 
 ## [1.1.0]
 
