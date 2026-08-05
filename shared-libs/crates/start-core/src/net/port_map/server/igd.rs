@@ -192,11 +192,15 @@ fn upnp_error_text(code: u16) -> &'static str {
     }
 }
 
-/// Render the IGD root device description for `uuid`.
-pub fn render_root_desc(uuid: &str) -> String {
+/// Render the IGD root device description for `uuid`, identifying the gateway
+/// as `product` — this is the name UPnP clients display for it, so each product
+/// must pass its own rather than inherit whichever one the template was written
+/// for.
+pub fn render_root_desc(product: &str, uuid: &str) -> String {
     format!(
         include_str!("igd_xml/root_desc.xml"),
         device_type = IGD_DEVICE,
+        product = product,
         uuid = uuid,
         service = WANIP_SERVICE,
         cif_service = WANCIF_SERVICE,
@@ -472,7 +476,7 @@ mod tests {
     // so this service's presence is load-bearing, not decorative.
     #[test]
     fn root_desc_advertises_wan_common_interface_config() {
-        let xml = render_root_desc("abcd1234-0000-0000-0000-000000000000");
+        let xml = render_root_desc("TestGateway", "abcd1234-0000-0000-0000-000000000000");
         let root = Element::parse(xml.as_bytes()).unwrap();
         let device = root.get_child("device").unwrap();
         let (scpd, control) =
@@ -481,6 +485,27 @@ mod tests {
         assert_eq!(control, CONTROL_PATH);
         // The SCPD it points at must parse, or a client fetching it gets junk.
         Element::parse(CIF_SCPD.as_bytes()).expect("CIF SCPD is well-formed");
+    }
+
+    // The description carries the name UPnP clients display for the gateway, so
+    // it has to come from the caller — a hardcoded one means every product
+    // advertises itself as whichever one the template was written for.
+    #[test]
+    fn root_desc_identifies_the_calling_product() {
+        let xml = render_root_desc("StartWRT", "abcd1234-0000-0000-0000-000000000000");
+        let root = Element::parse(xml.as_bytes()).unwrap();
+        let device = root.get_child("device").unwrap();
+        assert_eq!(
+            device
+                .get_child("friendlyName")
+                .and_then(|e| e.get_text())
+                .as_deref(),
+            Some("StartWRT")
+        );
+        assert!(
+            !xml.contains("StartTunnel"),
+            "no other product's name may leak into the description:\n{xml}"
+        );
     }
 
     #[test]
@@ -504,7 +529,7 @@ mod tests {
 
     #[test]
     fn root_desc_advertises_wanip_service() {
-        let xml = render_root_desc("abcd1234-0000-0000-0000-000000000000");
+        let xml = render_root_desc("TestGateway", "abcd1234-0000-0000-0000-000000000000");
         let root = Element::parse(xml.as_bytes()).unwrap();
         let device = root.get_child("device").unwrap();
         let (scpd, control) = find_wanip(device).expect("WANIPConnection service");

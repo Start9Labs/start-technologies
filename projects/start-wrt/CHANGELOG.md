@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recognize an Internet Gateway Device, answers the status actions they check
   before mapping anything, and supports reading mappings back
   (`GetSpecificPortMappingEntry`/`GetGenericPortMappingEntry`) — a device sees
-  only its own. Uses the shared `start-core` PCP/IGD
+  only its own. The router identifies itself as "StartWRT" to those clients. Uses the shared `start-core` PCP/IGD
   server cores; since StartWRT has no SNI demux, the shared PCP server now
   advertises the Start9 HOSTNAME capability only on gateways that really
   implement it (StartTunnel), so StartOS clients fall back to plain forwards
@@ -81,6 +81,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   you chained it to — and every screen reported success. Disabled VPNs are no
   longer offered as chain targets, and the router rejects one outright.
 
+- **Changing a published port no longer briefly drops the firewall.** Applying
+  a port-forward change restarted the firewall, which tears the whole ruleset
+  down and rebuilds it as two separate steps — for a moment in between, the
+  router had no firewall and no NAT, and connections started in that window
+  were unfiltered. It now reloads instead, applying the new ruleset in a single
+  atomic step with no gap, and a ruleset that failed to build leaves the
+  running one untouched rather than leaving nothing in place.
+
 - **Enabling LAN IPv6 no longer silently fails when the Admin profile routes
   through an IPv4-only VPN.** Saving the LAN IPv6 settings reported success
   but immediately reverted to disabled: the save re-derived the admin LAN's
@@ -119,6 +127,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   corrected `API_CONTRACT.md` wire types and documented the previously missing
   endpoints, and fixed stale paths, commands, and structure descriptions across
   the developer docs.
+
 - **Cloudflare Dynamic DNS now saves a working configuration.** The saved
   config was missing fields the update client requires (the Bearer-token
   marker and the zone), so Cloudflare updates could never succeed. The form
@@ -130,6 +139,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   permissions. Proxied (orange-cloud) records are supported: the client
   reads the registered IP through the Cloudflare API rather than DNS, which
   would only ever see the proxy's address.
+  
 - **Dynamic DNS now actually updates your provider.** The image was missing
   the `ddns-scripts` update client (and its Cloudflare and No-IP extensions),
   so DDNS settings were saved but no DNS record was ever updated. The FreeDNS

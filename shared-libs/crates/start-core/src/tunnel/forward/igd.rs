@@ -44,7 +44,7 @@ pub async fn run(ctx: TunnelContext) {
             return;
         }
     };
-    let root_desc: Arc<str> = Arc::from(render_root_desc(&uuid));
+    let root_desc: Arc<str> = Arc::from(render_root_desc("StartTunnel", &uuid));
     tokio::join!(http_server(ctx.clone(), root_desc), ssdp_server(ctx, uuid));
 }
 

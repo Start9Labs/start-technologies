@@ -201,8 +201,8 @@ impl PortControl {
             .insert(section, Instant::now() + lease);
     }
 
-    fn restart_firewall(&self) {
-        crate::published_ports::restart_firewall();
+    fn reload_firewall(&self) {
+        crate::published_ports::reload_firewall();
     }
 
     /// Resolve the requesting IP to an authorized device: a neighbor-table
@@ -359,7 +359,7 @@ impl PortControl {
                     source
                 );
                 self.bump_lease(section, lease);
-                self.restart_firewall();
+                self.reload_firewall();
                 Ok(())
             }
         }
@@ -443,7 +443,7 @@ impl PortControl {
         if !removed.is_empty() {
             tracing::info!("port-control: removed forward(s) {removed:?}");
             self.forget_leases(&removed);
-            self.restart_firewall();
+            self.reload_firewall();
         }
         removed.len()
     }
@@ -592,7 +592,7 @@ impl PortControl {
             uci_task(move || async move { remove_auto_sections(&uci_root, &names).await }).await?;
         self.forget_leases(&doomed);
         if removed > 0 {
-            self.restart_firewall();
+            self.reload_firewall();
         }
         Ok(())
     }
@@ -1087,7 +1087,7 @@ async fn serve_pcp(pc: &Arc<PortControl>) -> Result<(), Error> {
 }
 
 async fn run_igd(pc: Arc<PortControl>) {
-    let root_desc: Arc<str> = Arc::from(render_root_desc(&device_uuid()));
+    let root_desc: Arc<str> = Arc::from(render_root_desc("StartWRT", &device_uuid()));
     let app = Router::new()
         .route(ROOT_DESC_PATH, {
             let root_desc = root_desc.clone();

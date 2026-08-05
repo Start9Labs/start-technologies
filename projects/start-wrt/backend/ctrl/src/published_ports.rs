@@ -1158,7 +1158,7 @@ pub async fn set<C: CtrlContext>(
                     }
                 }
                 if ctx.effectful() {
-                    restart_firewall();
+                    reload_firewall();
                     if dhcp_modified {
                         reload_dnsmasq();
                     }
@@ -1331,7 +1331,7 @@ pub async fn reconcile(ctx: ServerContext) -> Result<Value, Error> {
                 return Err(err.into());
             }
             Ok(()) => {
-                restart_firewall();
+                reload_firewall();
                 crate::activity::log(
                     "published-ports",
                     "reconciled",
@@ -1603,14 +1603,44 @@ async fn resolve_device_zones(
     mac_zones
 }
 
-pub(crate) fn restart_firewall() {
+/// Apply firewall config changes.
+///
+/// `reload` renders the ruleset and hands it to a single `nft -f` transaction
+/// (`table` / `flush table` / `table {…}`), so the change lands atomically and a
+/// bad ruleset aborts leaving the old one live. `restart` instead runs `stop`
+/// — `nft delete table inet fw4` — and then `start`, as two separate
+/// invocations: in between, the router has no firewall and no NAT at all. Every
+/// published-port change used to open that window.
+///
+/// `fw4 reload` refuses to run when the firewall isn't loaded (it requires
+/// existing state), which is the one case `restart` handled and this doesn't —
+/// so fall back to it there, and only there.
+pub(crate) fn reload_firewall() {
     tokio::spawn(async {
-        if let Err(e) = crate::run_quiet_async(
+        // `run_quiet_async` reports the exit status rather than failing on it,
+        // so a non-zero reload has to be checked explicitly — otherwise the
+        // fallback below would never run.
+        match crate::run_quiet_async(
+            tokio::process::Command::new("/etc/init.d/firewall").arg("reload"),
+        )
+        .await
+        {
+            Ok(status) if status.success() => return,
+            Ok(status) => tracing::warn!(
+                "firewall reload exited {status} (not loaded?); falling back to restart"
+            ),
+            Err(e) => {
+                tracing::warn!("could not run firewall reload ({e}); falling back to restart")
+            }
+        }
+        match crate::run_quiet_async(
             tokio::process::Command::new("/etc/init.d/firewall").arg("restart"),
         )
         .await
         {
-            tracing::error!("failed to restart firewall: {e}");
+            Ok(status) if status.success() => {}
+            Ok(status) => tracing::error!("firewall restart exited {status}"),
+            Err(e) => tracing::error!("failed to restart firewall: {e}"),
         }
     });
 }
