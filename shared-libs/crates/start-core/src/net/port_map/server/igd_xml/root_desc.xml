@@ -18,6 +18,15 @@
         <manufacturer>Start9</manufacturer>
         <modelName>StartTunnel</modelName>
         <UDN>uuid:{uuid}-wan</UDN>
+        <serviceList>
+          <service>
+            <serviceType>{cif_service}</serviceType>
+            <serviceId>urn:upnp-org:serviceId:WANCommonIFC1</serviceId>
+            <controlURL>{control}</controlURL>
+            <eventSubURL></eventSubURL>
+            <SCPDURL>{cif_scpd}</SCPDURL>
+          </service>
+        </serviceList>
         <deviceList>
           <device>
             <deviceType>urn:schemas-upnp-org:device:WANConnectionDevice:1</deviceType>

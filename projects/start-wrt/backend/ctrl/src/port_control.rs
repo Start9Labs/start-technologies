@@ -84,10 +84,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use startos::net::port_map::server::igd::{
     format_uuid, handle_control, header_value, render_root_desc, serve_static, ssdp_response,
-    st_matches, CONTROL_PATH, IGD_HTTP_PORT, ROOT_DESC_PATH, SCPD, SCPD_PATH, SSDP_MULTICAST,
-    SSDP_PORT,
+    st_matches, CIF_SCPD, CIF_SCPD_PATH, CONTROL_PATH, IGD_HTTP_PORT, ROOT_DESC_PATH, SCPD,
+    SCPD_PATH, SSDP_MULTICAST, SSDP_PORT,
 };
-use startos::net::port_map::server::{handle, GatewayBackend, PCP_PORT};
+use startos::net::port_map::server::{handle, GatewayBackend, MappingEntry, PCP_PORT};
 use startos::tunnel::forward::sni::SniDemux;
 use tokio::net::UdpSocket;
 use uciedit::openwrt::{DhcpHost, FirewallRedirect, FirewallRule, FirewallTarget};
@@ -454,6 +454,61 @@ impl PortControl {
     /// lock throughout, so a renewal either lands before the expiry decision or
     /// re-creates its section afterwards — it can never be granted and then
     /// collected by the same sweep.
+    /// The auto forwards pointing at `peer`, as IGD mapping entries. Each
+    /// forward opens both transports, so it reports as one TCP and one UDP
+    /// entry — a client asks about a single protocol at a time and must find
+    /// the mapping it just made.
+    async fn forwards_for(&self, peer: Ipv4Addr) -> Vec<MappingEntry> {
+        let uci_root = self.uci_root.clone();
+        let target = peer.to_string();
+        let found: Vec<(String, u16, u16, String)> = uci_task(move || async move {
+            let arena = Arena::new();
+            let cfgs = parse_all(&uci_root, &arena, &["firewall"]).await?;
+            Ok(cfgs["firewall"]
+                .sections
+                .iter()
+                .filter_map(|sec| {
+                    let r = sec.get::<FirewallRedirect>().ok()?;
+                    let label = r._apf_label?;
+                    if r.dest_ip.as_deref() != Some(target.as_str()) {
+                        return None;
+                    }
+                    let external = r.src_dport.as_deref().and_then(parse_port_range)?.0;
+                    let internal = r.dest_port.as_deref().and_then(parse_port_range)?.0;
+                    Some((sec.name()?.to_string(), external, internal, label))
+                })
+                .collect())
+        })
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!("port-control: listing forwards failed: {e}");
+            Vec::new()
+        });
+
+        let now = Instant::now();
+        let leases = self.leases.lock().unwrap();
+        found
+            .into_iter()
+            .flat_map(|(section, external_port, internal_port, label)| {
+                // An untracked section (fresh boot) reports 0 = permanent
+                // rather than "already expired".
+                let lease_seconds = leases
+                    .get(&section)
+                    .map(|t| t.saturating_duration_since(now).as_secs() as u32)
+                    .unwrap_or(0);
+                ["TCP", "UDP"]
+                    .into_iter()
+                    .map(move |protocol| MappingEntry {
+                        external_port,
+                        internal: SocketAddrV4::new(peer, internal_port),
+                        protocol,
+                        description: format!("Auto forward ({label})"),
+                        lease_seconds,
+                    })
+            })
+            .collect()
+    }
+
     async fn sweep(&self) -> Result<(), Error> {
         let _serial = self.write_serial.lock().await;
         let uci_root = self.uci_root.clone();
@@ -578,6 +633,10 @@ impl GatewayBackend for Via {
 
     async fn is_known_client(&self, peer: Ipv4Addr) -> bool {
         self.pc.authorized_client(peer).await.is_some()
+    }
+
+    async fn list_forwards(&self, peer: Ipv4Addr) -> Vec<MappingEntry> {
+        self.pc.forwards_for(peer).await
     }
 
     /// No SNI dataplane on this gateway: the ANNOUNCE marker is omitted and
@@ -1035,6 +1094,10 @@ async fn run_igd(pc: Arc<PortControl>) {
             get(move || serve_static(root_desc.clone(), "text/xml"))
         })
         .route(SCPD_PATH, get(|| serve_static(Arc::from(SCPD), "text/xml")))
+        .route(
+            CIF_SCPD_PATH,
+            get(|| serve_static(Arc::from(CIF_SCPD), "text/xml")),
+        )
         .route(CONTROL_PATH, post(igd_control))
         .with_state(pc);
     loop {

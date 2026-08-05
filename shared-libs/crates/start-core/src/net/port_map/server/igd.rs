@@ -10,7 +10,7 @@ use std::sync::Arc;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
-use crate::net::port_map::server::GatewayBackend;
+use crate::net::port_map::server::{GatewayBackend, MappingEntry};
 
 pub const SSDP_MULTICAST: Ipv4Addr = Ipv4Addr::new(239, 255, 255, 250);
 pub const SSDP_PORT: u16 = 1900;
@@ -20,15 +20,38 @@ pub const IGD_HTTP_PORT: u16 = 49001;
 /// ("permanent") means, per WANIPConnection:2's reading of 0 as one week.
 pub const IGD_MAX_LEASE_SECONDS: u32 = 604_800;
 pub const WANIP_SERVICE: &str = "urn:schemas-upnp-org:service:WANIPConnection:1";
+/// Declared on the `WANDevice`. Carries no port-mapping actions, but a client
+/// looking for an IGD identifies one by finding this service type in the device
+/// description — miniupnpc's `UPNP_GetValidIGD` classifies a device without it
+/// as `UPNP_UNKNOWN_DEVICE` and refuses to use it at all.
+pub const WANCIF_SERVICE: &str = "urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1";
 pub const IGD_DEVICE: &str = "urn:schemas-upnp-org:device:InternetGatewayDevice:1";
 pub const SERVER_HEADER: &str = "StartOS UPnP/1.1";
 pub const ROOT_DESC_PATH: &str = "/rootDesc.xml";
 pub const SCPD_PATH: &str = "/WANIPCn.xml";
+pub const CIF_SCPD_PATH: &str = "/WANCfg.xml";
+/// Both services share one control endpoint: actions are dispatched by name,
+/// which is unambiguous across the two.
 pub const CONTROL_PATH: &str = "/ctl/IPConn";
 
 /// Minimal WANIPConnection SCPD. Clients (e.g. igd-next) read its `actionList`
 /// to learn each action's input argument names before issuing a request.
 pub const SCPD: &str = include_str!("igd_xml/scpd.xml");
+/// Minimal WANCommonInterfaceConfig SCPD, served so the service declared in the
+/// root description resolves rather than 404ing.
+pub const CIF_SCPD: &str = include_str!("igd_xml/cif_scpd.xml");
+
+/// Uptime reported by `GetStatusInfo`, measured from the first call — clients
+/// use it only as a monotonic "how long has this connection been up".
+fn uptime_seconds() -> u32 {
+    static STARTED: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    STARTED
+        .get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_secs()
+        .try_into()
+        .unwrap_or(u32::MAX)
+}
 
 /// Format a 16-byte slice as a stable, well-formed UUID/UDN string.
 pub fn format_uuid(bytes: &[u8]) -> String {
@@ -176,8 +199,10 @@ pub fn render_root_desc(uuid: &str) -> String {
         device_type = IGD_DEVICE,
         uuid = uuid,
         service = WANIP_SERVICE,
+        cif_service = WANCIF_SERVICE,
         control = CONTROL_PATH,
         scpd = SCPD_PATH,
+        cif_scpd = CIF_SCPD_PATH,
     )
 }
 
@@ -203,7 +228,119 @@ pub async fn handle_control<B: GatewayBackend + ?Sized>(
         Some("AddPortMapping") => add_mapping(backend, peer, body, false).await,
         Some("AddAnyPortMapping") => add_mapping(backend, peer, body, true).await,
         Some("DeletePortMapping") => delete_mapping(backend, peer, body).await,
+        Some("GetSpecificPortMappingEntry") => get_specific_mapping(backend, peer, body).await,
+        Some("GetGenericPortMappingEntry") => get_generic_mapping(backend, peer, body).await,
+        // Static descriptions of the WAN connection. A client uses these to
+        // decide the gateway is a usable IGD before it will map anything:
+        // miniupnpc calls GetStatusInfo and treats anything but `Connected` as
+        // a disconnected IGD, refusing to continue.
+        Some("GetStatusInfo") => ok(
+            "GetStatusInfo",
+            &format!(
+                "<NewConnectionStatus>Connected</NewConnectionStatus>\
+                 <NewLastConnectionError>ERROR_NONE</NewLastConnectionError>\
+                 <NewUptime>{}</NewUptime>",
+                uptime_seconds()
+            ),
+        ),
+        Some("GetConnectionTypeInfo") => ok(
+            "GetConnectionTypeInfo",
+            "<NewConnectionType>IP_Routed</NewConnectionType>\
+             <NewPossibleConnectionTypes>IP_Routed</NewPossibleConnectionTypes>",
+        ),
+        Some("GetNATRSIPStatus") => ok(
+            "GetNATRSIPStatus",
+            "<NewRSIPAvailable>0</NewRSIPAvailable><NewNATEnabled>1</NewNATEnabled>",
+        ),
+        // WANCommonInterfaceConfig. The link rates are unknown to us and
+        // reported as 0, which the spec permits and clients treat as "unknown".
+        Some("GetCommonLinkProperties") => ok(
+            "GetCommonLinkProperties",
+            "<NewWANAccessType>Ethernet</NewWANAccessType>\
+             <NewLayer1UpstreamMaxBitRate>0</NewLayer1UpstreamMaxBitRate>\
+             <NewLayer1DownstreamMaxBitRate>0</NewLayer1DownstreamMaxBitRate>\
+             <NewPhysicalLinkStatus>Up</NewPhysicalLinkStatus>",
+        ),
         _ => fault(401, "Invalid Action"),
+    }
+}
+
+/// `NewProtocol` from a SOAP body, normalized to the IGD spelling.
+fn soap_protocol(body: &str) -> Option<&'static str> {
+    match soap_arg::<String>(body, "NewProtocol")?
+        .to_ascii_uppercase()
+        .as_str()
+    {
+        "TCP" => Some("TCP"),
+        "UDP" => Some("UDP"),
+        _ => None,
+    }
+}
+
+fn mapping_response(action: &str, entry: &MappingEntry) -> Response {
+    ok(
+        action,
+        &format!(
+            "<NewRemoteHost></NewRemoteHost>\
+             <NewExternalPort>{}</NewExternalPort>\
+             <NewProtocol>{}</NewProtocol>\
+             <NewInternalPort>{}</NewInternalPort>\
+             <NewInternalClient>{}</NewInternalClient>\
+             <NewEnabled>1</NewEnabled>\
+             <NewPortMappingDescription>{}</NewPortMappingDescription>\
+             <NewLeaseDuration>{}</NewLeaseDuration>",
+            entry.external_port,
+            entry.protocol,
+            entry.internal.port(),
+            entry.internal.ip(),
+            entry.description,
+            entry.lease_seconds,
+        ),
+    )
+}
+
+/// Read back one mapping by external port + protocol. Clients call this right
+/// after `AddPortMapping` to confirm the mapping took, so answering it wrongly
+/// makes a successful mapping look like a failure.
+async fn get_specific_mapping<B: GatewayBackend + ?Sized>(
+    backend: &B,
+    peer: Ipv4Addr,
+    body: &str,
+) -> Response {
+    let (Some(external_port), Some(protocol)) =
+        (soap_u16(body, "NewExternalPort"), soap_protocol(body))
+    else {
+        return fault(402, "Invalid Args");
+    };
+    if !backend.is_known_client(peer).await {
+        return fault(606, "Action not authorized");
+    }
+    match backend
+        .list_forwards(peer)
+        .await
+        .into_iter()
+        .find(|e| e.external_port == external_port && e.protocol == protocol)
+    {
+        Some(entry) => mapping_response("GetSpecificPortMappingEntry", &entry),
+        None => fault(714, "NoSuchEntryInArray"),
+    }
+}
+
+/// Enumerate the peer's mappings by index; clients walk it until 714.
+async fn get_generic_mapping<B: GatewayBackend + ?Sized>(
+    backend: &B,
+    peer: Ipv4Addr,
+    body: &str,
+) -> Response {
+    let Some(index) = soap_arg::<usize>(body, "NewPortMappingIndex") else {
+        return fault(402, "Invalid Args");
+    };
+    if !backend.is_known_client(peer).await {
+        return fault(606, "Action not authorized");
+    }
+    match backend.list_forwards(peer).await.into_iter().nth(index) {
+        Some(entry) => mapping_response("GetGenericPortMappingEntry", &entry),
+        None => fault(714, "NoSuchEntryInArray"),
     }
 }
 
@@ -295,10 +432,9 @@ mod tests {
 
     use super::*;
 
-    /// Recreates how an IGD client locates the WANIPConnection service: walk
-    /// devices/serviceLists for a matching serviceType, returning (SCPDURL,
-    /// controlURL).
-    fn find_wanip(device: &Element) -> Option<(String, String)> {
+    /// Recreates how an IGD client locates a service: walk devices/serviceLists
+    /// for a matching serviceType, returning (SCPDURL, controlURL).
+    fn find_service(device: &Element, service_type: &str) -> Option<(String, String)> {
         if let Some(service_list) = device.get_child("serviceList") {
             for child in &service_list.children {
                 if let Some(svc) = child.as_element() {
@@ -307,7 +443,7 @@ mod tests {
                             .get_child("serviceType")
                             .and_then(|e| e.get_text())
                             .as_deref()
-                            == Some(WANIP_SERVICE)
+                            == Some(service_type)
                     {
                         return Some((
                             svc.get_child("SCPDURL")?.get_text()?.into_owned(),
@@ -323,7 +459,47 @@ mod tests {
             .iter()
             .filter_map(|c| c.as_element())
             .filter(|c| c.name == "device")
-            .find_map(find_wanip)
+            .find_map(|d| find_service(d, service_type))
+    }
+
+    fn find_wanip(device: &Element) -> Option<(String, String)> {
+        find_service(device, WANIP_SERVICE)
+    }
+
+    // A client identifies a gateway as an IGD by finding WANCommonInterfaceConfig
+    // in the description. Without it miniupnpc — and everything built on it —
+    // classifies us as UPNP_UNKNOWN_DEVICE and refuses to map anything at all,
+    // so this service's presence is load-bearing, not decorative.
+    #[test]
+    fn root_desc_advertises_wan_common_interface_config() {
+        let xml = render_root_desc("abcd1234-0000-0000-0000-000000000000");
+        let root = Element::parse(xml.as_bytes()).unwrap();
+        let device = root.get_child("device").unwrap();
+        let (scpd, control) =
+            find_service(device, WANCIF_SERVICE).expect("WANCommonInterfaceConfig service");
+        assert_eq!(scpd, CIF_SCPD_PATH);
+        assert_eq!(control, CONTROL_PATH);
+        // The SCPD it points at must parse, or a client fetching it gets junk.
+        Element::parse(CIF_SCPD.as_bytes()).expect("CIF SCPD is well-formed");
+    }
+
+    #[test]
+    fn protocol_argument_is_normalized() {
+        let body = |p: &str| {
+            format!(
+                r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+<s:Body>
+<u:GetSpecificPortMappingEntry xmlns:u="{WANIP_SERVICE}">
+<NewProtocol>{p}</NewProtocol>
+</u:GetSpecificPortMappingEntry>
+</s:Body>
+</s:Envelope>"#
+            )
+        };
+        assert_eq!(soap_protocol(&body("TCP")), Some("TCP"));
+        assert_eq!(soap_protocol(&body("udp")), Some("UDP"));
+        assert_eq!(soap_protocol(&body("SCTP")), None);
     }
 
     #[test]

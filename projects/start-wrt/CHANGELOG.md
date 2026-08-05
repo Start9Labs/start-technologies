@@ -33,7 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   back off — or forgetting the device — closes that device's forwards
   immediately.
   The Published Ports page gains a read-only "Automatic" section showing each
-  forward's device, protocol, and expiry. Uses the shared `start-core` PCP/IGD
+  forward's device, protocol, and expiry. UPnP clients see a complete gateway:
+  the router advertises the `WANCommonInterfaceConfig` service clients use to
+  recognize an Internet Gateway Device, answers the status actions they check
+  before mapping anything, and supports reading mappings back
+  (`GetSpecificPortMappingEntry`/`GetGenericPortMappingEntry`) — a device sees
+  only its own. Uses the shared `start-core` PCP/IGD
   server cores; since StartWRT has no SNI demux, the shared PCP server now
   advertises the Start9 HOSTNAME capability only on gateways that really
   implement it (StartTunnel), so StartOS clients fall back to plain forwards

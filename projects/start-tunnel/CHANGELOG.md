@@ -34,6 +34,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   own. Devices that ask for a permanent mapping, which is what StartOS does,
   are unaffected.
 
+- **Third-party UPnP clients can now use the tunnel as a gateway.** The device
+  description didn't advertise the `WANCommonInterfaceConfig` service, and the
+  tunnel answered none of the actions a client uses to check a gateway before
+  using it (`GetStatusInfo`, `GetConnectionTypeInfo`, `GetNATRSIPStatus`) or to
+  read a mapping back (`GetSpecificPortMappingEntry`,
+  `GetGenericPortMappingEntry`). Software built on the common UPnP client
+  library — which includes many torrent clients and consumer apps — therefore
+  rejected the tunnel outright with "no valid UPnP Internet Gateway Device
+  found", or created a mapping and then reported it as failed because it could
+  not read it back. StartOS was unaffected; its client requires none of these.
+
 ### Security
 
 - **Reading the tunnel's public IP address over UPnP now requires an authorized

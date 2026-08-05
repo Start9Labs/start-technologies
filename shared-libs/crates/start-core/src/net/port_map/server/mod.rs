@@ -45,6 +45,19 @@ const PROTO_TCP: u8 = 6;
 /// fewer than requested; the client skips the range if it can't get them all).
 const MAX_PORT_SET: u16 = 1024;
 
+/// One mapping a gateway holds, as the UPnP IGD query actions report it.
+/// `protocol` is the IGD spelling (`TCP`/`UDP`); a forward covering both is
+/// reported once per transport, since a client asks about one at a time.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MappingEntry {
+    pub external_port: u16,
+    pub internal: SocketAddrV4,
+    pub protocol: &'static str,
+    pub description: String,
+    /// Remaining lease in seconds; `0` means "permanent" in IGD terms.
+    pub lease_seconds: u32,
+}
+
 /// Per-gateway I/O and forward backend for the shared PCP server.
 pub trait GatewayBackend: Send + Sync {
     /// Create or refresh a forward of `count` contiguous ports from `source`
@@ -117,6 +130,17 @@ pub trait GatewayBackend: Send + Sync {
         _external_port: u16,
     ) -> impl Future<Output = ()> + Send {
         async {}
+    }
+
+    /// The mappings this gateway currently holds on behalf of `peer`, for the
+    /// IGD query actions. Scoped to the peer's own mappings so one device can't
+    /// enumerate another's — the same ownership rule `remove_forward_by_source`
+    /// applies. The default reports none, which answers those actions with
+    /// `NoSuchEntryInArray` rather than inventing entries; a backend that can
+    /// enumerate should override it, since clients verify a mapping by reading
+    /// it back and treat a failed read as a failed mapping.
+    fn list_forwards(&self, _peer: Ipv4Addr) -> impl Future<Output = Vec<MappingEntry>> + Send {
+        async { Vec::new() }
     }
 
     /// The SNI demultiplexer used for HOSTNAME-bound shared-port mappings, or

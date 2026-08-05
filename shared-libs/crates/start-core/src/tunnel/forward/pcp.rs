@@ -13,10 +13,10 @@ use std::time::{Duration, Instant};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tokio::net::UdpSocket;
 
-use crate::net::port_map::server::{GatewayBackend, PCP_PORT, handle, handle6};
+use crate::net::port_map::server::{GatewayBackend, MappingEntry, PCP_PORT, handle, handle6};
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
-use crate::tunnel::db::PortForward;
+use crate::tunnel::db::{PortForward, PortForwards};
 use crate::tunnel::forward::igd::{
     apply_peer_forward_range, bind_to_wireguard, external_ipv4, is_known_client,
 };
@@ -240,6 +240,16 @@ impl GatewayBackend for TunnelContext {
             self,
             &LeaseKey::Pinhole(SocketAddrV6::new(gua, external_port, 0, 0)),
         );
+    }
+
+    async fn list_forwards(&self, peer: Ipv4Addr) -> Vec<MappingEntry> {
+        match self.db.peek().await.as_port_forwards().de() {
+            Ok(forwards) => mapping_entries(&forwards, peer),
+            Err(e) => {
+                tracing::warn!("failed to read port forwards for {peer}: {e}");
+                Vec::new()
+            }
+        }
     }
 
     fn sni(&self) -> Option<&Arc<SniDemux>> {
@@ -641,12 +651,66 @@ async fn remove_peer_forward(ctx: &TunnelContext, peer: Ipv4Addr, internal_port:
     lease::forget(ctx, &LeaseKey::Dnat(source));
 }
 
+/// The gateway-created forwards pointing at `peer`, as IGD mapping entries.
+///
+/// Scoped to `auto` forwards owned by the requesting peer: a manually added
+/// forward is the operator's, not something this device created, and belongs no
+/// more in its UPnP view than another device's would. SNI routes are skipped —
+/// a hostname-demuxed route isn't expressible as a port mapping. A PORT_SET
+/// range expands to one entry per port so a client asking about any port in the
+/// range finds it, and each is reported for both transports, matching the
+/// protocol-agnostic DNAT the tunnel actually installs.
+///
+/// `lease_seconds` is reported as `0` — "permanent" in IGD terms. The tunnel
+/// tracks expiry in the lease map rather than on the forward itself, and the
+/// mappings clients read back are overwhelmingly the lease-0 kind this is
+/// exactly right for; a timed mapping is under-reported rather than wrong in a
+/// way that would make a client drop it.
+fn mapping_entries(forwards: &PortForwards, peer: Ipv4Addr) -> Vec<MappingEntry> {
+    let mut out = Vec::new();
+    for (source, forward) in &forwards.0 {
+        let PortForward::Dnat {
+            target,
+            enabled,
+            count,
+            auto,
+            label,
+            ..
+        } = forward
+        else {
+            continue;
+        };
+        if !enabled || !auto || *target.ip() != peer {
+            continue;
+        }
+        let description = label
+            .clone()
+            .unwrap_or_else(|| "Automatic forward".to_string());
+        for offset in 0..*count {
+            let (Some(external_port), Some(internal_port)) = (
+                source.port().checked_add(offset),
+                target.port().checked_add(offset),
+            ) else {
+                break;
+            };
+            out.extend(["TCP", "UDP"].into_iter().map(|protocol| MappingEntry {
+                external_port,
+                internal: SocketAddrV4::new(peer, internal_port),
+                protocol,
+                description: description.clone(),
+                lease_seconds: 0,
+            }));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use std::net::SocketAddrV4;
 
-    use super::{peer_forward_matches, plan_dnat_conversion, sni_route_fields};
-    use crate::tunnel::db::{PortForward, SniRoute};
+    use super::{mapping_entries, peer_forward_matches, plan_dnat_conversion, sni_route_fields};
+    use crate::tunnel::db::{PortForward, PortForwards, SniRoute};
 
     fn route(label: Option<&str>, enabled: bool, auto: bool) -> SniRoute {
         SniRoute {
@@ -765,5 +829,78 @@ mod tests {
             sni_route_fields(Some(&existing), false, &Some("ignored".to_string()));
         assert_eq!(label.as_deref(), Some("ignored"));
         assert!(auto);
+    }
+
+    fn owned_dnat(target: &str, count: u16, enabled: bool, auto: bool) -> PortForward {
+        PortForward::Dnat {
+            target: target.parse().unwrap(),
+            label: None,
+            enabled,
+            count,
+            auto,
+        }
+    }
+
+    // A client reads a mapping back after creating it and treats a failed read
+    // as a failed mapping, so this must find the peer's own automatic forwards
+    // — and only those.
+    #[test]
+    fn mapping_entries_report_only_the_peers_own_automatic_forwards() {
+        let peer: std::net::Ipv4Addr = "10.59.0.2".parse().unwrap();
+        let mut forwards = PortForwards(Default::default());
+        let mut insert = |source: &str, f: PortForward| {
+            forwards
+                .0
+                .insert(source.parse::<SocketAddrV4>().unwrap(), f);
+        };
+        insert(
+            "203.0.113.1:443",
+            owned_dnat("10.59.0.2:8443", 1, true, true),
+        );
+        // Another device's forward, a manual one, and a disabled one: all excluded.
+        insert(
+            "203.0.113.1:444",
+            owned_dnat("10.59.0.9:8443", 1, true, true),
+        );
+        insert(
+            "203.0.113.1:445",
+            owned_dnat("10.59.0.2:9443", 1, true, false),
+        );
+        insert(
+            "203.0.113.1:446",
+            owned_dnat("10.59.0.2:9444", 1, false, true),
+        );
+        drop(insert);
+
+        let entries = mapping_entries(&forwards, peer);
+        // One forward, reported for both transports.
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().all(|e| e.external_port == 443));
+        assert!(entries.iter().all(|e| e.internal.port() == 8443));
+        assert!(entries.iter().all(|e| *e.internal.ip() == peer));
+        assert!(entries.iter().all(|e| e.lease_seconds == 0));
+        let mut protocols: Vec<_> = entries.iter().map(|e| e.protocol).collect();
+        protocols.sort();
+        assert_eq!(protocols, vec!["TCP", "UDP"]);
+    }
+
+    // A PORT_SET range answers for every port it covers, not just its base.
+    #[test]
+    fn mapping_entries_expand_a_port_range() {
+        let peer: std::net::Ipv4Addr = "10.59.0.2".parse().unwrap();
+        let mut forwards = PortForwards(Default::default());
+        forwards.0.insert(
+            "203.0.113.1:5000".parse::<SocketAddrV4>().unwrap(),
+            owned_dnat("10.59.0.2:6000", 3, true, true),
+        );
+
+        let entries = mapping_entries(&forwards, peer);
+        assert_eq!(entries.len(), 6, "3 ports x 2 transports");
+        let tcp: Vec<_> = entries
+            .iter()
+            .filter(|e| e.protocol == "TCP")
+            .map(|e| (e.external_port, e.internal.port()))
+            .collect();
+        assert_eq!(tcp, vec![(5000, 6000), (5001, 6001), (5002, 6002)]);
     }
 }
