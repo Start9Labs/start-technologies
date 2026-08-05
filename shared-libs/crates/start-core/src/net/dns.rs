@@ -266,6 +266,24 @@ pub(crate) fn name_server_socket_addr(ns: &NameServerConfig) -> SocketAddr {
     SocketAddr::new(ns.ip, ns.connections.first().map_or(53, |c| c.port))
 }
 
+/// The upstream nameservers resolv.conf lists, minus loopback — those point back
+/// at this server, so forwarding to one is a query loop.
+///
+/// Selecting by address rather than by position matters: hickory yields one
+/// `NameServerConfig` per nameserver, not one per nameserver-and-protocol, so
+/// anything counting entries drops whole upstreams. Callers pair this with
+/// [`forward_name_server`] so each upstream keeps a TCP connection alongside UDP
+/// — without it, any answer too large for a UDP datagram fails instead of
+/// retrying over TCP.
+fn upstream_name_servers(config: &ResolverConfig) -> impl Iterator<Item = SocketAddr> + '_ {
+    config
+        .name_servers()
+        .iter()
+        .map(name_server_socket_addr)
+        .filter(|addr| !addr.ip().is_loopback())
+        .dedup()
+}
+
 /// Parse systemd-resolved's resolv.conf. hickory 0.26 only exposes
 /// `system_conf::parse_resolv_conf` on non-apple unix; this path only runs on
 /// the (Linux) server, so non-Linux targets just need a stub to compile.
@@ -347,6 +365,16 @@ fn spawn_forwarder(
                             // resolvers give up around 5s, so a longer forward
                             // serves nobody; keep the default retry count.
                             opts.timeout = Duration::from_secs(5);
+                            // Retry over TCP when a UDP query fails — hickory
+                            // leaves this off, which turns any answer an
+                            // upstream won't hand back over UDP into a
+                            // SERVFAIL. That covers large TXT sets and the
+                            // multi-KB SRV responses Lightning nodes bootstrap
+                            // from, and it is not a property of the answer
+                            // alone: whether a given upstream needs TCP for it
+                            // varies by resolver, so the box's behavior changes
+                            // with the network it is on.
+                            opts.try_tcp_on_error = true;
                             last_config = Some((config, opts));
                             true
                         }
@@ -380,15 +408,7 @@ fn spawn_forwarder(
                                 .as_network_mut()
                                 .as_dns_mut()
                                 .as_dhcp_servers_mut()
-                                .ser(
-                                    &config
-                                        .name_servers()
-                                        .iter()
-                                        .map(name_server_socket_addr)
-                                        .dedup()
-                                        .skip(2)
-                                        .collect(),
-                                )
+                                .ser(&upstream_name_servers(config).collect())
                         })
                         .await
                         .result?;
@@ -400,7 +420,9 @@ fn spawn_forwarder(
                                 .map(|addr| forward_name_server(*addr))
                                 .collect()
                         } else {
-                            config.name_servers().iter().skip(2).cloned().collect()
+                            upstream_name_servers(config)
+                                .map(forward_name_server)
+                                .collect()
                         };
                     let auth: Vec<Arc<dyn ZoneHandler>> = vec![Arc::new(
                         ForwardZoneHandler::builder_tokio(ForwardConfig {
