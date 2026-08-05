@@ -1,8 +1,8 @@
 # Third-party notices
 
 Everything in this repository is MIT (see [LICENSE](LICENSE)) except the files
-listed here. This document is the complete list — if something is not named
-below, it is MIT.
+listed here, which carry their own terms. If you find something that belongs on
+this list, please open an issue.
 
 Third-party code pulled in at build time (Cargo and npm dependencies, the Debian
 base of the StartOS image, OpenWrt itself) is out of scope here; it keeps its own
@@ -12,9 +12,9 @@ license and is not redistributed in this repository.
 
 ### `projects/start-wrt/openwrt-overlay/`, `projects/start-wrt/openwrt-patches/`
 
-GPL-2.0-only. Files added to, and patches against, the OpenWrt build tree —
-copyright SpaceMiT Ltd., OpenWrt.org and the Linux kernel contributors. Sixteen
-files carry an explicit `SPDX-License-Identifier: GPL-2.0-only` header. Full
+GPL-licensed, mostly GPL-2.0-only. Files added to, and patches against, the
+OpenWrt build tree — copyright SpaceMiT Ltd., OpenWrt.org and the Linux kernel
+contributors. Sixteen carry an explicit `SPDX-License-Identifier` header. Full
 text: [`projects/start-wrt/openwrt-overlay/COPYING`](projects/start-wrt/openwrt-overlay/COPYING).
 Details: [`projects/start-wrt/openwrt-overlay/README.md`](projects/start-wrt/openwrt-overlay/README.md).
 
@@ -25,6 +25,12 @@ owners of the discontinued 2023 Server One can still flash it. Copyright (c)
 2000-2015 Intel Corporation, all rights reserved; governed by Intel's own
 firmware license, which permits neither decompilation nor sublicensing. Start9
 grants no rights to it.
+
+### `projects/start-os/build/image-recipe/raspberrypi/squashfs/usr/bin/extract-ikconfig`
+
+GPL-2.0. The Linux kernel's `scripts/extract-ikconfig`, shipped unmodified in the
+Raspberry Pi image; it extracts a kernel's embedded `.config`. Copyright (c)
+2009, 2010 Dick Streefland. Its own header carries the notice.
 
 ### `shared-libs/ts-modules/shared/assets/fonts/Hanken_Grotesk/`, `projects/start-wrt/web/assets/fonts/Hanken_Grotesk/`
 
@@ -41,13 +47,6 @@ per-dependency notices are generated alongside it as
 [`.github/actions/upload-each/dist/index.js.LICENSES.txt`](.github/actions/upload-each/dist/index.js.LICENSES.txt);
 regenerate both together with `npm run build` in that directory.
 
-### Brand marks in `projects/brochure-marketplace/` and `shared-libs/ts-modules/`
-
-Third-party logos and wordmarks (Bitcoin Core, LND, Let's Encrypt, and the
-service brands shown in the marketplace) remain the trademarks of their
-respective owners. They are used for identification only; the MIT grant over
-this repository does not extend to them.
-
 ## MIT, but not ours alone
 
 These are MIT — the repository's blanket claim holds — but they are derived from
@@ -60,8 +59,15 @@ someone else's work and carry that author's copyright as well as Start9's.
 | `shared-libs/crates/jsonpath/`                                                                | [freestrings/jsonpath](https://github.com/freestrings/jsonpath)       | Changseok Han (MIT)                                                       |
 | `projects/start-os/build/image-recipe/raspberrypi/img/usr/lib/startos/scripts/init_resize.sh` | [RPi-Distro/raspi-config](https://github.com/RPi-Distro/raspi-config) | Alex Bradbury (MIT)                                                       |
 
-## Non-copyrightable third-party artifacts
+## Trademarks
 
-`projects/start-wrt/openwrt-overlay/` also carries SpaceMiT's opkg signing keys
-and a vendor root CA certificate. These are functional cryptographic data rather
-than creative works, so no license attaches; they are noted here for provenance.
+Product names and logos appearing in this repository — Bitcoin Core, LND, Let's
+Encrypt and the service brands shown in the marketplace — are the trademarks of
+their respective owners and are used for identification only. No trademark
+rights are granted by the MIT license.
+
+## Key material
+
+`projects/start-wrt/openwrt-overlay/` carries SpaceMiT's opkg signing keys and a
+vendor root CA certificate, shipped unmodified from the vendor BSP. They are key
+material rather than code, and are listed here for provenance.

@@ -2,10 +2,6 @@ MIT License
 
 Copyright (c) 2024 Start9 Labs, Inc.
 
-This license covers StartWRT except for `openwrt-overlay/` and
-`openwrt-patches/`, which are GPL-2.0-only third-party material and are governed
-by `openwrt-overlay/COPYING`. See `openwrt-overlay/README.md`.
-
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights

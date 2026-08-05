@@ -209,5 +209,9 @@ that way.
 
 If a change vendors third-party code into the tree, it must keep the upstream
 copyright notice and be added to [NOTICE.md](NOTICE.md) in the same PR. Prefer a
-build-time dependency over a checked-in copy — copyleft code (GPL, AGPL, LGPL)
-must not be added outside the directories NOTICE.md already carves out.
+build-time dependency over a checked-in copy.
+
+Don't link GPL or AGPL code into a StartOS binary: the combined work would have
+to be conveyed under those terms. LGPL and MPL-2.0 code may be linked — both
+permit it — but each carries obligations we then owe downstream, so raise it
+before adding one. `deny.toml` encodes which licenses are accepted.

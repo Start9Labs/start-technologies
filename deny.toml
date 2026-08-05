@@ -1,7 +1,11 @@
-# Keeps the Rust tree distributable under the repo's MIT license (see NOTICE.md).
-# Permissive licenses only, plus MPL-2.0: its copyleft is per-file, so linking it
-# into an MIT binary is fine as long as we don't modify the MPL sources
-# themselves (imbl, attohttpc, option-ext, lazy_format).
+# Restricts the dependency tree to licenses whose obligations we can meet while
+# conveying our binaries under MIT (see NOTICE.md).
+#
+# MPL-2.0's copyleft is per-file: it never reaches our sources. Shipping a binary
+# that links it still obliges us to keep those crates' source available under the
+# MPL and say where to get it (§3.2) — that duty comes from distributing, not
+# from modifying. LGPL likewise permits linking into a differently-licensed work,
+# subject to its notice and relink conditions.
 [licenses]
 allow = [
   "0BSD",
@@ -13,6 +17,7 @@ allow = [
   "CC0-1.0",
   "CDLA-Permissive-2.0",
   "ISC",
+  "LGPL-3.0",
   "MIT",
   "MPL-2.0",
   "Unicode-3.0",

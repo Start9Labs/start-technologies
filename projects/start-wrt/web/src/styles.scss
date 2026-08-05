@@ -1,3 +1,6 @@
+// One variable face spans 100-900. start-wrt's designs use only 400 and 700;
+// intermediate weights now render at their true weight rather than snapping to
+// the nearest shipped face.
 @font-face {
   font-family: 'Hanken Grotesk';
   font-style: normal;
