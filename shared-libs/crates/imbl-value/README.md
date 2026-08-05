@@ -54,6 +54,13 @@ let back: Config = from_value(v).unwrap();
 - `ts-rs` — `TS` impls for `Value`/`InOMap` for TypeScript type generation (off by default; required by
   `start_core`).
 
+## Provenance
+
+The `Value` (de)serialization impls (`src/de.rs`, `src/ser.rs`), the `Index` impls (`src/index.rs`), and the
+`json!` macro (`src/macros.rs`) are derived from [serde_json](https://github.com/serde-rs/json), adapted to
+the `imbl`-backed `Value`. serde_json is Copyright (c) Erick Tryzelaar and David Tolnay, dual-licensed
+MIT OR Apache-2.0; those portions are used here under MIT. See [LICENSE](LICENSE).
+
 ## Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how it works: the `Value` enum, module map, `InOMap`, and features.
@@ -63,4 +70,5 @@ let back: Config = from_value(v).unwrap();
 
 ## License
 
-MIT (see `Cargo.toml`).
+MIT — see [LICENSE](LICENSE). Portions derived from serde_json (see [Provenance](#provenance)) are used
+under serde_json's MIT license; the notice is reproduced in [LICENSE](LICENSE).

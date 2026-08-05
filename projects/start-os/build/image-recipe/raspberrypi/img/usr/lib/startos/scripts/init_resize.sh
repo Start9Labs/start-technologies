@@ -1,4 +1,6 @@
 #!/bin/bash
+# Derived from RPi-Distro/raspi-config usr/lib/raspi-config/init_resize.sh,
+# MIT licensed, Copyright 2012 Alex Bradbury.
 
 log() { echo "init_resize: $*"; }
 

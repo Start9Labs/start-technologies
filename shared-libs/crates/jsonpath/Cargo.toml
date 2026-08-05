@@ -1,6 +1,7 @@
 [package]
 authors = ["Changseok Han <freestrings@gmail.com>"]
 name = "jsonpath_lib"
+publish = false
 version = "0.3.0"
 
 description = "It is JsonPath engine written in Rust. it provide a similar API interface in Webassembly and Javascript too. - Webassembly Demo: https://freestrings.github.io/jsonpath"
