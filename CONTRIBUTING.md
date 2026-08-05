@@ -200,3 +200,14 @@ fix(core): resolve race condition in service startup
 docs: update CONTRIBUTING.md with style guidelines
 refactor(sdk): simplify package validation logic
 ```
+
+## Licensing
+
+This repository is MIT. By contributing you agree your work is licensed under
+the MIT License in [LICENSE](LICENSE), and that you have the right to license it
+that way.
+
+If a change vendors third-party code into the tree, it must keep the upstream
+copyright notice and be added to [NOTICE.md](NOTICE.md) in the same PR. Prefer a
+build-time dependency over a checked-in copy — copyleft code (GPL, AGPL, LGPL)
+must not be added outside the directories NOTICE.md already carves out.

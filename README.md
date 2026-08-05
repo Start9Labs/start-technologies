@@ -94,3 +94,10 @@ StartOS is the flagship, but it shares this repo with the rest of the Start9 sta
 There are multiple ways to contribute: work directly on a product in this repo, package a service for the marketplace, or help with documentation and guides. See [CONTRIBUTING.md](CONTRIBUTING.md) or visit [start9.com/contribute](https://start9.com/contribute/).
 
 To report security issues, email [security@start9.com](mailto:security@start9.com).
+
+## License
+
+MIT — see [LICENSE](LICENSE). Copyright (c) 2023 Start9 Labs, Inc.
+
+A short list of third-party files carry their own terms; [NOTICE.md](NOTICE.md)
+names every one of them. Anything not listed there is MIT.

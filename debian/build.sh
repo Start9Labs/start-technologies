@@ -64,6 +64,21 @@ Conflicts: ${CONFLICTS}
 Description: StartOS Debian Package
 EOF
 
+mkdir -p dpkg-workdir/$BASENAME/usr/share/doc/${PROJECT}
+{
+    echo "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/"
+    echo "Upstream-Name: ${PROJECT}"
+    echo "Source: https://github.com/Start9Labs/start-technologies"
+    echo
+    echo "Files: *"
+    echo "Copyright: 2023 Start9 Labs, Inc."
+    echo "License: MIT"
+    sed 's/^$/./; s/^/ /' LICENSE
+    echo
+    echo "Comment: Files under other terms are listed in NOTICE.md."
+    sed 's/^$/./; s/^/ /' NOTICE.md
+} > dpkg-workdir/$BASENAME/usr/share/doc/${PROJECT}/copyright
+
 cd dpkg-workdir/$BASENAME
 find . -type f -not -path "./DEBIAN/*" -exec md5sum {} \; | sort -k 2 | sed 's/\.\/\(.*\)/\1/' > DEBIAN/md5sums
 cd ../..
