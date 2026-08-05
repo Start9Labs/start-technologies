@@ -16,11 +16,11 @@ allow = [
 confidence-threshold = 0.93
 
 [[licenses.clarify]]
-name = "webpki"
 expression = "ISC"
 license-files = [{ path = "LICENSE", hash = 0x001c7e6c }]
+name = "webpki"
 
 [[licenses.clarify]]
-name = "ring"
 expression = "OpenSSL"
 license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
+name = "ring"
