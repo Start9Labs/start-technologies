@@ -1418,9 +1418,10 @@ struct PolicyRoutingGuard {
     table_id: u32,
 }
 
-/// Remove stale per-interface policy-routing state (fwmark ip rules and their
-/// routing tables) for interfaces that no longer exist. The nft mark rules are
-/// owned declaratively by [`reconcile_mangle_rules`], so they need no GC here.
+/// Remove stale per-interface policy-routing state (fwmark ip rules, v6 source
+/// rules, and their routing tables) for interfaces that no longer exist. The nft
+/// mark rules are owned declaratively by [`reconcile_mangle_rules`], so they need
+/// no GC here.
 async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
     let active_tables: BTreeSet<u32> = active_ifaces
         .iter()
@@ -1461,6 +1462,63 @@ async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
             }
             stale.insert(table_id);
         }
+    }
+
+    // Stale priority-60 v6 source rules, which must be deleted carrying the
+    // selector they were added with.
+    let mut stale_v6_src = Vec::<(u32, String)>::new();
+    if let Ok(rules) = Command::new("ip")
+        .arg("-6")
+        .arg("rule")
+        .arg("show")
+        .invoke(ErrorKind::Network)
+        .await
+        .and_then(|b| String::from_utf8(b).with_kind(ErrorKind::Utf8))
+    {
+        for line in rules.lines() {
+            let Some(rest) = line.trim().strip_prefix("60:") else {
+                continue;
+            };
+            let Some(pos) = rest.find("lookup ") else {
+                continue;
+            };
+            let Ok(table_id) = rest[pos + 7..]
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .parse::<u32>()
+            else {
+                continue;
+            };
+            if table_id < 1000 || active_tables.contains(&table_id) {
+                continue;
+            }
+            let mut toks = rest.split_whitespace();
+            if toks.find(|t| *t == "from").is_none() {
+                continue;
+            }
+            let Some(addr) = toks.next() else {
+                continue;
+            };
+            stale.insert(table_id);
+            stale_v6_src.push((table_id, addr.to_owned()));
+        }
+    }
+
+    for (table_id, addr) in stale_v6_src {
+        Command::new("ip")
+            .arg("-6")
+            .arg("rule")
+            .arg("del")
+            .arg("from")
+            .arg(&addr)
+            .arg("lookup")
+            .arg(table_id.to_string())
+            .arg("priority")
+            .arg("60")
+            .invoke(ErrorKind::Network)
+            .await
+            .ok();
     }
 
     // For each stale table, remove the priority-50 fwmark rule and flush its
@@ -1999,12 +2057,15 @@ async fn apply_policy_routing(
 /// the default outbound (the priority-75 catch-all) then drops v6 rather than
 /// letting it fall through to some other interface's default.
 ///
-/// The table backs two rule layers, both IPv4 parity: the priority-75
-/// default-outbound catch-all ([`apply_default_outbound`]) and the priority-50
-/// CONNMARK reply-routing rule installed at the end here (marks set by
-/// [`reconcile_mangle_rules`]). IPv6 has no NAT/SNI-demux reply layer to build —
-/// the mark alone routes a reply back out the interface its connection arrived
-/// on, so a v6 service reached through a tunnel can answer.
+/// The table backs three rule layers: the priority-75 default-outbound catch-all
+/// ([`apply_default_outbound`]), the priority-50 CONNMARK reply-routing rule
+/// installed at the end here (IPv4 parity; marks set by
+/// [`reconcile_mangle_rules`]), and — v6-only — a priority-60 source rule per
+/// global address on the interface. IPv6 has no NAT/SNI-demux reply layer to
+/// build: the mark routes a *forwarded* reply back out the interface its
+/// connection arrived on, but a host-terminated one is routed before the output
+/// hook can restore that mark, so the source rule is what lets a v6 service
+/// reached through a tunnel answer.
 async fn apply_policy_routing_v6(
     guard: &PolicyRoutingGuard,
     iface: &GatewayId,
@@ -2018,14 +2079,17 @@ async fn apply_policy_routing_v6(
         IpAddr::V6(v6) => Some(*v6),
         _ => None,
     });
-    // The interface can carry v6 if it has a v6 gateway, or holds a global
-    // (non-link-local, non-ULA) v6 address of its own — the delegated-GUA case,
-    // where a point-to-point wg tunnel has no gateway but still routes v6.
-    let v6_capable = ipv6_gateway.is_some()
-        || subnets.iter().any(|n| match n {
-            IpNet::V6(v6n) => !ipv6_is_local(v6n.addr()),
-            _ => false,
-        });
+    // Global (non-link-local, non-ULA) v6 addresses of the interface's own — the
+    // delegated-GUA case, where a point-to-point wg tunnel has no gateway but
+    // still routes v6.
+    let global_v6: BTreeSet<String> = subnets
+        .iter()
+        .filter_map(|n| match n {
+            IpNet::V6(v6n) if !ipv6_is_local(v6n.addr()) => Some(v6n.addr().to_string()),
+            _ => None,
+        })
+        .collect();
+    let v6_capable = ipv6_gateway.is_some() || !global_v6.is_empty();
 
     // Mirror main's non-default v6 routes into the per-interface table, so the
     // priority-75 catch-all does not send on-link/local v6 through the gateway.
@@ -2153,6 +2217,55 @@ async fn apply_policy_routing_v6(
             .arg(&table_str)
             .arg("priority")
             .arg("50")
+            .invoke(ErrorKind::Network)
+            .await
+            .log_err();
+    }
+
+    // Ensure a priority-60 source rule per global v6 address on this interface.
+    // The CONNMARK rule above cannot catch a locally generated reply: the kernel
+    // routes a SYN-ACK before the output hook restores its mark, so it falls to
+    // the priority-75 catch-all — and when the default outbound has no v6, that
+    // table's leak-guard `blackhole default` fails the lookup outright and the
+    // reply is dropped before it is ever built. Keyed on source address, which
+    // *is* known that early, this routes it out the interface that owns it.
+    let existing_src: BTreeSet<String> = rules_output
+        .lines()
+        .filter_map(|l| {
+            let toks: Vec<&str> = l.trim().strip_prefix("60:")?.split_whitespace().collect();
+            toks.windows(2)
+                .any(|w| w[0] == "lookup" && w[1].parse::<u32>().ok() == Some(table_id))
+                .then(|| toks.windows(2).find(|w| w[0] == "from").map(|w| w[1]))
+                .flatten()
+                .map(|addr| addr.to_owned())
+        })
+        .collect();
+    for addr in global_v6.difference(&existing_src) {
+        Command::new("ip")
+            .arg("-6")
+            .arg("rule")
+            .arg("add")
+            .arg("from")
+            .arg(addr)
+            .arg("lookup")
+            .arg(&table_str)
+            .arg("priority")
+            .arg("60")
+            .invoke(ErrorKind::Network)
+            .await
+            .log_err();
+    }
+    for addr in existing_src.difference(&global_v6) {
+        Command::new("ip")
+            .arg("-6")
+            .arg("rule")
+            .arg("del")
+            .arg("from")
+            .arg(addr)
+            .arg("lookup")
+            .arg(&table_str)
+            .arg("priority")
+            .arg("60")
             .invoke(ErrorKind::Network)
             .await
             .log_err();

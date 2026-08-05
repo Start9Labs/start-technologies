@@ -19,6 +19,17 @@ file tracks notable changes since the move to the monorepo.
   `WAN: N/A` and `NTP: Unknown`. It now uses a private temporary file and
   removes it on every exit path.
 
+- **A service reached over IPv6 through a tunnel now answers.** StartOS sends a
+  reply back out the interface its connection arrived on by restoring a
+  connection mark, but the kernel routes the reply that _opens_ a connection
+  before that mark is restored. On a server whose gateway carries no IPv6 of its
+  own, that reply fell to the gateway's routing table — which drops IPv6 to keep
+  it from leaking out the wrong interface — and was discarded before it was ever
+  sent, so an inbound IPv6 connection to a tunnel-delegated address hung until
+  it timed out. A reply from an interface's own global IPv6 address now leaves
+  by that interface. IPv4, and traffic forwarded to a service container, were
+  unaffected.
+
 ## [0.4.0.1]
 
 ### Changed
