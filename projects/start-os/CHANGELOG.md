@@ -8,6 +8,21 @@ Full per-release notes are published on the
 [GitHub releases page](https://github.com/Start9Labs/start-technologies/releases). This
 file tracks notable changes since the move to the monorepo.
 
+## [0.4.0.2]
+
+### Fixed
+
+- **DNS answers too large for a single UDP reply no longer fail.** StartOS's
+  resolver returned SERVFAIL for any answer an upstream would not hand back over
+  UDP, because it never retried the query over TCP. Large `TXT` record sets and
+  multi-kilobyte `SRV` responses were the casualties — most visibly, a freshly
+  installed Lightning node could not resolve the seed records it discovers its
+  first peers from, so it sat at zero peers indefinitely. Whether a given answer
+  needs TCP depends on the upstream resolver, so this affected some networks and
+  not others. StartOS now retries over TCP, and selects its upstream resolvers
+  by address rather than by position in `resolv.conf` — the latter had been
+  silently discarding upstreams.
+
 ## [0.4.0.1]
 
 ### Changed
