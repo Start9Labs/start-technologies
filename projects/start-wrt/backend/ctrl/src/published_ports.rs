@@ -294,6 +294,16 @@ pub fn remove_ports_for_macs(cfgs: &mut Configs, macs: &HashSet<String>) -> usiz
                     .ok()
                     .filter(is_pp_v6_rule)
                     .and_then(|r| r._pp_mac.clone())
+            })
+            .or_else(|| {
+                // Automatic (PCP/UPnP) forwards pin the device's address and
+                // zone the same way, so a profile move strands them too. The
+                // device re-requests on its next renewal, against its new zone.
+                section
+                    .get::<FirewallRedirect>()
+                    .ok()
+                    .filter(|r| r._apf_label.is_some() && r.target == "DNAT")
+                    .and_then(|r| r._apf_mac.clone())
             });
         if let Some(mac) = pp_mac {
             if !mac.is_empty() && macs.contains(&mac.to_uppercase()) {
@@ -315,7 +325,11 @@ pub fn remove_ports_for_macs(cfgs: &mut Configs, macs: &HashSet<String>) -> usiz
             return true;
         }
         let named = host.name.as_deref().is_some_and(|n| !n.is_empty());
-        if named {
+        // The automatic-port-forwarding permission also lives on the host
+        // section, and may be the only thing on it. It's a user decision, so a
+        // profile move must not silently revoke it along with the stale pin.
+        let keep = named || host._allow_pcp.is_some();
+        if keep {
             // User-owned: keep the section, drop only the stale IPv4 pin.
             if host.ip.is_some() {
                 let mut host = host;
@@ -408,7 +422,7 @@ fn validate_port_or_range(s: &str) -> bool {
     }
 }
 
-fn validate_mac(s: &str) -> bool {
+pub(crate) fn validate_mac(s: &str) -> bool {
     let parts: Vec<&str> = s.split(':').collect();
     parts.len() == 6
         && parts
@@ -3051,6 +3065,86 @@ config host 'host_b'
         assert!(
             !dhcp.contains("BB:BB:BB:BB:BB:BB"),
             "anonymous host should be removed:\n{dhcp}"
+        );
+    }
+
+    /// A profile move strands an automatic forward exactly as it strands a
+    /// manual one — it pins the device's old address and zone — so both go.
+    /// The device's *permission* to make them must survive, though: it's a user
+    /// decision, and on an unnamed host it's the only thing on the section.
+    #[tokio::test]
+    async fn remove_ports_drops_auto_forwards_but_keeps_the_permission() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_firewall(
+            dir.path(),
+            "\
+config redirect 'apf_aaaaaaaaaaaa_8443'
+\toption name 'Auto forward (PCP)'
+\toption src 'wan'
+\toption dest 'lan'
+\toption target 'DNAT'
+\tlist proto 'tcp'
+\toption src_dport '8443'
+\toption dest_port '8443'
+\toption dest_ip '192.168.1.50'
+\toption enabled '1'
+\toption _apf_label 'PCP'
+\toption _apf_mac 'AA:AA:AA:AA:AA:AA'
+
+config redirect 'apf_bbbbbbbbbbbb_9443'
+\toption name 'Auto forward (UPnP)'
+\toption src 'wan'
+\toption dest 'lan'
+\toption target 'DNAT'
+\tlist proto 'tcp'
+\toption src_dport '9443'
+\toption dest_port '9443'
+\toption dest_ip '192.168.1.60'
+\toption enabled '1'
+\toption _apf_label 'UPnP'
+\toption _apf_mac 'BB:BB:BB:BB:BB:BB'
+",
+        );
+        // An unnamed host carrying nothing but the auto-forward permission.
+        std::fs::write(
+            dir.path().join("dhcp"),
+            "\
+config host 'host_a'
+\toption mac 'AA:AA:AA:AA:AA:AA'
+\toption ip '192.168.1.50'
+\toption _allow_pcp '1'
+",
+        )
+        .unwrap();
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(dir.path(), &arena, &["firewall", "dhcp"])
+            .await
+            .unwrap();
+        let mut macs = HashSet::new();
+        macs.insert("AA:AA:AA:AA:AA:AA".to_string());
+        let removed = remove_ports_for_macs(&mut cfgs, &macs);
+        dump_all(dir.path(), cfgs).await.unwrap();
+
+        assert_eq!(removed, 1, "only the moved device's forward");
+        let fw = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        assert!(
+            !fw.contains("apf_aaaaaaaaaaaa_8443"),
+            "stranded auto forward should be removed:\n{fw}"
+        );
+        assert!(
+            fw.contains("apf_bbbbbbbbbbbb_9443"),
+            "another device's forward is untouched:\n{fw}"
+        );
+
+        let dhcp = std::fs::read_to_string(dir.path().join("dhcp")).unwrap();
+        assert!(
+            dhcp.contains("_allow_pcp"),
+            "the permission is user-owned and must survive:\n{dhcp}"
+        );
+        assert!(
+            !dhcp.contains("192.168.1.50"),
+            "but its stale IPv4 pin is cleared:\n{dhcp}"
         );
     }
 }

@@ -65,9 +65,12 @@ Forwards created this way appear in the **Automatic** section of the Published P
 
 - The device itself creates, renews, and removes its forwards.
 - A forward the device stops renewing expires and is removed automatically once the lifetime the device asked for runs out — about an hour for typical clients, and never longer than a week even for a device that asks to keep the port indefinitely.
-- To stop a device from creating forwards, turn its toggle back off on the device page. Its existing forwards are closed immediately, and the device can no longer open new ones.
+- A forward is also removed once the device no longer holds the address it points at — if the device leaves the network long enough for its DHCP lease to lapse, or comes back on a different address. This keeps a forward from quietly delivering Internet traffic to whichever device is given that address next. Devices with a reserved address are unaffected.
+- To stop a device from creating forwards, turn its toggle back off on the device page — or forget the device entirely. Either way its existing forwards are closed immediately, and it can no longer open new ones.
 
 Automatic forwards survive router reboots, so a self-configured device stays reachable while the router restarts. They can never take over a port that one of your manual rules already uses — the device's request is refused instead. The reverse also holds: if you publish a port manually that an automatic forward is currently using, your manual rule wins and the automatic forward is removed.
+
+Ports the router answers on itself are protected the same way. If you have [Remote Access](settings.md#remote-access) turned on, or an [inbound VPN](inbound-vpn.md) reachable from the Internet, a device cannot take those ports over — requests for them are refused, so automatic forwarding can never cost you access to your own router.
 
 ## Endpoints
 

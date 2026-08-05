@@ -18,12 +18,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   device can only ever forward ports to itself, and requests that would take
   over a manually published port are refused (conversely, publishing a port an
   automatic forward holds removes the automatic forward — manual rules win).
+  Ports the router itself answers on from the internet are refused too, so an
+  automatic forward can never take over your remote access to the router, its
+  SSH, or a VPN server you've exposed.
   Forwards are stored as tagged UCI firewall redirects (so they survive
   reboots and never collide with manual published-port rules), renew on an
   in-memory lease (no flash writes on renewal), and expire on the lifetime the
   device requested when it stops renewing them — at most a week, even for a
-  device that asks to hold the port indefinitely. Turning the toggle back off
-  closes that device's forwards immediately.
+  device that asks to hold the port indefinitely. A forward is also removed
+  once the device no longer holds the address it points at — its DHCP lease
+  lapsed, or it returned on a different address — so a forward can never
+  quietly deliver Internet traffic to whichever device is given that address
+  next (devices with a reserved address are unaffected). Turning the toggle
+  back off — or forgetting the device — closes that device's forwards
+  immediately.
   The Published Ports page gains a read-only "Automatic" section showing each
   forward's device, protocol, and expiry. Uses the shared `start-core` PCP/IGD
   server cores; since StartWRT has no SNI demux, the shared PCP server now

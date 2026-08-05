@@ -83,6 +83,17 @@ are tracked in memory to avoid flash writes; UCI is only written on
 create/change/remove. The OpenWrt image must **not** ship `miniupnpd` — it
 would conflict on these ports and manage forwards outside the UCI model.
 
+**Open problem — LAN source spoofing.** PCP authorization resolves the claimed
+UDP source address through the neighbor table, so a LAN host can act as an
+authorized neighbor: opening ports that expose _that_ device, or tearing its
+mappings down. StartTunnel avoids this only because WireGuard authenticates the
+source address; a LAN bridge has no equivalent, no standard addresses it (RFC
+6887 assumes a trusted internal network; RFC 7652 authentication is unused in
+practice; miniupnpd does nothing here), and the mitigations we know of are
+unsatisfying. Deliberately unsolved and wanting a better idea — the per-device,
+default-off permission bounds it to explicitly trusted devices. Detail and the
+candidate approaches are in the `port_control.rs` module doc.
+
 ## Security Profiles
 
 The core concept. Each profile creates:

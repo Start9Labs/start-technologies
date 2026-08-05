@@ -29,7 +29,7 @@ Click a device name to open its detail page:
 
 - **Allow automatic port forwarding** — Off by default. Toggle on to let this device open and renew its own port forwards using the standard UPnP and PCP protocols. Used by StartOS servers (which configure themselves automatically), game consoles, and similar devices. See [Automatic port forwarding](published-ports.md#automatic-port-forwarding).
 
-- **Forget** — Remove an offline device from the list. Custom name, reserved IP settings, and the device's cached name are lost. If the device reconnects, it will appear as a new entry.
+- **Forget** — Remove an offline device from the list. Custom name, reserved IP settings, and the device's cached name are lost, and any automatic port forwards it holds are closed. If the device reconnects, it will appear as a new entry.
 
 > [!TIP]
 > Reserve an IPv4 address for any device you plan to use with [Published Ports](published-ports.md). IPv4 port forwarding rules require a stable address to ensure traffic always reaches the correct device (publishing a port reserves one automatically).

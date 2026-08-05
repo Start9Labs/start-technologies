@@ -138,6 +138,9 @@ struct DhcpLease {
     mac: String,
     ip: String,
     hostname: String,
+    /// Unix expiry from the lease file; dnsmasq writes `0` for a lease that
+    /// never expires.
+    expires: u64,
 }
 
 /// Placeholder name for a device with no UCI name, DHCP hostname, or cached
@@ -208,10 +211,35 @@ fn parse_dhcp_leases(output: &str) -> Vec<DhcpLease> {
                 mac: parts[1].to_uppercase(),
                 ip: parts[2].to_string(),
                 hostname: parts[3].to_string(),
+                expires: parts[0].parse().unwrap_or(0),
             });
         }
     }
     leases
+}
+
+/// MAC (uppercase) → the IPv4 dnsmasq currently has leased to it, across every
+/// lease file. Expired entries are dropped; an expiry of `0` means the lease
+/// never expires and always counts as current.
+///
+/// `None` when no lease file exists at all: the caller cannot then tell "this
+/// device holds no lease" from "the leases are unreadable", and must not act on
+/// the difference. Used by port-control to bind a forward to the address
+/// assignment behind it.
+pub(crate) async fn current_lease_ips() -> Option<HashMap<String, String>> {
+    if dhcp_lease_files().await.is_empty() {
+        return None;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    Some(
+        parse_dhcp_leases(&read_all_dhcp_leases().await)
+            .into_iter()
+            .filter(|l| l.expires == 0 || l.expires > now)
+            .map(|l| (l.mac, l.ip))
+            .collect(),
+    )
 }
 
 /// Directory and filename prefix for dnsmasq lease files.
@@ -606,7 +634,7 @@ async fn query_wg_active_peers(wg_interfaces: &[String]) -> Vec<(String, Vec<WgA
     results
 }
 
-fn reload_dnsmasq() {
+pub(crate) fn reload_dnsmasq() {
     tokio::spawn(async {
         let _ = crate::run_quiet_async(
             tokio::process::Command::new("/etc/init.d/dnsmasq").arg("reload"),
@@ -1623,6 +1651,11 @@ pub async fn forget<C: CtrlContext>(
                     None,
                 );
                 crate::device_names::forget(&mac_upper).await;
+                // Forgetting a device drops the `_allow_pcp` flag with its DHCP
+                // host entry, so it can no longer create forwards — but the
+                // ones it already holds are ordinary firewall sections that
+                // would otherwise stay open until their leases lapse.
+                crate::port_control::close_device_forwards(&mac_upper).await;
                 if ctx.effectful() {
                     flush_device_from_network(&mac_upper).await;
                 }

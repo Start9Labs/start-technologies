@@ -529,7 +529,7 @@ export default {
   536: 'Puerto público',
   537: 'Caduca',
   538: 'Permitir el reenvío automático de puertos',
-  539: 'Permite a este dispositivo abrir y renovar sus propios reenvíos de puertos mediante UPnP/PCP (usado por servidores StartOS, consolas de juegos y similares). Desactivado por defecto; los reenvíos activos aparecen en la página de Puertos Publicados.',
+  539: 'Permite a este dispositivo abrir y renovar sus propios reenvíos de puertos mediante UPnP/PCP (usado por servidores StartOS, consolas de juegos y similares). Desactivado por defecto; los reenvíos activos aparecen en la página de Puertos publicados.',
   540: 'Permisos',
   541: 'min',
 } satisfies i18n

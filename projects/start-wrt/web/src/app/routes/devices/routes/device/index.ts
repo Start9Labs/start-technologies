@@ -1,4 +1,11 @@
-import { Component, computed, effect, inject } from '@angular/core'
+import {
+  Component,
+  computed,
+  effect,
+  inject,
+  linkedSignal,
+  signal,
+} from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import {
   FormsModule,
@@ -124,7 +131,8 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
       <input
         tuiSwitch
         type="checkbox"
-        [ngModel]="data()?.allowAutoPortForward ?? false"
+        [ngModel]="allowAutoForward()"
+        [disabled]="autoForwardPending()"
         (ngModelChange)="onToggleAutoForward($event)"
       />
       {{ 'Allow automatic port forwarding' | i18n }}
@@ -190,6 +198,13 @@ export default class DeviceDetail {
     ),
     { requireSync: true },
   )
+
+  // Follows the stored permission, but the switch can run ahead of it while a
+  // write is in flight; a rejected write resets it in `onToggleAutoForward`.
+  readonly allowAutoForward = linkedSignal(
+    () => this.data()?.allowAutoPortForward ?? false,
+  )
+  readonly autoForwardPending = signal(false)
 
   constructor() {
     // Refresh device data to get latest info
@@ -268,9 +283,16 @@ export default class DeviceDetail {
   }
 
   async onToggleAutoForward(allow: boolean) {
-    // One-way [ngModel] from data(): on failure the refresh snaps the switch
-    // back to the stored value.
-    await this.service.setAutoForward(this.mac, allow)
+    // Move the switch with the click, then put it back if the write is
+    // rejected. Binding straight to data() cannot do this: the stored value
+    // never changed, so Angular would write nothing and the switch would sit
+    // in the position the click left it, contradicting the device's state.
+    this.autoForwardPending.set(true)
+    this.allowAutoForward.set(allow)
+    if (!(await this.service.setAutoForward(this.mac, allow))) {
+      this.allowAutoForward.set(this.data()?.allowAutoPortForward ?? false)
+    }
+    this.autoForwardPending.set(false)
   }
 
   onCancel() {

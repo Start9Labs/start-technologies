@@ -830,7 +830,9 @@ struct SetAutoForwardRequest {
 // Backend: stores the flag on the device's DHCP host section (`_allow_pcp`),
 // creating one if needed, and invalidates the port-control authorization cache
 // so the change applies immediately. Default is off: a device with no flag can
-// never create forwards via PCP/UPnP.
+// never create forwards via PCP/UPnP. Setting `allow: false` also closes the
+// forwards the device already holds, rather than leaving them open until their
+// leases lapse (up to a week).
 ```
 
 ### `devices.forget`
@@ -841,7 +843,10 @@ struct DeviceForgetRequest {
     mac: String,
 }
 // Response: null
-// Backend: removes the DHCP host for the MAC and its remembered name, flushes
+// Backend: removes the DHCP host for the MAC and its remembered name, closes
+// any automatic (PCP/UPnP) forwards the device holds — forgetting it drops the
+// `_allow_pcp` flag with the host section, so those forwards would otherwise
+// outlive the authorization that created them — flushes
 // matching neighbor/ARP entries (`ip neigh del`), and rewrites every dnsmasq
 // lease file (the base file plus per-profile /tmp/dhcp.leases.dns_*) with
 // dnsmasq stopped (stop → edit → start), so the in-memory lease can't

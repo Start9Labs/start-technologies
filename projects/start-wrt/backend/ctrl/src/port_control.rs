@@ -27,9 +27,46 @@
 //! serialize on one internal lock, so the sweep can never collect a forward
 //! concurrently with its own renewal.
 //!
+//! A forward is also bound to the *address assignment* behind it, not just to a
+//! clock: the sweep drops one whose owning MAC no longer holds the address it
+//! points at (RFC 6887 §15, and the RFC 6970 §5.10 requirement to discard
+//! mappings when an internal address is released). A renewing client re-resolves
+//! its own address anyway — the section is keyed by MAC and external port, so a
+//! renumbered device rewrites its own `dest_ip` — but a client that asked for a
+//! permanent mapping never renews, and without this its forward would keep
+//! pointing at an address DHCP is free to hand to someone else. A static
+//! reservation pins the forward regardless, since nobody else can be given that
+//! address.
+//!
 //! This gateway has no SNI demux dataplane, so [`GatewayBackend::sni`] is
 //! `None`: the PCP ANNOUNCE reply omits the Start9 capability marker and
 //! clients use plain forwards only.
+//!
+//! # Known limitation: LAN source-address spoofing (unsolved)
+//!
+//! PCP rides on unauthenticated UDP, and authorization here resolves the
+//! *claimed* source address through the neighbor table — nothing ties a
+//! datagram to the host that really sent it. A LAN host can therefore present
+//! as an authorized neighbor and, on its behalf, open ports (exposing *that*
+//! device, never itself — the shared cores force the DNAT target to the claimed
+//! address) or tear its mappings down with `lifetime = 0`. UPnP is unaffected:
+//! it is TCP, so the handshake proves the address.
+//!
+//! StartTunnel does not share this exposure, and not because of anything in the
+//! protocol layer: its PCP and IGD sockets are `SO_BINDTODEVICE`-bound to the
+//! WireGuard interface, and WireGuard binds a packet's source address to the
+//! peer key that decrypted it, so one peer cannot present as another. A LAN
+//! bridge offers no equivalent.
+//!
+//! There is no industry answer to copy — RFC 6887 assumes a trusted internal
+//! network, its optional authentication (RFC 7652) is unimplemented in
+//! practice, and miniupnpd (the reference gateway) does nothing here either.
+//! The candidate mitigations are all unsatisfying: a per-device `src_mac` fw4
+//! rule pinning 5351, or reading the arrival interface via `IP_PKTINFO` (which
+//! doesn't help within one bridge). Left open deliberately, pending a better
+//! idea; the per-device default-off permission bounds the blast radius to
+//! devices a user explicitly trusted, which already puts this ahead of a
+//! typical consumer router's always-on UPnP.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -53,7 +90,7 @@ use startos::net::port_map::server::igd::{
 use startos::net::port_map::server::{handle, GatewayBackend, PCP_PORT};
 use startos::tunnel::forward::sni::SniDemux;
 use tokio::net::UdpSocket;
-use uciedit::openwrt::{DhcpHost, FirewallRedirect};
+use uciedit::openwrt::{DhcpHost, FirewallRedirect, FirewallRule, FirewallTarget};
 use uciedit::{dump_all, parse_all, Arena};
 
 use crate::invoke::Invoke;
@@ -420,47 +457,85 @@ impl PortControl {
     async fn sweep(&self) -> Result<(), Error> {
         let _serial = self.write_serial.lock().await;
         let uci_root = self.uci_root.clone();
-        let sections: Vec<String> = uci_task(move || async move {
+        let (sections, reserved) = uci_task(move || async move {
             let arena = Arena::new();
-            let cfgs = parse_all(&uci_root, &arena, &["firewall"]).await?;
-            Ok(cfgs["firewall"]
+            let cfgs = parse_all(&uci_root, &arena, &["firewall", "dhcp"]).await?;
+            let sections: Vec<AutoSection> = cfgs["firewall"]
                 .sections
                 .iter()
                 .filter_map(|sec| {
                     let r = sec.get::<FirewallRedirect>().ok()?;
                     r._apf_label.as_ref()?;
-                    sec.name().map(|n| n.to_string())
+                    Some(AutoSection {
+                        name: sec.name().map(|n| n.to_string())?,
+                        mac: r._apf_mac.map(|m| m.to_uppercase()),
+                        dest_ip: r.dest_ip,
+                    })
                 })
-                .collect())
+                .collect();
+            // Statically reserved addresses can't be handed to anyone else, so
+            // they pin a forward even with no lease on file.
+            let mut reserved: HashMap<String, String> = HashMap::new();
+            cfgs["dhcp"].each::<DhcpHost, Error>(|_, host| {
+                if let Some(ip) = host.ip.filter(|ip| !ip.is_empty()) {
+                    reserved.insert(host.mac.to_uppercase(), ip);
+                }
+            })?;
+            Ok((sections, reserved))
         })
         .await?;
 
         let now = Instant::now();
         let expired: Vec<String> = {
             let mut leases = self.leases.lock().unwrap();
-            leases.retain(|k, _| sections.contains(k));
+            leases.retain(|k, _| sections.iter().any(|s| &s.name == k));
             let mut expired = Vec::new();
-            for name in &sections {
-                match leases.get(name) {
+            for section in &sections {
+                match leases.get(&section.name) {
                     None => {
-                        leases.insert(name.clone(), now + GRACE_LEASE);
+                        leases.insert(section.name.clone(), now + GRACE_LEASE);
                     }
-                    Some(t) if *t <= now => expired.push(name.clone()),
+                    Some(t) if *t <= now => expired.push(section.name.clone()),
                     Some(_) => {}
                 }
             }
             expired
         };
-        if expired.is_empty() {
+
+        // A forward is only meaningful while the device still holds the address
+        // it points at. Renewals re-resolve that address, but a client that
+        // asked for a permanent mapping never renews — so bind the forward to
+        // the DHCP assignment directly, per RFC 6887 §15 and the RFC 6970 §5.10
+        // requirement to drop mappings when an internal address is released.
+        // Without lease files we can't tell "no lease" from "unreadable", so we
+        // leave every forward alone rather than guess.
+        let unbound = match crate::devices::current_lease_ips().await {
+            Some(leases) => unbound_sections(&sections, &reserved, &leases)
+                .into_iter()
+                .filter(|name| !expired.contains(name))
+                .collect(),
+            None => Vec::new(),
+        };
+
+        if expired.is_empty() && unbound.is_empty() {
             return Ok(());
         }
+        if !expired.is_empty() {
+            tracing::info!("port-control: expiring stale auto forward(s): {expired:?}");
+        }
+        if !unbound.is_empty() {
+            tracing::info!(
+                "port-control: removing auto forward(s) whose device no longer holds the \
+                 address they point at: {unbound:?}"
+            );
+        }
 
-        tracing::info!("port-control: expiring stale auto forward(s): {expired:?}");
+        let doomed: Vec<String> = expired.into_iter().chain(unbound).collect();
         let uci_root = self.uci_root.clone();
-        let names = expired.clone();
+        let names = doomed.clone();
         let removed =
             uci_task(move || async move { remove_auto_sections(&uci_root, &names).await }).await?;
-        self.forget_leases(&expired);
+        self.forget_leases(&doomed);
         if removed > 0 {
             self.restart_firewall();
         }
@@ -560,6 +635,38 @@ fn lease_for(lifetime: Option<u32>) -> Duration {
         .min(MAX_LEASE)
 }
 
+/// An auto-forward section as the sweep sees it: enough to decide whether it
+/// has expired and whether it still points at its owner's address.
+struct AutoSection {
+    name: String,
+    mac: Option<String>,
+    dest_ip: Option<String>,
+}
+
+/// The sections whose owner no longer holds the address they forward to —
+/// either the device was given a different one or its lease is gone, and in
+/// both cases the traffic would now land on some other host. A statically
+/// reserved address pins the forward regardless: nobody else can be given it.
+/// Sections missing their `_apf_mac`/`dest_ip` tags are left alone; there's
+/// nothing to check them against.
+fn unbound_sections(
+    sections: &[AutoSection],
+    reserved: &HashMap<String, String>,
+    leases: &HashMap<String, String>,
+) -> Vec<String> {
+    sections
+        .iter()
+        .filter(|section| {
+            let (Some(mac), Some(dest_ip)) = (&section.mac, &section.dest_ip) else {
+                return false;
+            };
+            !reserved.get(mac).is_some_and(|ip| ip == dest_ip)
+                && !leases.get(mac).is_some_and(|ip| ip == dest_ip)
+        })
+        .map(|section| section.name.clone())
+        .collect()
+}
+
 enum ApplyOutcome {
     /// The external range is held by someone else (718 to the client).
     Conflict,
@@ -595,6 +702,30 @@ fn desired_redirect(
         _apf_label: Some(label.into()),
         _apf_mac: Some(mac.into()),
     }
+}
+
+/// Whether `want` (a requested external range) overlaps a port the router
+/// itself answers on from the WAN: an input-chain rule — `src wan`, no `dest`
+/// zone, `ACCEPT`. Reading the live rules rather than a hardcoded list means a
+/// port stops being reserved when its feature is turned off, and any future
+/// WAN-exposed service is covered without touching this code. IPv6-only rules
+/// are ignored — they share no port space with an IPv4 redirect.
+fn reserves_router_port(firewall: &uciedit::Config<'_>, want: (u16, u16)) -> bool {
+    firewall.sections.iter().any(|sec| {
+        let Ok(rule) = sec.get::<FirewallRule>() else {
+            return false;
+        };
+        if rule.target != FirewallTarget::ACCEPT || rule.enabled.as_deref() == Some("0") {
+            return false;
+        }
+        if rule.src != "wan" || rule.dest.is_some() || rule.family.as_deref() == Some("ipv6") {
+            return false;
+        }
+        rule.dest_port
+            .as_deref()
+            .and_then(parse_port_range)
+            .is_some_and(|range| ranges_overlap(want, range))
+    })
 }
 
 /// Renewal detection: same external range, target, zone, and owner. The label
@@ -656,6 +787,17 @@ async fn apply_forward_uci(
             if ranges_overlap(want, range) {
                 return Ok(ApplyOutcome::Conflict);
             }
+        }
+        // Ports the router answers on itself from the WAN — Remote Access
+        // (80/443/22) and the VPN server's listen port — are input-chain
+        // ACCEPT *rules*, invisible to the redirect scan above. nftables
+        // applies prerouting DNAT before the routing decision, so granting one
+        // of these would silently divert the router's own web UI, SSH, or
+        // inbound VPN to the requesting device (the manual-forward half of
+        // this collision is issue #3451). Refuse, as StartTunnel reserves the
+        // port its HTTP→HTTPS redirect owns.
+        if reserves_router_port(&cfgs["firewall"], want) {
+            return Ok(ApplyOutcome::Conflict);
         }
         if let Some(ours) = &ours {
             if redirect_matches(ours, &desired) {
@@ -808,14 +950,34 @@ fn device_uuid() -> String {
 // ── Listeners ──────────────────────────────────────────────
 
 /// Run all port-control servers for the life of the daemon. Each half
-/// self-restarts on error.
+/// self-restarts on error, and each runs in its own supervised task.
 pub async fn run(pc: Arc<PortControl>) {
     tokio::join!(
-        run_pcp(pc.clone()),
-        run_igd(pc.clone()),
-        run_ssdp(pc.clone()),
-        run_sweep(pc),
+        supervise("PCP", pc.clone(), run_pcp),
+        supervise("IGD", pc.clone(), run_igd),
+        supervise("SSDP", pc.clone(), run_ssdp),
+        supervise("sweep", pc, run_sweep),
     );
+}
+
+/// Run one server for the life of the daemon. Each already retries its own
+/// errors internally, so the only way out is a panic — and sharing one task
+/// would let that panic take the other three with it. Losing the sweep is the
+/// case that matters: forwards would stay open with nothing left to close them.
+async fn supervise<F, Fut>(name: &'static str, pc: Arc<PortControl>, start: F)
+where
+    F: Fn(Arc<PortControl>) -> Fut,
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    loop {
+        match tokio::spawn(start(pc.clone())).await {
+            Ok(()) => return,
+            Err(e) => {
+                tracing::error!("port-control {name} server panicked ({e}); restarting");
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        }
+    }
 }
 
 async fn run_pcp(pc: Arc<PortControl>) {
@@ -1023,10 +1185,10 @@ pub struct AutoForward {
 }
 
 #[instrument(skip_all)]
-pub async fn auto_list(_ctx: ServerContext) -> Result<Vec<AutoForward>, Error> {
-    let uci_root = std::path::Path::new("/etc/config");
+pub async fn auto_list(ctx: ServerContext) -> Result<Vec<AutoForward>, Error> {
+    let uci_root = ctx.uci_root();
     let arena = Arena::new();
-    let cfgs = parse_all(uci_root, &arena, &["firewall", "dhcp"]).await?;
+    let cfgs = parse_all(&uci_root, &arena, &["firewall", "dhcp"]).await?;
 
     // Device display names: UCI static host names win, cached learned names
     // fill the gaps.
@@ -1075,6 +1237,14 @@ pub async fn set_auto_forward<C: CtrlContext>(
     ctx: C,
     DeserializeStdin(req): DeserializeStdin<SetAutoForwardReq>,
 ) -> Result<(), Error> {
+    // A bad MAC would otherwise be written into a new `config host` section
+    // that dnsmasq may refuse to load — taking the rest of the file with it.
+    if !crate::published_ports::validate_mac(&req.mac) {
+        return Err(Error::new(
+            eyre!("invalid mac: {}", req.mac),
+            ErrorKind::InvalidValue,
+        ));
+    }
     let mac_upper = req.mac.to_uppercase();
     let allow = req.allow;
     let written =
@@ -1107,20 +1277,37 @@ pub async fn set_auto_forward<C: CtrlContext>(
             ),
             None,
         );
+        // The write may have created the device's host section; dnsmasq owns
+        // that file, so let it re-read rather than pick the change up at some
+        // arbitrary later reload.
+        if ctx.effectful() {
+            crate::devices::reload_dnsmasq();
+        }
         // Apply immediately: drop cached (un)authorization results.
-        if let Some(pc) = PORT_CONTROL.get() {
+        if !allow {
+            close_device_forwards(&req.mac).await;
+        } else if let Some(pc) = PORT_CONTROL.get() {
             pc.invalidate_clients();
-            // Revoking permission closes the ports it granted, rather than
-            // leaving them open until their leases lapse — otherwise the only
-            // control the user has over an automatic forward wouldn't take
-            // effect for up to a week. The client discovers this on its next
-            // refresh and stops re-asserting, since it is no longer authorized.
-            if !allow {
-                pc.remove_client_forwards(&req.mac, |_| true).await;
-            }
         }
     }
     Ok(())
+}
+
+/// Close every automatic forward owned by `mac` and drop its cached
+/// authorization. Called wherever a device loses the permission that created
+/// those forwards — the per-device toggle going off, or the device being
+/// forgotten outright. Without it the ports outlive the authorization by up to
+/// [`MAX_LEASE`], and the user's only control over an automatic forward
+/// wouldn't take effect for as much as a week. The client discovers the loss on
+/// its next refresh and stops re-asserting, since it is no longer authorized.
+///
+/// A no-op outside daemon mode, where [`PORT_CONTROL`] is unset.
+pub(crate) async fn close_device_forwards(mac: &str) {
+    let Some(pc) = PORT_CONTROL.get() else {
+        return;
+    };
+    pc.invalidate_clients();
+    pc.remove_client_forwards(mac, |_| true).await;
 }
 
 #[cfg(test)]
@@ -1298,6 +1485,131 @@ config redirect 'pp_a'
         // Nothing was written.
         let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
         assert!(!written.contains("apf_"));
+    }
+
+    /// Input-chain ACCEPTs for services the router answers on itself: Remote
+    /// Access (`system.rs`) and a VPN server's listen port (`vpn_server.rs`),
+    /// plus three that must *not* reserve anything.
+    const ROUTER_FW: &str = "\
+config rule 'startwrt_remote_443'
+\toption name 'Remote access 443'
+\toption src 'wan'
+\toption dest_port '443'
+\tlist proto 'tcp'
+\toption target 'ACCEPT'
+
+config rule 'startwrt_remote_22'
+\toption name 'Remote access 22'
+\toption src 'wan'
+\toption dest_port '22'
+\tlist proto 'tcp'
+\toption target 'ACCEPT'
+
+config rule 'wg_listen'
+\toption name 'VPN server'
+\toption src 'wan'
+\toption dest_port '51820'
+\tlist proto 'udp'
+\toption target 'ACCEPT'
+
+config rule 'remote_v6_only'
+\toption name 'Remote access over IPv6'
+\toption src 'wan'
+\toption dest_port '8443'
+\toption family 'ipv6'
+\tlist proto 'tcp'
+\toption target 'ACCEPT'
+
+config rule 'turned_off'
+\toption name 'Disabled service'
+\toption src 'wan'
+\toption dest_port '9443'
+\tlist proto 'tcp'
+\toption target 'ACCEPT'
+\toption enabled '0'
+
+config rule 'wan_to_lan'
+\toption name 'Forwarded, not delivered locally'
+\toption src 'wan'
+\toption dest 'lan'
+\toption dest_port '7443'
+\tlist proto 'tcp'
+\toption target 'ACCEPT'
+";
+
+    /// Request `count` external ports from `port` against a fresh `ROUTER_FW`.
+    async fn apply_at(port: u16, count: u16) -> ApplyOutcome {
+        let dir = temp_root(ROUTER_FW);
+        apply_forward_uci(
+            dir.path(),
+            &section_name("11:22:33:44:55:66", port),
+            LABEL_PCP,
+            "11:22:33:44:55:66",
+            Some("br-lan"),
+            SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), port),
+            SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 60), port),
+            count,
+        )
+        .await
+        .unwrap()
+    }
+
+    // A prerouting DNAT beats an input-chain ACCEPT, so granting one of these
+    // would divert the router's own web UI, SSH, or inbound VPN to the
+    // requesting device.
+    #[tokio::test]
+    async fn apply_refuses_ports_the_router_answers_on() {
+        assert!(matches!(apply_at(443, 1).await, ApplyOutcome::Conflict));
+        assert!(matches!(apply_at(51820, 1).await, ApplyOutcome::Conflict));
+        // A range that merely covers one of them is refused as a whole.
+        assert!(matches!(apply_at(20, 6).await, ApplyOutcome::Conflict));
+    }
+
+    // ...but the reservation is read from the live rules, so it's exactly as
+    // wide as what the router is actually listening for.
+    #[tokio::test]
+    async fn router_port_reservation_is_narrowly_scoped() {
+        // IPv6-only rule: shares no port space with an IPv4 redirect.
+        assert!(matches!(apply_at(8443, 1).await, ApplyOutcome::Written));
+        // Disabled rule: the feature is off, so the port is free.
+        assert!(matches!(apply_at(9443, 1).await, ApplyOutcome::Written));
+        // `dest` set = forwarded through the router, not delivered to it.
+        assert!(matches!(apply_at(7443, 1).await, ApplyOutcome::Written));
+        // Nothing claims this one at all.
+        assert!(matches!(apply_at(8080, 1).await, ApplyOutcome::Written));
+    }
+
+    #[test]
+    fn forwards_are_bound_to_the_address_assignment() {
+        let section = |name: &str, mac: &str, ip: &str| AutoSection {
+            name: name.into(),
+            mac: Some(mac.into()),
+            dest_ip: Some(ip.into()),
+        };
+        let sections = vec![
+            section("current", "AA:AA:AA:AA:AA:AA", "192.168.1.50"),
+            section("renumbered", "BB:BB:BB:BB:BB:BB", "192.168.1.60"),
+            section("no_lease", "CC:CC:CC:CC:CC:CC", "192.168.1.70"),
+            section("reserved", "DD:DD:DD:DD:DD:DD", "192.168.1.80"),
+            AutoSection {
+                name: "untagged".into(),
+                mac: None,
+                dest_ip: Some("192.168.1.90".into()),
+            },
+        ];
+        let leases = HashMap::from([
+            ("AA:AA:AA:AA:AA:AA".to_string(), "192.168.1.50".to_string()),
+            // The device is still on the network, but at a different address —
+            // the forward now points at whoever holds .60.
+            ("BB:BB:BB:BB:BB:BB".to_string(), "192.168.1.61".to_string()),
+        ]);
+        // A static reservation survives having no lease on file.
+        let reserved =
+            HashMap::from([("DD:DD:DD:DD:DD:DD".to_string(), "192.168.1.80".to_string())]);
+
+        let mut unbound = unbound_sections(&sections, &reserved, &leases);
+        unbound.sort();
+        assert_eq!(unbound, vec!["no_lease", "renumbered"]);
     }
 
     #[tokio::test]
