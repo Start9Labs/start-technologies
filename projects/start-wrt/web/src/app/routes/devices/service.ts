@@ -80,25 +80,17 @@ export class DevicesService extends FormService<Device[]> {
     // List doesn't have a single store operation
   }
 
-  // Update device settings
-  update(mac: string, data: DeviceUpdateData) {
+  // Update device settings. The automatic-port-forwarding permission is a
+  // separate endpoint but the same Save, so it rides along in one action —
+  // otherwise one click would raise two loaders and two success toasts.
+  // `allowAutoForward` is undefined when the permission didn't change.
+  update(mac: string, data: DeviceUpdateData, allowAutoForward?: boolean) {
     return this.actions.run(
       async () => {
         await this.devicesApi.update(mac, data)
-        await this.refreshAndWait()
-      },
-      {
-        loading: this.i18n.transform('Updating device'),
-        success: this.i18n.transform('Device updated'),
-      },
-    )
-  }
-
-  // Allow/deny automatic port forwarding (PCP/UPnP) for a device
-  setAutoForward(mac: string, allow: boolean) {
-    return this.actions.run(
-      async () => {
-        await this.devicesApi.setAutoForward(mac, allow)
+        if (allowAutoForward !== undefined) {
+          await this.devicesApi.setAutoForward(mac, allowAutoForward)
+        }
         await this.refreshAndWait()
       },
       {

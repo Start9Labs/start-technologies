@@ -1,17 +1,6 @@
-import {
-  Component,
-  computed,
-  effect,
-  inject,
-  linkedSignal,
-  signal,
-} from '@angular/core'
+import { Component, computed, effect, inject } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
-import {
-  FormsModule,
-  NonNullableFormBuilder,
-  ReactiveFormsModule,
-} from '@angular/forms'
+import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms'
 import { ActivatedRoute, Router, RouterLink } from '@angular/router'
 import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
 import {
@@ -120,29 +109,29 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
           }}
         </p>
       </section>
+      <header tuiHeader="h6">
+        <h2 tuiTitle>{{ 'Permissions' | i18n }}</h2>
+      </header>
+      <section>
+        <label tuiLabel>
+          <input
+            tuiSwitch
+            type="checkbox"
+            formControlName="allowAutoPortForward"
+          />
+          {{ 'Allow automatic port forwarding' | i18n }}
+          <i
+            [tuiHint]="
+              'Lets this device open and renew its own port forwards via UPnP/PCP (used by StartOS servers, game consoles, and similar). Off by default; active forwards appear on the Published Ports page.'
+                | i18n
+            "
+          ></i>
+        </label>
+      </section>
       @if (data()) {
         <footer appFooter></footer>
       }
     </form>
-    <header tuiHeader="h6">
-      <h2 tuiTitle>{{ 'Permissions' | i18n }}</h2>
-    </header>
-    <label tuiLabel [tuiSkeleton]="!data()">
-      <input
-        tuiSwitch
-        type="checkbox"
-        [ngModel]="allowAutoForward()"
-        [disabled]="autoForwardPending()"
-        (ngModelChange)="onToggleAutoForward($event)"
-      />
-      {{ 'Allow automatic port forwarding' | i18n }}
-      <i
-        [tuiHint]="
-          'Lets this device open and renew its own port forwards via UPnP/PCP (used by StartOS servers, game consoles, and similar). Off by default; active forwards appear on the Published Ports page.'
-            | i18n
-        "
-      ></i>
-    </label>
   `,
   styles: `
     header[tuiHeader='h6'] {
@@ -161,7 +150,6 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
   imports: [
     RouterLink,
     ReactiveFormsModule,
-    FormsModule,
     TuiHeader,
     TuiTitle,
     TuiLink,
@@ -199,13 +187,6 @@ export default class DeviceDetail {
     { requireSync: true },
   )
 
-  // Follows the stored permission, but the switch can run ahead of it while a
-  // write is in flight; a rejected write resets it in `onToggleAutoForward`.
-  readonly allowAutoForward = linkedSignal(
-    () => this.data()?.allowAutoPortForward ?? false,
-  )
-  readonly autoForwardPending = signal(false)
-
   constructor() {
     // Refresh device data to get latest info
     this.service.refresh()
@@ -219,6 +200,7 @@ export default class DeviceDetail {
       if (data && this.form.pristine) {
         this.form.reset({
           name: data.name,
+          allowAutoPortForward: data.allowAutoPortForward,
           ip: {
             ipv4Static: data.ipv4Static,
             ipv4: data.ipv4 ?? '',
@@ -256,11 +238,22 @@ export default class DeviceDetail {
     const ipv4Changed =
       formValue.ip.ipv4Static && formValue.ip.ipv4 !== (this.data()?.ipv4 ?? '')
 
-    const success = await this.service.update(this.mac, {
-      name: formValue.name,
-      ipv4Static: formValue.ip.ipv4Static,
-      ipv4: formValue.ip.ipv4,
-    })
+    // Only send the permission when it actually changed — it's a separate
+    // endpoint, and revoking it closes the device's existing forwards.
+    const allowAutoForward =
+      formValue.allowAutoPortForward !== this.data()?.allowAutoPortForward
+        ? formValue.allowAutoPortForward
+        : undefined
+
+    const success = await this.service.update(
+      this.mac,
+      {
+        name: formValue.name,
+        ipv4Static: formValue.ip.ipv4Static,
+        ipv4: formValue.ip.ipv4,
+      },
+      allowAutoForward,
+    )
 
     if (success) {
       this.form.markAsPristine()
@@ -282,24 +275,12 @@ export default class DeviceDetail {
       .subscribe()
   }
 
-  async onToggleAutoForward(allow: boolean) {
-    // Move the switch with the click, then put it back if the write is
-    // rejected. Binding straight to data() cannot do this: the stored value
-    // never changed, so Angular would write nothing and the switch would sit
-    // in the position the click left it, contradicting the device's state.
-    this.autoForwardPending.set(true)
-    this.allowAutoForward.set(allow)
-    if (!(await this.service.setAutoForward(this.mac, allow))) {
-      this.allowAutoForward.set(this.data()?.allowAutoPortForward ?? false)
-    }
-    this.autoForwardPending.set(false)
-  }
-
   onCancel() {
     const data = this.data()
     if (data) {
       this.form.reset({
         name: data.name,
+        allowAutoPortForward: data.allowAutoPortForward,
         ip: {
           ipv4Static: data.ipv4Static,
           ipv4: data.ipv4 ?? '',

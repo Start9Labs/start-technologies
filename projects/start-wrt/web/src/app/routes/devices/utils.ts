@@ -32,6 +32,7 @@ export interface Device extends DeviceTableItem {
 export function getDeviceForm(builder: NonNullableFormBuilder) {
   return builder.group({
     name: builder.control('', [CustomValidators.hostname()]),
+    allowAutoPortForward: builder.control(false),
     ip: builder.group({
       ipv4Static: builder.control(false),
       ipv4: builder.control('', [CustomValidators.ipv4()]),
