@@ -1,26 +1,21 @@
+# Keeps the Rust tree distributable under the repo's MIT license (see NOTICE.md).
+# Permissive licenses only, plus MPL-2.0: its copyleft is per-file, so linking it
+# into an MIT binary is fine as long as we don't modify the MPL sources
+# themselves (imbl, attohttpc, option-ext, lazy_format).
 [licenses]
 allow = [
+  "0BSD",
   "Apache-2.0",
   "Apache-2.0 WITH LLVM-exception",
-  "MIT",
-  "ISC",
-  "MPL-2.0",
-  "CC0-1.0",
   "BSD-2-Clause",
   "BSD-3-Clause",
-  "LGPL-3.0",
-  "OpenSSL",
-  "Unicode-DFS-2016",
+  "BSL-1.0",
+  "CC0-1.0",
+  "CDLA-Permissive-2.0",
+  "ISC",
+  "MIT",
+  "MPL-2.0",
+  "Unicode-3.0",
   "Zlib",
 ]
 confidence-threshold = 0.93
-
-[[licenses.clarify]]
-expression = "ISC"
-license-files = [{ path = "LICENSE", hash = 0x001c7e6c }]
-name = "webpki"
-
-[[licenses.clarify]]
-expression = "OpenSSL"
-license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
-name = "ring"
