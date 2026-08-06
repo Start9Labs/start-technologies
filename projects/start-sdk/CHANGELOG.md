@@ -1,6 +1,13 @@
 # Changelog
 
-## 2.0.10 — StartOS 0.4.0-beta.10
+## 2.0.10 — StartOS 0.4.0
+
+### Changed
+
+- **Minimum StartOS version bumped to `0.4.0`.** The 2.0 line has declared
+  `0.4.0-beta.10` since 2.0.0; 0.4.0 is the release that shipped, and it is what
+  a package built with this SDK now writes as its manifest `osVersion` — so the
+  registry offers that package to servers on 0.4.0 or later
 
 ### Fixed
 
