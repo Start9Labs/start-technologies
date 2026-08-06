@@ -1,4 +1,5 @@
 import { inject, Injectable, signal } from '@angular/core'
+import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
 import { FormService } from 'src/app/services/form.service'
 import {
   AutoForwardDisplay,
@@ -11,12 +12,18 @@ import {
   ApiService,
   AutoForwardFromApi,
   PublishedPortFromApi,
+  PublishedPortsSetRequest,
+  RouterPortCollision,
 } from 'src/app/services/api/api.service'
+import { i18nPipe } from 'src/app/i18n/i18n.pipe'
+import { confirmRouterPortOverride } from 'src/app/services/router-port-override'
 
 @Injectable()
 export class PublishedPortsService extends FormService<PublishedPortDisplay[]> {
   private readonly api = inject(ApiService)
   private readonly devicesApi = inject(DevicesApiService)
+  private readonly dialogs = inject(TuiResponsiveDialogService)
+  private readonly i18n = inject(i18nPipe)
 
   private devices: Device[] = []
 
@@ -37,8 +44,42 @@ export class PublishedPortsService extends FormService<PublishedPortDisplay[]> {
     return portsFromApi.map(fromApiToDisplay)
   }
 
+  /**
+   * The backend applies the request unless an unconfirmed forward captures a
+   * port the router itself answers on from the WAN (remote access, SSH, VPN)
+   * — then it reports the collisions and applies nothing. Surface those for
+   * confirmation and re-save with the override set on the named ports, so the
+   * question is asked once per port (the override is persisted). The re-save
+   * recurses through this same path: a collision that appears between attempts
+   * (the config changed while the dialog was open) gets its own prompt rather
+   * than a silently unapplied save. Overriding save() here covers every call
+   * site: dialog save, toggle, delete.
+   */
+  override async save(data: PublishedPortDisplay[]): Promise<boolean> {
+    let pending: RouterPortCollision[] = []
+    const ok = await this.actions.run(async () => {
+      const result = await this.api.publishedPortsSet(this.buildRequest(data))
+      pending = result.pending_router_port_collisions
+      if (!pending.length) await this.refreshAndWait()
+    })
+    if (!ok || !pending.length) return ok
+    if (!(await confirmRouterPortOverride(this.dialogs, this.i18n, pending))) {
+      return false
+    }
+    const ids = new Set(pending.map(c => c.id))
+    return this.save(
+      data.map(p => (ids.has(p.id) ? { ...p, overrideRouterPorts: true } : p)),
+    )
+  }
+
   async store(items: PublishedPortDisplay[]): Promise<void> {
-    await this.api.publishedPortsSet({
+    await this.api.publishedPortsSet(this.buildRequest(items))
+  }
+
+  private buildRequest(
+    items: PublishedPortDisplay[],
+  ): PublishedPortsSetRequest {
+    return {
       ports: items.map(item => ({
         id: item.id,
         enabled: item.enabled,
@@ -50,8 +91,9 @@ export class PublishedPortsService extends FormService<PublishedPortDisplay[]> {
         ipv6: item.ipv6,
         ipv4_public_port: item.ipv4PublicPort,
         source: item.source,
+        override_router_ports: item.overrideRouterPorts ?? false,
       })),
-    })
+    }
   }
 
   getDevices(): Device[] {
@@ -117,6 +159,7 @@ function fromApiToDisplay(p: PublishedPortFromApi): PublishedPortDisplay {
     ipv6: p.ipv6,
     ipv4PublicPort: p.ipv4_public_port ?? undefined,
     source: p.source,
+    overrideRouterPorts: p.override_router_ports,
     status: p.status,
     statusReason: p.status_reason ?? undefined,
     deviceName: p.device_name ?? undefined,

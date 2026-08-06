@@ -53,6 +53,7 @@ import {
   WanDdnsSetRequest,
   PublishedPortFromApi,
   PublishedPortsSetRequest,
+  PublishedPortsSetResult,
   AutoForwardFromApi,
   OutboundVpn,
   OutboundVpnCreateRequest,
@@ -339,7 +340,9 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'published-ports.list', params: {} })
   }
 
-  async publishedPortsSet(params: PublishedPortsSetRequest): Promise<null> {
+  async publishedPortsSet(
+    params: PublishedPortsSetRequest,
+  ): Promise<PublishedPortsSetResult> {
     return this.rpc.request({ method: 'published-ports.set', params })
   }
 

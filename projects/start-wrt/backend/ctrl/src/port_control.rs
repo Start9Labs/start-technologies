@@ -760,31 +760,71 @@ fn desired_redirect(
         _pp_mac: None,
         _apf_label: Some(label.into()),
         _apf_mac: Some(mac.into()),
+        _pp_router_override: None,
     }
 }
 
 /// Whether `want` (a requested external range) overlaps a port the router
-/// itself answers on from the WAN: an input-chain rule — `src wan`, no `dest`
-/// zone, `ACCEPT`. Reading the live rules rather than a hardcoded list means a
-/// port stops being reserved when its feature is turned off, and any future
-/// WAN-exposed service is covered without touching this code. IPv6-only rules
-/// are ignored — they share no port space with an IPv4 redirect.
+/// itself answers on from the WAN. Auto forwards are always tcp+udp, so any
+/// transport overlap reserves the port.
 fn reserves_router_port(firewall: &uciedit::Config<'_>, want: (u16, u16)) -> bool {
-    firewall.sections.iter().any(|sec| {
+    !router_reserved_overlaps(firewall, want, true, true).is_empty()
+}
+
+/// The ports the router itself answers on from the WAN — input-chain rules
+/// (`src wan`, no `dest` zone, `ACCEPT`) — whose port range overlaps `want`
+/// over a requested transport (`tcp`/`udp`). Returns each overlapping rule's
+/// `dest_port` spec, deduped. Reading the live rules rather than a hardcoded
+/// list means a port stops being reserved when its feature is turned off, and
+/// any future WAN-exposed service is covered without touching this code.
+/// IPv6-only rules are ignored — they share no port space with an IPv4
+/// redirect. Transport matters: Remote Access (80/443/22) is TCP, WireGuard
+/// is UDP, so e.g. a UDP-only forward on 443 collides with nothing.
+pub(crate) fn router_reserved_overlaps(
+    firewall: &uciedit::Config<'_>,
+    want: (u16, u16),
+    tcp: bool,
+    udp: bool,
+) -> Vec<String> {
+    let mut overlaps: Vec<String> = Vec::new();
+    for sec in &firewall.sections {
         let Ok(rule) = sec.get::<FirewallRule>() else {
-            return false;
+            continue;
         };
         if rule.target != FirewallTarget::ACCEPT || rule.enabled.as_deref() == Some("0") {
-            return false;
+            continue;
         }
         if rule.src != "wan" || rule.dest.is_some() || rule.family.as_deref() == Some("ipv6") {
-            return false;
+            continue;
         }
-        rule.dest_port
-            .as_deref()
-            .and_then(parse_port_range)
-            .is_some_and(|range| ranges_overlap(want, range))
-    })
+        // fw4's default proto for a rule is tcp+udp; "all"/"tcpudp" also match
+        // either transport. A rule reachable over neither requested transport
+        // (e.g. proto icmp) shares nothing with this forward.
+        let (rule_tcp, rule_udp) = if rule.proto.is_empty() {
+            (true, true)
+        } else {
+            let any = rule
+                .proto
+                .iter()
+                .any(|p| p.eq_ignore_ascii_case("all") || p.eq_ignore_ascii_case("tcpudp"));
+            (
+                any || rule.proto.iter().any(|p| p.eq_ignore_ascii_case("tcp")),
+                any || rule.proto.iter().any(|p| p.eq_ignore_ascii_case("udp")),
+            )
+        };
+        if !((tcp && rule_tcp) || (udp && rule_udp)) {
+            continue;
+        }
+        let Some(spec) = rule.dest_port.as_deref() else {
+            continue;
+        };
+        if parse_port_range(spec).is_some_and(|range| ranges_overlap(want, range))
+            && !overlaps.iter().any(|p| p == spec)
+        {
+            overlaps.push(spec.to_string());
+        }
+    }
+    overlaps
 }
 
 /// Renewal detection: same external range, target, zone, and owner. The label
@@ -852,9 +892,11 @@ async fn apply_forward_uci(
         // ACCEPT *rules*, invisible to the redirect scan above. nftables
         // applies prerouting DNAT before the routing decision, so granting one
         // of these would silently divert the router's own web UI, SSH, or
-        // inbound VPN to the requesting device (the manual-forward half of
-        // this collision is issue #3451). Refuse, as StartTunnel reserves the
-        // port its HTTP→HTTPS redirect owns.
+        // inbound VPN to the requesting device (issue #3451; the manual path
+        // surfaces the same collision as a confirmation dialog the user can
+        // override — see `published_ports::set`). A protocol client can't be
+        // asked, so refuse, as StartTunnel reserves the port its HTTP→HTTPS
+        // redirect owns.
         if reserves_router_port(&cfgs["firewall"], want) {
             return Ok(ApplyOutcome::Conflict);
         }

@@ -56,6 +56,7 @@ import {
   WanDdnsSetRequest,
   PublishedPortFromApi,
   PublishedPortsSetRequest,
+  PublishedPortsSetResult,
   AutoForwardFromApi,
   OutboundVpn,
   OutboundVpnCreateRequest,
@@ -1268,6 +1269,7 @@ export class MockApiService extends ApiService {
       ipv6: true,
       ipv4_public_port: null,
       source: 'any',
+      override_router_ports: false,
       status: 'active',
       status_reason: null,
       device_name: 'Home Server',
@@ -1285,6 +1287,7 @@ export class MockApiService extends ApiService {
       ipv6: false,
       ipv4_public_port: null,
       source: 'any',
+      override_router_ports: false,
       status: 'active',
       status_reason: null,
       device_name: 'Gaming PC',
@@ -1302,6 +1305,7 @@ export class MockApiService extends ApiService {
       ipv6: true,
       ipv4_public_port: '2222',
       source: '203.0.113.0/24',
+      override_router_ports: false,
       status: 'disabled',
       status_reason: null,
       device_name: null,
@@ -1358,8 +1362,37 @@ export class MockApiService extends ApiService {
     return { name: host?.options.name ?? null, ipv4, ipv6 }
   }
 
-  async publishedPortsSet(params: PublishedPortsSetRequest): Promise<null> {
+  async publishedPortsSet(
+    params: PublishedPortsSetRequest,
+  ): Promise<PublishedPortsSetResult> {
     await pauseFor(250)
+
+    // Router-port collision handshake (matches the real backend): an enabled,
+    // unconfirmed IPv4 forward capturing a port the router answers on itself
+    // (Remote Access 80/443/22, TCP — active unless remote access is off)
+    // reports the collision and applies nothing.
+    if (this.mockSystemInfo.remoteAccess !== 'never') {
+      const pending = params.ports
+        .filter(
+          p =>
+            p.enabled &&
+            p.ipv4 &&
+            !p.override_router_ports &&
+            p.protocol !== 'udp',
+        )
+        .map(p => {
+          const spec = p.ipv4_public_port || p.ports
+          const [lo, hi = lo] = spec.split('-').map(Number)
+          const routerPorts = ['80', '443', '22'].filter(
+            rp => Number(rp) >= lo && Number(rp) <= hi,
+          )
+          return { id: p.id, label: p.label, router_ports: routerPorts }
+        })
+        .filter(c => c.router_ports.length)
+      if (pending.length) {
+        return { pending_router_port_collisions: pending }
+      }
+    }
 
     // Auto-reserve static IPv4 for enabled ports (matches real backend
     // behavior). No IPv6 counterpart: the backend tracks the device's
@@ -1398,7 +1431,7 @@ export class MockApiService extends ApiService {
       'updated',
       `Updated published ports (${params.ports.length} rule${params.ports.length !== 1 ? 's' : ''})`,
     )
-    return null
+    return { pending_router_port_collisions: [] }
   }
 
   async publishedPortsAutoList(): Promise<AutoForwardFromApi[]> {

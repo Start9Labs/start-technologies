@@ -537,4 +537,7 @@ export const ENGLISH: Record<string, number> = {
   'Lets this device open and renew its own port forwards via UPnP/PCP (used by StartOS servers, game consoles, and similar). Off by default; active forwards appear on the Published Ports page.': 539,
   'Permissions': 540,
   'min': 541,
+  'Port Used by This Router': 542,
+  'Port(s) {ports} are used by this router itself — for remote access to its web interface, SSH, or a VPN server. Publishing them will send that traffic to the selected device instead, cutting those services off from outside your network. Publish anyway?': 543,
+  'Publish Anyway': 544,
 }

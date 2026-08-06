@@ -29,6 +29,9 @@ Published ports (port forwarding) allow devices on the Internet to reach specifi
 > [!NOTE]
 > If the device's [Security Profile](security-profiles.md) routes its traffic through an [Outbound VPN](outbound-vpn.md), creating or re-enabling a rule prompts for confirmation: published ports are reached over your public WAN address, not through the VPN, so the port is exposed on your real public IP.
 
+> [!WARNING]
+> Some ports the router answers on itself. If [Remote Access](settings.md#remote-access) is on — including the default "When behind NAT" mode while the router sits behind another router — the router serves its own web interface, and optionally SSH, on WAN ports 80, 443, and 22; an [Inbound VPN](inbound-vpn.md) listens on its configured port. Publishing one of these ports sends that traffic to your device instead, cutting the router's own service off from outside your network (access from your LAN is unaffected). Saving such a rule therefore prompts for confirmation first — you can override it deliberately, e.g. to run your own web server on 443 when you don't use remote access to the router. You are asked once per rule; editing the rule asks again.
+
 ## Editing a Rule
 
 1. Navigate to `Internet > Published Ports` and select "Edit" from the rule's actions menu.
@@ -70,7 +73,7 @@ Forwards created this way appear in the **Automatic** section of the Published P
 
 Automatic forwards survive router reboots, so a self-configured device stays reachable while the router restarts. They can never take over a port that one of your manual rules already uses — the device's request is refused instead. The reverse also holds: if you publish a port manually that an automatic forward is currently using, your manual rule wins and the automatic forward is removed.
 
-Ports the router answers on itself are protected the same way. If you have [Remote Access](settings.md#remote-access) turned on, or an [inbound VPN](inbound-vpn.md) reachable from the Internet, a device cannot take those ports over — requests for them are refused, so automatic forwarding can never cost you access to your own router.
+Ports the router answers on itself are protected the same way. If you have [Remote Access](settings.md#remote-access) turned on, or an [inbound VPN](inbound-vpn.md) reachable from the Internet, a device cannot take those ports over — requests for them are refused, so automatic forwarding can never cost you access to your own router. (Publishing such a port manually asks you to confirm instead — a device can't be asked, but you can.)
 
 ## Endpoints
 

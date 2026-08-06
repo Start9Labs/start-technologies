@@ -44,6 +44,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   implement it (StartTunnel), so StartOS clients fall back to plain forwards
   here instead of recording hostname mappings that would route nothing.
 
+### Changed
+
+- **Publishing a port the router itself answers on now asks for confirmation.**
+  Ports the router serves from the internet — remote access to its web
+  interface and SSH (80/443/22, including "When behind NAT" mode while the
+  router sits behind another router) and an inbound VPN's listen port —
+  previously could be published to a device without warning, silently cutting
+  that router service off from outside your network. Saving such a rule now
+  surfaces the conflict in a confirmation dialog; you can still publish the
+  port deliberately, and you're asked once per rule. Detection follows the
+  live configuration (nothing is asked for ports no router service uses) and
+  matches transports, so e.g. a UDP-only forward on 443 doesn't warn.
+
 ### Removed
 
 - **The IPv6 "Reserve" option has been removed — it never worked and never

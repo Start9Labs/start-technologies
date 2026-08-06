@@ -532,4 +532,7 @@ export default {
   539: 'Erlaubt diesem Gerät, eigene Portweiterleitungen über UPnP/PCP zu öffnen und zu erneuern (genutzt von StartOS-Servern, Spielkonsolen und Ähnlichem). Standardmäßig aus; aktive Weiterleitungen erscheinen auf der Seite „Veröffentlichte Ports“.',
   540: 'Berechtigungen',
   541: 'Min.',
+  542: 'Port wird von diesem Router verwendet',
+  543: 'Die Ports {ports} werden von diesem Router selbst verwendet — für den Fernzugriff auf seine Weboberfläche, SSH oder einen VPN-Server. Werden sie veröffentlicht, geht dieser Datenverkehr stattdessen an das ausgewählte Gerät, wodurch diese Dienste von außerhalb Ihres Netzwerks nicht mehr erreichbar sind. Trotzdem veröffentlichen?',
+  544: 'Trotzdem veröffentlichen',
 } satisfies i18n

@@ -532,4 +532,7 @@ export default {
   539: 'Permet à cet appareil d’ouvrir et de renouveler ses propres redirections de ports via UPnP/PCP (utilisé par les serveurs StartOS, les consoles de jeu et autres). Désactivé par défaut ; les redirections actives apparaissent sur la page Ports publiés.',
   540: 'Autorisations',
   541: 'min',
+  542: 'Port utilisé par ce routeur',
+  543: 'Les ports {ports} sont utilisés par ce routeur lui-même — pour l’accès à distance à son interface web, SSH ou un serveur VPN. En les publiant, ce trafic sera envoyé vers l’appareil sélectionné, rendant ces services inaccessibles depuis l’extérieur de votre réseau. Publier quand même ?',
+  544: 'Publier quand même',
 } satisfies i18n

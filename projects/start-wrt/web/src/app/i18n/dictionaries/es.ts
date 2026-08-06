@@ -532,4 +532,7 @@ export default {
   539: 'Permite a este dispositivo abrir y renovar sus propios reenvíos de puertos mediante UPnP/PCP (usado por servidores StartOS, consolas de juegos y similares). Desactivado por defecto; los reenvíos activos aparecen en la página de Puertos publicados.',
   540: 'Permisos',
   541: 'min',
+  542: 'Puerto utilizado por este router',
+  543: 'Los puertos {ports} los utiliza este propio router — para el acceso remoto a su interfaz web, SSH o un servidor VPN. Si los publica, ese tráfico se enviará al dispositivo seleccionado, dejando esos servicios inaccesibles desde fuera de su red. ¿Publicar de todos modos?',
+  544: 'Publicar de todos modos',
 } satisfies i18n

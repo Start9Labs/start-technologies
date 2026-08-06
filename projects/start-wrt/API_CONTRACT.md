@@ -929,6 +929,9 @@ struct PublishedPort {
     ipv4_public_port: Option<String>,
     /// "any" or CIDR like "203.0.113.0/24"
     source: String,
+    /// The user confirmed capturing a port the router answers on itself (see
+    /// `published-ports.set`); round-tripped so later saves don't re-prompt.
+    override_router_ports: bool,
     // --- Enriched by backend ---
     status: PublishedPortStatus,
     status_reason: Option<String>,
@@ -957,15 +960,48 @@ struct PublishedPortInput {
     ipv6: bool,
     ipv4_public_port: Option<String>,
     source: String,
+    /// Confirms forwarding a port the router itself answers on from the WAN
+    /// (persisted as `_pp_router_override` on the redirect and round-tripped
+    /// through `list`, so the confirmation is asked once per port).
+    #[serde(default)]
+    override_router_ports: bool,
 }
 
 #[derive(Deserialize)]
 struct PublishedPortsSetRequest {
     ports: Vec<PublishedPortInput>,
 }
-// Response: null
+
+#[derive(Serialize)]
+struct RouterPortCollision {
+    id: String,
+    label: String,
+    /// The colliding router-service port spec(s), e.g. ["443", "22"].
+    router_ports: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct PublishedPortsSetResult {
+    pending_router_port_collisions: Vec<RouterPortCollision>,
+}
 // Backend: rebuilds firewall redirect+rule sections, resolves device IPs, restarts firewall
 ```
+
+The request is applied **unless** an enabled IPv4 forward without
+`override_router_ports` would capture a port the router itself answers on from
+the WAN — a live input-chain ACCEPT rule: Remote Access (80/443/22, including
+"When behind NAT" mode whenever the WAN address is private) or the VPN
+server's listen port. nftables applies prerouting DNAT before the routing
+decision, so such a forward silently diverts those router services to the
+device (issue #3451). In that case nothing is applied and
+`pending_router_port_collisions` names the offending ports; the UI shows a
+confirmation dialog and re-saves with `override_router_ports: true` on the
+named ports. An empty list in the response means the request was applied.
+Detection is transport-aware (Remote Access is TCP, WireGuard is UDP — a
+UDP-only forward on 443 collides with nothing) and skipped in configs-only
+mode (the CLI editor confirms implicitly, like `ethernet.set` / `wifi.set`).
+The automatic (PCP/UPnP) path refuses the same collision outright — a
+protocol client can't be asked.
 
 Validation (errors with `MissingDeviceAddress`, rejecting the whole request):
 

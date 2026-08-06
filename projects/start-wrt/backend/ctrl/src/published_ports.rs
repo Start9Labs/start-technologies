@@ -102,6 +102,10 @@ pub struct PublishedPort {
     pub ipv6: bool,
     pub ipv4_public_port: Option<String>,
     pub source: String,
+    /// The user confirmed forwarding a port the router itself answers on from
+    /// the WAN (see [`RouterPortCollision`]); round-tripped so later saves of
+    /// the full list don't re-prompt for the same collision.
+    pub override_router_ports: bool,
     pub status: PublishedPortStatus,
     pub status_reason: Option<String>,
     pub device_name: Option<String>,
@@ -121,11 +125,37 @@ pub struct PublishedPortInput {
     pub ipv6: bool,
     pub ipv4_public_port: Option<String>,
     pub source: String,
+    /// Confirms forwarding a port the router itself answers on from the WAN
+    /// (persisted as `_pp_router_override` on the redirect). Without it, a
+    /// colliding port makes [`set`] report the collision and apply nothing.
+    #[serde(default)]
+    pub override_router_ports: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PublishedPortsSetRequest {
     pub ports: Vec<PublishedPortInput>,
+}
+
+/// An enabled IPv4 forward in a [`set`] request whose external range captures
+/// a port the router itself answers on from the WAN (Remote Access 80/443/22,
+/// the VPN server's listen port). nftables applies prerouting DNAT before the
+/// routing decision, so the forward would silently divert those services to
+/// the device (issue #3451). Surfaced to the UI for a confirmation dialog; the
+/// user overrides by re-saving with `override_router_ports` on the named port.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RouterPortCollision {
+    pub id: String,
+    pub label: String,
+    /// The colliding router-service port spec(s), e.g. ["443", "22"].
+    pub router_ports: Vec<String>,
+}
+
+/// [`set`] response. A non-empty collision list means nothing was applied —
+/// the caller confirms and re-saves; empty means the request was applied.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PublishedPortsSetResult {
+    pub pending_router_port_collisions: Vec<RouterPortCollision>,
 }
 
 /// A published port that will be removed because the device it forwards to can
@@ -500,6 +530,8 @@ struct RawPort {
     ipv6: bool,
     ipv4_public_port: Option<String>,
     source: String,
+    /// Confirmed router-port collision (`_pp_router_override` on the redirect).
+    override_router_ports: bool,
     /// The IPv6 rule's stored `dest_ip` (the full GUA it forwards to), if any.
     /// Used by `compute_status` to detect a rule stranded on an old prefix.
     dest_ipv6: Option<String>,
@@ -632,6 +664,8 @@ fn sections_to_raw_port(
         ipv6: rule.is_some(),
         ipv4_public_port,
         source,
+        override_router_ports: redirect
+            .is_some_and(|r| r._pp_router_override.as_deref() == Some("1")),
         dest_ipv6: rule.and_then(|r| r.dest_ip.clone()),
     }
 }
@@ -805,6 +839,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<PublishedPort>, Error> {
                 ipv6: raw.ipv6,
                 ipv4_public_port: raw.ipv4_public_port.clone(),
                 source: raw.source.clone(),
+                override_router_ports: raw.override_router_ports,
                 status,
                 status_reason,
                 device_name: device.map(|d| d.name.clone()),
@@ -832,7 +867,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<PublishedPort>, Error> {
 pub async fn set<C: CtrlContext>(
     ctx: C,
     DeserializeStdin(req): DeserializeStdin<PublishedPortsSetRequest>,
-) -> Result<(), Error> {
+) -> Result<PublishedPortsSetResult, Error> {
     validate_inputs(&req.ports)?;
 
     // A LAN device can only have a Global Unicast Address (GUA) if the router
@@ -919,6 +954,22 @@ pub async fn set<C: CtrlContext>(
 
         let arena = Arena::new();
         let mut cfgs = parse_all(ctx.uci_root(), &arena, &["firewall", "dhcp"]).await?;
+
+        // A forward capturing a port the router itself answers on from the
+        // WAN needs the user's explicit say-so (issue #3451): report the
+        // collisions and apply nothing until each named port is re-saved with
+        // `override_router_ports`. The auto (PCP/UPnP) path refuses the same
+        // collision outright — a protocol client can't be asked. Configs-only
+        // mode has no dialog: the CLI editor confirms implicitly, matching
+        // `ethernet::set` / `wifi::set`.
+        if ctx.effectful() {
+            let pending = router_port_collisions(&cfgs["firewall"], &req.ports);
+            if !pending.is_empty() {
+                return Ok(PublishedPortsSetResult {
+                    pending_router_port_collisions: pending,
+                });
+            }
+        }
 
         // Auto-reserve a static DHCP IPv4 lease for enabled ports that lack
         // one (the dest_ip of the DNAT redirect must stay put). There is no
@@ -1085,6 +1136,7 @@ pub async fn set<C: CtrlContext>(
                     _pp_mac: Some(port.device_mac.clone()),
                     _apf_label: None,
                     _apf_mac: None,
+                    _pp_router_override: port.override_router_ports.then(|| "1".into()),
                 };
                 let section_name = format!("pp_{}", safe_id);
                 cfgs["firewall"].append(&redirect, Some(&section_name))?;
@@ -1180,10 +1232,44 @@ pub async fn set<C: CtrlContext>(
                     &format!("Updated published ports ({} rules)", req.ports.len()),
                     None,
                 );
-                return Ok(());
+                return Ok(PublishedPortsSetResult {
+                    pending_router_port_collisions: Vec::new(),
+                });
             }
         }
     }
+}
+
+/// The unconfirmed router-port collisions in a `set` request: enabled IPv4
+/// forwards without `override_router_ports` whose external range captures a
+/// port the router answers on itself over a shared transport (see
+/// [`RouterPortCollision`]). An unparseable port spec is skipped here —
+/// `validate_inputs` already rejects malformed requests.
+fn router_port_collisions(
+    firewall: &uciedit::Config<'_>,
+    ports: &[PublishedPortInput],
+) -> Vec<RouterPortCollision> {
+    ports
+        .iter()
+        .filter(|p| p.enabled && p.ipv4 && !p.override_router_ports)
+        .filter_map(|p| {
+            let range = crate::port_control::parse_port_range(
+                p.ipv4_public_port.as_deref().unwrap_or(&p.ports),
+            )?;
+            let (tcp, udp) = match p.protocol {
+                Protocol::Tcp => (true, false),
+                Protocol::Udp => (false, true),
+                Protocol::TcpUdp => (true, true),
+            };
+            let router_ports =
+                crate::port_control::router_reserved_overlaps(firewall, range, tcp, udp);
+            (!router_ports.is_empty()).then(|| RouterPortCollision {
+                id: p.id.clone(),
+                label: p.label.clone(),
+                router_ports,
+            })
+        })
+        .collect()
 }
 
 /// Recompute the `dest_ip` of every IPv6 published-port forward against the
@@ -1932,6 +2018,7 @@ config rule 'pp_a_v6'
             ipv6: true,
             ipv4_public_port: None,
             source: "any".into(),
+            override_router_ports: false,
             dest_ipv6: dest_ipv6.map(str::to_string),
         }
     }
@@ -2315,6 +2402,7 @@ config redirect 'pp_pub2'
             ipv6,
             ipv4_public_port: None,
             source: "any".to_string(),
+            override_router_ports: false,
         }
     }
 
@@ -2586,6 +2674,169 @@ config redirect 'pp_del1'
             content.contains("option _pp_id 'a-b-c'"),
             "_pp_id should preserve original ID in:\n{content}"
         );
+    }
+
+    // ── router_port_collisions tests ──
+
+    /// The WAN-input ACCEPT rules the router writes for its own services:
+    /// Remote Access in `default` (behind-NAT) mode — src_ip-scoped, one
+    /// family per rule — plus an unscoped SSH rule (`always` shape), a
+    /// WireGuard listen rule (UDP), an IPv6-only twin, and a disabled rule.
+    const ROUTER_SERVICE_RULES: &str = "config rule 'startwrt_remote_443_a'
+\toption name 'startwrt_remote_443_a'
+\toption src 'wan'
+\toption src_ip '192.168.0.0/16'
+\toption dest_port '443'
+\tlist proto 'tcp'
+\toption target 'ACCEPT'
+\toption family 'ipv4'
+
+config rule 'startwrt_remote_22'
+\toption name 'startwrt_remote_22'
+\toption src 'wan'
+\toption dest_port '22'
+\tlist proto 'tcp'
+\toption target 'ACCEPT'
+
+config rule 'allow_wireguard_vpn0'
+\toption name 'Allow-WireGuard-vpn0'
+\toption src 'wan'
+\toption dest_port '51820'
+\tlist proto 'udp'
+\toption target 'ACCEPT'
+
+config rule 'remote_v6_only'
+\toption name 'remote_v6_only'
+\toption src 'wan'
+\toption dest_port '8443'
+\tlist proto 'tcp'
+\toption target 'ACCEPT'
+\toption family 'ipv6'
+
+config rule 'disabled_rule'
+\toption name 'disabled_rule'
+\toption src 'wan'
+\toption dest_port '9000'
+\tlist proto 'tcp'
+\toption target 'ACCEPT'
+\toption enabled '0'
+";
+
+    async fn collisions_for(ports: Vec<PublishedPortInput>) -> Vec<RouterPortCollision> {
+        let dir = tempfile::tempdir().unwrap();
+        setup_firewall(dir.path(), ROUTER_SERVICE_RULES);
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["firewall"]).await.unwrap();
+        router_port_collisions(&cfgs["firewall"], &ports)
+    }
+
+    #[tokio::test]
+    async fn router_collision_detected_for_remote_access_and_vpn() {
+        // TCP 443 hits the (src_ip-scoped, behind-NAT-mode) remote rule: the
+        // DNAT has no source scoping, so the scoped rule still loses.
+        let hits = collisions_for(vec![make_input(|p| p.ports = "443".into())]).await;
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, "valid-id");
+        assert_eq!(hits[0].router_ports, vec!["443"]);
+
+        // A range sweeping several router ports reports each of them; the
+        // external range is what counts when it differs from the device port.
+        let hits = collisions_for(vec![make_input(|p| {
+            p.ports = "8000-8010".into();
+            p.ipv4_public_port = Some("20-52000".into());
+            p.protocol = Protocol::TcpUdp;
+        })])
+        .await;
+        assert_eq!(hits[0].router_ports, vec!["443", "22", "51820"]);
+    }
+
+    #[tokio::test]
+    async fn router_collision_respects_transport_and_flags() {
+        // UDP-only on 443 shares no transport with the TCP remote rule; TCP
+        // on the WireGuard port shares none with its UDP rule.
+        assert!(collisions_for(vec![make_input(|p| {
+            p.ports = "443".into();
+            p.protocol = Protocol::Udp;
+        })])
+        .await
+        .is_empty());
+        assert!(collisions_for(vec![make_input(|p| {
+            p.ports = "51820".into();
+            p.protocol = Protocol::Tcp;
+        })])
+        .await
+        .is_empty());
+        // UDP on the WireGuard port does collide.
+        assert_eq!(
+            collisions_for(vec![make_input(|p| {
+                p.ports = "51820".into();
+                p.protocol = Protocol::Udp;
+            })])
+            .await[0]
+                .router_ports,
+            vec!["51820"]
+        );
+
+        // IPv6-only and disabled rules never reserve; neither does anything
+        // for a disabled, IPv6-only, or already-overridden port.
+        assert!(
+            collisions_for(vec![make_input(|p| p.ports = "8443".into())])
+                .await
+                .is_empty()
+        );
+        assert!(
+            collisions_for(vec![make_input(|p| p.ports = "9000".into())])
+                .await
+                .is_empty()
+        );
+        assert!(collisions_for(vec![make_input(|p| {
+            p.ports = "443".into();
+            p.enabled = false;
+        })])
+        .await
+        .is_empty());
+        assert!(collisions_for(vec![make_input(|p| {
+            p.ports = "443".into();
+            p.ipv4 = false;
+            p.ipv6 = true;
+        })])
+        .await
+        .is_empty());
+        assert!(collisions_for(vec![make_input(|p| {
+            p.ports = "443".into();
+            p.override_router_ports = true;
+        })])
+        .await
+        .is_empty());
+    }
+
+    #[tokio::test]
+    async fn set_persists_router_override_flag() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_firewall(dir.path(), "");
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        set(
+            ctx,
+            DeserializeStdin(PublishedPortsSetRequest {
+                ports: vec![make_input(|p| {
+                    p.ports = "443".into();
+                    p.override_router_ports = true;
+                })],
+            }),
+        )
+        .await
+        .unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        assert!(
+            content.contains("option _pp_router_override '1'"),
+            "override not persisted: {content}"
+        );
+        // And it round-trips through extraction for the next save.
+        let arena = Arena::new();
+        let ports = extract_ports(&arena, dir.path()).await.unwrap();
+        assert!(ports[0].override_router_ports);
     }
 
     // ── Validation tests ──

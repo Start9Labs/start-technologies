@@ -30,6 +30,13 @@ export interface PublishedPort {
   ipv6: boolean
   ipv4PublicPort?: string // External port for IPv4 (defaults to internal)
   source: 'any' | string // 'any' or CIDR like "203.0.113.0/24"
+  /**
+   * The user confirmed capturing a port the router answers on itself (remote
+   * access, SSH, VPN). Round-tripped so later saves of the full list don't
+   * re-prompt; absent/false on ports built by the edit dialog, so editing a
+   * rule re-validates it.
+   */
+  overrideRouterPorts?: boolean
 }
 
 export interface PublishedPortDialogResult {
