@@ -80,6 +80,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   normally — straight out your Internet connection instead of through the VPN
   you chained it to — and every screen reported success. Disabled VPNs are no
   longer offered as chain targets, and the router rejects one outright.
+  
+- **The bottom of the screen is no longer cut off on shorter displays.** On
+  screens shorter than a page's contextual help content, the sidebar's
+  Collapse button and the bottom of the page — including a form's Cancel/Save
+  buttons, even when scrolled all the way down — were clipped, whether or not
+  the help panel was open. The layout now always fits the screen exactly, and
+  long help content scrolls within its panel.
+
+- **A narrow window no longer cuts off the right side of the page.** Below
+  the mobile-layout width, page content is laid out at the width the collapsed
+  sidebar leaves free; with the sidebar still expanded, that layout ran under
+  the window's right edge — hiding a form's Cancel/Save buttons and other
+  right-edge content — with no way to scroll to it. The sidebar now collapses
+  automatically when the window becomes that narrow (and re-collapses after
+  navigating on a phone), and expanding it by hand at that width now shows a
+  horizontal scrollbar, so everything stays reachable either way.
 
 - **Changing a published port no longer briefly drops the firewall.** Applying
   a port-forward change restarted the firewall, which tears the whole ruleset
@@ -139,7 +155,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   permissions. Proxied (orange-cloud) records are supported: the client
   reads the registered IP through the Cloudflare API rather than DNS, which
   would only ever see the proxy's address.
-  
+
 - **Dynamic DNS now actually updates your provider.** The image was missing
   the `ddns-scripts` update client (and its Cloudflare and No-IP extensions),
   so DDNS settings were saved but no DNS record was ever updated. The FreeDNS

@@ -103,31 +103,31 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
             <input tuiInput [readOnly]="true" [value]="data()?.ipv6 ?? ''" />
           </tui-textfield>
         </div>
-        <p class="ipv6-note">
+        <p class="note">
           {{
             'Chosen by the device — IPv6 addresses cannot be reserved' | i18n
           }}
         </p>
       </section>
-      <header tuiHeader="h6">
-        <h2 tuiTitle>{{ 'Permissions' | i18n }}</h2>
-      </header>
-      <section>
-        <label tuiLabel>
-          <input
-            tuiSwitch
-            type="checkbox"
-            formControlName="allowAutoPortForward"
-          />
-          {{ 'Allow automatic port forwarding' | i18n }}
-          <i
-            [tuiHint]="
+      <fieldset>
+        <legend>{{ 'Permissions' | i18n }}</legend>
+        <section>
+          <label tuiLabel>
+            <input
+              tuiSwitch
+              type="checkbox"
+              formControlName="allowAutoPortForward"
+            />
+            {{ 'Allow automatic port forwarding' | i18n }}
+          </label>
+          <p class="note">
+            {{
               'Lets this device open and renew its own port forwards via UPnP/PCP (used by StartOS servers, game consoles, and similar). Off by default; active forwards appear on the Published Ports page.'
                 | i18n
-            "
-          ></i>
-        </label>
-      </section>
+            }}
+          </p>
+        </section>
+      </fieldset>
       @if (data()) {
         <footer appFooter></footer>
       }
@@ -139,7 +139,13 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
       max-width: 50rem;
     }
 
-    .ipv6-note {
+    // Taiga's tuiForm fieldset is an auto-fit grid; flip to flex (it
+    // pre-declares flex-wrap) so the section spans the full width.
+    fieldset {
+      display: flex;
+    }
+
+    .note {
       margin: 0;
       font: var(--tui-font-text-s);
       color: var(--tui-text-secondary);
