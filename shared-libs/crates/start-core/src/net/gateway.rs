@@ -2062,10 +2062,10 @@ async fn apply_policy_routing(
 /// installed at the end here (IPv4 parity; marks set by
 /// [`reconcile_mangle_rules`]), and — v6-only — a priority-60 source rule per
 /// global address on the interface. IPv6 has no NAT/SNI-demux reply layer to
-/// build: the mark routes a *forwarded* reply back out the interface its
-/// connection arrived on, but a host-terminated one is routed before the output
-/// hook can restore that mark, so the source rule is what lets a v6 service
-/// reached through a tunnel answer.
+/// build: restoring the mark reroutes a reply once there is a packet to
+/// reroute, but the reply that opens a connection is routed before the output
+/// hook runs, so the source rule is what lets a v6 service reached through a
+/// tunnel answer.
 async fn apply_policy_routing_v6(
     guard: &PolicyRoutingGuard,
     iface: &GatewayId,
@@ -2223,12 +2223,13 @@ async fn apply_policy_routing_v6(
     }
 
     // Ensure a priority-60 source rule per global v6 address on this interface.
-    // The CONNMARK rule above cannot catch a locally generated reply: the kernel
-    // routes a SYN-ACK before the output hook restores its mark, so it falls to
-    // the priority-75 catch-all — and when the default outbound has no v6, that
-    // table's leak-guard `blackhole default` fails the lookup outright and the
-    // reply is dropped before it is ever built. Keyed on source address, which
-    // *is* known that early, this routes it out the interface that owns it.
+    // The CONNMARK rule above cannot catch the reply that opens a connection:
+    // the kernel routes a SYN-ACK before the output hook restores its mark, so
+    // it falls to the priority-75 catch-all — and when the default outbound has
+    // no v6, that table's leak-guard `blackhole default` fails the lookup
+    // outright and the reply is dropped before it is ever built. Keyed on
+    // source address, which *is* known that early, this routes it out the
+    // interface that owns it.
     let existing_src: BTreeSet<String> = rules_output
         .lines()
         .filter_map(|l| {
