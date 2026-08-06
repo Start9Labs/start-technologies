@@ -15,6 +15,7 @@ import { Effects } from '../Effects'
  */
 export async function getRootCa(effects: Effects): Promise<string> {
 <<<<<<< HEAD
+<<<<<<< HEAD
   // The root only comes back inside a fullchain, so we mint a leaf we discard.
   const chain = await effects.getSslCertificate({ hostnames: [] })
   return chain[chain.length - 1]
@@ -24,4 +25,9 @@ export async function getRootCa(effects: Effects): Promise<string> {
   const [, , rootCa] = await effects.getSslCertificate({ hostnames: [] })
   return rootCa
 >>>>>>> 97b0bf4e0 (refactor(sdk): make getRootCa a plain function over an empty hostname set)
+=======
+  // The root only comes back inside a fullchain, so we mint a leaf we discard.
+  const chain = await effects.getSslCertificate({ hostnames: [] })
+  return chain[chain.length - 1]
+>>>>>>> 1694b09ca (fix(sdk): getRootCa takes the last cert in the chain, not the third)
 }
