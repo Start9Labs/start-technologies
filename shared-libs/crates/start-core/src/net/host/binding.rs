@@ -1143,6 +1143,58 @@ mod test {
         assert!(ports.is_ssl(443));
     }
 
+    /// `Public::init` plants the binding already holding 443 but no plaintext
+    /// port, so `os_bindings` only ever reaches it through `update` — the shape
+    /// the test above skips by starting from `new`, which is how the UI came to
+    /// ship on an ephemeral port through 0.4.0.
+    #[test]
+    fn the_os_ui_claims_80_from_the_seeded_binding() {
+        let mut ports = AvailablePorts::new();
+        let admin = opts(80, Some(443), None);
+        let seeded = BindInfo {
+            enabled: false,
+            options: admin.clone(),
+            net: NetInfo {
+                assigned_port: None,
+                assigned_ssl_port: Some(443),
+            },
+            addresses: DerivedAddressInfo::default(),
+            interfaces: BTreeMap::new(),
+        };
+
+        let ui = seeded.update(&mut ports, admin.clone(), true).unwrap();
+        assert_eq!(ui.net.assigned_port, Some(80));
+        assert_eq!(ui.net.assigned_ssl_port, Some(443));
+
+        let ui = ui.update(&mut ports, admin, true).unwrap();
+        assert_eq!(ui.net.assigned_port, Some(80));
+        assert_eq!(ui.net.assigned_ssl_port, Some(443));
+    }
+
+    /// Why the drift needs `v0_4_0_2` rather than healing itself: `update`
+    /// keeps the port it already holds even for a privileged claimant whose
+    /// preferred port is free.
+    #[test]
+    fn a_drifted_os_ui_port_does_not_heal_on_rebind() {
+        let mut ports = AvailablePorts::new();
+        ports.set_ssl(443, true);
+        ports.set_ssl(55543, false);
+        let admin = opts(80, Some(443), None);
+        let drifted = BindInfo {
+            enabled: false,
+            options: admin.clone(),
+            net: NetInfo {
+                assigned_port: Some(55543),
+                assigned_ssl_port: Some(443),
+            },
+            addresses: DerivedAddressInfo::default(),
+            interfaces: BTreeMap::new(),
+        };
+
+        let ui = drifted.update(&mut ports, admin, true).unwrap();
+        assert_eq!(ui.net.assigned_port, Some(55543));
+    }
+
     #[test]
     fn gua_detection() {
         assert!(ipv6_addr("2001:db8::1", 443).gua().is_some()); // global unicast
