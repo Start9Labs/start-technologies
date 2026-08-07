@@ -312,9 +312,14 @@ impl BindInfo {
         // external port is in the user's address book and keys their per-address
         // overrides, so a binding that changes how its port is served keeps the
         // same number — carrying it to the other field when it holds just one.
+        // A binding that ends up serving both has nothing to carry: each leg wants
+        // its own preferred port, and carrying would hand one leg's number to the other.
         available_ports.free(held.assigned_port.into_iter().chain(held.assigned_ssl_port));
+        let preferred_ssl_port = options.preferred_ssl_port();
+        let wants_plain_port = options.wants_plain_port();
+        let serves_both = wants_plain_port && preferred_ssl_port.is_some();
         let carried = match (held.assigned_port, held.assigned_ssl_port) {
-            (Some(port), None) | (None, Some(port)) => Some(port),
+            (Some(port), None) | (None, Some(port)) if !serves_both => Some(port),
             _ => None,
         };
         let mut reclaim = |held: Option<u16>, preferred: u16, ssl: bool| {
@@ -325,12 +330,10 @@ impl BindInfo {
                 .map_or_else(|| available_ports.alloc(ssl), Ok)
         };
 
-        let assigned_ssl_port = options
-            .preferred_ssl_port()
+        let assigned_ssl_port = preferred_ssl_port
             .map(|preferred| reclaim(held.assigned_ssl_port, preferred, true))
             .transpose()?;
-        let assigned_port = options
-            .wants_plain_port()
+        let assigned_port = wants_plain_port
             .then(|| reclaim(held.assigned_port, options.preferred_external_port, false))
             .transpose()?;
 
@@ -1169,6 +1172,52 @@ mod test {
         let ui = ui.update(&mut ports, admin, true).unwrap();
         assert_eq!(ui.net.assigned_port, Some(80));
         assert_eq!(ui.net.assigned_ssl_port, Some(443));
+    }
+
+    /// A binding that grows a second leg must not hand the leg it already has to
+    /// the new one: `carried` is for a port moving between the fields, not for a
+    /// binding that ends up serving both.
+    #[test]
+    fn gaining_a_leg_does_not_carry_the_other_leg_s_port() {
+        let mut ports = AvailablePorts::new();
+        let privileged = false;
+        let plain = BindInfo::new(&mut ports, opts(8080, None, Some(false)), privileged).unwrap();
+        assert_eq!(plain.net.assigned_port, Some(8080));
+
+        let both = plain
+            .update(&mut ports, opts(8080, Some(8443), None), privileged)
+            .unwrap();
+        assert_eq!(both.net.assigned_port, Some(8080));
+        assert_eq!(both.net.assigned_ssl_port, Some(8443));
+    }
+
+    /// The seeded admin binding is the same shape from the other side, and its
+    /// plaintext leg must want 80 outright — not 443 with 80 as the fallback the
+    /// ssl leg's head start happens to force.
+    #[test]
+    fn the_os_ui_plaintext_leg_wants_80_even_when_443_is_free() {
+        let admin = opts(80, Some(443), None);
+        let seeded = || BindInfo {
+            enabled: false,
+            options: admin.clone(),
+            net: NetInfo {
+                assigned_port: None,
+                assigned_ssl_port: Some(443),
+            },
+            addresses: DerivedAddressInfo::default(),
+            interfaces: BTreeMap::new(),
+        };
+
+        let mut ports = AvailablePorts::new();
+        let ui = seeded().update(&mut ports, admin.clone(), true).unwrap();
+        assert_eq!(ui.net.assigned_port, Some(80));
+        assert_eq!(ui.net.assigned_ssl_port, Some(443));
+
+        // 443 already taken, so the ssl leg cannot clear it out of the plain leg's way.
+        let mut squatted = AvailablePorts::new();
+        assert_eq!(squatted.try_alloc(443, true, true), Some(443));
+        let ui = seeded().update(&mut squatted, admin, true).unwrap();
+        assert_eq!(ui.net.assigned_port, Some(80));
     }
 
     /// Why the drift needs `v0_4_0_2` rather than healing itself: `update`
