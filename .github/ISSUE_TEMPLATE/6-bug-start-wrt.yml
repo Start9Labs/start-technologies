@@ -82,10 +82,14 @@ body:
     attributes:
       label: Steps to reproduce
 <<<<<<< HEAD
+<<<<<<< HEAD
       description: Number them, and say what you saw at the step where it went wrong.
 =======
       description: If you found this by reading the code rather than hitting it, leave this blank and fill in **Root cause** below instead.
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+      description: Number them, and say what you saw at the step where it went wrong.
+>>>>>>> dc022b1b9 (chore(github): inline the issue body spec in AGENTS.md, drop root-cause from the forms)
 
   - type: textarea
     id: uci
@@ -95,6 +99,7 @@ body:
       render: shell
 
   - type: textarea
+<<<<<<< HEAD
 <<<<<<< HEAD
 =======
     id: root-cause
@@ -106,6 +111,8 @@ body:
 
   - type: textarea
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+>>>>>>> dc022b1b9 (chore(github): inline the issue body spec in AGENTS.md, drop root-cause from the forms)
     id: logs
     attributes:
       label: Logs & evidence

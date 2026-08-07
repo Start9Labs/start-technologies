@@ -103,6 +103,7 @@ body:
     attributes:
       label: Steps to reproduce
 <<<<<<< HEAD
+<<<<<<< HEAD
       description: Number them, and say what you saw at the step where it went wrong.
 =======
       description: If you found this by reading the code rather than hitting it, leave this blank and fill in **Root cause** below instead.
@@ -119,6 +120,9 @@ body:
 =======
         `<path/to/file>:<line>` — <what the code does today, and why that is wrong>
 >>>>>>> 68139e9c5 (chore(github): make root-cause placeholders obviously synthetic)
+=======
+      description: Number them, and say what you saw at the step where it went wrong.
+>>>>>>> dc022b1b9 (chore(github): inline the issue body spec in AGENTS.md, drop root-cause from the forms)
 
   - type: textarea
     id: logs

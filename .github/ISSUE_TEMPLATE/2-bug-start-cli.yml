@@ -134,6 +134,7 @@ body:
 
   - type: textarea
 <<<<<<< HEAD
+<<<<<<< HEAD
     id: repro
     attributes:
       label: Steps to reproduce
@@ -155,6 +156,8 @@ body:
 >>>>>>> 68139e9c5 (chore(github): make root-cause placeholders obviously synthetic)
 
   - type: textarea
+=======
+>>>>>>> dc022b1b9 (chore(github): inline the issue body spec in AGENTS.md, drop root-cause from the forms)
     id: logs
     attributes:
 <<<<<<< HEAD
