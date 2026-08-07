@@ -6,11 +6,15 @@ labels: [start-docs]
 =======
 assignees:
 <<<<<<< HEAD
+<<<<<<< HEAD
   - MattDHill
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
 =======
   - dr-bonez
 >>>>>>> 6ea0ee759 (chore(github): route bug reports to their product owners)
+=======
+  - MattDHill
+>>>>>>> 1f1d99706 (chore(github): assign documentation bugs to MattDHill)
 body:
   - type: markdown
     attributes:
