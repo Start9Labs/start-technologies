@@ -59,11 +59,14 @@ pub async fn export_service_interface(
         .ctx
         .db
         .mutate(|db| {
-            db.as_public_mut()
+            let hosts = db
+                .as_public_mut()
                 .as_package_data_mut()
                 .as_idx_mut(&package_id)
                 .or_not_found(&package_id)?
-                .as_hosts_mut()
+                .as_hosts_mut();
+            remove_interface_records(hosts, &id)?;
+            hosts
                 .as_idx_mut(&host_id)
                 .or_not_found(&host_id)?
                 .as_bindings_mut()
@@ -117,11 +120,14 @@ pub async fn export_range_service_interface(
         .ctx
         .db
         .mutate(|db| {
-            db.as_public_mut()
+            let hosts = db
+                .as_public_mut()
                 .as_package_data_mut()
                 .as_idx_mut(&package_id)
                 .or_not_found(&package_id)?
-                .as_hosts_mut()
+                .as_hosts_mut();
+            remove_interface_records(hosts, &interface.id)?;
+            hosts
                 .as_idx_mut(&host_id)
                 .or_not_found(&host_id)?
                 .as_binding_ranges_mut()
@@ -133,6 +139,30 @@ pub async fn export_range_service_interface(
         .await
         .result?;
 
+    Ok(())
+}
+
+/// An exported interface id lives under exactly one binding or range. When a
+/// package update moves an interface (new internal port, host, or origin kind),
+/// re-exporting it must remove the record under its old location —
+/// `clear_service_interfaces` won't, since the id is still exported.
+fn remove_interface_records(
+    hosts: &mut Model<Hosts>,
+    id: &ServiceInterfaceId,
+) -> Result<(), Error> {
+    for (_, host) in hosts.as_entries_mut()? {
+        for (_, bind) in host.as_bindings_mut().as_entries_mut()? {
+            bind.as_interfaces_mut().remove(id)?;
+        }
+        for (_, range) in host.as_binding_ranges_mut().as_entries_mut()? {
+            range.as_interface_mut().mutate(|iface| {
+                if iface.as_ref().map_or(false, |i| &i.id == id) {
+                    *iface = None;
+                }
+                Ok(())
+            })?;
+        }
+    }
     Ok(())
 }
 

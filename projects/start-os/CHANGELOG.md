@@ -28,6 +28,15 @@ file tracks notable changes since the move to the monorepo.
   published port range. It withdraws both when the address is disabled or
   deleted.
 
+- **An interface a service update moves to a different internal port is listed
+  once, not twice.** StartOS keeps a service's former port binding dormant so
+  its addresses and external port survive if the service returns to it — but
+  the interface record exported from that binding lingered too, so after an
+  update like Jitsi's (Web UI moved from port 80 to 8000) the service showed
+  the same interface twice. Exporting an interface now removes the record of
+  its previous export, wherever it lived; a lingering duplicate clears the next
+  time its service initializes — at the reboot this update performs.
+
 ## [0.4.0.1]
 
 ### Changed
