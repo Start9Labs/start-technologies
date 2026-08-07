@@ -2,7 +2,18 @@ name: 🌐 StartTunnel — Bug Report
 description: A defect in StartTunnel — the VPS-hosted virtual private router.
 type: Bug
 labels: [StartTunnel]
+<<<<<<< HEAD
 body:
+=======
+assignees:
+  - MattDHill
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Filing this with an agent?** `gh issue create` bypasses this form entirely — pass the metadata yourself with `--type Bug --label StartTunnel`, and mirror the `###` headings below as your body's sections. Title the issue as the *finding*, not the symptom alone: `<what breaks> — <why> (<file:line>)`.
+
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
   - type: checkboxes
     id: prerequisites
     attributes:
@@ -29,6 +40,7 @@ body:
     validations:
       required: true
 
+<<<<<<< HEAD
   - type: input
     id: firewall
     attributes:
@@ -36,6 +48,8 @@ body:
       description: '`ufw status`, or any nftables/iptables rules you manage yourself. A host firewall in front of StartTunnel has broken connectivity before, so this is worth checking even if it seems unrelated.'
       placeholder: ufw active — 22/tcp, 443/tcp allowed
 
+=======
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
   - type: dropdown
     id: area
     attributes:
@@ -52,6 +66,16 @@ body:
     validations:
       required: true
 
+<<<<<<< HEAD
+=======
+  - type: input
+    id: firewall
+    attributes:
+      label: Host firewall
+      description: '`ufw status`, or any nftables/iptables rules you manage yourself. A host firewall in front of StartTunnel has broken connectivity before, so this is worth checking even if it seems unrelated.'
+      placeholder: ufw active — 22/tcp, 443/tcp allowed
+
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
   - type: textarea
     id: current
     attributes:
@@ -70,7 +94,19 @@ body:
     id: repro
     attributes:
       label: Steps to reproduce
+<<<<<<< HEAD
       description: Number them, and say what you saw at the step where it went wrong.
+=======
+      description: If you found this by reading the code rather than hitting it, leave this blank and fill in **Root cause** below instead.
+
+  - type: textarea
+    id: root-cause
+    attributes:
+      label: Root cause / code pointers
+      description: If you traced it, name the file, the line, and the mechanism. `tunnelbox` is a thin wrapper — the logic is in `shared-libs/crates/start-core/src/tunnel/`.
+      placeholder: |
+        `shared-libs/crates/start-core/src/tunnel/...` — …
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
 
   - type: textarea
     id: logs

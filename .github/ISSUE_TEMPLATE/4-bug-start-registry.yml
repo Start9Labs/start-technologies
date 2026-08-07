@@ -2,10 +2,20 @@ name: 🗄️ Start Registry — Bug Report
 description: A defect in the registry server (`registrybox`) — package/OS indexes, assets, or signing.
 type: Bug
 labels: [start-registry]
+<<<<<<< HEAD
+=======
+assignees:
+  - MattDHill
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
 body:
   - type: markdown
     attributes:
       value: |
+<<<<<<< HEAD
+=======
+        **Filing this with an agent?** `gh issue create` bypasses this form entirely — pass the metadata yourself with `--type Bug --label start-registry`, and mirror the `###` headings below as your body's sections. Title the issue as the *finding*, not the symptom alone: `<what breaks> — <why> (<file:line>)`.
+
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
         A package that is *missing or broken in a registry* is an issue for that package's own repo, not here. This form is for the registry server itself.
 
   - type: checkboxes
@@ -25,6 +35,7 @@ body:
     validations:
       required: true
 
+<<<<<<< HEAD
   - type: input
     id: version
     attributes:
@@ -45,6 +56,8 @@ body:
     validations:
       required: true
 
+=======
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
   - type: dropdown
     id: area
     attributes:
@@ -63,6 +76,29 @@ body:
     validations:
       required: true
 
+<<<<<<< HEAD
+=======
+  - type: dropdown
+    id: client
+    attributes:
+      label: How were you talking to it?
+      options:
+        - StartOS marketplace tab
+        - marketplace.start9.com (brochure)
+        - start-cli registry commands
+        - Direct HTTP / JSON-RPC
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: registrybox version
+      description: Only for a self-hosted registry — the release you deployed, or the git hash if you built it.
+      placeholder: 0.4.0.2
+
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
   - type: textarea
     id: current
     attributes:
@@ -82,7 +118,19 @@ body:
     id: repro
     attributes:
       label: Steps to reproduce
+<<<<<<< HEAD
       description: Number them, and say what you saw at the step where it went wrong.
+=======
+      description: If you found this by reading the code rather than hitting it, leave this blank and fill in **Root cause** below instead.
+
+  - type: textarea
+    id: root-cause
+    attributes:
+      label: Root cause / code pointers
+      description: If you traced it, name the file, the line, and the mechanism. `registrybox` is a thin wrapper — the server logic is in `shared-libs/crates/start-core/src/registry/`.
+      placeholder: |
+        `shared-libs/crates/start-core/src/registry/...` — …
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
 
   - type: textarea
     id: logs

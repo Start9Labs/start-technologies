@@ -1,0 +1,52 @@
+name: Issue project label
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  issues: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v9
+        with:
+          script: |
+            // Mirrors the Project dropdown in .github/ISSUE_TEMPLATE/9-feature-request.yml.
+            const PROJECT_LABELS = [
+              'StartOS',
+              'start-cli',
+              'StartSDK',
+              'StartWRT',
+              'StartTunnel',
+              'start-registry',
+              'start-docs',
+              'brochure',
+              'repo',
+            ]
+
+            const section = (context.payload.issue.body || '')
+              .split(/^###[ \t]+/m)
+              .find((s) => s.split('\n')[0].trim() === 'Project')
+            if (!section) return
+
+            const picked = section
+              .split('\n')
+              .slice(1)
+              .map((line) => line.trim())
+              .find((line) => line.length > 0)
+
+            if (!PROJECT_LABELS.includes(picked)) {
+              core.info(`No project label matches ${JSON.stringify(picked)}`)
+              return
+            }
+            if (context.payload.issue.labels.some((l) => l.name === picked)) return
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              labels: [picked],
+            })

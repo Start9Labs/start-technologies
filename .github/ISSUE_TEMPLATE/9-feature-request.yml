@@ -1,7 +1,18 @@
 name: 💡 Feature Request
 description: Suggest a change or an addition to any Start9 product.
 type: Feature
+<<<<<<< HEAD
 body:
+=======
+assignees:
+  - MattDHill
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Filing this with an agent?** `gh issue create` bypasses this form entirely — pass the metadata yourself with `--type Feature --label <project>`, using the exact label string from the dropdown below, and mirror the `###` headings as your body's sections.
+
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
   - type: checkboxes
     id: prerequisites
     attributes:
@@ -15,7 +26,11 @@ body:
     attributes:
       label: Project
       description: |
+<<<<<<< HEAD
         Applied as the label automatically.
+=======
+        Applied as the label automatically. These are the exact label strings — pass one to `--label` if you are filing from the CLI.
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
 
         - `StartOS` — the OS, its web UI, and the service runtime
         - `start-cli` — the command-line client
@@ -67,7 +82,11 @@ body:
       label: Affected areas
       description: If you know the code, name the files or subsystems this would touch, and anything it would break or need migrating.
       placeholder: |
+<<<<<<< HEAD
         `<path/to/file>` — <what would need to change>
+=======
+        `shared-libs/crates/start-core/src/net/…` — …
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
 
   - type: textarea
     id: context

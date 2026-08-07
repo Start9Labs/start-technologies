@@ -2,7 +2,18 @@ name: 🖥️ StartOS — Bug Report
 description: A defect in StartOS itself — the OS, its web UI, or the service runtime.
 type: Bug
 labels: [StartOS]
+<<<<<<< HEAD
 body:
+=======
+assignees:
+  - MattDHill
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Filing this with an agent?** `gh issue create` bypasses this form entirely — pass the metadata yourself with `--type Bug --label StartOS`, and mirror the `###` headings below as your body's sections. Title the issue as the *finding*, not the symptom alone: `<what breaks> — <why> (<file:line>)`.
+
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
   - type: checkboxes
     id: prerequisites
     attributes:
@@ -12,11 +23,19 @@ body:
           required: true
 
   - type: input
+<<<<<<< HEAD
     id: version
     attributes:
       label: StartOS version
       description: Shown in the UI under **System → About**. From a client, `start-cli -H https://<your-server> git-info` prints the exact build — the version string is stable across builds, so the git hash is what identifies the binary.
       placeholder: 0.4.0.2 (git 1a2b3c4)
+=======
+    id: os-version
+    attributes:
+      label: StartOS version
+      description: Shown in the UI under **System → About**. From a client, `start-cli -H https://<your-server> git-info` prints the exact build — the version string is stable across builds, so the git hash is what identifies the binary.
+      placeholder: 0.4.0.2 (git 282a3a5)
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
     validations:
       required: true
 
@@ -44,6 +63,7 @@ body:
     validations:
       required: true
 
+<<<<<<< HEAD
   - type: input
     id: browser
     attributes:
@@ -55,6 +75,12 @@ body:
     id: area
     attributes:
       label: Which surface?
+=======
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where does it happen?
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
       options:
         - Web UI
         - Setup wizard
@@ -68,6 +94,16 @@ body:
     validations:
       required: true
 
+<<<<<<< HEAD
+=======
+  - type: input
+    id: client
+    attributes:
+      label: Client OS & browser
+      description: Only needed for web UI bugs.
+      placeholder: macOS 15.3, Firefox 134.0
+
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
   - type: textarea
     id: current
     attributes:
@@ -87,7 +123,11 @@ body:
     id: repro
     attributes:
       label: Steps to reproduce
+<<<<<<< HEAD
       description: Number them, and say what you saw at the step where it went wrong.
+=======
+      description: If you found this by reading the code rather than hitting it, leave this blank and fill in **Root cause** below instead.
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
       placeholder: |
         1. On this page…
         2. Click this button…
@@ -95,6 +135,17 @@ body:
         4. See error…
 
   - type: textarea
+<<<<<<< HEAD
+=======
+    id: root-cause
+    attributes:
+      label: Root cause / code pointers
+      description: If you traced it, name the file, the line, and the mechanism. This is the most valuable part of the report — a confirmed root cause is usually what moves an issue to `Approved`.
+      placeholder: |
+        `shared-libs/crates/start-core/src/net/dns.rs:214` — `skip(2)` is positional under hickory 0.26, so it drops the first two real upstreams rather than the two placeholder entries it was written against.
+
+  - type: textarea
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
     id: logs
     attributes:
       label: Logs & evidence

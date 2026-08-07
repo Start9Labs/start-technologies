@@ -2,7 +2,18 @@ name: ⌨️ Start CLI — Bug Report
 description: A defect in `start-cli` — remote RPC calls, or the local packaging and key tooling.
 type: Bug
 labels: [start-cli]
+<<<<<<< HEAD
 body:
+=======
+assignees:
+  - MattDHill
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Filing this with an agent?** `gh issue create` bypasses this form entirely — pass the metadata yourself with `--type Bug --label start-cli`, and mirror the `###` headings below as your body's sections. Title the issue as the *finding*, not the symptom alone: `<what breaks> — <why> (<file:line>)`.
+
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
   - type: checkboxes
     id: prerequisites
     attributes:
@@ -12,16 +23,28 @@ body:
           required: true
 
   - type: input
+<<<<<<< HEAD
     id: version
     attributes:
       label: start-cli version
       description: Paste both `start-cli --version` and `start-cli git-info`. The version string is stable across builds, so the git hash is what identifies the binary.
       placeholder: 0.4.0-beta.10 / 1a2b3c4
+=======
+    id: cli-version
+    attributes:
+      label: start-cli version
+      description: Paste both `start-cli --version` and `start-cli git-info`. The version string is stable across builds, so the git hash is what identifies the binary.
+      placeholder: 0.4.0-beta.10 / 282a3a5
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
     validations:
       required: true
 
   - type: dropdown
+<<<<<<< HEAD
     id: platform
+=======
+    id: client-os
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
     attributes:
       label: Where is it running?
       options:
@@ -44,12 +67,23 @@ body:
         - Shipped with StartOS (`startbox`)
         - Other
 
+<<<<<<< HEAD
   - type: input
     id: os-version
     attributes:
       label: Target StartOS version
       description: Only needed for remote calls. Client and server are versioned together, so a mismatch is often the cause.
       placeholder: 0.4.0.2
+=======
+  - type: textarea
+    id: command
+    attributes:
+      label: Exact command
+      description: The full invocation, with secrets redacted. Include `--host`/`-H` if it is a remote call.
+      placeholder: start-cli -H https://server.local package list
+    validations:
+      required: true
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
 
   - type: dropdown
     id: area
@@ -67,6 +101,16 @@ body:
     validations:
       required: true
 
+<<<<<<< HEAD
+=======
+  - type: input
+    id: server-version
+    attributes:
+      label: Target StartOS version
+      description: Only needed for remote calls. Client and server are versioned together, so a mismatch is often the cause.
+      placeholder: 0.4.0.2
+
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
   - type: textarea
     id: current
     attributes:
@@ -82,6 +126,7 @@ body:
       required: true
 
   - type: textarea
+<<<<<<< HEAD
     id: repro
     attributes:
       label: Steps to reproduce
@@ -89,10 +134,22 @@ body:
       placeholder: start-cli -H https://server.local package list
     validations:
       required: true
+=======
+    id: root-cause
+    attributes:
+      label: Root cause / code pointers
+      description: If you traced it, name the file, the line, and the mechanism. Most of `start-cli` is a thin wrapper, so the cause is usually in `shared-libs/crates/start-core/`.
+      placeholder: |
+        `shared-libs/crates/start-core/src/...` — …
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
 
   - type: textarea
     id: logs
     attributes:
+<<<<<<< HEAD
       label: Logs & evidence
+=======
+      label: Output & evidence
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
       description: Full stderr, ideally with `RUST_LOG=debug` set.
       render: shell

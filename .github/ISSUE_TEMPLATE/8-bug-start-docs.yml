@@ -2,10 +2,20 @@ name: 📚 Documentation — Bug Report
 description: Something on docs.start9.com is wrong, out of date, or missing.
 type: Bug
 labels: [start-docs]
+<<<<<<< HEAD
+=======
+assignees:
+  - MattDHill
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
 body:
   - type: markdown
     attributes:
       value: |
+<<<<<<< HEAD
+=======
+        **Filing this with an agent?** `gh issue create` bypasses this form entirely — pass the metadata yourself with `--type Bug --label start-docs`, and mirror the `###` headings below as your body's sections.
+
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
         Every page on docs.start9.com is authored in this repo, so a documentation fix is a normal pull request — if you can already see what the page should say, send the PR instead of filing this.
 
   - type: checkboxes
@@ -25,7 +35,11 @@ body:
       required: true
 
   - type: dropdown
+<<<<<<< HEAD
     id: area
+=======
+    id: book
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
     attributes:
       label: Which book?
       options:
@@ -39,6 +53,7 @@ body:
     validations:
       required: true
 
+<<<<<<< HEAD
   - type: input
     id: source
     attributes:
@@ -46,6 +61,8 @@ body:
       description: The Markdown source in this repo, if you found it. Each product's book lives in `projects/<product>/docs/`; the site itself is `projects/start-docs/`.
       placeholder: projects/start-os/docs/src/installing-startos.md
 
+=======
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
   - type: dropdown
     id: kind
     attributes:
@@ -77,6 +94,16 @@ body:
     validations:
       required: true
 
+<<<<<<< HEAD
+=======
+  - type: input
+    id: source
+    attributes:
+      label: Source file
+      description: The Markdown source in this repo, if you found it. Each product's book lives in `projects/<product>/docs/`; the site itself is `projects/start-docs/`.
+      placeholder: projects/start-os/docs/src/installing-startos.md
+
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
   - type: textarea
     id: context
     attributes:

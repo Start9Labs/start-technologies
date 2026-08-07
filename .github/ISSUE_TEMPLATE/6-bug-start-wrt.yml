@@ -2,7 +2,18 @@ name: 📡 StartWRT — Bug Report
 description: A defect in StartWRT — the OpenWrt-based router OS for the SpaceMiT K1.
 type: Bug
 labels: [StartWRT]
+<<<<<<< HEAD
 body:
+=======
+assignees:
+  - MattDHill
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Filing this with an agent?** `gh issue create` bypasses this form entirely — pass the metadata yourself with `--type Bug --label StartWRT`, and mirror the `###` headings below as your body's sections. Title the issue as the *finding*, not the symptom alone: `<what breaks> — <why> (<file:line>)`.
+
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
   - type: checkboxes
     id: prerequisites
     attributes:
@@ -67,7 +78,11 @@ body:
     id: repro
     attributes:
       label: Steps to reproduce
+<<<<<<< HEAD
       description: Number them, and say what you saw at the step where it went wrong.
+=======
+      description: If you found this by reading the code rather than hitting it, leave this blank and fill in **Root cause** below instead.
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
 
   - type: textarea
     id: uci
@@ -77,6 +92,17 @@ body:
       render: shell
 
   - type: textarea
+<<<<<<< HEAD
+=======
+    id: root-cause
+    attributes:
+      label: Root cause / code pointers
+      description: If you traced it, name the file, the line, and the mechanism. StartWRT's own backend is `projects/start-wrt/` (crates `ctrl`, `uciedit`); changes to the OpenWrt base live in `openwrt-patches/` and `openwrt-overlay/`, never in the disposable `openwrt/` build workspace.
+      placeholder: |
+        `projects/start-wrt/crates/...` — …
+
+  - type: textarea
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
     id: logs
     attributes:
       label: Logs & evidence

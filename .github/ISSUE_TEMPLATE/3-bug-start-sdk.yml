@@ -2,10 +2,20 @@ name: 📦 Start SDK — Bug Report
 description: A defect in `@start9labs/start-sdk` — packaging a service, or the effects API at runtime.
 type: Bug
 labels: [StartSDK]
+<<<<<<< HEAD
+=======
+assignees:
+  - MattDHill
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
 body:
   - type: markdown
     attributes:
       value: |
+<<<<<<< HEAD
+=======
+        **Filing this with an agent?** `gh issue create` bypasses this form entirely — pass the metadata yourself with `--type Bug --label StartSDK`, and mirror the `###` headings below as your body's sections. Title the issue as the *finding*, not the symptom alone: `<what breaks> — <why> (<file:line>)`.
+
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
         Packaging *questions* belong in the [developer Matrix room](https://matrix.to/#/#developer-space:matrix.start9labs.com); this form is for SDK defects.
 
   - type: checkboxes
@@ -17,7 +27,11 @@ body:
           required: true
 
   - type: input
+<<<<<<< HEAD
     id: version
+=======
+    id: sdk-version
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
     attributes:
       label: SDK version
       description: From your package's `package.json`, or `npm ls @start9labs/start-sdk`.
@@ -25,6 +39,29 @@ body:
     validations:
       required: true
 
+<<<<<<< HEAD
+=======
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where does it fail?
+      options:
+        - s9pk build / pack
+        - Manifest & versioning
+        - Effects API at runtime
+        - Health checks
+        - Actions & inputs
+        - Dependencies
+        - Backups
+        - Interfaces & addresses
+        - Mounts & volumes
+        - TypeScript types / osBindings
+        - Packaging documentation
+        - Other / unsure
+    validations:
+      required: true
+
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
   - type: input
     id: package
     attributes:
@@ -46,6 +83,7 @@ body:
       description: '`node --version`'
       placeholder: v22.11.0
 
+<<<<<<< HEAD
   - type: dropdown
     id: area
     attributes:
@@ -66,6 +104,8 @@ body:
     validations:
       required: true
 
+=======
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
   - type: textarea
     id: current
     attributes:
@@ -83,6 +123,7 @@ body:
       required: true
 
   - type: textarea
+<<<<<<< HEAD
     id: repro
     attributes:
       label: Steps to reproduce
@@ -90,6 +131,23 @@ body:
       render: typescript
 
   - type: textarea
+=======
+    id: snippet
+    attributes:
+      label: Minimal reproduction
+      description: The smallest snippet from your package that triggers it.
+      render: typescript
+
+  - type: textarea
+    id: root-cause
+    attributes:
+      label: Root cause / code pointers
+      description: If you traced it, name the file, the line, and the mechanism. The SDK source is `projects/start-sdk/lib/`; shared types come from `shared-libs/ts-modules/start-core/`.
+      placeholder: |
+        `projects/start-sdk/lib/backup/Backups.ts:88` — the `cp` runs through `exec`, which carries a default 30 s timeout, so any dump larger than that window is SIGKILLed mid-copy.
+
+  - type: textarea
+>>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
     id: logs
     attributes:
       label: Logs & evidence
