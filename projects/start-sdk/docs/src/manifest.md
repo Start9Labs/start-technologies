@@ -216,6 +216,21 @@ The registry stores a version's variants together and disambiguates them **by ha
 >
 > In particular an `nvidia` variant must carry an NVIDIA `device` filter, not `[]` — `nvidiaContainer: true` wires up the GPU runtime but does **not** set a hardware requirement, so without the filter the NVIDIA variant is indistinguishable from the CPU fallback and one of the two fails to publish.
 
+#### Minimum RAM
+
+`hardwareRequirements.ram` is the memory floor below which StartOS will not offer the package. **It is compared against the host's total RAM in bytes.** StartOS records `MemTotal` in bytes and the check is a raw comparison against the number you declare — nothing in the SDK or the OS converts units on your behalf.
+
+```typescript
+hardwareRequirements: {
+  ram: 8 * 1024 ** 3, // 8 GiB
+},
+```
+
+> [!WARNING]
+> A value that reads as megabytes — `ram: 8192` — declares **8 KiB**, which every machine satisfies, so the requirement silently gates nothing. Write the byte count as an explicit power-of-two expression, so the unit is visible where the value is.
+
+Leave it unset when the service has no hard floor. Bear in mind that a box failing the check is not offered the package at all, so **raising the floor on an already-published package cuts existing installs below it off from further updates** — call that out in the release notes when you do it.
+
 ### Virtual Networking (VPN / kernel tun interfaces)
 
 For services that bring up their own kernel tunnel interface — VPNs, WireGuard, or any `tun`-class workload — set `virtualNetworking: true` at the manifest top level:

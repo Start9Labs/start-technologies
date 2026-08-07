@@ -61,6 +61,7 @@ import {
   GetOutboundGateway,
   GetSslCertificate,
   GetSystemSmtp,
+  getRootCa,
   getServiceManifest,
   nullIfEmpty,
   splitCommand,
@@ -76,7 +77,7 @@ import { createVolumes } from './util/Volume'
 import { getDataVersion, setDataVersion } from './version'
 
 /** The minimum StartOS version required by this SDK release */
-export const OSVersion = testTypeVersion('0.4.0-beta.10')
+export const OSVersion = testTypeVersion('0.4.0')
 
 // prettier-ignore
 type AnyNeverCond<T extends any[], Then, Else> = 
@@ -620,6 +621,11 @@ export class StartSdk<Manifest extends T.SDKManifest> {
         hostnames: string[],
         algorithm?: T.Algorithm,
       ) => new GetSslCertificate(effects, { hostnames, algorithm }),
+      /**
+       * Get this server's root CA certificate (PEM). Install it in your
+       * container to reach other services on this server over HTTPS.
+       */
+      getRootCa,
       /** Retrieve the manifest of any installed service package by its ID */
       getServiceManifest,
       /**
