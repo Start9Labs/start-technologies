@@ -5,8 +5,12 @@ labels: [start-registry]
 <<<<<<< HEAD
 =======
 assignees:
+<<<<<<< HEAD
   - MattDHill
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+  - dr-bonez
+>>>>>>> 6ea0ee759 (chore(github): route bug reports to their product owners)
 body:
   - type: markdown
     attributes:
