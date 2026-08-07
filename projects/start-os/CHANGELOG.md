@@ -12,6 +12,13 @@ file tracks notable changes since the move to the monorepo.
 
 ### Fixed
 
+- **The StartOS UI is served over plain HTTP on port 80.** Servers set up before
+  0.4.0.1 gave the interface a high-numbered port instead, and nothing answered
+  on it — so a service that reached the StartOS API over the container bridge,
+  and any address StartOS reported for its own plaintext interface, pointed
+  somewhere dead. Existing servers move to port 80 on update, and the high port
+  goes back to the pool for services to use.
+
 - **The login banner reports system status for every user, not just the first
   one to log in.** It staged its database snapshot at a fixed path in `/tmp`,
   which `pam_motd` created as root at login — so any subsequent non-root run
