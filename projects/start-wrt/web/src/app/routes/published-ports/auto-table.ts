@@ -70,8 +70,8 @@ export class AutoForwardsTable {
   private readonly i18n = inject(i18nPipe)
 
   protected expiry(item: AutoForwardDisplay): string {
-    if (item.expiresSecs === undefined) return '—'
-    const minutes = Math.max(1, Math.round(item.expiresSecs / 60))
-    return `${minutes} ${this.i18n.transform('min')}`
+    return item.expiresSecs === undefined
+      ? '—'
+      : `${Math.max(1, Math.round(item.expiresSecs / 60))} ${this.i18n.transform('min')}`
   }
 }

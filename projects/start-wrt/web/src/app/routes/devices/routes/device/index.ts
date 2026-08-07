@@ -103,11 +103,11 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
             <input tuiInput [readOnly]="true" [value]="data()?.ipv6 ?? ''" />
           </tui-textfield>
         </div>
-        <p class="note">
+        <div class="g-secondary">
           {{
             'Chosen by the device — IPv6 addresses cannot be reserved' | i18n
           }}
-        </p>
+        </div>
       </section>
       <fieldset>
         <legend>{{ 'Permissions' | i18n }}</legend>
@@ -120,12 +120,12 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
             />
             {{ 'Allow automatic port forwarding' | i18n }}
           </label>
-          <p class="note">
+          <div class="g-secondary">
             {{
               'Lets this device open and renew its own port forwards via UPnP/PCP (used by StartOS servers, game consoles, and similar). Off by default; active forwards appear on the Published Ports page.'
                 | i18n
             }}
-          </p>
+          </div>
         </section>
       </fieldset>
       @if (data()) {
@@ -137,18 +137,6 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
     header[tuiHeader='h6'] {
       align-items: center;
       max-width: 50rem;
-    }
-
-    // Taiga's tuiForm fieldset is an auto-fit grid; flip to flex (it
-    // pre-declares flex-wrap) so the section spans the full width.
-    fieldset {
-      display: flex;
-    }
-
-    .note {
-      margin: 0;
-      font: var(--tui-font-text-s);
-      color: var(--tui-text-secondary);
     }
   `,
   host: { class: 'g-page' },
