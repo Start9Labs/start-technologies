@@ -97,9 +97,9 @@ A pre-release version instead takes prerelease segments: `exver::Version::new([0
 4. **`as_version_t()` match** — `Self::V0_4_0_1(v) => DynVersion(Box::new(v.0)), // VERSION_BUMP`
 5. **`as_exver()` match** (inside `#[cfg(test)]`) — `Version::V0_4_0_1(Wrapper(x)) => x.semver(), // VERSION_BUMP`
 
-### 5. Release-gated docs
+### 5. Release-gated docs — leave these to the release
 
-`projects/start-os/docs/src/installing-startos.md` (and `update-040.md`) pin the GitHub release link to the shipping version. `manage-release.sh pre-check start-os` fails on a stale or `releases/latest` link.
+`projects/start-os/docs/src/installing-startos.md` (and `update-040.md`) pin the GitHub release link to the shipping version. **Do not move it with the version bump.** The docs site deploys from `master` (`docs-deploy.yml`), so a link bumped ahead of the release is a published 404 for as long as the cut takes — two days, for 0.4.0.1. It moves when the release is cut, and `manage-release.sh pre-check start-os` is what gates it there, failing on a stale or `releases/latest` link.
 
 ### 6. SDK TypeScript version (only on breaking SDK changes)
 
@@ -112,6 +112,8 @@ cargo test -p start-core --features test version::   # incl. current_matches_man
 ./scripts/manage-release.sh pre-check start-os
 ```
 
+`pre-check` gates the release, not the bump, so expect its docs release-link check to report the previous version until the cut moves it (step 5). Everything else it checks should pass.
+
 ## Summary checklist
 
 - [ ] Update root `package.json` + `package-lock.json`
@@ -119,7 +121,7 @@ cargo test -p start-core --features test version::   # incl. current_matches_man
 - [ ] Create `shared-libs/crates/start-core/src/version/vX_Y_Z_N.rs`
 - [ ] Update `shared-libs/crates/start-core/src/version/mod.rs` in 5 locations
 - [ ] Add the `CHANGELOG.md` entry under a new heading
-- [ ] Bump the release link in `projects/start-os/docs/src/`
+- [ ] Leave the `projects/start-os/docs/src/` release link alone — it moves when the release is cut
 - [ ] Update `projects/start-sdk/lib/StartSdk.ts` `OSVersion` — **only** on breaking SDK changes
 - [ ] `cargo test` + `pre-check` pass
 
