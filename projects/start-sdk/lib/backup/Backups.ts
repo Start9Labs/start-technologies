@@ -12,6 +12,8 @@ import {
 
 const BACKUP_HOST_PATH = '/media/startos/backup'
 const BACKUP_CONTAINER_MOUNT = '/backup-target'
+// these steps can outlast exec's 30 s default
+const NO_TIMEOUT = null
 
 /** A password value, or a function that returns one. Functions are resolved lazily (only during restore). */
 export type LazyPassword = string | (() => string | Promise<string>) | null
@@ -41,7 +43,7 @@ export type PgDumpConfig<M extends T.SDKManifest> = {
   initdbArgs?: string[]
   /** Additional options passed to `pg_ctl start -o` (e.g. '-c shared_preload_libraries=vectorchord'). Appended after `-c listen_addresses=`. */
   pgOptions?: string
-  /** Milliseconds to wait for PostgreSQL to accept connections before failing (default 60000). Raise for large clusters that need longer to start or run crash recovery. */
+  /** Milliseconds to wait for PostgreSQL to accept connections before failing (default 60000). Also passed to `pg_ctl` as `-t`, bounding its own wait for startup and for the shutdown checkpoint. Raise for large clusters that need longer to start, run crash recovery, or shut down. */
   readyTimeout?: number
 }
 
@@ -193,7 +195,8 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
    * this uses `pg_dump` to create a logical dump before backup and `pg_restore` to rebuild
    * the database after restore.
    *
-   * The dump file is written directly to the backup target — no data duplication on disk.
+   * The dump is staged in the subcontainer's `/tmp` and copied to the backup
+   * target, so it needs transient room for one copy of the dump.
    *
    * @returns A configured Backups instance with pre/post hooks. Chain `.addVolume()` or
    * `.addSync()` to include additional volumes/paths in the backup.
@@ -214,6 +217,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
       readyTimeout = 60_000,
     } = config
     const pgdata = `${mountpoint}${pgdataPath}`
+    const pgCtlTimeout = String(Math.ceil(readyTimeout / 1000))
     const dumpFile = `${BACKUP_CONTAINER_MOUNT}/${database}-db.dump`
     // pg_dump's writes are silently dropped on the backup-fs FUSE mount —
     // pg_dump exits 0 but the file stays 0 bytes. `cp` writes through the
@@ -231,17 +235,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
       })
     }
 
-    async function startPg(
-      sub: {
-        exec(cmd: string[], opts?: any): Promise<{ exitCode: number | null }>
-        execFail(
-          cmd: string[],
-          opts?: any,
-          timeout?: number | null,
-        ): Promise<any>
-      },
-      label: string,
-    ) {
+    async function startPg(sub: SubContainer<M>, label: string) {
       await sub.exec(['rm', '-f', `${pgdata}/postmaster.pid`], {
         user: 'postgres',
       })
@@ -255,9 +249,20 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
       const pgStartOpts = pgOptions
         ? `-c listen_addresses= ${pgOptions}`
         : '-c listen_addresses='
-      await sub.execFail(['pg_ctl', 'start', '-D', pgdata, '-o', pgStartOpts], {
-        user: 'postgres',
-      })
+      await sub.execFail(
+        [
+          'pg_ctl',
+          'start',
+          '-D',
+          pgdata,
+          '-t',
+          pgCtlTimeout,
+          '-o',
+          pgStartOpts,
+        ],
+        { user: 'postgres' },
+        NO_TIMEOUT,
+      )
       for (let elapsed = 0; elapsed < readyTimeout; elapsed += 1000) {
         const { exitCode } = await sub.exec(['pg_isready', '-U', user], {
           user: 'postgres',
@@ -292,14 +297,20 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
             await sub.execFail(
               ['pg_dump', '-U', user, '-Fc', '-f', tmpDumpFile, database],
               { user: 'postgres' },
-              null,
+              NO_TIMEOUT,
             )
             console.log('[pg-dump] copying dump to backup target')
-            await sub.execFail(['cp', tmpDumpFile, dumpFile], { user: 'root' })
+            await sub.execFail(
+              ['cp', tmpDumpFile, dumpFile],
+              { user: 'root' },
+              NO_TIMEOUT,
+            )
             console.log('[pg-dump] stopping postgres')
-            await sub.execFail(['pg_ctl', 'stop', '-D', pgdata, '-w'], {
-              user: 'postgres',
-            })
+            await sub.execFail(
+              ['pg_ctl', 'stop', '-D', pgdata, '-w', '-t', pgCtlTimeout],
+              { user: 'postgres' },
+              NO_TIMEOUT,
+            )
             console.log('[pg-dump] complete')
           },
         )
@@ -315,17 +326,23 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
             await mountBackupTarget(sub.rootfs)
             // Stage the dump off the FUSE before pg_restore reads it — see
             // the comment on `tmpDumpFile` above.
-            await sub.execFail(['cp', dumpFile, tmpDumpFile], { user: 'root' })
+            await sub.execFail(
+              ['cp', dumpFile, tmpDumpFile],
+              { user: 'root' },
+              NO_TIMEOUT,
+            )
             await sub.execFail(['chown', 'postgres:postgres', tmpDumpFile], {
               user: 'root',
             })
             await sub.execFail(
               ['chown', '-R', 'postgres:postgres', mountpoint],
               { user: 'root' },
+              NO_TIMEOUT,
             )
             await sub.execFail(
               ['initdb', '-D', pgdata, '-U', user, ...initdbArgs],
               { user: 'postgres' },
+              NO_TIMEOUT,
             )
             await startPg(sub, 'pg-restore')
             await sub.execFail(['createdb', '-U', user, database], {
@@ -343,7 +360,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
                 tmpDumpFile,
               ],
               { user: 'postgres' },
-              null,
+              NO_TIMEOUT,
             )
             if (resolvedPassword !== null) {
               await sub.execFail(
@@ -359,9 +376,11 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
                 { user: 'postgres' },
               )
             }
-            await sub.execFail(['pg_ctl', 'stop', '-D', pgdata, '-w'], {
-              user: 'postgres',
-            })
+            await sub.execFail(
+              ['pg_ctl', 'stop', '-D', pgdata, '-w', '-t', pgCtlTimeout],
+              { user: 'postgres' },
+              NO_TIMEOUT,
+            )
           },
         )
       })
@@ -374,7 +393,8 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
    * this uses `mysqldump` to create a logical dump before backup and `mysql` to restore
    * the database after restore.
    *
-   * The dump file is stored temporarily in `dumpVolume` during backup and cleaned up afterward.
+   * The dump is staged in the subcontainer's `/tmp` and copied to the backup
+   * target, so it needs transient room for one copy of the dump.
    *
    * @returns A configured Backups instance with pre/post hooks. Chain `.addVolume()` or
    * `.addSync()` to include additional volumes/paths in the backup.
@@ -409,10 +429,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
       })
     }
 
-    async function waitForMysql(
-      sub: { exec(cmd: string[]): Promise<{ exitCode: number | null }> },
-      cmd: string[],
-    ) {
+    async function waitForMysql(sub: SubContainer<M>, cmd: string[]) {
       for (let elapsed = 0; elapsed < readyTimeout; elapsed += 1000) {
         const { exitCode } = await sub.exec(cmd)
         if (exitCode === 0) return
@@ -423,10 +440,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
       )
     }
 
-    async function startMysql(sub: {
-      exec(cmd: string[], opts?: any): Promise<{ exitCode: number | null }>
-      execFail(cmd: string[], opts?: any, timeout?: number | null): Promise<any>
-    }) {
+    async function startMysql(sub: SubContainer<M>) {
       if (engine === 'mariadb') {
         // MariaDB doesn't support --daemonize; fire-and-forget the exec
         sub
@@ -439,6 +453,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
               ...mysqldOptions,
             ],
             { user: 'root' },
+            NO_TIMEOUT,
           )
           .catch(e =>
             console.error('[mysql-backup] mysqld exited unexpectedly:', e),
@@ -454,15 +469,12 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
             ...mysqldOptions,
           ],
           { user: 'root' },
-          null,
+          NO_TIMEOUT,
         )
       }
     }
 
-    async function stopMysql(sub: {
-      exec(cmd: string[], opts?: any): Promise<{ exitCode: number | null }>
-      execFail(cmd: string[], opts?: any, timeout?: number | null): Promise<any>
-    }) {
+    async function stopMysql(sub: SubContainer<M>) {
       // SIGTERM mysqld and wait for it to finish flushing before teardown.
       // A killed-but-unreaped mysqld lingers as a zombie that keeps its PID,
       // so `tail --pid`/`kill -0` would block here forever — treat the zombie
@@ -485,7 +497,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
           ].join('\n'),
         ],
         { user: 'root' },
-        null,
+        NO_TIMEOUT,
       )
     }
 
@@ -514,9 +526,11 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
               user: 'root',
             })
             if (engine === 'mysql') {
-              await sub.execFail(['chown', '-R', 'mysql:mysql', datadir], {
-                user: 'root',
-              })
+              await sub.execFail(
+                ['chown', '-R', 'mysql:mysql', datadir],
+                { user: 'root' },
+                NO_TIMEOUT,
+              )
             }
             await startMysql(sub)
             await waitForMysql(sub, readyCmd)
@@ -531,9 +545,13 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
                 database,
               ],
               { user: 'root' },
-              null,
+              NO_TIMEOUT,
             )
-            await sub.execFail(['cp', tmpDumpFile, dumpFile], { user: 'root' })
+            await sub.execFail(
+              ['cp', tmpDumpFile, dumpFile],
+              { user: 'root' },
+              NO_TIMEOUT,
+            )
             await stopMysql(sub)
           },
         )
@@ -558,6 +576,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
               await sub.execFail(
                 ['mysql_install_db', '--user=mysql', `--datadir=${datadir}`],
                 { user: 'root' },
+                NO_TIMEOUT,
               )
             } else {
               await sub.execFail(
@@ -568,6 +587,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
                   `--datadir=${datadir}`,
                 ],
                 { user: 'root' },
+                NO_TIMEOUT,
               )
             }
             await startMysql(sub)
@@ -589,7 +609,11 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
             })
             // Stage the dump off the FUSE before mysql reads it — see
             // the comment on `tmpDumpFile` above.
-            await sub.execFail(['cp', dumpFile, tmpDumpFile], { user: 'root' })
+            await sub.execFail(
+              ['cp', dumpFile, tmpDumpFile],
+              { user: 'root' },
+              NO_TIMEOUT,
+            )
             // Restore from dump
             await sub.execFail(
               [
@@ -598,7 +622,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
                 `mysql -u root ${pw !== null ? `-p'${pw}'` : ''} ${database} < ${tmpDumpFile}`,
               ],
               { user: 'root' },
-              null,
+              NO_TIMEOUT,
             )
             await stopMysql(sub)
           },

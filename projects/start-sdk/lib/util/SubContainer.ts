@@ -174,7 +174,7 @@ export interface SubContainer<
    * DOES NOT THROW ON NONZERO EXIT CODE (see execFail)
    * @param command an array representing the command and args to execute
    * @param options
-   * @param timeoutMs how long to wait before killing the command in ms
+   * @param timeoutMs How long to wait before SIGKILL (default 30 s, `null` for no timeout)
    * @param abort optional AbortController; aborting SIGKILLs the process
    * @returns
    */
@@ -187,6 +187,7 @@ export interface SubContainer<
     throw: () => { stdout: string | Buffer; stderr: string | Buffer }
     exitCode: number | null
     exitSignal: NodeJS.Signals | null
+    timedOutAfterMs: number | null
     stdout: string | Buffer
     stderr: string | Buffer
   }>
@@ -195,7 +196,7 @@ export interface SubContainer<
    * @description run a command inside this subcontainer, throwing on non-zero exit status
    * @param command an array representing the command and args to execute
    * @param options
-   * @param timeoutMs how long to wait before killing the command in ms
+   * @param timeoutMs How long to wait before SIGKILL (default 30 s, `null` for no timeout)
    * @param abort optional AbortController; aborting SIGKILLs the process
    * @returns
    * @throws {@link ExitError} on non-zero exit code or signal termination
@@ -688,6 +689,7 @@ export class SubContainerEager<
     throw: () => { stdout: string | Buffer; stderr: string | Buffer }
     exitCode: number | null
     exitSignal: NodeJS.Signals | null
+    timedOutAfterMs: number | null
     stdout: string | Buffer
     stderr: string | Buffer
   }> {
@@ -765,8 +767,12 @@ export class SubContainerEager<
     return new Promise((resolve, reject) => {
       child.on('error', reject)
       let killTimeout: NodeJS.Timeout | undefined
+      let timedOut = false
       if (timeoutMs !== null && child.pid) {
-        killTimeout = setTimeout(() => child.kill('SIGKILL'), timeoutMs)
+        killTimeout = setTimeout(() => {
+          timedOut = true
+          child.kill('SIGKILL')
+        }, timeoutMs)
       }
       child.stdout.on('data', appendData(stdout))
       child.stderr.on('data', appendData(stderr))
@@ -775,6 +781,8 @@ export class SubContainerEager<
         const result = {
           exitCode: code,
           exitSignal: signal,
+          // the deadline can elapse after something else already killed it
+          timedOutAfterMs: timedOut && signal === 'SIGKILL' ? timeoutMs : null,
           stdout: stdout.data,
           stderr: stderr.data,
         }
@@ -1125,6 +1133,7 @@ export class SubContainerLazy<
     throw: () => { stdout: string | Buffer; stderr: string | Buffer }
     exitCode: number | null
     exitSignal: NodeJS.Signals | null
+    timedOutAfterMs: number | null
     stdout: string | Buffer
     stderr: string | Buffer
   }> {
@@ -1269,6 +1278,7 @@ export class ExitError extends Error {
     readonly result: {
       exitCode: number | null
       exitSignal: T.Signals | null
+      timedOutAfterMs: number | null
       stdout: string | Buffer
       stderr: string | Buffer
     },
@@ -1276,6 +1286,8 @@ export class ExitError extends Error {
     let message: string
     if (result.exitCode) {
       message = `${command} failed with exit code ${result.exitCode}: ${result.stderr}`
+    } else if (result.timedOutAfterMs !== null) {
+      message = `${command} timed out after ${result.timedOutAfterMs}ms and was killed with ${result.exitSignal}: ${result.stderr}`
     } else if (result.exitSignal) {
       message = `${command} terminated with signal ${result.exitSignal}: ${result.stderr}`
     } else {

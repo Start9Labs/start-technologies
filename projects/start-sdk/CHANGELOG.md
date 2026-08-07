@@ -75,6 +75,54 @@
   one, so the guard only duplicated that check while giving the filename a
   second place to go stale. Cosmetic — no build ever failed over it
 
+- **A database dump backup or restore is no longer killed after exactly thirty
+  seconds.** Steps in `Backups.withPgDump` / `Backups.withMysqlDump` run under
+  `SubContainer.exec`'s default 30 s cap unless they opt out, and 1.5.2 — which
+  began staging the dump in `/tmp` and copying it to the backup target, rather
+  than dumping onto the target directly — left the opt-out on `pg_dump` and
+  gave the new `cp` none. The copy's duration is set by the size of the dump and
+  the speed of the target. So a backup that had succeeded for months began
+  failing the first time that copy crossed thirty seconds, with nothing to point
+  at the cause:
+
+  ```
+  Failed: Unknown Error: Error: cp terminated with signal SIGKILL:
+  ```
+
+  Restore stages the dump off the target through the same kind of copy, under
+  the same cap — so a database whose dump took longer than thirty seconds to
+  copy could not be restored at all, which is discovered during recovery, when
+  the backup is all the user has. Every step of a dump or restore whose
+  duration follows the data now opts out: both copies, `pg_ctl start` and
+  `pg_ctl stop` (which wait on the cluster's crash recovery and its shutdown
+  checkpoint), the recursive `chown`s over the data directory, `initdb`,
+  `mysql_install_db` / `mysqld --initialize-insecure`, and the foreground
+  `mysqld` MariaDB runs for the length of the dump.
+
+  The two `pg_ctl` steps keep a bound, because `pg_ctl` has its own: `-w` is its
+  default and it gives up after `-t` seconds, which was 60 regardless of what
+  the SDK allowed. `PgDumpConfig.readyTimeout` — the knob 2.0.1 added for
+  clusters that need longer — now supplies that `-t`, so raising it reaches the
+  step that actually blocks instead of stopping at the readiness poll. Its
+  default is 60 000 ms, which is `pg_ctl`'s own default, so nothing changes
+  until you raise it. Fixes
+  [#3636](https://github.com/Start9Labs/start-technologies/issues/3636)
+
+- **A command killed by `SubContainer.exec`'s own timeout now says that it timed
+  out.** The error was built from the signal alone, so the SDK's timer read
+  exactly like an OOM kill, a cgroup kill, or an operator's `kill -9` — and
+  since `cp` writes nothing to stderr when it is killed, the whole user-facing
+  notification was `cp terminated with signal SIGKILL:`. The message now names
+  the timeout and the limit that elapsed:
+
+  ```
+  cp timed out after 30000ms and was killed with SIGKILL:
+  ```
+
+  `exec`'s result carries `timedOutAfterMs` — the limit that fired, or `null`
+  when the process was not killed by this timer — alongside `exitCode` and
+  `exitSignal`
+
 ## 2.0.9 — StartOS 0.4.0-beta.10 (2026-07-25)
 
 ### Fixed
