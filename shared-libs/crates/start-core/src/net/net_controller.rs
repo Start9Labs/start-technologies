@@ -574,18 +574,21 @@ impl NetServiceData {
                     .filter_map(|gw| net_ifaces.get(gw).and_then(|i| i.ip_info.as_ref()))
                     .flat_map(|ip| ip.subnets.iter().map(|s| s.addr()))
                     .collect();
-                forwards.insert(
-                    external,
-                    (
-                        SocketAddrV4::new(self.ip, *port),
-                        1,
-                        ForwardRequirements {
-                            public_gateways: fwd_public,
-                            private_ips: fwd_private,
-                            secure: bind.options.secure.is_some(),
-                        },
-                    ),
-                );
+                // StartOS answers these addresses itself, and a loopback DNAT is martian-dropped on ingress.
+                if !self.ip.is_loopback() {
+                    forwards.insert(
+                        external,
+                        (
+                            SocketAddrV4::new(self.ip, *port),
+                            1,
+                            ForwardRequirements {
+                                public_gateways: fwd_public,
+                                private_ips: fwd_private,
+                                secure: bind.options.secure.is_some(),
+                            },
+                        ),
+                    );
+                }
 
                 // No listener of ours answers here, so DNAT the host's
                 // GUA:external to the container's v6:internal. A LAN-only GUA is
