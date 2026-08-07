@@ -90,10 +90,14 @@ body:
       description: If you know the code, name the files or subsystems this would touch, and anything it would break or need migrating.
       placeholder: |
 <<<<<<< HEAD
+<<<<<<< HEAD
         `<path/to/file>` — <what would need to change>
 =======
         `shared-libs/crates/start-core/src/net/…` — …
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+        `<path/to/file>` — <what would need to change>
+>>>>>>> 68139e9c5 (chore(github): make root-cause placeholders obviously synthetic)
 
   - type: textarea
     id: context

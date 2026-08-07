@@ -37,8 +37,12 @@ body:
     attributes:
       label: StartOS version
       description: Shown in the UI under **System → About**. From a client, `start-cli -H https://<your-server> git-info` prints the exact build — the version string is stable across builds, so the git hash is what identifies the binary.
+<<<<<<< HEAD
       placeholder: 0.4.0.2 (git 282a3a5)
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+      placeholder: 0.4.0.2 (git 1a2b3c4)
+>>>>>>> 68139e9c5 (chore(github): make root-cause placeholders obviously synthetic)
     validations:
       required: true
 
@@ -143,9 +147,9 @@ body:
     id: root-cause
     attributes:
       label: Root cause / code pointers
-      description: If you traced it, name the file, the line, and the mechanism. This is the most valuable part of the report — a confirmed root cause is usually what moves an issue to `Approved`.
+      description: If you traced it, name the file, the line, and the mechanism. Leave it blank rather than guessing — an unverified cause sends triage down the wrong path, and a verified one is usually what moves an issue to `Approved`.
       placeholder: |
-        `shared-libs/crates/start-core/src/net/dns.rs:214` — `skip(2)` is positional under hickory 0.26, so it drops the first two real upstreams rather than the two placeholder entries it was written against.
+        `<path/to/file>:<line>` — <what the code does today, and why that is wrong>
 
   - type: textarea
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)

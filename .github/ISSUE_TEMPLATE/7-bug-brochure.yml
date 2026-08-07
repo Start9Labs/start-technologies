@@ -111,10 +111,14 @@ body:
     id: root-cause
     attributes:
       label: Root cause / code pointers
-      description: If you traced it, name the file, the line, and the mechanism. The app is `projects/brochure-marketplace/src/`; the shared UI it renders is `shared-libs/ts-modules/marketplace/`.
+      description: If you traced it, name the file, the line, and the mechanism. Leave it blank rather than guessing — an unverified cause sends triage down the wrong path. The app is `projects/brochure-marketplace/src/`; the shared UI it renders is `shared-libs/ts-modules/marketplace/`.
       placeholder: |
+<<<<<<< HEAD
         `shared-libs/ts-modules/marketplace/...` — …
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+        `<path/to/file>:<line>` — <what the code does today, and why that is wrong>
+>>>>>>> 68139e9c5 (chore(github): make root-cause placeholders obviously synthetic)
 
   - type: textarea
     id: logs
