@@ -3,10 +3,13 @@ description: A defect in marketplace.start9.com — the public package-browsing 
 type: Bug
 labels: [brochure]
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 assignees:
   - MattDHill
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
 body:
   - type: markdown
     attributes:
@@ -39,10 +42,14 @@ body:
 
   - type: input
 <<<<<<< HEAD
+<<<<<<< HEAD
     id: browser
 =======
     id: client
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+    id: browser
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
     attributes:
       label: Browser & OS
       placeholder: Firefox 134.0, macOS 15.3
@@ -50,6 +57,9 @@ body:
       required: true
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
   - type: input
     id: registry
     attributes:
@@ -57,8 +67,11 @@ body:
       description: Only needed if you had pointed the site at a registry other than the default.
       placeholder: registry.start9.com
 
+<<<<<<< HEAD
 =======
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
   - type: dropdown
     id: area
     attributes:
@@ -75,6 +88,7 @@ body:
       required: true
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
   - type: input
     id: registry
@@ -84,6 +98,8 @@ body:
       placeholder: registry.start9.com
 
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
   - type: textarea
     id: current
     attributes:
@@ -128,10 +144,15 @@ body:
     id: logs
     attributes:
 <<<<<<< HEAD
+<<<<<<< HEAD
       label: Logs & evidence
       description: Browser console errors and failed network requests. You can drag screenshots into this box.
 =======
       label: Console output & screenshots
       description: Browser console errors and failed network requests. You can drag images into this box.
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+      label: Logs & evidence
+      description: Browser console errors and failed network requests. You can drag screenshots into this box.
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
       render: shell

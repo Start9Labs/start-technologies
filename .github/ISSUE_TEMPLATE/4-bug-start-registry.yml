@@ -3,6 +3,7 @@ description: A defect in the registry server (`registrybox`) — package/OS inde
 type: Bug
 labels: [start-registry]
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 assignees:
 <<<<<<< HEAD
@@ -11,6 +12,8 @@ assignees:
 =======
   - dr-bonez
 >>>>>>> 6ea0ee759 (chore(github): route bug reports to their product owners)
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
 body:
   - type: markdown
     attributes:
@@ -43,6 +46,9 @@ body:
       required: true
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
   - type: input
     id: version
     attributes:
@@ -63,8 +69,11 @@ body:
     validations:
       required: true
 
+<<<<<<< HEAD
 =======
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
   - type: dropdown
     id: area
     attributes:
@@ -83,6 +92,7 @@ body:
     validations:
       required: true
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 =======
   - type: dropdown
@@ -106,6 +116,8 @@ body:
       placeholder: 0.4.0.2
 
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
   - type: textarea
     id: current
     attributes:

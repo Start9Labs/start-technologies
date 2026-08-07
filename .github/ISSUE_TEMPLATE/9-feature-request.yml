@@ -2,10 +2,13 @@ name: 💡 Feature Request
 description: Suggest a change or an addition to any Start9 product.
 type: Feature
 <<<<<<< HEAD
+<<<<<<< HEAD
 body:
 =======
 assignees:
   - MattDHill
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
 body:
 <<<<<<< HEAD
   - type: markdown

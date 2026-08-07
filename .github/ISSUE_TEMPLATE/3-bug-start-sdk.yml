@@ -3,6 +3,7 @@ description: A defect in `@start9labs/start-sdk` — packaging a service, or the
 type: Bug
 labels: [StartSDK]
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 assignees:
 <<<<<<< HEAD
@@ -11,6 +12,8 @@ assignees:
 =======
   - dr-bonez
 >>>>>>> 6ea0ee759 (chore(github): route bug reports to their product owners)
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
 body:
   - type: markdown
     attributes:
@@ -35,10 +38,14 @@ body:
 
   - type: input
 <<<<<<< HEAD
+<<<<<<< HEAD
     id: version
 =======
     id: sdk-version
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+    id: version
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
     attributes:
       label: SDK version
       description: From your package's `package.json`, or `npm ls @start9labs/start-sdk`.
@@ -46,6 +53,7 @@ body:
     validations:
       required: true
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 =======
   - type: dropdown
@@ -69,6 +77,8 @@ body:
       required: true
 
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
   - type: input
     id: package
     attributes:
@@ -91,6 +101,9 @@ body:
       placeholder: v22.11.0
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
   - type: dropdown
     id: area
     attributes:
@@ -111,8 +124,11 @@ body:
     validations:
       required: true
 
+<<<<<<< HEAD
 =======
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
   - type: textarea
     id: current
     attributes:
@@ -131,6 +147,7 @@ body:
 
   - type: textarea
 <<<<<<< HEAD
+<<<<<<< HEAD
     id: repro
     attributes:
       label: Steps to reproduce
@@ -140,9 +157,12 @@ body:
   - type: textarea
 =======
     id: snippet
+=======
+    id: repro
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
     attributes:
-      label: Minimal reproduction
-      description: The smallest snippet from your package that triggers it.
+      label: Steps to reproduce
+      description: The smallest snippet from your package that triggers it, and what you ran to hit it.
       render: typescript
 
   - type: textarea

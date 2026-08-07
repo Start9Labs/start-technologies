@@ -3,10 +3,13 @@ description: A defect in StartTunnel — the VPS-hosted virtual private router.
 type: Bug
 labels: [StartTunnel]
 <<<<<<< HEAD
+<<<<<<< HEAD
 body:
 =======
 assignees:
   - dr-bonez
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
 body:
 <<<<<<< HEAD
   - type: markdown
@@ -44,6 +47,9 @@ body:
       required: true
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
   - type: input
     id: firewall
     attributes:
@@ -51,8 +57,11 @@ body:
       description: '`ufw status`, or any nftables/iptables rules you manage yourself. A host firewall in front of StartTunnel has broken connectivity before, so this is worth checking even if it seems unrelated.'
       placeholder: ufw active — 22/tcp, 443/tcp allowed
 
+<<<<<<< HEAD
 =======
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
   - type: dropdown
     id: area
     attributes:
@@ -70,6 +79,7 @@ body:
       required: true
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
   - type: input
     id: firewall
@@ -79,6 +89,8 @@ body:
       placeholder: ufw active — 22/tcp, 443/tcp allowed
 
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
   - type: textarea
     id: current
     attributes:

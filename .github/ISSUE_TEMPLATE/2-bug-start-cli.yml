@@ -3,10 +3,13 @@ description: A defect in `start-cli` — remote RPC calls, or the local packagin
 type: Bug
 labels: [start-cli]
 <<<<<<< HEAD
+<<<<<<< HEAD
 body:
 =======
 assignees:
   - dr-bonez
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
 body:
 <<<<<<< HEAD
   - type: markdown
@@ -27,6 +30,9 @@ body:
 
   - type: input
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
     id: version
     attributes:
       label: start-cli version
@@ -48,10 +54,14 @@ body:
 
   - type: dropdown
 <<<<<<< HEAD
+<<<<<<< HEAD
     id: platform
 =======
     id: client-os
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+    id: platform
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
     attributes:
       label: Where is it running?
       options:
@@ -75,6 +85,7 @@ body:
         - Other
 
 <<<<<<< HEAD
+<<<<<<< HEAD
   - type: input
     id: os-version
     attributes:
@@ -91,6 +102,14 @@ body:
     validations:
       required: true
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+  - type: input
+    id: os-version
+    attributes:
+      label: Target StartOS version
+      description: Only needed for remote calls. Client and server are versioned together, so a mismatch is often the cause.
+      placeholder: 0.4.0.2
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
 
   - type: dropdown
     id: area
@@ -109,6 +128,7 @@ body:
       required: true
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
   - type: input
     id: server-version
@@ -118,6 +138,8 @@ body:
       placeholder: 0.4.0.2
 
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
   - type: textarea
     id: current
     attributes:
@@ -135,6 +157,9 @@ body:
   - type: textarea
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
     id: repro
     attributes:
       label: Steps to reproduce
@@ -142,6 +167,7 @@ body:
       placeholder: start-cli -H https://server.local package list
     validations:
       required: true
+<<<<<<< HEAD
 =======
     id: root-cause
     attributes:
@@ -165,5 +191,12 @@ body:
 =======
       label: Output & evidence
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs & evidence
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
       description: Full stderr, ideally with `RUST_LOG=debug` set.
       render: shell

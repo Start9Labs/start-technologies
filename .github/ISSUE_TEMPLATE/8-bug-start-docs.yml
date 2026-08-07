@@ -3,6 +3,7 @@ description: Something on docs.start9.com is wrong, out of date, or missing.
 type: Bug
 labels: [start-docs]
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 assignees:
 <<<<<<< HEAD
@@ -15,6 +16,8 @@ assignees:
 =======
   - MattDHill
 >>>>>>> 1f1d99706 (chore(github): assign documentation bugs to MattDHill)
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
 body:
   - type: markdown
     attributes:
@@ -47,10 +50,14 @@ body:
 
   - type: dropdown
 <<<<<<< HEAD
+<<<<<<< HEAD
     id: area
 =======
     id: book
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+    id: area
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
     attributes:
       label: Which book?
       options:
@@ -65,6 +72,9 @@ body:
       required: true
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
   - type: input
     id: source
     attributes:
@@ -72,8 +82,11 @@ body:
       description: The Markdown source in this repo, if you found it. Each product's book lives in `projects/<product>/docs/`; the site itself is `projects/start-docs/`.
       placeholder: projects/start-os/docs/src/installing-startos.md
 
+<<<<<<< HEAD
 =======
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
   - type: dropdown
     id: kind
     attributes:
@@ -106,6 +119,7 @@ body:
       required: true
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
   - type: input
     id: source
@@ -115,6 +129,8 @@ body:
       placeholder: projects/start-os/docs/src/installing-startos.md
 
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
   - type: textarea
     id: context
     attributes:

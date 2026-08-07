@@ -3,10 +3,13 @@ description: A defect in StartOS itself — the OS, its web UI, or the service r
 type: Bug
 labels: [StartOS]
 <<<<<<< HEAD
+<<<<<<< HEAD
 body:
 =======
 assignees:
   - dr-bonez
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
 body:
 <<<<<<< HEAD
   - type: markdown
@@ -27,6 +30,9 @@ body:
 
   - type: input
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
     id: version
     attributes:
       label: StartOS version
@@ -71,6 +77,9 @@ body:
       required: true
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
   - type: input
     id: browser
     attributes:
@@ -78,6 +87,7 @@ body:
       description: Only needed for web UI bugs.
       placeholder: Firefox 134.0, macOS 15.3
 
+<<<<<<< HEAD
   - type: dropdown
     id: area
     attributes:
@@ -88,6 +98,12 @@ body:
     attributes:
       label: Where does it happen?
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which surface?
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
       options:
         - Web UI
         - Setup wizard
@@ -102,6 +118,7 @@ body:
       required: true
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
   - type: input
     id: client
@@ -111,6 +128,8 @@ body:
       placeholder: macOS 15.3, Firefox 134.0
 
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
   - type: textarea
     id: current
     attributes:

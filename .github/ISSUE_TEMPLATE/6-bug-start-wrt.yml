@@ -3,10 +3,13 @@ description: A defect in StartWRT — the OpenWrt-based router OS for the SpaceM
 type: Bug
 labels: [StartWRT]
 <<<<<<< HEAD
+<<<<<<< HEAD
 body:
 =======
 assignees:
   - dominion5254
+=======
+>>>>>>> 706d43e82 (chore(github): unify form structure, move assignment into the triage workflow)
 body:
 <<<<<<< HEAD
   - type: markdown
