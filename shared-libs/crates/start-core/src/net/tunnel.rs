@@ -10,7 +10,7 @@ use ts_rs::TS;
 use crate::GatewayId;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::public::{
-    GatewayType, NetworkInfo, NetworkInterfaceInfo, NetworkInterfaceType,
+    GatewayType, IpInfo, NetworkInfo, NetworkInterfaceInfo, NetworkInterfaceType,
 };
 use crate::net::host::all_hosts;
 use crate::prelude::*;
@@ -104,20 +104,21 @@ pub async fn add_tunnel(
         ));
     }
 
-    let mut sub = ctx
+    let mut ip_info = ctx
         .db
-        .subscribe(
+        .watch(
             "/public/serverInfo/network/gateways"
                 .parse::<JsonPointer>()
                 .with_kind(ErrorKind::Database)?
                 .join_end(iface.as_str())
                 .join_end("ipInfo"),
         )
-        .await;
+        .await
+        .typed::<Option<IpInfo>>();
 
     crate::net::gateway::add_wireguard_config(iface.as_str(), &config).await?;
 
-    sub.recv().await;
+    ip_info.wait_for(|ip_info| ip_info.is_some()).await?;
 
     if set_as_default_outbound {
         ctx.db
@@ -140,18 +141,14 @@ pub async fn add_tunnel(
             .watch("/public/serverInfo/network".parse::<JsonPointer>().unwrap())
             .await
             .typed::<NetworkInfo>();
-        loop {
-            if watch
-                .peek()?
-                .as_gateways()
-                .as_idx(&iface)
-                .and_then(|g| g.as_ip_info().transpose_ref())
-                .is_some()
-            {
-                break;
-            }
-            watch.changed().await?;
-        }
+        watch
+            .wait_for(|network| {
+                network
+                    .gateways
+                    .get(&iface)
+                    .map_or(false, |g| g.ip_info.is_some())
+            })
+            .await?;
         Ok::<_, Error>(())
     })
     .await
@@ -260,12 +257,9 @@ pub async fn remove_tunnel(
             .watch("/public/serverInfo/network".parse::<JsonPointer>().unwrap())
             .await
             .typed::<NetworkInfo>();
-        loop {
-            if watch.peek()?.as_gateways().as_idx(&id).is_none() {
-                break;
-            }
-            watch.changed().await?;
-        }
+        watch
+            .wait_for(|network| !network.gateways.contains_key(&id))
+            .await?;
         Ok::<_, Error>(())
     })
     .await

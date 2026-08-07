@@ -191,12 +191,8 @@ impl ServiceRef {
             )
             .await
             .typed::<StatusInfo>();
-        loop {
-            if watch.peek_and_mark_seen()?.de()?.started.is_none() {
-                return Ok(());
-            }
-            watch.changed().await?;
-        }
+        watch.wait_for(|s| s.started.is_none()).await?;
+        Ok(())
     }
 
     pub async fn uninstall(

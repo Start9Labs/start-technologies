@@ -2873,14 +2873,15 @@ impl NetworkInterfaceController {
     }
 
     pub async fn forget(&self, interface: &GatewayId) -> Result<(), Error> {
-        let mut sub = self
+        let mut gateways = self
             .db
-            .subscribe(
+            .watch(
                 "/public/serverInfo/network/gateways"
-                    .parse::<JsonPointer<_, _>>()
+                    .parse::<JsonPointer>()
                     .with_kind(ErrorKind::Database)?,
             )
-            .await;
+            .await
+            .typed::<OrdMap<GatewayId, NetworkInterfaceInfo>>();
         let mut err = None;
         let changed = self.watcher.ip_info.send_if_modified(|ip_info| {
             if ip_info
@@ -2899,7 +2900,9 @@ impl NetworkInterfaceController {
             return Err(e);
         }
         if changed {
-            sub.recv().await;
+            gateways
+                .wait_for(|gateways| !gateways.contains_key(interface))
+                .await?;
         }
         Ok(())
     }
