@@ -44,6 +44,29 @@ describe('host', () => {
     void _typecheck
   })
 
+  describe('MultiHost.retire / retirePort', () => {
+    test('retire forwards the host id', async () => {
+      const retireHost = jest.fn(async () => true)
+      const host = sdk.MultiHost.of({ retireHost } as unknown as Effects, 'ui')
+      await expect(host.retire()).resolves.toBe(true)
+      expect(retireHost).toHaveBeenCalledWith({ id: 'ui' })
+    })
+
+    // The positional port becomes a named field — the shape most likely to rot.
+    test('retirePort forwards the host id and the port', async () => {
+      const retireBinding = jest.fn(async () => false)
+      const host = sdk.MultiHost.of(
+        { retireBinding } as unknown as Effects,
+        'api',
+      )
+      await expect(host.retirePort(9090)).resolves.toBe(false)
+      expect(retireBinding).toHaveBeenCalledWith({
+        id: 'api',
+        internalPort: 9090,
+      })
+    })
+  })
+
   describe('MultiHost.bindPortRange', () => {
     const fakeEffects = (
       bindRange: jest.Mock = jest.fn(async () => null),

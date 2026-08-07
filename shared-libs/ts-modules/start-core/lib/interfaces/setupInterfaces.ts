@@ -51,6 +51,16 @@ export const setupServiceInterfaces: SetupServiceInterfaces = <
           interfaces.push(params.id)
           return effects.exportRangeServiceInterface(params)
         },
+        retireHost: () => {
+          throw new Error(
+            'MultiHost.retire() cannot be called from setupInterfaces: this pass ends by disabling everything it did not declare, so the outcome would depend on statement order. Retire from a migration up().',
+          )
+        },
+        retireBinding: () => {
+          throw new Error(
+            'MultiHost.retirePort() cannot be called from setupInterfaces: this pass ends by disabling everything it did not declare, so the outcome would depend on statement order. Retire from a migration up().',
+          )
+        },
       },
     })
     await effects.clearBindings({ except: bindings })

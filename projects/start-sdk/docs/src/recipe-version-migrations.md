@@ -10,6 +10,8 @@ The latest version always lives in `startos/versions/current.ts`. Adding a migra
 
 **Reference:** [Versions](versions.md) · [File Models](file-models.md)
 
+A version that stops binding a host or a port has one more job: retire it in the same `up()`, or its external port stays claimed and dependencies keep resolving a dead address. See [Retiring a Host or Binding](interfaces.md#retiring-a-host-or-binding).
+
 ## Examples
 
 See `startos/versions/` in: [bitcoin-core](https://github.com/Start9Labs/bitcoin-core-startos), [cln](https://github.com/Start9Labs/cln-startos), [lnd](https://github.com/Start9Labs/lnd-startos), [monerod](https://github.com/Start9Labs/monerod-startos), [nextcloud](https://github.com/Start9Labs/nextcloud-startos), [simplex](https://github.com/Start9Labs/simplex-startos), [tor](https://github.com/Start9Labs/tor-startos), [synapse](https://github.com/Start9Labs/synapse-startos)

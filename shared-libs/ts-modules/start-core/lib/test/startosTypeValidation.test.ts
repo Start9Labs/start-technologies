@@ -19,6 +19,8 @@ import { CreateSubcontainerFsParams } from '.././osBindings'
 import { DestroySubcontainerFsParams } from '.././osBindings'
 import { BindParams } from '.././osBindings'
 import { BindRangeParams } from '.././osBindings'
+import { RetireHostParams } from '.././osBindings'
+import { RetireBindingParams } from '.././osBindings'
 import { GetHostInfoParams } from '.././osBindings'
 import { CreateNotificationParams } from '.././osBindings'
 import { SetHealth, SetBackupProgress, SetInitProgress } from '.././osBindings'
@@ -74,6 +76,8 @@ describe('startosTypeValidation ', () => {
       clearBindings: {} as ClearBindingsParams,
       bind: {} as BindParams,
       bindRange: {} as BindRangeParams,
+      retireHost: {} as RetireHostParams,
+      retireBinding: {} as RetireBindingParams,
       getHostInfo: {} as WithCallback<GetHostInfoParams>,
       restart: undefined,
       shutdown: undefined,

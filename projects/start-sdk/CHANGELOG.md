@@ -1,15 +1,42 @@
 # Changelog
 
-## 2.0.10 — StartOS 0.4.0
+## 2.0.10 — StartOS 0.4.0.2
 
 ### Changed
 
-- **Minimum StartOS version bumped to `0.4.0`.** The 2.0 line has declared
-  `0.4.0-beta.10` since 2.0.0; 0.4.0 is the release that shipped, and it is what
-  a package built with this SDK now writes as its manifest `osVersion` — so the
-  registry offers that package to servers on 0.4.0 or later
+- **Minimum StartOS version bumped to `0.4.0.2`.** The 2.0 line had declared
+  `0.4.0-beta.10` since 2.0.0, against a 0.4.0 that has since shipped. `0.4.0.2`
+  is the release carrying the effects behind `MultiHost.retire()` /
+  `retirePort()` below, and it is what a package built with this SDK now writes
+  as its manifest `osVersion` — so the registry offers that package to servers
+  on 0.4.0.2 or later, and a server too old to run a retire migration is never
+  offered the package that would attempt one
+
+- **`effects.getServicePortForward` resolves `null` instead of throwing when
+  the binding does not exist.** It is the one host effect with no `callback`,
+  so a caller cannot react to a change — and throwing was the worst available
+  answer for exactly that caller. It also could not tell "no such binding" from
+  "the host itself is gone", and a binding merely disabled by `clearBindings`
+  still reported its stale ports, which retiring now makes an observable
+  difference. Prefer `sdk.host.getBridgeAddress` to reach a dependency; this is
+  raw allocator metadata
 
 ### Added
+
+- **`MultiHost.retire()` and `MultiHost.retirePort()` permanently remove a host
+  or a binding.** `setupInterfaces` ends each pass by
+  _disabling_ whatever it did not declare, which keeps the row, the external
+  port number and the user's per-address choices so a conditionally-declared
+  binding returns at the address they bookmarked. A binding dropped for good
+  therefore stayed behind: its external port stayed claimed for as long as the
+  service was installed, and a dependency resolving it through
+  `getBridgeAddress` still got a `10.0.3.1:<port>` that nothing listens on.
+  Retiring deletes the host or binding and its exported service interfaces —
+  and, for a whole host, the user's domains for it — returning the external
+  ports to the server's pool. Call it from the `up()` of the version that stops
+  binding; it resolves `false` where there was nothing to remove, so a re-run is
+  safe. See
+  [Retiring a Host or Binding](https://docs.start9.com/packaging/interfaces.html#retiring-a-host-or-binding)
 
 - **`sdk.getRootCa(effects)` returns this server's root CA certificate.** A
   service that dials an address the _user_ supplies — a monitor target, a

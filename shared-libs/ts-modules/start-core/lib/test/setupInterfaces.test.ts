@@ -10,6 +10,25 @@ describe('setupServiceInterfaces', () => {
     clearServiceInterfaces: jest.fn(async () => null),
   })
 
+  test.each([
+    ['retireHost', (e: any) => e.retireHost({ id: 'old-ui' })],
+    [
+      'retireBinding',
+      (e: any) => e.retireBinding({ id: 'ui', internalPort: 80 }),
+    ],
+  ])('%s throws inside a setupInterfaces pass', async (_name, call) => {
+    const effects = fakeEffects()
+    // The pass ends by disabling everything it did not declare, so a retire
+    // here would depend on statement order.
+    await expect(
+      setupServiceInterfaces(async ({ effects }) => {
+        await call(effects)
+        return [] as any
+      })(effects as unknown as Effects),
+    ).rejects.toThrow('migration up()')
+    expect(effects.clearBindings).not.toHaveBeenCalled()
+  })
+
   test('a bindRange call is preserved in the clearBindings except set', async () => {
     const effects = fakeEffects()
     await setupServiceInterfaces(async ({ effects }) => {

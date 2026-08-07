@@ -73,6 +73,16 @@ impl Host {
     pub fn new() -> Self {
         Self::default()
     }
+    /// Hand every external port this host holds back to the pool. Shared by
+    /// uninstall and retirement so the two cannot drift apart.
+    pub fn release(&self, available_ports: &mut AvailablePorts) {
+        for info in self.bindings.values() {
+            info.release(available_ports);
+        }
+        for range in self.binding_ranges.values() {
+            range.release(available_ports);
+        }
+    }
     pub fn addresses<'a>(&'a self) -> impl Iterator<Item = HostAddress> + 'a {
         self.public_domains
             .iter()
@@ -563,6 +573,34 @@ pub fn host_for<'a>(
     host_info(db, package_id)?.upsert(host_id, || Ok(Host::new()))
 }
 
+/// [`host_for`] without the upsert, for paths where a missing host means there
+/// is nothing to do. Creating a host on the way to removing something from it
+/// resurrects one the service has retired.
+pub fn host_for_existing<'a>(
+    db: &'a mut DatabaseModel,
+    package_id: &PackageId,
+    host_id: &HostId,
+) -> Result<Option<&'a mut Model<Host>>, Error> {
+    if package_id.is_start_os() {
+        if *host_id != HostId::admin() {
+            return Ok(None);
+        }
+        return Ok(Some(
+            db.as_public_mut()
+                .as_server_info_mut()
+                .as_network_mut()
+                .as_host_mut(),
+        ));
+    }
+    Ok(db
+        .as_public_mut()
+        .as_package_data_mut()
+        .as_idx_mut(package_id)
+        .or_not_found(package_id)?
+        .as_hosts_mut()
+        .as_idx_mut(host_id))
+}
+
 pub fn all_hosts(db: &mut DatabaseModel) -> impl Iterator<Item = Result<&mut Model<Host>, Error>> {
     use patch_db::DestructureMut;
     let destructured = db.as_public_mut().destructure_mut();
@@ -696,6 +734,10 @@ pub trait HostApiKind: 'static {
         inheritance: &Self::Inheritance,
         db: &'a mut DatabaseModel,
     ) -> Result<&'a mut Model<Host>, Error>;
+    fn host_for_existing<'a>(
+        inheritance: &Self::Inheritance,
+        db: &'a mut DatabaseModel,
+    ) -> Result<Option<&'a mut Model<Host>>, Error>;
 }
 pub struct ForPackage;
 impl HostApiKind for ForPackage {
@@ -714,6 +756,12 @@ impl HostApiKind for ForPackage {
     ) -> Result<&'a mut Model<Host>, Error> {
         host_for(db, package, host)
     }
+    fn host_for_existing<'a>(
+        (package, host): &Self::Inheritance,
+        db: &'a mut DatabaseModel,
+    ) -> Result<Option<&'a mut Model<Host>>, Error> {
+        host_for_existing(db, package, host)
+    }
 }
 pub struct ForServer;
 impl HostApiKind for ForServer {
@@ -728,6 +776,12 @@ impl HostApiKind for ForServer {
         db: &'a mut DatabaseModel,
     ) -> Result<&'a mut Model<Host>, Error> {
         host_for(db, &PackageId::start_os(), &HostId::admin())
+    }
+    fn host_for_existing<'a>(
+        _: &Self::Inheritance,
+        db: &'a mut DatabaseModel,
+    ) -> Result<Option<&'a mut Model<Host>>, Error> {
+        host_for_existing(db, &PackageId::start_os(), &HostId::admin())
     }
 }
 

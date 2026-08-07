@@ -10,6 +10,18 @@ file tracks notable changes since the move to the monorepo.
 
 ## [0.4.0.2]
 
+### Added
+
+- **A service can permanently retire a network host or a port it no longer
+  uses, and the port numbers it held become available again.** A service that
+  reorganizes its interfaces across an update — renaming a host, dropping a
+  port — could previously only switch the old one off, which keeps its port
+  number reserved for as long as the service is installed. Retiring removes it
+  outright and releases its port forwards, proxy entries, local DNS records and
+  any port mapping StartOS asked your router for. A domain you had assigned to
+  a retired host is removed with it, so check the service's release notes and
+  assign it to one of the service's current interfaces.
+
 ### Fixed
 
 - **Image upgrades verify their checksum again.** `upgrade` compared the image's
@@ -17,6 +29,11 @@ file tracks notable changes since the move to the monorepo.
   caller passed — so the comparison never ran and a corrupt but still mountable
   image would be installed without complaint. It now verifies whenever
   `CHECKSUM` is set.
+
+- **Removing a domain from a service leaves its network settings otherwise
+  untouched.** Naming a network host the service does not have — a stale id, or
+  a typo — added that host to the service as an empty entry, which then stayed
+  in its network settings with nothing to remove it.
 
 - **The login banner reports system status for every user, not just the first
   one to log in.** It staged its database snapshot at a fixed path in `/tmp`,

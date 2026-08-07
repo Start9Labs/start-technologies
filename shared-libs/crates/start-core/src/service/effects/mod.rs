@@ -165,6 +165,14 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
             from_fn_async(net::bind::clear_bindings).no_cli(),
         )
         .subcommand(
+            "retire-host",
+            from_fn_async(net::bind::retire_host).no_cli(),
+        )
+        .subcommand(
+            "retire-binding",
+            from_fn_async(net::bind::retire_binding).no_cli(),
+        )
+        .subcommand(
             "get-host-info",
             from_fn_async(net::host::get_host_info).no_cli(),
         )
