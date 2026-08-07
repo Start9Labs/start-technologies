@@ -6,4 +6,4 @@ export type DesiredStatus =
   | { main: 'restarting'; restartAgain: boolean }
   | { main: 'running' }
   | { main: 'backing-up'; onComplete: StartStop }
-  | { main: 'updating' }
+  | { main: 'updating'; onComplete: StartStop }

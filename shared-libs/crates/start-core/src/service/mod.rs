@@ -43,7 +43,7 @@ use crate::service::action::update_tasks;
 use crate::service::rpc::{ExitParams, InitKind};
 use crate::service::service_map::InstallProgressHandles;
 use crate::service::uninstall::cleanup;
-use crate::status::{DesiredStatus, StatusInfo};
+use crate::status::StatusInfo;
 use crate::util::Never;
 use crate::util::actor::concurrent::ConcurrentActor;
 use crate::util::future::NonDetachingJoinHandle;
@@ -161,7 +161,8 @@ impl ServiceRef {
 
     /// Stops the main chain through the actor, which owns run state: marks the status
     /// Updating and waits for the actor to report the stop. `init()` maps Updating back
-    /// to Running, so the replacement service — or the old one after a crash — starts again.
+    /// to the recorded run state, so the replacement service — or the old one after a
+    /// crash — comes back the way it was.
     pub async fn quiesce(&self) -> Result<(), Error> {
         let id = &self.seed.id;
         let db = &self.seed.ctx.db;
@@ -172,14 +173,7 @@ impl ServiceRef {
                 .or_not_found(id)?
                 .as_status_info_mut()
                 .as_desired_mut()
-                .map_mutate(|s| {
-                    Ok(match s {
-                        DesiredStatus::Running | DesiredStatus::Restarting { .. } => {
-                            DesiredStatus::Updating
-                        }
-                        x => x,
-                    })
-                })
+                .map_mutate(|s| Ok(s.updating()))
         })
         .await
         .result?;
