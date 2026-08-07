@@ -61,6 +61,7 @@ import {
   GetOutboundGateway,
   GetSslCertificate,
   GetSystemSmtp,
+  getRootCa,
   getServiceManifest,
   nullIfEmpty,
   splitCommand,
@@ -620,6 +621,11 @@ export class StartSdk<Manifest extends T.SDKManifest> {
         hostnames: string[],
         algorithm?: T.Algorithm,
       ) => new GetSslCertificate(effects, { hostnames, algorithm }),
+      /**
+       * Get this server's root CA certificate (PEM). Install it in your
+       * container to reach other services on this server over HTTPS.
+       */
+      getRootCa,
       /** Retrieve the manifest of any installed service package by its ID */
       getServiceManifest,
       /**

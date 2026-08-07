@@ -18,6 +18,7 @@ file tracks notable changes since the move to the monorepo.
   could not write it and the banner fell back to `Services: Unknown`,
   `WAN: N/A` and `NTP: Unknown`. It now uses a private temporary file and
   removes it on every exit path.
+
 - **A service reached over IPv6 through a tunnel now answers.** StartOS sends a
   reply back out the interface its connection arrived on by restoring a
   connection mark, but the kernel routes the reply that _opens_ a connection
@@ -28,6 +29,11 @@ file tracks notable changes since the move to the monorepo.
   it timed out. A reply from an interface's own global IPv6 address now leaves
   by that interface. IPv4, and traffic forwarded to a service container, were
   unaffected.
+
+- **Notification selection checkboxes no longer cover text on phones.** When
+  notification selection is active, each checkbox replaces its notification
+  icon while preserving the title's spacing.
+
 - **A service that uses UDP is reachable from the Internet on a public IP
   address.** StartOS already passed UDP through to the service, but the mapping
   it asked your gateway for over PCP, NAT-PMP or UPnP covered TCP only, and a

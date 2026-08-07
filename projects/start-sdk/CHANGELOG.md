@@ -9,8 +9,31 @@
   a package built with this SDK now writes as its manifest `osVersion` — so the
   registry offers that package to servers on 0.4.0 or later
 
+### Added
+
+- **`sdk.getRootCa(effects)` returns this server's root CA certificate.** A
+  service that dials an address the _user_ supplies — a monitor target, a
+  notification endpoint, a webhook — gets whatever address StartOS showed them,
+  which on the LAN is always HTTPS with a certificate chaining to this server's
+  root CA. No container trusts that root, so the dial fails verification, and
+  the only way to obtain the root was to mint a certificate you didn't want and
+  take the last link of the chain. Packages doing that by hand have taken the
+  wrong link: installing `[0]`, the leaf, as a trust anchor silently trusts
+  nothing while looking correct. `getRootCa` returns the root directly. See
+  [Trusting this server's certificates](https://docs.start9.com/packaging/service-to-service.html#trusting-this-servers-certificates)
+
 ### Fixed
 
+- **`hardwareRequirements.ram` is documented in bytes, which is what StartOS
+  actually compares it against.** Its TSDoc claimed megabytes and its
+  `@example` showed `ram: 8192`, so packages following it declared an 8 KiB
+  floor that every machine satisfies and that therefore gated nothing. The
+  example now writes the value as `8 * 1024 ** 3`, and the packaging guide's
+  manifest page gained a Minimum RAM section covering the unit and the fact
+  that raising a floor on a published package cuts smaller hosts off from
+  updates. The same example's device filter is corrected too — it still showed
+  the `devices` / `pattern` / `patternDescription` shape replaced by `device`
+  and `DeviceFilter` in 2.0.0
 - **A `runUntilSuccess` timeout now says which daemon failed and why.** It
   reported a bare list of ids, which cannot distinguish a daemon that is slow to
   start from one that is crash-looping, and leaked the internal sentinel

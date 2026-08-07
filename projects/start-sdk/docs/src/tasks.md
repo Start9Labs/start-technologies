@@ -117,7 +117,7 @@ With `condition: 'input-not-matches'`, the task is **satisfied** when the action
 
 ### Idempotency and `replayId`
 
-Tasks are idempotent by default. The SDK computes a default `replayId` of `[package-id]:[action-id]`, so calling `createOwnTask` / `createTask` multiple times with the same action does **not** create duplicate tasks — subsequent calls are no-ops against the same replay key. You can safely re-run your init function on every container rebuild without accumulating stale tasks.
+Tasks are idempotent by default. The SDK computes a default `replayId` of `[package-id]:[action-id]`, so calling `createOwnTask` / `createTask` multiple times with the same action does **not** create duplicate tasks — subsequent calls are no-ops against the same replay key. You can safely re-run your init function on every container rebuild without accumulating stale tasks — for as long as the key itself stays the same. See [Retiring a replay key](#retiring-a-replay-key) for what to do when it changes.
 
 Provide a custom `replayId` only when you need to intentionally create multiple distinct tasks for the same action (e.g., one-per-peer setup prompts). Each unique `replayId` becomes a separate task.
 
@@ -125,4 +125,37 @@ To cancel a task programmatically, clear it by its replay key:
 
 ```typescript
 await sdk.action.clearTask(effects, 'my-service:set-admin-password')
+```
+
+### Retiring a replay key
+
+The default key is derived from the action id, so it is stable only for as long as that id is. Change either half — **rename the action, point the task at a different action, or target a different package** — and the SDK writes a _new_ key. The old one is not rewritten and not reaped: it stays in the database exactly as last written, still enforcing a contract you no longer intend.
+
+**Clearing it is the job of the package that created the task**, in the migration for the version that changes the key:
+
+```typescript
+export const current = VersionInfo.of({
+  version: '1.2.0:1',
+  releaseNotes: { en_US: '…' },
+  migrations: {
+    up: async ({ effects }) => {
+      await sdk.action.clearTask(effects, 'bitcoind:other-config')
+    },
+  },
+})
+```
+
+Nothing else can do this for you. StartOS cannot distinguish a key you retired from one you simply did not write on a given run, and the SDK cannot reap "keys I did not create this run" because tasks are legitimately raised from init, from actions, and by other packages.
+
+Skipping it fails in one of two ways, neither of them visible from inside your own package:
+
+- **The retired action still exists.** Both keys stay live and both keep re-arming. If they set different values, satisfying one un-satisfies the other, and the user ping-pongs between them with no way to settle.
+- **The retired action is gone.** StartOS can no longer resolve its input, so the task's state freezes at whatever it last held. If that was active and `critical`, the package stays stopped and **no user action can clear it** — the task points at an action that no longer exists to be run.
+
+The same applies when a task becomes conditional. If you only raise it for some configurations — one backend of several, say — clear the keys for the branches you are not on, so a task never lingers against a service the user no longer talks to. `fulcrum-bch-startos` does this with a `NODE_TASK_KEYS` map and a single `clearTask` call covering every unselected node.
+
+A user already stuck in either state can only be recovered from the CLI, naming the package that _created_ the task (not the one it targets):
+
+```bash
+start-cli package action clear-task <creating-package> '<replay-id>' --force
 ```

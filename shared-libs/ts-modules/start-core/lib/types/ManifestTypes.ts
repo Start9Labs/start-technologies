@@ -103,20 +103,22 @@ export type SDKManifest = {
    */
   readonly dependencies: Record<string, ManifestDependency>
   /**
-   * @description (optional) A set of hardware requirements for this service. If the user's machine
-   *   does not meet these requirements, they will not be able to install this service.
-   * @property {object[]} devices - List of required devices (display or processor).
-   *    `pattern` refers to a regular expression that at least one device of the specified class must match
-   *    `patternDescription` is what will be displayed to the user about what kind of device is required
-   * @property {number} ram - Minimum RAM requirement (in megabytes MB)
+   * @description (optional) A set of hardware requirements for this service. A machine that does
+   *   not meet them is not offered this service at all — so tightening a requirement on an
+   *   already-published package cuts hosts below it off from further updates.
+   * @property {object[]} device - Device filters; at least one device of the given `class` must
+   *    match each filter. `product` and `vendor` are regular expressions (`null` matches any), and
+   *    `description` is what the user is shown about the hardware required.
+   * @property {number} ram - Minimum RAM, **in bytes**, compared against the host's total RAM.
+   *    No unit conversion is applied, so write it as a power-of-two expression: a bare `8192`
+   *    declares 8 KiB, which every machine satisfies, and gates nothing.
    * @example
    * ```
     hardwareRequirements: {
-      devices: [
-        { class: 'display', pattern: 'CometLake', patternDescription: 'A CometLake (10th generation) Intel Integrated GPU' },
-        { class: 'processor', pattern: 'i[3579]-10[0-9]{3}U CPU', patternDescription: 'A 10th Generation Intel i-Series processor' },
+      device: [
+        { class: 'display', product: null, vendor: null, driver: 'nvidia', description: 'An NVIDIA GPU' },
       ],
-      ram: 8192,
+      ram: 8 * 1024 ** 3, // 8 GiB
     },
    * ```
    */
