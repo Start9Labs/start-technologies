@@ -18,7 +18,8 @@ use crate::hostname::ServerHostname;
 use crate::net::forward::AvailablePorts;
 use crate::net::host::address::{HostAddress, PublicDomainConfig, address_api};
 use crate::net::host::binding::{
-    BindInfo, BindOptions, BindingRanges, Bindings, RangeBindInfo, binding,
+    BindInfo, BindOptions, BindingRanges, Bindings, RangeBindInfo, binding, internal_span,
+    overlap_error,
 };
 use crate::net::service_interface::{HostnameInfo, HostnameMetadata};
 use crate::prelude::*;
@@ -624,6 +625,14 @@ impl Model<Host> {
         options: BindOptions,
         privileged: bool,
     ) -> Result<(), Error> {
+        let claim = internal_port..=internal_port;
+        if let Some(existing) = self
+            .as_binding_ranges()
+            .de()?
+            .enabled_overlap(&claim, None)?
+        {
+            return Err(overlap_error(&claim, &existing));
+        }
         self.as_bindings_mut().mutate(|b| {
             let info = if let Some(info) = b.remove(&internal_port) {
                 info.update(available_ports, options, privileged)?
@@ -653,6 +662,17 @@ impl Model<Host> {
                 eyre!("numberOfPorts must be at least 2; use bind for a single port"),
                 ErrorKind::InvalidRequest,
             ));
+        }
+        let claim = internal_span(internal_start_port, number_of_ports)?;
+        if let Some(existing) = self.as_bindings().de()?.enabled_overlap(&claim) {
+            return Err(overlap_error(&claim, &existing));
+        }
+        if let Some(existing) = self
+            .as_binding_ranges()
+            .de()?
+            .enabled_overlap(&claim, Some(internal_start_port))?
+        {
+            return Err(overlap_error(&claim, &existing));
         }
         self.as_binding_ranges_mut().mutate(|ranges| {
             let existing = ranges.get(&internal_start_port);
@@ -848,11 +868,14 @@ mod tests {
     use imbl::OrdMap;
     use imbl_value::InternedString;
 
-    use super::mdns_gateways;
+    use super::{Host, Model, mdns_gateways};
     use crate::GatewayId;
     use crate::db::model::public::{
         CapabilityVerdict, IpInfo, NetworkInterfaceInfo, NetworkInterfaceType,
     };
+    use crate::net::forward::AvailablePorts;
+    use crate::net::host::binding::BindOptions;
+    use crate::prelude::*;
 
     fn iface(
         device_type: NetworkInterfaceType,
@@ -899,5 +922,90 @@ mod tests {
             mdns_gateways(&ifaces),
             [gw("eth0"), gw("wlan0"), gw("wg-ok")].into_iter().collect()
         );
+    }
+
+    fn host() -> Model<Host> {
+        Model::<Host>::new(&Host::default()).unwrap()
+    }
+
+    fn plain(preferred_external_port: u16) -> BindOptions {
+        BindOptions {
+            preferred_external_port,
+            add_ssl: None,
+            secure: Some(crate::net::host::binding::Security { ssl: false }),
+        }
+    }
+
+    #[test]
+    fn a_range_may_not_cover_a_port_the_host_binds() {
+        let mut ports = AvailablePorts::new();
+        let mut host = host();
+        host.add_binding(&mut ports, 28332, plain(28332), false)
+            .unwrap();
+
+        let err = host
+            .add_binding_range(&mut ports, 28331, 40000, 4, false)
+            .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::InvalidRequest);
+        assert!(host.as_binding_ranges().de().unwrap().is_empty());
+        assert!(ports.try_alloc(40000, false, false).is_some());
+    }
+
+    #[test]
+    fn a_dormant_binding_does_not_block_the_range_that_supersedes_it() {
+        let mut ports = AvailablePorts::new();
+        let mut host = host();
+        host.add_binding(&mut ports, 28332, plain(28332), false)
+            .unwrap();
+        host.add_binding(&mut ports, 28333, plain(28333), false)
+            .unwrap();
+        host.as_bindings_mut()
+            .mutate(|b| Ok(b.values_mut().for_each(|i| i.disable())))
+            .unwrap();
+
+        host.add_binding_range(&mut ports, 28332, 40000, 2, false)
+            .unwrap();
+        assert!(host.as_binding_ranges().de().unwrap().contains_key(&28332));
+    }
+
+    #[test]
+    fn a_port_inside_an_enabled_range_may_not_be_bound_singly() {
+        let mut ports = AvailablePorts::new();
+        let mut host = host();
+        host.add_binding_range(&mut ports, 42000, 42000, 500, false)
+            .unwrap();
+
+        let err = host
+            .add_binding(&mut ports, 42499, plain(9000), false)
+            .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::InvalidRequest);
+        host.add_binding(&mut ports, 42500, plain(9000), false)
+            .unwrap();
+    }
+
+    #[test]
+    fn reaffirming_a_range_and_binding_a_disjoint_port_both_succeed() {
+        let mut ports = AvailablePorts::new();
+        let mut host = host();
+        host.add_binding(&mut ports, 3478, plain(3478), false)
+            .unwrap();
+        host.add_binding_range(&mut ports, 42000, 42000, 500, false)
+            .unwrap();
+        host.add_binding_range(&mut ports, 42000, 42000, 500, false)
+            .unwrap();
+
+        let err = host
+            .add_binding_range(&mut ports, 42499, 50000, 2, false)
+            .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::InvalidRequest);
+    }
+
+    #[test]
+    fn a_range_may_not_run_off_the_end_of_the_port_space() {
+        let mut ports = AvailablePorts::new();
+        let err = host()
+            .add_binding_range(&mut ports, 65535, 40000, 2, false)
+            .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::InvalidRequest);
     }
 }

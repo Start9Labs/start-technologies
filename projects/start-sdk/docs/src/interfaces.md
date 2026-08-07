@@ -255,6 +255,8 @@ await zmqRange.export(
 
 Two distinct endpoints are two `bindPortRange` calls — a range is a homogeneous pool of ports, so it maps to one named interface. Range interfaces show up in the service's **Interfaces** page using the same per-gateway address cards as single-port interfaces (non-SSL, IPv4-only). The public/WAN address is disabled by default; enabling it surfaces the exact port range to forward on the router.
 
+Each internal port a host currently binds belongs to one claim. A `bindPortRange` covering a port the same host also passes to `bindPort` — or to another range — is rejected, because the two claims describe the same container socket under different exposure rules. Only what your package declares in the current pass counts, so folding existing single ports into a range works as long as you drop their `bindPort` calls in the same release; the disabled leftovers do not conflict, and [Retiring a Host or Binding](#retiring-a-host-or-binding) is how you give their port numbers back.
+
 | `createRangeInterface` option | Type               | Description                                                            |
 | ----------------------------- | ------------------ | ---------------------------------------------------------------------- |
 | `id`                          | `string`           | Unique identifier for the range interface.                             |

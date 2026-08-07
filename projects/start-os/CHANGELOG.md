@@ -109,6 +109,13 @@ file tracks notable changes since the move to the monorepo.
   its previous export, wherever it lived; a lingering duplicate clears the next
   time its service initializes — at the reboot this update performs.
 
+- **A port a service asks StartOS to keep off insecure networks stays off them,
+  even when the service also publishes a port range.** A range and a single port
+  could both claim one container port, and a range carries its own exposure
+  rules — so the range's rule could reach the port on gateways the port's own
+  settings excluded. StartOS now rejects the overlapping claim and names both
+  ports, so the service reports the conflict instead of serving it.
+
 ## [0.4.0.1]
 
 ### Changed

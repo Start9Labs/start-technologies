@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{SocketAddr, SocketAddrV6};
+use std::ops::RangeInclusive;
 use std::str::FromStr;
 
 use clap::Parser;
@@ -209,6 +210,71 @@ impl std::ops::Deref for BindingRanges {
 impl std::ops::DerefMut for BindingRanges {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+/// The inclusive internal port span a claim of `count` ports from `start` covers.
+/// `count - 1` is taken first — `start + count` overflows u16 for a span ending
+/// at 65535.
+pub fn internal_span(start: u16, count: u16) -> Result<RangeInclusive<u16>, Error> {
+    count
+        .checked_sub(1)
+        .and_then(|last| start.checked_add(last))
+        .map(|end| start..=end)
+        .ok_or_else(|| {
+            Error::new(
+                eyre!("a span of {count} ports from {start} does not fit in the port space"),
+                ErrorKind::InvalidRequest,
+            )
+        })
+}
+
+pub fn overlap_error(claim: &RangeInclusive<u16>, existing: &RangeInclusive<u16>) -> Error {
+    fn describe(span: &RangeInclusive<u16>) -> String {
+        if span.start() == span.end() {
+            format!("port {}", span.start())
+        } else {
+            format!("port range {}-{}", span.start(), span.end())
+        }
+    }
+    Error::new(
+        eyre!(
+            "internal {} overlaps {}, which this host already binds",
+            describe(claim),
+            describe(existing)
+        ),
+        ErrorKind::InvalidRequest,
+    )
+}
+
+impl Bindings {
+    /// The span of the first enabled single-port binding inside `claim`.
+    pub fn enabled_overlap(&self, claim: &RangeInclusive<u16>) -> Option<RangeInclusive<u16>> {
+        self.range(claim.clone())
+            .find(|(_, info)| info.enabled)
+            .map(|(port, _)| *port..=*port)
+    }
+}
+
+impl BindingRanges {
+    /// The span of the first enabled range overlapping `claim`. `rebinding` is
+    /// the key of the entry an idempotent re-bind re-affirms, which must not
+    /// conflict with itself.
+    pub fn enabled_overlap(
+        &self,
+        claim: &RangeInclusive<u16>,
+        rebinding: Option<u16>,
+    ) -> Result<Option<RangeInclusive<u16>>, Error> {
+        for (start, info) in self.iter() {
+            if !info.enabled || Some(*start) == rebinding {
+                continue;
+            }
+            let existing = internal_span(*start, info.number_of_ports)?;
+            if existing.start() <= claim.end() && claim.start() <= existing.end() {
+                return Ok(Some(existing));
+            }
+        }
+        Ok(None)
     }
 }
 
@@ -1614,6 +1680,74 @@ mod test {
             !info
                 .disabled
                 .contains(&(InternedString::intern("example.com"), 49152))
+        );
+    }
+
+    fn range_info(external_start_port: u16, number_of_ports: u16, enabled: bool) -> RangeBindInfo {
+        RangeBindInfo {
+            enabled,
+            external_start_port,
+            number_of_ports,
+            addresses: Default::default(),
+            interface: None,
+        }
+    }
+
+    #[test]
+    fn internal_span_covers_every_port_and_rejects_one_past_the_end() {
+        assert_eq!(internal_span(42000, 500).unwrap(), 42000..=42499);
+        assert_eq!(internal_span(65534, 2).unwrap(), 65534..=65535);
+        assert_eq!(internal_span(8080, 1).unwrap(), 8080..=8080);
+        assert!(internal_span(65535, 2).is_err());
+        assert!(internal_span(0, 0).is_err());
+    }
+
+    #[test]
+    fn only_enabled_bindings_occupy_their_port() {
+        let mut ports = AvailablePorts::new();
+        let live = BindInfo::new(&mut ports, opts(28332, None, Some(false)), false).unwrap();
+        let mut dormant = BindInfo::new(&mut ports, opts(28333, None, Some(false)), false).unwrap();
+        dormant.disable();
+        let bindings = Bindings([(28332, live), (28333, dormant)].into_iter().collect());
+
+        assert_eq!(
+            bindings.enabled_overlap(&(28330..=28334)),
+            Some(28332..=28332)
+        );
+        assert_eq!(bindings.enabled_overlap(&(28333..=28340)), None);
+        assert_eq!(bindings.enabled_overlap(&(28333..=28333)), None);
+    }
+
+    #[test]
+    fn a_range_does_not_conflict_with_the_entry_it_reaffirms() {
+        let ranges = BindingRanges(
+            [
+                (42000, range_info(42000, 500, true)),
+                (50000, range_info(50000, 10, false)),
+            ]
+            .into_iter()
+            .collect(),
+        );
+
+        // Re-affirming 42000 skips itself but a second range still collides.
+        assert_eq!(
+            ranges
+                .enabled_overlap(&(42000..=42499), Some(42000))
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            ranges.enabled_overlap(&(42499..=42600), None).unwrap(),
+            Some(42000..=42499)
+        );
+        assert_eq!(
+            ranges.enabled_overlap(&(42500..=42600), None).unwrap(),
+            None
+        );
+        // A dormant range never conflicts.
+        assert_eq!(
+            ranges.enabled_overlap(&(50005..=50020), None).unwrap(),
+            None
         );
     }
 }
