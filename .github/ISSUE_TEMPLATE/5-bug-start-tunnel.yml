@@ -8,12 +8,15 @@ body:
 assignees:
   - dr-bonez
 body:
+<<<<<<< HEAD
   - type: markdown
     attributes:
       value: |
         **Filing this with an agent?** `gh issue create` bypasses this form entirely — pass the metadata yourself with `--type Bug --label StartTunnel`, and mirror the `###` headings below as your body's sections. Title the issue as the *finding*, not the symptom alone: `<what breaks> — <why> (<file:line>)`.
 
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+>>>>>>> 745136b51 (chore(github): drop agent-addressed preambles the web form can't deliver)
   - type: checkboxes
     id: prerequisites
     attributes:

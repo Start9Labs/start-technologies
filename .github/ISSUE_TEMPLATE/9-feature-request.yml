@@ -7,12 +7,15 @@ body:
 assignees:
   - MattDHill
 body:
+<<<<<<< HEAD
   - type: markdown
     attributes:
       value: |
         **Filing this with an agent?** `gh issue create` bypasses this form entirely — pass the metadata yourself with `--type Feature --label <project>`, using the exact label string from the dropdown below, and mirror the `###` headings as your body's sections.
 
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+>>>>>>> 745136b51 (chore(github): drop agent-addressed preambles the web form can't deliver)
   - type: checkboxes
     id: prerequisites
     attributes:
@@ -27,10 +30,14 @@ body:
       label: Project
       description: |
 <<<<<<< HEAD
+<<<<<<< HEAD
         Applied as the label automatically.
 =======
         Applied as the label automatically. These are the exact label strings — pass one to `--label` if you are filing from the CLI.
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+        Applied as the label automatically.
+>>>>>>> 745136b51 (chore(github): drop agent-addressed preambles the web form can't deliver)
 
         - `StartOS` — the OS, its web UI, and the service runtime
         - `start-cli` — the command-line client

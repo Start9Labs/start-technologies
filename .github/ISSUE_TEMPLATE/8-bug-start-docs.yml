@@ -20,10 +20,13 @@ body:
     attributes:
       value: |
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
         **Filing this with an agent?** `gh issue create` bypasses this form entirely — pass the metadata yourself with `--type Bug --label start-docs`, and mirror the `###` headings below as your body's sections.
 
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+>>>>>>> 745136b51 (chore(github): drop agent-addressed preambles the web form can't deliver)
         Every page on docs.start9.com is authored in this repo, so a documentation fix is a normal pull request — if you can already see what the page should say, send the PR instead of filing this.
 
   - type: checkboxes

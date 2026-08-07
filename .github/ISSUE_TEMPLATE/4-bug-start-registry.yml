@@ -16,10 +16,13 @@ body:
     attributes:
       value: |
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
         **Filing this with an agent?** `gh issue create` bypasses this form entirely — pass the metadata yourself with `--type Bug --label start-registry`, and mirror the `###` headings below as your body's sections. Title the issue as the *finding*, not the symptom alone: `<what breaks> — <why> (<file:line>)`.
 
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+>>>>>>> 745136b51 (chore(github): drop agent-addressed preambles the web form can't deliver)
         A package that is *missing or broken in a registry* is an issue for that package's own repo, not here. This form is for the registry server itself.
 
   - type: checkboxes

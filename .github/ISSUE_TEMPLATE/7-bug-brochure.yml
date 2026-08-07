@@ -12,10 +12,13 @@ body:
     attributes:
       value: |
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
         **Filing this with an agent?** `gh issue create` bypasses this form entirely — pass the metadata yourself with `--type Bug --label brochure`, and mirror the `###` headings below as your body's sections. Title the issue as the *finding*, not the symptom alone: `<what breaks> — <why> (<file:line>)`.
 
 >>>>>>> 149a886f6 (chore(github): per-project bug forms, native issue types, agent filing contract)
+=======
+>>>>>>> 745136b51 (chore(github): drop agent-addressed preambles the web form can't deliver)
         This site reuses the same `@start9labs/marketplace` UI that ships inside StartOS. If you see the same defect in your server's marketplace tab, file it as a **StartOS** bug instead — the fix belongs in the shared library.
 
   - type: checkboxes
