@@ -33,7 +33,9 @@ export class Daemon<
   private onExitFns: ((success: boolean) => void)[] = []
   private loop: { abort: AbortController; done: Promise<void> } | null = null
   private releaseSubcontainerHold: (() => Promise<void>) | null = null
-  private _detached = false
+  private detached = false
+  private _lastExitError: Error | null = null
+  private _failedExits = 0
   protected constructor(
     readonly subcontainer: C,
     private startCommand: () => Promise<CommandController<Manifest, C>>,
@@ -49,6 +51,24 @@ export class Daemon<
   /** Returns true if this daemon is a one-shot process (exits after success) */
   isOneshot(): this is Oneshot<Manifest> {
     return this.oneshot
+  }
+  /**
+   * The error from the most recent abnormal exit, or `null` if none has been
+   * recorded. An exit driven by {@link stop} or {@link term} is deliberate and
+   * does not set this; the restart loop otherwise logs the error and retries,
+   * retaining it here rather than reporting it to anyone.
+   */
+  get lastExitError(): Error | null {
+    return this._lastExitError
+  }
+  /**
+   * How many times the process has exited abnormally over this daemon's
+   * lifetime. Nothing resets it — neither a restart nor a
+   * {@link stop}/{@link start} cycle — so a non-zero count means the process
+   * has died at least once, not that it is dying now.
+   */
+  get failedExits(): number {
+    return this._failedExits
   }
   /**
    * Factory method to create a new Daemon.
@@ -69,7 +89,7 @@ export class Daemon<
         CommandController.of<Manifest, C>()(effects, subcontainer, exec)
       const res = new Daemon<Manifest, C>(subcontainer, startCommand)
       effects.onLeaveContext(() => {
-        if (res._detached) return
+        if (res.detached) return
         res.term().catch(e => logErrorOnce(asError(e)))
       })
       return res
@@ -93,7 +113,7 @@ export class Daemon<
    * Idempotent.
    */
   detach(): void {
-    this._detached = true
+    this.detached = true
   }
   /**
    * Start the daemon. If it is already running, this is a no-op.
@@ -133,7 +153,11 @@ export class Daemon<
           const success = await this.commandController.wait().then(
             _ => true,
             err => {
-              if (!signal.aborted) logErrorOnce(err)
+              if (!signal.aborted) {
+                logErrorOnce(err)
+                this._lastExitError = asError(err)
+                this._failedExits += 1
+              }
               return false
             },
           )

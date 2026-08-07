@@ -61,6 +61,7 @@ pub enum ErrorKind {
     DhcpStaticHostsInSubnet = 1023,
     SubnetCollision = 1024,
     PublishedPortsUseIpv6 = 1025,
+    VpnDisabled = 1026,
 }
 
 impl From<ErrorKind> for startos::ErrorKind {
@@ -122,6 +123,7 @@ impl ErrorKind {
             DhcpStaticHostsInSubnet => "DHCP Static Hosts in Subnet",
             SubnetCollision => "Subnet Collision",
             PublishedPortsUseIpv6 => "Published Ports Use IPv6",
+            VpnDisabled => "Outbound VPN Disabled",
         }
     }
 }

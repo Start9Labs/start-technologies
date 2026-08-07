@@ -80,4 +80,8 @@ The interface is organized around the router's feature areas:
 
 ## License
 
-Copyright Start9 Labs, Inc.
+MIT — see [LICENSE](LICENSE). Copyright (c) 2024 Start9 Labs, Inc.
+
+[`openwrt-overlay/`](openwrt-overlay/) and [`openwrt-patches/`](openwrt-patches/)
+are the exception: they are GPL-licensed material from SpaceMiT, OpenWrt and the
+Linux kernel, governed by [`openwrt-overlay/COPYING`](openwrt-overlay/COPYING).

@@ -39,15 +39,16 @@ pub async fn discover(local_ip: Ipv4Addr) -> Result<Gateway<Tokio>, Error> {
     })
 }
 
-/// Map `external_port` -> `local_ip:internal_port` (TCP) on `gateway`.
+/// Map `external_port` -> `local_ip:internal_port` for `protocol` on `gateway`.
 pub async fn add_port(
     gateway: &Gateway<Tokio>,
+    protocol: PortMappingProtocol,
     external_port: u16,
     local_ip: Ipv4Addr,
     internal_port: u16,
 ) -> Result<(), Error> {
     let call = gateway.add_port(
-        PortMappingProtocol::TCP,
+        protocol,
         external_port,
         SocketAddr::new(IpAddr::V4(local_ip), internal_port),
         LEASE_DURATION,
@@ -64,9 +65,14 @@ pub async fn add_port(
     }
 }
 
-/// Remove the TCP mapping for `external_port`; a missing mapping is not an error.
-pub async fn remove_port(gateway: &Gateway<Tokio>, external_port: u16) -> Result<(), Error> {
-    let call = gateway.remove_port(PortMappingProtocol::TCP, external_port);
+/// Remove the mapping for `protocol` and `external_port`; a missing mapping is
+/// not an error.
+pub async fn remove_port(
+    gateway: &Gateway<Tokio>,
+    protocol: PortMappingProtocol,
+    external_port: u16,
+) -> Result<(), Error> {
+    let call = gateway.remove_port(protocol, external_port);
     match tokio::time::timeout(CONTROL_TIMEOUT, call).await {
         Ok(Ok(())) | Ok(Err(igd_next::RemovePortError::NoSuchPortMapping)) => Ok(()),
         Ok(Err(e)) => Err(Error::new(

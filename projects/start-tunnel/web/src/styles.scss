@@ -1,10 +1,3 @@
-@font-face {
-  font-family: 'MBF Minimal';
-  font-style: normal;
-  font-weight: 400;
-  src: url('/assets/fonts/MBF_Minimal_Custom.otf');
-}
-
 [tuiTheme='dark'] {
   // Backgrounds
   --tui-background-base: #07080c;
@@ -80,8 +73,8 @@
   --tui-stroke-width: 1.5px;
   --tui-radius-m: 0.5rem;
 
-  --tui-typography-family-text: 'Proxima Nova', system-ui;
-  --tui-typography-family-display: 'Proxima Nova', system-ui;
+  --tui-typography-family-text: 'Hanken Grotesk', system-ui;
+  --tui-typography-family-display: 'Hanken Grotesk', system-ui;
 }
 
 ::selection {

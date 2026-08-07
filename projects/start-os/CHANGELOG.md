@@ -8,6 +8,26 @@ Full per-release notes are published on the
 [GitHub releases page](https://github.com/Start9Labs/start-technologies/releases). This
 file tracks notable changes since the move to the monorepo.
 
+## [0.4.0.2]
+
+### Fixed
+
+- **The login banner reports system status for every user, not just the first
+  one to log in.** It staged its database snapshot at a fixed path in `/tmp`,
+  which `pam_motd` created as root at login — so any subsequent non-root run
+  could not write it and the banner fell back to `Services: Unknown`,
+  `WAN: N/A` and `NTP: Unknown`. It now uses a private temporary file and
+  removes it on every exit path.
+
+- **A service that uses UDP is reachable from the Internet on a public IP
+  address.** StartOS already passed UDP through to the service, but the mapping
+  it asked your gateway for over PCP, NAT-PMP or UPnP covered TCP only, and a
+  router maps each protocol separately — so a VPN, a video-call relay or a game
+  server needed a UDP rule added to the router by hand. StartOS now asks for
+  both protocols: on a public IP address, over IPv4 and IPv6 alike, and on a
+  published port range. It withdraws both when the address is disabled or
+  deleted.
+
 ## [0.4.0.1]
 
 ### Changed

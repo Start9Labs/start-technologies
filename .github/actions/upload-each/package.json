@@ -4,8 +4,9 @@
   "private": true,
   "description": "Upload every file matching a glob as its own GitHub Actions artifact.",
   "main": "dist/index.js",
+  "license": "MIT",
   "scripts": {
-    "build": "ncc build src/index.js -o dist --minify"
+    "build": "ncc build src/index.js -o dist --minify --license index.js.LICENSES.txt"
   },
   "dependencies": {
     "@actions/artifact": "^2.3.2",

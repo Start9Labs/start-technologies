@@ -52,12 +52,13 @@ If you're using [Claude Code](https://claude.com/claude-code) (recommended), poi
 
 ## Networking
 
-| Recipe                                                  | Description                                                        |
-| ------------------------------------------------------- | ------------------------------------------------------------------ |
-| [Expose a Web UI](recipe-web-ui.md)                     | Single HTTP interface for browser access                           |
-| [Expose Multiple Interfaces](recipe-multi-interface.md) | RPC, API, peer, WebSocket, or SSH on different ports               |
-| [Expose an API-Only Interface](recipe-api-interface.md) | Programmatic access with no browser UI                             |
-| [Reach Another Service](service-to-service.md)          | Dial a dependency over the host bridge (`getOsIp` + assigned port) |
+| Recipe                                                                                       | Description                                                        |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| [Expose a Web UI](recipe-web-ui.md)                                                          | Single HTTP interface for browser access                           |
+| [Expose Multiple Interfaces](recipe-multi-interface.md)                                      | RPC, API, peer, WebSocket, or SSH on different ports               |
+| [Expose an API-Only Interface](recipe-api-interface.md)                                      | Programmatic access with no browser UI                             |
+| [Reach Another Service](service-to-service.md)                                               | Dial a dependency over the host bridge (`getOsIp` + assigned port) |
+| [Trust This Server's Certificates](service-to-service.md#trusting-this-servers-certificates) | Reach an HTTPS address the user supplies, via `getRootCa`          |
 
 ## Dependencies
 

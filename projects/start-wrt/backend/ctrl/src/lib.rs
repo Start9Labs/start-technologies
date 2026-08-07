@@ -475,25 +475,34 @@ pub async fn run_quiet_async(
         .await
 }
 
-pub fn init_logging(_name: &str) {
-    use tracing_rfc_5424::rfc3164::Rfc3164;
-    use tracing_rfc_5424::tracing::TrivialTracingFormatter;
-    use tracing_rfc_5424::transport::UnixSocket;
+pub fn init_logging(name: &str) {
+    use std::ffi::CString;
+
+    use syslog_tracing::{Facility, Options, Syslog};
     use tracing_subscriber::layer::SubscriberExt;
-    use tracing_subscriber::{EnvFilter, Registry};
+    use tracing_subscriber::{fmt, EnvFilter, Registry};
 
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn,activity=info"));
 
-    let syslog = tracing_rfc_5424::layer::Layer::<
-        tracing_subscriber::Registry,
-        Rfc3164,
-        TrivialTracingFormatter,
-        UnixSocket,
-    >::try_default()
-    .unwrap();
+    // openlog(3) keeps the identity pointer, so it has to outlive the process.
+    let identity: &'static _ = Box::leak(
+        CString::new(name)
+            .expect("logging identity contains a nul byte")
+            .into_boxed_c_str(),
+    );
+    let syslog = Syslog::new(identity, Options::default(), Facility::default())
+        .expect("failed to open syslog");
 
-    let subscriber = Registry::default().with(syslog).with(filter);
+    // syslogd stamps and tags each line itself, so emit only the message.
+    let subscriber = Registry::default()
+        .with(
+            fmt::layer()
+                .with_writer(syslog)
+                .with_ansi(false)
+                .without_time(),
+        )
+        .with(filter);
     tracing::subscriber::set_global_default(subscriber)
         .expect("failed to set global tracing subscriber");
 }

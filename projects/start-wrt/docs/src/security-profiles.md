@@ -42,7 +42,7 @@ One SSID, multiple passwords. One router, multiple isolated networks. The profil
    - **Auto whitelist new profiles** — A checkbox shown in Whitelist mode. When checked, newly created profiles are automatically added to this profile's whitelist. Useful for admin profiles that should maintain access to all network segments.
 
 1. On the **WAN / Internet** tab, configure Internet access:
-   - **Outbound Routing** — Choose how traffic from this profile reaches the Internet. Select **Direct** for direct Internet access, or **VPN** to route all traffic through an outbound VPN. The VPN option cannot be selected if you have no [Outbound VPN](outbound-vpn.md) clients; choosing VPN reveals a VPN client picker.
+   - **Outbound Routing** — Choose how traffic from this profile reaches the Internet. Select **Direct** for direct Internet access, or **VPN** to route all traffic through an outbound VPN. The VPN option cannot be selected if you have no enabled [Outbound VPN](outbound-vpn.md) clients; choosing VPN reveals a picker listing your enabled VPNs (a disabled VPN's tunnel is down, so routing a profile through it would cut that profile off).
 
    - **WAN Access** — Controls Internet access for devices on this profile:
      - **All** — Unrestricted Internet access.

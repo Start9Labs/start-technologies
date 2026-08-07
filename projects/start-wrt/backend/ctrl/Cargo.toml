@@ -1,5 +1,6 @@
 [package]
 edition = "2021"
+license = "MIT"
 name = "startwrt-core"
 version = "1.0.2"
 
@@ -73,6 +74,7 @@ serde_yaml = "0.9.34"
 sha-crypt = "0.5.0"
 sha2 = "0.10.8"
 startos = { package = "start-core", path = "../../../../shared-libs/crates/start-core" }
+syslog-tracing = "0.3"
 tempfile = "3.14.0"
 thiserror = "2.0.12"
 tokio = { version = "1.41.1", features = [
@@ -92,7 +94,6 @@ tokio = { version = "1.41.1", features = [
 tokio-rustls = "0.26"
 tower-http = { version = "0.6", features = ["cors"] }
 tracing = "0.1"
-tracing-rfc-5424 = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uciedit = { path = "../uciedit" }
 url = { version = "2", features = ["serde"] }

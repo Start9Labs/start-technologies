@@ -1163,14 +1163,18 @@ pub async fn attach(
         }
 
         let exit = child.wait().await?;
+        // Send the exit code, not `into_raw()`'s wait status: the client hands this
+        // straight to `std::process::exit`, which keeps only the low byte, and a
+        // normal exit encodes as `code << 8` — so every code would arrive as 0.
+        let code = exit
+            .code()
+            .unwrap_or_else(|| 128 + exit.signal().unwrap_or_default());
         ws.send(Message::Text("exit".into()))
             .await
             .with_kind(ErrorKind::Network)?;
-        ws.send(Message::Binary(
-            i32::to_be_bytes(exit.into_raw()).to_vec().into(),
-        ))
-        .await
-        .with_kind(ErrorKind::Network)?;
+        ws.send(Message::Binary(i32::to_be_bytes(code).to_vec().into()))
+            .await
+            .with_kind(ErrorKind::Network)?;
 
         Ok(())
     }

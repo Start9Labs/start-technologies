@@ -2,6 +2,7 @@
   "name": "jsonpath-wasm-browser-example",
   "version": "0.1.0",
   "main": "index.js",
+  "license": "MIT",
   "scripts": {
     "build": "webpack --config webpack.config.js",
     "start": "webpack-dev-server"

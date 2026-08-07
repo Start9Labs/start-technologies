@@ -26,7 +26,7 @@ use crate::context::config::ContextConfig;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::public::{NetworkInterfaceInfo, NetworkInterfaceType};
 use crate::middleware::auth::Auth;
-use crate::middleware::auth::local::{LocalAuthContext, local_auth_header};
+use crate::middleware::auth::local::{LocalAuthContext, dial_addr, local_auth_header};
 use crate::middleware::auth::signature::{NonceCache, url_host_str};
 use crate::middleware::cors::Cors;
 use crate::net::dns_update::rfc2136::{DnsInjector, InjectedRecord};
@@ -827,7 +827,7 @@ impl CallRemote<TunnelContext> for CliContext {
         let (tunnel_addr, addr_from_config) = if let Some(addr) = self.tunnel_addr {
             (addr, true)
         } else if let Some(addr) = self.tunnel_listen {
-            (addr, true)
+            (dial_addr(addr), true)
         } else {
             (TUNNEL_DEFAULT_LISTEN, false)
         };

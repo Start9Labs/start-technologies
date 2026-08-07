@@ -2,6 +2,12 @@
 
 Start9's 2023 Server One was the Intel NUC11ATKC4, whose BIOS was refered to as "ATJSLCPX" by Intel, and whose latest release was AT0043.cap before they officially discontinued support for the product line.
 
+> [!NOTE]
+> The BIOS capsule linked below is Intel's, not Start9's — Copyright (c) Intel
+> Corporation, all rights reserved, and subject to Intel's own firmware license.
+> We mirror it unmodified because Intel withdrew it when the product line was
+> discontinued. It is not covered by StartOS's MIT license.
+
 ## Required Equipment
 
 - A monitor and keyboard.

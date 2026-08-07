@@ -88,6 +88,7 @@
 - [Initialization](init.md)
 - [Interfaces](interfaces.md)
 - [Service-to-Service Networking](service-to-service.md)
+- [Outbound Network Access](outbound-networking.md)
 - [Actions](actions.md)
 - [Tasks](tasks.md)
 - [Notifications](notifications.md)

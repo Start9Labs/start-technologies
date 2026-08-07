@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`start-tunnel` reaches a daemon that listens on a wildcard address.** With no
+  `--tunnel`, the CLI derives the daemon's address from `tunnel-listen` and
+  authenticates with the local authcookie, which it sends only to a loopback
+  address. A tunnel server binds `0.0.0.0` by nature, so the derived address was
+  never loopback: the CLI skipped the token and then, having no local auth, fell
+  through to dialling `https://0.0.0.0` — a request that can't succeed. A wildcard
+  listen address is now dialled over loopback, since binding every interface is not
+  a destination.
+
 - **`subnet <SUBNET> set-wan` and `subnet <SUBNET> set-ipv6` take the subnet
   once, from the parent `subnet` command.** Both asked for it a second time
   after the subcommand name, and no invocation satisfied that — giving the

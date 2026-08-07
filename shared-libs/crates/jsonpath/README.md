@@ -676,4 +676,5 @@ console.log(
 - [AGENTS.md](AGENTS.md) — AI/dev operating rules and layout map (`CLAUDE.md` is a one-line
   `@AGENTS.md` import).
 
-Licensed under MIT — see [LICENSE](LICENSE).
+Licensed under MIT — see [LICENSE](LICENSE). Originally written by Changseok Han as
+[freestrings/jsonpath](https://github.com/freestrings/jsonpath), Copyright (c) 2019 Changseok Han.

@@ -1,6 +1,6 @@
 # Service-to-Service Networking
 
-[Interfaces](interfaces.md) covers how your service exposes ports **inbound**. This page covers the reverse: how your service reaches **another** service at runtime — a wallet dialing Bitcoin's RPC, an indexer dialing Bitcoin's P2P port, anything dialing Tor's SOCKS proxy.
+[Interfaces](interfaces.md) covers how your service exposes ports **inbound**. This page covers the reverse: how your service reaches **another** service at runtime — a wallet dialing Bitcoin's RPC, an indexer dialing Bitcoin's P2P port, anything dialing Tor's SOCKS proxy. For reaching the internet rather than a sibling package, see [Outbound Network Access](outbound-networking.md).
 
 There is exactly one supported way to do this, and three once-common patterns that are now forbidden.
 
@@ -119,6 +119,24 @@ await sdk.MultiHost.of(effects, socksHostId).bindPort(socksPort, {
 ```
 
 Export the host id and internal port as constants so dependents import them rather than hardcoding.
+
+## Trusting this server's certificates
+
+Everything above assumes you know who you are dialing — a dependency you declared, resolved to a bridge address. Some services instead dial an address the **user** types into the service's own UI: a monitor target, a notification endpoint, a webhook. You cannot resolve those, and the user cannot see bridge addresses, so what they paste is whatever StartOS showed them — which on the LAN is always HTTPS, with a certificate chaining to this server's root CA. Nothing in your container trusts that root, so the dial fails verification.
+
+`sdk.getRootCa` returns that root, PEM encoded:
+
+```typescript
+const rootCa = await sdk.getRootCa(effects) // a plain Promise, not reactive
+await appSub.writeFile('/app/startos-root-ca.crt', rootCa)
+```
+
+Then point the runtime at it — `NODE_EXTRA_CA_CERTS` for Node, `SSL_CERT_FILE` for most others — or, for an image whose clients read the system store, write it under `/usr/local/share/ca-certificates/` and run `update-ca-certificates`. Write it to the **subcontainer rootfs**, not a volume: it is regenerated from code on every start, so a volume only lands it in the user's backups (see [Writing to Subcontainer Rootfs](main.md#writing-to-subcontainer-rootfs)).
+
+> [!WARNING]
+> Do not reach for the root by indexing `sdk.getSslCertificate` — `[0]` is the leaf and installing it as a trust anchor silently trusts nothing, which is a mistake packages have shipped. `getSslCertificate` is for **serving** a certificate ([Minting the certificate](interfaces.md#minting-the-certificate)); `getRootCa` is for **trusting** one.
+
+This is a fallback for addresses you cannot resolve. When you _do_ know the target — a declared dependency — use its bridge address and skip TLS entirely.
 
 ## Forbidden patterns
 

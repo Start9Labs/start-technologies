@@ -1045,6 +1045,14 @@ struct OutboundVpnCreateResponse {
 // OpenVPN configs (no INI headers) are rejected with an OpenVPN-specific
 // message. The web UI mirrors this with an async file-content check before
 // submit, but the backend is the authoritative gate.
+//
+// `target` must be "Internet" or an existing VPN's label (else InvalidValue),
+// must not close a chain cycle (VpnChainCycle), and must not name a VPN that
+// is disabled (VpnDisabled) — a disabled interface is never registered with
+// netifd, so the vcr_<iface> chain route is dropped and this VPN's endpoint
+// traffic silently falls back to the WAN. `vpn-client.set-enabled` holds the
+// other half of that invariant, refusing to disable a VPN that something
+// already chains through.
 ```
 
 ### `vpn-client.update`
@@ -1064,6 +1072,11 @@ struct OutboundVpnUpdateRequest {
 // Response: null
 // Backend: updates label+target metadata and the interface `mtu` option.
 // Bounces the WG interface only when the MTU actually changed.
+//
+// Validation: same `target` rules as vpn-client.create, except the disabled
+// check runs ONLY when `target` differs from the stored one — mirroring
+// guard_subnet_collision, so an unrelated edit (label, MTU) isn't blocked by a
+// broken chain already present in the config.
 ```
 
 ### `vpn-client.delete`
@@ -1400,6 +1413,11 @@ struct ProfileCreateRequest {
 // Validation: gateway_ip must stay inside the LAN network block (see
 //   lan.ipv4-set). owns_lan profiles must be a valid RFC 1918 selection;
 //   others must share the admin LAN's first two octets, else InvalidRequest.
+//   outbound must be "wan" or an outbound VPN that vpn-client.list reports as
+//   enabled: an unknown interface (or one that is a VPN server rather than a
+//   client) is ErrorKind::NotFound, a disabled one ErrorKind::VpnDisabled.
+//   A disabled VPN's tunnel never comes up, so routing a profile through it
+//   would blackhole that profile.
 ```
 
 ### `profiles.set`
@@ -1417,7 +1435,7 @@ struct ProfileSetRequest {
     force: bool,
 }
 // Response: ProfileId
-// Validation: same gateway_ip block check as profiles.create.
+// Validation: same gateway_ip and outbound checks as profiles.create.
 ```
 
 ### `profiles.delete`

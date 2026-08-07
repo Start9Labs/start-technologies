@@ -1,11 +1,21 @@
 #!/bin/sh
 
 parse_essential_db_info() {
-    DB_DUMP="/tmp/startos_db.json"
+    # A fixed path in /tmp does not survive being run by more than one user:
+    # pam_motd runs this as root at login, so the file ends up root-owned and
+    # every later non-root run fails to write it — the banner then silently
+    # degrades to "Unknown" for exactly the fields this function fills. It is
+    # also a predictable path in a world-writable directory. Use a private
+    # temp file instead, and clean it up on every exit path.
+    DB_DUMP=$(mktemp "${TMPDIR:-/tmp}/startos_db.XXXXXXXX") || return 1
 
     if command -v start-cli >/dev/null 2>&1; then
-        timeout 30 start-cli db dump > "$DB_DUMP" 2>/dev/null || return 1
+        timeout 30 start-cli db dump > "$DB_DUMP" 2>/dev/null || {
+            rm -f "$DB_DUMP"
+            return 1
+        }
     else
+        rm -f "$DB_DUMP"
         return 1
     fi
 

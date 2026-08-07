@@ -12,5 +12,5 @@ If no device is still signed in, you can reset your password by reinstalling Sta
 
 1. Download and flash the latest version of StartOS, using the appropriate [installation guide](installing-startos.md) for your hardware.
 1. Visit http://start.local.
-1. When selecting your data drive, select **Keep my data**.
+1. When prompted, select **Preserve** to keep your existing data.
 1. Create a new password and complete setup. All your previous addresses and data will be preserved.
