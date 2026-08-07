@@ -240,6 +240,90 @@ password: Value.text({
 
 `default` also takes a plain string when you want a fixed literal. The same `RandomString` shape is what [`utils.getDefaultString`](recipe-admin-credentials.md#never-roll-your-own-password-rng) resolves in a `withoutInput` handler — between the two, package code never needs its own random-string generator.
 
+### Editing Records the Service Owns
+
+Some actions edit records that live inside the service — rows in its database, or whatever its own API exposes — rather than in a StartOS file model. The form is then a _view_ of state that can change behind it: the user may edit the same records in the service's own admin UI, or from a second StartOS session, between opening the form and saving it.
+
+Carry the correlation state you need in hidden fields. `Value.hidden(parser)` accepts any zod type, works at any level of the spec — the root, or inside a list item's object spec — renders nothing, and round-trips from the prefill function through to the handler's `input`:
+
+```typescript
+import { z } from '@start9labs/start-sdk'
+
+const inputSpec = InputSpec.of({
+  // The record ids that existed when this form was rendered.
+  knownIds: Value.hidden(z.array(z.string()).nullish()),
+  items: Value.list(
+    sdk.List.obj(
+      { name: i18n('Items') },
+      {
+        displayAs: '{{name}}',
+        spec: InputSpec.of({
+          // Absent on a row the user just added (→ create); present on one
+          // read back from the service (→ update in place).
+          id: Value.hidden(z.string().nullish()),
+          name: Value.text({ name: i18n('Name'), required: true, default: null }),
+        }),
+      },
+    ),
+  ),
+})
+```
+
+Two rules then keep the action from destroying work it never saw.
+
+**Correlate by the service's id, not by a user-visible field.** With the id in hand the handler can tell an edit from a create. Matching on the name instead makes a rename read as "delete the old record, create a new one" — which duplicates on rename and orphans on removal.
+
+**Scope deletion to what the form actually rendered.** A handler that deletes every record missing from the submitted list will also delete records created after the form opened. Delete only within `knownIds`:
+
+```typescript
+export const editItems = sdk.Action.withInput(
+  'edit-items',
+  {
+    name: i18n('Edit Items'),
+    description: i18n("Edit the service's records"),
+    warning: i18n('Removing a row deletes that record.'),
+    // It reads and writes the live service, so it needs the service up.
+    allowedStatuses: 'only-running',
+    group: null,
+    visibility: 'enabled',
+  },
+  inputSpec,
+  // Prefill from the service, recording the ids we are about to show
+  async ({ effects }) => {
+    const records = await serviceApi<Record[]>('/records')
+    return {
+      knownIds: records.map(r => r.id),
+      items: records.map(r => ({ id: r.id, name: r.name })),
+    }
+  },
+  // Create and update, then delete only within what we rendered
+  async ({ effects, input }) => {
+    const submitted = new Set<string>()
+    for (const row of input.items) {
+      if (row.id) {
+        submitted.add(row.id)
+        await serviceApi(`/records/${row.id}`, { method: 'PUT', body: row })
+      } else {
+        await serviceApi('/records', { method: 'POST', body: row })
+      }
+    }
+    const rendered = new Set(input.knownIds ?? [])
+    for (const record of await serviceApi<Record[]>('/records')) {
+      if (rendered.has(record.id) && !submitted.has(record.id)) {
+        await serviceApi(`/records/${record.id}`, { method: 'DELETE' })
+      }
+    }
+  },
+)
+```
+
+Hidden fields travel to the client with the rest of the form and are not user-editable, which makes them right for correlation state and wrong for anything secret.
+
+Two further cautions for this shape of action:
+
+- **Reconcile in the handler, not in a startup oneshot.** A oneshot in `main` that re-applies the form's records on every boot fights the service's own UI — it overwrites whatever the user changed there between restarts.
+- **Decide what a rejected record should do to the rest.** If the service validates on write, one bad record in an all-or-nothing loop fails the whole save, so an unrelated edit in the same submission never lands. Either apply rows independently and report the failures together, or document that the form is all-or-nothing.
+
 ## Conventions
 
 ### Wrap User-Facing Strings in `i18n()`
