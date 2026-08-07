@@ -308,26 +308,18 @@ impl BindInfo {
             interfaces,
             ..
         } = self;
-        // Release both ports up front so the numbers below can be reclaimed. The
-        // external port is in the user's address book and keys their per-address
-        // overrides, so a binding that changes how its port is served keeps the
-        // same number — carrying it to the other field when it holds just one.
-        // A binding that ends up serving both has nothing to carry: each leg wants
-        // its own preferred port, and carrying would hand one leg's number to the other.
+        // Free both up front so each leg can reclaim the number it already holds —
+        // it is in the user's address book and keys their per-address overrides.
         available_ports.free(held.assigned_port.into_iter().chain(held.assigned_ssl_port));
         let preferred_ssl_port = options.preferred_ssl_port();
         let wants_plain_port = options.wants_plain_port();
-        let serves_both = wants_plain_port && preferred_ssl_port.is_some();
-        let carried = match (held.assigned_port, held.assigned_ssl_port) {
-            (Some(port), None) | (None, Some(port)) if !serves_both => Some(port),
-            _ => None,
-        };
         let mut reclaim = |held: Option<u16>, preferred: u16, ssl: bool| {
-            let want = held.or(carried).unwrap_or(preferred);
-            available_ports
-                .try_alloc(want, ssl, privileged)
-                .or_else(|| available_ports.try_alloc(preferred, ssl, privileged))
-                .map_or_else(|| available_ports.alloc(ssl), Ok)
+            for port in held.into_iter().chain([preferred]) {
+                if let Some(port) = available_ports.try_alloc(port, ssl, privileged) {
+                    return Ok(port);
+                }
+            }
+            available_ports.alloc(ssl)
         };
 
         let assigned_ssl_port = preferred_ssl_port
@@ -1174,9 +1166,8 @@ mod test {
         assert_eq!(ui.net.assigned_ssl_port, Some(443));
     }
 
-    /// A binding that grows a second leg must not hand the leg it already has to
-    /// the new one: `carried` is for a port moving between the fields, not for a
-    /// binding that ends up serving both.
+    /// A binding that grows a second leg must not hand the port it already has to
+    /// the new one — each leg keeps its own.
     #[test]
     fn gaining_a_leg_does_not_carry_the_other_leg_s_port() {
         let mut ports = AvailablePorts::new();
