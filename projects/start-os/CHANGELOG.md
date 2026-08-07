@@ -18,6 +18,15 @@ file tracks notable changes since the move to the monorepo.
   image would be installed without complaint. It now verifies whenever
   `CHECKSUM` is set.
 
+- **A service whose startup routine throws now reports the failure in its own
+  logs, and StartOS names the failure for what it is.** The container runtime
+  handed the exception back to StartOS over its socket without also printing
+  it, so a service that failed to start went quiet in `Logs` at the moment it
+  needed to speak, while restarting every ten seconds. The exception now
+  appears in the service's own log next to the procedure that raised it, and
+  StartOS labels a failure that came from the runtime `Service Runtime Error`
+  rather than `Unknown Error`.
+
 - **The login banner reports system status for every user, not just the first
   one to log in.** It staged its database snapshot at a fixed path in `/tmp`,
   which `pam_motd` created as root at login — so any subsequent non-root run
