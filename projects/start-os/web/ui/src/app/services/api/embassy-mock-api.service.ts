@@ -843,6 +843,41 @@ export class MockApiService extends ApiService {
     return null
   }
 
+  async setNut(params: T.SetNutParams): Promise<null> {
+    await pauseFor(2000)
+    this.mockRevision([
+      {
+        op: PatchOp.REPLACE,
+        path: '/serverInfo/nut',
+        value: params.config,
+      },
+    ])
+    return null
+  }
+
+  async getNutStatus(params: {}): Promise<T.NutStatus> {
+    await pauseFor(1000)
+    return {
+      target: 'ups@localhost:3493',
+      variables: {
+        'battery.charge': '96',
+        'battery.runtime': '4280',
+        'battery.type': 'PbAc',
+        'device.mfr': 'Start9 Mock UPS',
+        'device.model': 'NUT Simulator',
+        'device.serial': 'MOCK-UPS-001',
+        'driver.name': 'usbhid-ups',
+        'driver.version': '2.8.1',
+        'input.voltage': '120.1',
+        'output.voltage': '120.0',
+        'ups.load': '18',
+        'ups.mfr': 'Start9 Mock UPS',
+        'ups.model': 'NUT Simulator',
+        'ups.status': 'OL',
+      },
+    }
+  }
+
   // ssh
 
   async getSshKeys(params: {}): Promise<T.SshKeyResponse[]> {

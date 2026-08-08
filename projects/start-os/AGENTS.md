@@ -3,7 +3,7 @@
 Operating rules for AI developers working in `start-os/`. `CLAUDE.md` is a
 one-line `@AGENTS.md` import. See the root [AGENTS.md](../../AGENTS.md) for
 monorepo-wide rules, and [ARCHITECTURE.md](ARCHITECTURE.md) and
-[CONTRIBUTING.md](CONTRIBUTING.md) for how this product is wired and built.
+the root [CONTRIBUTING.md](../../CONTRIBUTING.md) for shared setup and conventions.
 
 **Read up the tree first.** These docs are hierarchical: before working here, read the `AGENTS.md` in each enclosing directory up to the repo root (and their `ARCHITECTURE.md` / `CONTRIBUTING.md` where relevant). This file covers only what is specific to this scope and does not repeat rules already stated higher up.
 
@@ -24,10 +24,44 @@ monorepo-wide rules, and [ARCHITECTURE.md](ARCHITECTURE.md) and
   and `assets/` live directly in this dir; the shared build infra (root
   `build/`) and `apt/` are at the repo root.
 
+## Prerequisites
+
+The OS product is a thin wrapper over `shared-libs/crates/start-core`, the shared
+TypeScript modules, and the SDK. Build commands run from the repo root unless
+noted otherwise. Start with the root `CONTRIBUTING.md` for the shared Rust,
+Node, Docker, Make, and git toolchain.
+
+Building a bootable OS image additionally needs multi-architecture emulation
+and image-packaging tools on Debian or Ubuntu:
+
+```sh
+sudo apt install -y qemu-user-static binfmt-support squashfs-tools b3sum
+docker run --privileged --rm tonistiigi/binfmt --install all
+docker buildx create --name start9 --use 2>/dev/null || docker buildx use start9
+```
+
+Web-only work does not need the image toolchain. For faster local iteration,
+source `projects/start-os/devmode.sh` from the repo root; it sets
+`ENVIRONMENT=dev` and `GIT_BRANCH_AS_HASH=1`.
+
+## Build configuration
+
+StartOS accepts the root build variables `PLATFORM`, `ENVIRONMENT`, `PROFILE`,
+and `GIT_BRANCH_AS_HASH`.
+
+- `PLATFORM`: `x86_64`, `x86_64-nonfree`, `aarch64`, `aarch64-nonfree`,
+  `riscv64`, or `raspberrypi`. Nonfree variants add proprietary firmware and
+  drivers; Raspberry Pi necessarily includes nonfree components. The selected
+  platform is remembered between builds.
+- `ENVIRONMENT`: hyphen-separated flags: `dev` (password SSH before setup and
+  no frontend compression), `unstable` (assertions/debugging at a performance
+  cost), and `console` (tokio-console).
+
 ## Build & test (run from the repo root)
 
-- Compile the OS bins: `cargo check -p start-os` (or `cargo build -p start-os
---bin startbox`). Local `cargo check` is **linux-only** — CI also builds
+- Compile the OS bins: `cargo check -p start-os` (or
+  `cargo build -p start-os --bin startbox`). Local `cargo check` is
+  **linux-only** — CI also builds
   apple-darwin and aarch64/riscv64 musl; platform-specific changes can pass here
   yet break those.
 - Regenerate TS bindings after any change to exported Rust types:
@@ -43,6 +77,58 @@ monorepo-wide rules, and [ARCHITECTURE.md](ARCHITECTURE.md) and
   prettier config).
 - Regenerate `start-container` man pages (committed under `man/`):
   `cargo test -p start-core export_manpage_start_container`.
+
+Primary product/image targets:
+
+```sh
+make start-os                   # bins + UI + container-runtime image
+make start-os-ui                # admin UI (start-os-uis also builds setup)
+make start-os-$(IMAGE_TYPE)     # bootable image: start-os-iso or start-os-img
+make start-os-deb               # Debian package
+make start-os-squashfs          # squashfs image
+```
+
+## Deploying to a device
+
+These targets modify a live device and are slow or destructive. Ask the user
+before running any of them.
+
+| Target                                        | Purpose                               |
+| --------------------------------------------- | ------------------------------------- |
+| `start-os-update-startbox REMOTE=start9@<ip>` | Deploy binary + UI only               |
+| `start-os-update-deb REMOTE=start9@<ip>`      | Deploy the Debian package             |
+| `start-os-update REMOTE=start9@<ip>`          | OTA-style update                      |
+| `start-os-emulate-reflash REMOTE=start9@<ip>` | Reflash like a live ISO               |
+| `start-os-update-overlay REMOTE=start9@<ip>`  | Deploy to the reboot-volatile overlay |
+| `start-os-wormhole`                           | Send the startbox binary remotely     |
+| `start-os-wormhole-deb`                       | Send the Debian package remotely      |
+| `start-os-wormhole-squashfs`                  | Send the squashfs remotely            |
+
+## Creating a VM
+
+Install `virt-manager`, add the user to `libvirt`, build an ISO with
+`PLATFORM=$(uname -m) ENVIRONMENT=dev make start-os-iso`, then follow the
+screenshots under `assets/create-vm/`. Point a storage pool at the root
+`results/` directory and select a generic/unknown OS. Start a new login session
+after adding the user to `libvirt` so the group membership takes effect.
+
+## Community and security
+
+Use the [packaging guide](https://docs.start9.com/packaging) for service-package
+work rather than this product workflow. StartOS development discussion is in
+the [developer Matrix room](https://matrix.to/#/#dev-startos:matrix.start9labs.com).
+Report security issues privately to [security@start9.com](mailto:security@start9.com).
+
+## Cross-layer verification
+
+For Rust types exported to TypeScript, verify in this order:
+
+1. `cargo check -p start-os`
+2. `make start-core-ts-bindings`
+3. `cd shared-libs/ts-modules/start-core && make dist`
+4. `cd projects/start-sdk && make bundle`
+5. `npm run check:ui && npm run check:setup`
+6. `cd projects/start-os/container-runtime && npm run check`
 
 ## Gotchas
 

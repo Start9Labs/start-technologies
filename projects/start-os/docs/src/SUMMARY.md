@@ -71,6 +71,7 @@
 - [SSH](ssh.md)
 - [SMTP](smtp.md)
 - [WiFi](wifi.md)
+- [Network UPS Tools (NUT)](network-ups-tools.md)
 - [Internationalization](internationalization.md)
 - [Kiosk Mode](kiosk-mode.md)
 - [Updating StartOS](updating-startos.md)

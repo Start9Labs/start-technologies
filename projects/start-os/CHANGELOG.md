@@ -10,6 +10,14 @@ file tracks notable changes since the move to the monorepo.
 
 ## [0.4.0.2]
 
+### Added
+
+- **Network UPS Tools can monitor a directly connected or network-hosted UPS
+  and shut StartOS down before its battery is exhausted.** The System settings
+  page configures server and client modes, preserves settings while monitoring
+  is disabled, and displays the UPS variables reported by NUT. Direct mode can
+  also expose the UPS to secondary NUT clients on the network.
+
 ### Fixed
 
 - **The login banner reports system status for every user, not just the first

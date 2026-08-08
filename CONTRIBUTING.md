@@ -2,7 +2,7 @@
 
 This guide is for contributing to the Start9 monorepo (StartOS and the other products that live here). If you are interested in packaging a service for StartOS, visit the [packaging guide](https://docs.start9.com/packaging). If you are interested in promoting, providing technical support, creating tutorials, or helping in other ways, please visit the [Start9 website](https://start9.com/contribute).
 
-This file covers what is **common to the whole monorepo** — the shared toolchain, branch policy, the cross-cutting test/format entry points, and code/commit conventions. **Per-product system dependencies, build targets, deploy steps, and release procedure live in that product's own scope** — its `AGENTS.md` (e.g. [`projects/start-sdk/AGENTS.md`](projects/start-sdk/AGENTS.md)), or its `CONTRIBUTING.md` in scopes not yet migrated (e.g. [`projects/start-os/CONTRIBUTING.md`](projects/start-os/CONTRIBUTING.md) for building the StartOS OS image). See [`AGENTS.md`](AGENTS.md) for that migration and the reasoning behind it.
+This file covers what is **common to the whole monorepo** — the shared toolchain, branch policy, the cross-cutting test/format entry points, and code/commit conventions. **Per-product system dependencies, build targets, deploy steps, and release procedure live in that product's own scope** — its `AGENTS.md` (e.g. [`projects/start-os/AGENTS.md`](projects/start-os/AGENTS.md)), or its `CONTRIBUTING.md` in scopes not yet migrated. See [`AGENTS.md`](AGENTS.md) for that migration and the reasoning behind it.
 
 ## Documentation
 
@@ -25,9 +25,9 @@ The repo root's docs split across four files:
 > Debian/Ubuntu is the only officially supported build environment.
 > MacOS has limited build capabilities and Windows requires [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install).
 
-The shared toolchain below is enough to build the Rust bins and the web apps. **Individual products need more** — most notably the StartOS OS image, which adds multi-arch emulation and image-packaging tooling. See each product's `CONTRIBUTING.md` for its additional system dependencies.
+The shared toolchain below is enough to build the Rust bins and the web apps. **Individual products need more** — most notably the StartOS OS image, which adds multi-arch emulation and image-packaging tooling. See each product's `AGENTS.md` or remaining `CONTRIBUTING.md` for its additional system dependencies.
 
-**Web-UI work skips most of this.** The Angular front ends build and run standalone against mock data — they need only Node 24 and Make, no Rust, Docker, or OS-image tooling. See [`shared-libs/ts-modules/CONTRIBUTING.md`](shared-libs/ts-modules/CONTRIBUTING.md).
+**Web-UI work skips most of this.** The Angular front ends build and run standalone against mock data — they need only Node 24 and Make, no Rust, Docker, or OS-image tooling. See [`shared-libs/ts-modules/AGENTS.md`](shared-libs/ts-modules/AGENTS.md).
 
 ```sh
 # Common build tooling
@@ -68,17 +68,17 @@ The repo has four integration branches. `master` is for the current release — 
 This is a monorepo: one root Cargo workspace and one Angular workspace, both rooted at the repo root. The root `Makefile` is a thin orchestrator (it `include`s each product's `build.mk`) — run `make` with no target to print a help summary; there is no default target. Run build commands from the repo root.
 
 - **A single Rust bin:** `cargo build -p <crate> --bin <bin>` — crates are `start-os` (`startbox` / `start-container`), `start-cli`, `start-registry` (`registrybox`), `start-tunnel` (`tunnelbox`), and `startwrt-core` (`startwrt`).
-- **A whole product** (bins + UI + packaging) has its own `make` targets and build instructions in its `CONTRIBUTING.md`:
+- **A whole product** (bins + UI + packaging) has its own `make` targets and build instructions in its scope documentation:
 
 | Product                                | Primary build target                                                                                          | Build & deploy docs                                                                  |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| StartOS (OS image, UIs, device deploy) | `make start-os`                                                                                               | [`projects/start-os/CONTRIBUTING.md`](projects/start-os/CONTRIBUTING.md)             |
+| StartOS (OS image, UIs, device deploy) | `make start-os`                                                                                               | [`projects/start-os/AGENTS.md`](projects/start-os/AGENTS.md)                         |
 | start-cli                              | `make start-cli`                                                                                              | [`projects/start-cli/CONTRIBUTING.md`](projects/start-cli/CONTRIBUTING.md)           |
 | start-registry                         | `make start-registry`                                                                                         | [`projects/start-registry/CONTRIBUTING.md`](projects/start-registry/CONTRIBUTING.md) |
 | StartTunnel                            | `make start-tunnel`                                                                                           | [`projects/start-tunnel/CONTRIBUTING.md`](projects/start-tunnel/CONTRIBUTING.md)     |
 | StartWRT                               | `make start-wrt` (`make start-wrt-image` for the full OpenWrt image — hours, fetches the pinned OpenWrt tree) | [`projects/start-wrt/CONTRIBUTING.md`](projects/start-wrt/CONTRIBUTING.md)           |
 | Start SDK                              | `make bundle` (from `projects/start-sdk`)                                                                     | [`projects/start-sdk/AGENTS.md`](projects/start-sdk/AGENTS.md)                       |
-| Web (shared libs + app UIs)            | `npm run build:ui`                                                                                            | [`shared-libs/ts-modules/CONTRIBUTING.md`](shared-libs/ts-modules/CONTRIBUTING.md)   |
+| Web (shared libs + app UIs)            | `npm run build:ui`                                                                                            | [`shared-libs/ts-modules/AGENTS.md`](shared-libs/ts-modules/AGENTS.md)               |
 
 `make start-core-ts-bindings` regenerates the TypeScript bindings from the Rust types, and `make clean` removes all compiled artifacts. Cross-layer changes (Rust → bindings → SDK → web/runtime) are described in [ARCHITECTURE.md](ARCHITECTURE.md#build-pipeline).
 

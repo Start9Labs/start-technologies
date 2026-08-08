@@ -66,6 +66,7 @@ pub mod lxc;
 pub mod middleware;
 pub mod net;
 pub mod notifications;
+pub mod nut;
 pub mod os_install;
 pub mod prelude;
 pub mod progress;
@@ -394,6 +395,9 @@ pub fn server<C: Context>() -> ParentHandler<C> {
                 .with_about("about.clear-smtp")
                 .with_call_remote::<CliContext>(),
         )
+        .subcommand("set-nut", from_fn_async(nut::set_nut).no_cli())
+        .subcommand("clear-nut", from_fn_async(nut::clear_nut).no_cli())
+        .subcommand("nut-status", from_fn_async(nut::get_nut_status).no_cli())
         .subcommand(
             "host",
             net::host::server_host_api::<C>().with_about("about.commands-host-system-ui"),

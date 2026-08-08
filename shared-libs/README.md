@@ -46,5 +46,4 @@ npm run check                        # typecheck all projects
 ## Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how the two sub-libs fit into the monorepo
-- [CONTRIBUTING.md](CONTRIBUTING.md) — build/test/format workflow
-- [AGENTS.md](AGENTS.md) — practical notes for working in this directory
+- [AGENTS.md](AGENTS.md) — build/test/format workflow and practical notes

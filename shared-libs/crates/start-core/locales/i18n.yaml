@@ -1689,6 +1689,119 @@ net.tunnel.timeout-waiting-for-remove:
   fr_FR: "délai d'attente dépassé pour la suppression de la passerelle %{gateway} de la base de données"
   pl_PL: "upłynął limit czasu oczekiwania na usunięcie bramy %{gateway} z bazy danych"
 
+# nut.rs
+nut.field-device-or-address:
+  en_US: "device or address"
+  de_DE: "Gerät oder Adresse"
+  es_ES: "dispositivo o dirección"
+  fr_FR: "périphérique ou adresse"
+  pl_PL: "urządzenie lub adres"
+
+nut.field-driver:
+  en_US: "driver"
+  de_DE: "Treiber"
+  es_ES: "controlador"
+  fr_FR: "pilote"
+  pl_PL: "sterownik"
+
+nut.field-monitor-password:
+  en_US: "monitor password"
+  de_DE: "Monitor-Passwort"
+  es_ES: "contraseña de monitorización"
+  fr_FR: "mot de passe de surveillance"
+  pl_PL: "hasło monitora"
+
+nut.field-monitor-username:
+  en_US: "monitor username"
+  de_DE: "Monitor-Benutzername"
+  es_ES: "nombre de usuario de monitorización"
+  fr_FR: "nom d’utilisateur de surveillance"
+  pl_PL: "nazwa użytkownika monitora"
+
+nut.field-network-client-password:
+  en_US: "network client password"
+  de_DE: "Passwort des Netzwerk-Clients"
+  es_ES: "contraseña del cliente de red"
+  fr_FR: "mot de passe du client réseau"
+  pl_PL: "hasło klienta sieciowego"
+
+nut.field-network-client-username:
+  en_US: "network client username"
+  de_DE: "Benutzername des Netzwerk-Clients"
+  es_ES: "nombre de usuario del cliente de red"
+  fr_FR: "nom d’utilisateur du client réseau"
+  pl_PL: "nazwa użytkownika klienta sieciowego"
+
+nut.field-server-host:
+  en_US: "server host"
+  de_DE: "Server-Host"
+  es_ES: "host del servidor"
+  fr_FR: "hôte du serveur"
+  pl_PL: "host serwera"
+
+nut.field-ups-name:
+  en_US: "UPS name"
+  de_DE: "USV-Name"
+  es_ES: "nombre del SAI"
+  fr_FR: "nom de l’onduleur"
+  pl_PL: "nazwa UPS"
+
+nut.invalid-identifier:
+  en_US: "Invalid NUT %{field}: use letters, numbers, dots, underscores, or hyphens"
+  de_DE: "Ungültiges NUT-Feld %{field}: Verwenden Sie Buchstaben, Zahlen, Punkte, Unterstriche oder Bindestriche"
+  es_ES: "Campo NUT %{field} no válido: use letras, números, puntos, guiones bajos o guiones"
+  fr_FR: "Champ NUT %{field} invalide : utilisez des lettres, des chiffres, des points, des traits de soulignement ou des traits d'union"
+  pl_PL: "Nieprawidłowe pole NUT %{field}: użyj liter, cyfr, kropek, podkreśleń lub myślników"
+
+nut.invalid-port:
+  en_US: "NUT port must be greater than 0"
+  de_DE: "Der NUT-Port muss größer als 0 sein"
+  es_ES: "El puerto NUT debe ser mayor que 0"
+  fr_FR: "Le port NUT doit être supérieur à 0"
+  pl_PL: "Port NUT musi być większy niż 0"
+
+nut.invalid-shutdown-delay:
+  en_US: "NUT shutdown delay must be 300 seconds or less"
+  de_DE: "Die NUT-Abschaltverzögerung darf höchstens 300 Sekunden betragen"
+  es_ES: "La demora de apagado de NUT debe ser de 300 segundos o menos"
+  fr_FR: "Le délai d'arrêt NUT doit être inférieur ou égal à 300 secondes"
+  pl_PL: "Opóźnienie wyłączenia NUT musi wynosić maksymalnie 300 sekund"
+
+nut.invalid-token:
+  en_US: "Invalid NUT %{field}: value must be ASCII and contain no whitespace"
+  de_DE: "Ungültiges NUT-Feld %{field}: Der Wert muss ASCII sein und darf keine Leerzeichen enthalten"
+  es_ES: "Campo NUT %{field} no válido: el valor debe ser ASCII y no contener espacios"
+  fr_FR: "Champ NUT %{field} invalide : la valeur doit être en ASCII et ne contenir aucun espace"
+  pl_PL: "Nieprawidłowe pole NUT %{field}: wartość musi być ASCII i nie może zawierać spacji"
+
+nut.disabled:
+  en_US: "Network UPS Tools is disabled"
+  de_DE: "Network UPS Tools ist deaktiviert"
+  es_ES: "Network UPS Tools está desactivado"
+  fr_FR: "Network UPS Tools est désactivé"
+  pl_PL: "Network UPS Tools jest wyłączony"
+
+nut.enabled-without-settings:
+  en_US: "Network UPS Tools cannot be enabled without configuration"
+  de_DE: "Network UPS Tools kann nicht ohne Konfiguration aktiviert werden"
+  es_ES: "Network UPS Tools no puede activarse sin configuración"
+  fr_FR: "Network UPS Tools ne peut pas être activé sans configuration"
+  pl_PL: "Nie można włączyć Network UPS Tools bez konfiguracji"
+
+nut.status-command-failed:
+  en_US: "NUT status command failed for %{target}: %{error}"
+  de_DE: "NUT-Statusbefehl für %{target} fehlgeschlagen: %{error}"
+  es_ES: "El comando de estado de NUT falló para %{target}: %{error}"
+  fr_FR: "La commande d'état NUT a échoué pour %{target} : %{error}"
+  pl_PL: "Polecenie statusu NUT nie powiodło się dla %{target}: %{error}"
+
+nut.status-missing:
+  en_US: "NUT status for %{target} did not include ups.status"
+  de_DE: "Der NUT-Status für %{target} enthielt kein ups.status"
+  es_ES: "El estado de NUT para %{target} no incluyó ups.status"
+  fr_FR: "L'état NUT pour %{target} ne contenait pas ups.status"
+  pl_PL: "Status NUT dla %{target} nie zawierał ups.status"
+
 # net/wifi.rs
 net.wifi.password-no-special-characters:
   en_US: "WiFi Password may not have special characters"

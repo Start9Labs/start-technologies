@@ -130,5 +130,4 @@ Services often extend `Observable` and expose reactive streams via DI:
 ## Further reading
 
 - [README.md](README.md) — what this is and how to use it
-- [CONTRIBUTING.md](CONTRIBUTING.md) — setup, build/test/format, translations
-- [AGENTS.md](AGENTS.md) — agent / day-to-day operating rules (`CLAUDE.md` is a one-line `@AGENTS.md` import)
+- [AGENTS.md](AGENTS.md) — setup, build/test/format, translations, and day-to-day operating rules (`CLAUDE.md` is a one-line `@AGENTS.md` import)

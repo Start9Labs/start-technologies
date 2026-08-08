@@ -56,6 +56,7 @@ StartOS is a sovereign computing platform that makes it easy to run a personal s
 - [SSH](ssh.md)
 - [SMTP](smtp.md)
 - [WiFi](wifi.md)
+- [Network UPS Tools (NUT)](network-ups-tools.md)
 - [Internationalization](internationalization.md)
 - [Kiosk Mode](kiosk-mode.md)
 - [Updating StartOS](updating-startos.md)

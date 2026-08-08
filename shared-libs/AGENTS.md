@@ -3,14 +3,14 @@
 This directory is a container for two cross-product libraries. There is no build
 or test target for `shared-libs/` itself — operate inside the relevant sub-library and
 read its own `AGENTS.md` first. `CLAUDE.md` is a one-line `@AGENTS.md` import. See
-[ARCHITECTURE.md](ARCHITECTURE.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+[ARCHITECTURE.md](ARCHITECTURE.md) and the root [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 **Read up the tree first.** These docs are hierarchical: before working here, read the `AGENTS.md` in each enclosing directory up to the repo root (and their `ARCHITECTURE.md` / `CONTRIBUTING.md` where relevant). This file covers only what is specific to this scope and does not repeat rules already stated higher up.
 
 ## Layout
 
 - `crates/start-core/` — Rust backend lib (`start-core`, lib name `start_core`).
-  Has its own `AGENTS.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md`, plus topic notes
+  Has its own `AGENTS.md` and `ARCHITECTURE.md`, plus topic notes
   (`core-rust-patterns.md`, `i18n-patterns.md`, `patchdb.md`, `rpc-toolkit.md`,
   `s9pk-structure.md`, `exver.md`, `VERSION_BUMP.md`).
 - `ts-modules/` — shared TypeScript modules; the `@start9labs/shared`

@@ -390,6 +390,10 @@ pub async fn init(
 
     update_server_info.start();
     sync_kiosk(server_info.as_kiosk().de()?.unwrap_or(false)).await?;
+    if let Err(e) = crate::nut::sync_nut(server_info.as_nut().de().unwrap_or_default()).await {
+        tracing::warn!("could not synchronize NUT configuration: {e}");
+        tracing::debug!("{e:?}");
+    }
     let ram = get_mem_info().await?.total.0 as u64 * 1024 * 1024;
     let devices = lshw().await?;
     let status_info = ServerStatus {

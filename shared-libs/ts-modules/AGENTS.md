@@ -1,6 +1,6 @@
 # AGENTS.md — shared-libs/ts-modules
 
-Agent/dev instructions for `shared-libs/ts-modules` — the directory of shared TypeScript modules: the two Angular libs `@start9labs/shared`, `@start9labs/marketplace`, and the non-Angular `@start9labs/start-core` (`start-core/` — the SDK's core types/ABI/effects/OS bindings, consumed by web and bundled into the SDK; it has its own `Makefile`/`package.json` and builds outside the Angular workspace). The Angular workspace root config (`angular.json`, `package.json`, `tsconfig.json`) lives at the repo root. `CLAUDE.md` is a one-line `@AGENTS.md` import. See `ARCHITECTURE.md` for structure, `CONTRIBUTING.md` for full setup.
+Agent/dev instructions for `shared-libs/ts-modules` — the directory of shared TypeScript modules: the two Angular libs `@start9labs/shared`, `@start9labs/marketplace`, and the non-Angular `@start9labs/start-core` (`start-core/` — the SDK's core types/ABI/effects/OS bindings, consumed by web and bundled into the SDK; it has its own `Makefile`/`package.json` and builds outside the Angular workspace). The Angular workspace root config (`angular.json`, `package.json`, `tsconfig.json`) lives at the repo root. `CLAUDE.md` is a one-line `@AGENTS.md` import. See `ARCHITECTURE.md` for structure and the root `CONTRIBUTING.md` for shared setup.
 
 **Read up the tree first.** These docs are hierarchical: before working here, read the `AGENTS.md` in each enclosing directory up to the repo root (and their `ARCHITECTURE.md` / `CONTRIBUTING.md` where relevant). This file covers only what is specific to this scope and does not repeat rules already stated higher up.
 
@@ -20,6 +20,26 @@ make web-format              # prettier; make web-format-check for CI
 npm run start:ui             # mock dev server (needs config.json — cp shared-libs/ts-modules/config-sample.json config.json)
 npm run build:ui             # prod build of a single app
 ```
+
+Copy `shared-libs/ts-modules/config-sample.json` to the repository-root
+`config.json` before running an app. `useMocks` selects the mock backend;
+`maskAs` accepts `tor`, `local`, `localhost`, `ipv4`, `ipv6`, or `clearnet`,
+and `maskAsHttps` selects the protocol. For a live server, set `useMocks` to
+false, copy `proxy.conf-sample.json` to `proxy.conf.json`, replace
+`<CHANGEME>` with the server hostname, and run `npm run start:ui:proxy`.
+
+## Translations
+
+The shared UI supports English, Spanish, Polish, German, and French.
+
+- English keys and numeric IDs live in `shared/src/i18n/dictionaries/en.ts`;
+  add the same ID with a real translation to every other dictionary.
+- Keep translation batches small enough to review and sanity-check them in
+  product context.
+- A new language needs its dictionary, two `I18N_PROVIDERS` registrations,
+  an entry in `i18n.service.ts`, and the translated language name in every
+  dictionary.
+- Run `npm run check:i18n` after every dictionary change.
 
 ## Gotchas
 

@@ -32,4 +32,4 @@ npm run start:ui        # mock-backed dev server
 
 ## Documentation
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for full setup, live-server proxying, and translation guides, [ARCHITECTURE.md](ARCHITECTURE.md) for how the front end is structured, and [AGENTS.md](AGENTS.md) for agent / day-to-day operating rules.
+See [AGENTS.md](AGENTS.md) for setup, live-server proxying, translations, and day-to-day operating rules, and [ARCHITECTURE.md](ARCHITECTURE.md) for how the front end is structured.

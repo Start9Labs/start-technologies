@@ -3,6 +3,7 @@ import type { Governor } from './Governor'
 import type { KeyboardOptions } from './KeyboardOptions'
 import type { LshwDevice } from './LshwDevice'
 import type { NetworkInfo } from './NetworkInfo'
+import type { NutConfig } from './NutConfig'
 import type { ServerStatus } from './ServerStatus'
 import type { SmtpValue } from './SmtpValue'
 
@@ -23,6 +24,7 @@ export type ServerInfo = {
   zram: boolean
   governor: Governor | null
   smtp: SmtpValue | null
+  nut: NutConfig
   echoipUrls: string[]
   ram: number
   devices: Array<LshwDevice>

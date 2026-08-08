@@ -5,8 +5,8 @@ All six product bins (`startbox`/`startd`, `start-container`, `start-cli`, `regi
 `tunnelbox`, `startwrt`) link against it; all but `startwrt` are thin wrappers in the product
 crates (`startwrt` is a full backend of its own that imports this crate aliased as `startos`).
 
-`CLAUDE.md` is a one-line `@AGENTS.md` import. See [ARCHITECTURE.md](ARCHITECTURE.md) and
-[CONTRIBUTING.md](CONTRIBUTING.md).
+`CLAUDE.md` is a one-line `@AGENTS.md` import. See [ARCHITECTURE.md](ARCHITECTURE.md)
+and the root [CONTRIBUTING.md](../../../CONTRIBUTING.md) for shared setup.
 
 Topical references: [rpc-toolkit.md](rpc-toolkit.md), [patchdb.md](patchdb.md),
 [i18n-patterns.md](i18n-patterns.md), [core-rust-patterns.md](core-rust-patterns.md),
@@ -25,12 +25,28 @@ Topical references: [rpc-toolkit.md](rpc-toolkit.md), [patchdb.md](patchdb.md),
 
 ## Build & test (run from the repo root)
 
+- Install Rust (including nightly for formatting), rust-analyzer if desired,
+  and Docker for the cross-compilation and test containers.
 - `cargo check -p start-core` — type-check the library.
 - `make start-core-test` — run the test suite (wraps `run-tests.sh`, which uses the `rust-zig-builder`
   container and the `test` feature; skips `export_` tests). Or run a single test directly:
   `cargo test -p start-core <name> --features=test`.
 - `make start-core-format` — format this crate (`make start-core-format-check` for the read-only CI check). Nightly is required for formatting.
 - `cargo build -p start-os --bin startbox` (or the other product crate/bin) to build a binary.
+
+## Extending the API
+
+- A new RPC defines serializable params and response types, implements an async
+  handler (normally with `from_fn_async`), and registers it in the appropriate
+  `ParentHandler` tree. See [rpc-toolkit.md](rpc-toolkit.md) for the supported
+  handler shapes.
+- Types exposed to TypeScript derive `TS` and carry `#[ts(export)]`. Use
+  camel-case serde names and explicit `#[ts(type = "...")]` overrides for Rust
+  types that do not map directly to JavaScript. Regenerate and rebuild the
+  bindings as described below.
+- Add backend translation keys to `locales/i18n.yaml` in all five languages,
+  following the module namespace and kebab-case key convention, then use them
+  through `t!(...)`. See [i18n-patterns.md](i18n-patterns.md).
 
 ## Gotchas
 

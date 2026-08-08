@@ -54,7 +54,7 @@ full ISO/img build.
 ## Quickstart
 
 Build commands run from the **repo root** (one Cargo workspace, one Angular
-workspace). See [CONTRIBUTING.md](CONTRIBUTING.md) for environment setup
+workspace). See [AGENTS.md](AGENTS.md) for environment setup
 (including the OS-image toolchain) and the full build/test workflow.
 
 ```sh
@@ -75,8 +75,7 @@ test suite.
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how the OS product is structured and how
   data flows backend → frontend.
-- [CONTRIBUTING.md](CONTRIBUTING.md) — build/test/format workflow for this product.
-- [AGENTS.md](AGENTS.md) — operating rules for AI developers working here.
+- [AGENTS.md](AGENTS.md) — build/test/format workflow and operating rules.
 - [CHANGELOG.md](CHANGELOG.md) — release history.
 - End-user docs: [docs.start9.com](https://docs.start9.com) (built from `docs/`).
 

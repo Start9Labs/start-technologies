@@ -447,6 +447,14 @@ export class LiveApiService extends ApiService {
     return this.rpcRequest({ method: 'server.test-smtp', params })
   }
 
+  async setNut(params: T.SetNutParams): Promise<null> {
+    return this.rpcRequest({ method: 'server.set-nut', params })
+  }
+
+  async getNutStatus(params: {}): Promise<T.NutStatus> {
+    return this.rpcRequest({ method: 'server.nut-status', params })
+  }
+
   // ssh
 
   async getSshKeys(params: {}): Promise<T.SshKeyResponse[]> {
