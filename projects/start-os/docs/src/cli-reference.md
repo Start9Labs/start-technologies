@@ -715,6 +715,11 @@ Scaffold a new package from the current workspace's template, using NAME (e.g. `
 
 Build an s9pk package from source files.
 
+The packer adds read access to files and read/search access to directories in the packaged
+JavaScript ingredient (`ugo+rX`). This keeps `javascript.squashfs` usable when a build tool creates
+`javascript/` under a restrictive umask, while preserving executable bits and the source tree's
+permissions.
+
 - `-o, --output <PATH>` — Output file path
 - `--javascript <PATH>` — JavaScript bundle path
 - `--icon <PATH>` — Service icon path

@@ -98,8 +98,8 @@ Until both steps run, a changed `#[ts(export)]` type is out of sync with everyth
 ## Further reading
 
 - [README.md](README.md) — what this crate is and how to use it
-- [CONTRIBUTING.md](CONTRIBUTING.md) — build, test, format, and contribution workflow
-- [AGENTS.md](AGENTS.md) — operating rules for AI/dev work (`CLAUDE.md` is a one-line `@AGENTS.md` import)
+- [AGENTS.md](AGENTS.md) — build, test, format, and operating rules for AI/dev work
+  (`CLAUDE.md` is a one-line `@AGENTS.md` import)
 - [rpc-toolkit.md](rpc-toolkit.md) — JSON-RPC handler patterns
 - [patchdb.md](patchdb.md) — Patch-DB watch patterns and TypedDbWatch
 - [i18n-patterns.md](i18n-patterns.md) — Internationalization conventions

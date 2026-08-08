@@ -12,6 +12,10 @@ file tracks notable changes since the move to the monorepo.
 
 ### Fixed
 
+- **`s9pk pack` no longer embeds inaccessible JavaScript under a restrictive umask.** The bundled
+  CLI now adds read access to files and read/search access to directories while creating the v2
+  JavaScript SquashFS, without modifying the source tree or stripping executable bits.
+
 - **The login banner reports system status for every user, not just the first
   one to log in.** It staged its database snapshot at a fixed path in `/tmp`,
   which `pam_motd` created as root at login — so any subsequent non-root run

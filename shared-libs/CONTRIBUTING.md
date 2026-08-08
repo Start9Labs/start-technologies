@@ -1,7 +1,7 @@
 # Contributing to shared-libs
 
 `shared-libs/` groups two cross-product libraries. Contribute inside the relevant
-sub-library; each has its own `CONTRIBUTING.md` with the full detail.
+sub-library and follow its local `AGENTS.md` plus any remaining contribution guide.
 
 ## Documentation
 
@@ -32,7 +32,7 @@ cd shared-libs/crates/start-core && ./run-tests.sh
 - Local `cargo check` is linux-only. CI builds an apple-darwin + linux-musl
   matrix; consider those targets for any change touching `libc`/platform APIs or
   dependencies (cfg-gate platform code rather than reimplementing it).
-- See [`crates/start-core/CONTRIBUTING.md`](crates/start-core/CONTRIBUTING.md)
+- See [`crates/start-core/AGENTS.md`](crates/start-core/AGENTS.md)
   and the topic notes (`core-rust-patterns.md`, `patchdb.md`, `rpc-toolkit.md`,
   `i18n-patterns.md`, `VERSION_BUMP.md`).
 

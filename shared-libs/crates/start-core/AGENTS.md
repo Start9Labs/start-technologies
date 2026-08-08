@@ -5,8 +5,10 @@ All six product bins (`startbox`/`startd`, `start-container`, `start-cli`, `regi
 `tunnelbox`, `startwrt`) link against it; all but `startwrt` are thin wrappers in the product
 crates (`startwrt` is a full backend of its own that imports this crate aliased as `startos`).
 
-`CLAUDE.md` is a one-line `@AGENTS.md` import. See [ARCHITECTURE.md](ARCHITECTURE.md) and
-[CONTRIBUTING.md](CONTRIBUTING.md).
+`CLAUDE.md` is a one-line `@AGENTS.md` import. This file is both the contribution guide and the
+agent/dev operating rules for this scope. See [ARCHITECTURE.md](ARCHITECTURE.md) for how the crate
+is structured and the repo-root [CONTRIBUTING.md](../../../CONTRIBUTING.md) for shared setup and
+conventions.
 
 Topical references: [rpc-toolkit.md](rpc-toolkit.md), [patchdb.md](patchdb.md),
 [i18n-patterns.md](i18n-patterns.md), [core-rust-patterns.md](core-rust-patterns.md),
@@ -27,10 +29,44 @@ Topical references: [rpc-toolkit.md](rpc-toolkit.md), [patchdb.md](patchdb.md),
 
 - `cargo check -p start-core` — type-check the library.
 - `make start-core-test` — run the test suite (wraps `run-tests.sh`, which uses the `rust-zig-builder`
-  container and the `test` feature; skips `export_` tests). Or run a single test directly:
+  test image and the `test` feature; skips `export_` tests). The script builds
+  `start9/cargo-zigbuild-test` from `build/test/testenv.Dockerfile`, adding the Node.js and SquashFS
+  tools required by s9pk integration tests to the standard builder. Or run a single test directly:
   `cargo test -p start-core <name> --features=test`.
-- `make start-core-format` — format this crate (`make start-core-format-check` for the read-only CI check). Nightly is required for formatting.
+- `make start-core-format` — format this crate with the repository's pinned-nightly container
+  (`make start-core-format-check` for the read-only CI check).
 - `cargo build -p start-os --bin startbox` (or the other product crate/bin) to build a binary.
+
+## Adding a New RPC Endpoint
+
+1. Define a params struct with `#[derive(Deserialize, Serialize)]`.
+2. Choose a handler type (`from_fn_async` for most cases).
+3. Write the handler function:
+   `async fn my_handler(ctx: RpcContext, params: MyParams) -> Result<MyResponse, Error>`.
+4. Register it in the appropriate `ParentHandler` tree.
+5. If params/response should be available in TypeScript, add `#[derive(TS)]` and `#[ts(export)]`.
+
+See [rpc-toolkit.md](rpc-toolkit.md) for full handler patterns and all four handler types.
+
+## Adding TS-Exported Types
+
+1. Add `ts_rs::TS` to the derive list and `#[ts(export)]` to the struct or enum.
+2. Use `#[serde(rename_all = "camelCase")]` for JS-friendly field names.
+3. For types that do not implement `TS` (such as `DateTime<Utc>` and `exver::Version`), use
+   `#[ts(type = "string")]` overrides.
+4. For `u64` fields that should be a JavaScript `number`, use `#[ts(type = "number")]`.
+5. Run `make start-core-ts-bindings`.
+6. Rebuild the affected consumer: `cd shared-libs/ts-modules/start-core && make dist` for web,
+   and/or `cd projects/start-sdk && make bundle` for the SDK/container-runtime.
+
+## Adding i18n Keys
+
+1. Add the key to `locales/i18n.yaml` with all five translations.
+2. Use the `t!("your.key.name")` macro in Rust.
+3. Match existing module-path namespaces and use kebab-case for multi-word segments.
+4. Let compile-time validation confirm that every locale is present.
+
+See [i18n-patterns.md](i18n-patterns.md) for full conventions.
 
 ## Gotchas
 

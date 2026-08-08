@@ -108,6 +108,11 @@ make start-wrt-test           # StartWRT Rust crates
 cd shared-libs/crates/start-core && cargo test <test_name> --features=test
 ```
 
+`make start-core-test` builds `start9/cargo-zigbuild-test` from
+`build/test/testenv.Dockerfile`. The derived image adds Node.js and the SquashFS
+tools used by the s9pk integration tests to the standard Rust builder; Docker
+caches it after the first build.
+
 Each product's `CONTRIBUTING.md` covers its own scoped tests.
 
 ## Formatting

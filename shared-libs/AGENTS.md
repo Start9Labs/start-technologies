@@ -10,7 +10,7 @@ read its own `AGENTS.md` first. `CLAUDE.md` is a one-line `@AGENTS.md` import. S
 ## Layout
 
 - `crates/start-core/` — Rust backend lib (`start-core`, lib name `start_core`).
-  Has its own `AGENTS.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md`, plus topic notes
+  Has its own `AGENTS.md`, `ARCHITECTURE.md`, plus topic notes
   (`core-rust-patterns.md`, `i18n-patterns.md`, `patchdb.md`, `rpc-toolkit.md`,
   `s9pk-structure.md`, `exver.md`, `VERSION_BUMP.md`).
 - `ts-modules/` — shared TypeScript modules; the `@start9labs/shared`

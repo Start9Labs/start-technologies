@@ -93,6 +93,11 @@ make install
 make clean
 ```
 
+`start-cli s9pk pack` adds read access to every file and read/search access to every directory in
+the packaged JavaScript ingredient (`ugo+rX`). This keeps `javascript.squashfs` usable when Node.js
+or another build tool created `javascript/` under a restrictive umask. Existing executable bits are
+preserved, and the source directory's permissions are not changed.
+
 ### Chaining Commands
 
 You can chain multiple targets in a single invocation:

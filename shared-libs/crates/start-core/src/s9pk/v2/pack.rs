@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, LazyLock, OnceLock};
@@ -64,6 +65,7 @@ pub static CONTAINER_DATADIR: LazyLock<&'static str> = LazyLock::new(|| {
 pub struct SqfsDir {
     path: PathBuf,
     tmpdir: Arc<TmpDir>,
+    permission_action: Option<&'static str>,
     sqfs: OnceCell<MultiCursorFile>,
 }
 impl SqfsDir {
@@ -71,7 +73,14 @@ impl SqfsDir {
         Self {
             path,
             tmpdir,
+            permission_action: None,
             sqfs: OnceCell::new(),
+        }
+    }
+    fn world_readable(path: PathBuf, tmpdir: Arc<TmpDir>) -> Self {
+        Self {
+            permission_action: Some("chmod(ugo+rX)@true"),
+            ..Self::new(path, tmpdir)
         }
     }
     async fn file(&self) -> Result<&MultiCursorFile, Error> {
@@ -85,12 +94,23 @@ impl SqfsDir {
                         .invoke(ErrorKind::Filesystem)
                         .await?;
                 } else {
-                    Command::new("mksquashfs")
-                        .arg(&self.path)
-                        .arg(&path)
-                        .arg("-quiet")
-                        .invoke(ErrorKind::Filesystem)
-                        .await?;
+                    let mut command = Command::new("mksquashfs");
+                    command.arg(&self.path).arg(&path).arg("-quiet");
+                    if let Some(action) = self.permission_action {
+                        let source_mode = tokio::fs::metadata(&self.path)
+                            .await
+                            .with_ctx(|_| (ErrorKind::Filesystem, self.path.display()))?
+                            .permissions()
+                            .mode()
+                            & 0o7777;
+                        let root_mode = source_mode | 0o555;
+                        command
+                            .arg("-root-mode")
+                            .arg(format!("{root_mode:o}"))
+                            .arg("-action")
+                            .arg(action);
+                    }
+                    command.invoke(ErrorKind::Filesystem).await?;
                 }
 
                 Ok(MultiCursorFile::from(
@@ -702,7 +722,7 @@ pub async fn pack(ctx: CliContext, params: PackParams) -> Result<(), Error> {
         "javascript.squashfs".into(),
         Entry::file(TmpSource::new(
             tmp_dir.clone(),
-            PackSource::Squashfs(Arc::new(SqfsDir::new(js_dir, tmp_dir.clone()))),
+            PackSource::Squashfs(Arc::new(SqfsDir::world_readable(js_dir, tmp_dir.clone()))),
         )),
     );
 
@@ -944,4 +964,160 @@ pub async fn list_ingredients(_: CliContext, params: PackParams) -> Result<Vec<P
     }
 
     Ok(ingredients)
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
+    use super::*;
+    use crate::context::config::ClientConfig;
+    use crate::developer::write_signing_key;
+
+    const CHILD_ENV: &str = "STARTOS_PACK_PERMISSIONS_TEST_CHILD";
+    const TEST_NAME: &str =
+        "s9pk::v2::pack::tests::javascript_squashfs_is_readable_after_restrictive_umask";
+
+    fn mode(path: impl AsRef<Path>) -> u32 {
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    #[tokio::test]
+    async fn javascript_squashfs_is_readable_after_restrictive_umask() {
+        let workspace = Arc::new(TmpDir::new().await.unwrap());
+        // Umask is process-global, so isolate it instead of racing other tests.
+        if std::env::var_os(CHILD_ENV).is_none() {
+            let startos = workspace.join(".startos");
+            tokio::fs::create_dir(&startos).await.unwrap();
+            write_signing_key(
+                &ed25519_dalek::SigningKey::from_bytes(&[7; 32]),
+                startos.join("build.key.pem"),
+            )
+            .await
+            .unwrap();
+
+            Command::new("sh")
+                .arg("-c")
+                .arg(r#"umask 077; exec "$@""#)
+                .arg("sh")
+                .arg(std::env::current_exe().unwrap())
+                .arg(TEST_NAME)
+                .arg("--exact")
+                .arg("--nocapture")
+                .env(CHILD_ENV, &**workspace)
+                .current_dir(&*workspace)
+                .capture(false)
+                .invoke(ErrorKind::Filesystem)
+                .await
+                .unwrap();
+            return;
+        }
+
+        let package = workspace.join("package");
+        let javascript = package.join("javascript");
+        tokio::fs::create_dir_all(javascript.join("nested"))
+            .await
+            .unwrap();
+        tokio::fs::write(
+            javascript.join("index.js"),
+            r#"module.exports.manifest = {
+  id: "permissions",
+  version: "1.0.0:0",
+  canMigrateTo: "1.0.0:0",
+  canMigrateFrom: "1.0.0:0",
+  title: "Permissions",
+  description: { short: "Test package", long: "Test package" },
+  releaseNotes: "Initial test version",
+  license: "MIT",
+  packageRepo: "https://example.com/package",
+  upstreamRepo: "https://example.com/upstream",
+  images: {},
+  volumes: []
+}
+"#,
+        )
+        .await
+        .unwrap();
+        tokio::fs::write(javascript.join("nested/helper"), "#!/bin/sh\n")
+            .await
+            .unwrap();
+        tokio::fs::write(package.join("icon.png"), [])
+            .await
+            .unwrap();
+        tokio::fs::write(package.join("LICENSE.md"), "MIT\n")
+            .await
+            .unwrap();
+        tokio::fs::write(package.join("instructions.md"), "Test instructions\n")
+            .await
+            .unwrap();
+        tokio::fs::set_permissions(&javascript, std::fs::Permissions::from_mode(0o770))
+            .await
+            .unwrap();
+        tokio::fs::set_permissions(
+            javascript.join("nested/helper"),
+            std::fs::Permissions::from_mode(0o700),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(mode(&javascript), 0o770);
+        assert_eq!(mode(javascript.join("index.js")), 0o600);
+        assert_eq!(mode(javascript.join("nested/helper")), 0o700);
+
+        let output = workspace.join("permissions.s9pk");
+        pack(
+            CliContext::init(ClientConfig::default()).unwrap(),
+            PackParams {
+                path: Some(package),
+                output: Some(output.clone()),
+                javascript: None,
+                icon: None,
+                license: None,
+                instructions: None,
+                assets: None,
+                no_assets: true,
+                arch: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let s9pk = S9pk::open(output, None).await.unwrap();
+        let javascript_entry = s9pk
+            .as_archive()
+            .contents()
+            .get_path("javascript.squashfs")
+            .unwrap();
+        let squashfs_path = workspace.join("javascript.squashfs");
+        tokio::fs::write(
+            &squashfs_path,
+            javascript_entry
+                .expect_file()
+                .unwrap()
+                .to_vec(javascript_entry.hash())
+                .await
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        let extracted = workspace.join("extracted");
+        Command::new("sh")
+            .arg("-c")
+            .arg(r#"umask 000; exec unsquashfs -quiet -dest "$1" "$2""#)
+            .arg("sh")
+            .arg(&extracted)
+            .arg(squashfs_path)
+            .invoke(ErrorKind::Filesystem)
+            .await
+            .unwrap();
+
+        assert_eq!(mode(&extracted), 0o775);
+        assert_eq!(mode(extracted.join("nested")), 0o755);
+        assert_eq!(mode(extracted.join("index.js")), 0o644);
+        assert_eq!(mode(extracted.join("nested/helper")), 0o755);
+
+        assert_eq!(mode(&javascript), 0o770);
+        assert_eq!(mode(javascript.join("index.js")), 0o600);
+        assert_eq!(mode(javascript.join("nested/helper")), 0o700);
+    }
 }
