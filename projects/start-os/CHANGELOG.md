@@ -15,9 +15,13 @@ file tracks notable changes since the move to the monorepo.
 - **A service that adds an SSL port keeps the address you already had.** When a
   service gained an SSL port alongside a plaintext one it already had, the new
   SSL port took over the existing number and the plaintext port was moved to an
-  arbitrary one — changing an address you may have saved. Each now keeps its
-  own: the port you already had stays where it is, and the one being added takes
-  the port the service asks for.
+  arbitrary one — so the address you had saved started answering over SSL, and
+  the port the service documents for SSL was never used. Services carried
+  forward from 0.3.5.1 hit this most: Electrs served Electrum over SSL on 50001
+  rather than 50002, so a wallet pointed at it could only connect with SSL
+  switched on. Each port now keeps its own — the one you already had stays where
+  it is, the one being added takes the port the service asks for — and a service
+  already on the wrong ports is moved back when you update.
 
 - **The StartOS UI is served over plain HTTP on port 80.** Servers set up before
   0.4.0.1 gave the interface a high-numbered port instead, and nothing answered
