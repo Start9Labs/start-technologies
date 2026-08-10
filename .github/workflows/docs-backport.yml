@@ -107,13 +107,33 @@ jobs:
             # a fix was written on live-docs and hand-copied to master first.
             if ! git cherry-pick -x -n $(git rev-list --reverse "$RANGE"); then
               git cherry-pick --abort || true
-              echo "conflict=true" >> "$GITHUB_OUTPUT"
+              echo "fallback=conflict" >> "$GITHUB_OUTPUT"
               echo "::warning::Backport conflicts with master — opening a PR instead."
               exit 0
             fi
 
             if git diff --cached --quiet; then
               echo "::notice::live-docs commits are already in master — nothing to backport."
+              exit 0
+            fi
+
+            # createCommitOnBranch can only express regular files: additions
+            # carry base64 content and land as mode 100644. A symlink (every
+            # book's docs/theme is one, mode 120000) would be read through to
+            # its target — and where that target is a directory, base64 fails,
+            # the command substitution swallows it, and the mutation happily
+            # writes contents:"" *over the symlink*. Divert anything that is not
+            # a plain 100644-to-100644 change to the git-based fallback, which
+            # represents modes natively.
+            UNSUPPORTED=$(git diff --cached --raw "$BASE" | awk -F'\t' '{
+              split($1, m, " ");
+              old = substr(m[1], 2); new = m[2];
+              if ((old != "100644" && old != "000000") || (new != "100644" && new != "000000")) print $2;
+            }')
+            if [ -n "$UNSUPPORTED" ]; then
+              echo "::warning::Backport touches paths the commit API cannot represent (symlinks or mode changes) — opening a PR instead."
+              printf '  %s\n' $UNSUPPORTED
+              echo "fallback=unsupported-mode" >> "$GITHUB_OUTPUT"
               exit 0
             fi
 
@@ -170,19 +190,21 @@ jobs:
             cat /tmp/commit-result || true
           done
 
-          echo "conflict=true" >> "$GITHUB_OUTPUT"
+          echo "fallback=contention" >> "$GITHUB_OUTPUT"
           echo "::warning::Could not land on master after 3 attempts — opening a PR instead."
 
       # Only reached when the change could not land unattended. The commit is
       # preserved on a branch so a maintainer can resolve it by hand.
       - name: Open a PR instead
-        if: steps.pick.outputs.conflict == 'true'
+        if: steps.pick.outputs.fallback != ''
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           AFTER: ${{ github.event.after }}
           BEFORE: ${{ github.event.before }}
+          REASON: ${{ steps.pick.outputs.fallback }}
         run: |
           set -euo pipefail
+          echo "Falling back to a PR: $REASON"
           BRANCH="backport/live-docs-$(git rev-parse --short "$AFTER")"
           git fetch --no-tags origin master
           git reset --hard origin/master
@@ -215,7 +237,19 @@ jobs:
           {
             echo "Automated backport of the documentation change published to docs.start9.com from \`live-docs\` (${AFTER})."
             echo
-            echo "It could not be applied to master unattended — **resolve the conflicts before merging**. Until this lands, master's copy of the docs is out of step and the next tag will revert the published fix."
+            case "$REASON" in
+              unsupported-mode)
+                echo "It carries a symlink or file-mode change, which the signed commit API cannot represent, so it comes as a branch instead. **Nothing is wrong with it** — review and merge normally."
+                ;;
+              contention)
+                echo "master moved under it three times running, so it comes as a branch instead. **Nothing is wrong with it** — review and merge normally."
+                ;;
+              *)
+                echo "It could not be applied to master unattended — **resolve the conflicts before merging**."
+                ;;
+            esac
+            echo
+            echo "Until this lands, master's copy of the docs is out of step and the next tag will revert the published fix."
             if [ -n "$DROPPED" ]; then
               echo
               echo "> [!WARNING]"

@@ -92,7 +92,7 @@ CI then runs the llms.txt generator (`scripts/generate-llms-txt.ts`) to produce 
 
 ## Deployment
 
-Deployment is via GitHub Actions (`.github/workflows/docs-deploy.yml` at the monorepo root). It triggers on pushes to `master` touching `projects/start-docs/**`, `projects/start-os/docs/**`, `projects/start-tunnel/docs/**`, or `projects/start-sdk/docs/**`. Steps:
+Deployment is via GitHub Actions (`.github/workflows/docs-deploy.yml` at the monorepo root). It triggers on pushes to **`live-docs`** — not `master` — touching `projects/start-docs/**`, `projects/start-os/docs/**`, `projects/start-tunnel/docs/**`, `projects/start-sdk/docs/**`, or `projects/start-wrt/docs/**`, and its checkout is pinned to `live-docs` so a manual dispatch cannot publish another branch. Content reaches `live-docs` on a product tag (`docs-sync-on-tag.yml`) or by PR for fixes to already-published pages (`docs-backport.yml` then lands the same change on master). See [AGENTS.md](AGENTS.md#deployment). Steps:
 
 1. Install mdBook (v0.5.2) and mdbook-tabs (0.3.4)
 2. `./build.sh`, then generate llms.txt in `scripts/`
