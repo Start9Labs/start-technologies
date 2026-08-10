@@ -343,48 +343,127 @@ changelog_section() {
 # Cut the release from an up-to-date master, or fall back to `pull-gha` for a
 # repair.
 promote_alpha_debs() {
-    local arch darch idx entry hash filename want
+    local keyring tmp want arch darch rel_path idx_sha got entry hash sha filename base
+    keyring="$REPO_ROOT/apt/start9-alpha.gpg"
+    if [ ! -f "$keyring" ]; then
+        >&2 echo "Cannot verify the ${APT_ALPHA_SUITE} suite: ${keyring} is missing."
+        exit 1
+    fi
+
     want=$(tag_commit_sha)
+    tmp=$(mktemp -d)
     echo "Promoting ${PROJECT} debs from the ${APT_ALPHA_SUITE} suite (commit ${want})..."
+
+    # The marker and the clear happen before anything is fetched, so an
+    # interrupted promotion can never leave a previous run's debs sitting beside
+    # a marker that says otherwise — `push` then fails on an empty dir rather
+    # than shipping a mixed set.
+    echo "$want" > "$(gha_commit_file)"
+    rm -f ./*.deb
+
+    # Root of trust. Alpha is signed with the CI key precisely so its consumers
+    # can verify it, and a releaser promoting into stable is one — reading the
+    # index over plain HTTPS and trusting a self-asserted field would let anyone
+    # who can write the bucket (without the signing key) get bytes stable-signed.
+    curl -fsSL "${APT_BASE_URL}/dists/${APT_ALPHA_SUITE}/InRelease" -o "$tmp/InRelease"
+    if ! gpg --no-default-keyring --keyring "$keyring" --batch --yes \
+        --output "$tmp/Release" --decrypt "$tmp/InRelease" 2> "$tmp/gpg.err"; then
+        >&2 echo "  ✗ the ${APT_ALPHA_SUITE} InRelease is not signed by the key in ${keyring}"
+        >&2 sed 's/^/    /' "$tmp/gpg.err"
+        rm -rf "$tmp"
+        exit 1
+    fi
+
     for arch in $DEB_ARCHES; do
         darch=$(deb_arch "$arch")
-        idx="${APT_BASE_URL}/dists/${APT_ALPHA_SUITE}/${APT_COMPONENT}/binary-${darch}/Packages"
+        rel_path="${APT_COMPONENT}/binary-${darch}/Packages"
+
+        # The index, against the hash the signed Release commits to.
+        idx_sha=$(awk -v p="$rel_path" '
+            /^SHA256:/ { in_sha = 1; next }
+            /^[^ ]/    { in_sha = 0 }
+            in_sha && $3 == p { print $1; exit }
+        ' "$tmp/Release")
+        if [ -z "$idx_sha" ]; then
+            >&2 echo "  ✗ the signed Release does not list ${rel_path}"
+            rm -rf "$tmp"
+            exit 1
+        fi
+        curl -fsSL "${APT_BASE_URL}/dists/${APT_ALPHA_SUITE}/${rel_path}" -o "$tmp/Packages"
+        got=$(sha256sum "$tmp/Packages" | cut -d' ' -f1)
+        if [ "$got" != "$idx_sha" ]; then
+            >&2 echo "  ✗ ${rel_path} does not match the hash the signed Release commits to"
+            rm -rf "$tmp"
+            exit 1
+        fi
+
         # Emitted at the stanza boundary, not on a particular field: the index
         # does not guarantee an order, and Git-Hash follows Filename in practice.
-        entry=$(curl -fsSL "$idx" | awk -v pkg="$PROJECT" -v ver="$VERSION" '
+        entry=$(awk -v pkg="$PROJECT" -v ver="$VERSION" '
             function flush() {
-                if (p == pkg && index(v, ver) > 0 && f != "") print h "\t" f
-                p = ""; v = ""; h = ""; f = ""
+                if (p == pkg && index(v, ver) > 0 && f != "") print h "\t" s "\t" f
+                p = ""; v = ""; h = ""; s = ""; f = ""
             }
-            /^$/       { flush(); next }
+            /^$/         { flush(); next }
             /^Package:/  { p = $2 }
             /^Version:/  { v = $2 }
             /^Git-Hash:/ { h = $2 }
+            /^SHA256:/   { s = $2 }
             /^Filename:/ { f = $2 }
             END { flush() }
-        ')
+        ' "$tmp/Packages")
         # First line taken in the shell rather than piped through `head -1`,
         # which would close the pipe early and take SIGPIPE under `pipefail`.
         entry=${entry%%$'\n'*}
         if [ -z "$entry" ]; then
             >&2 echo "  ✗ ${darch}: no ${PROJECT} ${VERSION} deb in the ${APT_ALPHA_SUITE} suite"
-            return 1
+            rm -rf "$tmp"
+            exit 1
         fi
         hash=${entry%%$'\t'*}
+        entry=${entry#*$'\t'}
+        sha=${entry%%$'\t'*}
         filename=${entry#*$'\t'}
+
         if [ "$hash" != "$want" ]; then
             >&2 echo "  ✗ ${darch}: ${APT_ALPHA_SUITE} holds a build of ${hash:-an unrecorded commit}, not ${want}"
-            >&2 echo "    Alpha carries the newest master build. Cut the release from an up-to-date"
-            >&2 echo "    master, or use 'pull-gha' with the run that built ${want}."
-            return 1
+            >&2 echo
+            >&2 echo "    Alpha holds the newest build of THIS product, which is not the same as the"
+            >&2 echo "    tip of master: the ${PROJECT} workflow is path-filtered, so master advances"
+            >&2 echo "    on changes elsewhere without producing a new build. Usually the fix is to"
+            >&2 echo "    tag the commit that produced these bytes, not to wait for a build of HEAD"
+            >&2 echo "    that will never come:"
+            >&2 echo
+            if [ -n "$hash" ]; then
+                >&2 echo "      COMMIT=${hash} ./scripts/manage-release.sh release ${PROJECT}"
+            else
+                >&2 echo "      (this deb predates the Git-Hash control field — use 'pull-gha')"
+            fi
+            >&2 echo
+            >&2 echo "    Check that commit is the one you mean to ship. 'pull-gha' stays the repair"
+            >&2 echo "    path when it is not."
+            rm -rf "$tmp"
+            exit 1
         fi
-        echo "  ${arch}: ${filename}"
-        curl -fsSL "${APT_BASE_URL}/${filename}" -o "$(basename "$filename")"
+
+        # The payload, against the hash the (now trusted) index commits to. The
+        # pool key is stable across builds, so without this an alpha republish
+        # between the index read and this download would swap the bytes after
+        # the commit check had already passed.
+        base=$(basename "$filename")
+        echo "  ${arch}: ${base}"
+        curl -fsSL "${APT_BASE_URL}/${filename}" -o "$tmp/$base"
+        got=$(sha256sum "$tmp/$base" | cut -d' ' -f1)
+        if [ "$got" != "$sha" ]; then
+            >&2 echo "  ✗ ${darch}: ${base} does not match the hash the signed index commits to"
+            >&2 echo "    (the suite was republished mid-promotion, or the object was tampered with)"
+            rm -rf "$tmp"
+            exit 1
+        fi
     done
-    # Same marker pull-gha writes, so cmd_tag still refuses to tag a different
-    # commit than the staged assets were built from — the check above only holds
-    # for the COMMIT in effect at promotion time.
-    echo "$want" > "$(gha_commit_file)"
+
+    mv "$tmp"/*.deb .
+    rm -rf "$tmp"
 }
 
 pull_gha_debs() {
