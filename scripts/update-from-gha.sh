@@ -179,7 +179,11 @@ echo "Uploading the image..."
 remote_sh 'sudo tee /media/startos/images/next.rootfs > /dev/null' < "$SQUASHFS"
 
 echo "Upgrading..."
-remote_sh "sudo CHECKSUM=$SQFS_SUM /usr/lib/startos/scripts/upgrade /media/startos/images/next.rootfs"
+# The checksum is passed twice on purpose. Servers running an older image carry
+# an `upgrade` that only compares when a second positional argument is present,
+# so CHECKSUM alone would be silently ignored there; the current script keys off
+# CHECKSUM and ignores $2. Passing both verifies on either.
+remote_sh "sudo CHECKSUM=$SQFS_SUM /usr/lib/startos/scripts/upgrade /media/startos/images/next.rootfs $SQFS_SUM"
 
 echo
 echo "Done — $REMOTE is running ${RUN_SHA:0:7} after it reboots."

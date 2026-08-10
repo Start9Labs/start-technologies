@@ -14,7 +14,10 @@ on:
       - 'projects/start-tunnel/docs/**'
       - 'projects/start-sdk/docs/**'
       - 'projects/start-wrt/docs/**'
-  # For redeploying the current live-docs without a new commit.
+  # For redeploying the current live-docs without a new commit. The Run workflow
+  # UI defaults its ref to master, so the checkout below pins `live-docs`
+  # explicitly — otherwise a default dispatch would publish master's unreleased
+  # books and versions.conf to docs.start9.com.
   workflow_dispatch:
 
 permissions:
@@ -31,7 +34,11 @@ jobs:
       run:
         working-directory: projects/start-docs
     steps:
+      # Pinned, not inherited from the triggering ref: this workflow publishes to
+      # production, and live-docs is the only branch that may reach it.
       - uses: actions/checkout@v4
+        with:
+          ref: live-docs
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

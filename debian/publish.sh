@@ -29,15 +29,19 @@ SUITE="${SUITE:-stable}"
 COMPONENT="${COMPONENT:-main}"
 REPO_DIR="$(mktemp -d)"
 
-# Every suite owns its own pool, so publishing to one can never evict another's
-# .deb (the eviction below and the Packages scan are both pool-scoped). `stable`
-# keeps the historical pool/<component>/ path because the published repo is
+# Every suite owns its own pool, so publishing to one can never index or evict
+# another's .deb — the eviction below, the Packages scan, and both syncs are all
+# scoped to POOL_ROOT. The roots must be **siblings**, not nested: `stable`
+# scans its whole root, so an `alpha` pool living under `pool/` would show up in
+# `dists/stable/.../Packages` as `Filename: pool/alpha/...`.
+#
+# `stable` keeps the historical `pool/` path because the published repo is
 # already laid out that way — moving it would break `stable` for the window
 # between the delete and the re-upload.
 if [ "$SUITE" = stable ]; then
     POOL_ROOT="pool"
 else
-    POOL_ROOT="pool/${SUITE}"
+    POOL_ROOT="pool-${SUITE}"
 fi
 
 cleanup() {
@@ -78,10 +82,26 @@ fi
 # so publishing `alpha` from CI can neither index nor delete anything in
 # `stable`. Trust is already separated by the per-suite Release signature; this
 # separates write access too.
+#
+# A failed or partial download must NOT be swallowed: the upload below prunes
+# whatever is missing from this mirror, so proceeding on half a mirror would
+# delete the other half of the suite. An empty prefix is the one benign case
+# (first publish), and it is detected explicitly rather than inferred from an
+# error.
+sync_down() {
+    local prefix="$1" dest="$2" listing
+    mkdir -p "$dest"
+    listing=$(s3 ls --recursive "s3://${BUCKET}/${prefix}")
+    if [ -z "$listing" ]; then
+        echo "  s3://${BUCKET}/${prefix} is empty — first publish into it."
+        return 0
+    fi
+    s3 sync --no-mime-magic "s3://${BUCKET}/${prefix}" "$dest"
+}
+
 echo "Syncing the ${SUITE} suite from s3://${BUCKET}/ ..."
-mkdir -p "$REPO_DIR/$POOL_ROOT" "$REPO_DIR/dists/${SUITE}"
-s3 sync --no-mime-magic "s3://${BUCKET}/${POOL_ROOT}/" "$REPO_DIR/${POOL_ROOT}/" 2>/dev/null || true
-s3 sync --no-mime-magic "s3://${BUCKET}/dists/${SUITE}/" "$REPO_DIR/dists/${SUITE}/" 2>/dev/null || true
+sync_down "${POOL_ROOT}/" "$REPO_DIR/${POOL_ROOT}/"
+sync_down "dists/${SUITE}/" "$REPO_DIR/dists/${SUITE}/"
 
 # Collect all .deb files from arguments
 DEB_FILES=()

@@ -196,6 +196,14 @@ jobs:
     needs: [deb]
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
     runs-on: ubuntu-latest
+    # All three deb products publish into the same pool-alpha/ + dists/alpha/.
+    # Each one syncs that suite down, adds only its own debs, and uploads with
+    # --delete-removed — so two running at once would each prune the other's
+    # just-published package. The group name is deliberately fixed and shared
+    # across the three workflows; never scope it by github.workflow.
+    concurrency:
+      group: apt-publish-alpha
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v6
 

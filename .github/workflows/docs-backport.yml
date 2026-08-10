@@ -33,7 +33,18 @@ concurrency:
 jobs:
   backport:
     name: Backport to master
-    if: ${{ !contains(github.event.head_commit.message, '[skip-backport]') }}
+    # The marker only silences the backport for the docs bot's own sync commits.
+    # Keyed on the message alone, any docs commit that happened to contain the
+    # string — a page documenting this very workflow, say — would vanish from
+    # master silently. A non-bot commit carrying it is warned about below and
+    # backported anyway.
+    if: >-
+      ${{
+        !(
+          contains(github.event.head_commit.message, '[skip-backport]')
+          && github.event.head_commit.author.name == 'start9-docs-bot[bot]'
+        )
+      }}
     runs-on: ubuntu-latest
     # master is PR-protected with no bypass for github-actions[bot], so this
     # needs the docs bot App, which IS a bypass actor. Its private key is an
@@ -55,6 +66,11 @@ jobs:
           ref: master
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
+
+      - name: Warn about a stray skip marker
+        if: ${{ contains(github.event.head_commit.message, '[skip-backport]') }}
+        run: |
+          echo "::warning::The head commit contains [skip-backport] but was not authored by the docs bot, so it is being backported anyway. That marker is reserved for docs-sync-on-tag.yml."
 
       - name: Backport onto master
         id: pick

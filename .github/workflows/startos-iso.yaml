@@ -192,11 +192,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           BASE_REF: ${{ github.base_ref }}
           HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
           # An integration/* branch merging into master is the last gate before
           # the batch ships — build every platform image so reviewers can flash
           # and test it, whatever paths it happens to touch.
-          if [ "$BASE_REF" = master ] && [ "${HEAD_REF#integration/}" != "$HEAD_REF" ]; then
+          #
+          # head_ref is only a branch *name*, which a fork controls freely, so
+          # the branch must also live in this repo. Otherwise anyone could spend
+          # the full image matrix by naming a fork branch integration/anything.
+          if [ "$BASE_REF" = master ] \
+            && [ "$HEAD_REPO" = "${{ github.repository }}" ] \
+            && [ "${HEAD_REF#integration/}" != "$HEAD_REF" ]; then
             echo "$HEAD_REF -> master: building the full image matrix."
             echo "image=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -483,6 +490,12 @@ jobs:
         }}
       S3_BUCKET: s3://startos-images
       S3_CDN: https://startos-images.nyc3.cdn.digitaloceanspaces.com
+      # Alpha artifacts get their own key prefix so per-commit builds never
+      # accumulate in — or collide with — the release namespace manage-release.sh
+      # publishes and signs. Basenames already carry the commit hash, so the
+      # prefix is about keeping the namespaces separable (and separately
+      # expirable), not about preventing an overwrite.
+      S3_PREFIX: ${{ (github.event_name == 'push' || github.event.inputs.deploy == 'alpha') && 'alpha/' || '' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -571,7 +584,7 @@ jobs:
             for file in *_${PLATFORM}.squashfs *_${PLATFORM}.iso *_${PLATFORM}.img; do
               [ -f "$file" ] || continue
               echo "Uploading $file..."
-              s3cmd put -P "$file" "${{ env.S3_BUCKET }}/v${VERSION}/$file"
+              s3cmd put -P "$file" "${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}v${VERSION}/$file"
             done
           done
 
@@ -612,6 +625,6 @@ jobs:
                 --platform="$PLATFORM" \
                 --version="$VERSION" \
                 "$file" \
-                "${{ env.S3_CDN }}/v${VERSION}/$file"
+                "${{ env.S3_CDN }}/${{ env.S3_PREFIX }}v${VERSION}/$file"
             done
           done

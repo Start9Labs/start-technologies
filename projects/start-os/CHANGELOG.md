@@ -12,6 +12,12 @@ file tracks notable changes since the move to the monorepo.
 
 ### Fixed
 
+- **Image upgrades verify their checksum again.** `upgrade` compared the image's
+  blake3 hash only when it was given a second positional argument, which no
+  caller passed — so the comparison never ran and a corrupt but still mountable
+  image would be installed without complaint. It now verifies whenever
+  `CHECKSUM` is set.
+
 - **The login banner reports system status for every user, not just the first
   one to log in.** It staged its database snapshot at a fixed path in `/tmp`,
   which `pam_motd` created as root at login — so any subsequent non-root run

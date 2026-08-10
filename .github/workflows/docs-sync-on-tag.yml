@@ -13,6 +13,10 @@ name: Sync docs to live-docs on tag
 # projects/start-docs/versions.conf rides along with the rest of the infra, so
 # the version each book is published under is whatever the tagged tree said. It
 # is a deliberate, hand-maintained file: set it in master before you tag.
+#
+# Two guards protect the shared tree: the tagged commit must be an ancestor of
+# master, and a tag that predates the infrastructure already published syncs its
+# book alone. Between them, a backfilled or re-cut tag cannot roll the site back.
 on:
   push:
     tags: ['*/v*']
@@ -55,11 +59,35 @@ jobs:
           set -euo pipefail
 
           PROJECT="${TAG%%/v*}"
-          echo "Tag $TAG -> project $PROJECT"
+          SRC=$(git rev-list -n1 "$TAG")
+          echo "Tag $TAG -> project $PROJECT, commit $SRC"
 
           if ! git cat-file -e "$TAG:projects/$PROJECT/docs" 2>/dev/null; then
             echo "::notice::$PROJECT ships no docs/ book — nothing to publish."
             exit 0
+          fi
+
+          git fetch --no-tags origin master
+
+          # A tag cut off an unmerged branch would publish content master has no
+          # copy of, and [skip-backport] stops the backport from reconciling it.
+          if ! git merge-base --is-ancestor "$SRC" origin/master; then
+            echo "::error::$TAG points at $SRC, which is not an ancestor of master. Merge the branch and re-cut the tag before publishing its docs."
+            exit 1
+          fi
+
+          # The shared projects/start-docs tree (theme, build.sh, versions.conf,
+          # deploy infra) is not versioned per product, so a backfilled or re-cut
+          # tag from an old commit would roll the whole site back to that commit's
+          # infrastructure. Each sync records the commit it published from; if
+          # this tag predates that, publish the book alone and leave the shared
+          # tree where it is. Ancestry, not dates — tag order is not chronology.
+          PREV=$(git log -1 --format=%B -- projects/start-docs | sed -n 's/^Source-Commit: *//p' | head -n1)
+          SYNC_INFRA=1
+          if [ -n "$PREV" ] && git cat-file -e "${PREV}^{commit}" 2>/dev/null \
+            && [ "$PREV" != "$SRC" ] && git merge-base --is-ancestor "$SRC" "$PREV"; then
+            SYNC_INFRA=0
+            echo "::warning::$TAG ($SRC) predates the published docs infrastructure ($PREV) — publishing $PROJECT's book only, leaving projects/start-docs untouched."
           fi
 
           git config user.name "start9-docs-bot[bot]"
@@ -67,18 +95,24 @@ jobs:
 
           # Delete then restore from the tag, so files the release removed are
           # actually gone rather than left behind by a copy-over.
-          rm -rf "projects/$PROJECT/docs" projects/start-docs
-          git checkout "$TAG" -- "projects/$PROJECT/docs" projects/start-docs
+          rm -rf "projects/$PROJECT/docs"
+          git checkout "$TAG" -- "projects/$PROJECT/docs"
+          if [ "$SYNC_INFRA" = 1 ]; then
+            rm -rf projects/start-docs
+            git checkout "$TAG" -- projects/start-docs
+          fi
 
-          if git diff --cached --quiet && git diff --quiet; then
+          git add -A "projects/$PROJECT/docs" projects/start-docs
+          if git diff --cached --quiet; then
             echo "::notice::live-docs already matches $TAG."
             exit 0
           fi
 
-          git add -A "projects/$PROJECT/docs" projects/start-docs
           # [skip-backport] is load-bearing, not a nicety: this push DOES raise a
           # push event (App tokens are exempt from the GITHUB_TOKEN no-recursion
           # rule), so docs-backport.yml will see it. The content came from master
-          # already, so it must not be bounced back.
-          git commit -m "docs: publish $PROJECT docs from $TAG [skip-backport]"
+          # already, so it must not be bounced back. Source-Commit is what the
+          # next run's rollback guard reads.
+          git commit -m "docs: publish $PROJECT docs from $TAG [skip-backport]" \
+                     -m "Source-Commit: $SRC"
           git push origin HEAD:live-docs
