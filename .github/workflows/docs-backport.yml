@@ -184,19 +184,52 @@ jobs:
         run: |
           set -euo pipefail
           BRANCH="backport/live-docs-$(git rev-parse --short "$AFTER")"
+          git fetch --no-tags origin master
           git reset --hard origin/master
           git checkout -b "$BRANCH"
-          git cherry-pick -x $(git rev-list --reverse "${BEFORE}..${AFTER}") || true
-          # Leave conflict markers in the tree rather than dropping the change:
-          # the PR is the handoff, and an empty branch would hide the problem.
-          git add -A
-          git -c core.editor=true cherry-pick --continue 2> /dev/null || true
+
+          # One commit at a time, and every conflict resolved by keeping the
+          # markers. Cherry-picking the whole range at once stops at the first
+          # conflict, and a single --continue only advances past that one — the
+          # tail would be dropped from a branch whose PR claims the whole range.
+          # --allow-empty keeps a patch already present in master from aborting
+          # the sequence.
+          DROPPED=""
+          for commit in $(git rev-list --reverse "${BEFORE}..${AFTER}"); do
+            if git cherry-pick -x --allow-empty --keep-redundant-commits "$commit"; then
+              continue
+            fi
+            git add -A
+            if ! git -c core.editor=true cherry-pick --continue; then
+              git cherry-pick --abort || true
+              DROPPED="$DROPPED $commit"
+              echo "::warning::Could not carry $commit onto the backport branch."
+            fi
+          done
+
           git push -f origin "$BRANCH"
+
+          # The PR body must describe what the branch actually carries. A commit
+          # that could not be applied at all is named here rather than left to be
+          # inferred from a range that no longer matches the diff.
+          {
+            echo "Automated backport of the documentation change published to docs.start9.com from \`live-docs\` (${AFTER})."
+            echo
+            echo "It could not be applied to master unattended — **resolve the conflicts before merging**. Until this lands, master's copy of the docs is out of step and the next tag will revert the published fix."
+            if [ -n "$DROPPED" ]; then
+              echo
+              echo "> [!WARNING]"
+              echo "> These commits could not be carried onto this branch at all and are **not** included. Apply them by hand:"
+              echo ">"
+              for commit in $DROPPED; do
+                echo "> - \`$(git rev-parse --short "$commit")\` $(git log -1 --format=%s "$commit")"
+              done
+            fi
+          } > /tmp/pr-body.md
+
           gh pr create \
             --base master \
             --head "$BRANCH" \
             --title "docs: backport live-docs $(git rev-parse --short "$AFTER") to master" \
-            --body "Automated backport of the documentation change published to docs.start9.com from \`live-docs\` (${AFTER}).
-
-          It could not be applied to master unattended — **resolve the conflicts before merging**. Until this lands, master's copy of the docs is out of step and the next tag will revert the published fix." \
+            --body-file /tmp/pr-body.md \
             || echo "::warning::A PR for $BRANCH already exists."

@@ -210,6 +210,13 @@ jobs:
     # --delete-removed — so two running at once would each prune the other's
     # just-published package. The group name is deliberately fixed and shared
     # across the three workflows; never scope it by github.workflow.
+    #
+    # Known limitation: GitHub keeps only one *pending* run per group, so if all
+    # three publish at once the middle one is superseded rather than queued, and
+    # that product's alpha deb stays at its previous version until its next push
+    # to master. That costs freshness on a testing channel, never correctness —
+    # the suite is always internally consistent, because the superseded run
+    # never wrote.
     concurrency:
       group: apt-publish-alpha
       cancel-in-progress: false

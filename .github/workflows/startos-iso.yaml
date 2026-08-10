@@ -495,6 +495,13 @@ jobs:
         )
       )
     runs-on: ubuntu-latest
+    # The workflow-level group is scoped by event, so a dispatched alpha deploy
+    # could otherwise run alongside a master-push one and interleave their
+    # remove -> add -> asset-add sequences against the same registry version.
+    # This group is per channel and shared across event types.
+    concurrency:
+      group: startos-deploy-${{ github.event_name == 'push' && 'alpha' || github.event.inputs.deploy }}
+      cancel-in-progress: false
     env:
       # A master push is always alpha; a dispatch deploys to the channel it named.
       CHANNEL: ${{ github.event_name == 'push' && 'alpha' || github.event.inputs.deploy }}

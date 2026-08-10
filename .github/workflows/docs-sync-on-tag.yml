@@ -82,7 +82,12 @@ jobs:
           # infrastructure. Each sync records the commit it published from; if
           # this tag predates that, publish the book alone and leave the shared
           # tree where it is. Ancestry, not dates — tag order is not chronology.
-          PREV=$(git log -1 --format=%B -- projects/start-docs | sed -n 's/^Source-Commit: *//p' | head -n1)
+          # Walk back to the newest commit that actually carries a trailer, not
+          # just the newest commit touching the tree: a hand PR to live-docs
+          # fixing the shared infrastructure has no trailer, and reading only the
+          # tip would blank the watermark and re-open the rollback it guards
+          # against. (Necessarily inert until the first sync writes one.)
+          PREV=$(git log --format=%B -- projects/start-docs | sed -n 's/^Source-Commit: *//p' | head -n1)
           SYNC_INFRA=1
           if [ -n "$PREV" ] && git cat-file -e "${PREV}^{commit}" 2>/dev/null \
             && [ "$PREV" != "$SRC" ] && git merge-base --is-ancestor "$SRC" "$PREV"; then
