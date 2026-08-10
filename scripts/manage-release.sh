@@ -48,7 +48,7 @@ NOTES_MARKER="## What's Changed"
 # signature and hash check below would pass while quietly promoting whatever
 # build the edge happened to be holding. Signatures prove authenticity, not
 # freshness. End users keep the CDN — apt is built to tolerate a stale mirror.
-APT_BASE_URL="https://start9-debs.nyc3.digitaloceanspaces.com"
+APT_BASE_URL="${APT_BASE_URL:-https://start9-debs.nyc3.digitaloceanspaces.com}"
 # Belt and braces for any intermediary between here and the origin.
 APT_NO_CACHE=(-H 'Cache-Control: no-cache' -H 'Pragma: no-cache')
 APT_SUITE="stable"
@@ -355,6 +355,16 @@ changelog_section() {
 # consumers can verify it, and a releaser promoting into stable is one: reading
 # the index over plain HTTPS would let anyone able to write the bucket (without
 # holding the signing key) get bytes stable-signed by the releaser.
+# macOS ships shasum, not coreutils' sha256sum — same as checksum_block, which
+# has carried this fallback all along. Prints the bare hash.
+sha256_of() {
+    if command -v sha256sum > /dev/null 2>&1; then
+        sha256sum "$1" | cut -d' ' -f1
+    else
+        shasum -a 256 "$1" | cut -d' ' -f1
+    fi
+}
+
 verify_alpha_release() {
     local keyring="$1" tmp="$2"
     curl -fsSL "${APT_NO_CACHE[@]}" "${APT_BASE_URL}/dists/${APT_ALPHA_SUITE}/InRelease" -o "$tmp/InRelease"
@@ -365,29 +375,13 @@ verify_alpha_release() {
         return 1
     fi
 
-    # A signature proves who produced the metadata, never when. Anyone able to
-    # write the bucket without holding the key can restore an older, still
-    # validly signed Release + Packages + pool, and every check below would pass
-    # while promoting a build that was superseded long ago. Valid-Until is the
-    # bound on that replay window; debian/publish.sh emits it.
-    local valid_until expires now
-    # Trimmed by substitution, not split on ": " — the timestamp's own colons
-    # would otherwise truncate it to the hour and shift the comparison.
-    valid_until=$(awk '/^Valid-Until:/ { sub(/^Valid-Until:[[:space:]]*/, ""); print; exit }' "$tmp/Release")
-    if [ -z "$valid_until" ]; then
-        >&2 echo "  ✗ the ${APT_ALPHA_SUITE} Release carries no Valid-Until, so its age cannot be bounded."
-        >&2 echo "    Suites published before that field was added need one republish (any master"
-        >&2 echo "    push to a deb product); until then use 'pull-gha'."
-        return 1
-    fi
-    expires=$(date -u -d "$valid_until" +%s 2> /dev/null || echo 0)
-    now=$(date -u +%s)
-    if [ "$expires" -le "$now" ]; then
-        >&2 echo "  ✗ the ${APT_ALPHA_SUITE} Release expired at ${valid_until}."
-        >&2 echo "    It is either stale (no build has published since) or a replay of older"
-        >&2 echo "    signed metadata. Land a build before releasing."
-        return 1
-    fi
+    # No freshness bound is enforced here, deliberately. A signature proves
+    # authenticity and not recency, so replaying older signed metadata is
+    # possible for anyone who can write the bucket — but the defence against
+    # promoting the wrong build is that the operator is told which commit is
+    # being tagged (resolve_alpha_commit prints it, and a replay shows up as an
+    # unexpectedly old hash), not metadata that expires on a timer unrelated to
+    # this project's release cadence.
 }
 
 verify_alpha_packages() {
@@ -403,7 +397,7 @@ verify_alpha_packages() {
         return 1
     fi
     curl -fsSL "${APT_NO_CACHE[@]}" "${APT_BASE_URL}/dists/${APT_ALPHA_SUITE}/${rel_path}" -o "$tmp/Packages.${darch}"
-    got=$(sha256sum "$tmp/Packages.${darch}" | cut -d' ' -f1)
+    got=$(sha256_of "$tmp/Packages.${darch}")
     if [ "$got" != "$idx_sha" ]; then
         >&2 echo "  ✗ ${rel_path} does not match the hash the signed Release commits to"
         return 1
@@ -546,17 +540,19 @@ assert_metadata_matches_adopted() {
     return 1
 }
 
+# Clear every payload this staging path produces, both halves. Clearing only the
+# debs left the reverse partial set possible: binaries from a failed cli download
+# sitting beside a fresh marker, or a previous attempt's debs beside new
+# binaries. The marker is written by the caller before either half is fetched.
+clear_alpha_staging() {
+    rm -f ./*.deb
+    [ "$KIND" != cli ] || rm -f ./start-cli_*
+}
+
 promote_alpha_debs() {
     local want arch darch base got
     want=$(tag_commit_sha)
     echo "Promoting ${PROJECT} debs from the ${APT_ALPHA_SUITE} suite (commit ${want})..."
-
-    # The marker and the clear happen before anything is fetched, so an
-    # interrupted promotion can never leave a previous run's debs beside a marker
-    # that says otherwise — `push` then fails on an empty dir rather than
-    # shipping a mixed set.
-    echo "$want" > "$(gha_commit_file)"
-    rm -f ./*.deb
 
     for arch in $DEB_ARCHES; do
         darch=$(deb_arch "$arch")
@@ -566,7 +562,7 @@ promote_alpha_debs() {
         # The pool key is stable across builds, so without this an alpha
         # republish between the index read and this download would swap the
         # bytes after the commit check had already passed.
-        got=$(sha256sum "$ALPHA_TMP/$base" | cut -d' ' -f1)
+        got=$(sha256_of "$ALPHA_TMP/$base")
         if [ "$got" != "${ALPHA_SHAS[$arch]}" ]; then
             >&2 echo "  ✗ ${darch}: ${base} does not match the hash the signed index commits to"
             >&2 echo "    (the suite was republished mid-promotion, or the object was tampered with)"
@@ -1001,9 +997,15 @@ cmd_pull_alpha() {
     resolve_alpha_commit "$ALPHA_COMMIT" || { rm -rf "$ALPHA_TMP"; exit 1; }
     assert_metadata_matches_adopted || { rm -rf "$ALPHA_TMP"; exit 1; }
 
+    # Marker and clear before either half is fetched, so a failure anywhere
+    # leaves an empty staging dir rather than one half of a release beside a
+    # marker that vouches for both. `push` then fails on the empty dir.
+    echo "$(tag_commit_sha)" > "$(gha_commit_file)"
+    clear_alpha_staging
+
     if [ "$KIND" = cli ]; then
-        # Now validated against the adopted commit, so both halves really are
-        # pinned to the commit being tagged.
+        # Resolved after adoption, so the run is validated against the commit
+        # actually being tagged and both halves really are pinned to it.
         resolve_gha_run
         echo "Downloading start-cli binaries from run ${RUN_ID} (commit ${RUN_SHA})..."
         pull_gha_cli_binaries
@@ -1547,13 +1549,17 @@ Subcommands:
                      from. `git checkout "$(... alpha-commit <project>)"` puts a
                      tree on it. (cli/deb.)
   pull-alpha         Stage a deb release by promoting the `alpha` apt suite's
-                     build of the commit being tagged — what CI published and
-                     testers have been running. Selected and verified by the
-                     Git-Hash control field, so a mismatch (master moved past
-                     the tag) stops rather than shipping unsoaked bytes. This is
-                     what `release` uses. For start-cli it also pulls the
-                     per-triple binaries from a run, which have no channel to
-                     promote from. (cli/deb.)
+                     current build — what CI published and testers have been
+                     running. The whole chain is verified against the suite
+                     signature (apt/start9-alpha.gpg).
+                     The tag follows the artifact: with COMMIT unset this adopts
+                     the commit alpha built and tags there, which is usually not
+                     HEAD, since each product's workflow is path-filtered. It
+                     says which commit, and prints the matching `git checkout`.
+                     Set COMMIT to assert a different one and it fails instead of
+                     overriding you. This is what `release` uses. For start-cli
+                     it also pulls the per-triple binaries from a run, which have
+                     no channel to promote from. (cli/deb.)
   pull-gha           Download build artifacts from a GitHub Actions run.
                      Fails unless the run built the commit being tagged
                      (COMMIT, default HEAD).

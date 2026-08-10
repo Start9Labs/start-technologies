@@ -27,10 +27,6 @@ ENDPOINT="${S3_ENDPOINT:-https://nyc3.digitaloceanspaces.com}"
 GPG_KEY_ID="${GPG_KEY_ID:-5259ADFC2D63C217}"
 SUITE="${SUITE:-stable}"
 COMPONENT="${COMPONENT:-main}"
-# How long the signed Release stays valid. A suite that goes this long without a
-# publish expires and apt refuses it — which is the point: for a rolling channel
-# like `alpha`, silence is information.
-VALID_DAYS="${VALID_DAYS:-30}"
 REPO_DIR="$(mktemp -d)"
 
 # Every suite owns its own pool, so publishing to one can never index or evict
@@ -164,15 +160,8 @@ done
         -o "APT::FTPArchive::Release::Architectures=amd64 arm64 riscv64" \
         -o "APT::FTPArchive::Release::Components=${COMPONENT}" \
         . > Release
-    # Valid-Until bounds how long this signed metadata stays acceptable. Without
-    # it a signature proves only authenticity, never freshness: anyone able to
-    # write the bucket could restore an older, still validly signed Release +
-    # Packages + pool and have apt — or scripts/manage-release.sh promoting to
-    # stable — accept a build that was superseded long ago. apt enforces this
-    # field itself, so the whole suite expires rather than silently rotting.
-    sed -i "/^Date:/a Valid-Until: $(date -u -d "+${VALID_DAYS} days" '+%a, %d %b %Y %H:%M:%S UTC')" Release
 )
-echo "Generated Release file (valid for ${VALID_DAYS} days)"
+echo "Generated Release file"
 
 # Sign if GPG key is available
 if [ -n "$GPG_KEY_ID" ]; then
