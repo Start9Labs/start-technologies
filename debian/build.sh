@@ -14,6 +14,13 @@ else
 fi
 BASENAME=${BASENAME:-"$(./build/env/basename.sh)"}
 VERSION=${VERSION:-$(./build/env/version.sh "$PROJECT")}
+# Recorded in the control file below so a published .deb can be tied back to the
+# commit that produced it. The apt pool cannot carry that on its own: dpkg-name
+# renames each file to <package>_<version>_<arch>.deb, dropping the hash the
+# build basename has, and Version alone repeats across every master build of a
+# version. scripts/manage-release.sh checks this field before promoting a build
+# from alpha to stable.
+GIT_HASH=${GIT_HASH:-$(cat ./build/env/GIT_HASH.txt 2> /dev/null || echo unknown)}
 if [ "$PLATFORM" = "x86_64" ] || [ "$PLATFORM" = "x86_64-nonfree" ] || [ "$PLATFORM" = "x86_64-nvidia" ]; then
     DEB_ARCH=amd64
 elif [ "$PLATFORM" = "aarch64" ] || [ "$PLATFORM" = "aarch64-nonfree" ] || [ "$PLATFORM" = "aarch64-nvidia" ] || [ "$PLATFORM" = "raspberrypi" ] || [ "$PLATFORM" = "rockchip64" ]; then
@@ -53,6 +60,7 @@ fi
 cat > dpkg-workdir/$BASENAME/DEBIAN/control << EOF
 Package: ${PROJECT}
 Version: ${VERSION}
+Git-Hash: ${GIT_HASH}
 Section: unknown
 Priority: required
 Maintainer: Aiden McClelland <aiden@start9.com>

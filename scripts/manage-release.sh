@@ -44,6 +44,11 @@ NOTES_MARKER="## What's Changed"
 
 APT_BASE_URL="https://start9-debs.nyc3.digitaloceanspaces.com"
 APT_SUITE="stable"
+# CI publishes every master build into `alpha` (.github/workflows/apt-publish-alpha.yml).
+# A deb release promotes from there rather than rebuilding trust from a CI run,
+# so the bytes testers have been running are the bytes that reach stable — the
+# same source -> target promotion the OS and StartWRT releases use.
+APT_ALPHA_SUITE="alpha"
 APT_COMPONENT="main"
 
 # StartWRT publishes flashable images to its own registry pair + S3 bucket. The
@@ -324,6 +329,64 @@ changelog_section() {
 # --- Deb helpers (shared by the deb and cli kinds) ---
 
 # Download this project's per-arch debs from a GitHub Actions run into the cwd.
+# Download this project's debs for the commit being tagged from the alpha suite.
+#
+# Selection is by the Git-Hash control field (written by debian/build.sh), which
+# dpkg-scanpackages carries into the Packages index — so the build is identified
+# and verified before a byte is downloaded. Version alone would not do: every
+# master build of a version publishes under the same Version, and the apt pool
+# holds exactly one deb per package/arch, so `alpha` always carries the newest
+# master build of that version and nothing older.
+#
+# A mismatch therefore means master moved past the commit being tagged. That is
+# a real stop, not a nuisance: releasing then would ship bytes no one soaked.
+# Cut the release from an up-to-date master, or fall back to `pull-gha` for a
+# repair.
+promote_alpha_debs() {
+    local arch darch idx entry hash filename want
+    want=$(tag_commit_sha)
+    echo "Promoting ${PROJECT} debs from the ${APT_ALPHA_SUITE} suite (commit ${want})..."
+    for arch in $DEB_ARCHES; do
+        darch=$(deb_arch "$arch")
+        idx="${APT_BASE_URL}/dists/${APT_ALPHA_SUITE}/${APT_COMPONENT}/binary-${darch}/Packages"
+        # Emitted at the stanza boundary, not on a particular field: the index
+        # does not guarantee an order, and Git-Hash follows Filename in practice.
+        entry=$(curl -fsSL "$idx" | awk -v pkg="$PROJECT" -v ver="$VERSION" '
+            function flush() {
+                if (p == pkg && index(v, ver) > 0 && f != "") print h "\t" f
+                p = ""; v = ""; h = ""; f = ""
+            }
+            /^$/       { flush(); next }
+            /^Package:/  { p = $2 }
+            /^Version:/  { v = $2 }
+            /^Git-Hash:/ { h = $2 }
+            /^Filename:/ { f = $2 }
+            END { flush() }
+        ')
+        # First line taken in the shell rather than piped through `head -1`,
+        # which would close the pipe early and take SIGPIPE under `pipefail`.
+        entry=${entry%%$'\n'*}
+        if [ -z "$entry" ]; then
+            >&2 echo "  ✗ ${darch}: no ${PROJECT} ${VERSION} deb in the ${APT_ALPHA_SUITE} suite"
+            return 1
+        fi
+        hash=${entry%%$'\t'*}
+        filename=${entry#*$'\t'}
+        if [ "$hash" != "$want" ]; then
+            >&2 echo "  ✗ ${darch}: ${APT_ALPHA_SUITE} holds a build of ${hash:-an unrecorded commit}, not ${want}"
+            >&2 echo "    Alpha carries the newest master build. Cut the release from an up-to-date"
+            >&2 echo "    master, or use 'pull-gha' with the run that built ${want}."
+            return 1
+        fi
+        echo "  ${arch}: ${filename}"
+        curl -fsSL "${APT_BASE_URL}/${filename}" -o "$(basename "$filename")"
+    done
+    # Same marker pull-gha writes, so cmd_tag still refuses to tag a different
+    # commit than the staged assets were built from — the check above only holds
+    # for the COMMIT in effect at promotion time.
+    echo "$want" > "$(gha_commit_file)"
+}
+
 pull_gha_debs() {
     local arch
     for arch in $DEB_ARCHES; do
@@ -652,9 +715,9 @@ cmd_pre_check() {
     echo "Pre-check passed."
 }
 
-cmd_pull_gha() {
-    require_kind os cli deb wrt
-
+# Resolve RUN_ID (prompting when unset), assert the run built the commit being
+# tagged, and stage the release dir. Sets RUN_ID and RUN_SHA for the caller.
+resolve_gha_run() {
     if [ -z "${RUN_ID:-}" ]; then
         read -rp "RUN_ID (GitHub Actions run for ${PROJECT}): " RUN_ID
     fi
@@ -665,19 +728,38 @@ cmd_pull_gha() {
     fi
 
     # The tag must point at the commit these artifacts were built from.
-    local run_sha tag_sha
-    run_sha=$(gh run view -R "$REPO" "$RUN_ID" --json headSha -q .headSha)
+    local tag_sha
+    RUN_SHA=$(gh run view -R "$REPO" "$RUN_ID" --json headSha -q .headSha)
     tag_sha=$(tag_commit_sha)
-    if [ "$run_sha" != "$tag_sha" ]; then
-        >&2 echo "Run ${RUN_ID} built commit ${run_sha},"
+    if [ "$RUN_SHA" != "$tag_sha" ]; then
+        >&2 echo "Run ${RUN_ID} built commit ${RUN_SHA},"
         >&2 echo "but tag ${TAG} would be cut at ${COMMIT:-HEAD} (${tag_sha})."
-        >&2 echo "Pass the run for that commit, or set COMMIT=${run_sha}."
+        >&2 echo "Pass the run for that commit, or set COMMIT=${RUN_SHA}."
         exit 1
     fi
 
     ensure_release_dir
-    echo "$run_sha" > "$(gha_commit_file)"
-    echo "Downloading ${PROJECT} artifacts from run ${RUN_ID} (commit ${run_sha})..."
+    echo "$RUN_SHA" > "$(gha_commit_file)"
+}
+
+# The per-triple start-cli binaries. Unlike the debs these are published only as
+# GitHub release assets, so there is no channel to promote them from and a
+# release still needs the run that built the tagged commit.
+pull_gha_cli_binaries() {
+    local triple name
+    for triple in $CLI_TRIPLES; do
+        name=$(cli_asset_name "$triple")
+        echo "  start-cli_${triple} -> start-cli_${name}"
+        gh run download -R "$REPO" "$RUN_ID" -n "start-cli_${triple}" -D "$(pwd)"
+        mv start-cli "start-cli_${name}"
+    done
+}
+
+cmd_pull_gha() {
+    require_kind os cli deb wrt
+
+    resolve_gha_run
+    echo "Downloading ${PROJECT} artifacts from run ${RUN_ID} (commit ${RUN_SHA})..."
 
     case "$KIND" in
         os)
@@ -690,13 +772,7 @@ cmd_pull_gha() {
             ensure_img_gz
             ;;
         cli)
-            for triple in $CLI_TRIPLES; do
-                local name
-                name=$(cli_asset_name "$triple")
-                echo "  start-cli_${triple} -> start-cli_${name}"
-                gh run download -R "$REPO" "$RUN_ID" -n "start-cli_${triple}" -D "$(pwd)"
-                mv start-cli "start-cli_${name}"
-            done
+            pull_gha_cli_binaries
             pull_gha_debs
             ;;
         deb)
@@ -707,6 +783,21 @@ cmd_pull_gha() {
             gh run download -R "$REPO" "$RUN_ID" -n "$STARTWRT_BUILD_ARTIFACT" -D "$(pwd)"
             ;;
     esac
+}
+
+# Stage a deb release from the alpha suite. For start-cli the per-triple
+# binaries have no channel to come from, so the run that built the tagged commit
+# is still needed for those — both halves are pinned to that commit, so mixing
+# the two sources cannot mix builds.
+cmd_pull_alpha() {
+    require_kind cli deb
+    ensure_release_dir
+    if [ "$KIND" = cli ]; then
+        resolve_gha_run
+        echo "Downloading start-cli binaries from run ${RUN_ID} (commit ${RUN_SHA})..."
+        pull_gha_cli_binaries
+    fi
+    promote_alpha_debs
 }
 
 cmd_pull() {
@@ -1180,8 +1271,13 @@ cmd_release() {
             cmd_sign
             ;;
         cli | deb)
+            # Promote the debs CI published to alpha rather than rebuilding
+            # trust from a CI run: what testers have been running is what ships.
+            # (start-cli's per-triple binaries still come from the run — they are
+            # published only as release assets, so there is no channel to promote
+            # them from. Both halves are pinned to the tagged commit.)
             cmd_pre_check
-            cmd_pull_gha
+            cmd_pull_alpha
             cmd_tag
             cmd_create_gh_release
             cmd_push
@@ -1234,6 +1330,14 @@ crate's — or package.json for start-sdk); the git tag / GitHub release is
 Subcommands:
   pre-check          Verify the changelog documents this version and that the
                      version is not already tagged/released.
+  pull-alpha         Stage a deb release by promoting the `alpha` apt suite's
+                     build of the commit being tagged — what CI published and
+                     testers have been running. Selected and verified by the
+                     Git-Hash control field, so a mismatch (master moved past
+                     the tag) stops rather than shipping unsoaked bytes. This is
+                     what `release` uses. For start-cli it also pulls the
+                     per-triple binaries from a run, which have no channel to
+                     promote from. (cli/deb.)
   pull-gha           Download build artifacts from a GitHub Actions run.
                      Fails unless the run built the commit being tagged
                      (COMMIT, default HEAD).
@@ -1317,6 +1421,7 @@ TAG="${PROJECT}/v${VERSION}"
 case "$SUBCOMMAND" in
     pre-check) cmd_pre_check ;;
     pull-gha) cmd_pull_gha ;;
+    pull-alpha) cmd_pull_alpha ;;
     pull) cmd_pull ;;
     tag) cmd_tag ;;
     create-gh-release) cmd_create_gh_release ;;
