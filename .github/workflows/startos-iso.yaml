@@ -46,6 +46,10 @@ on:
           - NONE
           - alpha
           - beta
+      force-overwrite:
+        type: boolean
+        description: Replace S3 objects that already exist for this commit
+        default: false
   # `paths:` below mirror projects/start-os/build.mk's build inputs — keep both
   # in sync (see root AGENTS.md "Coupled changes").
   push:
@@ -583,17 +587,36 @@ jobs:
           mkdir -p ~/.startos
           printf '%s' "${{ secrets.DEV_KEY }}" > ~/.startos/developer.key.pem
 
+      # An existing object under one of these keys is a hard stop. Basenames are
+      # commit-derived, so a key that already exists means this commit was
+      # already published — and since `os promote` copies asset URLs through
+      # verbatim, beta or production commitments may already point at those
+      # exact bytes. Replacing them would leave those signatures validating
+      # against content that no longer matches. Re-dispatch with
+      # force-overwrite when replacing is genuinely what you want, such as
+      # re-running a deploy that failed partway through.
       - name: Upload to S3
+        env:
+          FORCE_OVERWRITE: ${{ github.event.inputs.force-overwrite == 'true' }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           cd artifacts
+          conflicts=0
           for PLATFORM in ${{ steps.platforms.outputs.list }}; do
             for file in *_${PLATFORM}.squashfs *_${PLATFORM}.iso *_${PLATFORM}.img; do
               [ -f "$file" ] || continue
+              key="${{ env.S3_BUCKET }}/v${VERSION}/$file"
+              if [ "$FORCE_OVERWRITE" != true ] && [ -n "$(s3cmd ls "$key")" ]; then
+                echo "::error::$key already exists — this commit has been published before. Overwriting it would invalidate any beta or production commitment pointing at that URL. Re-dispatch with force-overwrite to replace it deliberately."
+                conflicts=$((conflicts + 1))
+                continue
+              fi
               echo "Uploading $file..."
-              s3cmd put -P "$file" "${{ env.S3_BUCKET }}/v${VERSION}/$file"
+              s3cmd put -P "$file" "$key"
             done
           done
+          # Report every conflict before failing, rather than one per re-run.
+          [ "$conflicts" -eq 0 ] || exit 1
 
       # `registry os asset add` upserts the platform slot but rejects a second
       # write whose blake3 differs from the one already committed there

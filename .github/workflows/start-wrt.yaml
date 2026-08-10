@@ -19,6 +19,10 @@ on:
         options:
           - NONE
           - release
+      force-overwrite:
+        type: boolean
+        description: Replace S3 objects that already exist for this commit
+        default: false
   # `paths:` below mirror projects/start-wrt/build.mk's build inputs — keep
   # both in sync (see root AGENTS.md "Coupled changes"). The web is part of the
   # root Angular workspace, so the workspace inputs (shared-libs/ts-modules/**,
@@ -271,15 +275,30 @@ jobs:
           use_https = True
           EOF
 
+      # An existing object under one of these keys is a hard stop — basenames are
+      # commit-derived, so the key existing means this commit was already
+      # published, and promotion copies asset URLs through verbatim, so a
+      # beta or production commitment may already point at those exact bytes.
+      # Re-dispatch with force-overwrite to replace one deliberately.
       - name: Upload images to S3
+        env:
+          FORCE_OVERWRITE: ${{ github.event.inputs.force-overwrite == 'true' }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           cd artifacts
+          conflicts=0
           for file in *.img *.img.gz; do
             [ -f "$file" ] || continue
+            key="${{ env.S3_BUCKET }}/v${VERSION}/$file"
+            if [ "$FORCE_OVERWRITE" != true ] && [ -n "$(s3cmd ls "$key")" ]; then
+              echo "::error::$key already exists — this commit has been published before. Overwriting it would invalidate any beta or production commitment pointing at that URL. Re-dispatch with force-overwrite to replace it deliberately."
+              conflicts=$((conflicts + 1))
+              continue
+            fi
             echo "Uploading $file..."
-            s3cmd put -P "$file" "${{ env.S3_BUCKET }}/v${VERSION}/$file"
+            s3cmd put -P "$file" "$key"
           done
+          [ "$conflicts" -eq 0 ] || exit 1
 
       # `registry os asset add` rejects a write whose blake3 differs from the one
       # already committed to that platform slot, so re-indexing a version that
