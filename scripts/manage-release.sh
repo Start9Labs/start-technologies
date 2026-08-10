@@ -42,7 +42,15 @@ SDK_NPM_PACKAGE="@start9labs/start-sdk"
 # must agree — hence one constant rather than the string in both places.
 NOTES_MARKER="## What's Changed"
 
+# The S3 origin, deliberately NOT the `*.cdn.*` host that apt/start9*.list point
+# clients at. Do not "harmonize" the two. A promotion has to see the suite as it
+# is right now: a cached InRelease is still a validly signed InRelease, so every
+# signature and hash check below would pass while quietly promoting whatever
+# build the edge happened to be holding. Signatures prove authenticity, not
+# freshness. End users keep the CDN — apt is built to tolerate a stale mirror.
 APT_BASE_URL="https://start9-debs.nyc3.digitaloceanspaces.com"
+# Belt and braces for any intermediary between here and the origin.
+APT_NO_CACHE=(-H 'Cache-Control: no-cache' -H 'Pragma: no-cache')
 APT_SUITE="stable"
 # CI publishes every master build into `alpha` (.github/workflows/apt-publish-alpha.yml).
 # A deb release promotes from there rather than rebuilding trust from a CI run,
@@ -349,7 +357,7 @@ changelog_section() {
 # holding the signing key) get bytes stable-signed by the releaser.
 verify_alpha_release() {
     local keyring="$1" tmp="$2"
-    curl -fsSL "${APT_BASE_URL}/dists/${APT_ALPHA_SUITE}/InRelease" -o "$tmp/InRelease"
+    curl -fsSL "${APT_NO_CACHE[@]}" "${APT_BASE_URL}/dists/${APT_ALPHA_SUITE}/InRelease" -o "$tmp/InRelease"
     if ! gpg --no-default-keyring --keyring "$keyring" --batch --yes \
         --output "$tmp/Release" --decrypt "$tmp/InRelease" 2> "$tmp/gpg.err"; then
         >&2 echo "  \u2717 the ${APT_ALPHA_SUITE} InRelease is not signed by the key in ${keyring}"
@@ -370,7 +378,7 @@ verify_alpha_packages() {
         >&2 echo "  \u2717 the signed Release does not list ${rel_path}"
         return 1
     fi
-    curl -fsSL "${APT_BASE_URL}/dists/${APT_ALPHA_SUITE}/${rel_path}" -o "$tmp/Packages.${darch}"
+    curl -fsSL "${APT_NO_CACHE[@]}" "${APT_BASE_URL}/dists/${APT_ALPHA_SUITE}/${rel_path}" -o "$tmp/Packages.${darch}"
     got=$(sha256sum "$tmp/Packages.${darch}" | cut -d' ' -f1)
     if [ "$got" != "$idx_sha" ]; then
         >&2 echo "  \u2717 ${rel_path} does not match the hash the signed Release commits to"
@@ -518,7 +526,7 @@ promote_alpha_debs() {
         darch=$(deb_arch "$arch")
         base=$(basename "${FILES[$arch]}")
         echo "  ${arch}: ${base}"
-        curl -fsSL "${APT_BASE_URL}/${FILES[$arch]}" -o "$tmp/$base"
+        curl -fsSL "${APT_NO_CACHE[@]}" "${APT_BASE_URL}/${FILES[$arch]}" -o "$tmp/$base"
         # The payload, against the hash the (now trusted) index commits to. The
         # pool key is stable across builds, so without this an alpha republish
         # between the index read and this download would swap the bytes after
@@ -550,7 +558,7 @@ pull_apt_debs() {
     for arch in $DEB_ARCHES; do
         darch=$(deb_arch "$arch")
         idx="${APT_BASE_URL}/dists/${APT_SUITE}/${APT_COMPONENT}/binary-${darch}/Packages"
-        filename=$(curl -fsSL "$idx" 2>/dev/null | awk -v pkg="$PROJECT" -v ver="$VERSION" '
+        filename=$(curl -fsSL "${APT_NO_CACHE[@]}" "$idx" 2>/dev/null | awk -v pkg="$PROJECT" -v ver="$VERSION" '
             /^$/ { p=""; v="" }
             /^Package:/ { p=$2 }
             /^Version:/ { v=$2 }
@@ -558,7 +566,7 @@ pull_apt_debs() {
         ' | head -1)
         if [ -n "$filename" ]; then
             echo "  ${arch}: ${filename}"
-            curl -fsSL "${APT_BASE_URL}/${filename}" -o "$(basename "$filename")"
+            curl -fsSL "${APT_NO_CACHE[@]}" "${APT_BASE_URL}/${filename}" -o "$(basename "$filename")"
         else
             >&2 echo "  ! no ${PROJECT} ${arch} deb for ${VERSION} in apt repo"
         fi
