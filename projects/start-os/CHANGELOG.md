@@ -18,6 +18,13 @@ file tracks notable changes since the move to the monorepo.
   image would be installed without complaint. It now verifies whenever
   `CHECKSUM` is set.
 
+- **Large QR codes in action results render instead of failing.** The canvas was
+  fixed at 350px and the encoder pinned to correction level `M`, so a payload
+  past 3391 characters exceeded what any version at that level can hold: the
+  encoder threw and the modal came up empty. Shorter but still dense codes drew
+  modules too fine for a camera to resolve. Codes now scale to the room their
+  container offers and drop to level `L` when `M` has no version left.
+
 - **The login banner reports system status for every user, not just the first
   one to log in.** It staged its database snapshot at a fixed path in `/tmp`,
   which `pam_motd` created as root at login — so any subsequent non-root run

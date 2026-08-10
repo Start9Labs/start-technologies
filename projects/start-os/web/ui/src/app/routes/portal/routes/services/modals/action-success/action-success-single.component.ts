@@ -3,7 +3,7 @@ import { Component, inject, Input } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { CopyService, i18nPipe } from '@start9labs/shared'
 import { TuiButton, TuiInput } from '@taiga-ui/core'
-import { QrCodeComponent } from 'ng-qrcode'
+import { QRComponent } from 'src/app/components/qr.component'
 import { SingleResult } from './types'
 
 @Component({
@@ -49,10 +49,9 @@ import { SingleResult } from './types'
       }
     </tui-textfield>
     <ng-template #qr>
-      <qr-code
+      <app-qr
         [value]="single.value"
         [style.filter]="single.masked && masked ? 'blur(0.5rem)' : null"
-        size="350"
       />
       @if (single.masked && masked) {
         <button
@@ -84,7 +83,7 @@ import { SingleResult } from './types'
     FormsModule,
     TuiInput,
     TuiButton,
-    QrCodeComponent,
+    QRComponent,
     i18nPipe,
   ],
 })
