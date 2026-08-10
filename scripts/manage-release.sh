@@ -360,8 +360,32 @@ verify_alpha_release() {
     curl -fsSL "${APT_NO_CACHE[@]}" "${APT_BASE_URL}/dists/${APT_ALPHA_SUITE}/InRelease" -o "$tmp/InRelease"
     if ! gpg --no-default-keyring --keyring "$keyring" --batch --yes \
         --output "$tmp/Release" --decrypt "$tmp/InRelease" 2> "$tmp/gpg.err"; then
-        >&2 echo "  \u2717 the ${APT_ALPHA_SUITE} InRelease is not signed by the key in ${keyring}"
+        >&2 echo "  ✗ the ${APT_ALPHA_SUITE} InRelease is not signed by the key in ${keyring}"
         >&2 sed 's/^/    /' "$tmp/gpg.err"
+        return 1
+    fi
+
+    # A signature proves who produced the metadata, never when. Anyone able to
+    # write the bucket without holding the key can restore an older, still
+    # validly signed Release + Packages + pool, and every check below would pass
+    # while promoting a build that was superseded long ago. Valid-Until is the
+    # bound on that replay window; debian/publish.sh emits it.
+    local valid_until expires now
+    # Trimmed by substitution, not split on ": " — the timestamp's own colons
+    # would otherwise truncate it to the hour and shift the comparison.
+    valid_until=$(awk '/^Valid-Until:/ { sub(/^Valid-Until:[[:space:]]*/, ""); print; exit }' "$tmp/Release")
+    if [ -z "$valid_until" ]; then
+        >&2 echo "  ✗ the ${APT_ALPHA_SUITE} Release carries no Valid-Until, so its age cannot be bounded."
+        >&2 echo "    Suites published before that field was added need one republish (any master"
+        >&2 echo "    push to a deb product); until then use 'pull-gha'."
+        return 1
+    fi
+    expires=$(date -u -d "$valid_until" +%s 2> /dev/null || echo 0)
+    now=$(date -u +%s)
+    if [ "$expires" -le "$now" ]; then
+        >&2 echo "  ✗ the ${APT_ALPHA_SUITE} Release expired at ${valid_until}."
+        >&2 echo "    It is either stale (no build has published since) or a replay of older"
+        >&2 echo "    signed metadata. Land a build before releasing."
         return 1
     fi
 }
@@ -375,13 +399,13 @@ verify_alpha_packages() {
         in_sha && $3 == p { print $1; exit }
     ' "$tmp/Release")
     if [ -z "$idx_sha" ]; then
-        >&2 echo "  \u2717 the signed Release does not list ${rel_path}"
+        >&2 echo "  ✗ the signed Release does not list ${rel_path}"
         return 1
     fi
     curl -fsSL "${APT_NO_CACHE[@]}" "${APT_BASE_URL}/dists/${APT_ALPHA_SUITE}/${rel_path}" -o "$tmp/Packages.${darch}"
     got=$(sha256sum "$tmp/Packages.${darch}" | cut -d' ' -f1)
     if [ "$got" != "$idx_sha" ]; then
-        >&2 echo "  \u2717 ${rel_path} does not match the hash the signed Release commits to"
+        >&2 echo "  ✗ ${rel_path} does not match the hash the signed Release commits to"
         return 1
     fi
 }
@@ -409,19 +433,57 @@ alpha_stanza() {
     echo "${entry%%$'\n'*}"
 }
 
-# The commit alpha's current build of this project was produced from.
-alpha_build_commit() {
-    local keyring tmp stanza
+# Verify the alpha suite and collect this project's debs for every architecture.
+# Populates ALPHA_COMMIT / ALPHA_SHAS / ALPHA_FILES and leaves the verified
+# metadata in ALPHA_TMP, which the caller removes.
+#
+# One function so every consumer gets the same guarantees: `alpha-commit` used to
+# read a single arch and accept a missing Git-Hash, so it could print a commit
+# that `pull-alpha` then refused.
+alpha_collect() {
+    local keyring arch darch stanza h
     keyring="$REPO_ROOT/apt/start9-alpha.gpg"
-    tmp=$(mktemp -d)
-    verify_alpha_release "$keyring" "$tmp" || { rm -rf "$tmp"; return 1; }
-    verify_alpha_packages "$tmp" "$(deb_arch "${DEB_ARCHES%% *}")" || { rm -rf "$tmp"; return 1; }
-    stanza=$(alpha_stanza "$tmp/Packages.$(deb_arch "${DEB_ARCHES%% *}")")
-    rm -rf "$tmp"
-    [ -n "$stanza" ] || return 1
-    echo "${stanza%%$'\t'*}"
+    if [ ! -f "$keyring" ]; then
+        >&2 echo "Cannot verify the ${APT_ALPHA_SUITE} suite: ${keyring} is missing."
+        return 1
+    fi
+    ALPHA_TMP=$(mktemp -d)
+    declare -gA ALPHA_SHAS=() ALPHA_FILES=()
+    ALPHA_COMMIT=""
+
+    verify_alpha_release "$keyring" "$ALPHA_TMP" || return 1
+
+    for arch in $DEB_ARCHES; do
+        darch=$(deb_arch "$arch")
+        verify_alpha_packages "$ALPHA_TMP" "$darch" || return 1
+        stanza=$(alpha_stanza "$ALPHA_TMP/Packages.${darch}")
+        if [ -z "$stanza" ]; then
+            >&2 echo "  ✗ ${darch}: no ${PROJECT} ${VERSION} deb in the ${APT_ALPHA_SUITE} suite"
+            return 1
+        fi
+        h=${stanza%%$'\t'*}
+        stanza=${stanza#*$'\t'}
+        ALPHA_SHAS[$arch]=${stanza%%$'\t'*}
+        ALPHA_FILES[$arch]=${stanza#*$'\t'}
+
+        if [ -z "$h" ]; then
+            >&2 echo "  ✗ ${arch}: this deb predates the Git-Hash control field — use 'pull-gha'"
+            return 1
+        fi
+        # Every arch must come from one build: a half-published suite would
+        # otherwise ship a release assembled from two different commits.
+        if [ -z "$ALPHA_COMMIT" ]; then
+            ALPHA_COMMIT=$h
+        elif [ "$h" != "$ALPHA_COMMIT" ]; then
+            >&2 echo "  ✗ ${APT_ALPHA_SUITE} holds different commits per architecture (${ALPHA_COMMIT} vs ${h})."
+            >&2 echo "    Wait for the build to finish publishing every arch, or use 'pull-gha'."
+            return 1
+        fi
+    done
 }
 
+# Download the collected debs, each verified against the hash the signed index
+# commits to, and stage them only once every one has passed.
 # Decide which commit the tag points at. The tag is a claim that a commit
 # produced the artifact, so when we are promoting, alpha's build is what decides
 # it — this adopts that commit rather than making the operator notice a mismatch
@@ -462,86 +524,57 @@ resolve_alpha_commit() {
     echo "  To work from that tree: git checkout ${alpha_hash}"
 }
 
+# cmd_pre_check validates, and release_notes reads, the *working tree* — but an
+# adopted commit can be behind it. Where the changelog is identical the
+# distinction is immaterial, so the common case stays frictionless; where it is
+# not, the published notes would describe a tree the tag does not point at, so
+# stop and ask for the checkout rather than shipping notes that do not match.
+assert_metadata_matches_adopted() {
+    local adopted head changelog
+    adopted=$(tag_commit_sha)
+    head=$(cd "$REPO_ROOT" && git rev-parse --verify HEAD)
+    [ "$adopted" != "$head" ] || return 0
+    changelog=$(changelog_path "$PROJECT")
+    (cd "$REPO_ROOT" && git diff --quiet "$adopted" HEAD -- "$changelog") && return 0
+
+    >&2 echo "  ✗ $(basename "$(dirname "$changelog")")/CHANGELOG.md differs between HEAD and the"
+    >&2 echo "    commit being tagged (${adopted}). Release notes are read from the working"
+    >&2 echo "    tree, so they would describe a tree the tag does not point at."
+    >&2 echo
+    >&2 echo "      git checkout ${adopted}"
+    >&2 echo "      ./scripts/manage-release.sh release ${PROJECT}"
+    return 1
+}
+
 promote_alpha_debs() {
-    local keyring tmp want arch darch stanza common h base got
-    keyring="$REPO_ROOT/apt/start9-alpha.gpg"
-    if [ ! -f "$keyring" ]; then
-        >&2 echo "Cannot verify the ${APT_ALPHA_SUITE} suite: ${keyring} is missing."
-        exit 1
-    fi
-
-    tmp=$(mktemp -d)
-    verify_alpha_release "$keyring" "$tmp" || { rm -rf "$tmp"; exit 1; }
-
-    # Read every arch's stanza before deciding anything, so the commit to tag is
-    # chosen from what alpha actually holds rather than assumed from HEAD.
-    declare -A HASHES SHAS FILES
-    for arch in $DEB_ARCHES; do
-        darch=$(deb_arch "$arch")
-        verify_alpha_packages "$tmp" "$darch" || { rm -rf "$tmp"; exit 1; }
-        stanza=$(alpha_stanza "$tmp/Packages.${darch}")
-        if [ -z "$stanza" ]; then
-            >&2 echo "  \u2717 ${darch}: no ${PROJECT} ${VERSION} deb in the ${APT_ALPHA_SUITE} suite"
-            rm -rf "$tmp"
-            exit 1
-        fi
-        HASHES[$arch]=${stanza%%$'\t'*}
-        stanza=${stanza#*$'\t'}
-        SHAS[$arch]=${stanza%%$'\t'*}
-        FILES[$arch]=${stanza#*$'\t'}
-    done
-
-    # Every arch must come from one build: a half-published suite would
-    # otherwise ship a release assembled from two different commits.
-    common=""
-    for arch in $DEB_ARCHES; do
-        h=${HASHES[$arch]}
-        if [ -z "$h" ]; then
-            >&2 echo "  ✗ ${arch}: this deb predates the Git-Hash control field — use 'pull-gha'"
-            rm -rf "$tmp"
-            exit 1
-        fi
-        if [ -z "$common" ]; then
-            common=$h
-        elif [ "$h" != "$common" ]; then
-            >&2 echo "  ✗ ${APT_ALPHA_SUITE} holds different commits per architecture (${common} vs ${h})."
-            >&2 echo "    Wait for the build to finish publishing every arch, or use 'pull-gha'."
-            rm -rf "$tmp"
-            exit 1
-        fi
-    done
-
-    resolve_alpha_commit "$common" || { rm -rf "$tmp"; exit 1; }
+    local want arch darch base got
     want=$(tag_commit_sha)
     echo "Promoting ${PROJECT} debs from the ${APT_ALPHA_SUITE} suite (commit ${want})..."
 
     # The marker and the clear happen before anything is fetched, so an
     # interrupted promotion can never leave a previous run's debs beside a marker
-    # that says otherwise \u2014 `push` then fails on an empty dir rather than
+    # that says otherwise — `push` then fails on an empty dir rather than
     # shipping a mixed set.
     echo "$want" > "$(gha_commit_file)"
     rm -f ./*.deb
 
     for arch in $DEB_ARCHES; do
         darch=$(deb_arch "$arch")
-        base=$(basename "${FILES[$arch]}")
+        base=$(basename "${ALPHA_FILES[$arch]}")
         echo "  ${arch}: ${base}"
-        curl -fsSL "${APT_NO_CACHE[@]}" "${APT_BASE_URL}/${FILES[$arch]}" -o "$tmp/$base"
-        # The payload, against the hash the (now trusted) index commits to. The
-        # pool key is stable across builds, so without this an alpha republish
-        # between the index read and this download would swap the bytes after
-        # the commit check had already passed.
-        got=$(sha256sum "$tmp/$base" | cut -d' ' -f1)
-        if [ "$got" != "${SHAS[$arch]}" ]; then
-            >&2 echo "  \u2717 ${darch}: ${base} does not match the hash the signed index commits to"
+        curl -fsSL "${APT_NO_CACHE[@]}" "${APT_BASE_URL}/${ALPHA_FILES[$arch]}" -o "$ALPHA_TMP/$base"
+        # The pool key is stable across builds, so without this an alpha
+        # republish between the index read and this download would swap the
+        # bytes after the commit check had already passed.
+        got=$(sha256sum "$ALPHA_TMP/$base" | cut -d' ' -f1)
+        if [ "$got" != "${ALPHA_SHAS[$arch]}" ]; then
+            >&2 echo "  ✗ ${darch}: ${base} does not match the hash the signed index commits to"
             >&2 echo "    (the suite was republished mid-promotion, or the object was tampered with)"
-            rm -rf "$tmp"
-            exit 1
+            return 1
         fi
     done
 
-    mv "$tmp"/*.deb .
-    rm -rf "$tmp"
+    mv "$ALPHA_TMP"/*.deb .
 }
 
 pull_gha_debs() {
@@ -951,18 +984,33 @@ cmd_pull_gha() {
 #   git checkout "$(./scripts/manage-release.sh alpha-commit start-tunnel)"
 cmd_alpha_commit() {
     require_kind cli deb
-    alpha_build_commit
+    alpha_collect || { rm -rf "${ALPHA_TMP:-}"; exit 1; }
+    echo "$ALPHA_COMMIT"
+    rm -rf "$ALPHA_TMP"
 }
 
 cmd_pull_alpha() {
     require_kind cli deb
     ensure_release_dir
+
+    # Adopt alpha's commit FIRST. For start-cli the per-triple binaries come from
+    # a CI run, and resolving that run before adoption validated it against HEAD
+    # while the debs (and the tag) ended up on alpha's older commit — binaries
+    # from one commit, debs and tag from another, with the marker agreeing.
+    alpha_collect || { rm -rf "${ALPHA_TMP:-}"; exit 1; }
+    resolve_alpha_commit "$ALPHA_COMMIT" || { rm -rf "$ALPHA_TMP"; exit 1; }
+    assert_metadata_matches_adopted || { rm -rf "$ALPHA_TMP"; exit 1; }
+
     if [ "$KIND" = cli ]; then
+        # Now validated against the adopted commit, so both halves really are
+        # pinned to the commit being tagged.
         resolve_gha_run
         echo "Downloading start-cli binaries from run ${RUN_ID} (commit ${RUN_SHA})..."
         pull_gha_cli_binaries
     fi
-    promote_alpha_debs
+
+    promote_alpha_debs || { rm -rf "$ALPHA_TMP"; exit 1; }
+    rm -rf "$ALPHA_TMP"
 }
 
 cmd_pull() {
