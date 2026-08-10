@@ -495,12 +495,14 @@ jobs:
         )
       )
     runs-on: ubuntu-latest
-    # The workflow-level group is scoped by event, so a dispatched alpha deploy
-    # could otherwise run alongside a master-push one and interleave their
-    # remove -> add -> asset-add sequences against the same registry version.
-    # This group is per channel and shared across event types.
+    # One lock for every deploy, not one per channel. The workflow-level group is
+    # scoped by event, so a dispatch could otherwise run alongside a master-push
+    # deploy; and alpha and beta are not independent either — both write the same
+    # `v$VERSION/` S3 keys for a given commit, so two channels deploying it at
+    # once could both pass the overwrite check below and then race the same
+    # object.
     concurrency:
-      group: startos-deploy-${{ github.event_name == 'push' && 'alpha' || github.event.inputs.deploy }}
+      group: startos-deploy
       cancel-in-progress: false
     env:
       # A master push is always alpha; a dispatch deploys to the channel it named.

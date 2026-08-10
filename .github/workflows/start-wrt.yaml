@@ -207,11 +207,11 @@ jobs:
         )
       }}
     runs-on: ubuntu-latest
-    # Per channel and shared across event types: the workflow-level group is
-    # scoped by event, so a dispatched deploy could otherwise interleave its
-    # remove -> add -> asset-add sequence with a master-push one.
+    # One lock for every deploy, not one per channel: the workflow-level group is
+    # scoped by event, and the channels are not independent anyway — both write
+    # the same `v$VERSION/` S3 keys for a given commit.
     concurrency:
-      group: startwrt-deploy-${{ github.event_name == 'push' && 'alpha' || 'beta' }}
+      group: startwrt-deploy
       cancel-in-progress: false
     # S3_CDN/PLATFORM (and the compat floor in the register step) mirror
     # scripts/manage-release.sh's STARTWRT_S3_CDN / STARTWRT_PLATFORM /

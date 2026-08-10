@@ -33,9 +33,22 @@ concurrency:
 jobs:
   publish:
     name: Publish to alpha apt
+    # `workflow_run.branches` filters the *head branch* of the triggering run,
+    # and a pull_request run reports the PR's head branch — so a fork PR opened
+    # from a branch literally named `master` satisfies it. Requiring the
+    # triggering event to be a push closes that: a push run can only originate
+    # from a ref in this repository.
+    #
     # A failed product build must not publish, but it also must not block the
     # other two: the next successful build of any product republishes the set.
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch'
+        || (
+          github.event.workflow_run.event == 'push'
+          && github.event.workflow_run.conclusion == 'success'
+        )
+      }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -49,8 +62,16 @@ jobs:
           collected=0
           for wf in start-cli.yaml start-tunnel.yaml start-registry.yaml; do
             product="${wf%.yaml}"
+            # --event push is load-bearing, not a tidiness filter. `-b master`
+            # alone matches any run whose head branch is named master, which
+            # includes a pull_request run from a fork branch of that name — this
+            # job would then collect and sign attacker-built .debs into alpha.
+            # It also excludes workflow_dispatch builds, which may be
+            # dev-flavoured or partial-arch. The select() re-asserts it on the
+            # returned row so the query fails closed.
             run_id=$(gh run list -R "$GITHUB_REPOSITORY" -w "$wf" -b master \
-              -s success -L 1 --json databaseId -q '.[0].databaseId')
+              --event push -s success -L 1 --json databaseId,event \
+              -q '.[] | select(.event == "push") | .databaseId')
             if [ -z "$run_id" ] || [ "$run_id" = null ]; then
               echo "::warning::$product has no successful master run; the suite keeps whatever version it already holds."
               continue

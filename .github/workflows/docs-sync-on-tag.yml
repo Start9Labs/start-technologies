@@ -87,7 +87,13 @@ jobs:
           # fixing the shared infrastructure has no trailer, and reading only the
           # tip would blank the watermark and re-open the rollback it guards
           # against. (Necessarily inert until the first sync writes one.)
-          PREV=$(git log --format=%B -- projects/start-docs | sed -n 's/^Source-Commit: *//p' | head -n1)
+          # Captured whole, then sliced in the shell, rather than piped through
+          # `head -n1`: head closes the pipe after one line, and once enough
+          # trailers exist for sed to flush a second time it takes SIGPIPE and
+          # `pipefail` aborts the sync. That threshold is passed at ~120 published
+          # tags, so the pipe form works until it suddenly doesn't.
+          TRAILERS=$(git log --format=%B -- projects/start-docs | sed -n 's/^Source-Commit: *//p')
+          PREV=${TRAILERS%%$'\n'*}
           SYNC_INFRA=1
           if [ -n "$PREV" ] && git cat-file -e "${PREV}^{commit}" 2>/dev/null \
             && [ "$PREV" != "$SRC" ] && git merge-base --is-ancestor "$SRC" "$PREV"; then
