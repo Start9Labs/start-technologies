@@ -91,7 +91,7 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
         .subcommand("mount", from_fn_async(dependency::mount).no_cli())
         .subcommand(
             "bind-mount",
-            from_fn_async(bind_mount::bind_mount::<C>).no_display(),
+            from_fn_async(bind_mount::bind_mount).no_display(),
         )
         .subcommand(
             "get-installed-packages",

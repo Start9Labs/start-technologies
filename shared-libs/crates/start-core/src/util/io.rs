@@ -3,7 +3,7 @@ use std::future::Future;
 use std::io::Cursor;
 use std::mem::MaybeUninit;
 use std::os::unix::prelude::MetadataExt;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -1719,22 +1719,39 @@ fn canonicalize_rec(path: &Path, create_parent: bool) -> BoxFuture<'_, Result<Pa
         match tokio::fs::canonicalize(path).await {
             Ok(canonical) => Ok(canonical),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let Some(file_name) = path.file_name() else {
+                let mut components = path.components();
+                let Some(last) = components.next_back() else {
                     return Err(e).with_ctx(|_| {
                         (ErrorKind::Filesystem, lazy_format!("canonicalize {path:?}"))
                     });
                 };
-                let parent = path.parent().unwrap_or(Path::new("."));
+                let parent = components.as_path();
+                let parent = if parent.as_os_str().is_empty() {
+                    Path::new(".")
+                } else {
+                    parent
+                };
                 if create_parent {
                     // short-circuit: create the whole missing chain at once
                     tokio::fs::create_dir_all(parent).await.with_ctx(|_| {
                         (ErrorKind::Filesystem, lazy_format!("mkdir -p {parent:?}"))
                     })?;
                 }
-                // resolve the first existing ancestor, then re-append the tail
-                Ok(canonicalize_rec(parent, create_parent)
-                    .await?
-                    .join(file_name))
+                // resolve the first existing ancestor, then re-append the tail.
+                // A `..` hidden behind a not-yet-existing component cannot be
+                // resolved now, but the kernel would resolve it at use time —
+                // fold it lexically instead of re-appending it verbatim.
+                let mut resolved = canonicalize_rec(parent, create_parent).await?;
+                match last {
+                    Component::ParentDir => {
+                        resolved.pop();
+                    }
+                    Component::Normal(name) => {
+                        resolved.push(name);
+                    }
+                    _ => {}
+                }
+                Ok(resolved)
             }
             Err(e) => {
                 Err(e).with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("canonicalize {path:?}")))
@@ -1815,5 +1832,45 @@ impl Drop for AtomicFile {
             let path = std::mem::take(&mut self.tmp_path);
             tokio::spawn(async move { tokio::fs::remove_file(path).await.log_err() });
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[tokio::test]
+    async fn canonicalize_folds_parent_components_in_missing_tails() {
+        let tmp = PathBuf::from(format!("/tmp/canonicalize-test-{}", std::process::id()));
+        let base = tmp.join("base");
+        tokio::fs::create_dir_all(base.join("inner")).await.unwrap();
+        let canonical_base = tokio::fs::canonicalize(&base).await.unwrap();
+
+        // a `..` hidden behind a missing component folds lexically
+        assert_eq!(
+            canonicalize(base.join("missing/../inner"), false)
+                .await
+                .unwrap(),
+            canonical_base.join("inner")
+        );
+        // folding can climb above missing components into the existing prefix
+        assert_eq!(
+            canonicalize(base.join("missing/../../x"), false)
+                .await
+                .unwrap(),
+            canonical_base.parent().unwrap().join("x")
+        );
+        // terminal `..`
+        assert_eq!(
+            canonicalize(base.join("missing/.."), false).await.unwrap(),
+            canonical_base
+        );
+        // existing paths are still kernel-resolved
+        assert_eq!(
+            canonicalize(base.join("inner"), false).await.unwrap(),
+            canonical_base.join("inner")
+        );
+
+        tokio::fs::remove_dir_all(&tmp).await.ok();
     }
 }

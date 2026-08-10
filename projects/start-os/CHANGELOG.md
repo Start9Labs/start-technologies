@@ -70,6 +70,11 @@ file tracks notable changes since the move to the monorepo.
   its previous export, wherever it lived; a lingering duplicate clears the next
   time its service initializes — at the reboot this update performs.
 
+### Security
+
+- **Service mount paths are validated and confined to their intended
+  directories.**
+
 ## [0.4.0.1]
 
 ### Changed
