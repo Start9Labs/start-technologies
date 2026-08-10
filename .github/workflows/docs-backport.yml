@@ -117,6 +117,15 @@ jobs:
               exit 0
             fi
 
+            # --no-renames on all three diffs below, and it is load-bearing.
+            # Rename detection is on by default, and a rename is one `R` row
+            # carrying two tab-separated paths: the additions filter would emit
+            # only the new path while the deletions filter emitted nothing, so
+            # the commit would add the moved page and leave the old one behind —
+            # and this awk would read the *old* path out of $2. Turning detection
+            # off renders a rename as a delete plus an add, which the API
+            # expresses exactly and which gives every row a single path.
+            #
             # createCommitOnBranch can only express regular files: additions
             # carry base64 content and land as mode 100644. A symlink (every
             # book's docs/theme is one, mode 120000) would be read through to
@@ -125,7 +134,7 @@ jobs:
             # writes contents:"" *over the symlink*. Divert anything that is not
             # a plain 100644-to-100644 change to the git-based fallback, which
             # represents modes natively.
-            UNSUPPORTED=$(git diff --cached --raw "$BASE" | awk -F'\t' '{
+            UNSUPPORTED=$(git diff --cached --raw --no-renames "$BASE" | awk -F'\t' '{
               split($1, m, " ");
               old = substr(m[1], 2); new = m[2];
               if ((old != "100644" && old != "000000") || (new != "100644" && new != "000000")) print $2;
@@ -142,13 +151,13 @@ jobs:
             # choke on a large binary asset. Docs fixes don't move those; if one
             # ever does, this fails loudly and the PR fallback below takes it.
             additions=$(
-              git diff --cached --name-only --diff-filter=d "$BASE" | while read -r f; do
+              git diff --cached --name-only --no-renames --diff-filter=d "$BASE" | while read -r f; do
                 jq -n --arg path "$f" --arg contents "$(base64 -w0 "$f")" \
                   '{path: $path, contents: $contents}'
               done | jq -sc .
             )
             deletions=$(
-              git diff --cached --name-only --diff-filter=D "$BASE" \
+              git diff --cached --name-only --no-renames --diff-filter=D "$BASE" \
                 | jq -R '{path: .}' | jq -sc .
             )
 
