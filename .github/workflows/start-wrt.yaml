@@ -213,9 +213,6 @@ jobs:
     env:
       S3_BUCKET: s3://startwrt-images
       S3_CDN: https://startwrt-images.nyc3.cdn.digitaloceanspaces.com
-      # Alpha builds get their own key prefix so per-commit images stay out of
-      # the release namespace manage-release.sh publishes and signs.
-      S3_PREFIX: ${{ github.event_name == 'push' && 'alpha/' || '' }}
       REGISTRY: ${{ github.event_name == 'push' && vars.STARTWRT_ALPHA_REGISTRY || 'https://startwrt-beta-registry.start9.com' }}
       PLATFORM: spacemit,k1-x
     steps:
@@ -281,7 +278,7 @@ jobs:
           for file in *.img *.img.gz; do
             [ -f "$file" ] || continue
             echo "Uploading $file..."
-            s3cmd put -P "$file" "${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}v${VERSION}/$file"
+            s3cmd put -P "$file" "${{ env.S3_BUCKET }}/v${VERSION}/$file"
           done
 
       # `registry os asset add` rejects a write whose blake3 differs from the one
@@ -327,5 +324,5 @@ jobs:
             echo "Indexing $file for platform ${{ env.PLATFORM }}..."
             start-cli --registry="${{ env.REGISTRY }}" registry os asset add \
               --platform="${{ env.PLATFORM }}" --version="$VERSION" \
-              "$index_file" "${{ env.S3_CDN }}/${{ env.S3_PREFIX }}v${VERSION}/$file"
+              "$index_file" "${{ env.S3_CDN }}/v${VERSION}/$file"
           done

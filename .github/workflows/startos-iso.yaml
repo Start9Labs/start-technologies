@@ -105,7 +105,20 @@ concurrency:
 
 env:
   NODEJS_VERSION: '24.17.0'
-  ENVIRONMENT: '${{ fromJson(format(''["{0}", ""]'', github.event.inputs.environment || ''dev''))[github.event.inputs.environment == ''NONE''] }}'
+  # Empty (release-equivalent) on master, `dev` everywhere else a build happens
+  # without an explicit input — PRs and integration/* branches, where password
+  # SSH before setup and uncompressed frontends are what you want.
+  #
+  # master must NOT be dev: alpha is the source registry that beta and then
+  # production are promoted from, and `os promote` copies each asset's URL and
+  # commitment through verbatim. Whatever a master push builds is what ships.
+  ENVIRONMENT: >-
+    ${{
+      fromJson(format('["{0}", ""]', github.event.inputs.environment || 'dev'))[
+        github.event.inputs.environment == 'NONE'
+        || (github.event_name == 'push' && github.ref == 'refs/heads/master')
+      ]
+    }}
 
 jobs:
   compile:
@@ -490,12 +503,6 @@ jobs:
         }}
       S3_BUCKET: s3://startos-images
       S3_CDN: https://startos-images.nyc3.cdn.digitaloceanspaces.com
-      # Alpha artifacts get their own key prefix so per-commit builds never
-      # accumulate in — or collide with — the release namespace manage-release.sh
-      # publishes and signs. Basenames already carry the commit hash, so the
-      # prefix is about keeping the namespaces separable (and separately
-      # expirable), not about preventing an overwrite.
-      S3_PREFIX: ${{ (github.event_name == 'push' || github.event.inputs.deploy == 'alpha') && 'alpha/' || '' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -584,7 +591,7 @@ jobs:
             for file in *_${PLATFORM}.squashfs *_${PLATFORM}.iso *_${PLATFORM}.img; do
               [ -f "$file" ] || continue
               echo "Uploading $file..."
-              s3cmd put -P "$file" "${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}v${VERSION}/$file"
+              s3cmd put -P "$file" "${{ env.S3_BUCKET }}/v${VERSION}/$file"
             done
           done
 
@@ -625,6 +632,6 @@ jobs:
                 --platform="$PLATFORM" \
                 --version="$VERSION" \
                 "$file" \
-                "${{ env.S3_CDN }}/${{ env.S3_PREFIX }}v${VERSION}/$file"
+                "${{ env.S3_CDN }}/v${VERSION}/$file"
             done
           done

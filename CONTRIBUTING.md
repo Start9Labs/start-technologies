@@ -92,6 +92,8 @@ Alpha is continuously deployed from master; nothing else is. Releases are cut de
 
 The `alpha` apt suite is signed with a **CI-only key**, not the production release key, and carries its own keyring (`signed-by=/usr/share/keyrings/start9-alpha.gpg`). Trusting alpha therefore never implies trusting it to publish `stable`; the two suites share a bucket but nothing else.
 
+**Alpha builds are release-equivalent** — `ENVIRONMENT` is empty on master, not `dev`. Alpha is the source registry that beta and then production are promoted from, and promotion copies each asset's URL and signed commitment through verbatim, so the bytes a master push produces are the bytes that eventually ship. Builds from PRs and `integration/*` branches still default to `dev` (password SSH before setup, uncompressed frontends), since those are for testing rather than promotion.
+
 To put a CI build on a server without building locally:
 
 ```sh

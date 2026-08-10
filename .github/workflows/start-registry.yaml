@@ -71,7 +71,16 @@ concurrency:
 
 env:
   NODEJS_VERSION: '24.11.0'
-  ENVIRONMENT: '${{ fromJson(format(''["{0}", ""]'', github.event.inputs.environment || ''dev''))[github.event.inputs.environment == ''NONE''] }}'
+  # Empty (release-equivalent) on master, `dev` everywhere else a build happens
+  # without an explicit input — PRs and integration/* branches. Continuous
+  # deployment must not ship dev-flavoured artifacts.
+  ENVIRONMENT: >-
+    ${{
+      fromJson(format('["{0}", ""]', github.event.inputs.environment || 'dev'))[
+        github.event.inputs.environment == 'NONE'
+        || (github.event_name == 'push' && github.ref == 'refs/heads/master')
+      ]
+    }}
 
 jobs:
   compile:
