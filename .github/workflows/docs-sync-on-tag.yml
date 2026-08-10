@@ -1,0 +1,84 @@
+name: Sync docs to live-docs on tag
+
+# Cutting `<project>/v<version>` is what makes that product's documentation
+# current, so the tag is what publishes it: this copies the tagged tree's book
+# (and the shared start-docs infrastructure it renders through) onto live-docs,
+# which docs.start9.com serves. The push then triggers docs-deploy.yml on its
+# own — no explicit dispatch needed, because an App installation token raises
+# real events.
+#
+# Projects with no docs/ subtree (start-cli, start-registry) are skipped whole —
+# there is no book to publish, so there is no reason to move site infra either.
+#
+# projects/start-docs/versions.conf rides along with the rest of the infra, so
+# the version each book is published under is whatever the tagged tree said. It
+# is a deliberate, hand-maintained file: set it in master before you tag.
+on:
+  push:
+    tags: ['*/v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-sync-on-tag
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync ${{ github.ref_name }} docs onto live-docs
+    runs-on: ubuntu-latest
+    # live-docs is PR-protected with no bypass for github-actions[bot], so this
+    # needs the docs bot App, which IS a bypass actor. Its private key is an
+    # environment secret whose deployment policy admits only `*/v*` tags — a
+    # workflow run on any other ref is refused the secret and so cannot mint a
+    # token that bypasses anything. Keep that policy in step with the trigger.
+    environment: docs-publish
+    steps:
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ secrets.DOCS_BOT_APP_ID }}
+          private-key: ${{ secrets.DOCS_BOT_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v6
+        with:
+          ref: live-docs
+          fetch-depth: 0
+          fetch-tags: true
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Copy the tagged docs onto live-docs
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          PROJECT="${TAG%%/v*}"
+          echo "Tag $TAG -> project $PROJECT"
+
+          if ! git cat-file -e "$TAG:projects/$PROJECT/docs" 2>/dev/null; then
+            echo "::notice::$PROJECT ships no docs/ book — nothing to publish."
+            exit 0
+          fi
+
+          git config user.name "start9-docs-bot[bot]"
+          git config user.email "start9-docs-bot[bot]@users.noreply.github.com"
+
+          # Delete then restore from the tag, so files the release removed are
+          # actually gone rather than left behind by a copy-over.
+          rm -rf "projects/$PROJECT/docs" projects/start-docs
+          git checkout "$TAG" -- "projects/$PROJECT/docs" projects/start-docs
+
+          if git diff --cached --quiet && git diff --quiet; then
+            echo "::notice::live-docs already matches $TAG."
+            exit 0
+          fi
+
+          git add -A "projects/$PROJECT/docs" projects/start-docs
+          # [skip-backport] is load-bearing, not a nicety: this push DOES raise a
+          # push event (App tokens are exempt from the GITHUB_TOKEN no-recursion
+          # rule), so docs-backport.yml will see it. The content came from master
+          # already, so it must not be bounced back.
+          git commit -m "docs: publish $PROJECT docs from $TAG [skip-backport]"
+          git push origin HEAD:live-docs

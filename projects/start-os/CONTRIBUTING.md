@@ -83,6 +83,16 @@ These targets push to a **live device** and are slow/destructive — be delibera
 | `start-os-emulate-reflash REMOTE=start9@<ip>` | Reflash as if using a live ISO                  |
 | `start-os-update-overlay REMOTE=start9@<ip>`  | Deploy to in-memory overlay (reverts on reboot) |
 
+To deploy a **CI build** rather than a local one — no local compile, and the image is exactly what alpha testers get:
+
+| Target                                                         | Description                                     |
+| -------------------------------------------------------------- | ----------------------------------------------- |
+| `start-os-update-from-gha REMOTE=start9@<ip>`                  | Latest successful master build                  |
+| `start-os-update-from-gha REMOTE=start9@<ip> RUN_ID=<id\|url>` | A specific Actions run (e.g. an integration PR) |
+| `start-os-update-from-gha REMOTE=start9@<ip> BRANCH=<name>`    | That branch's latest successful build           |
+
+It reads the platform off the device, downloads that run's `<platform>.squashfs`, and runs the same checksummed upgrade as `start-os-update-squashfs`. Needs `gh` (authenticated) and `b3sum`. Squashfs artifacts expire 14 days after the run. `scripts/update-from-gha.sh --help` documents the rest.
+
 For devices on a different network (uses [magic-wormhole](https://github.com/magic-wormhole/magic-wormhole)):
 
 | Target                       | Description              |

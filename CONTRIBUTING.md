@@ -15,6 +15,14 @@ The repo root's docs split across four files:
 
 **These docs must be kept up to date.** When you change project structure, conventions, build process, or product context, update the relevant file(s) in the same change — do not defer. Each product and shared library keeps its own `README.md`/`ARCHITECTURE.md`/`AGENTS.md` for what is specific to it (most still carry a `CONTRIBUTING.md` too, which is being folded into that scope's `AGENTS.md` — see [`AGENTS.md`](AGENTS.md)) — see `projects/*/`, `shared-libs/crates/start-core/`, `shared-libs/ts-modules/`, and `projects/start-os/container-runtime/`.
 
+### The user-facing books, and `live-docs`
+
+Each product's end-user documentation is an mdBook under `projects/<product>/docs/`, and a user-visible change updates it in the same PR (see [`AGENTS.md`](AGENTS.md)). Those edits go to master like any other change — but master's books describe what is _next_, not what is published.
+
+**[docs.start9.com](https://docs.start9.com) serves the `live-docs` branch.** A book goes live when its product is tagged: the tag sync copies that tag's `docs/` tree, plus the shared `projects/start-docs/` site infrastructure, onto `live-docs` and redeploys. So the site always matches released software, and docs for an unreleased version can sit in master indefinitely without leaking.
+
+To fix something that is _already published_ — a typo, a broken link, a wrong instruction on the live site — PR it against `live-docs` directly. It deploys on merge, and is then pushed to master automatically so the next tag doesn't revert it. That automatic backport is direct-to-master and needs no second review; only a conflict with master falls back to a PR, and that PR is yours to resolve.
+
 ## Collaboration
 
 - [Matrix](https://matrix.to/#/#dev-startos:matrix.start9labs.com)
@@ -61,7 +69,35 @@ git clone https://github.com/Start9Labs/start-technologies.git
 cd start-technologies
 ```
 
-The repo has four integration branches. `master` is for the current release — if the latest release is a pre-release (i.e. "beta.X"), PRs for new features and bugfixes go here. Otherwise target a `next/` branch for the release the change should ship in: `next/patch`, `next/minor`, or `next/major`. If you are unsure which to target, ask a maintainer.
+### Branches
+
+**`master` is always shippable.** Nothing lands on it until it is finished and tested — every push to master deploys straight to the alpha channel (see [Channels](#channels)). Target it directly with a PR when your change is ready to ship on its own.
+
+**`integration/<topic>` is for work that isn't.** When a change is too large or too risky to land piecemeal — a refactor spanning several products, a feature that only makes sense once all its parts exist — open an `integration/` branch named for the work (`integration/tunnel-v2`), land the pieces there as ordinary PRs, and soak it as a unit. The PR that merges it into master is the last gate before it ships, so CI builds the full set of flashable images on that PR specifically, whatever paths it touched. Delete the branch once it merges. If you are unsure whether your change needs one, ask a maintainer.
+
+The old `next/patch` | `next/minor` | `next/major` branches are retired; CI no longer builds them.
+
+**`live-docs` is what docs.start9.com serves.** It is not a development branch — see [The user-facing books, and `live-docs`](#the-user-facing-books-and-live-docs).
+
+### Channels
+
+Alpha is continuously deployed from master; nothing else is. Releases are cut deliberately from a merged master with `scripts/manage-release.sh` (see [AGENTS.md](AGENTS.md#releases)).
+
+| Product                                | What a master push publishes                                               |
+| -------------------------------------- | -------------------------------------------------------------------------- |
+| StartOS                                | images to S3, indexed into the alpha registry                              |
+| start-cli, StartTunnel, start-registry | `.deb`s into the `alpha` apt suite (`apt/start9-alpha.list`)               |
+| StartWRT                               | images into the alpha registry, only once `STARTWRT_ALPHA_REGISTRY` is set |
+| Start SDK                              | nothing — npm versions are permanent, so the SDK publishes only on release |
+
+The `alpha` apt suite is signed with a **CI-only key**, not the production release key, and carries its own keyring (`signed-by=/usr/share/keyrings/start9-alpha.gpg`). Trusting alpha therefore never implies trusting it to publish `stable`; the two suites share a bucket but nothing else.
+
+To put a CI build on a server without building locally:
+
+```sh
+make start-os-update-from-gha REMOTE=start9@<ip>              # latest master build
+make start-os-update-from-gha REMOTE=start9@<ip> RUN_ID=<id>  # a specific run
+```
 
 ## Building
 

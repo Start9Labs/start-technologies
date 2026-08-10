@@ -26,7 +26,7 @@ on:
   push:
     branches:
       - master
-      - next/*
+      - integration/*
     paths:
       - 'projects/start-wrt/**'
       - 'shared-libs/crates/**'
@@ -47,7 +47,7 @@ on:
   pull_request:
     branches:
       - master
-      - next/*
+      - integration/*
     paths:
       - 'projects/start-wrt/**'
       - 'shared-libs/crates/**'
@@ -67,10 +67,12 @@ on:
       - '!**/*.md'
 
 # The group is scoped by event so a master push can't cancel an in-flight
-# dispatched release build; dispatches queue behind each other, never cancel.
+# dispatched release build. Only pull requests cancel: a push to master
+# publishes to alpha, so master pushes queue behind each other rather than
+# aborting a publish half-done.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   NODEJS_VERSION: '24.17.0'
@@ -103,14 +105,23 @@ jobs:
           path: target/riscv64gc-unknown-linux-musl/release/startwrt
           retention-days: 14
 
-  # Heavy path: full flashable OpenWrt image. Gated to manual dispatch because
-  # it downloads the pinned upstream OpenWrt tarball (build/openwrt-version,
-  # patched from openwrt-patches/ + openwrt-overlay/) and runs a multi-hour
-  # build. Also runs when deploying, since the `deploy` job needs the freshly
-  # built images.
+  # Heavy path: full flashable OpenWrt image. It downloads the pinned upstream
+  # OpenWrt tarball (build/openwrt-version, patched from openwrt-patches/ +
+  # openwrt-overlay/) and runs a multi-hour build, so it is gated to the three
+  # cases that need a real image: a dispatch that asks for one (or deploys), an
+  # integration/* branch merging into master (the batch has to be flashable
+  # before it ships), and a push to master once continuous alpha deploys are
+  # switched on. That last one is opt-in via the STARTWRT_ALPHA_REGISTRY repo
+  # variable — unset, master pushes stay on the fast `compile` path only, since
+  # there is no alpha StartWRT registry to publish to yet.
   image:
     name: Build OpenWrt image
-    if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.build-image == 'true' || github.event.inputs.deploy == 'release') }}
+    if: >-
+      ${{
+        (github.event_name == 'workflow_dispatch' && (github.event.inputs.build-image == 'true' || github.event.inputs.deploy == 'release'))
+        || (github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.STARTWRT_ALPHA_REGISTRY != '')
+        || (github.event_name == 'pull_request' && github.base_ref == 'master' && startsWith(github.head_ref, 'integration/'))
+      }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -163,21 +174,34 @@ jobs:
   # production promotion (`release start-wrt`) stay deliberate local gates run
   # from the top-level scripts/manage-release.sh — the promote re-signs with the
   # local developer key, so production never trusts the CI key.
-  # Dispatch-gated (deploy == 'release'), matching startos-iso.
+  # Two ways in: a dispatch with deploy == 'release' (into beta, matching
+  # startos-iso), or a push to master, which continuously deploys into the alpha
+  # registry named by the STARTWRT_ALPHA_REGISTRY repo variable. With that
+  # variable unset there is no alpha channel, so master pushes skip both this and
+  # the `image` job it needs.
   deploy:
     name: Deploy
     needs: [image]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'release' }}
+    if: >-
+      ${{
+        !cancelled() && needs.image.result == 'success'
+        && (
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'release')
+          || (github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.STARTWRT_ALPHA_REGISTRY != '')
+        )
+      }}
     runs-on: ubuntu-latest
-    # REGISTRY/S3_CDN/PLATFORM (and the compat floor in the register step)
-    # mirror scripts/manage-release.sh's STARTWRT_SOURCE_REGISTRY /
-    # STARTWRT_S3_CDN / STARTWRT_PLATFORM / STARTWRT_COMPAT_FLOOR, whose
-    # cmd_register is the manual fallback for the register/index steps below —
-    # keep them in sync (root AGENTS.md "Coupled changes").
+    # S3_CDN/PLATFORM (and the compat floor in the register step) mirror
+    # scripts/manage-release.sh's STARTWRT_S3_CDN / STARTWRT_PLATFORM /
+    # STARTWRT_COMPAT_FLOOR, and the dispatch REGISTRY mirrors
+    # STARTWRT_SOURCE_REGISTRY, whose cmd_register is the manual fallback for the
+    # register/index steps below — keep them in sync (root AGENTS.md "Coupled
+    # changes"). The alpha registry has no manage-release.sh counterpart: nothing
+    # is ever released from it.
     env:
       S3_BUCKET: s3://startwrt-images
       S3_CDN: https://startwrt-images.nyc3.cdn.digitaloceanspaces.com
-      REGISTRY: https://startwrt-beta-registry.start9.com
+      REGISTRY: ${{ github.event_name == 'push' && vars.STARTWRT_ALPHA_REGISTRY || 'https://startwrt-beta-registry.start9.com' }}
       PLATFORM: spacemit,k1-x
     steps:
       - uses: actions/checkout@v6
@@ -245,15 +269,27 @@ jobs:
             s3cmd put -P "$file" "${{ env.S3_BUCKET }}/v${VERSION}/$file"
           done
 
+      # `registry os asset add` rejects a write whose blake3 differs from the one
+      # already committed to that platform slot, so re-indexing a version that
+      # already holds a build fails. Alpha rolls the same version number on every
+      # master push, so drop the version entry first. Beta never republishes in
+      # place and is left alone.
+      - name: Drop the previous alpha build of this version
+        if: github.event_name == 'push'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          start-cli --registry="${{ env.REGISTRY }}" registry os version remove "$VERSION" \
+            || echo "::notice::v${VERSION} was not indexed in ${{ env.REGISTRY }} yet."
+
       # The compat range is the set of installed versions allowed to upgrade to
       # this one; the floor matches manage-release.sh's STARTWRT_COMPAT_FLOOR.
-      - name: Register StartWRT version in beta registry
+      - name: Register StartWRT version in the target registry
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           start-cli --registry="${{ env.REGISTRY }}" registry os version add \
             "$VERSION" "v${VERSION}" '' ">=0.1.0-beta.1 <=${VERSION}"
 
-      - name: Index assets in beta registry
+      - name: Index assets in the target registry
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           cd artifacts

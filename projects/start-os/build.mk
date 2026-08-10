@@ -150,6 +150,10 @@ start-os-update-squashfs: results/$(BASENAME).squashfs
 	$(call cp,results/$(BASENAME).squashfs,/media/startos/images/next.rootfs)
 	$(call ssh,'sudo CHECKSUM=$(SQFS_SUM) /usr/lib/startos/scripts/upgrade /media/startos/images/next.rootfs')
 
+start-os-update-from-gha: # update from a CI build rather than a local one (RUN_ID=<id|url>, or BRANCH=<name> for that branch's latest)
+	@if [ -z "$(REMOTE)" ]; then >&2 echo "Must specify REMOTE" && false; fi
+	./scripts/update-from-gha.sh $(if $(RUN_ID),--run "$(RUN_ID)") $(if $(BRANCH),--branch "$(BRANCH)") $(REMOTE)
+
 start-os-emulate-reflash: $(STARTOS_TARGETS)
 	@if [ -z "$(REMOTE)" ]; then >&2 echo "Must specify REMOTE" && false; fi
 	$(call ssh,'sudo /usr/lib/startos/scripts/chroot-and-upgrade --create')

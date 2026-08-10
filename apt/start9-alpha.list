@@ -1,0 +1,1 @@
+deb [arch=amd64,arm64,riscv64 signed-by=/usr/share/keyrings/start9-alpha.gpg] https://start9-debs.nyc3.cdn.digitaloceanspaces.com alpha main

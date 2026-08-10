@@ -11,7 +11,8 @@
 #   S3_SECRET_KEY    - S3 secret key
 #   S3_ENDPOINT      - S3 endpoint (default: https://nyc3.digitaloceanspaces.com)
 #   S3_BUCKET        - S3 bucket name (default: start9-debs)
-#   SUITE            - Apt suite name (default: stable)
+#   SUITE            - Apt suite name (default: stable). Each suite owns a
+#                      separate pool, so suites never evict each other.
 #   COMPONENT        - Apt component name (default: main)
 
 set -e
@@ -27,6 +28,17 @@ GPG_KEY_ID="${GPG_KEY_ID:-5259ADFC2D63C217}"
 SUITE="${SUITE:-stable}"
 COMPONENT="${COMPONENT:-main}"
 REPO_DIR="$(mktemp -d)"
+
+# Every suite owns its own pool, so publishing to one can never evict another's
+# .deb (the eviction below and the Packages scan are both pool-scoped). `stable`
+# keeps the historical pool/<component>/ path because the published repo is
+# already laid out that way — moving it would break `stable` for the window
+# between the delete and the re-upload.
+if [ "$SUITE" = stable ]; then
+    POOL_ROOT="pool"
+else
+    POOL_ROOT="pool/${SUITE}"
+fi
 
 cleanup() {
     rm -rf "$REPO_DIR"
@@ -60,9 +72,16 @@ else
     }
 fi
 
-# Sync existing repo from S3
-echo "Syncing existing repo from s3://${BUCKET}/ ..."
-s3 sync --no-mime-magic "s3://${BUCKET}/" "$REPO_DIR/" 2>/dev/null || true
+# Sync down only what this suite owns — its pool and its dists/ directory.
+# Everything below (the eviction, the Packages scan, the --delete-removed upload)
+# then operates on a tree that physically cannot contain another suite's files,
+# so publishing `alpha` from CI can neither index nor delete anything in
+# `stable`. Trust is already separated by the per-suite Release signature; this
+# separates write access too.
+echo "Syncing the ${SUITE} suite from s3://${BUCKET}/ ..."
+mkdir -p "$REPO_DIR/$POOL_ROOT" "$REPO_DIR/dists/${SUITE}"
+s3 sync --no-mime-magic "s3://${BUCKET}/${POOL_ROOT}/" "$REPO_DIR/${POOL_ROOT}/" 2>/dev/null || true
+s3 sync --no-mime-magic "s3://${BUCKET}/dists/${SUITE}/" "$REPO_DIR/dists/${SUITE}/" 2>/dev/null || true
 
 # Collect all .deb files from arguments
 DEB_FILES=()
@@ -87,7 +106,7 @@ fi
 for deb in "${DEB_FILES[@]}"; do
     PKG_NAME="$(dpkg-deb --field "$deb" Package)"
     PKG_ARCH="$(dpkg-deb --field "$deb" Architecture)"
-    POOL_DIR="$REPO_DIR/pool/${COMPONENT}/${PKG_NAME:0:1}/${PKG_NAME}"
+    POOL_DIR="$REPO_DIR/${POOL_ROOT}/${COMPONENT}/${PKG_NAME:0:1}/${PKG_NAME}"
     mkdir -p "$POOL_DIR"
     # Remove old versions for the same architecture
     for old in "$POOL_DIR"/${PKG_NAME}_*_${PKG_ARCH}.deb; do
@@ -95,7 +114,7 @@ for deb in "${DEB_FILES[@]}"; do
     done
     cp "$deb" "$POOL_DIR/"
     dpkg-name -o "$POOL_DIR/$(basename "$deb")" 2>/dev/null || true
-    echo "Added: $(basename "$deb") -> pool/${COMPONENT}/${PKG_NAME:0:1}/${PKG_NAME}/"
+    echo "Added: $(basename "$deb") -> ${POOL_ROOT}/${COMPONENT}/${PKG_NAME:0:1}/${PKG_NAME}/"
 done
 
 # Generate Packages indices for each architecture
@@ -104,7 +123,7 @@ for arch in amd64 arm64 riscv64; do
     mkdir -p "$BINARY_DIR"
     (
         cd "$REPO_DIR"
-        dpkg-scanpackages --multiversion --arch "$arch" pool/ > "$BINARY_DIR/Packages"
+        dpkg-scanpackages --multiversion --arch "$arch" "$POOL_ROOT/" > "$BINARY_DIR/Packages"
         gzip -k -f "$BINARY_DIR/Packages"
     )
     echo "Generated Packages index for ${arch}"
@@ -136,9 +155,16 @@ else
     echo "Warning: GPG_KEY_ID not set, Release file is unsigned" >&2
 fi
 
-# Upload to S3
-echo "Uploading to s3://${BUCKET}/ ..."
-s3 sync --acl-public --no-mime-magic --delete-removed "$REPO_DIR/" "s3://${BUCKET}/"
+# Upload to S3, one prefix at a time so --delete-removed can only ever prune
+# within this suite. --delete-after keeps that pruning from running before the
+# new pool files land, so the Packages index published above never points at an
+# object that has been deleted but not yet re-uploaded. The pool goes first for
+# the same reason: the index must never be newer than what it indexes.
+echo "Uploading the ${SUITE} suite to s3://${BUCKET}/ ..."
+s3 sync --acl-public --no-mime-magic --delete-removed --delete-after \
+    "$REPO_DIR/${POOL_ROOT}/" "s3://${BUCKET}/${POOL_ROOT}/"
+s3 sync --acl-public --no-mime-magic --delete-removed --delete-after \
+    "$REPO_DIR/dists/${SUITE}/" "s3://${BUCKET}/dists/${SUITE}/"
 
 [ -n "$S3CMD_CONFIG" ] && rm -f "$S3CMD_CONFIG"
 echo "Done."

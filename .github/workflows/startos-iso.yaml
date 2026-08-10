@@ -51,7 +51,7 @@ on:
   push:
     branches:
       - master
-      - next/*
+      - integration/*
     paths:
       - 'projects/start-os/**'
       - 'shared-libs/**'
@@ -74,7 +74,7 @@ on:
   pull_request:
     branches:
       - master
-      - next/*
+      - integration/*
     paths:
       - 'projects/start-os/**'
       - 'shared-libs/**'
@@ -96,10 +96,12 @@ on:
       - '!**/*.md'
 
 # The group is scoped by event so a master push can't cancel an in-flight
-# dispatched release build; dispatches queue behind each other, never cancel.
+# dispatched release build. Only pull requests cancel: a push to master
+# publishes to alpha, so master pushes queue behind each other rather than
+# aborting a publish half-done.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   NODEJS_VERSION: '24.17.0'
@@ -172,6 +174,8 @@ jobs:
   # recipe, systemd units, apt, or shared build infra. Pure code/web/docs PRs are
   # already covered by `compile` (the binaries) and the Automated Tests workflow,
   # so they skip images here and get full image coverage on the push to master.
+  # The exception is an integration/* branch merging into master: that PR is the
+  # gate before the batch ships, so it always gets the full testable image set.
   # On push/dispatch the guard below is bypassed and images always build.
   changes:
     name: Detect image-affecting changes
@@ -186,7 +190,17 @@ jobs:
         id: filter
         env:
           GH_TOKEN: ${{ github.token }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
         run: |
+          # An integration/* branch merging into master is the last gate before
+          # the batch ships — build every platform image so reviewers can flash
+          # and test it, whatever paths it happens to touch.
+          if [ "$BASE_REF" = master ] && [ "${HEAD_REF#integration/}" != "$HEAD_REF" ]; then
+            echo "$HEAD_REF -> master: building the full image matrix."
+            echo "image=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           files="$(gh api --paginate \
             "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
             --jq '.[].filename')"
@@ -441,21 +455,31 @@ jobs:
     needs: [image]
     # Explicit status check so the skipped PR-only `changes` job can't poison
     # the implicit success() through the needs chain (actions/runner#2205).
+    # Two ways in: a push to master, which continuously deploys to alpha (master
+    # is only ever merged to when a change is already tested and shippable), or a
+    # dispatch naming a channel.
     # Allowlist the channels rather than excluding NONE: a `!= 'NONE'` gate also admits
     # an empty deploy input, which uploaded a branch build to the public bucket and then
     # died on the empty REGISTRY below. Keep in sync with the REGISTRY map.
     if: >-
       !cancelled() && needs.image.result == 'success'
-      && github.event_name == 'workflow_dispatch'
-      && contains(fromJson('["alpha", "beta"]'), github.event.inputs.deploy)
+      && (
+        (github.event_name == 'push' && github.ref == 'refs/heads/master')
+        || (
+          github.event_name == 'workflow_dispatch'
+          && contains(fromJson('["alpha", "beta"]'), github.event.inputs.deploy)
+        )
+      )
     runs-on: ubuntu-latest
     env:
+      # A master push is always alpha; a dispatch deploys to the channel it named.
+      CHANNEL: ${{ github.event_name == 'push' && 'alpha' || github.event.inputs.deploy }}
       REGISTRY: >-
         ${{
           fromJson('{
             "alpha": "https://alpha-registry-x.start9.com",
             "beta": "https://beta-registry.start9.com"
-          }')[github.event.inputs.deploy]
+          }')[github.event_name == 'push' && 'alpha' || github.event.inputs.deploy]
         }}
       S3_BUCKET: s3://startos-images
       S3_CDN: https://startos-images.nyc3.cdn.digitaloceanspaces.com
@@ -474,7 +498,9 @@ jobs:
       - name: Determine platforms
         id: platforms
         run: |
-          INPUT="${{ github.event.inputs.platform }}"
+          echo "Deploying to ${{ env.CHANNEL }} (${{ env.REGISTRY }})"
+          # A push carries no inputs; the image matrix defaults to ALL there too.
+          INPUT="${{ github.event.inputs.platform || 'ALL' }}"
           if [ "$INPUT" = "ALL" ]; then
             PLATFORMS="x86_64 x86_64-nonfree x86_64-nvidia aarch64 aarch64-nonfree aarch64-nvidia raspberrypi riscv64 riscv64-nonfree"
           else
@@ -548,6 +574,25 @@ jobs:
               s3cmd put -P "$file" "${{ env.S3_BUCKET }}/v${VERSION}/$file"
             done
           done
+
+      # `registry os asset add` upserts the platform slot but rejects a second
+      # write whose blake3 differs from the one already committed there
+      # (asset/add.rs "commitment-mismatch"), so re-indexing a version that
+      # already holds a build fails. Alpha deliberately rolls the same version
+      # number on every master push, so the version entry has to be dropped
+      # first. Beta never republishes in place and is left alone.
+      #
+      # Removing the version drops *every* platform indexed under it, so this is
+      # gated to full-matrix deploys — which every master push is. A dispatch
+      # naming a single platform deliberately skips it rather than silently
+      # wiping the other eight; if that version already holds a build, the index
+      # step below fails on the commitment mismatch, which is the honest outcome.
+      - name: Drop the previous alpha build of this version
+        if: ${{ env.CHANNEL == 'alpha' && (github.event.inputs.platform || 'ALL') == 'ALL' }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          start-cli --registry="${{ env.REGISTRY }}" registry os version remove "$VERSION" \
+            || echo "::notice::v${VERSION} was not indexed in ${{ env.REGISTRY }} yet."
 
       - name: Register OS version
         run: |

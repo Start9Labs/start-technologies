@@ -31,7 +31,7 @@ on:
   push:
     branches:
       - master
-      - next/*
+      - integration/*
     paths:
       - 'projects/start-registry/**'
       - 'shared-libs/crates/**'
@@ -47,7 +47,7 @@ on:
   pull_request:
     branches:
       - master
-      - next/*
+      - integration/*
     paths:
       - 'projects/start-registry/**'
       - 'shared-libs/crates/**'
@@ -62,10 +62,12 @@ on:
       - '!**/*.md'
 
 # The group is scoped by event so a master push can't cancel an in-flight
-# dispatched release build; dispatches queue behind each other, never cancel.
+# dispatched release build. Only pull requests cancel: a push to master
+# publishes to alpha, so master pushes queue behind each other rather than
+# aborting a publish half-done.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   NODEJS_VERSION: '24.11.0'
@@ -198,3 +200,31 @@ jobs:
           ENTRYPOINT ["start-registryd"]
 
           EOF
+
+  # master is only ever merged to once a change is tested and shippable, so every
+  # push publishes into the `alpha` apt suite for testers. The `stable` suite is
+  # untouched — each suite owns its own pool (debian/publish.sh) — and real
+  # releases still go out only through scripts/manage-release.sh.
+  publish-alpha:
+    name: Publish to alpha apt
+    needs: [compile]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download deb artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: '*.deb'
+          path: debs/
+          merge-multiple: true
+
+      - uses: ./.github/actions/publish-apt
+        with:
+          suite: alpha
+          path: debs
+          s3-access-key: ${{ secrets.S3_ACCESS_KEY }}
+          s3-secret-key: ${{ secrets.S3_SECRET_KEY }}
+          gpg-private-key: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+          gpg-key-id: ${{ secrets.APT_GPG_KEY_ID }}

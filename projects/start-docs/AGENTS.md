@@ -45,4 +45,11 @@ The StartOS, StartTunnel, Packaging, and StartWRT books are NOT here — they mo
 
 ## Deployment
 
-GitHub Actions `.github/workflows/docs-deploy.yml` (at the monorepo root) builds and rsyncs to the VPS on push to `master` touching `projects/start-docs/**`, `projects/start-os/docs/**`, `projects/start-tunnel/docs/**`, `projects/start-sdk/docs/**`, or `projects/start-wrt/docs/**`. It regenerates nginx routing from `versions.conf`. Don't hardcode book names in nginx — the generated `book_versions.conf` handles that.
+**The site serves the `live-docs` branch, not `master`.** GitHub Actions `.github/workflows/docs-deploy.yml` (at the monorepo root) builds and rsyncs to the VPS on push to `live-docs` touching `projects/start-docs/**`, `projects/start-os/docs/**`, `projects/start-tunnel/docs/**`, `projects/start-sdk/docs/**`, or `projects/start-wrt/docs/**` — keep that `paths:` list in step with the set of books. It regenerates nginx routing from `versions.conf`. Don't hardcode book names in nginx — the generated `book_versions.conf` handles that.
+
+Content reaches `live-docs` two ways:
+
+- **On a tag.** `docs-sync-on-tag.yml` copies the tagged tree's `projects/<project>/docs/` **and all of `projects/start-docs/`** onto `live-docs`, then dispatches the deploy. This is how a book — and any change you make in this project, including `versions.conf`, `build.sh`, and `theme/` — actually goes live. Work here therefore ships on someone else's release: if a site change needs to go out now, PR it to `live-docs` as below.
+- **By PR into `live-docs`.** For fixing what is already published. It deploys on merge and is then pushed back to master automatically (`docs-backport.yml`), so don't also write the fix in master.
+
+Because a tag sync overwrites this whole project from the tagged tree, never hand-edit `projects/start-docs/**` on `live-docs` expecting it to survive — land it in master too (the backport does this for you).

@@ -1,0 +1,186 @@
+name: Backport live-docs to master
+
+# Anything merged into live-docs is a fix to already-published documentation, so
+# it has to reach master too or the next tag will quietly revert it. It was
+# already reviewed on the way into live-docs, so this lands it on master
+# directly rather than asking for a second approval. A conflict is the one case
+# that still needs a human: it falls back to a branch + PR so the change can't
+# be silently dropped.
+#
+# The commit is created through the GraphQL API rather than `git commit`, so
+# GitHub signs it as the docs bot — master's `required_signatures` rule is
+# satisfied honestly instead of being bypassed. The same call takes an
+# expectedHeadOid, which makes the write an atomic compare-and-swap against
+# master's head: a race loses cleanly and retries instead of clobbering.
+#
+# The tag sync (docs-sync-on-tag.yml) must NOT bounce back here — it copies a
+# tag's tree, which already came from master. Its commits carry [skip-backport],
+# checked below. That marker is the only thing stopping the loop, since its push
+# raises a real push event.
+on:
+  push:
+    branches: ['live-docs']
+
+permissions:
+  contents: read
+
+# Serialized: two live-docs merges in quick succession would otherwise race each
+# other onto master.
+concurrency:
+  group: docs-backport
+  cancel-in-progress: false
+
+jobs:
+  backport:
+    name: Backport to master
+    if: ${{ !contains(github.event.head_commit.message, '[skip-backport]') }}
+    runs-on: ubuntu-latest
+    # master is PR-protected with no bypass for github-actions[bot], so this
+    # needs the docs bot App, which IS a bypass actor. Its private key is an
+    # environment secret whose deployment policy admits only `live-docs` — a
+    # workflow run on any other ref is refused the secret and so cannot mint a
+    # token that bypasses master. That gate, not the App's existence, is what
+    # keeps this from being a repo-wide escalation. Keep it in step with the
+    # trigger above.
+    environment: docs-backport
+    steps:
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ secrets.DOCS_BOT_APP_ID }}
+          private-key: ${{ secrets.DOCS_BOT_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v6
+        with:
+          ref: master
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Backport onto master
+        id: pick
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+        run: |
+          set -euo pipefail
+
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            echo "::notice::live-docs was just created — nothing to backport."
+            exit 0
+          fi
+
+          git fetch --no-tags origin live-docs master
+          git config user.name "start9-docs-bot[bot]"
+          git config user.email "start9-docs-bot[bot]@users.noreply.github.com"
+
+          RANGE="${BEFORE}..${AFTER}"
+          if [ -z "$(git rev-list "$RANGE")" ]; then
+            echo "::notice::No new commits in $RANGE."
+            exit 0
+          fi
+
+          for attempt in 1 2 3; do
+            git fetch --no-tags origin master
+            git reset --hard origin/master
+            BASE=$(git rev-parse origin/master)
+
+            # -n applies every patch to the index and commits once at the end.
+            # Cherry-picking commit-by-commit would abort on any patch that is
+            # already in master (an "empty" pick), which is the common case when
+            # a fix was written on live-docs and hand-copied to master first.
+            if ! git cherry-pick -x -n $(git rev-list --reverse "$RANGE"); then
+              git cherry-pick --abort || true
+              echo "conflict=true" >> "$GITHUB_OUTPUT"
+              echo "::warning::Backport conflicts with master — opening a PR instead."
+              exit 0
+            fi
+
+            if git diff --cached --quiet; then
+              echo "::notice::live-docs commits are already in master — nothing to backport."
+              exit 0
+            fi
+
+            # createCommitOnBranch carries the whole content of every changed
+            # file, base64'd, in one mutation — fine for prose, but it would
+            # choke on a large binary asset. Docs fixes don't move those; if one
+            # ever does, this fails loudly and the PR fallback below takes it.
+            additions=$(
+              git diff --cached --name-only --diff-filter=d "$BASE" | while read -r f; do
+                jq -n --arg path "$f" --arg contents "$(base64 -w0 "$f")" \
+                  '{path: $path, contents: $contents}'
+              done | jq -sc .
+            )
+            deletions=$(
+              git diff --cached --name-only --diff-filter=D "$BASE" \
+                | jq -R '{path: .}' | jq -sc .
+            )
+
+            {
+              echo "docs: backport live-docs $(git rev-parse --short "$AFTER") to master"
+              echo
+              echo "Backports the following from live-docs:"
+              echo
+              git log --reverse --format='- %h %s' "$RANGE"
+            } > /tmp/backport-msg
+
+            # expectedHeadOid makes this a compare-and-swap: if master moved
+            # since the reset above, the mutation is rejected and we re-derive
+            # the patch against the new head rather than overwriting it.
+            if jq -n \
+              --arg repo "$GITHUB_REPOSITORY" \
+              --arg oid "$BASE" \
+              --arg headline "$(head -n1 /tmp/backport-msg)" \
+              --arg body "$(tail -n +3 /tmp/backport-msg)" \
+              --argjson additions "$additions" \
+              --argjson deletions "$deletions" \
+              '{
+                 query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }",
+                 variables: {
+                   input: {
+                     branch: { repositoryNameWithOwner: $repo, branchName: "master" },
+                     expectedHeadOid: $oid,
+                     message: { headline: $headline, body: $body },
+                     fileChanges: { additions: $additions, deletions: $deletions }
+                   }
+                 }
+               }' | gh api graphql --input - > /tmp/commit-result; then
+              echo "Committed to master:"
+              jq -r '.data.createCommitOnBranch.commit | "  \(.oid)\n  \(.url)"' /tmp/commit-result
+              exit 0
+            fi
+
+            echo "::notice::master moved during attempt $attempt — retrying."
+            cat /tmp/commit-result || true
+          done
+
+          echo "conflict=true" >> "$GITHUB_OUTPUT"
+          echo "::warning::Could not land on master after 3 attempts — opening a PR instead."
+
+      # Only reached when the change could not land unattended. The commit is
+      # preserved on a branch so a maintainer can resolve it by hand.
+      - name: Open a PR instead
+        if: steps.pick.outputs.conflict == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          AFTER: ${{ github.event.after }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          BRANCH="backport/live-docs-$(git rev-parse --short "$AFTER")"
+          git reset --hard origin/master
+          git checkout -b "$BRANCH"
+          git cherry-pick -x $(git rev-list --reverse "${BEFORE}..${AFTER}") || true
+          # Leave conflict markers in the tree rather than dropping the change:
+          # the PR is the handoff, and an empty branch would hide the problem.
+          git add -A
+          git -c core.editor=true cherry-pick --continue 2> /dev/null || true
+          git push -f origin "$BRANCH"
+          gh pr create \
+            --base master \
+            --head "$BRANCH" \
+            --title "docs: backport live-docs $(git rev-parse --short "$AFTER") to master" \
+            --body "Automated backport of the documentation change published to docs.start9.com from \`live-docs\` (${AFTER}).
+
+          It could not be applied to master unattended — **resolve the conflicts before merging**. Until this lands, master's copy of the docs is out of step and the next tag will revert the published fix." \
+            || echo "::warning::A PR for $BRANCH already exists."
