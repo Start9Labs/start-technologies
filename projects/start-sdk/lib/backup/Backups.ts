@@ -12,8 +12,6 @@ import {
 
 const BACKUP_HOST_PATH = '/media/startos/backup'
 const BACKUP_CONTAINER_MOUNT = '/backup-target'
-// these steps can outlast exec's 30 s default
-const NO_TIMEOUT = null
 
 /** A password value, or a function that returns one. Functions are resolved lazily (only during restore). */
 export type LazyPassword = string | (() => string | Promise<string>) | null
@@ -260,8 +258,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
           '-o',
           pgStartOpts,
         ],
-        { user: 'postgres' },
-        NO_TIMEOUT,
+        { user: 'postgres', timeoutMs: null },
       )
       for (let elapsed = 0; elapsed < readyTimeout; elapsed += 1000) {
         const { exitCode } = await sub.exec(['pg_isready', '-U', user], {
@@ -296,20 +293,17 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
             console.log('[pg-dump] dumping database')
             await sub.execFail(
               ['pg_dump', '-U', user, '-Fc', '-f', tmpDumpFile, database],
-              { user: 'postgres' },
-              NO_TIMEOUT,
+              { user: 'postgres', timeoutMs: null },
             )
             console.log('[pg-dump] copying dump to backup target')
-            await sub.execFail(
-              ['cp', tmpDumpFile, dumpFile],
-              { user: 'root' },
-              NO_TIMEOUT,
-            )
+            await sub.execFail(['cp', tmpDumpFile, dumpFile], {
+              user: 'root',
+              timeoutMs: null,
+            })
             console.log('[pg-dump] stopping postgres')
             await sub.execFail(
               ['pg_ctl', 'stop', '-D', pgdata, '-w', '-t', pgCtlTimeout],
-              { user: 'postgres' },
-              NO_TIMEOUT,
+              { user: 'postgres', timeoutMs: null },
             )
             console.log('[pg-dump] complete')
           },
@@ -326,23 +320,20 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
             await mountBackupTarget(sub.rootfs)
             // Stage the dump off the FUSE before pg_restore reads it — see
             // the comment on `tmpDumpFile` above.
-            await sub.execFail(
-              ['cp', dumpFile, tmpDumpFile],
-              { user: 'root' },
-              NO_TIMEOUT,
-            )
+            await sub.execFail(['cp', dumpFile, tmpDumpFile], {
+              user: 'root',
+              timeoutMs: null,
+            })
             await sub.execFail(['chown', 'postgres:postgres', tmpDumpFile], {
               user: 'root',
             })
             await sub.execFail(
               ['chown', '-R', 'postgres:postgres', mountpoint],
-              { user: 'root' },
-              NO_TIMEOUT,
+              { user: 'root', timeoutMs: null },
             )
             await sub.execFail(
               ['initdb', '-D', pgdata, '-U', user, ...initdbArgs],
-              { user: 'postgres' },
-              NO_TIMEOUT,
+              { user: 'postgres', timeoutMs: null },
             )
             await startPg(sub, 'pg-restore')
             await sub.execFail(['createdb', '-U', user, database], {
@@ -359,8 +350,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
                 '--no-privileges',
                 tmpDumpFile,
               ],
-              { user: 'postgres' },
-              NO_TIMEOUT,
+              { user: 'postgres', timeoutMs: null },
             )
             if (resolvedPassword !== null) {
               await sub.execFail(
@@ -378,8 +368,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
             }
             await sub.execFail(
               ['pg_ctl', 'stop', '-D', pgdata, '-w', '-t', pgCtlTimeout],
-              { user: 'postgres' },
-              NO_TIMEOUT,
+              { user: 'postgres', timeoutMs: null },
             )
           },
         )
@@ -452,8 +441,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
               '--bind-address=127.0.0.1',
               ...mysqldOptions,
             ],
-            { user: 'root' },
-            NO_TIMEOUT,
+            { user: 'root', timeoutMs: null },
           )
           .catch(e =>
             console.error('[mysql-backup] mysqld exited unexpectedly:', e),
@@ -468,8 +456,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
             '--daemonize',
             ...mysqldOptions,
           ],
-          { user: 'root' },
-          NO_TIMEOUT,
+          { user: 'root', timeoutMs: null },
         )
       }
     }
@@ -496,8 +483,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
             'done',
           ].join('\n'),
         ],
-        { user: 'root' },
-        NO_TIMEOUT,
+        { user: 'root', timeoutMs: null },
       )
     }
 
@@ -526,11 +512,10 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
               user: 'root',
             })
             if (engine === 'mysql') {
-              await sub.execFail(
-                ['chown', '-R', 'mysql:mysql', datadir],
-                { user: 'root' },
-                NO_TIMEOUT,
-              )
+              await sub.execFail(['chown', '-R', 'mysql:mysql', datadir], {
+                user: 'root',
+                timeoutMs: null,
+              })
             }
             await startMysql(sub)
             await waitForMysql(sub, readyCmd)
@@ -544,14 +529,12 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
                 `--result-file=${tmpDumpFile}`,
                 database,
               ],
-              { user: 'root' },
-              NO_TIMEOUT,
+              { user: 'root', timeoutMs: null },
             )
-            await sub.execFail(
-              ['cp', tmpDumpFile, dumpFile],
-              { user: 'root' },
-              NO_TIMEOUT,
-            )
+            await sub.execFail(['cp', tmpDumpFile, dumpFile], {
+              user: 'root',
+              timeoutMs: null,
+            })
             await stopMysql(sub)
           },
         )
@@ -575,8 +558,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
             if (engine === 'mariadb') {
               await sub.execFail(
                 ['mysql_install_db', '--user=mysql', `--datadir=${datadir}`],
-                { user: 'root' },
-                NO_TIMEOUT,
+                { user: 'root', timeoutMs: null },
               )
             } else {
               await sub.execFail(
@@ -586,8 +568,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
                   '--user=mysql',
                   `--datadir=${datadir}`,
                 ],
-                { user: 'root' },
-                NO_TIMEOUT,
+                { user: 'root', timeoutMs: null },
               )
             }
             await startMysql(sub)
@@ -609,11 +590,10 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
             })
             // Stage the dump off the FUSE before mysql reads it — see
             // the comment on `tmpDumpFile` above.
-            await sub.execFail(
-              ['cp', dumpFile, tmpDumpFile],
-              { user: 'root' },
-              NO_TIMEOUT,
-            )
+            await sub.execFail(['cp', dumpFile, tmpDumpFile], {
+              user: 'root',
+              timeoutMs: null,
+            })
             // Restore from dump
             await sub.execFail(
               [
@@ -621,8 +601,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
                 '-c',
                 `mysql -u root ${pw !== null ? `-p'${pw}'` : ''} ${database} < ${tmpDumpFile}`,
               ],
-              { user: 'root' },
-              NO_TIMEOUT,
+              { user: 'root', timeoutMs: null },
             )
             await stopMysql(sub)
           },

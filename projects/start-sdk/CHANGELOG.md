@@ -9,6 +9,16 @@
   a package built with this SDK now writes as its manifest `osVersion` — so the
   registry offers that package to servers on 0.4.0 or later
 
+- **`SubContainer.exec` / `execFail` take `timeoutMs` and `abort` as named
+  options rather than as third and fourth positional arguments.**
+  `sub.execFail(cmd, { user: 'root' }, null)` becomes
+  `sub.execFail(cmd, { user: 'root', timeoutMs: null })`. A bare `null` in the
+  third position gave no hint which of the two knobs it was setting or what it
+  meant, and reaching the fourth argument meant supplying the third. Both moved
+  together because dropping only `timeoutMs` would have left `abort` sliding
+  into a position whose type it does not match. Passing either positionally is
+  now a compile error, so anything that needs updating says so at build time
+
 ### Added
 
 - **`sdk.getRootCa(effects)` returns this server's root CA certificate.** A
