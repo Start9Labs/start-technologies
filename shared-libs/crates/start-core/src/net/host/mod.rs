@@ -121,6 +121,17 @@ fn mdns_gateways(gateways: &OrdMap<GatewayId, NetworkInterfaceInfo>) -> BTreeSet
         .collect()
 }
 
+fn secure_gateways<'a>(
+    gateways: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+    candidates: impl IntoIterator<Item = &'a GatewayId>,
+) -> BTreeSet<GatewayId> {
+    candidates
+        .into_iter()
+        .filter(|g| gateways.get(*g).map_or(false, |g| g.secure()))
+        .cloned()
+        .collect()
+}
+
 impl Model<Host> {
     pub fn update_addresses(
         &mut self,
@@ -228,11 +239,7 @@ impl Model<Host> {
                 let mdns_gateways = if opt.secure.is_some() {
                     mdns_gateways.clone()
                 } else {
-                    mdns_gateways
-                        .iter()
-                        .filter(|g| gateways.get(*g).map_or(false, |g| g.secure()))
-                        .cloned()
-                        .collect()
+                    secure_gateways(gateways, mdns_gateways.iter())
                 };
                 if !mdns_gateways.is_empty() {
                     available.insert(HostnameInfo {
@@ -306,11 +313,7 @@ impl Model<Host> {
                     let gateways = if opt.secure.is_some() {
                         domain_gateways.clone()
                     } else {
-                        domain_gateways
-                            .iter()
-                            .cloned()
-                            .filter(|g| gateways.get(g).map_or(false, |g| g.secure()))
-                            .collect()
+                        secure_gateways(gateways, domain_gateways.iter())
                     };
                     available.insert(HostnameInfo {
                         ssl: opt.secure.map_or(false, |s| s.ssl),
@@ -868,7 +871,7 @@ mod tests {
     use imbl::OrdMap;
     use imbl_value::InternedString;
 
-    use super::{Host, Model, mdns_gateways};
+    use super::{Host, Model, mdns_gateways, secure_gateways};
     use crate::GatewayId;
     use crate::db::model::public::{
         CapabilityVerdict, IpInfo, NetworkInterfaceInfo, NetworkInterfaceType,
@@ -1007,5 +1010,34 @@ mod tests {
             .add_binding_range(&mut ports, 65535, 40000, 2, false)
             .unwrap_err();
         assert_eq!(err.kind, ErrorKind::InvalidRequest);
+    }
+
+    #[test]
+    fn secure_gateways_follows_the_operators_override() {
+        let mut ifaces: OrdMap<GatewayId, NetworkInterfaceInfo> = [
+            (gw("lxcbr0"), iface(NetworkInterfaceType::Bridge, None)),
+            (gw("eth0"), iface(NetworkInterfaceType::Ethernet, None)),
+            (gw("wlan0"), iface(NetworkInterfaceType::Wireless, None)),
+        ]
+        .into_iter()
+        .collect();
+        let candidates = [gw("lxcbr0"), gw("eth0"), gw("wlan0"), gw("gone")];
+
+        assert_eq!(
+            secure_gateways(&ifaces, candidates.iter()),
+            [gw("lxcbr0")].into_iter().collect()
+        );
+
+        ifaces[&gw("eth0")].secure = Some(true);
+        assert_eq!(
+            secure_gateways(&ifaces, candidates.iter()),
+            [gw("lxcbr0"), gw("eth0")].into_iter().collect()
+        );
+
+        ifaces[&gw("lxcbr0")].secure = Some(false);
+        assert_eq!(
+            secure_gateways(&ifaces, candidates.iter()),
+            [gw("eth0")].into_iter().collect()
+        );
     }
 }

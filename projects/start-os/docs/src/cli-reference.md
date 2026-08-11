@@ -413,6 +413,16 @@ Rename a gateway.
 
 Set the default outbound gateway for all services.
 
+### `start-cli net gateway set-secure <GATEWAY> [SECURE]`
+
+Mark a gateway's network as trusted, so services' non-SSL addresses are offered on it. See [Secure Gateways](gateways.md#secure-gateways).
+
+- `SECURE` — `true` (the default) or `false`
+
+### `start-cli net gateway unset-secure <GATEWAY>`
+
+Let StartOS decide, which trusts only the loopback and container-bridge gateways.
+
 ### `start-cli net gateway check-dns <GATEWAY>`
 
 Test DNS resolution through a gateway.

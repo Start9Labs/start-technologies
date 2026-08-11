@@ -667,8 +667,8 @@ impl NetServiceData {
         //
         // `secure: true` is intentional: ranges carry no Security option (no
         // SSL/vhost), so without it the forward.rs security gate
-        // (`!reqs.secure && !info.secure()`) would drop every range on a normal
-        // (non-secure) WAN gateway, since no gateway is ever marked secure.
+        // (`!reqs.secure && !info.secure()`) would drop every range on a gateway
+        // the operator has not marked secure.
         for (&internal_start, range) in host.binding_ranges.iter() {
             if !range.enabled {
                 continue;

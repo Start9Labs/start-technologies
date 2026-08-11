@@ -64,7 +64,7 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
                     }
 
                     let mut table = Table::new();
-                    table.add_row(row![bc => "INTERFACE", "TYPE", "ADDRESSES", "WAN IP"]);
+                    table.add_row(row![bc => "INTERFACE", "TYPE", "SECURE", "ADDRESSES", "WAN IP"]);
                     for (iface, info) in res {
                         table.add_row(row![
                             iface,
@@ -72,6 +72,12 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
                                 .as_ref()
                                 .and_then(|ip_info| ip_info.device_type)
                                 .map_or_else(|| "UNKNOWN".to_owned(), |ty| format!("{ty:?}")),
+                            match info.secure {
+                                Some(true) => "YES",
+                                Some(false) => "NO",
+                                None if info.secure() => "YES (auto)",
+                                None => "NO (auto)",
+                            },
                             info.ip_info.as_ref().map_or_else(
                                 || "<DISCONNECTED>".to_owned(),
                                 |ip_info| ip_info
@@ -115,6 +121,22 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.rename-gateway")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "set-secure",
+            from_fn_async(set_secure)
+                .with_metadata("sync_db", Value::Bool(true))
+                .no_display()
+                .with_about("about.mark-gateway-network-secure")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "unset-secure",
+            from_fn_async(unset_secure)
+                .with_metadata("sync_db", Value::Bool(true))
+                .no_display()
+                .with_about("about.allow-gateway-infer-network-security")
                 .with_call_remote::<CliContext>(),
         )
         .subcommand(
@@ -554,6 +576,46 @@ async fn set_name(
     RenameGatewayParams { id, name }: RenameGatewayParams,
 ) -> Result<(), Error> {
     ctx.net_controller.net_iface.set_name(&id, name).await
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+struct SetGatewaySecureParams {
+    #[arg(help = "help.arg.gateway-id")]
+    gateway: GatewayId,
+    #[arg(help = "help.arg.is-secure")]
+    secure: Option<bool>,
+}
+
+async fn set_secure(
+    ctx: RpcContext,
+    SetGatewaySecureParams { gateway, secure }: SetGatewaySecureParams,
+) -> Result<(), Error> {
+    ctx.net_controller
+        .net_iface
+        .set_secure(&gateway, Some(secure.unwrap_or(true)))
+        .await
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+struct UnsetGatewaySecureParams {
+    #[arg(help = "help.arg.gateway-id")]
+    gateway: GatewayId,
+}
+
+async fn unset_secure(
+    ctx: RpcContext,
+    UnsetGatewaySecureParams { gateway }: UnsetGatewaySecureParams,
+) -> Result<(), Error> {
+    ctx.net_controller
+        .net_iface
+        .set_secure(&gateway, None)
+        .await
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
@@ -3096,6 +3158,49 @@ impl NetworkInterfaceController {
                 })
                 .unwrap_or(false)
         });
+        if changed {
+            sub.recv().await;
+        }
+
+        Ok(())
+    }
+
+    pub async fn set_secure(
+        &self,
+        interface: &GatewayId,
+        secure: Option<bool>,
+    ) -> Result<(), Error> {
+        let mut sub = self
+            .db
+            .subscribe(
+                "/public/serverInfo/network/gateways"
+                    .parse::<JsonPointer<_, _>>()
+                    .with_kind(ErrorKind::Database)?
+                    .join_end(interface.as_str())
+                    .join_end("secure"),
+            )
+            .await;
+        let mut err = None;
+        let changed = self.watcher.ip_info.send_if_modified(|ip_info| {
+            let info = match ip_info.get_mut(interface).or_not_found(interface) {
+                Ok(info) => info,
+                Err(e) => {
+                    err = Some(e);
+                    return false;
+                }
+            };
+            if secure == Some(false) && info.is_intrinsically_secure() {
+                err = Some(Error::new(
+                    eyre!("{}", t!("net.gateway.cannot-mark-internal-insecure")),
+                    ErrorKind::InvalidRequest,
+                ));
+                return false;
+            }
+            std::mem::replace(&mut info.secure, secure) != secure
+        });
+        if let Some(e) = err {
+            return Err(e);
+        }
         if changed {
             sub.recv().await;
         }
