@@ -34,7 +34,6 @@ file tracks notable changes since the move to the monorepo.
   untouched.** Naming a network host the service does not have — a stale id, or
   a typo — added that host to the service as an empty entry, which then stayed
   in its network settings with nothing to remove it.
-  
 - **A service whose startup routine throws now reports the failure in its own
   logs, and StartOS names the failure for what it is.** The container runtime
   handed the exception back to StartOS over its socket without also printing
