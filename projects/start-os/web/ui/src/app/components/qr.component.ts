@@ -9,24 +9,15 @@ import { QrCodeComponent } from 'ng-qrcode'
 const utf8 = new TextEncoder()
 
 /**
- * ng-qrcode draws a fixed-pixel canvas at correction level `M`, which fails two
- * ways once a payload gets long. Past what `M` can hold the encoder throws "The
- * amount of data is too big to be stored in a QR Code" and nothing renders at
- * all. Below that the code still draws, but a fixed 350px canvas leaves a
- * version-29 code with modules under 3px — too fine for a camera to resolve.
- *
- * So the canvas is drawn oversized and CSS decides the physical size, keeping
- * whatever room the container offers, and dense payloads drop to level `L`.
+ * ng-qrcode encodes at correction level `M`, which has no version left past
+ * what that level can hold: the encoder throws "The amount of data is too big
+ * to be stored in a QR Code" and the modal comes up empty, with only a console
+ * error to say why. Level `L` carries the payload instead.
  */
 @Component({
   selector: 'app-qr',
   template: `
-    <qr-code
-      styleClass="g-qr"
-      [value]="value()"
-      [errorCorrectionLevel]="level()"
-      [size]="1024"
-    />
+    <qr-code [value]="value()" [errorCorrectionLevel]="level()" size="350" />
   `,
   imports: [QrCodeComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,

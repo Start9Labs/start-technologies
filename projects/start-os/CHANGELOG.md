@@ -18,12 +18,10 @@ file tracks notable changes since the move to the monorepo.
   image would be installed without complaint. It now verifies whenever
   `CHECKSUM` is set.
 
-- **Large QR codes in action results render instead of failing.** The canvas was
-  fixed at 350px and the encoder pinned to correction level `M`, so a payload
-  past about 2.3 kB exceeded what any version at that level can hold: the
-  encoder threw and the modal came up empty. Shorter but still dense codes drew
-  modules too fine for a camera to resolve. Codes now scale to the room their
-  container offers and drop to level `L` when `M` has no version left.
+- **Large QR codes render instead of coming up blank.** The encoder was pinned
+  to correction level `M`, which has no version left past about 2.3 kB — so a
+  longer value threw and the dialog opened empty, with only a console error to
+  say why. Those codes now encode at level `L`, which carries about 2.9 kB.
 
 - **The login banner reports system status for every user, not just the first
   one to log in.** It staged its database snapshot at a fixed path in `/tmp`,

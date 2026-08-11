@@ -51,16 +51,6 @@ ul {
   margin-left: -0.3rem;
 }
 
-// Sizes the oversized canvas app-qr draws to whatever room it is given. Nearest
-// neighbour rather than the browser's default smoothing: blurred module edges
-// cost a camera far more than a slightly smaller code does.
-.g-qr {
-  width: 100%;
-  height: auto;
-  max-width: 30rem;
-  image-rendering: pixelated;
-}
-
 .g-page {
   @include taiga.scrollbar-hidden();
 
