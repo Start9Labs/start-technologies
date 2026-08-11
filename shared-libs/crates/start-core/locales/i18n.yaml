@@ -4181,13 +4181,6 @@ help.arg.internal-port:
   pl_PL: "Numer portu wewnętrznego"
 
 
-help.arg.is-public:
-  en_US: "Whether the interface is publicly addressable"
-  de_DE: "Ob die Schnittstelle öffentlich erreichbar ist"
-  es_ES: "Si la interfaz es accesible públicamente"
-  fr_FR: "Si l'interface est accessible publiquement"
-  pl_PL: "Czy interfejs jest publicznie adresowalny"
-
 help.arg.json-value:
   en_US: "JSON value to set"
   de_DE: "JSON-Wert zum Setzen"
@@ -4700,12 +4693,6 @@ about.add-wifi-ssid-password:
   fr_FR: "Ajouter un ssid et mot de passe wifi"
   pl_PL: "Dodaj ssid i hasło wifi"
 
-about.allow-gateway-infer-inbound-access-from-wan:
-  en_US: "Allow this gateway to infer whether it has inbound access from the WAN based on its IPv4 address"
-  de_DE: "Diesem Gateway erlauben, anhand seiner IPv4-Adresse zu ermitteln, ob es eingehenden Zugriff vom WAN hat"
-  es_ES: "Permitir que este gateway deduzca si tiene acceso entrante desde WAN basado en su dirección IPv4"
-  fr_FR: "Permettre à cette passerelle de déduire si elle a un accès entrant depuis le WAN en fonction de son adresse IPv4"
-  pl_PL: "Pozwól tej bramce wywnioskować, czy ma dostęp przychodzący z WAN na podstawie adresu IPv4"
 
 about.apply-available-update:
   en_US: "Apply available update"
@@ -5568,12 +5555,6 @@ about.import-certificate-for-webserver:
   fr_FR: "Importer un certificat pour le serveur web"
   pl_PL: "Importuj certyfikat dla serwera internetowego"
 
-about.indicate-gateway-inbound-access-from-wan:
-  en_US: "Indicate gateway inbound access from WAN"
-  de_DE: "Eingehenden Zugriff vom WAN zum Gateway anzeigen"
-  es_ES: "Indicar acceso entrante del gateway desde WAN"
-  fr_FR: "Indiquer l'accès entrant de la passerelle depuis le WAN"
-  pl_PL: "Wskaż dostęp przychodzący bramy z WAN"
 
 about.initialize-a-packaging-workspace:
   en_US: "Initialize a StartOS packaging workspace"
