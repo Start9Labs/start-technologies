@@ -21,6 +21,13 @@
   difference. Prefer `sdk.host.getBridgeAddress` to reach a dependency; this is
   raw allocator metadata
 
+- **The scaffolded `build.yml` no longer passes `DEV_KEY`.** A PR build only
+  compiles and packs, and the reusable workflow already falls back to
+  `init-key` when no key is present, so the secret bought nothing and put the
+  real signing key on a runner executing branch-authored code. `release.yml`
+  and `tagAndRelease.yml` publish, and still take it. Existing packages should
+  drop the `secrets:` block from their own `build.yml`
+
 ### Added
 
 - **`MultiHost.retire()` and `MultiHost.retirePort()` permanently remove a host
