@@ -20,7 +20,7 @@ file tracks notable changes since the move to the monorepo.
 
 - **Large QR codes in action results render instead of failing.** The canvas was
   fixed at 350px and the encoder pinned to correction level `M`, so a payload
-  past 3391 characters exceeded what any version at that level can hold: the
+  past about 2.3 kB exceeded what any version at that level can hold: the
   encoder threw and the modal came up empty. Shorter but still dense codes drew
   modules too fine for a camera to resolve. Codes now scale to the room their
   container offers and drop to level `L` when `M` has no version left.

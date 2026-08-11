@@ -6,13 +6,14 @@ import {
 } from '@angular/core'
 import { QrCodeComponent } from 'ng-qrcode'
 
+const utf8 = new TextEncoder()
+
 /**
  * ng-qrcode draws a fixed-pixel canvas at correction level `M`, which fails two
- * ways once a payload gets long. Past 3391 alphanumeric characters level `M`
- * has no version left, the encoder throws "The amount of data is too big to be
- * stored in a QR Code" and nothing renders at all. Below that the code still
- * draws, but a fixed 350px canvas leaves a version-29 code with modules under
- * 3px — too fine for a hardware wallet's camera to resolve.
+ * ways once a payload gets long. Past what `M` can hold the encoder throws "The
+ * amount of data is too big to be stored in a QR Code" and nothing renders at
+ * all. Below that the code still draws, but a fixed 350px canvas leaves a
+ * version-29 code with modules under 3px — too fine for a camera to resolve.
  *
  * So the canvas is drawn oversized and CSS decides the physical size, keeping
  * whatever room the container offers, and dense payloads drop to level `L`.
@@ -33,6 +34,11 @@ import { QrCodeComponent } from 'ng-qrcode'
 export class QRComponent {
   readonly value = input.required<string>()
 
-  /** Alphanumeric capacity of a version-40 code: 3391 at `M`, 4296 at `L`. */
-  readonly level = computed(() => (this.value().length > 3391 ? 'L' : 'M'))
+  /**
+   * Byte-mode capacity of a version-40 code, which anything with a lowercase
+   * letter in it encodes as: 2331 bytes at `M`, 2953 at `L`.
+   */
+  readonly level = computed(() =>
+    utf8.encode(this.value()).length > 2331 ? 'L' : 'M',
+  )
 }
