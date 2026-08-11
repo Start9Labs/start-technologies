@@ -20,7 +20,7 @@ StartOS makes this practical. Install a Bitcoin node from the StartOS Marketplac
 
 - **[Lightning Wallets](lightning-wallets.md)** — Native apps and self-hosted web tools for managing your LND or Core Lightning node, including RTL, ThunderHub, Zeus, Alby Hub, and more.
 
-- **[Migrating LND to StartOS](lnd-migration.md)** — How to transfer your LND node from Umbrel, RaspiBlitz, myNode, or another platform to StartOS without closing channels.
+- **[Migrating LND to StartOS](lnd-migration.md)** — How to transfer your LND node from Umbrel, myNode, or another StartOS server without closing channels.
 
 ## Supported Implementations
 
