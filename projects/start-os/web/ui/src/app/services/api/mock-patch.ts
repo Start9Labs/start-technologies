@@ -462,6 +462,16 @@ export const mockPatchData: DataModel = {
           hasInput: false,
           group: null,
         },
+        'big-qr': {
+          name: 'Show Large QR',
+          description:
+            'Returns a QR payload too long for correction level M, the size a hardware-wallet code reaches',
+          warning: null,
+          visibility: 'enabled',
+          allowedStatuses: 'any',
+          hasInput: false,
+          group: null,
+        },
         test: {
           name: 'Do Another Thing',
           description:
