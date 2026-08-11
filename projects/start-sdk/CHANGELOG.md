@@ -24,6 +24,18 @@
 
 ### Fixed
 
+- **A build whose `start-cli s9pk list-ingredients` fails now stops instead of
+  silently repacking the previous s9pk.** That command produces the s9pk's
+  entire source-dependency list, `javascript/index.js` included — nothing else
+  in `s9pk.mk` ties the package to your TypeScript. `$(shell)` discards exit
+  status, so any failure left `INGREDIENTS` empty, detaching every source file
+  from the target's prerequisites; make then found the existing s9pk newer than
+  its only surviving prerequisites (`.git/HEAD`, `.git/index`) and declared it up
+  to date, while the recipe still printed `✅ Build Complete!` and exited 0. The
+  result was a package that omitted the changes just made to it, with no
+  indication anything was wrong — most easily hit by editing a source file and
+  rebuilding without touching git in between, on a workspace whose
+  `.startos/config.yaml` names a host that no longer resolves
 - **`hardwareRequirements.ram` is documented in bytes, which is what StartOS
   actually compares it against.** Its TSDoc claimed megabytes and its
   `@example` showed `ram: 8192`, so packages following it declared an 8 KiB
