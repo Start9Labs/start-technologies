@@ -112,7 +112,13 @@ const isDevBuild = (process.env.STARTOS_ENVIRONMENT ?? '')
 
 const jsonParse = (x: string) => JSON.parse(x)
 
-const handleRpc = (id: IdType, result: Promise<RpcResult>) =>
+// codes are start-core ErrorKind discriminants; the OS localizes the message from the code
+const errorKind = {
+  invalidRequest: { code: 38, message: 'Invalid Request' },
+  serviceRuntime: { code: 59, message: 'Service Runtime Error' },
+} as const
+
+const handleRpc = (id: IdType, method: string, result: Promise<RpcResult>) =>
   result
     .then(result => {
       return {
@@ -129,15 +135,17 @@ const handleRpc = (id: IdType, result: Promise<RpcResult>) =>
         (x as any).result = null
       return x
     })
-    .catch(error => ({
-      jsonrpc,
-      id,
-      error: {
-        code: 0,
-        message: typeof error,
-        data: { details: '' + error, debug: error?.stack },
-      },
-    }))
+    .catch(error => {
+      console.error(`${method} failed`, utils.asError(error))
+      return {
+        jsonrpc,
+        id,
+        error: {
+          ...errorKind.serviceRuntime,
+          data: { details: '' + error, debug: error?.stack },
+        },
+      }
+    })
 
 const hasIdSchema = z.object({ id: idType })
 const hasId = (v: unknown): v is z.infer<typeof hasIdSchema> =>
@@ -181,12 +189,11 @@ export class RpcListener {
         jsonrpc,
         id,
         error: {
-          message: typeof error,
+          ...errorKind.invalidRequest,
           data: {
             details: error?.message ?? String(error),
             debug: error?.stack,
           },
-          code: 1,
         },
       })
       const writeDataToSocket = (x: SocketResponse) => {
@@ -270,7 +277,7 @@ export class RpcListener {
         const { input: inp, timeout, id: eventId } = params
         const result = this.getResult(procedure, system, eventId, timeout, inp)
 
-        return handleRpc(id, result)
+        return handleRpc(id, 'execute', result)
       }
       case 'sandbox': {
         const { id, params } = sandboxRunType.parse(input)
@@ -279,7 +286,7 @@ export class RpcListener {
         const { input: inp, timeout, id: eventId } = params
         const result = this.getResult(procedure, system, eventId, timeout, inp)
 
-        return handleRpc(id, result)
+        return handleRpc(id, 'sandbox', result)
       }
       case 'callback': {
         const {
@@ -298,6 +305,7 @@ export class RpcListener {
         })
         return handleRpc(
           id,
+          'start',
           this.system.start(effects).then(result => ({ result })),
         )
       }
@@ -306,6 +314,7 @@ export class RpcListener {
         this.callbacks?.removeChild('main')
         return handleRpc(
           id,
+          'stop',
           this.system.stop().then(result => ({ result })),
         )
       }
@@ -313,6 +322,7 @@ export class RpcListener {
         const { id, params } = exitType.parse(input)
         return handleRpc(
           id,
+          'exit',
           (async () => {
             if (this._system) {
               let target = null
@@ -337,6 +347,7 @@ export class RpcListener {
         const { id, params } = initType.parse(input)
         return handleRpc(
           id,
+          'init',
           (async () => {
             if (!this._system) {
               const system = await this.getDependencies.system()
@@ -364,6 +375,7 @@ export class RpcListener {
         const { id, params } = evalType.parse(input)
         return handleRpc(
           id,
+          'eval',
           (async () => {
             const result = await new Function(
               `return (async () => { return (${params.script}) }).call(this)`,
@@ -448,17 +460,16 @@ export class RpcListener {
           }
       }
     })().then(ensureResultTypeShape, error => {
-      const errorSchema = z.object({
-        error: z.string(),
-        code: z.number().default(0),
-      })
-      const parsed = errorSchema.safeParse(error)
-      if (parsed.success) {
-        return {
-          error: { code: parsed.data.code, message: parsed.data.error },
-        }
+      const legacy = z.object({ error: z.string() }).safeParse(error)
+      return {
+        error: {
+          ...errorKind.serviceRuntime,
+          data: {
+            details: legacy.success ? legacy.data.error : String(error),
+            debug: error?.stack,
+          },
+        },
       }
-      return { error: { code: 0, message: String(error) } }
     })
   }
 }
