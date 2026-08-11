@@ -9,13 +9,13 @@
   a package built with this SDK now writes as its manifest `osVersion` — so the
   registry offers that package to servers on 0.4.0 or later
 
-- **`SubContainer.exec` / `execFail` take `timeoutMs` and `abort` as named
+- **`SubContainer.exec` / `execFail` take `timeout` and `abort` as named
   options rather than as third and fourth positional arguments.**
   `sub.execFail(cmd, { user: 'root' }, null)` becomes
-  `sub.execFail(cmd, { user: 'root', timeoutMs: null })`. A bare `null` in the
+  `sub.execFail(cmd, { user: 'root', timeout: null })`. A bare `null` in the
   third position gave no hint which of the two knobs it was setting or what it
   meant, and reaching the fourth argument meant supplying the third. Both moved
-  together because dropping only `timeoutMs` would have left `abort` sliding
+  together because dropping only `timeout` would have left `abort` sliding
   into a position whose type it does not match. Passing either positionally is
   now a compile error, so anything that needs updating says so at build time
 
@@ -129,7 +129,7 @@
   cp timed out after 30000ms and was killed with SIGKILL:
   ```
 
-  `exec`'s result carries `timedOutAfterMs` — the limit that fired, or `null`
+  `exec`'s result carries `timedOutAfter` — the limit that fired, or `null`
   when the process was not killed by this timer — alongside `exitCode` and
   `exitSignal`
 

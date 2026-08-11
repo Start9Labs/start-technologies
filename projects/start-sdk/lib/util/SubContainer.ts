@@ -13,7 +13,7 @@ const False = () => false
 export type ExecOptions = {
   input?: string | Buffer
   /** How long to wait before SIGKILL, in ms (default 30000). `null` waits as long as the command takes — use it whenever the runtime is set by the size of the data or the speed of a disk. */
-  timeoutMs?: number | null
+  timeout?: number | null
   /** Aborting SIGKILLs the process */
   abort?: AbortController
 }
@@ -177,7 +177,7 @@ export interface SubContainer<
    * @description run a command inside this subcontainer
    * DOES NOT THROW ON NONZERO EXIT CODE (see execFail)
    * @param command an array representing the command and args to execute
-   * @param options env, cwd, user, stdin, `timeoutMs` (default 30 s, `null` for no timeout), and `abort`
+   * @param options env, cwd, user, stdin, `timeout` (default 30 s, `null` for no timeout), and `abort`
    * @returns
    */
   exec(
@@ -187,7 +187,7 @@ export interface SubContainer<
     throw: () => { stdout: string | Buffer; stderr: string | Buffer }
     exitCode: number | null
     exitSignal: NodeJS.Signals | null
-    timedOutAfterMs: number | null
+    timedOutAfter: number | null
     stdout: string | Buffer
     stderr: string | Buffer
   }>
@@ -195,7 +195,7 @@ export interface SubContainer<
   /**
    * @description run a command inside this subcontainer, throwing on non-zero exit status
    * @param command an array representing the command and args to execute
-   * @param options env, cwd, user, stdin, `timeoutMs` (default 30 s, `null` for no timeout), and `abort`
+   * @param options env, cwd, user, stdin, `timeout` (default 30 s, `null` for no timeout), and `abort`
    * @returns
    * @throws {@link ExitError} on non-zero exit code or signal termination
    */
@@ -672,7 +672,7 @@ export class SubContainerEager<
    * Does NOT throw on non-zero exit (see {@link execFail}).
    *
    * @param command Argv array representing the command and its arguments
-   * @param options Optional environment, user, cwd, stdin input, `timeoutMs` (default 30 s, `null` for no timeout), and `abort`
+   * @param options Optional environment, user, cwd, stdin input, `timeout` (default 30 s, `null` for no timeout), and `abort`
    */
   async exec(
     command: string[],
@@ -681,7 +681,7 @@ export class SubContainerEager<
     throw: () => { stdout: string | Buffer; stderr: string | Buffer }
     exitCode: number | null
     exitSignal: NodeJS.Signals | null
-    timedOutAfterMs: number | null
+    timedOutAfter: number | null
     stdout: string | Buffer
     stderr: string | Buffer
   }> {
@@ -695,7 +695,7 @@ export class SubContainerEager<
     let extra: string[] = []
     // what's left of `spawnOptions` is forwarded to cp.spawn; copied so the
     // deletes below can't strip the caller's object for its next call
-    const { timeoutMs = 30000, abort, ...spawnOptions } = options ?? {}
+    const { timeout = 30000, abort, ...spawnOptions } = options ?? {}
     let user = imageMeta.user || 'root'
     if (spawnOptions.user) {
       user = spawnOptions.user
@@ -763,11 +763,11 @@ export class SubContainerEager<
       child.on('error', reject)
       let killTimeout: NodeJS.Timeout | undefined
       let timedOut = false
-      if (timeoutMs !== null && child.pid) {
+      if (timeout !== null && child.pid) {
         killTimeout = setTimeout(() => {
           timedOut = true
           child.kill('SIGKILL')
-        }, timeoutMs)
+        }, timeout)
       }
       child.stdout.on('data', appendData(stdout))
       child.stderr.on('data', appendData(stderr))
@@ -777,7 +777,7 @@ export class SubContainerEager<
           exitCode: code,
           exitSignal: signal,
           // the deadline can elapse after something else already killed it
-          timedOutAfterMs: timedOut && signal === 'SIGKILL' ? timeoutMs : null,
+          timedOutAfter: timedOut && signal === 'SIGKILL' ? timeout : null,
           stdout: stdout.data,
           stderr: stderr.data,
         }
@@ -798,7 +798,7 @@ export class SubContainerEager<
    * Run a command inside this subcontainer, throwing on non-zero exit.
    *
    * @param command Argv array representing the command and its arguments
-   * @param options Optional environment, user, cwd, stdin input, `timeoutMs` (default 30 s, `null` for no timeout), and `abort`
+   * @param options Optional environment, user, cwd, stdin input, `timeout` (default 30 s, `null` for no timeout), and `abort`
    * @throws {@link ExitError} on non-zero exit code or signal termination
    */
   async execFail(
@@ -1109,7 +1109,7 @@ export class SubContainerLazy<
    * Does NOT throw on non-zero exit (see {@link execFail}).
    *
    * @param command Argv array representing the command and its arguments
-   * @param options Optional environment, user, cwd, stdin input, `timeoutMs` (default 30 s, `null` for no timeout), and `abort`
+   * @param options Optional environment, user, cwd, stdin input, `timeout` (default 30 s, `null` for no timeout), and `abort`
    */
   async exec(
     command: string[],
@@ -1118,7 +1118,7 @@ export class SubContainerLazy<
     throw: () => { stdout: string | Buffer; stderr: string | Buffer }
     exitCode: number | null
     exitSignal: NodeJS.Signals | null
-    timedOutAfterMs: number | null
+    timedOutAfter: number | null
     stdout: string | Buffer
     stderr: string | Buffer
   }> {
@@ -1130,7 +1130,7 @@ export class SubContainerLazy<
    * (materializes on first call).
    *
    * @param command Argv array representing the command and its arguments
-   * @param options Optional environment, user, cwd, stdin input, `timeoutMs` (default 30 s, `null` for no timeout), and `abort`
+   * @param options Optional environment, user, cwd, stdin input, `timeout` (default 30 s, `null` for no timeout), and `abort`
    * @throws {@link ExitError} on non-zero exit code or signal termination
    */
   async execFail(
@@ -1259,7 +1259,7 @@ export class ExitError extends Error {
     readonly result: {
       exitCode: number | null
       exitSignal: T.Signals | null
-      timedOutAfterMs: number | null
+      timedOutAfter: number | null
       stdout: string | Buffer
       stderr: string | Buffer
     },
@@ -1267,8 +1267,8 @@ export class ExitError extends Error {
     let message: string
     if (result.exitCode) {
       message = `${command} failed with exit code ${result.exitCode}: ${result.stderr}`
-    } else if (result.timedOutAfterMs !== null) {
-      message = `${command} timed out after ${result.timedOutAfterMs}ms and was killed with ${result.exitSignal}: ${result.stderr}`
+    } else if (result.timedOutAfter !== null) {
+      message = `${command} timed out after ${result.timedOutAfter}ms and was killed with ${result.exitSignal}: ${result.stderr}`
     } else if (result.exitSignal) {
       message = `${command} terminated with signal ${result.exitSignal}: ${result.stderr}`
     } else {

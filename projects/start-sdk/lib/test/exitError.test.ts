@@ -5,7 +5,7 @@ describe('ExitError', () => {
     const err = new ExitError('pg_dump', {
       exitCode: 1,
       exitSignal: null,
-      timedOutAfterMs: null,
+      timedOutAfter: null,
       stdout: '',
       stderr: 'connection refused',
     })
@@ -18,7 +18,7 @@ describe('ExitError', () => {
     const err = new ExitError('cp', {
       exitCode: null,
       exitSignal: 'SIGKILL',
-      timedOutAfterMs: null,
+      timedOutAfter: null,
       stdout: '',
       stderr: '',
     })
@@ -29,7 +29,7 @@ describe('ExitError', () => {
     const err = new ExitError('cp', {
       exitCode: null,
       exitSignal: 'SIGKILL',
-      timedOutAfterMs: 30000,
+      timedOutAfter: 30000,
       stdout: '',
       stderr: '',
     })
