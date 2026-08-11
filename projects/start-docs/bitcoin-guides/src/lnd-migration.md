@@ -10,68 +10,79 @@ How to transfer your LND node — including on-chain funds and open Lightning ch
 
 StartOS's LND service can pull wallet and channel data directly from the following platforms over your local network:
 
-- **Umbrel** (1.x and 0.5.x)
-- **RaspiBlitz**
+- **Umbrel** 1.x
 - **myNode**
+- **another StartOS server**
 
-If your source platform is not listed, you may still be able to migrate by manually copying the LND data directory. See [Manual Migration](#manual-migration) below.
+If your source platform is not listed, see [Other Platforms](#other-platforms) below.
 
 ## Prerequisites
 
 - Both devices (source node and StartOS server) must be on the **same local network**.
-- Your source node must be **running and accessible** at the time of migration.
-- You need your source node's **local IP address** (check your router's admin page if unsure).
-- You need your source node's **password(s)** for SSH or API access, depending on the platform.
+- Your source node must be **running and reachable** at the time of migration.
+- You need your source node's **local IP address or `.local` hostname** (check your router's admin page if unsure).
+- You need the password the migration signs in with:
+
+| Source          | Password to enter                                                               |
+| --------------- | ------------------------------------------------------------------------------- |
+| Umbrel          | The password for your Umbrel dashboard, which is also its SSH password          |
+| myNode          | The password for myNode's `admin` user, used for both SSH and the web interface |
+| Another StartOS | That server's master password                                                   |
+
+You do not need your source node's LND wallet password. The migration reads it from the origin and carries it across, so StartOS can unlock the wallet you already have.
 
 ## Migration Steps
 
 ### 1. Install LND on StartOS
 
-Install LND from the StartOS Marketplace, but **do not start it**. Starting the service creates a new wallet, which prevents the migration action from running. If you have already started LND, uninstall it and install a fresh copy.
+Install LND from the StartOS Marketplace, but **do not start it**. LND posts two critical tasks on install and cannot be started until both are done — leave them for now.
 
-### 2. Run the Migration Action
+The migration refuses to run if a wallet already exists on this server, so if you have already created one with **Start Fresh**, uninstall LND and install a fresh copy.
 
-Open LND on your StartOS server and go to **Actions**. Select the migration action that matches your source platform:
+### 2. Run the Migration
 
-- **Migrate from Umbrel 1.x**
-- **Migrate from Umbrel 0.5**
-- **Migrate from RaspiBlitz**
+Open LND on your StartOS server, go to **Actions**, and run **Initialize Wallet**. Under **Initialization Method**, choose the option matching your source platform:
+
+- **Migrate from Umbrel**
 - **Migrate from myNode**
+- **Migrate from StartOS**
 
-Enter your source node's local IP address and any required passwords when prompted.
+Enter your source node's address and password, then submit.
 
 ### 3. Wait for the Migration to Complete
 
-The migration will copy your LND wallet, channel database, and configuration from the source node. This may take several minutes depending on the size of your channel database and network speed.
+The migration shuts down the services on your source node, copies LND's wallet, channel database and configuration across, and adopts its wallet password. This can take anywhere from a few minutes to a few hours, depending on the size of your channel database and the speed of your network and the source node's disk. Leave the action running until it reports success.
 
 ### 4. Disconnect the Old Node
 
-Once the migration is complete, **shut down and disconnect your old node** before proceeding. This is critical — running two nodes with the same channel state will result in force-closures and potential loss of funds.
+Once the migration reports success, **shut down and disconnect your old node** before proceeding. This is critical — running two nodes with the same channel state will result in force-closures and potential loss of funds.
 
-### 5. Start LND on StartOS
+The migration stops the source node's services as its first step, and the StartOS source is left with LND uninstalled, but only powering the device down guarantees it stays off.
 
-With the old node safely shut down, start LND on your StartOS server. It will begin syncing and reconnecting to your peers with the migrated channel state.
+### 5. Choose a Bitcoin Backend and Start LND
+
+With the old node safely shut down, complete LND's second critical task by running **Bitcoin Backend**: pick **Bitcoin** if you run a Bitcoin node on this server (recommended), or **Neutrino** to use the built-in light client.
+
+Then start LND. Umbrel, myNode and pre-0.21 StartOS nodes all run LND's older `bolt` database, which StartOS converts to SQLite before the service comes up. On a large channel database this conversion can itself take hours; LND reports which stage it is on while it runs, and the service will not finish starting until it is done. Leave it alone until it does.
+
+LND will then begin syncing and reconnecting to your peers with the migrated channel state.
 
 > [!WARNING]
 >
 > Never restart your old node after the migration has completed. If you need to go back to your old node for any reason, do **not** start LND on StartOS first.
 
-## Manual Migration
+## Other Platforms
 
-If your source platform is not listed above, you can migrate by manually copying the LND data directory. The key files are:
+There is no built-in migration for platforms outside the list above — including RaspiBlitz, which earlier StartOS releases supported and current ones do not.
 
-- `wallet.db` — Your on-chain wallet
-- `channel.backup` — Static channel backups (SCB)
-- `data/graph/mainnet/channel.db` — Channel state database
+The safe route from an unsupported platform is to **close your channels on the old node first**, letting the balances settle on-chain, and then recover the on-chain funds on StartOS. Run **Initialize Wallet → Start Fresh** on StartOS and send the funds over from your old wallet, or restore your old node's seed into an on-chain wallet of your choice. This costs you your channels and the fees to re-open them, but it carries none of the force-close risk of moving channel state by hand.
 
-> [!NOTE]
->
-> Manual migration carries more risk than the built-in actions. If you are unsure about the process, consider closing your channels on the old node first, then restoring from seed on StartOS. This is safer but requires re-opening channels.
+Copying an LND data directory across by hand is possible — it is what the built-in migrations do — but there is no supported path for it, and a partial or inconsistent copy of a channel database force-closes channels rather than failing safely. If you intend to try it anyway, the source and destination paths each migration uses are documented in the [LND package README](https://github.com/Start9Labs/lnd-startos#initialize-wallet).
 
 ## Troubleshooting
 
-**"Import action not available"** — LND has already been started and a wallet exists. Uninstall LND and install a fresh copy from the StartOS Marketplace.
+**The migration option is missing, or the action refuses to run** — LND already has a wallet, or the service has been started. Uninstall LND and install a fresh copy from the StartOS Marketplace.
 
-**Migration times out or fails** — Ensure both devices are on the same local network and that the source node is running. Double-check the IP address and passwords.
+**Migration times out or fails** — Ensure both devices are on the same local network and that the source node is running. Double-check the address and password. A failed migration leaves no wallet behind, so you can correct the details and run the action again.
 
 **Channels force-close after migration** — This usually means the old node was restarted after migration, or the channel database was corrupted during transfer. Unfortunately, force-closed channels cannot be recovered — the funds will be returned to your on-chain wallet after the timelock expires.
