@@ -168,9 +168,9 @@ operator reads is `data.details`.
 Codes are either a standard JSON-RPC code or a `start-core` `ErrorKind`
 discriminant (`shared-libs/crates/start-core/src/error.rs`):
 
-| code     | message                   | raised when                              |
-| -------- | ------------------------- | ---------------------------------------- |
-| `-32602` | `invalid params`          | the request carries no `method`          |
-| `-32601` | `Method not found`        | the `method` is not one of the above     |
-| `38`     | `Invalid Request`         | the line is malformed, or dispatch fails |
-| `59`     | `Javascript Engine Error` | a method or procedure threw              |
+| code     | message                 | raised when                              |
+| -------- | ----------------------- | ---------------------------------------- |
+| `-32602` | `invalid params`        | the request carries no `method`          |
+| `-32601` | `Method not found`      | the `method` is not one of the above     |
+| `38`     | `Invalid Request`       | the line is malformed, or dispatch fails |
+| `59`     | `Service Runtime Error` | a method or procedure threw              |

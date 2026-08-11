@@ -115,7 +115,7 @@ const jsonParse = (x: string) => JSON.parse(x)
 // codes are start-core ErrorKind discriminants; the OS localizes the message from the code
 const errorKind = {
   invalidRequest: { code: 38, message: 'Invalid Request' },
-  javascript: { code: 59, message: 'Javascript Engine Error' },
+  serviceRuntime: { code: 59, message: 'Service Runtime Error' },
 } as const
 
 const handleRpc = (id: IdType, method: string, result: Promise<RpcResult>) =>
@@ -141,7 +141,7 @@ const handleRpc = (id: IdType, method: string, result: Promise<RpcResult>) =>
         jsonrpc,
         id,
         error: {
-          ...errorKind.javascript,
+          ...errorKind.serviceRuntime,
           data: { details: '' + error, debug: error?.stack },
         },
       }
@@ -463,7 +463,7 @@ export class RpcListener {
       const legacy = z.object({ error: z.string() }).safeParse(error)
       return {
         error: {
-          ...errorKind.javascript,
+          ...errorKind.serviceRuntime,
           data: {
             details: legacy.success ? legacy.data.error : String(error),
             debug: error?.stack,

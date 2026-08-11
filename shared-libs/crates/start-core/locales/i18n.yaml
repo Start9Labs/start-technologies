@@ -803,12 +803,12 @@ error.lan-port-conflict:
   fr_FR: "Configuration de Port LAN Incompatible"
   pl_PL: "Niekompatybilna Konfiguracja Portu LAN"
 
-error.javascript:
-  en_US: "Javascript Engine Error"
-  de_DE: "JavaScript-Engine-Fehler"
-  es_ES: "Error del Motor JavaScript"
-  fr_FR: "Erreur du Moteur JavaScript"
-  pl_PL: "Błąd Silnika JavaScript"
+error.service-runtime:
+  en_US: "Service Runtime Error"
+  de_DE: "Dienstlaufzeitfehler"
+  es_ES: "Error del Entorno de Ejecución del Servicio"
+  fr_FR: "Erreur du Runtime de Service"
+  pl_PL: "Błąd Środowiska Wykonawczego Usługi"
 
 error.pem:
   en_US: "PEM Encoding Error"
