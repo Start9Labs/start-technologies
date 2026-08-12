@@ -333,14 +333,14 @@ export class Daemons<Manifest extends T.SDKManifest, Ids extends string>
    * `requires` wiring stays consistent. Re-runs are coalesced.
    *
    * The diff key (`configHash`) covers the subcontainer descriptor
-   * (`imageId`, `sharedRun`, `name`, structural `mounts.build()`), exec
-   * (`command`, `env`, `cwd`, `user`, `runAsInit`, `sigtermTimeout`),
-   * `requires` (sorted), the structural parts of `ready` (`display`,
-   * `gracePeriod`), and the entry's `uses`. Closures (`ready.fn`,
-   * `ready.trigger`) and pre-built `Daemon` instances are intentionally
-   * excluded — surface a value through one of the hashed fields, or
-   * declare it in `uses`, if you want the reconciler to react to it
-   * changing.
+   * (`imageId`, `sharedRun`, `name`, structural `mounts.build()`), the
+   * whole `exec` options object, `requires` (sorted), the structural
+   * parts of `ready` (`display`, `gracePeriod`), and the entry's
+   * `uses`. Function values inside them (`exec.fn`, `exec.onStdout`,
+   * `ready.fn`, `ready.trigger`) hash as constant sentinels — their
+   * contents are intentionally invisible — as is any pre-built `Daemon`
+   * instance: declare a captured value in `uses` if you want the
+   * reconciler to react to it changing.
    *
    * **Use lazy SubContainers** ({@link SubContainer.of}) for daemons under
    * `Daemons.dynamic`. Eager handles created inside `fn` are wasted on
@@ -836,13 +836,16 @@ function validateEntries<M extends T.SDKManifest>(
  * running across re-runs. Any difference triggers a restart.
  *
  * Hashed fields: kind, id, sorted requires, subcontainer descriptor
- * (`imageId`, `sharedRun`, `name`, `mounts.build()`), exec (`command`,
- * `env`, `cwd`, `user`, `runAsInit`, `sigtermTimeout`), ready's
- * structural parts (`display`, `gracePeriod`), and `uses`.
+ * (`imageId`, `sharedRun`, `name`, `mounts.build()`), the whole `exec`
+ * options object, ready's structural parts (`display`, `gracePeriod`),
+ * and `uses`.
  *
- * NOT hashed: `ready.fn`, `ready.trigger`, function-form `exec.fn`, and
- * any pre-built `daemon` instance. `uses` is the escape hatch for
- * values only visible inside those closures.
+ * Function values (`exec.fn`, `exec.onStdout`, `ready.fn`,
+ * `ready.trigger`) hash as constant `UNSERIALIZABLE:FUNCTION`
+ * sentinels — two different closures hash alike, so their contents
+ * never trigger a restart — and a pre-built `daemon` instance is not
+ * hashed at all. `uses` is the escape hatch for values only visible
+ * inside those closures.
  *
  * `uses` is canonicalized like every other hashed field, and never
  * throws: functions, symbols, cycles and `undefined` normalize to an
@@ -881,7 +884,7 @@ export function configHash<M extends T.SDKManifest>(
     id: entry.id,
     requires: [...entry.requires].sort(),
     sub: subHash,
-    exec: normalizeExec(entry.exec),
+    exec: entry.exec,
     uses: entry.uses,
     ready:
       entry.kind === 'daemon'
@@ -891,29 +894,6 @@ export function configHash<M extends T.SDKManifest>(
           }
         : null,
   })
-}
-
-function normalizeExec(exec: unknown): unknown {
-  if (!exec || typeof exec !== 'object') return null
-  if ('fn' in (exec as object)) return { __fn: true }
-  const e = exec as ExecCommandOptions
-  return {
-    command: normalizeCommand(e.command),
-    env: e.env ?? null,
-    cwd: e.cwd ?? null,
-    user: e.user ?? null,
-    runAsInit: e.runAsInit ?? false,
-    sigtermTimeout: e.sigtermTimeout ?? null,
-  }
-}
-
-function normalizeCommand(c: T.CommandType): unknown {
-  if (typeof c === 'string') return { kind: 'string', value: c }
-  if (Array.isArray(c)) return { kind: 'argv', value: [...c] }
-  if (T.isUseEntrypoint(c)) {
-    return { kind: 'entrypoint', value: c.overridCmd ?? null }
-  }
-  return null
 }
 
 function stableStringify(v: unknown): string {

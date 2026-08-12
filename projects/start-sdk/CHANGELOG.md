@@ -50,7 +50,12 @@
   useful, and anything else normalizes rather than failing a reconcile:
   functions, symbols, cycles and `undefined` hash as distinct
   `UNSERIALIZABLE:*` sentinels (so a change visible only there triggers no
-  restart), and BigInts hash as their decimal string
+  restart), and BigInts hash as their decimal string. The `exec` options
+  object is now canonicalized in full rather than whitelisted, so a
+  fn-form exec's `sigtermTimeout` and a command exec's `onStdout`/`onStderr`
+  callbacks participate in the hash (the callbacks themselves hash as
+  constant sentinels — added or removed restarts, one closure swapped for
+  another does not)
 
 - **`MultiHost.retire()` and `MultiHost.retirePort()` permanently remove a host
   or a binding.** `setupInterfaces` ends each pass by

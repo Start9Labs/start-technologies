@@ -322,6 +322,44 @@ describe('configHash', () => {
     expect(configHash(a.entries[1])).not.toEqual(configHash(b.entries[1]))
   })
 
+  it("changes when a fn-form exec's sigtermTimeout changes", () => {
+    const e = fakeEffects()
+    const make = (sigtermTimeout?: number) =>
+      Daemons.of<Manifest>({ effects: e }).addDaemon('a', {
+        subcontainer: lazy(e),
+        exec: { fn: async () => null, sigtermTimeout },
+        ready: baseReady,
+        requires: [],
+      }).entries[0]
+    expect(configHash(make(5000))).not.toEqual(configHash(make(6000)))
+    // different fn closures still hash alike — their contents are invisible
+    expect(configHash(make(5000))).toEqual(
+      configHash(
+        Daemons.of<Manifest>({ effects: e }).addDaemon('a', {
+          subcontainer: lazy(e),
+          exec: { fn: async () => null, sigtermTimeout: 5000 },
+          ready: baseReady,
+          requires: [],
+        }).entries[0],
+      ),
+    )
+  })
+
+  it('changes when an output callback is added to a command exec', () => {
+    const e = fakeEffects()
+    const make = (withCallback: boolean) =>
+      Daemons.of<Manifest>({ effects: e }).addDaemon('a', {
+        subcontainer: lazy(e),
+        exec: {
+          command: ['cmd'],
+          ...(withCallback ? { onStdout: () => {} } : {}),
+        },
+        ready: baseReady,
+        requires: [],
+      }).entries[0]
+    expect(configHash(make(true))).not.toEqual(configHash(make(false)))
+  })
+
   it('is order-independent for requires (sorted before hash)', () => {
     const e = fakeEffects()
     const a = Daemons.of<Manifest>({ effects: e })
