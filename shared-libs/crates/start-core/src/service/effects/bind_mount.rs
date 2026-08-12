@@ -11,13 +11,13 @@ use std::os::fd::AsFd;
 use std::path::PathBuf;
 
 use clap::Parser;
-use rpc_toolkit::Context;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::disk::mount::filesystem::idmapped::IdMap;
 use crate::disk::mount::filesystem::syscall::{self, DetachedMount};
 use crate::prelude::*;
+use crate::service::effects::ContainerCliContext;
 
 #[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
 #[command(rename_all = "kebab-case")]
@@ -47,7 +47,9 @@ pub struct BindMountParams {
     pub idmap: Vec<IdMap>,
 }
 
-pub async fn bind_mount<C: Context>(_: C, params: BindMountParams) -> Result<(), Error> {
+// The concrete context type keeps this subcommand off the RPC server's tree:
+// `handler()` only retains subcommands whose context matches the serving one.
+pub async fn bind_mount(_: ContainerCliContext, params: BindMountParams) -> Result<(), Error> {
     let BindMountParams {
         source,
         target,

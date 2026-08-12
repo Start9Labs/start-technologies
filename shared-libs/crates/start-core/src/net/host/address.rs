@@ -607,9 +607,10 @@ pub async fn remove_public_domain<Kind: HostApiKind>(
     let fqdn = InternedString::intern(fqdn.to_ascii_lowercase());
     ctx.db
         .mutate(|db| {
-            Kind::host_for(&inheritance, db)?
-                .as_public_domains_mut()
-                .remove(&fqdn)?;
+            let Some(host) = Kind::host_for_existing(&inheritance, db)? else {
+                return Ok(());
+            };
+            host.as_public_domains_mut().remove(&fqdn)?;
             let hostname = ServerHostname::load(db.as_public().as_server_info())?;
             let gateways = db
                 .as_public()
@@ -698,8 +699,10 @@ pub async fn remove_private_domain<Kind: HostApiKind>(
     let domain = InternedString::intern(domain.to_ascii_lowercase());
     ctx.db
         .mutate(|db| {
-            Kind::host_for(&inheritance, db)?
-                .as_private_domains_mut()
+            let Some(host) = Kind::host_for_existing(&inheritance, db)? else {
+                return Ok(());
+            };
+            host.as_private_domains_mut()
                 .mutate(|d| Ok(d.remove(&domain)))?;
             let hostname = ServerHostname::load(db.as_public().as_server_info())?;
             let gateways = db

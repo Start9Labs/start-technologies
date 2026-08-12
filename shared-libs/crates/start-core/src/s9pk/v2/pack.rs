@@ -665,7 +665,7 @@ pub async fn pack(ctx: CliContext, params: PackParams) -> Result<(), Error> {
             "console.log(JSON.stringify(require('{}/index.js').manifest))",
             js_dir.display()
         ))
-        .invoke(ErrorKind::Javascript)
+        .invoke(ErrorKind::ServiceRuntime)
         .await?
         .into();
     files.insert(
@@ -893,7 +893,7 @@ pub async fn list_ingredients(_: CliContext, params: PackParams) -> Result<Vec<P
                     "console.log(JSON.stringify(require('{}').manifest))",
                     js_path.display()
                 ))
-                .invoke(ErrorKind::Javascript)
+                .invoke(ErrorKind::ServiceRuntime)
                 .await?,
         )
         .with_kind(ErrorKind::Deserialization)

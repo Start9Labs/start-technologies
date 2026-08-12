@@ -217,6 +217,13 @@ impl RangeBindInfo {
         self.enabled = false;
     }
 
+    /// Hand the whole span back to the pool. `number_of_ports` is at least 2,
+    /// so subtract before adding — `start + count` overflows a u16 at 65535.
+    pub fn release(&self, available_ports: &mut AvailablePorts) {
+        available_ports
+            .free(self.external_start_port..=self.external_start_port + (self.number_of_ports - 1));
+    }
+
     /// Addresses actually served by this range. Analogous to
     /// [`BindInfo::enabled_addresses`]: a range with no exported interface is
     /// internal-only (lo / lxcbr0), its per-address overrides dormant.
@@ -308,29 +315,24 @@ impl BindInfo {
             interfaces,
             ..
         } = self;
-        // Release both ports up front so the numbers below can be reclaimed. The
-        // external port is in the user's address book and keys their per-address
-        // overrides, so a binding that changes how its port is served keeps the
-        // same number — carrying it to the other field when it holds just one.
+        // Free both up front so each leg can reclaim the number it already holds —
+        // it is in the user's address book and keys their per-address overrides.
         available_ports.free(held.assigned_port.into_iter().chain(held.assigned_ssl_port));
-        let carried = match (held.assigned_port, held.assigned_ssl_port) {
-            (Some(port), None) | (None, Some(port)) => Some(port),
-            _ => None,
-        };
+        let preferred_ssl_port = options.preferred_ssl_port();
+        let wants_plain_port = options.wants_plain_port();
         let mut reclaim = |held: Option<u16>, preferred: u16, ssl: bool| {
-            let want = held.or(carried).unwrap_or(preferred);
-            available_ports
-                .try_alloc(want, ssl, privileged)
-                .or_else(|| available_ports.try_alloc(preferred, ssl, privileged))
-                .map_or_else(|| available_ports.alloc(ssl), Ok)
+            for port in held.into_iter().chain([preferred]) {
+                if let Some(port) = available_ports.try_alloc(port, ssl, privileged) {
+                    return Ok(port);
+                }
+            }
+            available_ports.alloc(ssl)
         };
 
-        let assigned_ssl_port = options
-            .preferred_ssl_port()
+        let assigned_ssl_port = preferred_ssl_port
             .map(|preferred| reclaim(held.assigned_ssl_port, preferred, true))
             .transpose()?;
-        let assigned_port = options
-            .wants_plain_port()
+        let assigned_port = wants_plain_port
             .then(|| reclaim(held.assigned_port, options.preferred_external_port, false))
             .transpose()?;
 
@@ -347,6 +349,18 @@ impl BindInfo {
     }
     pub fn disable(&mut self) {
         self.enabled = false;
+    }
+
+    /// Inverse of [`BindInfo::new`]. Unlike [`BindInfo::update`], which reclaims
+    /// the same numbers to keep the user's address book stable, this returns
+    /// them to the pool for anyone.
+    pub fn release(&self, available_ports: &mut AvailablePorts) {
+        available_ports.free(
+            self.net
+                .assigned_port
+                .into_iter()
+                .chain(self.net.assigned_ssl_port),
+        );
     }
 }
 
@@ -1106,6 +1120,64 @@ mod test {
         assert!(!ports.is_ssl(8080));
     }
 
+    /// Retiring has to hand both external ports back. Disabling — all
+    /// `clearBindings` does — keeps them claimed for the life of the server.
+    #[test]
+    fn release_frees_both_ports() {
+        let mut ports = AvailablePorts::new();
+        let privileged = false;
+
+        let bind = BindInfo::new(&mut ports, opts(8081, Some(8444), None), privileged).unwrap();
+        assert_eq!(bind.net.assigned_port, Some(8081));
+        assert_eq!(bind.net.assigned_ssl_port, Some(8444));
+        // not vacuous: both are held before the release
+        assert_eq!(ports.try_alloc(8081, false, privileged), None);
+        assert_eq!(ports.try_alloc(8444, true, privileged), None);
+
+        bind.release(&mut ports);
+
+        assert_eq!(ports.try_alloc(8081, false, privileged), Some(8081));
+        assert_eq!(ports.try_alloc(8444, true, privileged), Some(8444));
+    }
+
+    #[test]
+    fn release_leaves_other_bindings_alone() {
+        let mut ports = AvailablePorts::new();
+        let privileged = false;
+        let neighbor =
+            BindInfo::new(&mut ports, opts(9000, None, Some(false)), privileged).unwrap();
+        let bind = BindInfo::new(&mut ports, opts(8080, None, Some(false)), privileged).unwrap();
+        assert_eq!(bind.net.assigned_ssl_port, None);
+
+        bind.release(&mut ports);
+
+        assert_eq!(ports.try_alloc(8080, false, privileged), Some(8080));
+        assert_eq!(ports.try_alloc(9000, false, privileged), None);
+        assert_eq!(neighbor.net.assigned_port, Some(9000));
+    }
+
+    /// The whole span, inclusive — and a range ending at 65535 must not
+    /// overflow u16 on the way back to the pool.
+    #[test]
+    fn release_frees_the_whole_range_span() {
+        let mut ports = AvailablePorts::new();
+        let privileged = false;
+        ports.try_alloc_range(65534, 2, privileged).unwrap();
+        let range = RangeBindInfo {
+            enabled: true,
+            external_start_port: 65534,
+            number_of_ports: 2,
+            addresses: Default::default(),
+            interface: None,
+        };
+        assert_eq!(ports.try_alloc(65535, false, privileged), None);
+
+        range.release(&mut ports);
+
+        // succeeds only if both 65534 and 65535 came back
+        ports.try_alloc_range(65534, 2, privileged).unwrap();
+    }
+
     #[test]
     fn a_rebind_does_not_migrate_onto_a_freed_preferred_port() {
         let mut ports = AvailablePorts::new();
@@ -1141,6 +1213,103 @@ mod test {
         assert_eq!(ui.net.assigned_port, Some(80));
         assert_eq!(ui.net.assigned_ssl_port, Some(443));
         assert!(ports.is_ssl(443));
+    }
+
+    /// `Public::init` plants the binding already holding 443 but no plaintext
+    /// port, so `os_bindings` only ever reaches it through `update` — the shape
+    /// the test above skips by starting from `new`, which is how the UI came to
+    /// ship on an ephemeral port through 0.4.0.
+    #[test]
+    fn the_os_ui_claims_80_from_the_seeded_binding() {
+        let mut ports = AvailablePorts::new();
+        let admin = opts(80, Some(443), None);
+        let seeded = BindInfo {
+            enabled: false,
+            options: admin.clone(),
+            net: NetInfo {
+                assigned_port: None,
+                assigned_ssl_port: Some(443),
+            },
+            addresses: DerivedAddressInfo::default(),
+            interfaces: BTreeMap::new(),
+        };
+
+        let ui = seeded.update(&mut ports, admin.clone(), true).unwrap();
+        assert_eq!(ui.net.assigned_port, Some(80));
+        assert_eq!(ui.net.assigned_ssl_port, Some(443));
+
+        let ui = ui.update(&mut ports, admin, true).unwrap();
+        assert_eq!(ui.net.assigned_port, Some(80));
+        assert_eq!(ui.net.assigned_ssl_port, Some(443));
+    }
+
+    /// A binding that grows a second leg must not hand the port it already has to
+    /// the new one — each leg keeps its own.
+    #[test]
+    fn gaining_a_leg_does_not_carry_the_other_leg_s_port() {
+        let mut ports = AvailablePorts::new();
+        let privileged = false;
+        let plain = BindInfo::new(&mut ports, opts(8080, None, Some(false)), privileged).unwrap();
+        assert_eq!(plain.net.assigned_port, Some(8080));
+
+        let both = plain
+            .update(&mut ports, opts(8080, Some(8443), None), privileged)
+            .unwrap();
+        assert_eq!(both.net.assigned_port, Some(8080));
+        assert_eq!(both.net.assigned_ssl_port, Some(8443));
+    }
+
+    /// The seeded admin binding is the same shape from the other side, and its
+    /// plaintext leg must want 80 outright — not 443 with 80 as the fallback the
+    /// ssl leg's head start happens to force.
+    #[test]
+    fn the_os_ui_plaintext_leg_wants_80_even_when_443_is_free() {
+        let admin = opts(80, Some(443), None);
+        let seeded = || BindInfo {
+            enabled: false,
+            options: admin.clone(),
+            net: NetInfo {
+                assigned_port: None,
+                assigned_ssl_port: Some(443),
+            },
+            addresses: DerivedAddressInfo::default(),
+            interfaces: BTreeMap::new(),
+        };
+
+        let mut ports = AvailablePorts::new();
+        let ui = seeded().update(&mut ports, admin.clone(), true).unwrap();
+        assert_eq!(ui.net.assigned_port, Some(80));
+        assert_eq!(ui.net.assigned_ssl_port, Some(443));
+
+        // 443 already taken, so the ssl leg cannot clear it out of the plain leg's way.
+        let mut squatted = AvailablePorts::new();
+        assert_eq!(squatted.try_alloc(443, true, true), Some(443));
+        let ui = seeded().update(&mut squatted, admin, true).unwrap();
+        assert_eq!(ui.net.assigned_port, Some(80));
+    }
+
+    /// Why the drift needs `v0_4_0_2` rather than healing itself: `update`
+    /// keeps the port it already holds even for a privileged claimant whose
+    /// preferred port is free.
+    #[test]
+    fn a_drifted_os_ui_port_does_not_heal_on_rebind() {
+        let mut ports = AvailablePorts::new();
+        ports.set_ssl(443, true);
+        ports.set_ssl(55543, false);
+        let admin = opts(80, Some(443), None);
+        let drifted = BindInfo {
+            enabled: false,
+            options: admin.clone(),
+            net: NetInfo {
+                assigned_port: Some(55543),
+                assigned_ssl_port: Some(443),
+            },
+            addresses: DerivedAddressInfo::default(),
+            interfaces: BTreeMap::new(),
+        };
+
+        let ui = drifted.update(&mut ports, admin, true).unwrap();
+        assert_eq!(ui.net.assigned_port, Some(55543));
     }
 
     #[test]

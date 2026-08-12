@@ -162,20 +162,26 @@ export function makeEffects(context: EffectContext): Effects {
       },
     },
     bind(...[options]: Parameters<T.Effects['bind']>) {
-      return rpcRound('bind', {
-        ...options,
-        stack: new Error().stack,
-      }) as ReturnType<T.Effects['bind']>
+      return rpcRound('bind', { ...options }) as ReturnType<T.Effects['bind']>
     },
     bindRange(...[options]: Parameters<T.Effects['bindRange']>) {
-      return rpcRound('bind-range', {
-        ...options,
-        stack: new Error().stack,
-      }) as ReturnType<T.Effects['bindRange']>
+      return rpcRound('bind-range', { ...options }) as ReturnType<
+        T.Effects['bindRange']
+      >
     },
     clearBindings(...[options]: Parameters<T.Effects['clearBindings']>) {
       return rpcRound('clear-bindings', { ...options }) as ReturnType<
         T.Effects['clearBindings']
+      >
+    },
+    retireHost(...[options]: Parameters<T.Effects['retireHost']>) {
+      return rpcRound('retire-host', { ...options }) as ReturnType<
+        T.Effects['retireHost']
+      >
+    },
+    retireBinding(...[options]: Parameters<T.Effects['retireBinding']>) {
+      return rpcRound('retire-binding', { ...options }) as ReturnType<
+        T.Effects['retireBinding']
       >
     },
     clearServiceInterfaces(

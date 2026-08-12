@@ -159,3 +159,5 @@ A user already stuck in either state can only be recovered from the CLI, naming 
 ```bash
 start-cli package action clear-task <creating-package> '<replay-id>' --force
 ```
+
+Network state has the same shape and the same remedy — see [Retiring a Host or Binding](interfaces.md#retiring-a-host-or-binding).

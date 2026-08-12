@@ -262,6 +262,64 @@ Two distinct endpoints are two `bindPortRange` calls — a range is a homogeneou
 | `description`                 | `string`           | Description shown to the user. Wrap with `i18n()`.                     |
 | `scheme`                      | `string` \| `null` | Optional transport prefix (e.g. `'tcp'`). Omit for raw UDP/TCP ranges. |
 
+## Retiring a Host or Binding
+
+`setupInterfaces()` ends every pass by **disabling** each binding it did not just declare — it does not delete it. Disabling is the right default: it keeps the row, the external port number, and the user's per-address choices, so a binding your package declares conditionally comes back at the same address they already bookmarked.
+
+The cost is that a binding you stop declaring **for good** stays behind. It keeps its external port claimed for as long as your service is installed, it keeps recomputing its addresses, and a dependency resolving it through `getBridgeAddress` still gets a `10.0.3.1:<port>` that nothing listens on. Retire it explicitly:
+
+```typescript
+await sdk.MultiHost.of(effects, 'ui-multi').retire() // the whole host
+await sdk.MultiHost.of(effects, 'api').retirePort(9090) // one port, or one range
+```
+
+`retire()` removes the host and everything under it: its bindings and port ranges, their exported service interfaces, the user's public and private domains for that host, and their per-address enable/disable and WAN opt-in choices. `retirePort()` removes whichever of the single port and the port range is bound at that `internalPort` — and both, if both are — leaving the host and its domains in place. Both return the external ports to the server's pool. Both are irreversible: after `retire()`, binding the id again starts a fresh host with none of the user's setup.
+
+Note what that last part means: `retire()` discards configuration the **user** created, not just your package's. A domain they attached to the host goes with it, and nothing tells them. Name the host in your release notes whenever a release retires one, so they know to reattach the domain to a current interface.
+
+### The migration pattern
+
+Retire in the `up()` of the version that stops binding, in the same release as the `interfaces.ts` change:
+
+```typescript
+export const v2_0_0 = VersionInfo.of({
+  version: '2.0.0:0',
+  releaseNotes: {
+    en_US: 'Upstream 2.0. The web UI moved to a single host and the bundled metrics listener was removed.',
+  },
+  migrations: {
+    up: async ({ effects }) => {
+      await sdk.MultiHost.of(effects, 'ui-multi').retire()
+      await sdk.MultiHost.of(effects, 'api').retirePort(9090)
+    },
+    down: IMPOSSIBLE,
+  },
+})
+```
+
+Both halves ship together. Retiring an id your `setupInterfaces` still binds simply recreates it on the next pass, minus the user's domains — so the retire has to land in the release that drops the binding, not before or after it. `down` is `IMPOSSIBLE` because a downgrade cannot give the user their domains back.
+
+Retiring from **inside** the `sdk.setupInterfaces` callback throws. That pass ends with the disable sweep, so a retire in the middle of it would depend on statement order.
+
+### Why this cannot be automatic
+
+StartOS cannot infer it. A binding missing from one pass is indistinguishable from a binding the service will declare on the next one — under a different config, a backend the user has not selected yet, or a feature they toggled off. Deleting on absence would free the external port and drop their WAN opt-in every time they turned a feature off, and hand that port number to another package before they turned it back on. That is exactly what disabling exists to prevent.
+
+The SDK cannot infer it either: it sees only the calls a pass actually made. Only the author knows a port is gone for good, and only knows it at a version boundary — which is what a migration is.
+
+This is the same shape as [retiring a replay key](tasks.md#retiring-a-replay-key): state your package created, that outlives the release which stopped creating it, and that only your package can say is finished.
+
+### Failure modes
+
+- **Retiring an id you still bind.** Migrations run before `setupInterfaces`, so the port is normally reclaimed on the same pass and nothing looks wrong. The symptom is the user's setup silently reset — a custom domain and WAN toggle back to defaults after an update.
+- **A port that moved rather than disappeared.** Retiring the old binding and adding the new one in the same release keeps the host's domains, but StartOS isolates a **public** domain from a binding added after it, so the user has to re-enable that domain on the new binding. Private domains carry over on their own. Say so in your release notes.
+- **Treating `false` as failure.** Both calls resolve `false` when there was nothing to remove — the normal result on a re-run, and on a server that skipped the version. Not an error.
+- **Retiring the last binding on a host.** That does not retire the host. Its domains stay, now addressing nothing. Use `retire()` when the host itself is going away.
+
+### Cleaning up after the fact
+
+A package that already shipped a version dropping a host or a port still has the row and the port claim sitting on every server that installed it. Retire is a no-op where the id was never present, so one maintenance release naming the stale ids in its `up()` covers the whole installed base at once. List the ids in your release notes: any domain the user attached to a host you retire is removed with it, and they will want to know where to reattach it.
+
 ## TLS Termination
 
 StartOS terminates TLS at the platform edge and proxies plain HTTP to your container. This has two important consequences any time your service generates URLs or makes scheme decisions:

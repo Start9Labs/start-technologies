@@ -1,15 +1,59 @@
 # Changelog
 
-## 2.0.10 — StartOS 0.4.0
+## 2.0.10 — StartOS 0.4.0.2
 
 ### Changed
 
-- **Minimum StartOS version bumped to `0.4.0`.** The 2.0 line has declared
-  `0.4.0-beta.10` since 2.0.0; 0.4.0 is the release that shipped, and it is what
-  a package built with this SDK now writes as its manifest `osVersion` — so the
-  registry offers that package to servers on 0.4.0 or later
+- **Minimum StartOS version bumped to `0.4.0.2`.** The 2.0 line had declared
+  `0.4.0-beta.10` since 2.0.0, against a 0.4.0 that has since shipped. `0.4.0.2`
+  is the release carrying the effects behind `MultiHost.retire()` /
+  `retirePort()` below, and it is what a package built with this SDK now writes
+  as its manifest `osVersion` — so the registry offers that package to servers
+  on 0.4.0.2 or later, and a server too old to run a retire migration is never
+  offered the package that would attempt one
+
+- **`effects.getServicePortForward` resolves `null` instead of throwing when
+  the binding does not exist.** It is the one host effect with no `callback`,
+  so a caller cannot react to a change — and throwing was the worst available
+  answer for exactly that caller. It also could not tell "no such binding" from
+  "the host itself is gone", and a binding merely disabled by `clearBindings`
+  still reported its stale ports, which retiring now makes an observable
+  difference. Prefer `sdk.host.getBridgeAddress` to reach a dependency; this is
+  raw allocator metadata
+
+- **The scaffolded `build.yml` no longer passes `DEV_KEY`.** A PR build only
+  compiles and packs, and the reusable workflow already falls back to
+  `init-key` when no key is present, so the secret bought nothing and put the
+  real signing key on a runner executing branch-authored code. `release.yml`
+  and `tagAndRelease.yml` publish, and still take it. Existing packages should
+  drop the `secrets:` block from their own `build.yml`
+
+- **`SubContainer.exec` / `execFail` take `timeout` and `abort` as named
+  options rather than as third and fourth positional arguments.**
+  `sub.execFail(cmd, { user: 'root' }, null)` becomes
+  `sub.execFail(cmd, { user: 'root', timeout: null })`. A bare `null` in the
+  third position gave no hint which of the two knobs it was setting or what it
+  meant, and reaching the fourth argument meant supplying the third. Both moved
+  together because dropping only `timeout` would have left `abort` sliding
+  into a position whose type it does not match. Passing either positionally is
+  now a compile error, so anything that needs updating says so at build time
 
 ### Added
+
+- **`MultiHost.retire()` and `MultiHost.retirePort()` permanently remove a host
+  or a binding.** `setupInterfaces` ends each pass by
+  _disabling_ whatever it did not declare, which keeps the row, the external
+  port number and the user's per-address choices so a conditionally-declared
+  binding returns at the address they bookmarked. A binding dropped for good
+  therefore stayed behind: its external port stayed claimed for as long as the
+  service was installed, and a dependency resolving it through
+  `getBridgeAddress` still got a `10.0.3.1:<port>` that nothing listens on.
+  Retiring deletes the host or binding and its exported service interfaces —
+  and, for a whole host, the user's domains for it — returning the external
+  ports to the server's pool. Call it from the `up()` of the version that stops
+  binding; it resolves `false` where there was nothing to remove, so a re-run is
+  safe. See
+  [Retiring a Host or Binding](https://docs.start9.com/packaging/interfaces.html#retiring-a-host-or-binding)
 
 - **`sdk.getRootCa(effects)` returns this server's root CA certificate.** A
   service that dials an address the _user_ supplies — a monitor target, a
@@ -24,6 +68,18 @@
 
 ### Fixed
 
+- **A build whose `start-cli s9pk list-ingredients` fails now stops instead of
+  silently repacking the previous s9pk.** That command produces the s9pk's
+  entire source-dependency list, `javascript/index.js` included — nothing else
+  in `s9pk.mk` ties the package to your TypeScript. `$(shell)` discards exit
+  status, so any failure left `INGREDIENTS` empty, detaching every source file
+  from the target's prerequisites; make then found the existing s9pk newer than
+  its only surviving prerequisites (`.git/HEAD`, `.git/index`) and declared it up
+  to date, while the recipe still printed `✅ Build Complete!` and exited 0. The
+  result was a package that omitted the changes just made to it, with no
+  indication anything was wrong — most easily hit by editing a source file and
+  rebuilding without touching git in between, on a workspace whose
+  `.startos/config.yaml` names a host that no longer resolves
 - **`hardwareRequirements.ram` is documented in bytes, which is what StartOS
   actually compares it against.** Its TSDoc claimed megabytes and its
   `@example` showed `ram: 8192`, so packages following it declared an 8 KiB
@@ -74,6 +130,54 @@
   name: `init-key` already checks for an existing key and prints that it found
   one, so the guard only duplicated that check while giving the filename a
   second place to go stale. Cosmetic — no build ever failed over it
+
+- **A database dump backup or restore is no longer killed after exactly thirty
+  seconds.** Steps in `Backups.withPgDump` / `Backups.withMysqlDump` run under
+  `SubContainer.exec`'s default 30 s cap unless they opt out, and 1.5.2 — which
+  began staging the dump in `/tmp` and copying it to the backup target, rather
+  than dumping onto the target directly — left the opt-out on `pg_dump` and
+  gave the new `cp` none. The copy's duration is set by the size of the dump and
+  the speed of the target. So a backup that had succeeded for months began
+  failing the first time that copy crossed thirty seconds, with nothing to point
+  at the cause:
+
+  ```
+  Failed: Unknown Error: Error: cp terminated with signal SIGKILL:
+  ```
+
+  Restore stages the dump off the target through the same kind of copy, under
+  the same cap — so a database whose dump took longer than thirty seconds to
+  copy could not be restored at all, which is discovered during recovery, when
+  the backup is all the user has. Every step of a dump or restore whose
+  duration follows the data now opts out: both copies, `pg_ctl start` and
+  `pg_ctl stop` (which wait on the cluster's crash recovery and its shutdown
+  checkpoint), the recursive `chown`s over the data directory, `initdb`,
+  `mysql_install_db` / `mysqld --initialize-insecure`, and the foreground
+  `mysqld` MariaDB runs for the length of the dump.
+
+  The two `pg_ctl` steps keep a bound, because `pg_ctl` has its own: `-w` is its
+  default and it gives up after `-t` seconds, which was 60 regardless of what
+  the SDK allowed. `PgDumpConfig.readyTimeout` — the knob 2.0.1 added for
+  clusters that need longer — now supplies that `-t`, so raising it reaches the
+  step that actually blocks instead of stopping at the readiness poll. Its
+  default is 60 000 ms, which is `pg_ctl`'s own default, so nothing changes
+  until you raise it. Fixes
+  [#3636](https://github.com/Start9Labs/start-technologies/issues/3636)
+
+- **A command killed by `SubContainer.exec`'s own timeout now says that it timed
+  out.** The error was built from the signal alone, so the SDK's timer read
+  exactly like an OOM kill, a cgroup kill, or an operator's `kill -9` — and
+  since `cp` writes nothing to stderr when it is killed, the whole user-facing
+  notification was `cp terminated with signal SIGKILL:`. The message now names
+  the timeout and the limit that elapsed:
+
+  ```
+  cp timed out after 30000ms and was killed with SIGKILL:
+  ```
+
+  `exec`'s result carries `timedOutAfter` — the limit that fired, or `null`
+  when the process was not killed by this timer — alongside `exitCode` and
+  `exitSignal`
 
 ## 2.0.9 — StartOS 0.4.0-beta.10 (2026-07-25)
 

@@ -10,7 +10,28 @@ file tracks notable changes since the move to the monorepo.
 
 ## [0.4.0.2]
 
+### Added
+
+- **A service can permanently retire a network host or a port it no longer
+  uses, and the port numbers it held become available again.** A service that
+  reorganizes its interfaces across an update — renaming a host, dropping a
+  port — could previously only switch the old one off, which keeps its port
+  number reserved for as long as the service is installed. Retiring removes it
+  outright and releases its port forwards, proxy entries, local DNS records and
+  any port mapping StartOS asked your router for. A domain you had assigned to
+  a retired host is removed with it, so check the service's release notes and
+  assign it to one of the service's current interfaces.
+
 ### Fixed
+
+- **Your server answers to its own addresses and no others.** A name that
+  resolved to your server but was never configured on it — a domain you pointed
+  at its LAN IP, or its `.local` name typed without the `.local` — was served
+  your dashboard, along with a certificate for that name signed by your server's
+  Root CA. Logging in was never possible under those names, so the page could
+  not be used for anything, but it should not have been reachable. Your server
+  now serves its `.local` address, the domains you have assigned to it, and
+  direct connections to its IP address.
 
 - **Image upgrades verify their checksum again.** `upgrade` compared the image's
   blake3 hash only when it was given a second positional argument, which no
@@ -22,6 +43,34 @@ file tracks notable changes since the move to the monorepo.
   to correction level `M`, which has no version left past about 2.3 kB — so a
   longer value threw and the dialog opened empty, with only a console error to
   say why. Those codes now encode at level `L`, which carries about 2.9 kB.
+
+- **Removing a domain from a service leaves its network settings otherwise
+  untouched.** Naming a network host the service does not have — a stale id, or
+  a typo — added that host to the service as an empty entry, which then stayed
+  in its network settings with nothing to remove it.
+
+- **A service whose startup routine throws now reports the failure in its own
+  logs, and StartOS names the failure for what it is.** The container runtime
+  handed the exception back to StartOS over its socket without also printing
+  it, so a service that failed to start went quiet in `Logs` at the moment it
+  needed to speak, while restarting every ten seconds. The exception now
+  appears in the service's own log next to the procedure that raised it, and
+  StartOS labels a failure that came from the runtime `Service Runtime Error`
+  rather than `Unknown Error`.
+
+- **A service that adds an SSL port keeps the address you already had.** When a
+  service gained an SSL port alongside a plaintext one it already had, the new
+  SSL port took over the existing number and the plaintext port was moved to an
+  arbitrary one — changing an address you may have saved. Each now keeps its
+  own: the port you already had stays where it is, and the one being added takes
+  the port the service asks for.
+
+- **The StartOS UI is served over plain HTTP on port 80.** Servers set up before
+  0.4.0.1 gave the interface a high-numbered port instead, and nothing answered
+  on it — so a service that reached the StartOS API over the container bridge,
+  and any address StartOS reported for its own plaintext interface, pointed
+  somewhere dead. Existing servers move to port 80 on update, and the high port
+  goes back to the pool for services to use.
 
 - **The login banner reports system status for every user, not just the first
   one to log in.** It staged its database snapshot at a fixed path in `/tmp`,
@@ -74,6 +123,11 @@ file tracks notable changes since the move to the monorepo.
   the same interface twice. Exporting an interface now removes the record of
   its previous export, wherever it lived; a lingering duplicate clears the next
   time its service initializes — at the reboot this update performs.
+
+### Security
+
+- **Service mount paths are validated and confined to their intended
+  directories.**
 
 ## [0.4.0.1]
 

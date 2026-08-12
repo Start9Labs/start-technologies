@@ -50,6 +50,8 @@ You can add domains to a gateway table by clicking "Add Domain" on the gateway a
 - **[Public Domain](clearnet.md)** — A clearnet domain (e.g. `mysite.com`) accessible from the Internet. Requires DNS configuration and port forwarding.
 - **[Private Domain](private-domains.md)** — A custom domain (e.g. `nextcloud.private`) that works on LAN and VPN. Requires your gateway to use StartOS for DNS. Only available on Ethernet and Wireless gateways — not WireGuard (StartTunnel) gateways.
 
+A domain you add belongs to the interface you added it to. If an update reorganizes a service's interfaces and retires the one your domain was on, the domain is removed with it — check the service's release notes, which should say when an update does this, and add the domain to one of the service's current interfaces.
+
 ### Tor Onion Addresses
 
 If the [Tor](tor.md) service is installed and running, a **Tor** table also appears among the interface's addresses. Tor functions like a gateway but is managed as a marketplace service rather than a system gateway.

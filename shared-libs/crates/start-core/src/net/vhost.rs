@@ -1465,6 +1465,19 @@ fn cancel_dead<A: Accept + 'static>(targets: &mut InOMap<DynVHostTarget<A>, Targ
 
 type Mapping<A> = BTreeMap<Option<InternedString>, InOMap<DynVHostTarget<A>, TargetEntry>>;
 
+/// The [`Mapping`] key for a connection's SNI.
+///
+/// `None` is a connection that named no host — no SNI, or an SNI carrying an IP
+/// literal, which RFC 6066 forbids but clients send anyway — and is served by
+/// the bare-IP entry. A name is served only if it has an entry of its own: the
+/// lookup has no fallback, so a host answers to the names it was given and
+/// nothing else.
+fn host_key(server_name: Option<&str>) -> Option<InternedString> {
+    server_name
+        .filter(|name| name.parse::<IpAddr>().is_err())
+        .map(InternedString::from)
+}
+
 pub struct GetVHostAcmeProvider<A: Accept + 'static>(pub Watch<Mapping<A>>);
 impl<A: Accept + 'static> Clone for GetVHostAcmeProvider<A> {
     fn clone(&self) -> Self {
@@ -1566,9 +1579,10 @@ where
         hello: &'a ClientHello<'a>,
         metadata: &'a <A as Accept>::Metadata,
     ) -> Option<TlsHandlerAction> {
+        let sni = host_key(hello.server_name());
+
         let routed = self.mapping.peek(|m| {
-            m.get(&hello.server_name().map(InternedString::from))
-                .or_else(|| m.get(&None))
+            m.get(&sni)
                 .into_iter()
                 .flatten()
                 .filter(|(_, e)| e.alive())
@@ -1576,33 +1590,30 @@ where
                 .map(|(t, e)| (t.clone(), e.ctx.clone()))
         });
 
-        let acme_alpn = hello
-            .alpn()
-            .into_iter()
-            .flatten()
-            .any(|a| a == ACME_TLS_ALPN_NAME);
+        let Some((target, ctx)) = routed else {
+            return None;
+        };
 
         // Passthroughs should not intermediate ACME challenges — the
         // backend is the ACME client and holds the challenge cert.
-        if let Some((target, ctx)) = routed.as_ref().filter(|(t, _)| t.0.is_passthrough()) {
+        if target.0.is_passthrough() {
             let stub = passthrough_stub_config(&self.crypto_provider).log_err()?;
-            let (_, store) = target
-                .clone()
-                .into_preprocessed(ctx.clone(), stub, hello, metadata)
-                .await?;
+            let (_, store) = target.into_preprocessed(ctx, stub, hello, metadata).await?;
             self.preprocessed = Some(store);
             return Some(TlsHandlerAction::Passthrough);
         }
 
-        // ACME challenge for a terminating target (or for one with no
-        // explicit vhost mapping): answer locally from the inner chain.
-        if acme_alpn {
+        // ACME challenge for a terminating target: answer locally from the inner
+        // chain. Reached only for a host we serve, so a challenge for anything
+        // else is refused above rather than answered with a fresh leaf.
+        if hello
+            .alpn()
+            .into_iter()
+            .flatten()
+            .any(|a| a == ACME_TLS_ALPN_NAME)
+        {
             return self.inner.get_config(hello, metadata).await;
         }
-
-        let Some((target, ctx)) = routed else {
-            return None;
-        };
 
         let action = self.inner.get_config(hello, metadata).await?;
         let cfg = match action {
@@ -1911,6 +1922,38 @@ async fn copy_bidirectional_hangs_without_keepalive_when_peer_idle() {
     );
 
     proxy.abort();
+}
+
+#[cfg(test)]
+mod host_key_tests {
+    use super::*;
+
+    /// A dial that names no host is the bare-IP case the `None` entry serves.
+    #[test]
+    fn an_ip_literal_sni_is_the_same_as_no_sni() {
+        assert_eq!(host_key(None), None);
+        assert_eq!(host_key(Some("192.168.1.5")), None);
+        assert_eq!(host_key(Some("::1")), None);
+        assert_eq!(host_key(Some("fd00:3::1")), None);
+    }
+
+    #[test]
+    fn a_name_keys_to_itself() {
+        assert_eq!(
+            host_key(Some("server-name.local")),
+            Some(InternedString::intern("server-name.local"))
+        );
+        assert_eq!(
+            host_key(Some("example.com")),
+            Some(InternedString::intern("example.com"))
+        );
+        // Not an IP, so it keys like any other name — and nothing registers it,
+        // so the lookup misses and the connection is refused.
+        assert_eq!(
+            host_key(Some("server-name")),
+            Some(InternedString::intern("server-name"))
+        );
+    }
 }
 
 #[cfg(test)]

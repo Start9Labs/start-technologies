@@ -477,7 +477,7 @@ if (result.exitCode !== 0) {
 
 // execFail() - throws on error (good for required commands)
 // Uses the default user from the Dockerfile (no need to specify { user: '...' })
-await appSub.execFail(['git', 'clone', 'https://github.com/user/repo.git'])
+await appSub.execFail(['myapp', 'check-config'])
 
 // Override user when needed (e.g., run as root)
 await appSub.exec(['update-ca-certificates'], { user: 'root' })
@@ -496,6 +496,26 @@ The `user` option is optional. If omitted, commands run as the default user defi
 - The command failure is not critical (warnings, optional setup)
 - You need to inspect the exit code or output regardless of success/failure
 - You want custom error handling logic
+
+### Commands That Run Longer Than 30 Seconds
+
+`exec` and `execFail` take a `timeout` option: how long the SDK waits before it gives up and fails the call. It defaults to **30 s**, so a command that legitimately takes longer — cloning a large repository, importing a database, copying a multi-gigabyte file — fails partway through unless you say otherwise. Pass `null` to wait as long as it takes:
+
+```typescript
+// Gives up after 30 s — fine for a command that either answers quickly or is stuck
+await appSub.execFail(['update-ca-certificates'], { user: 'root' })
+
+// No limit — takes as long as the database takes
+await appSub.execFail(['pg_restore', '-U', user, '-d', database, dumpFile], {
+  user: 'postgres',
+  timeout: null,
+})
+```
+
+Opt out whenever the runtime is set by something you cannot bound: the size of the data, the speed of a disk or backup target, or another process you are waiting on. Keep the default for commands that should answer promptly, where the timeout is what stops a wedged container from hanging the service.
+
+> [!NOTE]
+> On timeout the SDK sends `SIGKILL` to the process it spawned and reports `timed out after <n>ms and was killed with SIGKILL`; `exec()`'s result carries `timedOutAfter`, set to the limit that elapsed. The command itself runs inside the subcontainer and is not signalled — it stops when the subcontainer is torn down, so treat a timeout as "the SDK stopped waiting", not "the work stopped".
 
 ## PostgreSQL Sidecar
 

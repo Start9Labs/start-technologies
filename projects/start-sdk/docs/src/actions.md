@@ -246,7 +246,17 @@ password: Value.text({
 
 Every string that a user will see — action `name`, `description`, `warning`, `reason` on tasks, messages on health checks and action results — must be wrapped in `i18n()`. Raw strings bypass translation and leak English into non-English locales. The existing examples on this page illustrate the pattern: `name: i18n('Configure SMTP')`, not `name: 'Configure SMTP'`.
 
-Thrown errors are the exception. `throw new Error(...)` messages are developer-facing diagnostics that surface in logs and stack traces, not translated UI copy — leave them as plain strings and do **not** wrap them in `i18n()`.
+**That includes what a handler throws.** An error out of an action handler is not a log line the user never sees — StartOS catches it and renders the message as the alert that tells them the action failed, so it is the only feedback they get and it needs a dictionary entry like any other:
+
+```typescript
+if (!apiKey) {
+  throw new Error(i18n('An API key is required. Create one under Settings → API Keys.'))
+}
+```
+
+Wrapping it works because `setupI18n` resolves eagerly against the container's locale and hands back a finished string; StartOS renders an unrecognized string verbatim, so a translated message reaches the user in their language and an untranslated one leaks English into the alert.
+
+Errors thrown outside an action are a different matter. A throw from `setupMain`, `setupInit`, or a migration reaches the user as a **Service Launch Error** — a crash report shown next to Rebuild and Uninstall buttons, not copy anyone composed. Those are diagnostics: leave them as plain strings, and keep them specific enough to debug from.
 
 ### Don't `as const` What the SDK Already Types
 

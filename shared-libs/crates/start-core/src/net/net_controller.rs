@@ -23,7 +23,7 @@ use crate::net::forward::{
 };
 use crate::net::gateway::NetworkInterfaceController;
 use crate::net::host::binding::{AddSslOptions, BindId, BindOptions, UpstreamCertValidation};
-use crate::net::host::{Host, Hosts, host_for};
+use crate::net::host::{Host, Hosts, host_for, host_for_existing};
 use crate::net::port_map::{PortMapController, candidate_gateways};
 use crate::net::service_interface::{
     AddressInfo, HostnameInfo, HostnameMetadata, ServiceInterface, ServiceInterfaceType,
@@ -311,6 +311,15 @@ fn ssl_vhost_public_v4<'a>(
         .collect()
 }
 
+/// Hosts the datapath still holds that the database no longer has. Collected
+/// before the update loop so a port handed from a retired host to a surviving
+/// one in the same pass comes down before it is rebuilt.
+fn retired_hosts<'a>(held: impl Iterator<Item = &'a HostId>, current: &Hosts) -> Vec<HostId> {
+    held.filter(|id| !current.0.contains_key(*id))
+        .cloned()
+        .collect()
+}
+
 #[derive(Default, Debug)]
 struct HostBinds {
     /// `(internal-target, count, requirements, rc)` keyed by external start
@@ -474,11 +483,16 @@ impl NetServiceData {
                     );
                 }
 
-                // Domain vhosts: group by (domain, ssl_port), merge public/private
+                // Named vhosts: group by (hostname, ssl_port), merge public/private
                 // sets. Terminating when we hold the TLS (add_ssl); an SNI
                 // passthrough to the container's own TLS otherwise. Either way the
-                // domain entry carries its own gateways, so a public domain accepts
-                // WAN even where the bare IP is disabled.
+                // entry carries its own gateways, so a public domain accepts WAN
+                // even where the bare IP is disabled.
+                //
+                // The mDNS name is registered here like any other: the vhost
+                // controller serves a name only if it has an entry, and this is
+                // where the set of names a host answers to is decided. It is never
+                // public, so it contributes no upstream port map.
                 let passthrough = bind.options.add_ssl.is_none();
                 for addr_info in &enabled_addresses {
                     if !addr_info.ssl {
@@ -486,7 +500,8 @@ impl NetServiceData {
                     }
                     match &addr_info.metadata {
                         HostnameMetadata::PublicDomain { .. }
-                        | HostnameMetadata::PrivateDomain { .. } => {}
+                        | HostnameMetadata::PrivateDomain { .. }
+                        | HostnameMetadata::Mdns { .. } => {}
                         _ => continue,
                     }
                     let domain = &addr_info.hostname;
@@ -574,18 +589,21 @@ impl NetServiceData {
                     .filter_map(|gw| net_ifaces.get(gw).and_then(|i| i.ip_info.as_ref()))
                     .flat_map(|ip| ip.subnets.iter().map(|s| s.addr()))
                     .collect();
-                forwards.insert(
-                    external,
-                    (
-                        SocketAddrV4::new(self.ip, *port),
-                        1,
-                        ForwardRequirements {
-                            public_gateways: fwd_public,
-                            private_ips: fwd_private,
-                            secure: bind.options.secure.is_some(),
-                        },
-                    ),
-                );
+                // StartOS answers these addresses itself, and a loopback DNAT is martian-dropped on ingress.
+                if !self.ip.is_loopback() {
+                    forwards.insert(
+                        external,
+                        (
+                            SocketAddrV4::new(self.ip, *port),
+                            1,
+                            ForwardRequirements {
+                                public_gateways: fwd_public,
+                                private_ips: fwd_private,
+                                secure: bind.options.secure.is_some(),
+                            },
+                        ),
+                    );
+                }
 
                 // No listener of ours answers here, so DNAT the host's
                 // GUA:external to the container's v6:internal. A LAN-only GUA is
@@ -887,6 +905,19 @@ impl NetServiceData {
 
         Ok(())
     }
+
+    /// Tear down everything the datapath holds for a host that is no longer in
+    /// the database. Reconciling against an empty host is what reaps it: the v6
+    /// forwards, the vhost port maps and the RFC 2136 records carry no
+    /// refcount, so dropping `HostBinds` on its own leaves them up.
+    async fn retire(&mut self, ctrl: &NetController, id: HostId) -> Result<(), Error> {
+        if !self.binds.contains_key(&id) {
+            return Ok(());
+        }
+        self.update(ctrl, id.clone(), Host::new()).await?;
+        self.binds.remove(&id);
+        Ok(())
+    }
 }
 
 pub struct NetService {
@@ -986,9 +1017,25 @@ impl NetService {
                     // Handle host updates
                     if hosts_changed {
                         if let Err(e) = async {
-                            let hosts = watch.peek()?.de().unwrap_or_default();
+                            // A host absent from a hosts map we failed to read is
+                            // not a retired host. Bail rather than tear every
+                            // one of them down.
+                            let hosts: Hosts = match watch.peek()?.de() {
+                                Ok(hosts) => hosts,
+                                Err(e) => {
+                                    tracing::error!("Failed to read hosts for {id}: {e}");
+                                    tracing::debug!("{e:?}");
+                                    return Ok(());
+                                }
+                            };
                             let mut data = thread_data.lock().await;
                             let ctrl = data.net_controller()?;
+                            // Retire first: a port handed from a removed host to
+                            // a surviving one in the same pass has to come down
+                            // before it is rebuilt.
+                            for host_id in retired_hosts(data.binds.keys(), &hosts) {
+                                data.retire(&*ctrl, host_id).await?;
+                            }
                             for (host_id, host) in hosts.0 {
                                 data.update(&*ctrl, host_id, host).await?;
                             }
@@ -1292,6 +1339,100 @@ impl NetService {
         rev.result.map(|_| rev.revision.is_some())
     }
 
+    /// Permanently remove a host and everything nested in it — its bindings and
+    /// ranges, their exported service interfaces, the operator's domains and
+    /// per-address choices — returning its external ports to the pool. `false`
+    /// if there was no such host.
+    ///
+    /// The datapath comes down through the sync task's retire pass; the patch
+    /// this writes is what wakes it.
+    pub async fn retire_host(&self, id: HostId) -> Result<bool, Error> {
+        let (ctrl, pkg_id) = {
+            let data = self.data.lock().await;
+            (data.net_controller()?, data.id.clone())
+        };
+        let Some(pkg_id) = pkg_id else {
+            return Err(Error::new(
+                eyre!("the server's own host cannot be retired"),
+                ErrorKind::InvalidRequest,
+            ));
+        };
+        ctrl.db
+            .mutate(|db| {
+                let Some(host) = db
+                    .as_public_mut()
+                    .as_package_data_mut()
+                    .as_idx_mut(&pkg_id)
+                    .or_not_found(&pkg_id)?
+                    .as_hosts_mut()
+                    .remove(&id)?
+                    .map(|h| h.de())
+                    .transpose()?
+                else {
+                    return Ok(false);
+                };
+                db.as_private_mut()
+                    .as_available_ports_mut()
+                    .mutate(|p| Ok(host.release(p)))?;
+                Ok(true)
+            })
+            .await
+            .result
+    }
+
+    /// Permanently remove one binding — or the port range at the same key,
+    /// which `bindings` and `binding_ranges` share — and its exported service
+    /// interfaces, returning its external ports to the pool. `false` if nothing
+    /// was bound at `internal_port`.
+    ///
+    /// The host survives, so the ordinary reconcile tears the datapath down.
+    pub async fn retire_binding(&self, id: HostId, internal_port: u16) -> Result<bool, Error> {
+        let (ctrl, pkg_id) = {
+            let data = self.data.lock().await;
+            (data.net_controller()?, data.id.clone())
+        };
+        let Some(pkg_id) = pkg_id else {
+            return Err(Error::new(
+                eyre!("the server's own bindings cannot be retired"),
+                ErrorKind::InvalidRequest,
+            ));
+        };
+        ctrl.db
+            .mutate(|db| {
+                let gateways = db
+                    .as_public()
+                    .as_server_info()
+                    .as_network()
+                    .as_gateways()
+                    .de()?;
+                let hostname = ServerHostname::load(db.as_public().as_server_info())?;
+                let mut ports = db.as_private().as_available_ports().de()?;
+
+                let Some(host) = host_for_existing(db, &pkg_id, &id)? else {
+                    return Ok(false);
+                };
+                let mut retired = false;
+                if let Some(bind) = host.as_bindings_mut().remove(&internal_port)? {
+                    bind.de()?.release(&mut ports);
+                    retired = true;
+                }
+                if let Some(range) = host.as_binding_ranges_mut().remove(&internal_port)? {
+                    range.de()?.release(&mut ports);
+                    retired = true;
+                }
+                if !retired {
+                    return Ok(false);
+                }
+                // `port_forwards` is computed from the bindings, so it still
+                // advertises the retired one until this re-derives it.
+                host.update_addresses(&hostname, &gateways, &ports)?;
+                db.as_private_mut().as_available_ports_mut().ser(&ports)?;
+                Ok(true)
+            })
+            .await
+            .result
+    }
+
     pub async fn remove_all(mut self) -> Result<(), Error> {
         if Weak::upgrade(&self.data.lock().await.controller).is_none() {
             self.shutdown = true;
@@ -1391,5 +1532,68 @@ mod tests {
             BTreeSet::from([wg.clone()]),
             "an SSL-port bare IP does mark it public"
         );
+    }
+
+    fn host_id(s: &str) -> HostId {
+        HostId::from(Id::try_from(s.to_owned()).unwrap())
+    }
+
+    fn hosts(ids: impl IntoIterator<Item = &'static str>) -> Hosts {
+        Hosts(
+            ids.into_iter()
+                .map(|id| (host_id(id), Host::new()))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn only_hosts_the_database_dropped_are_retired() {
+        let held = [host_id("ui"), host_id("api"), host_id("peer")];
+
+        assert_eq!(
+            retired_hosts(held.iter(), &hosts(["ui", "api", "peer"])),
+            Vec::<HostId>::new(),
+            "nothing is retired while every held host is still in the database"
+        );
+        assert_eq!(
+            retired_hosts(held.iter(), &hosts(["ui", "peer"])),
+            vec![host_id("api")],
+            "the host the database dropped is retired"
+        );
+        assert_eq!(
+            retired_hosts(held.iter(), &hosts(["ui", "api", "peer", "metrics"])),
+            Vec::<HostId>::new(),
+            "a host the database gained but the datapath has not built yet is not a retirement"
+        );
+        assert_eq!(
+            retired_hosts(held.iter(), &hosts([])),
+            held.to_vec(),
+            "an uninstalled package retires every host it held"
+        );
+        assert_eq!(
+            retired_hosts([].iter(), &hosts(["ui"])),
+            Vec::<HostId>::new(),
+            "the first pass after a restart holds nothing, so it retires nothing"
+        );
+    }
+
+    /// Retiring a host works by reconciling it against an empty [`Host`], which
+    /// is a teardown only for as long as every resource `HostBinds` holds is
+    /// driven by the desired set `update` computes from that host. Adding a
+    /// field here fails to compile until it is destructured, which is the
+    /// prompt to go wire it into `update`'s teardown — several of these carry
+    /// no refcount, so nothing else would reap them.
+    #[test]
+    fn host_binds_holds_only_what_update_reconciles() {
+        let HostBinds {
+            forwards,
+            vhosts,
+            private_dns,
+            gua_forwards,
+        } = HostBinds::default();
+        assert!(forwards.is_empty());
+        assert!(vhosts.is_empty());
+        assert!(private_dns.is_empty());
+        assert!(gua_forwards.is_empty());
     }
 }
