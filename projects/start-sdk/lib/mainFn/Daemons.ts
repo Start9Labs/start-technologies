@@ -168,6 +168,17 @@ type NewDaemonParams<
   exec: DaemonCommandType<Manifest, C>
   /** The subcontainer in which the daemon runs */
   subcontainer: C
+  /**
+   * Arbitrary value folded into this entry's `configHash` under
+   * `Daemons.dynamic`: when it changes between reconciliations, the
+   * daemon/oneshot is restarted. Use it to surface values a closure
+   * captures (`exec.fn`, `ready.fn`), which the hash cannot see.
+   *
+   * Only JSON-serializable values are useful here — functions, symbols,
+   * and `undefined` normalize to `null` and never trigger a restart.
+   * Circular structures and BigInts throw at reconcile time.
+   */
+  hashExtra?: unknown
 }
 
 type OptionalParamSync<T> = T | (() => T | null)
@@ -186,6 +197,13 @@ type AddDaemonParams<
    * this daemon starts. Enforces startup ordering in the daemon chain.
    */
   requires: Exclude<Ids, Id>[]
+  /**
+   * Arbitrary value folded into this entry's `configHash` under
+   * `Daemons.dynamic` — see {@link NewDaemonParams.hashExtra}. This is the
+   * only way to make the reconciler react to a change inside a pre-built
+   * `{ daemon }`, which is otherwise entirely opaque to the hash.
+   */
+  hashExtra?: unknown
 }
 
 type AddOneshotParams<
@@ -221,6 +239,7 @@ type DaemonEntry<M extends T.SDKManifest> =
       exec: DaemonCommandType<M, SubContainer<M> | null>
       ready: Ready
       requires: ReadonlyArray<string>
+      hashExtra: unknown
       /** If supplied via the `{ daemon: ... }` form, pre-built daemon. */
       prebuiltDaemon: Daemon<M> | null
     }
@@ -230,6 +249,7 @@ type DaemonEntry<M extends T.SDKManifest> =
       subcontainer: SubContainer<M> | null
       exec: DaemonCommandType<M, SubContainer<M> | null>
       requires: ReadonlyArray<string>
+      hashExtra: unknown
     }
   | {
       kind: 'health'
@@ -313,11 +333,12 @@ export class Daemons<Manifest extends T.SDKManifest, Ids extends string>
    * The diff key (`configHash`) covers the subcontainer descriptor
    * (`imageId`, `sharedRun`, `name`, structural `mounts.build()`), exec
    * (`command`, `env`, `cwd`, `user`, `runAsInit`, `sigtermTimeout`),
-   * `requires` (sorted), and the structural parts of `ready` (`display`,
-   * `gracePeriod`). Closures (`ready.fn`, `ready.trigger`) and pre-built
-   * `Daemon` instances are intentionally excluded — surface a value
-   * through one of the hashed fields if you want the reconciler to react
-   * to it changing.
+   * `requires` (sorted), the structural parts of `ready` (`display`,
+   * `gracePeriod`), and the entry's `hashExtra`. Closures (`ready.fn`,
+   * `ready.trigger`) and pre-built `Daemon` instances are intentionally
+   * excluded — surface a value through one of the hashed fields, or pass
+   * it as `hashExtra`, if you want the reconciler to react to it
+   * changing.
    *
    * **Use lazy SubContainers** ({@link SubContainer.of}) for daemons under
    * `Daemons.dynamic`. Eager handles created inside `fn` are wasted on
@@ -409,6 +430,7 @@ export class Daemons<Manifest extends T.SDKManifest, Ids extends string>
               >),
         ready: opts.ready,
         requires: opts.requires as string[],
+        hashExtra: opts.hashExtra,
         prebuiltDaemon:
           'daemon' in opts ? (opts.daemon as Daemon<Manifest>) : null,
       }
@@ -465,6 +487,7 @@ export class Daemons<Manifest extends T.SDKManifest, Ids extends string>
           SubContainer<Manifest> | null
         >,
         requires: opts.requires as string[],
+        hashExtra: opts.hashExtra,
       }
       return prev.appendEntry(entry)
     }
@@ -812,11 +835,17 @@ function validateEntries<M extends T.SDKManifest>(
  *
  * Hashed fields: kind, id, sorted requires, subcontainer descriptor
  * (`imageId`, `sharedRun`, `name`, `mounts.build()`), exec (`command`,
- * `env`, `cwd`, `user`, `runAsInit`, `sigtermTimeout`), and ready's
- * structural parts (`display`, `gracePeriod`).
+ * `env`, `cwd`, `user`, `runAsInit`, `sigtermTimeout`), ready's
+ * structural parts (`display`, `gracePeriod`), and `hashExtra`.
  *
  * NOT hashed: `ready.fn`, `ready.trigger`, function-form `exec.fn`, and
- * any pre-built `daemon` instance.
+ * any pre-built `daemon` instance. `hashExtra` is the escape hatch for
+ * values only visible inside those closures.
+ *
+ * `hashExtra` is canonicalized like every other hashed field: only
+ * JSON-serializable values are useful (functions/symbols/`undefined`
+ * normalize to `null`), and a value JSON cannot represent at all
+ * (circular structure, BigInt) throws, naming the offending entry.
  *
  * @param entry A recorded {@link Daemons} entry (`Daemons.entries[i]`)
  * @returns A canonical JSON string suitable for equality comparison
@@ -851,6 +880,7 @@ export function configHash<M extends T.SDKManifest>(
     requires: [...entry.requires].sort(),
     sub: subHash,
     exec: normalizeExec(entry.exec),
+    hashExtra: canonicalizeExtra(entry.id, entry.hashExtra),
     ready:
       entry.kind === 'daemon'
         ? {
@@ -886,6 +916,19 @@ function normalizeCommand(c: T.CommandType): unknown {
 
 function stableStringify(v: unknown): string {
   return JSON.stringify(canonicalize(v))
+}
+
+function canonicalizeExtra(id: string, v: unknown): unknown {
+  if (v === undefined) return null
+  try {
+    const out = canonicalize(v)
+    JSON.stringify(out)
+    return out
+  } catch {
+    throw new Error(
+      `Daemons: hashExtra for entry '${id}' must be JSON-serializable`,
+    )
+  }
 }
 
 function canonicalize(v: unknown): unknown {

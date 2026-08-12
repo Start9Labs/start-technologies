@@ -40,6 +40,17 @@
 
 ### Added
 
+- **`addDaemon()` / `addOneshot()` accept a `hashExtra` value that
+  `Daemons.dynamic` folds into the entry's `configHash`.** The reconciler's
+  diff key covers only structural fields; closures (`exec.fn`, `ready.fn`,
+  `ready.trigger`) and pre-built `Daemon` instances are invisible to it, so a
+  value captured by a closure could change without the reconciler restarting
+  the daemon. Pass the value as `hashExtra` and any change restarts the
+  daemon/oneshot on the next reconcile. Only JSON-serializable values are
+  useful: functions, symbols and `undefined` normalize to `null` (never
+  triggering a restart), and a value JSON cannot represent at all (circular
+  structure, BigInt) throws a descriptive error at reconcile time
+
 - **`MultiHost.retire()` and `MultiHost.retirePort()` permanently remove a host
   or a binding.** `setupInterfaces` ends each pass by
   _disabling_ whatever it did not declare, which keeps the row, the external

@@ -134,6 +134,70 @@ describe('configHash', () => {
     expect(configHash(a)).not.toEqual(configHash(b))
   })
 
+  it('changes when hashExtra changes', () => {
+    const e = fakeEffects()
+    const make = (hashExtra: unknown) =>
+      Daemons.of<Manifest>({ effects: e }).addDaemon('a', {
+        subcontainer: lazy(e),
+        exec: { command: ['cmd'] },
+        ready: baseReady,
+        requires: [],
+        hashExtra,
+      }).entries[0]
+    expect(configHash(make({ port: 5959 }))).not.toEqual(
+      configHash(make({ port: 5960 })),
+    )
+    expect(configHash(make({ port: 5959 }))).toEqual(
+      configHash(make({ port: 5959 })),
+    )
+    // key order is irrelevant (canonicalized)
+    expect(configHash(make({ a: 1, b: 2 }))).toEqual(
+      configHash(make({ b: 2, a: 1 })),
+    )
+  })
+
+  it('hashExtra participates for oneshots', () => {
+    const e = fakeEffects()
+    const oneshot = (hashExtra: unknown) =>
+      Daemons.of<Manifest>({ effects: e }).addOneshot('a', {
+        subcontainer: lazy(e),
+        exec: { command: ['cmd'] },
+        requires: [],
+        hashExtra,
+      }).entries[0]
+    expect(configHash(oneshot('x'))).not.toEqual(configHash(oneshot('y')))
+  })
+
+  it('normalizes non-JSON hashExtra values to null instead of restarting', () => {
+    const e = fakeEffects()
+    const make = (hashExtra: unknown) =>
+      Daemons.of<Manifest>({ effects: e }).addDaemon('a', {
+        subcontainer: lazy(e),
+        exec: { command: ['cmd'] },
+        ready: baseReady,
+        requires: [],
+        hashExtra,
+      }).entries[0]
+    expect(configHash(make(() => 1))).toEqual(configHash(make(undefined)))
+    expect(configHash(make(undefined))).toEqual(configHash(make(null as any)))
+  })
+
+  it('throws a descriptive error for an unserializable hashExtra', () => {
+    const e = fakeEffects()
+    const circular: any = {}
+    circular.self = circular
+    const entry = Daemons.of<Manifest>({ effects: e }).addDaemon('a', {
+      subcontainer: lazy(e),
+      exec: { command: ['cmd'] },
+      ready: baseReady,
+      requires: [],
+      hashExtra: circular,
+    }).entries[0]
+    expect(() => configHash(entry)).toThrow(
+      "hashExtra for entry 'a' must be JSON-serializable",
+    )
+  })
+
   it('changes when command changes', () => {
     const e = fakeEffects()
     const a = Daemons.of<Manifest>({ effects: e }).addDaemon('a', {
