@@ -11,7 +11,7 @@ PACKAGE_ID := $(shell awk -F"'" '/id:/ {print $$2}' startos/manifest/index.ts)
 # macOS still ships, where the guard would fire on every build instead.
 INGREDIENTS := $(shell start-cli s9pk list-ingredients 2>/dev/null || echo __LIST_INGREDIENTS_FAILED__)
 ifneq ($(filter __LIST_INGREDIENTS_FAILED__,$(INGREDIENTS)),)
-$(error `start-cli s9pk list-ingredients` failed, so make cannot tell which files the s9pk depends on and would silently repack the previous build. Run it directly to see the error — a host in .startos/config.yaml that no longer resolves is a common cause, since start-cli resolves it even for commands that contact no server.)
+$(error `start-cli s9pk list-ingredients` failed, so make cannot tell which files the s9pk depends on and would silently repack the previous build. Run it directly to see the error.)
 endif
 # Resolve the actual git dir so this works inside git worktrees, where .git
 # is a file pointing at <main>/.git/worktrees/<name> rather than a directory.
