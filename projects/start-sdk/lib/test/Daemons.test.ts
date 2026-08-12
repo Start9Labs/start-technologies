@@ -134,15 +134,15 @@ describe('configHash', () => {
     expect(configHash(a)).not.toEqual(configHash(b))
   })
 
-  it('changes when hashExtra changes', () => {
+  it('changes when uses changes', () => {
     const e = fakeEffects()
-    const make = (hashExtra: unknown) =>
+    const make = (uses: unknown) =>
       Daemons.of<Manifest>({ effects: e }).addDaemon('a', {
         subcontainer: lazy(e),
         exec: { command: ['cmd'] },
         ready: baseReady,
         requires: [],
-        hashExtra,
+        uses,
       }).entries[0]
     expect(configHash(make({ port: 5959 }))).not.toEqual(
       configHash(make({ port: 5960 })),
@@ -156,42 +156,46 @@ describe('configHash', () => {
     )
   })
 
-  it('hashExtra participates for oneshots', () => {
+  it('uses participates for oneshots', () => {
     const e = fakeEffects()
-    const oneshot = (hashExtra: unknown) =>
+    const oneshot = (uses: unknown) =>
       Daemons.of<Manifest>({ effects: e }).addOneshot('a', {
         subcontainer: lazy(e),
         exec: { command: ['cmd'] },
         requires: [],
-        hashExtra,
+        uses,
       }).entries[0]
     expect(configHash(oneshot('x'))).not.toEqual(configHash(oneshot('y')))
   })
 
-  it('normalizes non-JSON hashExtra values to null instead of restarting', () => {
+  it('normalizes non-JSON uses values to distinct sentinels instead of restarting', () => {
     const e = fakeEffects()
-    const make = (hashExtra: unknown) =>
+    const make = (uses: unknown) =>
       Daemons.of<Manifest>({ effects: e }).addDaemon('a', {
         subcontainer: lazy(e),
         exec: { command: ['cmd'] },
         ready: baseReady,
         requires: [],
-        hashExtra,
+        uses,
       }).entries[0]
-    expect(configHash(make(() => 1))).toEqual(configHash(make(undefined)))
+    // unserializable kinds get their own sentinel, distinct from null and
+    // from each other — but two values of the same kind hash alike, so a
+    // change only visible there still triggers no restart
+    expect(configHash(make(() => 1))).not.toEqual(configHash(make(undefined)))
+    expect(configHash(make(() => 1))).not.toEqual(configHash(make(Symbol('x'))))
+    expect(configHash(make(() => 1))).toEqual(configHash(make(() => 2)))
     expect(configHash(make(undefined))).toEqual(configHash(make(null as any)))
-    expect(configHash(make(Symbol('x')))).toEqual(configHash(make(undefined)))
   })
 
-  it('normalizes a circular hashExtra instead of throwing', () => {
+  it('normalizes a circular uses instead of throwing', () => {
     const e = fakeEffects()
-    const make = (hashExtra: unknown) =>
+    const make = (uses: unknown) =>
       Daemons.of<Manifest>({ effects: e }).addDaemon('a', {
         subcontainer: lazy(e),
         exec: { command: ['cmd'] },
         ready: baseReady,
         requires: [],
-        hashExtra,
+        uses,
       }).entries[0]
     const circular = (port: number) => {
       const o: any = { port }
@@ -202,21 +206,21 @@ describe('configHash', () => {
     expect(configHash(make(circular(5959)))).toEqual(
       configHash(make(circular(5959))),
     )
-    // the cycle collapses to null, the rest of the value still hashes
+    // the cycle collapses to a sentinel, the rest of the value still hashes
     expect(configHash(make(circular(5959)))).not.toEqual(
       configHash(make(circular(5960))),
     )
   })
 
-  it('hashes a bigint hashExtra by value instead of throwing', () => {
+  it('hashes a bigint uses by value instead of throwing', () => {
     const e = fakeEffects()
-    const make = (hashExtra: unknown) =>
+    const make = (uses: unknown) =>
       Daemons.of<Manifest>({ effects: e }).addDaemon('a', {
         subcontainer: lazy(e),
         exec: { command: ['cmd'] },
         ready: baseReady,
         requires: [],
-        hashExtra,
+        uses,
       }).entries[0]
     expect(() => configHash(make({ n: 1n }))).not.toThrow()
     expect(configHash(make({ n: 1n }))).toEqual(configHash(make({ n: 1n })))

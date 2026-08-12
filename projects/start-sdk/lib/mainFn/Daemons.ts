@@ -169,16 +169,18 @@ type NewDaemonParams<
   /** The subcontainer in which the daemon runs */
   subcontainer: C
   /**
-   * Arbitrary value folded into this entry's `configHash` under
-   * `Daemons.dynamic`: when it changes between reconciliations, the
-   * daemon/oneshot is restarted. Use it to surface values a closure
-   * captures (`exec.fn`, `ready.fn`), which the hash cannot see.
+   * Values this daemon/oneshot's closures use, folded into the entry's
+   * `configHash` under `Daemons.dynamic`: when they change between
+   * reconciliations, the daemon/oneshot is restarted. Closures
+   * (`exec.fn`, `ready.fn`) are invisible to the hash, so anything they
+   * capture that the reconciler should react to must be listed here.
    *
-   * Only JSON-serializable values are useful here — functions, symbols,
-   * `undefined` and cycles normalize to `null` and never trigger a
+   * Only JSON-serializable values are useful here — functions, symbols
+   * and cycles normalize to an `UNSERIALIZABLE:*` sentinel and
+   * `undefined` to `null`, so a change only visible there triggers no
    * restart; BigInts hash as their decimal string.
    */
-  hashExtra?: unknown
+  uses?: unknown
 }
 
 type OptionalParamSync<T> = T | (() => T | null)
@@ -198,12 +200,12 @@ type AddDaemonParams<
    */
   requires: Exclude<Ids, Id>[]
   /**
-   * Arbitrary value folded into this entry's `configHash` under
-   * `Daemons.dynamic` — see {@link NewDaemonParams.hashExtra}. This is the
-   * only way to make the reconciler react to a change inside a pre-built
-   * `{ daemon }`, which is otherwise entirely opaque to the hash.
+   * Values this daemon uses — see {@link NewDaemonParams.uses}. This is
+   * the only way to make the reconciler react to a change inside a
+   * pre-built `{ daemon }`, which is otherwise entirely opaque to the
+   * hash.
    */
-  hashExtra?: unknown
+  uses?: unknown
 }
 
 type AddOneshotParams<
@@ -239,7 +241,7 @@ type DaemonEntry<M extends T.SDKManifest> =
       exec: DaemonCommandType<M, SubContainer<M> | null>
       ready: Ready
       requires: ReadonlyArray<string>
-      hashExtra: unknown
+      uses: unknown
       /** If supplied via the `{ daemon: ... }` form, pre-built daemon. */
       prebuiltDaemon: Daemon<M> | null
     }
@@ -249,7 +251,7 @@ type DaemonEntry<M extends T.SDKManifest> =
       subcontainer: SubContainer<M> | null
       exec: DaemonCommandType<M, SubContainer<M> | null>
       requires: ReadonlyArray<string>
-      hashExtra: unknown
+      uses: unknown
     }
   | {
       kind: 'health'
@@ -334,10 +336,10 @@ export class Daemons<Manifest extends T.SDKManifest, Ids extends string>
    * (`imageId`, `sharedRun`, `name`, structural `mounts.build()`), exec
    * (`command`, `env`, `cwd`, `user`, `runAsInit`, `sigtermTimeout`),
    * `requires` (sorted), the structural parts of `ready` (`display`,
-   * `gracePeriod`), and the entry's `hashExtra`. Closures (`ready.fn`,
+   * `gracePeriod`), and the entry's `uses`. Closures (`ready.fn`,
    * `ready.trigger`) and pre-built `Daemon` instances are intentionally
-   * excluded — surface a value through one of the hashed fields, or pass
-   * it as `hashExtra`, if you want the reconciler to react to it
+   * excluded — surface a value through one of the hashed fields, or
+   * declare it in `uses`, if you want the reconciler to react to it
    * changing.
    *
    * **Use lazy SubContainers** ({@link SubContainer.of}) for daemons under
@@ -430,7 +432,7 @@ export class Daemons<Manifest extends T.SDKManifest, Ids extends string>
               >),
         ready: opts.ready,
         requires: opts.requires as string[],
-        hashExtra: opts.hashExtra,
+        uses: opts.uses,
         prebuiltDaemon:
           'daemon' in opts ? (opts.daemon as Daemon<Manifest>) : null,
       }
@@ -487,7 +489,7 @@ export class Daemons<Manifest extends T.SDKManifest, Ids extends string>
           SubContainer<Manifest> | null
         >,
         requires: opts.requires as string[],
-        hashExtra: opts.hashExtra,
+        uses: opts.uses,
       }
       return prev.appendEntry(entry)
     }
@@ -836,16 +838,17 @@ function validateEntries<M extends T.SDKManifest>(
  * Hashed fields: kind, id, sorted requires, subcontainer descriptor
  * (`imageId`, `sharedRun`, `name`, `mounts.build()`), exec (`command`,
  * `env`, `cwd`, `user`, `runAsInit`, `sigtermTimeout`), ready's
- * structural parts (`display`, `gracePeriod`), and `hashExtra`.
+ * structural parts (`display`, `gracePeriod`), and `uses`.
  *
  * NOT hashed: `ready.fn`, `ready.trigger`, function-form `exec.fn`, and
- * any pre-built `daemon` instance. `hashExtra` is the escape hatch for
+ * any pre-built `daemon` instance. `uses` is the escape hatch for
  * values only visible inside those closures.
  *
- * `hashExtra` is canonicalized like every other hashed field, and never
- * throws: functions, symbols, `undefined` and cycles normalize to
- * `null` (so changes only visible there trigger no restart), and
- * BigInts hash as their decimal string.
+ * `uses` is canonicalized like every other hashed field, and never
+ * throws: functions, symbols and cycles normalize to an
+ * `UNSERIALIZABLE:*` sentinel and `undefined` to `null` (so changes
+ * only visible there trigger no restart), and BigInts hash as their
+ * decimal string.
  *
  * @param entry A recorded {@link Daemons} entry (`Daemons.entries[i]`)
  * @returns A canonical JSON string suitable for equality comparison
@@ -880,7 +883,7 @@ export function configHash<M extends T.SDKManifest>(
     requires: [...entry.requires].sort(),
     sub: subHash,
     exec: normalizeExec(entry.exec),
-    hashExtra: entry.hashExtra,
+    uses: entry.uses,
     ready:
       entry.kind === 'daemon'
         ? {
@@ -921,9 +924,10 @@ function stableStringify(v: unknown): string {
 function canonicalize(v: unknown, ancestors: Set<object> = new Set()): unknown {
   if (v === undefined || v === null) return null
   if (typeof v === 'bigint') return v.toString()
-  if (typeof v === 'function' || typeof v === 'symbol') return null
+  if (typeof v === 'function') return 'UNSERIALIZABLE:FUNCTION'
+  if (typeof v === 'symbol') return 'UNSERIALIZABLE:SYMBOL'
   if (typeof v !== 'object') return v
-  if (ancestors.has(v)) return null
+  if (ancestors.has(v)) return 'UNSERIALIZABLE:CIRCULAR'
   ancestors.add(v)
   let out: unknown
   if (Array.isArray(v)) {
