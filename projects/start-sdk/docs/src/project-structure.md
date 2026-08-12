@@ -94,9 +94,13 @@ jobs:
   build:
     if: github.event.pull_request.draft == false
     uses: Start9Labs/start-technologies/.github/workflows/build.yml@master
-    secrets:
-      DEV_KEY: ${{ secrets.DEV_KEY }}
+    # No DEV_KEY — a PR build doesn't publish, so it doesn't need the signing key.
 ```
+
+A PR build only compiles and packs; it never publishes. The reusable workflow falls back to
+`start-cli init-key` when no signing key is present, so passing `DEV_KEY` here would put the
+real key on a runner executing branch-authored code for no benefit. **release.yml** and
+**tagAndRelease.yml** do publish, and still need it.
 
 **tagAndRelease.yml** -- on merge to master, checks the version against the registry named by `REFERENCE_REGISTRY`. That is whichever registry the track treats as already-shipped — it is configured per repo/org and is not necessarily production. If that registry already serves the version, the workflow exits gracefully without building. Otherwise it force-moves the release tag onto the new commit, then builds and publishes to the test registry, replacing the release's same-named assets. If a new commit arrives while a previous run is still in progress, the old run is cancelled:
 

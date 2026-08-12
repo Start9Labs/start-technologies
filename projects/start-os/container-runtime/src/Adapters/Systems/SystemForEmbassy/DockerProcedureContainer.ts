@@ -138,7 +138,10 @@ export class DockerProcedureContainer extends Drop {
     timeoutMs?: number | null,
   ) {
     try {
-      return await this.subcontainer.exec(commands, options, timeoutMs)
+      return await this.subcontainer.exec(commands, {
+        ...options,
+        timeout: timeoutMs,
+      })
     } finally {
       await this.subcontainer.destroy?.()
     }
@@ -150,7 +153,10 @@ export class DockerProcedureContainer extends Drop {
     options?: CommandOptions & ExecOptions,
   ) {
     try {
-      const res = await this.subcontainer.exec(commands, options, timeoutMs)
+      const res = await this.subcontainer.exec(commands, {
+        ...options,
+        timeout: timeoutMs,
+      })
       if (res.exitCode !== 0) {
         const codeOrSignal =
           res.exitCode !== null

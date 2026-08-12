@@ -483,11 +483,16 @@ impl NetServiceData {
                     );
                 }
 
-                // Domain vhosts: group by (domain, ssl_port), merge public/private
+                // Named vhosts: group by (hostname, ssl_port), merge public/private
                 // sets. Terminating when we hold the TLS (add_ssl); an SNI
                 // passthrough to the container's own TLS otherwise. Either way the
-                // domain entry carries its own gateways, so a public domain accepts
-                // WAN even where the bare IP is disabled.
+                // entry carries its own gateways, so a public domain accepts WAN
+                // even where the bare IP is disabled.
+                //
+                // The mDNS name is registered here like any other: the vhost
+                // controller serves a name only if it has an entry, and this is
+                // where the set of names a host answers to is decided. It is never
+                // public, so it contributes no upstream port map.
                 let passthrough = bind.options.add_ssl.is_none();
                 for addr_info in &enabled_addresses {
                     if !addr_info.ssl {
@@ -495,7 +500,8 @@ impl NetServiceData {
                     }
                     match &addr_info.metadata {
                         HostnameMetadata::PublicDomain { .. }
-                        | HostnameMetadata::PrivateDomain { .. } => {}
+                        | HostnameMetadata::PrivateDomain { .. }
+                        | HostnameMetadata::Mdns { .. } => {}
                         _ => continue,
                     }
                     let domain = &addr_info.hostname;

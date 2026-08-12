@@ -24,6 +24,15 @@ file tracks notable changes since the move to the monorepo.
 
 ### Fixed
 
+- **Your server answers to its own addresses and no others.** A name that
+  resolved to your server but was never configured on it — a domain you pointed
+  at its LAN IP, or its `.local` name typed without the `.local` — was served
+  your dashboard, along with a certificate for that name signed by your server's
+  Root CA. Logging in was never possible under those names, so the page could
+  not be used for anything, but it should not have been reachable. Your server
+  now serves its `.local` address, the domains you have assigned to it, and
+  direct connections to its IP address.
+
 - **Image upgrades verify their checksum again.** `upgrade` compared the image's
   blake3 hash only when it was given a second positional argument, which no
   caller passed — so the comparison never ran and a corrupt but still mountable
@@ -115,6 +124,11 @@ file tracks notable changes since the move to the monorepo.
   rules — so the range's rule could reach the port on gateways the port's own
   settings excluded. StartOS now rejects the overlapping claim and names both
   ports, so the service reports the conflict instead of serving it.
+
+### Security
+
+- **Service mount paths are validated and confined to their intended
+  directories.**
 
 ## [0.4.0.1]
 
