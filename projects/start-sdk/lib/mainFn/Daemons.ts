@@ -175,8 +175,8 @@ type NewDaemonParams<
    * captures (`exec.fn`, `ready.fn`), which the hash cannot see.
    *
    * Only JSON-serializable values are useful here — functions, symbols,
-   * and `undefined` normalize to `null` and never trigger a restart.
-   * Circular structures and BigInts throw at reconcile time.
+   * `undefined` and cycles normalize to `null` and never trigger a
+   * restart; BigInts hash as their decimal string.
    */
   hashExtra?: unknown
 }
@@ -842,10 +842,10 @@ function validateEntries<M extends T.SDKManifest>(
  * any pre-built `daemon` instance. `hashExtra` is the escape hatch for
  * values only visible inside those closures.
  *
- * `hashExtra` is canonicalized like every other hashed field: only
- * JSON-serializable values are useful (functions/symbols/`undefined`
- * normalize to `null`), and a value JSON cannot represent at all
- * (circular structure, BigInt) throws, naming the offending entry.
+ * `hashExtra` is canonicalized like every other hashed field, and never
+ * throws: functions, symbols, `undefined` and cycles normalize to
+ * `null` (so changes only visible there trigger no restart), and
+ * BigInts hash as their decimal string.
  *
  * @param entry A recorded {@link Daemons} entry (`Daemons.entries[i]`)
  * @returns A canonical JSON string suitable for equality comparison
@@ -880,7 +880,7 @@ export function configHash<M extends T.SDKManifest>(
     requires: [...entry.requires].sort(),
     sub: subHash,
     exec: normalizeExec(entry.exec),
-    hashExtra: canonicalizeExtra(entry.id, entry.hashExtra),
+    hashExtra: entry.hashExtra,
     ready:
       entry.kind === 'daemon'
         ? {
@@ -918,31 +918,24 @@ function stableStringify(v: unknown): string {
   return JSON.stringify(canonicalize(v))
 }
 
-function canonicalizeExtra(id: string, v: unknown): unknown {
-  if (v === undefined) return null
-  try {
-    const out = canonicalize(v)
-    JSON.stringify(out)
-    return out
-  } catch {
-    throw new Error(
-      `Daemons: hashExtra for entry '${id}' must be JSON-serializable`,
-    )
-  }
-}
-
-function canonicalize(v: unknown): unknown {
+function canonicalize(v: unknown, ancestors: Set<object> = new Set()): unknown {
   if (v === undefined || v === null) return null
-  if (Array.isArray(v)) return v.map(canonicalize)
-  if (typeof v === 'object') {
-    const keys = Object.keys(v as object).sort()
-    const out: Record<string, unknown> = {}
-    for (const k of keys)
-      out[k] = canonicalize((v as Record<string, unknown>)[k])
-    return out
+  if (typeof v === 'bigint') return v.toString()
+  if (typeof v === 'function' || typeof v === 'symbol') return null
+  if (typeof v !== 'object') return v
+  if (ancestors.has(v)) return null
+  ancestors.add(v)
+  let out: unknown
+  if (Array.isArray(v)) {
+    out = v.map(el => canonicalize(el, ancestors))
+  } else {
+    const obj: Record<string, unknown> = {}
+    for (const k of Object.keys(v).sort())
+      obj[k] = canonicalize((v as Record<string, unknown>)[k], ancestors)
+    out = obj
   }
-  if (typeof v === 'function') return null
-  return v
+  ancestors.delete(v)
+  return out
 }
 
 type RunningEntry<M extends T.SDKManifest> = {

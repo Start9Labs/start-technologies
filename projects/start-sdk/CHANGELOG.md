@@ -47,9 +47,10 @@
   value captured by a closure could change without the reconciler restarting
   the daemon. Pass the value as `hashExtra` and any change restarts the
   daemon/oneshot on the next reconcile. Only JSON-serializable values are
-  useful: functions, symbols and `undefined` normalize to `null` (never
-  triggering a restart), and a value JSON cannot represent at all (circular
-  structure, BigInt) throws a descriptive error at reconcile time
+  useful, and anything else normalizes rather than failing a reconcile:
+  functions, symbols, `undefined` and cycles hash as `null` (so a change
+  visible only there triggers no restart), and BigInts hash as their decimal
+  string
 
 - **`MultiHost.retire()` and `MultiHost.retirePort()` permanently remove a host
   or a binding.** `setupInterfaces` ends each pass by

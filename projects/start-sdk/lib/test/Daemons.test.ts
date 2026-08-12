@@ -180,22 +180,47 @@ describe('configHash', () => {
       }).entries[0]
     expect(configHash(make(() => 1))).toEqual(configHash(make(undefined)))
     expect(configHash(make(undefined))).toEqual(configHash(make(null as any)))
+    expect(configHash(make(Symbol('x')))).toEqual(configHash(make(undefined)))
   })
 
-  it('throws a descriptive error for an unserializable hashExtra', () => {
+  it('normalizes a circular hashExtra instead of throwing', () => {
     const e = fakeEffects()
-    const circular: any = {}
-    circular.self = circular
-    const entry = Daemons.of<Manifest>({ effects: e }).addDaemon('a', {
-      subcontainer: lazy(e),
-      exec: { command: ['cmd'] },
-      ready: baseReady,
-      requires: [],
-      hashExtra: circular,
-    }).entries[0]
-    expect(() => configHash(entry)).toThrow(
-      "hashExtra for entry 'a' must be JSON-serializable",
+    const make = (hashExtra: unknown) =>
+      Daemons.of<Manifest>({ effects: e }).addDaemon('a', {
+        subcontainer: lazy(e),
+        exec: { command: ['cmd'] },
+        ready: baseReady,
+        requires: [],
+        hashExtra,
+      }).entries[0]
+    const circular = (port: number) => {
+      const o: any = { port }
+      o.self = o
+      return o
+    }
+    expect(() => configHash(make(circular(5959)))).not.toThrow()
+    expect(configHash(make(circular(5959)))).toEqual(
+      configHash(make(circular(5959))),
     )
+    // the cycle collapses to null, the rest of the value still hashes
+    expect(configHash(make(circular(5959)))).not.toEqual(
+      configHash(make(circular(5960))),
+    )
+  })
+
+  it('hashes a bigint hashExtra by value instead of throwing', () => {
+    const e = fakeEffects()
+    const make = (hashExtra: unknown) =>
+      Daemons.of<Manifest>({ effects: e }).addDaemon('a', {
+        subcontainer: lazy(e),
+        exec: { command: ['cmd'] },
+        ready: baseReady,
+        requires: [],
+        hashExtra,
+      }).entries[0]
+    expect(() => configHash(make({ n: 1n }))).not.toThrow()
+    expect(configHash(make({ n: 1n }))).toEqual(configHash(make({ n: 1n })))
+    expect(configHash(make({ n: 1n }))).not.toEqual(configHash(make({ n: 2n })))
   })
 
   it('changes when command changes', () => {
