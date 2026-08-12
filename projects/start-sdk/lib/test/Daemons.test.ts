@@ -184,7 +184,10 @@ describe('configHash', () => {
     expect(configHash(make(() => 1))).not.toEqual(configHash(make(undefined)))
     expect(configHash(make(() => 1))).not.toEqual(configHash(make(Symbol('x'))))
     expect(configHash(make(() => 1))).toEqual(configHash(make(() => 2)))
-    expect(configHash(make(undefined))).toEqual(configHash(make(null as any)))
+    expect(configHash(make(undefined))).not.toEqual(
+      configHash(make(null as any)),
+    )
+    expect(configHash(make(undefined))).toEqual(configHash(make(undefined)))
   })
 
   it('normalizes a circular uses instead of throwing', () => {

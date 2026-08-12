@@ -48,8 +48,8 @@
   the daemon. Declare the value as `uses` and any change restarts the
   daemon/oneshot on the next reconcile. Only JSON-serializable values are
   useful, and anything else normalizes rather than failing a reconcile:
-  functions, symbols and cycles hash as an `UNSERIALIZABLE:*` sentinel,
-  `undefined` hashes as `null` (so a change visible only there triggers no
+  functions, symbols, cycles and `undefined` hash as distinct
+  `UNSERIALIZABLE:*` sentinels (so a change visible only there triggers no
   restart), and BigInts hash as their decimal string
 
 - **`MultiHost.retire()` and `MultiHost.retirePort()` permanently remove a host

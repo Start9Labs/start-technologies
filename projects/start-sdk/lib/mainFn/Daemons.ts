@@ -175,10 +175,10 @@ type NewDaemonParams<
    * (`exec.fn`, `ready.fn`) are invisible to the hash, so anything they
    * capture that the reconciler should react to must be listed here.
    *
-   * Only JSON-serializable values are useful here — functions, symbols
-   * and cycles normalize to an `UNSERIALIZABLE:*` sentinel and
-   * `undefined` to `null`, so a change only visible there triggers no
-   * restart; BigInts hash as their decimal string.
+   * Only JSON-serializable values are useful here — functions, symbols,
+   * cycles and `undefined` normalize to an `UNSERIALIZABLE:*` sentinel,
+   * so a change only visible there triggers no restart; BigInts hash as
+   * their decimal string.
    */
   uses?: unknown
 }
@@ -845,10 +845,9 @@ function validateEntries<M extends T.SDKManifest>(
  * values only visible inside those closures.
  *
  * `uses` is canonicalized like every other hashed field, and never
- * throws: functions, symbols and cycles normalize to an
- * `UNSERIALIZABLE:*` sentinel and `undefined` to `null` (so changes
- * only visible there trigger no restart), and BigInts hash as their
- * decimal string.
+ * throws: functions, symbols, cycles and `undefined` normalize to an
+ * `UNSERIALIZABLE:*` sentinel (so changes only visible there trigger
+ * no restart), and BigInts hash as their decimal string.
  *
  * @param entry A recorded {@link Daemons} entry (`Daemons.entries[i]`)
  * @returns A canonical JSON string suitable for equality comparison
@@ -922,7 +921,8 @@ function stableStringify(v: unknown): string {
 }
 
 function canonicalize(v: unknown, ancestors: Set<object> = new Set()): unknown {
-  if (v === undefined || v === null) return null
+  if (v === undefined) return 'UNSERIALIZABLE:UNDEFINED'
+  if (v === null) return null
   if (typeof v === 'bigint') return v.toString()
   if (typeof v === 'function') return 'UNSERIALIZABLE:FUNCTION'
   if (typeof v === 'symbol') return 'UNSERIALIZABLE:SYMBOL'
