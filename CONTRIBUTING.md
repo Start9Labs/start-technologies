@@ -6,12 +6,13 @@ This file covers what is **common to the whole monorepo** — the shared toolcha
 
 ## Documentation
 
-The repo root's docs split across four files:
+The repo root's docs split across five files:
 
 - `README.md` — what this is
 - `ARCHITECTURE.md` — how it's built (the monorepo layout)
 - `CONTRIBUTING.md` — this file; how to contribute
 - `AGENTS.md` — AI-developer/agent operating rules (`CLAUDE.md` is a one-line `@AGENTS.md` import)
+- `SECURITY.md` — how to report a vulnerability, and what is in scope
 
 **These docs must be kept up to date.** When you change project structure, conventions, build process, or product context, update the relevant file(s) in the same change — do not defer. Each product and shared library keeps its own `README.md`/`ARCHITECTURE.md`/`AGENTS.md` for what is specific to it (most still carry a `CONTRIBUTING.md` too, which is being folded into that scope's `AGENTS.md` — see [`AGENTS.md`](AGENTS.md)) — see `projects/*/`, `shared-libs/crates/start-core/`, `shared-libs/ts-modules/`, and `projects/start-os/container-runtime/`.
 
@@ -26,7 +27,7 @@ To fix something that is _already published_ — a typo, a broken link, a wrong 
 ## Collaboration
 
 - [Matrix](https://matrix.to/#/#dev-startos:matrix.start9labs.com)
-- Security issues: [security@start9.com](mailto:security@start9.com)
+- Security issues: [security@start9.com](mailto:security@start9.com) — see [SECURITY.md](SECURITY.md)
 
 ## Environment Setup
 

@@ -88,12 +88,13 @@ StartOS is the flagship, but it shares this repo with the rest of the Start9 sta
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how the monorepo fits together
 - [CONTRIBUTING.md](CONTRIBUTING.md) — environment setup, build, test, and format workflow
 - [AGENTS.md](AGENTS.md) — AI-developer/agent operating rules (`CLAUDE.md` is a one-line `@AGENTS.md` import)
+- [SECURITY.md](SECURITY.md) — how to report a vulnerability, and what is in scope
 
 ## Contributing
 
 There are multiple ways to contribute: work directly on a product in this repo, package a service for the marketplace, or help with documentation and guides. See [CONTRIBUTING.md](CONTRIBUTING.md) or visit [start9.com/contribute](https://start9.com/contribute/).
 
-To report security issues, email [security@start9.com](mailto:security@start9.com).
+To report security issues, email [security@start9.com](mailto:security@start9.com). See [SECURITY.md](SECURITY.md) for what is in scope and what happens next.
 
 ## License
 

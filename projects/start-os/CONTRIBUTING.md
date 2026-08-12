@@ -13,7 +13,7 @@ User-facing changes (UI, CLI, install/setup flow) must update the end-user docs 
 ## Collaboration
 
 - [Matrix](https://matrix.to/#/#dev-startos:matrix.start9labs.com)
-- Security issues: [security@start9.com](mailto:security@start9.com)
+- Security issues: [security@start9.com](mailto:security@start9.com) — see [SECURITY.md](../../SECURITY.md)
 
 ## Prerequisites
 
