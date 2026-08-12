@@ -2134,6 +2134,20 @@ registry.os.asset.signer-not-authorized:
   fr_FR: "Le signataire %{guid} n'est pas autorisé"
   pl_PL: "Sygnatariusz %{guid} nie jest autoryzowany"
 
+registry.os.asset.missing-signer:
+  en_US: "Missing signer"
+  de_DE: "Fehlender Unterzeichner"
+  es_ES: "Falta firmante"
+  fr_FR: "Signataire manquant"
+  pl_PL: "Brak sygnatariusza"
+
+registry.os.asset.remove-not-exist:
+  en_US: "v%{version} has no asset indexed for %{platform}, so nothing was removed"
+  de_DE: "Für v%{version} ist kein Asset für %{platform} indiziert, daher wurde nichts entfernt"
+  es_ES: "v%{version} no tiene ningún activo indexado para %{platform}, por lo que no se eliminó nada"
+  fr_FR: "v%{version} n'a aucun actif indexé pour %{platform}, donc rien n'a été supprimé"
+  pl_PL: "v%{version} nie ma zasobu zaindeksowanego dla %{platform}, więc nic nie usunięto"
+
 # registry/os/version/signer.rs
 registry.os.version.signer-not-authorized:
   en_US: "Signer %{signer} is not authorized to sign for v%{version}"
@@ -4855,12 +4869,12 @@ about.commands-add-remove-list-versions:
   fr_FR: "Commandes pour ajouter, supprimer ou lister les versions ou signataires de versions"
   pl_PL: "Polecenia dodania, usunięcia lub wyświetlenia wersji lub sygnatariuszy wersji"
 
-about.commands-add-sign-get-assets:
-  en_US: "Commands to add, sign, or get registry assets"
-  de_DE: "Befehle zum Hinzufügen, Signieren oder Abrufen von Registry-Assets"
-  es_ES: "Comandos para agregar, firmar u obtener activos del registro"
-  fr_FR: "Commandes pour ajouter, signer ou obtenir des actifs du registre"
-  pl_PL: "Polecenia dodania, podpisania lub pobrania zasobów rejestru"
+about.commands-add-sign-remove-get-assets:
+  en_US: "Commands to add, sign, remove, or get registry assets"
+  de_DE: "Befehle zum Hinzufügen, Signieren, Entfernen oder Abrufen von Registry-Assets"
+  es_ES: "Comandos para agregar, firmar, eliminar u obtener activos del registro"
+  fr_FR: "Commandes pour ajouter, signer, supprimer ou obtenir des actifs du registre"
+  pl_PL: "Polecenia dodania, podpisania, usunięcia lub pobrania zasobów rejestru"
 
 about.commands-authentication:
   en_US: "Commands related to Authentication i.e. login, logout"
@@ -5092,6 +5106,13 @@ about.commands-registry-info:
   es_ES: "Ver o editar información del registro"
   fr_FR: "Afficher ou modifier les informations du registre"
   pl_PL: "Wyświetl lub edytuj informacje rejestru"
+
+about.commands-remove-assets:
+  en_US: "Commands to remove image, iso, or squashfs files"
+  de_DE: "Befehle zum Entfernen von Image-, ISO- oder Squashfs-Dateien"
+  es_ES: "Comandos para eliminar archivos de imagen, iso o squashfs"
+  fr_FR: "Commandes pour supprimer des fichiers image, iso ou squashfs"
+  pl_PL: "Polecenia usuwania plików obrazu, iso lub squashfs"
 
 about.commands-restore-backup:
   en_US: "Commands for restoring package(s) from backup"
@@ -6004,6 +6025,20 @@ about.remove-existing-backup-target:
   fr_FR: "Supprimer la cible de sauvegarde existante"
   pl_PL: "Usuń istniejący cel kopii zapasowej"
 
+about.remove-img-registry:
+  en_US: "Remove IMG file from registry"
+  de_DE: "IMG-Datei aus der Registry entfernen"
+  es_ES: "Eliminar archivo IMG del registro"
+  fr_FR: "Supprimer le fichier IMG du registre"
+  pl_PL: "Usuń plik IMG z rejestru"
+
+about.remove-iso-registry:
+  en_US: "Remove ISO file from registry"
+  de_DE: "ISO-Datei aus der Registry entfernen"
+  es_ES: "Eliminar archivo ISO del registro"
+  fr_FR: "Supprimer le fichier ISO du registre"
+  pl_PL: "Usuń plik ISO z rejestru"
+
 about.remove-mirror-package:
   en_US: "Remove mirror package"
   de_DE: "Mirror-Paket entfernen"
@@ -6066,6 +6101,13 @@ about.remove-signer:
   es_ES: "Eliminar firmante y todas sus autorizaciones"
   fr_FR: "Supprimer le signataire et toutes ses autorisations"
   pl_PL: "Usuń sygnatariusza i wszystkie jego autoryzacje"
+
+about.remove-squashfs-registry:
+  en_US: "Remove squashfs file from registry"
+  de_DE: "Squashfs-Datei aus der Registry entfernen"
+  es_ES: "Eliminar archivo squashfs del registro"
+  fr_FR: "Supprimer le fichier squashfs du registre"
+  pl_PL: "Usuń plik squashfs z rejestru"
 
 about.remove-pinhole:
   en_US: "Remove IPv6 pinhole"

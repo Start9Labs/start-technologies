@@ -1013,9 +1013,21 @@ Sign an OS asset and register the signature.
 - `-p, --platform <PLATFORM>` — Target platform (required)
 - `-v, --version <VERSION>` — OS version (required)
 
-### `start-cli registry os asset remove`
+### `start-cli registry os asset remove img <VERSION> <PLATFORM>`
 
-Remove an OS asset.
+Drop one platform's IMG file from a version's index entry. The asset bytes stay
+where they are; this removes the registry's record of them, which is what frees
+the platform slot for a re-index.
+
+### `start-cli registry os asset remove iso <VERSION> <PLATFORM>`
+
+Drop one platform's ISO file from a version's index entry. Same arguments as
+`remove img`.
+
+### `start-cli registry os asset remove squashfs <VERSION> <PLATFORM>`
+
+Drop one platform's squashfs file from a version's index entry. Same arguments
+as `remove img`.
 
 ### `start-cli registry os asset get img <VERSION> <PLATFORM>`
 

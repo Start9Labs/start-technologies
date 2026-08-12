@@ -2,11 +2,22 @@
 .el .ds Aq '
 .TH start-cli-registry-os-asset-remove 1  "remove " 
 .SH NAME
-start\-cli\-registry\-os\-asset\-remove
+start\-cli\-registry\-os\-asset\-remove \- Commands to remove image, iso, or squashfs files
 .SH SYNOPSIS
-\fBstart\-cli registry os asset remove\fR [\fB\-h\fR|\fB\-\-help\fR] 
+\fBstart\-cli registry os asset remove\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
 .SH DESCRIPTION
+Commands to remove image, iso, or squashfs files
 .SH OPTIONS
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help
+.SH SUBCOMMANDS
+.TP
+start\-cli\-registry\-os\-asset\-remove\-img(1)
+Remove IMG file from registry
+.TP
+start\-cli\-registry\-os\-asset\-remove\-iso(1)
+Remove ISO file from registry
+.TP
+start\-cli\-registry\-os\-asset\-remove\-squashfs(1)
+Remove squashfs file from registry

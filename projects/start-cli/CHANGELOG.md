@@ -13,6 +13,16 @@ or the CLI's externally observable behavior.
 
 ### Fixed
 
+- **`registry os asset remove` can be run.** Its `iso`/`img`/`squashfs` handlers were registered
+  as RPC-only, and — unlike `add`, `sign`, and `get`, which each pair their RPC handlers with a
+  CLI counterpart — nothing was registered in their place. `remove` was left parsing as a leaf
+  that accepts no arguments: it listed under `registry os asset --help` with a blank description,
+  and naming an asset type came back `unexpected argument 'iso' found` with exit 2. The three
+  subcommands now take `<VERSION> <PLATFORM>` and reach the registry directly, mirroring
+  `registry os asset get`, so a single platform's asset can be dropped without removing the whole
+  version and re-adding every other platform. Asking to remove a platform the version has no
+  asset for now says so instead of reporting success.
+
 - **The local authcookie now reaches a registry or tunnel daemon that listens on a
   non-loopback address.** Run on the server itself, the CLI presents the daemon's local
   authcookie as an `Authorization: Bearer` header — but it attached that header only when

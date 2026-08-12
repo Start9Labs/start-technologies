@@ -4,6 +4,14 @@ All notable changes to `start-registry` (the Start Registry server) are document
 
 ## [1.0.2]
 
+- **`os asset remove` can be run.** Its `iso`/`img`/`squashfs` handlers were registered as
+  RPC-only with no CLI counterpart, so `remove` parsed as a leaf that accepts no arguments — it
+  listed with a blank description and rejected `os asset remove iso 0.4.0 x86_64` as an
+  unexpected argument. The three subcommands now take `<VERSION> <PLATFORM>`, mirroring
+  `os asset get`. Dropping a version's index entry for a single platform no longer requires
+  removing the whole version and re-adding every other platform. Asking to remove a platform the
+  version has no asset for now says so instead of reporting success.
+
 - **`start-registry` works on a registry host that listens on a non-loopback address.** With no
   `--registry`, the CLI derives the registry's address from `registry-listen` and authenticates
   with the local authcookie — but it only sent that token when the derived URL was literally
