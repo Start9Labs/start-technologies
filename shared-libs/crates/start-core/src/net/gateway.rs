@@ -3170,18 +3170,19 @@ impl NetworkInterfaceController {
         interface: &GatewayId,
         secure: Option<bool>,
     ) -> Result<(), Error> {
-        let mut sub = self
+        let mut watch = self
             .db
-            .subscribe(
+            .watch(
                 "/public/serverInfo/network/gateways"
-                    .parse::<JsonPointer<_, _>>()
+                    .parse::<JsonPointer>()
                     .with_kind(ErrorKind::Database)?
                     .join_end(interface.as_str())
                     .join_end("secure"),
             )
-            .await;
+            .await
+            .typed::<Option<bool>>();
         let mut err = None;
-        let changed = self.watcher.ip_info.send_if_modified(|ip_info| {
+        self.watcher.ip_info.send_if_modified(|ip_info| {
             let info = match ip_info.get_mut(interface).or_not_found(interface) {
                 Ok(info) => info,
                 Err(e) => {
@@ -3213,9 +3214,7 @@ impl NetworkInterfaceController {
         if let Some(e) = err {
             return Err(e);
         }
-        if changed {
-            sub.recv().await;
-        }
+        watch.wait_for(|persisted| *persisted == secure).await?;
 
         Ok(())
     }
