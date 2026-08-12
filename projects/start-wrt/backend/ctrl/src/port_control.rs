@@ -42,35 +42,44 @@
 //! `None`: the PCP ANNOUNCE reply omits the Start9 capability marker and
 //! clients use plain forwards only.
 //!
-//! # Known limitation: LAN source-address spoofing (unsolved)
+//! # LAN source-address spoofing: cross-segment closed, same-segment open
 //!
-//! PCP rides on unauthenticated UDP, and authorization here resolves the
-//! *claimed* source address through the neighbor table — nothing ties a
-//! datagram to the host that really sent it. A LAN host can therefore present
-//! as an authorized neighbor and, on its behalf, open ports (exposing *that*
-//! device, never itself — the shared cores force the DNAT target to the claimed
-//! address) or tear its mappings down with `lifetime = 0`. UPnP is unaffected:
-//! it is TCP, so the handshake proves the address.
+//! PCP rides on unauthenticated UDP, and authorization resolves the *claimed*
+//! source address through the neighbor table — nothing in the datagram itself
+//! proves which host really sent it. Two cases, handled differently:
 //!
-//! StartTunnel does not share this exposure, and not because of anything in the
-//! protocol layer: its PCP and IGD sockets are `SO_BINDTODEVICE`-bound to the
-//! WireGuard interface, and WireGuard binds a packet's source address to the
-//! peer key that decrypted it, so one peer cannot present as another. A LAN
-//! bridge offers no equivalent.
+//! - **Across LAN segments (closed).** A host on one bridge presenting a
+//!   *different* bridge's device address is rejected by the arrival-interface
+//!   check: [`serve_pcp`] reads the receiving interface from `IP_PKTINFO` and
+//!   [`arrival_matches`] requires it to be the interface the neighbor table
+//!   places the claimed source on. A datagram that arrived on `br-lan` cannot
+//!   act as a device the neighbor table locates on `br-lan.101`. UPnP needs no
+//!   such check — it is TCP, so the handshake already proves the address.
+//! - **Within one segment (open).** Two hosts on the same bridge share an L2
+//!   broadcast domain, so a spoofed source is indistinguishable from the real
+//!   one — `IP_PKTINFO` reports the same interface for both. A same-bridge host
+//!   can therefore still open an authorized neighbor's ports on its behalf
+//!   (exposing *that* device, never itself — the shared cores force the DNAT
+//!   target to the claimed address) or tear its mappings down with
+//!   `lifetime = 0`. Closing this needs L2 source guard (DHCP-snooping-backed
+//!   ip↔mac↔port binding), which the K1's single wired bridge can't provide; the
+//!   honest boundary is to isolate untrusted devices in their own profile.
 //!
-//! There is no industry answer to copy — RFC 6887 assumes a trusted internal
-//! network, its optional authentication (RFC 7652) is unimplemented in
-//! practice, and miniupnpd (the reference gateway) does nothing here either.
-//! The candidate mitigations are all unsatisfying: a per-device `src_mac` fw4
-//! rule pinning 5351, or reading the arrival interface via `IP_PKTINFO` (which
-//! doesn't help within one bridge). Left open deliberately, pending a better
-//! idea; the per-device default-off permission bounds the blast radius to
-//! devices a user explicitly trusted, which already puts this ahead of a
-//! typical consumer router's always-on UPnP.
+//! StartTunnel does not share even the residual exposure: its sockets are
+//! `SO_BINDTODEVICE`-bound to the WireGuard interface, which ties a packet's
+//! source address to the peer key that decrypted it, so one peer cannot present
+//! as another. A LAN bridge offers no equivalent within a segment.
+//!
+//! RFC 6887 assumes a trusted internal network, and its optional authentication
+//! (RFC 7652) is unimplemented in practice, so there is no protocol-layer answer
+//! to copy for the same-segment case. The per-device default-off permission
+//! bounds the residual blast radius to devices a user explicitly trusted and
+//! placed on a shared segment with an attacker.
 
 use std::collections::HashMap;
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -80,6 +89,9 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
+use nix::net::if_::if_nametoindex;
+use nix::sys::socket::sockopt::Ipv4PacketInfo;
+use nix::sys::socket::{recvmsg, setsockopt, ControlMessageOwned, MsgFlags, SockaddrIn};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use startos::net::port_map::server::igd::{
@@ -89,6 +101,7 @@ use startos::net::port_map::server::igd::{
 };
 use startos::net::port_map::server::{handle, GatewayBackend, MappingEntry, PCP_PORT};
 use startos::tunnel::forward::sni::SniDemux;
+use tokio::io::Interest;
 use tokio::net::UdpSocket;
 use uciedit::openwrt::{DhcpHost, FirewallRedirect, FirewallRule, FirewallTarget};
 use uciedit::{dump_all, parse_all, Arena};
@@ -598,11 +611,62 @@ impl PortControl {
     }
 }
 
+/// Which interface a request physically arrived on, for the arrival-interface
+/// (reverse-path) check. PCP rides unauthenticated UDP, so a device on one LAN
+/// bridge can present a *different* bridge's device address as its source and
+/// open that device's ports (a cross-segment spoof). Requiring the datagram to
+/// have arrived on the same interface the neighbor table places the claimed
+/// source on closes that case. UPnP is TCP — the handshake already proves the
+/// source — so it is [`Arrival::Unchecked`]. The same-segment case (attacker and
+/// victim on one bridge) is unaffected and unsolvable without L2 source guard.
+#[derive(Clone, Copy)]
+enum Arrival {
+    /// TCP-proven (UPnP): no L2 check applies.
+    Unchecked,
+    /// PCP: the datagram arrived on this interface index (`IP_PKTINFO`).
+    On(u32),
+    /// PCP: the arrival interface could not be resolved — fail closed.
+    Indeterminate,
+}
+
+/// Whether a request that arrived as `arrival` may act as a device the neighbor
+/// table currently places on `neigh_iface`. A PCP datagram must have arrived on
+/// that same interface; anything else is a cross-segment source spoof and is
+/// rejected. Fails closed when either the arrival interface or the neighbor's
+/// can't be resolved.
+fn arrival_matches(arrival: Arrival, neigh_iface: &str) -> bool {
+    match arrival {
+        Arrival::Unchecked => true,
+        Arrival::On(arrival_idx) => match if_nametoindex(neigh_iface) {
+            Ok(idx) if idx == arrival_idx => true,
+            Ok(_) => {
+                tracing::debug!(
+                    "PCP: request arrived on ifindex {arrival_idx} but the claimed device is on \
+                     {neigh_iface}; rejecting cross-segment spoof"
+                );
+                false
+            }
+            // The neighbor's interface vanished between resolution and now:
+            // nothing to validate against, so fail closed.
+            Err(e) => {
+                tracing::warn!("PCP: cannot resolve ifindex for {neigh_iface} ({e}); rejecting");
+                false
+            }
+        },
+        Arrival::Indeterminate => {
+            tracing::warn!("PCP: arrival interface undetermined; rejecting (fail-closed)");
+            false
+        }
+    }
+}
+
 /// Labels forwards by which listener they arrived through — the trait itself
 /// can't distinguish a PCP MAP from a UPnP AddPortMapping.
 struct Via {
     pc: Arc<PortControl>,
     label: &'static str,
+    /// Interface the request arrived on, for the PCP arrival-interface check.
+    arrival: Arrival,
 }
 
 impl GatewayBackend for Via {
@@ -632,7 +696,15 @@ impl GatewayBackend for Via {
     }
 
     async fn is_known_client(&self, peer: Ipv4Addr) -> bool {
-        self.pc.authorized_client(peer).await.is_some()
+        let Some(client) = self.pc.authorized_client(peer).await else {
+            return false;
+        };
+        // A PCP request must have arrived on the interface the neighbor table
+        // places its claimed source on; a UPnP request is TCP-proven and skips
+        // the check. Gating here means a mismatch falls through the shared
+        // core's `handle` as NOT_AUTHORIZED, covering both MAP and lifetime-0
+        // delete — nothing reaches `add_forward`/`remove_forward` without it.
+        arrival_matches(self.arrival, &client.iface)
     }
 
     async fn list_forwards(&self, peer: Ipv4Addr) -> Vec<MappingEntry> {
@@ -1090,22 +1162,63 @@ async fn run_pcp(pc: Arc<PortControl>) {
     }
 }
 
+/// Receive one PCP datagram, returning its bytes, sender, and the interface it
+/// arrived on (from `IP_PKTINFO`). `Arrival::Indeterminate` when the kernel gave
+/// us no usable ifindex, so the caller fails closed rather than skip the check.
+async fn recv_pcp(
+    socket: &UdpSocket,
+    buf: &mut [u8],
+) -> std::io::Result<(usize, SocketAddrV4, Arrival)> {
+    socket
+        .async_io(Interest::READABLE, || {
+            let mut iov = [std::io::IoSliceMut::new(&mut *buf)];
+            let mut cmsg = nix::cmsg_space!(libc::in_pktinfo);
+            let msg = recvmsg::<SockaddrIn>(
+                socket.as_raw_fd(),
+                &mut iov,
+                Some(&mut cmsg),
+                MsgFlags::empty(),
+            )
+            .map_err(std::io::Error::from)?;
+            let mut arrival = Arrival::Indeterminate;
+            for c in msg.cmsgs()? {
+                if let ControlMessageOwned::Ipv4PacketInfo(info) = c {
+                    if info.ipi_ifindex != 0 {
+                        arrival = Arrival::On(info.ipi_ifindex as u32);
+                    }
+                }
+            }
+            let from = msg
+                .address
+                .map(|a: SockaddrIn| SocketAddrV4::new(a.ip(), a.port()))
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "PCP recvmsg: no source address",
+                    )
+                })?;
+            Ok((msg.bytes, from, arrival))
+        })
+        .await
+}
+
 async fn serve_pcp(pc: &Arc<PortControl>) -> Result<(), Error> {
     let socket = Arc::new(
         UdpSocket::bind((Ipv4Addr::UNSPECIFIED, PCP_PORT))
             .await
             .with_kind(ErrorKind::Network)?,
     );
+    // Ask the kernel to attach IP_PKTINFO to each datagram, so `recv_pcp` learns
+    // the interface it arrived on — the input to the cross-segment spoof check.
+    setsockopt(&*socket, Ipv4PacketInfo, &true)
+        .map_err(|e| Error::new(eyre!("IP_PKTINFO: {e}"), ErrorKind::Network))?;
     tracing::info!("PCP server listening on 0.0.0.0:{PCP_PORT}");
     let mut buf = [0u8; 1100];
     loop {
-        let (n, from) = socket
-            .recv_from(&mut buf)
+        let (n, from, arrival) = recv_pcp(&socket, &mut buf)
             .await
             .with_kind(ErrorKind::Network)?;
-        let IpAddr::V4(peer) = from.ip() else {
-            continue;
-        };
+        let peer = *from.ip();
         // The WAN firewall zone already rejects unsolicited input; this guard
         // is defense in depth for the unspecified bind.
         if !peer.is_private() {
@@ -1119,6 +1232,7 @@ async fn serve_pcp(pc: &Arc<PortControl>) -> Result<(), Error> {
         let via = Via {
             pc: pc.clone(),
             label: LABEL_PCP,
+            arrival,
         };
         tokio::spawn(async move {
             if let Some(resp) = handle(&via, peer, &req, via.pc.epoch()).await {
@@ -1177,6 +1291,8 @@ async fn igd_control(
     let via = Via {
         pc,
         label: LABEL_UPNP,
+        // UPnP is TCP: the handshake proves the source address.
+        arrival: Arrival::Unchecked,
     };
     handle_control(&via, peer, &headers, &body).await
 }
@@ -1918,5 +2034,31 @@ config redirect 'dns_override_lan'
             None,
             "its lease is dropped too, so the sweep won't re-grace it"
         );
+    }
+
+    // The arrival-interface check: a PCP datagram is honored only if it arrived
+    // on the interface the neighbor table places its claimed source on, closing
+    // cross-segment source spoofing. UPnP (TCP-proven) always passes.
+    #[test]
+    fn arrival_interface_check_rejects_cross_segment() {
+        let lo = if_nametoindex("lo").expect("loopback resolvable");
+
+        // UPnP: no L2 check, always allowed for an authorized client.
+        assert!(arrival_matches(Arrival::Unchecked, "lo"));
+
+        // PCP arriving on the same interface the device lives on: allowed.
+        assert!(arrival_matches(Arrival::On(lo), "lo"));
+
+        // PCP claiming a device on a *different* interface than it arrived on:
+        // rejected (the cross-segment spoof).
+        assert!(!arrival_matches(Arrival::On(lo.wrapping_add(9999)), "lo"));
+
+        // Fail closed when the neighbor's interface can't be resolved...
+        assert!(!arrival_matches(
+            Arrival::On(lo),
+            "definitely-not-an-interface"
+        ));
+        // ...and when the arrival interface itself was indeterminate.
+        assert!(!arrival_matches(Arrival::Indeterminate, "lo"));
     }
 }

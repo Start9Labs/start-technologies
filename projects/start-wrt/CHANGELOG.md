@@ -15,7 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   StartWRT router, and game consoles/torrent clients are covered too.
   Authorization is per-device and **off by default**: enable it with the new
   "Allow automatic port forwarding" toggle on the device's detail page. A
-  device can only ever forward ports to itself, and requests that would take
+  device can only ever forward ports to itself — and because PCP runs over UDP,
+  a request is honored only when it actually arrives from the network the
+  device lives on, so a device on one network can't open forwards on behalf of
+  a device on another. Requests that would take
   over a manually published port are refused (conversely, publishing a port an
   automatic forward holds removes the automatic forward — manual rules win).
   Ports the router itself answers on from the internet are refused too, so an
@@ -93,7 +96,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   normally — straight out your Internet connection instead of through the VPN
   you chained it to — and every screen reported success. Disabled VPNs are no
   longer offered as chain targets, and the router rejects one outright.
-  
+
 - **The bottom of the screen is no longer cut off on shorter displays.** On
   screens shorter than a page's contextual help content, the sidebar's
   Collapse button and the bottom of the page — including a form's Cancel/Save

@@ -4854,6 +4854,7 @@ dependencies = [
  "cfg-if",
  "cfg_aliases 0.2.1",
  "libc",
+ "memoffset 0.9.1",
 ]
 
 [[package]]
@@ -7938,6 +7939,7 @@ dependencies = [
  "imbl-value",
  "include_dir",
  "itertools 0.14.0",
+ "libc",
  "macaddr",
  "mime_guess",
  "nix 0.29.0",
