@@ -63,7 +63,7 @@ The copy and conversion together can take anywhere from a few minutes to several
 
 Once LND is online with your migrated wallet, **shut down and disconnect your old node**. This is critical — running two nodes with the same channel state will result in force-closures and potential loss of funds.
 
-The migration stops the source node's services before copying, and a StartOS source is left with LND uninstalled — but only powering the device down guarantees it stays off. In particular, rebooting a migrated Umbrel or myNode brings its LND back.
+The migration stops the source node's services before copying — and on a StartOS source that stop persists across reboots — but only powering the device down guarantees it stays off. In particular, rebooting a migrated Umbrel or myNode brings its LND back.
 
 LND will then sync and reconnect to your peers with the migrated channel state.
 
@@ -85,6 +85,6 @@ Copying an LND data directory across by hand is possible — it is what the buil
 
 **The task fails when submitted** — StartOS could not sign in to your source node. Ensure both devices are on the same local network and the source node is running, then double-check the address and password and run the task again. Nothing has been copied at this point.
 
-**Wallet Import shows failure after starting LND** — the source node stopped being reachable between scheduling and starting (powered off, address changed, or its services shut down by hand). The migration retries on its own; to intervene, stop LND, bring the source node back online, and start LND again — the migration resumes.
+**Wallet Import shows failure after starting LND** — the source node stopped being reachable between scheduling and starting (powered off, address changed, or its services shut down by hand). The migration retries a few times on its own; if it keeps failing, LND stops itself and re-posts the **Initialize Wallet** task — bring the source node back online, run the task again with the corrected details, and start LND to retry.
 
 **Channels force-close after migration** — This usually means the old node was restarted after migration, or the channel database was corrupted during transfer. Unfortunately, force-closed channels cannot be recovered — the funds will be returned to your on-chain wallet after the timelock expires.
