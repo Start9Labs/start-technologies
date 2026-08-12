@@ -502,6 +502,17 @@ mod test {
         assert!(!iface(Bridge, Some(false)).secure());
     }
 
+    // `set_secure` refuses `Some(false)` on an intrinsically secure gateway, and
+    // this is why it cannot lean on `is_intrinsically_secure` alone to decide.
+    #[test]
+    fn a_disconnected_gateway_reports_no_device_type() {
+        let disconnected = NetworkInterfaceInfo::default();
+
+        assert!(disconnected.ip_info.is_none());
+        assert!(!disconnected.is_intrinsically_secure());
+        assert!(!iface(NetworkInterfaceType::Bridge, None).ip_info.is_none());
+    }
+
     fn gateway_type_of(type_field: serde_json::Value) -> GatewayType {
         serde_json::from_value::<NetworkInterfaceInfo>(serde_json::json!({ "type": type_field }))
             .unwrap()

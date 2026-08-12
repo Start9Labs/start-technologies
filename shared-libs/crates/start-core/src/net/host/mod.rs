@@ -1018,6 +1018,8 @@ mod tests {
             (gw("lxcbr0"), iface(NetworkInterfaceType::Bridge, None)),
             (gw("eth0"), iface(NetworkInterfaceType::Ethernet, None)),
             (gw("wlan0"), iface(NetworkInterfaceType::Wireless, None)),
+            // Secure, but never a candidate: the result is the intersection.
+            (gw("lo"), iface(NetworkInterfaceType::Loopback, None)),
         ]
         .into_iter()
         .collect();

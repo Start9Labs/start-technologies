@@ -421,7 +421,7 @@ Mark a gateway's network as trusted, so services' non-SSL addresses are offered 
 
 ### `start-cli net gateway unset-secure <GATEWAY>`
 
-Let StartOS decide, which trusts only the loopback and container-bridge gateways.
+Let StartOS decide whether a gateway's network is trusted with unencrypted traffic — it trusts only the loopback and container-bridge gateways.
 
 ### `start-cli net gateway check-dns <GATEWAY>`
 

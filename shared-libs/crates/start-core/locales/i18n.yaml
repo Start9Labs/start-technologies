@@ -1888,6 +1888,13 @@ net.gateway.cannot-forget-connected-interface:
   fr_FR: "Impossible d'oublier l'interface actuellement connectée"
   pl_PL: "Nie można zapomnieć aktualnie podłączonego interfejsu"
 
+net.gateway.cannot-mark-disconnected-insecure:
+  en_US: "StartOS cannot tell which network a disconnected gateway reaches; reconnect it first, or use unset-secure"
+  de_DE: "StartOS kann nicht feststellen, welches Netzwerk ein getrenntes Gateway erreicht; verbinde es zuerst erneut oder verwende unset-secure"
+  es_ES: "StartOS no puede determinar a qué red llega una puerta de enlace desconectada; vuelve a conectarla primero o usa unset-secure"
+  fr_FR: "StartOS ne peut pas déterminer quel réseau atteint une passerelle déconnectée ; reconnecte-la d'abord, ou utilise unset-secure"
+  pl_PL: "StartOS nie może ustalić, do jakiej sieci prowadzi odłączona brama; podłącz ją ponownie lub użyj unset-secure"
+
 net.gateway.cannot-mark-internal-insecure:
   en_US: "The loopback and container-bridge gateways never leave this server, so they are always trusted"
   de_DE: "Die Loopback- und Container-Bridge-Gateways verlassen diesen Server nie und sind daher immer vertrauenswürdig"

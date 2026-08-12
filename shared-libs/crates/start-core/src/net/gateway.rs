@@ -3189,12 +3189,24 @@ impl NetworkInterfaceController {
                     return false;
                 }
             };
-            if secure == Some(false) && info.is_intrinsically_secure() {
-                err = Some(Error::new(
-                    eyre!("{}", t!("net.gateway.cannot-mark-internal-insecure")),
-                    ErrorKind::InvalidRequest,
-                ));
-                return false;
+            if secure == Some(false) {
+                // `ip_info` is cleared on every boot and whenever NetworkManager
+                // drops the device, so an unknown device type has to fail closed
+                // or lxcbr0 can be marked insecure through a restart window.
+                if info.ip_info.is_none() {
+                    err = Some(Error::new(
+                        eyre!("{}", t!("net.gateway.cannot-mark-disconnected-insecure")),
+                        ErrorKind::InvalidRequest,
+                    ));
+                    return false;
+                }
+                if info.is_intrinsically_secure() {
+                    err = Some(Error::new(
+                        eyre!("{}", t!("net.gateway.cannot-mark-internal-insecure")),
+                        ErrorKind::InvalidRequest,
+                    ));
+                    return false;
+                }
             }
             std::mem::replace(&mut info.secure, secure) != secure
         });
