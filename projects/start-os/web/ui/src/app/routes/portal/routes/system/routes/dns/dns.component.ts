@@ -11,6 +11,7 @@ import {
   catchError,
   combineLatest,
   defer,
+  distinctUntilChanged,
   first,
   map,
   of,
@@ -189,8 +190,14 @@ export default class SystemDnsComponent {
   // than inspecting the list. Re-runs when the servers change, so saving a fix
   // clears the warning. `null` while in flight: absence of an answer yet is not
   // a failure.
+  //
+  // Deduped because watch$ emits for a patch on the watched path OR any
+  // ancestor of it, and never compares values — so anything touching the busy
+  // /serverInfo/network subtree would otherwise re-probe and, via startWith,
+  // blink the warning off and back while DNS settings had not changed.
   protected readonly resolves = toSignal(
     this.patch.watch$('serverInfo', 'network', 'dns').pipe(
+      distinctUntilChanged((a, b) => JSON.stringify(a) === JSON.stringify(b)),
       switchMap(() =>
         defer(() => this.api.queryDns({ fqdn: 'registry.start9.com' })).pipe(
           map(res => !!res.ipv4 || !!res.ipv6),
