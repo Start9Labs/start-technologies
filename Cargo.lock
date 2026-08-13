@@ -7963,7 +7963,7 @@ dependencies = [
  "serde_yaml",
  "sha-crypt",
  "sha2 0.10.9",
- "socket2",
+ "socket2 0.6.3",
  "start-core",
  "syslog-tracing",
  "tempfile",

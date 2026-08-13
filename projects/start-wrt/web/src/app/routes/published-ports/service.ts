@@ -1,5 +1,8 @@
 import { inject, Injectable, signal } from '@angular/core'
 import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
+import { TUI_CONFIRM } from '@taiga-ui/kit'
+import { firstValueFrom } from 'rxjs'
+import { fill } from 'src/app/i18n/validation-errors'
 import { FormService } from 'src/app/services/form.service'
 import {
   AutoForwardDisplay,
@@ -16,7 +19,6 @@ import {
   RouterPortCollision,
 } from 'src/app/services/api/api.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
-import { confirmRouterPortOverride } from 'src/app/services/router-port-override'
 
 @Injectable()
 export class PublishedPortsService extends FormService<PublishedPortDisplay[]> {
@@ -63,13 +65,42 @@ export class PublishedPortsService extends FormService<PublishedPortDisplay[]> {
       if (!pending.length) await this.refreshAndWait()
     })
     if (!ok || !pending.length) return ok
-    if (!(await confirmRouterPortOverride(this.dialogs, this.i18n, pending))) {
+    if (!(await this.confirmRouterPortOverride(pending))) {
       return false
     }
     const ids = new Set(pending.map(c => c.id))
     return this.save(
       data.map(p => (ids.has(p.id) ? { ...p, overrideRouterPorts: true } : p)),
     )
+  }
+
+  /**
+   * If `pending` is non-empty, prompt the user to confirm publishing port(s)
+   * the router itself answers on from the WAN (remote access to its web
+   * interface, SSH, or a VPN server) — the forward would capture that traffic.
+   * Returns true when there is nothing to confirm or the user confirmed, false
+   * when they cancelled.
+   */
+  private async confirmRouterPortOverride(
+    pending: RouterPortCollision[],
+  ): Promise<boolean> {
+    if (!pending.length) return true
+    const ports = [...new Set(pending.flatMap(c => c.router_ports))].join(', ')
+    return firstValueFrom(
+      this.dialogs.open<boolean>(TUI_CONFIRM, {
+        label: this.i18n.transform('Port Used by This Router'),
+        data: {
+          content: fill(
+            this.i18n.transform(
+              'Port(s) {ports} are used by this router itself — for remote access to its web interface, SSH, or a VPN server. Publishing them will send that traffic to the selected device instead, cutting those services off from outside your network. Publish anyway?',
+            ),
+            { ports },
+          ),
+          yes: this.i18n.transform('Publish Anyway'),
+          no: this.i18n.transform('Cancel'),
+        },
+      }),
+    ).catch(() => false)
   }
 
   async store(items: PublishedPortDisplay[]): Promise<void> {
