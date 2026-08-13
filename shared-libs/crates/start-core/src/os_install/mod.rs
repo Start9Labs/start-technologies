@@ -288,6 +288,10 @@ pub async fn install_os_to(
         {
             if let Err(e) = async {
                 // cp -r ${guard}/config /tmp/config
+                // Whatever is added here, keep overlay/var/lib/dkms and overlay/etc/shadow:
+                // dropping the MOK key leaves the re-signed modules unmatched by the
+                // certificate the firmware already trusts, with no password left to enroll
+                // a new one, so Secure Boot silently stops loading them.
                 delete_file(guard.path().join("config/upgrade")).await?;
                 delete_file(guard.path().join("config/overlay/etc/hostname")).await?;
                 delete_file(guard.path().join("config/disk.guid")).await?;
