@@ -52,9 +52,10 @@ file tracks notable changes since the move to the monorepo.
 - **The 64-bit ARM NVIDIA image boots on NVIDIA GB10 hardware again, such as the
   DGX Spark, and is considerably smaller.** These images drive the GPU with
   NVIDIA's own driver and turn nouveau off, but they were still built with
-  nouveau's firmware for every supported chip — 152 MB of it, most of it inside
-  the initramfs that the bootloader must read in full before the kernel starts.
-  On GB10 that left the machine sitting on the last line the bootloader printed.
+  graphics firmware they cannot use — nouveau's, for every chip it supports,
+  along with an older driver series' — and 152 MB of it sat inside the initramfs
+  that the bootloader must read in full before the kernel starts. On GB10 that
+  left the machine sitting on the last line the bootloader printed.
   The images now carry only the graphics firmware they can use, which more than
   halves what is read at startup and takes a substantial amount off the
   download.
