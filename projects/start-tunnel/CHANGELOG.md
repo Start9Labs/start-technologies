@@ -5,7 +5,21 @@ All notable changes to StartTunnel are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.2]
+## [1.3.0]
+
+### Added
+
+- **Devices can request SNI hostname routes over UPnP, not only PCP.** The
+  tunnel's UPnP IGD now serves two Start9 vendor actions
+  (`X_START9_AddHostnameMapping` / `X_START9_DeleteHostnameMapping`, advertised
+  in its `WANIPConnection:1` SCPD) that bind a hostname on a shared external
+  port via SNI demultiplexing — the same capability the PCP `HOSTNAME` option
+  provides. A device that reaches the tunnel over UPnP but not PCP (for
+  example, UDP 5351 filtered by an intermediate device) previously kept its
+  ordinary port forwards but silently lost SNI demux; StartOS now falls back to
+  the vendor action automatically. Unlike standard UPnP mappings, these routes
+  are always lease-bearing and expire if the device stops renewing them, so a
+  vanished device can never squat a hostname against its legitimate owner.
 
 ### Fixed
 

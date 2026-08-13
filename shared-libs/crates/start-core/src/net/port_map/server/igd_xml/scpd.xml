@@ -33,6 +33,34 @@
         <argument><name>NewProtocol</name><direction>in</direction><relatedStateVariable>PortMappingProtocol</relatedStateVariable></argument>
       </argumentList>
     </action>
+    <!-- Start9 vendor actions: SNI hostname mappings on a shared external port
+         (the UPnP transport for the PCP HOSTNAME option). Leases are finite:
+         NewLeaseDuration 0 requests the server default, and the grant is
+         clamped to the server maximum (3600s); renew before expiry. -->
+    <action>
+      <name>X_START9_AddHostnameMapping</name>
+      <argumentList>
+        <argument><name>NewRemoteHost</name><direction>in</direction><relatedStateVariable>RemoteHost</relatedStateVariable></argument>
+        <argument><name>NewExternalPort</name><direction>in</direction><relatedStateVariable>ExternalPort</relatedStateVariable></argument>
+        <argument><name>NewProtocol</name><direction>in</direction><relatedStateVariable>PortMappingProtocol</relatedStateVariable></argument>
+        <argument><name>NewInternalPort</name><direction>in</direction><relatedStateVariable>InternalPort</relatedStateVariable></argument>
+        <argument><name>NewInternalClient</name><direction>in</direction><relatedStateVariable>InternalClient</relatedStateVariable></argument>
+        <argument><name>NewEnabled</name><direction>in</direction><relatedStateVariable>PortMappingEnabled</relatedStateVariable></argument>
+        <argument><name>NewPortMappingDescription</name><direction>in</direction><relatedStateVariable>PortMappingDescription</relatedStateVariable></argument>
+        <argument><name>NewLeaseDuration</name><direction>in</direction><relatedStateVariable>PortMappingLeaseDuration</relatedStateVariable></argument>
+        <argument><name>NewHostname</name><direction>in</direction><relatedStateVariable>X_START9_Hostname</relatedStateVariable></argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>X_START9_DeleteHostnameMapping</name>
+      <argumentList>
+        <argument><name>NewRemoteHost</name><direction>in</direction><relatedStateVariable>RemoteHost</relatedStateVariable></argument>
+        <argument><name>NewExternalPort</name><direction>in</direction><relatedStateVariable>ExternalPort</relatedStateVariable></argument>
+        <argument><name>NewProtocol</name><direction>in</direction><relatedStateVariable>PortMappingProtocol</relatedStateVariable></argument>
+        <argument><name>NewInternalPort</name><direction>in</direction><relatedStateVariable>InternalPort</relatedStateVariable></argument>
+        <argument><name>NewHostname</name><direction>in</direction><relatedStateVariable>X_START9_Hostname</relatedStateVariable></argument>
+      </argumentList>
+    </action>
   </actionList>
   <serviceStateTable>
     <stateVariable sendEvents="no"><name>ExternalIPAddress</name><dataType>string</dataType></stateVariable>
@@ -44,5 +72,6 @@
     <stateVariable sendEvents="no"><name>PortMappingEnabled</name><dataType>boolean</dataType></stateVariable>
     <stateVariable sendEvents="no"><name>PortMappingDescription</name><dataType>string</dataType></stateVariable>
     <stateVariable sendEvents="no"><name>PortMappingLeaseDuration</name><dataType>ui4</dataType></stateVariable>
+    <stateVariable sendEvents="no"><name>X_START9_Hostname</name><dataType>string</dataType></stateVariable>
   </serviceStateTable>
 </scpd>

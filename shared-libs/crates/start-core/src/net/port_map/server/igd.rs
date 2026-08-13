@@ -17,7 +17,10 @@ use std::sync::Arc;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
-use crate::net::port_map::server::{GatewayBackend, MappingEntry};
+use crate::net::port_map::pcp::hostname::{
+    RESULT_HOSTNAME_TAKEN, RESULT_UNSUPP_HOSTNAME, validate_hostname,
+};
+use crate::net::port_map::server::{GatewayBackend, MAX_LIFETIME_SECONDS, MappingEntry};
 
 pub const SSDP_MULTICAST: Ipv4Addr = Ipv4Addr::new(239, 255, 255, 250);
 pub const SSDP_PORT: u16 = 1900;
@@ -40,6 +43,11 @@ pub const CIF_SCPD_PATH: &str = "/WANCfg.xml";
 /// Both services share one control endpoint: actions are dispatched by name,
 /// which is unambiguous across the two.
 pub const CONTROL_PATH: &str = "/ctl/IPConn";
+/// Start9 vendor actions binding/removing an SNI hostname on a shared external
+/// port — the UPnP transport for what the PCP `HOSTNAME` option does. The one
+/// definition of the wire names; the client (`port_map::upnp`) imports them.
+pub const ADD_HOSTNAME_ACTION: &str = "X_START9_AddHostnameMapping";
+pub const DELETE_HOSTNAME_ACTION: &str = "X_START9_DeleteHostnameMapping";
 
 /// Minimal WANIPConnection SCPD. Clients (e.g. igd-next) read its `actionList`
 /// to learn each action's input argument names before issuing a request.
@@ -195,8 +203,22 @@ fn upnp_error_text(code: u16) -> &'static str {
         714 => "NoSuchEntryInArray",
         718 => "ConflictInMappingEntry",
         725 => "OnlyPermanentLeasesSupported",
+        // Vendor range (800-899): SNI hostname mappings, mirroring the PCP
+        // HOSTNAME result codes.
+        800 => "HostnameTaken",
+        801 => "HostnameNotSupported",
         _ => "Action Failed",
     }
+}
+
+/// UPnP vendor fault for an `add_sni_forward` PCP result code.
+fn sni_fault(code: u8) -> Response {
+    let upnp = match code {
+        RESULT_HOSTNAME_TAKEN => 800,
+        RESULT_UNSUPP_HOSTNAME => 801,
+        _ => 501,
+    };
+    fault(upnp, upnp_error_text(upnp))
 }
 
 /// Render the IGD root device description for `uuid`, identifying the gateway
@@ -271,6 +293,19 @@ fn host_is_ip_literal(headers: &HeaderMap) -> bool {
     addr.parse::<Ipv4Addr>().is_ok()
 }
 
+/// Whether `action` changes gateway state, and so must name itself in the
+/// `SOAPAction` header rather than the body alone. Every mutating arm of
+/// [`handle_control`]'s dispatch belongs here; a read left out of it keeps the
+/// body fallback, which is what lets a client read the external IP during
+/// discovery.
+fn is_mutation(action: &str) -> bool {
+    matches!(
+        action,
+        "AddPortMapping" | "AddAnyPortMapping" | "DeletePortMapping"
+    ) || action == ADD_HOSTNAME_ACTION
+        || action == DELETE_HOSTNAME_ACTION
+}
+
 /// Dispatch a SOAP control request from `peer` to the matching IGD action.
 pub async fn handle_control<B: GatewayBackend + ?Sized>(
     backend: &B,
@@ -291,11 +326,7 @@ pub async fn handle_control<B: GatewayBackend + ?Sized>(
     // header. So mutations must name themselves in the header (the UPnP spec
     // mandates it; every real client complies), leaving the body fallback to
     // the reads, whose responses a cross-origin page can't see anyway.
-    if matches!(
-        action.as_deref(),
-        Some("AddPortMapping" | "AddAnyPortMapping" | "DeletePortMapping")
-    ) && !headers.contains_key("SOAPAction")
-    {
+    if action.as_deref().is_some_and(is_mutation) && !headers.contains_key("SOAPAction") {
         return StatusCode::FORBIDDEN.into_response();
     }
     match action.as_deref() {
@@ -336,6 +367,10 @@ pub async fn handle_control<B: GatewayBackend + ?Sized>(
              <NewLayer1DownstreamMaxBitRate>0</NewLayer1DownstreamMaxBitRate>\
              <NewPhysicalLinkStatus>Up</NewPhysicalLinkStatus>",
         ),
+        Some(a) if a == ADD_HOSTNAME_ACTION => add_hostname_mapping(backend, peer, body).await,
+        Some(a) if a == DELETE_HOSTNAME_ACTION => {
+            delete_hostname_mapping(backend, peer, body).await
+        }
         _ => fault(401, "Invalid Action"),
     }
 }
@@ -498,6 +533,115 @@ async fn delete_mapping<B: GatewayBackend + ?Sized>(
     } else {
         fault(714, "NoSuchEntryInArray")
     }
+}
+
+/// Start9 vendor action: bind `NewHostname` on the shared external port via the
+/// gateway's SNI demux — the UPnP transport for what the PCP HOSTNAME option
+/// does. Same guards as [`add_mapping`].
+async fn add_hostname_mapping<B: GatewayBackend + ?Sized>(
+    backend: &B,
+    peer: Ipv4Addr,
+    body: &str,
+) -> Response {
+    // Advertised-but-refused where the gateway has no SNI dataplane (StartWRT
+    // until its demux lands): the shared SCPD lists the action regardless, so
+    // refuse explicitly — the UPnP spelling of the PCP path's
+    // RESULT_UNSUPP_HOSTNAME refusal.
+    if backend.sni().is_none() {
+        return fault(801, upnp_error_text(801));
+    }
+    let (Some(external_port), Some(internal_port)) = (
+        soap_u16(body, "NewExternalPort"),
+        soap_u16(body, "NewInternalPort"),
+    ) else {
+        return fault(402, "Invalid Args");
+    };
+    if external_port == 0 || internal_port == 0 {
+        return fault(402, "Invalid Args");
+    }
+    let Some(hostname) = soap_arg::<String>(body, "NewHostname")
+        .filter(|h| validate_hostname(h))
+        .map(|h| h.to_ascii_lowercase())
+    else {
+        return fault(402, "Invalid Args");
+    };
+    // The SNI demux is TCP-only; the PCP path likewise refuses a non-TCP
+    // HOSTNAME MAP rather than granting a silently-TCP route.
+    if let Some(p) = soap_arg::<String>(body, "NewProtocol") {
+        if !p.eq_ignore_ascii_case("TCP") {
+            return fault(402, "Invalid Args");
+        }
+    }
+    if !backend.is_known_client(peer).await {
+        return fault(606, "Action not authorized");
+    }
+    let Some(source_ip) = backend.external_ipv4(peer).await else {
+        return fault(501, "Action Failed");
+    };
+    let source = SocketAddrV4::new(source_ip, external_port);
+    // Secure mode: force the target to the requesting peer's own address.
+    let target = SocketAddrV4::new(peer, internal_port);
+
+    // Always lease-bearing, unlike add_mapping: a `None` lifetime is reserved
+    // for operator-created SNI routes, and an unreaped device route would answer
+    // HOSTNAME_TAKEN to its legitimate owner forever. Lease 0 means "default".
+    let lifetime = match soap_u32(body, "NewLeaseDuration") {
+        Some(n) if n > 0 => n.min(MAX_LIFETIME_SECONDS),
+        _ => MAX_LIFETIME_SECONDS,
+    };
+    match backend
+        .add_sni_forward(
+            source,
+            target,
+            std::slice::from_ref(&hostname),
+            Some(lifetime),
+        )
+        .await
+    {
+        Ok(()) => ok(ADD_HOSTNAME_ACTION, ""),
+        Err(code) => sni_fault(code),
+    }
+}
+
+/// Start9 vendor action: remove the SNI route for `NewHostname`. Owner-scoped
+/// — the target is forced to the requesting peer, so a peer can only remove
+/// routes pointing at itself — and gated on `is_known_client`, matching the
+/// PCP lifetime-0 delete rather than the ungated [`delete_mapping`].
+async fn delete_hostname_mapping<B: GatewayBackend + ?Sized>(
+    backend: &B,
+    peer: Ipv4Addr,
+    body: &str,
+) -> Response {
+    if backend.sni().is_none() {
+        return fault(801, upnp_error_text(801));
+    }
+    let (Some(external_port), Some(internal_port)) = (
+        soap_u16(body, "NewExternalPort"),
+        soap_u16(body, "NewInternalPort"),
+    ) else {
+        return fault(402, "Invalid Args");
+    };
+    let Some(hostname) = soap_arg::<String>(body, "NewHostname")
+        .filter(|h| validate_hostname(h))
+        .map(|h| h.to_ascii_lowercase())
+    else {
+        return fault(402, "Invalid Args");
+    };
+    // Gated like the PCP delete (a lifetime-0 MAP sits behind the same check):
+    // ownership alone protects other peers' routes, but an unknown peer should
+    // not reach the backend's removal path at all.
+    if !backend.is_known_client(peer).await {
+        return fault(606, "Action not authorized");
+    }
+    let Some(source_ip) = backend.external_ipv4(peer).await else {
+        return fault(714, "NoSuchEntryInArray");
+    };
+    let source = SocketAddrV4::new(source_ip, external_port);
+    let target = SocketAddrV4::new(peer, internal_port);
+    backend
+        .remove_sni_forward(source, target, std::slice::from_ref(&hostname))
+        .await;
+    ok(DELETE_HOSTNAME_ACTION, "")
 }
 
 #[cfg(test)]
@@ -877,6 +1021,37 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
     }
 
+    /// The `SOAPAction` requirement covers every mutating action, not only the
+    /// standard three: a vendor action that changes state is exactly as
+    /// reachable from a cross-origin page as `AddPortMapping` is.
+    #[tokio::test]
+    async fn browser_shaped_requests_cannot_reach_vendor_mutations() {
+        for body in [
+            add_hostname_body("0", "git.example.com"),
+            delete_hostname_body("git.example.com"),
+        ] {
+            let stub = HostnameStub::new(true);
+
+            let resp = handle_control(&stub, PEER, &host_headers("192.168.1.1:49001"), &body).await;
+            assert_eq!(
+                resp.status(),
+                StatusCode::FORBIDDEN,
+                "a mutation named only in the body must be refused"
+            );
+            assert!(
+                stub.calls.lock().unwrap().is_empty(),
+                "a refused request must not reach the backend"
+            );
+
+            let resp = control(&stub, PEER, &body).await;
+            assert_eq!(
+                resp.status(),
+                StatusCode::OK,
+                "the same body from a real client goes through"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn static_docs_share_the_host_gate() {
         let doc: Arc<str> = Arc::from("<root/>");
@@ -929,5 +1104,459 @@ mod tests {
         let uuid = format_uuid(&bytes);
         assert_eq!(uuid, "00010203-0405-0607-0809-0a0b0c0d0e0f");
         assert_eq!(format_uuid(&bytes), format_uuid(&bytes));
+    }
+
+    // ---- Start9 hostname vendor actions ----
+
+    use std::future::Future;
+    use std::sync::Mutex;
+
+    use crate::tunnel::forward::sni::SniDemux;
+
+    const PEER: Ipv4Addr = Ipv4Addr::new(10, 59, 0, 2);
+    const OTHER_PEER: Ipv4Addr = Ipv4Addr::new(10, 59, 0, 3);
+    const EXT_IP: Ipv4Addr = Ipv4Addr::new(203, 0, 113, 1);
+
+    /// Backend recording `add_sni_forward` calls while still driving the real
+    /// demux, so ownership semantics (HOSTNAME_TAKEN, owner-scoped delete) are
+    /// exercised against the actual registration logic.
+    struct HostnameStub {
+        sni: Arc<SniDemux>,
+        known: bool,
+        calls: Mutex<Vec<(SocketAddrV4, SocketAddrV4, Vec<String>, Option<u32>)>>,
+    }
+    impl HostnameStub {
+        fn new(known: bool) -> Self {
+            Self {
+                sni: SniDemux::new(),
+                known,
+                calls: Mutex::new(Vec::new()),
+            }
+        }
+    }
+    impl GatewayBackend for HostnameStub {
+        fn add_forward(
+            &self,
+            _: SocketAddrV4,
+            _: SocketAddrV4,
+            _: u16,
+            _: Ipv4Addr,
+            _: Option<u32>,
+        ) -> impl Future<Output = Result<(), u16>> + Send {
+            async { Ok(()) }
+        }
+        fn remove_forward(&self, _: Ipv4Addr, _: u16) -> impl Future<Output = ()> + Send {
+            async {}
+        }
+        fn remove_forward_by_source(
+            &self,
+            _: SocketAddrV4,
+            _: Ipv4Addr,
+        ) -> impl Future<Output = bool> + Send {
+            async { false }
+        }
+        fn external_ipv4(&self, _: Ipv4Addr) -> impl Future<Output = Option<Ipv4Addr>> + Send {
+            async { Some(EXT_IP) }
+        }
+        fn is_known_client(&self, _: Ipv4Addr) -> impl Future<Output = bool> + Send {
+            let known = self.known;
+            async move { known }
+        }
+        fn sni(&self) -> Option<&Arc<SniDemux>> {
+            Some(&self.sni)
+        }
+        fn add_sni_forward(
+            &self,
+            source: SocketAddrV4,
+            target: SocketAddrV4,
+            hostnames: &[String],
+            lifetime: Option<u32>,
+        ) -> impl Future<Output = Result<(), u8>> + Send {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((source, target, hostnames.to_vec(), lifetime));
+            let res = self
+                .sni
+                .register(*source.ip(), source.port(), hostnames, target, lifetime);
+            async move { res }
+        }
+    }
+
+    /// A hostname-action body with `NewInternalClient` deliberately naming a
+    /// DIFFERENT host, so target forcing is what the tests observe.
+    fn add_hostname_body(lease: &str, hostname: &str) -> String {
+        format!(
+            r#"<?xml version="1.0"?>
+<s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+<s:Body>
+<u:X_START9_AddHostnameMapping xmlns:u="{WANIP_SERVICE}">
+<NewRemoteHost></NewRemoteHost>
+<NewExternalPort>443</NewExternalPort>
+<NewProtocol>TCP</NewProtocol>
+<NewInternalPort>8443</NewInternalPort>
+<NewInternalClient>10.59.1.99</NewInternalClient>
+<NewEnabled>1</NewEnabled>
+<NewPortMappingDescription>StartOS</NewPortMappingDescription>
+<NewLeaseDuration>{lease}</NewLeaseDuration>
+<NewHostname>{hostname}</NewHostname>
+</u:X_START9_AddHostnameMapping>
+</s:Body>
+</s:Envelope>"#
+        )
+    }
+
+    fn delete_hostname_body(hostname: &str) -> String {
+        format!(
+            r#"<?xml version="1.0"?>
+<s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+<s:Body>
+<u:X_START9_DeleteHostnameMapping xmlns:u="{WANIP_SERVICE}">
+<NewRemoteHost></NewRemoteHost>
+<NewExternalPort>443</NewExternalPort>
+<NewProtocol>TCP</NewProtocol>
+<NewInternalPort>8443</NewInternalPort>
+<NewHostname>{hostname}</NewHostname>
+</u:X_START9_DeleteHostnameMapping>
+</s:Body>
+</s:Envelope>"#
+        )
+    }
+
+    async fn body_text(resp: Response) -> String {
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        String::from_utf8_lossy(&bytes).into_owned()
+    }
+
+    /// The headers a real client sends for `body`: an IP-literal `Host`, and
+    /// the `SOAPAction` naming the action the body carries.
+    fn client_headers(body: &str) -> HeaderMap {
+        let action = soap_action(&HeaderMap::new(), body).expect("body names an action");
+        let mut headers = host_headers("192.168.1.1:49001");
+        headers.insert(
+            "SOAPAction",
+            format!(r#""{WANIP_SERVICE}#{action}""#).parse().unwrap(),
+        );
+        headers
+    }
+
+    async fn control(stub: &HostnameStub, peer: Ipv4Addr, body: &str) -> Response {
+        handle_control(stub, peer, &client_headers(body), body).await
+    }
+
+    #[test]
+    fn scpd_lists_input_args_for_hostname_actions() {
+        let scpd = Element::parse(SCPD.as_bytes()).unwrap();
+        let action_list = scpd.get_child("actionList").unwrap();
+        let mut actions = std::collections::HashMap::new();
+        for child in &action_list.children {
+            if let Some(a) = child.as_element() {
+                let name = a
+                    .get_child("name")
+                    .unwrap()
+                    .get_text()
+                    .unwrap()
+                    .into_owned();
+                let ins: Vec<String> = a
+                    .get_child("argumentList")
+                    .map(|al| {
+                        al.children
+                            .iter()
+                            .filter_map(|c| c.as_element())
+                            .filter(|arg| {
+                                arg.get_child("direction")
+                                    .and_then(|d| d.get_text())
+                                    .as_deref()
+                                    == Some("in")
+                            })
+                            .filter_map(|arg| {
+                                arg.get_child("name")?.get_text().map(|t| t.into_owned())
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                actions.insert(name, ins);
+            }
+        }
+        let add = actions
+            .get("X_START9_AddHostnameMapping")
+            .expect("X_START9_AddHostnameMapping");
+        assert_eq!(
+            add,
+            &[
+                "NewRemoteHost",
+                "NewExternalPort",
+                "NewProtocol",
+                "NewInternalPort",
+                "NewInternalClient",
+                "NewEnabled",
+                "NewPortMappingDescription",
+                "NewLeaseDuration",
+                "NewHostname",
+            ]
+        );
+        let del = actions
+            .get("X_START9_DeleteHostnameMapping")
+            .expect("X_START9_DeleteHostnameMapping");
+        assert_eq!(
+            del,
+            &[
+                "NewRemoteHost",
+                "NewExternalPort",
+                "NewProtocol",
+                "NewInternalPort",
+                "NewHostname",
+            ]
+        );
+        // Every referenced state variable must exist in the serviceStateTable.
+        let table = scpd.get_child("serviceStateTable").unwrap();
+        assert!(
+            table
+                .children
+                .iter()
+                .filter_map(|c| c.as_element())
+                .any(
+                    |v| v.get_child("name").and_then(|n| n.get_text()).as_deref()
+                        == Some("X_START9_Hostname")
+                )
+        );
+    }
+
+    // The client's hand-rolled envelopes parse to exactly the values it put in —
+    // the round-trip check standing in for igd-next's private request machinery.
+    #[test]
+    fn client_envelopes_round_trip_through_server_parser() {
+        let body = crate::net::port_map::upnp::add_hostname_body(
+            443,
+            Ipv4Addr::new(10, 59, 1, 5),
+            8443,
+            "git.example.com",
+        );
+        assert_eq!(
+            soap_action(&HeaderMap::new(), &body).as_deref(),
+            Some("X_START9_AddHostnameMapping")
+        );
+        assert_eq!(soap_u16(&body, "NewExternalPort"), Some(443));
+        assert_eq!(soap_u16(&body, "NewInternalPort"), Some(8443));
+        assert_eq!(soap_u16(&body, "NewLeaseDuration"), Some(3600));
+        assert_eq!(
+            soap_arg::<String>(&body, "NewHostname").as_deref(),
+            Some("git.example.com")
+        );
+
+        let body = crate::net::port_map::upnp::delete_hostname_body(443, 8443, "git.example.com");
+        assert_eq!(
+            soap_action(&HeaderMap::new(), &body).as_deref(),
+            Some("X_START9_DeleteHostnameMapping")
+        );
+        assert_eq!(soap_u16(&body, "NewExternalPort"), Some(443));
+        assert_eq!(soap_u16(&body, "NewInternalPort"), Some(8443));
+        assert_eq!(
+            soap_arg::<String>(&body, "NewHostname").as_deref(),
+            Some("git.example.com")
+        );
+    }
+
+    // Lease grants: 0 and absent request the default; a nonzero request is
+    // honored up to the cap; and the backend NEVER receives `None` (permanent),
+    // which is reserved for operator-created routes.
+    #[tokio::test]
+    async fn hostname_mapping_is_always_lease_bearing() {
+        for (lease, granted) in [
+            ("0", super::super::MAX_LIFETIME_SECONDS),
+            ("600", 600),
+            ("7200", super::super::MAX_LIFETIME_SECONDS),
+            // Past u16 — NewLeaseDuration is ui4, so this must clamp, not
+            // fall back to a failed parse.
+            ("100000", super::super::MAX_LIFETIME_SECONDS),
+        ] {
+            let stub = HostnameStub::new(true);
+            let resp = control(&stub, PEER, &add_hostname_body(lease, "git.example.com")).await;
+            assert_eq!(resp.status(), StatusCode::OK, "lease {lease}");
+            let calls = stub.calls.lock().unwrap();
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].3, Some(granted), "lease {lease}");
+        }
+    }
+
+    // `NewInternalClient` names another host, but the route target is forced to
+    // the requesting peer — a peer can only publish itself.
+    #[tokio::test]
+    async fn hostname_mapping_forces_target_to_peer() {
+        let stub = HostnameStub::new(true);
+        let resp = control(&stub, PEER, &add_hostname_body("0", "Git.Example.Com")).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let calls = stub.calls.lock().unwrap();
+        assert_eq!(calls[0].0, SocketAddrV4::new(EXT_IP, 443));
+        assert_eq!(calls[0].1, SocketAddrV4::new(PEER, 8443));
+        // Hostnames are lowercased before registration, like the PCP parser.
+        assert_eq!(calls[0].2, vec!["git.example.com".to_string()]);
+    }
+
+    // The SNI demux is TCP-only: an explicit non-TCP protocol is refused, like
+    // the PCP path's non-TCP HOSTNAME check, instead of granting a
+    // silently-TCP route.
+    #[tokio::test]
+    async fn hostname_mapping_rejects_non_tcp() {
+        let stub = HostnameStub::new(true);
+        let body = add_hostname_body("0", "git.example.com").replace(
+            "<NewProtocol>TCP</NewProtocol>",
+            "<NewProtocol>UDP</NewProtocol>",
+        );
+        let resp = control(&stub, PEER, &body).await;
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(body_text(resp).await.contains("<errorCode>402</errorCode>"));
+        assert!(stub.calls.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn hostname_mapping_rejects_unknown_peer() {
+        let stub = HostnameStub::new(false);
+        let resp = control(&stub, PEER, &add_hostname_body("0", "git.example.com")).await;
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(body_text(resp).await.contains("<errorCode>606</errorCode>"));
+        assert!(stub.calls.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn hostname_mapping_rejects_malformed_hostname() {
+        for bad in ["ex ample.com", ".example.com", ""] {
+            let stub = HostnameStub::new(true);
+            let resp = control(&stub, PEER, &add_hostname_body("0", bad)).await;
+            assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR, "{bad:?}");
+            assert!(
+                body_text(resp).await.contains("<errorCode>402</errorCode>"),
+                "{bad:?}"
+            );
+            assert!(stub.calls.lock().unwrap().is_empty(), "{bad:?}");
+        }
+    }
+
+    // A hostname held by a different target answers the vendor fault 800
+    // (HostnameTaken), the UPnP spelling of RESULT_HOSTNAME_TAKEN.
+    #[tokio::test]
+    async fn hostname_taken_by_another_target_faults_800() {
+        let stub = HostnameStub::new(true);
+        let resp = control(&stub, PEER, &add_hostname_body("0", "git.example.com")).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        // Same hostname from another peer (different target) is refused…
+        let resp = control(
+            &stub,
+            OTHER_PEER,
+            &add_hostname_body("0", "git.example.com"),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(body_text(resp).await.contains("<errorCode>800</errorCode>"));
+        // …while the owner reclaims (refresh) fine.
+        let resp = control(&stub, PEER, &add_hostname_body("0", "git.example.com")).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    // Delete is gated on is_known_client like the PCP lifetime-0 MAP, so an
+    // unknown peer never reaches the backend's removal path.
+    #[tokio::test]
+    async fn hostname_delete_rejects_unknown_peer() {
+        let stub = HostnameStub::new(false);
+        let resp = control(&stub, PEER, &delete_hostname_body("git.example.com")).await;
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(body_text(resp).await.contains("<errorCode>606</errorCode>"));
+    }
+
+    // Delete is owner-scoped: another peer's delete of the same hostname is a
+    // no-op (the route stays, observable as 800 for a third target), while the
+    // owner's delete frees the name.
+    #[tokio::test]
+    async fn hostname_delete_is_owner_scoped() {
+        let stub = HostnameStub::new(true);
+        let resp = control(&stub, PEER, &add_hostname_body("0", "git.example.com")).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // Another peer's delete succeeds as a request but removes nothing.
+        let resp = control(&stub, OTHER_PEER, &delete_hostname_body("git.example.com")).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let resp = control(
+            &stub,
+            OTHER_PEER,
+            &add_hostname_body("0", "git.example.com"),
+        )
+        .await;
+        assert!(
+            body_text(resp).await.contains("<errorCode>800</errorCode>"),
+            "route should still be held by the original owner"
+        );
+
+        // The owner's delete frees the hostname for a new target.
+        let resp = control(&stub, PEER, &delete_hostname_body("git.example.com")).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let resp = control(
+            &stub,
+            OTHER_PEER,
+            &add_hostname_body("0", "git.example.com"),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    // The StartWRT-shaped backend: no SNI dataplane, but the shared SCPD still
+    // advertises the vendor actions — both must refuse with the vendor fault
+    // 801 before reaching the backend, the UPnP twin of the PCP path's
+    // RESULT_UNSUPP_HOSTNAME refusal.
+    #[tokio::test]
+    async fn hostname_actions_fault_801_without_sni_dataplane() {
+        struct NoSniStub;
+        impl GatewayBackend for NoSniStub {
+            fn add_forward(
+                &self,
+                _: SocketAddrV4,
+                _: SocketAddrV4,
+                _: u16,
+                _: Ipv4Addr,
+                _: Option<u32>,
+            ) -> impl Future<Output = Result<(), u16>> + Send {
+                async { Ok(()) }
+            }
+            fn remove_forward(&self, _: Ipv4Addr, _: u16) -> impl Future<Output = ()> + Send {
+                async {}
+            }
+            fn remove_forward_by_source(
+                &self,
+                _: SocketAddrV4,
+                _: Ipv4Addr,
+            ) -> impl Future<Output = bool> + Send {
+                async { false }
+            }
+            fn external_ipv4(&self, _: Ipv4Addr) -> impl Future<Output = Option<Ipv4Addr>> + Send {
+                async { Some(EXT_IP) }
+            }
+            fn is_known_client(&self, _: Ipv4Addr) -> impl Future<Output = bool> + Send {
+                async { true }
+            }
+            fn sni(&self) -> Option<&Arc<SniDemux>> {
+                None
+            }
+            // The refusal must happen before any registration is attempted.
+            fn add_sni_forward(
+                &self,
+                _: SocketAddrV4,
+                _: SocketAddrV4,
+                _: &[String],
+                _: Option<u32>,
+            ) -> impl Future<Output = Result<(), u8>> + Send {
+                async { panic!("add_sni_forward reached on a backend without an SNI dataplane") }
+            }
+        }
+
+        let stub = NoSniStub;
+        let body = add_hostname_body("0", "git.example.com");
+        let resp = handle_control(&stub, PEER, &client_headers(&body), &body).await;
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(body_text(resp).await.contains("<errorCode>801</errorCode>"));
+        let body = delete_hostname_body("git.example.com");
+        let resp = handle_control(&stub, PEER, &client_headers(&body), &body).await;
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(body_text(resp).await.contains("<errorCode>801</errorCode>"));
     }
 }

@@ -22,6 +22,15 @@ file tracks notable changes since the move to the monorepo.
   one canonical origin can now direct Open UI to that address while it remains
   enabled and compatible with the current browser session.
 
+- **Private-domain routes on a shared port survive a network path that blocks
+  PCP.** When you bind a private domain through a Start9 gateway, StartOS asks
+  the gateway to route the hostname by TLS SNI — previously only over PCP, so
+  a network that filters UDP 5351 between your server and the gateway kept
+  ordinary port forwards working while the domain silently stopped being
+  routed. StartOS now falls back to asking over UPnP (a Start9 vendor action
+  the gateway advertises), so the route comes up either way; PCP remains
+  preferred when it gets through.
+
 - **A service can permanently retire a network host or a port it no longer
   uses, and the port numbers it held become available again.** A service that
   reorganizes its interfaces across an update — renaming a host, dropping a

@@ -210,7 +210,13 @@ struct Spec {
 
 enum Active {
     Pcp(PortMapping),
-    Upnp { external_ip: Option<Ipv4Addr> },
+    Upnp {
+        external_ip: Option<Ipv4Addr>,
+        /// Kept for teardown: a hostname mapping's delete action must name the
+        /// internal port to identify the peer-scoped SNI route, and the spec it
+        /// came from is already gone by then.
+        internal_port: u16,
+    },
 }
 
 enum Command {
@@ -395,7 +401,7 @@ fn external_ip_of(active: &BTreeMap<MappingKey, Active>, external_port: u16) -> 
         .and_then(|(_, a)| {
             routable_external_ip(match a {
                 Active::Pcp(m) => m.external_ip(),
-                Active::Upnp { external_ip } => external_ip.map(IpAddr::V4),
+                Active::Upnp { external_ip, .. } => external_ip.map(IpAddr::V4),
             })
         })
 }
@@ -628,8 +634,17 @@ impl State {
                 }
                 // A PCP mapping not yet at its renewal point: leave it be.
                 Some(Active::Pcp(_)) => {}
-                // UPnP has no lease; re-assert in case a gateway reboot dropped
-                // it.
+                // Re-assert UPnP in case a gateway reboot dropped it. A
+                // hostname key re-registers idempotently (the same target
+                // reclaims), so skip the remote delete — deleting first would
+                // leave the route down until the backoff-gated retry if the
+                // re-add fails, and churn the gateway's persisted state every
+                // tick. Only the local entry is dropped so apply() sees an
+                // inactive key.
+                Some(Active::Upnp { .. }) if key.2.is_some() => {
+                    self.active.remove(&key);
+                    self.apply(interfaces, key).await;
+                }
                 Some(Active::Upnp { .. }) => {
                     self.teardown(key.clone()).await;
                     self.apply(interfaces, key).await;
@@ -654,13 +669,28 @@ impl State {
                     crate::dev_log!(debug, "PCP/NAT-PMP unmap for {key:?} failed: {e}");
                 }
             }
-            Some(Active::Upnp { .. }) => {
-                let (local_ip, external_port, _, protocol) = key;
+            Some(Active::Upnp { internal_port, .. }) => {
+                let (local_ip, external_port, hostname, protocol) = key;
                 if let IpAddr::V4(local_v4) = local_ip {
                     if let Some(gw) = self.gateway_for(local_v4).await {
-                        upnp::remove_port(gw, protocol.upnp(), external_port)
-                            .await
-                            .log_err();
+                        match &hostname {
+                            // A hostname key is an SNI route, not a port forward.
+                            Some(host) => {
+                                upnp::remove_hostname_mapping(
+                                    gw,
+                                    external_port,
+                                    internal_port,
+                                    host,
+                                )
+                                .await
+                                .log_err();
+                            }
+                            None => {
+                                upnp::remove_port(gw, protocol.upnp(), external_port)
+                                    .await
+                                    .log_err();
+                            }
+                        }
                     }
                 }
             }
@@ -709,8 +739,10 @@ impl State {
         };
         let now = Utc::now();
 
-        // HOSTNAME (SNI-demux) mapping: PCP-only, since NAT-PMP/UPnP can't demux
-        // by SNI. Other hostnames on the same port are separate mappings.
+        // HOSTNAME (SNI-demux) mapping: PCP first, falling back to the UPnP
+        // vendor action (X_START9_AddHostnameMapping) when no gateway grants it
+        // over PCP. NAT-PMP has no way to carry a hostname. Other hostnames on
+        // the same port are separate mappings.
         if let Some(hostname) = &hostname {
             let options = [pcp::PcpOption {
                 code: OPTION_HOSTNAME,
@@ -794,6 +826,88 @@ impl State {
                             "PCP HOSTNAME map {local_ip}:{external_port} {hostname} via {gw} failed: {e}"
                         )
                     }
+                }
+            }
+
+            // No gateway granted the mapping over PCP: fall back to the UPnP
+            // vendor action if the IGD's SCPD advertises it (IPv4 only, like
+            // the plain UPnP path).
+            if let IpAddr::V4(local_v4) = local_ip {
+                let upnp_dead = capabilities_for_local(interfaces, local_ip)
+                    .and_then(|c| c.upnp.fresh(now))
+                    == Some(false);
+                if upnp_dead {
+                    crate::dev_log!(
+                        debug,
+                        "UPnP HOSTNAME skip on {local_ip}: known to have no IGD"
+                    );
+                    return attempted;
+                }
+                attempted = true;
+                // (added, drop_cache): the cache is shared with every other
+                // mapping on this local IP, so only evict it when the gateway
+                // is gone or misbehaving — an IGD that answers but doesn't
+                // advertise the vendor action is a stable condition, and
+                // evicting for it would force sibling mappings to re-discover.
+                let (added, drop_cache) = match self.gateway_for(local_v4).await {
+                    Some(gw) => {
+                        // Discovery alone proves the IGD, whatever the call says.
+                        report_local(interfaces, local_ip, true);
+                        if !upnp::supports_hostname(gw) {
+                            crate::dev_log!(
+                                debug,
+                                "UPnP HOSTNAME skip on {local_ip}: IGD doesn't advertise the vendor action"
+                            );
+                            (false, false)
+                        } else {
+                            match upnp::add_hostname_mapping(
+                                gw,
+                                external_port,
+                                local_v4,
+                                spec.internal_port,
+                                hostname,
+                            )
+                            .await
+                            {
+                                Ok(()) => {
+                                    tracing::debug!(
+                                        "UPnP HOSTNAME mapped {external_port}->{local_v4}:{} {hostname}",
+                                        spec.internal_port
+                                    );
+                                    (true, false)
+                                }
+                                Err(e) => {
+                                    crate::dev_log!(
+                                        debug,
+                                        "UPnP HOSTNAME map {local_v4}:{external_port} {hostname} failed: {e}"
+                                    );
+                                    (false, true)
+                                }
+                            }
+                        }
+                    }
+                    None => {
+                        report_local(interfaces, local_ip, false);
+                        (false, true)
+                    }
+                };
+                if added {
+                    // Best-effort external IP from the cached discovery so a
+                    // reachability check can short-circuit.
+                    let external_ip = match self.gateway_for(local_v4).await {
+                        Some(gw) => upnp::external_ipv4(gw).await.ok().flatten(),
+                        None => None,
+                    };
+                    self.active.insert(
+                        key.clone(),
+                        Active::Upnp {
+                            external_ip,
+                            internal_port: spec.internal_port,
+                        },
+                    );
+                } else if drop_cache {
+                    // Re-discover next time in case the gateway went away.
+                    self.upnp_cache.remove(&local_v4);
                 }
             }
             return attempted;
@@ -977,8 +1091,13 @@ impl State {
                 // Best-effort external IP (local IGD query) so a reachability check
                 // can short-circuit; `get_external_ipv4` discards private/CGNAT.
                 let external_ip = upnp::get_external_ipv4(local_v4).await.ok().flatten();
-                self.active
-                    .insert(key.clone(), Active::Upnp { external_ip });
+                self.active.insert(
+                    key.clone(),
+                    Active::Upnp {
+                        external_ip,
+                        internal_port: spec.internal_port,
+                    },
+                );
             } else {
                 // Re-discover next time in case the gateway went away.
                 self.upnp_cache.remove(&local_v4);
@@ -1092,15 +1211,22 @@ mod tests {
         let public = Ipv4Addr::new(1, 2, 3, 4);
         let mut active = BTreeMap::new();
         active.insert(
-            (ip, 443, None, TransportProtocol::Tcp),
+            (
+                ip,
+                443,
+                Some("example.com".into()),
+                TransportProtocol::Tcp,
+            ),
             Active::Upnp {
                 external_ip: Some(public),
+                internal_port: 443,
             },
         );
         active.insert(
             (ip, 8080, None, TransportProtocol::Udp),
             Active::Upnp {
                 external_ip: Some(public),
+                internal_port: 8080,
             },
         );
 
@@ -1121,6 +1247,7 @@ mod tests {
             (ip, 443, None, TransportProtocol::Tcp),
             Active::Upnp {
                 external_ip: Some(Ipv4Addr::new(192, 168, 8, 1)),
+                internal_port: 443,
             },
         );
         assert_eq!(external_ip_of(&active, 443), None);
