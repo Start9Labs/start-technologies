@@ -331,6 +331,11 @@ if [ "${NVIDIA}" = "1" ]; then
     echo "blacklist nouveau" > /etc/modprobe.d/blacklist-nouveau.conf
     echo "options nouveau modeset=0" >> /etc/modprobe.d/blacklist-nouveau.conf
 
+    # initramfs-tools copies the firmware every included module declares, blacklist
+    # or not, so nouveau's GSP blobs land in the initramfs the bootloader must read.
+    echo "[nvidia-hook] Removing nouveau GSP firmware..." >&2
+    apt-get purge -y firmware-nvidia-graphics firmware-nvidia-tesla-535-gsp
+
     echo "[nvidia-hook] Rebuilding initramfs..." >&2
     update-initramfs -u -k "\${KVER}"
 

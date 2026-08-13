@@ -49,6 +49,15 @@ file tracks notable changes since the move to the monorepo.
   produced, and only the container's boot-time device pass — which races with
   the grant — widened them; on the losing side of that race a CI runner's jobs
   failed to start with `Failed to open() /dev/net/tun: Permission denied`.
+- **The 64-bit ARM NVIDIA image boots on NVIDIA GB10 hardware again, such as the
+  DGX Spark, and is considerably smaller.** These images drive the GPU with
+  NVIDIA's own driver and turn nouveau off, but they were still built with
+  nouveau's firmware for every supported chip — 152 MB of it, most of it inside
+  the initramfs that the bootloader must read in full before the kernel starts.
+  On GB10 that left the machine sitting on the last line the bootloader printed.
+  The images now carry only the graphics firmware they can use, which more than
+  halves what is read at startup and takes a substantial amount off the
+  download.
 
 - **Your server answers to its own addresses and no others.** A name that
   resolved to your server but was never configured on it — a domain you pointed
