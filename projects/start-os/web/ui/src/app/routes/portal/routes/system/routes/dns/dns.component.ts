@@ -4,10 +4,19 @@ import { FormsModule, ReactiveFormsModule } from '@angular/forms'
 import { RouterLink } from '@angular/router'
 import { DocsLinkDirective, i18nPipe, TaskService } from '@start9labs/shared'
 import { ISB } from '@start9labs/start-core'
-import { TuiButton, TuiTitle } from '@taiga-ui/core'
+import { TuiButton, TuiNotification, TuiTitle } from '@taiga-ui/core'
 import { TuiHeader } from '@taiga-ui/layout'
 import { PatchDB } from 'patch-db-client'
-import { combineLatest, first, switchMap } from 'rxjs'
+import {
+  catchError,
+  combineLatest,
+  defer,
+  first,
+  map,
+  of,
+  startWith,
+  switchMap,
+} from 'rxjs'
 import { FormGroupComponent } from 'src/app/routes/portal/components/form/containers/group.component'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { FormService } from 'src/app/services/form.service'
@@ -63,6 +72,21 @@ const ipv6 =
 
         <form-group [spec]="d.spec" />
 
+        @if (resolves() === false) {
+          <p tuiNotification appearance="negative">
+            {{
+              'StartOS cannot resolve domain names with the current DNS servers. Services that reach the internet by name will fail.'
+                | i18n
+            }}
+            @if (d.dhcp) {
+              {{
+                'Your router is not providing a DNS server that answers. Select "Static" above and enter one.'
+                  | i18n
+              }}
+            }
+          </p>
+        }
+
         @for (warn of d.warn; track $index) {
           <p>{{ warn }}</p>
         }
@@ -106,6 +130,7 @@ const ipv6 =
     FormGroupComponent,
     TuiButton,
     TuiHeader,
+    TuiNotification,
     TuiTitle,
     RouterLink,
     TitleDirective,
@@ -159,6 +184,23 @@ export default class SystemDnsComponent {
     }),
   })
 
+  // Configured servers can be present and simply not answer — indistinguishable
+  // from a working setup until something asks — so this resolves a name rather
+  // than inspecting the list. Re-runs when the servers change, so saving a fix
+  // clears the warning. `null` while in flight: absence of an answer yet is not
+  // a failure.
+  protected readonly resolves = toSignal(
+    this.patch.watch$('serverInfo', 'network', 'dns').pipe(
+      switchMap(() =>
+        defer(() => this.api.queryDns({ fqdn: 'registry.start9.com' })).pipe(
+          map(res => !!res.ipv4 || !!res.ipv6),
+          catchError(() => of(false)),
+          startWith(null),
+        ),
+      ),
+    ),
+  )
+
   readonly data = toSignal(
     combineLatest([
       this.patch.watch$('packageData').pipe(first()),
@@ -185,31 +227,28 @@ export default class SystemDnsComponent {
 
         const form = this.formService.createForm(spec, { strategy: current })
 
-        let warn: string[] = []
-
-        if (
-          Object.values(pkgs).some(p =>
-            Object.values(p.hosts).some(
-              h => Object.keys(h?.privateDomains || {}).length,
-            ),
-          )
-        ) {
-          Object.values(gateways)
-            .filter(g =>
-              (dns.staticServers || dns.dhcpServers).some(d =>
-                g.ipInfo?.lanIp.includes(d),
-              ),
-            )
-            .map(
-              g =>
-                `${this.i18n.transform('Warning. StartOS is currently using the following gateway for DNS')}: ${g.ipInfo!.name}. ${this.i18n.transform('If you intend to use this gateway for private domain resolution, set alternative static DNS servers using the form above.')}`,
-            )
-        }
+        const warn = Object.values(pkgs).some(p =>
+          Object.values(p.hosts).some(
+            h => Object.keys(h?.privateDomains || {}).length,
+          ),
+        )
+          ? Object.values(gateways)
+              .filter(g =>
+                (dns.staticServers || dns.dhcpServers).some(d =>
+                  g.ipInfo?.lanIp.includes(d),
+                ),
+              )
+              .map(
+                g =>
+                  `${this.i18n.transform('Warning. StartOS is currently using the following gateway for DNS')}: ${g.ipInfo!.name}. ${this.i18n.transform('If you intend to use this gateway for private domain resolution, set alternative static DNS servers using the form above.')}`,
+              )
+          : []
 
         return {
           spec,
           form,
           warn,
+          dhcp: !dns.staticServers,
         }
       }),
     ),

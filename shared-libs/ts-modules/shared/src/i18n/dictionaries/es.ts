@@ -805,4 +805,6 @@ export default {
   912: 'Los datos de StartOS en la unidad de datos seleccionada están en una partición junto a una instalación de SO anterior, y no pueden conservarse en este dispositivo. Para borrar la unidad y empezar de nuevo, elija "Sobrescribir".',
   913: 'Los datos de StartOS en la unidad de datos seleccionada ocupan toda la unidad, por lo que el SO no puede instalarse en la misma unidad sin borrarlos. Para conservar sus datos, seleccione otra unidad para el SO. Para borrarlos, elija "Sobrescribir".',
   914: 'Inicio de sesión correcto, pero el servidor rechazó la nueva clave del dispositivo. Inténtelo de nuevo.',
+  915: 'StartOS no puede resolver nombres de dominio con los servidores DNS actuales. Los servicios que acceden a internet por nombre fallarán.',
+  916: 'Su router no está proporcionando un servidor DNS que responda. Seleccione "Estático" arriba e introduzca uno.',
 } satisfies i18n

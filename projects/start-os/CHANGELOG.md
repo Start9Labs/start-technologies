@@ -38,6 +38,16 @@ file tracks notable changes since the move to the monorepo.
 
 ### Fixed
 
+- **The DNS page says so when your DNS servers cannot resolve anything.** A
+  server whose configured DNS never answers still routes traffic perfectly by
+  IP, so nothing looks wrong — but every service that reaches the internet by
+  name silently fails, and there was no indication anywhere in StartOS. This is
+  most likely on DHCP, where the servers come from a router that may filter DNS
+  or not serve it to every client. The page now resolves a name to check, and
+  warns when it cannot, pointing at the Static option. A warning about using a
+  gateway for private-domain resolution was also being computed and then thrown
+  away, so it never appeared at all; it does now.
+
 - **Your server answers to its own addresses and no others.** A name that
   resolved to your server but was never configured on it — a domain you pointed
   at its LAN IP, or its `.local` name typed without the `.local` — was served

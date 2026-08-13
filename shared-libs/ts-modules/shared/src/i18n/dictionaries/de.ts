@@ -805,4 +805,6 @@ export default {
   912: 'Die StartOS-Daten auf dem ausgewählten Datenlaufwerk befinden sich auf einer Partition neben einer älteren OS-Installation und können auf diesem Gerät nicht beibehalten werden. Um das Laufwerk zu löschen und neu zu beginnen, wählen Sie "Überschreiben".',
   913: 'Die StartOS-Daten auf dem ausgewählten Datenlaufwerk erstrecken sich über das gesamte Laufwerk, sodass das OS nicht auf demselben Laufwerk installiert werden kann, ohne sie zu löschen. Um Ihre Daten zu behalten, wählen Sie ein anderes OS-Laufwerk. Um sie zu löschen, wählen Sie "Überschreiben".',
   914: 'Anmeldung erfolgreich, aber der Server hat den neuen Geräteschlüssel abgelehnt. Versuchen Sie es erneut.',
+  915: 'StartOS kann mit den aktuellen DNS-Servern keine Domainnamen auflösen. Dienste, die das Internet über Namen erreichen, werden fehlschlagen.',
+  916: 'Ihr Router stellt keinen antwortenden DNS-Server bereit. Wählen Sie oben "Statisch" und geben Sie einen an.',
 } satisfies i18n
