@@ -49,6 +49,15 @@ file tracks notable changes since the move to the monorepo.
   produced, and only the container's boot-time device pass — which races with
   the grant — widened them; on the losing side of that race a CI runner's jobs
   failed to start with `Failed to open() /dev/net/tun: Permission denied`.
+- **Reinstalling with "Preserve" copies your server's configuration before it
+  rewrites the drive, so the configuration survives.** The copy used to be taken
+  afterwards, by which point there was nothing left to read — so the server came
+  back with its configuration reset, and said nothing about it. Among the things
+  lost was the key your server uses to sign its add-on drivers, which on a
+  machine with Secure Boot left hardware such as an NVIDIA GPU unavailable
+  afterwards. A reinstall that cannot read the configuration it was asked to keep
+  now stops and says so, rather than continuing and discarding it.
+
 - **On a server with Secure Boot enabled, hardware that needs an add-on driver —
   an NVIDIA GPU, most commonly — works after setup.** Secure Boot only loads such
   a driver once you approve the key your server signs it with, and approving that
