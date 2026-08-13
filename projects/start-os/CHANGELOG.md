@@ -49,6 +49,17 @@ file tracks notable changes since the move to the monorepo.
   produced, and only the container's boot-time device pass — which races with
   the grant — widened them; on the losing side of that race a CI runner's jobs
   failed to start with `Failed to open() /dev/net/tun: Permission denied`.
+- **On a server with Secure Boot enabled, hardware that needs an add-on driver —
+  an NVIDIA GPU, most commonly — works after setup.** Secure Boot only loads such
+  a driver once you approve the key your server signs it with, and approving that
+  key is protected by your master password. Your server only ever asked the
+  firmware to trust the key while starting up, which on a new server happens
+  before you have set a password, so the request was never made and you were
+  never shown the prompt — leaving the driver unable to load, with nothing to say
+  why. Your server now asks as soon as you set your password, so the prompt
+  appears on the next restart. See
+  [Initial Setup](https://docs.start9.com/start-os/initial-setup.html).
+
 - **The 64-bit ARM NVIDIA image boots on NVIDIA GB10 hardware again, such as the
   DGX Spark, and is considerably smaller.** These images drive the GPU with
   NVIDIA's own driver and turn nouveau off, but they were still built with

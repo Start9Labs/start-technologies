@@ -475,10 +475,9 @@ pub async fn install_os_to(
 
         crate::util::mok::sign_unsigned_modules(overlay.path()).await?;
 
-        let mok_pub = overlay
-            .path()
-            .join(crate::util::mok::DKMS_MOK_PUB.trim_start_matches('/'));
-        match crate::util::mok::enroll_mok(&mok_pub).await {
+        // Only stages an enrollment if the target already carries a password; a fresh
+        // install has none until setup, which enrolls it then.
+        match crate::util::mok::enroll_mok(overlay.path()).await {
             Ok(enrolled) => mok_enrolled = enrolled,
             Err(e) => tracing::warn!("MOK enrollment failed: {e}"),
         }
