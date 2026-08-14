@@ -15,6 +15,8 @@ This guide is for flashing StartOS to a USB drive, then installing it onto a des
 
     - **Slim (FOSS-only)**: 100% open source, containing **no** proprietary firmware or drivers. Only compatible with certain hardware, such as the Start9 Server Pure.
 
+    An **NVIDIA** variant is also published for x86_64 and aarch64. Choose it only if your server has an NVIDIA GPU you want services to use for computation — it adds NVIDIA's driver and container toolkit on top of the Standard image. It supports GeForce RTX 20-series, Quadro RTX and newer; older cards such as the GeForce GTX 900- and 10-series, or Tesla M40, P40, P100 and V100, are not supported and should use the Standard image.
+
 1.  Verify the SHA256 checksum against the one listed on GitHub (optional but recommended).
     - **Mac**. Open a terminal and run:
 

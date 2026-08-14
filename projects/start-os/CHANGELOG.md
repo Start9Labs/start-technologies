@@ -36,6 +36,17 @@ file tracks notable changes since the move to the monorepo.
   plaintext address, including the passwords typed into it. See
   [Gateways](https://docs.start9.com/start-os/gateways.html).
 
+### Changed
+
+- **The NVIDIA images now use NVIDIA's open kernel modules, which support GeForce
+  RTX 20-series, Quadro RTX and newer.** This is what makes current cards work at
+  all — an RTX 50-series, an RTX PRO 6000 or an NVIDIA GB10 can only be driven by
+  these modules. The trade is at the other end of the range: **a GeForce GTX
+  900-series or 10-series card, a Titan X or Xp, or a Tesla M40, P40, P100 or
+  V100 will no longer be driven by the NVIDIA images.** If you rely on one of
+  those, stay on 0.4.0.1 or use the Standard image, whose open-source `nouveau`
+  driver still provides display output without GPU compute.
+
 ### Fixed
 
 - Trim whitespace on form inputs.
@@ -83,8 +94,8 @@ file tracks notable changes since the move to the monorepo.
   the image built NVIDIA's driver in the flavour that does not support this
   generation of GPU, so the driver found the card but could never bring it up.
   The images now carry only the graphics firmware they can use, switch that
-  driver off, and build the flavour NVIDIA supports here — which is what NVIDIA's
-  own operating system does on the same hardware.
+  driver off, and build the kernel modules NVIDIA supports here — which is what
+  NVIDIA's own operating system does on the same hardware.
 
 - **Your server answers to its own addresses and no others.** A name that
   resolved to your server but was never configured on it — a domain you pointed

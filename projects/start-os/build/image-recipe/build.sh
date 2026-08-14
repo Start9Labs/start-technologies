@@ -94,14 +94,6 @@ elif [ "${IB_TARGET_ARCH}" = "riscv64" ]; then
 fi
 
 
-# Blackwell is open-only from 580.173.02, and on GB10 the proprietary modules
-# enumerate the GPU but never finish RmInitAdapter. aarch64 has no pre-Turing NVIDIA
-# hardware to lose by this; x86_64 does, so it keeps the proprietary flavour.
-NVIDIA_MODULE_TYPE=proprietary
-if [ "${IB_TARGET_PLATFORM}" = "aarch64-nvidia" ]; then
-	NVIDIA_MODULE_TYPE=open
-fi
-
 BOOTAPPEND_LIVE="boot=live noautologin console=tty0"
 if [ "${IB_TARGET_PLATFORM}" = "aarch64-nvidia" ]; then
 	# Same GB10 hang the installed system guards against — see debian/postinst.
@@ -320,10 +312,12 @@ if [ "${NVIDIA}" = "1" ]; then
 
     echo "[nvidia-hook] Running NVIDIA installer for kernel \${KVER}" >&2
 
-    # Otherwise the installer picks the flavour from the build host's own GPUs.
+    # Pinned, or the installer picks the flavour from the build host's own GPUs. Open
+    # is the only flavour that drives Blackwell, and it covers Turing and later; these
+    # images deliberately do not support Maxwell, Pascal or Volta.
     if ! sh "\${RUN_PATH}" \
         --silent \
-        --kernel-module-type=${NVIDIA_MODULE_TYPE} \
+        --kernel-module-type=open \
         --kernel-name="\${KVER}" \
         --no-x-check \
         --no-nouveau-check \
