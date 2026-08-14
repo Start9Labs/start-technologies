@@ -4,7 +4,7 @@ This page covers how to _behave_ while working on a package — the disciplines 
 
 ## Keep README and instructions in sync
 
-`README.md` and `instructions.md` are part of the package, not afterthoughts, and they track different things. `README.md` is the architectural reference for developers and AI — update it for any change to how the package is built, structured, or behaves (a new or renamed action, an added or removed volume/port/interface/dependency, a changed default, a new feature or limitation). `instructions.md` is the end-user guide — update it whenever a change affects what the user sees or does. When a change touches both, update both in the same change.
+`README.md` and `instructions.md` are part of the package, not afterthoughts, and they track different things. `README.md` is the package's technical reference, and the only one an AI support or administering agent reads — update it for any change to how the package is built, structured, or behaves (a new or renamed action, an added or removed volume/port/interface/dependency, a changed default, a new feature or limitation). `instructions.md` is the end-user guide — update it whenever a change affects what the user sees or does. When a change touches both, update both in the same change.
 
 Apply this loop on every task:
 
@@ -38,6 +38,16 @@ Before reporting a feature as done, exercise it against a running service:
 - **Install on a StartOS box** (or run the image directly) and confirm the daemon stays up — not just that it starts.
 - **Use the actual feature.** If you wired up admin credentials, log in with them. If you mounted a data volume, write data and restart to confirm it survives. If you exposed a port, connect to it.
 - **A feature you have only compiled is unverified.** Say so plainly — "builds clean; not yet installed/tested" — rather than implying it works.
+
+### Inspecting a running install
+
+To read a generated config or grep the application's own logs from inside a container:
+
+```
+start-cli package attach <id> -n <subcontainer-name> -- <cmd>
+```
+
+Select the subcontainer by **name** with `-n` — the name passed to `SubContainer.of` in `main.ts` — or by image with `-i`. `-s`/`--subcontainer` takes the internal **Guid**, not the name, so passing a name to it fails with "no matching subcontainers"; that is the most common way this command is got wrong. A service with more than one subcontainer requires a selector, and with none given `attach` falls back to an interactive picker that panics in a non-TTY shell — which is the missing selector surfacing, not a TTY requirement.
 
 ## Don't fabricate — verify or flag
 

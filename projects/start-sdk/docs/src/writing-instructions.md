@@ -2,7 +2,7 @@
 
 `instructions.md` is a required file at the root of every StartOS package, alongside `README.md`. Its contents are packed into the s9pk archive and surfaced to the user under the **Instructions** tab on the service details page in StartOS.
 
-Instructions are **for the human running the service** — not for developers, not for AI assistants. They pick up where the marketplace listing left off: by the time someone reads this tab they have seen the short and long description and clicked Install, so don't reintroduce the service. Orient them to what it does _on StartOS_, walk them through getting it usefully running, and point them at upstream documentation when they need to go deeper.
+Instructions are **written for the human running the service** — not for developers, and not a place for the package's internals. AI agents do read this file, but only to learn what the user has been shown: a support agent answers in the terms the user sees here, and an assistant administering the server relies on it to know what the user was walked through. Writing for anyone but the human is what makes it useless to all three. They pick up where the marketplace listing left off: by the time someone reads this tab they have seen the short and long description and clicked Install, so don't reintroduce the service. Orient them to what it does _on StartOS_, walk them through getting it usefully running, and point them at upstream documentation when they need to go deeper.
 
 ## Instructions vs. README — they are not the same file
 
@@ -10,7 +10,7 @@ It is tempting to treat `instructions.md` as a copy of the README. Resist this. 
 
 |                           | README                                                                                           | instructions.md                                                 |
 | ------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
-| **Audience**              | Developers, AI assistants, contributors                                                          | End users running the service on StartOS                        |
+| **Audience**              | AI support and administering agents; developers                                                  | End users running the service on StartOS                        |
 | **Question it answers**   | "How does this package work, and how does it differ from running the upstream service directly?" | "I just installed this — now what? How do I use it on StartOS?" |
 | **Tone**                  | Technical, structured, scannable for parsing                                                     | Practical, instructional, written in second person              |
 | **Versions / image tags** | Avoided (manifest is source of truth)                                                            | Avoided for the same reason                                     |
@@ -18,6 +18,8 @@ It is tempting to treat `instructions.md` as a copy of the README. Resist this. 
 | **Surfaced where**        | The package repository on GitHub                                                                 | Inside the StartOS UI, post-install                             |
 
 If your README is a reference manual, your instructions are a quick-start guide for a non-developer who just clicked Install.
+
+A package carries a third documentation file, `AGENTS.md`, for whoever changes the package. Nothing that belongs in it belongs here. For which reader gets which file, see [Who reads this file](writing-readmes.md#who-reads-this-file).
 
 ## What belongs in instructions
 
