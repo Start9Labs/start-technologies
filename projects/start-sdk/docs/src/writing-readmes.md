@@ -1,17 +1,46 @@
 # Writing Service READMEs
 
-Every StartOS package README should document **how your service on StartOS differs from the upstream version**. Users should be able to read your README and understand exactly what is different -- everything else, they can find in the upstream docs.
+Every StartOS package README documents **how your service on StartOS differs from the upstream version**. Everything else, a reader can find in the upstream docs. It is also the file that AI agents read to support, operate, and contribute to your package, so its structure is load-bearing in a way an ordinary repository README's is not.
 
-## Guiding Principles
+## Who reads this file
 
-**Do not duplicate upstream documentation.** If something is not mentioned in your README, users should assume the upstream docs are accurate.
+Four readers consume a package's documentation, and they are **nested** — each reads a prefix of the same list, not a file of its own.
 
-Write for two audiences:
+| Reader                                   | Reads                                                        |
+| ---------------------------------------- | ------------------------------------------------------------ |
+| The user running the service             | `instructions.md`                                            |
+| An AI support agent                      | `instructions.md` + `README.md`                              |
+| An AI assistant administering the server | `instructions.md` + `README.md` + the live action/health ABI |
+| A developer or AI changing the package   | `instructions.md` + `README.md` + `AGENTS.md`                |
 
-1. **Humans** -- clear, scannable, with practical examples
-2. **AI assistants** -- structured data that can be parsed programmatically
+Two consequences:
 
-## Recommended Structure
+- **The README is the only technical file a support agent gets.** It reads this and `instructions.md` from your repository and nothing else — not `AGENTS.md`, not your source. If a fact is needed to diagnose a user's problem, it belongs here.
+- **Where readers conflict, the operable surface wins.** An agent wants predictable structure it can address; a developer wants prose. Both are served by fixed headings with real writing underneath — not by prose that wanders across section boundaries.
+
+`instructions.md` is for the user (see [Writing Service Instructions](writing-instructions.md)); `AGENTS.md` is for whoever changes the package, and repeats nothing this file says (see [Project Structure — AGENTS.md](project-structure.md#agentsmd-and-claudemd)).
+
+## Guiding principles
+
+**Do not duplicate upstream documentation.** If something is not mentioned in your README, readers should assume the upstream docs are accurate.
+
+**State differences, never sameness.** The scoping note at the top of the file already says that anything this document does not mention behaves as upstream — a complete statement that stays accurate for free. An enumeration of unchanged features cannot match it: the list is unbounded, it goes stale as upstream grows, and it inverts the note's logic, because once such a list exists a feature missing from it reads as changed. Where a reader would reasonably expect the package to have broken something and it did not, say so beside the thing that would have broken it.
+
+**Do not restate `instructions.md`.** Every reader of this file also has that one, so a fact stated in both is a copy that will eventually disagree with itself. Upstream documentation links in particular belong _only_ in `instructions.md`'s `## Documentation` section — that section is parsed to source a package's upstream docs, so a second copy here is the one nothing validates and the one that rots when upstream moves. Say what the package does differently; let `instructions.md` say how to use it.
+
+**Do not re-encode what StartOS can introspect.** An agent administering your service already has every action's id, name, description, warning, visibility, `allowedStatuses` and input schema from the OS, along with health-check ids and live status. Restating those here adds a second copy that goes stale and costs the agent context to read. Document instead what the ABI cannot express: **when** to run a thing, what it **costs**, whether it is **safe to repeat**, what **state** it changes, and which **symptom** it resolves.
+
+**The heading set is fixed, not suggested.** Section headings are how an agent retrieves part of a README without loading all of it, so they are an addressing scheme. A package that renames `## Actions` to `## Available Actions` does not fail loudly — it silently degrades retrieval to "load the whole file". Use the headings below verbatim, in this order, and omit a section only where the guidance below says you may.
+
+The order runs in four groups: **what the package is made of** (runtime, volumes, file models, dependencies, interfaces), **how it behaves** (install, actions, tasks, health, backups), **what to expect when it doesn't** (limitations, troubleshooting), then the machine-readable summary. Keep a new section inside the group it belongs to.
+
+Nothing here is about contributing to the package. Build workflow, repo conventions, and the packaging guide live in `AGENTS.md` — restating them here produces a section identical in every package, useful to none of this file's readers.
+
+**Open every H2 with prose.** One or two sentences between the heading and the first table or subsection, describing what the section covers. This text is extracted as the section's summary in the generated index, and it is what an agent reads to decide whether to fetch the section at all.
+
+**No version numbers anywhere.** Not upstream versions, not image tags, not dependency version ranges. The manifest and `setupDependencies()` are the source of truth; a copy here is wrong from the next bump onward.
+
+## Required structure
 
 ````markdown
 <p align="center">
@@ -20,11 +49,10 @@ Write for two audiences:
 
 # [Service Name] on StartOS
 
-> **Upstream docs:** <https://docs.example.com/>
->
 > Everything not listed in this document should behave the same as upstream
 > [Service Name]. If a feature, setting, or behavior is not mentioned here,
-> the upstream documentation is accurate and fully applicable.
+> the upstream documentation is accurate and fully applicable — see the
+> Documentation section of `instructions.md` for links.
 
 [Brief description of what the service does and link to upstream repo]
 
@@ -38,51 +66,27 @@ Write for two audiences:
 
 ## Image and Container Runtime
 
-[Image source, architectures, entrypoint modifications]
-
 ## Volume and Data Layout
 
-[Mount points, data directories, StartOS-specific files like store.json]
-
-## Installation and First-Run Flow
-
-[How setup differs from upstream -- skipped wizards, auto-configuration, initial credentials]
-
-## Configuration Management
-
-[Which settings are managed by StartOS vs configurable via upstream methods]
-
-## Network Access and Interfaces
-
-[Exposed ports, protocols, access methods]
-
-## Actions (StartOS UI)
-
-[Each action: name, purpose, availability, inputs/outputs]
-
-## Backups and Restore
-
-[What's backed up, restore behavior]
-
-## Health Checks
-
-[Endpoint, grace period, messages]
+## File Models
 
 ## Dependencies
 
-[Required and optional dependencies — health checks, mounted volumes, purpose]
+## Network Access and Interfaces
+
+## Installation and First-Run Flow
+
+## Actions
+
+## Tasks
+
+## Health Checks
+
+## Backups and Restore
 
 ## Limitations and Differences
 
-[Numbered list of key limitations compared to upstream]
-
-## What Is Unchanged from Upstream
-
-[Explicit list of features that work exactly as documented upstream]
-
-## Contributing
-
-[Link to AGENTS.md]
+## Troubleshooting
 
 ---
 
@@ -90,27 +94,32 @@ Write for two audiences:
 
 ```yaml
 package_id: string
+image: registry/name # never a tag
 architectures: [list]
+subcontainers: [list]
 volumes:
   volume_name: mount_path
-ports:
-  interface_name: port_number
-dependencies: [list or "none"]
+file_models:
+  - path/to/config.json
 startos_managed_env_vars:
   - VAR_NAME
+dependencies: [list or "none"]
+interfaces:
+  interface_id: { type: ui | api | p2p, port: number }
 actions:
   - action-id
+tasks:
+  - { action: action-id, severity: critical | important | optional }
+health_checks:
+  - check-id
 ```
-
-> [!IMPORTANT]
-> Do not include `upstream_version`, image tags, or dependency version constraints in the YAML block (or anywhere else in the README). The manifest is the single source of truth for versions — README version references go stale on every bump and create misinformation. If a user wants to know the version, they can look at the manifest or the service page.
 ````
 
-## Sections to Document
+## Sections
 
 ### Logo
 
-Every README should begin with the service icon centered above the title. Use the standard format:
+Every README begins with the service icon centered above the title:
 
 ```html
 <p align="center">
@@ -118,9 +127,11 @@ Every README should begin with the service icon centered above the title. Use th
 </p>
 ```
 
-Adjust the `src` to match the actual icon filename (e.g., `icon.png` if the icon is a PNG).
+Adjust `src` to the actual icon filename.
 
 ### Image and Container Runtime
+
+Where the image comes from and how it runs.
 
 | What to Document | Example                                   |
 | ---------------- | ----------------------------------------- |
@@ -128,7 +139,11 @@ Adjust the `src` to match the actual icon filename (e.g., `icon.png` if the icon
 | Architectures    | x86_64, aarch64, riscv64                  |
 | Entrypoint       | Default or custom                         |
 
+Name the subcontainers the package runs and what each is for. An agent needs them to attach to a running install (`start-cli package attach <id> -n <subcontainer-name>`), and it cannot introspect them.
+
 ### Volume and Data Layout
+
+Where the service's data lives.
 
 | What to Document | Example                              |
 | ---------------- | ------------------------------------ |
@@ -137,91 +152,117 @@ Adjust the `src` to match the actual icon filename (e.g., `icon.png` if the icon
 | StartOS files    | `store.json` for persistent settings |
 | Database         | Embedded SQLite vs external          |
 
-### Installation and First-Run Flow
+### File Models
 
-Document if your package:
+Which configuration files the package owns, how they get their values, and what happens to an edit the user makes by hand.
 
-- Skips an upstream setup wizard
-- Auto-generates credentials
-- Pre-configures settings
-- Creates tasks for initial setup
+For each model: the file it maps to and its format, how it is seeded (merged defaults at install, generated from a resolved dependency address, written by an action), what rewrites it afterwards and when, and whether a hand edit survives.
 
-### Configuration Management
+**Ownership is the part that generates support tickets.** "Why did my setting revert" is almost always a value the package re-asserts on every start. Say plainly which keys are re-asserted, which are seeded once and then belong to the user, and whether an action exists to hand a key back.
 
-Use a table to clarify the division of responsibility:
+Note `store.json` if the package keeps one — it holds StartOS-side state rather than upstream configuration, and it is usually what makes an ownership decision survive a restart.
 
-| StartOS-Managed                          | Upstream-Managed                              |
-| ---------------------------------------- | --------------------------------------------- |
-| Settings controlled via actions/env vars | Settings configurable via app's own UI/config |
-
-### Actions
-
-For each action, document:
-
-- **Name**: What users see in the StartOS UI
-- **Purpose**: What it does
-- **Visibility**: Visible, hidden, or conditional
-- **Availability**: Any status, only running, only stopped
-- **Inputs**: What users provide
-- **Outputs**: Credentials, confirmation, etc.
-
-### Network Interfaces
-
-For each interface:
-
-- Port number
-- Protocol (HTTP, SSH, etc.)
-- Purpose (UI, API, etc.)
-- Access methods (LAN IP, .local, .onion, custom domains)
-
-### Backups
-
-- What volumes/data are included
-- Data NOT backed up (if any)
-- Restore behavior
-
-### Health Checks
-
-- Endpoint or method
-- Grace period
-- Success/failure messages
+Where a setting is delivered by environment variable instead of a file, say so and say why: a variable the application re-reads on every launch behaves nothing like one it consumes only on the launch that finds its value unset, and treating the second kind as authoritative is a common packaging bug. A configuration file the package writes without a model belongs in this section too.
 
 ### Dependencies
 
-For each dependency, document:
+What this service needs from other services.
 
-- **Service name** and whether it is required or optional
-- **Health checks** that must pass before this service starts
-- **Mounted volumes** — if a dependency volume is mounted, note the mount point and whether it is read-only
-- **Purpose** — why this dependency is needed (e.g. "blockchain data via RPC", "Electrum lookups")
+For each dependency: its name, whether it is required or optional, the health checks that must pass before this service starts, any mounted volume (with mount point and read-only status), and why it is needed.
 
-Do **not** restate the version range. `setupDependencies()` declares it, and a copy in the README goes stale the first time you raise the floor — point the reader at that code if the minimum is worth mentioning at all.
+Do **not** restate the version range — `setupDependencies()` declares it, and a copy goes stale the first time you raise the floor. If the service has no dependencies, state "None" explicitly.
 
-If the service has no dependencies, state "None" explicitly.
+### Network Access and Interfaces
 
-### Limitations
+What the service exposes. For each interface: its id, type (`ui`/`api`/`p2p`), port, protocol, and purpose.
 
-Be explicit about:
+Describe what the interface serves, not how StartOS interface controls work — LAN/Tor/domain addressing is a platform feature documented once, not per package.
 
-- Features that do not work or work differently
-- Unavailable configuration options
-- Unsupported dependencies
-- Version-specific limitations
+### Installation and First-Run Flow
 
-### AI Quick Reference
+How setup differs from upstream. Document if your package skips a setup wizard, auto-generates credentials, pre-configures settings, boots the service during init, or creates tasks for initial setup — and any ordering constraint the user or an agent must respect.
 
-End every README with a YAML block for machine parsing. This block should contain the package ID, upstream version, image, architectures, volumes, ports, dependencies, managed environment variables, and action IDs.
+### Actions
 
-## Pre-Publish Checklist
+What can be done to the service, and when.
+
+The OS supplies each action's id, name, description, warning, visibility, `allowedStatuses` and input schema. Do not restate them. For each **user-facing** action, document what the metadata cannot carry:
+
+- **When to run it** — the situation that calls for it.
+- **What it changes** — which files, volumes, or application state.
+- **Cost** — roughly how long it takes, and whether it interrupts service.
+- **Repeat safety** — idempotent, a no-op while already running, or destructive on a second run.
+- **What happens next** — restarts, where to watch progress.
+- **Outputs** — credentials or values the caller receives.
+
+Flag actions with `visibility: 'hidden'` as not user-facing, so a support agent never tells a user to run one. Where an action exists to satisfy a task, leave the trigger and clearing rules to [Tasks](#tasks) rather than describing them twice.
+
+### Tasks
+
+What the service asks the user to do, and what makes the prompt go away.
+
+StartOS reports which tasks are _currently_ raised, but the condition that raises one and the thing that clears it are your package's logic and cannot be introspected. This is the section that answers "my service won't start and I can't press anything" — a `critical` task blocks startup and suspends the ordinary controls, which is among the most common support reports a package generates.
+
+For each task the package creates:
+
+- **What raises it** — the condition, not the `reason` string the UI already shows.
+- **Severity** — `critical` (blocks the service from starting), `important` (prominent, non-blocking), or `optional`.
+- **What clears it** — running the target action, a configuration reaching an acceptable state, or the underlying condition resolving on its own. Say whether it can return.
+- **Where it appears** — for a dependency task (`createTask`), name the dependency and its action. The user sees that prompt on _another_ service's page, and nothing there explains which package asked for it.
+
+Omit the section if the package raises no tasks.
+
+### Health Checks
+
+How to tell whether the service is working.
+
+For each check: what it probes, its grace period, and — most importantly — **what a failure means and what to do about it.** "Not ready" is a state an agent can already read; the diagnostic value is in what distinguishes a slow start from a real fault.
+
+### Backups and Restore
+
+What survives a backup, and what a restored instance has to rebuild.
+
+Lead with the **strategy**, because it decides what the guarantee actually is: volumes copied wholesale (`ofVolumes`), a database dumped and replayed rather than copied (`withPgDump` / `withMysqlDump`), or a mix. A volume that is dumped is not a volume that is backed up — its files are never captured, and restore reconstructs it by starting the engine and replaying the dump. Saying only that it is "included" tells a reader the opposite of what happens.
+
+Then: what is deliberately excluded and why (a cache or an index that rebuilds is a feature, not a gap), and what a restored instance still has to do before it is usable — a resync from a dependency, a credential to re-enter, a dependency that must be present first.
+
+### Limitations and Differences
+
+A numbered list of what does not work, works differently, or is unavailable compared to upstream — including unsupported dependencies and deliberately disabled features.
+
+### Troubleshooting
+
+Symptom → check → action, for the failure modes this package actually has. This is the section a support agent and an administering assistant reach for first, and the one no amount of ABI introspection can replace.
+
+Write each entry as an observable symptom (what the user sees, or what a health check reports), the check that confirms the cause, and the resolution — an action to run, a dependency to install, a value to correct. Cover the failures you have actually seen: dependency misconfiguration, an interrupted upgrade, an exhausted resource, a credential the user rotated out from under the service.
+
+Omit the section only if the package genuinely has no known failure modes beyond upstream's.
+
+### Quick Reference for AI Consumers
+
+A YAML block summarizing the package's operable surface — the fields in the template above. It exists so an agent can establish what the package _is_ in one cheap read before deciding which prose section to fetch.
+
+Its keys mirror the sections, in section order, so it doubles as an index. A section earns a key only when its content is a flat enumeration; where the meaningful fact is a behavior rather than a list, the section stays narrative and gets no key — installation, backups, limitations and troubleshooting are all in that group. A key that flattens a behavior into a list is worse than no key, because it reads as precise: `backups: {included, excluded}` would file a dumped database under "included" and tell a reader their volume is captured when it never is.
+
+Include no versions of any kind: not `upstream_version`, not image tags, not dependency version constraints.
+
+## Pre-publish checklist
 
 - [ ] Centered logo header at the top of the file
-- [ ] Upstream docs linked at the top
+- [ ] Upstream-behavior scoping note at the top; no upstream documentation links (those live in `instructions.md`)
+- [ ] Nothing restated from `instructions.md`
+- [ ] Headings match the required set, verbatim and in order
+- [ ] Every H2 opens with one or two sentences of prose before any table or subsection
 - [ ] All volumes and mount points documented
-- [ ] All actions documented with their purpose
-- [ ] All StartOS-managed settings/env vars listed
+- [ ] Subcontainer names documented
+- [ ] Every user-facing action covers when to run it, what it changes, its cost, and its repeat safety — without restating the OS metadata
+- [ ] Hidden actions flagged as not user-facing
+- [ ] Every task documented with what raises it, its severity, and what clears it — or the section omitted because the package raises none
+- [ ] Health-check failures explained, not just listed
+- [ ] Troubleshooting section covers the package's real failure modes
 - [ ] All dependencies documented (or "None" stated explicitly)
+- [ ] Every file model documented — how it is seeded, what rewrites it, and whether a hand edit survives
 - [ ] All limitations listed explicitly
-- [ ] "What Is Unchanged" section included
-- [ ] YAML quick reference block for AI consumers
-- [ ] No specific version numbers anywhere (image tags, upstream version, dep version constraints — all stale the moment you bump)
-- [ ] Tested that documented features match actual behavior
+- [ ] YAML quick reference block present and version-free
+- [ ] No version numbers anywhere — upstream version, image tags, dependency ranges
+- [ ] Documented features match actual behavior, verified against a running install
