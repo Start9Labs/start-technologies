@@ -40,6 +40,16 @@ file tracks notable changes since the move to the monorepo.
 
 - Trim whitespace on form inputs.
 
+- **Services that run their own containers or a VPN can reach the devices they
+  were granted.** A service opting into `userspaceFilesystems` or
+  `virtualNetworking` is handed `/dev/fuse` and `/dev/net/tun` inside its
+  container. Those nodes are now created with the same permissions the host
+  gives them, so a service running as a non-root user can open them. Previously
+  the permissions were left to whatever StartOS's own file-creation mask
+  produced, and only the container's boot-time device pass — which races with
+  the grant — widened them; on the losing side of that race a CI runner's jobs
+  failed to start with `Failed to open() /dev/net/tun: Permission denied`.
+
 - **Your server answers to its own addresses and no others.** A name that
   resolved to your server but was never configured on it — a domain you pointed
   at its LAN IP, or its `.local` name typed without the `.local` — was served
