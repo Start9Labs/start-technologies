@@ -94,6 +94,12 @@ elif [ "${IB_TARGET_ARCH}" = "riscv64" ]; then
 fi
 
 
+BOOTAPPEND_LIVE="boot=live noautologin console=tty0"
+if [ "${IB_TARGET_PLATFORM}" = "aarch64-nvidia" ]; then
+	# Same GB10 hang the installed system guards against — see debian/postinst.
+	BOOTAPPEND_LIVE="$BOOTAPPEND_LIVE initcall_blacklist=tegra234_cbb_init"
+fi
+
 cat > /etc/wgetrc << EOF
 retry_connrefused = on
 tries = 100
@@ -104,7 +110,7 @@ lb config \
 	--iso-preparer "START9 LABS; HTTPS://START9.COM" \
 	--iso-publisher "START9 LABS; HTTPS://START9.COM" \
 	--backports true \
-	--bootappend-live "boot=live noautologin console=tty0" \
+	--bootappend-live "$BOOTAPPEND_LIVE" \
 	--bootloaders $BOOTLOADERS \
 	--cache false \
 	--mirror-bootstrap "https://deb.debian.org/debian/" \
