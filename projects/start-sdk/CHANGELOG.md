@@ -38,6 +38,41 @@
   into a position whose type it does not match. Passing either positionally is
   now a compile error, so anything that needs updating says so at build time
 
+- **Service READMEs now have a fixed section contract, and the scaffolded
+  template matches it.** A package README is the only technical file an AI
+  support agent is given, and the file an assistant administering a server
+  reads to operate a service — so its headings are an addressing scheme that
+  lets an agent fetch one section instead of a whole file, not a style choice.
+  A renamed section does not fail loudly; it silently degrades retrieval to
+  loading everything. The set is now fixed and ordered in four groups, gaining
+  `File Models` (replacing `Configuration Management`, which named an
+  abstraction rather than the config files it covers), `Tasks`, and
+  `Troubleshooting`, and losing `Contributing` and `What Is Unchanged from
+Upstream` — the first is boilerplate identical in every package and already
+  in `AGENTS.md`, the second an unbounded list that inverts the scoping note
+  at the top of the file, which already says everything unmentioned behaves as
+  upstream. Sections must not restate `instructions.md` (upstream
+  documentation links belong only in its `## Documentation` section, which is
+  parsed) or re-encode what StartOS already exposes — action ids,
+  descriptions, warnings, `allowedStatuses`, input schemas, health-check ids.
+  Document instead what the ABI cannot carry: when to run a thing, what it
+  costs, whether it is safe to repeat, what it changes, and which symptom it
+  resolves. See
+  [Writing Service READMEs](https://docs.start9.com/packaging/writing-readmes.html)
+
+- **A package's `AGENTS.md` is now scoped to what only a contributor needs.** It
+  had drifted into a third description of the package, restating whole README
+  sections nearly verbatim — and it is the one documentation file no support or
+  administering agent ever reads, so anything support-relevant that landed there
+  was invisible exactly where it was needed. It now carries only what the other
+  two files cannot: repo mechanics, prohibitions worth stating as imperatives,
+  extension points, naming traps, and build invocations specific to the package.
+  Most packages want one to four bullets; a simple one wants none. The scaffolded
+  template accordingly no longer ships an "Inspecting a running install" section
+  — `start-cli package attach`'s `-n`-takes-a-name versus `-s`-takes-a-Guid trap
+  is guide material rather than per-package boilerplate, and now lives in
+  [Development Workflow](https://docs.start9.com/packaging/workflow.html)
+
 ### Added
 
 - **`addDaemon()` / `addOneshot()` accept a `uses` value that
