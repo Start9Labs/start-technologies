@@ -159,7 +159,17 @@ jobs:
 
 `AGENTS.md` is the package's agent-context file. Generic packaging knowledge — SDK patterns, the disciplines on the [Development Workflow](./workflow.md) page, the rules throughout this guide — lives in one canonical place: the packaging guide, **not** copied into each package repo where 40+ duplicates would drift out of sync. `AGENTS.md` carries only what's specific to _this_ repo.
 
-Keep it short and repo-specific: state that this is a StartOS service package, point at the repo's `TODO.md` as the worklist, give the doc-sync rule (keep `README.md` and `instructions.md` in step with every change), and capture any package-specific gotchas — in short, how to work in _this_ repo. Do **not** restate generic guide content or turn it into a web-fetch driver (don't instruct the agent to pull guide pages over the web up front). Developers work with the guide checked out locally alongside the package (see [Environment Setup](./environment-setup.md)); the local-first navigation — read `start-technologies/projects/start-sdk/docs/src/` directly, fall back to <https://docs.start9.com/packaging> only when no local copy exists — is set up once by the workspace-level `CLAUDE.md`, not repeated per repo.
+Keep it short and repo-specific: state that this is a StartOS service package, point at the repo's `TODO.md` as the worklist, give the doc-sync rule (keep `README.md` and `instructions.md` in step with every change), and capture any package-specific gotchas — in short, how to work in _this_ repo. Do **not** restate generic guide content or turn it into a web-fetch driver (don't instruct the agent to pull guide pages over the web up front).
+
+It is also the one package document with a single reader, so it must not restate `README.md` or `instructions.md` either — anyone changing the package has both. That leaves it carrying only what has no home in them:
+
+- **Repo mechanics** — parallel version branches, a worktree layout, a vendored tree.
+- **Prohibitions** — a change that looks right and is not, with the one clause that says why. Inline these rather than linking: an imperative behind a pointer is a suggestion.
+- **Extension points** — where the next backend, interface, or migration gets added.
+- **Naming traps** — a package id that differs from the repo directory, for instance.
+- **Build or test invocations** specific to this package.
+
+Most packages need one to four bullets here; a simple one needs none. Explaining _how the package works_ is `README.md`'s job — see [Writing READMEs — Who reads this file](./writing-readmes.md#who-reads-this-file) for who reads which file. Developers work with the guide checked out locally alongside the package (see [Environment Setup](./environment-setup.md)); the local-first navigation — read `start-technologies/projects/start-sdk/docs/src/` directly, fall back to <https://docs.start9.com/packaging> only when no local copy exists — is set up once by the workspace-level `CLAUDE.md`, not repeated per repo.
 
 `CLAUDE.md` is a one-line import of that same file:
 
