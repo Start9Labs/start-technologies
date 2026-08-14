@@ -16,21 +16,26 @@ Include:
 - The git hash, if you tested a build from `master`. Every `master` build of a product publishes under the same version number, so the hash is the only thing that identifies it. StartOS shows it in the web UI under the server's About dialog, next to the version.
 - What an attacker gains, and what access they need to start.
 - Steps to reproduce, ideally from a clean install.
-- A proof of concept, if you have one. It saves everyone time. If you would rather keep an exploit off email, the GitHub advisory form holds the report privately between you and the maintainers.
+- A proof of concept, if you have one. It saves everyone time. To keep an exploit out of plaintext mail, encrypt it to the key below, or use the GitHub advisory form.
 - Whether you want credit in the release notes, and the name to use.
 
 Machine-readable contact details are at <https://start9.com/.well-known/security.txt>, per RFC 9116.
 
 ### Our OpenPGP key
 
-`security@start9.com` shares an OpenPGP key with the rest of Start9:
+Encrypt your report to this key, or use it to check a Start9 signature:
 
 ```
 Start9 <security@start9.com>
 5456 DBFF 1B9D F905 041F  A776 5259 ADFC 2D63 C217
 ```
 
-It is in this repository as [`apt/start9.gpg`](apt/start9.gpg), and published at <https://start9.com/start9.gpg> and on <https://keys.openpgp.org>. It is the key that signs the `stable` suite of Start9's Debian repository ([`apt/start9.list`](apt/start9.list)), so a machine that already installs Start9 packages carries a copy you can compare the fingerprint against. Use it to check a Start9 signature. To send a report confidentially, use the GitHub advisory form above.
+```
+gpg --fetch-keys https://start9.com/start9.gpg
+gpg --encrypt --armor --recipient security@start9.com report.txt
+```
+
+The key is also in this repository as [`apt/start9.gpg`](apt/start9.gpg) and on <https://keys.openpgp.org>. The same key signs the `stable` suite of Start9's Debian repository ([`apt/start9.list`](apt/start9.list)), so a machine that already installs Start9 packages carries a copy you can compare the fingerprint against.
 
 ## What happens next
 
