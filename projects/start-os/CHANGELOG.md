@@ -70,17 +70,21 @@ file tracks notable changes since the move to the monorepo.
   [Initial Setup](https://docs.start9.com/start-os/initial-setup.html).
 
 - **The 64-bit ARM NVIDIA image boots on NVIDIA GB10 hardware again, such as the
-  DGX Spark, and is considerably smaller.** Two separate faults each stopped the
-  machine on the last line the bootloader printed, so fixing either one alone
-  changed nothing. These images drive the GPU with NVIDIA's own driver and turn
-  nouveau off, yet were still built with graphics firmware they cannot use —
-  nouveau's, for every chip it supports, along with an older driver series' — and
-  152 MB of it sat inside the initramfs that the bootloader must read in full
-  before the kernel starts. Separately, a Tegra fabric driver that recent kernels
-  build in claims one of the GB10's internal buses and reads a protected register
-  on it, stopping the machine during hardware detection, before it can display
-  anything. The images now carry only the graphics firmware they can use, and
-  switch that driver off — which is what NVIDIA's own OS does on this hardware.
+  DGX Spark, its GPU works, and the image is considerably smaller.** Three
+  separate faults were involved, two of which each stopped the machine on the
+  last line the bootloader printed — so fixing either one alone changed nothing.
+  These images drive the GPU with NVIDIA's own driver and turn nouveau off, yet
+  were still built with graphics firmware they cannot use — nouveau's, for every
+  chip it supports, along with an older driver series' — and 152 MB of it sat
+  inside the initramfs that the bootloader must read in full before the kernel
+  starts. Separately, a Tegra fabric driver that recent kernels build in claims
+  one of the GB10's internal buses and reads a protected register on it, stopping
+  the machine during hardware detection before it can display anything. Finally,
+  the image built NVIDIA's driver in the flavour that does not support this
+  generation of GPU, so the driver found the card but could never bring it up.
+  The images now carry only the graphics firmware they can use, switch that
+  driver off, and build the flavour NVIDIA supports here — which is what NVIDIA's
+  own operating system does on the same hardware.
 
 - **Your server answers to its own addresses and no others.** A name that
   resolved to your server but was never configured on it — a domain you pointed

@@ -94,6 +94,14 @@ elif [ "${IB_TARGET_ARCH}" = "riscv64" ]; then
 fi
 
 
+# Blackwell is open-only from 580.173.02, and on GB10 the proprietary modules
+# enumerate the GPU but never finish RmInitAdapter. aarch64 has no pre-Turing NVIDIA
+# hardware to lose by this; x86_64 does, so it keeps the proprietary flavour.
+NVIDIA_MODULE_TYPE=proprietary
+if [ "${IB_TARGET_PLATFORM}" = "aarch64-nvidia" ]; then
+	NVIDIA_MODULE_TYPE=open
+fi
+
 BOOTAPPEND_LIVE="boot=live noautologin console=tty0"
 if [ "${IB_TARGET_PLATFORM}" = "aarch64-nvidia" ]; then
 	# Same GB10 hang the installed system guards against — see debian/postinst.
