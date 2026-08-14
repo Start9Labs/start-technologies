@@ -12,8 +12,23 @@ admin credentials", "expose a web UI") to the constructs, the reference pages, a
 package to copy. Find the recipe before you read this package's neighbours: a package you reach by
 grepping may be non-conformant, and the recipe outranks it.
 
-Work this package's `TODO.md` from top to bottom. Keep `README.md` (architecture, for developers and LLMs) and `instructions.md` (end-user docs) in sync with your changes.
+Work this package's `TODO.md` from top to bottom. Keep `README.md` (the package's technical reference — the only one an AI support or administering agent reads) and `instructions.md` (end-user docs) in sync with your changes.
 
-## Inspecting a running install
+## This repo
 
-To run a command inside a service's container (read its generated config, grep app logs), use `start-cli package attach <id> -n <subcontainer-name> -- <cmd>`. Select the subcontainer by **name** with `-n` (the name passed to `SubContainer.of` in `main.ts`, e.g. `-n web`) or by image with `-i`. Note: `-s/--subcontainer` matches the internal **Guid**, not the name, so passing a name to `-s` fails with "no matching subcontainers". A service with more than one subcontainer requires a selector; with none given, `attach` falls back to an interactive picker that panics in a non-TTY shell — that's the missing selector, not a TTY requirement.
+<!--
+TODO: only what someone *changing* this package needs and cannot get from
+README.md or instructions.md. Those two are the richer sources on how the package
+works and who it serves — restating them here creates a third copy that drifts.
+
+What has no home in them, and belongs here:
+
+  - repo mechanics — parallel version branches, a worktree layout, a vendored tree
+  - prohibitions — a change that looks right and is not, plus the one clause saying why
+  - extension points — where the next backend, interface, or migration gets added
+  - naming traps — e.g. a package id that differs from the repo directory name
+  - build or test invocations specific to this package
+
+Most packages need one to four bullets. A simple one needs none — delete the
+section rather than padding it. Remove this comment when you write yours.
+-->
