@@ -10,26 +10,13 @@
 > `instructions.md` for links.
 
 <!--
-TODO: Write this README per the packaging guide:
+TODO: fill in the sections below, then delete these comments.
+
+Read Writing Service READMEs first — it is the authority on who reads this file,
+why the heading set is fixed and ordered, and what belongs in each section:
+
   ../src/writing-readmes.md
-
-It documents how the StartOS package differs from upstream. Its readers are an AI
-support agent, an AI assistant administering the server, and developers — end users
-get instructions.md instead, and everyone who reads this file has that one too, so
-never restate it.
-
-The headings below are a fixed set, in this order: they are how an agent fetches part
-of this file without loading all of it. Don't rename or reorder them. They run in four
-groups — what the package is made of, how it behaves, what to expect when it doesn't,
-then meta. Delete a section only where the guide says you may (Tasks and
-Troubleshooting, if the package has neither). Open every section with a sentence or two
-of prose before any table — that text becomes the section's summary in the generated
-index.
-
-Don't restate what StartOS already exposes (action ids, descriptions, allowed
-statuses, input schemas): document when to run a thing, what it costs, whether it is
-safe to repeat, and what it changes. No version numbers or image tags anywhere — the
-manifest is the source of truth. Remove these comments when you're done.
+  https://docs.start9.com/packaging/writing-readmes.html
 -->
 
 ## Table of Contents

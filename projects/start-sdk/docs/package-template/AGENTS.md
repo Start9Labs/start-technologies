@@ -17,18 +17,13 @@ Work this package's `TODO.md` from top to bottom. Keep `README.md` (the package'
 ## This repo
 
 <!--
-TODO: only what someone *changing* this package needs and cannot get from
-README.md or instructions.md. Those two are the richer sources on how the package
-works and who it serves — restating them here creates a third copy that drifts.
+TODO: write the bullets for this package, then delete this comment.
 
-What has no home in them, and belongs here:
+Only what someone *changing* this package needs and cannot get from README.md or
+instructions.md. What belongs here, and what does not, is set out under
+"AGENTS.md and CLAUDE.md":
 
-  - repo mechanics — parallel version branches, a worktree layout, a vendored tree
-  - prohibitions — a change that looks right and is not, plus the one clause saying why
-  - extension points — where the next backend, interface, or migration gets added
-  - naming traps — e.g. a package id that differs from the repo directory name
-  - build or test invocations specific to this package
+  ../start-technologies/projects/start-sdk/docs/src/project-structure.md
 
-Most packages need one to four bullets. A simple one needs none — delete the
-section rather than padding it. Remove this comment when you write yours.
+A simple package needs none of this — delete the section rather than padding it.
 -->

@@ -18,7 +18,7 @@ Two consequences:
 - **The README is the only technical file a support agent gets.** It reads this and `instructions.md` from your repository and nothing else — not `AGENTS.md`, not your source. If a fact is needed to diagnose a user's problem, it belongs here.
 - **Where readers conflict, the operable surface wins.** An agent wants predictable structure it can address; a developer wants prose. Both are served by fixed headings with real writing underneath — not by prose that wanders across section boundaries.
 
-`instructions.md` is for the user (see [Writing Service Instructions](writing-instructions.md)); `AGENTS.md` is for whoever changes the package, and repeats nothing this file says.
+`instructions.md` is for the user (see [Writing Service Instructions](writing-instructions.md)); `AGENTS.md` is for whoever changes the package, and repeats nothing this file says (see [Project Structure — AGENTS.md](project-structure.md#agentsmd-and-claudemd)).
 
 ## Guiding principles
 
