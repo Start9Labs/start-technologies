@@ -75,6 +75,12 @@ Automatic forwards survive router reboots, so a self-configured device stays rea
 
 Ports the router answers on itself are protected the same way. If you have [Remote Access](settings.md#remote-access) turned on, or an [inbound VPN](inbound-vpn.md) reachable from the Internet, a device cannot take those ports over — requests for them are refused, so automatic forwarding can never cost you access to your own router. (Publishing such a port manually asks you to confirm instead — a device can't be asked, but you can.)
 
+### Hostname routes (shared ports)
+
+A device can also ask for a **hostname route** instead of a whole port: the router inspects each incoming TLS connection's requested hostname (SNI) and delivers it to whichever device registered that hostname, so several devices — or several services on one StartOS server — can share a single external port such as 443. StartOS servers use this automatically when you give services on a shared port their own domains.
+
+Hostname routes appear in the same **Automatic** section with `SNI` in the Protocol column and the hostname shown alongside. They follow the same rules as other automatic forwards — per-device permission, the device renews them, they expire on their own — with two differences: a shared port is claimed whole (an ordinary forward on that port is refused while hostname routes hold it, and publishing it manually asks you to confirm), and hostname routes do not survive a router restart — the device simply re-registers them within a few minutes, so no action is needed.
+
 > **A note on trust.** The PCP protocol runs over plain UDP, which carries no proof of who sent a request. The router verifies that each request actually arrives from the network the requesting device is on, so a device on one network can never open forwards on behalf of a device on another. Within a single network, though, automatic forwarding trusts the devices sharing it — exactly as UPnP and PCP do on every router, which is why it is off by default. If you run devices you don't fully trust, keep them on their own [Security Profile](security-profiles.md) so they cannot act for the devices you do.
 
 ## Endpoints

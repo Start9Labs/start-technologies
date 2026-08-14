@@ -33,11 +33,69 @@ use crate::prelude::*;
 use crate::util::Invoke;
 
 /// Firewall mark for transparent-egress reply diversion. Outside the gateway's
-/// per-interface `1000 + ifindex` mark space and its priority-50 rule.
+/// per-interface `1000 + ifindex` mark space and its priority-50 rule. The mark
+/// value is fixed across hosts (the StartWRT fw4 include hardcodes it); only
+/// how it is matched varies ([`DivertConfig::masked_fwmark`]).
 pub const DIVERT_MARK: u32 = 0x0054_0001;
-/// Dedicated routing table holding the local-delivery default for diverted
-/// replies. Outside the gateway's `1000 + ifindex` table space.
+/// Default routing table holding the local-delivery default for diverted
+/// replies. Outside the gateway's `1000 + ifindex` table space. Overridable via
+/// [`DivertConfig::route_table`] where the number collides with a host's own
+/// table namespace (StartWRT keys per-profile tables by VLAN tag, 1-4094).
 pub const DIVERT_TABLE: u32 = 1344;
+
+/// Host-specific parameters for the reply-path divert. The defaults are the
+/// StartOS/StartTunnel values; a host with a different routing/firewall layout
+/// (StartWRT) installs its own via [`set_divert_config`] at startup.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DivertConfig {
+    /// Routing table for the local-delivery default route.
+    pub route_table: u32,
+    /// Priority of the fwmark policy rule.
+    pub rule_priority: u32,
+    /// Match the fwmark with a mask (`mark/mark`) instead of exactly — required
+    /// on hosts whose mark rule sets the divert bits with `or` (preserving
+    /// unrelated mark bits, e.g. StartWRT's `0x80` DNAT-return bit), so a
+    /// diverted packet's mark may carry more than [`DIVERT_MARK`] alone.
+    pub masked_fwmark: bool,
+    /// Whether [`ensure_divert_infra`] owns the nft mark rule. `false` on a
+    /// host whose firewall framework ships the rule declaratively (StartWRT's
+    /// fw4 auto-included `/etc/nftables.d` file), leaving only the iproute2
+    /// half managed here.
+    pub manage_nft: bool,
+}
+
+impl Default for DivertConfig {
+    fn default() -> Self {
+        DivertConfig {
+            route_table: DIVERT_TABLE,
+            rule_priority: 49,
+            masked_fwmark: false,
+            manage_nft: true,
+        }
+    }
+}
+
+static DIVERT_CONFIG: std::sync::OnceLock<DivertConfig> = std::sync::OnceLock::new();
+
+/// Install host-specific divert parameters. Call before anything runs the SNI
+/// demux — the first [`ensure_divert_infra`] latches whatever is set at that
+/// point. `Err` returns the rejected value when a config was already installed.
+pub fn set_divert_config(cfg: DivertConfig) -> Result<(), DivertConfig> {
+    DIVERT_CONFIG.set(cfg)
+}
+
+fn divert_config() -> &'static DivertConfig {
+    DIVERT_CONFIG.get_or_init(DivertConfig::default)
+}
+
+/// The fwmark match for the divert policy rule under `cfg`.
+fn fwmark_arg(cfg: &DivertConfig) -> String {
+    if cfg.masked_fwmark {
+        format!("{DIVERT_MARK:#x}/{DIVERT_MARK:#x}")
+    } else {
+        format!("{DIVERT_MARK:#x}")
+    }
+}
 
 /// `mangle_prerouting` rule that marks inbound packets belonging to a local
 /// `IP_TRANSPARENT` (SNI-demux) socket — the replies to a source-preserving
@@ -140,8 +198,11 @@ static DIVERT_ASSERT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(())
 /// to be (re-)added, so periodic callers can surface external flushes.
 pub async fn ensure_divert_infra() -> Result<bool, Error> {
     let _guard = DIVERT_ASSERT.lock().await;
+    let cfg = divert_config();
     let mut repaired = false;
-    let table = DIVERT_TABLE.to_string();
+    let table = cfg.route_table.to_string();
+    let priority = cfg.rule_priority.to_string();
+    let fwmark = fwmark_arg(cfg);
 
     // Both families, and independently: `ip` and `ip -6` keep separate rule and
     // route tables, so the same DIVERT_TABLE/DIVERT_MARK numbers serve each.
@@ -163,8 +224,9 @@ pub async fn ensure_divert_infra() -> Result<bool, Error> {
             .invoke(ErrorKind::Network)
             .await?;
 
-        // Policy rule at priority 49 — above the gateway's per-interface symmetric
-        // -return rules at 50 — so diverted replies win.
+        // Policy rule at the configured priority (default 49 — above the
+        // gateway's per-interface symmetric-return rules at 50, and below
+        // StartWRT's 100/150/200 ladder) so diverted replies win.
         let rules = Command::new("ip")
             .args([flag, "rule", "list"])
             .invoke(ErrorKind::Network)
@@ -173,15 +235,7 @@ pub async fn ensure_divert_infra() -> Result<bool, Error> {
         if !String::from_utf8_lossy(&rules).contains(&format!("lookup {table}")) {
             Command::new("ip")
                 .args([
-                    flag,
-                    "rule",
-                    "add",
-                    "fwmark",
-                    &format!("{DIVERT_MARK:#x}"),
-                    "lookup",
-                    &table,
-                    "priority",
-                    "49",
+                    flag, "rule", "add", "fwmark", &fwmark, "lookup", &table, "priority", &priority,
                 ])
                 .invoke(ErrorKind::Network)
                 .await?;
@@ -191,6 +245,10 @@ pub async fn ensure_divert_infra() -> Result<bool, Error> {
         // nft `sni-divert` mark rule. The gateway reconcile owns (and re-adds) it on
         // hosts that run it; install it directly where nothing else does (the tunnel),
         // skipping if already present so we never duplicate or fight the reconcile.
+        // A host whose firewall framework ships the rule itself opts out entirely.
+        if !cfg.manage_nft {
+            continue;
+        }
         let chain = Command::new("nft")
             .args(["list", "chain", family, "startos", "mangle_prerouting"])
             .invoke(ErrorKind::Network)
@@ -227,4 +285,27 @@ pub async fn ensure_divert_infra() -> Result<bool, Error> {
     // routable via its own ingress interface, so even strict RPF (1) accepts it
     // (verified in a netns harness under both strict and loose).
     Ok(repaired)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_matches_legacy_behavior() {
+        let cfg = DivertConfig::default();
+        assert_eq!(cfg.route_table, DIVERT_TABLE);
+        assert_eq!(cfg.rule_priority, 49);
+        assert_eq!(fwmark_arg(&cfg), format!("{DIVERT_MARK:#x}"));
+        assert!(cfg.manage_nft);
+    }
+
+    #[test]
+    fn masked_fwmark_matches_or_set_marks() {
+        let cfg = DivertConfig {
+            masked_fwmark: true,
+            ..DivertConfig::default()
+        };
+        assert_eq!(fwmark_arg(&cfg), "0x540001/0x540001");
+    }
 }

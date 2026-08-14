@@ -33,6 +33,9 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
         >
           {{ 'Public port' | i18n }}
         </th>
+        <th tuiTh [sorter]="'hostname' | tuiSorter" [style.min-width.rem]="10">
+          {{ 'Hostname' | i18n }}
+        </th>
         <th tuiTh [sorter]="'label' | tuiSorter" [style.min-width.rem]="8">
           {{ 'Protocol' | i18n }}
         </th>
@@ -54,6 +57,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
           </td>
           <td tuiTd>{{ item.ports }}</td>
           <td tuiTd>{{ item.publicPorts }}</td>
+          <td tuiTd>{{ item.hostname || '—' }}</td>
           <td tuiTd>{{ item.label }}</td>
           <td tuiTd>{{ expiry(item) }}</td>
         </tr>

@@ -80,6 +80,11 @@ pub struct FirewallRule {
     /// Published-port metadata: device MAC
     #[uci(default)]
     pub _pp_mac: Option<String>,
+    /// Auto port-control metadata: marks a rule owned by the port-control
+    /// server ("SNI" on the WAN-input ACCEPT admitting an SNI-demux listener).
+    /// Mirrors [`FirewallRedirect::_apf_label`].
+    #[uci(default)]
+    pub _apf_label: Option<String>,
 }
 
 #[derive(Debug, TypedSection, Default)]

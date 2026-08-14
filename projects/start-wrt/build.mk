@@ -105,7 +105,9 @@ $(STARTWRT_OPENWRT)/.config: $(STARTWRT_DIR)/build/openwrt.diffconfig $(STARTWRT
 # Stage the binary + UCI configs + init scripts into openwrt/files/.
 .PHONY: start-wrt-stage
 start-wrt-stage: $(STARTWRT_OPENWRT)/files/.staged
-$(STARTWRT_OPENWRT)/files/.staged: $(STARTWRT_BIN) $(call ls-files, $(STARTWRT_DIR)/backend/firstboot_config) $(STARTWRT_DIR)/build/stage-files.sh
+$(STARTWRT_OPENWRT)/files/.staged: $(STARTWRT_BIN) $(call ls-files, $(STARTWRT_DIR)/backend/firstboot_config) \
+		$(call ls-files, $(STARTWRT_DIR)/backend/hotplug) $(call ls-files, $(STARTWRT_DIR)/backend/nftables) \
+		$(STARTWRT_DIR)/build/stage-files.sh
 	ARCH=$(STARTWRT_ARCH) RUST_ARCH=$(STARTWRT_RUST_ARCH) PROFILE=$(PROFILE) ./$(STARTWRT_DIR)/build/stage-files.sh
 	touch $(STARTWRT_OPENWRT)/files/.staged
 

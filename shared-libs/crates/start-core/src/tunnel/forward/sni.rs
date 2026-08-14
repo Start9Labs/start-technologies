@@ -68,6 +68,17 @@ impl PortBindings {
     }
 }
 
+/// One live hostname route, as reported by [`SniDemux::snapshot`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SniRoute {
+    pub ext_ip: Ipv4Addr,
+    pub ext_port: u16,
+    pub hostname: String,
+    pub target: SocketAddrV4,
+    /// Seconds until the binding expires; `None` for a permanent binding.
+    pub remaining_secs: Option<u64>,
+}
+
 /// Called `(ext_port, active)` when a port's listener starts/stops, so a gateway
 /// can open/close inbound access (e.g. a StartWRT firewall ACCEPT rule).
 type OnChange = Box<dyn Fn(u16, bool) + Send + Sync>;
@@ -223,6 +234,69 @@ impl SniDemux {
             }
         });
         self.reap_if_empty(key);
+    }
+
+    /// The live hostname routes, for gateway UIs (StartWRT's Automatic table).
+    /// Fallbacks are not reported — they are port-level, not hostname routes.
+    pub fn snapshot(&self) -> Vec<SniRoute> {
+        let now = Instant::now();
+        self.ports.peek(|ports| {
+            ports
+                .iter()
+                .flat_map(|(&(ext_ip, ext_port), entry)| {
+                    entry
+                        .hostnames
+                        .iter()
+                        .filter(|(_, b)| b.expiry.is_none_or(|e| e > now))
+                        .map(move |(name, b)| SniRoute {
+                            ext_ip,
+                            ext_port,
+                            hostname: name.clone(),
+                            target: b.target,
+                            remaining_secs: b
+                                .expiry
+                                .map(|e| e.saturating_duration_since(now).as_secs()),
+                        })
+                })
+                .collect()
+        })
+    }
+
+    /// Move every binding keyed to another external IPv4 onto `new_ip` — the
+    /// gateway's WAN address changed, but the routes (and their ports) live on.
+    /// On hostname collision the binding already at the new key wins; a fallback
+    /// already at the new key likewise. Stranded listeners are dropped without
+    /// firing `on_change(port, false)` — the port set is unchanged, and a
+    /// spawned teardown could race the re-add and close a live port —
+    /// then re-ensured on the new key (`on_change(port, true)` is an idempotent
+    /// upsert for the gateway). No-op when everything is already on `new_ip`.
+    pub fn rekey_ipv4(self: &Arc<Self>, new_ip: Ipv4Addr) {
+        let moved: Vec<PortKey> = self.ports.mutate(|ports| {
+            let old_keys: Vec<PortKey> = ports.keys().filter(|k| k.0 != new_ip).copied().collect();
+            let mut moved = Vec::new();
+            for old in old_keys {
+                let Some(bindings) = ports.remove(&old) else {
+                    continue;
+                };
+                let entry = ports.entry((new_ip, old.1)).or_default();
+                for (name, b) in bindings.hostnames {
+                    entry.hostnames.entry(name).or_insert(b);
+                }
+                if entry.fallback.is_none() {
+                    entry.fallback = bindings.fallback;
+                }
+                moved.push(old);
+            }
+            moved
+        });
+        for old in &moved {
+            if let Some(handle) = self.listeners.mutate(|l| l.remove(old)) {
+                drop(handle); // aborts the stranded listener; no on_change
+            }
+        }
+        for old in moved {
+            self.ensure_listener((new_ip, old.1));
+        }
     }
 
     fn prune(&self) {
@@ -508,5 +582,89 @@ mod tests {
         );
         assert_eq!(pb.select(Some("other.org")).unwrap().ip().octets()[3], 9);
         assert_eq!(pb.select(None).unwrap().ip().octets()[3], 9);
+    }
+
+    #[tokio::test]
+    async fn snapshot_reports_live_routes_with_remaining() {
+        let demux = SniDemux::new();
+        let ip = Ipv4Addr::LOCALHOST;
+        let t1 = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 443);
+        let t2 = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 2), 443);
+        demux
+            .register(ip, 44311, &["a.example.com".to_string()], t1, Some(3600))
+            .unwrap();
+        demux
+            .register(ip, 44311, &["b.example.com".to_string()], t2, None)
+            .unwrap();
+        // Fallbacks are port-level, not hostname routes: not reported.
+        demux.register_fallback(ip, 44312, t1).unwrap();
+
+        let mut snap = demux.snapshot();
+        snap.sort_by(|a, b| a.hostname.cmp(&b.hostname));
+        assert_eq!(snap.len(), 2);
+        assert_eq!(snap[0].hostname, "a.example.com");
+        assert_eq!(snap[0].target, t1);
+        assert_eq!((snap[0].ext_ip, snap[0].ext_port), (ip, 44311));
+        let remaining = snap[0].remaining_secs.unwrap();
+        assert!(remaining > 3590 && remaining <= 3600, "got {remaining}");
+        assert_eq!(snap[1].remaining_secs, None);
+    }
+
+    #[tokio::test]
+    async fn rekey_moves_bindings_and_never_fires_teardown() {
+        let events = Arc::new(SyncMutex::new(Vec::<(u16, bool)>::new()));
+        let recorded = events.clone();
+        let demux = SniDemux::with_on_change(move |port, active| {
+            recorded.mutate(|e| e.push((port, active)))
+        });
+        let old_ip = Ipv4Addr::new(203, 0, 113, 1);
+        let new_ip = Ipv4Addr::new(203, 0, 113, 2);
+        let t1 = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 443);
+        let t2 = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 2), 443);
+
+        demux
+            .register(
+                old_ip,
+                44313,
+                &["a.example.com".to_string()],
+                t1,
+                Some(3600),
+            )
+            .unwrap();
+        demux.register_fallback(old_ip, 44313, t1).unwrap();
+        // A binding already on the new key: survives the merge and wins any
+        // hostname collision.
+        demux
+            .register(new_ip, 44313, &["a.example.com".to_string()], t2, None)
+            .unwrap();
+        demux
+            .register(new_ip, 44313, &["c.example.com".to_string()], t2, None)
+            .unwrap();
+
+        demux.rekey_ipv4(new_ip);
+
+        demux.ports.peek(|p| {
+            assert!(p.get(&(old_ip, 44313)).is_none(), "old key drained");
+            let pb = p.get(&(new_ip, 44313)).unwrap();
+            assert_eq!(
+                pb.hostnames.get("a.example.com").unwrap().target,
+                t2,
+                "existing binding at the new key wins the collision"
+            );
+            assert_eq!(pb.hostnames.get("c.example.com").unwrap().target, t2);
+            assert_eq!(pb.fallback, Some(t1), "moved fallback fills the empty slot");
+        });
+        demux.listeners.peek(|l| {
+            assert!(l.contains_key(&(new_ip, 44313)) && !l.contains_key(&(old_ip, 44313)))
+        });
+        assert!(
+            events.peek(|e| e.iter().all(|&(_, active)| active)),
+            "rekey must never fire on_change(port, false)"
+        );
+
+        // Already keyed to new_ip: a second rekey is a no-op (no new events).
+        let before = events.peek(|e| e.len());
+        demux.rekey_ipv4(new_ip);
+        assert_eq!(events.peek(|e| e.len()), before);
     }
 }

@@ -693,7 +693,7 @@ export type PublishedPortsSetResult = {
  */
 export interface AutoForwardFromApi {
   id: string
-  /** Which protocol created it: "PCP" or "UPnP". */
+  /** Which protocol created it: "PCP", "UPnP", or "SNI" (a hostname route). */
   label: string
   device_mac: string
   device_name: string | null
@@ -701,6 +701,8 @@ export interface AutoForwardFromApi {
   ports: string
   public_ports: string
   expires_secs: number | null
+  /** TLS-SNI hostname for an SNI route sharing its port; null for forwards. */
+  hostname: string | null
 }
 
 // Outbound VPN (WireGuard Client) types

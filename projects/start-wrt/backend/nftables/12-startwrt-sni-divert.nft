@@ -1,0 +1,17 @@
+# SNI-demux reply-path divert. The demux originates the internal leg of a
+# demuxed connection from the *client's* source address (IP_TRANSPARENT), so
+# device->client replies transit this router addressed to the client; this rule
+# marks any inbound packet belonging to such a local transparent socket, and
+# the daemon's `ip rule fwmark 0x540001/0x540001 lookup 5344` delivers it into
+# that socket instead of forwarding it on. `mark or` preserves unrelated mark
+# bits (10-startwrt-dnat-mark.nft's 0x80) — which is also why the rule is
+# matched masked. Shipping it here (fw4 re-renders /etc/nftables.d includes on
+# every reload) means no reload can produce a ruleset without it.
+#
+# `socket transparent` needs kmod-nft-socket; without that package fw4 fails
+# to load the ENTIRE ruleset, so this file and the kmod-nft-socket/
+# kmod-nf-socket entries in build/openwrt.diffconfig must ship together.
+chain startwrt_sni_divert {
+	type filter hook prerouting priority mangle; policy accept;
+	meta l4proto tcp socket transparent 1 meta mark set meta mark or 0x00540001
+}

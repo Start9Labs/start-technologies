@@ -60,10 +60,12 @@ export interface PublishedPortDisplay extends PublishedPort {
  */
 export interface AutoForwardDisplay {
   id: string
-  label: string // "PCP" | "UPnP"
+  label: string // "PCP" | "UPnP" | "SNI"
   deviceMac: string
   deviceName?: string
   ports: string
   publicPorts: string
   expiresSecs?: number
+  /** TLS-SNI hostname for an SNI route sharing its port with other hostnames */
+  hostname?: string
 }

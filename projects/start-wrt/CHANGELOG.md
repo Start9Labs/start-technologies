@@ -45,11 +45,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   UPnP endpoints refuse browser-shaped requests — DNS-rebinding requests and
   blind cross-origin writes alike — so a malicious web page cannot use a LAN
   device's browser to read the network's public IP, fingerprint the router, or
-  open that device's ports. Uses the shared `start-core` PCP/IGD
-  server cores; since StartWRT has no SNI demux, the shared PCP server now
-  advertises the Start9 HOSTNAME capability only on gateways that really
-  implement it (StartTunnel), so StartOS clients fall back to plain forwards
-  here instead of recording hostname mappings that would route nothing.
+  open that device's ports. Uses the shared `start-core` PCP/IGD server cores.
+  Devices can also register **SNI hostname routes** on a shared external port
+  (over PCP's HOSTNAME extension or the `X_START9_AddHostnameMapping` UPnP
+  vendor action): the router reads each TLS connection's requested hostname
+  and delivers it to whichever device owns it, so several devices — or several
+  services on one StartOS server with their own domains — share one port such
+  as 443. Hostname routes appear in the Automatic section with their hostname,
+  follow the same per-device permission and lease expiry as plain forwards,
+  claim their shared port whole (plain forwards on it are refused; ports the
+  router itself answers on are refused to hostname routes for the same
+  reason), and are re-registered by the device within minutes after a router
+  restart rather than persisted.
 - The UI now detects when the running firmware ships a newer interface than
   the page is displaying (every RPC response and `system.info` report the
   firmware's build stamp and the UI compares it to its own). An update

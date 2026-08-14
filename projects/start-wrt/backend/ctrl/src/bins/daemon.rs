@@ -350,6 +350,19 @@ async fn inner_main() -> Result<(), Error> {
         // Port-control servers (PCP + UPnP IGD): automatic port forwarding for
         // per-device-authorized LAN clients. After init_ssl so the IGD device
         // UUID (derived from the root CA) is stable.
+        //
+        // SNI-demux divert parameters, before anything can run the demux: the
+        // nft mark rule ships as an fw4 include (12-startwrt-sni-divert.nft,
+        // `mark or` — hence the masked match), so only the iproute2 half is
+        // managed in-process; table 5344 clears the VLAN-tag (1-4094) table
+        // namespace; priority 49 sits below the 100/150/200 rule ladder.
+        let _ =
+            startos::net::transparent::set_divert_config(startos::net::transparent::DivertConfig {
+                route_table: 5344,
+                rule_priority: 49,
+                masked_fwmark: true,
+                manage_nft: false,
+            });
         let pc = crate::port_control::PortControl::new("/etc/config".into());
         if crate::port_control::PORT_CONTROL.set(pc.clone()).is_ok() {
             tokio::spawn(crate::port_control::run(pc));

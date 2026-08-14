@@ -45,6 +45,15 @@ pub fn published_ports<C: CtrlContext>() -> ParentHandler<C> {
                 .with_display_serializable()
                 .with_call_remote::<CliContext>(),
         )
+        .subcommand(
+            "wan-changed",
+            // Forwarded to the daemon like `reconcile`: the SNI routes to
+            // re-key live only in the daemon's demux memory.
+            from_fn_async_local(crate::port_control::wan_changed)
+                .with_metadata("no_auth", Value::Bool(true))
+                .no_display()
+                .with_call_remote::<CliContext>(),
+        )
 }
 
 /// Uppercase MACs referenced by `pp_*_v6` rules, kept current by [`set`] and

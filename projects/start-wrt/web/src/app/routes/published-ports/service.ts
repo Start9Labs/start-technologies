@@ -174,6 +174,7 @@ function autoFromApiToDisplay(a: AutoForwardFromApi): AutoForwardDisplay {
     ports: a.ports,
     publicPorts: a.public_ports,
     expiresSecs: a.expires_secs ?? undefined,
+    hostname: a.hostname ?? undefined,
   }
 }
 

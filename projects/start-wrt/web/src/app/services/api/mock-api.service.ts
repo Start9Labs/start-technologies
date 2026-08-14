@@ -1454,6 +1454,7 @@ export class MockApiService extends ApiService {
         ports: '5443',
         public_ports: '5443',
         expires_secs: 3542,
+        hostname: null,
       },
       {
         id: 'apf_001a2b3c4d5e_80',
@@ -1464,6 +1465,18 @@ export class MockApiService extends ApiService {
         ports: '5080',
         public_ports: '80',
         expires_secs: 3211,
+        hostname: null,
+      },
+      {
+        id: 'sni_443_nextcloud.example.com',
+        label: 'SNI',
+        device_mac: mac,
+        device_name: device.name,
+        internal_ip: device.ipv4,
+        ports: '443',
+        public_ports: '443',
+        expires_secs: 2954,
+        hostname: 'nextcloud.example.com',
       },
     ]
   }

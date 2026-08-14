@@ -79,9 +79,10 @@ UPnP side up to parity with a PCP capability that already exists.
 ## Non-goals
 
 - Changing the PCP `HOSTNAME` path, which stays the preferred transport.
-- Building StartWRT's SNI dataplane. That is a separate, larger project; this
-  change is inert on StartWRT until it lands, and then works with no further
-  edit.
+- ~~Building StartWRT's SNI dataplane.~~ Originally out of scope; the dataplane
+  was subsequently folded into the same branch (divert infra as an fw4 include
+  - `DivertConfig`, `Via::sni() -> Some`, WAN-admit rules, WAN re-key), so the
+    vendor action ships _working_ on StartWRT, not inert.
 - IPv6 (the demux is v4-only today).
 - NAT-PMP, which has no extension mechanism to carry a hostname.
 
@@ -129,12 +130,14 @@ both transports report the same conditions:
 | Malformed hostname                                | malformed-option               | 402 `Invalid Args`             |
 | Peer not an authorized device                     | —                              | 606 `Action not authorized`    |
 
-**801 is what makes this change inert-but-correct on StartWRT.** Both handlers
-check `backend.sni().is_none()` before doing anything else and fault 801
-(possible because this branch stacks on PR #3634's `Option`-ification of
-`sni()`), so the action is advertised-but-refused on StartWRT — whose backend
-returns `None` — until its dataplane exists. `sni_fault` additionally maps a
-backend `RESULT_UNSUPP_HOSTNAME` to the same 801.
+**801 is the honest answer from any gateway without an SNI dataplane.** Both
+handlers check `backend.sni().is_none()` before doing anything else and fault
+801 (possible because this branch stacks on PR #3634's `Option`-ification of
+`sni()`), so a backend returning `None` advertises-but-refuses rather than
+"succeeding" into a demux nothing listens on. StartWRT's backend originally
+returned `None`; its dataplane now rides this same branch, so on both Start9
+gateways `sni()` is `Some` and 801 remains for future/partial backends.
+`sni_fault` additionally maps a backend `RESULT_UNSUPP_HOSTNAME` to the same 801.
 
 ### Capability discovery — free, via `control_schema`
 
@@ -227,8 +230,14 @@ dashboard visibility come free via the shared trait method.
 
 ### StartWRT
 
-Nothing in this change. `sni()` returns `None` (PR #3634), so the action faults 801. When StartWRT's SNI dataplane lands and `sni()` becomes `Some`, the vendor
-action starts working with no edit here.
+The SNI dataplane rides this branch: `kmod-nft-socket` in the image, the
+reply-path divert as an fw4 include (`12-startwrt-sni-divert.nft`) plus a
+`DivertConfig` for the iproute2 half (table 5344, masked fwmark), `sni()`
+returning the shared demux, per-port WAN-admit ACCEPT rules (`apf_sni_<port>`,
+which also make the port read as router-reserved), WAN re-key via a `wan`
+hotplug hook + sweep backstop, and SNI rows in `published-ports.auto-list`.
+Routes are demux-memory only (finite-lease, device-renewed); a daemon restart
+drops them until the device re-asserts.
 
 ### Client — `net/port_map/{client,upnp}.rs`
 
@@ -255,9 +264,10 @@ bindings, or database.
 ## Phasing
 
 1. **Shared server + SCPD + lease semantics**, with StartTunnel regression tests.
-   Ships working on StartTunnel; inert (801) on StartWRT.
+   Ships working on StartTunnel.
 2. **Client UPnP hostname path + capability caching.** The cross-layer step.
-3. **StartWRT** — no work. Inherits when its SNI dataplane lands.
+3. **StartWRT SNI dataplane** — folded into the same branch (see the StartWRT
+   section above), so the router serves the action rather than faulting 801.
 
 Phase 1 is independently useful and independently reviewable: it makes the
 gateway answer the action, which is what a manual `curl` or a third-party client
@@ -296,8 +306,9 @@ Per the root `AGENTS.md`:
 - `projects/start-os/CHANGELOG.md` under the prospective next version — the
   client fallback changes StartOS behavior, and client-side port-map changes
   carry StartOS entries by precedent.
-- No StartWRT changelog entry — nothing user-visible changes there until its SNI
-  dataplane lands.
+- `projects/start-wrt/CHANGELOG.md` — the dataplane rides this branch, so the
+  unreleased automatic-port-forwarding entry describes hostname routes, and
+  the StartWRT docs book's published-ports page documents them.
 - If the capability field is added: TS bindings → SDK rebuild → web /
   container-runtime type checks, in that order, in the same change.
 - `API_CONTRACT.md` is untouched; this is not a JSON-RPC surface.
