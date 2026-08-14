@@ -323,7 +323,7 @@ if [ "${NVIDIA}" = "1" ]; then
     # Otherwise the installer picks the flavour from the build host's own GPUs.
     if ! sh "\${RUN_PATH}" \
         --silent \
-        --kernel-module-type=proprietary \
+        --kernel-module-type=${NVIDIA_MODULE_TYPE} \
         --kernel-name="\${KVER}" \
         --no-x-check \
         --no-nouveau-check \
