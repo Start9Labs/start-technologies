@@ -105,7 +105,13 @@ jobs:
             # Cherry-picking commit-by-commit would abort on any patch that is
             # already in master (an "empty" pick), which is the common case when
             # a fix was written on live-docs and hand-copied to master first.
-            if ! git cherry-pick -x -n $(git rev-list --reverse "$RANGE"); then
+            #
+            # --first-parent with -m 1 takes a merged PR as a single patch: the
+            # merge's own net change against the previous live-docs tip. Without
+            # -m 1 cherry-pick refuses a merge outright, and replaying the
+            # branch's commits instead re-fights a conflict the merge already
+            # settled and drops a resolution recorded only in the merge.
+            if ! git cherry-pick -x -n -m 1 $(git rev-list --reverse --first-parent "$RANGE"); then
               git cherry-pick --abort || true
               echo "fallback=conflict" >> "$GITHUB_OUTPUT"
               echo "::warning::Backport conflicts with master — opening a PR instead."
@@ -224,10 +230,11 @@ jobs:
           # conflict, and a single --continue only advances past that one — the
           # tail would be dropped from a branch whose PR claims the whole range.
           # --allow-empty keeps a patch already present in master from aborting
-          # the sequence.
+          # the sequence. Same commit list as the bulk pick above, or the branch
+          # would carry something other than what was tried against master.
           DROPPED=""
-          for commit in $(git rev-list --reverse "${BEFORE}..${AFTER}"); do
-            if git cherry-pick -x --allow-empty --keep-redundant-commits "$commit"; then
+          for commit in $(git rev-list --reverse --first-parent "${BEFORE}..${AFTER}"); do
+            if git cherry-pick -x -m 1 --allow-empty --keep-redundant-commits "$commit"; then
               continue
             fi
             git add -A
@@ -239,6 +246,14 @@ jobs:
           done
 
           git push -f origin "$BRANCH"
+
+          # Keeping the markers leaves a branch GitHub still reports as
+          # mergeable, so the body has to say so out loud. --all-match is the
+          # per-file conjunction; -e A --and -e B would ask for both on one line.
+          MARKED=$(git grep -l --all-match -e '^<<<<<<< ' -e '^>>>>>>> ' HEAD -- . | sed 's|^HEAD:||' || true)
+          if [ -n "$MARKED" ]; then
+            echo "::warning::The backport branch carries unresolved conflict markers."
+          fi
 
           # The PR body must describe what the branch actually carries. A commit
           # that could not be applied at all is named here rather than left to be
@@ -253,12 +268,22 @@ jobs:
               contention)
                 echo "master moved under it three times running, so it comes as a branch instead. **Nothing is wrong with it** — review and merge normally."
                 ;;
-              *)
+              conflict)
                 echo "It could not be applied to master unattended — **resolve the conflicts before merging**."
+                ;;
+              *)
+                echo "It could not be applied to master unattended (\`$REASON\`) — check the run log before merging."
                 ;;
             esac
             echo
             echo "Until this lands, master's copy of the docs is out of step and the next tag will revert the published fix."
+            if [ -n "$MARKED" ]; then
+              echo
+              echo "> [!CAUTION]"
+              echo "> Conflicts were resolved by keeping the markers, so these files carry \`<<<<<<<\` / \`>>>>>>>\` and must be fixed before merging:"
+              echo ">"
+              printf '> - `%s`\n' $MARKED
+            fi
             if [ -n "$DROPPED" ]; then
               echo
               echo "> [!WARNING]"
