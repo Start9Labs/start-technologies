@@ -32,7 +32,7 @@ Two consequences:
 
 **The heading set is fixed, not suggested.** Section headings are how an agent retrieves part of a README without loading all of it, so they are an addressing scheme. A package that renames `## Actions` to `## Available Actions` does not fail loudly — it silently degrades retrieval to "load the whole file". Use the headings below verbatim, in this order, and omit a section only where the guidance below says you may.
 
-The order runs in four groups: **what the package is made of** (runtime, volumes, file models, dependencies, interfaces), **how it behaves** (install, actions, tasks, health, backups), **what to expect when it doesn't** (limitations, troubleshooting), then the machine-readable summary. Keep a new section inside the group it belongs to.
+The order runs in four groups: **what the package is made of** (runtime, volumes, file models, dependencies, interfaces), **how it behaves** (install, actions, tasks, health, backups), **what to expect when it doesn't** (limitations), then the machine-readable summary. Keep a new section inside the group it belongs to.
 
 Nothing here is about contributing to the package. Build workflow, repo conventions, and the packaging guide live in `AGENTS.md` — restating them here produces a section identical in every package, useful to none of this file's readers.
 
@@ -85,8 +85,6 @@ Nothing here is about contributing to the package. Build workflow, repo conventi
 ## Backups and Restore
 
 ## Limitations and Differences
-
-## Troubleshooting
 
 ---
 
@@ -230,19 +228,11 @@ Then: what is deliberately excluded and why (a cache or an index that rebuilds i
 
 A numbered list of what does not work, works differently, or is unavailable compared to upstream — including unsupported dependencies and deliberately disabled features.
 
-### Troubleshooting
-
-Symptom → check → action, for the failure modes this package actually has. This is the section a support agent and an administering assistant reach for first, and the one no amount of ABI introspection can replace.
-
-Write each entry as an observable symptom (what the user sees, or what a health check reports), the check that confirms the cause, and the resolution — an action to run, a dependency to install, a value to correct. Cover the failures you have actually seen: dependency misconfiguration, an interrupted upgrade, an exhausted resource, a credential the user rotated out from under the service.
-
-Omit the section only if the package genuinely has no known failure modes beyond upstream's.
-
 ### Quick Reference for AI Consumers
 
 A YAML block summarizing the package's operable surface — the fields in the template above. It exists so an agent can establish what the package _is_ in one cheap read before deciding which prose section to fetch.
 
-Its keys mirror the sections, in section order, so it doubles as an index. A section earns a key only when its content is a flat enumeration; where the meaningful fact is a behavior rather than a list, the section stays narrative and gets no key — installation, backups, limitations and troubleshooting are all in that group. A key that flattens a behavior into a list is worse than no key, because it reads as precise: `backups: {included, excluded}` would file a dumped database under "included" and tell a reader their volume is captured when it never is.
+Its keys mirror the sections, in section order, so it doubles as an index. A section earns a key only when its content is a flat enumeration; where the meaningful fact is a behavior rather than a list, the section stays narrative and gets no key — installation, backups and limitations are all in that group. A key that flattens a behavior into a list is worse than no key, because it reads as precise: `backups: {included, excluded}` would file a dumped database under "included" and tell a reader their volume is captured when it never is.
 
 Include no versions of any kind: not `upstream_version`, not image tags, not dependency version constraints.
 
@@ -259,7 +249,6 @@ Include no versions of any kind: not `upstream_version`, not image tags, not dep
 - [ ] Hidden actions flagged as not user-facing
 - [ ] Every task documented with what raises it, its severity, and what clears it — or the section omitted because the package raises none
 - [ ] Health-check failures explained, not just listed
-- [ ] Troubleshooting section covers the package's real failure modes
 - [ ] All dependencies documented (or "None" stated explicitly)
 - [ ] Every file model documented — how it is seeded, what rewrites it, and whether a hand edit survives
 - [ ] All limitations listed explicitly

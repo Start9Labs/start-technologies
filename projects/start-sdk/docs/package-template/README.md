@@ -67,10 +67,6 @@ why the heading set is fixed and ordered, and what belongs in each section:
 
 <!-- TODO -->
 
-## Troubleshooting
-
-<!-- TODO: symptom → check → action, for this package's real failure modes. Delete if there are none beyond upstream's. -->
-
 ---
 
 ## Quick Reference for AI Consumers
