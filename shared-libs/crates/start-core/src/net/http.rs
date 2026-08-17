@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::IpAddr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -14,7 +14,7 @@ use hyper::body::{Body as HyperBody, Incoming};
 use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 
 use crate::net::host::binding::ProxyAuth;
 use crate::prelude::*;
@@ -33,6 +33,38 @@ fn box_incoming(b: Incoming) -> ProxyBody {
 
 fn box_full(bytes: Bytes) -> ProxyBody {
     Full::new(bytes).map_err(|e: Infallible| match e {}).boxed()
+}
+
+/// Marks a response as still on its way to the client. `disable_keep_alive`
+/// only closes the connection outright while it is idle; called mid-response
+/// it stamps `Connection: close` on the head instead. Held by the relayed
+/// body, so it drops once that head and body have been written.
+struct Relaying {
+    count: Arc<AtomicUsize>,
+    done: Arc<Notify>,
+}
+
+impl Relaying {
+    fn start(count: Arc<AtomicUsize>, done: Arc<Notify>) -> Self {
+        count.fetch_add(1, Ordering::Relaxed);
+        Self { count, done }
+    }
+
+    fn hold(self, body: ProxyBody) -> ProxyBody {
+        body.map_frame(move |frame| {
+            let _ = &self;
+            frame
+        })
+        .boxed()
+    }
+}
+
+impl Drop for Relaying {
+    fn drop(&mut self) {
+        if self.count.fetch_sub(1, Ordering::Relaxed) == 1 {
+            self.done.notify_one();
+        }
+    }
 }
 
 /// Pre-compiled view of a [`ProxyAuth`] used on the proxy hot-path.
@@ -340,11 +372,11 @@ where
         .handshake(TokioIo::new(to))
         .await?;
     let client = Arc::new(Mutex::new(client));
-    // Set while a 101 is being relayed. Shutting the client leg down in that
-    // window makes hyper replace the upstream's `Connection: Upgrade` with
-    // `Connection: close`, which conformant WebSocket clients reject.
-    let upgrading = Arc::new(AtomicBool::new(false));
-    let svc_upgrading = upgrading.clone();
+    // Non-zero while a relayed response is still being written to the client.
+    let relaying = Arc::new(AtomicUsize::new(0));
+    let relayed = Arc::new(Notify::new());
+    let svc_relaying = relaying.clone();
+    let svc_relayed = relayed.clone();
     // hyper disarms `header_read_timeout` while a body or upgrade is in
     // flight, so this can't kill an active stream — only idle keep-alive.
     let from = hyper::server::conn::http1::Builder::new()
@@ -355,7 +387,8 @@ where
             service_fn(move |mut req| {
                 let client = client.clone();
                 let gate = gate.clone();
-                let upgrading = svc_upgrading.clone();
+                let relaying = svc_relaying.clone();
+                let relayed = svc_relayed.clone();
                 async move {
                     if let Err(resp) =
                         apply_request_policy(&mut req, src_ip, add_forwarded, gate.as_ref())
@@ -374,25 +407,20 @@ where
                                     .any(|s| s.trim().eq_ignore_ascii_case("upgrade"))
                             })
                         {
-                            // Must be set before `send_request`: the upstream
-                            // connection resolves in the same poll that delivers
-                            // the 101, before this future is resumed.
-                            upgrading.store(true, Ordering::Relaxed);
                             Some(hyper::upgrade::on(&mut req))
                         } else {
                             None
                         };
 
+                    // Taken before `send_request`, because the upstream
+                    // connection can resolve in the same poll that delivers the
+                    // response — before this future is resumed.
+                    let relaying = Relaying::start(relaying, relayed);
+
                     let mut res = match client.lock().await.send_request(req).await {
                         Ok(r) => r,
-                        Err(e) => {
-                            upgrading.store(false, Ordering::Relaxed);
-                            return Err(e);
-                        }
+                        Err(e) => return Err(e),
                     };
-                    if upgrade.is_some() && res.status() != http::StatusCode::SWITCHING_PROTOCOLS {
-                        upgrading.store(false, Ordering::Relaxed);
-                    }
 
                     if let Some(from) = upgrade {
                         let kind = res
@@ -431,12 +459,13 @@ where
                         });
                     }
 
-                    Ok::<_, hyper::Error>(res.map(box_incoming))
+                    Ok::<_, hyper::Error>(res.map(|b| relaying.hold(box_incoming(b))))
                 }
             }),
         );
     let mut from = Box::pin(from.with_upgrades());
     let mut to = Box::pin(to.with_upgrades().fuse());
+    let mut deferred = false;
     loop {
         tokio::select! {
             res = from.as_mut() => return Ok(res?),
@@ -444,10 +473,20 @@ where
                 res?;
                 // The backend is gone. Hand the client the EOF now, the way the
                 // splice path does, instead of leaving it a connection that
-                // looks reusable and aborts the next request it carries.
-                if !upgrading.load(Ordering::Relaxed) {
+                // looks reusable and aborts the next request it carries. But
+                // `disable_keep_alive` only closes outright when the connection
+                // is idle — mid-response it stamps `Connection: close` on the
+                // head instead, which is a header the backend never sent, and
+                // on a 101 it lands on top of `Connection: Upgrade`.
+                if relaying.load(Ordering::Relaxed) == 0 {
                     from.as_mut().graceful_shutdown();
+                } else {
+                    deferred = true;
                 }
+            }
+            _ = relayed.notified(), if deferred => {
+                deferred = false;
+                from.as_mut().graceful_shutdown();
             }
         }
     }
@@ -516,6 +555,44 @@ mod tests {
                 "client leg outlived the upstream: it is now a connection that looks reusable \
                  and will abort the next request written to it",
             );
+        assert_eq!(eof.unwrap(), 0);
+    }
+
+    /// A backend that answers and closes in the same breath still gets its
+    /// response relayed verbatim: `Connection: close` is a header it never
+    /// sent, and the close is carried by closing, not by editing the reply.
+    #[tokio::test]
+    async fn a_relayed_response_is_not_rewritten_when_the_backend_closes() {
+        let (mut client, client_facing) = tokio::io::duplex(4096);
+        let (backend_facing, mut backend) = tokio::io::duplex(4096);
+
+        tokio::spawn(run_http1_proxy(
+            client_facing,
+            backend_facing,
+            None,
+            false,
+            None,
+        ));
+        tokio::spawn(async move {
+            read_head(&mut backend).await;
+            backend
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi")
+                .await
+                .unwrap();
+            drop(backend);
+        });
+
+        client
+            .write_all(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+            .await
+            .unwrap();
+        let head = read_head(&mut client).await;
+        assert!(!head.contains("connection: close"), "{head:?}");
+        client.read_exact(&mut [0u8; 2]).await.unwrap();
+
+        let eof = tokio::time::timeout(Duration::from_secs(5), client.read(&mut [0u8; 1]))
+            .await
+            .expect("client leg outlived the upstream");
         assert_eq!(eof.unwrap(), 0);
     }
 
