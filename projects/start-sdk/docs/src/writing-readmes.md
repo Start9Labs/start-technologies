@@ -30,13 +30,7 @@ Two consequences:
 
 **Do not re-encode what StartOS can introspect.** An agent administering your service already has every action's id, name, description, warning, visibility, `allowedStatuses` and input schema from the OS, along with health-check ids and live status. Restating those here adds a second copy that goes stale and costs the agent context to read. Document instead what the ABI cannot express: **when** to run a thing, what it **costs**, whether it is **safe to repeat**, what **state** it changes, and which **symptom** it resolves.
 
-<<<<<<< HEAD
-**The heading set is fixed, not suggested.** Section headings are how an agent retrieves part of a README without loading all of it, so they are an addressing scheme. A package that renames `## Actions` to `## Available Actions` does not fail loudly — it silently degrades retrieval to "load the whole file". Use the headings below verbatim, in this order.
-
-**A section with nothing to say still says "None."** Only **Tasks** and **Troubleshooting** may be left out, and only when the package genuinely has neither. Everywhere else an empty section is a fact worth stating: "no config file on disk", "no dependencies", "no actions" each answer a question outright, where a missing heading is ambiguous — the reader cannot tell an absent section from an unwritten one, and an agent addressing that heading gets nothing back either way.
-=======
 **The heading set is fixed, not suggested.** Section headings are how an agent retrieves part of a README without loading all of it, so they are an addressing scheme. A package that renames `## Actions` to `## Available Actions` does not fail loudly — it silently degrades retrieval to "load the whole file". Use the headings below verbatim, in this order. No heading is optional: a section with nothing to say still says "None." An empty section is a fact worth stating — "no config file on disk", "no dependencies", "no actions", "no tasks" each answer a question outright, where a missing heading is ambiguous, since the reader cannot tell an absent section from an unwritten one and an agent addressing that heading gets nothing back either way.
->>>>>>> 415abe3a4 (Merge pull request #3720 from Start9Labs/docs/tasks-section-is-required)
 
 The order runs in four groups: **what the package is made of** (runtime, volumes, file models, dependencies, interfaces), **how it behaves** (install, actions, tasks, health, backups), **what to expect when it doesn't** (limitations), then the machine-readable summary. Keep a new section inside the group it belongs to.
 
