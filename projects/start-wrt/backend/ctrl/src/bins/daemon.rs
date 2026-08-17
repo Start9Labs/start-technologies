@@ -15,7 +15,6 @@ use rpc_toolkit::Server;
 use serde::Deserialize;
 use startos::net::tls::TlsListener;
 use startos::net::web_server::{Accept, Acceptor, DynAccept, MetadataVisitor, WebServer};
-use tokio::net::TcpListener;
 use tokio::signal::unix::SignalKind;
 use tokio::sync::mpsc;
 use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer};
@@ -455,9 +454,13 @@ async fn inner_main() -> Result<(), Error> {
     // WebSocket upgrades. `TlsListener` adds slow-loris-resistant handshake
     // timeouts (5s ClientHello, 15s full handshake) and runs each handshake
     // in a per-connection task so a stalled client cannot block accept.
+    // SO_REUSEPORT on the UI wildcards: the SNI demux binds `(wan_ip, 443)`
+    // *specific* alongside these when hostname routes share the port, and a
+    // reuseport group admits a member only if every socket on the port opted
+    // in. TCP delivery prefers the most-specific bound address, so the demux
+    // takes WAN-IP-destined connections and these wildcards keep the LAN.
     let http_addr = SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], 80));
-    let http_listener = TcpListener::bind(http_addr)
-        .await
+    let http_listener = startos::net::utils::bind_tokio_listener_reuse_port(http_addr)
         .with_kind(ErrorKind::Network)?;
     tracing::info!("HTTP listening on {}", http_addr);
 
@@ -467,8 +470,7 @@ async fn inner_main() -> Result<(), Error> {
     if tls_ready {
         let materials = ssl::init_tls_materials()?;
         let https_addr = SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], 443));
-        let https_listener = TcpListener::bind(https_addr)
-            .await
+        let https_listener = startos::net::utils::bind_tokio_listener_reuse_port(https_addr)
             .with_kind(ErrorKind::Network)?;
         tracing::info!("HTTPS listening on {}", https_addr);
         let tls = TlsListener::new(https_listener, ssl::StaticTlsHandler::new(materials));

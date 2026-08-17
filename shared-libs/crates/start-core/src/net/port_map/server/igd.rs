@@ -1119,7 +1119,9 @@ mod tests {
 
     /// Backend recording `add_sni_forward` calls while still driving the real
     /// demux, so ownership semantics (HOSTNAME_TAKEN, owner-scoped delete) are
-    /// exercised against the actual registration logic.
+    /// exercised against the actual registration logic. The request bodies use
+    /// an unprivileged external port (44300): registration is bind-gated, and
+    /// a real 443 bind needs root the test runner doesn't have.
     struct HostnameStub {
         sni: Arc<SniDemux>,
         known: bool,
@@ -1192,7 +1194,7 @@ mod tests {
 <s:Body>
 <u:X_START9_AddHostnameMapping xmlns:u="{WANIP_SERVICE}">
 <NewRemoteHost></NewRemoteHost>
-<NewExternalPort>443</NewExternalPort>
+<NewExternalPort>44300</NewExternalPort>
 <NewProtocol>TCP</NewProtocol>
 <NewInternalPort>8443</NewInternalPort>
 <NewInternalClient>10.59.1.99</NewInternalClient>
@@ -1213,7 +1215,7 @@ mod tests {
 <s:Body>
 <u:X_START9_DeleteHostnameMapping xmlns:u="{WANIP_SERVICE}">
 <NewRemoteHost></NewRemoteHost>
-<NewExternalPort>443</NewExternalPort>
+<NewExternalPort>44300</NewExternalPort>
 <NewProtocol>TCP</NewProtocol>
 <NewInternalPort>8443</NewInternalPort>
 <NewHostname>{hostname}</NewHostname>
@@ -1389,7 +1391,7 @@ mod tests {
         let resp = control(&stub, PEER, &add_hostname_body("0", "Git.Example.Com")).await;
         assert_eq!(resp.status(), StatusCode::OK);
         let calls = stub.calls.lock().unwrap();
-        assert_eq!(calls[0].0, SocketAddrV4::new(EXT_IP, 443));
+        assert_eq!(calls[0].0, SocketAddrV4::new(EXT_IP, 44300));
         assert_eq!(calls[0].1, SocketAddrV4::new(PEER, 8443));
         // Hostnames are lowercased before registration, like the PCP parser.
         assert_eq!(calls[0].2, vec!["git.example.com".to_string()]);

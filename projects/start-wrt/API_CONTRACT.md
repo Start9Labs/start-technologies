@@ -1054,7 +1054,15 @@ Besides plain forwards, the list includes **SNI hostname routes** (label
 by ClientHello SNI so several devices/hostnames share one port. These live in
 daemon memory (not UCI), always carry a lease (≤1h, device-renewed), and do
 not survive a daemon restart — the device re-asserts them. A demuxed port
-reads as router-reserved to manual and plain-auto forwards.
+reads as router-reserved to manual and plain-auto forwards. Ports the router
+answers on itself refuse hostname routes — except 443, where Remote Access
+coexists with the demux: while routes share the port, connections naming no
+routed hostname (e.g. browsing the router by IP, which sends no SNI) are piped
+to the router's own UI, admitted from exactly the sources the Remote Access
+mode allows (any in "always"; RFC1918 in "default" behind NAT; none in
+"never"). A route is granted only once its listener is actually bound
+(`NO_RESOURCES` / UPnP fault 501 otherwise), so a granted route can never
+leave the port open with nothing serving it.
 
 ```rust
 // Request: {}

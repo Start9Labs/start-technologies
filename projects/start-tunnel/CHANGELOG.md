@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the vendor action automatically. Unlike standard UPnP mappings, these routes
   are always lease-bearing and expire if the device stops renewing them, so a
   vanished device can never squat a hostname against its legitimate owner.
+  A hostname grant (over either protocol) is now also refused outright when
+  the tunnel cannot bind the shared port's listener, instead of being
+  acknowledged while routing nothing.
 
 ### Fixed
 

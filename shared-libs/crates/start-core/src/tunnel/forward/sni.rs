@@ -16,6 +16,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, copy_bidirectional};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
+use crate::net::port_map::pcp::RESULT_NO_RESOURCES;
 use crate::net::port_map::pcp::hostname::RESULT_HOSTNAME_TAKEN;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::sync::SyncMutex;
@@ -25,9 +26,6 @@ type PortKey = (Ipv4Addr, u16);
 
 const CLIENTHELLO_CAP: usize = 16384;
 const CLIENTHELLO_TIMEOUT: Duration = Duration::from_secs(5);
-/// Backoff for bind/accept failures (e.g. fd exhaustion); the listener retries
-/// rather than giving up its port.
-const BIND_RETRY_DELAY: Duration = Duration::from_secs(5);
 const ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 #[derive(Clone)]
@@ -37,11 +35,33 @@ struct Binding {
     expiry: Option<Instant>,
 }
 
+/// Which sources a port's fallback admits. Hostname routes are never
+/// source-scoped (an SNI client can come from anywhere); the fallback can be,
+/// because it may stand in for a firewall rule that was source-scoped — e.g.
+/// StartWRT remote access in "behind NAT" mode admits only private sources,
+/// and the demux taking its port must not widen that.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FallbackSource {
+    Any,
+    /// RFC1918 sources only.
+    PrivateOnly,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Fallback {
+    target: SocketAddrV4,
+    source: FallbackSource,
+    /// Open the internal leg source-preserving (`transparent_connect`). False
+    /// for a gateway-self fallback: a spoofed-source dial to the gateway's own
+    /// listener would be martian-dropped on the loopback reply path.
+    transparent: bool,
+}
+
 #[derive(Default)]
 struct PortBindings {
     /// hostname (lowercase) -> binding; a `*.suffix` key is a wildcard.
     hostnames: BTreeMap<String, Binding>,
-    fallback: Option<SocketAddrV4>,
+    fallback: Option<Fallback>,
 }
 
 impl PortBindings {
@@ -53,18 +73,29 @@ impl PortBindings {
         self.hostnames.is_empty() && self.fallback.is_none()
     }
     /// exact match, then a `*.suffix` wildcard on the parent, then fallback.
-    fn select(&self, sni: Option<&str>) -> Option<SocketAddrV4> {
+    /// Returns the target and whether to open the internal leg
+    /// source-preserving. `peer` gates a source-scoped fallback only — hostname
+    /// routes match regardless of source.
+    fn select(&self, sni: Option<&str>, peer: Ipv4Addr) -> Option<(SocketAddrV4, bool)> {
         if let Some(name) = sni {
             if let Some(b) = self.hostnames.get(name) {
-                return Some(b.target);
+                return Some((b.target, true));
             }
             if let Some((_, rest)) = name.split_once('.') {
                 if let Some(b) = self.hostnames.get(&format!("*.{rest}")) {
-                    return Some(b.target);
+                    return Some((b.target, true));
                 }
             }
         }
-        self.fallback
+        let f = self.fallback?;
+        match f.source {
+            FallbackSource::Any => {}
+            // std's `is_private` is exactly RFC1918, matching the firewall
+            // source scoping this fallback stands in for.
+            FallbackSource::PrivateOnly if peer.is_private() => {}
+            FallbackSource::PrivateOnly => return None,
+        }
+        Some((f.target, f.transparent))
     }
 }
 
@@ -143,6 +174,9 @@ impl SniDemux {
     /// Register hostname bindings for `(ext_ip, ext_port) -> target` and ensure
     /// the listener runs. `Err(RESULT_HOSTNAME_TAKEN)` if any name is held by a
     /// different target — all-or-nothing; the same target reclaims.
+    /// `Err(RESULT_NO_RESOURCES)` if the listener cannot bind: a grant must
+    /// never outrun its socket, since the gateway opens firewall access on the
+    /// strength of it.
     pub fn register(
         self: &Arc<Self>,
         ext_ip: Ipv4Addr,
@@ -171,7 +205,32 @@ impl SniDemux {
             }
             Ok(())
         })?;
-        self.ensure_listener(key);
+        if let Err(e) = self.ensure_listener(key) {
+            tracing::warn!(
+                "SNI demux bind on {}:{} failed; refusing the grant: {e}",
+                key.0,
+                key.1
+            );
+            // Roll back this call's insertions so snapshot/auto-list never
+            // report a route with no listener behind it. Same-target removal is
+            // safe: a distinct pre-existing same-target binding implies a live
+            // listener, in which case the bind was never attempted.
+            self.ports.mutate(|ports| {
+                if let Some(entry) = ports.get_mut(&key) {
+                    for name in hostnames {
+                        if entry
+                            .hostnames
+                            .get(name)
+                            .is_some_and(|b| b.target == target)
+                        {
+                            entry.hostnames.remove(name);
+                        }
+                    }
+                }
+            });
+            self.reap_if_empty(key);
+            return Err(RESULT_NO_RESOURCES);
+        }
         Ok(())
     }
 
@@ -202,24 +261,83 @@ impl SniDemux {
 
     /// Set the hostname-less fallback for `(ext_ip, ext_port) -> target` and
     /// ensure the listener runs. Traffic matching no hostname route (or sending
-    /// no SNI) is spliced here. `Err(RESULT_HOSTNAME_TAKEN)` if a different
-    /// target already holds the fallback; the same target reclaims (idempotent).
+    /// no SNI) is spliced here, source-preserving, from any source.
+    /// `Err(RESULT_HOSTNAME_TAKEN)` if a different target already holds the
+    /// fallback; the same target reclaims (idempotent).
+    /// `Err(RESULT_NO_RESOURCES)` if the listener cannot bind.
     pub fn register_fallback(
         self: &Arc<Self>,
         ext_ip: Ipv4Addr,
         ext_port: u16,
         target: SocketAddrV4,
     ) -> Result<(), u8> {
+        self.register_fallback_with(
+            ext_ip,
+            ext_port,
+            Fallback {
+                target,
+                source: FallbackSource::Any,
+                transparent: true,
+            },
+        )
+    }
+
+    /// Like [`register_fallback`](Self::register_fallback), but for the
+    /// gateway's *own* listener (e.g. StartWRT's web UI behind a shared 443):
+    /// the internal leg is a plain connect — a source-preserving dial to
+    /// ourselves would be martian-dropped — and `source` scopes who may reach
+    /// it, mirroring the firewall rule the demux displaced.
+    pub fn register_local_fallback(
+        self: &Arc<Self>,
+        ext_ip: Ipv4Addr,
+        ext_port: u16,
+        target: SocketAddrV4,
+        source: FallbackSource,
+    ) -> Result<(), u8> {
+        self.register_fallback_with(
+            ext_ip,
+            ext_port,
+            Fallback {
+                target,
+                source,
+                transparent: false,
+            },
+        )
+    }
+
+    fn register_fallback_with(
+        self: &Arc<Self>,
+        ext_ip: Ipv4Addr,
+        ext_port: u16,
+        fallback: Fallback,
+    ) -> Result<(), u8> {
         let key = (ext_ip, ext_port);
         self.ports.mutate(|ports| {
             let entry = ports.entry(key).or_default();
-            if entry.fallback.is_some_and(|t| t != target) {
+            if entry.fallback.is_some_and(|f| f.target != fallback.target) {
                 return Err(RESULT_HOSTNAME_TAKEN);
             }
-            entry.fallback = Some(target);
+            // Same-target re-register also refreshes source/transparency, so a
+            // policy change (e.g. a remote-access mode switch) applies in place.
+            entry.fallback = Some(fallback);
             Ok(())
         })?;
-        self.ensure_listener(key);
+        if let Err(e) = self.ensure_listener(key) {
+            tracing::warn!(
+                "SNI demux bind on {}:{} failed; refusing the fallback: {e}",
+                key.0,
+                key.1
+            );
+            self.ports.mutate(|ports| {
+                if let Some(entry) = ports.get_mut(&key) {
+                    if entry.fallback.is_some_and(|f| f.target == fallback.target) {
+                        entry.fallback = None;
+                    }
+                }
+            });
+            self.reap_if_empty(key);
+            return Err(RESULT_NO_RESOURCES);
+        }
         Ok(())
     }
 
@@ -228,7 +346,7 @@ impl SniDemux {
         let key = (ext_ip, ext_port);
         self.ports.mutate(|ports| {
             if let Some(entry) = ports.get_mut(&key) {
-                if entry.fallback == Some(target) {
+                if entry.fallback.is_some_and(|f| f.target == target) {
                     entry.fallback = None;
                 }
             }
@@ -270,6 +388,9 @@ impl SniDemux {
     /// spawned teardown could race the re-add and close a live port —
     /// then re-ensured on the new key (`on_change(port, true)` is an idempotent
     /// upsert for the gateway). No-op when everything is already on `new_ip`.
+    /// If a re-bind on the new key fails, that port's routes are dropped and
+    /// `on_change(port, false)` *does* fire — dead routes must not hold the
+    /// gateway's port open; clients re-assert within their lease.
     pub fn rekey_ipv4(self: &Arc<Self>, new_ip: Ipv4Addr) {
         let moved: Vec<PortKey> = self.ports.mutate(|ports| {
             let old_keys: Vec<PortKey> = ports.keys().filter(|k| k.0 != new_ip).copied().collect();
@@ -295,7 +416,20 @@ impl SniDemux {
             }
         }
         for old in moved {
-            self.ensure_listener((new_ip, old.1));
+            let key = (new_ip, old.1);
+            if let Err(e) = self.ensure_listener(key) {
+                tracing::error!(
+                    "SNI demux re-key bind on {}:{} failed; dropping the port's routes: {e}",
+                    key.0,
+                    key.1
+                );
+                self.ports.mutate(|ports| {
+                    ports.remove(&key);
+                });
+                if let Some(cb) = &self.on_change {
+                    cb(key.1, false);
+                }
+            }
         }
     }
 
@@ -333,41 +467,44 @@ impl SniDemux {
         }
     }
 
-    fn ensure_listener(self: &Arc<Self>, key: PortKey) {
+    /// Ensure a listener for `key`, binding inline so a failure is observable
+    /// to the caller — never grant first and bind later, or traffic the
+    /// gateway admits for the grant falls through to whatever wildcard socket
+    /// shares the port (on StartWRT, the router's own web UI).
+    /// `SO_REUSEPORT` lets this specific `(ext_ip, port)` socket coexist with a
+    /// same-process wildcard listener on the same port: TCP delivery prefers
+    /// the most-specific bound address, so the demux receives only traffic to
+    /// its external IP and the wildcard keeps the rest.
+    fn ensure_listener(self: &Arc<Self>, key: PortKey) -> std::io::Result<()> {
         let already = self.listeners.mutate(|l| l.contains_key(&key));
         if already {
-            return;
+            return Ok(());
         }
+        let listener = crate::net::utils::bind_tokio_listener_reuse_port(
+            SocketAddrV4::new(key.0, key.1).into(),
+        )?;
         let ports = self.ports.clone();
-        let handle = NonDetachingJoinHandle::from(tokio::spawn(run_listener(key, ports)));
+        let handle = NonDetachingJoinHandle::from(tokio::spawn(run_listener(listener, key, ports)));
         self.listeners.mutate(|l| {
             l.insert(key, handle);
         });
         if let Some(cb) = &self.on_change {
             cb(key.1, true);
         }
+        Ok(())
     }
 }
 
-async fn run_listener(key: PortKey, ports: Arc<SyncMutex<BTreeMap<PortKey, PortBindings>>>) {
+async fn run_listener(
+    listener: tokio::net::TcpListener,
+    key: PortKey,
+    ports: Arc<SyncMutex<BTreeMap<PortKey, PortBindings>>>,
+) {
     if let Err(e) = crate::net::transparent::ensure_divert_infra_once().await {
         tracing::warn!(
             "SNI demux reply-path divert setup failed (source preservation may be degraded): {e}"
         );
     }
-    let listener = loop {
-        match crate::net::utils::bind_tokio_listener(SocketAddrV4::new(key.0, key.1).into()) {
-            Ok(listener) => break listener,
-            Err(e) => {
-                tracing::warn!(
-                    "SNI demux bind on {}:{} failed (retrying): {e}",
-                    key.0,
-                    key.1
-                );
-                tokio::time::sleep(BIND_RETRY_DELAY).await;
-            }
-        }
-    };
     tracing::info!("SNI demux listening on {}:{}", key.0, key.1);
     loop {
         match listener.accept().await {
@@ -417,27 +554,42 @@ async fn handle_conn(
         }
     };
 
-    let target = ports.peek(|p| p.get(&key).and_then(|e| e.select(sni.as_deref())));
-    let Some(target) = target else {
-        return; // no match and no fallback: close
-    };
     let SocketAddr::V4(peer) = peer else {
         return; // IPv4-only listener; should not occur
     };
-    // Open the internal leg from the client's own source address (RFC §4.6).
-    // No plain-connect fallback: the backend gates LAN-only addresses on the
-    // source being private, and this server's own wg address is private — a
-    // fallback would present every WAN client as LAN-local.
-    let mut upstream = match crate::net::transparent::transparent_connect(
-        SocketAddr::V4(peer),
-        SocketAddr::V4(target),
-    )
-    .await
-    {
-        Ok(upstream) => upstream,
-        Err(e) => {
-            tracing::warn!("SNI demux transparent egress to {target} for {peer} failed: {e}");
-            return;
+    let selected = ports.peek(|p| {
+        p.get(&key)
+            .and_then(|e| e.select(sni.as_deref(), *peer.ip()))
+    });
+    let Some((target, transparent)) = selected else {
+        return; // no match and no admissible fallback: close
+    };
+    let mut upstream = if transparent {
+        // Open the internal leg from the client's own source address (RFC
+        // §4.6). No plain-connect fallback on failure: the backend gates
+        // LAN-only addresses on the source being private, and this server's
+        // own wg address is private — a fallback would present every WAN
+        // client as LAN-local.
+        match crate::net::transparent::transparent_connect(
+            SocketAddr::V4(peer),
+            SocketAddr::V4(target),
+        )
+        .await
+        {
+            Ok(upstream) => upstream,
+            Err(e) => {
+                tracing::warn!("SNI demux transparent egress to {target} for {peer} failed: {e}");
+                return;
+            }
+        }
+    } else {
+        // Gateway-self fallback: plain connect to our own listener.
+        match TcpStream::connect(SocketAddr::V4(target)).await {
+            Ok(upstream) => upstream,
+            Err(e) => {
+                tracing::warn!("SNI demux local egress to {target} for {peer} failed: {e}");
+                return;
+            }
         }
     };
     if upstream.write_all(&buf).await.is_err() {
@@ -536,52 +688,182 @@ mod tests {
 
         // A named route coexists with the fallback: exact SNI hits the route,
         // no/unmatched SNI hits the fallback.
+        let anywhere = Ipv4Addr::new(203, 0, 113, 50);
         demux
             .register(ip, port, &["a.example.com".to_string()], host_target, None)
             .unwrap();
         demux.ports.peek(|p| {
             let pb = p.get(&(ip, port)).unwrap();
-            assert_eq!(pb.select(Some("a.example.com")), Some(host_target));
-            assert_eq!(pb.select(Some("nope.example.com")), Some(fb));
-            assert_eq!(pb.select(None), Some(fb));
+            assert_eq!(
+                pb.select(Some("a.example.com"), anywhere),
+                Some((host_target, true))
+            );
+            assert_eq!(
+                pb.select(Some("nope.example.com"), anywhere),
+                Some((fb, true))
+            );
+            assert_eq!(pb.select(None, anywhere), Some((fb, true)));
         });
 
         // Unregister with the wrong target is a no-op; the right target clears it,
         // leaving the named route intact.
         demux.unregister_fallback(ip, port, SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 8), 443));
         demux.ports.peek(|p| {
-            assert_eq!(p.get(&(ip, port)).unwrap().fallback, Some(fb));
+            assert_eq!(
+                p.get(&(ip, port)).unwrap().fallback.map(|f| f.target),
+                Some(fb)
+            );
         });
         demux.unregister_fallback(ip, port, fb);
         demux.ports.peek(|p| {
             let pb = p.get(&(ip, port)).unwrap();
             assert_eq!(pb.fallback, None);
-            assert_eq!(pb.select(None), None);
-            assert_eq!(pb.select(Some("a.example.com")), Some(host_target));
+            assert_eq!(pb.select(None, anywhere), None);
+            assert_eq!(
+                pb.select(Some("a.example.com"), anywhere),
+                Some((host_target, true))
+            );
         });
+    }
+
+    // A local (gateway-self) fallback: plain-connect leg, and PrivateOnly
+    // scoping admits RFC1918 sources while public sources fall through to a
+    // close — never to the gateway's own listener.
+    #[tokio::test]
+    async fn local_fallback_source_policy() {
+        let demux = SniDemux::new();
+        let ip = Ipv4Addr::LOCALHOST;
+        let port = 44320u16;
+        let ui = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 443);
+        let host_target = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 443);
+        demux
+            .register_local_fallback(ip, port, ui, FallbackSource::PrivateOnly)
+            .unwrap();
+        demux
+            .register(ip, port, &["a.example.com".to_string()], host_target, None)
+            .unwrap();
+        let private = Ipv4Addr::new(192, 168, 1, 2);
+        let public = Ipv4Addr::new(203, 0, 113, 50);
+        demux.ports.peek(|p| {
+            let pb = p.get(&(ip, port)).unwrap();
+            // Hostname routes are never source-scoped.
+            assert_eq!(
+                pb.select(Some("a.example.com"), public),
+                Some((host_target, true))
+            );
+            // The local fallback is plain-connect and private-only.
+            assert_eq!(pb.select(None, private), Some((ui, false)));
+            assert_eq!(pb.select(None, public), None);
+        });
+        // Re-registering with a new policy updates in place (mode switch).
+        demux
+            .register_local_fallback(ip, port, ui, FallbackSource::Any)
+            .unwrap();
+        demux.ports.peek(|p| {
+            let pb = p.get(&(ip, port)).unwrap();
+            assert_eq!(pb.select(None, public), Some((ui, false)));
+        });
+    }
+
+    // A grant must never outrun its socket: with the port held by a non-
+    // SO_REUSEPORT listener the bind fails, the register is refused with
+    // NO_RESOURCES, nothing is recorded, and on_change never fires — so a
+    // gateway never opens firewall access for a route with no listener.
+    #[tokio::test]
+    async fn bind_failure_refuses_grant_and_rolls_back() {
+        let events = Arc::new(SyncMutex::new(Vec::<(u16, bool)>::new()));
+        let recorded = events.clone();
+        let demux = SniDemux::with_on_change(move |port, active| {
+            recorded.mutate(|e| e.push((port, active)))
+        });
+        // Plain bind (no SO_REUSEPORT) — the demux's reuseport bind cannot join.
+        let blocker = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = blocker.local_addr().unwrap().port();
+        let target = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 443);
+
+        let err = demux
+            .register(
+                Ipv4Addr::LOCALHOST,
+                port,
+                &["a.example.com".to_string()],
+                target,
+                Some(3600),
+            )
+            .unwrap_err();
+        assert_eq!(err, RESULT_NO_RESOURCES);
+        assert!(demux.snapshot().is_empty(), "rolled back on bind failure");
+        demux.listeners.peek(|l| assert!(l.is_empty()));
+        assert!(events.peek(|e| e.is_empty()), "on_change must not fire");
+        assert_eq!(
+            demux
+                .register_fallback(Ipv4Addr::LOCALHOST, port, target)
+                .unwrap_err(),
+            RESULT_NO_RESOURCES
+        );
+        demux
+            .ports
+            .peek(|p| assert!(!p.contains_key(&(Ipv4Addr::LOCALHOST, port))));
+
+        // Blocker gone: the same register now succeeds and on_change fires.
+        drop(blocker);
+        demux
+            .register(
+                Ipv4Addr::LOCALHOST,
+                port,
+                &["a.example.com".to_string()],
+                target,
+                Some(3600),
+            )
+            .unwrap();
+        assert_eq!(demux.snapshot().len(), 1);
+        assert_eq!(events.peek(|e| e.clone()), vec![(port, true)]);
+    }
+
+    // The coexistence the SO_REUSEPORT bind exists for: a same-process
+    // wildcard listener (StartWRT's web UI) shares the port with the demux's
+    // specific bind.
+    #[tokio::test]
+    async fn reuseport_bind_coexists_with_wildcard_listener() {
+        let wildcard =
+            crate::net::utils::bind_tokio_listener_reuse_port((Ipv4Addr::UNSPECIFIED, 0).into())
+                .unwrap();
+        let port = wildcard.local_addr().unwrap().port();
+        let demux = SniDemux::new();
+        demux
+            .register(
+                Ipv4Addr::LOCALHOST,
+                port,
+                &["a.example.com".to_string()],
+                SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 443),
+                Some(3600),
+            )
+            .unwrap();
+        demux
+            .listeners
+            .peek(|l| assert!(l.contains_key(&(Ipv4Addr::LOCALHOST, port))));
     }
 
     #[test]
     fn select_exact_wildcard_fallback() {
         let mut pb = PortBindings::default();
         let exp = Instant::now() + Duration::from_secs(60);
+        let peer = Ipv4Addr::new(203, 0, 113, 50);
         let mk = |o: u8| Binding {
             target: SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, o), 443),
             expiry: Some(exp),
         };
         pb.hostnames.insert("a.example.com".into(), mk(1));
         pb.hostnames.insert("*.example.com".into(), mk(2));
-        pb.fallback = Some(SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 9), 443));
-        assert_eq!(
-            pb.select(Some("a.example.com")).unwrap().ip().octets()[3],
-            1
-        );
-        assert_eq!(
-            pb.select(Some("b.example.com")).unwrap().ip().octets()[3],
-            2
-        );
-        assert_eq!(pb.select(Some("other.org")).unwrap().ip().octets()[3], 9);
-        assert_eq!(pb.select(None).unwrap().ip().octets()[3], 9);
+        pb.fallback = Some(Fallback {
+            target: SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 9), 443),
+            source: FallbackSource::Any,
+            transparent: true,
+        });
+        let sel = |sni| pb.select(sni, peer).unwrap().0;
+        assert_eq!(sel(Some("a.example.com")).ip().octets()[3], 1);
+        assert_eq!(sel(Some("b.example.com")).ip().octets()[3], 2);
+        assert_eq!(sel(Some("other.org")).ip().octets()[3], 9);
+        assert_eq!(sel(None).ip().octets()[3], 9);
     }
 
     #[tokio::test]
@@ -652,7 +934,11 @@ mod tests {
                 "existing binding at the new key wins the collision"
             );
             assert_eq!(pb.hostnames.get("c.example.com").unwrap().target, t2);
-            assert_eq!(pb.fallback, Some(t1), "moved fallback fills the empty slot");
+            assert_eq!(
+                pb.fallback.map(|f| f.target),
+                Some(t1),
+                "moved fallback fills the empty slot"
+            );
         });
         demux.listeners.peek(|l| {
             assert!(l.contains_key(&(new_ip, 44313)) && !l.contains_key(&(old_ip, 44313)))

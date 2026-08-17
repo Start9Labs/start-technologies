@@ -54,9 +54,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as 443. Hostname routes appear in the Automatic section with their hostname,
   follow the same per-device permission and lease expiry as plain forwards,
   claim their shared port whole (plain forwards on it are refused; ports the
-  router itself answers on are refused to hostname routes for the same
-  reason), and are re-registered by the device within minutes after a router
-  restart rather than persisted.
+  router itself answers on — SSH, an inbound VPN — are refused to hostname
+  routes for the same reason), and are re-registered by the device within
+  minutes after a router restart rather than persisted. Remote access to the
+  router's own web interface is the exception, not a casualty: hostname
+  routes and remote access share port 443 — connections naming a routed
+  hostname reach its device, and everything else (such as browsing the
+  router by IP address) still reaches the router interface, accepted from
+  exactly the sources your Remote Access setting allows, so enabling one
+  feature never silently disables the other.
 - The UI now detects when the running firmware ships a newer interface than
   the page is displaying (every RPC response and `system.info` report the
   firmware's build stamp and the UI compares it to its own). An update

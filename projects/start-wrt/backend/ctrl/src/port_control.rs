@@ -124,7 +124,7 @@ use startos::net::port_map::server::igd::{
     SCPD_PATH, SSDP_MULTICAST, SSDP_PORT,
 };
 use startos::net::port_map::server::{handle, GatewayBackend, MappingEntry, PCP_PORT};
-use startos::tunnel::forward::sni::SniDemux;
+use startos::tunnel::forward::sni::{FallbackSource, SniDemux};
 use tokio::io::Interest;
 use tokio::net::UdpSocket;
 use uciedit::openwrt::{DhcpHost, FirewallRedirect, FirewallRule, FirewallTarget};
@@ -698,7 +698,43 @@ impl PortControl {
         // Best-effort: the demux routes regardless, and the sweep heals a
         // missed rule within a minute.
         self.sync_sni_rules().await;
+        self.sync_sni_fallback(*source.ip()).await;
         Ok(())
+    }
+
+    /// Keep the demux's remote-access fallback in step with the Remote Access
+    /// setting: while hostname routes share 443 — the one port both the demux
+    /// and the router's WAN UI can serve — no-SNI/unknown-SNI connections pipe
+    /// to the router's own UI listener, scoped to the same sources the
+    /// setting's firewall rules admit, so taking the port never breaks (or
+    /// widens) remote access. Registered on route add and a Remote Access
+    /// change, swept once a minute as the backstop (which also clears it once
+    /// the last 443 route expires).
+    pub(crate) async fn sync_sni_fallback(&self, wan: Ipv4Addr) {
+        let has_443 = self
+            .sni
+            .snapshot()
+            .iter()
+            .any(|r| r.ext_port == 443 && r.ext_ip == wan);
+        let mode = {
+            let uci_root = self.uci_root.clone();
+            uci_task(move || async move {
+                let arena = Arena::new();
+                let cfgs = parse_all(&uci_root, &arena, &["startwrt"]).await?;
+                Ok(crate::system::preferences(&cfgs["startwrt"])?.remote_access)
+            })
+            .await
+            .unwrap_or_else(|_| "default".to_string())
+        };
+        let ui = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 443);
+        match (has_443, remote_access_fallback_source(&mode, wan)) {
+            (true, Some(source)) => {
+                if let Err(code) = self.sni.register_local_fallback(wan, 443, ui, source) {
+                    tracing::warn!("port-control: remote-access fallback on 443 refused ({code})");
+                }
+            }
+            _ => self.sni.unregister_fallback(wan, 443, ui),
+        }
     }
 
     /// Reconcile the `apf_sni_*` WAN-admit rules against the demux's live port
@@ -725,14 +761,20 @@ impl PortControl {
     /// rules back in line with the live ports (heals a failed callback write,
     /// an external edit, or a stale rule from before a daemon restart).
     async fn sni_maintain(&self) {
-        if let Some(ip) = self.wan_ipv4().await {
+        let wan = self.wan_ipv4().await;
+        if let Some(ip) = wan {
             if self.sni.snapshot().iter().any(|r| r.ext_ip != ip) {
                 tracing::info!("port-control: re-keying SNI routes onto WAN address {ip}");
                 self.sni.rekey_ipv4(ip);
             }
         }
-        let _serial = self.write_serial.lock().await;
-        self.sync_sni_rules().await;
+        {
+            let _serial = self.write_serial.lock().await;
+            self.sync_sni_rules().await;
+        }
+        if let Some(ip) = wan {
+            self.sync_sni_fallback(ip).await;
+        }
     }
 }
 
@@ -1209,13 +1251,27 @@ fn desired_sni_rule(port: u16) -> FirewallRule {
     }
 }
 
+/// Which sources the remote-access fallback admits, mirroring exactly the
+/// firewall rules `apply_remote_access_config` writes for the mode: "always"
+/// is unscoped; "default" behind NAT (RFC1918 WAN — std's `is_private` matches
+/// `system::is_private_ipv4`) admits private sources only; a public WAN in
+/// "default", or "never", writes no WAN rules and so gets no fallback.
+fn remote_access_fallback_source(mode: &str, wan: Ipv4Addr) -> Option<FallbackSource> {
+    match mode {
+        "always" => Some(FallbackSource::Any),
+        "default" if wan.is_private() => Some(FallbackSource::PrivateOnly),
+        _ => None,
+    }
+}
+
 /// Whether tcp `port` is unavailable to the SNI demux: an enabled WAN-ingress
 /// DNAT redirect overlaps it (that traffic already goes wholesale to one
 /// device), or the router itself answers on it from the WAN (Remote Access,
 /// the VPN server — the demux's specific `(wan_ip, port)` bind would beat
 /// their wildcard binds and capture traffic it has no route for). The demux's
 /// own admit rules are excluded, so a second hostname on an already-demuxed
-/// port is not a self-conflict.
+/// port is not a self-conflict — and Remote Access's 443 rules are excluded
+/// in favor of the UI fallback (see `sync_sni_fallback`).
 fn sni_port_conflicts(firewall: &uciedit::Config<'_>, port: u16) -> bool {
     let want = (port, port);
     for sec in &firewall.sections {
@@ -1236,6 +1292,20 @@ fn sni_port_conflicts(firewall: &uciedit::Config<'_>, port: u16) -> bool {
             continue;
         };
         if rule._apf_label.as_deref() == Some(LABEL_SNI) {
+            continue;
+        }
+        // Remote Access's own 443 rules don't conflict: the daemon registers
+        // its web UI as the demuxed port's fallback with the same source
+        // scoping (see `sync_sni_fallback`), so remote access rides the shared
+        // port instead of losing it. Only 443 — the UI's TLS port — can do
+        // this: SSH (22) is server-speaks-first and the port-80 redirect is
+        // plain HTTP, neither of which an SNI peek can serve.
+        if port == 443
+            && (rule.name.starts_with(crate::system::REMOTE_RULE_PREFIX)
+                || sec
+                    .name()
+                    .is_some_and(|n| n.starts_with(crate::system::REMOTE_RULE_PREFIX)))
+        {
             continue;
         }
         if rule.target != FirewallTarget::ACCEPT || rule.enabled.as_deref() == Some("0") {
@@ -2474,13 +2544,19 @@ config redirect 'dns_override_lan'
             "nothing registered on refusal"
         );
 
-        // A port the router answers on itself (Remote Access): the demux's
-        // specific (wan_ip, port) bind would beat the router's wildcard bind
-        // and capture its WAN UI.
+        // A non-443 port the router answers on itself (Remote Access SSH):
+        // still refused — SSH is server-speaks-first, so it can't ride the
+        // demux's fallback the way the 443 UI does.
         let dir = temp_root(ROUTER_FW);
         let pc = PortControl::new(dir.path().to_path_buf());
+        let ssh = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), 22);
         let err = pc
-            .add_sni_route(source, target, &["a.example.com".to_string()], Some(3600))
+            .add_sni_route(
+                ssh,
+                SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 60), 22),
+                &["a.example.com".to_string()],
+                Some(3600),
+            )
             .await
             .unwrap_err();
         assert_eq!(err, RESULT_HOSTNAME_TAKEN);
@@ -2495,6 +2571,48 @@ config redirect 'dns_override_lan'
         )
         .await
         .unwrap();
+    }
+
+    // Remote Access's own rules stop conflicting exactly on 443 — the port
+    // whose traffic the UI fallback can serve — while every other
+    // router-answered or forwarded port keeps refusing.
+    #[tokio::test]
+    async fn remote_access_coexists_on_443_only() {
+        let dir = temp_root(ROUTER_FW);
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["firewall"]).await.unwrap();
+        let fw = &cfgs["firewall"];
+        assert!(
+            !sni_port_conflicts(fw, 443),
+            "RA's 443 rides the UI fallback"
+        );
+        assert!(sni_port_conflicts(fw, 22), "RA's SSH keeps its refusal");
+
+        let dir = temp_root(MANUAL_FW);
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["firewall"]).await.unwrap();
+        assert!(
+            sni_port_conflicts(&cfgs["firewall"], 443),
+            "a manual DNAT on 443 is not Remote Access"
+        );
+    }
+
+    // The fallback's source scoping mirrors apply_remote_access_config's rule
+    // emission case-for-case.
+    #[test]
+    fn fallback_source_mirrors_remote_access_modes() {
+        let private_wan = Ipv4Addr::new(192, 168, 10, 92);
+        let public_wan = Ipv4Addr::new(203, 0, 113, 7);
+        assert_eq!(
+            remote_access_fallback_source("default", private_wan),
+            Some(FallbackSource::PrivateOnly)
+        );
+        assert_eq!(remote_access_fallback_source("default", public_wan), None);
+        assert_eq!(
+            remote_access_fallback_source("always", public_wan),
+            Some(FallbackSource::Any)
+        );
+        assert_eq!(remote_access_fallback_source("never", private_wan), None);
     }
 
     // The admit rule makes a demuxed port read as router-held, so a plain auto
