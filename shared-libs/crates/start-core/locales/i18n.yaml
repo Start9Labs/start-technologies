@@ -7,6 +7,27 @@ acme.invalid-contact:
   fr_FR: "Contact ACME invalide %{contact} : doit être un URI « mailto: » contenant une adresse e-mail (par exemple « mailto:vous@example.com »)"
   pl_PL: "Nieprawidłowy kontakt ACME %{contact}: musi być URI „mailto:” zawierającym adres e-mail (np. „mailto:ty@example.com”)"
 
+acme.order-failed-message:
+  en_US: "%{error}. The address does not answer until a certificate is issued: check that its DNS record points at this server, and that port 443 reaches it — a certificate authority validates on port 443 whatever port the address itself serves."
+  de_DE: "%{error}. Die Adresse antwortet erst, wenn ein Zertifikat ausgestellt ist: Prüfen Sie, ob ihr DNS-Eintrag auf diesen Server zeigt und Port 443 ihn erreicht — eine Zertifizierungsstelle validiert über Port 443, unabhängig davon, über welchen Port die Adresse selbst bereitgestellt wird."
+  es_ES: "%{error}. La dirección no responde hasta que se emita un certificado: comprueba que su registro DNS apunte a este servidor y que el puerto 443 llegue hasta él; una autoridad de certificación valida por el puerto 443 sea cual sea el puerto en el que se sirva la dirección."
+  fr_FR: "%{error}. L'adresse ne répond pas tant qu'un certificat n'est pas émis : vérifiez que son enregistrement DNS pointe vers ce serveur et que le port 443 l'atteint — une autorité de certification valide sur le port 443, quel que soit le port sur lequel l'adresse est servie."
+  pl_PL: "%{error}. Adres nie odpowiada, dopóki certyfikat nie zostanie wydany: sprawdź, czy jego rekord DNS wskazuje ten serwer i czy port 443 do niego dociera — urząd certyfikacji weryfikuje przez port 443, niezależnie od portu, na którym serwowany jest sam adres."
+
+acme.order-failed-title:
+  en_US: "Could not get a certificate for %{domain}"
+  de_DE: "Zertifikat für %{domain} konnte nicht bezogen werden"
+  es_ES: "No se ha podido obtener un certificado para %{domain}"
+  fr_FR: "Impossible d'obtenir un certificat pour %{domain}"
+  pl_PL: "Nie udało się uzyskać certyfikatu dla %{domain}"
+
+acme.order-timed-out:
+  en_US: "The certificate authority did not answer in time"
+  de_DE: "Die Zertifizierungsstelle hat nicht rechtzeitig geantwortet"
+  es_ES: "La autoridad de certificación no respondió a tiempo"
+  fr_FR: "L'autorité de certification n'a pas répondu à temps"
+  pl_PL: "Urząd certyfikacji nie odpowiedział na czas"
+
 bins.deprecated.renamed:
   en_US: "%{old} has been renamed to %{new}"
   de_DE: "%{old} wurde in %{new} umbenannt"

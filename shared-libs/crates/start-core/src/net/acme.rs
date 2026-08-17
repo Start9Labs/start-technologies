@@ -52,7 +52,15 @@ pub struct OrderEntry {
     /// [`DEFAULT_FAILURE_BACKOFF`]. Inside this window `get_cert`
     /// returns `None` instead of starting a new order.
     backoff_until: Option<Instant>,
+    /// Set once the operator has been told this order is failing. Every retry
+    /// while it stands is silent; the entry is dropped when a certificate
+    /// finally lands, so the next failure after that speaks again.
+    reported: bool,
 }
+
+/// Told the SANs of an order that failed and why, to surface to the operator.
+pub type ReportOrderFailure =
+    Arc<dyn Fn(BTreeSet<InternedString>, String) -> BoxFuture<'static, ()> + Send + Sync>;
 
 /// Cooldown for failures without a server-supplied `Retry-After`. Long
 /// enough to break the per-connection retry loop.
@@ -76,6 +84,7 @@ pub struct AcmeTlsHandler<M: HasModel, S> {
     pub crypto_provider: Arc<CryptoProvider>,
     pub get_provider: S,
     pub in_progress: Watch<BTreeMap<BTreeSet<InternedString>, OrderEntry>>,
+    pub report_failure: Option<ReportOrderFailure>,
 }
 impl<M, S> AcmeTlsHandler<M, S>
 where
@@ -174,6 +183,7 @@ where
             }
 
             let provider_clone = provider.clone();
+            let report_failure = self.report_failure.clone();
             let acme_cache = self.acme_cache.clone();
             let db = self.db.clone();
             let in_progress = self.in_progress.clone();
@@ -211,32 +221,49 @@ where
 
                 acme_cache.mutate(|c| c.retain(|c, _| !cache_entries_clone.contains_key(c)));
 
-                let (cert, backoff) = match res {
+                let (cert, failure) = match res {
                     Ok(Ok(cert)) => (Some(cert), None),
                     Ok(Err(e)) => {
                         let retry_after = retry_after_from_order_error(&e);
                         tracing::warn!("ACME order failed for {san_info_clone:?}: {e}");
                         tracing::debug!("{e:?}");
-                        (None, Some(retry_after.unwrap_or(DEFAULT_FAILURE_BACKOFF)))
+                        (
+                            None,
+                            Some((
+                                retry_after.unwrap_or(DEFAULT_FAILURE_BACKOFF),
+                                e.to_string(),
+                            )),
+                        )
                     }
                     Err(_) => {
                         tracing::warn!("ACME order timed out for {san_info_clone:?} after 120s");
-                        (None, Some(DEFAULT_FAILURE_BACKOFF))
+                        (
+                            None,
+                            Some((
+                                DEFAULT_FAILURE_BACKOFF,
+                                t!("acme.order-timed-out").to_string(),
+                            )),
+                        )
                     }
                 };
 
                 // Success: leave the entry alone; the next cached-cert
                 // path call removes it. Failure: arm the cooldown.
-                if let Some(d) = backoff {
-                    in_progress.send_if_modified(|map| {
+                if let Some((d, error)) = failure {
+                    let report = in_progress.send_modify(|map| {
                         let Some(entry) = map.get_mut(&san_info_clone) else {
                             return false;
                         };
                         entry.in_flight = None;
                         entry.backoff_until = Some(Instant::now() + d);
                         tracing::info!("ACME order for {san_info_clone:?} backing off for {d:?}");
-                        true
+                        std::mem::replace(&mut entry.reported, true) == false
                     });
+                    if report {
+                        if let Some(report) = &report_failure {
+                            report(san_info_clone.clone(), error).await;
+                        }
+                    }
                 }
 
                 cert
@@ -309,12 +336,10 @@ where
             .flatten()
             .any(|a| a == ACME_TLS_ALPN_NAME)
         {
-            // Only a name we have an order in flight for is answerable, and
-            // answering with anything else — a local-CA leaf from a later
-            // handler — would just fail validation.
+            // Only a name we have an order in flight for is answerable.
             let Some(cert) = self.acme_cache.peek(|c| c.get(domain).cloned()) else {
                 tracing::debug!("no ACME challenge in flight for {domain}");
-                return Some(TlsHandlerAction::Reject);
+                return None;
             };
             tracing::info!("Waiting for verification cert for {domain}");
             let cert = cert
@@ -346,16 +371,6 @@ where
                     .with_no_client_auth()
                     .with_cert_resolver(Arc::new(SingleCertResolver(Arc::new(cert)))),
             ));
-        }
-
-        // The name is configured for ACME and we have no certificate for it.
-        // Falling through to the local root CA would serve the box's own CA
-        // chain — an identifier shared by every service on this server — to a
-        // client that asked for a publicly trusted one, under a UI that still
-        // says the issuer is the ACME provider. Refuse instead.
-        if self.get_provider.get_provider(&domains).await.is_some() {
-            tracing::warn!("refusing {domain}: no ACME certificate available");
-            return Some(TlsHandlerAction::Reject);
         }
 
         None

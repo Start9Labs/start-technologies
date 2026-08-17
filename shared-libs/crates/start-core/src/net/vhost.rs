@@ -37,6 +37,7 @@ use crate::db::model::public::{AcmeSettings, NetworkInterfaceInfo};
 use crate::db::{DbAccessByKey, DbAccessMut};
 use crate::net::acme::{
     AcmeCertStore, AcmeProvider, AcmeTlsAlpnCache, AcmeTlsHandler, GetAcmeProvider,
+    ReportOrderFailure,
 };
 use crate::net::forward::START9_BRIDGE_V6_SUBNET;
 use crate::net::gateway::{
@@ -44,9 +45,10 @@ use crate::net::gateway::{
 };
 use crate::net::port_map::{PortMapController, candidate_gateways};
 use crate::net::ssl::{CertBranding, CertStore, RootCaTlsHandler};
-use crate::net::tls::{ChainedHandler, TlsHandler, TlsHandlerAction, TlsListener, TlsMetadata};
+use crate::net::tls::{TlsHandler, TlsHandlerAction, TlsListener, TlsMetadata};
 use crate::net::utils::{bind_mio_listener, ipv6_is_link_local, is_private_ip};
 use crate::net::web_server::{Accept, AcceptStream, ExtractVisitor, TcpMetadata, extract};
+use crate::notifications::NotificationLevel;
 use crate::prelude::*;
 use crate::util::collections::EqSet;
 use crate::util::future::NonDetachingJoinHandle;
@@ -324,6 +326,33 @@ impl VHostController {
         })
     }
 
+    /// Notifies the operator, once per name until a certificate lands, that
+    /// ACME issuance is failing. The address refuses connections while that is
+    /// true, so nothing else would say why.
+    fn report_acme_failure(&self) -> ReportOrderFailure {
+        let db = self.db.clone();
+        Arc::new(move |sans, error| {
+            let db = db.clone();
+            async move {
+                let domain = sans.iter().map(|s| &**s).collect::<Vec<_>>().join(", ");
+                db.mutate(|db| {
+                    crate::notifications::notify(
+                        db,
+                        None,
+                        NotificationLevel::Warning,
+                        t!("acme.order-failed-title", domain = domain).to_string(),
+                        t!("acme.order-failed-message", domain = domain, error = error).to_string(),
+                        (),
+                    )
+                })
+                .await
+                .result
+                .log_err();
+            }
+            .boxed()
+        })
+    }
+
     fn create_server(&self, port: u16) -> VHostServer<VHostBindListener> {
         let bind_reqs = Watch::new(VHostBindRequirements::default());
         let listener = VHostBindListener {
@@ -340,6 +369,7 @@ impl VHostController {
             self.crypto_provider.clone(),
             self.branding.clone(),
             self.acme_cache.clone(),
+            self.report_acme_failure(),
         )
     }
 
@@ -453,7 +483,7 @@ impl VHostController {
     pub fn reconcile_port_maps(
         &self,
         owner: HostMapOwner,
-        targets: &BTreeMap<(Option<InternedString>, u16), ProxyTarget>,
+        targets: &BTreeMap<VHostKey, ProxyTarget>,
     ) {
         let ip_info = self.interfaces.watcher.ip_info();
         self.sync_port_maps(owner, desired_port_maps(targets, &ip_info));
@@ -501,6 +531,11 @@ impl VHostController {
     }
 }
 
+/// A vhost entry's identity: `(hostname, external port, serves the public
+/// exposure)`. A name reachable both from the LAN and from the internet has one
+/// entry per side, so that only the public one carries a certificate authority.
+pub type VHostKey = (Option<InternedString>, u16, bool);
+
 /// The port ACME's TLS-ALPN-01 challenge is dialed at. Fixed by the protocol —
 /// the validator ignores whatever port the name is actually served on.
 const ACME_CHALLENGE_PORT: u16 = 443;
@@ -527,11 +562,11 @@ type DesiredPortMaps = BTreeMap<
 /// IPv4s gets a mapping keyed by the vhost's hostname. IPv6 GUAs carry no NAT,
 /// so they get a firewall pinhole at the same port instead.
 fn desired_port_maps(
-    targets: &BTreeMap<(Option<InternedString>, u16), ProxyTarget>,
+    targets: &BTreeMap<VHostKey, ProxyTarget>,
     ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
 ) -> DesiredPortMaps {
     let mut desired = DesiredPortMaps::new();
-    for ((maybe_host, external), target) in targets {
+    for ((maybe_host, external, _), target) in targets {
         // IPv4: forward the port to the box's LAN IPv4 — a PCP HOSTNAME mapping
         // (SNI demux) for a domain, a plain pinhole for a bare `*` vhost.
         for gw_id in &target.public_v4 {
@@ -794,6 +829,16 @@ pub trait VHostTarget<A: Accept>: std::fmt::Debug + Eq {
     fn filter(&self, metadata: &<A as Accept>::Metadata) -> bool {
         true
     }
+    /// Whether this target answers `metadata` as one of the box's own private
+    /// addresses, which takes precedence over answering it as a public one. A
+    /// name can be served both ways at once — the same domain resolving to a
+    /// LAN address inside the network and a public one outside it — and on
+    /// IPv4 both arrive on the same gateway, so a target that claims the
+    /// connection here is the one that owns it.
+    #[allow(unused_variables)]
+    fn filter_private(&self, metadata: &<A as Accept>::Metadata) -> bool {
+        false
+    }
     fn acme(&self) -> Option<&AcmeProvider> {
         None
     }
@@ -821,6 +866,7 @@ pub trait VHostTarget<A: Accept>: std::fmt::Debug + Eq {
 
 pub trait DynVHostTargetT<A: Accept>: std::fmt::Debug + Any {
     fn filter(&self, metadata: &<A as Accept>::Metadata) -> bool;
+    fn filter_private(&self, metadata: &<A as Accept>::Metadata) -> bool;
     fn acme(&self) -> Option<&AcmeProvider>;
     fn bind_requirements(&self) -> (BTreeSet<GatewayId>, BTreeSet<IpAddr>);
     fn is_passthrough(&self) -> bool;
@@ -844,6 +890,9 @@ pub trait DynVHostTargetT<A: Accept>: std::fmt::Debug + Any {
 impl<A: Accept, T: VHostTarget<A> + 'static> DynVHostTargetT<A> for T {
     fn filter(&self, metadata: &<A as Accept>::Metadata) -> bool {
         VHostTarget::filter(self, metadata)
+    }
+    fn filter_private(&self, metadata: &<A as Accept>::Metadata) -> bool {
+        VHostTarget::filter_private(self, metadata)
     }
     fn acme(&self) -> Option<&AcmeProvider> {
         VHostTarget::acme(self)
@@ -1030,8 +1079,16 @@ impl ProxyTarget {
             IpAddr::V4(_) => self.public_v4.contains(gw_id),
             IpAddr::V6(v6) => self.public_v6.contains(&v6),
         };
-        wan || (self.private.contains(&dst)
-            && (subnets.iter().any(|s| s.contains(&src)) || is_private_ip(src)))
+        wan || self.accepts_as_private(subnets, src, dst)
+    }
+
+    /// Whether this is a dial of one of our own private addresses from the
+    /// network that address is on. IPv4 gives such a dial the same arrival
+    /// gateway as a forwarded WAN one — the box sees its own LAN IPv4 either
+    /// way — so the source address is what tells them apart.
+    fn accepts_as_private(&self, subnets: &OrdSet<IpNet>, src: IpAddr, dst: IpAddr) -> bool {
+        self.private.contains(&dst)
+            && (subnets.iter().any(|s| s.contains(&src)) || is_private_ip(src))
     }
 
     /// Whether the box gateways `client`, which source preservation requires:
@@ -1063,6 +1120,36 @@ impl ProxyTarget {
     }
 }
 
+/// Where a connection came from and landed: `(arrival gateway, that gateway's
+/// subnets, source, local address)`.
+struct Arrival {
+    gateway: GatewayId,
+    subnets: OrdSet<IpNet>,
+    src: IpAddr,
+    dst: IpAddr,
+}
+
+fn arrival<A>(metadata: &<A as Accept>::Metadata) -> Option<Arrival>
+where
+    A: Accept + 'static,
+    <A as Accept>::Metadata: Visit<ExtractVisitor<GatewayInfo>>
+        + Visit<ExtractVisitor<TcpMetadata>>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+{
+    let gw = extract::<GatewayInfo, _>(metadata)?;
+    let tcp = extract::<TcpMetadata, _>(metadata)?;
+    let ip_info = gw.info.ip_info.as_ref()?;
+    Some(Arrival {
+        gateway: gw.id.clone(),
+        subnets: ip_info.subnets.clone(),
+        src: tcp.peer_addr.ip(),
+        dst: tcp.local_addr.ip(),
+    })
+}
+
 impl<A> VHostTarget<A> for ProxyTarget
 where
     A: Accept + 'static,
@@ -1074,19 +1161,16 @@ where
 {
     type PreprocessRes = AcceptStream;
     fn filter(&self, metadata: &<A as Accept>::Metadata) -> bool {
-        let gw = extract::<GatewayInfo, _>(metadata);
-        let tcp = extract::<TcpMetadata, _>(metadata);
-        let (Some(gw), Some(tcp)) = (gw, tcp) else {
+        let Some(at) = arrival::<A>(metadata) else {
             return false;
         };
-        let Some(ip_info) = &gw.info.ip_info else {
+        self.accepts(&at.gateway, &at.subnets, at.src, at.dst)
+    }
+    fn filter_private(&self, metadata: &<A as Accept>::Metadata) -> bool {
+        let Some(at) = arrival::<A>(metadata) else {
             return false;
         };
-
-        let src = tcp.peer_addr.ip();
-        let dst = tcp.local_addr.ip();
-
-        self.accepts(&gw.id, &ip_info.subnets, src, dst)
+        self.accepts_as_private(&at.subnets, at.src, at.dst)
     }
     fn acme(&self) -> Option<&AcmeProvider> {
         self.acme.as_ref()
@@ -1526,8 +1610,11 @@ impl<A: Accept + 'static> GetAcmeProvider for GetVHostAcmeProvider<A> {
                     if x.parse::<IpAddr>().is_ok() {
                         return Some(acc);
                     }
-                    let (t, _) = m.get(&Some(x.clone()))?.iter().find(|(_, e)| e.alive())?;
-                    let acme = t.0.acme()?;
+                    let acme = m
+                        .get(&Some(x.clone()))?
+                        .iter()
+                        .filter(|(_, e)| e.alive())
+                        .find_map(|(t, _)| t.0.acme())?;
                     Some(if let Some(acc) = acc {
                         if acme == acc {
                             // all must match
@@ -1577,16 +1664,18 @@ fn passthrough_stub_config(crypto_provider: &Arc<CryptoProvider>) -> Result<Serv
 /// The handler holds the cert-resolution chain as `inner` and only invokes
 /// it when the matched target terminates TLS, or when the connection is the
 /// ACME `acme-tls/1` ALPN challenge (which has to be answered locally).
-pub struct VHostTlsHandler<I, A: Accept + 'static> {
-    inner: I,
+pub struct VHostTlsHandler<Acme, RootCa, A: Accept + 'static> {
+    acme: Acme,
+    root_ca: RootCa,
     crypto_provider: Arc<CryptoProvider>,
     mapping: Watch<Mapping<A>>,
     preprocessed: Option<Preprocessed<A>>,
 }
-impl<I: Clone, A: Accept + 'static> Clone for VHostTlsHandler<I, A> {
+impl<Acme: Clone, RootCa: Clone, A: Accept + 'static> Clone for VHostTlsHandler<Acme, RootCa, A> {
     fn clone(&self) -> Self {
         Self {
-            inner: self.inner.clone(),
+            acme: self.acme.clone(),
+            root_ca: self.root_ca.clone(),
             crypto_provider: self.crypto_provider.clone(),
             mapping: self.mapping.clone(),
             // Per-connection state — never carried across clones; each
@@ -1596,12 +1685,13 @@ impl<I: Clone, A: Accept + 'static> Clone for VHostTlsHandler<I, A> {
     }
 }
 
-impl<'a, A, I> TlsHandler<'a, A> for VHostTlsHandler<I, A>
+impl<'a, A, Acme, RootCa> TlsHandler<'a, A> for VHostTlsHandler<Acme, RootCa, A>
 where
     A: Accept + 'a,
     <A as Accept>::Metadata:
         Visit<ExtractVisitor<GatewayInfo>> + Visit<ExtractVisitor<TcpMetadata>> + Send + Sync,
-    I: TlsHandler<'a, A> + Send,
+    Acme: TlsHandler<'a, A> + Send,
+    RootCa: TlsHandler<'a, A> + Send,
 {
     async fn get_config(
         &'a mut self,
@@ -1611,11 +1701,10 @@ where
         let sni = host_key(hello.server_name());
 
         let routed = self.mapping.peek(|m| {
-            m.get(&sni)
-                .into_iter()
-                .flatten()
-                .filter(|(_, e)| e.alive())
-                .find(|(t, _)| t.0.filter(metadata))
+            let alive = || m.get(&sni).into_iter().flatten().filter(|(_, e)| e.alive());
+            alive()
+                .find(|(t, _)| t.0.filter_private(metadata))
+                .or_else(|| alive().find(|(t, _)| t.0.filter(metadata)))
                 .map(|(t, e)| (t.clone(), e.ctx.clone()))
         });
 
@@ -1629,7 +1718,7 @@ where
             // only from the controller-wide cache of in-flight orders, so this
             // still refuses every name we are not ourselves ordering for.
             if acme_challenge {
-                return self.inner.get_config(hello, metadata).await;
+                return self.acme.get_config(hello, metadata).await;
             }
             return None;
         };
@@ -1643,13 +1732,29 @@ where
             return Some(TlsHandlerAction::Passthrough);
         }
 
-        // ACME challenge for a terminating target: answer locally from the inner
-        // chain.
+        // ACME challenge for a terminating target: answer it ourselves.
         if acme_challenge {
-            return self.inner.get_config(hello, metadata).await;
+            return self.acme.get_config(hello, metadata).await;
         }
 
-        let action = self.inner.get_config(hello, metadata).await?;
+        let action = if target.0.acme().is_some() {
+            // This address is served the certificate its authority issued or
+            // nothing at all. The local root CA would answer for any name asked
+            // of it, so falling back to it hands a client that asked for a
+            // publicly trusted certificate one signed by a chain shared with
+            // every other address on this server — under a name the UI still
+            // labels with the authority. Refuse the connection instead.
+            self.acme.get_config(hello, metadata).await?
+        } else {
+            // No authority on this address: the local root CA serves it, as it
+            // does every LAN address. A certificate the authority issued for
+            // this name is still preferred where one exists, so a domain
+            // reachable both ways presents the same certificate either way.
+            match self.acme.get_config(hello, metadata).await {
+                Some(action) => action,
+                None => self.root_ca.get_config(hello, metadata).await?,
+            }
+        };
         let cfg = match action {
             TlsHandlerAction::Tls(cfg) => cfg,
             other => return Some(other),
@@ -1663,10 +1768,7 @@ where
 struct VHostListener<M, A>(
     TlsListener<
         A,
-        VHostTlsHandler<
-            ChainedHandler<Arc<AcmeTlsHandler<M, GetVHostAcmeProvider<A>>>, RootCaTlsHandler<M>>,
-            A,
-        >,
+        VHostTlsHandler<Arc<AcmeTlsHandler<M, GetVHostAcmeProvider<A>>>, RootCaTlsHandler<M>, A>,
     >,
 )
 where
@@ -1775,6 +1877,7 @@ impl<A: Accept> VHostServer<A> {
         crypto_provider: Arc<CryptoProvider>,
         branding: CertBranding,
         acme_cache: AcmeTlsAlpnCache,
+        report_acme_failure: ReportOrderFailure,
     ) -> Self
     where
         for<'a> M: HasModel<Model = Model<M>>
@@ -1800,20 +1903,19 @@ impl<A: Accept> VHostServer<A> {
                 let mut listener = VHostListener(TlsListener::new(
                     listener,
                     VHostTlsHandler {
-                        inner: ChainedHandler(
-                            Arc::new(AcmeTlsHandler {
-                                db: db.clone(),
-                                acme_cache,
-                                crypto_provider: crypto_provider.clone(),
-                                get_provider: GetVHostAcmeProvider(mapping.clone()),
-                                in_progress: Watch::new(BTreeMap::new()),
-                            }),
-                            RootCaTlsHandler {
-                                db,
-                                crypto_provider: crypto_provider.clone(),
-                                branding,
-                            },
-                        ),
+                        acme: Arc::new(AcmeTlsHandler {
+                            db: db.clone(),
+                            acme_cache,
+                            crypto_provider: crypto_provider.clone(),
+                            get_provider: GetVHostAcmeProvider(mapping.clone()),
+                            in_progress: Watch::new(BTreeMap::new()),
+                            report_failure: Some(report_acme_failure),
+                        }),
+                        root_ca: RootCaTlsHandler {
+                            db,
+                            crypto_provider: crypto_provider.clone(),
+                            branding,
+                        },
                         crypto_provider,
                         mapping,
                         preprocessed: None,
@@ -2072,12 +2174,14 @@ mod port_map_tests {
         }
     }
 
+    /// Every entry here is a public leg — a private one carries no public
+    /// gateway, so it contributes no port map at all.
     fn targets<'a>(
         entries: impl IntoIterator<Item = (Option<&'a str>, u16, ProxyTarget)>,
-    ) -> BTreeMap<(Option<InternedString>, u16), ProxyTarget> {
+    ) -> BTreeMap<VHostKey, ProxyTarget> {
         entries
             .into_iter()
-            .map(|(host, port, target)| ((host.map(InternedString::intern), port), target))
+            .map(|(host, port, target)| ((host.map(InternedString::intern), port, true), target))
             .collect()
     }
 
@@ -2267,6 +2371,33 @@ mod accept_filter_tests {
 
         // A different gateway is never WAN-accepted on IPv4.
         assert!(!t.accepts(&gw("other"), &no_subnets, src, v4));
+    }
+
+    /// A domain reachable both ways is two targets. IPv4 hands a forwarded WAN
+    /// dial and a local one the same arrival gateway, so the public leg claims
+    /// both — the source address is what separates them, and the private leg's
+    /// claim is the stronger one.
+    #[test]
+    fn a_lan_dial_of_a_dual_exposure_domain_belongs_to_the_private_leg() {
+        let g = gw("eth0");
+        let no_subnets = OrdSet::new();
+        let lan_dst = ip("192.168.1.2");
+        let public_leg = target(&["eth0"], &[], &[]);
+        let private_leg = target(&[], &[], &["192.168.1.2"]);
+
+        let lan_src = ip("192.168.1.50");
+        assert!(private_leg.accepts_as_private(&no_subnets, lan_src, lan_dst));
+        assert!(!public_leg.accepts_as_private(&no_subnets, lan_src, lan_dst));
+        assert!(
+            public_leg.accepts(&g, &no_subnets, lan_src, lan_dst),
+            "the public leg cannot tell a local dial from a forwarded one, \
+             which is why the private leg is preferred"
+        );
+
+        let wan_src = ip("203.0.113.9");
+        assert!(!private_leg.accepts_as_private(&no_subnets, wan_src, lan_dst));
+        assert!(!private_leg.accepts(&g, &no_subnets, wan_src, lan_dst));
+        assert!(public_leg.accepts(&g, &no_subnets, wan_src, lan_dst));
     }
 
     // LAN accept via `private` is matched by the exact local `dst` (so it is

@@ -29,9 +29,6 @@ pub enum TlsHandlerAction {
     Tls(ServerConfig),
     /// Don't complete TLS — rewind the BackTrackingIO and return the raw stream.
     Passthrough,
-    /// Refuse the connection. Unlike returning `None`, this stops the chain: a
-    /// later handler must not answer for a name this one owns.
-    Reject,
 }
 
 use crate::net::http::handle_http_on_https;
@@ -69,27 +66,6 @@ pub trait TlsHandler<'a, A: Accept> {
         hello: &'a ClientHello<'a>,
         metadata: &'a A::Metadata,
     ) -> impl Future<Output = Option<TlsHandlerAction>> + Send + 'a;
-}
-
-#[derive(Clone)]
-pub struct ChainedHandler<H0, H1>(pub H0, pub H1);
-impl<'a, A, H0, H1> TlsHandler<'a, A> for ChainedHandler<H0, H1>
-where
-    A: Accept + 'a,
-    <A as Accept>::Metadata: Send + Sync,
-    H0: TlsHandler<'a, A> + Send,
-    H1: TlsHandler<'a, A> + Send,
-{
-    async fn get_config(
-        &'a mut self,
-        hello: &'a ClientHello<'a>,
-        metadata: &'a <A as Accept>::Metadata,
-    ) -> Option<TlsHandlerAction> {
-        if let Some(config) = self.0.get_config(hello, metadata).await {
-            return Some(config);
-        }
-        self.1.get_config(hello, metadata).await
-    }
 }
 
 #[derive(Debug)]
@@ -259,7 +235,7 @@ where
                                 Box::pin(bt) as AcceptStream,
                             )));
                         }
-                        Some(TlsHandlerAction::Reject) | None => {
+                        None => {
                             crate::dev_log!(debug, "no certificate for SNI {:?}", sni);
                             // The io buffers writes until the handshake config
                             // is settled, so the alert only reaches the wire
@@ -502,21 +478,6 @@ mod test {
     }
 
     #[derive(Clone)]
-    struct Rejects;
-    impl<'a, A: Accept + 'a> TlsHandler<'a, A> for Rejects
-    where
-        A::Metadata: Sync,
-    {
-        async fn get_config(
-            &'a mut self,
-            _: &'a ClientHello<'a>,
-            _: &'a A::Metadata,
-        ) -> Option<TlsHandlerAction> {
-            Some(TlsHandlerAction::Reject)
-        }
-    }
-
-    #[derive(Clone)]
     struct Declines;
     impl<'a, A: Accept + 'a> TlsHandler<'a, A> for Declines
     where
@@ -571,15 +532,13 @@ mod test {
         res
     }
 
-    /// A handler that owns a name refuses for it: the next handler in the chain
-    /// must not answer with a certificate of its own.
+    /// A refused connection says so: the client is told the name was not
+    /// recognized instead of watching the socket close mid-handshake.
     #[tokio::test]
-    async fn a_rejecting_handler_stops_the_chain() {
-        let cert = Arc::new(self_signed_for_loopback());
-
-        let err = handshake_through(ChainedHandler(Rejects, Serves(cert.clone())))
+    async fn a_refused_connection_gets_a_tls_alert() {
+        let err = handshake_through(Declines)
             .await
-            .expect_err("a rejected connection must not complete a handshake");
+            .expect_err("a handler that serves nothing must not complete a handshake");
         assert!(
             matches!(
                 err.into_inner()
@@ -589,13 +548,12 @@ mod test {
                     tokio_rustls::rustls::AlertDescription::UnrecognisedName
                 ))
             ),
-            "the rejection must reach the client as a TLS alert, not a bare close",
+            "the refusal must reach the client as a TLS alert, not a bare close",
         );
 
-        // Declining still falls through — that is what makes the two distinct.
-        handshake_through(ChainedHandler(Declines, Serves(cert)))
+        handshake_through(Serves(Arc::new(self_signed_for_loopback())))
             .await
-            .expect("a handler that declines lets the next one answer");
+            .expect("a handler that serves a certificate completes the handshake");
     }
 
     #[tokio::test]

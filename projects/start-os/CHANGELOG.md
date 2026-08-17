@@ -182,9 +182,12 @@ file tracks notable changes since the move to the monorepo.
   Your Root CA chain is the same on every address your server exposes, which
   makes it a value that links them all to one server, handed to anyone who
   connects. Such an address now refuses the connection until its certificate is
-  available. A certificate already issued keeps being served through its last 30
-  days while renewal is retried, so a renewal that begins failing does not take
-  the address down.
+  available, and tells you so: a notification names the domain and why issuance
+  failed, once per domain until a certificate lands. A certificate already
+  issued keeps being served through its last 30 days while renewal is retried,
+  so a renewal that begins failing does not take the address down, and a domain
+  you also reach on your local network keeps answering there with your server's
+  own certificate.
 
 ## [0.4.0.1]
 
