@@ -12,6 +12,7 @@ import {
 } from '../inputSpecTypes'
 import { DefaultString } from '../inputSpecTypes'
 import { _, once } from '../../../util'
+import { withPatterns } from './patternCheck'
 import { z } from '../../../zExport'
 import { DeepPartial } from '../../../types'
 
@@ -333,7 +334,7 @@ export class Value<
      */
     generate?: RandomString | null
   }) {
-    const validator = asRequiredParser(z.string(), a)
+    const validator = asRequiredParser(withPatterns(z.string(), a.patterns), a)
     return new Value<AsRequired<string, Required>>(
       async () => ({
         spec: {
@@ -399,7 +400,7 @@ export class Value<
             generate: a.generate ?? null,
             ...a,
           },
-          validator: asRequiredParser(z.string(), a),
+          validator: asRequiredParser(withPatterns(z.string(), a.patterns), a),
         }
       },
       z.string().nullable(),
@@ -463,7 +464,7 @@ export class Value<
      */
     immutable?: boolean
   }) {
-    const validator = asRequiredParser(z.string(), a)
+    const validator = asRequiredParser(withPatterns(z.string(), a.patterns), a)
     return new Value<AsRequired<string, Required>>(async () => {
       const built: ValueSpecTextarea = {
         description: null,
@@ -523,7 +524,7 @@ export class Value<
             immutable: false,
             ...a,
           },
-          validator: asRequiredParser(z.string(), a),
+          validator: asRequiredParser(withPatterns(z.string(), a.patterns), a),
         }
       },
       z.string().nullable(),

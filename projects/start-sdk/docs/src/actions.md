@@ -221,6 +221,31 @@ export const configure = sdk.Action.withInput(
 
 The five arguments to `withInput` are: action ID, metadata (static object or async function), input spec, prefill function, and handler.
 
+### Validating Input
+
+A text field's `patterns` are checked before your handler runs, on **every** path into the action — the form, `start-cli package action run`, and a direct RPC call alike. A value that fails one is rejected with that pattern's `description`, so the caller sees the same message wherever they came from.
+
+```typescript
+sessionTimeout: Value.text({
+  name: i18n('Session Timeout'),
+  required: false,
+  default: null,
+  patterns: [
+    {
+      regex: '^([0-9]+(s|m|h))+$',
+      description: i18n('Must be a number followed by s, m, or h'),
+    },
+  ],
+}),
+```
+
+Two details worth knowing, both inherited from how the form has always behaved:
+
+- **A pattern is anchored.** `[a-z]+` matches the whole value, not a substring — write it as though `^` and `$` were there, because they are added if you leave them off.
+- **An empty value skips its patterns**, and is left to `required`. An optional field the user leaves blank is not made invalid by a pattern it could never satisfy.
+
+Anything a pattern can't express — a cross-field rule, a value that has to exist on disk — still belongs in the handler, where a `throw` surfaces to the caller the same way.
+
 ### Generating Values in a Form
 
 When a form field holds a secret, don't generate it in package code. `Value.text` accepts a `RandomString` spec — `{ charset, len }` — in two places, and StartOS does the generating:

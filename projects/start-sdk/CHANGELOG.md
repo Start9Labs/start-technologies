@@ -100,6 +100,17 @@
 
 ### Fixed
 
+- **A text field's `patterns` are now enforced on every path into an action,
+  not only by the web form.** The regexes reached the browser and nothing else,
+  so an action invoked over `start-cli` or RPC arrived at the handler with a
+  value that had never been tested — a field's own declaration that a value is
+  invalid was ignored precisely where no human was reading the form. The check
+  now lives in the input spec's parser, which `Action.run` already applies to
+  the submitted input. It mirrors the form: a pattern is **anchored** unless it
+  already is, so `[a-z]+` constrains the whole value rather than a substring,
+  and an **empty value passes**, left to `required`. Covers `Value.text`,
+  `Value.textarea`, `List.text` and their dynamic variants
+
 - **A build whose `start-cli s9pk list-ingredients` fails now stops instead of
   silently repacking the previous s9pk.** That command produces the s9pk's
   entire source-dependency list, `javascript/index.js` included — nothing else
