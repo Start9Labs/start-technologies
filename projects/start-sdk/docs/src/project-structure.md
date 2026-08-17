@@ -228,7 +228,9 @@ Packages with multiple upstream sources (e.g. a service plus its database sideca
 
 Stores supplementary files and scripts needed by the service, such as configuration generators or entrypoint scripts. **Required** -- the `assets/` directory must exist and contain at least one file for git to track it and for the build to succeed, so it carries a `.gitkeep` even when the package has no assets of its own. Keep the `.gitkeep` when you add real assets; it costs nothing and keeps every package's layout identical.
 
-Do **not** add a `README.md` or `ABOUT.md` here. What the directory is for is documented on this page and demonstrated by every existing package, so a per-package copy is one more thing to keep true — and the ones that exist today are near-universally the scaffold's own boilerplate, describing the directory to nobody. The same applies to `startos/fileModels/`.
+Do **not** add a `README.md` or `ABOUT.md` to explain what the directory is for. That is documented on this page and demonstrated by every existing package, so a per-package copy is one more thing to keep true — and the ones that exist today are near-universally the scaffold's own boilerplate, describing the directory to nobody. The same applies to `startos/fileModels/`.
+
+Documenting the assets themselves is a different thing and is fine: where a package ships scripts here whose roles aren't obvious from their filenames, a short `README.md` describing _those files_ earns its place.
 
 ## startos/
 
