@@ -519,6 +519,50 @@ mod tests {
         assert_eq!(eof.unwrap(), 0);
     }
 
+    /// The proxy relays the backend's own 101 rather than answering the
+    /// upgrade itself, so the client hears nothing until the backend has
+    /// spoken.
+    #[tokio::test]
+    async fn upgrade_is_not_answered_before_the_backend_answers() {
+        let (mut client, client_facing) = tokio::io::duplex(4096);
+        let (backend_facing, mut backend) = tokio::io::duplex(4096);
+
+        tokio::spawn(run_http1_proxy(
+            client_facing,
+            backend_facing,
+            None,
+            false,
+            None,
+        ));
+        tokio::spawn(async move {
+            read_head(&mut backend).await;
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            backend
+                .write_all(
+                    b"HTTP/1.1 101 Switching Protocols\r\n\
+                      Connection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            std::future::pending::<()>().await;
+        });
+
+        client
+            .write_all(
+                b"GET /ws HTTP/1.1\r\nHost: x\r\n\
+                  Connection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+            )
+            .await
+            .unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), client.read(&mut [0u8; 1]))
+                .await
+                .is_err(),
+            "the client was answered before the backend had responded",
+        );
+        assert!(read_head(&mut client).await.starts_with("http/1.1 101"));
+    }
+
     /// Shutting the client leg down while a 101 is in flight makes hyper
     /// replace `Connection: Upgrade` with `Connection: close`, which
     /// conformant WebSocket clients reject (RFC 6455 §4.1). The tunnel still
