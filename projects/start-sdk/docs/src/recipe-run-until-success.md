@@ -10,4 +10,4 @@ In `setupOnInit` (on install), build a daemon chain with `.addDaemon()` and `.ad
 
 ## Examples
 
-See `startos/init/` in: [nextcloud](https://github.com/Start9Labs/nextcloud-startos), [actual-budget](https://github.com/Start9Labs/actual-budget-startos), [immich](https://github.com/Start9Labs/immich-startos), [jitsi](https://github.com/Start9Labs/jitsi-startos), [garage](https://github.com/Start9Labs/garage-startos)
+See `startos/init/` in: [nextcloud](https://github.com/Start9Labs/nextcloud-startos), [actual-budget](https://github.com/Start9Labs/actual-budget-startos), [immich](https://github.com/Start9Labs/immich-startos), [garage](https://github.com/Start9Labs/garage-startos)

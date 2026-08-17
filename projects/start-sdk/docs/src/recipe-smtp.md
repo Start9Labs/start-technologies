@@ -10,4 +10,4 @@ Add the SDK's built-in `smtpShape` to your store.json file model. Create a `mana
 
 ## Examples
 
-See `startos/actions/` and `startos/fileModels/` in: [ghost](https://github.com/Start9Labs/ghost-startos), [gitea](https://github.com/Start9Labs/gitea-startos), [immich](https://github.com/Start9Labs/immich-startos), [synapse](https://github.com/Start9Labs/synapse-startos), [vaultwarden](https://github.com/Start9Labs/vaultwarden-startos), [mcaptcha](https://github.com/Start9Labs/mcaptcha-startos)
+See `startos/actions/` and `startos/fileModels/` in: [ghost](https://github.com/Start9Labs/ghost-startos), [gitea](https://github.com/Start9Labs/gitea-startos), [immich](https://github.com/Start9Labs/immich-startos), [synapse](https://github.com/Start9Labs/synapse-startos), [vaultwarden](https://github.com/Start9Labs/vaultwarden-startos)
