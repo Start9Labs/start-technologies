@@ -40,6 +40,18 @@ file tracks notable changes since the move to the monorepo.
 
 - Trim whitespace on form inputs.
 
+- **A Let's Encrypt domain works on an interface served on a port other than
+  `443`** — an Electrum server on `50002`, a TURN server on `5349`. Let's
+  Encrypt proves you control a name by connecting to it on port `443` whatever
+  port the service behind it uses, and nothing on your server answered there for
+  that name: the certificate was never issued, so the address served your
+  server's Root CA instead and clients that validate against public authorities
+  could not connect at all. StartOS now answers the challenge on whichever port
+  it arrives at, and over StartTunnel claims port `443` for that domain
+  automatically, routing it to the port the interface uses. On a router, forward
+  `443` to your server as you would for a standard domain — the domain's own
+  port is not enough on its own.
+
 - **Services that run their own containers or a VPN can reach the devices they
   were granted.** A service opting into `userspaceFilesystems` or
   `virtualNetworking` is handed `/dev/fuse` and `/dev/net/tun` inside its

@@ -443,23 +443,12 @@ impl VHostController {
         })
     }
 
-    /// Reconcile best-effort upstream port mappings for `owner`'s public vhosts.
-    /// `desired` maps `(box IP to map from, external port)` to `(internal port,
-    /// candidate gateways, hostnames)`. A `Some(hostname)` is mapped via PCP
-    /// HOSTNAME — the gateway treats the hostname as part of the mapping's identity
-    /// and demultiplexes the shared external port by TLS SNI, so one service adding
-    /// or removing a hostname never disturbs another's on the same port. A `None`
-    /// is a bare-IP (`*` vhost) forward: no SNI, so a plain pinhole to the box's own
-    /// IP where the OS reverse proxy listens. Like the rest of the port-map layer
-    /// this is best-effort: a gateway that can't honor it leaves a manual forward.
-    /// Reconcile every upstream IPv4 port map `owner`'s vhosts need, derived from
-    /// the vhost `targets` themselves — the controller owns the whole port-map
+    /// Reconcile every upstream port map `owner`'s vhosts need, derived from the
+    /// vhost `targets` themselves — the controller owns the whole port-map
     /// lifecycle, so callers hand over the same `ProxyTarget` set they use to bind
-    /// the listeners and compute nothing. For each target public on IPv4
-    /// (`public_v4`), each of that gateway's box IPv4s gets a mapping keyed by the
-    /// vhost's hostname: `Some(host)` is a PCP HOSTNAME mapping (SNI demux), `None`
-    /// is a bare-IP (`*` vhost) pinhole. IPv6 GUAs carry no NAT, so they get no
-    /// mapping here. Always call this every update — an owner whose target set went
+    /// the listeners and compute nothing. Best-effort like the rest of the
+    /// port-map layer: a gateway that can't honor a mapping leaves a manual
+    /// forward. Always call this every update — an owner whose target set went
     /// empty withdraws its prior mappings via the per-owner diff.
     pub fn reconcile_port_maps(
         &self,
@@ -467,104 +456,14 @@ impl VHostController {
         targets: &BTreeMap<(Option<InternedString>, u16), ProxyTarget>,
     ) {
         let ip_info = self.interfaces.watcher.ip_info();
-        // `(box IP, ext port) -> (internal port, ordered PCP gateway candidates,
-        // hostnames)`. Gateways stay an ordered Vec (the port-mapper tries them in
-        // preference order and takes the first that binds); hostnames are a set —
-        // `None` is the bare-IP/GUA pinhole, `Some(h)` an SNI route, and neither
-        // repeats nor cares about order.
-        let mut desired: BTreeMap<
-            (IpAddr, u16),
-            (
-                u16,
-                Vec<(IpAddr, Option<u32>)>,
-                BTreeSet<Option<InternedString>>,
-            ),
-        > = BTreeMap::new();
-        for ((maybe_host, external), target) in targets {
-            // IPv4: forward the port to the box's LAN IPv4 — a PCP HOSTNAME mapping
-            // (SNI demux) for a domain, a plain pinhole for a bare `*` vhost.
-            for gw_id in &target.public_v4 {
-                let Some(info) = ip_info.get(gw_id) else {
-                    continue;
-                };
-                let Some(gw_ip_info) = &info.ip_info else {
-                    continue;
-                };
-                let gateways = candidate_gateways(info);
-                if gateways.is_empty() {
-                    continue;
-                }
-                for subnet in &gw_ip_info.subnets {
-                    let IpAddr::V4(local_ip) = subnet.addr() else {
-                        continue;
-                    };
-                    desired
-                        .entry((IpAddr::V4(local_ip), *external))
-                        .or_insert_with(|| (*external, gateways.clone(), BTreeSet::new()))
-                        .2
-                        .insert(maybe_host.clone());
-                }
-            }
-            // IPv6: the box's own GUA is the listener (no NAT), so open a firewall
-            // pinhole for GUA:port. No SNI demux over v6 (every host has its own
-            // GUA, nothing to share), so these are always hostname-less.
-            for gua in &target.public_v6 {
-                let Some(info) = ip_info.iter().map(|(_, i)| i).find(|info| {
-                    info.ip_info.as_ref().map_or(false, |i| {
-                        i.subnets.iter().any(|s| s.addr() == IpAddr::V6(*gua))
-                    })
-                }) else {
-                    continue;
-                };
-                let v6_gateways: Vec<(IpAddr, Option<u32>)> = candidate_gateways(info)
-                    .into_iter()
-                    .filter(|(g, _)| g.is_ipv6())
-                    .collect();
-                if v6_gateways.is_empty() {
-                    continue;
-                }
-                desired
-                    .entry((IpAddr::V6(*gua), *external))
-                    .or_insert_with(|| (*external, v6_gateways, BTreeSet::new()))
-                    .2
-                    .insert(None);
-            }
-        }
-        // v6 HTTP->HTTPS redirect: for a GUA exposing 443, ask the gateway for an
-        // 80->443 redirect pinhole, unless 80 is already a real pinhole on that GUA.
-        // (No IPv4 equivalent — the upstream gateway serves the port-80 redirect.)
-        let redirects: Vec<(Ipv6Addr, Vec<(IpAddr, Option<u32>)>)> = desired
-            .iter()
-            .filter_map(|((ip, port), (_, gateways, _))| match ip {
-                IpAddr::V6(gua) if *port == 443 => Some((*gua, gateways.clone())),
-                _ => None,
-            })
-            .filter(|(gua, _)| !desired.contains_key(&(IpAddr::V6(*gua), 80)))
-            .collect();
-        for (gua, gateways) in redirects {
-            desired
-                .entry((IpAddr::V6(gua), 80))
-                .or_insert((443, gateways, BTreeSet::from([None])));
-        }
-        self.sync_port_maps(owner, desired);
+        self.sync_port_maps(owner, desired_port_maps(targets, &ip_info));
     }
 
-    fn sync_port_maps(
-        &self,
-        owner: HostMapOwner,
-        desired: BTreeMap<
-            (IpAddr, u16),
-            (
-                u16,
-                Vec<(IpAddr, Option<u32>)>,
-                BTreeSet<Option<InternedString>>,
-            ),
-        >,
-    ) {
+    fn sync_port_maps(&self, owner: HostMapOwner, desired: DesiredPortMaps) {
         let want: BTreeSet<(IpAddr, u16, Option<InternedString>)> = desired
             .iter()
-            .flat_map(|((ip, port), (_, _, hostnames))| {
-                hostnames.iter().map(move |h| (*ip, *port, h.clone()))
+            .flat_map(|((ip, port), (_, hostnames))| {
+                hostnames.keys().map(move |h| (*ip, *port, h.clone()))
             })
             .collect();
         let had = self
@@ -576,8 +475,8 @@ impl VHostController {
                 None => self.port_map.remove(*ip, *port),
             }
         }
-        for ((ip, port), (internal, gateways, hostnames)) in &desired {
-            for hostname in hostnames {
+        for ((ip, port), (gateways, hostnames)) in &desired {
+            for (hostname, internal) in hostnames {
                 match hostname {
                     Some(h) => self.port_map.ensure_hostname(
                         *ip,
@@ -600,6 +499,125 @@ impl VHostController {
             }
         });
     }
+}
+
+/// The port ACME's TLS-ALPN-01 challenge is dialed at. Fixed by the protocol —
+/// the validator ignores whatever port the name is actually served on.
+const ACME_CHALLENGE_PORT: u16 = 443;
+
+/// The upstream port maps a set of vhost targets calls for: `(box IP to map
+/// from, external port) -> (ordered PCP gateway candidates, hostname -> box-side
+/// port)`. Gateways stay an ordered Vec — the port-mapper tries them in
+/// preference order and takes the first that binds. A `Some(hostname)` is
+/// mapped via PCP HOSTNAME: the gateway treats the hostname as part of the
+/// mapping's identity and demultiplexes the shared external port by TLS SNI, so
+/// one service adding or removing a hostname never disturbs another's on the
+/// same port — and each name carries its own box-side port. A `None` is a
+/// bare-IP (`*` vhost) forward or an IPv6 GUA pinhole: no SNI, so a plain
+/// pinhole to the box's own IP where the OS reverse proxy listens.
+type DesiredPortMaps = BTreeMap<
+    (IpAddr, u16),
+    (
+        Vec<(IpAddr, Option<u32>)>,
+        BTreeMap<Option<InternedString>, u16>,
+    ),
+>;
+
+/// For each target public on IPv4 (`public_v4`), each of that gateway's box
+/// IPv4s gets a mapping keyed by the vhost's hostname. IPv6 GUAs carry no NAT,
+/// so they get a firewall pinhole at the same port instead.
+fn desired_port_maps(
+    targets: &BTreeMap<(Option<InternedString>, u16), ProxyTarget>,
+    ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+) -> DesiredPortMaps {
+    let mut desired = DesiredPortMaps::new();
+    for ((maybe_host, external), target) in targets {
+        // IPv4: forward the port to the box's LAN IPv4 — a PCP HOSTNAME mapping
+        // (SNI demux) for a domain, a plain pinhole for a bare `*` vhost.
+        for gw_id in &target.public_v4 {
+            let Some(info) = ip_info.get(gw_id) else {
+                continue;
+            };
+            let Some(gw_ip_info) = &info.ip_info else {
+                continue;
+            };
+            let gateways = candidate_gateways(info);
+            if gateways.is_empty() {
+                continue;
+            }
+            for subnet in &gw_ip_info.subnets {
+                let IpAddr::V4(local_ip) = subnet.addr() else {
+                    continue;
+                };
+                desired
+                    .entry((IpAddr::V4(local_ip), *external))
+                    .or_insert_with(|| (gateways.clone(), BTreeMap::new()))
+                    .1
+                    .insert(maybe_host.clone(), *external);
+                // The domain's own port carries no ACME challenge, so route the
+                // challenge port to it as well or the order can never complete.
+                // By name only — the challenge is selected by SNI, and the
+                // unnamed forward there is the OS's own. `or_insert` so a real
+                // binding on that port keeps it, in any visit order.
+                if let Some(hostname) = maybe_host
+                    && target.acme.is_some()
+                    && *external != ACME_CHALLENGE_PORT
+                {
+                    desired
+                        .entry((IpAddr::V4(local_ip), ACME_CHALLENGE_PORT))
+                        .or_insert_with(|| (gateways.clone(), BTreeMap::new()))
+                        .1
+                        .entry(Some(hostname.clone()))
+                        .or_insert(*external);
+                }
+            }
+        }
+        // IPv6: the box's own GUA is the listener (no NAT), so open a firewall
+        // pinhole for GUA:port. No SNI demux over v6, so these are always
+        // hostname-less — which is also why the challenge port gets no v6
+        // counterpart: a GUA belongs to the gateway and every host on the box
+        // shares it, so claiming :443 on one would claim it for all of them.
+        // A domain public over both families validates over IPv4; one public
+        // only over IPv6 has no path for its challenge.
+        for gua in &target.public_v6 {
+            let Some(info) = ip_info.iter().map(|(_, i)| i).find(|info| {
+                info.ip_info.as_ref().map_or(false, |i| {
+                    i.subnets.iter().any(|s| s.addr() == IpAddr::V6(*gua))
+                })
+            }) else {
+                continue;
+            };
+            let v6_gateways: Vec<(IpAddr, Option<u32>)> = candidate_gateways(info)
+                .into_iter()
+                .filter(|(g, _)| g.is_ipv6())
+                .collect();
+            if v6_gateways.is_empty() {
+                continue;
+            }
+            desired
+                .entry((IpAddr::V6(*gua), *external))
+                .or_insert_with(|| (v6_gateways, BTreeMap::new()))
+                .1
+                .insert(None, *external);
+        }
+    }
+    // v6 HTTP->HTTPS redirect: for a GUA exposing 443, ask the gateway for an
+    // 80->443 redirect pinhole, unless 80 is already a real pinhole on that GUA.
+    // (No IPv4 equivalent — the upstream gateway serves the port-80 redirect.)
+    let redirects: Vec<(Ipv6Addr, Vec<(IpAddr, Option<u32>)>)> = desired
+        .iter()
+        .filter_map(|((ip, port), (gateways, _))| match ip {
+            IpAddr::V6(gua) if *port == 443 => Some((*gua, gateways.clone())),
+            _ => None,
+        })
+        .filter(|(gua, _)| !desired.contains_key(&(IpAddr::V6(*gua), 80)))
+        .collect();
+    for (gua, gateways) in redirects {
+        desired
+            .entry((IpAddr::V6(gua), 80))
+            .or_insert((gateways, BTreeMap::from([(None, 443)])));
+    }
+    desired
 }
 
 /// Union of all ProxyTargets' bind requirements for a VHostServer.
@@ -1478,6 +1496,17 @@ fn host_key(server_name: Option<&str>) -> Option<InternedString> {
         .map(InternedString::from)
 }
 
+/// A TLS-ALPN-01 challenge names the host it is validating, and the name is the
+/// whole authorization: it is what the challenge is answered against. A dial
+/// that names nothing is an ordinary connection whatever it advertises, and
+/// treating it as a challenge would hand it to a handler that answers by name.
+fn is_acme_challenge<'a>(
+    server_name: Option<&str>,
+    mut alpn: impl Iterator<Item = &'a [u8]>,
+) -> bool {
+    server_name.is_some() && alpn.any(|a| a == ACME_TLS_ALPN_NAME)
+}
+
 pub struct GetVHostAcmeProvider<A: Accept + 'static>(pub Watch<Mapping<A>>);
 impl<A: Accept + 'static> Clone for GetVHostAcmeProvider<A> {
     fn clone(&self) -> Self {
@@ -1590,7 +1619,18 @@ where
                 .map(|(t, e)| (t.clone(), e.ctx.clone()))
         });
 
+        let acme_challenge =
+            is_acme_challenge(hello.server_name(), hello.alpn().into_iter().flatten());
+
         let Some((target, ctx)) = routed else {
+            // TLS-ALPN-01 is always validated at :443, but the name being
+            // validated may only be served on some other port, so its challenge
+            // lands on a server that doesn't route it. The inner handler answers
+            // only from the controller-wide cache of in-flight orders, so this
+            // still refuses every name we are not ourselves ordering for.
+            if acme_challenge {
+                return self.inner.get_config(hello, metadata).await;
+            }
             return None;
         };
 
@@ -1604,14 +1644,8 @@ where
         }
 
         // ACME challenge for a terminating target: answer locally from the inner
-        // chain. Reached only for a host we serve, so a challenge for anything
-        // else is refused above rather than answered with a fresh leaf.
-        if hello
-            .alpn()
-            .into_iter()
-            .flatten()
-            .any(|a| a == ACME_TLS_ALPN_NAME)
-        {
+        // chain.
+        if acme_challenge {
             return self.inner.get_config(hello, metadata).await;
         }
 
@@ -1937,6 +1971,25 @@ mod host_key_tests {
         assert_eq!(host_key(Some("fd00:3::1")), None);
     }
 
+    /// A challenge is answered by name, so a dial that names nothing is never
+    /// one — otherwise it reaches a handler with no name to check, which
+    /// declines, and the next handler in the chain answers with a local
+    /// certificate.
+    #[test]
+    fn a_challenge_without_a_name_is_not_a_challenge() {
+        let acme = || [ACME_TLS_ALPN_NAME].into_iter();
+        assert!(is_acme_challenge(Some("example.com"), acme()));
+        assert!(!is_acme_challenge(None, acme()));
+        assert!(!is_acme_challenge(
+            Some("example.com"),
+            [b"h2".as_slice()].into_iter()
+        ));
+        assert!(!is_acme_challenge(
+            Some("example.com"),
+            std::iter::empty::<&[u8]>()
+        ));
+    }
+
     #[test]
     fn a_name_keys_to_itself() {
         assert_eq!(
@@ -1953,6 +2006,178 @@ mod host_key_tests {
             host_key(Some("server-name")),
             Some(InternedString::intern("server-name"))
         );
+    }
+}
+
+#[cfg(test)]
+mod port_map_tests {
+    use std::str::FromStr;
+
+    use super::*;
+    use crate::db::model::public::{GatewayType, IpInfo, NetworkInterfaceType};
+
+    const GATEWAY: &str = "wg0";
+    const BOX_IP: &str = "10.13.13.5";
+    const GUA: &str = "2001:db8::5";
+
+    /// A StartTunnel gateway: on-link, so NetworkManager reports no next hop and
+    /// `candidate_gateways` derives the relay from the subnet.
+    fn ip_info() -> OrdMap<GatewayId, NetworkInterfaceInfo> {
+        let mut info = OrdMap::new();
+        info.insert(
+            GatewayId::from(InternedString::intern(GATEWAY)),
+            NetworkInterfaceInfo {
+                name: None,
+                secure: None,
+                ip_info: Some(Arc::new(IpInfo {
+                    name: InternedString::intern(GATEWAY),
+                    scope_id: 0,
+                    device_type: Some(NetworkInterfaceType::Wireguard),
+                    subnets: ["10.13.13.5/24", "2001:db8::5/64"]
+                        .into_iter()
+                        .map(|s| s.parse::<IpNet>().unwrap())
+                        .collect(),
+                    lan_ip: Default::default(),
+                    wan_ip: None,
+                    ntp_servers: Default::default(),
+                    dns_servers: Default::default(),
+                })),
+                gateway_type: GatewayType::InboundOutbound,
+                port_map: Default::default(),
+                dns_update: Default::default(),
+            },
+        );
+        info
+    }
+
+    fn target(acme: bool, v6: bool) -> ProxyTarget {
+        ProxyTarget {
+            public_v4: [GatewayId::from(InternedString::intern(GATEWAY))]
+                .into_iter()
+                .collect(),
+            public_v6: if v6 {
+                [GUA.parse().unwrap()].into_iter().collect()
+            } else {
+                BTreeSet::new()
+            },
+            private: BTreeSet::new(),
+            acme: acme.then(|| AcmeProvider::from_str("letsencrypt").unwrap()),
+            addr: "10.0.3.2:443".parse().unwrap(),
+            addr_v6: None,
+            add_x_forwarded_headers: false,
+            auth: None,
+            connect_ssl: Err(AlpnInfo::Reflect),
+            passthrough: false,
+            preserve_source_ip: false,
+        }
+    }
+
+    fn targets<'a>(
+        entries: impl IntoIterator<Item = (Option<&'a str>, u16, ProxyTarget)>,
+    ) -> BTreeMap<(Option<InternedString>, u16), ProxyTarget> {
+        entries
+            .into_iter()
+            .map(|(host, port, target)| ((host.map(InternedString::intern), port), target))
+            .collect()
+    }
+
+    /// The hostname -> box-side port routes mapped at `(ip, external)`.
+    fn routes(desired: &DesiredPortMaps, ip: &str, external: u16) -> Vec<(String, u16)> {
+        let key: (IpAddr, u16) = (ip.parse().unwrap(), external);
+        desired
+            .get(&key)
+            .map(|(_, hosts)| {
+                hosts
+                    .iter()
+                    .map(|(h, port)| (h.as_ref().map_or("*".into(), |h| h.to_string()), *port))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The challenge is dialed at :443 whatever port the domain serves on, so
+    /// the domain's own route is not enough on its own.
+    #[test]
+    fn an_acme_domain_off_443_also_routes_the_challenge_port() {
+        let desired = desired_port_maps(
+            &targets([(Some("electrum.example.com"), 50002, target(true, false))]),
+            &ip_info(),
+        );
+
+        assert_eq!(
+            routes(&desired, BOX_IP, 50002),
+            [("electrum.example.com".to_string(), 50002)],
+        );
+        assert_eq!(
+            routes(&desired, BOX_IP, 443),
+            [("electrum.example.com".to_string(), 50002)],
+        );
+    }
+
+    /// Each name carries its own box-side port, so two domains on one external
+    /// port do not collapse onto whichever was reconciled first.
+    #[test]
+    fn each_acme_domain_keeps_its_own_challenge_route() {
+        let desired = desired_port_maps(
+            &targets([
+                (Some("electrum.example.com"), 50002, target(true, false)),
+                (Some("turn.example.com"), 5349, target(true, false)),
+            ]),
+            &ip_info(),
+        );
+
+        assert_eq!(
+            routes(&desired, BOX_IP, 443),
+            [
+                ("electrum.example.com".to_string(), 50002),
+                ("turn.example.com".to_string(), 5349),
+            ],
+        );
+    }
+
+    /// The challenge port is only claimed for a name whose certificate we hold,
+    /// and never for the bare-IP vhost, whose :443 forward belongs to the OS.
+    #[test]
+    fn nothing_else_claims_the_challenge_port() {
+        let desired = desired_port_maps(
+            &targets([
+                (Some("plain.example.com"), 50002, target(false, false)),
+                (None, 8443, target(true, false)),
+            ]),
+            &ip_info(),
+        );
+
+        assert!(routes(&desired, BOX_IP, 443).is_empty());
+    }
+
+    /// A domain that really is served on :443 keeps its own route there.
+    #[test]
+    fn a_real_443_binding_owns_the_port_it_serves() {
+        let desired = desired_port_maps(
+            &targets([
+                (Some("example.com"), 443, target(true, false)),
+                (Some("example.com"), 50002, target(true, false)),
+            ]),
+            &ip_info(),
+        );
+
+        assert_eq!(
+            routes(&desired, BOX_IP, 443),
+            [("example.com".to_string(), 443)],
+        );
+    }
+
+    /// IPv6 pinholes carry no name and no port translation: a GUA on :443 still
+    /// gets the 80 -> 443 redirect and nothing else.
+    #[test]
+    fn ipv6_pinholes_are_unchanged() {
+        let desired = desired_port_maps(
+            &targets([(Some("example.com"), 443, target(true, true))]),
+            &ip_info(),
+        );
+
+        assert_eq!(routes(&desired, GUA, 443), [("*".to_string(), 443)]);
+        assert_eq!(routes(&desired, GUA, 80), [("*".to_string(), 443)]);
     }
 }
 
