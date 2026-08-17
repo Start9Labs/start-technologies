@@ -63,9 +63,6 @@ Three things make this correct, and each matters:
 
 `getBridgeAddress` returns the same `Watchable` as `sdk.host.get`, so it carries every read strategy. Use `.const()` in `setupMain` and `setupOnInit`; use `.once()` only inside an action, where a live snapshot rather than a subscription is what you want.
 
-> [!NOTE]
-> Packages written before start-sdk 2.0.8 carry a local `bridgeAddress` helper in their `utils.ts` doing this by hand. Delete it and call `sdk.host.getBridgeAddress` instead.
-
 ## The Tor exception: always-on flags
 
 Some flags should be passed **unconditionally**, even when the dependency is absent — most commonly Bitcoin's `-onion=<tor SOCKS>`. A dead bridge address there is harmless (connection refused), and passing the flag always means Tor works the moment it's installed with no reconfiguration.
