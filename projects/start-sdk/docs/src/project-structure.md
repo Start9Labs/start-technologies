@@ -12,7 +12,8 @@ my-service-startos/
 │   └── workflows/
 │       ├── build.yml          # CI build on PR
 │       ├── tagAndRelease.yml  # Version check, tag, and release on merge
-│       └── release.yml        # Release on manual tag push
+│       ├── release.yml        # Release on manual tag push
+│       └── syncNext.yml       # Carry the base branch onto `next` on merge
 ├── assets/                 # Supplementary files (required, can be empty)
 │   └── ABOUT.md
 ├── startos/                # Primary development directory
@@ -65,11 +66,12 @@ These files typically require minimal modification:
 
 ### .github/workflows/
 
-Every package should include three GitHub Actions workflows that delegate to the reusable CI workflows in this monorepo (`.github/workflows/`, migrated from the old `shared-workflows` repo). The CI pipeline has two automatic stages, plus an optional manual path:
+Every package should include four GitHub Actions workflows that delegate to the reusable CI workflows in this monorepo (`.github/workflows/`, migrated from the old `shared-workflows` repo). The CI pipeline has two automatic stages, plus an optional manual path, and a branch-hygiene job that runs alongside them:
 
 ```
 PR opened/updated ──> Build
 PR merged to master ──> Version check ──> Tag ──> Build ──> Release ──> Publish
+                   └─> Sync next
 Manual tag push ──> Build ──> Release ──> Publish (bypasses version check)
 ```
 
@@ -154,6 +156,30 @@ jobs:
     permissions:
       contents: write
 ```
+
+**syncNext.yml** -- carries every change that lands on the base branch onto the paired `next` iteration branch, so `next` never falls behind what has already shipped:
+
+```yaml
+name: Sync next
+
+on:
+  push:
+    branches: ['master']
+  workflow_dispatch:
+
+jobs:
+  sync:
+    uses: Start9Labs/start-technologies/.github/workflows/syncNext.yml@master
+    permissions:
+      contents: write
+      pull-requests: write
+```
+
+The paired branch is derived rather than configured: an explicit `next/<base>` is used where one exists — that is how the multi-branch packages keep one iteration branch per major line or flavor — and otherwise the repo's default branch pairs with a plain `next`. **A repo with no `next` gets one created at the base tip on the first run**, so a package never has to be seeded by hand.
+
+Nothing is force-pushed and no history is rewritten. `next` is fast-forwarded when it is merely behind, given a merge commit when it carries unmerged work, and left untouched with a pull request opened for a human only when that merge conflicts. `workflow_dispatch` is there so a package can be brought into line without waiting for its next merge.
+
+List every base branch the package maintains under `branches:`, and note this is one of the two workflows whose branch list must match the branch the repo actually uses — a package on `main` that still says `master` here silently never syncs.
 
 ### AGENTS.md and CLAUDE.md
 

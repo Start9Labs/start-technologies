@@ -1,0 +1,151 @@
+name: Sync next
+
+# Keeps a package's long-lived `next` iteration branch in step with the base
+# branch it stacks on. Without it a base advances — a feature branch merged, a
+# fix pushed direct — and `next` silently rots: every `next/*` branch on
+# bitcoin-core had fallen eleven commits behind before this existed, and 83 of
+# the fleet's 114 `next` branches were behind their base.
+#
+# The pairing is derived, never configured. An explicit `next/<base>` wins
+# where one exists — that is the multi-branch packages (bitcoin-core's
+# 28.x..31.x, bitcoin-knots' 29.x and 29.x-prerdts, azerothcore's main and
+# playerbots) — and otherwise the repo's default branch pairs with a plain
+# `next`. A base with neither gets a branch created for it, which is how a
+# package that never had a `next` acquires one.
+#
+# Nothing here force-pushes and nothing rewrites history, so this cannot race a
+# Helix session working the same branch. The outcomes are: create, fast-forward
+# (the overwhelming majority), a merge commit when `next` carries unmerged work,
+# or — only when that merge conflicts — a pull request for a human.
+#
+# That PR takes the base branch itself as its head, so it needs no scratch
+# branch, stays current as the base advances, and closes on its own once a later
+# run merges cleanly, because merging the base into `next` makes the PR's head
+# reachable from its own base.
+#
+# No loop is possible: this only ever writes to `next`/`next/*`, which is never
+# a trigger branch for this workflow.
+
+on:
+  workflow_call:
+
+concurrency:
+  # Serialized per (repo, base): two merges in quick succession would otherwise
+  # race onto the same `next`. Never cancelled — a cancelled run just leaves the
+  # branch behind again, which is the condition this exists to remove.
+  group: sync-next-${{ github.repository }}-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync next
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout services repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Sync the paired next branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # A reusable workflow inherits the caller's `github` context, so this
+          # is the base branch whose push triggered the run.
+          BASE: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch --no-tags --prune origin '+refs/heads/*:refs/remotes/origin/*'
+
+          exists() { git rev-parse --verify -q "refs/remotes/origin/$1" >/dev/null; }
+
+          # A push always has its own ref, so this only fires if a caller lists a
+          # branch the repo does not have — which is the failure mode where CI
+          # silently never runs, and it should say so rather than resolve
+          # nothing and act on it.
+          if ! exists "$BASE"; then
+            echo "::error::No branch '$BASE' on this repository — check the branches listed in the caller workflow."
+            exit 1
+          fi
+
+          DEFAULT_BRANCH=$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)
+
+          # The pairing rule, in full. Order matters: an explicit `next/<base>`
+          # outranks the plain `next` even on the default branch, which is what
+          # keeps azerothcore (default `main`, paired `next/main`) correct.
+          if exists "next/$BASE"; then
+            TARGET="next/$BASE"
+          elif [ "$BASE" = "$DEFAULT_BRANCH" ]; then
+            TARGET="next"
+          else
+            TARGET="next/$BASE"
+          fi
+          echo "Base branch:   $BASE"
+          echo "Paired branch: $TARGET"
+
+          if ! exists "$TARGET"; then
+            echo "::notice::$TARGET does not exist — creating it at $BASE."
+            git push origin "$(git rev-parse "origin/$BASE"):refs/heads/$TARGET"
+            exit 0
+          fi
+
+          BASE_SHA=$(git rev-parse "origin/$BASE")
+          TARGET_SHA=$(git rev-parse "origin/$TARGET")
+
+          if [ "$BASE_SHA" = "$TARGET_SHA" ]; then
+            echo "::notice::$TARGET is already at $BASE."
+            exit 0
+          fi
+
+          if git merge-base --is-ancestor "$TARGET_SHA" "$BASE_SHA"; then
+            echo "$TARGET is strictly behind $BASE — fast-forwarding."
+            git push origin "$BASE_SHA:refs/heads/$TARGET"
+            exit 0
+          fi
+
+          # `next` is ahead and the base is fully contained in it — the normal
+          # state while Helix has work in flight. Nothing to carry across.
+          if git merge-base --is-ancestor "$BASE_SHA" "$TARGET_SHA"; then
+            echo "::notice::$TARGET already contains $BASE — nothing to sync."
+            exit 0
+          fi
+
+          # Genuinely diverged. Merge rather than rebase: a rebase means
+          # force-pushing a branch a Helix session may be sitting on, and since
+          # `next` collapses into a single changeset when it merges back, its
+          # internal history does not need to be linear.
+          git checkout -B sync-next-work "origin/$TARGET"
+          if git merge --no-edit -m "chore: merge $BASE into $TARGET" "origin/$BASE"; then
+            git push origin "HEAD:refs/heads/$TARGET"
+            echo "::notice::Merged $BASE into $TARGET."
+            exit 0
+          fi
+          git merge --abort || true
+
+          echo "::warning::Merging $BASE into $TARGET conflicts — opening a pull request."
+          OPEN=$(gh pr list --base "$TARGET" --head "$BASE" --state open --json number --jq 'length')
+          if [ "$OPEN" != "0" ]; then
+            echo "::notice::A sync pull request into $TARGET is already open."
+            exit 0
+          fi
+
+          {
+            echo "\`$BASE\` has moved on and cannot be merged into \`$TARGET\` unattended — the merge conflicts."
+            echo
+            echo "Resolve the conflicts and merge this PR. Until it lands, \`$TARGET\` is missing what \`$BASE\` has gained, and work built on it will be based on a stale tree."
+            echo
+            echo "Nothing was force-pushed and no history was rewritten; \`$TARGET\` is exactly as it was."
+          } > /tmp/sync-next-body.md
+
+          gh pr create \
+            --base "$TARGET" \
+            --head "$BASE" \
+            --title "chore: sync $BASE into $TARGET" \
+            --body-file /tmp/sync-next-body.md \
+            || echo "::warning::Could not open a sync pull request into $TARGET."
+        shell: bash
