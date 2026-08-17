@@ -10,4 +10,4 @@ Generate a password in `setupOnInit` and store it in a file model. In `setupMain
 
 ## Examples
 
-See `startos/main.ts` and `startos/backups.ts` in: [btcpayserver](https://github.com/Start9Labs/btcpayserver-startos), [immich](https://github.com/Start9Labs/immich-startos), [nextcloud](https://github.com/Start9Labs/nextcloud-startos), [spliit](https://github.com/Start9Labs/spliit-startos), [mcaptcha](https://github.com/Start9Labs/mcaptcha-startos)
+See `startos/main.ts` and `startos/backups.ts` in: [btcpayserver](https://github.com/Start9Labs/btcpayserver-startos), [immich](https://github.com/Start9Labs/immich-startos), [nextcloud](https://github.com/Start9Labs/nextcloud-startos), [spliit](https://github.com/Start9Labs/spliit-startos)

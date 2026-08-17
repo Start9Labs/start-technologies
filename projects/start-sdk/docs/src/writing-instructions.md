@@ -27,7 +27,7 @@ A good `instructions.md` covers, roughly in this order:
 
 1. **A brief orientation — usually skip it.** The reader already saw the marketplace short and long description before clicking Install, so don't restate them. The default is to omit this section and go straight to **Documentation**. Add a line only if there is genuinely new context the listing did not cover — a hard ordering constraint, a permanent decision the user is about to make, or similar. "You've installed X" framing is _not_ useful; the reader knows. Don't pad.
 
-2. **Documentation links.** A `## Documentation` section. Port exactly the URLs the manifest previously carried in its `docsUrls` array, each with a few words on what it is ("the upstream admin guide", "the official Foo configuration reference"). Do not add marketing, donation, project-home, or support-channel links — those live elsewhere and were deliberately omitted from `docsUrls`. Link to canonical, stable URLs the upstream maintains — not specific commits, not your own README.
+2. **Documentation links.** A `## Documentation` section. List the upstream documentation URLs, each with a few words on what it is ("the upstream admin guide", "the official Foo configuration reference"). Do not add marketing, donation, project-home, or support-channel links — those live elsewhere. Link to canonical, stable URLs the upstream maintains — not specific commits, not your own README.
 
 3. **What it gives you on StartOS** — the practical answer to "why did I just install this?" Keep it concrete: the interfaces it exposes, the data it manages, the experience the StartOS package adds on top of upstream.
 
@@ -36,9 +36,6 @@ A good `instructions.md` covers, roughly in this order:
 5. **Using the available features** — once the service is running, what can the user actually do with it? Describe the interfaces (web UI, RPC, etc.) and the **user-visible** actions. Hidden actions (`visibility: 'hidden'` in the package source — typically those invoked by the platform or by another service rather than by a human) do not belong here; the user never sees them. Likewise, do not parrot `allowedStatuses` from action source code ("the service must be running", "the service must be stopped"): describe what the user actually encounters in the UI, and omit the qualifier when it's noise.
 
 6. **Important limitations — usually omit.** The default is no Limitations section at all. Add one only if there is a specific, consequential thing the user will be surprised by: a deliberately disabled feature they may go looking for, a hard data caveat, an incompatibility worth flagging up front. Generic caveats ("performance depends on your hardware", "encryption keys are sensitive") are not limitations and do not belong here.
-
-> [!NOTE]
-> Older StartOS manifests carried a `docsUrls` array for upstream documentation links. That field has been removed — those links belong in the `## Documentation` section of this file now, where you can give each one the context a bare URL in the manifest never had.
 
 ## What does not belong in instructions
 
@@ -79,7 +76,7 @@ Use the sections that apply — a trivial service might be two paragraphs and a 
 
 - [Upstream documentation](https://docs.example.org) — what it is in a few words (the config reference, the upstream README, etc.).
 
-(Port exactly the URLs the manifest previously carried in `docsUrls`. Don't add marketing, project-home, donation, or support links here.)
+(Don't add marketing, project-home, donation, or support links here.)
 
 ## What you get on StartOS
 
@@ -126,5 +123,5 @@ Use the sections that apply — a trivial service might be two paragraphs and a 
 - [ ] Every sentence is something the user could act on — no "this is typically triggered automatically by …" plumbing notes.
 - [ ] No hard-coded version numbers, image tags, or secrets.
 - [ ] Limitations section is omitted unless there is a specific, consequential surprise to flag.
-- [ ] A `## Documentation` section ports the URLs the manifest's `docsUrls` previously carried, each with a few words of context. No added marketing / donation / project-home / support links.
+- [ ] A `## Documentation` section lists the upstream documentation URLs, each with a few words of context. No added marketing / donation / project-home / support links.
 - [ ] Renders cleanly in the StartOS Instructions tab on a real install.

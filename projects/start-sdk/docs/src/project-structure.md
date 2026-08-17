@@ -31,10 +31,10 @@ my-service-startos/
 │   ├── backups.ts          # Backup volumes and exclusions
 │   ├── dependencies.ts     # Service dependencies
 │   ├── index.ts            # Exports (boilerplate)
-│   ├── interfaces.ts       # Network interface definitions (optional - not in barebones scaffold)
+│   ├── interfaces.ts       # Network interface definitions (optional)
 │   ├── main.ts             # Daemon runtime and health checks
 │   ├── sdk.ts              # SDK initialization (boilerplate)
-│   ├── utils.ts            # Package-specific utilities (empty in barebones scaffold)
+│   ├── utils.ts            # Package-specific utilities
 │   └── versions/           # Version management and migrations
 ├── .gitignore
 ├── AGENTS.md               # Agent context: repo identity + how to work in this repo
@@ -66,7 +66,11 @@ These files typically require minimal modification:
 
 ### .github/workflows/
 
+<<<<<<< HEAD
 Every package should include four GitHub Actions workflows that delegate to the reusable CI workflows in this monorepo (`.github/workflows/`, migrated from the old `shared-workflows` repo). The CI pipeline has two automatic stages, plus an optional manual path, and a branch-hygiene job that runs alongside them:
+=======
+Every package should include three GitHub Actions workflows that delegate to the reusable CI workflows in this monorepo (`.github/workflows/`). The CI pipeline has two automatic stages, plus an optional manual path:
+>>>>>>> 88a3520c4 (docs(sdk): delete published guide text with no live producer (#3725))
 
 ```
 PR opened/updated ──> Build
@@ -183,7 +187,7 @@ List every base branch the package maintains under `branches:`, and note this is
 
 ### AGENTS.md and CLAUDE.md
 
-`AGENTS.md` is the package's agent-context file. Generic packaging knowledge — SDK patterns, the disciplines on the [Development Workflow](./workflow.md) page, the rules throughout this guide — lives in one canonical place: the packaging guide, **not** copied into each package repo where 40+ duplicates would drift out of sync. `AGENTS.md` carries only what's specific to _this_ repo.
+`AGENTS.md` is the package's agent-context file. Generic packaging knowledge — SDK patterns, the disciplines on the [Development Workflow](./workflow.md) page, the rules throughout this guide — lives in one canonical place: the packaging guide, **not** copied into each package repo where duplicates would drift out of sync. `AGENTS.md` carries only what's specific to _this_ repo.
 
 Keep it short and repo-specific: state that this is a StartOS service package, point at the repo's `TODO.md` as the worklist, give the doc-sync rule (keep `README.md` and `instructions.md` in step with every change), and capture any package-specific gotchas — in short, how to work in _this_ repo. Do **not** restate generic guide content or turn it into a web-fetch driver (don't instruct the agent to pull guide pages over the web up front).
 
@@ -285,8 +289,6 @@ This file is plumbing, used for exporting package functions to StartOS.
 #### interfaces.ts (optional)
 
 `setupInterfaces()` is where you define the service interfaces and determine how they are exposed. This function executes on service install, update, and config save. It takes the user's config input as an argument, which will be `null` for install and update.
-
-The barebones scaffold ships no `interfaces.ts` — many services (background workers, sidecars) expose nothing on the network. When a service does, add this file and wire its `setInterfaces` into `init/index.ts` (conventionally before `setDependencies`).
 
 #### main.ts
 

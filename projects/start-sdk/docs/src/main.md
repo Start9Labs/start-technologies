@@ -399,7 +399,7 @@ sdk.Mounts.of()
 ```
 
 > [!WARNING]
-> `sdk.Mounts` is an immutable builder. Every `mountVolume` / `mountAssets` / `mountDependency` / `mountBackups` call returns a **new** `Mounts` instance — the original is unchanged. Discarded return values silently drop the mount.
+> `sdk.Mounts` is an immutable builder. Every `mountVolume` / `mountAssets` / `mountDependency` call returns a **new** `Mounts` instance — the original is unchanged. Discarded return values silently drop the mount.
 >
 > ```typescript
 > // BROKEN — conditional mount is lost
@@ -427,7 +427,7 @@ sdk.Mounts.of()
 
 ### Remapping Ownership (`idmap`)
 
-Every mount (`mountVolume` / `mountAssets` / `mountDependency` / `mountBackups`) takes an optional **`idmap`** — a list of `{ fromId, toId, range? }` entries that remap ownership at the mount boundary, so files stored under one uid/gid on the volume appear under the uid/gid the service expects. `fromId` is the id seen on the filesystem, `toId` is the id processes in the container see, and `range` (default `1`) covers that many consecutive ids. The container's own LXC id-mapping is applied automatically — don't include it here.
+Every mount (`mountVolume` / `mountAssets` / `mountDependency`) takes an optional **`idmap`** — a list of `{ fromId, toId, range? }` entries that remap ownership at the mount boundary, so files stored under one uid/gid on the volume appear under the uid/gid the service expects. `fromId` is the id seen on the filesystem, `toId` is the id processes in the container see, and `range` (default `1`) covers that many consecutive ids. The container's own LXC id-mapping is applied automatically — don't include it here.
 
 ```typescript
 sdk.Mounts.of().mountVolume({

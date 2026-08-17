@@ -10,4 +10,4 @@ In `setupOnInit`, check `kind === 'install'` and run one-time setup: generate pa
 
 ## Examples
 
-See `startos/init/` in: [spliit](https://github.com/Start9Labs/spliit-startos), [ghost](https://github.com/Start9Labs/ghost-startos), [nextcloud](https://github.com/Start9Labs/nextcloud-startos), [immich](https://github.com/Start9Labs/immich-startos), [gitea](https://github.com/Start9Labs/gitea-startos), [synapse](https://github.com/Start9Labs/synapse-startos), [simplex](https://github.com/Start9Labs/simplex-startos), [mcaptcha](https://github.com/Start9Labs/mcaptcha-startos), [vaultwarden](https://github.com/Start9Labs/vaultwarden-startos)
+See `startos/init/` in: [spliit](https://github.com/Start9Labs/spliit-startos), [ghost](https://github.com/Start9Labs/ghost-startos), [nextcloud](https://github.com/Start9Labs/nextcloud-startos), [immich](https://github.com/Start9Labs/immich-startos), [gitea](https://github.com/Start9Labs/gitea-startos), [synapse](https://github.com/Start9Labs/synapse-startos), [simplex](https://github.com/Start9Labs/simplex-startos), [vaultwarden](https://github.com/Start9Labs/vaultwarden-startos)
