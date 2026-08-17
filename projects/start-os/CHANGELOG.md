@@ -174,6 +174,18 @@ file tracks notable changes since the move to the monorepo.
 - **Service mount paths are validated and confined to their intended
   directories.**
 
+- **An address you assigned to a public certificate authority serves that
+  authority's certificate and nothing else.** When StartOS could not obtain the
+  certificate, the address fell back to one signed by your server's Root CA
+  while still listing Let's Encrypt as its authority — so the fallback was
+  invisible from the server itself, whose own trust store contains that Root CA.
+  Your Root CA chain is the same on every address your server exposes, which
+  makes it a value that links them all to one server, handed to anyone who
+  connects. Such an address now refuses the connection until its certificate is
+  available. A certificate already issued keeps being served through its last 30
+  days while renewal is retried, so a renewal that begins failing does not take
+  the address down.
+
 ## [0.4.0.1]
 
 ### Changed

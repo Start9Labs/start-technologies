@@ -30,7 +30,7 @@ use crate::db::model::Database;
 use crate::db::model::public::AcmeSettings;
 use crate::db::{DbAccess, DbAccessByKey, DbAccessMut};
 use crate::error::ErrorData;
-use crate::net::ssl::should_use_cert;
+use crate::net::ssl::{cert_is_unexpired, should_use_cert};
 use crate::net::tls::{SingleCertResolver, TlsHandler, TlsHandlerAction};
 use crate::net::web_server::Accept;
 use crate::prelude::*;
@@ -93,12 +93,12 @@ where
 
         let peek = self.db.peek().await;
         let store = <M as DbAccess<AcmeCertStore>>::access(&peek);
-        if let Some(cert) = store
+        let cached = store
             .as_certs()
             .as_idx(&provider.0)
             .and_then(|p| p.as_idx(JsonKey::new_ref(san_info)))
-        {
-            let cert = cert.de().log_err()?;
+            .and_then(|cert| cert.de().log_err());
+        if let Some(cert) = &cached {
             if cert
                 .fullchain
                 .get(0)
@@ -108,27 +108,28 @@ where
                 // Cached cert is healthy; drop any stale order/backoff state.
                 self.in_progress
                     .send_if_modified(|map| map.remove(san_info).is_some());
-                return Some(
-                    CertifiedKey::from_der(
-                        cert.fullchain
-                            .into_iter()
-                            .map(|c| Ok(CertificateDer::from(c.to_der()?)))
-                            .collect::<Result<_, Error>>()
-                            .log_err()?,
-                        PrivateKeyDer::from(PrivatePkcs8KeyDer::from(
-                            cert.key.0.private_key_to_pkcs8().log_err()?,
-                        )),
-                        &*self.crypto_provider,
-                    )
-                    .log_err()?,
-                );
+                return certified_key(cert, &self.crypto_provider);
             }
         }
 
-        let contact = <M as DbAccessByKey<AcmeSettings>>::access_by_key(&peek, &provider)?
-            .as_contact()
-            .de()
-            .log_err()?;
+        // Everything past here can fail to produce a certificate. A cached one
+        // that is merely inside its 30-day renewal window is still publicly
+        // trusted, so it stays the answer of last resort — the alternative is
+        // refusing a name we can still serve correctly.
+        let renewing = || {
+            certified_key(
+                cached.as_ref().filter(|c| unexpired(c))?,
+                &self.crypto_provider,
+            )
+        };
+
+        let Some(contact) = <M as DbAccessByKey<AcmeSettings>>::access_by_key(&peek, &provider)
+            .and_then(|settings| settings.as_contact().de().log_err())
+        else {
+            // The provider was removed from the server's settings while a domain
+            // still names it, so no order can be placed for it at all.
+            return renewing();
+        };
         drop(peek);
 
         let identifiers: Vec<_> = san_info
@@ -249,11 +250,32 @@ where
 
         match action {
             Action::Await(fut) => fut.await,
-            // Inside cooldown: fall through to a self-signed cert from
-            // `RootCaTlsHandler` instead of blocking the handshake.
             Action::Backoff => None,
         }
+        .or_else(renewing)
     }
+}
+
+fn unexpired(cert: &AcmeCert) -> bool {
+    cert.fullchain
+        .get(0)
+        .and_then(|c| cert_is_unexpired(&c.0).log_err())
+        .unwrap_or(false)
+}
+
+fn certified_key(cert: &AcmeCert, crypto_provider: &CryptoProvider) -> Option<CertifiedKey> {
+    CertifiedKey::from_der(
+        cert.fullchain
+            .iter()
+            .map(|c| Ok(CertificateDer::from(c.0.to_der()?)))
+            .collect::<Result<_, Error>>()
+            .log_err()?,
+        PrivateKeyDer::from(PrivatePkcs8KeyDer::from(
+            cert.key.0.private_key_to_pkcs8().log_err()?,
+        )),
+        crypto_provider,
+    )
+    .log_err()
 }
 
 pub trait GetAcmeProvider {
@@ -287,16 +309,13 @@ where
             .flatten()
             .any(|a| a == ACME_TLS_ALPN_NAME)
         {
-            let cert = self
-                .acme_cache
-                .peek(|c| c.get(domain).cloned())
-                .ok_or_else(|| {
-                    Error::new(
-                        eyre!("No challenge recv available for {domain}"),
-                        ErrorKind::OpenSsl,
-                    )
-                })
-                .log_err()?;
+            // Only a name we have an order in flight for is answerable, and
+            // answering with anything else — a local-CA leaf from a later
+            // handler — would just fail validation.
+            let Some(cert) = self.acme_cache.peek(|c| c.get(domain).cloned()) else {
+                tracing::debug!("no ACME challenge in flight for {domain}");
+                return Some(TlsHandlerAction::Reject);
+            };
             tracing::info!("Waiting for verification cert for {domain}");
             let cert = cert
                 .filter(|c| futures::future::ready(c.is_some()))
@@ -327,6 +346,16 @@ where
                     .with_no_client_auth()
                     .with_cert_resolver(Arc::new(SingleCertResolver(Arc::new(cert)))),
             ));
+        }
+
+        // The name is configured for ACME and we have no certificate for it.
+        // Falling through to the local root CA would serve the box's own CA
+        // chain — an identifier shared by every service on this server — to a
+        // client that asked for a publicly trusted one, under a UI that still
+        // says the issuer is the ACME provider. Refuse instead.
+        if self.get_provider.get_provider(&domains).await.is_some() {
+            tracing::warn!("refusing {domain}: no ACME certificate available");
+            return Some(TlsHandlerAction::Reject);
         }
 
         None

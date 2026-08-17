@@ -55,6 +55,20 @@ pub fn should_use_cert(cert: &X509Ref) -> Result<bool, ErrorStack> {
             == Ordering::Greater)
 }
 
+/// Whether `cert` is inside its validity window. [`should_use_cert`] is the
+/// stricter test that also demands 30 days of headroom, so that a renewal is
+/// attempted well before this one turns false.
+pub fn cert_is_unexpired(cert: &X509Ref) -> Result<bool, ErrorStack> {
+    Ok(cert
+        .not_before()
+        .compare(Asn1Time::days_from_now(0)?.as_ref())?
+        == Ordering::Less
+        && cert
+            .not_after()
+            .compare(Asn1Time::days_from_now(0)?.as_ref())?
+            == Ordering::Greater)
+}
+
 /// Controls the strings baked into generated certificates (Subject CN, O, OU).
 /// Exposed so downstream consumers can issue certs with their own branding
 /// without having to reimplement the X.509 builders. Not persisted — callers
@@ -807,5 +821,48 @@ where
         }
         .log_err()
         .map(TlsHandlerAction::Tls)
+    }
+}
+
+#[cfg(test)]
+mod cert_validity_tests {
+    use openssl::x509::X509Builder;
+
+    use super::*;
+
+    fn cert_expiring_in(days: i64) -> X509 {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let key = gen_nistp256().unwrap();
+        let mut builder = X509Builder::new().unwrap();
+        builder
+            .set_not_before(&Asn1Time::from_unix(now - 86400).unwrap())
+            .unwrap();
+        builder
+            .set_not_after(&Asn1Time::from_unix(now + days * 86400).unwrap())
+            .unwrap();
+        builder.set_pubkey(&key).unwrap();
+        builder.sign(&key, MessageDigest::sha256()).unwrap();
+        builder.build()
+    }
+
+    /// The last 30 days of a certificate's life are the renewal window: too old
+    /// to keep serving without trying to renew, still perfectly good to serve
+    /// while that renewal is failing.
+    #[test]
+    fn the_renewal_window_is_unexpired_but_due_for_renewal() {
+        let fresh = cert_expiring_in(60);
+        assert!(should_use_cert(&fresh).unwrap());
+        assert!(cert_is_unexpired(&fresh).unwrap());
+
+        let renewing = cert_expiring_in(10);
+        assert!(!should_use_cert(&renewing).unwrap());
+        assert!(cert_is_unexpired(&renewing).unwrap());
+
+        let expired = cert_expiring_in(-1);
+        assert!(!should_use_cert(&expired).unwrap());
+        assert!(!cert_is_unexpired(&expired).unwrap());
     }
 }

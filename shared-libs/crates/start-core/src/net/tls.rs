@@ -29,6 +29,9 @@ pub enum TlsHandlerAction {
     Tls(ServerConfig),
     /// Don't complete TLS — rewind the BackTrackingIO and return the raw stream.
     Passthrough,
+    /// Refuse the connection. Unlike returning `None`, this stops the chain: a
+    /// later handler must not answer for a name this one owns.
+    Reject,
 }
 
 use crate::net::http::handle_http_on_https;
@@ -256,8 +259,12 @@ where
                                 Box::pin(bt) as AcceptStream,
                             )));
                         }
-                        None => {
+                        Some(TlsHandlerAction::Reject) | None => {
                             crate::dev_log!(debug, "no certificate for SNI {:?}", sni);
+                            // The io buffers writes until the handshake config
+                            // is settled, so the alert only reaches the wire
+                            // once buffering is off.
+                            let _ = mid.io.stop_buffering();
                             let _ = mid
                                 .io
                                 .write_all(&[
@@ -492,6 +499,103 @@ mod test {
         // sanity: the other cert is itself valid against its own pin
         let other_match = client_config_with_cert(provider(), &other_pem).unwrap();
         assert!(handshake_succeeds(&other_key, &other_cert, other_match).await);
+    }
+
+    #[derive(Clone)]
+    struct Rejects;
+    impl<'a, A: Accept + 'a> TlsHandler<'a, A> for Rejects
+    where
+        A::Metadata: Sync,
+    {
+        async fn get_config(
+            &'a mut self,
+            _: &'a ClientHello<'a>,
+            _: &'a A::Metadata,
+        ) -> Option<TlsHandlerAction> {
+            Some(TlsHandlerAction::Reject)
+        }
+    }
+
+    #[derive(Clone)]
+    struct Declines;
+    impl<'a, A: Accept + 'a> TlsHandler<'a, A> for Declines
+    where
+        A::Metadata: Sync,
+    {
+        async fn get_config(
+            &'a mut self,
+            _: &'a ClientHello<'a>,
+            _: &'a A::Metadata,
+        ) -> Option<TlsHandlerAction> {
+            None
+        }
+    }
+
+    #[derive(Clone)]
+    struct Serves(Arc<(PKey<Private>, X509)>);
+    impl<'a, A: Accept + 'a> TlsHandler<'a, A> for Serves
+    where
+        A::Metadata: Sync,
+    {
+        async fn get_config(
+            &'a mut self,
+            _: &'a ClientHello<'a>,
+            _: &'a A::Metadata,
+        ) -> Option<TlsHandlerAction> {
+            Some(TlsHandlerAction::Tls(server_config(&self.0.0, &self.0.1)))
+        }
+    }
+
+    /// Run one connection against a `TlsListener` fronting `handler`, with a
+    /// client that accepts any certificate, and return the handshake result.
+    async fn handshake_through<H>(handler: H) -> Result<(), std::io::Error>
+    where
+        for<'a> H: TlsHandler<'a, tokio::net::TcpListener> + Clone + Send + 'static,
+    {
+        let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut tls = TlsListener::new(listener, handler);
+        let server = tokio::spawn(async move {
+            let _ = futures::future::poll_fn(|cx| tls.poll_accept(cx)).await;
+        });
+
+        let connector = TlsConnector::from(Arc::new(client_config_no_verify(provider()).unwrap()));
+        let tcp = TcpStream::connect(addr).await.unwrap();
+        let res = connector
+            .connect(ServerName::try_from("example.com").unwrap(), tcp)
+            .await
+            .map(|_| ());
+        server.abort();
+        res
+    }
+
+    /// A handler that owns a name refuses for it: the next handler in the chain
+    /// must not answer with a certificate of its own.
+    #[tokio::test]
+    async fn a_rejecting_handler_stops_the_chain() {
+        let cert = Arc::new(self_signed_for_loopback());
+
+        let err = handshake_through(ChainedHandler(Rejects, Serves(cert.clone())))
+            .await
+            .expect_err("a rejected connection must not complete a handshake");
+        assert!(
+            matches!(
+                err.into_inner()
+                    .and_then(|e| e.downcast::<tokio_rustls::rustls::Error>().ok())
+                    .as_deref(),
+                Some(tokio_rustls::rustls::Error::AlertReceived(
+                    tokio_rustls::rustls::AlertDescription::UnrecognisedName
+                ))
+            ),
+            "the rejection must reach the client as a TLS alert, not a bare close",
+        );
+
+        // Declining still falls through — that is what makes the two distinct.
+        handshake_through(ChainedHandler(Declines, Serves(cert)))
+            .await
+            .expect("a handler that declines lets the next one answer");
     }
 
     #[tokio::test]
