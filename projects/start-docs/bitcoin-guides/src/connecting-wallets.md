@@ -77,7 +77,7 @@ There are four ways that happens, and which one applies is a property of the wal
 
 Electrum is the one wallet that needs a file placed by hand, and it is worth understanding why, because the failure is silent.
 
-Electrum checks a server against a bundled list of public certificate authorities. When that check fails it looks at _how_ it failed: a server presenting a **self-signed certificate** is one Electrum will pin on the spot and connect to. Your server does not present a self-signed certificate — it presents one _signed by your server's own authority_, which is a different failure, and Electrum treats it as a server it cannot use. It never gets as far as offering to pin anything.
+Electrum checks a server against a bundled list of public certificate authorities, and when that check fails it looks at _how_ it failed. A server presenting a **self-signed certificate** is one Electrum pins on the spot and connects to. Your server presents something different — a certificate signed by an intermediate, which is signed in turn by your server's own root authority — and that is a different failure, which Electrum treats as a server it cannot use. It never gets as far as offering to pin anything. The behaviour is tracked upstream as [spesmilo/electrum#7459](https://github.com/spesmilo/electrum/issues/7459).
 
 The fix is to give Electrum the authority instead of the certificate. Electrum loads the file at `certs/<host>` as a trust anchor, so putting your root CA there makes the whole chain verify — and keeps working when your server renews its certificate, which pinning would not.
 
