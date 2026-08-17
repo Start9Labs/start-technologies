@@ -41,10 +41,9 @@
 ### Added
 
 - **Scaffolded packages get a fourth workflow, `syncNext.yml`, which keeps the
-  `next` iteration branch in step with the base branch it stacks on.** A base
-  branch advancing used to leave `next` behind indefinitely — 83 of the fleet's
-  114 `next` branches were behind, and every `next/*` on bitcoin-core by eleven
-  commits — so work resumed on `next` started from a stale tree. The paired
+  `next` iteration branch in step with the base branch it stacks on.** Nothing
+  else moves `next`, so a base branch advancing leaves it behind indefinitely
+  and work resumed there starts from a stale tree. The paired
   branch is derived rather than configured (an explicit `next/<base>` where one
   exists, otherwise the default branch pairs with a plain `next`), and a repo
   with no `next` gets one created at the base tip on the first run. Nothing is

@@ -2,9 +2,8 @@ name: Sync next
 
 # Keeps a package's long-lived `next` iteration branch in step with the base
 # branch it stacks on. Without it a base advances — a feature branch merged, a
-# fix pushed direct — and `next` silently rots: every `next/*` branch on
-# bitcoin-core had fallen eleven commits behind before this existed, and 83 of
-# the fleet's 114 `next` branches were behind their base.
+# fix pushed direct — and `next` silently rots, because nothing else moves it:
+# work resumed there starts from a stale tree.
 #
 # The pairing is derived, never configured. An explicit `next/<base>` wins
 # where one exists — that is the multi-branch packages (bitcoin-core's
