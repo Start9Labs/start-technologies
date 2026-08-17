@@ -12,18 +12,20 @@ name: Sync next
 # `next`. A base with neither gets a branch created for it, which is how a
 # package that never had a `next` acquires one.
 #
-# Nothing here force-pushes and nothing rewrites history, so this cannot race a
-# Helix session working the same branch. The outcomes are: create, fast-forward
-# (the overwhelming majority), a merge commit when `next` carries unmerged work,
-# or — only when that merge conflicts — a pull request for a human.
+# Neither `next` nor the base is ever force-pushed or rewritten, so this cannot
+# race a Helix session working the same branch. The outcomes are: create,
+# fast-forward (the overwhelming majority), a merge commit when `next` carries
+# unmerged work, or — only when that merge conflicts — a pull request for a
+# human.
 #
-# That PR takes the base branch itself as its head, so it needs no scratch
-# branch, stays current as the base advances, and closes on its own once a later
-# run merges cleanly, because merging the base into `next` makes the PR's head
-# reachable from its own base.
+# That PR's head is a throwaway `sync-next/<base>` branch holding the base tip,
+# never the base itself: GitHub's web conflict editor commits to the head
+# branch, so a PR headed by the base would resolve straight onto the base. It
+# still closes on its own once a later run merges cleanly, because merging the
+# base into `next` makes the scratch tip reachable from the PR's own base.
 #
-# No loop is possible: this only ever writes to `next`/`next/*`, which is never
-# a trigger branch for this workflow.
+# No loop is possible: this only ever writes to `next`/`next/*` and
+# `sync-next/*`, none of which is a trigger branch for this workflow.
 
 on:
   workflow_call:
@@ -127,23 +129,31 @@ jobs:
           git merge --abort || true
 
           echo "::warning::Merging $BASE into $TARGET conflicts — opening a pull request."
-          OPEN=$(gh pr list --base "$TARGET" --head "$BASE" --state open --json number --jq 'length')
+          SCRATCH="sync-next/$BASE"
+          OPEN=$(gh pr list --base "$TARGET" --head "$SCRATCH" --state open --json number --jq 'length')
           if [ "$OPEN" != "0" ]; then
             echo "::notice::A sync pull request into $TARGET is already open."
             exit 0
           fi
+
+          # Only ever reached with no sync PR open, so this cannot discard
+          # conflict resolutions a human has already pushed onto the scratch
+          # branch.
+          git push --force origin "$BASE_SHA:refs/heads/$SCRATCH"
 
           {
             echo "\`$BASE\` has moved on and cannot be merged into \`$TARGET\` unattended — the merge conflicts."
             echo
             echo "Resolve the conflicts and merge this PR. Until it lands, \`$TARGET\` is missing what \`$BASE\` has gained, and work built on it will be based on a stale tree."
             echo
-            echo "Nothing was force-pushed and no history was rewritten; \`$TARGET\` is exactly as it was."
+            echo "**Merge it with a merge commit, not a squash.** \`$TARGET\` has to come out with \`$BASE\` as an ancestor; a squash gives it equivalent content under a fresh commit instead, and the next sync diverges again for the same reason this one did."
+            echo
+            echo "\`$TARGET\` and \`$BASE\` are both untouched — nothing was pushed to either and no history was rewritten. \`$SCRATCH\` is a throwaway branch holding the \`$BASE\` tip, and it is deleted when this merges."
           } > /tmp/sync-next-body.md
 
           gh pr create \
             --base "$TARGET" \
-            --head "$BASE" \
+            --head "$SCRATCH" \
             --title "chore: sync $BASE into $TARGET" \
             --body-file /tmp/sync-next-body.md \
             || echo "::warning::Could not open a sync pull request into $TARGET."

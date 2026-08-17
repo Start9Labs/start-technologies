@@ -46,10 +46,14 @@
   and work resumed there starts from a stale tree. The paired
   branch is derived rather than configured (an explicit `next/<base>` where one
   exists, otherwise the default branch pairs with a plain `next`), and a repo
-  with no `next` gets one created at the base tip on the first run. Nothing is
-  force-pushed: `next` is fast-forwarded when merely behind, merged when it
-  carries unmerged work, and left alone with a PR opened for a human only when
-  that merge conflicts
+  with no `next` gets one created at the base tip on the first run. Neither
+  `next` nor the base is force-pushed: `next` is fast-forwarded when merely
+  behind, merged when it carries unmerged work, and left alone with a PR opened
+  for a human only when that merge conflicts. That PR is headed by a throwaway
+  `sync-next/<base>` branch rather than the base itself, because GitHub's web
+  conflict editor commits to the head branch — and it wants a merge commit, not
+  a squash, or `next` comes out without the base as an ancestor and the
+  following sync conflicts again
 
 - **`addDaemon()` / `addOneshot()` accept a `uses` value that
   `Daemons.dynamic` folds into the entry's `configHash`.** The reconciler's

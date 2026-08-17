@@ -177,7 +177,7 @@ jobs:
 
 The paired branch is derived rather than configured: an explicit `next/<base>` is used where one exists — that is how the multi-branch packages keep one iteration branch per major line or flavor — and otherwise the repo's default branch pairs with a plain `next`. **A repo with no `next` gets one created at the base tip on the first run**, so a package never has to be seeded by hand.
 
-Nothing is force-pushed and no history is rewritten. `next` is fast-forwarded when it is merely behind, given a merge commit when it carries unmerged work, and left untouched with a pull request opened for a human only when that merge conflicts. `workflow_dispatch` is there so a package can be brought into line without waiting for its next merge.
+Neither `next` nor the base branch is force-pushed or rewritten. `next` is fast-forwarded when it is merely behind, given a merge commit when it carries unmerged work, and left untouched with a pull request opened for a human only when that merge conflicts. That pull request is headed by a throwaway `sync-next/<base>` branch rather than the base itself, so resolving its conflicts in GitHub's web editor — which commits to the head branch — cannot land on the base. **Merge it with a merge commit rather than a squash**, so `next` comes out with the base as an ancestor; a squash leaves equivalent content under a fresh commit and the following sync conflicts all over again. `workflow_dispatch` is there so a package can be brought into line without waiting for its next merge.
 
 List every base branch the package maintains under `branches:`, and note this is one of the two workflows whose branch list must match the branch the repo actually uses — a package on `main` that still says `master` here silently never syncs.
 
