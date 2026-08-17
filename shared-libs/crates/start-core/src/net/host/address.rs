@@ -408,6 +408,20 @@ pub async fn add_public_domain<Kind: HostApiKind>(
                 {
                     return Err(Error::new(eyre!("unknown acme provider {}, please run acme.init for this provider first", acme.0), ErrorKind::InvalidRequest));
                 }
+                // A host that serves its own TLS holds its own certificate:
+                // StartOS never terminates the connection, so it can neither
+                // obtain one from an authority nor present it.
+                if !Kind::host_for(&inheritance, db)?
+                    .as_bindings()
+                    .de()?
+                    .values()
+                    .any(|b| b.options.add_ssl.is_some())
+                {
+                    return Err(Error::new(
+                        eyre!("{}", t!("acme.passthrough-host", domain = fqdn)),
+                        ErrorKind::InvalidRequest,
+                    ));
+                }
             }
 
             // Adding a domain that is already present is a no-op for exposure:

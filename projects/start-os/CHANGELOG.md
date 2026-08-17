@@ -52,6 +52,13 @@ file tracks notable changes since the move to the monorepo.
   `443` to your server as you would for a standard domain — the domain's own
   port is not enough on its own.
 
+- **A service that presents its own TLS certificate is shown as presenting
+  it.** StartOS does not terminate such a connection, so the certificate the
+  client checks is the service's — but a domain on that interface reported
+  whichever certificate authority had been chosen for it, and the choice was
+  offered in the first place. Those addresses now report `Self signed`, and
+  choosing an authority for one is refused with an explanation.
+
 - **Services that run their own containers or a VPN can reach the devices they
   were granted.** A service opting into `userspaceFilesystems` or
   `virtualNetworking` is handed `/dev/fuse` and `/dev/net/tun` inside its
