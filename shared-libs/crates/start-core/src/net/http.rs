@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use bytes::Bytes;
+use futures::FutureExt;
 use http::{HeaderMap, HeaderValue};
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
@@ -309,16 +310,12 @@ where
             }),
         );
     let mut from = Box::pin(from);
-    let mut to = Box::pin(to);
-    let mut upstream_done = false;
+    let mut to = Box::pin(to.fuse());
     loop {
         tokio::select! {
             res = from.as_mut() => return Ok(res?),
-            // Re-polling a hyper connection after it has resolved is a contract
-            // violation, so this arm has to disarm itself.
-            res = to.as_mut(), if !upstream_done => {
+            res = to.as_mut() => {
                 res?;
-                upstream_done = true;
                 // GOAWAY plus drain, so in-flight streams still finish.
                 from.as_mut().graceful_shutdown();
             }
@@ -439,17 +436,12 @@ where
             }),
         );
     let mut from = Box::pin(from.with_upgrades());
-    let mut to = Box::pin(to.with_upgrades());
-    let mut upstream_done = false;
+    let mut to = Box::pin(to.with_upgrades().fuse());
     loop {
         tokio::select! {
             res = from.as_mut() => return Ok(res?),
-            // Re-polling a hyper connection after it has resolved is a contract
-            // violation, and the client one panics outright, so this arm has to
-            // disarm itself.
-            res = to.as_mut(), if !upstream_done => {
+            res = to.as_mut() => {
                 res?;
-                upstream_done = true;
                 // The backend is gone. Hand the client the EOF now, the way the
                 // splice path does, instead of leaving it a connection that
                 // looks reusable and aborts the next request it carries.
