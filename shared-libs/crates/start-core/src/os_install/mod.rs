@@ -245,11 +245,14 @@ pub struct InstallOsResult {
     pub mok_enrolled: bool,
 }
 
-/// The OS root of a previous install on this disk: the first partition carrying a
-/// `config` directory. Identified by content rather than by label, so that an
-/// install predating any particular labelling scheme is still found. Only valid
-/// before `partition`, which rewrites the OS partitions and takes that filesystem
-/// with them.
+/// The OS root of a previous install on this disk: the first partition whose
+/// `config` completed setup (carries a `disk.guid`, written on setup completion).
+/// Identified by content rather than by label, so that an install predating any
+/// particular labelling scheme is still found. A config without `disk.guid` never
+/// reached setup — including the fresh default a failed earlier attempt of this
+/// very install left behind, which must not be mistaken for the real config.
+/// Only valid before `partition`, which rewrites the OS partitions and takes that
+/// filesystem with them.
 async fn previous_os_root(disk_path: &Path) -> Option<PathBuf> {
     for idx in 1..=16 {
         let part = partition_for(disk_path, idx);
@@ -265,11 +268,11 @@ async fn previous_os_root(disk_path: &Path) -> Option<PathBuf> {
                     continue;
                 }
             };
-        let has_config = tokio::fs::metadata(guard.path().join("config"))
+        let has_guid = tokio::fs::metadata(guard.path().join("config/disk.guid"))
             .await
-            .map_or(false, |m| m.is_dir());
+            .map_or(false, |m| m.is_file());
         guard.unmount().await.log_err();
-        if has_config {
+        if has_guid {
             return Some(part);
         }
     }
@@ -278,6 +281,20 @@ async fn previous_os_root(disk_path: &Path) -> Option<PathBuf> {
 
 const CONFIG_BAK: &str = "/tmp/config.bak";
 const CONFIG_BAK_STAGED: &str = "/tmp/config.bak.staged";
+/// Records which disk CONFIG_BAK was preserved from: /tmp survives a failed install
+/// attempt within one boot, and only a leftover from this same disk may be restored.
+const CONFIG_BAK_SRC: &str = "/tmp/config.bak.src";
+
+async fn clear_config_bak() -> Result<(), Error> {
+    delete_dir(CONFIG_BAK).await?;
+    delete_file(CONFIG_BAK_SRC).await
+}
+
+async fn config_bak_matches(disk_path: &Path) -> bool {
+    tokio::fs::read_to_string(CONFIG_BAK_SRC)
+        .await
+        .map_or(false, |s| Path::new(s.trim()) == disk_path)
+}
 
 /// Copy the previous install's config aside, for `install_os_to` to restore once the
 /// disk has been rewritten.
@@ -291,6 +308,11 @@ async fn preserve_config(disk_path: &Path) -> Result<(), Error> {
             "no previous StartOS root on {}; nothing to preserve",
             disk_path.display()
         );
+        // A leftover backup from an earlier attempt in this boot is only this disk's
+        // if the marker says so — anything else would restore another disk's config.
+        if !config_bak_matches(disk_path).await {
+            clear_config_bak().await?;
+        }
         return Ok(());
     };
     tracing::info!("preserving config from {}", old_root.display());
@@ -303,7 +325,7 @@ async fn preserve_config(disk_path: &Path) -> Result<(), Error> {
         // Anything added here must leave overlay/var/lib/dkms and overlay/etc/shadow
         // alone — they hold the Secure Boot MOK key and the password that enrolls it.
         delete_dir(CONFIG_BAK_STAGED).await?;
-        delete_dir(CONFIG_BAK).await?;
+        clear_config_bak().await?;
         Command::new("cp")
             .arg("-r")
             .arg(guard.path().join("config"))
@@ -316,6 +338,7 @@ async fn preserve_config(disk_path: &Path) -> Result<(), Error> {
         delete_dir(Path::new(CONFIG_BAK_STAGED).join("overlay/lib")).await?;
         delete_dir(Path::new(CONFIG_BAK_STAGED).join("overlay/usr/lib")).await?;
         tokio::fs::rename(CONFIG_BAK_STAGED, CONFIG_BAK).await?;
+        write_file_atomic(CONFIG_BAK_SRC, format!("{}\n", disk_path.display())).await?;
         Ok::<_, Error>(())
     }
     .await;
@@ -346,7 +369,7 @@ pub async fn install_os_to(
     } else {
         // The restore below is unconditional, so a run that preserves nothing must not
         // inherit a backup an earlier attempt in this boot left behind.
-        delete_dir(CONFIG_BAK).await?;
+        clear_config_bak().await?;
     }
 
     let part_info = partition(disk_path, capacity, partition_table, protect, use_efi).await?;
