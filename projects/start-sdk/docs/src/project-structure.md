@@ -66,11 +66,7 @@ These files typically require minimal modification:
 
 ### .github/workflows/
 
-<<<<<<< HEAD
-Every package should include four GitHub Actions workflows that delegate to the reusable CI workflows in this monorepo (`.github/workflows/`, migrated from the old `shared-workflows` repo). The CI pipeline has two automatic stages, plus an optional manual path, and a branch-hygiene job that runs alongside them:
-=======
-Every package should include three GitHub Actions workflows that delegate to the reusable CI workflows in this monorepo (`.github/workflows/`). The CI pipeline has two automatic stages, plus an optional manual path:
->>>>>>> 88a3520c4 (docs(sdk): delete published guide text with no live producer (#3725))
+Every package should include four GitHub Actions workflows that delegate to the reusable CI workflows in this monorepo (`.github/workflows/`). The CI pipeline has two automatic stages, plus an optional manual path, and a branch-hygiene job that runs alongside them:
 
 ```
 PR opened/updated ──> Build
