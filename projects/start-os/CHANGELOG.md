@@ -38,6 +38,14 @@ file tracks notable changes since the move to the monorepo.
 
 ### Changed
 
+- **A CryptPad installed before the update is carried across as CryptPad
+  (Legacy), so the new CryptPad can be installed alongside it.** The 0.4.0
+  CryptPad wraps a release several years newer and stores its data in a
+  different layout, so nothing carries across automatically. Renaming the old
+  one lets both sit on your server at once: export your drive from CryptPad
+  (Legacy), import it into the new CryptPad, and uninstall the old one once you
+  are satisfied. This matches how Ghost, Synapse and Monero are handled.
+
 - **The NVIDIA images now use NVIDIA's open kernel modules, which support GeForce
   RTX 20-series, Quadro RTX and newer.** This is what makes current cards work at
   all — an RTX 50-series, an RTX PRO 6000 or an NVIDIA GB10 can only be driven by

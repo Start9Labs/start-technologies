@@ -230,6 +230,9 @@ impl TryFrom<ManifestV1> for Manifest {
         if &*value.id == "monerod" {
             value.id = "monerod-legacy".parse()?;
         }
+        if &*value.id == "cryptpad" {
+            value.id = "cryptpad-legacy".parse()?;
+        }
         if &*value.id == "fedimintd" {
             value.id = "fedimint-guardian".parse()?;
         }

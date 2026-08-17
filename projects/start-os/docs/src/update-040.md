@@ -29,6 +29,8 @@ The following services cannot be migrated automatically. Review these before sta
 
 - **Synapse** — The old Synapse was Tor-only. The new Synapse is clearnet-only. These are different services now with no migration path.
 
+- **CryptPad** — The new CryptPad wraps a release several years newer and stores its data differently, so nothing carries across automatically. Your existing CryptPad survives the update as **CryptPad (Legacy)** and keeps working, which means you can install the new CryptPad alongside it: open CryptPad (Legacy), sign in, and use CryptPad's **Export** to download your drive, then import it into the new CryptPad. Uninstall CryptPad (Legacy) once you are satisfied — uninstalling deletes its data.
+
 - **Jam** — Jam's backend, JoinMarket, is being replaced by a separate reimplementation (JoinMarket NG) for technical and security reasons, making Jam defunct on StartOS v0.3.5.1 and unavailable on v0.4.0 until that backend matures and a new version of Jam is built for it. You should back up your seed, move out any spendable funds (fidelity-bond funds stay locked until expiry), and uninstall Jam prior to updating to v0.4.0.
 
 ### LAN addresses are changing
