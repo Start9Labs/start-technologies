@@ -38,6 +38,17 @@ file tracks notable changes since the move to the monorepo.
 
 ### Fixed
 
+- **Apps that hold a connection open — desktop sync clients, API pollers — stop
+  dropping in and out.** Nextcloud Desktop and clients like it showed a
+  recurring "Network error" that cleared itself a few seconds later. A service
+  routinely closes a connection once it has sat idle for a few seconds, and a
+  client is built to notice that and open a fresh one. StartOS's reverse proxy
+  kept the client's half of the pair open after the service had closed its own,
+  so the client went on holding a connection it had every reason to believe was
+  good, and the next request it sent over that connection was cut off with no
+  reply. The proxy now closes the client's half as soon as the service closes
+  its own, which is the signal the client is waiting for.
+
 - Trim whitespace on form inputs.
 
 - **Services that run their own containers or a VPN can reach the devices they
