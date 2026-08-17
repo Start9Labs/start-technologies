@@ -45,15 +45,31 @@ jobs:
           ARCH=$(uname -m)
           OS=$(uname -s | tr '[:upper:]' '[:lower:]')
           ASSET_NAME="start-cli_${ARCH}-${OS}"
-          DOWNLOAD_URL=$(curl -fsS \
-            -H "Authorization: token ${{ github.token }}" \
-            https://api.github.com/repos/Start9Labs/start-technologies/releases \
-            | jq -r '[.[].assets[] | select(.name=="'"$ASSET_NAME"'")] | first | .browser_download_url')
-          if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
-            echo "Error: Could not find asset '$ASSET_NAME' in Start9Labs/start-technologies releases"
+          # A degraded list-releases endpoint answers 200 with an empty array, so
+          # curl sees success and --retry never fires. Retry on an empty list to
+          # keep that from reporting as a missing asset.
+          for attempt in 1 2 3 4 5; do
+            RELEASES=$(curl -fsS --retry 3 --retry-connrefused \
+              -H "Authorization: token ${{ github.token }}" \
+              'https://api.github.com/repos/Start9Labs/start-technologies/releases?per_page=100' || true)
+            COUNT=$(printf '%s' "$RELEASES" | jq 'length' 2>/dev/null || echo 0)
+            if [ "$COUNT" -gt 0 ]; then break; fi
+            if [ "$attempt" -lt 5 ]; then
+              echo "list-releases returned no releases (attempt ${attempt}/5); retrying in $((attempt * 10))s"
+              sleep $((attempt * 10))
+            fi
+          done
+          if [ "$COUNT" -eq 0 ]; then
+            echo "Error: Start9Labs/start-technologies list-releases returned no releases; the GitHub API is degraded"
             exit 1
           fi
-          curl -fsSL \
+          DOWNLOAD_URL=$(printf '%s' "$RELEASES" \
+            | jq -r --arg name "$ASSET_NAME" '[.[].assets[] | select(.name == $name)] | first | .browser_download_url')
+          if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
+            echo "Error: no Start9Labs/start-technologies release of the $COUNT returned carries asset '$ASSET_NAME'"
+            exit 1
+          fi
+          curl -fsSL --retry 3 --retry-connrefused \
             -H "Authorization: token ${{ github.token }}" \
             -H "Accept: application/octet-stream" \
             "$DOWNLOAD_URL" -o /tmp/start-cli
