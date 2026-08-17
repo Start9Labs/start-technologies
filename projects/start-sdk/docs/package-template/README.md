@@ -53,7 +53,7 @@ why the heading set is fixed and ordered, and what belongs in each section:
 
 ## Tasks
 
-<!-- TODO: each task — what raises it, severity, what clears it. Delete the section if the package raises none. -->
+<!-- TODO: each task — what raises it, severity, what clears it. Or "None." -->
 
 ## Health Checks
 

@@ -30,9 +30,13 @@ Two consequences:
 
 **Do not re-encode what StartOS can introspect.** An agent administering your service already has every action's id, name, description, warning, visibility, `allowedStatuses` and input schema from the OS, along with health-check ids and live status. Restating those here adds a second copy that goes stale and costs the agent context to read. Document instead what the ABI cannot express: **when** to run a thing, what it **costs**, whether it is **safe to repeat**, what **state** it changes, and which **symptom** it resolves.
 
+<<<<<<< HEAD
 **The heading set is fixed, not suggested.** Section headings are how an agent retrieves part of a README without loading all of it, so they are an addressing scheme. A package that renames `## Actions` to `## Available Actions` does not fail loudly — it silently degrades retrieval to "load the whole file". Use the headings below verbatim, in this order.
 
 **A section with nothing to say still says "None."** Only **Tasks** and **Troubleshooting** may be left out, and only when the package genuinely has neither. Everywhere else an empty section is a fact worth stating: "no config file on disk", "no dependencies", "no actions" each answer a question outright, where a missing heading is ambiguous — the reader cannot tell an absent section from an unwritten one, and an agent addressing that heading gets nothing back either way.
+=======
+**The heading set is fixed, not suggested.** Section headings are how an agent retrieves part of a README without loading all of it, so they are an addressing scheme. A package that renames `## Actions` to `## Available Actions` does not fail loudly — it silently degrades retrieval to "load the whole file". Use the headings below verbatim, in this order. No heading is optional: a section with nothing to say still says "None." An empty section is a fact worth stating — "no config file on disk", "no dependencies", "no actions", "no tasks" each answer a question outright, where a missing heading is ambiguous, since the reader cannot tell an absent section from an unwritten one and an agent addressing that heading gets nothing back either way.
+>>>>>>> 415abe3a4 (Merge pull request #3720 from Start9Labs/docs/tasks-section-is-required)
 
 The order runs in four groups: **what the package is made of** (runtime, volumes, file models, dependencies, interfaces), **how it behaves** (install, actions, tasks, health, backups), **what to expect when it doesn't** (limitations), then the machine-readable summary. Keep a new section inside the group it belongs to.
 
@@ -212,7 +216,7 @@ For each task the package creates:
 - **What clears it** — running the target action, a configuration reaching an acceptable state, or the underlying condition resolving on its own. Say whether it can return.
 - **Where it appears** — for a dependency task (`createTask`), name the dependency and its action. The user sees that prompt on _another_ service's page, and nothing there explains which package asked for it.
 
-Omit the section if the package raises no tasks.
+If the package creates no tasks, state "None" — that the service is never held on a prompt, and its ordinary controls are always available, is itself worth saying.
 
 ### Health Checks
 
@@ -251,7 +255,7 @@ Include no versions of any kind: not `upstream_version`, not image tags, not dep
 - [ ] Subcontainer names documented
 - [ ] Every user-facing action covers when to run it, what it changes, its cost, and its repeat safety — without restating the OS metadata
 - [ ] Hidden actions flagged as not user-facing
-- [ ] Every task documented with what raises it, its severity, and what clears it — or the section omitted because the package raises none
+- [ ] Every task documented with what raises it, its severity, and what clears it — or "None" stated explicitly
 - [ ] Health-check failures explained, not just listed
 - [ ] All dependencies documented (or "None" stated explicitly)
 - [ ] Every file model documented — how it is seeded, what rewrites it, and whether a hand edit survives
