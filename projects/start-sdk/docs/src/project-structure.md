@@ -47,7 +47,6 @@ my-service-startos/
 ├── package.json
 ├── package-lock.json
 ├── README.md               # Service documentation (see Writing READMEs)
-├── TODO.md                 # Pending work on the package
 ├── tsconfig.json
 ├── UPDATING.md             # Per-package upstream-version tracking
 └── upstream-project/       # Git submodule (optional)
@@ -185,7 +184,7 @@ List every base branch the package maintains under `branches:`, and note this is
 
 `AGENTS.md` is the package's agent-context file. Generic packaging knowledge — SDK patterns, the disciplines on the [Development Workflow](./workflow.md) page, the rules throughout this guide — lives in one canonical place: the packaging guide, **not** copied into each package repo where duplicates would drift out of sync. `AGENTS.md` carries only what's specific to _this_ repo.
 
-Keep it short and repo-specific: state that this is a StartOS service package, point at the repo's `TODO.md` as the worklist, give the doc-sync rule (keep `README.md` and `instructions.md` in step with every change), and capture any package-specific gotchas — in short, how to work in _this_ repo. Do **not** restate generic guide content or turn it into a web-fetch driver (don't instruct the agent to pull guide pages over the web up front).
+Keep it short and repo-specific: state that this is a StartOS service package, give the doc-sync rule (keep `README.md` and `instructions.md` in step with every change), and capture any package-specific gotchas — in short, how to work in _this_ repo. Do **not** restate generic guide content or turn it into a web-fetch driver (don't instruct the agent to pull guide pages over the web up front).
 
 It is also the one package document with a single reader, so it must not restate `README.md` or `instructions.md` either — anyone changing the package has both. That leaves it carrying only what has no home in them:
 
@@ -234,10 +233,6 @@ If you are pulling a pre-built Docker image (no submodule), copy the license tex
 Service documentation following the structure described in [Writing READMEs](./writing-readmes.md). Every README should document how the StartOS package differs from the upstream service.
 
 It is **packed into the `.s9pk`** alongside `instructions.md`, so an AI assistant administering the server reads the README for the version actually installed, offline, rather than fetching whatever a repository's default branch has since moved to. Unlike `instructions.md` it is optional — a package without one still builds — but nothing on the server can fall back to a copy that isn't there, so ship one.
-
-### TODO.md
-
-A running list of pending work on this package. Add items when you defer work; remove them when complete. An empty `TODO.md` (just the `# TODO` heading) is fine — keep the file present so contributors know where to record items.
 
 ### UPDATING.md
 

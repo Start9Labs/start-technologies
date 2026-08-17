@@ -8,6 +8,7 @@
 
 - [Environment Setup](environment-setup.md)
 - [Quick Start](quick-start.md)
+- [New Package Checklist](new-package-checklist.md)
 - [Development Workflow](workflow.md)
 - [Agent Context](agent-context.md)
 

@@ -170,11 +170,11 @@ s9pk.init.not-in-workspace:
   pl_PL: "Nie jesteś w obszarze roboczym pakowania. Najpierw uruchom `start-cli s9pk init-workspace`."
 
 s9pk.init.package-created:
-  en_US: "Created %{id} at %{path}. Next: work the checklist in TODO.md."
-  de_DE: "%{id} wurde unter %{path} erstellt. Nächster Schritt: Arbeite die Checkliste in TODO.md ab."
-  es_ES: "Se creó %{id} en %{path}. Siguiente: completa la lista de tareas en TODO.md."
-  fr_FR: "%{id} créé dans %{path}. Étape suivante : suivez la liste de tâches dans TODO.md."
-  pl_PL: "Utworzono %{id} w %{path}. Następnie: wykonaj listę zadań w TODO.md."
+  en_US: "Created %{id} at %{path}. Next: work the New Package Checklist (docs.start9.com/packaging/new-package-checklist.html)."
+  de_DE: "%{id} wurde unter %{path} erstellt. Nächster Schritt: Arbeite die Checkliste für neue Pakete ab (docs.start9.com/packaging/new-package-checklist.html)."
+  es_ES: "Se creó %{id} en %{path}. Siguiente: completa la lista de comprobación para paquetes nuevos (docs.start9.com/packaging/new-package-checklist.html)."
+  fr_FR: "%{id} créé dans %{path}. Étape suivante : suivez la liste de contrôle pour nouveaux paquets (docs.start9.com/packaging/new-package-checklist.html)."
+  pl_PL: "Utworzono %{id} w %{path}. Następnie: wykonaj listę kontrolną nowego pakietu (docs.start9.com/packaging/new-package-checklist.html)."
 
 s9pk.init.package-exists:
   en_US: "%{path} already exists; choose a different name or remove it."
