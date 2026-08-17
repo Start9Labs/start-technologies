@@ -62,7 +62,6 @@ Make sure `make start-registry-format-check` is clean before opening a PR.
 - **Comments:** default to none; clear names over prose. A comment is for a non-obvious _why_ only — one short line.
 - **API additions:** add subcommands in `registry/mod.rs`; use `with_call_remote::<CliContext>()` to expose them to the `start-registry` CLI and `with_about(...)` for help text. Tag admin-only commands with `with_metadata("admin", true)`.
 - **Schema changes:** changing `RegistryDatabase` / index types requires a migration in `shared-libs/crates/start-core/src/registry/migrations`.
-- **Version:** `Cargo.toml` `version` (with `# VERSION_BUMP`) tracks the OS release line — don't bump it independently.
 
 ## Docs are part of the change
 

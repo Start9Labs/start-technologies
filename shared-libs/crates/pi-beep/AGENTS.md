@@ -2,7 +2,7 @@
 
 A tiny first-party bin in the start-technologies monorepo at `shared-libs/crates/pi-beep` (Cargo package
 `pi-beep`, binary `pi-beep`). It reimplements the Unix `beep` command using the Raspberry Pi's PWM
-hardware exposed through `/sys/class/pwm/`. The whole crate is a single ~117-line `src/main.rs` whose
+hardware exposed through `/sys/class/pwm/`. The whole crate is a single `src/main.rs` whose
 only dependency is `clap`. `CLAUDE.md` is a one-line `@AGENTS.md` import; edit this file instead.
 See [ARCHITECTURE.md](ARCHITECTURE.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -30,7 +30,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 cargo build -p pi-beep                                          # host build
 cargo build -p pi-beep --target=aarch64-unknown-linux-musl      # cross-compile for RPi (needs rust-zig-builder)
 ARCH=aarch64 PROFILE=release ./shared-libs/crates/pi-beep/build-pi-beep.sh      # what the OS image build runs
-cargo test -p pi-beep                                           # no tests defined; passes trivially
+cargo test -p pi-beep
 ```
 
 ## Gotchas

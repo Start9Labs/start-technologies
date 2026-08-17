@@ -10,7 +10,7 @@ the workflow.
 
 ## Layout
 
-- `src/lib.rs` — crate root. Re-exports `exver::*` and `emver`; gates `wasm` and the test module.
+- `src/lib.rs` — crate root. Re-exports `exver::*` and `emver`; gates the test module.
 - `src/exver.rs` — all core types and logic: `Version`, `ExtendedVersion`, `VersionRange`,
   `ParseError`, `PreReleaseSegment`, the `Operator` constants (`EQ`/`NEQ`/`GT`/`GTE`/`LT`/`LTE`),
   the `AnyRange`/`AllRange` monoid wrappers, the Pest `Grammar`, `FromStr`/`Display`/`Serialize`

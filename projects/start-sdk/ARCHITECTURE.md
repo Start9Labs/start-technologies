@@ -24,7 +24,7 @@ The Start SDK builds on a shared core library to form a layered architecture: **
 └─────────────────────────────────────────────────────────────┘
 ```
 
-The SDK follows [Semantic Versioning](https://semver.org/) and is versioned independently of StartOS (the current `@start9labs/start-sdk` 2.0.10 targets StartOS 0.4.0). Each `CHANGELOG.md` heading records the SDK version and the StartOS release it targets.
+The SDK follows [Semantic Versioning](https://semver.org/) and is versioned independently of StartOS. Each `CHANGELOG.md` heading records the SDK version and the StartOS release it targets.
 
 ## Place in the monorepo
 
@@ -176,7 +176,7 @@ Parser and verifier for `.s9pk` service package archives:
 
 ### Utilities (`shared-libs/ts-modules/start-core/lib/util/`)
 
-~28 utility modules including:
+Utility modules including:
 
 **Reactive subscription wrappers** — Each wraps an Effects callback-based method into a consistent reactive API:
 
@@ -258,7 +258,7 @@ Features:
 - Graceful shutdown with configurable signals and timeouts
 - One-shot commands that run before daemons start
 
-Internally the builder is record-then-materialize: `.addDaemon()` appends a recorded entry, `Daemons.build()` walks the entries to construct `HealthDaemon`s with correct dependency wiring and runs `updateStatus()`. Side-effects start at `build()`, so the timing is identical to the prior eager builder for `setupMain` users.
+Internally the builder is record-then-materialize: `.addDaemon()` appends a recorded entry, `Daemons.build()` walks the entries to construct `HealthDaemon`s with correct dependency wiring and runs `updateStatus()`. Side-effects start at `build()`.
 
 **`Daemons.dynamic`** makes the daemon set a reactive function of on-disk state. `main` is always `setupMain`; `Daemons.dynamic(effects, fn)` returns a `DaemonsReconciler` — a `T.DaemonBuildable`, exactly like a static `Daemons.of(...)` chain — which you return from `setupMain`. The builder `fn` returns a regular `Daemons.of(...).addDaemon(...)` chain; the reconciler diffs its entries against the running set on every `effects.constRetry` trigger. Inside the builder, `constRetry` is bound to a rerun-and-reconcile rather than `effects.restart()`, so a change reconciles in place and the service stays `running`:
 
@@ -472,6 +472,5 @@ The manifest type flows through the entire SDK via generics. When you call `Star
 ## Further reading
 
 - [README.md](README.md) — overview and quickstart
-- [AGENTS.md](AGENTS.md) — build, test, release, and contribution workflow
 - [AGENTS.md](AGENTS.md) — agent/dev instructions (`CLAUDE.md` is a one-line `@AGENTS.md` import)
 - [Packaging docs](https://docs.start9.com/packaging) — the developer-facing reference (mdbook in `docs/`)

@@ -2,7 +2,7 @@
 
 The TypeScript SDK (`@start9labs/start-sdk`) for building StartOS service packages. Lives at `projects/start-sdk/` inside the start-technologies monorepo. One npm package plus the packaging build wrapper and the packaging mdbook. `CLAUDE.md` is a one-line `@AGENTS.md` import.
 
-This file is **both** the contribution guide and the agent/dev operating rules for this scope — how to set up, build, test, and release the SDK, plus the gotchas. It has no `CONTRIBUTING.md`: this scope's was folded in here (the rest of the monorepo still carries one per scope; that migration is in progress). See [`ARCHITECTURE.md`](ARCHITECTURE.md) for how the SDK is structured — modules, data flow, the build pipeline, and the design patterns (builder chains, effects-as-capabilities, manifest type threading). If you are building a service package _using_ the SDK rather than developing the SDK itself, you want the [packaging docs](https://docs.start9.com/packaging).
+This file is **both** the contribution guide and the agent/dev operating rules for this scope — how to set up, build, test, and release the SDK, plus the gotchas. It has no `CONTRIBUTING.md`: this scope's was folded in here. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for how the SDK is structured — modules, data flow, the build pipeline, and the design patterns (builder chains, effects-as-capabilities, manifest type threading). If you are building a service package _using_ the SDK rather than developing the SDK itself, you want the [packaging docs](https://docs.start9.com/packaging).
 
 **Read up the tree first.** These docs are hierarchical: before working here, read the `AGENTS.md` in each enclosing directory up to the repo root (and their `ARCHITECTURE.md` / `CONTRIBUTING.md` where relevant). This file covers only what is specific to this scope and does not repeat rules already stated higher up — commit/PR conventions live in the root [`CONTRIBUTING.md`](../../CONTRIBUTING.md).
 
@@ -25,7 +25,6 @@ Node.js v22+ (nvm recommended), npm, and GNU Make.
 | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `make node_modules`           | `npm ci`                                                                                                                                            |
 | `make bundle`                 | build only: build `@start9labs/start-core` (prerequisite), compile SDK → `dist/`. Deliberately does **not** run `test` or `check-fmt` — see Gotchas |
-| `make dist`                   | compile SDK (depends on start-core)                                                                                                                 |
 | `make test`                   | jest                                                                                                                                                |
 | `make check`                  | `tsc --noEmit`                                                                                                                                      |
 | `make fmt` / `make check-fmt` | Prettier write / check on all `.ts`                                                                                                                 |

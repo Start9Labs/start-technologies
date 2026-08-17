@@ -2,7 +2,7 @@
 
 This guide is for contributing to the Start9 monorepo (StartOS and the other products that live here). If you are interested in packaging a service for StartOS, visit the [packaging guide](https://docs.start9.com/packaging). If you are interested in promoting, providing technical support, creating tutorials, or helping in other ways, please visit the [Start9 website](https://start9.com/contribute).
 
-This file covers what is **common to the whole monorepo** — the shared toolchain, branch policy, the cross-cutting test/format entry points, and code/commit conventions. **Per-product system dependencies, build targets, deploy steps, and release procedure live in that product's own scope** — its `AGENTS.md` (e.g. [`projects/start-sdk/AGENTS.md`](projects/start-sdk/AGENTS.md)), or its `CONTRIBUTING.md` in scopes not yet migrated (e.g. [`projects/start-os/CONTRIBUTING.md`](projects/start-os/CONTRIBUTING.md) for building the StartOS OS image). See [`AGENTS.md`](AGENTS.md) for that migration and the reasoning behind it.
+This file covers what is **common to the whole monorepo** — the shared toolchain, branch policy, the cross-cutting test/format entry points, and code/commit conventions. **Per-product system dependencies, build targets, deploy steps, and release procedure live in that product's own scope** — its `AGENTS.md` (e.g. [`projects/start-sdk/AGENTS.md`](projects/start-sdk/AGENTS.md)), or its `CONTRIBUTING.md` in scopes not yet migrated (e.g. [`projects/start-os/CONTRIBUTING.md`](projects/start-os/CONTRIBUTING.md) for building the StartOS OS image).
 
 ## Documentation
 
@@ -13,7 +13,7 @@ The repo root's docs split across four files:
 - `CONTRIBUTING.md` — this file; how to contribute
 - `AGENTS.md` — AI-developer/agent operating rules (`CLAUDE.md` is a one-line `@AGENTS.md` import)
 
-**These docs must be kept up to date.** When you change project structure, conventions, build process, or product context, update the relevant file(s) in the same change — do not defer. Each product and shared library keeps its own `README.md`/`ARCHITECTURE.md`/`AGENTS.md` for what is specific to it (most still carry a `CONTRIBUTING.md` too, which is being folded into that scope's `AGENTS.md` — see [`AGENTS.md`](AGENTS.md)) — see `projects/*/`, `shared-libs/crates/start-core/`, `shared-libs/ts-modules/`, and `projects/start-os/container-runtime/`.
+**These docs must be kept up to date.** When you change project structure, conventions, build process, or product context, update the relevant file(s) in the same change — do not defer. Each product and shared library keeps its own `README.md`/`ARCHITECTURE.md`/`AGENTS.md` for what is specific to it — see `projects/*/`, `shared-libs/crates/start-core/`, `shared-libs/ts-modules/`, and `projects/start-os/container-runtime/`.
 
 ### The user-facing books, and `live-docs`
 

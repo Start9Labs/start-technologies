@@ -40,7 +40,7 @@ cargo test -p jsonpath_lib --test '*'      # integration tests only (tests/)
 cargo test -p jsonpath_lib selector_delete # a single test by name
 ```
 
-The `tests/` directory is a single integration-test crate with 11 modules; doc tests run from the
+The `tests/` directory is a single integration-test crate; doc tests run from the
 examples in `src/lib.rs` and `README.md`.
 
 ## Formatting
@@ -50,8 +50,7 @@ make start-core-format         # format the shared Rust crates (incl. jsonpath)
 make start-core-format-check   # CI-style read-only check
 ```
 
-The workspace uses nightly rustfmt. Note this crate carries pre-existing warnings (unused imports,
-lifetime elisions) that predate the divergence; don't churn unrelated lines to silence them.
+The workspace uses nightly rustfmt.
 
 ## Working in this crate
 
