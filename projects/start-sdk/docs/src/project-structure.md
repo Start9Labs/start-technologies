@@ -14,7 +14,7 @@ my-service-startos/
 │       ├── tagAndRelease.yml  # Version check, tag, and release on merge
 │       └── release.yml        # Release on manual tag push
 ├── assets/                 # Supplementary files (required, can be empty)
-│   └── ABOUT.md
+│   └── .gitkeep
 ├── startos/                # Primary development directory
 │   ├── actions/            # User-facing action scripts
 │   ├── fileModels/         # Type-safe config file representations
@@ -226,7 +226,9 @@ Packages with multiple upstream sources (e.g. a service plus its database sideca
 
 ## assets/
 
-Stores supplementary files and scripts needed by the service, such as configuration generators or entrypoint scripts. **Required** -- the `assets/` directory must exist and contain at least one file (e.g. `ABOUT.md`) for git to track it and for the build to succeed.
+Stores supplementary files and scripts needed by the service, such as configuration generators or entrypoint scripts. **Required** -- the `assets/` directory must exist and contain at least one file for git to track it and for the build to succeed, so it carries a `.gitkeep` even when the package has no assets of its own. Keep the `.gitkeep` when you add real assets; it costs nothing and keeps every package's layout identical.
+
+Do **not** add a `README.md` or `ABOUT.md` here. What the directory is for is documented on this page and demonstrated by every existing package, so a per-package copy is one more thing to keep true — and the ones that exist today are near-universally the scaffold's own boilerplate, describing the directory to nobody. The same applies to `startos/fileModels/`.
 
 ## startos/
 
@@ -308,9 +310,12 @@ Each action receives its own file and is also passed into `Actions.of()` in `act
 
 ```
 fileModels/
+├── .gitkeep
 ├── store.json.ts
 └── config.json.ts
 ```
+
+Like `assets/`, this directory carries a `.gitkeep` so it survives in git when a package declares no file models, and it takes no `README.md` either.
 
 In the `fileModels/` directory, you can create separate `.ts` files from which you export a file model for each file from the file system you want to represent. Supported file formats are `.yaml`, `.toml`, `.json`, `.env`, `.ini`, `.txt`. For alternative file formats, you can use the `raw` method and provide custom serialization and parser functions.
 

@@ -38,6 +38,16 @@
   into a position whose type it does not match. Passing either positionally is
   now a compile error, so anything that needs updating says so at build time
 
+### Changed
+
+- **`assets/` and `startos/fileModels/` are scaffolded with a `.gitkeep` and no
+  `README.md`.** Both directories have to exist for a package to build, and both
+  are commonly empty, so the placeholder is what keeps them in git. The template
+  previously shipped a `README.md` in each explaining what the directory was
+  for — content this page already carries and every existing package already
+  demonstrates, so the copies only ever drifted. Across the fleet 90 such files
+  had accumulated, 77 of them verbatim scaffold boilerplate
+
 ### Added
 
 - **`addDaemon()` / `addOneshot()` accept a `uses` value that
