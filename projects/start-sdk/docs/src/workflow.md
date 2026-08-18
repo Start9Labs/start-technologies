@@ -29,6 +29,16 @@ See [Writing READMEs](./writing-readmes.md) and [Writing Instructions](./writing
 
 If `tsc`, a test, or the pack step fails — even on something unrelated to your change — the package does not pass. "Pre-existing" is not a pass condition; it is a signal that nobody has fixed the problem yet. Either fix it, or stop and flag it explicitly. Never report a run as green when any check was red.
 
+### Reinstall before believing a type error
+
+A `node_modules` that has drifted from `package-lock.json` produces errors that read exactly like real bugs in your code — a nullability complaint, a mismatch deep inside a dependency's own typings. Run `npm ci` and check whether the error survives before you spend time on it, and certainly before you change code to satisfy it.
+
+The same drift ruins `git bisect`. If `node_modules` is shared across the checkouts you're bisecting — symlinked in, or left in place while the tree moves under it — every commit is judged against the same broken typings, and the bisect lands on an innocent commit with total confidence.
+
+## Work one package at a time
+
+Finish a change in one package before starting the next. When several packages need the same edit, that is a deliberate decision to make once and then apply, not a default to slip into: a mistake made in one package is a bug, and the same mistake cascaded across a fleet is an afternoon of reverts. Land the first one, confirm it builds and behaves, and only then propagate.
+
 ## Verify against reality, not against `tsc`
 
 A clean `tsc` and a successful `start-cli s9pk pack` prove the code type-checks and the package builds. They prove **nothing** about whether the service runs, the web UI loads, logins work, or data persists. Type-checking a credential flow that has never accepted a login, or a daemon that mounts the wrong path, passes just as green as one that works.

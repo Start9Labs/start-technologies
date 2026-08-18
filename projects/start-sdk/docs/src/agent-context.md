@@ -53,25 +53,26 @@ Read pages from your local checkout (`start-technologies/projects/start-sdk/docs
 
 ## Where to read for X
 
-| Need                                                | Read                                                                     |
-| --------------------------------------------------- | ------------------------------------------------------------------------ |
-| Find the right recipe for a task                    | `start-technologies/projects/start-sdk/docs/src/recipes.md`              |
-| How to behave on every task (the disciplines below) | `start-technologies/projects/start-sdk/docs/src/workflow.md`             |
-| File/directory layout of a package                  | `start-technologies/projects/start-sdk/docs/src/project-structure.md`    |
-| Service metadata, descriptions                      | `start-technologies/projects/start-sdk/docs/src/manifest.md`             |
-| Versions, migrations, release notes                 | `start-technologies/projects/start-sdk/docs/src/versions.md`             |
-| Daemons, health checks, oneshots, lifecycle         | `start-technologies/projects/start-sdk/docs/src/main.md`                 |
-| Install / update / restore init logic               | `start-technologies/projects/start-sdk/docs/src/init.md`                 |
-| Network interfaces and ports                        | `start-technologies/projects/start-sdk/docs/src/interfaces.md`           |
-| User-facing actions                                 | `start-technologies/projects/start-sdk/docs/src/actions.md`              |
-| Prompting the user to run actions                   | `start-technologies/projects/start-sdk/docs/src/tasks.md`                |
-| Config files as typed models                        | `start-technologies/projects/start-sdk/docs/src/file-models.md`          |
-| Service dependencies                                | `start-technologies/projects/start-sdk/docs/src/dependencies.md`         |
-| Build / install commands                            | `start-technologies/projects/start-sdk/docs/src/makefile.md`             |
-| Writing the README                                  | `start-technologies/projects/start-sdk/docs/src/writing-readmes.md`      |
-| Writing user instructions                           | `start-technologies/projects/start-sdk/docs/src/writing-instructions.md` |
-| Publishing / registries                             | `start-technologies/projects/start-sdk/docs/src/publishing.md`           |
-| `start-cli` reference                               | `start-technologies/projects/start-sdk/docs/src/cli.md`                  |
+| Need                                                  | Read                                                                      |
+| ----------------------------------------------------- | ------------------------------------------------------------------------- |
+| Find the right recipe for a task                      | `start-technologies/projects/start-sdk/docs/src/recipes.md`               |
+| How to behave on every task (the disciplines below)   | `start-technologies/projects/start-sdk/docs/src/workflow.md`              |
+| Branches, release lines, upstream bumps, sibling deps | `start-technologies/projects/start-sdk/docs/src/maintaining-a-package.md` |
+| File/directory layout of a package                    | `start-technologies/projects/start-sdk/docs/src/project-structure.md`     |
+| Service metadata, descriptions                        | `start-technologies/projects/start-sdk/docs/src/manifest.md`              |
+| Versions, migrations, release notes                   | `start-technologies/projects/start-sdk/docs/src/versions.md`              |
+| Daemons, health checks, oneshots, lifecycle           | `start-technologies/projects/start-sdk/docs/src/main.md`                  |
+| Install / update / restore init logic                 | `start-technologies/projects/start-sdk/docs/src/init.md`                  |
+| Network interfaces and ports                          | `start-technologies/projects/start-sdk/docs/src/interfaces.md`            |
+| User-facing actions                                   | `start-technologies/projects/start-sdk/docs/src/actions.md`               |
+| Prompting the user to run actions                     | `start-technologies/projects/start-sdk/docs/src/tasks.md`                 |
+| Config files as typed models                          | `start-technologies/projects/start-sdk/docs/src/file-models.md`           |
+| Service dependencies                                  | `start-technologies/projects/start-sdk/docs/src/dependencies.md`          |
+| Build / install commands                              | `start-technologies/projects/start-sdk/docs/src/makefile.md`              |
+| Writing the README                                    | `start-technologies/projects/start-sdk/docs/src/writing-readmes.md`       |
+| Writing user instructions                             | `start-technologies/projects/start-sdk/docs/src/writing-instructions.md`  |
+| Publishing / registries                               | `start-technologies/projects/start-sdk/docs/src/publishing.md`            |
+| `start-cli` reference                                 | `start-technologies/projects/start-sdk/docs/src/cli.md`                   |
 
 ## Reading the SDK and OS source (last resort)
 

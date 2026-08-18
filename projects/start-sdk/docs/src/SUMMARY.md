@@ -9,6 +9,7 @@
 - [Environment Setup](environment-setup.md)
 - [Quick Start](quick-start.md)
 - [Development Workflow](workflow.md)
+- [Maintaining a Package](maintaining-a-package.md)
 - [Agent Context](agent-context.md)
 
 # Recipes
