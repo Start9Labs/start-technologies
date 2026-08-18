@@ -107,9 +107,11 @@ sync_down "dists/${SUITE}/" "$REPO_DIR/dists/${SUITE}/"
 DEB_FILES=()
 for arg in "$@"; do
     if [ -d "$arg" ]; then
+        # `gh run download` leaves a directory per artifact, and the product
+        # workflows name theirs `<product>_<arch>.deb`.
         while IFS= read -r -d '' f; do
             DEB_FILES+=("$f")
-        done < <(find "$arg" -name '*.deb' -print0)
+        done < <(find "$arg" -type f -name '*.deb' -print0)
     elif [ -f "$arg" ]; then
         DEB_FILES+=("$arg")
     else
