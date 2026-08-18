@@ -1,12 +1,12 @@
 # Development Workflow
 
-This page covers how to _behave_ while working on a package — the disciplines that apply to every change, no matter which SDK constructs you touch. The rest of the guide describes _what_ to build; this page describes _how_ to work while building it. These rules are the canonical home for the working discipline an AI coding agent should follow on every task.
+This page covers how to _behave_ while working on a package — the disciplines that apply to every change, no matter which SDK constructs you touch. The rest of the guide describes _what_ to build; this page describes _how_ to work while building it. These rules are the canonical home for the working discipline an AI coding agent should follow on every change.
 
 ## Keep README and instructions in sync
 
 `README.md` and `instructions.md` are part of the package, not afterthoughts, and they track different things. `README.md` is the package's technical reference, and the only one an AI support or administering agent reads — update it for any change to how the package is built, structured, or behaves (a new or renamed action, an added or removed volume/port/interface/dependency, a changed default, a new feature or limitation). `instructions.md` is the end-user guide — update it whenever a change affects what the user sees or does. When a change touches both, update both in the same change.
 
-Apply this loop on every task:
+Apply this loop on every change:
 
 1. Make the code change.
 2. Open `README.md` and `instructions.md`. Read what each says about the area you touched.

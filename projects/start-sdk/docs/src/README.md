@@ -33,7 +33,7 @@ What makes this experience possible is a unique package format (`.s9pk`) that pe
 
 ## Recipes
 
-Intent-driven guides for common packaging tasks. These are the primary entry point for both you and your AI coding agent.
+Intent-driven guides for common packaging objectives. These are the primary entry point for both you and your AI coding agent.
 
 - [What Do You Want To Do?](./recipes.md) - Browse all recipes by intent
 
