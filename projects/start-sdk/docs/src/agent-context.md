@@ -3,7 +3,7 @@
 > [!NOTE]
 > This page is the `AGENTS.md` that `start-cli s9pk init-workspace` links into every packaging workspace. Your workspace copy is a symlink to this file, so syncing the guide keeps it current.
 
-You are an AI assistant working in a **StartOS packaging workspace**. You help create, maintain, and update `.s9pk` service packages for StartOS. This file is your always-on context: the rules to follow, the patterns to know, and a map of where to read for any given task. The substance lives in the packaging guide under `start-technologies/projects/start-sdk/docs/` — read those pages locally, on demand, as the task requires. Do not load everything at once.
+You are an AI assistant working in a **StartOS packaging workspace**. You help create, maintain, and update `.s9pk` service packages for StartOS. This file is your always-on context: the rules to follow, the patterns to know, and a map of where to read for any given objective. The substance lives in the packaging guide under `start-technologies/projects/start-sdk/docs/` — read those pages locally, on demand, as the work requires. Do not load everything at once.
 
 ## Workspace layout
 
@@ -42,36 +42,37 @@ The guide has two layers:
 - **Recipes** — intent-driven pages: _what_ to do and _which_ constructs to combine. **Start here.** Each recipe names the SDK APIs and files involved and links to the reference pages and to real packages.
 - **Reference** — concept pages documenting each SDK construct in depth with code examples.
 
-Workflow for any task:
+Workflow for any objective:
 
 1. **Find the recipe.** Open the intent index: `start-technologies/projects/start-sdk/docs/src/recipes.md`.
 2. **Follow its reference links** for API details and code examples.
 3. **Follow its package links** — read the specific files it names in a real package (`startos/main.ts`, `startos/actions/`, …) for working production code.
-4. **Read only what the task needs.**
+4. **Read only what the objective needs.**
 
 Read pages from your local checkout (`start-technologies/projects/start-sdk/docs/src/<page>.md`). Only if `start-technologies/` is missing, fall back to the web (`https://docs.start9.com/packaging/<page>.html`).
 
 ## Where to read for X
 
-| Need                                                | Read                                                                     |
-| --------------------------------------------------- | ------------------------------------------------------------------------ |
-| Find the right recipe for a task                    | `start-technologies/projects/start-sdk/docs/src/recipes.md`              |
-| How to behave on every task (the disciplines below) | `start-technologies/projects/start-sdk/docs/src/workflow.md`             |
-| File/directory layout of a package                  | `start-technologies/projects/start-sdk/docs/src/project-structure.md`    |
-| Service metadata, descriptions                      | `start-technologies/projects/start-sdk/docs/src/manifest.md`             |
-| Versions, migrations, release notes                 | `start-technologies/projects/start-sdk/docs/src/versions.md`             |
-| Daemons, health checks, oneshots, lifecycle         | `start-technologies/projects/start-sdk/docs/src/main.md`                 |
-| Install / update / restore init logic               | `start-technologies/projects/start-sdk/docs/src/init.md`                 |
-| Network interfaces and ports                        | `start-technologies/projects/start-sdk/docs/src/interfaces.md`           |
-| User-facing actions                                 | `start-technologies/projects/start-sdk/docs/src/actions.md`              |
-| Prompting the user to run actions                   | `start-technologies/projects/start-sdk/docs/src/tasks.md`                |
-| Config files as typed models                        | `start-technologies/projects/start-sdk/docs/src/file-models.md`          |
-| Service dependencies                                | `start-technologies/projects/start-sdk/docs/src/dependencies.md`         |
-| Build / install commands                            | `start-technologies/projects/start-sdk/docs/src/makefile.md`             |
-| Writing the README                                  | `start-technologies/projects/start-sdk/docs/src/writing-readmes.md`      |
-| Writing user instructions                           | `start-technologies/projects/start-sdk/docs/src/writing-instructions.md` |
-| Publishing / registries                             | `start-technologies/projects/start-sdk/docs/src/publishing.md`           |
-| `start-cli` reference                               | `start-technologies/projects/start-sdk/docs/src/cli.md`                  |
+| Need                                                  | Read                                                                      |
+| ----------------------------------------------------- | ------------------------------------------------------------------------- |
+| Find the right recipe for an objective                | `start-technologies/projects/start-sdk/docs/src/recipes.md`               |
+| How to behave on every change (the disciplines below) | `start-technologies/projects/start-sdk/docs/src/workflow.md`              |
+| Branches, release lines, upstream bumps, sibling deps | `start-technologies/projects/start-sdk/docs/src/maintaining-a-package.md` |
+| File/directory layout of a package                    | `start-technologies/projects/start-sdk/docs/src/project-structure.md`     |
+| Service metadata, descriptions                        | `start-technologies/projects/start-sdk/docs/src/manifest.md`              |
+| Versions, migrations, release notes                   | `start-technologies/projects/start-sdk/docs/src/versions.md`              |
+| Daemons, health checks, oneshots, lifecycle           | `start-technologies/projects/start-sdk/docs/src/main.md`                  |
+| Install / update / restore init logic                 | `start-technologies/projects/start-sdk/docs/src/init.md`                  |
+| Network interfaces and ports                          | `start-technologies/projects/start-sdk/docs/src/interfaces.md`            |
+| User-facing actions                                   | `start-technologies/projects/start-sdk/docs/src/actions.md`               |
+| Prompting the user to run actions                     | `start-technologies/projects/start-sdk/docs/src/tasks.md`                 |
+| Config files as typed models                          | `start-technologies/projects/start-sdk/docs/src/file-models.md`           |
+| Service dependencies                                  | `start-technologies/projects/start-sdk/docs/src/dependencies.md`          |
+| Build / install commands                              | `start-technologies/projects/start-sdk/docs/src/makefile.md`              |
+| Writing the README                                    | `start-technologies/projects/start-sdk/docs/src/writing-readmes.md`       |
+| Writing user instructions                             | `start-technologies/projects/start-sdk/docs/src/writing-instructions.md`  |
+| Publishing / registries                               | `start-technologies/projects/start-sdk/docs/src/publishing.md`            |
+| `start-cli` reference                                 | `start-technologies/projects/start-sdk/docs/src/cli.md`                   |
 
 ## Reading the SDK and OS source (last resort)
 
@@ -99,7 +100,7 @@ Understand these before writing any code (full detail on the pages above):
 - **Code lives in reference pages and packages, not recipes.** Recipes describe the pattern; reference pages have the API; real packages have production implementations.
 - **Match existing patterns — but a neighbouring package is not the authority.** Read a package's code before introducing a new pattern. Then check it against the recipe: the fleet is mid-migration, so the package you happened to grep may itself be non-conformant. "It matches the package next door" is not a quality bar. A recipe and its named reference implementation outrank a package you found by searching.
 
-## Working discipline (every task)
+## Working discipline (every change)
 
 The full rules are in `start-technologies/projects/start-sdk/docs/src/workflow.md`; this is the digest.
 

@@ -1,12 +1,12 @@
 # Development Workflow
 
-This page covers how to _behave_ while working on a package — the disciplines that apply to every change, no matter which SDK constructs you touch. The rest of the guide describes _what_ to build; this page describes _how_ to work while building it. These rules are the canonical home for the working discipline an AI coding agent should follow on every task.
+This page covers how to _behave_ while working on a package — the disciplines that apply to every change, no matter which SDK constructs you touch. The rest of the guide describes _what_ to build; this page describes _how_ to work while building it. These rules are the canonical home for the working discipline an AI coding agent should follow on every change.
 
 ## Keep README and instructions in sync
 
 `README.md` and `instructions.md` are part of the package, not afterthoughts, and they track different things. `README.md` is the package's technical reference, and the only one an AI support or administering agent reads — update it for any change to how the package is built, structured, or behaves (a new or renamed action, an added or removed volume/port/interface/dependency, a changed default, a new feature or limitation). `instructions.md` is the end-user guide — update it whenever a change affects what the user sees or does. When a change touches both, update both in the same change.
 
-Apply this loop on every task:
+Apply this loop on every change:
 
 1. Make the code change.
 2. Open `README.md` and `instructions.md`. Read what each says about the area you touched.
@@ -28,6 +28,16 @@ See [Writing READMEs](./writing-readmes.md) and [Writing Instructions](./writing
 ## Pre-existing errors are still errors
 
 If `tsc`, a test, or the pack step fails — even on something unrelated to your change — the package does not pass. "Pre-existing" is not a pass condition; it is a signal that nobody has fixed the problem yet. Either fix it, or stop and flag it explicitly. Never report a run as green when any check was red.
+
+### Reinstall before believing a type error
+
+A `node_modules` that has drifted from `package-lock.json` produces errors that read exactly like real bugs in your code — a nullability complaint, a mismatch deep inside a dependency's own typings. Run `npm ci` and check whether the error survives before you spend time on it, and certainly before you change code to satisfy it.
+
+The same drift ruins `git bisect`. If `node_modules` is shared across the checkouts you're bisecting — symlinked in, or left in place while the tree moves under it — every commit is judged against the same broken typings, and the bisect lands on an innocent commit with total confidence.
+
+## Work one package at a time
+
+Finish a change in one package before starting the next. When several packages need the same edit, that is a deliberate decision to make once and then apply, not a default to slip into: a mistake made in one package is a bug, and the same mistake cascaded across a fleet is an afternoon of reverts. Land the first one, confirm it builds and behaves, and only then propagate.
 
 ## Verify against reality, not against `tsc`
 
@@ -68,6 +78,10 @@ Before concluding the SDK can't do what you need — or working around a limitat
 A comment asserting what an SDK call does — in a package you're reading, in a code review, in this guide's own prose — is a claim, not a fact. Confirm it against the reference page, the installed types, or the SDK source before you accept it, repeat it, or write code that depends on it. Wrong claims about semantics propagate: one plausible sentence gets copied into the next package, then quoted in a review, then built into a plan.
 
 `merge(effects, {})` is the standing example. It has variously been described as rewriting the file, as cleaning or stripping it, and as a no-op against an existing one. Every reading was plausible; none was correct — see [What an Empty merge() Does](./file-models.md#what-an-empty-merge-does).
+
+### Fetch a package before reading it as a reference
+
+The same applies to a package you open to derive behavior from — a dependency's volume path, a credential scheme, a shared pattern, a version pin. Fetch it first. A checkout you cloned weeks ago shows code the package has since changed, and it will mislead you with total confidence: reading a dependency's API key after upstream dropped it produces an integration that type-checks, builds, and cannot work.
 
 ## Read the monorepo source only when the guide can't answer
 

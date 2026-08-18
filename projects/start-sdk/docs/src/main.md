@@ -158,7 +158,7 @@ const ui = await sdk.host.getOwn(effects, 'ui', host => host?.bindings[80]?.inte
 
 ## Oneshots (Runtime)
 
-Oneshots are tasks that run on every startup before daemons. Use them for work whose answer can differ on the next start — file ownership, filesystem attributes, an app-level schema upgrade driven by the app's own state:
+Oneshots are commands that run to completion on every startup, before daemons. Use them for work whose answer can differ on the next start — file ownership, filesystem attributes, an app-level schema upgrade driven by the app's own state:
 
 ```typescript
 // change ownership of a directory
@@ -178,7 +178,7 @@ Oneshots are tasks that run on every startup before daemons. Use them for work w
 ```
 
 > [!WARNING]
-> Do NOT put one-time setup tasks (like `createsuperuser`) in `main.ts` oneshots -- they run on every startup and will fail on subsequent runs. Use a custom init file (e.g. `init/seedFiles.ts`) instead. See [Initialization Patterns](./init.md) for details.
+> Do NOT put one-time setup work (like `createsuperuser`) in `main.ts` oneshots -- they run on every startup and will fail on subsequent runs. Use a custom init file (e.g. `init/seedFiles.ts`) instead. See [Initialization Patterns](./init.md) for details.
 
 ### Choosing Between a Oneshot, an Init, and a Migration
 
