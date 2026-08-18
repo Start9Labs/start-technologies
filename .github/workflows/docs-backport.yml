@@ -156,16 +156,24 @@ jobs:
             # file, base64'd, in one mutation — fine for prose, but it would
             # choke on a large binary asset. Docs fixes don't move those; if one
             # ever does, this fails loudly and the PR fallback below takes it.
-            additions=$(
-              git diff --cached --name-only --no-renames --diff-filter=d "$BASE" | while read -r f; do
-                jq -n --arg path "$f" --arg contents "$(base64 -w0 "$f")" \
-                  '{path: $path, contents: $contents}'
-              done | jq -sc .
-            )
-            deletions=$(
-              git diff --cached --name-only --no-renames --diff-filter=D "$BASE" \
-                | jq -R '{path: .}' | jq -sc .
-            )
+            #
+            # Both lists go to disk and reach jq through --rawfile/--slurpfile
+            # rather than argv. A single argument is capped at MAX_ARG_STRLEN —
+            # 128 KiB on Linux, independent of the much larger ARG_MAX — and
+            # base64 inflates by a third, so passing the whole additions array
+            # (or one big file's contents) overflows once a change touches
+            # enough prose. jq is then never exec'd, `gh api graphql` reads
+            # empty stdin, and GitHub answers "A query attribute must be
+            # specified", which looks nothing like the actual cause. A nine-page
+            # docs change was 138 KB and hit exactly this.
+            : > /tmp/additions.json
+            git diff --cached --name-only --no-renames --diff-filter=d "$BASE" | while read -r f; do
+              base64 -w0 "$f" > /tmp/contents.b64
+              jq -n --arg path "$f" --rawfile contents /tmp/contents.b64 \
+                '{path: $path, contents: ($contents | rtrimstr("\n"))}' >> /tmp/additions.json
+            done
+            git diff --cached --name-only --no-renames --diff-filter=D "$BASE" \
+              | jq -R '{path: .}' > /tmp/deletions.json
 
             {
               echo "docs: backport live-docs $(git rev-parse --short "$AFTER") to master"
@@ -178,13 +186,17 @@ jobs:
             # expectedHeadOid makes this a compare-and-swap: if master moved
             # since the reset above, the mutation is rejected and we re-derive
             # the patch against the new head rather than overwriting it.
-            if jq -n \
+            # Assembled as its own step. A payload that cannot be built will
+            # not build on a retry either, so it takes the PR fallback straight
+            # away instead of spending the remaining attempts to report a cause
+            # it doesn't have.
+            if ! jq -n \
               --arg repo "$GITHUB_REPOSITORY" \
               --arg oid "$BASE" \
               --arg headline "$(head -n1 /tmp/backport-msg)" \
               --arg body "$(tail -n +3 /tmp/backport-msg)" \
-              --argjson additions "$additions" \
-              --argjson deletions "$deletions" \
+              --slurpfile additions /tmp/additions.json \
+              --slurpfile deletions /tmp/deletions.json \
               '{
                  query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }",
                  variables: {
@@ -195,18 +207,28 @@ jobs:
                      fileChanges: { additions: $additions, deletions: $deletions }
                    }
                  }
-               }' | gh api graphql --input - > /tmp/commit-result; then
+               }' > /tmp/payload.json; then
+              echo "fallback=payload" >> "$GITHUB_OUTPUT"
+              echo "::warning::Could not assemble the commit payload — opening a PR instead."
+              exit 0
+            fi
+
+            if gh api graphql --input /tmp/payload.json > /tmp/commit-result; then
               echo "Committed to master:"
               jq -r '.data.createCommitOnBranch.commit | "  \(.oid)\n  \(.url)"' /tmp/commit-result
               exit 0
             fi
 
-            echo "::notice::master moved during attempt $attempt — retrying."
+            # Don't name a cause. A lost compare-and-swap is the common one, but
+            # every other API failure lands here too, and asserting contention is
+            # what hid the argv overflow above until someone read the raw log.
+            echo "::notice::Attempt $attempt did not land — retrying. The API said:"
             cat /tmp/commit-result || true
           done
 
-          echo "fallback=contention" >> "$GITHUB_OUTPUT"
-          echo "::warning::Could not land on master after 3 attempts — opening a PR instead."
+          echo "fallback=api-failure" >> "$GITHUB_OUTPUT"
+          echo "::warning::The commit API refused this three times — opening a PR instead. Last response:"
+          cat /tmp/commit-result || true
 
       # Only reached when the change could not land unattended. The commit is
       # preserved on a branch so a maintainer can resolve it by hand.
@@ -265,8 +287,11 @@ jobs:
               unsupported-mode)
                 echo "It carries a symlink or file-mode change, which the signed commit API cannot represent, so it comes as a branch instead. **Nothing is wrong with it** — review and merge normally."
                 ;;
-              contention)
-                echo "master moved under it three times running, so it comes as a branch instead. **Nothing is wrong with it** — review and merge normally."
+              api-failure)
+                echo "The signed-commit API refused it three times running — usually master moving underneath it, but the run log has the actual response. The branch is a clean cherry-pick either way: **nothing is wrong with the content** — review and merge normally."
+                ;;
+              payload)
+                echo "The commit payload could not be assembled, most likely because the change is too large for a single signed-commit mutation, so it comes as a branch instead. **Nothing is wrong with it** — review and merge normally."
                 ;;
               conflict)
                 echo "It could not be applied to master unattended — **resolve the conflicts before merging**."
