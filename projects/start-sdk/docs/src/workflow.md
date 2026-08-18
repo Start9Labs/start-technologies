@@ -79,6 +79,10 @@ A comment asserting what an SDK call does — in a package you're reading, in a 
 
 `merge(effects, {})` is the standing example. It has variously been described as rewriting the file, as cleaning or stripping it, and as a no-op against an existing one. Every reading was plausible; none was correct — see [What an Empty merge() Does](./file-models.md#what-an-empty-merge-does).
 
+### Fetch a package before reading it as a reference
+
+The same applies to a package you open to derive behavior from — a dependency's volume path, a credential scheme, a shared pattern, a version pin. Fetch it first. A checkout you cloned weeks ago shows code the package has since changed, and it will mislead you with total confidence: reading a dependency's API key after upstream dropped it produces an integration that type-checks, builds, and cannot work.
+
 ## Read the monorepo source only when the guide can't answer
 
 Your workspace's `start-technologies/` is a checkout of the whole Start9 monorepo, so the **SDK source** (`projects/start-sdk/lib`) and the **StartOS source** (`projects/start-os`, and the shared core in `shared-libs/`) are already on disk — behind the recipes, the reference pages, real packages, and the installed `@start9labs/start-sdk` types.

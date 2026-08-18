@@ -14,6 +14,11 @@ Alongside the base sits **`next`** — a branch that is never deleted and keeps 
 
 [`syncNext.yml`](./project-structure.md#githubworkflows) keeps it honest: every push to the base is carried onto `next`, so it never falls behind what has already shipped. You do not have to create `next` yourself — the first run makes one at the base tip.
 
+**After `next` picks up the base, re-check the version it claims.** The base moves on its own, and it can land — and release — the very work `next` is carrying. Two things go wrong, and neither announces itself:
+
+- **The version is already published.** If `next` claimed `1.36.0:2` while the base was on `:1`, and the base has since released `1.36.0:2`, publishing `next` ships _different bytes under a live version_. Query the registry for the package's existing versions and take the next free revision.
+- **The release notes describe work that already shipped.** When the base landed the same submodule bump or upstream refresh independently, `next`'s own commit is a no-op after the sync, but its notes still announce the fix. Drop the redundant commit and rewrite the notes to describe only what this version adds on top.
+
 ### Merge a long-lived branch with a merge commit, never a squash
 
 This is the one branch rule that is easy to get wrong, because the habit runs the other way.
