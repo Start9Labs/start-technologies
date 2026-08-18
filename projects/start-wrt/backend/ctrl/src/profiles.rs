@@ -915,6 +915,12 @@ pub async fn reload_system_and_wifi_full() -> Result<(), Error> {
 }
 
 async fn reload_system_and_wifi_inner(restart_network: bool) -> Result<(), Error> {
+    // Before the network is touched: deleting a profile removes its interface
+    // and `ip6assign`, so this is the only moment its clients (still associated
+    // until `wifi` tears the SSID down, or wired on the VLAN) can be told to
+    // drop the prefix. See deprecate_odhcpd_prefixes. A no-op on profile
+    // create, beyond one extra RA.
+    crate::deprecate_odhcpd_prefixes().await;
     let network_action = if restart_network { "restart" } else { "reload" };
     let _ = crate::run_quiet_async(
         tokio::process::Command::new("/etc/init.d/network").arg(network_action),
