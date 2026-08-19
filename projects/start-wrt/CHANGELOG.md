@@ -7,23 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.1.0]
 
-### Added
-
-- **ChromeOS instructions for trusting the Root CA.** The "Trusting Your Root
-  CA" guide now includes a ChromeOS tab covering Chrome's certificate manager,
-  alongside the existing Mac, Windows, iOS, Android, and Linux instructions.
-  ChromeOS has no system keychain or terminal trust store, so none of the
-  existing platforms' steps applied to Chromebooks.
-
-### Changed
-
-- **The DIY Wi-Fi password instructions now use the web interface.** Bringing
-  up Wi-Fi on a board with no EEPROM password no longer routes through the
-  command line: connect over Ethernet, complete initial setup, and add an
-  Admin-profile password on the Wi-Fi Passwords page — the first Admin
-  password switches the radios on. The `startwrt-cli set-wifi-password`
-  utility still exists for headless provisioning.
-
 ### Removed
 
 - **The IPv6 "Reserve" option has been removed — it never worked and never
@@ -84,18 +67,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   corrected `API_CONTRACT.md` wire types and documented the previously missing
   endpoints, and fixed stale paths, commands, and structure descriptions across
   the developer docs.
-
-- **The Settings documentation now mirrors the screen.** Its sections follow
-  the actual tab order (General, Password, SSH Keys, Activity, Logs, Backup,
-  Advanced) — the previously undocumented SSH Keys and Backup tabs included —
-  and the General tab's subsections follow their on-screen order. The Remote
-  Access section now explains how to manage the router from outside your
-  network: use an Inbound VPN, which works regardless of the Remote Access
-  setting and needs no port forwards or address whitelists on the router;
-  the default "When behind NAT" mode covers routers behind another router
-  but never permits access from the public Internet. The Initial Setup
-  guide's web-interface overview now links each feature to its
-  documentation.
 
 - **Cloudflare Dynamic DNS now saves a working configuration.** The saved
   config was missing fields the update client requires (the Bearer-token
