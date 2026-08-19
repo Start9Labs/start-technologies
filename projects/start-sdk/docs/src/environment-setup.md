@@ -277,7 +277,7 @@ registry:
 
 The `registry` entries are Start9's, pre-filled — you only need them if you plan to **publish** a package, so you can ignore them while testing locally.
 
-The `host` block is the StartOS devices you install to, and ships commented out because there is no address that would be right for everyone. Uncomment it and set `default` to your own box, whose address is shown in the StartOS web interface — it looks like `https://server-name.local`, or use its IP such as `https://192.168.1.100`:
+The `host` block is the StartOS devices you install to, and ships commented out because no address would be right for everyone. Uncomment it and set `default` to your own box. Its `.local` address is built from the server's **hostname** — which StartOS generates and you can change — so take the address from the StartOS web interface rather than guessing it from the server's name; its IP works too:
 
 ```yaml
 host:

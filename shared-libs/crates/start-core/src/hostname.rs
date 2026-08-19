@@ -78,10 +78,6 @@ pub struct ServerHostnameInfo {
     pub hostname: ServerHostname,
 }
 
-lazy_static::lazy_static! {
-    static ref ADJECTIVES: Vec<String> = include_str!("./assets/adjectives.txt").lines().map(|x| x.to_string()).collect();
-    static ref NOUNS: Vec<String> = include_str!("./assets/nouns.txt").lines().map(|x| x.to_string()).collect();
-}
 impl AsRef<str> for ServerHostnameInfo {
     fn as_ref(&self) -> &str {
         &self.hostname

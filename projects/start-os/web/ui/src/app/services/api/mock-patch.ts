@@ -46,7 +46,7 @@ export const mockPatchData: DataModel = {
                 {
                   ssl: true,
                   public: false,
-                  hostname: 'adjective-noun.local',
+                  hostname: 'server-name.local',
                   port: 443,
                   metadata: {
                     kind: 'mdns',
@@ -501,7 +501,7 @@ export const mockPatchData: DataModel = {
                   {
                     ssl: true,
                     public: false,
-                    hostname: 'adjective-noun.local',
+                    hostname: 'server-name.local',
                     port: 42443,
                     metadata: {
                       kind: 'mdns',
@@ -659,7 +659,7 @@ export const mockPatchData: DataModel = {
                   {
                     ssl: false,
                     public: false,
-                    hostname: 'adjective-noun.local',
+                    hostname: 'server-name.local',
                     port: 49152,
                     metadata: { kind: 'mdns', gateways: ['eth0', 'wlan0'] },
                   },
@@ -754,7 +754,7 @@ export const mockPatchData: DataModel = {
                   {
                     ssl: false,
                     public: false,
-                    hostname: 'adjective-noun.local',
+                    hostname: 'server-name.local',
                     port: 48332,
                     metadata: {
                       kind: 'mdns',

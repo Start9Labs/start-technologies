@@ -32,7 +32,7 @@ The address already contains the host and the port, in the form `ssl://<host>:<p
 Which address you copy depends on where the wallet is:
 
 - **LAN IP** (`192.168.x.x`) — a phone or laptop on your home network. The most reliable choice.
-- **`.local` hostname** (`adjective-noun.local`) — the same, but it survives your router handing the server a new IP. Needs mDNS, which some networks and VPNs block.
+- **`.local` hostname** (`server-name.local`) — the same, but it survives your router handing the server a new IP. Needs mDNS, which some networks and VPNs block.
 - **`.onion`** — reachable from anywhere, no port forwarding, no domain. Requires Tor at both ends.
 - **Custom domain** — reachable from anywhere and faster than Tor. Requires setting one up.
 

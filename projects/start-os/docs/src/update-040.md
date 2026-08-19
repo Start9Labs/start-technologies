@@ -33,7 +33,7 @@ The following services cannot be migrated automatically. Review these before sta
 
 ### LAN addresses are changing
 
-In StartOS 0.3.x, each service had its own `.local` address (e.g. `longexamplepublickey.local`). In 0.4.0, services are accessed on unique ports of your server's main `.local` address (e.g. `adjective-noun.local:4545`). Your old per-service `.local` addresses will no longer exist after the update.
+In StartOS 0.3.x, each service had its own `.local` address (e.g. `longexamplepublickey.local`). In 0.4.0, services are accessed on unique ports of your server's main `.local` address (e.g. `server-name.local:4545`). Your old per-service `.local` addresses will no longer exist after the update.
 
 If you use a password manager, before updating, make sure your saved passwords have clear names/labels (not just the current `.local` URLs) so that you can identify them later and save the new URLs.
 
@@ -141,7 +141,7 @@ Both methods converge here: your server is migrating, and shows its progress at 
 
 1. When the migration is complete, follow the on-screen instructions to reboot. If you updated from a USB installer, remove the drive first — a Pi's microSD card stays in.
 
-1. Once your server has rebooted, go to your server's own address (`https://adjective-noun.local`) — the address you used on 0.3.5.1, not `start.local`.
+1. Once your server has rebooted, go to your server's own address (`https://server-name.local`) — the address you used on 0.3.5.1, not `start.local`.
 
    **If you get the old 0.3.5.1 interface, a blank page, or a "cannot connect" error, your browser is serving you its cached copy of the old UI.** The server is fine; the page is stale. Any of these will get you the 0.4.0 UI:
    - Open the address in a new private/incognito window.

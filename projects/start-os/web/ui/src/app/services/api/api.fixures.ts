@@ -1295,7 +1295,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
       available: null,
       startOs: {
         '1234-5678-9876-5432': {
-          hostname: 'adjective-noun',
+          hostname: 'server-name',
           timestamp: new Date().toISOString(),
           version: '0.4.0',
         },
@@ -1321,7 +1321,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
       available: 50000000000,
       startOs: {
         '1234-5678-9876-5432': {
-          hostname: 'adjective-noun',
+          hostname: 'server-name',
           timestamp: new Date().toISOString(),
           version: '0.4.0',
         },
@@ -1341,7 +1341,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
       available: 1000000000,
       startOs: {
         '1234-5678-9876-5432': {
-          hostname: 'adjective-noun',
+          hostname: 'server-name',
           timestamp: new Date().toISOString(),
           version: '0.4.0',
         },
@@ -1374,7 +1374,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
   //       mountable: true,
   //       startOs: {
   //         abcdefgh: {
-  //           hostname: 'adjective-noun.local',
+  //           hostname: 'server-name.local',
   //           version: '0.4.0',
   //           timestamp: new Date().toISOString(),
   //           passwordHash:
@@ -2285,7 +2285,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
                 {
                   ssl: true,
                   public: false,
-                  hostname: 'adjective-noun.local',
+                  hostname: 'server-name.local',
                   port: 1234,
                   metadata: {
                     kind: 'mdns',

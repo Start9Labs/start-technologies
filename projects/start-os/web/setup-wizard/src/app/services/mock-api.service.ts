@@ -71,7 +71,7 @@ export class MockApiService extends ApiService {
     if (this.statusIndex > 3) {
       return {
         status: 'complete',
-        hostname: 'adjective-noun',
+        hostname: 'server-name',
         rootCa: ROOT_CA,
         needsRestart: this.installCompleted,
       }
@@ -125,12 +125,12 @@ export class MockApiService extends ApiService {
     await pauseFor(1000)
     return {
       '9876-5432-1234-5678': {
-        hostname: 'adjective-noun',
+        hostname: 'server-name',
         version: '0.4.0',
         timestamp: new Date().toISOString(),
       },
       '9876-5432-1234-5671': {
-        hostname: 'adjective-noun',
+        hostname: 'server-name',
         version: '0.4.0',
         timestamp: new Date().toISOString(),
       },
@@ -166,7 +166,7 @@ export class MockApiService extends ApiService {
   async complete(): Promise<T.SetupResult> {
     await pauseFor(500)
     return {
-      hostname: 'adjective-noun',
+      hostname: 'server-name',
       rootCa: ROOT_CA,
       needsRestart: this.installCompleted,
     }

@@ -530,7 +530,7 @@ pub struct SetupExecuteCliParams {
     /// Friendly server name
     #[arg(long)]
     name: Option<InternedString>,
-    /// Hostname (LAN advertised) — defaults to a random adjective-noun pair
+    /// Hostname (LAN advertised) — generated if unset; changeable later
     #[arg(long)]
     hostname: Option<InternedString>,
 }
