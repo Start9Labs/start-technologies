@@ -62,6 +62,15 @@ file tracks notable changes since the move to the monorepo.
 
 - Trim whitespace on form inputs.
 
+- **Helper processes a service starts are cleared away once they finish.** A
+  service that shells out to other programs — a media downloader calling
+  `yt-dlp` and `ffmpeg`, an agent running tool subprocesses — orphans a helper
+  whenever the program that started it exits first. Those finished helpers
+  stayed listed inside the service's container as `<defunct>`, each still
+  holding a process slot, for as long as the service ran — so a service that
+  starts many of them built them up without limit, and only a restart cleared
+  them. The container's first process now collects them as they finish.
+
 - **Services that run their own containers or a VPN can reach the devices they
   were granted.** A service opting into `userspaceFilesystems` or
   `virtualNetworking` is handed `/dev/fuse` and `/dev/net/tun` inside its

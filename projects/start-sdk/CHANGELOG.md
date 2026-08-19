@@ -38,6 +38,18 @@
   into a position whose type it does not match. Passing either positionally is
   now a compile error, so anything that needs updating says so at build time
 
+- **StartOS 0.4.0.2 collects the processes a daemon orphans, and
+  `runAsInit: true` opts out of it.** Leave the option off and the
+  subcontainer's own init is PID 1, collecting any descendant your daemon
+  orphans as it exits — so a daemon that shells out to helper programs needs
+  nothing further, where before it wanted its command wrapped in `tini -s` to
+  keep `<defunct>` entries from piling up. A bare `tini` was never enough
+  there: with the option off your daemon joins the existing namespace rather
+  than heading one, so only the subreaper form collected anything. Turn it on
+  and your entrypoint takes PID 1 and that
+  job with it, which is why the option suits images built around `s6-overlay`,
+  `tini`, `dumb-init` or `supervisord` — they already do it
+
 ### Added
 
 - **Scaffolded packages get a fourth workflow, `syncNext.yml`, which keeps the

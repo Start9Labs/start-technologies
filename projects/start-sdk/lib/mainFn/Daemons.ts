@@ -120,7 +120,7 @@ export type ExecCommandOptions = {
    * @default 60_000
    */
   sigtermTimeout?: number
-  /** Run the command as PID 1 inside the container (init process) */
+  /** Run the command as PID 1 inside the container, in place of the init that reaps orphaned processes */
   runAsInit?: boolean
   /** Environment variables to set for the process */
   env?: { [variable in string]?: string } | undefined
