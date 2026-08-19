@@ -49,8 +49,7 @@ Two Angular 22 apps live under `web/`:
 They are part of the single Angular workspace rooted at `../../` (the repository root)
 (the root `angular.json` points each project's `root` at `projects/start-os/web/...`).
 They consume the shared `@start9labs/shared` and `@start9labs/marketplace` libs
-from the shared TypeScript modules at `../../shared-libs/ts-modules` and the SDK
-base from `../start-sdk`. The frontend talks to
+from the shared TypeScript modules at `../../shared-libs/ts-modules`. The frontend talks to
 the backend exclusively over JSON-RPC, with reactive state via Patch-DB.
 
 `web/patchdb-ui-seed.json` / `patchdb-ui-seed.beta.json` seed initial UI state
@@ -70,8 +69,7 @@ and [AGENTS](container-runtime/AGENTS.md) — read those before editing it.
 `backup-fs/` is the `startos-backup-fs` crate (a workspace member): an encrypted,
 erasure-coded FUSE filesystem used for StartOS backups. It builds to the
 `startos-backup-fs` binary (installed as `/usr/bin/startos-backup-fs` and
-`mount.backup-fs`). It was migrated into the monorepo from the former
-`Start9Labs/start-fs` repo and is no longer an external git dependency.
+`mount.backup-fs`).
 
 ## Systemd units and cgroups
 
@@ -137,5 +135,5 @@ resolving, so the UI is always eventually consistent with the backend.
 ## Further reading
 
 - [../../shared-libs/crates/start-core](../../shared-libs/crates/start-core) — Rust backend
-- [../../shared-libs/ts-modules](../../shared-libs/ts-modules) — shared TypeScript modules + workspace (currently the Angular libs `shared` and `marketplace`)
+- [../../shared-libs/ts-modules](../../shared-libs/ts-modules) — shared TypeScript modules + workspace
 - [container-runtime/ARCHITECTURE.md](container-runtime/ARCHITECTURE.md) — runtime

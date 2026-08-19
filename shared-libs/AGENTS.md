@@ -43,8 +43,7 @@ make web-format-check                # prettier check across the Angular workspa
 
 ## Gotchas
 
-- **No code lives directly in `shared-libs/`** — only the two sub-dirs. Don't add
-  files at this level beyond these doc files.
+- **No code lives directly in `shared-libs/`** — only the two sub-dirs.
 - **start-core is one crate in one workspace.** Build it by package name
   (`-p start-core`), not by `cd`-ing and running a bare `cargo build`. There is a
   single root `Cargo.toml` / `Cargo.lock`.
@@ -60,8 +59,7 @@ make web-format-check                # prettier check across the Angular workspa
 - **`build:deps` is a prerequisite.** `@start9labs/start-core` resolves to
   `shared-libs/ts-modules/start-core/dist` and `patch-db-client` to `shared-libs/crates/patch-db/client`
   (from the workspace root); both must be built before typecheck/build will succeed.
-- **patch-db is a first-party crate** at repo-root `shared-libs/crates/patch-db/` (not the old
-  root `patch-db/`). start-core consumes its Rust `core`; web consumes its
+- **patch-db is a first-party crate** at repo-root `shared-libs/crates/patch-db/`. start-core consumes its Rust `core`; web consumes its
   TS `client`.
 - **Web UI work follows the `start9-frontend` skill** at the repo root
   (`.claude/skills/start9-frontend/`) — see `ts-modules/AGENTS.md`.

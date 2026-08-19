@@ -38,7 +38,7 @@ cd shared-libs/crates/start-core && ./run-tests.sh
 
 ## ts-modules (shared TypeScript modules)
 
-Shared TypeScript modules; the current contents are Angular libraries, built
+Shared TypeScript modules, built
 through the single Angular workspace rooted at the repo root.
 
 ```bash

@@ -46,8 +46,7 @@ routinely run 20-30% longer than the same English sentence — not as permission
 to run long. Write the English well inside 80 and every locale still fits the
 tile.
 
-Two more characters' worth of advice, both from descriptions already in the
-registries:
+Two more characters' worth of advice:
 
 - **Don't open with the service's name.** The tile renders the title in bold on
   the line directly above, so "Foo is a self-hosted bar" spends its first words

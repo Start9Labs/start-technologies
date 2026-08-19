@@ -50,12 +50,8 @@ generator is `cargo test -p start-core export_manpage_start_cli`.
   falsey → `PREFER_DOCKER` is set (Docker). Truthy (`1/true/y/yes`) → Podman.
 - **In a StartOS image `start-cli` is a symlink to `startbox`** (see OS `Makefile`), the same
   `MultiExecutable` multiplexer. The standalone bin here enables only the `start-cli` sub-bin.
-- **Stale paths:** older docs referenced `core/`, `web/`, `sdk/`, `patch-db/` at the repo root.
-  They now live at `shared-libs/crates/start-core`, `shared-libs/ts-modules` + product `web/`, `projects/start-sdk/`,
-  `shared-libs/crates/patch-db`. Use the new paths.
 
 ## Verifying a command
 
-Build the bin, then run it against a StartOS test VM (see root docs for `helix-vm` /
-`start-cli` host flow). Remote commands need `-H https://<ip>` and an `auth login`; local
+Build the bin, then run it against a StartOS test VM. Remote commands need `-H https://<ip>` and an `auth login`; local
 commands (`s9pk`, `init-key`, `pubkey`, `util`) need no server.

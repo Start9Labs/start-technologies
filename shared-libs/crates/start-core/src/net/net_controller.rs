@@ -29,7 +29,7 @@ use crate::net::service_interface::{
     AddressInfo, HostnameInfo, HostnameMetadata, ServiceInterface, ServiceInterfaceType,
 };
 use crate::net::socks::SocksController;
-use crate::net::vhost::{AlpnInfo, DynVHostTarget, ProxyTarget, VHostController};
+use crate::net::vhost::{AlpnInfo, DynVHostTarget, ProxyTarget, VHostController, VHostKey};
 use crate::prelude::*;
 use crate::service::effects::callbacks::ServiceCallbacks;
 use crate::util::Invoke;
@@ -326,7 +326,7 @@ struct HostBinds {
     /// port. `count == 1` is the single-port case; `count > 1` represents a
     /// contiguous range forward.
     forwards: BTreeMap<u16, (SocketAddrV4, u16, ForwardRequirements, Arc<()>)>,
-    vhosts: BTreeMap<(Option<InternedString>, u16), (ProxyTarget, Arc<()>)>,
+    vhosts: BTreeMap<VHostKey, (ProxyTarget, Arc<()>)>,
     private_dns: BTreeMap<InternedString, Arc<()>>,
     /// Directly-forwarded v6: `(host GUA, external port) -> (container v6,
     /// internal port, LAN source filter)`. A GUA on a port no listener of ours
@@ -357,7 +357,7 @@ impl NetServiceData {
 
     async fn update(&mut self, ctrl: &NetController, id: HostId, host: Host) -> Result<(), Error> {
         let mut forwards: BTreeMap<u16, (SocketAddrV4, u16, ForwardRequirements)> = BTreeMap::new();
-        let mut vhosts: BTreeMap<(Option<InternedString>, u16), ProxyTarget> = BTreeMap::new();
+        let mut vhosts: BTreeMap<VHostKey, ProxyTarget> = BTreeMap::new();
         let mut private_dns: BTreeMap<InternedString, BTreeSet<GatewayId>> = BTreeMap::new();
         // Non-SSL v6 DNAT forwards to the container — net_controller's concern (no
         // vhost owns them), but the forward controller opens their upstream pinhole
@@ -460,7 +460,7 @@ impl NetServiceData {
                 {
                     let passthrough = bind.options.add_ssl.is_none();
                     vhosts.insert(
-                        (None, assigned_ssl_port),
+                        (None, assigned_ssl_port, true),
                         ProxyTarget {
                             public_v4: server_public_v4,
                             public_v6: server_public_v6,
@@ -508,14 +508,15 @@ impl NetServiceData {
                     let Some(domain_ssl_port) = addr_info.port else {
                         continue;
                     };
-                    let key = (Some(domain.clone()), domain_ssl_port);
+                    let key = (Some(domain.clone()), domain_ssl_port, addr_info.public);
                     let target = vhosts.entry(key).or_insert_with(|| ProxyTarget {
                         public_v4: BTreeSet::new(),
                         public_v6: BTreeSet::new(),
                         private: BTreeSet::new(),
-                        // A passthrough never intermediates ACME — the backend
-                        // is the ACME client and holds the challenge cert.
-                        acme: if passthrough {
+                        // The public leg's alone, so a name served both ways
+                        // keeps its LAN side. A passthrough never intermediates
+                        // ACME — the backend is the ACME client.
+                        acme: if passthrough || !addr_info.public {
                             None
                         } else {
                             host_addresses

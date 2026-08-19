@@ -50,6 +50,15 @@
   job with it, which is why the option suits images built around `s6-overlay`,
   `tini`, `dumb-init` or `supervisord` — they already do it
 
+### Changed
+
+- **`assets/` and `startos/fileModels/` are scaffolded with a `.gitkeep` and no
+  `README.md`.** Both directories have to exist for a package to build, and both
+  are commonly empty, so the placeholder is what keeps them in git. The template
+  previously shipped a `README.md` in each explaining what the directory was
+  for — content the packaging guide already carries, so the scaffolded copies
+  only ever drifted from it
+
 ### Added
 
 - **Scaffolded packages get a fourth workflow, `syncNext.yml`, which keeps the
@@ -233,6 +242,21 @@
   `exec`'s result carries `timedOutAfter` — the limit that fired, or `null`
   when the process was not killed by this timer — alongside `exitCode` and
   `exitSignal`
+
+### Security
+
+- **The bundled ESLint and typescript-eslint trees carry patched
+  `brace-expansion` and `js-yaml`.** `bundleDependencies` ships these
+  physically inside the published tarball, under
+  `node_modules/@start9labs/start-sdk/` in every package that installs the SDK,
+  where neither `overrides` nor `npm audit fix` can reach them — so a package
+  author auditing their own repo saw High-severity findings under a production
+  dependency and had no way to clear them. `brace-expansion` moves to 1.1.18
+  and 5.0.9 and `js-yaml` to 4.3.1, each within the range its parent already
+  declared, so nothing else in the tree moves and the SDK's own surface is
+  untouched. A package scaffolded from the template now reports
+  `found 0 vulnerabilities` from `npm audit --omit=dev`. Fixes
+  [#3592](https://github.com/Start9Labs/start-technologies/issues/3592)
 
 ## 2.0.9 — StartOS 0.4.0-beta.10 (2026-07-25)
 
