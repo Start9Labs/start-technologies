@@ -192,22 +192,16 @@ the source of truth.
 
 ### Documentation & Comments
 
-**Rust:**
+The rule agents work from is [AGENTS.md § Code style](AGENTS.md#code-style), and it applies to people too. In short:
 
-- Add doc comments (`///`) to public APIs, structs, and non-obvious functions
-- Use `//` comments sparingly for complex logic that isn't self-evident
-- Comments should be shorthand, not prose. Most comments can say what they need to in a single line.
+- **Default to no comment.** Reach for the rename or the smaller function first — a name that needs a comment is the wrong name.
+- **Comment the _why_, never the _what_:** a non-obvious mechanism, a deviation from convention, a load-bearing subtlety.
+- **Write plain prose** — one idea, a complete sentence, present tense, the actor named. Not a paragraph, and not shorthand with the articles and verbs stripped out. Shorten by dropping ideas, never grammar; a comment nobody can read is worse than the paragraph it replaced.
+- **Keep it true.** Update or delete a comment when the code moves under it. History belongs in the commit message, and a task belongs in a GitHub issue rather than a `// TODO`.
 
-**TypeScript:**
+**Rust:** a `///` on a public item is documentation — write it, and hold it to the same voice. On a `#[ts(export)]` type it also generates the TypeScript binding, so editing one is never a comment-only change (see [`shared-libs/crates/start-core/AGENTS.md`](shared-libs/crates/start-core/AGENTS.md)).
 
-- Document exported functions and complex types with JSDoc
-- Keep comments focused on "why" rather than "what"
-
-**General:**
-
-- Don't add comments that just restate the code
-- Update or remove comments when code changes
-- TODOs should include context: `// TODO(username): reason`
+**TypeScript:** the same goes for JSDoc on an exported SDK surface, which package authors read in their editor. Elsewhere, a line restating the signature is noise.
 
 ## Commits / PRs
 

@@ -106,7 +106,12 @@ What `### Environment` carries, by project:
 
 ## Code style
 
-- **Comment only what the code can't say for itself.** Add a comment for a non-obvious mechanism, a deviation from convention, or a load-bearing subtlety — not to restate what the code plainly does. Keep it terse: say what needs saying and no more, and prefer cutting a comment to padding it.
+- **Comment only what the code can't say for itself.** Add a comment for a non-obvious mechanism, a deviation from convention, or a load-bearing subtlety — not to restate what the code plainly does. Try the rename or the restructure that would make the comment unnecessary first; it is almost always available, and it is always better.
+- **The comment you keep is plain prose — not a paragraph, and not shorthand.** One idea in a complete sentence: present tense, active voice with the actor named, condition before instruction, identifiers in backticks. `// The caller must hold the lock while mutating entries.` beats both a four-line essay and `// lock req'd — else races`. Read it aloud; if you can't say it, rewrite it clearer rather than shorter.
+- **Shorten by removing ideas, never by removing grammar.** Drop the second and third fact — the history, the alternative you rejected, the bug that prompted the change — and keep the articles, the verbs, and the small words that let a sentence parse. What you cut goes in the commit message, where it doesn't rot.
+- **Say what is true, not when you wrote it.** No `currently`, `new`, `for now`, or `temporary until X lands`; no `// was: …` changelog; no pointer at a PR, a ticket, or a caller. Git holds the history, and a `// TODO` belongs in an issue (see [Filing issues](#filing-issues)).
+- **Doc comments on a public surface are documentation, and they stay.** A `///` on an exported item, a JSDoc on an SDK type a package author reads in their editor — write those, keep them accurate, and hold them to the same voice as everything above.
+- **Fix the bad comments you pass.** They are already spread through this repo, and cleaning them up as you go is how they go away. In a file you are already editing: delete a comment the code now says, rewrite an unreadable one as a sentence, and cut a correct-but-three-ideas-long one down to its one idea. Leave a comment that is merely plainer than you would have written it, and check the code before deleting one that looks wrong — some encode a constraint the code can't show. Don't open files to hunt, and don't let the cleanup outgrow the change it rides on.
 
 ## Gotchas
 
