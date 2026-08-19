@@ -24,6 +24,9 @@ or the CLI's externally observable behavior.
 
 ### Fixed
 
+- **`s9pk init-workspace` no longer scaffolds a placeholder host** — `dev-vm.local` resolved
+  nowhere, failing every command in a fresh workspace; comment it out in an existing one.
+
 - **`registry os asset remove` can be run.** Its `iso`/`img`/`squashfs` handlers were registered
   as RPC-only, and — unlike `add`, `sign`, and `get`, which each pair their RPC handlers with a
   CLI counterpart — nothing was registered in their place. `remove` was left parsing as a leaf

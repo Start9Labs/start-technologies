@@ -25,13 +25,16 @@ pub const BUILD_KEY_FILE: &str = "build.key.pem";
 // TODO: remove this legacy-filename support after a few releases.
 pub const LEGACY_BUILD_KEY_FILE: &str = "build-key";
 /// Workspace config: named host and registry targets the packager switches
-/// between. Scaffolded with defaults; the `host` entries are placeholders to
-/// point at your own StartOS boxes.
+/// between. The `host` block ships commented out: an unset host falls back to
+/// `http://localhost`, while a placeholder `.local` name is resolved eagerly by
+/// `CliContext::init` and its failure aborts *every* command — including
+/// `s9pk pack`, which never opens a socket.
 const CONFIG_FILE: &str = "config.yaml";
 const WORKSPACE_CONFIG_CONTENTS: &str = r#"schema: 1
-host:
-  default: https://dev-vm.local
-  prod: https://prodbox.local
+# The StartOS devices you install to. Uncomment and set `default` to your own
+# box's address — shown in its web interface — to enable `make install`.
+# host:
+#   default: https://server-name.local
 registry:
   default: https://alpha-registry-x.start9.com
   beta: https://beta-registry.start9.com
@@ -502,7 +505,7 @@ mod test {
     #[test]
     fn scaffolded_config_parses_as_workspace() {
         // the config init-workspace writes must load as the unified ClientConfig (its
-        // schema marker + host/registry profile maps), which is what the runtime reads
+        // schema marker + registry profile map), which is what the runtime reads
         // — not merely as schema-tagged YAML.
         let config = IoFormat::Yaml
             .from_reader::<_, crate::context::config::ClientConfig>(
@@ -510,7 +513,11 @@ mod test {
             )
             .unwrap();
         assert!(config.schema.is_some());
-        assert!(config.host.is_some_and(|host| !host.0.is_empty()));
+        assert!(config.registry.is_some_and(|registry| !registry.0.is_empty()));
+        // And it must scaffold no host at all. A placeholder is not inert: a `.local`
+        // one is pinned eagerly by CliContext::init, whose failure aborts every
+        // command — `s9pk pack` included, which never opens a socket.
+        assert!(config.host.is_none());
     }
 
     #[test]

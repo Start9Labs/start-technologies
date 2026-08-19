@@ -265,22 +265,23 @@ The `.startos/config.yaml` created with the workspace defines named **host** tar
 
 ```yaml
 schema: 1
-host:
-  default: https://dev-vm.local
-  prod: https://prodbox.local
+# The StartOS devices you install to. Uncomment and set `default` to your own
+# box's address — shown in its web interface — to enable `make install`.
+# host:
+#   default: https://server-name.local
 registry:
   default: https://alpha-registry-x.start9.com
   beta: https://beta-registry.start9.com
   prod: https://registry.start9.com
 ```
 
-The `registry` entries are Start9's, pre-filled — you only need them if you plan to **publish** a package, so you can ignore them while testing locally. The `host` entries are the StartOS devices you install to; edit `host.default` to point at your own box.
+The `registry` entries are Start9's, pre-filled — you only need them if you plan to **publish** a package, so you can ignore them while testing locally.
 
-Your device's address is shown in the StartOS web interface (it looks like `https://adjective-noun.local`, or use its IP such as `https://192.168.1.100`). Set it as `host.default`, for example:
+The `host` block is the StartOS devices you install to, and ships commented out because there is no address that would be right for everyone. Uncomment it and set `default` to your own box, whose address is shown in the StartOS web interface — it looks like `https://server-name.local`, or use its IP such as `https://192.168.1.100`:
 
 ```yaml
 host:
-  default: https://adjective-noun.local
+  default: https://server-name.local
 ```
 
 > [!TIP]
