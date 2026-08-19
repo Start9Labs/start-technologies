@@ -572,12 +572,38 @@ pub fn launch_init(_: ContainerCliContext, params: ExecParams) -> Result<(), Err
     )
     .with_ctx(|_| (ErrorKind::Filesystem, "mount procfs"))?;
     if params.command.is_empty() {
-        signal_hook::iterator::Signals::new(signal_hook::consts::TERM_SIGNALS)?
-            .forever()
-            .next();
+        let mut signals = signal_hook::iterator::Signals::new(
+            signal_hook::consts::TERM_SIGNALS
+                .iter()
+                .copied()
+                .chain([SIGCHLD]),
+        )?;
+        // the mount above is what lets a caller join the namespace, so a child can
+        // already have died — and its SIGCHLD been discarded — before this point
+        reap_orphans();
+        for signal in signals.forever() {
+            if signal != SIGCHLD {
+                break;
+            }
+            reap_orphans();
+        }
         std::process::exit(0)
     } else {
         params.exec()
+    }
+}
+
+fn reap_orphans() {
+    use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
+
+    loop {
+        match waitpid(None, Some(WaitPidFlag::WNOHANG)) {
+            Ok(WaitStatus::StillAlive) | Err(Errno::ECHILD) => break,
+            // nix reports EINVAL for a death by real-time signal, which it cannot
+            // classify — the child is reaped by then, so keep draining
+            Ok(_) | Err(Errno::EINVAL) => (),
+            Err(_) => break,
+        }
     }
 }
 

@@ -128,6 +128,11 @@ pub enum InterfaceProto {
     #[strum(serialize = "6rd")]
     SIXRD,
     WIREGUARD,
+    /// Any proto startwrt doesn't manage (e.g. a hand-configured `6in4`),
+    /// preserved verbatim so typed reads of such sections don't error and
+    /// untouched writes round-trip the original value.
+    #[strum(default)]
+    UNKNOWN(String),
 }
 
 #[derive(Debug, Default, TypedSection)]

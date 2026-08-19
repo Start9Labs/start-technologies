@@ -194,8 +194,7 @@ pub struct InitPackageParams {
 }
 
 /// Scaffold a new package from the workspace's bundled template, interpolating the
-/// display name and a normalized ID, then `npm install` the result. Leaves a
-/// `TODO.md` worklist that drives the package from clone to release-ready.
+/// display name and a normalized ID, then `npm install` the result.
 pub async fn init_package(
     _: CliContext,
     InitPackageParams { name }: InitPackageParams,

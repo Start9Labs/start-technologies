@@ -38,6 +38,27 @@
   into a position whose type it does not match. Passing either positionally is
   now a compile error, so anything that needs updating says so at build time
 
+- **StartOS 0.4.0.2 collects the processes a daemon orphans, and
+  `runAsInit: true` opts out of it.** Leave the option off and the
+  subcontainer's own init is PID 1, collecting any descendant your daemon
+  orphans as it exits — so a daemon that shells out to helper programs needs
+  nothing further, where before it wanted its command wrapped in `tini -s` to
+  keep `<defunct>` entries from piling up. A bare `tini` was never enough
+  there: with the option off your daemon joins the existing namespace rather
+  than heading one, so only the subreaper form collected anything. Turn it on
+  and your entrypoint takes PID 1 and that
+  job with it, which is why the option suits images built around `s6-overlay`,
+  `tini`, `dumb-init` or `supervisord` — they already do it
+
+### Changed
+
+- **`assets/` and `startos/fileModels/` are scaffolded with a `.gitkeep` and no
+  `README.md`.** Both directories have to exist for a package to build, and both
+  are commonly empty, so the placeholder is what keeps them in git. The template
+  previously shipped a `README.md` in each explaining what the directory was
+  for — content the packaging guide already carries, so the scaffolded copies
+  only ever drifted from it
+
 ### Added
 
 - **Scaffolded packages get a fourth workflow, `syncNext.yml`, which keeps the
@@ -221,6 +242,21 @@
   `exec`'s result carries `timedOutAfter` — the limit that fired, or `null`
   when the process was not killed by this timer — alongside `exitCode` and
   `exitSignal`
+
+### Security
+
+- **The bundled ESLint and typescript-eslint trees carry patched
+  `brace-expansion` and `js-yaml`.** `bundleDependencies` ships these
+  physically inside the published tarball, under
+  `node_modules/@start9labs/start-sdk/` in every package that installs the SDK,
+  where neither `overrides` nor `npm audit fix` can reach them — so a package
+  author auditing their own repo saw High-severity findings under a production
+  dependency and had no way to clear them. `brace-expansion` moves to 1.1.18
+  and 5.0.9 and `js-yaml` to 4.3.1, each within the range its parent already
+  declared, so nothing else in the tree moves and the SDK's own surface is
+  untouched. A package scaffolded from the template now reports
+  `found 0 vulnerabilities` from `npm audit --omit=dev`. Fixes
+  [#3592](https://github.com/Start9Labs/start-technologies/issues/3592)
 
 ## 2.0.9 — StartOS 0.4.0-beta.10 (2026-07-25)
 

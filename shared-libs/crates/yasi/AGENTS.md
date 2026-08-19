@@ -15,7 +15,7 @@ contributor workflow.
   internal `StringRepr` enum (`Heap`/`Stack`/`Static`), `StringRef` table entry, `DisplayHasher`
   and `DisplayEq` (Display-based hashing/equality), `TableString` (the heap-owned string with the
   table-eviction `Drop`), and the `lazy_static` global `TABLE: RwLock<RawTable<StringRef>>`.
-  Holds the two unit tests, including the `intern → drop` deadlock regression test.
+  Holds the unit tests, including the `intern → drop` deadlock regression test.
 - `src/serde.rs` — feature-gated (`serde`): `Serialize`/`Deserialize` for `InternedString` via an
   `InternedStringVisitor` (deserializes any string/bytes form by interning it).
 - `src/ts_rs.rs` — feature-gated (`ts-rs`): `ts_rs::TS` impl that reports the type as `"string"`,
@@ -35,7 +35,7 @@ make start-core-format-check               # CI read-only format check
 ## Gotchas
 
 - `Cargo.toml` declares `edition = "2024"` and the code uses 2024 features (let-chains in `eq`
-  closures). Build with a toolchain that supports edition 2024; sibling `exver` is still on 2021.
+  closures). Build with a toolchain that supports edition 2024.
 - Features `serde` and `ts-rs` are **not** in `default`. Consumers opt in (e.g. `imbl-value`
   enables `serde` and forwards `ts-rs`); plain `cargo test -p yasi` exercises neither module.
 - Strings of 20 bytes or fewer (`STACK_STR_SIZE`) are inlined in `StringRepr::Stack` and never

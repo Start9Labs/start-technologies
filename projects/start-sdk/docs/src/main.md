@@ -158,7 +158,7 @@ const ui = await sdk.host.getOwn(effects, 'ui', host => host?.bindings[80]?.inte
 
 ## Oneshots (Runtime)
 
-Oneshots are tasks that run on every startup before daemons. Use them for idempotent operations like migrations:
+Oneshots are commands that run to completion on every startup, before daemons. Use them for work whose answer can differ on the next start — file ownership, filesystem attributes, an app-level schema upgrade driven by the app's own state:
 
 ```typescript
 // change ownership of a directory
@@ -178,7 +178,30 @@ Oneshots are tasks that run on every startup before daemons. Use them for idempo
 ```
 
 > [!WARNING]
-> Do NOT put one-time setup tasks (like `createsuperuser`) in `main.ts` oneshots -- they run on every startup and will fail on subsequent runs. Use a custom init file (e.g. `init/seedFiles.ts`) instead. See [Initialization Patterns](./init.md) for details.
+> Do NOT put one-time setup work (like `createsuperuser`) in `main.ts` oneshots -- they run on every startup and will fail on subsequent runs. Use a custom init file (e.g. `init/seedFiles.ts`) instead. See [Initialization Patterns](./init.md) for details.
+
+### Choosing Between a Oneshot, an Init, and a Migration
+
+All three can express work that happens once, so "it only needs to happen once" does not pick one. What picks one is **what determines when the work runs**.
+
+| Mechanism                                         | Runs                                      | Keyed to                    |
+| ------------------------------------------------- | ----------------------------------------- | --------------------------- |
+| [`migrations.up`](./recipe-version-migrations.md) | once per install, crossing a version edge | the stored **data version** |
+| [`setupOnInit`](./init.md)                        | every container init                      | **why** it came up (`kind`) |
+| `.addOneshot`                                     | every `main()` start, before its daemons  | nothing — it always runs    |
+
+Ask what the work is a function of:
+
+- **The package version that wrote the data → `migrations.up`.** Only the version graph knows which version produced what is on disk. Relocating files an older release left in the wrong place, rewriting a config whose shape changed, repairing permissions an older release set — all of these. It also covers restoring a backup taken below the current version, because it dispatches off the restored data version, and it never runs on a fresh install.
+- **Why the container came up → `setupOnInit`.** Fresh install vs. restore vs. update vs. rebuild. Generating an internal secret must happen on install and never on restore; a `.const()` watcher must re-register on every rebuild. `kind` is the whole point, and no other mechanism has it.
+- **The app's or the volume's own state, re-asked every start → a oneshot.** `chown`, because StartOS mounts volumes root-owned every time. An app's schema upgrade, because which schema the data is in is the app's state and not the package's version.
+
+Two traps worth naming:
+
+- **"Migration" means two unrelated things.** An _application_ schema migration (`occ upgrade`, `alembic upgrade`, `manage.py migrate`) is driven by app state, re-asked every start, and belongs in a oneshot. A _package data_ migration is driven by the package version and belongs in `migrations.up`. Do not let the shared word decide the mechanism.
+- **Idempotence does not make a oneshot the right home for one-time work.** A guard that makes version-keyed work safe to repeat is a _proxy_ for the version rather than the version itself, and it silently stops being faithful as the code around it changes. Where more than one mechanism would work, prefer the one whose scope closes soonest: work on a version edge is read once and never reasoned about again, while work in a oneshot stays live for every future reader of `main.ts`.
+
+If the work needs a running daemon it cannot be a migration — migrations execute during init, before `main`. Use a oneshot, or an init that spins up its own subcontainer.
 
 ## Exec Command
 
@@ -249,7 +272,7 @@ Some images bundle their own init system or process supervisor — `s6-overlay` 
 - The image uses `s6-overlay` (any `linuxserver/*` image), `tini`, `dumb-init`, or `supervisord` as its entrypoint
 - The daemon starts but its supervisor immediately crashes complaining it is not PID 1
 
-Leave it off (the default) for images whose entrypoint is the application binary itself. (`runAsInit` is declared on the `exec` options in `Daemons.d.ts` — like many SDK options, it's easier to find by grepping the types than by searching the docs; see [Search the SDK before deciding something is impossible](workflow.md#search-the-sdk-before-deciding-something-is-impossible).) See [Package a Prebuilt Docker Image](recipe-prebuilt-image.md) for the full prebuilt-image workflow.
+Leave it off (the default) for images whose entrypoint is the application binary itself — StartOS's own init is PID 1 there and collects the processes your daemon orphans. With `runAsInit: true` that collecting is the entrypoint's job, which is why it belongs to images that supply a real init. (`runAsInit` is declared on the `exec` options in `Daemons.d.ts` — like many SDK options, it's easier to find by grepping the types than by searching the docs; see [Search the SDK before deciding something is impossible](workflow.md#search-the-sdk-before-deciding-something-is-impossible).) See [Package a Prebuilt Docker Image](recipe-prebuilt-image.md) for the full prebuilt-image workflow.
 
 ## Environment Variables
 

@@ -181,6 +181,8 @@ The key steps are:
 | `addSsl.upstreamCertValidation` | `'disable'` \| `{ certificate: string }` \| _omitted_ | How the OS validates your container's TLS cert when it [rewraps SSL](#rewrapping-ssl-to-a-tls-container). Omit to validate against the StartOS root CA (default). See [Rewrapping SSL](#rewrapping-ssl-to-a-tls-container). |
 | `secure`                        | `{ ssl: boolean }` \| `null`                          | For non-HTTP protocols, whether the connection is secure. `{ ssl: true }` with `addSsl: null` serves your container's own TLS end to end — see [Serving Your Own TLS](#serving-your-own-tls-passthrough).                   |
 
+An `addSsl` binding on any port can carry a Let's Encrypt certificate — issuance is per name, not per port. The user's side of that is one extra requirement: Let's Encrypt validates on port `443` whatever port you bind, so StartOS asks their gateway to route `443` for the domain as well. On a gateway that cannot do it automatically they forward `443` by hand. Worth a line in your instructions for an interface on a non-standard port that users will reach from software validating against public roots — an Electrum client, say.
+
 ## Interface Options
 
 ```typescript

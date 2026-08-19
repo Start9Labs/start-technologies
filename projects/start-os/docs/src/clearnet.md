@@ -38,12 +38,15 @@ If your gateway is your home router, you are revealing the approximate location 
 1. Enter the fully qualified domain name. For example, if you control `domain.com`, you could enter `domain.com` or `public.domain.com` or `nextcloud.public.domain.com`, etc.
 
 1. Select a Certificate Authority to sign the certificate for this domain.
-   - **Let's Encrypt**: Ideal for public access. All devices trust Let's Encrypt certificates by default.
+   - **Let's Encrypt**: Ideal for public access. All devices trust Let's Encrypt certificates by default. The domain serves that certificate and nothing else — while StartOS has yet to obtain one, the domain does not answer. Getting one requires port `443`, whatever port the interface itself uses; see [Configure Port Forwarding](#configure-port-forwarding).
    - **Local Root CA**: Ok for personal access. Bad for public access. Only devices that have downloaded and trusted your server's Root CA will be able to access the domain without issue.
 
 1. Click "Save".
 
 1. StartOS automatically tests your DNS record and port forwarding — plus the IPv6 firewall when your gateway has a GUA. If everything passes, the domain is ready to use. Otherwise a setup modal appears showing what still needs attention, with instructions and the ability to re-test each check.
+
+   > [!NOTE]
+   > These tests cover the port the interface itself is served on. A Let's Encrypt domain on any other port additionally needs port `443` — see [Configure Port Forwarding](#configure-port-forwarding).
 
 ## Set Up DNS Records
 
@@ -71,6 +74,9 @@ When a public address is enabled, StartOS first **attempts to open the port auto
 
 > [!TIP]
 > Most websites and APIs on the Internet are hosted on port `443`. Port `443` is so common, in fact, that apps and browsers _infer_ its presence. The _absence_ of a port _means_ the port is `443`. With rare exceptions, domains on StartOS also use port `443`, and that is why your domains usually do not display a port. The port forwarding rule needed for these standard domains is always the same, which means you only have to do it once!
+
+> [!IMPORTANT]
+> A Let's Encrypt domain needs port `443` even when its interface is served somewhere else — an Electrum server on `50002`, for example. Let's Encrypt proves you control a name by connecting to it on port `443`, whatever port the service behind it uses, and StartOS answers on whichever port that arrives at. Over StartTunnel, StartOS claims `443` for that domain automatically alongside the interface's own port, so there is nothing to do. On a router, forward `443` to your server as you would for a standard domain, and keep it forwarded — the certificate is renewed the same way. Choose **Local Root CA** instead for a domain whose gateway cannot offer port `443`.
 
 How you create a port forwarding rule depends on the type of gateway.
 

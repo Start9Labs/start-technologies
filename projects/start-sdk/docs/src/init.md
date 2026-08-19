@@ -173,11 +173,11 @@ export const uninit = sdk.setupUninit(versionGraph)
 
 ## runUntilSuccess Pattern
 
-Use `runUntilSuccess(timeout)` to run daemons and oneshots during init, waiting for completion before continuing. This is essential for setup tasks that need a running server.
+Use `runUntilSuccess(timeout)` to run daemons and oneshots during init, waiting for completion before continuing. This is essential for setup steps that need a running server.
 
 ### Oneshots Only
 
-For simple sequential tasks (like database migrations):
+For simple sequential steps (like the app's own database migrations):
 
 ```typescript
 await sdk.Daemons.of(effects)
@@ -305,7 +305,7 @@ urllib.request.urlopen(req)`,
 
 Init progress is surfaced in the **Installing** / **Updating** phase of the install, so a long first-run setup (migrations, bootstrapping a server, downloading assets) shows a moving bar instead of an apparent stall. This mirrors backup progress reporting.
 
-You never call the progress effect directly. The init harness builds one `FullProgressTracker` and passes it to **every** init handler as a third argument. Each handler adds its own phases (with its own names) to the shared tracker, unaware of the others. Add phases and update them — **every update auto-reports to the host in the background**, so there's nothing to flush by hand.
+You never call the progress effect directly. The init harness builds one `FullProgressTracker` and passes it to **every** init handler as a third argument. Each handler adds its own phases (with its own names) to the shared tracker, unaware of the others. Add phases and update them — **every update auto-reports to StartOS in the background**, so there's nothing to flush by hand.
 
 `progress.addPhase(name, contribution)` returns a `PhaseHandle` with `start()`, `setTotal(n)`, `setDone(n)`, `setUnits('steps' | 'bytes')`, and `complete()`. Just update the handle; the report follows automatically.
 
@@ -364,7 +364,7 @@ export const v2_0_0 = VersionInfo.of({
 
 ### Multi-phase Handlers
 
-For a handler with several distinct sub-tasks, add one phase per task. The tracker weights them by their `contribution` and reports a combined percentage:
+For a handler with several distinct steps, add one phase per step. The tracker weights them by their `contribution` and reports a combined percentage:
 
 ```typescript
 export const bootstrap = sdk.setupOnInit(async (effects, kind, progress) => {

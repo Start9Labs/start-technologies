@@ -109,7 +109,7 @@ backup                  # Backup create/restore (via continuations)
 
 diagnostics             # Diagnostic bundle creation
 
-uci                     # Generic UCI get/set/edit (legacy, being replaced)
+uci                     # Generic UCI get/set/edit (legacy)
   ├─ get
   ├─ set
   └─ edit
@@ -119,7 +119,7 @@ file                    # Generic file read/write (legacy)
 dir
   └─ get
 
-exec                    # Shell command execution (being phased out)
+exec                    # Shell command execution
 ```
 
 ## Modules

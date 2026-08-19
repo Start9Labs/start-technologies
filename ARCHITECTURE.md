@@ -19,7 +19,7 @@ start-technologies/                # repo root (monorepo)
 │   ├── src/bin/{startbox,start-container}.rs
 │   ├── web/                       #   Angular UI + setup-wizard
 │   ├── container-runtime/         #   Node LXC service runtime
-│   ├── debian/ apt/ assets/ build/
+│   ├── debian/ assets/ build/
 │   ├── *.service  services.slice
 │   └── Cargo.toml                 #   → depends on start-core
 ├── projects/start-cli/            # start-cli bin (src/main.rs)

@@ -463,10 +463,10 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
 
     async function stopMysql(sub: SubContainer<M>) {
       // SIGTERM mysqld and wait for it to finish flushing before teardown.
-      // A killed-but-unreaped mysqld lingers as a zombie that keeps its PID,
-      // so `tail --pid`/`kill -0` would block here forever — treat the zombie
-      // ('Z') state, or a vanished PID, as "fully exited". Bounded SIGKILL
-      // fallback guarantees we can never deadlock the backup.
+      // A finished mysqld reads as a vanished PID once reaped — by the
+      // subcontainer's init when it daemonized, by the exec that started it
+      // otherwise — and as a zombie ('Z') until then, so both mean done.
+      // Bounded SIGKILL fallback guarantees we can never deadlock the backup.
       await sub.execFail(
         [
           'sh',

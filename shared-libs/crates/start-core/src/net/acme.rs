@@ -30,7 +30,7 @@ use crate::db::model::Database;
 use crate::db::model::public::AcmeSettings;
 use crate::db::{DbAccess, DbAccessByKey, DbAccessMut};
 use crate::error::ErrorData;
-use crate::net::ssl::should_use_cert;
+use crate::net::ssl::{cert_is_unexpired, should_use_cert};
 use crate::net::tls::{SingleCertResolver, TlsHandler, TlsHandlerAction};
 use crate::net::web_server::Accept;
 use crate::prelude::*;
@@ -38,6 +38,9 @@ use crate::util::FromStrParser;
 use crate::util::serde::{Pem, Pkcs8Doc};
 use crate::util::sync::{SyncMutex, Watch};
 
+/// Names with an order in flight. Written only by the order path, which starts
+/// an order only for a name a vhost holds a provider for — so membership here
+/// is what makes a challenge answerable, and it must stay that way.
 pub type AcmeTlsAlpnCache =
     Arc<SyncMutex<BTreeMap<InternedString, Watch<Option<Arc<CertifiedKey>>>>>>;
 
@@ -52,7 +55,13 @@ pub struct OrderEntry {
     /// [`DEFAULT_FAILURE_BACKOFF`]. Inside this window `get_cert`
     /// returns `None` instead of starting a new order.
     backoff_until: Option<Instant>,
+    /// Set once reported, so retries stay silent; dropped with the entry.
+    reported: bool,
 }
+
+/// Told the SANs of a failed order and why, to surface to the operator.
+pub type ReportOrderFailure =
+    Arc<dyn Fn(BTreeSet<InternedString>, String) -> BoxFuture<'static, ()> + Send + Sync>;
 
 /// Cooldown for failures without a server-supplied `Retry-After`. Long
 /// enough to break the per-connection retry loop.
@@ -76,6 +85,7 @@ pub struct AcmeTlsHandler<M: HasModel, S> {
     pub crypto_provider: Arc<CryptoProvider>,
     pub get_provider: S,
     pub in_progress: Watch<BTreeMap<BTreeSet<InternedString>, OrderEntry>>,
+    pub report_failure: Option<ReportOrderFailure>,
 }
 impl<M, S> AcmeTlsHandler<M, S>
 where
@@ -93,12 +103,12 @@ where
 
         let peek = self.db.peek().await;
         let store = <M as DbAccess<AcmeCertStore>>::access(&peek);
-        if let Some(cert) = store
+        let cached = store
             .as_certs()
             .as_idx(&provider.0)
             .and_then(|p| p.as_idx(JsonKey::new_ref(san_info)))
-        {
-            let cert = cert.de().log_err()?;
+            .and_then(|cert| cert.de().log_err());
+        if let Some(cert) = &cached {
             if cert
                 .fullchain
                 .get(0)
@@ -108,27 +118,25 @@ where
                 // Cached cert is healthy; drop any stale order/backoff state.
                 self.in_progress
                     .send_if_modified(|map| map.remove(san_info).is_some());
-                return Some(
-                    CertifiedKey::from_der(
-                        cert.fullchain
-                            .into_iter()
-                            .map(|c| Ok(CertificateDer::from(c.to_der()?)))
-                            .collect::<Result<_, Error>>()
-                            .log_err()?,
-                        PrivateKeyDer::from(PrivatePkcs8KeyDer::from(
-                            cert.key.0.private_key_to_pkcs8().log_err()?,
-                        )),
-                        &*self.crypto_provider,
-                    )
-                    .log_err()?,
-                );
+                return certified_key(cert, &self.crypto_provider);
             }
         }
 
-        let contact = <M as DbAccessByKey<AcmeSettings>>::access_by_key(&peek, &provider)?
-            .as_contact()
-            .de()
-            .log_err()?;
+        // A cert inside its renewal window is still publicly trusted, so it
+        // answers for anything below here that cannot produce a new one.
+        let renewing = || {
+            certified_key(
+                cached.as_ref().filter(|c| unexpired(c))?,
+                &self.crypto_provider,
+            )
+        };
+
+        let Some(contact) = <M as DbAccessByKey<AcmeSettings>>::access_by_key(&peek, &provider)
+            .and_then(|settings| settings.as_contact().de().log_err())
+        else {
+            // Provider removed from the server while a domain still names it.
+            return renewing();
+        };
         drop(peek);
 
         let identifiers: Vec<_> = san_info
@@ -173,6 +181,7 @@ where
             }
 
             let provider_clone = provider.clone();
+            let report_failure = self.report_failure.clone();
             let acme_cache = self.acme_cache.clone();
             let db = self.db.clone();
             let in_progress = self.in_progress.clone();
@@ -210,32 +219,49 @@ where
 
                 acme_cache.mutate(|c| c.retain(|c, _| !cache_entries_clone.contains_key(c)));
 
-                let (cert, backoff) = match res {
+                let (cert, failure) = match res {
                     Ok(Ok(cert)) => (Some(cert), None),
                     Ok(Err(e)) => {
                         let retry_after = retry_after_from_order_error(&e);
                         tracing::warn!("ACME order failed for {san_info_clone:?}: {e}");
                         tracing::debug!("{e:?}");
-                        (None, Some(retry_after.unwrap_or(DEFAULT_FAILURE_BACKOFF)))
+                        (
+                            None,
+                            Some((
+                                retry_after.unwrap_or(DEFAULT_FAILURE_BACKOFF),
+                                e.to_string(),
+                            )),
+                        )
                     }
                     Err(_) => {
                         tracing::warn!("ACME order timed out for {san_info_clone:?} after 120s");
-                        (None, Some(DEFAULT_FAILURE_BACKOFF))
+                        (
+                            None,
+                            Some((
+                                DEFAULT_FAILURE_BACKOFF,
+                                t!("acme.order-timed-out").to_string(),
+                            )),
+                        )
                     }
                 };
 
                 // Success: leave the entry alone; the next cached-cert
                 // path call removes it. Failure: arm the cooldown.
-                if let Some(d) = backoff {
-                    in_progress.send_if_modified(|map| {
+                if let Some((d, error)) = failure {
+                    let report = in_progress.send_modify(|map| {
                         let Some(entry) = map.get_mut(&san_info_clone) else {
                             return false;
                         };
                         entry.in_flight = None;
                         entry.backoff_until = Some(Instant::now() + d);
                         tracing::info!("ACME order for {san_info_clone:?} backing off for {d:?}");
-                        true
+                        std::mem::replace(&mut entry.reported, true) == false
                     });
+                    if report {
+                        if let Some(report) = &report_failure {
+                            report(san_info_clone.clone(), error).await;
+                        }
+                    }
                 }
 
                 cert
@@ -249,11 +275,32 @@ where
 
         match action {
             Action::Await(fut) => fut.await,
-            // Inside cooldown: fall through to a self-signed cert from
-            // `RootCaTlsHandler` instead of blocking the handshake.
             Action::Backoff => None,
         }
+        .or_else(renewing)
     }
+}
+
+fn unexpired(cert: &AcmeCert) -> bool {
+    cert.fullchain
+        .get(0)
+        .and_then(|c| cert_is_unexpired(&c.0).log_err())
+        .unwrap_or(false)
+}
+
+fn certified_key(cert: &AcmeCert, crypto_provider: &CryptoProvider) -> Option<CertifiedKey> {
+    CertifiedKey::from_der(
+        cert.fullchain
+            .iter()
+            .map(|c| Ok(CertificateDer::from(c.0.to_der()?)))
+            .collect::<Result<_, Error>>()
+            .log_err()?,
+        PrivateKeyDer::from(PrivatePkcs8KeyDer::from(
+            cert.key.0.private_key_to_pkcs8().log_err()?,
+        )),
+        crypto_provider,
+    )
+    .log_err()
 }
 
 pub trait GetAcmeProvider {
@@ -287,16 +334,11 @@ where
             .flatten()
             .any(|a| a == ACME_TLS_ALPN_NAME)
         {
-            let cert = self
-                .acme_cache
-                .peek(|c| c.get(domain).cloned())
-                .ok_or_else(|| {
-                    Error::new(
-                        eyre!("No challenge recv available for {domain}"),
-                        ErrorKind::OpenSsl,
-                    )
-                })
-                .log_err()?;
+            // Only a name with an order in flight is answerable.
+            let Some(cert) = self.acme_cache.peek(|c| c.get(domain).cloned()) else {
+                tracing::debug!("no ACME challenge in flight for {domain}");
+                return None;
+            };
             tracing::info!("Waiting for verification cert for {domain}");
             let cert = cert
                 .filter(|c| futures::future::ready(c.is_some()))

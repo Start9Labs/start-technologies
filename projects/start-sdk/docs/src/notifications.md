@@ -2,7 +2,7 @@
 
 Notifications are messages your service can post to the StartOS notifications panel — the same panel where StartOS shows backup-completion notices, install failures, and similar OS-generated events. Use them **sparingly**, only for information the user genuinely needs to know about — most commonly that a long-running action has finished: a sync health check that finally passes, a lengthy reindex or migration completing. They are not a changelog feed or an activity log; the vast majority of what your service does should not produce one. If you need the user to _do_ something, use a [Task](./tasks.md) instead.
 
-The host attributes every notification to the calling service automatically — a package cannot post notifications on behalf of another package.
+StartOS attributes every notification to the calling service automatically — a package cannot post notifications on behalf of another package.
 
 ## Plain Notification
 

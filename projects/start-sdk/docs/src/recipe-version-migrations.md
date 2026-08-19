@@ -2,6 +2,8 @@
 
 When you release a new version of your package, users upgrading from older versions may need data migrations — transforming config formats, moving files, or updating store schemas. The version graph defines the migration path between versions.
 
+This is the mechanism for anything keyed to the package version — the data on disk was written by an older release and the new one cannot read it as-is. It runs once per install, covers restoring a backup taken below the current version, and never runs on a fresh install. Work whose answer can differ on the next start belongs in a oneshot instead; see [main.md § Choosing Between a Oneshot, an Init, and a Migration](main.md#choosing-between-a-oneshot-an-init-and-a-migration).
+
 ## Solution
 
 Define a `VersionGraph` with a `current` version and an array of `other` (previous) versions. Each version has `up` and `down` migration functions. Use `IMPOSSIBLE` for directions that can't be migrated. The `up` migration transforms old config, moves files, or runs `storeJson.merge(effects, {})` to apply new zod defaults. Only versions that introduced a migration need entries in the `other` array — `VersionGraph` reaches every other prior version on its own.

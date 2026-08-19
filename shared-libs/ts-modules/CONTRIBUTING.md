@@ -100,16 +100,6 @@ A pre-commit hook runs `lint-staged` (prettier on staged files).
 - Polish
 - German
 - French
-<!-- - Korean
-- Russian
-- Japanese
-- Hebrew
-- Arabic
-- Mandarin
-- Hindi
-- Portuguese
-- Italian
-- Thai -->
 
 ### Adding a new translation
 
