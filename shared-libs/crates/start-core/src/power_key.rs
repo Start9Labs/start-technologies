@@ -87,42 +87,49 @@ async fn guard_backups(
         watch
             .wait_for(|status: &ServerStatus| status.backup_progress.is_some())
             .await?;
-        // Enumerated per backup rather than once: udev tags every key-capable
-        // device, so the set changes whenever a keyboard is plugged in.
-        match power_key_devices().await {
-            Ok(devices) if !devices.is_empty() => {
-                let lock = manager
-                    .inhibit(
-                        "handle-power-key",
-                        "StartOS",
-                        "A backup is running",
-                        "block",
-                    )
-                    .await?;
-                {
-                    let backup_over =
-                        watch.wait_for(|status: &ServerStatus| status.backup_progress.is_none());
-                    tokio::pin!(backup_over);
-                    tokio::select! {
-                        over = &mut backup_over => { over?; }
-                        // Never inhibit a key nobody is reading.
-                        _ = read_power_key(devices, ctx) => tracing::warn!(
-                            "stopped reading the power key for this backup; systemd-logind has it back"
-                        ),
-                    }
-                }
-                drop(lock);
-            }
-            Ok(_) => tracing::info!("no power-switch input device to read the power key from"),
-            Err(e) => {
-                tracing::error!("could not enumerate input devices: {e}");
-                tracing::debug!("{e:?}");
-            }
+        // Every way of failing to guard one backup leaves the key to logind for
+        // that backup only; the next one sets up from scratch.
+        if let Err(e) = guard_backup(ctx, manager, watch).await {
+            tracing::error!("not guarding this backup from the power button: {e}");
+            tracing::debug!("{e:?}");
         }
         watch
             .wait_for(|status: &ServerStatus| status.backup_progress.is_none())
             .await?;
     }
+}
+
+async fn guard_backup(
+    ctx: &RpcContext,
+    manager: &Login1ManagerProxy<'_>,
+    watch: &mut TypedDbWatch<ServerStatus>,
+) -> Result<(), Error> {
+    // Enumerated per backup rather than once: udev tags every key-capable
+    // device, so the set changes whenever a keyboard is plugged in.
+    let devices = power_key_devices().await?;
+    if devices.is_empty() {
+        tracing::info!("no power-switch input device to read the power key from");
+        return Ok(());
+    }
+    let lock = manager
+        .inhibit(
+            "handle-power-key",
+            "StartOS",
+            "A backup is running",
+            "block",
+        )
+        .await?;
+    let backup_over = watch.wait_for(|status: &ServerStatus| status.backup_progress.is_none());
+    tokio::pin!(backup_over);
+    tokio::select! {
+        over = &mut backup_over => { over?; }
+        // Never inhibit a key nobody is reading.
+        _ = read_power_key(devices, ctx) => tracing::warn!(
+            "stopped reading the power key for this backup; systemd-logind has it back"
+        ),
+    }
+    drop(lock);
+    Ok(())
 }
 
 /// Returns as soon as any one device stops being readable: there is no telling

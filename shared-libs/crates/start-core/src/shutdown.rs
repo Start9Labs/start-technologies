@@ -277,9 +277,21 @@ pub async fn run_deferred_power_actions(ctx: RpcContext) {
             tracing::error!("deferred power action failed: {e}");
             tracing::debug!("{e:?}");
             // Put it back rather than losing it, and give whatever failed room
-            // to recover before trying again.
+            // to recover before trying again. Not via `defer_or_begin`: with the
+            // backup already over it would commit to performing the action
+            // instead of recording it.
             if let Some(action) = action {
-                defer_or_begin(&ctx, action, true).await.log_err();
+                ctx.db
+                    .mutate(|db| {
+                        db.as_public_mut()
+                            .as_server_info_mut()
+                            .as_status_info_mut()
+                            .as_deferred_power_action_mut()
+                            .ser(&Some(action))
+                    })
+                    .await
+                    .result
+                    .log_err();
             }
             tokio::time::sleep(TAKE_RETRY).await;
         }

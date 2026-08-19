@@ -33,6 +33,9 @@ const COUNTDOWN = 30
       </button>
     </footer>
   `,
+  // Both labels are sentences, and neither shrinks: 25rem cannot hold them on
+  // one row in any locale.
+  styles: 'footer { flex-wrap: wrap }',
   imports: [TuiButton, i18nPipe],
 })
 export class PowerComponent {
