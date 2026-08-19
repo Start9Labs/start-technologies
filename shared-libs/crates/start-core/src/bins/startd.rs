@@ -64,15 +64,16 @@ async fn inner_main(
         )
         .await?;
 
-        // A backup, a deferred power action and the shutting-down flags all die
-        // with the process that set them, and only `init` — which this branch
-        // skips — would otherwise clear them. A stale backup in particular would
-        // leave the power key inhibited with nothing left to release it. Before
-        // the RPC surface goes live, so nothing races the reset.
+        // Every status here is written by a task that died with the previous
+        // process, and only `init` — which this branch skips — would otherwise
+        // clear them. `restart` is deliberately left: it is a reboot-needed
+        // marker meant to outlive one. Before the RPC surface goes live, so
+        // nothing races the reset.
         ctx.db
             .mutate(|db| {
                 let status = db.as_public_mut().as_server_info_mut().as_status_info_mut();
                 status.as_backup_progress_mut().ser(&None)?;
+                status.as_update_progress_mut().ser(&None)?;
                 status.as_deferred_power_action_mut().ser(&None)?;
                 status.as_shutting_down_mut().ser(&false)?;
                 status.as_restarting_mut().ser(&false)
