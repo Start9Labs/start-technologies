@@ -38,6 +38,9 @@ use crate::util::FromStrParser;
 use crate::util::serde::{Pem, Pkcs8Doc};
 use crate::util::sync::{SyncMutex, Watch};
 
+/// Names with an order in flight. Written only by the order path, which starts
+/// an order only for a name a vhost holds a provider for — so membership here
+/// is what makes a challenge answerable, and it must stay that way.
 pub type AcmeTlsAlpnCache =
     Arc<SyncMutex<BTreeMap<InternedString, Watch<Option<Arc<CertifiedKey>>>>>>;
 
