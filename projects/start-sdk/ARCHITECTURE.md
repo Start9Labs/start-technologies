@@ -28,7 +28,7 @@ The SDK follows [Semantic Versioning](https://semver.org/) and is versioned inde
 
 ## Place in the monorepo
 
-The SDK lives at `projects/start-sdk/` inside the start-technologies monorepo, flattened so its source is directly under `lib/`. Its foundational layer was extracted into its own shared lib, `@start9labs/start-core` (`shared-libs/ts-modules/start-core/`), which is versionless and not published to npm on its own. Service-package developers consume the single published `@start9labs/start-sdk` from npm (its built `dist/` bundles `@start9labs/start-core` via npm `bundleDependencies`, so they install only one package); the container-runtime project in this monorepo consumes the built `dist/` (not the source), while web consumes `@start9labs/start-core` directly. The OS bindings in start-core mirror Rust types in `shared-libs/crates/start-core`.
+The SDK lives at `projects/start-sdk/` inside the start-technologies monorepo, flattened so its source is directly under `lib/`. Its foundational layer was extracted into its own shared lib, `@start9labs/start-core` (`shared-libs/ts-modules/start-core/`), which is versionless and not published to npm on its own. Service-package developers consume the single published `@start9labs/start-sdk` from npm (its built `dist/` bundles `@start9labs/start-core`, `eslint` and `typescript-eslint` via npm `bundleDependencies`, so they install only one package); the container-runtime project in this monorepo consumes the built `dist/` (not the source), while web consumes `@start9labs/start-core` directly. The OS bindings in start-core mirror Rust types in `shared-libs/crates/start-core`.
 
 ## Core Library (`@start9labs/start-core`)
 
