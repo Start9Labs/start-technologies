@@ -7,6 +7,7 @@ use ts_rs::TS;
 
 use crate::PLATFORM;
 use crate::context::RpcContext;
+use crate::db::model::DatabaseModel;
 use crate::db::model::public::{PowerAction, ServerStatus};
 use crate::disk::main::export;
 use crate::init::{STANDBY_MODE_PATH, SYSTEM_REBUILD_PATH};
@@ -173,16 +174,18 @@ pub async fn defer_until_backup_complete(
     action: PowerAction,
 ) -> Result<bool, Error> {
     ctx.db
-        .mutate(|db| {
-            let status = db.as_public_mut().as_server_info_mut().as_status_info_mut();
-            if status.as_backup_progress().transpose_ref().is_none() {
-                return Ok(false);
-            }
-            status.as_deferred_power_action_mut().ser(&Some(action))?;
-            Ok(true)
-        })
+        .mutate(|db| defer_if_backing_up(db, action))
         .await
         .result
+}
+
+fn defer_if_backing_up(db: &mut DatabaseModel, action: PowerAction) -> Result<bool, Error> {
+    let status = db.as_public_mut().as_server_info_mut().as_status_info_mut();
+    if status.as_backup_progress().transpose_ref().is_none() {
+        return Ok(false);
+    }
+    status.as_deferred_power_action_mut().ser(&Some(action))?;
+    Ok(true)
 }
 
 /// Either records `action` for after the backup, or commits to performing it
@@ -194,21 +197,36 @@ async fn defer_or_begin(
     after_backup: bool,
 ) -> Result<bool, Error> {
     ctx.db
-        .mutate(|db| {
-            let status = db.as_public_mut().as_server_info_mut().as_status_info_mut();
-            if after_backup && status.as_backup_progress().transpose_ref().is_some() {
-                status.as_deferred_power_action_mut().ser(&Some(action))?;
-                return Ok(true);
-            }
-            status.as_deferred_power_action_mut().ser(&None)?;
-            match action {
-                PowerAction::Restart => status.as_restarting_mut().ser(&true)?,
-                PowerAction::Shutdown => status.as_shutting_down_mut().ser(&true)?,
-            }
-            Ok(false)
-        })
+        .mutate(|db| defer_or_begin_in(db, action, after_backup))
         .await
         .result
+}
+
+fn defer_or_begin_in(
+    db: &mut DatabaseModel,
+    action: PowerAction,
+    after_backup: bool,
+) -> Result<bool, Error> {
+    let status = db.as_public_mut().as_server_info_mut().as_status_info_mut();
+    if after_backup && status.as_backup_progress().transpose_ref().is_some() {
+        status.as_deferred_power_action_mut().ser(&Some(action))?;
+        return Ok(true);
+    }
+    status.as_deferred_power_action_mut().ser(&None)?;
+    match action {
+        PowerAction::Restart => status.as_restarting_mut().ser(&true)?,
+        PowerAction::Shutdown => status.as_shutting_down_mut().ser(&true)?,
+    }
+    Ok(false)
+}
+
+/// Reads the deferred action and clears it in one breath, so a cancellation that
+/// lands first wins and the caller performs nothing.
+fn take_deferred(db: &mut DatabaseModel) -> Result<Option<PowerAction>, Error> {
+    let status = db.as_public_mut().as_server_info_mut().as_status_info_mut();
+    let action = status.as_deferred_power_action().de()?;
+    status.as_deferred_power_action_mut().ser(&None)?;
+    Ok(action)
 }
 
 /// Carries out each deferred power action once the backup it was waiting on
@@ -233,18 +251,7 @@ pub async fn run_deferred_power_actions(ctx: RpcContext) {
             tracing::debug!("{e:?}");
             return;
         }
-        // Taking the action clears it in the same mutation, so a cancellation
-        // that lands first wins and this pass does nothing.
-        let taken = ctx
-            .db
-            .mutate(|db| {
-                let status = db.as_public_mut().as_server_info_mut().as_status_info_mut();
-                let action = status.as_deferred_power_action().de()?;
-                status.as_deferred_power_action_mut().ser(&None)?;
-                Ok(action)
-            })
-            .await
-            .result;
+        let taken = ctx.db.mutate(take_deferred).await.result;
         let action = match taken {
             Ok(action) => action,
             Err(e) => {
@@ -336,4 +343,106 @@ pub async fn cancel_deferred_power(ctx: RpcContext) -> Result<(), Error> {
 pub async fn rebuild(ctx: RpcContext) -> Result<(), Error> {
     tokio::fs::write(SYSTEM_REBUILD_PATH, b"").await?;
     restart(ctx, ShutdownParams::default()).await
+}
+
+#[cfg(test)]
+mod test {
+    use imbl_value::json;
+    use patch_db::ModelExt;
+
+    use super::*;
+
+    fn db_with(backup_progress: Value, deferred: Value) -> DatabaseModel {
+        DatabaseModel::from_value(json!({
+            "public": { "serverInfo": { "statusInfo": {
+                "backupProgress": backup_progress,
+                "updateProgress": null,
+                "shuttingDown": false,
+                "restarting": false,
+                "restart": null,
+                "deferredPowerAction": deferred,
+            } } }
+        }))
+    }
+
+    fn backing_up() -> Value {
+        json!({ "overall": { "done": 0, "total": 2, "units": null }, "phases": [] })
+    }
+
+    /// `(deferred action, shutting down, restarting)`.
+    fn status(db: &DatabaseModel) -> (Option<PowerAction>, bool, bool) {
+        let status = db.as_public().as_server_info().as_status_info();
+        (
+            status.as_deferred_power_action().de().unwrap(),
+            status.as_shutting_down().de().unwrap(),
+            status.as_restarting().de().unwrap(),
+        )
+    }
+
+    #[test]
+    fn records_the_action_instead_of_beginning_it_during_a_backup() {
+        let mut db = db_with(backing_up(), json!(null));
+        assert!(defer_or_begin_in(&mut db, PowerAction::Shutdown, true).unwrap());
+        assert_eq!(
+            status(&db),
+            (Some(PowerAction::Shutdown), false, false),
+            "recorded, and nothing has begun"
+        );
+    }
+
+    #[test]
+    fn begins_the_action_when_no_backup_is_running() {
+        let mut db = db_with(json!(null), json!(null));
+        assert!(!defer_or_begin_in(&mut db, PowerAction::Restart, true).unwrap());
+        assert_eq!(status(&db), (None, false, true));
+    }
+
+    /// The systemd units drive a power-off that cannot wait, so they pass
+    /// `after_backup: false` and must interrupt the backup.
+    #[test]
+    fn begins_the_action_without_after_backup_even_during_a_backup() {
+        let mut db = db_with(backing_up(), json!(null));
+        assert!(!defer_or_begin_in(&mut db, PowerAction::Shutdown, false).unwrap());
+        assert_eq!(status(&db), (None, true, false));
+    }
+
+    /// Why [`run_deferred_power_actions`] cannot re-arm through this function:
+    /// with the backup over it takes the other branch and commits to the action,
+    /// which as a re-arm would leave the server flagged as powering down with
+    /// nothing left to do it.
+    #[test]
+    fn beginning_an_action_clears_any_pending_one() {
+        let mut db = db_with(json!(null), json!("restart"));
+        assert!(!defer_or_begin_in(&mut db, PowerAction::Shutdown, true).unwrap());
+        assert_eq!(status(&db), (None, true, false));
+    }
+
+    #[test]
+    fn the_power_key_records_but_never_begins() {
+        let mut db = db_with(backing_up(), json!(null));
+        assert!(defer_if_backing_up(&mut db, PowerAction::Shutdown).unwrap());
+        assert_eq!(status(&db), (Some(PowerAction::Shutdown), false, false));
+
+        let mut db = db_with(json!(null), json!(null));
+        assert!(!defer_if_backing_up(&mut db, PowerAction::Shutdown).unwrap());
+        assert_eq!(
+            status(&db),
+            (None, false, false),
+            "no backup to protect, so the press is logind's to act on"
+        );
+    }
+
+    #[test]
+    fn taking_the_action_clears_it_so_only_one_pass_performs_it() {
+        let mut db = db_with(json!(null), json!("restart"));
+        assert_eq!(take_deferred(&mut db).unwrap(), Some(PowerAction::Restart));
+        assert_eq!(take_deferred(&mut db).unwrap(), None);
+    }
+
+    /// A cancellation that lands before the take wins outright.
+    #[test]
+    fn taking_a_cancelled_action_yields_nothing() {
+        let mut db = db_with(json!(null), json!(null));
+        assert_eq!(take_deferred(&mut db).unwrap(), None);
+    }
 }
