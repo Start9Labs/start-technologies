@@ -18,6 +18,7 @@ use crate::net::web_server::{Acceptor, WebServer};
 use crate::prelude::*;
 use crate::shutdown::Shutdown;
 use crate::system::launch_metrics_task;
+use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::append_file;
 use crate::util::logger::LOGGER;
 
@@ -102,6 +103,17 @@ async fn inner_main(
                 .map_err(|_| ())
                 .expect("send shutdown signal");
         });
+
+        // Both run until this block returns with the shutdown message, at which
+        // point their handles drop and abort them.
+        let deferred_power_ctx = rpc_ctx.clone();
+        let _deferred_power = NonDetachingJoinHandle::from(tokio::spawn(
+            crate::shutdown::run_deferred_power_actions(deferred_power_ctx),
+        ));
+        let power_key_ctx = rpc_ctx.clone();
+        let _power_key = NonDetachingJoinHandle::from(tokio::spawn(
+            crate::power_key::watch_power_key(power_key_ctx),
+        ));
 
         let metrics_ctx = rpc_ctx.clone();
         let metrics_task = tokio::spawn(async move {

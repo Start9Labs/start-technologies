@@ -261,6 +261,7 @@ export const mockPatchData: DataModel = {
       shuttingDown: false,
       backupProgress: null,
       restart: null,
+      deferredPowerAction: null,
     },
     name: 'Random Words',
     hostname: 'random-words',

@@ -1,4 +1,5 @@
 import { Component, inject } from '@angular/core'
+import { toSignal } from '@angular/core/rxjs-interop'
 import { RouterLink } from '@angular/router'
 import {
   DialogService,
@@ -7,6 +8,7 @@ import {
   SafeLinksDirective,
   TaskService,
 } from '@start9labs/shared'
+import { T } from '@start9labs/start-core'
 import {
   TuiButton,
   TuiDataList,
@@ -17,8 +19,10 @@ import {
 import { filter } from 'rxjs'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { AuthService } from 'src/app/services/auth.service'
+import { OSService } from 'src/app/services/os.service'
 import { STATUS } from 'src/app/services/status.service'
 import { ABOUT } from './about.component'
+import { POWER } from './power.component'
 
 @Component({
   selector: 'header-menu',
@@ -144,12 +148,28 @@ export class HeaderMenuComponent {
   open = false
 
   readonly status = inject(STATUS)
+  readonly backingUp = toSignal(inject(OSService).backingUp$, {
+    initialValue: false,
+  })
 
   about() {
     this.dialog.openComponent(ABOUT, { label: 'About this server' }).subscribe()
   }
 
-  async promptPower(action: 'restart' | 'shutdown') {
+  async promptPower(action: T.PowerAction) {
+    // Interrupting a backup can corrupt the service being written, so offer to
+    // wait for it instead of asking the usual "are you sure".
+    if (this.backingUp()) {
+      this.dialog
+        .openComponent<boolean>(POWER, {
+          label: action === 'restart' ? 'Restart' : 'Warning',
+          size: 's',
+          data: action,
+        })
+        .subscribe(now => this.power(action, !now))
+      return
+    }
+
     this.dialog
       .openConfirm(
         action === 'restart'
@@ -175,15 +195,17 @@ export class HeaderMenuComponent {
             },
       )
       .pipe(filter(Boolean))
-      .subscribe(() =>
-        this.tasks.run(
-          async () =>
-            await this.api[
-              action === 'restart' ? 'restartServer' : 'shutdownServer'
-            ]({}),
-          `Beginning ${action}`,
-        ),
-      )
+      .subscribe(() => this.power(action, false))
+  }
+
+  private power(action: T.PowerAction, afterBackup: boolean) {
+    this.tasks.run(
+      async () =>
+        action === 'restart'
+          ? await this.api.restartServer({ afterBackup })
+          : await this.api.shutdownServer({ afterBackup }),
+      `Beginning ${action}`,
+    )
   }
 
   logout() {

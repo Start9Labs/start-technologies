@@ -8,4 +8,10 @@ export type ShutdownParams = {
    * container shutdown, so the connection drops once services are stopped.
    */
   wait: boolean
+  /**
+   * Let a running backup finish first, rather than interrupting it. Off by
+   * default, so the systemd units that drive a real power-off — which cannot
+   * wait — keep their existing behavior.
+   */
+  afterBackup: boolean
 }

@@ -101,6 +101,8 @@ const INIT_PROGRESS: T.FullProgress = {
 export class MockApiService extends ApiService {
   readonly mockWsSource$ = new Subject<Revision>()
   private readonly revertTime = 1800
+  private backingUp = false
+  private deferredPowerAction: T.PowerAction | null = null
   sequence = 0
 
   constructor() {
@@ -388,8 +390,12 @@ export class MockApiService extends ApiService {
     return 'updating'
   }
 
-  async restartServer(params: {}): Promise<null> {
+  async restartServer(params: Partial<T.ShutdownParams>): Promise<null> {
     await pauseFor(2000)
+
+    if (params.afterBackup && this.backingUp) {
+      return this.deferPower('restart')
+    }
 
     const patch = [
       {
@@ -414,8 +420,12 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async shutdownServer(params: {}): Promise<null> {
+  async shutdownServer(params: Partial<T.ShutdownParams>): Promise<null> {
     await pauseFor(2000)
+
+    if (params.afterBackup && this.backingUp) {
+      return this.deferPower('shutdown')
+    }
 
     const patch = [
       {
@@ -438,6 +448,11 @@ export class MockApiService extends ApiService {
     }, 2000)
 
     return null
+  }
+
+  async cancelDeferredPower(params: {}): Promise<null> {
+    await pauseFor(1000)
+    return this.deferPower(null)
   }
 
   async repairDisk(params: {}): Promise<null> {
@@ -922,6 +937,7 @@ export class MockApiService extends ApiService {
 
   async createBackup(params: T.BackupParams): Promise<null> {
     await pauseFor(2000)
+    this.backingUp = true
     const serverPath = '/serverInfo/statusInfo/backupProgress'
     const ids = params.packageIds || []
     // One phase per package plus a trailing "OS Data" phase (the host
@@ -999,6 +1015,14 @@ export class MockApiService extends ApiService {
         },
       ]
       this.mockRevision(lastPatch)
+      this.backingUp = false
+      if (this.deferredPowerAction) {
+        const action = this.deferredPowerAction
+        await this.deferPower(null)
+        await this[action === 'restart' ? 'restartServer' : 'shutdownServer'](
+          {},
+        )
+      }
 
       // Feature 1: a completed backup whose target still holds a legacy (V1)
       // folder raises a warning notification — bumps the unread badge and
@@ -2266,6 +2290,18 @@ export class MockApiService extends ApiService {
       { op: PatchOp.ADD, path: `${basePath}/available`, value: available },
     ]
     this.mockRevision(patch)
+  }
+
+  private deferPower(action: T.PowerAction | null): null {
+    this.deferredPowerAction = action
+    this.mockRevision([
+      {
+        op: PatchOp.REPLACE,
+        path: '/serverInfo/statusInfo/deferredPowerAction',
+        value: action,
+      },
+    ])
+    return null
   }
 
   private mockData(path: string): any {

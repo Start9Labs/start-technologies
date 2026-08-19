@@ -240,12 +240,16 @@ export class LiveApiService extends ApiService {
     return this.rpcRequest({ method: 'server.update', params })
   }
 
-  async restartServer(params: {}): Promise<null> {
+  async restartServer(params: Partial<T.ShutdownParams>): Promise<null> {
     return this.rpcRequest({ method: 'server.restart', params })
   }
 
-  async shutdownServer(params: {}): Promise<null> {
+  async shutdownServer(params: Partial<T.ShutdownParams>): Promise<null> {
     return this.rpcRequest({ method: 'server.shutdown', params })
+  }
+
+  async cancelDeferredPower(params: {}): Promise<null> {
+    return this.rpcRequest({ method: 'server.cancel-deferred-power', params })
   }
 
   async repairDisk(params: {}): Promise<null> {

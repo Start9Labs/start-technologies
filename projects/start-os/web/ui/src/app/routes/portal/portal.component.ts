@@ -80,6 +80,32 @@ import { HeaderComponent } from './components/header/header.component'
         </button>
       </tui-action-bar>
     }
+    @if (deferredPower(); as action) {
+      <tui-action-bar *tuiPopup="bar()">
+        <span tuiCell="m">
+          <tui-icon icon="@tui.power" />
+          @if (action === 'restart') {
+            {{
+              'A backup is running. Your server will restart when it finishes.'
+                | i18n
+            }}
+          } @else {
+            {{
+              'A backup is running. Your server will shut down when it finishes.'
+                | i18n
+            }}
+          }
+        </span>
+        <button
+          tuiButton
+          size="s"
+          appearance="secondary"
+          (click)="cancelDeferredPower()"
+        >
+          {{ 'Cancel' | i18n }}
+        </button>
+      </tui-action-bar>
+    }
   `,
   styles: `
     @use '@taiga-ui/styles/utils' as taiga;
@@ -177,6 +203,9 @@ export class PortalComponent {
   readonly restartReason = toSignal(
     this.patch.watch$('serverInfo', 'statusInfo', 'restart'),
   )
+  readonly deferredPower = toSignal(
+    this.patch.watch$('serverInfo', 'statusInfo', 'deferredPowerAction'),
+  )
   readonly bar = signal(true)
 
   getProgress(size: number, downloaded: number): number {
@@ -188,5 +217,9 @@ export class PortalComponent {
       this.bar.set(false)
       await this.api.restartServer({})
     }, 'Beginning restart')
+  }
+
+  cancelDeferredPower() {
+    this.tasks.run(async () => await this.api.cancelDeferredPower({}))
   }
 }

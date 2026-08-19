@@ -56,9 +56,17 @@ Restart, shut down, update, and configure the server.
 
 Restart the server.
 
+- `--after-backup` — Wait for a running backup to finish first
+
 ### `start-cli server shutdown`
 
 Shut down the server.
+
+- `--after-backup` — Wait for a running backup to finish first
+
+### `start-cli server cancel-deferred-power`
+
+Cancel a restart or shutdown that is waiting for a backup to finish.
 
 ### `start-cli server update`
 
