@@ -326,9 +326,8 @@ impl VHostController {
         })
     }
 
-    /// Notifies the operator, once per name until a certificate lands, that
-    /// ACME issuance is failing. The address refuses connections while that is
-    /// true, so nothing else would say why.
+    /// Once per name until a certificate lands: the address refuses
+    /// connections meanwhile, and nothing else would say why.
     fn report_acme_failure(&self) -> ReportOrderFailure {
         let db = self.db.clone();
         Arc::new(move |sans, error| {
@@ -531,25 +530,16 @@ impl VHostController {
     }
 }
 
-/// A vhost entry's identity: `(hostname, external port, serves the public
-/// exposure)`. A name reachable both from the LAN and from the internet has one
-/// entry per side, so that only the public one carries a certificate authority.
+/// `(hostname, external port, is the public leg)`. A name reachable both ways
+/// has one entry per side; only the public one carries an authority.
 pub type VHostKey = (Option<InternedString>, u16, bool);
 
-/// The port ACME's TLS-ALPN-01 challenge is dialed at. Fixed by the protocol —
-/// the validator ignores whatever port the name is actually served on.
+/// Where TLS-ALPN-01 is validated, whatever port the name is served on.
 const ACME_CHALLENGE_PORT: u16 = 443;
 
-/// The upstream port maps a set of vhost targets calls for: `(box IP to map
-/// from, external port) -> (ordered PCP gateway candidates, hostname -> box-side
-/// port)`. Gateways stay an ordered Vec — the port-mapper tries them in
-/// preference order and takes the first that binds. A `Some(hostname)` is
-/// mapped via PCP HOSTNAME: the gateway treats the hostname as part of the
-/// mapping's identity and demultiplexes the shared external port by TLS SNI, so
-/// one service adding or removing a hostname never disturbs another's on the
-/// same port — and each name carries its own box-side port. A `None` is a
-/// bare-IP (`*` vhost) forward or an IPv6 GUA pinhole: no SNI, so a plain
-/// pinhole to the box's own IP where the OS reverse proxy listens.
+/// `(box IP, external port) -> (gateway candidates in preference order,
+/// hostname -> box-side port)`. `Some(hostname)` is a PCP HOSTNAME mapping the
+/// gateway SNI-demuxes; `None` is a bare-IP forward or a GUA pinhole.
 type DesiredPortMaps = BTreeMap<
     (IpAddr, u16),
     (
@@ -558,9 +548,6 @@ type DesiredPortMaps = BTreeMap<
     ),
 >;
 
-/// For each target public on IPv4 (`public_v4`), each of that gateway's box
-/// IPv4s gets a mapping keyed by the vhost's hostname. IPv6 GUAs carry no NAT,
-/// so they get a firewall pinhole at the same port instead.
 fn desired_port_maps(
     targets: &BTreeMap<VHostKey, ProxyTarget>,
     ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
@@ -589,11 +576,9 @@ fn desired_port_maps(
                     .or_insert_with(|| (gateways.clone(), BTreeMap::new()))
                     .1
                     .insert(maybe_host.clone(), *external);
-                // The domain's own port carries no ACME challenge, so route the
-                // challenge port to it as well or the order can never complete.
-                // By name only — the challenge is selected by SNI, and the
-                // unnamed forward there is the OS's own. `or_insert` so a real
-                // binding on that port keeps it, in any visit order.
+                // Nothing answers the challenge on the domain's own port. By
+                // name only: the unnamed forward there is the OS's own, and
+                // `or_insert` leaves a real binding on it alone.
                 if let Some(hostname) = maybe_host
                     && target.acme.is_some()
                     && *external != ACME_CHALLENGE_PORT
@@ -609,11 +594,7 @@ fn desired_port_maps(
         }
         // IPv6: the box's own GUA is the listener (no NAT), so open a firewall
         // pinhole for GUA:port. No SNI demux over v6, so these are always
-        // hostname-less — which is also why the challenge port gets no v6
-        // counterpart: a GUA belongs to the gateway and every host on the box
-        // shares it, so claiming :443 on one would claim it for all of them.
-        // A domain public over both families validates over IPv4; one public
-        // only over IPv6 has no path for its challenge.
+        // hostname-less — and a GUA is shared, so no challenge port either.
         for gua in &target.public_v6 {
             let Some(info) = ip_info.iter().map(|(_, i)| i).find(|info| {
                 info.ip_info.as_ref().map_or(false, |i| {
@@ -830,11 +811,8 @@ pub trait VHostTarget<A: Accept>: std::fmt::Debug + Eq {
         true
     }
     /// Whether this target answers `metadata` as one of the box's own private
-    /// addresses, which takes precedence over answering it as a public one. A
-    /// name can be served both ways at once — the same domain resolving to a
-    /// LAN address inside the network and a public one outside it — and on
-    /// IPv4 both arrive on the same gateway, so a target that claims the
-    /// connection here is the one that owns it.
+    /// addresses. Preferred over a plain [`filter`](Self::filter) match, which
+    /// on IPv4 cannot tell a local dial from a forwarded one.
     #[allow(unused_variables)]
     fn filter_private(&self, metadata: &<A as Accept>::Metadata) -> bool {
         false
@@ -1082,10 +1060,8 @@ impl ProxyTarget {
         wan || self.accepts_as_private(subnets, src, dst)
     }
 
-    /// Whether this is a dial of one of our own private addresses from the
-    /// network that address is on. IPv4 gives such a dial the same arrival
-    /// gateway as a forwarded WAN one — the box sees its own LAN IPv4 either
-    /// way — so the source address is what tells them apart.
+    /// A dial of one of our own private addresses from that address's network.
+    /// On IPv4 the source is all that separates it from a forwarded one.
     fn accepts_as_private(&self, subnets: &OrdSet<IpNet>, src: IpAddr, dst: IpAddr) -> bool {
         self.private.contains(&dst)
             && (subnets.iter().any(|s| s.contains(&src)) || is_private_ip(src))
@@ -1120,8 +1096,6 @@ impl ProxyTarget {
     }
 }
 
-/// Where a connection came from and landed: `(arrival gateway, that gateway's
-/// subnets, source, local address)`.
 struct Arrival {
     gateway: GatewayId,
     subnets: OrdSet<IpNet>,
@@ -1580,10 +1554,8 @@ fn host_key(server_name: Option<&str>) -> Option<InternedString> {
         .map(InternedString::from)
 }
 
-/// A TLS-ALPN-01 challenge names the host it is validating, and the name is the
-/// whole authorization: it is what the challenge is answered against. A dial
-/// that names nothing is an ordinary connection whatever it advertises, and
-/// treating it as a challenge would hand it to a handler that answers by name.
+/// A challenge names the host it validates. One that names nothing is an
+/// ordinary connection, whatever it advertises.
 fn is_acme_challenge<'a>(
     server_name: Option<&str>,
     mut alpn: impl Iterator<Item = &'a [u8]>,
@@ -1712,11 +1684,8 @@ where
             is_acme_challenge(hello.server_name(), hello.alpn().into_iter().flatten());
 
         let Some((target, ctx)) = routed else {
-            // TLS-ALPN-01 is always validated at :443, but the name being
-            // validated may only be served on some other port, so its challenge
-            // lands on a server that doesn't route it. The inner handler answers
-            // only from the controller-wide cache of in-flight orders, so this
-            // still refuses every name we are not ourselves ordering for.
+            // Validation is at :443 whatever port the name is served on, so a
+            // challenge lands here. Answered only from our orders in flight.
             if acme_challenge {
                 return self.acme.get_config(hello, metadata).await;
             }
@@ -1738,18 +1707,12 @@ where
         }
 
         let action = if target.0.acme().is_some() {
-            // This address is served the certificate its authority issued or
-            // nothing at all. The local root CA would answer for any name asked
-            // of it, so falling back to it hands a client that asked for a
-            // publicly trusted certificate one signed by a chain shared with
-            // every other address on this server — under a name the UI still
-            // labels with the authority. Refuse the connection instead.
+            // The authority's certificate or nothing: the root CA would answer
+            // for the name with a chain shared by every address on this server.
             self.acme.get_config(hello, metadata).await?
         } else {
-            // No authority on this address: the local root CA serves it, as it
-            // does every LAN address. A certificate the authority issued for
-            // this name is still preferred where one exists, so a domain
-            // reachable both ways presents the same certificate either way.
+            // The authority's certificate where one exists, so a name served
+            // both ways presents the same one either way; the root CA else.
             match self.acme.get_config(hello, metadata).await {
                 Some(action) => action,
                 None => self.root_ca.get_config(hello, metadata).await?,
@@ -2073,10 +2036,8 @@ mod host_key_tests {
         assert_eq!(host_key(Some("fd00:3::1")), None);
     }
 
-    /// A challenge is answered by name, so a dial that names nothing is never
-    /// one — otherwise it reaches a handler with no name to check, which
-    /// declines, and the next handler in the chain answers with a local
-    /// certificate.
+    /// Otherwise it reaches a handler with no name to check, which declines,
+    /// and the root CA answers.
     #[test]
     fn a_challenge_without_a_name_is_not_a_challenge() {
         let acme = || [ACME_TLS_ALPN_NAME].into_iter();
@@ -2122,8 +2083,7 @@ mod port_map_tests {
     const BOX_IP: &str = "10.13.13.5";
     const GUA: &str = "2001:db8::5";
 
-    /// A StartTunnel gateway: on-link, so NetworkManager reports no next hop and
-    /// `candidate_gateways` derives the relay from the subnet.
+    /// On-link like StartTunnel: no next hop, so the relay comes from the subnet.
     fn ip_info() -> OrdMap<GatewayId, NetworkInterfaceInfo> {
         let mut info = OrdMap::new();
         info.insert(
@@ -2174,8 +2134,7 @@ mod port_map_tests {
         }
     }
 
-    /// Every entry here is a public leg — a private one carries no public
-    /// gateway, so it contributes no port map at all.
+    /// All public legs; a private one has no public gateway to map.
     fn targets<'a>(
         entries: impl IntoIterator<Item = (Option<&'a str>, u16, ProxyTarget)>,
     ) -> BTreeMap<VHostKey, ProxyTarget> {
@@ -2185,7 +2144,6 @@ mod port_map_tests {
             .collect()
     }
 
-    /// The hostname -> box-side port routes mapped at `(ip, external)`.
     fn routes(desired: &DesiredPortMaps, ip: &str, external: u16) -> Vec<(String, u16)> {
         let key: (IpAddr, u16) = (ip.parse().unwrap(), external);
         desired
@@ -2199,8 +2157,6 @@ mod port_map_tests {
             .unwrap_or_default()
     }
 
-    /// The challenge is dialed at :443 whatever port the domain serves on, so
-    /// the domain's own route is not enough on its own.
     #[test]
     fn an_acme_domain_off_443_also_routes_the_challenge_port() {
         let desired = desired_port_maps(
@@ -2218,8 +2174,6 @@ mod port_map_tests {
         );
     }
 
-    /// Each name carries its own box-side port, so two domains on one external
-    /// port do not collapse onto whichever was reconciled first.
     #[test]
     fn each_acme_domain_keeps_its_own_challenge_route() {
         let desired = desired_port_maps(
@@ -2239,8 +2193,6 @@ mod port_map_tests {
         );
     }
 
-    /// The challenge port is only claimed for a name whose certificate we hold,
-    /// and never for the bare-IP vhost, whose :443 forward belongs to the OS.
     #[test]
     fn nothing_else_claims_the_challenge_port() {
         let desired = desired_port_maps(
@@ -2254,7 +2206,6 @@ mod port_map_tests {
         assert!(routes(&desired, BOX_IP, 443).is_empty());
     }
 
-    /// A domain that really is served on :443 keeps its own route there.
     #[test]
     fn a_real_443_binding_owns_the_port_it_serves() {
         let desired = desired_port_maps(
@@ -2271,8 +2222,6 @@ mod port_map_tests {
         );
     }
 
-    /// IPv6 pinholes carry no name and no port translation: a GUA on :443 still
-    /// gets the 80 -> 443 redirect and nothing else.
     #[test]
     fn ipv6_pinholes_are_unchanged() {
         let desired = desired_port_maps(
@@ -2373,10 +2322,8 @@ mod accept_filter_tests {
         assert!(!t.accepts(&gw("other"), &no_subnets, src, v4));
     }
 
-    /// A domain reachable both ways is two targets. IPv4 hands a forwarded WAN
-    /// dial and a local one the same arrival gateway, so the public leg claims
-    /// both — the source address is what separates them, and the private leg's
-    /// claim is the stronger one.
+    /// IPv4 hands a forwarded dial and a local one the same gateway, so the
+    /// public leg claims both; the private leg's claim is the stronger one.
     #[test]
     fn a_lan_dial_of_a_dual_exposure_domain_belongs_to_the_private_leg() {
         let g = gw("eth0");

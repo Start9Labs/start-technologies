@@ -513,13 +513,9 @@ impl NetServiceData {
                         public_v4: BTreeSet::new(),
                         public_v6: BTreeSet::new(),
                         private: BTreeSet::new(),
-                        // The authority belongs to the public leg alone: a name
-                        // resolving to a LAN address inside the network and a
-                        // public one outside it is served by two entries, and
-                        // the LAN one answers with the server's own certificate
-                        // whatever the public one can obtain. A passthrough
-                        // never intermediates ACME either — the backend is the
-                        // ACME client and holds the challenge cert.
+                        // The public leg's alone, so a name served both ways
+                        // keeps its LAN side. A passthrough never intermediates
+                        // ACME — the backend is the ACME client.
                         acme: if passthrough || !addr_info.public {
                             None
                         } else {

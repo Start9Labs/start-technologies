@@ -55,9 +55,8 @@ file tracks notable changes since the move to the monorepo.
 - **A service that presents its own TLS certificate is shown as presenting
   it.** StartOS does not terminate such a connection, so the certificate the
   client checks is the service's — but a domain on that interface reported
-  whichever certificate authority had been chosen for it, and the choice was
-  offered in the first place. Those addresses now report `Self signed`, and
-  choosing an authority for one is refused with an explanation.
+  whichever certificate authority had been chosen for it. Those addresses now
+  report `Self signed`.
 
 - **Services that run their own containers or a VPN can reach the devices they
   were granted.** A service opting into `userspaceFilesystems` or

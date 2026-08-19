@@ -237,9 +237,8 @@ where
                         }
                         None => {
                             crate::dev_log!(debug, "no certificate for SNI {:?}", sni);
-                            // The io buffers writes until the handshake config
-                            // is settled, so the alert only reaches the wire
-                            // once buffering is off.
+                            // Writes are buffered until the config settles;
+                            // the alert has to reach the wire.
                             let _ = mid.io.stop_buffering();
                             let _ = mid
                                 .io
@@ -507,8 +506,7 @@ mod test {
         }
     }
 
-    /// Run one connection against a `TlsListener` fronting `handler`, with a
-    /// client that accepts any certificate, and return the handshake result.
+    /// One connection through `handler`, from a client that accepts any cert.
     async fn handshake_through<H>(handler: H) -> Result<(), std::io::Error>
     where
         for<'a> H: TlsHandler<'a, tokio::net::TcpListener> + Clone + Send + 'static,
@@ -532,8 +530,8 @@ mod test {
         res
     }
 
-    /// A refused connection says so: the client is told the name was not
-    /// recognized instead of watching the socket close mid-handshake.
+    /// The client is told the name was not recognized, rather than watching
+    /// the socket close mid-handshake.
     #[tokio::test]
     async fn a_refused_connection_gets_a_tls_alert() {
         let err = handshake_through(Declines)

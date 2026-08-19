@@ -52,13 +52,11 @@ pub struct OrderEntry {
     /// [`DEFAULT_FAILURE_BACKOFF`]. Inside this window `get_cert`
     /// returns `None` instead of starting a new order.
     backoff_until: Option<Instant>,
-    /// Set once the operator has been told this order is failing. Every retry
-    /// while it stands is silent; the entry is dropped when a certificate
-    /// finally lands, so the next failure after that speaks again.
+    /// Set once reported, so retries stay silent; dropped with the entry.
     reported: bool,
 }
 
-/// Told the SANs of an order that failed and why, to surface to the operator.
+/// Told the SANs of a failed order and why, to surface to the operator.
 pub type ReportOrderFailure =
     Arc<dyn Fn(BTreeSet<InternedString>, String) -> BoxFuture<'static, ()> + Send + Sync>;
 
@@ -121,10 +119,8 @@ where
             }
         }
 
-        // Everything past here can fail to produce a certificate. A cached one
-        // that is merely inside its 30-day renewal window is still publicly
-        // trusted, so it stays the answer of last resort — the alternative is
-        // refusing a name we can still serve correctly.
+        // A cert inside its renewal window is still publicly trusted, so it
+        // answers for anything below here that cannot produce a new one.
         let renewing = || {
             certified_key(
                 cached.as_ref().filter(|c| unexpired(c))?,
@@ -135,8 +131,7 @@ where
         let Some(contact) = <M as DbAccessByKey<AcmeSettings>>::access_by_key(&peek, &provider)
             .and_then(|settings| settings.as_contact().de().log_err())
         else {
-            // The provider was removed from the server's settings while a domain
-            // still names it, so no order can be placed for it at all.
+            // Provider removed from the server while a domain still names it.
             return renewing();
         };
         drop(peek);
@@ -336,7 +331,7 @@ where
             .flatten()
             .any(|a| a == ACME_TLS_ALPN_NAME)
         {
-            // Only a name we have an order in flight for is answerable.
+            // Only a name with an order in flight is answerable.
             let Some(cert) = self.acme_cache.peek(|c| c.get(domain).cloned()) else {
                 tracing::debug!("no ACME challenge in flight for {domain}");
                 return None;

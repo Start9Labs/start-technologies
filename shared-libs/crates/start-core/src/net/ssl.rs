@@ -55,9 +55,8 @@ pub fn should_use_cert(cert: &X509Ref) -> Result<bool, ErrorStack> {
             == Ordering::Greater)
 }
 
-/// Whether `cert` is inside its validity window. [`should_use_cert`] is the
-/// stricter test that also demands 30 days of headroom, so that a renewal is
-/// attempted well before this one turns false.
+/// Inside its validity window. [`should_use_cert`] additionally demands 30
+/// days of headroom, so a renewal is attempted well before this turns false.
 pub fn cert_is_unexpired(cert: &X509Ref) -> Result<bool, ErrorStack> {
     Ok(cert
         .not_before()
@@ -848,9 +847,8 @@ mod cert_validity_tests {
         builder.build()
     }
 
-    /// The last 30 days of a certificate's life are the renewal window: too old
-    /// to keep serving without trying to renew, still perfectly good to serve
-    /// while that renewal is failing.
+    /// The renewal window: too old to serve without trying to renew, still
+    /// good enough to serve while that renewal is failing.
     #[test]
     fn the_renewal_window_is_unexpired_but_due_for_renewal() {
         let fresh = cert_expiring_in(60);
