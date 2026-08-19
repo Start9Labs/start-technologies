@@ -222,6 +222,21 @@
   when the process was not killed by this timer — alongside `exitCode` and
   `exitSignal`
 
+### Security
+
+- **The bundled ESLint and typescript-eslint trees carry patched
+  `brace-expansion` and `js-yaml`.** `bundleDependencies` ships these
+  physically inside the published tarball, under
+  `node_modules/@start9labs/start-sdk/` in every package that installs the SDK,
+  where neither `overrides` nor `npm audit fix` can reach them — so a package
+  author auditing their own repo saw High-severity findings under a production
+  dependency and had no way to clear them. `brace-expansion` moves to 1.1.18
+  and 5.0.9 and `js-yaml` to 4.3.1, each within the range its parent already
+  declared, so nothing else in the tree moves and the SDK's own surface is
+  untouched. A package scaffolded from the template now reports
+  `found 0 vulnerabilities` from `npm audit --omit=dev`. Fixes
+  [#3592](https://github.com/Start9Labs/start-technologies/issues/3592)
+
 ## 2.0.9 — StartOS 0.4.0-beta.10 (2026-07-25)
 
 ### Fixed
