@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use clap::Parser;
 use patch_db::json_ptr::JsonPointer;
 use serde::{Deserialize, Serialize};
@@ -131,6 +133,8 @@ pub struct ShutdownParams {
     /// frontend omits this and gets an immediate reply). Cleared with
     /// `--nowait`. The wait can't outlive the webserver teardown that follows
     /// container shutdown, so the connection drops once services are stopped.
+    /// Nothing is waited for when `--after-backup` defers the action, since
+    /// there is no teardown yet to wait on.
     #[arg(long = "nowait", action = clap::ArgAction::SetFalse, help = "help.arg.nowait")]
     #[serde(default)]
     wait: bool,
@@ -143,6 +147,9 @@ pub struct ShutdownParams {
 }
 
 const STATUS_INFO_PTR: &str = "/public/serverInfo/statusInfo";
+/// How long to leave a failing patch-db alone before trying to take the
+/// deferred action again.
+const TAKE_RETRY: Duration = Duration::from_secs(30);
 
 async fn begin_shutdown(ctx: &RpcContext, restart: bool, wait: bool) {
     ctx.shutdown
@@ -158,10 +165,9 @@ async fn begin_shutdown(ctx: &RpcContext, restart: bool, wait: bool) {
 }
 
 /// Records `action` as the deferred power action if a backup is underway, and
-/// reports whether it did. The backup check and the write share one mutation, so
-/// a backup that finishes while the request is in flight can never strand the
-/// action — either it is recorded with the backup still running (and
-/// [`run_deferred_power_actions`] picks it up), or the caller powers off now.
+/// reports whether it did. Used where there is nothing to fall back to — the
+/// power key, where logind is the one powering the server off when no backup is
+/// running.
 pub async fn defer_until_backup_complete(
     ctx: &RpcContext,
     action: PowerAction,
@@ -179,9 +185,36 @@ pub async fn defer_until_backup_complete(
         .result
 }
 
-/// Carries out a deferred power action once the backup it was waiting on
-/// finishes. Runs for the lifetime of startd, because the action can be recorded
-/// at any point during a backup — from the web UI, the CLI, or the power button.
+/// Either records `action` for after the backup, or commits to performing it
+/// now — in one mutation, so a backup cannot start in the window between
+/// deciding and acting. Returns whether it was deferred.
+async fn defer_or_begin(
+    ctx: &RpcContext,
+    action: PowerAction,
+    after_backup: bool,
+) -> Result<bool, Error> {
+    ctx.db
+        .mutate(|db| {
+            let status = db.as_public_mut().as_server_info_mut().as_status_info_mut();
+            if after_backup && status.as_backup_progress().transpose_ref().is_some() {
+                status.as_deferred_power_action_mut().ser(&Some(action))?;
+                return Ok(true);
+            }
+            status.as_deferred_power_action_mut().ser(&None)?;
+            match action {
+                PowerAction::Restart => status.as_restarting_mut().ser(&true)?,
+                PowerAction::Shutdown => status.as_shutting_down_mut().ser(&true)?,
+            }
+            Ok(false)
+        })
+        .await
+        .result
+}
+
+/// Carries out each deferred power action once the backup it was waiting on
+/// finishes. Runs for the lifetime of startd: an action can be recorded at any
+/// point during any backup — from the web UI, the CLI, or the power button — so
+/// this must survive one having failed.
 pub async fn run_deferred_power_actions(ctx: RpcContext) {
     let mut watch = ctx
         .db
@@ -195,13 +228,14 @@ pub async fn run_deferred_power_actions(ctx: RpcContext) {
             })
             .await
         {
+            // The db is gone, so there is nothing left to retry against.
             tracing::error!("stopped watching for deferred power actions: {e}");
             tracing::debug!("{e:?}");
             return;
         }
         // Taking the action clears it in the same mutation, so a cancellation
-        // that lands first wins and this run does nothing.
-        let action = ctx
+        // that lands first wins and this pass does nothing.
+        let taken = ctx
             .db
             .mutate(|db| {
                 let status = db.as_public_mut().as_server_info_mut().as_status_info_mut();
@@ -210,10 +244,19 @@ pub async fn run_deferred_power_actions(ctx: RpcContext) {
                 Ok(action)
             })
             .await
-            .result
-            .log_err()
-            .flatten();
-        let res = match action {
+            .result;
+        let action = match taken {
+            Ok(action) => action,
+            Err(e) => {
+                // A failed mutation leaves the db untouched, so retrying
+                // immediately would spin against whatever is failing.
+                tracing::error!("could not take the deferred power action: {e}");
+                tracing::debug!("{e:?}");
+                tokio::time::sleep(TAKE_RETRY).await;
+                continue;
+            }
+        };
+        let performed = match action {
             Some(PowerAction::Restart) => {
                 tracing::info!("backup finished; carrying out the deferred restart");
                 restart(ctx.clone(), ShutdownParams::default()).await
@@ -224,11 +267,10 @@ pub async fn run_deferred_power_actions(ctx: RpcContext) {
             }
             None => continue,
         };
-        if let Err(e) = res {
+        if let Err(e) = performed {
             tracing::error!("deferred power action failed: {e}");
             tracing::debug!("{e:?}");
         }
-        return;
     }
 }
 
@@ -236,17 +278,9 @@ pub async fn shutdown(
     ctx: RpcContext,
     ShutdownParams { wait, after_backup }: ShutdownParams,
 ) -> Result<(), Error> {
-    if after_backup && defer_until_backup_complete(&ctx, PowerAction::Shutdown).await? {
+    if defer_or_begin(&ctx, PowerAction::Shutdown, after_backup).await? {
         return Ok(());
     }
-    ctx.db
-        .mutate(|db| {
-            let status = db.as_public_mut().as_server_info_mut().as_status_info_mut();
-            status.as_deferred_power_action_mut().ser(&None)?;
-            status.as_shutting_down_mut().ser(&true)
-        })
-        .await
-        .result?;
     begin_shutdown(&ctx, false, wait).await;
     Ok(())
 }
@@ -255,17 +289,9 @@ pub async fn restart(
     ctx: RpcContext,
     ShutdownParams { wait, after_backup }: ShutdownParams,
 ) -> Result<(), Error> {
-    if after_backup && defer_until_backup_complete(&ctx, PowerAction::Restart).await? {
+    if defer_or_begin(&ctx, PowerAction::Restart, after_backup).await? {
         return Ok(());
     }
-    ctx.db
-        .mutate(|db| {
-            let status = db.as_public_mut().as_server_info_mut().as_status_info_mut();
-            status.as_deferred_power_action_mut().ser(&None)?;
-            status.as_restarting_mut().ser(&true)
-        })
-        .await
-        .result?;
     begin_shutdown(&ctx, true, wait).await;
     Ok(())
 }

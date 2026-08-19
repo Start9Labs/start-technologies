@@ -71,6 +71,21 @@ async fn inner_main(
     };
 
     let (rpc_ctx, shutdown) = async {
+        // A backup and a deferred power action both die with the process that
+        // was running them, and only `init` — which a startd restart within a
+        // boot skips — would otherwise clear them. A stale backup in particular
+        // would leave the power button inhibited with nothing left to release
+        // it.
+        rpc_ctx
+            .db
+            .mutate(|db| {
+                let status = db.as_public_mut().as_server_info_mut().as_status_info_mut();
+                status.as_backup_progress_mut().ser(&None)?;
+                status.as_deferred_power_action_mut().ser(&None)
+            })
+            .await
+            .result?;
+
         crate::hostname::sync_hostname(&rpc_ctx.account.peek(|a| a.hostname.hostname.clone()))
             .await?;
 
@@ -110,9 +125,9 @@ async fn inner_main(
         let _deferred_power = NonDetachingJoinHandle::from(tokio::spawn(
             crate::shutdown::run_deferred_power_actions(deferred_power_ctx),
         ));
-        let power_key_ctx = rpc_ctx.clone();
+        #[cfg(target_os = "linux")]
         let _power_key = NonDetachingJoinHandle::from(tokio::spawn(
-            crate::power_key::watch_power_key(power_key_ctx),
+            crate::power_key::watch_power_key(rpc_ctx.clone()),
         ));
 
         let metrics_ctx = rpc_ctx.clone();

@@ -1,10 +1,10 @@
-import { Component } from '@angular/core'
-import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop'
+import { Component, signal } from '@angular/core'
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop'
 import { i18nPipe } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { TuiButton, TuiDialogContext } from '@taiga-ui/core'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
-import { map, take, timer } from 'rxjs'
+import { take, timer } from 'rxjs'
 
 // Long enough to read the warning, short enough to not strand someone who
 // walked away mid-decision.
@@ -41,19 +41,17 @@ export class PowerComponent {
 
   protected readonly action = this.context.data
 
-  protected readonly seconds = toSignal(
-    timer(0, 1000).pipe(
-      map(tick => COUNTDOWN - tick),
-      take(COUNTDOWN + 1),
-    ),
-    { initialValue: COUNTDOWN },
-  )
+  protected readonly seconds = signal(COUNTDOWN)
 
   constructor() {
-    // Choosing neither is choosing to wait.
-    timer(COUNTDOWN * 1000)
-      .pipe(takeUntilDestroyed())
-      .subscribe(() => this.wait())
+    // One timer drives both the label and the default, so the choice is made
+    // exactly when the label says it will be.
+    timer(0, 1000)
+      .pipe(take(COUNTDOWN + 1), takeUntilDestroyed())
+      .subscribe(tick => {
+        this.seconds.set(COUNTDOWN - tick)
+        if (tick === COUNTDOWN) this.wait()
+      })
   }
 
   protected now() {

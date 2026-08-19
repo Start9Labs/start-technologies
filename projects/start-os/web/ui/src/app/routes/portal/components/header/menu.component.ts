@@ -1,12 +1,10 @@
 import { Component, inject } from '@angular/core'
-import { toSignal } from '@angular/core/rxjs-interop'
 import { RouterLink } from '@angular/router'
 import {
   DialogService,
   DocsLinkDirective,
   i18nPipe,
   SafeLinksDirective,
-  TaskService,
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import {
@@ -19,10 +17,9 @@ import {
 import { filter } from 'rxjs'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { AuthService } from 'src/app/services/auth.service'
-import { OSService } from 'src/app/services/os.service'
+import { PowerService } from 'src/app/services/power.service'
 import { STATUS } from 'src/app/services/status.service'
 import { ABOUT } from './about.component'
-import { POWER } from './power.component'
 
 @Component({
   selector: 'header-menu',
@@ -142,33 +139,21 @@ import { POWER } from './power.component'
 export class HeaderMenuComponent {
   private readonly api = inject(ApiService)
   private readonly auth = inject(AuthService)
-  private readonly tasks = inject(TaskService)
   private readonly dialog = inject(DialogService)
+  private readonly power = inject(PowerService)
 
   open = false
 
   readonly status = inject(STATUS)
-  readonly backingUp = toSignal(inject(OSService).backingUp$, {
-    initialValue: false,
-  })
 
   about() {
     this.dialog.openComponent(ABOUT, { label: 'About this server' }).subscribe()
   }
 
   async promptPower(action: T.PowerAction) {
-    // Interrupting a backup can corrupt the service being written, so offer to
-    // wait for it instead of asking the usual "are you sure".
-    if (this.backingUp()) {
-      this.dialog
-        .openComponent<boolean>(POWER, {
-          label: action === 'restart' ? 'Restart' : 'Warning',
-          size: 's',
-          data: action,
-        })
-        .subscribe(now => this.power(action, !now))
-      return
-    }
+    // During a backup the choice on offer is a different one, and asking it is
+    // confirmation enough.
+    if (this.power.backingUp()) return this.power.power(action)
 
     this.dialog
       .openConfirm(
@@ -195,17 +180,7 @@ export class HeaderMenuComponent {
             },
       )
       .pipe(filter(Boolean))
-      .subscribe(() => this.power(action, false))
-  }
-
-  private power(action: T.PowerAction, afterBackup: boolean) {
-    this.tasks.run(
-      async () =>
-        action === 'restart'
-          ? await this.api.restartServer({ afterBackup })
-          : await this.api.shutdownServer({ afterBackup }),
-      `Beginning ${action}`,
-    )
+      .subscribe(() => this.power.power(action))
   }
 
   logout() {

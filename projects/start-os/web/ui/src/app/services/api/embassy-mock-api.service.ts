@@ -396,6 +396,7 @@ export class MockApiService extends ApiService {
     if (params.afterBackup && this.backingUp) {
       return this.deferPower('restart')
     }
+    this.deferPower(null)
 
     const patch = [
       {
@@ -426,6 +427,7 @@ export class MockApiService extends ApiService {
     if (params.afterBackup && this.backingUp) {
       return this.deferPower('shutdown')
     }
+    this.deferPower(null)
 
     const patch = [
       {

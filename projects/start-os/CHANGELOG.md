@@ -44,8 +44,8 @@ file tracks notable changes since the move to the monorepo.
   prompt counts down and takes that option for you. StartOS then carries out
   the restart or shutdown as soon as the backup completes, and until then a bar
   along the bottom of the screen says what is coming and lets you cancel it.
-  Pressing the server's physical power button during a backup does the same,
-  rather than powering off immediately. Over the CLI,
+  Pressing the server's physical power button during a backup waits for the
+  backup too, rather than powering off immediately. Over the CLI,
   `start-cli server restart` and `server shutdown` take `--after-backup` for
   the same behavior and `start-cli server cancel-deferred-power` calls it off.
   See [Creating Backups](https://docs.start9.com/start-os/backup-create.html).

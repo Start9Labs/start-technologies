@@ -47,3 +47,6 @@ There are three common topologies. For a home server, **line-interactive** is th
 StartOS does not currently include built-in support for UPS monitoring (USB or network), so it cannot automatically shut down when the battery is low during an extended outage. The server will run until battery exhaustion and then power off uncleanly. This still carries some risk of data corruption, but it is dramatically less risky than facing the original surge, brownout, or sudden outage with no UPS at all.
 
 If your area has frequent or long outages, size your UPS to give yourself time to shut down manually from the StartOS UI before the battery runs out.
+
+> [!NOTE]
+> If a backup is running when you do, StartOS offers to wait for the backup to finish and takes that option if you do not choose within 30 seconds — which on battery is rarely what you want. Choose `Shut down now` instead.

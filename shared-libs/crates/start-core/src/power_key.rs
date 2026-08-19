@@ -9,9 +9,11 @@
 //!
 //! The inhibitor names `handle-power-key` and not `shutdown` on purpose —
 //! blocking `shutdown` would also block the power-off StartOS itself asks
-//! systemd for at the end of a graceful teardown. Everything here degrades to
-//! today's behavior if it fails: no inhibitor means logind powers off as it
-//! always has, and no readable key device means the press is simply not seen.
+//! systemd for at the end of a graceful teardown.
+//!
+//! Failure gives the button back to logind rather than taking it away: the
+//! inhibitor is only ever held while the key is also being read, so a server
+//! whose key StartOS cannot see keeps powering off exactly as it does today.
 
 use std::io::Read;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
@@ -19,6 +21,7 @@ use std::path::{Path, PathBuf};
 
 use futures::future::join_all;
 use nix::sys::stat;
+use patch_db::TypedDbWatch;
 use patch_db::json_ptr::JsonPointer;
 use tokio::io::unix::AsyncFd;
 use zbus::proxy;
@@ -54,57 +57,6 @@ trait Login1Manager {
 }
 
 pub async fn watch_power_key(ctx: RpcContext) {
-    tokio::join!(inhibit_while_backing_up(ctx.clone()), read_power_key(ctx));
-}
-
-/// Holds a logind `handle-power-key` lock for exactly as long as a backup is
-/// running, so that a press during one reaches [`read_power_key`] instead of
-/// powering the server off.
-async fn inhibit_while_backing_up(ctx: RpcContext) {
-    let manager = match logind().await {
-        Ok(manager) => manager,
-        Err(e) => {
-            tracing::warn!(
-                "cannot reach systemd-logind, so the power button will keep powering the server off during a backup: {e}"
-            );
-            tracing::debug!("{e:?}");
-            return;
-        }
-    };
-    let mut watch = ctx
-        .db
-        .watch(STATUS_INFO_PTR.parse::<JsonPointer>().unwrap())
-        .await
-        .typed::<ServerStatus>();
-    loop {
-        let held = async {
-            watch
-                .wait_for(|status: &ServerStatus| status.backup_progress.is_some())
-                .await?;
-            let lock = manager
-                .inhibit(
-                    "handle-power-key",
-                    "StartOS",
-                    "A backup is running",
-                    "block",
-                )
-                .await?;
-            watch
-                .wait_for(|status: &ServerStatus| status.backup_progress.is_none())
-                .await?;
-            drop(lock);
-            Ok::<_, Error>(())
-        }
-        .await;
-        if let Err(e) = held {
-            tracing::error!("stopped inhibiting the power button during backups: {e}");
-            tracing::debug!("{e:?}");
-            return;
-        }
-    }
-}
-
-async fn read_power_key(ctx: RpcContext) {
     let devices = match power_key_devices().await {
         Ok(devices) => devices,
         Err(e) => {
@@ -114,9 +66,67 @@ async fn read_power_key(ctx: RpcContext) {
         }
     };
     if devices.is_empty() {
-        tracing::info!("no input device reports a power key");
+        tracing::info!(
+            "no power-switch input device, so the power button stays systemd-logind's during a backup"
+        );
         return;
     }
+    // Whichever half stops, both do: an inhibitor outliving the reader would be
+    // a power button that does nothing at all during a backup.
+    tokio::select! {
+        _ = inhibit_while_backing_up(ctx.clone()) => {}
+        _ = read_power_key(devices, ctx) => {}
+    }
+    tracing::warn!("no longer handling the power button; systemd-logind has it back");
+}
+
+/// Holds a logind `handle-power-key` lock for exactly as long as a backup is
+/// running, so that a press during one reaches [`read_power_key`] instead of
+/// powering the server off.
+async fn inhibit_while_backing_up(ctx: RpcContext) {
+    let manager = match logind().await {
+        Ok(manager) => manager,
+        Err(e) => {
+            tracing::warn!("cannot reach systemd-logind: {e}");
+            tracing::debug!("{e:?}");
+            return;
+        }
+    };
+    let mut watch = ctx
+        .db
+        .watch(STATUS_INFO_PTR.parse::<JsonPointer>().unwrap())
+        .await
+        .typed::<ServerStatus>();
+    if let Err(e) = inhibit_across_backups(&manager, &mut watch).await {
+        tracing::error!("stopped inhibiting the power button during backups: {e}");
+        tracing::debug!("{e:?}");
+    }
+}
+
+async fn inhibit_across_backups(
+    manager: &Login1ManagerProxy<'_>,
+    watch: &mut TypedDbWatch<ServerStatus>,
+) -> Result<(), Error> {
+    loop {
+        watch
+            .wait_for(|status: &ServerStatus| status.backup_progress.is_some())
+            .await?;
+        let lock = manager
+            .inhibit(
+                "handle-power-key",
+                "StartOS",
+                "A backup is running",
+                "block",
+            )
+            .await?;
+        watch
+            .wait_for(|status: &ServerStatus| status.backup_progress.is_none())
+            .await?;
+        drop(lock);
+    }
+}
+
+async fn read_power_key(devices: Vec<PathBuf>, ctx: RpcContext) {
     join_all(
         devices
             .into_iter()

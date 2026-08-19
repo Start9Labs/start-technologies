@@ -2,7 +2,7 @@ import { Component, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { RouterOutlet } from '@angular/router'
 import { WA_IS_MOBILE } from '@ng-web-apis/platform'
-import { i18nPipe, LeafProgressPipe, TaskService } from '@start9labs/shared'
+import { i18nPipe, LeafProgressPipe } from '@start9labs/shared'
 import {
   TuiButton,
   TuiCell,
@@ -14,10 +14,10 @@ import {
 import { TuiActionBar, TuiProgress } from '@taiga-ui/kit'
 import { PatchDB } from 'patch-db-client'
 import { TabsComponent } from 'src/app/routes/portal/components/tabs.component'
-import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { OSService } from 'src/app/services/os.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { PluginsService } from 'src/app/services/plugins.service'
+import { PowerService } from 'src/app/services/power.service'
 import { HeaderComponent } from './components/header/header.component'
 
 @Component({
@@ -49,8 +49,7 @@ import { HeaderComponent } from './components/header/header.component'
           }
         </span>
       </tui-action-bar>
-    }
-    @if (restartReason(); as reason) {
+    } @else if (restartReason(); as reason) {
       <tui-action-bar *tuiPopup="bar()">
         <span tuiCell="m">
           <tui-icon icon="@tui.refresh-cw" />
@@ -79,9 +78,8 @@ import { HeaderComponent } from './components/header/header.component'
           {{ 'Restart' | i18n }}
         </button>
       </tui-action-bar>
-    }
-    @if (deferredPower(); as action) {
-      <tui-action-bar *tuiPopup="bar()">
+    } @else if (deferredPower(); as action) {
+      <tui-action-bar *tuiPopup="true">
         <span tuiCell="m">
           <tui-icon icon="@tui.power" />
           @if (action === 'restart') {
@@ -193,9 +191,8 @@ import { HeaderComponent } from './components/header/header.component'
   ],
 })
 export class PortalComponent {
-  private readonly tasks = inject(TaskService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
-  private readonly api = inject(ApiService)
+  private readonly power = inject(PowerService)
 
   readonly mobile = inject(WA_IS_MOBILE)
   readonly plugins = inject(PluginsService)
@@ -213,13 +210,11 @@ export class PortalComponent {
   }
 
   restart() {
-    this.tasks.run(async () => {
-      this.bar.set(false)
-      await this.api.restartServer({})
-    }, 'Beginning restart')
+    this.bar.set(false)
+    this.power.power('restart')
   }
 
   cancelDeferredPower() {
-    this.tasks.run(async () => await this.api.cancelDeferredPower({}))
+    this.power.cancel()
   }
 }

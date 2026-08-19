@@ -67,6 +67,7 @@ pub mod middleware;
 pub mod net;
 pub mod notifications;
 pub mod os_install;
+#[cfg(target_os = "linux")]
 pub mod power_key;
 pub mod prelude;
 pub mod progress;

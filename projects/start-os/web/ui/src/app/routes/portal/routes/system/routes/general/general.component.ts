@@ -43,6 +43,7 @@ import { ABOUT } from 'src/app/routes/portal/components/header/about.component'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { ConfigService } from 'src/app/services/config.service'
 import { OSService } from 'src/app/services/os.service'
+import { PowerService } from 'src/app/services/power.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { TitleDirective } from 'src/app/services/title.service'
 import { KeyboardSelectComponent } from './keyboard-select.component'
@@ -281,6 +282,7 @@ export default class SystemGeneralComponent {
   private readonly injector = inject(INJECTOR)
   private readonly win = inject(WA_WINDOW)
   private readonly config = inject(ConfigService)
+  private readonly power = inject(PowerService)
 
   count = 0
 
@@ -525,9 +527,6 @@ export default class SystemGeneralComponent {
   }
 
   private async restart() {
-    this.tasks.run(
-      async () => await this.api.restartServer({}),
-      'Beginning restart',
-    )
+    this.power.power('restart')
   }
 }
