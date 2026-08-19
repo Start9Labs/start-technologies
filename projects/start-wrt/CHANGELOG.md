@@ -61,6 +61,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   RPC response, so an open tab notices within seconds of its next request even
   when the update restarted the daemon too quickly to drop a connection; pages
   that make no requests while idle re-check every 30 seconds.
+- **6in4 tunnels can now be configured on the router.** The `6in4` protocol
+  and the SIT kernel module it needs now ship in the image, so an IPv6 tunnel
+  from a broker such as Hurricane Electric can be set up over SSH — useful for
+  reaching IPv6 on an ISP that provides none. There is no UI for this yet.
+  Previously these packages had to be built and sideloaded by hand after every
+  update, since a sysupgrade does not preserve separately installed packages.
 
 ### Changed
 
@@ -101,6 +107,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   service goes live.
 
 ### Fixed
+
+- **The WAN IPv6 "6RD" mode now works.** Selecting it wrote a valid
+  configuration, but the image shipped without the `6rd` protocol handler or
+  the SIT kernel module it depends on, so the WAN interface simply came up
+  without IPv6 — with nothing in the UI to indicate why. Both now ship.
 
 - **Disabled outbound VPNs are no longer offered as a Security Profile's
   outbound route.** The VPN picker on the profile's WAN / Internet tab listed

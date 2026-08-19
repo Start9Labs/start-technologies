@@ -48,6 +48,10 @@ CONFIG_OPENSSL_WITH_SEED=y
 CONFIG_OPENSSL_WITH_SRP=y
 CONFIG_OPENSSL_WITH_TLS13=y
 CONFIG_OPENSSL_WITH_WHIRLPOOL=y
+# IPv6-over-IPv4 tunnels. Both pull in kmod-sit (and kmod-iptunnel{,4}); 6rd
+# also supplies the netifd proto handler the WAN IPv6 "6RD" mode writes.
+CONFIG_PACKAGE_6in4=y
+CONFIG_PACKAGE_6rd=y
 CONFIG_PACKAGE_MAC80211_DEBUGFS=y
 CONFIG_PACKAGE_MAC80211_MESH=y
 # CONFIG_PACKAGE_TAR_POSIX_ACL is not set
