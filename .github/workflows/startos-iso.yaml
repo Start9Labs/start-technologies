@@ -670,3 +670,223 @@ jobs:
                 "${{ env.S3_CDN }}/v${VERSION}/$file"
             done
           done
+
+      # Alpha rolls the same version number on every master push, and dropping
+      # the previous build from the index (above) leaves its objects in the
+      # bucket forever — nothing in the registry crate touches object storage.
+      # So reclaim them here, keyed on what the registries still reference.
+      #
+      # The direction matters: the registries supply the *candidates* for
+      # deletion, never the exemptions. Deleting "everything not referenced"
+      # would turn any registry that is unreachable, errored, or returns a shape
+      # we no longer parse into an instruction to delete the images it serves.
+      # Reading it the other way round makes every one of those failures a
+      # no-op, which is why the whole step is a series of refusals.
+      #
+      # Runs last so this build is already indexed, and inside the deploy job's
+      # `startos-deploy` lock so no other channel can be mid-upload.
+      - name: Prune superseded images
+        env:
+          # Every registry that can reference this bucket, not just the channels
+          # this workflow deploys to — production included, because `os promote`
+          # copies asset URLs through verbatim, so a beta or production
+          # commitment points at the very objects alpha stops referencing. Keep
+          # in sync with the REGISTRY map above (root AGENTS.md, "Coupled
+          # changes").
+          PRUNE_REGISTRIES: >-
+            https://registry.start9.com
+            https://beta-registry.start9.com
+            https://alpha-registry-x.start9.com
+          # CI's own upload-to-index gap is covered by the startos-deploy lock.
+          # This gate is for the one writer outside it: a hand upload into a
+          # version directory that is already indexed — manage-release.sh's
+          # push-gz, or the per-platform hotfix that leaves one version
+          # legitimately referencing two commits. That is an interactive
+          # operation, so give it days. Orphans are permanent; waiting only
+          # costs storage.
+          MIN_AGE_DAYS: 14
+        run: |
+          set -euo pipefail
+          # comm(1) compares byte-wise; sort must agree with it.
+          export LC_ALL=C
+
+          # Reclaiming has no deadline — the next deploy does it. So anything
+          # that stops us reading a trustworthy keep set skips this run rather
+          # than failing it: by the time this step runs the images are uploaded
+          # and indexed, and painting that red over someone else's outage
+          # costs a re-run that `force-overwrite: false` will refuse anyway.
+          # Only the assertions below, which mean this step itself is wrong,
+          # still fail.
+          skip() {
+            echo "::warning::$1 — skipping this prune, the next deploy reclaims"
+            exit 0
+          }
+
+          rm -rf prune && mkdir prune
+
+          for registry in $PRUNE_REGISTRIES; do
+            idx="prune/$(printf '%s' "$registry" | tr -c 'A-Za-z0-9' '-').json"
+            curl -sS --fail-with-body --retry 3 --retry-all-errors --max-time 120 \
+              -X POST "${registry%/}/rpc/v0" \
+              -H 'Content-Type: application/json' \
+              -d '{"jsonrpc":"2.0","id":1,"method":"os.index","params":{}}' -o "$idx" \
+              || skip "$registry did not answer os.index"
+            [ -s "$idx" ] || skip "$registry returned an empty response to os.index"
+            # A JSON-RPC error is an HTTP 200, and the shape has been migrated
+            # before (urls was once a scalar url), so check each explicitly
+            # rather than letting jq's `//` idioms read any of them as "no
+            # versions" — and report them apart, since a registry with no
+            # versions yet is a new channel, not a broken one.
+            jq -e 'has("error") | not' "$idx" > /dev/null \
+              || skip "$registry: os.index returned $(jq -c '.error' "$idx")"
+            jq -e '.result.versions | type == "object" and (length > 0)' "$idx" > /dev/null \
+              || skip "$registry publishes no OS versions"
+            jq -e '
+              ([.result.versions[] | .iso, .squashfs, .img] | all(type == "object"))
+              and ([.result.versions[] | (.iso, .squashfs, .img) | .[] | .urls]
+                   | all(type == "array" and (length > 0) and all(.[]; type == "string")))
+            ' "$idx" > /dev/null \
+              || skip "$registry: os.index answered in a shape this step does not recognise"
+            jq -r '
+              .result.versions | to_entries[] | .key as $version
+              | (.value.iso, .value.squashfs, .value.img) | .[] | .urls[]
+              | sub("[?#].*$"; "") | sub("^.*/"; "")
+              | [$version, .] | @tsv
+            ' "$idx" >> prune/referenced.tsv
+          done
+
+          # Match on the asset name alone, so a URL served from a mirror, a
+          # path-style host or a future CNAME still protects its object. That
+          # only holds while a name is a bucket key verbatim.
+          awk -F'\t' '
+            $2 ~ /[%[:space:]]/ {
+              printf "%s is referenced as a name that is not a literal key\n", $2 > "/dev/stderr"
+              exit 1
+            }
+            { print $2 > "prune/referenced-names.txt" }
+            {
+              prefix = "startos-" $1 "-"
+              if (index($2, prefix) == 1) {
+                hash = substr($2, length(prefix) + 1, 7)
+                if (hash ~ /^[0-9a-f]{7}$/) print $1 "\t" hash > "prune/referenced-builds.tsv"
+              }
+            }
+          ' prune/referenced.tsv || skip "a referenced asset name needs decoding to compare against a key"
+          touch prune/referenced-names.txt prune/referenced-builds.tsv prune/published.txt
+          sort -u -o prune/referenced-names.txt prune/referenced-names.txt
+          sort -u -o prune/referenced-builds.tsv prune/referenced-builds.tsv
+
+          # What this run just indexed has to come back out of what we just
+          # read. If it doesn't, the keep set isn't describing reality — and
+          # since `os asset add` reported success, the index silently didn't
+          # take, which is a broken deploy rather than someone else's outage.
+          # This one fails.
+          for PLATFORM in ${{ steps.platforms.outputs.list }}; do
+            for file in artifacts/*_${PLATFORM}.squashfs artifacts/*_${PLATFORM}.iso artifacts/*_${PLATFORM}.img; do
+              [ -f "$file" ] || continue
+              basename "$file" >> prune/published.txt
+            done
+          done
+          sort -u -o prune/published.txt prune/published.txt
+          unindexed="$(comm -23 prune/published.txt prune/referenced-names.txt)"
+          if [ -n "$unindexed" ]; then
+            echo "::error::images published by this run are missing from the registries just read:"
+            printf '%s\n' "$unindexed" | sed 's/^/  /'
+            exit 1
+          fi
+
+          s3cmd ls --recursive "${{ env.S3_BUCKET }}/" > prune/inventory.txt \
+            || skip "could not list ${{ env.S3_BUCKET }}"
+          # We uploaded to it minutes ago, so an empty listing is not a state
+          # this bucket can legitimately be in.
+          [ -s prune/inventory.txt ] || {
+            echo "::error::${{ env.S3_BUCKET }} listed as empty"
+            exit 1
+          }
+
+          # A candidate is a superseded build of a version the registries still
+          # publish: same version prefix, a commit none of them reference any
+          # more. Everything else — a version no registry knows about, a key
+          # that doesn't parse, an upload too recent to have been indexed — is
+          # reported and left alone.
+          cutoff="$(date -u -d "$MIN_AGE_DAYS days ago" +'%Y-%m-%d %H:%M')"
+          awk -v bucket="${{ env.S3_BUCKET }}/" -v cutoff="$cutoff" '
+            FILENAME == "prune/referenced-builds.tsv" { build[$1 "\t" $2] = 1; published[$1] = 1; next }
+            FILENAME == "prune/referenced-names.txt"  { referenced[$1] = 1; next }
+            {
+              at = $1 " " $2
+              size = $3
+              start = index($0, bucket)
+              if (start == 0) next
+              key = substr($0, start + length(bucket))
+
+              slash = index(key, "/")
+              name = substr(key, slash + 1)
+              version = substr(key, 2, slash - 2)
+              prefix = "startos-" version "-"
+              hash = substr(name, length(prefix) + 1, 7)
+              suffix = substr(name, length(prefix) + 8)
+
+              if (substr(key, 1, 1) != "v" || slash < 3 || index(name, "/") > 0) keep = "unrecognised key"
+              else if (index(name, prefix) != 1 || hash !~ /^[0-9a-f]{7}$/ ||
+                       suffix !~ /^[A-Za-z0-9._~-]*_[A-Za-z0-9_-]+\.(iso|squashfs|img)(\.gz)?$/) keep = "unrecognised name"
+              else if (!(version in published)) keep = "version not in any registry"
+              else if ((version "\t" hash) in build) keep = "referenced"
+              else if (name in referenced) keep = "referenced"
+              else if (at >= cutoff) keep = "newer than " cutoff
+              else keep = ""
+
+              if (keep == "") print size "\t" key > "prune/candidates.tsv"
+              else print keep "\t" size "\t" key > "prune/kept.tsv"
+            }
+          ' prune/referenced-builds.tsv prune/referenced-names.txt prune/inventory.txt
+          touch prune/candidates.tsv prune/kept.tsv
+          cut -f2 prune/candidates.tsv | sort > prune/candidate-keys.txt
+
+          # The requirement, re-derived by asset name instead of by (version,
+          # commit): nothing a registry references is in the delete set. And a
+          # bucket-side check that the keep set describes this bucket at all.
+          # Both mean this step is wrong, so both fail rather than skip.
+          awk -F'\t' '{ print $2 }' prune/candidates.tsv | sed 's|^v[^/]*/||' | sort -u > prune/candidate-names.txt
+          if [ -n "$(comm -12 prune/candidate-names.txt prune/referenced-names.txt)" ]; then
+            echo "::error::refusing to prune — these are referenced by a registry:"
+            comm -12 prune/candidate-names.txt prune/referenced-names.txt | sed 's/^/  /'
+            exit 1
+          fi
+          sed 's|^.*/||' prune/inventory.txt | sort -u > prune/inventory-names.txt
+          if [ -z "$(comm -12 prune/inventory-names.txt prune/referenced-names.txt)" ]; then
+            echo "::error::no referenced image was found in ${{ env.S3_BUCKET }} — refusing to prune"
+            exit 1
+          fi
+
+          # Totals, not the listing: the referenced tail grows without bound,
+          # and the number worth reading is how much sits outside every index.
+          echo "Keeping $(wc -l < prune/kept.tsv) objects:"
+          awk -F'\t' '
+            { objects[$1]++; bytes[$1] += $2 }
+            END {
+              for (reason in objects)
+                printf "%7d  %10.1f GiB  %s\n", objects[reason], bytes[reason] / 1073741824, reason
+            }
+          ' prune/kept.tsv | sort -rn
+
+          count="$(wc -l < prune/candidate-keys.txt)"
+          bytes="$(awk -F'\t' '{ total += $1 } END { print total + 0 }' prune/candidates.tsv)"
+          if [ "$count" -eq 0 ]; then
+            echo "::notice::nothing to prune"
+            exit 0
+          fi
+          echo "Pruning $count superseded images ($(numfmt --to=iec "$bytes")):"
+          sed 's/^/  /' prune/candidate-keys.txt
+
+          sed "s|^|${{ env.S3_BUCKET }}/|" prune/candidate-keys.txt | xargs -r -d '\n' -n 100 s3cmd del
+
+          # s3cmd's batch delete prints the keys it sent rather than the ones the
+          # server accepted, and returns 0 either way — so confirm by listing.
+          s3cmd ls --recursive "${{ env.S3_BUCKET }}/" | sed "s|^.*${{ env.S3_BUCKET }}/||" | sort > prune/remaining.txt
+          if [ -n "$(comm -12 prune/candidate-keys.txt prune/remaining.txt)" ]; then
+            echo "::error::these were not deleted:"
+            comm -12 prune/candidate-keys.txt prune/remaining.txt | sed 's/^/  /'
+            exit 1
+          fi
+          echo "::notice::pruned $count superseded images ($(numfmt --to=iec "$bytes")) from ${{ env.S3_BUCKET }}"
