@@ -19,7 +19,8 @@ use std::io::Read;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
-use futures::future::join_all;
+use futures::FutureExt;
+use futures::future::select_all;
 use nix::sys::stat;
 use patch_db::TypedDbWatch;
 use patch_db::json_ptr::JsonPointer;
@@ -126,11 +127,14 @@ async fn inhibit_across_backups(
     }
 }
 
+/// Returns as soon as any one device stops being readable: there is no telling
+/// which of them the firmware reports presses on, so a partial failure has to
+/// count as a failure.
 async fn read_power_key(devices: Vec<PathBuf>, ctx: RpcContext) {
-    join_all(
+    select_all(
         devices
             .into_iter()
-            .map(|path| read_device(path, ctx.clone())),
+            .map(|path| read_device(path, ctx.clone()).boxed()),
     )
     .await;
 }
@@ -187,7 +191,7 @@ async fn on_power_key(ctx: &RpcContext) {
             // contended sound device cannot stall the reader.
             tokio::spawn(async { BEP.play().await.log_err() });
         }
-        // logind is not inhibited and is already powering the server off.
+        // No backup left to protect.
         Ok(false) => (),
         Err(e) => {
             tracing::error!("could not defer the shutdown for the running backup: {e}");

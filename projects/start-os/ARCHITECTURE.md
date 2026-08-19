@@ -92,7 +92,9 @@ erasure-coded FUSE filesystem used for StartOS backups. It builds to the
   for the backup rather than one that interrupts it. The inhibitor names
   `handle-power-key` and not `shutdown` deliberately — blocking `shutdown`
   would also block the power-off StartOS asks systemd for at the end of its own
-  graceful teardown.
+  graceful teardown. Best-effort in one direction only: if logind is
+  unreachable, or no udev `power-switch` device can be read, `startd` takes no
+  inhibitor and the key keeps working exactly as it does today.
 
 ## OS image packaging
 

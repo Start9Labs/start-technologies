@@ -527,6 +527,6 @@ export default class SystemGeneralComponent {
   }
 
   private async restart() {
-    this.power.power('restart')
+    this.power.power('restart').subscribe()
   }
 }

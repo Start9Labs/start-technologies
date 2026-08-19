@@ -165,9 +165,9 @@ async fn begin_shutdown(ctx: &RpcContext, restart: bool, wait: bool) {
 }
 
 /// Records `action` as the deferred power action if a backup is underway, and
-/// reports whether it did. Used where there is nothing to fall back to — the
-/// power key, where logind is the one powering the server off when no backup is
-/// running.
+/// reports whether it did. Unlike [`defer_or_begin`] it never performs the
+/// action, which is what the power key needs: with no backup to wait for, the
+/// press is logind's to act on.
 pub async fn defer_until_backup_complete(
     ctx: &RpcContext,
     action: PowerAction,
@@ -256,14 +256,20 @@ pub async fn run_deferred_power_actions(ctx: RpcContext) {
                 continue;
             }
         };
+        // Still `after_backup`, so a backup that started since the take is
+        // waited for in turn rather than interrupted.
+        let params = ShutdownParams {
+            wait: false,
+            after_backup: true,
+        };
         let performed = match action {
             Some(PowerAction::Restart) => {
                 tracing::info!("backup finished; carrying out the deferred restart");
-                restart(ctx.clone(), ShutdownParams::default()).await
+                restart(ctx.clone(), params).await
             }
             Some(PowerAction::Shutdown) => {
                 tracing::info!("backup finished; carrying out the deferred shutdown");
-                shutdown(ctx.clone(), ShutdownParams::default()).await
+                shutdown(ctx.clone(), params).await
             }
             None => continue,
         };

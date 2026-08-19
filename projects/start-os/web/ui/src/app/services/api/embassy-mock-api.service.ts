@@ -1020,7 +1020,6 @@ export class MockApiService extends ApiService {
       this.backingUp = false
       if (this.deferredPowerAction) {
         const action = this.deferredPowerAction
-        await this.deferPower(null)
         await this[action === 'restart' ? 'restartServer' : 'shutdownServer'](
           {},
         )

@@ -30,7 +30,32 @@ import { HeaderComponent } from './components/header/header.component'
       </tui-scrollbar>
     </main>
     <app-tabs />
-    @if (update(); as update) {
+    @if (deferredPower(); as action) {
+      <tui-action-bar *tuiPopup="true">
+        <span tuiCell="m">
+          <tui-icon icon="@tui.power" />
+          @if (action === 'restart') {
+            {{
+              'A backup is running. Your server will restart when it finishes.'
+                | i18n
+            }}
+          } @else {
+            {{
+              'A backup is running. Your server will shut down when it finishes.'
+                | i18n
+            }}
+          }
+        </span>
+        <button
+          tuiButton
+          size="s"
+          appearance="secondary"
+          (click)="cancelDeferredPower()"
+        >
+          {{ 'Cancel' | i18n }}
+        </button>
+      </tui-action-bar>
+    } @else if (update(); as update) {
       <tui-action-bar *tuiPopup="bar()">
         <span tuiCell="m">
           @let leaf = update.overall | leafProgress;
@@ -76,31 +101,6 @@ import { HeaderComponent } from './components/header/header.component'
         </span>
         <button tuiButton size="s" appearance="primary" (click)="restart()">
           {{ 'Restart' | i18n }}
-        </button>
-      </tui-action-bar>
-    } @else if (deferredPower(); as action) {
-      <tui-action-bar *tuiPopup="true">
-        <span tuiCell="m">
-          <tui-icon icon="@tui.power" />
-          @if (action === 'restart') {
-            {{
-              'A backup is running. Your server will restart when it finishes.'
-                | i18n
-            }}
-          } @else {
-            {{
-              'A backup is running. Your server will shut down when it finishes.'
-                | i18n
-            }}
-          }
-        </span>
-        <button
-          tuiButton
-          size="s"
-          appearance="secondary"
-          (click)="cancelDeferredPower()"
-        >
-          {{ 'Cancel' | i18n }}
         </button>
       </tui-action-bar>
     }
@@ -210,8 +210,11 @@ export class PortalComponent {
   }
 
   restart() {
-    this.bar.set(false)
-    this.power.power('restart')
+    // Only stop offering the restart once one is actually under way — a
+    // deferred or dismissed one leaves the reason for this bar in place.
+    this.power.power('restart').subscribe(deferred => {
+      if (!deferred) this.bar.set(false)
+    })
   }
 
   cancelDeferredPower() {

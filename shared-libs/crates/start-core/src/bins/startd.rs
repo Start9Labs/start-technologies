@@ -64,6 +64,22 @@ async fn inner_main(
         )
         .await?;
 
+        // A backup, a deferred power action and the shutting-down flags all die
+        // with the process that set them, and only `init` — which this branch
+        // skips — would otherwise clear them. A stale backup in particular would
+        // leave the power key inhibited with nothing left to release it. Before
+        // the RPC surface goes live, so nothing races the reset.
+        ctx.db
+            .mutate(|db| {
+                let status = db.as_public_mut().as_server_info_mut().as_status_info_mut();
+                status.as_backup_progress_mut().ser(&None)?;
+                status.as_deferred_power_action_mut().ser(&None)?;
+                status.as_shutting_down_mut().ser(&false)?;
+                status.as_restarting_mut().ser(&false)
+            })
+            .await
+            .result?;
+
         server.serve_ui_for(ctx.clone());
         handle.complete();
 
@@ -71,21 +87,6 @@ async fn inner_main(
     };
 
     let (rpc_ctx, shutdown) = async {
-        // A backup and a deferred power action both die with the process that
-        // was running them, and only `init` — which a startd restart within a
-        // boot skips — would otherwise clear them. A stale backup in particular
-        // would leave the power button inhibited with nothing left to release
-        // it.
-        rpc_ctx
-            .db
-            .mutate(|db| {
-                let status = db.as_public_mut().as_server_info_mut().as_status_info_mut();
-                status.as_backup_progress_mut().ser(&None)?;
-                status.as_deferred_power_action_mut().ser(&None)
-            })
-            .await
-            .result?;
-
         crate::hostname::sync_hostname(&rpc_ctx.account.peek(|a| a.hostname.hostname.clone()))
             .await?;
 

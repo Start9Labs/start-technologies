@@ -153,7 +153,7 @@ export class HeaderMenuComponent {
   async promptPower(action: T.PowerAction) {
     // During a backup the choice on offer is a different one, and asking it is
     // confirmation enough.
-    if (this.power.backingUp()) return this.power.power(action)
+    if (this.power.backingUp()) return this.power.power(action).subscribe()
 
     this.dialog
       .openConfirm(
@@ -180,7 +180,7 @@ export class HeaderMenuComponent {
             },
       )
       .pipe(filter(Boolean))
-      .subscribe(() => this.power.power(action))
+      .subscribe(() => this.power.power(action).subscribe())
   }
 
   logout() {
