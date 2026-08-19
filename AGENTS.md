@@ -104,6 +104,11 @@ What `### Environment` carries, by project:
 - `brochure` — page URL, browser and OS, and the registry being browsed
 - `start-docs` — page URL, which book, and the source file under `projects/<product>/docs/`
 
+## Opening PRs
+
+- **Label every PR with the project(s) it modifies.** Nothing labels it for you: [`issue-triage.yml`](.github/workflows/issue-triage.yml) is bound to `issues:` alone, and no workflow reads a PR's diff. Pass them when you open it — `gh pr create --label StartOS --label StartSDK` — or add them after with `gh pr edit <n> --add-label repo`. Take them from the same set as an issue, listed under [Filing issues](#filing-issues); `gh` fails on a label the repo doesn't have, and the casing is matched literally.
+- **The diff decides, so a PR takes as many labels as it needs.** An issue carries the one product a defect surfaces in; a PR carries every project whose files it changes, because that is what tells a reviewer and a release what a merge can break. Build, CI, and release tooling — `.github/`, `build/`, `scripts/`, `Makefile`, `debian/`, `apt/`, and the repo-root docs — is `repo`. A `shared-libs/` change has no label of its own: label the products whose behavior it changes.
+
 ## Code style
 
 - **Comment only what the code can't say for itself.** Add a comment for a non-obvious mechanism, a deviation from convention, or a load-bearing subtlety — not to restate what the code plainly does. Try the rename or the restructure that would make the comment unnecessary first; it is almost always available, and it is always better.

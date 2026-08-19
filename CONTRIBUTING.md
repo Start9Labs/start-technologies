@@ -234,6 +234,8 @@ docs: update CONTRIBUTING.md with style guidelines
 refactor(sdk): simplify package validation logic
 ```
 
+**Label a PR with the project(s) it modifies**, so a reviewer can see what a merge can break. Nothing applies them for you; the label set and the rule are in [AGENTS.md § Opening PRs](AGENTS.md#opening-prs).
+
 ## Licensing
 
 This repository is MIT. By contributing you agree your work is licensed under
