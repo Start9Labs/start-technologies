@@ -805,7 +805,7 @@ export default {
   912: 'Les données StartOS du disque de données sélectionné se trouvent sur une partition aux côtés d’une ancienne installation de l’OS et ne peuvent pas être conservées sur cet appareil. Pour effacer le disque et repartir à zéro, choisissez « Écraser ».',
   913: 'Les données StartOS du disque de données sélectionné occupent l’intégralité du disque : l’OS ne peut donc pas être installé sur le même disque sans les effacer. Pour conserver vos données, sélectionnez un autre disque pour l’OS. Pour les effacer, choisissez « Écraser ».',
   914: 'Connexion réussie, mais le serveur a rejeté la nouvelle clé de l’appareil. Réessayez.',
-  915: 'Une sauvegarde est en cours. Éteindre maintenant peut corrompre la sauvegarde du service en cours d’écriture.',
+  915: 'Une sauvegarde est en cours. L’interrompre maintenant peut corrompre la sauvegarde du service en cours d’écriture.',
   916: 'Attendre la fin de la sauvegarde',
   917: 'Éteindre maintenant',
   918: 'Une sauvegarde est en cours. Votre serveur redémarrera une fois celle-ci terminée.',

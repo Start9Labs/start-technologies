@@ -120,8 +120,6 @@ async fn inner_main(
                 .expect("send shutdown signal");
         });
 
-        // Both run until this block returns with the shutdown message, at which
-        // point their handles drop and abort them.
         let deferred_power_ctx = rpc_ctx.clone();
         let _deferred_power = NonDetachingJoinHandle::from(tokio::spawn(
             crate::shutdown::run_deferred_power_actions(deferred_power_ctx),

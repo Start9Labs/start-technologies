@@ -146,7 +146,7 @@ pub struct ShutdownParams {
     after_backup: bool,
 }
 
-const STATUS_INFO_PTR: &str = "/public/serverInfo/statusInfo";
+pub(crate) const STATUS_INFO_PTR: &str = "/public/serverInfo/statusInfo";
 /// How long to leave a failing patch-db alone before trying to take the
 /// deferred action again.
 const TAKE_RETRY: Duration = Duration::from_secs(30);
@@ -276,6 +276,12 @@ pub async fn run_deferred_power_actions(ctx: RpcContext) {
         if let Err(e) = performed {
             tracing::error!("deferred power action failed: {e}");
             tracing::debug!("{e:?}");
+            // Put it back rather than losing it, and give whatever failed room
+            // to recover before trying again.
+            if let Some(action) = action {
+                defer_or_begin(&ctx, action, true).await.log_err();
+            }
+            tokio::time::sleep(TAKE_RETRY).await;
         }
     }
 }

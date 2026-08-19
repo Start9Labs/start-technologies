@@ -20,8 +20,9 @@ export class PowerService {
    * Every in-app route to a restart or shutdown goes through here, so that none
    * of them can interrupt a backup: during one the user is offered the choice
    * of waiting for it, and the server keeps whichever choice is made. Emits
-   * once the server has been asked, `true` if the action was deferred; a
-   * dismissed prompt asks for nothing and so emits nothing.
+   * once the server has been asked, `true` if the user chose to wait — not what
+   * the server then did, which the caller cannot see. A dismissed prompt asks
+   * for nothing and so emits nothing.
    */
   power(action: T.PowerAction): Observable<boolean> {
     if (!this.backingUp()) return this.run(action, false)

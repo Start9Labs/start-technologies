@@ -50,7 +50,7 @@ import { HeaderComponent } from './components/header/header.component'
           tuiButton
           size="s"
           appearance="secondary"
-          (click)="cancelDeferredPower()"
+          (click)="power.cancel()"
         >
           {{ 'Cancel' | i18n }}
         </button>
@@ -192,7 +192,7 @@ import { HeaderComponent } from './components/header/header.component'
 })
 export class PortalComponent {
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
-  private readonly power = inject(PowerService)
+  protected readonly power = inject(PowerService)
 
   readonly mobile = inject(WA_IS_MOBILE)
   readonly plugins = inject(PluginsService)
@@ -215,9 +215,5 @@ export class PortalComponent {
     this.power.power('restart').subscribe(deferred => {
       if (!deferred) this.bar.set(false)
     })
-  }
-
-  cancelDeferredPower() {
-    this.power.cancel()
   }
 }

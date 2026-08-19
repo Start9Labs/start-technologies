@@ -87,14 +87,12 @@ erasure-coded FUSE filesystem used for StartOS backups. It builds to the
 - `startos-restart.service` — restart handling.
 - The physical power key is systemd-logind's (`HandlePowerKey=poweroff`),
   except while a backup is running: `startd` then holds a logind
-  `handle-power-key` block inhibitor and reads the key itself
-  (`start-core/src/power_key.rs`), turning a press into a shutdown that waits
-  for the backup rather than one that interrupts it. The inhibitor names
-  `handle-power-key` and not `shutdown` deliberately — blocking `shutdown`
-  would also block the power-off StartOS asks systemd for at the end of its own
-  graceful teardown. Best-effort in one direction only: if logind is
-  unreachable, or no udev `power-switch` device can be read, `startd` takes no
-  inhibitor and the key keeps working exactly as it does today.
+  `handle-power-key` block inhibitor and reads the key itself, turning a press
+  into a shutdown that waits for the backup rather than one that interrupts it.
+  It is best-effort — when the inhibitor cannot be taken or no `power-switch`
+  device can be read, the key stays logind's — so treat it as one defence and
+  not a guarantee. See `start-core/src/power_key.rs` for why it inhibits
+  `handle-power-key` rather than `shutdown`.
 
 ## OS image packaging
 

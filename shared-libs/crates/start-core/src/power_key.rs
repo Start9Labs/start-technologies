@@ -7,13 +7,13 @@
 //! press still means something: it records a deferred shutdown, which the web
 //! UI surfaces and which StartOS carries out once the backup finishes.
 //!
-//! The inhibitor names `handle-power-key` and not `shutdown` on purpose —
-//! blocking `shutdown` would also block the power-off StartOS itself asks
-//! systemd for at the end of a graceful teardown.
-//!
-//! Failure gives the button back to logind rather than taking it away: the
-//! inhibitor is only ever held while the key is also being read, so a server
-//! whose key StartOS cannot see keeps powering off exactly as it does today.
+//! It names `handle-power-key` and not `shutdown` on purpose — blocking
+//! `shutdown` would also block the power-off StartOS itself asks systemd for at
+//! the end of a graceful teardown. Both the inhibitor and the readers live for
+//! one backup and are set up again for the next, so a device that came or went
+//! in between is picked up and one that failed does not stand the feature down
+//! for good. Failure gives the button back to logind rather than taking it
+//! away.
 
 use std::io::Read;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
@@ -31,11 +31,13 @@ use zbus::zvariant::OwnedFd;
 use crate::context::RpcContext;
 use crate::db::model::public::{PowerAction, ServerStatus};
 use crate::prelude::*;
-use crate::shutdown::defer_until_backup_complete;
+use crate::shutdown::{STATUS_INFO_PTR, defer_until_backup_complete};
 use crate::sound::BEP;
 
 const EV_KEY: u16 = 0x01;
-const KEY_POWER: usize = 116;
+/// Both codes logind acts on, handled by one arm of its own `case` — matching
+/// that is what keeps a press meaning here what it would have meant to logind.
+const KEY_POWER: [u16; 2] = [116, 356];
 const KEY_PRESSED: i32 = 1;
 
 const EVENT_SIZE: usize = std::mem::size_of::<libc::input_event>();
@@ -44,7 +46,6 @@ const EVENT_SIZE: usize = std::mem::size_of::<libc::input_event>();
 /// always the last 8 bytes.
 const EVENT_TAIL: usize = EVENT_SIZE - 8;
 
-const STATUS_INFO_PTR: &str = "/public/serverInfo/statusInfo";
 const POWER_SWITCH_TAG_DIR: &str = "/run/udev/tags/power-switch";
 
 #[proxy(
@@ -58,33 +59,6 @@ trait Login1Manager {
 }
 
 pub async fn watch_power_key(ctx: RpcContext) {
-    let devices = match power_key_devices().await {
-        Ok(devices) => devices,
-        Err(e) => {
-            tracing::error!("could not enumerate input devices: {e}");
-            tracing::debug!("{e:?}");
-            return;
-        }
-    };
-    if devices.is_empty() {
-        tracing::info!(
-            "no power-switch input device, so the power button stays systemd-logind's during a backup"
-        );
-        return;
-    }
-    // Whichever half stops, both do: an inhibitor outliving the reader would be
-    // a power button that does nothing at all during a backup.
-    tokio::select! {
-        _ = inhibit_while_backing_up(ctx.clone()) => {}
-        _ = read_power_key(devices, ctx) => {}
-    }
-    tracing::warn!("no longer handling the power button; systemd-logind has it back");
-}
-
-/// Holds a logind `handle-power-key` lock for exactly as long as a backup is
-/// running, so that a press during one reaches [`read_power_key`] instead of
-/// powering the server off.
-async fn inhibit_while_backing_up(ctx: RpcContext) {
     let manager = match logind().await {
         Ok(manager) => manager,
         Err(e) => {
@@ -98,13 +72,14 @@ async fn inhibit_while_backing_up(ctx: RpcContext) {
         .watch(STATUS_INFO_PTR.parse::<JsonPointer>().unwrap())
         .await
         .typed::<ServerStatus>();
-    if let Err(e) = inhibit_across_backups(&manager, &mut watch).await {
-        tracing::error!("stopped inhibiting the power button during backups: {e}");
+    if let Err(e) = guard_backups(&ctx, &manager, &mut watch).await {
+        tracing::error!("stopped guarding backups from the power button: {e}");
         tracing::debug!("{e:?}");
     }
 }
 
-async fn inhibit_across_backups(
+async fn guard_backups(
+    ctx: &RpcContext,
     manager: &Login1ManagerProxy<'_>,
     watch: &mut TypedDbWatch<ServerStatus>,
 ) -> Result<(), Error> {
@@ -112,25 +87,48 @@ async fn inhibit_across_backups(
         watch
             .wait_for(|status: &ServerStatus| status.backup_progress.is_some())
             .await?;
-        let lock = manager
-            .inhibit(
-                "handle-power-key",
-                "StartOS",
-                "A backup is running",
-                "block",
-            )
-            .await?;
+        // Enumerated per backup rather than once: udev tags every key-capable
+        // device, so the set changes whenever a keyboard is plugged in.
+        match power_key_devices().await {
+            Ok(devices) if !devices.is_empty() => {
+                let lock = manager
+                    .inhibit(
+                        "handle-power-key",
+                        "StartOS",
+                        "A backup is running",
+                        "block",
+                    )
+                    .await?;
+                {
+                    let backup_over =
+                        watch.wait_for(|status: &ServerStatus| status.backup_progress.is_none());
+                    tokio::pin!(backup_over);
+                    tokio::select! {
+                        over = &mut backup_over => { over?; }
+                        // Never inhibit a key nobody is reading.
+                        _ = read_power_key(devices, ctx) => tracing::warn!(
+                            "stopped reading the power key for this backup; systemd-logind has it back"
+                        ),
+                    }
+                }
+                drop(lock);
+            }
+            Ok(_) => tracing::info!("no power-switch input device to read the power key from"),
+            Err(e) => {
+                tracing::error!("could not enumerate input devices: {e}");
+                tracing::debug!("{e:?}");
+            }
+        }
         watch
             .wait_for(|status: &ServerStatus| status.backup_progress.is_none())
             .await?;
-        drop(lock);
     }
 }
 
 /// Returns as soon as any one device stops being readable: there is no telling
 /// which of them the firmware reports presses on, so a partial failure has to
 /// count as a failure.
-async fn read_power_key(devices: Vec<PathBuf>, ctx: RpcContext) {
+async fn read_power_key(devices: Vec<PathBuf>, ctx: &RpcContext) {
     select_all(
         devices
             .into_iter()
@@ -186,12 +184,10 @@ async fn on_power_key(ctx: &RpcContext) {
     match defer_until_backup_complete(ctx, PowerAction::Shutdown).await {
         Ok(true) => {
             tracing::info!("power key pressed during a backup; shutting down once it finishes");
-            // The only feedback available to whoever is standing at the server,
-            // whose press otherwise appears to have done nothing. Spawned so a
-            // contended sound device cannot stall the reader.
+            // The only feedback whoever pressed it has. Spawned so a contended
+            // sound device cannot stall the reader.
             tokio::spawn(async { BEP.play().await.log_err() });
         }
-        // No backup left to protect.
         Ok(false) => (),
         Err(e) => {
             tracing::error!("could not defer the shutdown for the running backup: {e}");
@@ -230,7 +226,7 @@ fn device_id(rdev: u64) -> String {
 fn is_power_key_press(event: &[u8]) -> bool {
     let tail = &event[EVENT_TAIL..];
     u16::from_ne_bytes([tail[0], tail[1]]) == EV_KEY
-        && u16::from_ne_bytes([tail[2], tail[3]]) as usize == KEY_POWER
+        && KEY_POWER.contains(&u16::from_ne_bytes([tail[2], tail[3]]))
         && i32::from_ne_bytes([tail[4], tail[5], tail[6], tail[7]]) == KEY_PRESSED
 }
 
@@ -250,8 +246,12 @@ mod test {
     fn recognizes_a_power_key_press() {
         let mut event = [0u8; EVENT_SIZE];
         event[EVENT_TAIL..EVENT_TAIL + 2].copy_from_slice(&EV_KEY.to_ne_bytes());
-        event[EVENT_TAIL + 2..EVENT_TAIL + 4].copy_from_slice(&(KEY_POWER as u16).to_ne_bytes());
+        event[EVENT_TAIL + 2..EVENT_TAIL + 4].copy_from_slice(&KEY_POWER[0].to_ne_bytes());
         event[EVENT_TAIL + 4..].copy_from_slice(&KEY_PRESSED.to_ne_bytes());
+        assert!(is_power_key_press(&event));
+
+        // KEY_POWER2, which logind acts on identically.
+        event[EVENT_TAIL + 2..EVENT_TAIL + 4].copy_from_slice(&KEY_POWER[1].to_ne_bytes());
         assert!(is_power_key_press(&event));
 
         // A release, which must not power anything off.

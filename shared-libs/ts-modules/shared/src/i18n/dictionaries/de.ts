@@ -805,7 +805,7 @@ export default {
   912: 'Die StartOS-Daten auf dem ausgewählten Datenlaufwerk befinden sich auf einer Partition neben einer älteren OS-Installation und können auf diesem Gerät nicht beibehalten werden. Um das Laufwerk zu löschen und neu zu beginnen, wählen Sie "Überschreiben".',
   913: 'Die StartOS-Daten auf dem ausgewählten Datenlaufwerk erstrecken sich über das gesamte Laufwerk, sodass das OS nicht auf demselben Laufwerk installiert werden kann, ohne sie zu löschen. Um Ihre Daten zu behalten, wählen Sie ein anderes OS-Laufwerk. Um sie zu löschen, wählen Sie "Überschreiben".',
   914: 'Anmeldung erfolgreich, aber der Server hat den neuen Geräteschlüssel abgelehnt. Versuchen Sie es erneut.',
-  915: 'Derzeit läuft eine Sicherung. Ein Ausschalten kann jetzt die Sicherung des gerade geschriebenen Dienstes beschädigen.',
+  915: 'Derzeit läuft eine Sicherung. Eine Unterbrechung kann jetzt die Sicherung des gerade geschriebenen Dienstes beschädigen.',
   916: 'Auf Abschluss der Sicherung warten',
   917: 'Jetzt herunterfahren',
   918: 'Eine Sicherung läuft. Ihr Server wird nach deren Abschluss neu gestartet.',

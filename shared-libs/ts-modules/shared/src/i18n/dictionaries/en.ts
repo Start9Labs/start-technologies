@@ -806,7 +806,7 @@ export const ENGLISH: Record<string, number> = {
   'The StartOS data on the selected data drive is stored on a partition alongside an older OS installation, and cannot be preserved on this device. To erase the drive and start fresh, choose "Overwrite".': 912,
   'The StartOS data on the selected data drive spans the entire drive, so the OS cannot be installed to the same drive without erasing it. To preserve your data, select a different OS drive. To erase it, choose "Overwrite".': 913,
   'Login succeeded, but the server rejected the new device key. Try again.': 914,
-  'A backup is currently running. Powering down now can corrupt the backup of the service being written.': 915,
+  'A backup is currently running. Interrupting it now can corrupt the backup of the service being written.': 915,
   'Wait for backup to complete': 916,
   'Shut down now': 917,
   'A backup is running. Your server will restart when it finishes.': 918,

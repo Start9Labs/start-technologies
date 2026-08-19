@@ -49,4 +49,4 @@ StartOS does not currently include built-in support for UPS monitoring (USB or n
 If your area has frequent or long outages, size your UPS to give yourself time to shut down manually from the StartOS UI before the battery runs out.
 
 > [!NOTE]
-> If a backup is running when you do, StartOS offers to wait for the backup to finish and takes that option if you do not choose within 30 seconds — which on battery is rarely what you want. Choose `Shut down now` instead.
+> If a backup is running when you do, StartOS offers to wait for the backup to finish and takes that option if you do not choose within 30 seconds — which on battery is rarely what you want. Choose `Shut down now` instead. The server's physical power button always waits for the backup, so on battery use the web UI rather than the button.
