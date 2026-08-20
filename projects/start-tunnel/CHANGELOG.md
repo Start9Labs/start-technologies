@@ -47,12 +47,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- **Reading the tunnel's public IP address over UPnP now requires an authorized
-  device.** The `GetExternalIPAddress` action answered any device that could
-  reach the tunnel's UPnP control endpoint, including one whose **Auto-publish**
-  permission was off. It now answers only devices allowed to create automatic
-  forwards — the same permission `AddPortMapping` already required.
-
 - **The UPnP device description no longer identifies the tunnel to web
   pages.** The description endpoint answered anyone who could reach it, and it
   names the product ("StartTunnel") plus a stable identifier derived from the

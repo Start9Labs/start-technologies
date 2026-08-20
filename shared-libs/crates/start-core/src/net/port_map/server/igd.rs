@@ -420,13 +420,11 @@ async fn get_generic_mapping<B: GatewayBackend + ?Sized>(
 }
 
 async fn get_external_ip<B: GatewayBackend + ?Sized>(backend: &B, peer: Ipv4Addr) -> Response {
-    // Same gate as AddPortMapping. The rebinding oracle this read would
-    // otherwise be is closed at the door by the `Host` check in
-    // `handle_control`; requiring authorization here is defense-in-depth,
-    // shrinking any residual disclosure to devices the user explicitly trusted.
-    if !backend.is_known_client(peer).await {
-        return fault(606, "Action not authorized");
-    }
+    // Answered for any client, as the standard specifies and as clients expect
+    // during discovery. Authorization would buy nothing: a client reaches this
+    // gateway through it, so the address is one it can determine for itself.
+    // The rebinding gate in `handle_control` is what keeps a web page from
+    // reading it on a client's behalf.
     match backend.external_ipv4(peer).await {
         Some(ip) => ok(
             "GetExternalIPAddress",
@@ -765,6 +763,75 @@ mod tests {
         fn sni(&self) -> Option<&Arc<crate::tunnel::forward::sni::SniDemux>> {
             None
         }
+    }
+
+    /// Backend that recognizes no peer, for the actions that answer regardless.
+    struct UnknownPeerStub;
+    impl GatewayBackend for UnknownPeerStub {
+        fn add_forward(
+            &self,
+            _: SocketAddrV4,
+            _: SocketAddrV4,
+            _: u16,
+            _: Ipv4Addr,
+            _: Option<u32>,
+        ) -> impl std::future::Future<Output = Result<(), u16>> + Send {
+            async { Ok(()) }
+        }
+        fn remove_forward(
+            &self,
+            _: Ipv4Addr,
+            _: u16,
+        ) -> impl std::future::Future<Output = ()> + Send {
+            async {}
+        }
+        fn remove_forward_by_source(
+            &self,
+            _: SocketAddrV4,
+            _: Ipv4Addr,
+        ) -> impl std::future::Future<Output = bool> + Send {
+            async { false }
+        }
+        fn external_ipv4(
+            &self,
+            _: Ipv4Addr,
+        ) -> impl std::future::Future<Output = Option<Ipv4Addr>> + Send {
+            async { Some(Ipv4Addr::new(203, 0, 113, 1)) }
+        }
+        fn is_known_client(&self, _: Ipv4Addr) -> impl std::future::Future<Output = bool> + Send {
+            async { false }
+        }
+        fn sni(&self) -> Option<&Arc<crate::tunnel::forward::sni::SniDemux>> {
+            None
+        }
+    }
+
+    fn external_ip_body() -> String {
+        format!(
+            r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+<s:Body><u:GetExternalIPAddress xmlns:u="{WANIP_SERVICE}"/></s:Body>
+</s:Envelope>"#
+        )
+    }
+
+    async fn body_string(resp: Response) -> String {
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
+    /// Deliberate: clients read the external IP during discovery, before they
+    /// are anything this gateway would map for, and refusing them there is what
+    /// makes a client report the gateway unusable.
+    #[tokio::test]
+    async fn external_ip_answers_a_client_the_gateway_would_not_map_for() {
+        let peer = Ipv4Addr::new(192, 168, 1, 5);
+        let headers = host_headers("192.168.1.1:49001");
+        let resp = handle_control(&UnknownPeerStub, peer, &headers, &external_ip_body()).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(body_string(resp).await.contains("203.0.113.1"));
     }
 
     fn status_info_body() -> String {
