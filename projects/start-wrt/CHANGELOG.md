@@ -41,7 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recognize an Internet Gateway Device, answers the status actions they check
   before mapping anything, and supports reading mappings back
   (`GetSpecificPortMappingEntry`/`GetGenericPortMappingEntry`) — a device sees
-  only its own. The router identifies itself as "StartWRT" to those clients. Uses the shared `start-core` PCP/IGD
+  only its own. The router identifies itself as "StartWRT" to those clients. The
+  UPnP endpoints refuse browser-shaped requests — DNS-rebinding requests and
+  blind cross-origin writes alike — so a malicious web page cannot use a LAN
+  device's browser to read the network's public IP, fingerprint the router, or
+  open that device's ports. Uses the shared `start-core` PCP/IGD
   server cores; since StartWRT has no SNI demux, the shared PCP server now
   advertises the Start9 HOSTNAME capability only on gateways that really
   implement it (StartTunnel), so StartOS clients fall back to plain forwards

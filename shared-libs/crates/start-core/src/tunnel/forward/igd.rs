@@ -144,9 +144,12 @@ async fn http_server(ctx: TunnelContext, root_desc: Arc<str>) {
     let app = Router::new()
         .route(
             ROOT_DESC_PATH,
-            get(move || serve_static(root_desc.clone(), "text/xml")),
+            get(move |headers: HeaderMap| serve_static(headers, root_desc.clone(), "text/xml")),
         )
-        .route(SCPD_PATH, get(|| serve_static(Arc::from(SCPD), "text/xml")))
+        .route(
+            SCPD_PATH,
+            get(|headers: HeaderMap| serve_static(headers, Arc::from(SCPD), "text/xml")),
+        )
         .route(CONTROL_PATH, post(control))
         .with_state(ctx.clone());
     loop {

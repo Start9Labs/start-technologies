@@ -53,6 +53,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   permission was off. It now answers only devices allowed to create automatic
   forwards — the same permission `AddPortMapping` already required.
 
+- **The UPnP device description no longer identifies the tunnel to web
+  pages.** The description endpoint answered anyone who could reach it, and it
+  names the product ("StartTunnel") plus a stable identifier derived from the
+  tunnel's WireGuard key — so a malicious website could rebind its own domain
+  to the gateway and read it from any tunneled phone or laptop's browser: a
+  cross-site tracking beacon that re-identifies a visitor behind this tunnel
+  from any network. All UPnP endpoints now refuse requests whose `Host` is not
+  an IP address, which a real UPnP client always sends and a rebinding page
+  never can. As defense-in-depth, actions that change port forwards must also
+  be named in the `SOAPAction` header (every real client sends it; a
+  cross-origin page can never attach it), so even a browser running on a
+  device that has been granted automatic port forwarding cannot be used to
+  drive forwards blind.
+
 ## [1.2.1]
 
 ### Fixed

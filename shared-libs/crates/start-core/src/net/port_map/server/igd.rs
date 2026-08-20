@@ -2,9 +2,16 @@
 //!
 //! Security model mirrors PCP: a peer can only forward to itself — the SOAP
 //! body's `NewInternalClient` is ignored and the target is forced to the
-//! requesting peer's own address.
+//! requesting peer's own address. The endpoints are HTTP, so they also defend
+//! against being driven from a victim's browser, on two fronts: every request
+//! — control and static descriptions alike — must carry an IP-literal `Host`
+//! ([`host_is_ip_literal`]), which defeats DNS rebinding (the only way a page
+//! can *read* responses); and mutating actions must be named in the
+//! `SOAPAction` header, which a cross-origin request can never carry, closing
+//! the blind-write POST a page could otherwise aim directly at a guessed
+//! gateway IP with no rebinding at all.
 
-use std::net::{Ipv4Addr, SocketAddrV4};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4};
 use std::sync::Arc;
 
 use axum::http::{HeaderMap, StatusCode, header};
@@ -211,13 +218,57 @@ pub fn render_root_desc(product: &str, uuid: &str) -> String {
 }
 
 /// Serve a static XML document with the given content type.
-pub async fn serve_static(body: Arc<str>, content_type: &'static str) -> Response {
+///
+/// Shares [`handle_control`]'s anti-rebinding `Host` gate: the device
+/// description carries the product name and a stable UUID, which a rebound
+/// page could otherwise read to fingerprint the network. Real clients fetch
+/// these documents at the IP-literal URL that SSDP advertised.
+pub async fn serve_static(
+    headers: HeaderMap,
+    body: Arc<str>,
+    content_type: &'static str,
+) -> Response {
+    if !host_is_ip_literal(&headers) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
     (
         StatusCode::OK,
         [(header::CONTENT_TYPE, content_type)],
         body.to_string(),
     )
         .into_response()
+}
+
+/// Whether the `Host` header names an IP literal rather than a DNS name.
+///
+/// A legitimate UPnP client reaches this endpoint through the control URL it
+/// read from the device description, whose host is always the gateway's own IP
+/// (SSDP advertises `http://<ip>:<port>/…`), so it sends `Host: <ip>` or
+/// `Host: <ip>:<port>`. A DNS-rebinding attacker's browser must keep the
+/// attacker's domain in `Host` — that name is what makes the response read
+/// same-origin with the malicious page — so a name-valued `Host` is the
+/// attack's signature. Requiring an IP literal closes the rebinding oracle
+/// (notably an otherwise well-known `GetExternalIPAddress` read that
+/// deanonymizes the network's public IP) without the server needing to know its
+/// own address. A missing `Host` is treated as a name (rejected): spec-
+/// compliant HTTP/1.1 clients always send one, and a browser fetch always does.
+fn host_is_ip_literal(headers: &HeaderMap) -> bool {
+    let Some(host) = headers
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+    else {
+        return false;
+    };
+    // IPv6 literal is bracketed per RFC 3986: `[::1]` or `[::1]:port`.
+    if let Some(rest) = host.strip_prefix('[') {
+        return rest
+            .split_once(']')
+            .is_some_and(|(addr, _)| addr.parse::<Ipv6Addr>().is_ok());
+    }
+    // IPv4, with an optional `:port`.
+    let addr = host.rsplit_once(':').map_or(host, |(h, _)| h);
+    addr.parse::<Ipv4Addr>().is_ok()
 }
 
 /// Dispatch a SOAP control request from `peer` to the matching IGD action.
@@ -227,7 +278,27 @@ pub async fn handle_control<B: GatewayBackend + ?Sized>(
     headers: &HeaderMap,
     body: &str,
 ) -> Response {
-    match soap_action(headers, body).as_deref() {
+    // Reject cross-origin (DNS-rebinding) requests before any action runs, so a
+    // rebound browser can neither read state (`GetExternalIPAddress`) nor mutate
+    // it (`AddPortMapping`). A real client always carries an IP-literal `Host`.
+    if !host_is_ip_literal(headers) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let action = soap_action(headers, body);
+    // The Host check stops rebinding, but a browser can still fire a "simple"
+    // cross-origin POST (no CORS preflight) straight at a guessed gateway IP,
+    // SOAP body and all — the one thing it can never attach is the SOAPAction
+    // header. So mutations must name themselves in the header (the UPnP spec
+    // mandates it; every real client complies), leaving the body fallback to
+    // the reads, whose responses a cross-origin page can't see anyway.
+    if matches!(
+        action.as_deref(),
+        Some("AddPortMapping" | "AddAnyPortMapping" | "DeletePortMapping")
+    ) && !headers.contains_key("SOAPAction")
+    {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    match action.as_deref() {
         Some("GetExternalIPAddress") => get_external_ip(backend, peer).await,
         Some("AddPortMapping") => add_mapping(backend, peer, body, false).await,
         Some("AddAnyPortMapping") => add_mapping(backend, peer, body, true).await,
@@ -349,9 +420,10 @@ async fn get_generic_mapping<B: GatewayBackend + ?Sized>(
 }
 
 async fn get_external_ip<B: GatewayBackend + ?Sized>(backend: &B, peer: Ipv4Addr) -> Response {
-    // Same gate as AddPortMapping: the SSDP layer only reveals the IGD to
-    // authorized clients, so the WAN address must not leak to everyone else
-    // through the well-known control path.
+    // Same gate as AddPortMapping. The rebinding oracle this read would
+    // otherwise be is closed at the door by the `Host` check in
+    // `handle_control`; requiring authorization here is defense-in-depth,
+    // shrinking any residual disclosure to devices the user explicitly trusted.
     if !backend.is_known_client(peer).await {
         return fault(606, "Action not authorized");
     }
@@ -618,6 +690,133 @@ mod tests {
         assert_eq!(soap_u16(&body, "NewExternalPort"), Some(443));
         assert_eq!(soap_u16(&body, "NewInternalPort"), Some(8443));
         assert_eq!(soap_u16(&body, "NoSuchArg"), None);
+    }
+
+    fn host_headers(value: &str) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        h.insert(header::HOST, value.parse().unwrap());
+        h
+    }
+
+    #[test]
+    fn host_ip_literal_accepts_real_clients_rejects_rebinding() {
+        // What SSDP advertises and real clients send back: IP literals.
+        for host in [
+            "192.168.1.1",
+            "192.168.1.1:49001",
+            "[fe80::1]",
+            "[fe80::1]:49001",
+        ] {
+            assert!(
+                host_is_ip_literal(&host_headers(host)),
+                "should accept {host}"
+            );
+        }
+        // DNS names — the rebinding signature — and a missing Host: rejected.
+        for host in ["evil.com", "evil.com:49001", "gateway.local", ""] {
+            assert!(
+                !host_is_ip_literal(&host_headers(host)),
+                "should reject {host}"
+            );
+        }
+        assert!(
+            !host_is_ip_literal(&HeaderMap::new()),
+            "should reject missing Host"
+        );
+    }
+
+    /// Backend that authorizes every peer, so a request that clears the
+    /// browser-facing gates reaches a normal SOAP response.
+    struct OpenStub;
+    impl GatewayBackend for OpenStub {
+        fn add_forward(
+            &self,
+            _: SocketAddrV4,
+            _: SocketAddrV4,
+            _: u16,
+            _: Ipv4Addr,
+            _: Option<u32>,
+        ) -> impl std::future::Future<Output = Result<(), u16>> + Send {
+            async { Ok(()) }
+        }
+        fn remove_forward(
+            &self,
+            _: Ipv4Addr,
+            _: u16,
+        ) -> impl std::future::Future<Output = ()> + Send {
+            async {}
+        }
+        fn remove_forward_by_source(
+            &self,
+            _: SocketAddrV4,
+            _: Ipv4Addr,
+        ) -> impl std::future::Future<Output = bool> + Send {
+            async { false }
+        }
+        fn external_ipv4(
+            &self,
+            _: Ipv4Addr,
+        ) -> impl std::future::Future<Output = Option<Ipv4Addr>> + Send {
+            async { Some(Ipv4Addr::new(203, 0, 113, 1)) }
+        }
+        fn is_known_client(&self, _: Ipv4Addr) -> impl std::future::Future<Output = bool> + Send {
+            async { true }
+        }
+        fn sni(&self) -> Option<&Arc<crate::tunnel::forward::sni::SniDemux>> {
+            None
+        }
+    }
+
+    fn status_info_body() -> String {
+        format!(
+            r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+<s:Body><u:GetStatusInfo xmlns:u="{WANIP_SERVICE}"/></s:Body>
+</s:Envelope>"#
+        )
+    }
+
+    #[tokio::test]
+    async fn control_blocks_browser_shaped_requests() {
+        let peer = Ipv4Addr::new(192, 168, 1, 5);
+        let body = add_port_body();
+
+        // Rebound Host (a DNS name): refused before any action runs.
+        let resp = handle_control(&OpenStub, peer, &host_headers("evil.com"), &body).await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+        // IP Host but the mutation named only in the body — exactly what a
+        // browser can send with no preflight: refused.
+        let headers = host_headers("192.168.1.1:49001");
+        let resp = handle_control(&OpenStub, peer, &headers, &body).await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+        // The same mutation with the SOAPAction header — what every real
+        // client sends — goes through.
+        let mut headers = host_headers("192.168.1.1:49001");
+        headers.insert(
+            "SOAPAction",
+            format!(r#""{WANIP_SERVICE}#AddPortMapping""#)
+                .parse()
+                .unwrap(),
+        );
+        let resp = handle_control(&OpenStub, peer, &headers, &body).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // Reads keep the body fallback: their responses are unreadable
+        // cross-origin, so a headerless read is harmless.
+        let headers = host_headers("192.168.1.1:49001");
+        let resp = handle_control(&OpenStub, peer, &headers, &status_info_body()).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn static_docs_share_the_host_gate() {
+        let doc: Arc<str> = Arc::from("<root/>");
+        let ok = serve_static(host_headers("192.168.1.1:49001"), doc.clone(), "text/xml").await;
+        assert_eq!(ok.status(), StatusCode::OK);
+        let rebound = serve_static(host_headers("evil.com"), doc, "text/xml").await;
+        assert_eq!(rebound.status(), StatusCode::FORBIDDEN);
     }
 
     #[test]

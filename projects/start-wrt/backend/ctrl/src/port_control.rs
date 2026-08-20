@@ -1247,12 +1247,15 @@ async fn run_igd(pc: Arc<PortControl>) {
     let app = Router::new()
         .route(ROOT_DESC_PATH, {
             let root_desc = root_desc.clone();
-            get(move || serve_static(root_desc.clone(), "text/xml"))
+            get(move |headers: HeaderMap| serve_static(headers, root_desc.clone(), "text/xml"))
         })
-        .route(SCPD_PATH, get(|| serve_static(Arc::from(SCPD), "text/xml")))
+        .route(
+            SCPD_PATH,
+            get(|headers: HeaderMap| serve_static(headers, Arc::from(SCPD), "text/xml")),
+        )
         .route(
             CIF_SCPD_PATH,
-            get(|| serve_static(Arc::from(CIF_SCPD), "text/xml")),
+            get(|headers: HeaderMap| serve_static(headers, Arc::from(CIF_SCPD), "text/xml")),
         )
         .route(CONTROL_PATH, post(igd_control))
         .with_state(pc);
