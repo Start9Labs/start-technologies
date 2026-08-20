@@ -75,9 +75,9 @@ function getCertificate(
   return toAuthorityName(getAcmeProvider(h, host, addSsl))
 }
 
-// The ACME authority that issues this address's certificate. Null unless all
-// three hold: the address carries TLS, StartOS terminates it, and the address
-// is a public domain whose authority is ACME rather than the local Root CA.
+// The ACME authority that issues this address's certificate, or null. A
+// service on a binding StartOS does not terminate is its own ACME client, and a
+// plaintext address has no certificate at all, so neither has an authority here.
 function getAcmeProvider(
   h: T.HostnameInfo,
   host: T.Host,

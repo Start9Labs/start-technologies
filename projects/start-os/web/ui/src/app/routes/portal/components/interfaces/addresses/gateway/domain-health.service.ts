@@ -198,9 +198,9 @@ export class DomainHealthService {
                   port: portOrRes,
                   acme: ctx.acme,
                 })
-                // A failed probe is not a pass. Report it as outstanding and
-                // unmeasured, the way the two above report theirs by returning
-                // null.
+                // A failed probe is not a pass. A bare null means the domain
+                // needs nothing, so report the failure as a probe that found
+                // nothing instead.
                 .catch(
                   (): T.CheckChallengeRes => ({ port: null, portV6: null }),
                 ),
@@ -233,9 +233,6 @@ export class DomainHealthService {
 
       const dnsPass = dnsAllPass(dns, gateway.ipInfo.wanIp, gua)
       const portOk = isRange || portAllPass(portResult, portV6Result, gua)
-      // A result is present only where the domain needs 443, and nothing on
-      // this network dials it, so the authority reaching it is the whole
-      // requirement. The address refuses every connection until it does.
       const challengeOk =
         !challenge || externalAllPass(challenge.port, challenge.portV6, gua)
 
@@ -249,6 +246,7 @@ export class DomainHealthService {
               count,
               packageId: ctx.packageId,
               addSsl: ctx.addSsl,
+              acme: ctx.acme ?? null,
               challenge,
               initialResults: { dns, portResult, portV6Result },
             }),
@@ -304,8 +302,9 @@ export class DomainHealthService {
         count,
         packageId: ctx.packageId,
         addSsl: ctx.addSsl,
-        // Whether 443 is outstanding takes a probe, and this view opens on a
-        // click without running one.
+        acme: ctx.acme ?? null,
+        // This view opens on a click and runs no probes; every section starts
+        // untested with a Test button, and it reaches no verdict.
         challenge: null,
       })
     } catch (e: any) {

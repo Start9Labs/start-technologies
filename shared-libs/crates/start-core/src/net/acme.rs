@@ -586,10 +586,10 @@ pub struct CheckChallengeParams {
 }
 
 /// Reachability of the port a certificate authority validates on, for a domain
-/// served on some other port. The domain's own port says nothing about it, and
-/// the address refuses every connection until a certificate is issued. A leg is
-/// null where it could not be probed, which is a failure to report and not a
-/// pass — the box has no IPv6 leg to probe when its gateway has no GUA.
+/// served on some other port, which the domain's own port says nothing about.
+/// A leg is null where nothing probed it: the probe errored, or — for `port_v6`
+/// — the gateway has no GUA. The caller decides what each means for its
+/// verdict.
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -604,6 +604,8 @@ pub struct CheckChallengeRes {
 ///
 /// A probe that errors is reported as an unprobed leg rather than failing the
 /// call, so a caller that adds a domain still gets its other results back.
+/// Until the first certificate issues the address answers nothing; through a
+/// renewal window it keeps serving the one it holds.
 pub async fn check_challenge(
     ctx: RpcContext,
     CheckChallengeParams {

@@ -44,8 +44,11 @@ export type DomainValidationData = {
   count: number
   packageId: string
   addSsl: boolean
-  // Probe results for port 443, where the authority validates this domain.
-  // Null where the domain does not need 443 right now: it names no ACME
+  // The ACME authority that issues this domain's certificate, if any. A domain
+  // with one needs port 443 whatever port it is served on.
+  acme: T.AcmeProvider | null
+  // Probe results for port 443. Null where nothing has probed it, or where the
+  // backend says the domain does not need it right now — it names no ACME
   // authority, it is already served there, or its certificate has life left.
   challenge: T.CheckChallengeRes | null
   initialResults?: {
@@ -340,11 +343,23 @@ export class DomainValidationComponent {
     { label: 'Address', value: this.ipv6Addr },
   ]
 
-  // The backend decides whether 443 is outstanding — it reads a certificate
-  // store the browser never sees — and the same answer both shows this section
-  // and holds `allPass` to it, so nothing here can be red beside an enabled
-  // Done.
-  readonly showChallenge = !!this.context.data.challenge
+  // No footer, so no verdict: see `showChallenge` and `allPass`.
+  readonly isManualMode = !this.context.data.initialResults
+
+  // Whether this domain has a 443 requirement at all.
+  private readonly challengeApplies =
+    !this.isRange &&
+    !!this.context.data.acme &&
+    this.context.data.port !== CHALLENGE_PORT
+  // Whether it is outstanding right now. Only the backend can say: a
+  // certificate with life left covers the domain until its renewal window, and
+  // the store holding it never reaches the browser.
+  private readonly challengeOutstanding = !!this.context.data.challenge
+  // A view that reaches a verdict shows only what is outstanding. The manual
+  // view reaches none, so it shows the requirement whenever there is one.
+  readonly showChallenge = this.isManualMode
+    ? this.challengeApplies
+    : this.challengeOutstanding
   readonly challengeFields: readonly PortCheckField[] = [
     { label: 'External Port', value: `${CHALLENGE_PORT}` },
     { label: 'Internal Port', value: `${CHALLENGE_PORT}` },
@@ -381,17 +396,13 @@ export class DomainValidationComponent {
       dnsAllPass(this.dnsResult(), this.wanIp, this.gua) &&
       (this.isRange ||
         portAllPass(this.portResult(), this.portV6Result(), this.gua)) &&
-      // Nothing on this network dials 443 for a domain served elsewhere, so the
-      // authority reaching it is the whole requirement.
-      (!this.showChallenge ||
+      (!this.challengeOutstanding ||
         externalAllPass(
           this.challengeResult(),
           this.challengeV6Result(),
           this.gua,
         )),
   )
-
-  readonly isManualMode = !this.context.data.initialResults
 
   constructor() {
     const challenge = this.context.data.challenge

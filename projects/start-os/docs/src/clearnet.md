@@ -46,7 +46,7 @@ If your gateway is your home router, you are revealing the approximate location 
 1. StartOS automatically tests your DNS record and port forwarding — plus the IPv6 firewall when your gateway has a GUA, and port `443` for a Let's Encrypt domain served on any other port. If everything passes, the domain is ready to use. Otherwise a setup modal appears showing what still needs attention, with instructions and the ability to re-test each check.
 
    > [!NOTE]
-   > The port `443` test is what tells you a Let's Encrypt domain will work: the authority validates there whatever port the address itself uses, and until it does the address answers nothing. The test applies while the domain is waiting on a certificate and through its renewal window, so keep `443` forwarded — see [Configure Port Forwarding](#configure-port-forwarding). It also appears as its own rule under **System → Gateways → Port Forwards**.
+   > The port `443` test is what tells you a Let's Encrypt domain will work: the authority validates there whatever port the address itself uses, and until the first certificate is issued the address answers nothing. The test applies while the domain is waiting on that certificate and again through each renewal window — a domain being renewed keeps serving the certificate it holds, so keep `443` forwarded and it renews without interruption. See [Configure Port Forwarding](#configure-port-forwarding); the rule also appears under **System → Gateways → Port Forwards**.
 
 ## Set Up DNS Records
 

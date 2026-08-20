@@ -267,8 +267,8 @@ pub struct VHostController {
     /// controller has asked the port-mapper to maintain for its vhosts —
     /// everything: IPv4 SNI HOSTNAME routes (`Some(hostname)`), IPv4 bare-IP (`*`
     /// vhost) pinholes and IPv6 GUA pinholes (`None`), and the v6 80->443 redirect.
-    /// Keyed by owner so one service's reconcile only adds/removes its own entries
-    /// on a shared port.
+    /// Keyed by owner, but a hostname-less key can be wanted by several at once,
+    /// so withdrawal goes through [`take_ownership`] rather than a per-owner diff.
     port_mappings: SyncMutex<BTreeMap<HostMapOwner, BTreeSet<PortMapKey>>>,
     /// Per-owner port-443 bind requirements contributed by ACME domains served
     /// on another port. Keyed by owner so a host that drops its ACME domains
@@ -532,15 +532,18 @@ impl VHostController {
                 hostnames.keys().map(move |h| (*ip, *port, h.clone()))
             })
             .collect();
-        let stale = self
-            .port_mappings
-            .mutate(|owners| take_ownership(owners, owner, want));
-        for (ip, port, hostname) in stale {
-            match hostname {
-                Some(h) => self.port_map.remove_hostname(ip, port, h.to_string()),
-                None => self.port_map.remove(ip, port),
+        // Withdraw under the same lock that decided to: another owner taking it
+        // between the decision and the send would record its want, ensure the
+        // mapping, and then have this remove land on top of it. Both calls hand
+        // the work to the port-mapper over a channel, so nothing blocks here.
+        self.port_mappings.mutate(|owners| {
+            for (ip, port, hostname) in take_ownership(owners, owner, want) {
+                match hostname {
+                    Some(h) => self.port_map.remove_hostname(ip, port, h.to_string()),
+                    None => self.port_map.remove(ip, port),
+                }
             }
-        }
+        });
         for ((ip, port), (gateways, hostnames)) in &desired {
             for (hostname, internal) in hostnames {
                 match hostname {
@@ -571,11 +574,10 @@ pub const ACME_CHALLENGE_PORT: u16 = 443;
 /// mapping; `None` is a bare-IP forward or a GUA pinhole.
 type PortMapKey = (IpAddr, u16, Option<InternedString>);
 
-/// Record `want` as `owner`'s mappings and return the ones to withdraw. A
-/// hostname-less key can be wanted by several owners at once — the IPv6
-/// challenge pinhole, and the 80->443 redirect a served 443 pulls in — and
-/// `PortMapController::remove` takes the whole key, so one owner dropping it is
-/// not enough.
+/// Record `want` as `owner`'s mappings and return the ones to withdraw. The
+/// port-map layer keeps no per-owner refcount, so any withdrawal is
+/// unconditional and one owner dropping a key several still want would shut it
+/// for all of them.
 fn take_ownership(
     owners: &mut BTreeMap<HostMapOwner, BTreeSet<PortMapKey>>,
     owner: HostMapOwner,
