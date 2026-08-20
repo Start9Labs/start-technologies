@@ -121,6 +121,12 @@
 
 ### Fixed
 
+- `i18n()` no longer throws when a number or a `Date` is interpolated: a service
+  container's `LANG=C.UTF-8` reduces to a locale `Intl` rejects
+
+- `SubContainer.exec` closes the child's stdin when it has no input to write,
+  instead of leaving a command that reads stdin blocked until the timeout
+
 - **A text field's `patterns` are now enforced on every path into an action,
   not only by the web form.** The regexes reached the browser and nothing else,
   so an action invoked over `start-cli` or RPC arrived at the handler with a
