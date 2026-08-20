@@ -166,7 +166,13 @@ export default class OutboundTable {
   protected add() {
     const existing = this.service.data() ?? []
     const data = {
-      targets: ['Internet', ...existing.map(v => v.label)],
+      // Only enabled VPNs are chainable — see getSafeTargets. existingLabels
+      // stays unfiltered: a disabled VPN's label is still taken, and that list
+      // drives duplicate-name validation.
+      targets: [
+        'Internet',
+        ...existing.filter(v => v.enabled).map(v => v.label),
+      ],
       existingLabels: existing.map(v => v.label),
     }
 

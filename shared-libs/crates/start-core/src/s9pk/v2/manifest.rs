@@ -51,6 +51,8 @@ impl Manifest {
         arch: Option<&str>,
         archive: &'a DirectoryContents<T>,
     ) -> Result<Filter, Error> {
+        self.metadata.description.validate()?;
+
         let mut expected = Expected::new(archive);
         expected.check_file("manifest.json")?;
         expected.check_stem("icon", |ext| {
@@ -62,6 +64,12 @@ impl Manifest {
         if let Err(e) = expected.check_file("instructions.md") {
             // backwards compatibility for s9pks built before instructions.md became required
             tracing::warn!("{e}");
+            tracing::debug!("{e:?}");
+        }
+        // README.md is optional, but it has to be checked to be kept: this filter drops
+        // every entry no check claims, so an unchecked README would be packed and then
+        // immediately stripped.
+        if let Err(e) = expected.check_file("README.md") {
             tracing::debug!("{e:?}");
         }
         expected.check_file("javascript.squashfs")?;
@@ -422,22 +430,33 @@ impl Description {
         self.long.localize_for(locale);
     }
 
+    /// The marketplace tile clamps `short` to two lines and hides the rest —
+    /// about 80 characters; the headroom is for locales that need more words
+    /// to say the same thing. `long` is rendered unclamped.
+    const SHORT_LIMIT: usize = 120;
+    const LONG_LIMIT: usize = 2000;
+
     pub fn validate(&self) -> Result<(), Error> {
-        if match &self.short {
-            LocaleString::Translated(s) => s.len() > 160,
-            LocaleString::LanguageMap(map) => map.values().any(|s| s.len() > 160),
-        } {
+        let too_long = |value: &LocaleString, limit: usize| match value {
+            LocaleString::Translated(s) => s.len() > limit,
+            LocaleString::LanguageMap(map) => map.values().any(|s| s.len() > limit),
+        };
+
+        if too_long(&self.short, Self::SHORT_LIMIT) {
             return Err(Error::new(
-                eyre!("Short description must be 160 characters or less."),
+                eyre!(
+                    "Short description must be {} characters or less.",
+                    Self::SHORT_LIMIT,
+                ),
                 crate::ErrorKind::ValidateS9pk,
             ));
         }
-        if match &self.short {
-            LocaleString::Translated(s) => s.len() > 5000,
-            LocaleString::LanguageMap(map) => map.values().any(|s| s.len() > 5000),
-        } {
+        if too_long(&self.long, Self::LONG_LIMIT) {
             return Err(Error::new(
-                eyre!("Long description must be 5000 characters or less."),
+                eyre!(
+                    "Long description must be {} characters or less.",
+                    Self::LONG_LIMIT,
+                ),
                 crate::ErrorKind::ValidateS9pk,
             ));
         }

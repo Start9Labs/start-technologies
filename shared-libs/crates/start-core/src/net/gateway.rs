@@ -64,7 +64,7 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
                     }
 
                     let mut table = Table::new();
-                    table.add_row(row![bc => "INTERFACE", "TYPE", "ADDRESSES", "WAN IP"]);
+                    table.add_row(row![bc => "INTERFACE", "TYPE", "SECURE", "ADDRESSES", "WAN IP"]);
                     for (iface, info) in res {
                         table.add_row(row![
                             iface,
@@ -72,6 +72,12 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
                                 .as_ref()
                                 .and_then(|ip_info| ip_info.device_type)
                                 .map_or_else(|| "UNKNOWN".to_owned(), |ty| format!("{ty:?}")),
+                            match info.secure {
+                                Some(true) => "YES",
+                                Some(false) => "NO",
+                                None if info.secure() => "YES (auto)",
+                                None => "NO (auto)",
+                            },
                             info.ip_info.as_ref().map_or_else(
                                 || "<DISCONNECTED>".to_owned(),
                                 |ip_info| ip_info
@@ -115,6 +121,22 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.rename-gateway")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "set-secure",
+            from_fn_async(set_secure)
+                .with_metadata("sync_db", Value::Bool(true))
+                .no_display()
+                .with_about("about.mark-gateway-network-secure")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "unset-secure",
+            from_fn_async(unset_secure)
+                .with_metadata("sync_db", Value::Bool(true))
+                .no_display()
+                .with_about("about.allow-gateway-infer-network-security")
                 .with_call_remote::<CliContext>(),
         )
         .subcommand(
@@ -554,6 +576,46 @@ async fn set_name(
     RenameGatewayParams { id, name }: RenameGatewayParams,
 ) -> Result<(), Error> {
     ctx.net_controller.net_iface.set_name(&id, name).await
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+struct SetGatewaySecureParams {
+    #[arg(help = "help.arg.gateway-id")]
+    gateway: GatewayId,
+    #[arg(help = "help.arg.is-secure")]
+    secure: Option<bool>,
+}
+
+async fn set_secure(
+    ctx: RpcContext,
+    SetGatewaySecureParams { gateway, secure }: SetGatewaySecureParams,
+) -> Result<(), Error> {
+    ctx.net_controller
+        .net_iface
+        .set_secure(&gateway, Some(secure.unwrap_or(true)))
+        .await
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+struct UnsetGatewaySecureParams {
+    #[arg(help = "help.arg.gateway-id")]
+    gateway: GatewayId,
+}
+
+async fn unset_secure(
+    ctx: RpcContext,
+    UnsetGatewaySecureParams { gateway }: UnsetGatewaySecureParams,
+) -> Result<(), Error> {
+    ctx.net_controller
+        .net_iface
+        .set_secure(&gateway, None)
+        .await
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
@@ -1418,9 +1480,10 @@ struct PolicyRoutingGuard {
     table_id: u32,
 }
 
-/// Remove stale per-interface policy-routing state (fwmark ip rules and their
-/// routing tables) for interfaces that no longer exist. The nft mark rules are
-/// owned declaratively by [`reconcile_mangle_rules`], so they need no GC here.
+/// Remove stale per-interface policy-routing state (fwmark ip rules, v6 source
+/// rules, and their routing tables) for interfaces that no longer exist. The nft
+/// mark rules are owned declaratively by [`reconcile_mangle_rules`], so they need
+/// no GC here.
 async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
     let active_tables: BTreeSet<u32> = active_ifaces
         .iter()
@@ -1461,6 +1524,63 @@ async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
             }
             stale.insert(table_id);
         }
+    }
+
+    // Stale priority-60 v6 source rules, which must be deleted carrying the
+    // selector they were added with.
+    let mut stale_v6_src = Vec::<(u32, String)>::new();
+    if let Ok(rules) = Command::new("ip")
+        .arg("-6")
+        .arg("rule")
+        .arg("show")
+        .invoke(ErrorKind::Network)
+        .await
+        .and_then(|b| String::from_utf8(b).with_kind(ErrorKind::Utf8))
+    {
+        for line in rules.lines() {
+            let Some(rest) = line.trim().strip_prefix("60:") else {
+                continue;
+            };
+            let Some(pos) = rest.find("lookup ") else {
+                continue;
+            };
+            let Ok(table_id) = rest[pos + 7..]
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .parse::<u32>()
+            else {
+                continue;
+            };
+            if table_id < 1000 || active_tables.contains(&table_id) {
+                continue;
+            }
+            let mut toks = rest.split_whitespace();
+            if toks.find(|t| *t == "from").is_none() {
+                continue;
+            }
+            let Some(addr) = toks.next() else {
+                continue;
+            };
+            stale.insert(table_id);
+            stale_v6_src.push((table_id, addr.to_owned()));
+        }
+    }
+
+    for (table_id, addr) in stale_v6_src {
+        Command::new("ip")
+            .arg("-6")
+            .arg("rule")
+            .arg("del")
+            .arg("from")
+            .arg(&addr)
+            .arg("lookup")
+            .arg(table_id.to_string())
+            .arg("priority")
+            .arg("60")
+            .invoke(ErrorKind::Network)
+            .await
+            .ok();
     }
 
     // For each stale table, remove the priority-50 fwmark rule and flush its
@@ -1999,12 +2119,15 @@ async fn apply_policy_routing(
 /// the default outbound (the priority-75 catch-all) then drops v6 rather than
 /// letting it fall through to some other interface's default.
 ///
-/// The table backs two rule layers, both IPv4 parity: the priority-75
-/// default-outbound catch-all ([`apply_default_outbound`]) and the priority-50
-/// CONNMARK reply-routing rule installed at the end here (marks set by
-/// [`reconcile_mangle_rules`]). IPv6 has no NAT/SNI-demux reply layer to build —
-/// the mark alone routes a reply back out the interface its connection arrived
-/// on, so a v6 service reached through a tunnel can answer.
+/// The table backs three rule layers: the priority-75 default-outbound catch-all
+/// ([`apply_default_outbound`]), the priority-50 CONNMARK reply-routing rule
+/// installed at the end here (IPv4 parity; marks set by
+/// [`reconcile_mangle_rules`]), and — v6-only — a priority-60 source rule per
+/// global address on the interface. IPv6 has no NAT/SNI-demux reply layer to
+/// build: restoring the mark reroutes a reply once there is a packet to
+/// reroute, but the reply that opens a connection is routed before the output
+/// hook runs, so the source rule is what lets a v6 service reached through a
+/// tunnel answer.
 async fn apply_policy_routing_v6(
     guard: &PolicyRoutingGuard,
     iface: &GatewayId,
@@ -2018,14 +2141,17 @@ async fn apply_policy_routing_v6(
         IpAddr::V6(v6) => Some(*v6),
         _ => None,
     });
-    // The interface can carry v6 if it has a v6 gateway, or holds a global
-    // (non-link-local, non-ULA) v6 address of its own — the delegated-GUA case,
-    // where a point-to-point wg tunnel has no gateway but still routes v6.
-    let v6_capable = ipv6_gateway.is_some()
-        || subnets.iter().any(|n| match n {
-            IpNet::V6(v6n) => !ipv6_is_local(v6n.addr()),
-            _ => false,
-        });
+    // Global (non-link-local, non-ULA) v6 addresses of the interface's own — the
+    // delegated-GUA case, where a point-to-point wg tunnel has no gateway but
+    // still routes v6.
+    let global_v6: BTreeSet<String> = subnets
+        .iter()
+        .filter_map(|n| match n {
+            IpNet::V6(v6n) if !ipv6_is_local(v6n.addr()) => Some(v6n.addr().to_string()),
+            _ => None,
+        })
+        .collect();
+    let v6_capable = ipv6_gateway.is_some() || !global_v6.is_empty();
 
     // Mirror main's non-default v6 routes into the per-interface table, so the
     // priority-75 catch-all does not send on-link/local v6 through the gateway.
@@ -2153,6 +2279,56 @@ async fn apply_policy_routing_v6(
             .arg(&table_str)
             .arg("priority")
             .arg("50")
+            .invoke(ErrorKind::Network)
+            .await
+            .log_err();
+    }
+
+    // Ensure a priority-60 source rule per global v6 address on this interface.
+    // The CONNMARK rule above cannot catch the reply that opens a connection:
+    // the kernel routes a SYN-ACK before the output hook restores its mark, so
+    // it falls to the priority-75 catch-all — and when the default outbound has
+    // no v6, that table's leak-guard `blackhole default` fails the lookup
+    // outright and the reply is dropped before it is ever built. Keyed on
+    // source address, which *is* known that early, this routes it out the
+    // interface that owns it.
+    let existing_src: BTreeSet<String> = rules_output
+        .lines()
+        .filter_map(|l| {
+            let toks: Vec<&str> = l.trim().strip_prefix("60:")?.split_whitespace().collect();
+            toks.windows(2)
+                .any(|w| w[0] == "lookup" && w[1].parse::<u32>().ok() == Some(table_id))
+                .then(|| toks.windows(2).find(|w| w[0] == "from").map(|w| w[1]))
+                .flatten()
+                .map(|addr| addr.to_owned())
+        })
+        .collect();
+    for addr in global_v6.difference(&existing_src) {
+        Command::new("ip")
+            .arg("-6")
+            .arg("rule")
+            .arg("add")
+            .arg("from")
+            .arg(addr)
+            .arg("lookup")
+            .arg(&table_str)
+            .arg("priority")
+            .arg("60")
+            .invoke(ErrorKind::Network)
+            .await
+            .log_err();
+    }
+    for addr in existing_src.difference(&global_v6) {
+        Command::new("ip")
+            .arg("-6")
+            .arg("rule")
+            .arg("del")
+            .arg("from")
+            .arg(addr)
+            .arg("lookup")
+            .arg(&table_str)
+            .arg("priority")
+            .arg("60")
             .invoke(ErrorKind::Network)
             .await
             .log_err();
@@ -2873,14 +3049,15 @@ impl NetworkInterfaceController {
     }
 
     pub async fn forget(&self, interface: &GatewayId) -> Result<(), Error> {
-        let mut sub = self
+        let mut gateways = self
             .db
-            .subscribe(
+            .watch(
                 "/public/serverInfo/network/gateways"
-                    .parse::<JsonPointer<_, _>>()
+                    .parse::<JsonPointer>()
                     .with_kind(ErrorKind::Database)?,
             )
-            .await;
+            .await
+            .typed::<OrdMap<GatewayId, NetworkInterfaceInfo>>();
         let mut err = None;
         let changed = self.watcher.ip_info.send_if_modified(|ip_info| {
             if ip_info
@@ -2899,7 +3076,9 @@ impl NetworkInterfaceController {
             return Err(e);
         }
         if changed {
-            sub.recv().await;
+            gateways
+                .wait_for(|gateways| !gateways.contains_key(interface))
+                .await?;
         }
         Ok(())
     }
@@ -2982,6 +3161,60 @@ impl NetworkInterfaceController {
         if changed {
             sub.recv().await;
         }
+
+        Ok(())
+    }
+
+    pub async fn set_secure(
+        &self,
+        interface: &GatewayId,
+        secure: Option<bool>,
+    ) -> Result<(), Error> {
+        let mut watch = self
+            .db
+            .watch(
+                "/public/serverInfo/network/gateways"
+                    .parse::<JsonPointer>()
+                    .with_kind(ErrorKind::Database)?
+                    .join_end(interface.as_str())
+                    .join_end("secure"),
+            )
+            .await
+            .typed::<Option<bool>>();
+        let mut err = None;
+        self.watcher.ip_info.send_if_modified(|ip_info| {
+            let info = match ip_info.get_mut(interface).or_not_found(interface) {
+                Ok(info) => info,
+                Err(e) => {
+                    err = Some(e);
+                    return false;
+                }
+            };
+            if secure == Some(false) {
+                // `ip_info` is cleared on every boot and whenever NetworkManager
+                // drops the device, so an unknown device type has to fail closed
+                // or lxcbr0 can be marked insecure through a restart window.
+                if info.ip_info.is_none() {
+                    err = Some(Error::new(
+                        eyre!("{}", t!("net.gateway.cannot-mark-disconnected-insecure")),
+                        ErrorKind::InvalidRequest,
+                    ));
+                    return false;
+                }
+                if info.is_intrinsically_secure() {
+                    err = Some(Error::new(
+                        eyre!("{}", t!("net.gateway.cannot-mark-internal-insecure")),
+                        ErrorKind::InvalidRequest,
+                    ));
+                    return false;
+                }
+            }
+            std::mem::replace(&mut info.secure, secure) != secure
+        });
+        if let Some(e) = err {
+            return Err(e);
+        }
+        watch.wait_for(|persisted| *persisted == secure).await?;
 
         Ok(())
     }

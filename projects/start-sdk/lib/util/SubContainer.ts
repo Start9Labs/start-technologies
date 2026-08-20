@@ -12,6 +12,10 @@ const False = () => false
 
 export type ExecOptions = {
   input?: string | Buffer
+  /** How long to wait before SIGKILL, in ms (default 30000). `null` waits as long as the command takes — use it whenever the runtime is set by the size of the data or the speed of a disk. */
+  timeout?: number | null
+  /** Aborting SIGKILLs the process */
+  abort?: AbortController
 }
 
 const TIMES_TO_WAIT_FOR_PROC = 100
@@ -173,20 +177,17 @@ export interface SubContainer<
    * @description run a command inside this subcontainer
    * DOES NOT THROW ON NONZERO EXIT CODE (see execFail)
    * @param command an array representing the command and args to execute
-   * @param options
-   * @param timeoutMs how long to wait before killing the command in ms
-   * @param abort optional AbortController; aborting SIGKILLs the process
+   * @param options env, cwd, user, stdin, `timeout` (default 30 s, `null` for no timeout), and `abort`
    * @returns
    */
   exec(
     command: string[],
     options?: CommandOptions & ExecOptions,
-    timeoutMs?: number | null,
-    abort?: AbortController,
   ): Promise<{
     throw: () => { stdout: string | Buffer; stderr: string | Buffer }
     exitCode: number | null
     exitSignal: NodeJS.Signals | null
+    timedOutAfter: number | null
     stdout: string | Buffer
     stderr: string | Buffer
   }>
@@ -194,17 +195,13 @@ export interface SubContainer<
   /**
    * @description run a command inside this subcontainer, throwing on non-zero exit status
    * @param command an array representing the command and args to execute
-   * @param options
-   * @param timeoutMs how long to wait before killing the command in ms
-   * @param abort optional AbortController; aborting SIGKILLs the process
+   * @param options env, cwd, user, stdin, `timeout` (default 30 s, `null` for no timeout), and `abort`
    * @returns
    * @throws {@link ExitError} on non-zero exit code or signal termination
    */
   execFail(
     command: string[],
     options?: CommandOptions & ExecOptions,
-    timeoutMs?: number | null,
-    abort?: AbortController,
   ): Promise<{ stdout: string | Buffer; stderr: string | Buffer }>
 
   /**
@@ -675,19 +672,16 @@ export class SubContainerEager<
    * Does NOT throw on non-zero exit (see {@link execFail}).
    *
    * @param command Argv array representing the command and its arguments
-   * @param options Optional environment, user, cwd, and stdin input
-   * @param timeoutMs How long to wait before SIGKILL (default 30 s, `null` for no timeout)
-   * @param abort Optional AbortController; aborting SIGKILLs the process
+   * @param options Optional environment, user, cwd, stdin input, `timeout` (default 30 s, `null` for no timeout), and `abort`
    */
   async exec(
     command: string[],
     options?: CommandOptions & ExecOptions,
-    timeoutMs: number | null = 30000,
-    abort?: AbortController,
   ): Promise<{
     throw: () => { stdout: string | Buffer; stderr: string | Buffer }
     exitCode: number | null
     exitSignal: NodeJS.Signals | null
+    timedOutAfter: number | null
     stdout: string | Buffer
     stderr: string | Buffer
   }> {
@@ -699,18 +693,21 @@ export class SubContainerEager<
       .catch(() => '{}')
       .then(JSON.parse)
     let extra: string[] = []
+    // what's left of `spawnOptions` is forwarded to cp.spawn; copied so the
+    // deletes below can't strip the caller's object for its next call
+    const { timeout = 30000, abort, ...spawnOptions } = options ?? {}
     let user = imageMeta.user || 'root'
-    if (options?.user) {
-      user = options.user
-      delete options.user
+    if (spawnOptions.user) {
+      user = spawnOptions.user
+      delete spawnOptions.user
     }
     let workdir = imageMeta.workdir || '/'
-    if (options?.cwd) {
-      workdir = options.cwd
-      delete options.cwd
+    if (spawnOptions.cwd) {
+      workdir = spawnOptions.cwd
+      delete spawnOptions.cwd
     }
-    if (options?.env) {
-      for (let [k, v] of Object.entries(options.env)) {
+    if (spawnOptions.env) {
+      for (let [k, v] of Object.entries(spawnOptions.env)) {
         extra.push(`--env=${k}=${v}`)
       }
     }
@@ -726,14 +723,14 @@ export class SubContainerEager<
         this.rootfs,
         ...command,
       ],
-      options || {},
+      spawnOptions,
     )
     abort?.signal.addEventListener('abort', () => child.kill('SIGKILL'))
-    if (options?.input) {
+    if (spawnOptions.input) {
       await new Promise<null>((resolve, reject) => {
         try {
           child.stdin.on('error', e => reject(e))
-          child.stdin.write(options.input, e => {
+          child.stdin.write(spawnOptions.input, e => {
             if (e) {
               reject(e)
             } else {
@@ -765,8 +762,12 @@ export class SubContainerEager<
     return new Promise((resolve, reject) => {
       child.on('error', reject)
       let killTimeout: NodeJS.Timeout | undefined
-      if (timeoutMs !== null && child.pid) {
-        killTimeout = setTimeout(() => child.kill('SIGKILL'), timeoutMs)
+      let timedOut = false
+      if (timeout !== null && child.pid) {
+        killTimeout = setTimeout(() => {
+          timedOut = true
+          child.kill('SIGKILL')
+        }, timeout)
       }
       child.stdout.on('data', appendData(stdout))
       child.stderr.on('data', appendData(stderr))
@@ -775,6 +776,8 @@ export class SubContainerEager<
         const result = {
           exitCode: code,
           exitSignal: signal,
+          // the deadline can elapse after something else already killed it
+          timedOutAfter: timedOut && signal === 'SIGKILL' ? timeout : null,
           stdout: stdout.data,
           stderr: stderr.data,
         }
@@ -795,20 +798,14 @@ export class SubContainerEager<
    * Run a command inside this subcontainer, throwing on non-zero exit.
    *
    * @param command Argv array representing the command and its arguments
-   * @param options Optional environment, user, cwd, and stdin input
-   * @param timeoutMs How long to wait before SIGKILL (default 30 s, `null` for no timeout)
-   * @param abort Optional AbortController; aborting SIGKILLs the process
+   * @param options Optional environment, user, cwd, stdin input, `timeout` (default 30 s, `null` for no timeout), and `abort`
    * @throws {@link ExitError} on non-zero exit code or signal termination
    */
   async execFail(
     command: string[],
     options?: CommandOptions & ExecOptions,
-    timeoutMs?: number | null,
-    abort?: AbortController,
   ): Promise<{ stdout: string | Buffer; stderr: string | Buffer }> {
-    return this.exec(command, options, timeoutMs, abort).then(res =>
-      res.throw(),
-    )
+    return this.exec(command, options).then(res => res.throw())
   }
 
   /**
@@ -1112,23 +1109,20 @@ export class SubContainerLazy<
    * Does NOT throw on non-zero exit (see {@link execFail}).
    *
    * @param command Argv array representing the command and its arguments
-   * @param options Optional environment, user, cwd, and stdin input
-   * @param timeoutMs How long to wait before SIGKILL (default 30 s, `null` for no timeout)
-   * @param abort Optional AbortController; aborting SIGKILLs the process
+   * @param options Optional environment, user, cwd, stdin input, `timeout` (default 30 s, `null` for no timeout), and `abort`
    */
   async exec(
     command: string[],
     options?: CommandOptions & ExecOptions,
-    timeoutMs: number | null = 30000,
-    abort?: AbortController,
   ): Promise<{
     throw: () => { stdout: string | Buffer; stderr: string | Buffer }
     exitCode: number | null
     exitSignal: NodeJS.Signals | null
+    timedOutAfter: number | null
     stdout: string | Buffer
     stderr: string | Buffer
   }> {
-    return (await this.eager()).exec(command, options, timeoutMs, abort)
+    return (await this.eager()).exec(command, options)
   }
 
   /**
@@ -1136,18 +1130,14 @@ export class SubContainerLazy<
    * (materializes on first call).
    *
    * @param command Argv array representing the command and its arguments
-   * @param options Optional environment, user, cwd, and stdin input
-   * @param timeoutMs How long to wait before SIGKILL (default 30 s, `null` for no timeout)
-   * @param abort Optional AbortController; aborting SIGKILLs the process
+   * @param options Optional environment, user, cwd, stdin input, `timeout` (default 30 s, `null` for no timeout), and `abort`
    * @throws {@link ExitError} on non-zero exit code or signal termination
    */
   async execFail(
     command: string[],
     options?: CommandOptions & ExecOptions,
-    timeoutMs?: number | null,
-    abort?: AbortController,
   ): Promise<{ stdout: string | Buffer; stderr: string | Buffer }> {
-    return (await this.eager()).execFail(command, options, timeoutMs, abort)
+    return (await this.eager()).execFail(command, options)
   }
 
   /**
@@ -1269,6 +1259,7 @@ export class ExitError extends Error {
     readonly result: {
       exitCode: number | null
       exitSignal: T.Signals | null
+      timedOutAfter: number | null
       stdout: string | Buffer
       stderr: string | Buffer
     },
@@ -1276,6 +1267,8 @@ export class ExitError extends Error {
     let message: string
     if (result.exitCode) {
       message = `${command} failed with exit code ${result.exitCode}: ${result.stderr}`
+    } else if (result.timedOutAfter !== null) {
+      message = `${command} timed out after ${result.timedOutAfter}ms and was killed with ${result.exitSignal}: ${result.stderr}`
     } else if (result.exitSignal) {
       message = `${command} terminated with signal ${result.exitSignal}: ${result.stderr}`
     } else {

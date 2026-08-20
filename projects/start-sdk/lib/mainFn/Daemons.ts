@@ -29,6 +29,14 @@ export const cpExec = promisify(CP.exec)
 export const cpExecFile = promisify(CP.execFile)
 
 /**
+ * Id of the sentinel {@link Daemons.runUntilSuccess} appends to the chain: a
+ * oneshot depending on every user daemon, so it completes exactly when all of
+ * them are ready. Not a component of the service — it publishes no health, and
+ * the timeout message leaves it out.
+ */
+const RUN_UNTIL_SUCCESS_ID = '__RUN_UNTIL_SUCCESS'
+
+/**
  * Configuration for a daemon's health-check readiness probe.
  *
  * Every daemon and standalone health check requires a `Ready` configuration
@@ -160,6 +168,19 @@ type NewDaemonParams<
   exec: DaemonCommandType<Manifest, C>
   /** The subcontainer in which the daemon runs */
   subcontainer: C
+  /**
+   * Values this daemon/oneshot's closures use, folded into the entry's
+   * `configHash` under `Daemons.dynamic`: when they change between
+   * reconciliations, the daemon/oneshot is restarted. Closures
+   * (`exec.fn`, `ready.fn`) are invisible to the hash, so anything they
+   * capture that the reconciler should react to must be listed here.
+   *
+   * Only JSON-serializable values are useful here — functions, symbols,
+   * cycles and `undefined` normalize to an `UNSERIALIZABLE:*` sentinel,
+   * so a change only visible there triggers no restart; BigInts hash as
+   * their decimal string.
+   */
+  uses?: unknown
 }
 
 type OptionalParamSync<T> = T | (() => T | null)
@@ -178,6 +199,13 @@ type AddDaemonParams<
    * this daemon starts. Enforces startup ordering in the daemon chain.
    */
   requires: Exclude<Ids, Id>[]
+  /**
+   * Values this daemon uses — see {@link NewDaemonParams.uses}. This is
+   * the only way to make the reconciler react to a change inside a
+   * pre-built `{ daemon }`, which is otherwise entirely opaque to the
+   * hash.
+   */
+  uses?: unknown
 }
 
 type AddOneshotParams<
@@ -213,6 +241,7 @@ type DaemonEntry<M extends T.SDKManifest> =
       exec: DaemonCommandType<M, SubContainer<M> | null>
       ready: Ready
       requires: ReadonlyArray<string>
+      uses: unknown
       /** If supplied via the `{ daemon: ... }` form, pre-built daemon. */
       prebuiltDaemon: Daemon<M> | null
     }
@@ -222,6 +251,7 @@ type DaemonEntry<M extends T.SDKManifest> =
       subcontainer: SubContainer<M> | null
       exec: DaemonCommandType<M, SubContainer<M> | null>
       requires: ReadonlyArray<string>
+      uses: unknown
     }
   | {
       kind: 'health'
@@ -303,13 +333,14 @@ export class Daemons<Manifest extends T.SDKManifest, Ids extends string>
    * `requires` wiring stays consistent. Re-runs are coalesced.
    *
    * The diff key (`configHash`) covers the subcontainer descriptor
-   * (`imageId`, `sharedRun`, `name`, structural `mounts.build()`), exec
-   * (`command`, `env`, `cwd`, `user`, `runAsInit`, `sigtermTimeout`),
-   * `requires` (sorted), and the structural parts of `ready` (`display`,
-   * `gracePeriod`). Closures (`ready.fn`, `ready.trigger`) and pre-built
-   * `Daemon` instances are intentionally excluded — surface a value
-   * through one of the hashed fields if you want the reconciler to react
-   * to it changing.
+   * (`imageId`, `sharedRun`, `name`, structural `mounts.build()`), the
+   * whole `exec` options object, `requires` (sorted), the structural
+   * parts of `ready` (`display`, `gracePeriod`), and the entry's
+   * `uses`. Function values inside them (`exec.fn`, `exec.onStdout`,
+   * `ready.fn`, `ready.trigger`) hash as constant sentinels — their
+   * contents are intentionally invisible — as is any pre-built `Daemon`
+   * instance: declare a captured value in `uses` if you want the
+   * reconciler to react to it changing.
    *
    * **Use lazy SubContainers** ({@link SubContainer.of}) for daemons under
    * `Daemons.dynamic`. Eager handles created inside `fn` are wasted on
@@ -401,6 +432,7 @@ export class Daemons<Manifest extends T.SDKManifest, Ids extends string>
               >),
         ready: opts.ready,
         requires: opts.requires as string[],
+        uses: opts.uses,
         prebuiltDaemon:
           'daemon' in opts ? (opts.daemon as Daemon<Manifest>) : null,
       }
@@ -457,6 +489,7 @@ export class Daemons<Manifest extends T.SDKManifest, Ids extends string>
           SubContainer<Manifest> | null
         >,
         requires: opts.requires as string[],
+        uses: opts.uses,
       }
       return prev.appendEntry(entry)
     }
@@ -614,15 +647,19 @@ export class Daemons<Manifest extends T.SDKManifest, Ids extends string>
    */
   async runUntilSuccess(timeout: number | null) {
     let resolve = (_: void) => {}
+    let timer: ReturnType<typeof setTimeout> | undefined
     const res = new Promise<void>((res, rej) => {
       resolve = res
       if (timeout) {
-        setTimeout(() => {
-          const notReady = (this.builtHealthDaemons ?? [])
-            .filter(d => !d.isReady)
-            .map(d => d.id)
-          rej(new Error(`Timed out waiting for ${notReady}`))
-        }, timeout)
+        timer = setTimeout(
+          () =>
+            rej(
+              new Error(
+                `Timed out after ${timeout}ms waiting for ${this.describeNotReady()}`,
+              ),
+            ),
+          timeout,
+        )
       }
     })
     // Build the user's chain through the normal path so onLeaveContext +
@@ -638,7 +675,7 @@ export class Daemons<Manifest extends T.SDKManifest, Ids extends string>
     const sentinelHd = new HealthDaemon<Manifest>(
       sentinelDaemon,
       [...(this.builtHealthDaemons ?? [])],
-      '__RUN_UNTIL_SUCCESS',
+      RUN_UNTIL_SUCCESS_ID,
       EXIT_SUCCESS,
       this.effects,
     )
@@ -649,9 +686,44 @@ export class Daemons<Manifest extends T.SDKManifest, Ids extends string>
       await sentinelHd.updateStatus()
       await res
     } finally {
+      clearTimeout(timer)
       await this.term()
     }
     return null
+  }
+
+  /**
+   * Human-readable account of every daemon that has not reached ready, each
+   * with its current health result and message, plus the count and last cause
+   * of any abnormal exits.
+   *
+   * The exit count sits alongside the current health rather than replacing it
+   * because the two disagree in the case that matters most: a `ready` check
+   * that returns `loading` on a failed probe overwrites the crash back to
+   * `loading` on its next poll, so health alone reads as "still starting" for
+   * a process that is dying every time.
+   *
+   * {@link RUN_UNTIL_SUCCESS_ID} is excluded — it depends on every other
+   * daemon, so it is never ready when anything else isn't.
+   */
+  private describeNotReady(): string {
+    const notReady = (this.builtHealthDaemons ?? []).filter(
+      d => !d.isReady && d.id !== RUN_UNTIL_SUCCESS_ID,
+    )
+    if (!notReady.length) return 'no daemons — every one became ready'
+    return notReady
+      .map(d => {
+        const detail: string[] = [d.health.result]
+        if (d.health.message) detail.push(d.health.message)
+        if (d.daemon?.failedExits)
+          detail.push(
+            `${d.daemon.failedExits} failed exit(s), last: ${
+              d.daemon.lastExitError?.message ?? 'cause unknown'
+            }`,
+          )
+        return `${d.id} (${detail.join('; ')})`
+      })
+      .join(', ')
   }
 
   /**
@@ -764,12 +836,21 @@ function validateEntries<M extends T.SDKManifest>(
  * running across re-runs. Any difference triggers a restart.
  *
  * Hashed fields: kind, id, sorted requires, subcontainer descriptor
- * (`imageId`, `sharedRun`, `name`, `mounts.build()`), exec (`command`,
- * `env`, `cwd`, `user`, `runAsInit`, `sigtermTimeout`), and ready's
- * structural parts (`display`, `gracePeriod`).
+ * (`imageId`, `sharedRun`, `name`, `mounts.build()`), the whole `exec`
+ * options object, ready's structural parts (`display`, `gracePeriod`),
+ * and `uses`.
  *
- * NOT hashed: `ready.fn`, `ready.trigger`, function-form `exec.fn`, and
- * any pre-built `daemon` instance.
+ * Function values (`exec.fn`, `exec.onStdout`, `ready.fn`,
+ * `ready.trigger`) hash as constant `UNSERIALIZABLE:FUNCTION`
+ * sentinels — two different closures hash alike, so their contents
+ * never trigger a restart — and a pre-built `daemon` instance is not
+ * hashed at all. `uses` is the escape hatch for values only visible
+ * inside those closures.
+ *
+ * `uses` is canonicalized like every other hashed field, and never
+ * throws: functions, symbols, cycles and `undefined` normalize to an
+ * `UNSERIALIZABLE:*` sentinel (so changes only visible there trigger
+ * no restart), and BigInts hash as their decimal string.
  *
  * @param entry A recorded {@link Daemons} entry (`Daemons.entries[i]`)
  * @returns A canonical JSON string suitable for equality comparison
@@ -803,7 +884,8 @@ export function configHash<M extends T.SDKManifest>(
     id: entry.id,
     requires: [...entry.requires].sort(),
     sub: subHash,
-    exec: normalizeExec(entry.exec),
+    exec: entry.exec,
+    uses: entry.uses,
     ready:
       entry.kind === 'daemon'
         ? {
@@ -814,45 +896,30 @@ export function configHash<M extends T.SDKManifest>(
   })
 }
 
-function normalizeExec(exec: unknown): unknown {
-  if (!exec || typeof exec !== 'object') return null
-  if ('fn' in (exec as object)) return { __fn: true }
-  const e = exec as ExecCommandOptions
-  return {
-    command: normalizeCommand(e.command),
-    env: e.env ?? null,
-    cwd: e.cwd ?? null,
-    user: e.user ?? null,
-    runAsInit: e.runAsInit ?? false,
-    sigtermTimeout: e.sigtermTimeout ?? null,
-  }
-}
-
-function normalizeCommand(c: T.CommandType): unknown {
-  if (typeof c === 'string') return { kind: 'string', value: c }
-  if (Array.isArray(c)) return { kind: 'argv', value: [...c] }
-  if (T.isUseEntrypoint(c)) {
-    return { kind: 'entrypoint', value: c.overridCmd ?? null }
-  }
-  return null
-}
-
 function stableStringify(v: unknown): string {
   return JSON.stringify(canonicalize(v))
 }
 
-function canonicalize(v: unknown): unknown {
-  if (v === undefined || v === null) return null
-  if (Array.isArray(v)) return v.map(canonicalize)
-  if (typeof v === 'object') {
-    const keys = Object.keys(v as object).sort()
-    const out: Record<string, unknown> = {}
-    for (const k of keys)
-      out[k] = canonicalize((v as Record<string, unknown>)[k])
-    return out
+function canonicalize(v: unknown, ancestors: Set<object> = new Set()): unknown {
+  if (v === undefined) return 'UNSERIALIZABLE:UNDEFINED'
+  if (v === null) return null
+  if (typeof v === 'bigint') return v.toString()
+  if (typeof v === 'function') return 'UNSERIALIZABLE:FUNCTION'
+  if (typeof v === 'symbol') return 'UNSERIALIZABLE:SYMBOL'
+  if (typeof v !== 'object') return v
+  if (ancestors.has(v)) return 'UNSERIALIZABLE:CIRCULAR'
+  ancestors.add(v)
+  let out: unknown
+  if (Array.isArray(v)) {
+    out = v.map(el => canonicalize(el, ancestors))
+  } else {
+    const obj: Record<string, unknown> = {}
+    for (const k of Object.keys(v).sort())
+      obj[k] = canonicalize((v as Record<string, unknown>)[k], ancestors)
+    out = obj
   }
-  if (typeof v === 'function') return null
-  return v
+  ancestors.delete(v)
+  return out
 }
 
 type RunningEntry<M extends T.SDKManifest> = {

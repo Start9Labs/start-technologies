@@ -57,9 +57,21 @@ StartWRT comes pre-installed on Start9 routers. If you need to reinstall or flas
 
 1. The setup wizard will guide you through the rest. If the router already has firmware installed, you can choose **Keep settings** or **Fresh Start** (full wipe). On a new device with no existing firmware, the welcome screen still appears, but **Fresh Start** is the only option offered. See [Factory Reset](factory-reset.md#reflash-microsd) for a full walkthrough of the reflash wizard.
 
-1. When the wizard completes, power off the router, remove the microSD card, and power it back on.
+1. When the wizard completes, power off the router, remove the microSD card, and power it back on. The router now boots StartWRT from its internal storage — the wizard installs everything needed for that, including the low-level boot firmware, so this works on any BananaPi BPI-F3 regardless of what (if anything) the factory installed.
 
 ## DIY and Unprogrammed Boards
+
+Flashing a bare BananaPi BPI-F3 works with the exact steps above: the setup wizard provisions the board's internal boot firmware (the eMMC boot partitions) as part of the flash, so the router boots from internal storage after the microSD card is removed even if the board arrived with no firmware at all.
+
+### Wi-Fi Card
+
+The BPI-F3 has no onboard Wi-Fi — the radio comes from a mini PCIe module, and the firmware image only carries drivers for the MediaTek MT7915/MT7916 family:
+
+- **MT7916-based modules** — the AsiaRF **AW7916-NPD**, as shipped in Start9 routers — are fully supported: 2.4 GHz and 5 GHz broadcast concurrently.
+- **MT7915-based modules** (e.g. the AsiaRF AW7915-NP1) initialize, but band-selectable cards operate **one band at a time**: with the stock configuration only the 2.4 GHz network comes up, and selecting **5 GHz** alone in Wi-Fi settings leaves no working radio.
+- Modules based on any other chipset have no driver in the image and will not work.
+
+There is one more difference on unprogrammed boards — the Wi-Fi password:
 
 Start9 routers ship with a unique Wi-Fi password programmed into the device's EEPROM and printed on a sticker on the bottom. A vendor-programmed board "just works": flash the image, boot, and connect to the `StartWRT` network with the sticker password.
 

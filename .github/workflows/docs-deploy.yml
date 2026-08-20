@@ -1,14 +1,23 @@
 name: Build and deploy docs
 
+# docs.start9.com serves the `live-docs` branch, not master. master carries the
+# docs for whatever is *next*; a book only goes live when its product is tagged
+# and docs-sync-on-tag.yml copies that tag's tree onto live-docs — its push is
+# what triggers this. Urgent fixes to what is already published go straight into
+# live-docs by PR, and docs-backport.yml then lands the same change on master.
 on:
   push:
-    branches: ['master']
+    branches: ['live-docs']
     paths:
       - 'projects/start-docs/**'
       - 'projects/start-os/docs/**'
       - 'projects/start-tunnel/docs/**'
       - 'projects/start-sdk/docs/**'
       - 'projects/start-wrt/docs/**'
+  # For redeploying the current live-docs without a new commit. The Run workflow
+  # UI defaults its ref to master, so the checkout below pins `live-docs`
+  # explicitly — otherwise a default dispatch would publish master's unreleased
+  # books and versions.conf to docs.start9.com.
   workflow_dispatch:
 
 permissions:
@@ -25,7 +34,11 @@ jobs:
       run:
         working-directory: projects/start-docs
     steps:
+      # Pinned, not inherited from the triggering ref: this workflow publishes to
+      # production, and live-docs is the only branch that may reach it.
       - uses: actions/checkout@v4
+        with:
+          ref: live-docs
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

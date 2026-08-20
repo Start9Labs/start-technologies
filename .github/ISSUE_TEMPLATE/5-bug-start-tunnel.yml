@@ -1,0 +1,80 @@
+name: 🌐 StartTunnel — Bug Report
+description: A defect in StartTunnel — the VPS-hosted virtual private router.
+type: Bug
+labels: [StartTunnel]
+body:
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites
+      options:
+        - label: I searched [existing issues](https://github.com/Start9Labs/start-technologies/issues?q=is%3Aissue) and this is not already reported.
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: StartTunnel version
+      description: Paste `start-tunnel --version`, and `dpkg -l start-tunnel | tail -1` for the package version.
+      placeholder: 1.2.1
+    validations:
+      required: true
+
+  - type: input
+    id: host
+    attributes:
+      label: VPS provider & OS
+      description: Where it runs, and whether the host is behind NAT or has a direct public IP — several bugs here only appear on one or the other.
+      placeholder: Hetzner CX22, Debian 12, direct public IPv4
+    validations:
+      required: true
+
+  - type: input
+    id: firewall
+    attributes:
+      label: Host firewall
+      description: '`ufw status`, or any nftables/iptables rules you manage yourself. A host firewall in front of StartTunnel has broken connectivity before, so this is worth checking even if it seems unrelated.'
+      placeholder: ufw active — 22/tcp, 443/tcp allowed
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which surface?
+      options:
+        - Install / upgrade
+        - Web UI
+        - WireGuard mesh & peers
+        - Port forwarding (DNAT)
+        - Subnet & WAN configuration
+        - DNS
+        - TLS / certificates
+        - Other / unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: What happens
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should happen instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Number them, and say what you saw at the step where it went wrong.
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs & evidence
+      description: '`journalctl -u start-tunnel`, and the relevant `nft list ruleset` or `wg show` output.'
+      render: shell

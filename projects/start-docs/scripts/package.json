@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Build and validation scripts for Start9 docs",
   "type": "module",
+  "license": "MIT",
   "scripts": {
     "generate-llms-txt": "npx tsx generate-llms-txt.ts",
     "prepare": "cd .. && husky"

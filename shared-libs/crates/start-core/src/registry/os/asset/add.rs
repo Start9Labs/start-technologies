@@ -57,19 +57,25 @@ pub fn remove_api<C: Context>() -> ParentHandler<C> {
             "iso",
             from_fn_async(remove_iso)
                 .with_metadata("get_signer", Value::Bool(true))
-                .no_cli(),
+                .with_custom_display_fn(|args, removed| warn_if_absent(&args.params, removed))
+                .with_about("about.remove-iso-registry")
+                .with_call_remote::<CliContext>(),
         )
         .subcommand(
             "img",
             from_fn_async(remove_img)
                 .with_metadata("get_signer", Value::Bool(true))
-                .no_cli(),
+                .with_custom_display_fn(|args, removed| warn_if_absent(&args.params, removed))
+                .with_about("about.remove-img-registry")
+                .with_call_remote::<CliContext>(),
         )
         .subcommand(
             "squashfs",
             from_fn_async(remove_squashfs)
                 .with_metadata("get_signer", Value::Bool(true))
-                .no_cli(),
+                .with_custom_display_fn(|args, removed| warn_if_absent(&args.params, removed))
+                .with_about("about.remove-squashfs-registry")
+                .with_call_remote::<CliContext>(),
         )
 }
 
@@ -289,17 +295,36 @@ pub async fn cli_add_asset(
     Ok(())
 }
 
-#[derive(Debug, Deserialize, Serialize, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[group(skip)]
+#[command(rename_all = "kebab-case")]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct RemoveAssetParams {
     #[ts(type = "string")]
+    #[arg(help = "help.arg.os-version")]
     pub version: Version,
     #[ts(type = "string")]
+    #[arg(help = "help.arg.platform")]
     pub platform: InternedString,
     #[serde(rename = "__Auth_signer")]
     #[ts(skip)]
-    pub signer: AnyVerifyingKey,
+    #[arg(skip)]
+    pub signer: Option<AnyVerifyingKey>,
+}
+
+fn warn_if_absent(params: &RemoveAssetParams, removed: bool) -> Result<(), Error> {
+    if !removed {
+        tracing::warn!(
+            "{}",
+            t!(
+                "registry.os.asset.remove-not-exist",
+                version = params.version,
+                platform = params.platform
+            )
+        );
+    }
+    Ok(())
 }
 
 async fn remove_asset(
@@ -314,7 +339,13 @@ async fn remove_asset(
     ) -> &mut Model<BTreeMap<InternedString, RegistryAsset<Blake3Commitment>>>
     + UnwindSafe
     + Send,
-) -> Result<(), Error> {
+) -> Result<bool, Error> {
+    let signer = signer.ok_or_else(|| {
+        Error::new(
+            eyre!("{}", t!("registry.os.asset.missing-signer")),
+            ErrorKind::InvalidRequest,
+        )
+    })?;
     ctx.db
         .mutate(|db| {
             let signer_guid = db.as_index().as_signers().get_signer(&signer)?;
@@ -329,15 +360,15 @@ async fn remove_asset(
                 .contains(&signer_guid)
                 || db.as_admins().de()?.contains(&signer_guid)
             {
-                accessor(
+                Ok(accessor(
                     db.as_index_mut()
                         .as_os_mut()
                         .as_versions_mut()
                         .as_idx_mut(&version)
                         .or_not_found(&version)?,
                 )
-                .remove(&platform)?;
-                Ok(())
+                .remove(&platform)?
+                .is_some())
             } else {
                 Err(Error::new(
                     eyre!("{}", t!("registry.os.asset.unauthorized")),
@@ -346,19 +377,20 @@ async fn remove_asset(
             }
         })
         .await
-        .result?;
-
-    Ok(())
+        .result
 }
 
-pub async fn remove_iso(ctx: RegistryContext, params: RemoveAssetParams) -> Result<(), Error> {
+pub async fn remove_iso(ctx: RegistryContext, params: RemoveAssetParams) -> Result<bool, Error> {
     remove_asset(ctx, params, |m| m.as_iso_mut()).await
 }
 
-pub async fn remove_img(ctx: RegistryContext, params: RemoveAssetParams) -> Result<(), Error> {
+pub async fn remove_img(ctx: RegistryContext, params: RemoveAssetParams) -> Result<bool, Error> {
     remove_asset(ctx, params, |m| m.as_img_mut()).await
 }
 
-pub async fn remove_squashfs(ctx: RegistryContext, params: RemoveAssetParams) -> Result<(), Error> {
+pub async fn remove_squashfs(
+    ctx: RegistryContext,
+    params: RemoveAssetParams,
+) -> Result<bool, Error> {
     remove_asset(ctx, params, |m| m.as_squashfs_mut()).await
 }

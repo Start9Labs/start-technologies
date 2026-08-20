@@ -2,7 +2,17 @@
 # This file is imported by ./Makefile. Make edits there
 
 PACKAGE_ID := $(shell awk -F"'" '/id:/ {print $$2}' startos/manifest/index.ts)
-INGREDIENTS := $(shell start-cli s9pk list-ingredients 2>/dev/null)
+# INGREDIENTS is the whole source-dependency list, javascript/index.js included —
+# nothing else ties the s9pk to your TypeScript. $(shell) discards exit status,
+# so a failure here would leave it empty, detaching every source file from the
+# s9pk's prerequisites; make would then call an existing s9pk up to date and
+# print "Build Complete" over the *previous* build. The sentinel turns that into
+# an error. Not $(.SHELLSTATUS): it is undefined on the GNU Make 3.81 that
+# macOS still ships, where the guard would fire on every build instead.
+INGREDIENTS := $(shell start-cli s9pk list-ingredients 2>/dev/null || echo __LIST_INGREDIENTS_FAILED__)
+ifneq ($(filter __LIST_INGREDIENTS_FAILED__,$(INGREDIENTS)),)
+$(error `start-cli s9pk list-ingredients` failed, so make cannot tell which files the s9pk depends on and would silently repack the previous build. Run it directly to see the error.)
+endif
 # Resolve the actual git dir so this works inside git worktrees, where .git
 # is a file pointing at <main>/.git/worktrees/<name> rather than a directory.
 GIT_DIR := $(shell git rev-parse --git-dir 2>/dev/null)

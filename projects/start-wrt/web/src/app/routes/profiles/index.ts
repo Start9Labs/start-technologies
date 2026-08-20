@@ -243,10 +243,15 @@ class Profiles {
       parseInt(p.gateway_ip.split('.')[2], 10),
     )
     const vpns = this.outboundService.data() || []
-    const outboundVpns = vpns.map(v => ({
-      interface: v.id,
-      label: v.label,
-    }))
+    // A disabled VPN's tunnel never comes up, so routing a profile through it
+    // would blackhole the profile — only offer the enabled ones (the backend
+    // rejects the rest).
+    const outboundVpns = vpns
+      .filter(v => v.enabled)
+      .map(v => ({
+        interface: v.id,
+        label: v.label,
+      }))
     const subnet = this.lanSubnet()
 
     // Check if editing a profile that has static IPs in its subnet, and collect

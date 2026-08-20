@@ -29,7 +29,7 @@ Tests are Jest + `ts-jest` (`jest.config.js`, `rootDir: ./src`). `mime` is mocke
 
 ## Gotchas
 
-- **Depends on the _built_ SDK at `../../start-sdk/dist`** (declared in `package.json` as `"@start9labs/start-sdk": "file:../../start-sdk/dist"`) **and on `@start9labs/start-core` at `../../../shared-libs/ts-modules/start-core/dist`** (for what were the deep `base/lib/...` imports). Editing `projects/start-sdk/` or `shared-libs/ts-modules/start-core/` source alone has no effect here — rebuild first: `cd projects/start-sdk && make bundle` (which builds start-core and bundles it). The Makefile target `projects/start-os/container-runtime/package-lock.json` also depends on `projects/start-sdk/dist/package.json`, so a stale SDK can break `npm ci`/`check`/`test`.
+- **Depends on the _built_ SDK at `../../start-sdk/dist`** (declared in `package.json` as `"@start9labs/start-sdk": "file:../../start-sdk/dist"`) **and on `@start9labs/start-core` at `../../../shared-libs/ts-modules/start-core/dist`**. Editing `projects/start-sdk/` or `shared-libs/ts-modules/start-core/` source alone has no effect here — rebuild first: `cd projects/start-sdk && make bundle` (which builds start-core and bundles it). The Makefile target `projects/start-os/container-runtime/package-lock.json` also depends on `projects/start-sdk/dist/package.json`, so a stale SDK can break `npm ci`/`check`/`test`.
 - **Formatting is the root prettier config** (`.prettierrc.json` at the repo root), applied via `make format` / `make web-format` from the repo root. Never run prettier from inside this directory: the root `.prettierignore` (which protects `__fixtures__/`) only applies when prettier runs from the root cwd.
 - **`CLAUDE.md` is just `@AGENTS.md`** — edit this file, not `CLAUDE.md`.
 
@@ -38,7 +38,3 @@ Tests are Jest + `ts-jest` (`jest.config.js`, `rootDir: ./src`). `mime` is mocke
 - Compiled JS is installed into the container at `/usr/lib/startos/init/index.js` (the systemd unit runs `start-container pipe-wrap node … /usr/lib/startos/init/index.js`).
 - `update-image-local.sh` mounts the **repo root** into `start9/build-env` (at `/root/start-os`) and runs `update-image.sh` inside it. `update-image.sh` `cd`s to its own dir (`projects/start-os/container-runtime/`), so it reaches the repo-root build output three levels up — it copies `start-container` from `../../../target/<arch>-unknown-linux-musl/release/`.
 - The squashfs lands at `rootfs.<arch>.squashfs` and is installed to `/usr/lib/startos/container-runtime/rootfs.squashfs`.
-
-## Stale-path note (monorepo)
-
-Pre-monorepo docs referenced `core/`, `sdk/`, `web/`, `patch-db/`, `container-runtime/` at the repo root. Current locations: host lib `shared-libs/crates/start-core`, SDK `projects/start-sdk`, Angular `shared-libs/ts-modules` + product `web/` dirs, this runtime `projects/start-os/container-runtime`, first-party `shared-libs/crates/patch-db`.

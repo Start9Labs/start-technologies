@@ -1,0 +1,129 @@
+name: Sync docs to live-docs on tag
+
+# Cutting `<project>/v<version>` is what makes that product's documentation
+# current, so the tag is what publishes it: this copies the tagged tree's book
+# (and the shared start-docs infrastructure it renders through) onto live-docs,
+# which docs.start9.com serves. The push then triggers docs-deploy.yml on its
+# own — no explicit dispatch needed, because an App installation token raises
+# real events.
+#
+# Projects with no docs/ subtree (start-cli, start-registry) are skipped whole —
+# there is no book to publish, so there is no reason to move site infra either.
+#
+# projects/start-docs/versions.conf rides along with the rest of the infra, so
+# the version each book is published under is whatever the tagged tree said. It
+# is a deliberate, hand-maintained file: set it in master before you tag.
+#
+# Two guards protect the shared tree: the tagged commit must be an ancestor of
+# master, and a tag that predates the infrastructure already published syncs its
+# book alone. Between them, a backfilled or re-cut tag cannot roll the site back.
+on:
+  push:
+    tags: ['*/v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-sync-on-tag
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync ${{ github.ref_name }} docs onto live-docs
+    runs-on: ubuntu-latest
+    # live-docs is PR-protected with no bypass for github-actions[bot], so this
+    # needs the docs bot App, which IS a bypass actor. Its private key is an
+    # environment secret whose deployment policy admits only `*/v*` tags — a
+    # workflow run on any other ref is refused the secret and so cannot mint a
+    # token that bypasses anything. Keep that policy in step with the trigger.
+    environment: docs-publish
+    steps:
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ secrets.DOCS_BOT_APP_ID }}
+          private-key: ${{ secrets.DOCS_BOT_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v6
+        with:
+          ref: live-docs
+          fetch-depth: 0
+          fetch-tags: true
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Copy the tagged docs onto live-docs
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          PROJECT="${TAG%%/v*}"
+          SRC=$(git rev-list -n1 "$TAG")
+          echo "Tag $TAG -> project $PROJECT, commit $SRC"
+
+          if ! git cat-file -e "$TAG:projects/$PROJECT/docs" 2>/dev/null; then
+            echo "::notice::$PROJECT ships no docs/ book — nothing to publish."
+            exit 0
+          fi
+
+          git fetch --no-tags origin master
+
+          # A tag cut off an unmerged branch would publish content master has no
+          # copy of, and [skip-backport] stops the backport from reconciling it.
+          if ! git merge-base --is-ancestor "$SRC" origin/master; then
+            echo "::error::$TAG points at $SRC, which is not an ancestor of master. Merge the branch and re-cut the tag before publishing its docs."
+            exit 1
+          fi
+
+          # The shared projects/start-docs tree (theme, build.sh, versions.conf,
+          # deploy infra) is not versioned per product, so a backfilled or re-cut
+          # tag from an old commit would roll the whole site back to that commit's
+          # infrastructure. Each sync records the commit it published from; if
+          # this tag predates that, publish the book alone and leave the shared
+          # tree where it is. Ancestry, not dates — tag order is not chronology.
+          # Walk back to the newest commit that actually carries a trailer, not
+          # just the newest commit touching the tree: a hand PR to live-docs
+          # fixing the shared infrastructure has no trailer, and reading only the
+          # tip would blank the watermark and re-open the rollback it guards
+          # against. (Necessarily inert until the first sync writes one.)
+          # Captured whole, then sliced in the shell, rather than piped through
+          # `head -n1`: head closes the pipe after one line, and once enough
+          # trailers exist for sed to flush a second time it takes SIGPIPE and
+          # `pipefail` aborts the sync. That threshold is passed at ~120 published
+          # tags, so the pipe form works until it suddenly doesn't.
+          TRAILERS=$(git log --format=%B -- projects/start-docs | sed -n 's/^Source-Commit: *//p')
+          PREV=${TRAILERS%%$'\n'*}
+          SYNC_INFRA=1
+          if [ -n "$PREV" ] && git cat-file -e "${PREV}^{commit}" 2>/dev/null \
+            && [ "$PREV" != "$SRC" ] && git merge-base --is-ancestor "$SRC" "$PREV"; then
+            SYNC_INFRA=0
+            echo "::warning::$TAG ($SRC) predates the published docs infrastructure ($PREV) — publishing $PROJECT's book only, leaving projects/start-docs untouched."
+          fi
+
+          git config user.name "start9-docs-bot[bot]"
+          git config user.email "start9-docs-bot[bot]@users.noreply.github.com"
+
+          # Delete then restore from the tag, so files the release removed are
+          # actually gone rather than left behind by a copy-over.
+          rm -rf "projects/$PROJECT/docs"
+          git checkout "$TAG" -- "projects/$PROJECT/docs"
+          if [ "$SYNC_INFRA" = 1 ]; then
+            rm -rf projects/start-docs
+            git checkout "$TAG" -- projects/start-docs
+          fi
+
+          git add -A "projects/$PROJECT/docs" projects/start-docs
+          if git diff --cached --quiet; then
+            echo "::notice::live-docs already matches $TAG."
+            exit 0
+          fi
+
+          # [skip-backport] is load-bearing, not a nicety: this push DOES raise a
+          # push event (App tokens are exempt from the GITHUB_TOKEN no-recursion
+          # rule), so docs-backport.yml will see it. The content came from master
+          # already, so it must not be bounced back. Source-Commit is what the
+          # next run's rollback guard reads.
+          git commit -m "docs: publish $PROJECT docs from $TAG [skip-backport]" \
+                     -m "Source-Commit: $SRC"
+          git push origin HEAD:live-docs

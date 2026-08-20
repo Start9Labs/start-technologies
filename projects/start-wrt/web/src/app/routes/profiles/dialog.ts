@@ -587,15 +587,20 @@ class AddProfile {
     return 1
   }
 
-  private getOutboundType(): 'direct' | 'vpn' {
+  /** The profile's current VPN outbound, if it is still one we can offer. */
+  private get existingVpn(): string | undefined {
     const outbound = this.existing?.outbound
-    return outbound && outbound !== 'wan' ? 'vpn' : 'direct'
+    return outbound && this.outboundVpns.some(v => v.interface === outbound)
+      ? outbound
+      : undefined
+  }
+
+  private getOutboundType(): 'direct' | 'vpn' {
+    return this.existingVpn ? 'vpn' : 'direct'
   }
 
   private getOutboundVpn(): string {
-    const outbound = this.existing?.outbound
-    if (outbound && outbound !== 'wan') return outbound
-    return this.outboundVpns[0]?.interface ?? ''
+    return this.existingVpn ?? this.outboundVpns[0]?.interface ?? ''
   }
 
   private parseDnsOverride(): {

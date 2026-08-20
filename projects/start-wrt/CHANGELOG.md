@@ -29,6 +29,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Disabled outbound VPNs are no longer offered as a Security Profile's
+  outbound route.** The VPN picker on the profile's WAN / Internet tab listed
+  every VPN, including disabled ones — and picking one silently cut that
+  profile off the Internet, since a disabled VPN's tunnel never comes up. The
+  picker now lists only enabled VPNs, and the router refuses a profile pointed
+  at a disabled — or nonexistent — VPN, so the command line can't create the
+  same dead end.
+
+  The same applied to VPN chaining, where it was quieter and worse: a disabled
+  VPN could be picked as another VPN's **Connects to** target, and the chain
+  then silently collapsed to a single hop. The downstream VPN connected
+  normally — straight out your Internet connection instead of through the VPN
+  you chained it to — and every screen reported success. Disabled VPNs are no
+  longer offered as chain targets, and the router rejects one outright.
+
 - **Enabling LAN IPv6 no longer silently fails when the Admin profile routes
   through an IPv4-only VPN.** Saving the LAN IPv6 settings reported success
   but immediately reverted to disabled: the save re-derived the admin LAN's
@@ -38,12 +53,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after switching the outbound back. The LAN IPv6 toggle is now the sole
   owner of that setting; with an IPv4-only VPN outbound, LAN devices still
   get local (ULA) IPv6 addresses while internet-bound IPv6 remains blocked
-  by the VPN kill switch, so nothing leaks around the tunnel.
+  by the VPN kill switch, so nothing leaks around the tunnel. That same
+  fault could also leave a router where the LAN IPv6 page read "Disabled"
+  while individual Security Profiles carried on handing out IPv6 addresses —
+  the page and the network disagreeing, with no way to bring them back into
+  line. Routers left in that state are now repaired automatically on the
+  first start after updating, which turns IPv6 off for those profiles too;
+  turn it back on from the LAN IPv6 page if you want it, and this time it
+  applies everywhere at once.
+
+- **Turning IPv6 off now tells your devices to drop their IPv6 addresses.**
+  Devices choose their own IPv6 addresses from a prefix the router advertises,
+  and the only way to take one back is to advertise it one last time as
+  expired. The router was restarting its advertisement service instead of
+  reloading it, which skips that goodbye entirely — so after disabling IPv6
+  (on the LAN, on a Security Profile, or on the WAN) devices carried on using
+  addresses that no longer worked, for up to 90 minutes, until the addresses
+  timed out on their own. The notice is now sent while the prefix is still
+  live. A device that is asleep or misses the notice still falls back to the
+  timeout.
+
+- **The Devices list no longer shows IPv6 addresses a device has given up.**
+  The router remembers a neighbouring address long after the device stops
+  using it, so a device could keep displaying an IPv6 address for hours after
+  it dropped it — most visibly after turning IPv6 off, where the address on
+  screen suggested nothing had changed. The router now confirms the device
+  still answers on an address before showing it, and leaves the field empty
+  when it does not.
 
 - **Published ports no longer reshuffle their order on every refresh.** The
   list is auto-refreshed every few seconds, and each refresh returned the
   rows in an arbitrary order, so the table visibly jumped around. Published
   ports now appear in a stable order, sorted by label.
+
+- **A device that missed its one chance to share its name over mDNS/Bonjour is
+  no longer stuck with a generic label until the router reboots.** The name
+  lookup was attempted exactly once per device, and it usually fired at the
+  worst moment — the instant the device first appeared (before its Bonjour
+  service finished starting), or during the reconnection rush right after a
+  router reboot — and sleeping phones and laptops don't answer at all. The
+  router now retries silent devices on a backoff schedule (about a minute
+  after the first miss, stretching to a day) before concluding the device has
+  no name to share; a device that answers is remembered permanently.
 
 - **IPv6 published-port rules now follow the target device when it changes
   its address.** Devices assign their own IPv6 addresses and change them
@@ -89,6 +140,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   WAN interface, so an update fires the moment the connection comes back up
   (e.g. after a modem reboot or PPPoE reconnect) instead of waiting for the
   next scheduled check.
+
+- **Published Ports endpoints no longer disappear when a WAN setting can't be
+  read.** A network interface hand-configured with a protocol StartWRT doesn't
+  manage (e.g. a `6in4` tunnel on `wan6`) made the WAN/LAN IPv6 settings
+  endpoints error, and the Published Ports page treated that one failure as
+  fatal — every port's IPv4 endpoint showed `—` even though the forwards were
+  active. Unmanaged protocols now read back gracefully (reported as IPv6
+  disabled) and are preserved untouched on disk, and the page now loads each
+  WAN setting independently, so one failure can no longer blank out the
+  endpoint list.
 
 ## [1.0.1]
 

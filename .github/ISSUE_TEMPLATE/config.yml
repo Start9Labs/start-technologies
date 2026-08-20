@@ -1,7 +1,14 @@
+blank_issues_enabled: true
 contact_links:
-  - name: 📚 Documentation
-    url: https://github.com/start9labs/documentation
-    about: This issue tracker is not for documentation issues. Please file documentation issues on the Start9 Docs repo.
-  - name: 🤔 Support Question
-    url: https://t.me/start9_labs
-    about: This issue tracker is not for support questions. Please post your question in our Telegram community channel.
+  - name: 💬 Support & troubleshooting
+    url: https://matrix.to/#/#general:start9.me
+    about: Not sure it is a bug? Ask in the community Matrix room. This tracker is for defects and feature requests, not support questions.
+  - name: 🛠️ Packaging & development chat
+    url: https://matrix.to/#/#developer-space:matrix.start9labs.com
+    about: Questions about packaging a service with the SDK, or building against StartOS.
+  - name: 📦 A specific service package
+    url: https://github.com/Start9Labs
+    about: Bugs in a packaged service (Bitcoin Core, LND, Nextcloud…) belong in that package's own *-startos repo, not here.
+  - name: 🖥️ Hardware compatibility
+    url: https://community.start9.com/t/known-good-hardware-master-list-hardware-capable-of-running-startos/
+    about: The community's known-good hardware list — worth checking before reporting a hardware-specific problem.

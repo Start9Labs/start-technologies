@@ -25,3 +25,8 @@ After [installing StartOS](installing-startos.md), follow these steps to initial
 1. Set your [server name](server-name.md). Your server's [mDNS address](mdns.md) is derived from this name.
 
 1. Once initialization completes, open your server's permanent local address, then follow the instructions for [Trusting your Root CA](./trust-ca.md) to establish a secure connection with your server.
+
+> [!IMPORTANT]
+> **If your server has Secure Boot enabled, the next restart asks you to enroll a key.** Some hardware needs a driver that Secure Boot will only load once you approve it, and the NVIDIA graphics driver is the common case. Your server generates its own key for this during setup and asks the firmware to trust it, so on the following restart you are shown a blue **MokManager** screen on the monitor — a keyboard and monitor are required, as this happens before StartOS starts.
+>
+> Choose **Enroll MOK → Continue → Yes**, then enter your master password. Your server then restarts and the driver loads normally. If you decline, everything else works, but hardware needing such a driver stays unavailable until you enroll the key.

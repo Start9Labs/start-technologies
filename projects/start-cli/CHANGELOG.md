@@ -9,6 +9,43 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
+## [1.1.1]
+
+### Added
+
+- **`s9pk pack` packs the package's `README.md`.** It sits beside `instructions.md` in the
+  archive and is readable with `S9pk::readme()`. The point is what runs on the server: an AI
+  assistant administering a service can now read the package's technical reference from the
+  installed `.s9pk` — offline, and describing the version actually installed — instead of
+  fetching a repository's default branch, which has usually moved on. Unlike `instructions.md`
+  it is **optional**, so a package without one still builds; it is simply absent from the
+  archive and the accessor returns `None`. Nothing is packed for an s9pk built before this,
+  and v1 packages migrated forward carry no README either.
+
+### Fixed
+
+- **`registry os asset remove` can be run.** Its `iso`/`img`/`squashfs` handlers were registered
+  as RPC-only, and — unlike `add`, `sign`, and `get`, which each pair their RPC handlers with a
+  CLI counterpart — nothing was registered in their place. `remove` was left parsing as a leaf
+  that accepts no arguments: it listed under `registry os asset --help` with a blank description,
+  and naming an asset type came back `unexpected argument 'iso' found` with exit 2. The three
+  subcommands now take `<VERSION> <PLATFORM>` and reach the registry directly, mirroring
+  `registry os asset get`, so a single platform's asset can be dropped without removing the whole
+  version and re-adding every other platform. Asking to remove a platform the version has no
+  asset for now says so instead of reporting success.
+
+- **The local authcookie now reaches a registry or tunnel daemon that listens on a
+  non-loopback address.** Run on the server itself, the CLI presents the daemon's local
+  authcookie as an `Authorization: Bearer` header — but it attached that header only when
+  the URL was literally loopback. With no `--registry`/`--tunnel` the CLI derives the URL
+  from the daemon's own `registry-listen`/`tunnel-listen`, which is commonly the wildcard
+  `0.0.0.0:5959`; that is not loopback, so the request went out unauthenticated and came
+  back `Unauthorized`. `start-cli registry admin list` on the registry host failed this way.
+  A wildcard listen address is now dialled over loopback — binding every interface is not a
+  destination — and an address derived from the daemon's own listen configuration counts as
+  naming this machine, so the token is attached. An explicit `--registry`/`--tunnel` target
+  is unchanged: the token still goes only to a loopback URL.
+
 ## [1.1.0]
 
 ### Changed

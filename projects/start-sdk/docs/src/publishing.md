@@ -34,9 +34,6 @@ Once your fork exists inside Start9-Community:
 
 Every subsequent change or version bump is another PR through the same cycle — merge publishes to beta, email/issue promotes onward.
 
-> [!NOTE]
-> The email / issue loop is clunky — we know. A developer portal with self-service submission management and one-click promotion is actively being built. Until it ships, email and issues are how the pipeline is operated.
-
 ## Pre-Publish Checklist
 
 Before publishing to your own registry — or before opening / updating a PR on the Start9-Community fork — walk through this. For community submissions, these checks must pass **before** you open the PR: the merge triggers the build, and anything wrong will ship directly to community-beta.

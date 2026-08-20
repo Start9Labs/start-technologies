@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 
 use clap::builder::ValueParserFactory;
@@ -134,6 +134,30 @@ pub struct MountParams {
     location: PathBuf,
     target: MountTarget,
 }
+
+fn relative_components(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(_) | Component::ParentDir => out.push(component.as_os_str()),
+            _ => {}
+        }
+    }
+    out
+}
+
+async fn confined_join(base: &Path, rel: &Path) -> Result<PathBuf, Error> {
+    let base = crate::util::io::canonicalize(base, false).await?;
+    let joined = crate::util::io::canonicalize(base.join(relative_components(rel)), false).await?;
+    if !joined.starts_with(&base) {
+        return Err(Error::new(
+            eyre!("mount paths must stay within their base directory"),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    Ok(joined)
+}
+
 pub async fn mount(
     context: EffectContext,
     MountParams {
@@ -150,18 +174,20 @@ pub async fn mount(
     }: MountParams,
 ) -> Result<(), Error> {
     let context = context.deref()?;
-    let subpath = subpath.unwrap_or_default();
-    let subpath = subpath.strip_prefix("/").unwrap_or(&subpath);
-    let source = data_dir(DATA_DIR, &package_id, &volume_id).join(subpath);
-    let location = location.strip_prefix("/").unwrap_or(&location);
-    let mountpoint = context
+    let source = confined_join(
+        &data_dir(DATA_DIR, &package_id, &volume_id),
+        subpath.as_deref().unwrap_or(Path::new("")),
+    )
+    .await?;
+    let rootfs = context
         .seed
         .persistent_container
         .lxc_container
         .get()
         .or_not_found("lxc container")?
         .rootfs_dir()
-        .join(location);
+        .to_owned();
+    let mountpoint = confined_join(&rootfs, &location).await?;
 
     if is_mountpoint(&mountpoint).await? {
         unmount(&mountpoint, true).await?;
@@ -513,6 +539,70 @@ pub async fn get_service_manifest(
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn relative_components_drops_roots_and_dots() {
+        assert_eq!(
+            relative_components(Path::new("/a/b/./c")),
+            PathBuf::from("a/b/c")
+        );
+        assert_eq!(relative_components(Path::new("")), PathBuf::new());
+        assert_eq!(
+            relative_components(Path::new("a/../b")),
+            PathBuf::from("a/../b")
+        );
+    }
+
+    #[tokio::test]
+    async fn confined_join_keeps_paths_under_the_base() {
+        let tmp = PathBuf::from(format!("/tmp/confined-join-test-{}", std::process::id()));
+        let base = tmp.join("base");
+        tokio::fs::create_dir_all(base.join("inner")).await.unwrap();
+        tokio::fs::create_dir_all(tmp.join("outside"))
+            .await
+            .unwrap();
+        #[cfg(unix)]
+        tokio::fs::symlink(tmp.join("outside"), base.join("link"))
+            .await
+            .unwrap();
+        let canonical_base = tokio::fs::canonicalize(&base).await.unwrap();
+
+        assert_eq!(
+            confined_join(&base, Path::new("inner")).await.unwrap(),
+            canonical_base.join("inner")
+        );
+        // a tail that does not exist yet is fine, as long as it is plain names
+        assert_eq!(
+            confined_join(&base, Path::new("inner/new/dir"))
+                .await
+                .unwrap(),
+            canonical_base.join("inner/new/dir")
+        );
+        assert_eq!(
+            confined_join(&base, Path::new("")).await.unwrap(),
+            canonical_base
+        );
+        // a `..` that resolves back inside is fine
+        assert_eq!(
+            confined_join(&base, Path::new("inner/../inner"))
+                .await
+                .unwrap(),
+            canonical_base.join("inner")
+        );
+        assert!(confined_join(&base, Path::new("../outside")).await.is_err());
+        assert!(
+            confined_join(&base, Path::new("missing/../../outside"))
+                .await
+                .is_err()
+        );
+        #[cfg(unix)]
+        {
+            assert!(confined_join(&base, Path::new("link")).await.is_err());
+            assert!(confined_join(&base, Path::new("link/sub")).await.is_err());
+        }
+
+        tokio::fs::remove_dir_all(&tmp).await.ok();
+    }
 
     fn idmap(from_id: u32, to_id: u32, range: u32) -> IdMap {
         IdMap {

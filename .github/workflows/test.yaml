@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - master
-      - next/*
+      - integration/*
     # A docs-only push to master needs no re-check — the PR that produced it
     # already ran the prettier gate below. Pull requests intentionally do NOT
     # ignore *.md (see the `prettier` job) so docs formatting is always checked.
@@ -13,7 +13,7 @@ on:
   pull_request:
     branches:
       - master
-      - next/*
+      - integration/*
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
@@ -128,6 +128,22 @@ jobs:
         run: docker build -t start9/fmt-env -f build/fmt/fmtenv.Dockerfile build/fmt
       - name: Check formatting
         run: make format-check
+
+  licenses:
+    name: Dependency Licenses
+    needs: [prettier, changes]
+    if: >-
+      !cancelled() && needs.prettier.result == 'success'
+      && github.event.pull_request.draft != true
+      && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # Checks the Cargo graph against deny.toml, so our binaries only ever link
+      # licenses whose obligations we can meet while shipping under MIT.
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses
 
   generated:
     name: Generated Artifacts

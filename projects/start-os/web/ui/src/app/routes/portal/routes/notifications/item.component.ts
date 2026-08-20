@@ -16,10 +16,10 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
   template: `
     @if (notificationItem(); as item) {
       <td>
-        <ng-content />
         {{ item.createdAt | date: 'MMM d, y, h:mm a' }}
       </td>
       <td class="title" [style.color]="color()">
+        <ng-content />
         <tui-icon [icon]="icon()" />
         {{ item.title }}
       </td>
@@ -69,12 +69,19 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
     '[class._new]': '!notificationItem()?.seen',
   },
   styles: `
+    :host {
+      position: relative;
+    }
+
     :host._new td {
       font-weight: bold;
       color: var(--tui-text-primary);
     }
 
+    /* the checkbox is projected in here but paints in the date column on desktop,
+       so its containing block has to be the row rather than this cell */
     .title {
+      position: static;
       width: 13rem;
     }
 
@@ -145,7 +152,7 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
       }
 
       :host-context(table:has(:checked)) tui-icon {
-        opacity: 0;
+        display: none;
       }
     }
   `,

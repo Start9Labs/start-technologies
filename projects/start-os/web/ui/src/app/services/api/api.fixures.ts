@@ -1506,6 +1506,25 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
     result: null,
   }
 
+  /**
+   * A payload longer than correction level `M` can hold in a version-40 code
+   * (3391 alphanumeric characters), which is the size a hardware-wallet BC-UR
+   * code reaches once it carries a certificate. Renders the largest QR the
+   * modal has to draw — 3618 characters, still inside level `L`'s 4296.
+   */
+  export const ActionResBigQr: ActionRes = {
+    version: '1',
+    title: 'Enrollment Code',
+    message: 'Scan this with your device.',
+    result: {
+      type: 'single',
+      copyable: true,
+      qr: true,
+      masked: false,
+      value: `UR:JADE-UPDPS/${'ABCDEFGHJKLMNPQRSTUVWXYZ0123456789'.repeat(106)}`,
+    },
+  }
+
   export const ActionResSingle: ActionRes = {
     version: '1',
     title: 'New Password',

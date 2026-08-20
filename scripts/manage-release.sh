@@ -42,8 +42,21 @@ SDK_NPM_PACKAGE="@start9labs/start-sdk"
 # must agree — hence one constant rather than the string in both places.
 NOTES_MARKER="## What's Changed"
 
-APT_BASE_URL="https://start9-debs.nyc3.digitaloceanspaces.com"
+# The S3 origin, deliberately NOT the `*.cdn.*` host that apt/start9*.list point
+# clients at. Do not "harmonize" the two. A promotion has to see the suite as it
+# is right now: a cached InRelease is still a validly signed InRelease, so every
+# signature and hash check below would pass while quietly promoting whatever
+# build the edge happened to be holding. Signatures prove authenticity, not
+# freshness. End users keep the CDN — apt is built to tolerate a stale mirror.
+APT_BASE_URL="${APT_BASE_URL:-https://start9-debs.nyc3.digitaloceanspaces.com}"
+# Belt and braces for any intermediary between here and the origin.
+APT_NO_CACHE=(-H 'Cache-Control: no-cache' -H 'Pragma: no-cache')
 APT_SUITE="stable"
+# CI publishes every master build into `alpha` (.github/workflows/apt-publish-alpha.yml).
+# A deb release promotes from there rather than rebuilding trust from a CI run,
+# so the bytes testers have been running are the bytes that reach stable — the
+# same source -> target promotion the OS and StartWRT releases use.
+APT_ALPHA_SUITE="alpha"
 APT_COMPONENT="main"
 
 # StartWRT publishes flashable images to its own registry pair + S3 bucket. The
@@ -324,6 +337,242 @@ changelog_section() {
 # --- Deb helpers (shared by the deb and cli kinds) ---
 
 # Download this project's per-arch debs from a GitHub Actions run into the cwd.
+# Download this project's debs for the commit being tagged from the alpha suite.
+#
+# Selection is by the Git-Hash control field (written by debian/build.sh), which
+# dpkg-scanpackages carries into the Packages index — so the build is identified
+# and verified before a byte is downloaded. Version alone would not do: every
+# master build of a version publishes under the same Version, and the apt pool
+# holds exactly one deb per package/arch, so `alpha` always carries the newest
+# master build of that version and nothing older.
+#
+# A mismatch therefore means master moved past the commit being tagged. That is
+# a real stop, not a nuisance: releasing then would ship bytes no one soaked.
+# Cut the release from an up-to-date master, or fall back to `pull-gha` for a
+# repair.
+# Verify the alpha suite's signed Release and return a verified Packages file
+# for one architecture. Alpha is signed with the CI key precisely so its
+# consumers can verify it, and a releaser promoting into stable is one: reading
+# the index over plain HTTPS would let anyone able to write the bucket (without
+# holding the signing key) get bytes stable-signed by the releaser.
+# macOS ships shasum, not coreutils' sha256sum — same as checksum_block, which
+# has carried this fallback all along. Prints the bare hash.
+sha256_of() {
+    if command -v sha256sum > /dev/null 2>&1; then
+        sha256sum "$1" | cut -d' ' -f1
+    else
+        shasum -a 256 "$1" | cut -d' ' -f1
+    fi
+}
+
+verify_alpha_release() {
+    local keyring="$1" tmp="$2"
+    curl -fsSL "${APT_NO_CACHE[@]}" "${APT_BASE_URL}/dists/${APT_ALPHA_SUITE}/InRelease" -o "$tmp/InRelease"
+    if ! gpg --no-default-keyring --keyring "$keyring" --batch --yes \
+        --output "$tmp/Release" --decrypt "$tmp/InRelease" 2> "$tmp/gpg.err"; then
+        >&2 echo "  ✗ the ${APT_ALPHA_SUITE} InRelease is not signed by the key in ${keyring}"
+        >&2 sed 's/^/    /' "$tmp/gpg.err"
+        return 1
+    fi
+
+    # No freshness bound is enforced here, deliberately. A signature proves
+    # authenticity and not recency, so replaying older signed metadata is
+    # possible for anyone who can write the bucket — but the defence against
+    # promoting the wrong build is that the operator is told which commit is
+    # being tagged (resolve_alpha_commit prints it, and a replay shows up as an
+    # unexpectedly old hash), not metadata that expires on a timer unrelated to
+    # this project's release cadence.
+}
+
+verify_alpha_packages() {
+    local tmp="$1" darch="$2" rel_path idx_sha got
+    rel_path="${APT_COMPONENT}/binary-${darch}/Packages"
+    idx_sha=$(awk -v p="$rel_path" '
+        /^SHA256:/ { in_sha = 1; next }
+        /^[^ ]/    { in_sha = 0 }
+        in_sha && $3 == p { print $1; exit }
+    ' "$tmp/Release")
+    if [ -z "$idx_sha" ]; then
+        >&2 echo "  ✗ the signed Release does not list ${rel_path}"
+        return 1
+    fi
+    curl -fsSL "${APT_NO_CACHE[@]}" "${APT_BASE_URL}/dists/${APT_ALPHA_SUITE}/${rel_path}" -o "$tmp/Packages.${darch}"
+    got=$(sha256_of "$tmp/Packages.${darch}")
+    if [ "$got" != "$idx_sha" ]; then
+        >&2 echo "  ✗ ${rel_path} does not match the hash the signed Release commits to"
+        return 1
+    fi
+}
+
+# Print "<git-hash>\t<sha256>\t<filename>" for this project's deb in a verified
+# Packages file. Emitted at the stanza boundary rather than on a particular
+# field: the index guarantees no order, and Git-Hash follows Filename in practice.
+alpha_stanza() {
+    local entry
+    entry=$(awk -v pkg="$PROJECT" -v ver="$VERSION" '
+        function flush() {
+            if (p == pkg && index(v, ver) > 0 && f != "") print h "\t" s "\t" f
+            p = ""; v = ""; h = ""; s = ""; f = ""
+        }
+        /^$/         { flush(); next }
+        /^Package:/  { p = $2 }
+        /^Version:/  { v = $2 }
+        /^Git-Hash:/ { h = $2 }
+        /^SHA256:/   { s = $2 }
+        /^Filename:/ { f = $2 }
+        END { flush() }
+    ' "$1")
+    # First line taken in the shell rather than piped through `head -1`, which
+    # would close the pipe early and take SIGPIPE under `pipefail`.
+    echo "${entry%%$'\n'*}"
+}
+
+# Verify the alpha suite and collect this project's debs for every architecture.
+# Populates ALPHA_COMMIT / ALPHA_SHAS / ALPHA_FILES and leaves the verified
+# metadata in ALPHA_TMP, which the caller removes.
+#
+# One function so every consumer gets the same guarantees: `alpha-commit` used to
+# read a single arch and accept a missing Git-Hash, so it could print a commit
+# that `pull-alpha` then refused.
+alpha_collect() {
+    local keyring arch darch stanza h
+    keyring="$REPO_ROOT/apt/start9-alpha.gpg"
+    if [ ! -f "$keyring" ]; then
+        >&2 echo "Cannot verify the ${APT_ALPHA_SUITE} suite: ${keyring} is missing."
+        return 1
+    fi
+    ALPHA_TMP=$(mktemp -d)
+    declare -gA ALPHA_SHAS=() ALPHA_FILES=()
+    ALPHA_COMMIT=""
+
+    verify_alpha_release "$keyring" "$ALPHA_TMP" || return 1
+
+    for arch in $DEB_ARCHES; do
+        darch=$(deb_arch "$arch")
+        verify_alpha_packages "$ALPHA_TMP" "$darch" || return 1
+        stanza=$(alpha_stanza "$ALPHA_TMP/Packages.${darch}")
+        if [ -z "$stanza" ]; then
+            >&2 echo "  ✗ ${darch}: no ${PROJECT} ${VERSION} deb in the ${APT_ALPHA_SUITE} suite"
+            return 1
+        fi
+        h=${stanza%%$'\t'*}
+        stanza=${stanza#*$'\t'}
+        ALPHA_SHAS[$arch]=${stanza%%$'\t'*}
+        ALPHA_FILES[$arch]=${stanza#*$'\t'}
+
+        if [ -z "$h" ]; then
+            >&2 echo "  ✗ ${arch}: this deb predates the Git-Hash control field — use 'pull-gha'"
+            return 1
+        fi
+        # Every arch must come from one build: a half-published suite would
+        # otherwise ship a release assembled from two different commits.
+        if [ -z "$ALPHA_COMMIT" ]; then
+            ALPHA_COMMIT=$h
+        elif [ "$h" != "$ALPHA_COMMIT" ]; then
+            >&2 echo "  ✗ ${APT_ALPHA_SUITE} holds different commits per architecture (${ALPHA_COMMIT} vs ${h})."
+            >&2 echo "    Wait for the build to finish publishing every arch, or use 'pull-gha'."
+            return 1
+        fi
+    done
+}
+
+# Download the collected debs, each verified against the hash the signed index
+# commits to, and stage them only once every one has passed.
+# Decide which commit the tag points at. The tag is a claim that a commit
+# produced the artifact, so when we are promoting, alpha's build is what decides
+# it — this adopts that commit rather than making the operator notice a mismatch
+# and re-run by hand.
+#
+# Each product's workflow is path-filtered, so master routinely advances without
+# producing a new build of that product: insisting on HEAD would demand a build
+# that will never exist. Adoption is confined to a commit already in this
+# branch's history, and an explicit COMMIT is never second-guessed.
+resolve_alpha_commit() {
+    local alpha_hash="$1" tag_sha behind
+    tag_sha=$(tag_commit_sha)
+    [ "$alpha_hash" != "$tag_sha" ] || return 0
+
+    if [ -n "${COMMIT:-}" ]; then
+        >&2 echo "  ✗ ${APT_ALPHA_SUITE} holds a build of ${alpha_hash}, but COMMIT=${COMMIT} is ${tag_sha}."
+        >&2 echo "    The tag has to point at the commit that produced the artifacts. Drop COMMIT"
+        >&2 echo "    to take alpha's, or use 'pull-gha' with the run that built ${tag_sha}."
+        return 1
+    fi
+
+    if ! (cd "$REPO_ROOT" && git rev-parse --verify --quiet "${alpha_hash}^{commit}" > /dev/null); then
+        >&2 echo "  ✗ ${APT_ALPHA_SUITE} holds a build of ${alpha_hash}, which is not in this repository."
+        >&2 echo "    git fetch origin, then re-run."
+        return 1
+    fi
+    if ! (cd "$REPO_ROOT" && git merge-base --is-ancestor "$alpha_hash" HEAD); then
+        >&2 echo "  ✗ ${APT_ALPHA_SUITE} holds a build of ${alpha_hash}, which is not an ancestor of HEAD."
+        >&2 echo "    That build did not come from the branch you are releasing. Check out the"
+        >&2 echo "    branch that contains it, or use 'pull-gha'."
+        return 1
+    fi
+
+    behind=$(cd "$REPO_ROOT" && git rev-list --count "${alpha_hash}..HEAD")
+    COMMIT="$alpha_hash"
+    echo "  Tagging ${alpha_hash}, the commit alpha built — HEAD is ${behind} commit(s) further on."
+    echo "  (${PROJECT}'s workflow is path-filtered, so master advances without rebuilding it.)"
+    echo "  To work from that tree: git checkout ${alpha_hash}"
+}
+
+# cmd_pre_check validates, and release_notes reads, the *working tree* — but an
+# adopted commit can be behind it. Where the changelog is identical the
+# distinction is immaterial, so the common case stays frictionless; where it is
+# not, the published notes would describe a tree the tag does not point at, so
+# stop and ask for the checkout rather than shipping notes that do not match.
+assert_metadata_matches_adopted() {
+    local adopted head changelog
+    adopted=$(tag_commit_sha)
+    head=$(cd "$REPO_ROOT" && git rev-parse --verify HEAD)
+    [ "$adopted" != "$head" ] || return 0
+    changelog=$(changelog_path "$PROJECT")
+    (cd "$REPO_ROOT" && git diff --quiet "$adopted" HEAD -- "$changelog") && return 0
+
+    >&2 echo "  ✗ $(basename "$(dirname "$changelog")")/CHANGELOG.md differs between HEAD and the"
+    >&2 echo "    commit being tagged (${adopted}). Release notes are read from the working"
+    >&2 echo "    tree, so they would describe a tree the tag does not point at."
+    >&2 echo
+    >&2 echo "      git checkout ${adopted}"
+    >&2 echo "      ./scripts/manage-release.sh release ${PROJECT}"
+    return 1
+}
+
+# Clear every payload this staging path produces, both halves. Clearing only the
+# debs left the reverse partial set possible: binaries from a failed cli download
+# sitting beside a fresh marker, or a previous attempt's debs beside new
+# binaries. The marker is written by the caller before either half is fetched.
+clear_alpha_staging() {
+    rm -f ./*.deb
+    [ "$KIND" != cli ] || rm -f ./start-cli_*
+}
+
+promote_alpha_debs() {
+    local want arch darch base got
+    want=$(tag_commit_sha)
+    echo "Promoting ${PROJECT} debs from the ${APT_ALPHA_SUITE} suite (commit ${want})..."
+
+    for arch in $DEB_ARCHES; do
+        darch=$(deb_arch "$arch")
+        base=$(basename "${ALPHA_FILES[$arch]}")
+        echo "  ${arch}: ${base}"
+        curl -fsSL "${APT_NO_CACHE[@]}" "${APT_BASE_URL}/${ALPHA_FILES[$arch]}" -o "$ALPHA_TMP/$base"
+        # The pool key is stable across builds, so without this an alpha
+        # republish between the index read and this download would swap the
+        # bytes after the commit check had already passed.
+        got=$(sha256_of "$ALPHA_TMP/$base")
+        if [ "$got" != "${ALPHA_SHAS[$arch]}" ]; then
+            >&2 echo "  ✗ ${darch}: ${base} does not match the hash the signed index commits to"
+            >&2 echo "    (the suite was republished mid-promotion, or the object was tampered with)"
+            return 1
+        fi
+    done
+
+    mv "$ALPHA_TMP"/*.deb .
+}
+
 pull_gha_debs() {
     local arch
     for arch in $DEB_ARCHES; do
@@ -338,7 +587,7 @@ pull_apt_debs() {
     for arch in $DEB_ARCHES; do
         darch=$(deb_arch "$arch")
         idx="${APT_BASE_URL}/dists/${APT_SUITE}/${APT_COMPONENT}/binary-${darch}/Packages"
-        filename=$(curl -fsSL "$idx" 2>/dev/null | awk -v pkg="$PROJECT" -v ver="$VERSION" '
+        filename=$(curl -fsSL "${APT_NO_CACHE[@]}" "$idx" 2>/dev/null | awk -v pkg="$PROJECT" -v ver="$VERSION" '
             /^$/ { p=""; v="" }
             /^Package:/ { p=$2 }
             /^Version:/ { v=$2 }
@@ -346,7 +595,7 @@ pull_apt_debs() {
         ' | head -1)
         if [ -n "$filename" ]; then
             echo "  ${arch}: ${filename}"
-            curl -fsSL "${APT_BASE_URL}/${filename}" -o "$(basename "$filename")"
+            curl -fsSL "${APT_NO_CACHE[@]}" "${APT_BASE_URL}/${filename}" -o "$(basename "$filename")"
         else
             >&2 echo "  ! no ${PROJECT} ${arch} deb for ${VERSION} in apt repo"
         fi
@@ -652,9 +901,9 @@ cmd_pre_check() {
     echo "Pre-check passed."
 }
 
-cmd_pull_gha() {
-    require_kind os cli deb wrt
-
+# Resolve RUN_ID (prompting when unset), assert the run built the commit being
+# tagged, and stage the release dir. Sets RUN_ID and RUN_SHA for the caller.
+resolve_gha_run() {
     if [ -z "${RUN_ID:-}" ]; then
         read -rp "RUN_ID (GitHub Actions run for ${PROJECT}): " RUN_ID
     fi
@@ -665,19 +914,38 @@ cmd_pull_gha() {
     fi
 
     # The tag must point at the commit these artifacts were built from.
-    local run_sha tag_sha
-    run_sha=$(gh run view -R "$REPO" "$RUN_ID" --json headSha -q .headSha)
+    local tag_sha
+    RUN_SHA=$(gh run view -R "$REPO" "$RUN_ID" --json headSha -q .headSha)
     tag_sha=$(tag_commit_sha)
-    if [ "$run_sha" != "$tag_sha" ]; then
-        >&2 echo "Run ${RUN_ID} built commit ${run_sha},"
+    if [ "$RUN_SHA" != "$tag_sha" ]; then
+        >&2 echo "Run ${RUN_ID} built commit ${RUN_SHA},"
         >&2 echo "but tag ${TAG} would be cut at ${COMMIT:-HEAD} (${tag_sha})."
-        >&2 echo "Pass the run for that commit, or set COMMIT=${run_sha}."
+        >&2 echo "Pass the run for that commit, or set COMMIT=${RUN_SHA}."
         exit 1
     fi
 
     ensure_release_dir
-    echo "$run_sha" > "$(gha_commit_file)"
-    echo "Downloading ${PROJECT} artifacts from run ${RUN_ID} (commit ${run_sha})..."
+    echo "$RUN_SHA" > "$(gha_commit_file)"
+}
+
+# The per-triple start-cli binaries. Unlike the debs these are published only as
+# GitHub release assets, so there is no channel to promote them from and a
+# release still needs the run that built the tagged commit.
+pull_gha_cli_binaries() {
+    local triple name
+    for triple in $CLI_TRIPLES; do
+        name=$(cli_asset_name "$triple")
+        echo "  start-cli_${triple} -> start-cli_${name}"
+        gh run download -R "$REPO" "$RUN_ID" -n "start-cli_${triple}" -D "$(pwd)"
+        mv start-cli "start-cli_${name}"
+    done
+}
+
+cmd_pull_gha() {
+    require_kind os cli deb wrt
+
+    resolve_gha_run
+    echo "Downloading ${PROJECT} artifacts from run ${RUN_ID} (commit ${RUN_SHA})..."
 
     case "$KIND" in
         os)
@@ -690,13 +958,7 @@ cmd_pull_gha() {
             ensure_img_gz
             ;;
         cli)
-            for triple in $CLI_TRIPLES; do
-                local name
-                name=$(cli_asset_name "$triple")
-                echo "  start-cli_${triple} -> start-cli_${name}"
-                gh run download -R "$REPO" "$RUN_ID" -n "start-cli_${triple}" -D "$(pwd)"
-                mv start-cli "start-cli_${name}"
-            done
+            pull_gha_cli_binaries
             pull_gha_debs
             ;;
         deb)
@@ -707,6 +969,50 @@ cmd_pull_gha() {
             gh run download -R "$REPO" "$RUN_ID" -n "$STARTWRT_BUILD_ARTIFACT" -D "$(pwd)"
             ;;
     esac
+}
+
+# Stage a deb release from the alpha suite. For start-cli the per-triple
+# binaries have no channel to come from, so the run that built the tagged commit
+# is still needed for those — both halves are pinned to that commit, so mixing
+# the two sources cannot mix builds.
+# Print the commit alpha's current build of this project came from, so a tree
+# can be put on it without hand-copying a hash out of an error message:
+#   git checkout "$(./scripts/manage-release.sh alpha-commit start-tunnel)"
+cmd_alpha_commit() {
+    require_kind cli deb
+    alpha_collect || { rm -rf "${ALPHA_TMP:-}"; exit 1; }
+    echo "$ALPHA_COMMIT"
+    rm -rf "$ALPHA_TMP"
+}
+
+cmd_pull_alpha() {
+    require_kind cli deb
+    ensure_release_dir
+
+    # Adopt alpha's commit FIRST. For start-cli the per-triple binaries come from
+    # a CI run, and resolving that run before adoption validated it against HEAD
+    # while the debs (and the tag) ended up on alpha's older commit — binaries
+    # from one commit, debs and tag from another, with the marker agreeing.
+    alpha_collect || { rm -rf "${ALPHA_TMP:-}"; exit 1; }
+    resolve_alpha_commit "$ALPHA_COMMIT" || { rm -rf "$ALPHA_TMP"; exit 1; }
+    assert_metadata_matches_adopted || { rm -rf "$ALPHA_TMP"; exit 1; }
+
+    # Marker and clear before either half is fetched, so a failure anywhere
+    # leaves an empty staging dir rather than one half of a release beside a
+    # marker that vouches for both. `push` then fails on the empty dir.
+    echo "$(tag_commit_sha)" > "$(gha_commit_file)"
+    clear_alpha_staging
+
+    if [ "$KIND" = cli ]; then
+        # Resolved after adoption, so the run is validated against the commit
+        # actually being tagged and both halves really are pinned to it.
+        resolve_gha_run
+        echo "Downloading start-cli binaries from run ${RUN_ID} (commit ${RUN_SHA})..."
+        pull_gha_cli_binaries
+    fi
+
+    promote_alpha_debs || { rm -rf "$ALPHA_TMP"; exit 1; }
+    rm -rf "$ALPHA_TMP"
 }
 
 cmd_pull() {
@@ -1180,8 +1486,13 @@ cmd_release() {
             cmd_sign
             ;;
         cli | deb)
+            # Promote the debs CI published to alpha rather than rebuilding
+            # trust from a CI run: what testers have been running is what ships.
+            # (start-cli's per-triple binaries still come from the run — they are
+            # published only as release assets, so there is no channel to promote
+            # them from. Both halves are pinned to the tagged commit.)
             cmd_pre_check
-            cmd_pull_gha
+            cmd_pull_alpha
             cmd_tag
             cmd_create_gh_release
             cmd_push
@@ -1234,6 +1545,21 @@ crate's — or package.json for start-sdk); the git tag / GitHub release is
 Subcommands:
   pre-check          Verify the changelog documents this version and that the
                      version is not already tagged/released.
+  alpha-commit       Print the commit alpha's current build of this project came
+                     from. `git checkout "$(... alpha-commit <project>)"` puts a
+                     tree on it. (cli/deb.)
+  pull-alpha         Stage a deb release by promoting the `alpha` apt suite's
+                     current build — what CI published and testers have been
+                     running. The whole chain is verified against the suite
+                     signature (apt/start9-alpha.gpg).
+                     The tag follows the artifact: with COMMIT unset this adopts
+                     the commit alpha built and tags there, which is usually not
+                     HEAD, since each product's workflow is path-filtered. It
+                     says which commit, and prints the matching `git checkout`.
+                     Set COMMIT to assert a different one and it fails instead of
+                     overriding you. This is what `release` uses. For start-cli
+                     it also pulls the per-triple binaries from a run, which have
+                     no channel to promote from. (cli/deb.)
   pull-gha           Download build artifacts from a GitHub Actions run.
                      Fails unless the run built the commit being tagged
                      (COMMIT, default HEAD).
@@ -1317,6 +1643,8 @@ TAG="${PROJECT}/v${VERSION}"
 case "$SUBCOMMAND" in
     pre-check) cmd_pre_check ;;
     pull-gha) cmd_pull_gha ;;
+    pull-alpha) cmd_pull_alpha ;;
+    alpha-commit) cmd_alpha_commit ;;
     pull) cmd_pull ;;
     tag) cmd_tag ;;
     create-gh-release) cmd_create_gh_release ;;

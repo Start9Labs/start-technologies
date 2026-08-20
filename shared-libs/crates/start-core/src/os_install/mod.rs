@@ -245,6 +245,107 @@ pub struct InstallOsResult {
     pub mok_enrolled: bool,
 }
 
+/// The OS root of a previous install on this disk: the first partition whose
+/// `config` completed setup (carries a `disk.guid`, written on setup completion).
+/// Identified by content rather than by label, so that an install predating any
+/// particular labelling scheme is still found. A config without `disk.guid` never
+/// reached setup — including the fresh default a failed earlier attempt of this
+/// very install left behind, which must not be mistaken for the real config.
+/// Only valid before `partition`, which rewrites the OS partitions and takes that
+/// filesystem with them.
+async fn previous_os_root(disk_path: &Path) -> Option<PathBuf> {
+    for idx in 1..=16 {
+        let part = partition_for(disk_path, idx);
+        if tokio::fs::metadata(&part).await.is_err() {
+            continue;
+        }
+        let guard =
+            match TmpMountGuard::mount(&BlockDev::new(part.clone()), MountType::ReadOnly).await {
+                Ok(guard) => guard,
+                Err(e) => {
+                    // Most partitions on the disk legitimately are not a StartOS root.
+                    tracing::debug!("not a previous StartOS root: {}: {e}", part.display());
+                    continue;
+                }
+            };
+        let has_guid = tokio::fs::metadata(guard.path().join("config/disk.guid"))
+            .await
+            .map_or(false, |m| m.is_file());
+        guard.unmount().await.log_err();
+        if has_guid {
+            return Some(part);
+        }
+    }
+    None
+}
+
+const CONFIG_BAK: &str = "/tmp/config.bak";
+const CONFIG_BAK_STAGED: &str = "/tmp/config.bak.staged";
+/// Records which disk CONFIG_BAK was preserved from: /tmp survives a failed install
+/// attempt within one boot, and only a leftover from this same disk may be restored.
+const CONFIG_BAK_SRC: &str = "/tmp/config.bak.src";
+
+async fn clear_config_bak() -> Result<(), Error> {
+    delete_dir(CONFIG_BAK).await?;
+    delete_file(CONFIG_BAK_SRC).await
+}
+
+async fn config_bak_matches(disk_path: &Path) -> bool {
+    tokio::fs::read_to_string(CONFIG_BAK_SRC)
+        .await
+        .map_or(false, |s| Path::new(s.trim()) == disk_path)
+}
+
+/// Copy the previous install's config aside, for `install_os_to` to restore once the
+/// disk has been rewritten.
+///
+/// Errors fail the install. This runs before `partition` touches a byte, so aborting
+/// costs the user a retry, whereas continuing would let `mkfs` destroy the only copy
+/// of a config we were asked to keep.
+async fn preserve_config(disk_path: &Path) -> Result<(), Error> {
+    let Some(old_root) = previous_os_root(disk_path).await else {
+        tracing::info!(
+            "no previous StartOS root on {}; nothing to preserve",
+            disk_path.display()
+        );
+        // A leftover backup from an earlier attempt in this boot is only this disk's
+        // if the marker says so — anything else would restore another disk's config.
+        if !config_bak_matches(disk_path).await {
+            clear_config_bak().await?;
+        }
+        return Ok(());
+    };
+    tracing::info!("preserving config from {}", old_root.display());
+
+    let guard = TmpMountGuard::mount(&BlockDev::new(old_root), MountType::ReadOnly).await?;
+    let res = async {
+        // Staged, then renamed: the restore takes whatever sits at CONFIG_BAK, so a
+        // half-copied tree must never occupy it. Pruning the copy rather than the
+        // original also leaves the previous install untouched if this fails.
+        // Anything added here must leave overlay/var/lib/dkms and overlay/etc/shadow
+        // alone — they hold the Secure Boot MOK key and the password that enrolls it.
+        delete_dir(CONFIG_BAK_STAGED).await?;
+        clear_config_bak().await?;
+        Command::new("cp")
+            .arg("-r")
+            .arg(guard.path().join("config"))
+            .arg(CONFIG_BAK_STAGED)
+            .invoke(crate::ErrorKind::Filesystem)
+            .await?;
+        delete_file(Path::new(CONFIG_BAK_STAGED).join("upgrade")).await?;
+        delete_file(Path::new(CONFIG_BAK_STAGED).join("overlay/etc/hostname")).await?;
+        delete_file(Path::new(CONFIG_BAK_STAGED).join("disk.guid")).await?;
+        delete_dir(Path::new(CONFIG_BAK_STAGED).join("overlay/lib")).await?;
+        delete_dir(Path::new(CONFIG_BAK_STAGED).join("overlay/usr/lib")).await?;
+        tokio::fs::rename(CONFIG_BAK_STAGED, CONFIG_BAK).await?;
+        write_file_atomic(CONFIG_BAK_SRC, format!("{}\n", disk_path.display())).await?;
+        Ok::<_, Error>(())
+    }
+    .await;
+    guard.unmount().await?;
+    res
+}
+
 pub async fn install_os_to(
     squashfs_path: impl AsRef<Path>,
     disk_path: impl AsRef<Path>,
@@ -257,6 +358,19 @@ pub async fn install_os_to(
     let squashfs_path = squashfs_path.as_ref();
     let disk_path = disk_path.as_ref();
     let protect = protect.as_ref().map(|p| p.as_ref());
+
+    // Must precede `partition`, which rewrites the OS partitions: afterwards the
+    // previous root is gone, so the backup finds nothing and a preserve install comes
+    // back with an empty config — taking with it, among other things, the MOK key whose
+    // certificate is already enrolled in firmware, leaving Secure Boot refusing every
+    // module signed with its replacement.
+    if protect.is_some() {
+        preserve_config(disk_path).await?;
+    } else {
+        // The restore below is unconditional, so a run that preserves nothing must not
+        // inherit a backup an earlier attempt in this boot left behind.
+        clear_config_bak().await?;
+    }
 
     let part_info = partition(disk_path, capacity, partition_table, protect, use_efi).await?;
 
@@ -282,34 +396,6 @@ pub async fn install_os_to(
         .invoke(crate::ErrorKind::DiskManagement)
         .await?;
 
-    if protect.is_some() {
-        if let Ok(guard) =
-            TmpMountGuard::mount(&BlockDev::new(part_info.root.clone()), MountType::ReadWrite).await
-        {
-            if let Err(e) = async {
-                // cp -r ${guard}/config /tmp/config
-                delete_file(guard.path().join("config/upgrade")).await?;
-                delete_file(guard.path().join("config/overlay/etc/hostname")).await?;
-                delete_file(guard.path().join("config/disk.guid")).await?;
-                delete_dir(guard.path().join("config/overlay/lib")).await?;
-                delete_dir(guard.path().join("config/overlay/usr/lib")).await?;
-                Command::new("cp")
-                    .arg("-r")
-                    .arg(guard.path().join("config"))
-                    .arg("/tmp/config.bak")
-                    .invoke(crate::ErrorKind::Filesystem)
-                    .await?;
-                Ok::<_, Error>(())
-            }
-            .await
-            {
-                tracing::error!("Error recovering previous config: {e}");
-                tracing::debug!("{e:?}");
-            }
-            guard.unmount().await?;
-        }
-    }
-
     Command::new("mkfs.btrfs")
         .arg("-f")
         .arg(&part_info.root)
@@ -327,11 +413,11 @@ pub async fn install_os_to(
 
     let config_path = rootfs.path().join("config");
 
-    if tokio::fs::metadata("/tmp/config.bak").await.is_ok() {
+    if tokio::fs::metadata(CONFIG_BAK).await.is_ok() {
         crate::util::io::delete_dir(&config_path).await?;
         Command::new("cp")
             .arg("-r")
-            .arg("/tmp/config.bak")
+            .arg(CONFIG_BAK)
             .arg(&config_path)
             .invoke(crate::ErrorKind::Filesystem)
             .await?;
@@ -475,10 +561,9 @@ pub async fn install_os_to(
 
         crate::util::mok::sign_unsigned_modules(overlay.path()).await?;
 
-        let mok_pub = overlay
-            .path()
-            .join(crate::util::mok::DKMS_MOK_PUB.trim_start_matches('/'));
-        match crate::util::mok::enroll_mok(&mok_pub).await {
+        // Only stages an enrollment if the target already carries a password; a fresh
+        // install has none until setup, which enrolls it then.
+        match crate::util::mok::enroll_mok(overlay.path()).await {
             Ok(enrolled) => mok_enrolled = enrolled,
             Err(e) => tracing::warn!("MOK enrollment failed: {e}"),
         }

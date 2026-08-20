@@ -144,3 +144,33 @@ The `execute` and `sandbox` methods route to procedures based on the `procedure`
 | `/backup/create`           | Create a backup              |
 | `/actions/{name}/getInput` | Get input spec for an action |
 | `/actions/{name}/run`      | Run an action with input     |
+
+## Errors
+
+A failed call answers with a JSON-RPC error object:
+
+```ts
+{
+  code: number,
+  message: string,   // fixed label for the code
+  data: {
+    details: string, // what went wrong
+    debug?: string,  // stack trace, when there is one
+  },
+}
+```
+
+`code` selects the error; `message` is that code's fixed label and carries no
+per-call detail. StartOS reads `code` and renders its own translated label from
+it, so anything written into `message` here reaches nobody — the text an
+operator reads is `data.details`.
+
+Codes are either a standard JSON-RPC code or a `start-core` `ErrorKind`
+discriminant (`shared-libs/crates/start-core/src/error.rs`):
+
+| code     | message                 | raised when                              |
+| -------- | ----------------------- | ---------------------------------------- |
+| `-32602` | `invalid params`        | the request carries no `method`          |
+| `-32601` | `Method not found`      | the `method` is not one of the above     |
+| `38`     | `Invalid Request`       | the line is malformed, or dispatch fails |
+| `59`     | `Service Runtime Error` | a method or procedure threw              |

@@ -389,7 +389,8 @@ impl LxcContainer {
                         let rdev = meta.st_rdev();
                         let major = ((rdev >> 8) & 0xfff) as u32;
                         let minor = ((rdev & 0xff) | ((rdev >> 12) & 0xfff00)) as u32;
-                        self.mknod(&path, ty, major, minor).await?;
+                        self.mknod(&path, ty, major, minor, meta.st_mode() & 0o7777)
+                            .await?;
                     }
                 }
             }
@@ -576,7 +577,16 @@ impl LxcContainer {
         Ok(UnixRpcClient::new(sock_path))
     }
 
-    pub async fn mknod(&self, path: &Path, ty: char, major: u32, minor: u32) -> Result<(), Error> {
+    pub async fn mknod(
+        &self,
+        path: &Path,
+        ty: char,
+        major: u32,
+        minor: u32,
+        mode: u32,
+    ) -> Result<(), Error> {
+        // -m so the node carries the host's mode instead of `0666 & ~umask(startd)`.
+        let mode = format!("{mode:04o}");
         if let Ok(dev_rel) = path.strip_prefix("/dev") {
             let parent = dev_rel.parent();
             let media_dev = self.rootfs_dir().join("media/startos/dev");
@@ -598,6 +608,8 @@ impl LxcContainer {
                 }
             }
             Command::new("mknod")
+                .arg("-m")
+                .arg(&mode)
                 .arg(&target_path)
                 .arg(&*InternedString::from_display(&ty))
                 .arg(&*InternedString::from_display(&major))
@@ -643,6 +655,8 @@ impl LxcContainer {
                 return Ok(());
             }
             Command::new("mknod")
+                .arg("-m")
+                .arg(&mode)
                 .arg(&target_path)
                 .arg(&*InternedString::from_display(&ty))
                 .arg(&*InternedString::from_display(&major))

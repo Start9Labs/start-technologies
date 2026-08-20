@@ -924,11 +924,13 @@ export class MockApiService extends ApiService {
       )
 
       // Mirror the backend's server-side name resolution chain:
-      // UCI name → DHCP hostname → device-<mac>.
+      // UCI name → DHCP hostname → derived label (fingerprint/OUI) →
+      // device-<mac>.
       const dhcpHostname = def.hostname !== '*' ? def.hostname : null
       const name =
         device.name ||
         dhcpHostname ||
+        def.identLabel ||
         `device-${mac.replace(/:/g, '').slice(-6).toLowerCase()}`
 
       return {
@@ -1393,7 +1395,11 @@ export class MockApiService extends ApiService {
       id: 'wg_mullvad',
       label: 'Mullvad',
       target: 'Proton',
-      enabled: true,
+      // Disabled by default so the mock exercises the enabled-only filters on
+      // the profile outbound picker and both chain-target pickers. Nothing
+      // targets Mullvad and no mock profile routes through it, so this is a
+      // consistent state.
+      enabled: false,
       used_by: [],
       supports_ipv6: false,
       mtu: 1280,

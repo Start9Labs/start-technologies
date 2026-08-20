@@ -77,8 +77,14 @@ impl Model<StatusInfo> {
             Ok(match s {
                 DesiredStatus::BackingUp {
                     on_complete: StartStop::Start,
+                }
+                | DesiredStatus::Updating {
+                    on_complete: StartStop::Start,
                 } => DesiredStatus::Running,
                 DesiredStatus::BackingUp {
+                    on_complete: StartStop::Stop,
+                }
+                | DesiredStatus::Updating {
                     on_complete: StartStop::Stop,
                 } => DesiredStatus::Stopped,
                 DesiredStatus::Restarting { .. } => DesiredStatus::Running,
@@ -104,6 +110,9 @@ pub enum DesiredStatus {
     BackingUp {
         on_complete: StartStop,
     },
+    Updating {
+        on_complete: StartStop,
+    },
 }
 impl Default for DesiredStatus {
     fn default() -> Self {
@@ -117,9 +126,15 @@ impl DesiredStatus {
             | Self::Restarting { .. }
             | Self::BackingUp {
                 on_complete: StartStop::Start,
+            }
+            | Self::Updating {
+                on_complete: StartStop::Start,
             } => true,
             Self::Stopped
             | Self::BackingUp {
+                on_complete: StartStop::Stop,
+            }
+            | Self::Updating {
                 on_complete: StartStop::Stop,
             } => false,
         }
@@ -138,9 +153,18 @@ impl DesiredStatus {
         }
     }
 
+    pub fn updating(&self) -> Self {
+        Self::Updating {
+            on_complete: self.run_state(),
+        }
+    }
+
     pub fn stop(&self) -> Self {
         match self {
             Self::BackingUp { .. } => Self::BackingUp {
+                on_complete: StartStop::Stop,
+            },
+            Self::Updating { .. } => Self::Updating {
                 on_complete: StartStop::Stop,
             },
             _ => Self::Stopped,
@@ -150,6 +174,9 @@ impl DesiredStatus {
     pub fn start(&self) -> Self {
         match self {
             Self::BackingUp { .. } => Self::BackingUp {
+                on_complete: StartStop::Start,
+            },
+            Self::Updating { .. } => Self::Updating {
                 on_complete: StartStop::Start,
             },
             Self::Stopped => Self::Running,

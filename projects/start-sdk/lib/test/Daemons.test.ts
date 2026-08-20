@@ -1,4 +1,5 @@
 import { Daemons, DaemonsReconciler, configHash } from '../mainFn/Daemons'
+import { cooldownTrigger } from '../trigger'
 import { Daemon } from '../mainFn/Daemon'
 import { Mounts } from '../mainFn/Mounts'
 import { setupMain } from '../mainFn'
@@ -133,6 +134,102 @@ describe('configHash', () => {
     expect(configHash(a)).not.toEqual(configHash(b))
   })
 
+  it('changes when uses changes', () => {
+    const e = fakeEffects()
+    const make = (uses: unknown) =>
+      Daemons.of<Manifest>({ effects: e }).addDaemon('a', {
+        subcontainer: lazy(e),
+        exec: { command: ['cmd'] },
+        ready: baseReady,
+        requires: [],
+        uses,
+      }).entries[0]
+    expect(configHash(make({ port: 5959 }))).not.toEqual(
+      configHash(make({ port: 5960 })),
+    )
+    expect(configHash(make({ port: 5959 }))).toEqual(
+      configHash(make({ port: 5959 })),
+    )
+    // key order is irrelevant (canonicalized)
+    expect(configHash(make({ a: 1, b: 2 }))).toEqual(
+      configHash(make({ b: 2, a: 1 })),
+    )
+  })
+
+  it('uses participates for oneshots', () => {
+    const e = fakeEffects()
+    const oneshot = (uses: unknown) =>
+      Daemons.of<Manifest>({ effects: e }).addOneshot('a', {
+        subcontainer: lazy(e),
+        exec: { command: ['cmd'] },
+        requires: [],
+        uses,
+      }).entries[0]
+    expect(configHash(oneshot('x'))).not.toEqual(configHash(oneshot('y')))
+  })
+
+  it('normalizes non-JSON uses values to distinct sentinels instead of restarting', () => {
+    const e = fakeEffects()
+    const make = (uses: unknown) =>
+      Daemons.of<Manifest>({ effects: e }).addDaemon('a', {
+        subcontainer: lazy(e),
+        exec: { command: ['cmd'] },
+        ready: baseReady,
+        requires: [],
+        uses,
+      }).entries[0]
+    // unserializable kinds get their own sentinel, distinct from null and
+    // from each other — but two values of the same kind hash alike, so a
+    // change only visible there still triggers no restart
+    expect(configHash(make(() => 1))).not.toEqual(configHash(make(undefined)))
+    expect(configHash(make(() => 1))).not.toEqual(configHash(make(Symbol('x'))))
+    expect(configHash(make(() => 1))).toEqual(configHash(make(() => 2)))
+    expect(configHash(make(undefined))).not.toEqual(
+      configHash(make(null as any)),
+    )
+    expect(configHash(make(undefined))).toEqual(configHash(make(undefined)))
+  })
+
+  it('normalizes a circular uses instead of throwing', () => {
+    const e = fakeEffects()
+    const make = (uses: unknown) =>
+      Daemons.of<Manifest>({ effects: e }).addDaemon('a', {
+        subcontainer: lazy(e),
+        exec: { command: ['cmd'] },
+        ready: baseReady,
+        requires: [],
+        uses,
+      }).entries[0]
+    const circular = (port: number) => {
+      const o: any = { port }
+      o.self = o
+      return o
+    }
+    expect(() => configHash(make(circular(5959)))).not.toThrow()
+    expect(configHash(make(circular(5959)))).toEqual(
+      configHash(make(circular(5959))),
+    )
+    // the cycle collapses to a sentinel, the rest of the value still hashes
+    expect(configHash(make(circular(5959)))).not.toEqual(
+      configHash(make(circular(5960))),
+    )
+  })
+
+  it('hashes a bigint uses by value instead of throwing', () => {
+    const e = fakeEffects()
+    const make = (uses: unknown) =>
+      Daemons.of<Manifest>({ effects: e }).addDaemon('a', {
+        subcontainer: lazy(e),
+        exec: { command: ['cmd'] },
+        ready: baseReady,
+        requires: [],
+        uses,
+      }).entries[0]
+    expect(() => configHash(make({ n: 1n }))).not.toThrow()
+    expect(configHash(make({ n: 1n }))).toEqual(configHash(make({ n: 1n })))
+    expect(configHash(make({ n: 1n }))).not.toEqual(configHash(make({ n: 2n })))
+  })
+
   it('changes when command changes', () => {
     const e = fakeEffects()
     const a = Daemons.of<Manifest>({ effects: e }).addDaemon('a', {
@@ -223,6 +320,44 @@ describe('configHash', () => {
         requires: ['init'],
       })
     expect(configHash(a.entries[1])).not.toEqual(configHash(b.entries[1]))
+  })
+
+  it("changes when a fn-form exec's sigtermTimeout changes", () => {
+    const e = fakeEffects()
+    const make = (sigtermTimeout?: number) =>
+      Daemons.of<Manifest>({ effects: e }).addDaemon('a', {
+        subcontainer: lazy(e),
+        exec: { fn: async () => null, sigtermTimeout },
+        ready: baseReady,
+        requires: [],
+      }).entries[0]
+    expect(configHash(make(5000))).not.toEqual(configHash(make(6000)))
+    // different fn closures still hash alike — their contents are invisible
+    expect(configHash(make(5000))).toEqual(
+      configHash(
+        Daemons.of<Manifest>({ effects: e }).addDaemon('a', {
+          subcontainer: lazy(e),
+          exec: { fn: async () => null, sigtermTimeout: 5000 },
+          ready: baseReady,
+          requires: [],
+        }).entries[0],
+      ),
+    )
+  })
+
+  it('changes when an output callback is added to a command exec', () => {
+    const e = fakeEffects()
+    const make = (withCallback: boolean) =>
+      Daemons.of<Manifest>({ effects: e }).addDaemon('a', {
+        subcontainer: lazy(e),
+        exec: {
+          command: ['cmd'],
+          ...(withCallback ? { onStdout: () => {} } : {}),
+        },
+        ready: baseReady,
+        requires: [],
+      }).entries[0]
+    expect(configHash(make(true))).not.toEqual(configHash(make(false)))
   })
 
   it('is order-independent for requires (sorted before hash)', () => {
@@ -443,5 +578,76 @@ describe('setupMain composition', () => {
     )
     const built = await main({ effects: e } as any)
     expect(built).toBeInstanceOf(DaemonsReconciler)
+  })
+})
+
+describe('runUntilSuccess timeout diagnostics', () => {
+  /**
+   * A daemon that never becomes ready, whose ready check reports `loading` on
+   * every poll.
+   */
+  const stuckChain = (e: T.Effects) =>
+    Daemons.of<Manifest>({ effects: e }).addDaemon('stuck', {
+      subcontainer: null,
+      exec: {
+        // Runs until the chain's teardown aborts it, so the `finally`'s
+        // term() after the timeout doesn't sit out the sigterm budget.
+        fn: (_sub, abort) =>
+          new Promise<null>(resolve =>
+            abort.addEventListener('abort', () => resolve(null), {
+              once: true,
+            }),
+          ),
+      },
+      ready: {
+        display: null,
+        // Poll fast so the first result lands well inside the test's budget;
+        // defaultTrigger's 1s lead-in would leave health on `starting`.
+        trigger: cooldownTrigger(5),
+        fn: () => ({ result: 'loading' as const, message: 'still warming up' }),
+      },
+      requires: [],
+    })
+
+  it('names the un-ready daemon with its health result and message', async () => {
+    await expect(
+      stuckChain(fakeEffects()).runUntilSuccess(200),
+    ).rejects.toThrow(/stuck \(loading; still warming up\)/)
+  })
+
+  it('omits the internal sentinel from the message', async () => {
+    await expect(stuckChain(fakeEffects()).runUntilSuccess(50)).rejects.toThrow(
+      expect.objectContaining({
+        message: expect.not.stringContaining('__RUN_UNTIL_SUCCESS'),
+      }),
+    )
+  })
+
+  it('reports the elapsed budget', async () => {
+    await expect(stuckChain(fakeEffects()).runUntilSuccess(50)).rejects.toThrow(
+      /Timed out after 50ms/,
+    )
+  })
+
+  it('surfaces the exit cause of a crash-looping daemon', async () => {
+    // The Nextcloud shape: the process dies on every start, but the ready
+    // check reports `loading` on a failed probe and so keeps overwriting the
+    // crash back to `loading`. Current health alone therefore says nothing —
+    // only the retained exit error identifies the fault.
+    const chain = Daemons.of<Manifest>({
+      effects: fakeEffects(),
+    }).addDaemon('crasher', {
+      subcontainer: null,
+      exec: { fn: async () => Promise.reject(new Error('exited with code 1')) },
+      ready: {
+        display: null,
+        trigger: cooldownTrigger(5),
+        fn: () => ({ result: 'loading' as const, message: null }),
+      },
+      requires: [],
+    })
+    await expect(chain.runUntilSuccess(200)).rejects.toThrow(
+      /crasher \(loading; \d+ failed exit\(s\), last: exited with code 1\)/,
+    )
   })
 })

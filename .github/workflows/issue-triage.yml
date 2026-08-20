@@ -1,0 +1,62 @@
+name: Issue triage
+
+on:
+  issues:
+    types: [opened, edited, labeled]
+
+permissions:
+  issues: write
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v9
+        with:
+          script: |
+            // Keys mirror the Project dropdown in .github/ISSUE_TEMPLATE/9-feature-request.yml
+            // and the static `labels:` on each bug form.
+            const OWNERS = {
+              StartOS: 'dr-bonez',
+              'start-cli': 'dr-bonez',
+              StartSDK: 'dr-bonez',
+              'start-registry': 'dr-bonez',
+              StartTunnel: 'dr-bonez',
+              StartWRT: 'dominion5254',
+              brochure: 'MattDHill',
+              'start-docs': 'MattDHill',
+              repo: 'dr-bonez',
+            }
+            const FEATURE_OWNER = 'MattDHill'
+            const DEFAULT_OWNER = 'dr-bonez'
+
+            const issue = context.payload.issue
+            const api = { owner: context.repo.owner, repo: context.repo.repo, issue_number: issue.number }
+            const labels = new Set(issue.labels.map((l) => l.name))
+
+            const picked = (issue.body || '')
+              .split(/^###[ \t]+/m)
+              .find((s) => s.split('\n')[0].trim() === 'Project')
+              ?.split('\n')
+              .slice(1)
+              .map((line) => line.trim())
+              .find((line) => line.length > 0)
+
+            if (picked && picked in OWNERS && !labels.has(picked)) {
+              await github.rest.issues.addLabels({ ...api, labels: [picked] })
+              labels.add(picked)
+              core.info(`Labelled ${picked}`)
+            }
+
+            if (issue.assignees.length) return
+
+            const project = [...labels].find((l) => l in OWNERS)
+            const owner = issue.type?.name === 'Feature' ? FEATURE_OWNER : project && OWNERS[project]
+            const assignee = owner || DEFAULT_OWNER
+
+            await github.rest.issues.addAssignees({ ...api, assignees: [assignee] })
+            core.info(
+              owner
+                ? `Assigned ${assignee}`
+                : `No owner for labels [${[...labels]}], type ${issue.type?.name} — assigned fallback ${assignee}`,
+            )

@@ -1,16 +1,21 @@
 import { Component, inject } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
-import { FormsModule, ReactiveFormsModule } from '@angular/forms'
+import {
+  FormsModule,
+  ReactiveFormsModule,
+  UntypedFormGroup,
+} from '@angular/forms'
 import { RouterLink } from '@angular/router'
 import { DocsLinkDirective, i18nPipe, TaskService } from '@start9labs/shared'
 import { ISB } from '@start9labs/start-core'
+import { tuiMarkControlAsTouchedAndValidate } from '@taiga-ui/cdk'
 import { TuiButton, TuiTitle } from '@taiga-ui/core'
 import { TuiHeader } from '@taiga-ui/layout'
 import { PatchDB } from 'patch-db-client'
 import { combineLatest, first, switchMap } from 'rxjs'
 import { FormGroupComponent } from 'src/app/routes/portal/components/form/containers/group.component'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
-import { FormService } from 'src/app/services/form.service'
+import { FormService, trim } from 'src/app/services/form.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { TitleDirective } from 'src/app/services/title.service'
 import { configBuilderToSpec } from 'src/app/utils/configBuilderToSpec'
@@ -71,8 +76,8 @@ const ipv6 =
           <button
             tuiButton
             size="l"
-            [disabled]="d.form.invalid || d.form.pristine"
-            (click)="save(d.form.value)"
+            [disabled]="d.form.pristine"
+            (click)="save(d.form)"
           >
             {{ 'Save' | i18n }}
           </button>
@@ -215,7 +220,14 @@ export default class SystemDnsComponent {
     ),
   )
 
-  async save({ strategy }: typeof this.dnsSpec._TYPE): Promise<void> {
+  async save(form: UntypedFormGroup): Promise<void> {
+    trim(form)
+    tuiMarkControlAsTouchedAndValidate(form)
+
+    if (form.invalid) return
+
+    const { strategy } = form.value as typeof this.dnsSpec._TYPE
+
     this.tasks.run(
       async () =>
         await this.api.setDns({

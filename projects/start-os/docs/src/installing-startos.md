@@ -8,12 +8,14 @@ This guide is for flashing StartOS to a USB drive, then installing it onto a des
 
 ## Download
 
-1.  Visit the [Github release page](https://github.com/Start9Labs/start-technologies/releases/tag/start-os/v0.4.0.1) to find the latest version of StartOS.
+1.  Visit the [Github release page](https://github.com/Start9Labs/start-technologies/releases/tag/start-os/v0.4.0.2) to find the latest version of StartOS.
 
 1.  Under "ISO Downloads", select the ISO for your architecture. StartOS is available in x86_64 (AMD64), aarch64 (ARM64), and RISC-V (RVA23). For x86_64 and aarch64, two variants are available:
     - **Standard**: Includes proprietary firmware and drivers for broader hardware compatibility, including display and wireless. Recommended for most users.
 
     - **Slim (FOSS-only)**: 100% open source, containing **no** proprietary firmware or drivers. Only compatible with certain hardware, such as the Start9 Server Pure.
+
+    An **NVIDIA** variant is also published for x86_64 and aarch64. Choose it only if your server has an NVIDIA GPU you want services to use for computation — it adds NVIDIA's driver and container toolkit on top of the Standard image. It supports GeForce RTX 20-series, Quadro RTX and newer; older cards such as the GeForce GTX 900- and 10-series, or Tesla M40, P40, P100 and V100, are not supported and should use the Standard image.
 
 1.  Verify the SHA256 checksum against the one listed on GitHub (optional but recommended).
     - **Mac**. Open a terminal and run:
@@ -74,7 +76,7 @@ This guide is for flashing StartOS to a USB drive, then installing it onto a des
 
 A Raspberry Pi does not use the USB installer above. Instead, you flash the StartOS image directly to the Pi's microSD card. This is also how a Raspberry Pi is updated to a new major version of StartOS — it cannot update over the air. If you are updating an existing 0.3.5.1 server, complete the [preparation steps in the update guide](update-040.md#prepare-your-server) before flashing.
 
-1. Visit the [Github release page](https://github.com/Start9Labs/start-technologies/releases/tag/start-os/v0.4.0.1) and, from the downloads list, download the **Raspberry Pi `.img.gz`** file.
+1. Visit the [Github release page](https://github.com/Start9Labs/start-technologies/releases/tag/start-os/v0.4.0.2) and, from the downloads list, download the **Raspberry Pi `.img.gz`** file.
 
 1. Verify the SHA256 checksum against the one listed on GitHub (optional but recommended) — see [Download](#download) for the command for your computer. The release lists checksums for both the compressed `.img.gz` you downloaded and the `.img` inside it.
 

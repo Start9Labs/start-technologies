@@ -9,6 +9,23 @@ import { VersionGraph } from '../version/VersionGraph'
 import { version as sdkVersion } from '../../package.json'
 
 /**
+ * Retypes every key the SDK does not define, so declaring one is a compile
+ * error at that key rather than a field that silently does nothing. The
+ * replacement is a string literal rather than `never` purely so the error names
+ * what went wrong.
+ *
+ * TypeScript applies its excess-property check only when a fresh object literal
+ * meets a non-generic target, and `Manifest` is inferred from the argument — so
+ * without this an unknown field joins the inferred type, typechecks, and is
+ * then dropped on the way to the built manifest.
+ */
+type NoExtraKeys<Manifest> = {
+  [K in keyof Manifest]: K extends keyof SDKManifest
+    ? Manifest[K]
+    : 'Unknown manifest field — not declared in SDKManifest'
+}
+
+/**
  * @description Use this function to define critical information about your package
  *
  * @param manifest Static properties of the package
@@ -20,7 +37,7 @@ export function setupManifest<
     id: Id
     volumes: VolumesTypes[]
   } & SDKManifest,
->(manifest: Manifest & SDKManifest): Manifest {
+>(manifest: Manifest & SDKManifest & NoExtraKeys<Manifest>): Manifest {
   return manifest
 }
 

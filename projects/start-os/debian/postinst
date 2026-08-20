@@ -36,7 +36,14 @@ if [ -f /etc/default/grub ]; then
 	grub_set() {
 		set_config /etc/default/grub "$1" "\"$2\""
 	}
-	grub_set GRUB_CMDLINE_LINUX 'boot=startos console=ttyS0,115200n8 console=tty0'
+	CMDLINE='boot=startos console=ttyS0,115200n8 console=tty0'
+	# tegra234-cbb ACPI-matches NVDA1070 and reads a firewalled fabric register
+	# before masking SError, which hangs a GB10 (DGX Spark) during ACPI scan —
+	# before any console exists. NVIDIA blacklists this same initcall on Spark.
+	if [ "$(cat /usr/lib/startos/PLATFORM.txt 2>/dev/null)" = aarch64-nvidia ]; then
+		CMDLINE="$CMDLINE initcall_blacklist=tegra234_cbb_init"
+	fi
+	grub_set GRUB_CMDLINE_LINUX "$CMDLINE"
 	grub_set GRUB_CMDLINE_LINUX_DEFAULT ''
 	grub_set GRUB_DISTRIBUTOR "StartOS v$(cat /usr/lib/startos/VERSION.txt)"
 	# Graphical terminal (serial added conditionally via /etc/grub.d/01_serial)

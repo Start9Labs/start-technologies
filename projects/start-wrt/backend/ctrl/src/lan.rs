@@ -585,14 +585,11 @@ pub async fn ipv6_set<C: CtrlContext>(
                 if ctx.effectful() {
                     let ipv6_enabled = req.slaac || req.dhcpv6;
 
-                    // Restart odhcpd first so it can send a deprecation RA
-                    // (prefix lifetimes=0) while the network is still up.
-                    // Without this, disabling IPv6 leaves clients with stale
-                    // SLAAC addresses until they naturally expire.
-                    let _ = crate::run_quiet_async(
-                        tokio::process::Command::new("/etc/init.d/odhcpd").arg("restart"),
-                    )
-                    .await;
+                    // Withdraw the old prefix while it is still on the interface
+                    // — see deprecate_odhcpd_prefixes. Without this, disabling
+                    // IPv6 leaves clients holding SLAAC addresses until they
+                    // expire on their own.
+                    crate::deprecate_odhcpd_prefixes().await;
                     let _ = crate::run_quiet_async(
                         tokio::process::Command::new("/etc/init.d/network").arg("restart"),
                     )

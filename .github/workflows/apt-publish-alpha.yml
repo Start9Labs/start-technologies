@@ -1,0 +1,103 @@
+name: Publish alpha apt suite
+
+# One writer for the whole alpha apt suite.
+#
+# The three deb products share `pool-alpha/` and `dists/alpha/`, and every
+# publish syncs the suite down, replaces its own package, and uploads with
+# --delete-removed — so concurrent writers prune each other. Serializing
+# per-product publishers on a shared concurrency group only half-solved it:
+# GitHub keeps a single *pending* run per group, so a third publisher superseded
+# a queued one and left that product's package stale until its next push.
+#
+# Collecting every product's latest successful master build into a single
+# publish makes supersession harmless instead: whichever run survives
+# republishes the current state of all three, so a dropped run costs nothing.
+# That is also why this collects the latest successful run per product rather
+# than the artifacts of the run that triggered it.
+on:
+  workflow_run:
+    workflows: [start-cli, start-tunnel, start-registry]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Listing and downloading artifacts from the product workflows' runs.
+  actions: read
+
+concurrency:
+  group: apt-publish-alpha
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish to alpha apt
+    # `workflow_run.branches` filters the *head branch* of the triggering run,
+    # and a pull_request run reports the PR's head branch — so a fork PR opened
+    # from a branch literally named `master` satisfies it. Requiring the
+    # triggering event to be a push closes that: a push run can only originate
+    # from a ref in this repository.
+    #
+    # A failed product build must not publish, but it also must not block the
+    # other two: the next successful build of any product republishes the set.
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch'
+        || (
+          github.event.workflow_run.event == 'push'
+          && github.event.workflow_run.conclusion == 'success'
+        )
+      }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Collect the latest master debs from every product
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p debs
+          collected=0
+          for wf in start-cli.yaml start-tunnel.yaml start-registry.yaml; do
+            product="${wf%.yaml}"
+            # --event push is load-bearing, not a tidiness filter. `-b master`
+            # alone matches any run whose head branch is named master, which
+            # includes a pull_request run from a fork branch of that name — this
+            # job would then collect and sign attacker-built .debs into alpha.
+            # It also excludes workflow_dispatch builds, which may be
+            # dev-flavoured or partial-arch. The select() re-asserts it on the
+            # returned row so the query fails closed.
+            run_id=$(gh run list -R "$GITHUB_REPOSITORY" -w "$wf" -b master \
+              --event push -s success -L 1 --json databaseId,event \
+              -q '.[] | select(.event == "push") | .databaseId')
+            if [ -z "$run_id" ] || [ "$run_id" = null ]; then
+              echo "::warning::$product has no successful master run; the suite keeps whatever version it already holds."
+              continue
+            fi
+            # Artifacts expire (14 days), so a product whose last successful
+            # build has aged out is skipped rather than failing the publish —
+            # its existing package stays put.
+            if ! gh run download -R "$GITHUB_REPOSITORY" "$run_id" -p '*.deb' -D debs; then
+              echo "::warning::$product run $run_id has no .deb artifacts left; skipping it."
+              continue
+            fi
+            echo "$product: collected from run $run_id"
+            collected=1
+          done
+          if [ "$collected" != 1 ]; then
+            echo "::error::No .deb artifacts could be collected from any product."
+            exit 1
+          fi
+          echo "Publishing:"
+          find debs -type f -name '*.deb' | sort | sed 's/^/  /'
+
+      - uses: ./.github/actions/publish-apt
+        with:
+          suite: alpha
+          path: debs
+          s3-access-key: ${{ secrets.S3_ACCESS_KEY }}
+          s3-secret-key: ${{ secrets.S3_SECRET_KEY }}
+          gpg-private-key: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+          gpg-key-id: ${{ secrets.APT_GPG_KEY_ID }}

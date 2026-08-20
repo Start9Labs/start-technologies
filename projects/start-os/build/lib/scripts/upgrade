@@ -17,8 +17,12 @@ fi
 echo 'Upgrading...'
 
 hash=$(b3sum $1 | head -c 32)
-if [ -n "$2" ] && [ "$hash" != "$CHECKSUM" ]; then
-    >&2 echo 'Checksum mismatch'
+# Gated on CHECKSUM, not on a second positional argument: every caller passes
+# only the image path, so the old `[ -n "$2" ]` guard meant the comparison never
+# ran and a corrupt-but-mountable image installed silently. $2 is still accepted
+# so callers written for the old form keep working.
+if [ -n "${CHECKSUM:-}" ] && [ "$hash" != "$CHECKSUM" ]; then
+    >&2 echo "Checksum mismatch: expected $CHECKSUM, got $hash"
     exit 2
 fi
 

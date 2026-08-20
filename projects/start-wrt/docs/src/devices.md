@@ -2,7 +2,7 @@
 
 The Devices page shows all devices that have connected to your router, organized into Online (currently connected) and Offline (previously seen) groups. Each device is associated with a [Security Profile](security-profiles.md) based on its [point of entry](points-of-entry.md).
 
-Devices appear here even without an active DHCP lease: devices with static IPs, IPv6-only devices, and devices connected through an external switch (learned from the bridge forwarding table) are all listed. Names are resolved on the router from the device's hostname, with mDNS/Bonjour used as a fallback to recover a friendly name.
+Devices appear here even without an active DHCP lease: devices with static IPs, IPv6-only devices, and devices connected through an external switch (learned from the bridge forwarding table) are all listed. Names are resolved on the router from the device's hostname, with mDNS/Bonjour used as a fallback to recover a friendly name. Some devices never share a name at all — Chromebooks deliberately withhold theirs, and many IoT gadgets can't send one; these are labeled by their operating system (recognized from how they request a network address), e.g. `Windows device (3af2b1)`, or by their hardware vendor, e.g. `Apple device (3af2b1)`, falling back to a generic `device-3af2b1` only when nothing identifies them. Assigning your own name always overrides any of these.
 
 ## Viewing Devices
 
@@ -12,7 +12,7 @@ Navigate to `Network > Devices` to see the device list. A search box above the l
 - **Connection** — How the device connects: Ethernet, Wi-Fi 2.4GHz, Wi-Fi 5GHz, or VPN.
 - **Security Profile** — The [Security Profile](security-profiles.md) the device is assigned to.
 - **MAC address** — The device's unique hardware identifier.
-- **IP address** — The device's IPv4 and IPv6 addresses. A lock icon indicates a reserved (static) IPv4 address.
+- **IP address** — The device's IPv4 and IPv6 addresses. A lock icon indicates a reserved (static) IPv4 address. The IPv6 address is shown only while the device is confirmed to still be using it, so the field is empty for a device that has dropped its IPv6 address or has none.
 - **Data and Speed** — Cumulative data usage and real-time upload/download speed for online devices.
 
 ## Device Detail Page

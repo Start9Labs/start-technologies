@@ -68,15 +68,16 @@ function getCertificate(
 ): string {
   if (!h.ssl) return '-'
 
+  // The service holds its own certificate on a binding StartOS does not
+  // terminate, whatever authority a domain on this host names.
+  if (!addSsl) return secure?.ssl ? 'Self signed' : '-'
+
   if (h.metadata.kind === 'public-domain') {
     const config = host.publicDomains[h.hostname]
     return config ? toAuthorityName(config.acme) : toAuthorityName(null)
   }
 
-  if (addSsl) return toAuthorityName(null)
-  if (secure?.ssl) return 'Self signed'
-
-  return '-'
+  return toAuthorityName(null)
 }
 
 function sortDomainsFirst(a: GatewayAddress, b: GatewayAddress): number {

@@ -414,6 +414,7 @@ pub(crate) fn rewrite_dns_forwarding(cfgs: &mut Configs, profile: &Profile) -> R
                 expandhosts: Some("1".to_string()),
                 boguspriv: Some("0".to_string()),
                 local: Some("/lan/".to_string()),
+                dhcpscript: Some(crate::device_ident::FINGERPRINT_SCRIPT_PATH.to_string()),
             },
             Some(&section_name),
         )?;
@@ -870,6 +871,12 @@ pub async fn reload_system_full() -> Result<(), Error> {
 }
 
 async fn reload_system_inner(restart_network: bool) -> Result<(), Error> {
+    // Before the network is touched: if this edit turned a profile's RA off
+    // (moved it onto an IPv4-only VPN, say), this is the only moment its clients
+    // can be told to drop the prefix — once netifd removes it there is nothing
+    // left to withdraw. See deprecate_odhcpd_prefixes. A no-op when nothing
+    // about IPv6 changed, beyond one extra RA.
+    crate::deprecate_odhcpd_prefixes().await;
     let network_action = if restart_network { "restart" } else { "reload" };
     let _ = crate::run_quiet_async(
         tokio::process::Command::new("/etc/init.d/network").arg(network_action),
@@ -909,6 +916,12 @@ pub async fn reload_system_and_wifi_full() -> Result<(), Error> {
 }
 
 async fn reload_system_and_wifi_inner(restart_network: bool) -> Result<(), Error> {
+    // Before the network is touched: deleting a profile removes its interface
+    // and `ip6assign`, so this is the only moment its clients (still associated
+    // until `wifi` tears the SSID down, or wired on the VLAN) can be told to
+    // drop the prefix. See deprecate_odhcpd_prefixes. A no-op on profile
+    // create, beyond one extra RA.
+    crate::deprecate_odhcpd_prefixes().await;
     let network_action = if restart_network { "restart" } else { "reload" };
     let _ = crate::run_quiet_async(
         tokio::process::Command::new("/etc/init.d/network").arg(network_action),
@@ -1310,6 +1323,7 @@ fn set_config<C: CtrlContext>(
     profile: &Profile<ProfileIdOpt>,
 ) -> Result<(ProfileId, Option<OldProfileState>), Error> {
     validate_profile_block(cfgs, profile)?;
+    crate::vpn_client::guard_outbound_available(cfgs, &profile.outbound)?;
     let ipv6 = is_ipv6_enabled(cfgs) && outbound_supports_ipv6(cfgs, &profile.outbound);
     // Check fullname uniqueness before renaming
     if let Some(given_fullname) = &profile.id.fullname {
@@ -1590,6 +1604,7 @@ fn create_config(
     pre_allocated_interface: Option<String>,
 ) -> Result<ProfileId, Error> {
     validate_profile_block(cfgs, profile)?;
+    crate::vpn_client::guard_outbound_available(cfgs, &profile.outbound)?;
     // The new interface isn't in the config yet, so no self-exclusion is needed:
     // reject if the requested /24 already belongs to any existing profile.
     guard_subnet_collision(cfgs, profile.gateway_ip, None)?;
@@ -2969,6 +2984,136 @@ pub async fn bootstrap_admin_profile(uci_root: &str) -> Result<(), Error> {
     Ok(())
 }
 
+/// Repair IPv6 state that a pre-1.0.2 router could be left in, where the LAN
+/// says IPv6 is off while individual profiles carry on advertising it.
+///
+/// Before the `!profile.owns_lan` guard in [`rewrite_dhcp`], any profile rewrite
+/// re-derived `dhcp.lan.ra` from the *Admin* profile's outbound, and would write
+/// `disabled` there while touching nothing else. The result is a router where
+/// `dhcp.lan.ra = 'disabled'` — which is what `is_ipv6_enabled`, the LAN IPv6
+/// page, and the IPv6 published-port guard all read — but the profile VLANs
+/// still hold `ra 'server'` and their `ip6assign`, so they keep handing out
+/// addresses. The UI says one thing and the network does another, and nothing
+/// converges them: the guard stops the divergence arising, it cannot undo one
+/// that already has.
+///
+/// Detection is deliberately narrow. On current code this combination is
+/// unreachable: [`lan::ipv6_set`](crate::lan::ipv6_set) writes the LAN and every
+/// profile in one transaction, and [`rewrite_dhcp`] derives each profile's `ra`
+/// from [`is_ipv6_enabled`], which reads `dhcp.lan.ra`. Firing only on the
+/// impossible state therefore cannot clobber a legitimate configuration.
+///
+/// The repair reconciles *down*, toward off — the direction every other part of
+/// the system already believes. That makes reality match what the product is
+/// already asserting, and it is fully recoverable: the LAN IPv6 toggle now works
+/// correctly and turns everything back on together. Reconciling *up* would be a
+/// guess at intent that silently resumes advertising on VLANs the user has been
+/// told are quiet.
+///
+/// NOTE: if a per-profile IPv6 toggle is ever introduced (the ULA→GUA redesign
+/// contemplates one), "LAN off, profile on" becomes a legitimate state and this
+/// heal must be revisited or removed — it would otherwise silently fight it.
+///
+/// Idempotent: a no-op, with no reload, once the state is consistent.
+pub async fn heal_ipv6_state(uci_root: &str) -> Result<(), Error> {
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root, &arena, &["network", "dhcp", "startwrt"]).await?;
+    let repaired = heal_ipv6_state_in_cfgs(&mut cfgs)?;
+
+    if repaired.is_empty() {
+        return Ok(());
+    }
+
+    dump_all(uci_root, cfgs).await?;
+    drop(arena);
+
+    crate::activity::log(
+        "lan",
+        "ipv6-repaired",
+        true,
+        &format!(
+            "Turned IPv6 off for {} — the LAN IPv6 setting was off but these were still advertising",
+            repaired.join(", ")
+        ),
+        None,
+    );
+
+    // reload_system_full withdraws the prefixes from clients before netifd
+    // removes them (see deprecate_odhcpd_prefixes) and does the `network
+    // restart` netifd needs to actually drop an `ip6assign`. Only ever reached
+    // on the repair path, so a healthy router pays nothing.
+    reload_system_full().await?;
+
+    Ok(())
+}
+
+/// The config half of [`heal_ipv6_state`], split out so it can be tested
+/// without spawning init scripts. Returns the interfaces it changed, sorted;
+/// empty means the state was already consistent and nothing should be applied.
+fn heal_ipv6_state_in_cfgs(cfgs: &mut Configs) -> Result<Vec<String>, Error> {
+    // Nothing to repair while the LAN is serving IPv6: profiles advertising
+    // alongside it is the normal, consistent state.
+    if is_ipv6_enabled(cfgs) {
+        return Ok(Vec::new());
+    }
+
+    // Profile interfaces, minus the admin LAN — its `ip6assign` is handled
+    // separately below and its RA is what we just tested.
+    let profile_interfaces: BTreeSet<String> = cfgs["startwrt"]
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<UciProfile>().ok())
+        .map(|p| p.interface)
+        .filter(|i| i != crate::lan::LAN_INTERFACE)
+        .collect();
+
+    let mut repaired = Vec::new();
+
+    for section in &mut cfgs["dhcp"].sections {
+        let Some(name) = section.name().map(|n| n.to_string()) else {
+            continue;
+        };
+        if !profile_interfaces.contains(&name) {
+            continue;
+        }
+        let Some(mut dhcp) = section.get_typed::<Dhcp>()? else {
+            continue;
+        };
+        if dhcp.ra.as_deref() == Some("server") || dhcp.dhcpv6.as_deref() == Some("server") {
+            dhcp.ra = Some("disabled".to_string());
+            dhcp.dhcpv6 = Some("disabled".to_string());
+            section.set(&dhcp)?;
+            repaired.push(name);
+        }
+    }
+
+    // Clear every stranded prefix assignment, the admin LAN's included: with RA
+    // off it serves no client, but it still holds an address on the bridge and
+    // would silently come back as a live prefix the moment RA returned.
+    for section in &mut cfgs["network"].sections {
+        let Some(name) = section.name().map(|n| n.to_string()) else {
+            continue;
+        };
+        let is_lan = name == crate::lan::LAN_INTERFACE;
+        if !is_lan && !profile_interfaces.contains(&name) {
+            continue;
+        }
+        let Some(mut iface) = section.get_typed::<NetworkInterface>()? else {
+            continue;
+        };
+        if iface.ip6assign.is_some() {
+            iface.ip6assign = None;
+            section.set(&iface)?;
+            if !repaired.contains(&name) {
+                repaired.push(name);
+            }
+        }
+    }
+
+    repaired.sort();
+    Ok(repaired)
+}
+
 #[derive(Debug, Parser, Serialize, Deserialize)]
 pub struct EditArgs {
     #[clap(flatten)]
@@ -3475,6 +3620,171 @@ mod tests {
 
     use super::*;
 
+    /// Write a network/dhcp/startwrt fixture, run the config half of the IPv6
+    /// heal over it, and hand back what it changed plus the resulting files.
+    /// Uses the pure inner function, so no init script is ever spawned.
+    async fn run_ipv6_heal(
+        network: &str,
+        dhcp: &str,
+        startwrt: &str,
+    ) -> (Vec<String>, String, String) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("network"), network).unwrap();
+        std::fs::write(dir.path().join("dhcp"), dhcp).unwrap();
+        std::fs::write(dir.path().join("startwrt"), startwrt).unwrap();
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "dhcp", "startwrt"])
+            .await
+            .unwrap();
+        let repaired = heal_ipv6_state_in_cfgs(&mut cfgs).unwrap();
+        dump_all(dir.path(), cfgs).await.unwrap();
+        drop(arena);
+
+        (
+            repaired,
+            std::fs::read_to_string(dir.path().join("network")).unwrap(),
+            std::fs::read_to_string(dir.path().join("dhcp")).unwrap(),
+        )
+    }
+
+    /// A router left in the pre-1.0.2 diverged state: the LAN says IPv6 is off,
+    /// both profile VLANs are still advertising, every ip6assign survives.
+    const HEAL_NETWORK_DIVERGED: &str = "\
+config interface 'lan'
+\toption device 'br-lan.1'
+\toption proto 'static'
+\toption ipaddr '192.168.1.1'
+\toption ip6assign '60'
+
+config interface 'guest'
+\toption device 'br-lan.101'
+\toption proto 'static'
+\toption ipaddr '192.168.101.1'
+\toption ip6assign '64'
+
+config interface 'iot'
+\toption device 'br-lan.102'
+\toption proto 'static'
+\toption ipaddr '192.168.102.1'
+\toption ip6assign '64'
+";
+
+    const HEAL_STARTWRT: &str = "\
+config profile lan
+\toption fullname 'Admin'
+\toption interface 'lan'
+\toption vlan_tag '1'
+\toption outbound 'wan'
+
+config profile guest
+\toption fullname 'Guest'
+\toption interface 'guest'
+\toption vlan_tag '101'
+\toption outbound 'wan'
+
+config profile iot
+\toption fullname 'IoT'
+\toption interface 'iot'
+\toption vlan_tag '102'
+\toption outbound 'wan'
+";
+
+    fn heal_dhcp(lan_ra: &str, profile_ra: &str) -> String {
+        format!(
+            "\
+config dhcp 'lan'
+\toption interface 'lan'
+\toption start '2'
+\toption limit '198'
+\toption leasetime '12h'
+\toption ra '{lan_ra}'
+\toption dhcpv6 '{lan_ra}'
+
+config dhcp 'guest'
+\toption interface 'guest'
+\toption start '2'
+\toption limit '198'
+\toption leasetime '12h'
+\toption ra '{profile_ra}'
+\toption dhcpv6 '{profile_ra}'
+
+config dhcp 'iot'
+\toption interface 'iot'
+\toption start '2'
+\toption limit '198'
+\toption leasetime '12h'
+\toption ra '{profile_ra}'
+\toption dhcpv6 '{profile_ra}'
+"
+        )
+    }
+
+    #[tokio::test]
+    async fn heal_ipv6_converges_the_diverged_state() {
+        let (repaired, network, dhcp) = run_ipv6_heal(
+            HEAL_NETWORK_DIVERGED,
+            &heal_dhcp("disabled", "server"),
+            HEAL_STARTWRT,
+        )
+        .await;
+
+        assert_eq!(repaired, vec!["guest", "iot", "lan"]);
+        assert!(
+            !network.contains("ip6assign"),
+            "every stranded prefix assignment must go, the admin LAN's included:\n{network}"
+        );
+        assert!(
+            !dhcp.contains("'server'"),
+            "no VLAN may still be advertising:\n{dhcp}"
+        );
+    }
+
+    #[tokio::test]
+    async fn heal_ipv6_leaves_a_working_configuration_alone() {
+        // The critical negative case. LAN IPv6 on, profiles advertising, every
+        // ip6assign in place — the normal consistent state, which the heal must
+        // never touch or it would break IPv6 for everyone on every boot.
+        let (repaired, network, dhcp) = run_ipv6_heal(
+            HEAL_NETWORK_DIVERGED,
+            &heal_dhcp("server", "server"),
+            HEAL_STARTWRT,
+        )
+        .await;
+
+        assert!(repaired.is_empty(), "healed a healthy router: {repaired:?}");
+        assert_eq!(network.matches("ip6assign").count(), 3);
+        assert_eq!(dhcp.matches("'server'").count(), 6);
+    }
+
+    #[tokio::test]
+    async fn heal_ipv6_is_a_noop_when_already_off_everywhere() {
+        let network = HEAL_NETWORK_DIVERGED.replace("\toption ip6assign '60'\n", "");
+        let network = network.replace("\toption ip6assign '64'\n", "");
+        let (repaired, network_out, dhcp) =
+            run_ipv6_heal(&network, &heal_dhcp("disabled", "disabled"), HEAL_STARTWRT).await;
+
+        assert!(repaired.is_empty(), "nothing to repair: {repaired:?}");
+        assert!(!network_out.contains("ip6assign"));
+        assert!(!dhcp.contains("'server'"));
+    }
+
+    #[tokio::test]
+    async fn heal_ipv6_is_idempotent() {
+        // Feed the first run's own output back in: the second pass must report
+        // no change, or the heal would restart the network on every boot.
+        let (first, network, dhcp) = run_ipv6_heal(
+            HEAL_NETWORK_DIVERGED,
+            &heal_dhcp("disabled", "server"),
+            HEAL_STARTWRT,
+        )
+        .await;
+        assert!(!first.is_empty());
+
+        let (second, _, _) = run_ipv6_heal(&network, &dhcp, HEAL_STARTWRT).await;
+        assert!(second.is_empty(), "second pass repaired again: {second:?}");
+    }
+
     #[test]
     fn test_window_contains_non_wrap() {
         // 09:00-17:00 on Monday (day 1) only.
@@ -3561,6 +3871,11 @@ config profile guest
 \toption fullname 'Guest'
 \toption interface 'guest'
 \toption vlan_tag '101'
+
+config vpn_client
+\toption interface 'wg_test'
+\toption label 'Test VPN'
+\toption target 'Internet'
 ",
         )
         .unwrap();
@@ -3592,6 +3907,14 @@ config bridge-vlan
 config bridge-vlan
 \toption device 'br-lan'
 \toption vlan '101'
+
+config interface 'wg_test'
+\toption proto 'wireguard'
+\toption private_key 'aGkmAm6PEDDjyZx/Lwc8AfwlVWuJOaKB6E5Hp+JqgVc='
+\toption disabled '0'
+\toption defaultroute '0'
+\toption peerdns '0'
+\tlist addresses '10.1.0.2/32'
 ",
         )
         .unwrap();
@@ -4545,7 +4868,7 @@ config profile guest
                 vlan_tag: Some(101),
             },
             gateway_ip: Ipv4Addr::new(192, 168, 101, 1),
-            outbound: "wg0".into(),
+            outbound: "wg_test".into(),
             lan_access: LanAccess::SameProfile,
             wan_access: WanAccess::All,
             dns_override: Vec::new(),
@@ -4579,7 +4902,7 @@ config profile guest
         .unwrap();
 
         assert_eq!(
-            result.outbound, "wg0",
+            result.outbound, "wg_test",
             "outbound should persist through set_config"
         );
     }
@@ -5103,7 +5426,7 @@ config profile guest
                 vlan_tag: Some(101),
             },
             gateway_ip: Ipv4Addr::new(192, 168, 101, 1),
-            outbound: "wg_mullvad".into(),
+            outbound: "wg_test".into(),
             lan_access: LanAccess::SameProfile,
             wan_access: WanAccess::All,
             dns_override: Vec::new(),
@@ -5121,9 +5444,9 @@ config profile guest
             .sections
             .iter()
             .filter_map(|s| s.get::<FirewallZone>().ok())
-            .find(|z| z.name == "vpn_wg_mullvad")
-            .expect("vpn_wg_mullvad zone should exist");
-        assert_eq!(vpn_zone.network, vec!["wg_mullvad".to_string()]);
+            .find(|z| z.name == "vpn_wg_test")
+            .expect("vpn_wg_test zone should exist");
+        assert_eq!(vpn_zone.network, vec!["wg_test".to_string()]);
         assert_eq!(vpn_zone.masq, Some(true));
         assert_eq!(vpn_zone.masq6, Some(true));
 
@@ -5135,9 +5458,58 @@ config profile guest
             .find(|z| z.name == DEFAULT_WAN_ZONE)
             .expect("WAN zone should exist");
         assert!(
-            !wan_zone.network.contains(&"wg_mullvad".to_string()),
+            !wan_zone.network.contains(&"wg_test".to_string()),
             "VPN interface must not be in the WAN zone, got: {:?}",
             wan_zone.network
+        );
+    }
+
+    #[tokio::test]
+    async fn set_config_rejects_disabled_outbound_vpn() {
+        // A disabled VPN's WireGuard interface never comes up, so routing a
+        // profile through it blackholes the profile. The UI only offers enabled
+        // VPNs; the RPC/CLI must refuse the rest rather than write the config.
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        let network = std::fs::read_to_string(dir.path().join("network"))
+            .unwrap()
+            .replace("\toption disabled '0'", "\toption disabled '1'");
+        std::fs::write(dir.path().join("network"), network).unwrap();
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp"],
+        )
+        .await
+        .unwrap();
+
+        let profile = Profile {
+            id: ProfileIdOpt {
+                fullname: Some("Guest".into()),
+                interface: Some("guest".into()),
+                vlan_tag: Some(101),
+            },
+            gateway_ip: Ipv4Addr::new(192, 168, 101, 1),
+            outbound: "wg_test".into(),
+            lan_access: LanAccess::SameProfile,
+            wan_access: WanAccess::All,
+            dns_override: Vec::new(),
+            dns_source: String::new(),
+            access_to_new_profiles: false,
+            owns_lan: false,
+        };
+
+        let err = set_config(ctx, &mut cfgs, &profile).unwrap_err();
+        assert_eq!(err.kind, ErrorKind::VpnDisabled);
+        assert!(
+            !cfgs["network"]
+                .sections
+                .iter()
+                .any(|s| s.name().as_deref() == Some("prt_guest")),
+            "a rejected outbound must not leave policy routing behind"
         );
     }
 
@@ -5918,6 +6290,24 @@ config zone
     fn setup_configs_with_ipv6_vpn(dir: &std::path::Path) {
         setup_configs(dir);
 
+        // Register both tunnels as outbound VPN clients — a profile may only
+        // route through an interface that has vpn_client metadata.
+        let mut startwrt = std::fs::read_to_string(dir.join("startwrt")).unwrap();
+        startwrt.push_str(
+            "\n\
+config vpn_client
+\toption interface 'wg_v6'
+\toption label 'V6 VPN'
+\toption target 'Internet'
+
+config vpn_client
+\toption interface 'wg_v4'
+\toption label 'V4 VPN'
+\toption target 'Internet'
+",
+        );
+        std::fs::write(dir.join("startwrt"), startwrt).unwrap();
+
         // Append WG interfaces to network config
         let mut network = std::fs::read_to_string(dir.join("network")).unwrap();
         network.push_str(
@@ -6392,6 +6782,15 @@ config dhcp 'guest'
 ",
         );
         std::fs::write(dir.path().join("network"), network).unwrap();
+        let mut startwrt = std::fs::read_to_string(dir.path().join("startwrt")).unwrap();
+        startwrt.push_str(
+            "\nconfig vpn_client
+\toption interface 'wg_v6'
+\toption label 'V6 VPN'
+\toption target 'Internet'
+",
+        );
+        std::fs::write(dir.path().join("startwrt"), startwrt).unwrap();
 
         let arena = Arena::new();
         let mut cfgs = parse_all(

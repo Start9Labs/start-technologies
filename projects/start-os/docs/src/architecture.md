@@ -137,4 +137,6 @@ S9PK files are signed with Ed25519 keys. The registry and StartOS verify signatu
 
 ## Source Code
 
-StartOS is fully open source. The main repository is [Start9Labs/start-technologies](https://github.com/Start9Labs/start-technologies) on GitHub. See the repository's CONTRIBUTING.md for build instructions and development setup.
+StartOS is open source under the MIT License. The main repository is [Start9Labs/start-technologies](https://github.com/Start9Labs/start-technologies) on GitHub, where NOTICE.md lists the few third-party files that carry their own terms. See the repository's CONTRIBUTING.md for build instructions and development setup.
+
+The Standard image additionally ships proprietary firmware and drivers for hardware compatibility; choose the Slim (FOSS-only) image if you need a build with none.

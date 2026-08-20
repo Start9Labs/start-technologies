@@ -17,6 +17,8 @@ StartWRT never updates automatically — updating always requires explicit actio
 
 Firmware integrity is enforced cryptographically (a Blake3 commitment plus ed25519 release signatures), so only properly signed StartWRT releases will install. A tampered or unsigned image is rejected.
 
+Updates also keep the router's low-level boot firmware (the eMMC boot partitions) in sync with the release — verified during the update and again on every boot — so every part of the boot chain ships and updates together. This is automatic; if it is already current, nothing is rewritten.
+
 ## Update by Reflashing (Fallback)
 
 If an in-app update ever fails, you can update StartWRT by reflashing from a microSD card. Use the **Keep settings** path in the reflash wizard, which replaces the firmware while preserving your settings. See [Installing StartWRT](installing.md) for how to create a bootable microSD card, and [Factory Reset](factory-reset.md#reflash-microsd) for a walkthrough of the reflash wizard.

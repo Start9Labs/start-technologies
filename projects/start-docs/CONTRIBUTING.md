@@ -112,7 +112,7 @@ Linux instructions here.
 - Anything that isn't a general OS picker (backup targets, cloud providers, …) gets its own `global` — don't overload `platform`.
 - Omit `global` for a one-off, page-local group.
 
-Keep the outer picker flat: the only sanctioned nesting is a single distro/version sub-group (with its own `global`) inside one platform tab. Don't nest `platform` inside `platform`, or nest more than one level deep.
+Keep the outer picker flat: the only sanctioned nesting is a single distro/version sub-group (with its own `global`) inside one platform tab.
 
 ### Cross-Book Links
 

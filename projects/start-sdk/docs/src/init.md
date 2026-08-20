@@ -173,11 +173,11 @@ export const uninit = sdk.setupUninit(versionGraph)
 
 ## runUntilSuccess Pattern
 
-Use `runUntilSuccess(timeout)` to run daemons and oneshots during init, waiting for completion before continuing. This is essential for setup tasks that need a running server.
+Use `runUntilSuccess(timeout)` to run daemons and oneshots during init, waiting for completion before continuing. This is essential for setup steps that need a running server.
 
 ### Oneshots Only
 
-For simple sequential tasks (like database migrations):
+For simple sequential steps (like the app's own database migrations):
 
 ```typescript
 await sdk.Daemons.of(effects)
@@ -250,6 +250,21 @@ await sdk.Daemons.of(effects)
 3. When the oneshot completes successfully, `runUntilSuccess` returns
 4. All processes are cleaned up automatically
 
+### When it times out
+
+If the timeout elapses before everything is ready, `runUntilSuccess` throws, which fails init: StartOS restores the package's volumes from the backup it took beforehand, then reverts an update to the previous version or removes a failed install. The error names every daemon that never became ready, with its current health result and message, and — for one whose process kept dying — how many times it exited and the error from the last exit:
+
+```
+Timed out after 120000ms waiting for server (loading; 12 failed exit(s), last: node exited with code 1), bootstrap (waiting)
+```
+
+Read it as: `server` never came up, and its process has been crash-looping rather than merely starting slowly; `bootstrap` never ran, because `waiting` means its `requires` are not all ready — here, `server`. A daemon reported as `loading` or `starting` with **no** failed exits is running but not passing its ready check — look at the check, not the process.
+
+A `waiting` daemon's message lists the `display` names of the dependencies still holding it up, which is why there is none above: the chain declares `display: null` on `server`. Give a daemon a `display` and its dependents name it.
+
+> [!TIP]
+> A `ready` function that returns `loading` on a failed probe (rather than `failure`) makes a dead process look identical to a slow one in the UI. The exit count above is what distinguishes them, but the daemon's own logs are still the place to find out why it died — a daemon's stdout and stderr go to the service logs.
+
 ### Making HTTP Calls Without curl
 
 Many slim Docker images do not have curl. Use the runtime's built-in HTTP capabilities instead.
@@ -290,7 +305,7 @@ urllib.request.urlopen(req)`,
 
 Init progress is surfaced in the **Installing** / **Updating** phase of the install, so a long first-run setup (migrations, bootstrapping a server, downloading assets) shows a moving bar instead of an apparent stall. This mirrors backup progress reporting.
 
-You never call the progress effect directly. The init harness builds one `FullProgressTracker` and passes it to **every** init handler as a third argument. Each handler adds its own phases (with its own names) to the shared tracker, unaware of the others. Add phases and update them — **every update auto-reports to the host in the background**, so there's nothing to flush by hand.
+You never call the progress effect directly. The init harness builds one `FullProgressTracker` and passes it to **every** init handler as a third argument. Each handler adds its own phases (with its own names) to the shared tracker, unaware of the others. Add phases and update them — **every update auto-reports to StartOS in the background**, so there's nothing to flush by hand.
 
 `progress.addPhase(name, contribution)` returns a `PhaseHandle` with `start()`, `setTotal(n)`, `setDone(n)`, `setUnits('steps' | 'bytes')`, and `complete()`. Just update the handle; the report follows automatically.
 
@@ -349,7 +364,7 @@ export const v2_0_0 = VersionInfo.of({
 
 ### Multi-phase Handlers
 
-For a handler with several distinct sub-tasks, add one phase per task. The tracker weights them by their `contribution` and reports a combined percentage:
+For a handler with several distinct steps, add one phase per step. The tracker weights them by their `contribution` and reports a combined percentage:
 
 ```typescript
 export const bootstrap = sdk.setupOnInit(async (effects, kind, progress) => {

@@ -91,7 +91,7 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
         .subcommand("mount", from_fn_async(dependency::mount).no_cli())
         .subcommand(
             "bind-mount",
-            from_fn_async(bind_mount::bind_mount::<C>).no_display(),
+            from_fn_async(bind_mount::bind_mount).no_display(),
         )
         .subcommand(
             "get-installed-packages",
@@ -163,6 +163,14 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "clear-bindings",
             from_fn_async(net::bind::clear_bindings).no_cli(),
+        )
+        .subcommand(
+            "retire-host",
+            from_fn_async(net::bind::retire_host).no_cli(),
+        )
+        .subcommand(
+            "retire-binding",
+            from_fn_async(net::bind::retire_binding).no_cli(),
         )
         .subcommand(
             "get-host-info",

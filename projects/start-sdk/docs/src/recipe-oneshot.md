@@ -1,6 +1,8 @@
 # Run a One-Shot Command
 
-Before the main daemon starts, you may need to fix file ownership, run database migrations, or perform other idempotent setup. Oneshots run to completion and block dependent daemons until they finish.
+Before the main daemon starts, you may need to fix file ownership, run the app's own database migrations, or perform other idempotent setup. Oneshots run to completion and block dependent daemons until they finish.
+
+A oneshot runs on **every** start, so it fits work whose answer can differ next time. Work keyed to the package version — relocating or repairing data an older release left behind — belongs in `migrations.up` instead, even when you can guard it to be idempotent. See [main.md § Choosing Between a Oneshot, an Init, and a Migration](main.md#choosing-between-a-oneshot-an-init-and-a-migration).
 
 ## Solution
 

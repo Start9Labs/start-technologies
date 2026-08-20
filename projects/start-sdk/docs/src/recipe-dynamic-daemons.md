@@ -46,7 +46,7 @@ On each run the reconciler diffs entries by `id` and a `configHash` of their str
 - **same `configHash`** — leave it running, untouched
 - **different `configHash`** — restart it
 
-Dependents (via `requires`) of any restarted or stopped daemon restart too, so the wiring stays consistent. Closures — `ready.fn`, `ready.trigger`, a function-form `exec.fn` — are **not** part of the hash, so surface anything the reconciler must react to through one of the hashed fields.
+Dependents (via `requires`) of any restarted or stopped daemon restart too, so the wiring stays consistent. Closures — `ready.fn`, `ready.trigger`, a function-form `exec.fn` — are **not** part of the hash. If such a closure captures a value the reconciler must react to (say, a host the `exec.fn` reads before building its command), pass that value as the entry's `uses`; any change to it restarts the daemon on the next reconcile. Only JSON-serializable `uses` values are useful — functions, symbols, cycles and `undefined` normalize to distinct `UNSERIALIZABLE:*` sentinels, so a change only visible there never triggers a restart, and BigInts hash as their decimal string.
 
 **Reference:** [Main](main.md) · [Actions](actions.md) · [File Models](file-models.md)
 

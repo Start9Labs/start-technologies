@@ -179,6 +179,67 @@ fn get_vpn_server_interfaces(cfgs: &Configs) -> std::collections::BTreeSet<Strin
         .collect()
 }
 
+/// The WireGuard interface section named `name`, if it exists and is one.
+fn wg_interface(cfgs: &Configs, name: &str) -> Option<WgInterface> {
+    cfgs["network"]
+        .sections
+        .iter()
+        .find(|s| s.name().as_deref() == Some(name))
+        .and_then(|s| s.get::<WgInterface>().ok())
+        .filter(|wg| wg.is_wireguard())
+}
+
+/// Reject a profile outbound that isn't a usable outbound VPN client.
+///
+/// `"wan"` (direct) always passes. Anything else must be an interface `list`
+/// reports as `enabled`, so the RPC/CLI can't select an outbound the UI never
+/// offers. Both failures blackhole the profile silently otherwise: an unknown
+/// interface still gets a `vpn_<X>` zone and a policy route pointing at
+/// nothing, and a disabled VPN's WireGuard interface never comes up.
+///
+/// A VPN server's interface fails the metadata lookup — servers carry
+/// `vpn_server`, not `vpn_client` — and `create` keeps the two namespaces
+/// disjoint via `InterfaceNameConflict`, so no separate check is needed.
+///
+/// Only the immediate hop is checked. `guard_target_enabled` and `set_enabled`
+/// between them keep every link of a chain enabled, so an enabled interface
+/// implies an enabled chain behind it — no walk needed here.
+pub(crate) fn guard_outbound_available(cfgs: &Configs, outbound: &str) -> Result<(), Error> {
+    if outbound == crate::profiles::DEFAULT_WAN_ZONE {
+        return Ok(());
+    }
+
+    let meta = cfgs["startwrt"]
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<UciVpnClient>().ok())
+        .find(|meta| meta.interface == outbound);
+    let Some(meta) = meta else {
+        return Err(Error::new(
+            eyre!("no outbound VPN client named {outbound}"),
+            ErrorKind::NotFound,
+        ));
+    };
+
+    let Some(wg) = wg_interface(cfgs, outbound) else {
+        return Err(Error::new(
+            eyre!("outbound VPN '{}' has no WireGuard interface", meta.label),
+            ErrorKind::NotFound,
+        ));
+    };
+    if wg.disabled() {
+        return Err(Error::new(
+            eyre!(
+                "outbound VPN '{}' is disabled — enable it before routing a profile through it",
+                meta.label
+            ),
+            ErrorKind::VpnDisabled,
+        ));
+    }
+
+    Ok(())
+}
+
 /// Compute which profiles use a given WireGuard interface as their outbound route.
 /// Reads UciProfile sections directly from startwrt config.
 fn get_used_by_profiles(cfgs: &Configs, wg_interface_name: &str) -> Vec<String> {
@@ -590,12 +651,61 @@ fn validate_target(cfgs: &Configs, target: &str, self_label: &str) -> Result<(),
         if current == "Internet" {
             return Ok(());
         }
+        // Bound the walk. Reaching `self_label` is the cycle this call is
+        // guarding against, but a cycle among *other* labels would spin here
+        // forever. Every edge is written through this function, so that can
+        // only come from a hand-edited /etc/config/startwrt — which must not
+        // hang the RPC thread.
+        if visited.iter().any(|v| v == current) {
+            return Err(Error::new(
+                eyre!("VPN chain cycle detected at '{}': {:?}", current, visited),
+                ErrorKind::VpnChainCycle,
+            ));
+        }
         visited.push(current.to_string());
         match label_to_target.get(current) {
             Some(next) => current = next,
             None => return Ok(()), // target chain ends at unknown label
         }
     }
+}
+
+/// Reject chaining onto a VPN that is disabled.
+///
+/// `"Internet"` always passes; an unknown label falls through to
+/// `validate_target`'s `InvalidValue`. A disabled interface is never registered
+/// with netifd, so the `vcr_<iface>` chain route pinning this VPN's endpoint
+/// through its target is dropped at config-parse time and the endpoint traffic
+/// silently falls back to the WAN — a single-hop connection where the user
+/// asked for two, with every surface still reporting success.
+///
+/// `set_enabled` holds the other half of this invariant, refusing to disable a
+/// VPN that something already chains through. Together they let
+/// `guard_outbound_available` check only the profile's immediate hop.
+fn guard_target_enabled(cfgs: &Configs, target: &str) -> Result<(), Error> {
+    if target == "Internet" {
+        return Ok(());
+    }
+
+    let target_iface = cfgs["startwrt"]
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<UciVpnClient>().ok())
+        .find(|meta| meta.label == target)
+        .map(|meta| meta.interface);
+
+    let Some(target_iface) = target_iface else {
+        return Ok(());
+    };
+
+    if wg_interface(cfgs, &target_iface).is_some_and(|wg| wg.disabled()) {
+        return Err(Error::new(
+            eyre!("target VPN '{target}' is disabled — enable it before chaining through it"),
+            ErrorKind::VpnDisabled,
+        ));
+    }
+
+    Ok(())
 }
 
 /// List all outbound VPN clients
@@ -687,6 +797,7 @@ pub async fn create(
         }
 
         validate_target(&cfgs, &req.target, &req.label)?;
+        guard_target_enabled(&cfgs, &req.target)?;
 
         // Create the WireGuard interface section
         create_wg_client_interface(&mut cfgs, &interface_name, &parsed, &arena)?;
@@ -764,9 +875,11 @@ pub async fn update(
             ));
         }
 
-        // Find and update metadata, capturing old label for cascade
+        // Find and update metadata, capturing old label for cascade and old
+        // target so the disabled-target guard fires only on an actual retarget
         let mut found = false;
         let mut old_label = String::new();
+        let mut old_target = String::new();
         for section in &mut cfgs["startwrt"].sections {
             let Ok(mut meta) = section.get::<UciVpnClient>() else {
                 continue;
@@ -776,6 +889,7 @@ pub async fn update(
             }
 
             old_label = meta.label.clone();
+            old_target = meta.target.clone();
             meta.label = req.label.clone();
             meta.target = req.target.clone();
             section.set(&meta)?;
@@ -791,6 +905,13 @@ pub async fn update(
         }
 
         validate_target(&cfgs, &req.target, &req.label)?;
+        // Only on an actual retarget, mirroring guard_subnet_collision: a
+        // no-op edit (label, MTU) must not be blocked by a broken chain that
+        // already exists in the stored config — otherwise a router that
+        // already chains onto a disabled VPN becomes uneditable.
+        if req.target != old_target {
+            guard_target_enabled(&cfgs, &req.target)?;
+        }
 
         // Cascade label rename: update any VPN clients targeting the old label
         if old_label != req.label {
@@ -2209,6 +2330,59 @@ MIID...snip...
         );
     }
 
+    // === guard_outbound_available ===
+
+    #[tokio::test]
+    async fn test_guard_outbound_accepts_wan_and_enabled_vpn() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_with_vpn_client(dir.path());
+
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+
+        guard_outbound_available(&cfgs, "wan").expect("direct WAN is always available");
+        guard_outbound_available(&cfgs, "wg_proton").expect("an enabled VPN client is available");
+    }
+
+    #[tokio::test]
+    async fn test_guard_outbound_rejects_disabled_vpn() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_with_vpn_client(dir.path());
+        let network = std::fs::read_to_string(dir.path().join("network"))
+            .unwrap()
+            .replace("\toption disabled '0'", "\toption disabled '1'");
+        std::fs::write(dir.path().join("network"), network).unwrap();
+
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+
+        let err = guard_outbound_available(&cfgs, "wg_proton").unwrap_err();
+        assert_eq!(err.kind, ErrorKind::VpnDisabled);
+    }
+
+    #[tokio::test]
+    async fn test_guard_outbound_rejects_unknown_and_server_interfaces() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_with_vpn_client(dir.path());
+
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+
+        let err = guard_outbound_available(&cfgs, "wg_nonexistent").unwrap_err();
+        assert_eq!(err.kind, ErrorKind::NotFound);
+
+        // wg_guest is a real WireGuard interface, but an inbound VPN server —
+        // it carries no vpn_client metadata, so it is not an egress path.
+        let err = guard_outbound_available(&cfgs, "wg_guest").unwrap_err();
+        assert_eq!(err.kind, ErrorKind::NotFound);
+    }
+
     #[tokio::test]
     async fn test_reset_profiles_noop_when_unused() {
         let dir = tempfile::tempdir().unwrap();
@@ -3590,6 +3764,79 @@ config wireguard_wg_c 'c_peer0'
         let arena = Arena::new();
         let cfgs = parse_all(dir.path(), &arena, &["startwrt"]).await.unwrap();
         assert!(validate_target(&cfgs, "A", "C").is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_validate_target_terminates_on_foreign_cycle() {
+        // A→B→A is a cycle that never reaches "C", the label being validated.
+        // The walk used to terminate only on self_label or "Internet", so this
+        // config spun forever. Only a hand-edited /etc/config/startwrt can
+        // produce it — every edge written through validate_target is acyclic.
+        //
+        // NOTE: if the walk's bound regresses, this test HANGS rather than
+        // failing an assertion.
+        let dir = tempfile::tempdir().unwrap();
+        setup_vpn_chain_configs(dir.path(), &[("wg_a", "A", "B"), ("wg_b", "B", "A")]);
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["startwrt"]).await.unwrap();
+
+        let err = validate_target(&cfgs, "A", "C").unwrap_err();
+        assert_eq!(err.kind, ErrorKind::VpnChainCycle);
+    }
+
+    // === guard_target_enabled tests ===
+
+    #[tokio::test]
+    async fn test_guard_target_enabled_accepts_internet_and_enabled_target() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_with_vpn_client(dir.path());
+
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+
+        guard_target_enabled(&cfgs, "Internet").expect("Internet is always chainable");
+        guard_target_enabled(&cfgs, "Proton VPN").expect("an enabled VPN is chainable");
+    }
+
+    #[tokio::test]
+    async fn test_guard_target_enabled_rejects_disabled_target() {
+        // Chaining onto a disabled VPN drops the vcr_ route at netifd
+        // config-parse time, silently degrading a two-hop chain to one hop.
+        let dir = tempfile::tempdir().unwrap();
+        setup_with_vpn_client(dir.path());
+        // wg_proton is the only interface carrying `disabled`, so this hits it.
+        let network = std::fs::read_to_string(dir.path().join("network"))
+            .unwrap()
+            .replace("\toption disabled '0'", "\toption disabled '1'");
+        std::fs::write(dir.path().join("network"), network).unwrap();
+
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+
+        let err = guard_target_enabled(&cfgs, "Proton VPN").unwrap_err();
+        assert_eq!(err.kind, ErrorKind::VpnDisabled);
+    }
+
+    #[tokio::test]
+    async fn test_guard_target_enabled_defers_unknown_label() {
+        // Division of labor: existence is validate_target's error to report,
+        // so this guard passes an unknown label through rather than shadowing
+        // InvalidValue with a less accurate VpnDisabled.
+        let dir = tempfile::tempdir().unwrap();
+        setup_with_vpn_client(dir.path());
+
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+
+        guard_target_enabled(&cfgs, "DoesNotExist").expect("unknown labels defer");
+        let err = validate_target(&cfgs, "DoesNotExist", "Self").unwrap_err();
+        assert_eq!(err.kind, ErrorKind::InvalidValue);
     }
 
     // === IPv6 chain endpoint tests ===

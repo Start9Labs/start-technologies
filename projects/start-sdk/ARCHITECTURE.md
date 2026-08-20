@@ -24,11 +24,11 @@ The Start SDK builds on a shared core library to form a layered architecture: **
 └─────────────────────────────────────────────────────────────┘
 ```
 
-The SDK follows [Semantic Versioning](https://semver.org/) and is versioned independently of StartOS (the current `@start9labs/start-sdk` 2.0.0 targets StartOS 0.4.0-beta.10). Each `CHANGELOG.md` heading records the SDK version and the StartOS release it targets.
+The SDK follows [Semantic Versioning](https://semver.org/) and is versioned independently of StartOS. Each `CHANGELOG.md` heading records the SDK version and the StartOS release it targets.
 
 ## Place in the monorepo
 
-The SDK lives at `projects/start-sdk/` inside the start-technologies monorepo, flattened so its source is directly under `lib/`. Its foundational layer was extracted into its own shared lib, `@start9labs/start-core` (`shared-libs/ts-modules/start-core/`), which is versionless and not published to npm on its own. Service-package developers consume the single published `@start9labs/start-sdk` from npm (its built `dist/` bundles `@start9labs/start-core` via npm `bundleDependencies`, so they install only one package); the container-runtime project in this monorepo consumes the built `dist/` (not the source), while web consumes `@start9labs/start-core` directly. The OS bindings in start-core mirror Rust types in `shared-libs/crates/start-core`.
+The SDK lives at `projects/start-sdk/` inside the start-technologies monorepo, flattened so its source is directly under `lib/`. Its foundational layer was extracted into its own shared lib, `@start9labs/start-core` (`shared-libs/ts-modules/start-core/`), which is versionless and not published to npm on its own. Service-package developers consume the single published `@start9labs/start-sdk` from npm (its built `dist/` bundles `@start9labs/start-core`, `eslint` and `typescript-eslint` via npm `bundleDependencies`, so they install only one package); the container-runtime project in this monorepo consumes the built `dist/` (not the source), while web consumes `@start9labs/start-core` directly. The OS bindings in start-core mirror Rust types in `shared-libs/crates/start-core`.
 
 ## Core Library (`@start9labs/start-core`)
 
@@ -176,7 +176,7 @@ Parser and verifier for `.s9pk` service package archives:
 
 ### Utilities (`shared-libs/ts-modules/start-core/lib/util/`)
 
-~28 utility modules including:
+Utility modules including:
 
 **Reactive subscription wrappers** — Each wraps an Effects callback-based method into a consistent reactive API:
 
@@ -258,7 +258,7 @@ Features:
 - Graceful shutdown with configurable signals and timeouts
 - One-shot commands that run before daemons start
 
-Internally the builder is record-then-materialize: `.addDaemon()` appends a recorded entry, `Daemons.build()` walks the entries to construct `HealthDaemon`s with correct dependency wiring and runs `updateStatus()`. Side-effects start at `build()`, so the timing is identical to the prior eager builder for `setupMain` users.
+Internally the builder is record-then-materialize: `.addDaemon()` appends a recorded entry, `Daemons.build()` walks the entries to construct `HealthDaemon`s with correct dependency wiring and runs `updateStatus()`. Side-effects start at `build()`.
 
 **`Daemons.dynamic`** makes the daemon set a reactive function of on-disk state. `main` is always `setupMain`; `Daemons.dynamic(effects, fn)` returns a `DaemonsReconciler` — a `T.DaemonBuildable`, exactly like a static `Daemons.of(...)` chain — which you return from `setupMain`. The builder `fn` returns a regular `Daemons.of(...).addDaemon(...)` chain; the reconciler diffs its entries against the running set on every `effects.constRetry` trigger. Inside the builder, `constRetry` is bound to a rerun-and-reconcile rather than `effects.restart()`, so a change reconciles in place and the service stays `running`:
 
@@ -472,6 +472,5 @@ The manifest type flows through the entire SDK via generics. When you call `Star
 ## Further reading
 
 - [README.md](README.md) — overview and quickstart
-- [AGENTS.md](AGENTS.md) — build, test, release, and contribution workflow
 - [AGENTS.md](AGENTS.md) — agent/dev instructions (`CLAUDE.md` is a one-line `@AGENTS.md` import)
 - [Packaging docs](https://docs.start9.com/packaging) — the developer-facing reference (mdbook in `docs/`)

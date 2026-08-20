@@ -173,9 +173,7 @@ pub async fn init(
     local_auth.complete();
 
     // Re-enroll MOK on every boot if Secure Boot key exists but isn't enrolled yet
-    if let Err(e) =
-        crate::util::mok::enroll_mok(std::path::Path::new(crate::util::mok::DKMS_MOK_PUB)).await
-    {
+    if let Err(e) = crate::util::mok::enroll_mok(std::path::Path::new("/")).await {
         tracing::warn!("MOK enrollment failed: {e}");
     }
 

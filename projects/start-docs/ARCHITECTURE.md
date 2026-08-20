@@ -10,7 +10,7 @@ This is the `projects/start-docs/` project in the `start-os` monorepo. It owns t
 
 The site is composed of independent mdBook instances — one per product. Each book has its own `book.toml`, `src/SUMMARY.md`, and content tree. Books build into subdirectories of `docs/` (the build output, gitignored) and are deployed together under a shared domain.
 
-Since this is now part of the `start-os` monorepo, the per-product books live **next to the code they document**, not inside this directory. This `docs/` project owns only the build infra, the shared theme, the landing page, and the Bitcoin Guides book.
+The per-product books live **next to the code they document**, not inside this directory. This `docs/` project owns only the build infra, the shared theme, the landing page, and the Bitcoin Guides book.
 
 ```
 start-os/ (monorepo root)
@@ -51,7 +51,7 @@ book_dir() {
 }
 ```
 
-So `packaging` is served from `projects/start-sdk/docs`, and any book not explicitly mapped (currently just `bitcoin-guides`) is expected to live directly under this project (`projects/start-docs/`). To move or add a book, edit `book_dir()` and `versions.conf`.
+So `packaging` is served from `projects/start-sdk/docs`, and any book not explicitly mapped is expected to live directly under this project (`projects/start-docs/`). To move or add a book, edit `book_dir()` and `versions.conf`.
 
 ## Shared Theme
 
@@ -92,7 +92,7 @@ CI then runs the llms.txt generator (`scripts/generate-llms-txt.ts`) to produce 
 
 ## Deployment
 
-Deployment is via GitHub Actions (`.github/workflows/docs-deploy.yml` at the monorepo root). It triggers on pushes to `master` touching `projects/start-docs/**`, `projects/start-os/docs/**`, `projects/start-tunnel/docs/**`, or `projects/start-sdk/docs/**`. Steps:
+Deployment is via GitHub Actions (`.github/workflows/docs-deploy.yml` at the monorepo root). It triggers on pushes to **`live-docs`** — not `master` — touching `projects/start-docs/**`, `projects/start-os/docs/**`, `projects/start-tunnel/docs/**`, `projects/start-sdk/docs/**`, or `projects/start-wrt/docs/**`, and its checkout is pinned to `live-docs` so a manual dispatch cannot publish another branch. Content reaches `live-docs` on a product tag (`docs-sync-on-tag.yml`) or by PR for fixes to already-published pages (`docs-backport.yml` then lands the same change on master). See [AGENTS.md](AGENTS.md#deployment). Steps:
 
 1. Install mdBook (v0.5.2) and mdbook-tabs (0.3.4)
 2. `./build.sh`, then generate llms.txt in `scripts/`

@@ -47,10 +47,10 @@ pub async fn sign_unsigned_modules(root: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-/// Read the start9 user's password hash from /etc/shadow.
+/// Read the start9 user's password hash from `<root>/etc/shadow`.
 /// Returns None if the user doesn't exist or the password is locked.
-async fn start9_shadow_hash() -> Result<Option<String>, Error> {
-    let shadow = tokio::fs::read_to_string("/etc/shadow").await?;
+async fn start9_shadow_hash(root: &Path) -> Result<Option<String>, Error> {
+    let shadow = tokio::fs::read_to_string(root.join("etc/shadow")).await?;
     for line in shadow.lines() {
         if let Some(("start9", rest)) = line.split_once(':') {
             if let Some((hash, _)) = rest.split_once(':') {
@@ -66,11 +66,13 @@ async fn start9_shadow_hash() -> Result<Option<String>, Error> {
     Ok(None)
 }
 
-/// Enroll the DKMS MOK certificate using the start9 user's password from /etc/shadow.
-/// Idempotent: skips if already enrolled, or if the user's password is not yet set.
-/// `mok_pub` is the path to the MOK public certificate (may be inside a chroot overlay during install).
-/// Returns true if a new enrollment was staged.
-pub async fn enroll_mok(mok_pub: &Path) -> Result<bool, Error> {
+/// Enroll the DKMS MOK certificate, protected by the start9 user's password.
+/// `root` holds both the certificate and `etc/shadow`: `/` at runtime, or the target
+/// overlay during install. Idempotent: skips if already enrolled, or if the password
+/// is not yet set — so it must also be called once the password is written, not only
+/// at boot. Returns true if a new enrollment was staged.
+pub async fn enroll_mok(root: &Path) -> Result<bool, Error> {
+    let mok_pub = &root.join(DKMS_MOK_PUB.trim_start_matches('/'));
     tracing::info!("enroll_mok: checking EFI and mok_pub={}", mok_pub.display());
     if tokio::fs::metadata("/sys/firmware/efi").await.is_err() {
         tracing::info!("enroll_mok: no EFI, skipping");
@@ -95,7 +97,7 @@ pub async fn enroll_mok(mok_pub: &Path) -> Result<bool, Error> {
         return Ok(false);
     }
 
-    let Some(hash) = start9_shadow_hash().await? else {
+    let Some(hash) = start9_shadow_hash(root).await? else {
         tracing::info!("enroll_mok: start9 user password not set, skipping");
         return Ok(false);
     };

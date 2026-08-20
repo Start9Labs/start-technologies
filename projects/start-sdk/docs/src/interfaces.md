@@ -6,6 +6,8 @@
 
 Your package declares _what_ it exposes. The **user** decides _where_ it is reachable. An interface is bound to the server's [gateways](/start-os/gateways.html), and the user enables or disables each resulting address individually from the service's **Interfaces** tab. LAN addresses (the `.local` hostname, the LAN IP) are enabled by default; public IPv4 addresses are **off** by default.
 
+**A public domain belongs to the host, but is enabled per binding.** The user adds it naming one internal port, and its addresses — the plain one and, where the binding has `addSsl`, the TLS one — are enabled on **that** binding straight away. Every other binding on the same `MultiHost` also gains the domain, but **off by default**, to be switched on individually like any other address. So a host that binds two ports needs the domain enabled twice, and a package that starts binding a second port later does not inherit the user's earlier choice for it.
+
 Two consequences worth internalizing before you write any interface code:
 
 - **`type` is a label, not a control.** `'ui'`, `'api'`, and `'p2p'` tell the user what an interface is _for_. They do not select a transport, grant public access, or imply anything about how the interface is reached.
@@ -179,6 +181,8 @@ The key steps are:
 | `addSsl.upstreamCertValidation` | `'disable'` \| `{ certificate: string }` \| _omitted_ | How the OS validates your container's TLS cert when it [rewraps SSL](#rewrapping-ssl-to-a-tls-container). Omit to validate against the StartOS root CA (default). See [Rewrapping SSL](#rewrapping-ssl-to-a-tls-container). |
 | `secure`                        | `{ ssl: boolean }` \| `null`                          | For non-HTTP protocols, whether the connection is secure. `{ ssl: true }` with `addSsl: null` serves your container's own TLS end to end — see [Serving Your Own TLS](#serving-your-own-tls-passthrough).                   |
 
+An `addSsl` binding on any port can carry a Let's Encrypt certificate — issuance is per name, not per port. The user's side of that is one extra requirement: Let's Encrypt validates on port `443` whatever port you bind, so StartOS asks their gateway to route `443` for the domain as well. On a gateway that cannot do it automatically they forward `443` by hand. Worth a line in your instructions for an interface on a non-standard port that users will reach from software validating against public roots — an Electrum client, say.
+
 ## Interface Options
 
 ```typescript
@@ -255,12 +259,72 @@ await zmqRange.export(
 
 Two distinct endpoints are two `bindPortRange` calls — a range is a homogeneous pool of ports, so it maps to one named interface. Range interfaces show up in the service's **Interfaces** page using the same per-gateway address cards as single-port interfaces (non-SSL, IPv4-only). The public/WAN address is disabled by default; enabling it surfaces the exact port range to forward on the router.
 
+Each internal port a host currently binds belongs to one claim. A `bindPortRange` covering a port the same host also passes to `bindPort` — or to another range — is rejected, because the two claims describe the same container socket under different exposure rules. Only what your package declares in the current pass counts, so folding existing single ports into a range works as long as you drop their `bindPort` calls in the same release; the disabled leftovers do not conflict, and [Retiring a Host or Binding](#retiring-a-host-or-binding) is how you give their port numbers back.
+
 | `createRangeInterface` option | Type               | Description                                                            |
 | ----------------------------- | ------------------ | ---------------------------------------------------------------------- |
 | `id`                          | `string`           | Unique identifier for the range interface.                             |
 | `name`                        | `string`           | Display name shown to the user. Wrap with `i18n()`.                    |
 | `description`                 | `string`           | Description shown to the user. Wrap with `i18n()`.                     |
 | `scheme`                      | `string` \| `null` | Optional transport prefix (e.g. `'tcp'`). Omit for raw UDP/TCP ranges. |
+
+## Retiring a Host or Binding
+
+`setupInterfaces()` ends every pass by **disabling** each binding it did not just declare — it does not delete it. Disabling is the right default: it keeps the row, the external port number, and the user's per-address choices, so a binding your package declares conditionally comes back at the same address they already bookmarked.
+
+The cost is that a binding you stop declaring **for good** stays behind. It keeps its external port claimed for as long as your service is installed, it keeps recomputing its addresses, and a dependency resolving it through `getBridgeAddress` still gets a `10.0.3.1:<port>` that nothing listens on. Retire it explicitly:
+
+```typescript
+await sdk.MultiHost.of(effects, 'ui-multi').retire() // the whole host
+await sdk.MultiHost.of(effects, 'api').retirePort(9090) // one port, or one range
+```
+
+`retire()` removes the host and everything under it: its bindings and port ranges, their exported service interfaces, the user's public and private domains for that host, and their per-address enable/disable and WAN opt-in choices. `retirePort()` removes whichever of the single port and the port range is bound at that `internalPort` — and both, if both are — leaving the host and its domains in place. Both return the external ports to the server's pool. Both are irreversible: after `retire()`, binding the id again starts a fresh host with none of the user's setup.
+
+Note what that last part means: `retire()` discards configuration the **user** created, not just your package's. A domain they attached to the host goes with it, and nothing tells them. Name the host in your release notes whenever a release retires one, so they know to reattach the domain to a current interface.
+
+### The migration pattern
+
+Retire in the `up()` of the version that stops binding, in the same release as the `interfaces.ts` change:
+
+```typescript
+export const v2_0_0 = VersionInfo.of({
+  version: '2.0.0:0',
+  releaseNotes: {
+    en_US: 'Upstream 2.0. The web UI moved to a single host and the bundled metrics listener was removed.',
+  },
+  migrations: {
+    up: async ({ effects }) => {
+      await sdk.MultiHost.of(effects, 'ui-multi').retire()
+      await sdk.MultiHost.of(effects, 'api').retirePort(9090)
+    },
+    down: IMPOSSIBLE,
+  },
+})
+```
+
+Both halves ship together. Retiring an id your `setupInterfaces` still binds simply recreates it on the next pass, minus the user's domains — so the retire has to land in the release that drops the binding, not before or after it. `down` is `IMPOSSIBLE` because a downgrade cannot give the user their domains back.
+
+Retiring from **inside** the `sdk.setupInterfaces` callback throws. That pass ends with the disable sweep, so a retire in the middle of it would depend on statement order.
+
+### Why this cannot be automatic
+
+StartOS cannot infer it. A binding missing from one pass is indistinguishable from a binding the service will declare on the next one — under a different config, a backend the user has not selected yet, or a feature they toggled off. Deleting on absence would free the external port and drop their WAN opt-in every time they turned a feature off, and hand that port number to another package before they turned it back on. That is exactly what disabling exists to prevent.
+
+The SDK cannot infer it either: it sees only the calls a pass actually made. Only the author knows a port is gone for good, and only knows it at a version boundary — which is what a migration is.
+
+This is the same shape as [retiring a replay key](tasks.md#retiring-a-replay-key): state your package created, that outlives the release which stopped creating it, and that only your package can say is finished.
+
+### Failure modes
+
+- **Retiring an id you still bind.** Migrations run before `setupInterfaces`, so the port is normally reclaimed on the same pass and nothing looks wrong. The symptom is the user's setup silently reset — a custom domain and WAN toggle back to defaults after an update.
+- **A port that moved rather than disappeared.** Retiring the old binding and adding the new one in the same release keeps the host's domains, but StartOS isolates a **public** domain from a binding added after it, so the user has to re-enable that domain on the new binding. Private domains carry over on their own. Say so in your release notes.
+- **Treating `false` as failure.** Both calls resolve `false` when there was nothing to remove — the normal result on a re-run, and on a server that skipped the version. Not an error.
+- **Retiring the last binding on a host.** That does not retire the host. Its domains stay, now addressing nothing. Use `retire()` when the host itself is going away.
+
+### Cleaning up after the fact
+
+A package that already shipped a version dropping a host or a port still has the row and the port claim sitting on every server that installed it. Retire is a no-op where the id was never present, so one maintenance release naming the stale ids in its `up()` covers the whole installed base at once. List the ids in your release notes: any domain the user attached to a host you retire is removed with it, and they will want to know where to reattach it.
 
 ## TLS Termination
 

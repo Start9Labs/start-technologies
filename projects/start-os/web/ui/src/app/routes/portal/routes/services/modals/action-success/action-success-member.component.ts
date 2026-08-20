@@ -15,7 +15,7 @@ import {
   TuiTitle,
   TuiInput,
 } from '@taiga-ui/core'
-import { QrCodeComponent } from 'ng-qrcode'
+import { QRComponent } from 'src/app/components/qr.component'
 
 @Component({
   selector: 'app-action-success-member',
@@ -77,10 +77,9 @@ import { QrCodeComponent } from 'ng-qrcode'
       </label>
     }
     <ng-template #qr>
-      <qr-code
+      <app-qr
         [value]="member.value"
         [style.filter]="member.masked && masked ? 'blur(0.5rem)' : null"
-        size="350"
       />
       @if (member.masked && masked) {
         <button
@@ -107,14 +106,7 @@ import { QrCodeComponent } from 'ng-qrcode'
       text-align: center;
     }
   `,
-  imports: [
-    FormsModule,
-    TuiInput,
-    TuiButton,
-    QrCodeComponent,
-    TuiTitle,
-    i18nPipe,
-  ],
+  imports: [FormsModule, TuiInput, TuiButton, QRComponent, TuiTitle, i18nPipe],
 })
 export class ActionSuccessMemberComponent {
   @ViewChild(TuiInputDirective, { read: ElementRef })

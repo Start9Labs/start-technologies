@@ -26,8 +26,7 @@ cargo build -p rpc-toolkit --features ts-rs
 cargo build -p rpc-toolkit --no-default-features   # JSON-only (no CBOR)
 ```
 
-This is **not** a vendored fork — it is a first-party crate consumed via a path dependency
-(currently by `start-core`). When you change a public API, update the consumers in the same change
+This is **not** a vendored fork — it is a first-party crate consumed via a path dependency. When you change a public API, update the consumers in the same change
 and check `cargo build -p start-core` still passes.
 
 ## Testing
@@ -43,12 +42,9 @@ CLI/server bindings, exercise it there.
 
 ## Formatting
 
-This crate ships a `rustfmt.toml` (`group_imports = "StdExternalCrate"`,
-`imports_granularity = "Module"`). Format with the shared Rust make target from the repo root:
+Format with the shared Rust make target from the repo root:
 
 ```bash
 make start-core-format         # format all shared Rust crates (incl. rpc-toolkit)
 make start-core-format-check   # CI read-only check
 ```
-
-The import-grouping options in `rustfmt.toml` are applied either way.

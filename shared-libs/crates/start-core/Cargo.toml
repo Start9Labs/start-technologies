@@ -76,6 +76,7 @@ ed25519-dalek = { version = "3.0.0-rc.1", features = [
 ] }
 ed25519-dalek-v1 = { package = "ed25519-dalek", version = "1" }
 exver = { path = "../exver", features = ["serde"] }
+fast-socks5 = "1.0.0"
 fd-lock-rs = "0.1.4"
 form_urlencoded = "1.2.1"
 futures = "0.3.28"
@@ -189,7 +190,6 @@ sha2 = "0.11.0"
 sha3 = "0.12.0"
 signal-hook = "0.3.17"
 socket2 = { version = "0.6.0", features = ["all"] }
-socks5-impl = { version = "0.7.2", features = ["client", "server"] }
 sqlx = { version = "0.8.6", features = [
   "postgres",
   "runtime-tokio-rustls",
