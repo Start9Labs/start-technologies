@@ -22,6 +22,7 @@ use crate::net::host::binding::{
     overlap_error,
 };
 use crate::net::service_interface::{HostnameInfo, HostnameMetadata};
+use crate::net::vhost::ACME_CHALLENGE_PORT;
 use crate::prelude::*;
 use crate::{GatewayId, HostId, PackageId};
 
@@ -441,6 +442,7 @@ impl Model<Host> {
         // binding/range serves internally only (`enabled_addresses`), and no
         // internal address is public, so it contributes nothing here.
         let bindings: Bindings = this.bindings.de()?;
+        let public_domains = this.public_domains.de()?;
         let mut port_forwards = BTreeSet::new();
         for bind in bindings.values() {
             for addr in bind.enabled_addresses() {
@@ -464,6 +466,16 @@ impl Model<Host> {
                 let Some(wan_ip) = ip_info.wan_ip else {
                     continue;
                 };
+                // A certificate authority validates the name at
+                // `ACME_CHALLENGE_PORT` whatever port the address is served on,
+                // so that forward is required too — and stays required, because
+                // renewal is validated the same way.
+                let challenge = addr.ssl
+                    && port != ACME_CHALLENGE_PORT
+                    && matches!(addr.metadata, HostnameMetadata::PublicDomain { .. })
+                    && public_domains
+                        .get(&addr.hostname)
+                        .map_or(false, |domain| domain.acme.is_some());
                 for subnet in &ip_info.subnets {
                     let IpAddr::V4(addr) = subnet.addr() else {
                         continue;
@@ -474,6 +486,14 @@ impl Model<Host> {
                         gateway: gw_id.clone(),
                         count: 1,
                     });
+                    if challenge {
+                        port_forwards.insert(PortForward {
+                            src: SocketAddrV4::new(wan_ip, ACME_CHALLENGE_PORT),
+                            dst: SocketAddrV4::new(addr, ACME_CHALLENGE_PORT),
+                            gateway: gw_id.clone(),
+                            count: 1,
+                        });
+                    }
                 }
             }
         }

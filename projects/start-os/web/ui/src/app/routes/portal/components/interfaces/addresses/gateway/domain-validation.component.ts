@@ -14,7 +14,12 @@ import { CheckIconComponent } from 'src/app/routes/portal/components/check-icon.
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { formatPortRange } from 'src/app/utils/format-port-range'
-import { dnsAllPass, getGua, portAllPass } from 'src/app/utils/gua'
+import {
+  dnsAllPass,
+  externalAllPass,
+  getGua,
+  portAllPass,
+} from 'src/app/utils/gua'
 import { parse } from 'tldts'
 import {
   PortCheckField,
@@ -30,7 +35,7 @@ export type DnsGateway = T.NetworkInterfaceInfo & {
 
 // Where a certificate authority validates a domain, whatever port the address
 // itself is served on. Mirrors `ACME_CHALLENGE_PORT` in the backend.
-const CHALLENGE_PORT = 443
+export const CHALLENGE_PORT = 443
 
 export type DomainValidationData = {
   fqdn: string
@@ -39,14 +44,10 @@ export type DomainValidationData = {
   count: number
   packageId: string
   addSsl: boolean
-  // The authority that validates this domain, when it is an ACME one. Such an
-  // authority is reached on its own port whatever port the address is served
-  // on, so the domain has a second reachability requirement.
-  acme: T.AcmeProvider | null
-  // The authority's port as the backend found it. Null where the domain does
-  // not need it right now — it already holds a certificate it can serve — and
-  // absent where nothing has probed it yet.
-  challenge?: T.CheckChallengeRes | null
+  // Probe results for port 443, where the authority validates this domain.
+  // Null where the domain does not need 443 right now: it names no ACME
+  // authority, it is already served there, or its certificate has life left.
+  challenge: T.CheckChallengeRes | null
   initialResults?: {
     dns: T.QueryDnsRes | null
     portResult: T.CheckPortRes | null
@@ -163,7 +164,17 @@ export type DomainValidationData = {
       <h3 tuiHeader="h6">{{ 'Certificate Authority' | i18n }}</h3>
       <p>
         {{
-          'Your certificate authority proves you control this domain by connecting to it on port 443, whatever port the address itself uses. Forward 443 to your server as well, or enable automatic port forwarding on the gateway.'
+          'Your certificate authority proves you control this domain by connecting to it on port 443, whatever port the address itself uses.'
+            | i18n
+        }}
+      </p>
+      <p>
+        {{ 'In your gateway' | i18n }} "{{ gatewayName }}",
+        {{ 'create this port forwarding rule' | i18n }}
+      </p>
+      <p>
+        {{
+          'Or enable automatic port forwarding (UPnP / NAT-PMP / PCP) on the gateway.'
             | i18n
         }}
       </p>
@@ -172,14 +183,23 @@ export type DomainValidationData = {
         [fields]="challengeFields"
         [result]="challengeResult()"
         [loading]="challengeLoading()"
+        [local]="false"
         (test)="testChallenge()"
       />
 
       @if (gua) {
+        <p>
+          {{
+            'Over IPv6 there is nothing to forward — your gateway firewall must allow inbound connections to this address instead.'
+              | i18n
+          }}
+        </p>
+
         <port-check-test
           [fields]="challengeV6Fields"
           [result]="challengeV6Result()"
           [loading]="challengeV6Loading()"
+          [local]="false"
           (test)="testChallengeV6()"
         />
       }
@@ -320,13 +340,11 @@ export class DomainValidationComponent {
     { label: 'Address', value: this.ipv6Addr },
   ]
 
-  // The authority's port is a requirement of the domain, not of the interface,
-  // so it is shown for as long as the domain names an ACME authority and is
-  // served somewhere other than that port.
-  readonly showChallenge =
-    !this.isRange &&
-    !!this.context.data.acme &&
-    this.context.data.port !== CHALLENGE_PORT
+  // The backend decides whether 443 is outstanding — it reads a certificate
+  // store the browser never sees — and the same answer both shows this section
+  // and holds `allPass` to it, so nothing here can be red beside an enabled
+  // Done.
+  readonly showChallenge = !!this.context.data.challenge
   readonly challengeFields: readonly PortCheckField[] = [
     { label: 'External Port', value: `${CHALLENGE_PORT}` },
     { label: 'Internal Port', value: `${CHALLENGE_PORT}` },
@@ -358,18 +376,15 @@ export class DomainValidationComponent {
     return dns && this.gua ? dns.ipv6 === this.gua : undefined
   })
 
-  // A domain already holding a certificate it can serve does not need the
-  // authority's port reachable right now, and is not held to it. Only the
-  // backend can tell, so an unprobed domain is not held to it either.
-  private readonly challengeOutstanding = !!this.context.data.challenge
-
   readonly allPass = computed(
     () =>
       dnsAllPass(this.dnsResult(), this.wanIp, this.gua) &&
       (this.isRange ||
         portAllPass(this.portResult(), this.portV6Result(), this.gua)) &&
-      (!this.challengeOutstanding ||
-        portAllPass(
+      // Nothing on this network dials 443 for a domain served elsewhere, so the
+      // authority reaching it is the whole requirement.
+      (!this.showChallenge ||
+        externalAllPass(
           this.challengeResult(),
           this.challengeV6Result(),
           this.gua,
@@ -381,7 +396,7 @@ export class DomainValidationComponent {
   constructor() {
     const challenge = this.context.data.challenge
     if (challenge) {
-      this.challengeResult.set(challenge.port)
+      this.challengeResult.set(challenge.port ?? undefined)
       this.challengeV6Result.set(challenge.portV6 ?? undefined)
     }
 

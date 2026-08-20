@@ -806,5 +806,6 @@ export default {
   913: 'Dane StartOS na wybranym dysku danych zajmują cały dysk, więc systemu nie można zainstalować na tym samym dysku bez ich wymazania. Aby zachować dane, wybierz inny dysk systemowy. Aby je wymazać, wybierz „Nadpisz”.',
   914: 'Logowanie powiodło się, ale serwer odrzucił nowy klucz urządzenia. Spróbuj ponownie.',
   915: 'Za długie na kod QR',
-  916: 'Twój urząd certyfikacji potwierdza kontrolę nad tą domeną, łącząc się z nią na porcie 443, niezależnie od portu używanego przez sam adres. Przekieruj również port 443 na swój serwer lub włącz automatyczne przekierowanie portów w bramie.',
+  916: 'Twój urząd certyfikacji potwierdza kontrolę nad tą domeną, łącząc się z nią na porcie 443, niezależnie od portu używanego przez sam adres.',
+  917: 'Przez IPv6 nie ma czego przekierowywać — zamiast tego zapora bramy musi zezwalać na połączenia przychodzące do tego adresu.',
 } satisfies i18n

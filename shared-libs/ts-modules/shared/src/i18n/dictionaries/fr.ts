@@ -806,5 +806,6 @@ export default {
   913: 'Les données StartOS du disque de données sélectionné occupent l’intégralité du disque : l’OS ne peut donc pas être installé sur le même disque sans les effacer. Pour conserver vos données, sélectionnez un autre disque pour l’OS. Pour les effacer, choisissez « Écraser ».',
   914: 'Connexion réussie, mais le serveur a rejeté la nouvelle clé de l’appareil. Réessayez.',
   915: 'Trop long pour un QR code',
-  916: "Votre autorité de certification prouve que vous contrôlez ce domaine en s'y connectant sur le port 443, quel que soit le port utilisé par l'adresse elle-même. Redirigez également le 443 vers votre serveur, ou activez la redirection de port automatique sur la passerelle.",
+  916: "Votre autorité de certification prouve que vous contrôlez ce domaine en s'y connectant sur le port 443, quel que soit le port utilisé par l'adresse elle-même.",
+  917: "En IPv6 il n'y a rien à rediriger — le pare-feu de votre passerelle doit à la place autoriser les connexions entrantes vers cette adresse.",
 } satisfies i18n

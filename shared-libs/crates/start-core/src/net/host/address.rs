@@ -587,8 +587,8 @@ pub async fn add_public_domain<Kind: HostApiKind>(
                 gateway: gateway.clone(),
             },
         ),
-        // An ACME authority validates at its own port, which the two probes
-        // above never touch when the domain is served somewhere else.
+        // TLS-ALPN-01 is validated at 443, which the two probes above never
+        // touch when the domain is served somewhere else.
         check_challenge(
             ctx.clone(),
             CheckChallengeParams {

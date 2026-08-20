@@ -9,9 +9,15 @@ import {
   PackageDataEntry,
 } from 'src/app/services/patch-db/data-model'
 import { renderPkgStatus } from 'src/app/services/pkg-status-rendering.service'
-import { dnsAllPass, getGua, portAllPass } from 'src/app/utils/gua'
+import {
+  dnsAllPass,
+  externalAllPass,
+  getGua,
+  portAllPass,
+} from 'src/app/utils/gua'
 import { GatewayAddress, MappedServiceInterface } from '../../interface.service'
 import {
+  CHALLENGE_PORT,
   DOMAIN_VALIDATION,
   DnsGateway,
   DomainValidationData,
@@ -26,9 +32,8 @@ import { PRIVATE_DNS_VALIDATION } from './private-dns.component'
 export type AddressCheckContext = {
   packageId: string
   addSsl: boolean
-  // The ACME authority of the domain being checked, when it has one. Such an
-  // authority validates on port 443 whatever port the address is served on, so
-  // the domain carries a reachability requirement its own port does not cover.
+  // The ACME authority of the domain being checked, when it has one. Such a
+  // domain also needs port 443 reachable — see CHALLENGE_PORT.
   acme?: T.AcmeProvider | null
   watch?: ServiceStatusWatch
 }
@@ -184,7 +189,7 @@ export class DomainHealthService {
             : this.api
                 .checkPortV6({ gateway: gatewayId, port: portOrRes })
                 .catch((): null => null),
-          isRange || !ctx.acme
+          isRange || !ctx.acme || portOrRes === CHALLENGE_PORT
             ? Promise.resolve(null)
             : this.api
                 .checkChallenge({
@@ -193,7 +198,12 @@ export class DomainHealthService {
                   port: portOrRes,
                   acme: ctx.acme,
                 })
-                .catch((): null => null),
+                // A failed probe is not a pass. Report it as outstanding and
+                // unmeasured, the way the two above report theirs by returning
+                // null.
+                .catch(
+                  (): T.CheckChallengeRes => ({ port: null, portV6: null }),
+                ),
         ])
         dns = dnsRes
         portResult = portRes
@@ -223,10 +233,11 @@ export class DomainHealthService {
 
       const dnsPass = dnsAllPass(dns, gateway.ipInfo.wanIp, gua)
       const portOk = isRange || portAllPass(portResult, portV6Result, gua)
-      // A challenge result is present only where the domain needs one; the
-      // address refuses every connection until that port answers.
+      // A result is present only where the domain needs 443, and nothing on
+      // this network dials it, so the authority reaching it is the whole
+      // requirement. The address refuses every connection until it does.
       const challengeOk =
-        !challenge || portAllPass(challenge.port, challenge.portV6, gua)
+        !challenge || externalAllPass(challenge.port, challenge.portV6, gua)
 
       if (!dnsPass || !portOk || !challengeOk) {
         setTimeout(
@@ -238,7 +249,6 @@ export class DomainHealthService {
               count,
               packageId: ctx.packageId,
               addSsl: ctx.addSsl,
-              acme: ctx.acme ?? null,
               challenge,
               initialResults: { dns, portResult, portV6Result },
             }),
@@ -294,7 +304,9 @@ export class DomainHealthService {
         count,
         packageId: ctx.packageId,
         addSsl: ctx.addSsl,
-        acme: ctx.acme ?? null,
+        // Whether 443 is outstanding takes a probe, and this view opens on a
+        // click without running one.
+        challenge: null,
       })
     } catch (e: any) {
       this.errorService.handleError(e)

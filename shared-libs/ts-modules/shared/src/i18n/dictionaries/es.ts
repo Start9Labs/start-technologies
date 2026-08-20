@@ -806,5 +806,6 @@ export default {
   913: 'Los datos de StartOS en la unidad de datos seleccionada ocupan toda la unidad, por lo que el SO no puede instalarse en la misma unidad sin borrarlos. Para conservar sus datos, seleccione otra unidad para el SO. Para borrarlos, elija "Sobrescribir".',
   914: 'Inicio de sesión correcto, pero el servidor rechazó la nueva clave del dispositivo. Inténtelo de nuevo.',
   915: 'Demasiado largo para un código QR',
-  916: 'Tu autoridad certificadora demuestra que controlas este dominio conectándose a él en el puerto 443, sea cual sea el puerto que use la propia dirección. Redirige también el 443 a tu servidor, o habilita el reenvío de puertos automático en la puerta de enlace.',
+  916: 'Tu autoridad certificadora demuestra que controlas este dominio conectándose a él en el puerto 443, sea cual sea el puerto que use la propia dirección.',
+  917: 'Por IPv6 no hay nada que redirigir: en su lugar, el firewall de tu puerta de enlace debe permitir las conexiones entrantes a esta dirección.',
 } satisfies i18n

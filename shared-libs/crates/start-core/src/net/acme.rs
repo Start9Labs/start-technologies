@@ -577,7 +577,9 @@ pub struct CheckChallengeParams {
     pub fqdn: InternedString,
     #[arg(help = "help.arg.gateway-id")]
     pub gateway: GatewayId,
-    #[arg(help = "help.arg.port")]
+    /// The external port the address itself is served on. Only decides whether
+    /// the challenge port needs a probe of its own; it is never probed here.
+    #[arg(help = "help.arg.address-port")]
     pub port: u16,
     #[arg(long, help = "help.arg.acme-provider")]
     pub acme: Option<AcmeProvider>,
@@ -585,18 +587,23 @@ pub struct CheckChallengeParams {
 
 /// Reachability of the port a certificate authority validates on, for a domain
 /// served on some other port. The domain's own port says nothing about it, and
-/// the address refuses every connection until a certificate is issued.
+/// the address refuses every connection until a certificate is issued. A leg is
+/// null where it could not be probed, which is a failure to report and not a
+/// pass — the box has no IPv6 leg to probe when its gateway has no GUA.
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct CheckChallengeRes {
-    pub port: CheckPortRes,
+    pub port: Option<CheckPortRes>,
     pub port_v6: Option<CheckPortV6Res>,
 }
 
 /// Probe the challenge port for a domain that needs one, or report `None` when
 /// it does not: the authority is not ACME, the address is already served on the
 /// challenge port, or a certificate is on hand that still has life in it.
+///
+/// A probe that errors is reported as an unprobed leg rather than failing the
+/// call, so a caller that adds a domain still gets its other results back.
 pub async fn check_challenge(
     ctx: RpcContext,
     CheckChallengeParams {
@@ -626,8 +633,8 @@ pub async fn check_challenge(
     );
 
     Ok(Some(CheckChallengeRes {
-        port: port_res?,
-        port_v6: port_v6_res?,
+        port: port_res.log_err(),
+        port_v6: port_v6_res.log_err().flatten(),
     }))
 }
 
@@ -635,7 +642,7 @@ pub async fn check_challenge(
 /// [`should_use_cert`] is the same predicate the cert resolver applies, so this
 /// turns true at the start of the renewal window — when the challenge port has
 /// to work again — rather than on the last day of validity.
-pub fn challenge_pending(
+fn challenge_pending(
     db: &DatabaseModel,
     fqdn: &InternedString,
     acme: &AcmeProvider,

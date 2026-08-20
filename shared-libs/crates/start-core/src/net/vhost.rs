@@ -269,8 +269,7 @@ pub struct VHostController {
     /// vhost) pinholes and IPv6 GUA pinholes (`None`), and the v6 80->443 redirect.
     /// Keyed by owner so one service's reconcile only adds/removes its own entries
     /// on a shared port.
-    port_mappings:
-        SyncMutex<BTreeMap<HostMapOwner, BTreeSet<(IpAddr, u16, Option<InternedString>)>>>,
+    port_mappings: SyncMutex<BTreeMap<HostMapOwner, BTreeSet<PortMapKey>>>,
     /// Per-owner port-443 bind requirements contributed by ACME domains served
     /// on another port. Keyed by owner so a host that drops its ACME domains
     /// withdraws its contribution.
@@ -477,13 +476,14 @@ impl VHostController {
         })
     }
 
-    /// Reconcile every upstream port map `owner`'s vhosts need, derived from the
-    /// vhost `targets` themselves — the controller owns the whole port-map
-    /// lifecycle, so callers hand over the same `ProxyTarget` set they use to bind
-    /// the listeners and compute nothing. Best-effort like the rest of the
-    /// port-map layer: a gateway that can't honor a mapping leaves a manual
-    /// forward. Always call this every update — an owner whose target set went
-    /// empty withdraws its prior mappings via the per-owner diff.
+    /// Reconcile every upstream port map `owner`'s vhosts need, and the port-443
+    /// listeners their ACME challenges need, derived from the vhost `targets`
+    /// themselves — the controller owns both lifecycles, so callers hand over the
+    /// same `ProxyTarget` set they use to bind the listeners and compute nothing.
+    /// The port maps are best-effort like the rest of that layer: a gateway that
+    /// can't honor a mapping leaves a manual forward. Always call this every
+    /// update — an owner whose target set went empty withdraws its prior
+    /// contribution to both.
     pub fn reconcile_port_maps(
         &self,
         owner: HostMapOwner,
@@ -496,21 +496,23 @@ impl VHostController {
 
     /// Fold this owner's port-443 challenge requirements into the 443 server,
     /// creating it if nothing else has, and dropping it once the last
-    /// requirement goes away and nothing is served there.
+    /// requirement goes away and nothing is served there. The union is taken
+    /// and applied under `servers`, so a concurrent owner's reconcile cannot
+    /// apply a snapshot that predates this one and close the port under it.
     fn sync_challenge_binds(&self, owner: HostMapOwner, reqs: VHostBindRequirements) {
-        let union = self.challenge_binds.mutate(|owners| {
-            if reqs.is_empty() {
-                owners.remove(&owner);
-            } else {
-                owners.insert(owner, reqs);
-            }
-            let mut union = VHostBindRequirements::default();
-            for reqs in owners.values() {
-                union.extend(reqs);
-            }
-            union
-        });
         self.servers.mutate(|writable| {
+            let union = self.challenge_binds.mutate(|owners| {
+                if reqs.is_empty() {
+                    owners.remove(&owner);
+                } else {
+                    owners.insert(owner, reqs);
+                }
+                let mut union = VHostBindRequirements::default();
+                for reqs in owners.values() {
+                    union.extend(reqs);
+                }
+                union
+            });
             let existing = writable.remove(&ACME_CHALLENGE_PORT);
             if existing.is_none() && union.is_empty() {
                 return;
@@ -524,19 +526,19 @@ impl VHostController {
     }
 
     fn sync_port_maps(&self, owner: HostMapOwner, desired: DesiredPortMaps) {
-        let want: BTreeSet<(IpAddr, u16, Option<InternedString>)> = desired
+        let want: BTreeSet<PortMapKey> = desired
             .iter()
             .flat_map(|((ip, port), (_, hostnames))| {
                 hostnames.keys().map(move |h| (*ip, *port, h.clone()))
             })
             .collect();
-        let had = self
+        let stale = self
             .port_mappings
-            .peek(|owners| owners.get(&owner).cloned().unwrap_or_default());
-        for (ip, port, hostname) in had.difference(&want) {
+            .mutate(|owners| take_ownership(owners, owner, want));
+        for (ip, port, hostname) in stale {
             match hostname {
-                Some(h) => self.port_map.remove_hostname(*ip, *port, h.to_string()),
-                None => self.port_map.remove(*ip, *port),
+                Some(h) => self.port_map.remove_hostname(ip, port, h.to_string()),
+                None => self.port_map.remove(ip, port),
             }
         }
         for ((ip, port), (gateways, hostnames)) in &desired {
@@ -555,13 +557,6 @@ impl VHostController {
                 }
             }
         }
-        self.port_mappings.mutate(|owners| {
-            if want.is_empty() {
-                owners.remove(&owner);
-            } else {
-                owners.insert(owner, want);
-            }
-        });
     }
 }
 
@@ -571,6 +566,32 @@ pub type VHostKey = (Option<InternedString>, u16, bool);
 
 /// Where TLS-ALPN-01 is validated, whatever port the name is served on.
 pub const ACME_CHALLENGE_PORT: u16 = 443;
+
+/// `(box IP, external port, hostname)`. `Some(hostname)` is a PCP HOSTNAME
+/// mapping; `None` is a bare-IP forward or a GUA pinhole.
+type PortMapKey = (IpAddr, u16, Option<InternedString>);
+
+/// Record `want` as `owner`'s mappings and return the ones to withdraw. A
+/// hostname-less key can be wanted by several owners at once — the IPv6
+/// challenge pinhole, and the 80->443 redirect a served 443 pulls in — and
+/// `PortMapController::remove` takes the whole key, so one owner dropping it is
+/// not enough.
+fn take_ownership(
+    owners: &mut BTreeMap<HostMapOwner, BTreeSet<PortMapKey>>,
+    owner: HostMapOwner,
+    want: BTreeSet<PortMapKey>,
+) -> Vec<PortMapKey> {
+    let had = owners.get(&owner).cloned().unwrap_or_default();
+    if want.is_empty() {
+        owners.remove(&owner);
+    } else {
+        owners.insert(owner, want.clone());
+    }
+    had.difference(&want)
+        .filter(|key| !owners.values().any(|kept| kept.contains(key)))
+        .cloned()
+        .collect()
+}
 
 /// `(box IP, external port) -> (gateway candidates in preference order,
 /// hostname -> box-side port)`. `Some(hostname)` is a PCP HOSTNAME mapping the
@@ -588,6 +609,9 @@ fn desired_port_maps(
     ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
 ) -> DesiredPortMaps {
     let mut desired = DesiredPortMaps::new();
+    // GUAs with something actually served on 443, as opposed to a challenge
+    // pinhole. Only the former earns the 80->443 redirect below.
+    let mut https_guas = BTreeSet::new();
     for ((maybe_host, external, _), target) in targets {
         // IPv4: forward the port to the box's LAN IPv4 — a PCP HOSTNAME mapping
         // (SNI demux) for a domain, a plain pinhole for a bare `*` vhost.
@@ -612,9 +636,10 @@ fn desired_port_maps(
                     .1
                     .insert(maybe_host.clone(), *external);
                 // Every listener answers a challenge out of the same cache, and
-                // 443 always has one, so the challenge route is 443 -> 443. By
-                // name only: the unnamed forward there is the OS's own, and
-                // `or_insert` leaves a real binding on it alone.
+                // `challenge_bind_reqs` applies this same predicate, so a target
+                // that emits this route also forces 443 to bind. By name only:
+                // the unnamed forward there is the OS's own, and `or_insert`
+                // leaves a real binding on it alone.
                 if let Some(hostname) = maybe_host
                     && target.acme.is_some()
                     && *external != ACME_CHALLENGE_PORT
@@ -651,6 +676,9 @@ fn desired_port_maps(
                 .or_insert_with(|| (v6_gateways.clone(), BTreeMap::new()))
                 .1
                 .insert(None, *external);
+            if *external == ACME_CHALLENGE_PORT {
+                https_guas.insert(*gua);
+            }
             // A challenge reaches the GUA on 443 like it reaches the IPv4 side,
             // so open that pinhole too.
             if maybe_host.is_some() && target.acme.is_some() && *external != ACME_CHALLENGE_PORT {
@@ -663,13 +691,16 @@ fn desired_port_maps(
             }
         }
     }
-    // v6 HTTP->HTTPS redirect: for a GUA exposing 443, ask the gateway for an
+    // v6 HTTP->HTTPS redirect: for a GUA serving 443, ask the gateway for an
     // 80->443 redirect pinhole, unless 80 is already a real pinhole on that GUA.
     // (No IPv4 equivalent — the upstream gateway serves the port-80 redirect.)
+    // A challenge pinhole is not served, and TLS-ALPN-01 never uses port 80.
     let redirects: Vec<(Ipv6Addr, Vec<(IpAddr, Option<u32>)>)> = desired
         .iter()
         .filter_map(|((ip, port), (gateways, _))| match ip {
-            IpAddr::V6(gua) if *port == 443 => Some((*gua, gateways.clone())),
+            IpAddr::V6(gua) if *port == 443 && https_guas.contains(gua) => {
+                Some((*gua, gateways.clone()))
+            }
             _ => None,
         })
         .filter(|(gua, _)| !desired.contains_key(&(IpAddr::V6(*gua), 80)))
@@ -2064,8 +2095,7 @@ impl<A: Accept> VHostServer<A> {
         self.challenge_bind_reqs.replace(reqs);
         self.mapping.peek(|mapping| self.update_bind_reqs(mapping));
     }
-    /// A server with nothing left to serve *and* no challenge to bind for. The
-    /// challenge requirements have no mapping entry of their own, so a 443
+    /// The challenge requirements have no mapping entry of their own, so a 443
     /// server held open by them alone still counts as in use.
     fn is_empty(&self) -> bool {
         self.mapping.peek(|m| m.is_empty()) && self.challenge_bind_reqs.peek(|r| r.is_empty())
@@ -2329,7 +2359,21 @@ mod port_map_tests {
 
         assert_eq!(routes(&desired, GUA, 50002), [("*".to_string(), 50002)]);
         assert_eq!(routes(&desired, GUA, 443), [("*".to_string(), 443)]);
-        // The 443 pinhole pulls in the 80->443 redirect a real 443 binding gets.
+        // TLS-ALPN-01 never uses port 80, so the challenge pinhole alone does
+        // not earn the 80->443 redirect a served 443 does.
+        assert!(routes(&desired, GUA, 80).is_empty());
+    }
+
+    #[test]
+    fn a_served_443_still_earns_the_ipv6_redirect_beside_a_challenge_pinhole() {
+        let desired = desired_port_maps(
+            &targets([
+                (Some("example.com"), 443, target(true, true)),
+                (Some("electrum.example.com"), 50002, target(true, true)),
+            ]),
+            &ip_info(),
+        );
+
         assert_eq!(routes(&desired, GUA, 80), [("*".to_string(), 443)]);
     }
 
@@ -2352,6 +2396,32 @@ mod port_map_tests {
         assert_eq!(
             reqs.private_ips,
             [GUA.parse::<IpAddr>().unwrap()].into_iter().collect(),
+        );
+    }
+
+    fn owner(name: &str) -> HostMapOwner {
+        (Some(name.parse().unwrap()), "main".parse().unwrap())
+    }
+
+    fn key(port: u16) -> PortMapKey {
+        (GUA.parse().unwrap(), port, None)
+    }
+
+    #[test]
+    fn a_pinhole_another_owner_still_wants_is_not_withdrawn() {
+        // Two ACME domains off 443 on the same GUA both ask for the challenge
+        // pinhole; one going away must not shut it for the other.
+        let mut owners = BTreeMap::new();
+        take_ownership(&mut owners, owner("electrs"), [key(50002), key(443)].into());
+        take_ownership(&mut owners, owner("cln"), [key(3010), key(443)].into());
+
+        assert_eq!(
+            take_ownership(&mut owners, owner("electrs"), BTreeSet::new()),
+            [key(50002)],
+        );
+        assert_eq!(
+            take_ownership(&mut owners, owner("cln"), BTreeSet::new()),
+            [key(443), key(3010)],
         );
     }
 

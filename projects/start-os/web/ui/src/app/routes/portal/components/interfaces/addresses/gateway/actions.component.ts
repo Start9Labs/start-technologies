@@ -272,11 +272,7 @@ export class GatewayActionsComponent {
       this.gatewayId(),
       port,
       this.address().count,
-      {
-        packageId: this.packageId(),
-        addSsl: this.value()?.addSsl ?? false,
-        acme: this.address().acme,
-      },
+      { packageId: this.packageId(), addSsl: this.value()?.addSsl ?? false },
     )
   }
 

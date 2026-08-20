@@ -111,9 +111,12 @@ file tracks notable changes since the move to the monorepo.
   wherever the domain is public — over StartTunnel, and as an IPv6 firewall
   pinhole on a gateway that opens one. On a router, forward `443` to your server
   as you would for a standard domain — the domain's own port is not enough on
-  its own. The checks that run when you add or enable such a domain now cover
-  port `443` as well, so a domain that would refuse every connection is reported
-  before you go looking for it, with its own row in the setup modal.
+  its own, and Port Forwards lists the `443` rule alongside it. The checks that
+  run when you add or enable such a domain cover port `443` as well, so a domain
+  that would refuse every connection is reported before you go looking for it,
+  with its own row in the setup modal. Such a domain is served on its own port
+  only, so reach it as `https://<name>:<port>`; `443` carries the certificate
+  authority's checks and nothing else.
 
 - **A service that presents its own TLS certificate is shown as presenting
   it.** StartOS does not terminate such a connection, so the certificate the
