@@ -4,119 +4,50 @@
 
 ### Changed
 
-- **Minimum StartOS version bumped to `0.4.0.2`.** The 2.0 line had declared
-  `0.4.0-beta.10` since 2.0.0, against a 0.4.0 that has since shipped. `0.4.0.2`
-  is the release carrying the effects behind `MultiHost.retire()` /
-  `retirePort()` below, and it is what a package built with this SDK now writes
-  as its manifest `osVersion` — so the registry offers that package to servers
-  on 0.4.0.2 or later, and a server too old to run a retire migration is never
-  offered the package that would attempt one
+- **Minimum StartOS version is now `0.4.0.2`**, which is what a package built
+  with this SDK writes as its manifest `osVersion`
 
-- **`effects.getServicePortForward` resolves `null` instead of throwing when
-  the binding does not exist.** It is the one host effect with no `callback`,
-  so a caller cannot react to a change — and throwing was the worst available
-  answer for exactly that caller. It also could not tell "no such binding" from
-  "the host itself is gone", and a binding merely disabled by `clearBindings`
-  still reported its stale ports, which retiring now makes an observable
-  difference. Prefer `sdk.host.getBridgeAddress` to reach a dependency; this is
-  raw allocator metadata
+- `effects.getServicePortForward` resolves `null` instead of throwing when the
+  binding does not exist. Prefer `sdk.host.getBridgeAddress` to reach a
+  dependency; this is raw allocator metadata
 
-- **The scaffolded `build.yml` no longer passes `DEV_KEY`.** A PR build only
-  compiles and packs, and the reusable workflow already falls back to
-  `init-key` when no key is present, so the secret bought nothing and put the
-  real signing key on a runner executing branch-authored code. `release.yml`
-  and `tagAndRelease.yml` publish, and still take it. Existing packages should
-  drop the `secrets:` block from their own `build.yml`
+- **The scaffolded `build.yml` no longer passes `DEV_KEY`** — a PR build only
+  compiles and packs, so it never needed the signing key. Existing packages
+  should drop the `secrets:` block from their own `build.yml`
 
-- **`SubContainer.exec` / `execFail` take `timeout` and `abort` as named
-  options rather than as third and fourth positional arguments.**
+- **Breaking — `SubContainer.exec` / `execFail` take `timeout` and `abort` as
+  named options** rather than as third and fourth positional arguments:
   `sub.execFail(cmd, { user: 'root' }, null)` becomes
-  `sub.execFail(cmd, { user: 'root', timeout: null })`. A bare `null` in the
-  third position gave no hint which of the two knobs it was setting or what it
-  meant, and reaching the fourth argument meant supplying the third. Both moved
-  together because dropping only `timeout` would have left `abort` sliding
-  into a position whose type it does not match. Passing either positionally is
-  now a compile error, so anything that needs updating says so at build time
+  `sub.execFail(cmd, { user: 'root', timeout: null })`. Passing either
+  positionally is now a compile error
 
-- **StartOS 0.4.0.2 collects the processes a daemon orphans, and
-  `runAsInit: true` opts out of it.** Leave the option off and the
-  subcontainer's own init is PID 1, collecting any descendant your daemon
-  orphans as it exits — so a daemon that shells out to helper programs needs
-  nothing further, where before it wanted its command wrapped in `tini -s` to
-  keep `<defunct>` entries from piling up. A bare `tini` was never enough
-  there: with the option off your daemon joins the existing namespace rather
-  than heading one, so only the subreaper form collected anything. Turn it on
-  and your entrypoint takes PID 1 and that
-  job with it, which is why the option suits images built around `s6-overlay`,
-  `tini`, `dumb-init` or `supervisord` — they already do it
+- **StartOS 0.4.0.2 collects the processes a daemon orphans**, so a daemon that
+  shells out to helper programs no longer needs its command wrapped in
+  `tini -s`. Set `runAsInit: true` to opt out and take PID 1 yourself, which
+  suits images built around `s6-overlay`, `tini`, `dumb-init` or `supervisord`
 
-### Changed
-
-- **`assets/` and `startos/fileModels/` are scaffolded with a `.gitkeep` and no
-  `README.md`.** Both directories have to exist for a package to build, and both
-  are commonly empty, so the placeholder is what keeps them in git. The template
-  previously shipped a `README.md` in each explaining what the directory was
-  for — content the packaging guide already carries, so the scaffolded copies
-  only ever drifted from it
+- `assets/` and `startos/fileModels/` are scaffolded with a `.gitkeep` rather
+  than a `README.md`
 
 ### Added
 
-- **Scaffolded packages get a fourth workflow, `syncNext.yml`, which keeps the
-  `next` iteration branch in step with the base branch it stacks on.** Nothing
-  else moves `next`, so a base branch advancing leaves it behind indefinitely
-  and work resumed there starts from a stale tree. The paired
-  branch is derived rather than configured (an explicit `next/<base>` where one
-  exists, otherwise the default branch pairs with a plain `next`), and a repo
-  with no `next` gets one created at the base tip on the first run. Neither
-  `next` nor the base is force-pushed: `next` is fast-forwarded when merely
-  behind, merged when it carries unmerged work, and left alone with a PR opened
-  for a human only when that merge conflicts. That PR is headed by a throwaway
-  `sync-next/<base>` branch rather than the base itself, because GitHub's web
-  conflict editor commits to the head branch — and it wants a merge commit, not
-  a squash, or `next` comes out without the base as an ancestor and the
-  following sync conflicts again
+- **Scaffolded packages get a fourth workflow, `syncNext.yml`**, which keeps the
+  `next` iteration branch in step with the base branch it stacks on. A repo with
+  no `next` gets one created at the base tip on the first run
 
-- **`addDaemon()` / `addOneshot()` accept a `uses` value that
-  `Daemons.dynamic` folds into the entry's `configHash`.** The reconciler's
-  diff key covers only structural fields; closures (`exec.fn`, `ready.fn`,
-  `ready.trigger`) and pre-built `Daemon` instances are invisible to it, so a
-  value captured by a closure could change without the reconciler restarting
-  the daemon. Declare the value as `uses` and any change restarts the
-  daemon/oneshot on the next reconcile. Only JSON-serializable values are
-  useful, and anything else normalizes rather than failing a reconcile:
-  functions, symbols, cycles and `undefined` hash as distinct
-  `UNSERIALIZABLE:*` sentinels (so a change visible only there triggers no
-  restart), and BigInts hash as their decimal string. The `exec` options
-  object is now canonicalized in full rather than whitelisted, so a
-  fn-form exec's `sigtermTimeout` and a command exec's `onStdout`/`onStderr`
-  callbacks participate in the hash (the callbacks themselves hash as
-  constant sentinels — added or removed restarts, one closure swapped for
-  another does not)
+- **`addDaemon()` / `addOneshot()` accept a `uses` value** that
+  `Daemons.dynamic` folds into the entry's `configHash`, so a value a closure
+  captures can restart the daemon on the next reconcile. Only JSON-serializable
+  values are useful
 
 - **`MultiHost.retire()` and `MultiHost.retirePort()` permanently remove a host
-  or a binding.** `setupInterfaces` ends each pass by
-  _disabling_ whatever it did not declare, which keeps the row, the external
-  port number and the user's per-address choices so a conditionally-declared
-  binding returns at the address they bookmarked. A binding dropped for good
-  therefore stayed behind: its external port stayed claimed for as long as the
-  service was installed, and a dependency resolving it through
-  `getBridgeAddress` still got a `10.0.3.1:<port>` that nothing listens on.
-  Retiring deletes the host or binding and its exported service interfaces —
-  and, for a whole host, the user's domains for it — returning the external
-  ports to the server's pool. Call it from the `up()` of the version that stops
-  binding; it resolves `false` where there was nothing to remove, so a re-run is
-  safe. See
+  or a binding**, returning its external ports to the server's pool — where
+  `setupInterfaces` otherwise only _disables_ what it did not declare. Call it
+  from the `up()` of the version that stops binding; re-running is safe. See
   [Retiring a Host or Binding](https://docs.start9.com/packaging/interfaces.html#retiring-a-host-or-binding)
 
-- **`sdk.getRootCa(effects)` returns this server's root CA certificate.** A
-  service that dials an address the _user_ supplies — a monitor target, a
-  notification endpoint, a webhook — gets whatever address StartOS showed them,
-  which on the LAN is always HTTPS with a certificate chaining to this server's
-  root CA. No container trusts that root, so the dial fails verification, and
-  the only way to obtain the root was to mint a certificate you didn't want and
-  take the last link of the chain. Packages doing that by hand have taken the
-  wrong link: installing `[0]`, the leaf, as a trust anchor silently trusts
-  nothing while looking correct. `getRootCa` returns the root directly. See
+- **`sdk.getRootCa(effects)` returns this server's root CA certificate**, for a
+  service that has to dial a user-supplied LAN address over HTTPS. See
   [Trusting this server's certificates](https://docs.start9.com/packaging/service-to-service.html#trusting-this-servers-certificates)
 
 ### Fixed
@@ -127,142 +58,47 @@
 - `SubContainer.exec` closes the child's stdin when it has no input to write,
   instead of leaving a command that reads stdin blocked until the timeout
 
-- **A text field's `patterns` are now enforced on every path into an action,
-  not only by the web form.** The regexes reached the browser and nothing else,
-  so an action invoked over `start-cli` or RPC arrived at the handler with a
-  value that had never been tested — a field's own declaration that a value is
-  invalid was ignored precisely where no human was reading the form. The check
-  now lives in the input spec's parser, which `Action.run` already applies to
-  the submitted input. It mirrors the form: a pattern is **anchored** unless it
-  already is, so `[a-z]+` constrains the whole value rather than a substring,
-  and an **empty value passes**, left to `required`. Covers `Value.text`,
-  `Value.textarea`, `List.text` and their dynamic variants
+- **A text field's `patterns` are enforced on every path into an action**, not
+  only by the web form. A pattern is anchored unless it already is, and an empty
+  value passes, left to `required`. Covers `Value.text`, `Value.textarea`,
+  `List.text` and their dynamic variants
 
-- **A build whose `start-cli s9pk list-ingredients` fails now stops instead of
-  silently repacking the previous s9pk.** That command produces the s9pk's
-  entire source-dependency list, `javascript/index.js` included — nothing else
-  in `s9pk.mk` ties the package to your TypeScript. `$(shell)` discards exit
-  status, so any failure left `INGREDIENTS` empty, detaching every source file
-  from the target's prerequisites; make then found the existing s9pk newer than
-  its only surviving prerequisites (`.git/HEAD`, `.git/index`) and declared it up
-  to date, while the recipe still printed `✅ Build Complete!` and exited 0. The
-  result was a package that omitted the changes just made to it, with no
-  indication anything was wrong — most easily hit by editing a source file and
-  rebuilding without touching git in between, on a workspace whose
-  `.startos/config.yaml` names a host that no longer resolves
-- **`hardwareRequirements.ram` is documented in bytes, which is what StartOS
-  actually compares it against.** Its TSDoc claimed megabytes and its
-  `@example` showed `ram: 8192`, so packages following it declared an 8 KiB
-  floor that every machine satisfies and that therefore gated nothing. The
-  example now writes the value as `8 * 1024 ** 3`, and the packaging guide's
-  manifest page gained a Minimum RAM section covering the unit and the fact
-  that raising a floor on a published package cuts smaller hosts off from
-  updates. The same example's device filter is corrected too — it still showed
-  the `devices` / `pattern` / `patternDescription` shape replaced by `device`
-  and `DeviceFilter` in 2.0.0
-- **A `runUntilSuccess` timeout now says which daemon failed and why.** It
-  reported a bare list of ids, which cannot distinguish a daemon that is slow to
-  start from one that is crash-looping, and leaked the internal sentinel
-  daemon's id as if it were a component — a package whose Postgres died on every
-  start reported only this, after burning its full thirty-minute budget:
+- **A build whose `start-cli s9pk list-ingredients` fails now stops**, rather
+  than silently repacking the previous s9pk and reporting success
 
-  ```
-  Timed out waiting for postgres,upgrade,__RUN_UNTIL_SUCCESS
-  ```
+- **`hardwareRequirements.ram` is documented in bytes**, not the megabytes its
+  TSDoc claimed — a package following the old `ram: 8192` example declared an
+  8 KiB floor that gated nothing. The example now writes `8 * 1024 ** 3`, and
+  the manifest page gained a Minimum RAM section
 
-  The message now carries each un-ready daemon's health result and message, the
-  count and cause of any abnormal exits, and the budget that elapsed:
-
-  ```
-  Timed out after 1800000ms waiting for postgres (loading; 47 failed exit(s), last: docker-entrypoint.sh exited with code 1), upgrade (waiting; postgres)
-  ```
-
-  The sentinel is excluded — it depends on every other daemon, so it is never
-  ready when anything else isn't. A crash-looping daemon's exit error was
-  previously swallowed by the restart loop, so this is the only place it reaches
-  the caller: `Daemon` now retains it as `lastExitError` alongside a
-  `failedExits` count, and `HealthDaemon` appends the cause to its
-  `<id> daemon crashed` health message. Reporting the exit count next to the
-  current health matters because they disagree in exactly the case that hurts —
-  a `ready` check that returns `loading` on a failed probe keeps overwriting the
-  crash back to `loading` between restarts
+- **A `runUntilSuccess` timeout names each un-ready daemon** with its health
+  result, the count and cause of any abnormal exits, and the budget that
+  elapsed, rather than a bare list of ids
 
 - **Package template cleanup.** Dropped the `alerts` manifest block, removed in
-  2.0.0, that the template still scaffolded, and the `hello-world` guard job
-  from `release.yml` / `tagAndRelease.yml`. Its workflows are now identical to
-  a real package's
+  2.0.0, and the `hello-world` guard job from `release.yml` / `tagAndRelease.yml`
 
-- **`make install` no longer announces "Initializing StartOS developer
-  environment…" on every run.** `check-init` guarded on
-  `~/.startos/developer.key.pem`, which start-cli 1.1.0 renamed to
-  `id.key.pem`, so the guard stopped matching and ran `start-cli init-key`
-  unconditionally. The condition is removed rather than repointed at the new
-  name: `init-key` already checks for an existing key and prints that it found
-  one, so the guard only duplicated that check while giving the filename a
-  second place to go stale. Cosmetic — no build ever failed over it
+- `make install` no longer announces "Initializing StartOS developer
+  environment…" on every run
 
 - **A database dump backup or restore is no longer killed after exactly thirty
-  seconds.** Steps in `Backups.withPgDump` / `Backups.withMysqlDump` run under
-  `SubContainer.exec`'s default 30 s cap unless they opt out, and 1.5.2 — which
-  began staging the dump in `/tmp` and copying it to the backup target, rather
-  than dumping onto the target directly — left the opt-out on `pg_dump` and
-  gave the new `cp` none. The copy's duration is set by the size of the dump and
-  the speed of the target. So a backup that had succeeded for months began
-  failing the first time that copy crossed thirty seconds, with nothing to point
-  at the cause:
-
-  ```
-  Failed: Unknown Error: Error: cp terminated with signal SIGKILL:
-  ```
-
-  Restore stages the dump off the target through the same kind of copy, under
-  the same cap — so a database whose dump took longer than thirty seconds to
-  copy could not be restored at all, which is discovered during recovery, when
-  the backup is all the user has. Every step of a dump or restore whose
-  duration follows the data now opts out: both copies, `pg_ctl start` and
-  `pg_ctl stop` (which wait on the cluster's crash recovery and its shutdown
-  checkpoint), the recursive `chown`s over the data directory, `initdb`,
-  `mysql_install_db` / `mysqld --initialize-insecure`, and the foreground
-  `mysqld` MariaDB runs for the length of the dump.
-
-  The two `pg_ctl` steps keep a bound, because `pg_ctl` has its own: `-w` is its
-  default and it gives up after `-t` seconds, which was 60 regardless of what
-  the SDK allowed. `PgDumpConfig.readyTimeout` — the knob 2.0.1 added for
-  clusters that need longer — now supplies that `-t`, so raising it reaches the
-  step that actually blocks instead of stopping at the readiness poll. Its
-  default is 60 000 ms, which is `pg_ctl`'s own default, so nothing changes
-  until you raise it. Fixes
+  seconds.** Every step of `Backups.withPgDump` / `withMysqlDump` whose duration
+  follows the size of the data now opts out of `SubContainer.exec`'s 30 s cap,
+  and `PgDumpConfig.readyTimeout` supplies `pg_ctl`'s `-t` so that raising it
+  reaches the step that actually blocks. Fixes
   [#3636](https://github.com/Start9Labs/start-technologies/issues/3636)
 
-- **A command killed by `SubContainer.exec`'s own timeout now says that it timed
-  out.** The error was built from the signal alone, so the SDK's timer read
-  exactly like an OOM kill, a cgroup kill, or an operator's `kill -9` — and
-  since `cp` writes nothing to stderr when it is killed, the whole user-facing
-  notification was `cp terminated with signal SIGKILL:`. The message now names
-  the timeout and the limit that elapsed:
-
-  ```
-  cp timed out after 30000ms and was killed with SIGKILL:
-  ```
-
-  `exec`'s result carries `timedOutAfter` — the limit that fired, or `null`
-  when the process was not killed by this timer — alongside `exitCode` and
-  `exitSignal`
+- **A command killed by `SubContainer.exec`'s own timeout now says it timed
+  out**, where the bare signal had read like an OOM kill. `exec`'s result
+  carries `timedOutAfter` alongside `exitCode` and `exitSignal`
 
 ### Security
 
 - **The bundled ESLint and typescript-eslint trees carry patched
-  `brace-expansion` and `js-yaml`.** `bundleDependencies` ships these
-  physically inside the published tarball, under
-  `node_modules/@start9labs/start-sdk/` in every package that installs the SDK,
-  where neither `overrides` nor `npm audit fix` can reach them — so a package
-  author auditing their own repo saw High-severity findings under a production
-  dependency and had no way to clear them. `brace-expansion` moves to 1.1.18
-  and 5.0.9 and `js-yaml` to 4.3.1, each within the range its parent already
-  declared, so nothing else in the tree moves and the SDK's own surface is
-  untouched. A package scaffolded from the template now reports
-  `found 0 vulnerabilities` from `npm audit --omit=dev`. Fixes
-  [#3592](https://github.com/Start9Labs/start-technologies/issues/3592)
+  `brace-expansion` and `js-yaml`**, which `bundleDependencies` puts beyond the
+  reach of `overrides` and `npm audit fix`. A package scaffolded from the
+  template now reports `found 0 vulnerabilities` from `npm audit --omit=dev`.
+  Fixes [#3592](https://github.com/Start9Labs/start-technologies/issues/3592)
 
 ## 2.0.9 — StartOS 0.4.0-beta.10 (2026-07-25)
 
