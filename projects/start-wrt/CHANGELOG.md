@@ -108,6 +108,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rows in an arbitrary order, so the table visibly jumped around. Published
   ports now appear in a stable order, sorted by label.
 
+- **A device that missed its one chance to share its name over mDNS/Bonjour is
+  no longer stuck with a generic label until the router reboots.** The name
+  lookup was attempted exactly once per device, and it usually fired at the
+  worst moment — the instant the device first appeared (before its Bonjour
+  service finished starting), or during the reconnection rush right after a
+  router reboot — and sleeping phones and laptops don't answer at all. The
+  router now retries silent devices on a backoff schedule (about a minute
+  after the first miss, stretching to a day) before concluding the device has
+  no name to share; a device that answers is remembered permanently.
+
 - **IPv6 published-port rules now follow the target device when it changes
   its address.** Devices assign their own IPv6 addresses and change them
   routinely — privacy addresses rotate daily, and most operating systems
@@ -142,6 +152,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   corrected `API_CONTRACT.md` wire types and documented the previously missing
   endpoints, and fixed stale paths, commands, and structure descriptions across
   the developer docs.
+
 - **Cloudflare Dynamic DNS now saves a working configuration.** The saved
   config was missing fields the update client requires (the Bearer-token
   marker and the zone), so Cloudflare updates could never succeed. The form

@@ -2,7 +2,7 @@
 edition = "2021"
 license = "MIT"
 name = "startwrt-core"
-version = "1.0.2"
+version = "1.1.0"
 
 [lib]
 name = "startwrt"
@@ -38,6 +38,7 @@ ed25519-dalek = { version = "2", features = [
   "digest",
 ] }
 fd-lock-rs = "0.1.4"
+flate2 = "1"
 form_urlencoded = "1"
 futures = "0.3.31"
 futures-util = "0.3"

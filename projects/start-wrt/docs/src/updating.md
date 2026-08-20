@@ -21,6 +21,8 @@ Firmware integrity is enforced cryptographically (a Blake3 commitment plus ed255
 
 Only the page that started the update reloads itself. If the interface was open anywhere else while the update was applied — another browser tab, another device — that page will show a "Refresh Needed" dialog once it notices the router is running newer firmware. Click **Reload** to load the new interface; nothing is reloaded out from under you automatically.
 
+Updates also keep the router's low-level boot firmware (the eMMC boot partitions) in sync with the release — verified during the update and again on every boot — so every part of the boot chain ships and updates together. This is automatic; if it is already current, nothing is rewritten.
+
 ## Update by Reflashing (Fallback)
 
 If an in-app update ever fails, you can update StartWRT by reflashing from a microSD card. Use the **Keep settings** path in the reflash wizard, which replaces the firmware while preserving your settings. See [Installing StartWRT](installing.md) for how to create a bootable microSD card, and [Factory Reset](factory-reset.md#reflash-microsd) for a walkthrough of the reflash wizard.

@@ -7913,7 +7913,7 @@ dependencies = [
 
 [[package]]
 name = "startwrt-core"
-version = "1.0.2"
+version = "1.1.0"
 dependencies = [
  "arc-swap",
  "async_cell",
@@ -7931,6 +7931,7 @@ dependencies = [
  "dirs",
  "ed25519-dalek 2.2.0",
  "fd-lock-rs",
+ "flate2",
  "form_urlencoded",
  "futures",
  "futures-util",

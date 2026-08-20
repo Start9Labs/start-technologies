@@ -414,6 +414,7 @@ pub(crate) fn rewrite_dns_forwarding(cfgs: &mut Configs, profile: &Profile) -> R
                 expandhosts: Some("1".to_string()),
                 boguspriv: Some("0".to_string()),
                 local: Some("/lan/".to_string()),
+                dhcpscript: Some(crate::device_ident::FINGERPRINT_SCRIPT_PATH.to_string()),
             },
             Some(&section_name),
         )?;

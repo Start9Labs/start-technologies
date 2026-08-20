@@ -22,6 +22,9 @@ define Build/boot-common
 	#mcopy -i $@.boot $(KDIR_TMP)/$(KERNEL_INITRAMFS_IMAGE) ::$(KERNEL_IMG)
 	mcopy -i $@.boot $(IMAGE_KERNEL) ::$(KERNEL_IMG)
 	mcopy -i $@.boot env_k1-x.txt ::
+	# eMMC bootinfo blob, read at runtime by the boot0 provisioning in the
+	# flash wizard (backend boot0.rs) and sysupgrade (spacemit_boot0.sh)
+	mcopy -i $@.boot $(STAGING_DIR_IMAGE)/factory/bootinfo_emmc.bin ::
 	$(foreach dts,$(shell echo $(DEVICE_DTS)),mcopy -i $@.boot $(KDIR)/image-$(dts).dtb ::$(dts).dtb;)
 
 	# boot-common runs once per IMAGE/ variant (sdcard.img and

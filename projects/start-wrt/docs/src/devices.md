@@ -2,7 +2,7 @@
 
 The Devices page shows all devices that have connected to your router, organized into Online (currently connected) and Offline (previously seen) groups. Each device is associated with a [Security Profile](security-profiles.md) based on its [point of entry](points-of-entry.md).
 
-Devices appear here even without an active DHCP lease: devices with static IPs, IPv6-only devices, and devices connected through an external switch (learned from the bridge forwarding table) are all listed. Names are resolved on the router from the device's hostname, with mDNS/Bonjour used as a fallback to recover a friendly name.
+Devices appear here even without an active DHCP lease: devices with static IPs, IPv6-only devices, and devices connected through an external switch (learned from the bridge forwarding table) are all listed. Names are resolved on the router from the device's hostname, with mDNS/Bonjour used as a fallback to recover a friendly name. Some devices never share a name at all — Chromebooks deliberately withhold theirs, and many IoT gadgets can't send one; these are labeled by their operating system (recognized from how they request a network address), e.g. `Windows device (3af2b1)`, or by their hardware vendor, e.g. `Apple device (3af2b1)`, falling back to a generic `device-3af2b1` only when nothing identifies them. Assigning your own name always overrides any of these.
 
 ## Viewing Devices
 

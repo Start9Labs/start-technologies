@@ -468,6 +468,8 @@ pub struct ProfileDnsmasq {
     pub boguspriv: Option<String>,
     #[uci(default)]
     pub local: Option<String>,
+    #[uci(default)]
+    pub dhcpscript: Option<String>,
 }
 
 #[derive(Debug, TypedSection, Default)]
