@@ -48,6 +48,10 @@ fn default_port_forward_count() -> u16 {
     1
 }
 
+fn default_port_forward_local() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -64,6 +68,11 @@ pub struct PortForward {
     /// existing single-port `PortForward`s.
     #[serde(default = "default_port_forward_count")]
     pub count: u16,
+    /// Whether devices on your own network dial this forward too. False for one
+    /// only a certificate authority dials: no address is served on that port,
+    /// so whether the router hairpins it back says nothing.
+    #[serde(default = "default_port_forward_local")]
+    pub local: bool,
 }
 
 impl AsRef<Host> for Host {
@@ -488,6 +497,7 @@ impl Model<Host> {
                         dst: SocketAddrV4::new(addr, port),
                         gateway: gw_id.clone(),
                         count: 1,
+                        local: true,
                     });
                     if challenge {
                         port_forwards.insert(PortForward {
@@ -495,6 +505,7 @@ impl Model<Host> {
                             dst: SocketAddrV4::new(addr, ACME_CHALLENGE_PORT),
                             gateway: gw_id.clone(),
                             count: 1,
+                            local: false,
                         });
                     }
                 }
@@ -538,6 +549,7 @@ impl Model<Host> {
                         dst: SocketAddrV4::new(lan_ip, internal_start),
                         gateway: gw_id.clone(),
                         count: range.number_of_ports,
+                        local: true,
                     });
                 }
             }

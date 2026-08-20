@@ -13,4 +13,10 @@ export type PortForward = {
    * existing single-port `PortForward`s.
    */
   count: number
+  /**
+   * Whether devices on your own network dial this forward too. False for one
+   * only a certificate authority dials: no address is served on that port,
+   * so whether the router hairpins it back says nothing.
+   */
+  local: boolean
 }

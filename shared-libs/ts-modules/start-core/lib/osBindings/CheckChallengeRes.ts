@@ -4,10 +4,10 @@ import type { CheckPortV6Res } from './CheckPortV6Res'
 
 /**
  * Reachability of the port a certificate authority validates on, for a domain
- * served on some other port. The domain's own port says nothing about it, and
- * the address refuses every connection until a certificate is issued. A leg is
- * null where it could not be probed, which is a failure to report and not a
- * pass — the box has no IPv6 leg to probe when its gateway has no GUA.
+ * served on some other port, which the domain's own port says nothing about.
+ * A leg is null where nothing probed it: the probe errored, or — for `port_v6`
+ * — the gateway has no GUA. The caller decides what each means for its
+ * verdict.
  */
 export type CheckChallengeRes = {
   port: CheckPortRes | null
