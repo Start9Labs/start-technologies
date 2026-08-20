@@ -1,0 +1,76 @@
+name: 💡 Feature Request
+description: Suggest a change or an addition to any Start9 product.
+type: Feature
+body:
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites
+      options:
+        - label: I searched [existing issues](https://github.com/Start9Labs/start-technologies/issues?q=is%3Aissue) and this is not already requested.
+          required: true
+
+  - type: dropdown
+    id: project
+    attributes:
+      label: Project
+      description: |
+        Applied as the label automatically.
+
+        - `StartOS` — the OS, its web UI, and the service runtime
+        - `start-cli` — the command-line client
+        - `StartSDK` — the service-packaging SDK
+        - `StartWRT` — the OpenWrt-based router OS
+        - `StartTunnel` — the VPS-hosted virtual private router
+        - `start-registry` — the registry server
+        - `start-docs` — docs.start9.com
+        - `brochure` — marketplace.start9.com
+        - `repo` — build, CI, and release tooling
+
+        The shared Rust and TypeScript libraries (`start-core`, `patch-db`, `exver`) have no label of their own — pick the product the change is most visible in.
+      options:
+        - StartOS
+        - start-cli
+        - StartSDK
+        - StartWRT
+        - StartTunnel
+        - start-registry
+        - start-docs
+        - brochure
+        - repo
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem & use case
+      description: What are you trying to do today, and what stops you? Lead with the problem — a request grounded in a concrete situation is far easier to evaluate than one framed only as a solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How you would like it to work. Rough is fine.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you weighed, and why you set them aside. Include anything you tried that almost worked — that is usually the most informative part.
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Affected areas
+      description: If you know the code, name the files or subsystems this would touch, and anything it would break or need migrating.
+      placeholder: |
+        `<path/to/file>` — <what would need to change>
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?
+      description: Screenshots, links, prior art in other projects, related issues.

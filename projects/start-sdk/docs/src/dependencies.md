@@ -122,7 +122,7 @@ sdk.action.createTask(
   effects,
   packageId: string,         // dependency service ID
   action: ActionDefinition,  // imported from the dependency package
-  severity: 'critical' | 'high' | 'medium' | 'low',
+  severity: 'critical' | 'important' | 'optional',
   options?: {
     input?: { kind: 'partial', accept: Partial<InputSpec>[], set: Partial<InputSpec> },
     when?: { condition: 'input-not-matches', once: boolean },
@@ -137,7 +137,7 @@ sdk.action.createTask(
 > - Import the action object from the dependency's published package.
 > - The dependency must be listed in your `package.json` — see [Adding the Dependency to `package.json`](#adding-the-dependency-to-packagejson), including the required `overrides` entry.
 > - `when: { condition: 'input-not-matches', once: false }` re-triggers until the action's input matches.
-> - `replayId` prevents duplicate tasks across restarts.
+> - `replayId` prevents duplicate tasks across restarts. It defaults to `[package-id]:[action-id]`, so it changes whenever you rename the action, retarget the task, or point it at a different package — and the key you stop writing is left behind, still enforcing the old contract. Clearing it is your package's job: see [Retiring a replay key](./tasks.md#retiring-a-replay-key).
 
 > [!IMPORTANT]
 > **`accept` entries are matched against the dependency's _resolved_ action input, not its raw config file.** That input is the dependency action's prefill — its config parsed through its file model — so an optional field comes back carrying its **resolved default**, never a missing key. bitcoind's `prune`, for example, reads as the number `0` on an unpruned node (its file model coerces an absent `prune` to `0`), so `accept: [{ prune: 0 }]` matches an unpruned node exactly. Match the concrete value the input actually holds.

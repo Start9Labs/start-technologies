@@ -125,7 +125,11 @@ export type AddOutboundVpnForm = FormRawValue<
 
 /**
  * Compute which VPN labels are safe targets for a given VPN.
- * A target T is unsafe if following T's chain eventually reaches selfLabel (cycle).
+ * A target T is unsafe if it is disabled, or if following T's chain eventually
+ * reaches selfLabel (cycle). A disabled target's interface is never registered
+ * with netifd, so the chain route through it is dropped and this VPN's traffic
+ * silently falls back to the WAN — one hop where the user asked for two.
+ * Note the cycle walk still traverses the full unfiltered graph.
  */
 export function getSafeTargets(
   selfLabel: string,
@@ -135,6 +139,7 @@ export function getSafeTargets(
     'Internet',
     ...allVpns
       .filter(v => v.label !== selfLabel)
+      .filter(v => v.enabled)
       .filter(v => {
         const visited = new Set<string>([selfLabel])
         let current: OutboundVpn | undefined = v

@@ -140,9 +140,12 @@ export class HealthDaemon<Manifest extends SDKManifest> {
       if (success && this.ready === 'EXIT_SUCCESS') {
         this.setHealth({ result: 'success', message: null })
       } else if (!success) {
+        const cause = this.daemon?.lastExitError?.message
         this.setHealth({
           result: 'failure',
-          message: `${this.id} daemon crashed`,
+          message: cause
+            ? `${this.id} daemon crashed: ${cause}`
+            : `${this.id} daemon crashed`,
         })
       } else if (!this.daemon?.isOneshot()) {
         this.setHealth({

@@ -10,6 +10,7 @@
     "test": "jest -c ./jest.config.js"
   },
   "author": "",
+  "license": "MIT",
   "dependencies": {
     "@iarna/toml": "^2.2.5",
     "@noble/curves": "^1.4.0",

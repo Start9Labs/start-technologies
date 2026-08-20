@@ -1,3 +1,5 @@
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+
 use base64::Engine;
 use http::HeaderValue;
 use http::header::AUTHORIZATION;
@@ -50,9 +52,24 @@ pub fn is_loopback(url: &Url) -> bool {
     }
 }
 
+/// Where to reach a daemon bound to `listen`. The unspecified address means
+/// "every interface on this host", which is not a destination — dial loopback.
+pub fn dial_addr(listen: SocketAddr) -> SocketAddr {
+    if listen.ip().is_unspecified() {
+        let loopback = match listen.ip() {
+            IpAddr::V4(_) => IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V6(_) => IpAddr::V6(Ipv6Addr::LOCALHOST),
+        };
+        SocketAddr::new(loopback, listen.port())
+    } else {
+        listen
+    }
+}
+
 /// `Authorization: Bearer` header carrying the server's local auth token, if
 /// this process can read it (i.e. it runs on the server itself). Only attach
-/// this to requests bound for a loopback address ([`is_loopback`]).
+/// this to requests bound for the local machine — a loopback URL
+/// ([`is_loopback`]), or one derived from the daemon's own listen address.
 pub async fn local_auth_header<C: LocalAuthContext>() -> Option<HeaderValue> {
     let token = read_file_to_string(C::LOCAL_AUTH_COOKIE_PATH).await.ok()?;
     let mut header = HeaderValue::from_str(&format!("Bearer {token}")).ok()?;
@@ -112,5 +129,34 @@ impl<C: LocalAuthContext> Middleware<C> for LocalAuth {
         check_from_header::<C>(self.authorization.as_ref())
             .await
             .map_err(|e| RpcResponse::from(RpcError::from(e)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wildcard_listen_dials_loopback() {
+        for (listen, expected) in [
+            ("0.0.0.0:5959", "127.0.0.1:5959"),
+            ("[::]:5959", "[::1]:5959"),
+            ("127.0.0.1:5959", "127.0.0.1:5959"),
+            ("192.168.1.5:5959", "192.168.1.5:5959"),
+        ] {
+            assert_eq!(
+                dial_addr(listen.parse().unwrap()),
+                expected.parse::<SocketAddr>().unwrap(),
+                "{listen}"
+            );
+        }
+    }
+
+    #[test]
+    fn dialed_wildcard_is_loopback() {
+        let url: Url = format!("http://{}", dial_addr("0.0.0.0:5959".parse().unwrap()))
+            .parse()
+            .unwrap();
+        assert!(is_loopback(&url));
     }
 }

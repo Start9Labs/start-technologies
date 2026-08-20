@@ -13,7 +13,10 @@ pub fn asset_api<C: Context>() -> ParentHandler<C> {
                 .no_display()
                 .with_about("about.add-asset-registry"),
         )
-        .subcommand("remove", add::remove_api::<C>())
+        .subcommand(
+            "remove",
+            add::remove_api::<C>().with_about("about.commands-remove-assets"),
+        )
         .subcommand("sign", sign::sign_api::<C>())
         .subcommand(
             "sign",

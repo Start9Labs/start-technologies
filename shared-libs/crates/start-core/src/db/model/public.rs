@@ -348,7 +348,7 @@ impl NetworkInterfaceInfo {
 
     // lo and lxcbr0 (the only Loopback/Bridge interfaces on StartOS) never leave the
     // host, so insecure traffic such as plain HTTP defaults to permitted over them.
-    fn is_intrinsically_secure(&self) -> bool {
+    pub fn is_intrinsically_secure(&self) -> bool {
         matches!(
             self.ip_info.as_ref().and_then(|i| i.device_type),
             Some(NetworkInterfaceType::Loopback | NetworkInterfaceType::Bridge)
@@ -478,6 +478,40 @@ pub struct ServerSpecs {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    fn iface(device_type: NetworkInterfaceType, secure: Option<bool>) -> NetworkInterfaceInfo {
+        NetworkInterfaceInfo {
+            secure,
+            ip_info: Some(std::sync::Arc::new(IpInfo {
+                device_type: Some(device_type),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn explicit_secure_overrides_the_intrinsic_default_both_ways() {
+        use NetworkInterfaceType::{Bridge, Ethernet, Loopback};
+
+        assert!(iface(Loopback, None).secure());
+        assert!(iface(Bridge, None).secure());
+        assert!(!iface(Ethernet, None).secure());
+
+        assert!(iface(Ethernet, Some(true)).secure());
+        assert!(!iface(Bridge, Some(false)).secure());
+    }
+
+    // `set_secure` refuses `Some(false)` on an intrinsically secure gateway, and
+    // this is why it cannot lean on `is_intrinsically_secure` alone to decide.
+    #[test]
+    fn a_disconnected_gateway_reports_no_device_type() {
+        let disconnected = NetworkInterfaceInfo::default();
+
+        assert!(disconnected.ip_info.is_none());
+        assert!(!disconnected.is_intrinsically_secure());
+        assert!(!iface(NetworkInterfaceType::Bridge, None).ip_info.is_none());
+    }
 
     fn gateway_type_of(type_field: serde_json::Value) -> GatewayType {
         serde_json::from_value::<NetworkInterfaceInfo>(serde_json::json!({ "type": type_field }))

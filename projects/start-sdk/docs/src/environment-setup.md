@@ -297,7 +297,7 @@ start-cli -H https://my-box.local <command>  # a URL works too
 With no flag, the `default` entry is used. `start-cli` finds this config by walking up from the current directory, so it works anywhere inside the workspace.
 
 > [!NOTE]
-> As of `@start9labs/start-sdk` 2.0, `make install` and `make publish` resolve their target through `start-cli` — the workspace `.startos/config.yaml` profiles, or `-H` / `-r`. (Older `s9pk.mk` parsed a single `host:` / `registry:` URL from the global `~/.startos/config.yaml`.) See [Makefile](./makefile.md).
+> As of `@start9labs/start-sdk` 2.0, `make install` and `make publish` resolve their target through `start-cli` — the workspace `.startos/config.yaml` profiles, or `-H` / `-r`. See [Makefile](./makefile.md).
 
 ### Keep it current
 

@@ -1,5 +1,6 @@
 {
   "name": "jsonpath-wasm-nodejs-example",
+  "license": "MIT",
   "scripts": {
     "start": "node index.js"
   },

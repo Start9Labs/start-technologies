@@ -57,7 +57,13 @@ monorepo-wide rules, and [ARCHITECTURE.md](ARCHITECTURE.md) and
   so the ignore applies (`__fixtures__/` etc. must stay unformatted). Don't add
   per-component prettier configs or scripts.
 - **Don't edit generated binding files** like
-  `shared-libs/ts-modules/start-core/lib/osBindings/index.ts` or `projects/start-sdk/s9pk.mk`.
+  `shared-libs/ts-modules/start-core/lib/osBindings/index.ts` — regenerate them
+  with `make start-core-ts-bindings`. `projects/start-sdk/s9pk.mk` is _not_
+  generated: it is hand-maintained build plumbing that ships inside the
+  published SDK, so its "DO NOT EDIT" header addresses package authors reading
+  their `node_modules` copy, not this repo. Edit it here — and treat it as a
+  public contract, since every package's build imports it
+  ([`projects/start-sdk/AGENTS.md`](../start-sdk/AGENTS.md)).
 - **Ask before destructive `make` recipes** — `update*`, `reflash`, `wormhole*`,
   image flashing, and `make clean*` consume hours/disk and may touch a live
   device.

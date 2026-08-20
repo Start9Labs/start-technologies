@@ -1,0 +1,84 @@
+name: 📚 Documentation — Bug Report
+description: Something on docs.start9.com is wrong, out of date, or missing.
+type: Bug
+labels: [start-docs]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Every page on docs.start9.com is authored in this repo, so a documentation fix is a normal pull request — if you can already see what the page should say, send the PR instead of filing this.
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites
+      options:
+        - label: I searched [existing issues](https://github.com/Start9Labs/start-technologies/issues?q=is%3Aissue) and this is not already reported.
+          required: true
+
+  - type: input
+    id: url
+    attributes:
+      label: Page URL
+      placeholder: https://docs.start9.com/…
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which book?
+      options:
+        - StartOS user documentation
+        - Packaging / SDK
+        - StartTunnel
+        - StartWRT
+        - Bitcoin guides
+        - Landing page & site chrome
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: source
+    attributes:
+      label: Source file
+      description: The Markdown source in this repo, if you found it. Each product's book lives in `projects/<product>/docs/`; the site itself is `projects/start-docs/`.
+      placeholder: projects/start-os/docs/src/installing-startos.md
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What is wrong with it?
+      options:
+        - Factually incorrect
+        - Out of date
+        - Missing / undocumented
+        - Broken link or image
+        - Typo / formatting
+        - Site build or rendering
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: What the page says now
+      description: Quote the passage. For a missing topic, say what you went looking for and where you expected to find it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What it should say
+      description: If the docs contradict the software, say which one you believe is correct — a mismatch is a bug in one of them, and which one decides where the fix lands.
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?
+      description: Screenshots, related pages, or the version of the software you were using when the docs did not match.

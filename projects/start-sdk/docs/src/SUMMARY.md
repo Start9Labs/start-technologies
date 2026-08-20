@@ -8,7 +8,9 @@
 
 - [Environment Setup](environment-setup.md)
 - [Quick Start](quick-start.md)
+- [New Package Checklist](new-package-checklist.md)
 - [Development Workflow](workflow.md)
+- [Maintaining a Package](maintaining-a-package.md)
 - [Agent Context](agent-context.md)
 
 # Recipes
@@ -88,6 +90,7 @@
 - [Initialization](init.md)
 - [Interfaces](interfaces.md)
 - [Service-to-Service Networking](service-to-service.md)
+- [Outbound Network Access](outbound-networking.md)
 - [Actions](actions.md)
 - [Tasks](tasks.md)
 - [Notifications](notifications.md)

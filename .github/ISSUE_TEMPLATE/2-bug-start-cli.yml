@@ -1,0 +1,98 @@
+name: ⌨️ Start CLI — Bug Report
+description: A defect in `start-cli` — remote RPC calls, or the local packaging and key tooling.
+type: Bug
+labels: [start-cli]
+body:
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites
+      options:
+        - label: I searched [existing issues](https://github.com/Start9Labs/start-technologies/issues?q=is%3Aissue) and this is not already reported.
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: start-cli version
+      description: Paste both `start-cli --version` and `start-cli git-info`. The version string is stable across builds, so the git hash is what identifies the binary.
+      placeholder: 0.4.0-beta.10 / 1a2b3c4
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Where is it running?
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Linux (x86_64)
+        - Linux (aarch64)
+        - Windows
+        - On a StartOS server (the `startbox` symlink)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How was it installed?
+      options:
+        - start9.com/start-cli/install.sh
+        - Built from source (`make start-cli` or `cargo build`)
+        - Shipped with StartOS (`startbox`)
+        - Other
+
+  - type: input
+    id: os-version
+    attributes:
+      label: Target StartOS version
+      description: Only needed for remote calls. Client and server are versioned together, so a mismatch is often the cause.
+      placeholder: 0.4.0.2
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which surface?
+      options:
+        - Remote RPC against a server
+        - s9pk build / packaging (`s9pk`)
+        - Keys & signing (`init-key`, `pubkey`)
+        - Auth & login
+        - Registry commands
+        - Utilities (`util`)
+        - Argument parsing / help output
+        - Other / unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: What happens
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should happen instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The full invocation, with secrets redacted — include `--host`/`-H` if it is a remote call. Add any preceding steps needed to reach the failure.
+      placeholder: start-cli -H https://server.local package list
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs & evidence
+      description: Full stderr, ideally with `RUST_LOG=debug` set.
+      render: shell

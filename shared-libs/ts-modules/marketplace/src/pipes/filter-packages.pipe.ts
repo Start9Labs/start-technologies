@@ -15,6 +15,8 @@ export function filterPackages(
   category: string | null = '',
   sort: string | null = '',
 ): MarketplacePkg[] {
+  query = query?.trim() || ''
+
   // query
   if (query) {
     let options: Fuse.IFuseOptions<MarketplacePkg> = {

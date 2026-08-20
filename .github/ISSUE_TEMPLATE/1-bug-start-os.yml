@@ -1,0 +1,102 @@
+name: 🖥️ StartOS — Bug Report
+description: A defect in StartOS itself — the OS, its web UI, or the service runtime.
+type: Bug
+labels: [StartOS]
+body:
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites
+      options:
+        - label: I searched [existing issues](https://github.com/Start9Labs/start-technologies/issues?q=is%3Aissue) and this is not already reported.
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: StartOS version
+      description: Shown in the UI under **System → About**. From a client, `start-cli -H https://<your-server> git-info` prints the exact build — the version string is stable across builds, so the git hash is what identifies the binary.
+      placeholder: 0.4.0.2 (git 1a2b3c4)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: arch
+    attributes:
+      label: Architecture / image
+      options:
+        - x86_64 (AMD64) — Full
+        - x86_64 (AMD64) — Slim (FOSS-only)
+        - aarch64 (ARM64) — Full
+        - aarch64 (ARM64) — Slim (FOSS-only)
+        - Raspberry Pi 4
+        - RISC-V (RVA23)
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: hardware
+    attributes:
+      label: Server hardware
+      description: Board or machine, RAM, and the disks involved.
+      placeholder: Start9 Server Pure, 16GB, 2TB NVMe — or — Raspberry Pi 4 (8GB) + Samsung T7 SSD
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser & OS
+      description: Only needed for web UI bugs.
+      placeholder: Firefox 134.0, macOS 15.3
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which surface?
+      options:
+        - Web UI
+        - Setup wizard
+        - Service / package runtime
+        - Marketplace & installs
+        - Networking & addresses
+        - Backup / restore
+        - System update or migration
+        - start-cli against this server
+        - Other / unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: What happens
+      description: The defect and how it manifests. Be specific about the failure — an error string, a wrong value, a hang.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should happen instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Number them, and say what you saw at the step where it went wrong.
+      placeholder: |
+        1. On this page…
+        2. Click this button…
+        3. Enter this value…
+        4. See error…
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs & evidence
+      description: Server logs, browser console output, screenshots. You can drag files into this box.
+      render: shell

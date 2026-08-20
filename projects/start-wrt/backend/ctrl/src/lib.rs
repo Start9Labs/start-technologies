@@ -9,6 +9,7 @@ pub mod bins;
 pub mod boot0;
 pub mod captive;
 pub mod continuations;
+pub mod device_ident;
 pub mod device_names;
 pub mod devices;
 pub mod diagnostics;
@@ -476,25 +477,64 @@ pub async fn run_quiet_async(
         .await
 }
 
-pub fn init_logging(_name: &str) {
-    use tracing_rfc_5424::rfc3164::Rfc3164;
-    use tracing_rfc_5424::tracing::TrivialTracingFormatter;
-    use tracing_rfc_5424::transport::UnixSocket;
+/// Make odhcpd re-read its config, and give it a moment to act on the change,
+/// **before** the network is torn down or reconfigured.
+///
+/// This is the only way to revoke an IPv6 prefix from LAN clients. SLAAC has no
+/// lease to expire, so a prefix is withdrawn by advertising it one last time
+/// with zero lifetimes (RFC 9096 §3.5). odhcpd emits that RA from
+/// `router_setup_interface(iface, false)`, which it reaches when a config reload
+/// finds RA newly disabled on an interface — i.e. on **SIGHUP**, which is what
+/// `/etc/init.d/odhcpd reload` sends. A `restart` does not: odhcpd's exit path
+/// tears down the process without touching the interfaces, so the old process
+/// dies silently and the new one starts with RA already off, having never told
+/// anyone. Clients then keep the address for the rest of its advertised valid
+/// lifetime (odhcpd caps this at 5400 s), which is why "IPv6 disabled" used to
+/// leave devices holding addresses for up to 90 minutes.
+///
+/// Two ordering constraints make this a helper rather than a one-line call:
+///
+/// * The UCI change must already be on disk — the reload is what reads it.
+/// * The prefix must still be on the interface, so this has to run *before*
+///   `network restart`/`reload`. There is nothing to wait on (`procd_send_signal`
+///   returns as soon as the signal is delivered, while the RA goes out later
+///   from odhcpd's event loop), so we settle for a fixed pause.
+///
+/// Best-effort by nature: odhcpd sends exactly one final RA, and a client that
+/// misses it — or is asleep — falls back to waiting out the valid lifetime.
+pub async fn deprecate_odhcpd_prefixes() {
+    let _ = run_quiet_async(tokio::process::Command::new("/etc/init.d/odhcpd").arg("reload")).await;
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+}
+
+pub fn init_logging(name: &str) {
+    use std::ffi::CString;
+
+    use syslog_tracing::{Facility, Options, Syslog};
     use tracing_subscriber::layer::SubscriberExt;
-    use tracing_subscriber::{EnvFilter, Registry};
+    use tracing_subscriber::{fmt, EnvFilter, Registry};
 
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn,activity=info"));
 
-    let syslog = tracing_rfc_5424::layer::Layer::<
-        tracing_subscriber::Registry,
-        Rfc3164,
-        TrivialTracingFormatter,
-        UnixSocket,
-    >::try_default()
-    .unwrap();
+    // openlog(3) keeps the identity pointer, so it has to outlive the process.
+    let identity: &'static _ = Box::leak(
+        CString::new(name)
+            .expect("logging identity contains a nul byte")
+            .into_boxed_c_str(),
+    );
+    let syslog = Syslog::new(identity, Options::default(), Facility::default())
+        .expect("failed to open syslog");
 
-    let subscriber = Registry::default().with(syslog).with(filter);
+    // syslogd stamps and tags each line itself, so emit only the message.
+    let subscriber = Registry::default()
+        .with(
+            fmt::layer()
+                .with_writer(syslog)
+                .with_ansi(false)
+                .without_time(),
+        )
+        .with(filter);
     tracing::subscriber::set_global_default(subscriber)
         .expect("failed to set global tracing subscriber");
 }

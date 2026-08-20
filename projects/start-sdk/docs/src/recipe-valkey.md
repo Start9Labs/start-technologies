@@ -10,4 +10,4 @@ Add a Valkey daemon with no persistent volume (ephemeral cache). Disable persist
 
 ## Examples
 
-See `startos/main.ts` in: [immich](https://github.com/Start9Labs/immich-startos), [nextcloud](https://github.com/Start9Labs/nextcloud-startos), [searxng](https://github.com/Start9Labs/searxng-startos), [mcaptcha](https://github.com/Start9Labs/mcaptcha-startos), [bitcoin-explorer](https://github.com/Start9Labs/bitcoin-explorer-startos)
+See `startos/main.ts` in: [immich](https://github.com/Start9Labs/immich-startos), [nextcloud](https://github.com/Start9Labs/nextcloud-startos), [searxng](https://github.com/Start9Labs/searxng-startos), [bitcoin-explorer](https://github.com/Start9Labs/bitcoin-explorer-startos)

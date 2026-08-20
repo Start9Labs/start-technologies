@@ -1,0 +1,84 @@
+name: 📡 StartWRT — Bug Report
+description: A defect in StartWRT — the OpenWrt-based router OS for the SpaceMiT K1.
+type: Bug
+labels: [StartWRT]
+body:
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites
+      options:
+        - label: I searched [existing issues](https://github.com/Start9Labs/start-technologies/issues?q=is%3Aissue) and this is not already reported.
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: StartWRT version / image
+      description: The release you flashed. If you built the image yourself, give the git hash instead.
+      placeholder: 1.0.0-beta.3
+    validations:
+      required: true
+
+  - type: dropdown
+    id: board
+    attributes:
+      label: Board
+      options:
+        - SpaceMiT K1 (BananaPi-F3)
+        - Other / built for a different target
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which surface?
+      options:
+        - Flashing / first boot
+        - Web UI
+        - startwrt RPC or CLI
+        - Network configuration (UCI)
+        - WiFi
+        - Routing & firewall
+        - DNS / DHCP
+        - Upgrade
+        - OpenWrt base layer
+        - Other / unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: What happens
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should happen instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Number them, and say what you saw at the step where it went wrong.
+
+  - type: textarea
+    id: uci
+    attributes:
+      label: Relevant UCI config
+      description: '`uci show <package>` for whichever config is involved — e.g. `uci show network`, `uci show firewall`. Redact keys and passwords.'
+      render: shell
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs & evidence
+      description: '`logread`, plus `dmesg` for anything at the kernel or driver layer.'
+      render: shell

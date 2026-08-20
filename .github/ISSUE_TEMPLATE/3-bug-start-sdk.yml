@@ -1,0 +1,97 @@
+name: 📦 Start SDK — Bug Report
+description: A defect in `@start9labs/start-sdk` — packaging a service, or the effects API at runtime.
+type: Bug
+labels: [StartSDK]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Packaging *questions* belong in the [developer Matrix room](https://matrix.to/#/#developer-space:matrix.start9labs.com); this form is for SDK defects.
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites
+      options:
+        - label: I searched [existing issues](https://github.com/Start9Labs/start-technologies/issues?q=is%3Aissue) and this is not already reported.
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: SDK version
+      description: From your package's `package.json`, or `npm ls @start9labs/start-sdk`.
+      placeholder: 2.0.10
+    validations:
+      required: true
+
+  - type: input
+    id: package
+    attributes:
+      label: Package being built
+      description: The service you are packaging, and its repo if public.
+      placeholder: bitcoind-startos (Start9Labs/bitcoind-startos)
+
+  - type: input
+    id: os-version
+    attributes:
+      label: StartOS version it runs on
+      description: Only needed if the failure is at runtime rather than build time.
+      placeholder: 0.4.0.2
+
+  - type: input
+    id: node
+    attributes:
+      label: Node version
+      description: '`node --version`'
+      placeholder: v22.11.0
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which surface?
+      options:
+        - s9pk build / pack
+        - Manifest & versioning
+        - Effects API at runtime
+        - Health checks
+        - Actions & inputs
+        - Dependencies
+        - Backups
+        - Interfaces & addresses
+        - Mounts & volumes
+        - TypeScript types / osBindings
+        - Packaging documentation
+        - Other / unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: What happens
+      description: Include the SDK call involved and the error it produces.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should happen instead
+      description: If the SDK's own documentation says otherwise, link the page — a docs/behavior mismatch is a bug in one of them.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The smallest snippet from your package that triggers it, and what you ran to hit it.
+      render: typescript
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs & evidence
+      description: Build output, or the service log from the running package.
+      render: shell

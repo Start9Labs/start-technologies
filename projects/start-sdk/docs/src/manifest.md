@@ -27,6 +27,36 @@ export const long = {
 }
 ```
 
+### How long each one may be
+
+|         | limit           |
+| ------- | --------------- |
+| `short` | 120 characters  |
+| `long`  | 2000 characters |
+
+Every locale gets the same limit, and it is enforced when the package is
+validated, so a description that overruns fails the build.
+
+`short` is not truncated when it overruns — the marketplace tile clamps it to
+two lines with `overflow: hidden`, so the remainder is silently cut off in the
+one place users browse. **Two lines is about 80 characters**, and it is the same
+two lines whatever language the tile renders in. The limit sits above that so a
+translation isn't failed over a few characters' growth — German and Polish
+routinely run 20-30% longer than the same English sentence — not as permission
+to run long. Write the English well inside 80 and every locale still fits the
+tile.
+
+Two more characters' worth of advice:
+
+- **Don't open with the service's name.** The tile renders the title in bold on
+  the line directly above, so "Foo is a self-hosted bar" spends its first words
+  on something the reader can already see.
+- **Say what it is, not what it is like.** Comparisons and superlatives cost
+  more characters than they earn at this size.
+
+`long` has no such budget — it is rendered unclamped on the service's details
+page — so its limit is about the reader's patience rather than the layout.
+
 ## manifest/index.ts
 
 ```typescript
@@ -215,6 +245,21 @@ The registry stores a version's variants together and disambiguates them **by ha
 > ```
 >
 > In particular an `nvidia` variant must carry an NVIDIA `device` filter, not `[]` — `nvidiaContainer: true` wires up the GPU runtime but does **not** set a hardware requirement, so without the filter the NVIDIA variant is indistinguishable from the CPU fallback and one of the two fails to publish.
+
+#### Minimum RAM
+
+`hardwareRequirements.ram` is the memory floor below which StartOS will not offer the package. **It is compared against the host's total RAM in bytes.** StartOS records `MemTotal` in bytes and the check is a raw comparison against the number you declare — nothing in the SDK or the OS converts units on your behalf.
+
+```typescript
+hardwareRequirements: {
+  ram: 8 * 1024 ** 3, // 8 GiB
+},
+```
+
+> [!WARNING]
+> A value that reads as megabytes — `ram: 8192` — declares **8 KiB**, which every machine satisfies, so the requirement silently gates nothing. Write the byte count as an explicit power-of-two expression, so the unit is visible where the value is.
+
+Leave it unset when the service has no hard floor. Bear in mind that a box failing the check is not offered the package at all, so **raising the floor on an already-published package cuts existing installs below it off from further updates** — call that out in the release notes when you do it.
 
 ### Virtual Networking (VPN / kernel tun interfaces)
 

@@ -1,0 +1,56 @@
+name: Publish debs to apt
+description: Publish .deb files into one suite of the S3-hosted apt repository
+
+inputs:
+  suite:
+    description: Apt suite to publish into (each suite owns a separate pool)
+    required: true
+  path:
+    description: Directory holding the .deb files to publish
+    required: false
+    default: debs
+  s3-access-key:
+    description: S3 access key for the apt bucket
+    required: true
+  s3-secret-key:
+    description: S3 secret key for the apt bucket
+    required: true
+  gpg-private-key:
+    description: Armored GPG private key that signs the suite's Release file
+    required: true
+  gpg-key-id:
+    description: Key ID to sign with
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # Checked before anything is uploaded: publish.sh leaves the suite unsigned
+    # when it can't sign, and an unsigned Release is one apt clients reject.
+    # Failing here beats publishing an apt suite nobody can install from.
+    - name: Verify signing credentials
+      shell: bash
+      env:
+        GPG_PRIVATE_KEY: ${{ inputs.gpg-private-key }}
+        GPG_KEY_ID: ${{ inputs.gpg-key-id }}
+      run: |
+        if [ -z "$GPG_PRIVATE_KEY" ] || [ -z "$GPG_KEY_ID" ]; then
+          echo "::error::APT_GPG_PRIVATE_KEY and APT_GPG_KEY_ID must be set as repository secrets to publish a signed apt suite."
+          exit 1
+        fi
+
+    - name: Install apt publishing tools
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq s3cmd dpkg-dev apt-utils
+
+    - name: Publish to the ${{ inputs.suite }} suite
+      shell: bash
+      env:
+        SUITE: ${{ inputs.suite }}
+        S3_ACCESS_KEY: ${{ inputs.s3-access-key }}
+        S3_SECRET_KEY: ${{ inputs.s3-secret-key }}
+        GPG_PRIVATE_KEY: ${{ inputs.gpg-private-key }}
+        GPG_KEY_ID: ${{ inputs.gpg-key-id }}
+      run: ./debian/publish.sh "${{ inputs.path }}"

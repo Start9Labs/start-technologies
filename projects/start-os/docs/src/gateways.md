@@ -36,3 +36,30 @@ Every gateway routes outbound traffic from your server to the Internet. Some gat
 ## Updating a Gateway's Config
 
 To re-import a gateway's WireGuard config — for example, a StartTunnel config re-issued with new settings — open the gateway's `⋮` menu, choose "Update config", and paste or upload the new file. The config is replaced **in place**: the gateway keeps its identity, so its port forwards and private/public domains are preserved. (Re-adding via "Add" would instead create a separate gateway.)
+
+## Secure Gateways
+
+Some service interfaces are served without SSL — plain HTTP, or another protocol carrying no encryption of its own. StartOS offers those addresses only on a network it treats as secure. Loopback and the container bridge are secure, because they never leave your server. Every other gateway — your router, WiFi, a WireGuard tunnel — is not, so a service interface bound without SSL is neither listed nor reachable through it.
+
+Marking a gateway secure tells StartOS that you trust the network on the other side of it. Those addresses are then offered there: your server's LAN IP addresses, its [`.local` name](mdns.md), and any [private domains](private-domains.md) you have added on that gateway.
+
+This setting lives on the command line. [SSH](ssh.md) into your server, then:
+
+```bash
+start-cli net gateway set-secure <GATEWAY>
+```
+
+To hand the decision back to StartOS:
+
+```bash
+start-cli net gateway unset-secure <GATEWAY>
+```
+
+`start-cli net gateway list` shows each gateway's current setting, with `(auto)` marking one StartOS decided.
+
+> [!WARNING]
+> This is one switch for the whole server, and it takes effect immediately. Every service you have installed that has a non-SSL address gains it on that network at once, and those addresses are enabled as soon as they are offered — there is no per-service confirmation. A service you normally reach over HTTPS may still have a plaintext leg, and anything on that network can read and alter traffic to it — including the passwords you type into it.
+>
+> Mark a gateway secure only when you control every device on the network it reaches. Leave a guest network, an office LAN, a coffee-shop WiFi, or any network carrying devices you do not manage as it is.
+
+Marking a gateway secure never exposes anything to the public internet. An address it unlocks is offered only to devices on the same network segment as that gateway: StartOS restricts the traffic to that segment, never opens a port on your router for it, and never carries it on a [public domain](clearnet.md). On a server whose interface holds a public IP directly — a VPS, or a modem in bridge mode — that segment is your provider's network, which contains machines you do not control.

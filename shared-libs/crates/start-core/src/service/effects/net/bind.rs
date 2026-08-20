@@ -1,5 +1,5 @@
 use crate::net::host::binding::{BindId, BindOptions, NetInfo};
-use crate::net::host::host_for;
+use crate::net::host::host_for_existing;
 use crate::service::effects::prelude::*;
 use crate::{HostId, PackageId};
 
@@ -102,6 +102,48 @@ pub async fn clear_bindings(
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RetireHostParams {
+    pub id: HostId,
+}
+
+/// No `packageId`: a service may only retire its own hosts.
+pub async fn retire_host(
+    context: EffectContext,
+    RetireHostParams { id }: RetireHostParams,
+) -> Result<bool, Error> {
+    let context = context.deref()?;
+    context
+        .seed
+        .persistent_container
+        .net_service
+        .retire_host(id)
+        .await
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RetireBindingParams {
+    pub id: HostId,
+    pub internal_port: u16,
+}
+
+pub async fn retire_binding(
+    context: EffectContext,
+    RetireBindingParams { id, internal_port }: RetireBindingParams,
+) -> Result<bool, Error> {
+    let context = context.deref()?;
+    context
+        .seed
+        .persistent_container
+        .net_service
+        .retire_binding(id, internal_port)
+        .await
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct GetServicePortForwardParams {
@@ -117,17 +159,14 @@ pub async fn get_service_port_forward(
         host_id,
         internal_port,
     }: GetServicePortForwardParams,
-) -> Result<NetInfo, Error> {
+) -> Result<Option<NetInfo>, Error> {
     let context = context.deref()?;
 
     let package_id = package_id.unwrap_or_else(|| context.seed.id.clone());
 
     let mut db = context.seed.ctx.db.peek().await;
-    Ok(host_for(&mut db, &package_id, &host_id)?
-        .as_bindings()
-        .de()?
-        .get(&internal_port)
-        .or_not_found(lazy_format!("binding for port {internal_port}"))?
-        .net
-        .clone())
+    Ok(host_for_existing(&mut db, &package_id, &host_id)?
+        .map(|host| host.as_bindings().de())
+        .transpose()?
+        .and_then(|bindings| bindings.get(&internal_port).map(|info| info.net.clone())))
 }

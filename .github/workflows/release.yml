@@ -236,7 +236,7 @@ jobs:
       - name: Generate changelog
         run: |
           FIRST_S9PK=$(ls *.s9pk | head -1)
-          RELEASE_NOTES=$(start-cli s9pk inspect "$FIRST_S9PK" manifest | jq -r '.releaseNotes | if type == "object" then (.["en-US"] // first(.[]) // "") else . end')
+          RELEASE_NOTES=$(start-cli s9pk inspect "$FIRST_S9PK" manifest | jq -r '.releaseNotes | if type == "object" then (.en_US // first(.[]) // "") else . end')
           {
             echo "## What's Changed"
             echo ""

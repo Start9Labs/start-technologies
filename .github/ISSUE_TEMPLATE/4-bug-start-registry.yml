@@ -1,0 +1,91 @@
+name: 🗄️ Start Registry — Bug Report
+description: A defect in the registry server (`registrybox`) — package/OS indexes, assets, or signing.
+type: Bug
+labels: [start-registry]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A package that is *missing or broken in a registry* is an issue for that package's own repo, not here. This form is for the registry server itself.
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites
+      options:
+        - label: I searched [existing issues](https://github.com/Start9Labs/start-technologies/issues?q=is%3Aissue) and this is not already reported.
+          required: true
+
+  - type: input
+    id: registry
+    attributes:
+      label: Which registry?
+      description: The URL you were talking to, or "self-hosted" plus how you deployed it.
+      placeholder: registry.start9.com
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: registrybox version
+      description: Only for a self-hosted registry — the release you deployed, or the git hash if you built it.
+      placeholder: 0.4.0.2
+
+  - type: dropdown
+    id: client
+    attributes:
+      label: How were you talking to it?
+      options:
+        - StartOS marketplace tab
+        - marketplace.start9.com (brochure)
+        - start-cli registry commands
+        - Direct HTTP / JSON-RPC
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which surface?
+      options:
+        - Package index
+        - OS index / version selection
+        - Asset upload
+        - Asset download
+        - Signing & signature verification
+        - Admins & signers
+        - Metrics
+        - JSON-RPC API
+        - Database / migration
+        - Other / unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: What happens
+      description: Include the request and the response — status code, RPC error, or the wrong data returned.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should happen instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Number them, and say what you saw at the step where it went wrong.
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs & evidence
+      render: shell

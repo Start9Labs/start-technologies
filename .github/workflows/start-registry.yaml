@@ -31,7 +31,7 @@ on:
   push:
     branches:
       - master
-      - next/*
+      - integration/*
     paths:
       - 'projects/start-registry/**'
       - 'shared-libs/crates/**'
@@ -47,7 +47,7 @@ on:
   pull_request:
     branches:
       - master
-      - next/*
+      - integration/*
     paths:
       - 'projects/start-registry/**'
       - 'shared-libs/crates/**'
@@ -62,14 +62,25 @@ on:
       - '!**/*.md'
 
 # The group is scoped by event so a master push can't cancel an in-flight
-# dispatched release build; dispatches queue behind each other, never cancel.
+# dispatched release build. Only pull requests cancel: a push to master
+# publishes to alpha, so master pushes queue behind each other rather than
+# aborting a publish half-done.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   NODEJS_VERSION: '24.11.0'
-  ENVIRONMENT: '${{ fromJson(format(''["{0}", ""]'', github.event.inputs.environment || ''dev''))[github.event.inputs.environment == ''NONE''] }}'
+  # Empty (release-equivalent) on master, `dev` everywhere else a build happens
+  # without an explicit input — PRs and integration/* branches. Continuous
+  # deployment must not ship dev-flavoured artifacts.
+  ENVIRONMENT: >-
+    ${{
+      fromJson(format('["{0}", ""]', github.event.inputs.environment || 'dev'))[
+        github.event.inputs.environment == 'NONE'
+        || (github.event_name == 'push' && github.ref == 'refs/heads/master')
+      ]
+    }}
 
 jobs:
   compile:

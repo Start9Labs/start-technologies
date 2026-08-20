@@ -1,79 +1,42 @@
 # Electrum Servers
 
-An Electrum server sits between your Bitcoin node and your wallet. It indexes the blockchain so wallets can quickly look up balances, transaction history, and unspent outputs for any address — without scanning the entire chain themselves. Most Bitcoin wallets connect to your self-hosted infrastructure through an Electrum server rather than directly via Bitcoin RPC.
+An Electrum server sits between your Bitcoin node and your wallet, indexing the blockchain so wallets can look up balances, history, and unspent outputs for an address instantly. Most Bitcoin wallets reach a self-hosted node this way rather than over Bitcoin RPC.
 
-A Bitcoin node stores every block ever produced, but it does not maintain an index of which addresses own which coins. When a wallet asks "what is the balance of this address?", the node would have to scan the entire blockchain to answer. An Electrum server solves this by building a persistent index that maps addresses to their transactions and unspent outputs. Once the index is built, lookups are instant. The server speaks the Electrum protocol, a lightweight client-server protocol that wallets already know how to use.
+On StartOS that server is **Fulcrum**. Once it is installed and synced, see [Connecting a Wallet](connecting-wallets.md).
+
+## Why you need one
+
+A Bitcoin node stores every block ever produced, but it keeps no index of which addresses own which coins. Asked "what is the balance of this address?", it would have to walk the entire chain. An Electrum server solves that by building a persistent index from addresses to their transactions and unspent outputs, and serving it over the Electrum protocol — which wallets already know how to speak.
 
 ```
-┌──────────┐      Electrum       ┌─────────────────┐       RPC        ┌──────────────┐
-│  Wallet  │ ──── protocol ────▶ │ Electrum Server  │ ──────────────▶  │ Bitcoin Node  │
-└──────────┘                     │ (Fulcrum)        │                  │              │
-                                 │ address index    │                  │ full chain   │
-                                 └─────────────────┘                  └──────────────┘
+┌──────────┐    Electrum     ┌──────────────────┐      RPC       ┌───────────────┐
+│  Wallet  │ ─── protocol ──▶│  Electrum server │ ──── + P2P ───▶│ Bitcoin node  │
+└──────────┘                 │  address index   │                │  full chain   │
+                             └──────────────────┘                └───────────────┘
 ```
 
 1. Your **Bitcoin node** downloads and validates every block on the network.
 2. Your **Electrum server** reads blocks from the node and builds an address-level index.
 3. Your **wallet** connects to the Electrum server and queries balances, history, and UTXOs instantly.
 
-The initial index build requires scanning the full blockchain, which can take hours or days depending on the implementation and your hardware. After that, the server stays in sync incrementally as new blocks arrive.
+Building that index the first time means reading the whole chain, which takes hours. After that the server keeps up incrementally as blocks arrive.
 
-## Options on StartOS
+## Fulcrum
 
-### Fulcrum (Recommended)
+Fulcrum builds a **complete** address index, so every wallet query is answered from local data. Queries stay fast even for addresses with long transaction histories, which is where lighter Electrum servers struggle. It is actively maintained and widely deployed across the self-hosting community.
 
-- **Author:** Calin Culianu (cculianu)
-- **Language:** C++
-- **StartOS:** Available on the StartOS Marketplace
+The cost is disk and patience: the index runs to hundreds of gigabytes on top of the chain itself, and the first build takes many hours. Install it, then leave it overnight. Fulcrum's own instructions in StartOS carry its exact requirements and settings.
 
-Fulcrum is a high-performance Electrum server written in C++. It is the recommended Electrum server for StartOS.
+It also needs your Bitcoin node to be **archival** rather than pruned — see [Archival vs Pruned Nodes](archival-vs-pruned.md). StartOS prompts you on the Bitcoin service if anything needs changing.
 
-**Why Fulcrum:**
+Wait for Fulcrum's **Sync Progress** health check to report Synced before pointing a wallet at it. A wallet connected to a half-built index shows a partial balance, which is alarming and entirely temporary.
 
-- **Fast queries** — Once indexed, address lookups and UTXO queries are consistently fast, even for addresses with large transaction histories.
-- **Full address index** — Fulcrum builds a complete index of all addresses, so every wallet query is served from local data.
-- **Mature and stable** — Actively maintained, widely deployed across the Bitcoin self-hosting community.
-- **Broad wallet support** — Every wallet that speaks the Electrum protocol works with Fulcrum. See [Bitcoin Wallets](bitcoin-wallets.md) for a full list.
+- [Fulcrum source and documentation](https://github.com/cculianu/Fulcrum)
 
-**Trade-offs:**
+## Do you need one at all?
 
-- **Disk usage** — The full address index requires significant disk space (roughly 60-100 GB on top of the blockchain itself).
-- **Initial sync time** — Building the index from scratch takes time, typically several hours on modern hardware. Plan to let it run overnight after installation.
+Not if your wallet talks to Bitcoin directly. Sparrow, FullyNoded, Wasabi and BTCPay Server all connect over Bitcoin's RPC interface, with no indexer in the picture and no extra disk.
 
-### electrs
+The difference shows up when you **import an existing wallet**. An Electrum server finds its history in seconds; a bare Bitcoin node has to walk the block range, which takes hours and cannot reach past a pruned node's horizon. Day-to-day use of a wallet that is already imported is much the same either way.
 
-- **Author:** Blockstream
-- **Language:** Rust
-
-electrs is a lightweight Electrum server written in Rust. It takes a different approach than Fulcrum — instead of building a full persistent index, electrs uses a compact index and fetches some data from the Bitcoin node on demand.
-
-**Advantages:**
-
-- **Lower disk usage** — The compact index uses significantly less disk space than Fulcrum's full index.
-- **Faster initial sync** — The lighter index builds faster than a full address index.
-
-**Disadvantages:**
-
-- **Slower queries** — Some queries require on-the-fly lookups from the Bitcoin node, making them noticeably slower than Fulcrum, especially for addresses with many transactions.
-- **Not on the StartOS Marketplace** — electrs is not currently available as a service on StartOS.
-
-## Comparison
-
-| Feature          | Fulcrum              | electrs                    |
-| ---------------- | -------------------- | -------------------------- |
-| **Query speed**  | Fast (full index)    | Slower (partial on-demand) |
-| **Disk usage**   | ~60-100 GB for index | ~5-10 GB for index         |
-| **Initial sync** | Several hours        | Faster                     |
-| **StartOS**      | Yes                  | No                         |
-| **Maintenance**  | Active               | Active                     |
-
-For StartOS users, **Fulcrum is the clear choice** — it is the only Electrum server available on the StartOS Marketplace and provides the best query performance for everyday wallet use.
-
-## Connecting Wallets
-
-Once Fulcrum is installed and synced on your StartOS server, wallets connect to it using an Electrum server address. Most wallets need just two pieces of information:
-
-- **Host** — Your server's address (local IP on your LAN, `.local` hostname, `.onion` address over Tor, or a clearnet address via VPN or reverse tunnel)
-- **Port** — The Electrum protocol port (typically 50001 for TCP or 50002 for SSL)
-
-For wallet-specific connection instructions, see [Bitcoin Wallets](bitcoin-wallets.md).
+See [Connecting a Wallet](connecting-wallets.md#which-connection-do-you-need) for the full comparison.

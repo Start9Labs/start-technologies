@@ -46,8 +46,10 @@ cargo build -p imbl-value --features ts-rs      # build with ts-rs TS impls
   holds for `Array`/`Object` via `imbl`'s structural sharing.
 - **Object keys are `yasi::InternedString`, not `String`.** `Object` is `InOMap<InternedString, Value>`;
   use the re-exported `imbl_value::InternedString` for keys.
-- **(De)serialization is custom.** `Value` uses the impls in `ser.rs`/`de.rs`, not `serde_json`'s — keep them
-  in sync if you touch either.
+- **(De)serialization is derived from `serde_json`.** `ser.rs`/`de.rs` (and `index.rs`, `macros.rs`) are
+  adapted from `serde_json`'s `value` module, rewritten against the `imbl`-backed `Value`. Keep `ser.rs` and
+  `de.rs` in sync with each other, and prefer porting upstream fixes over inventing new behavior. The
+  attribution lives in [LICENSE](LICENSE) — keep it if you touch these files.
 - **`json!` uses `local_inner_macros`** to avoid namespace pollution; the `json_internal_vec!` helper is
   defined outside that scope so `vec!` resolves correctly.
 - **Optional features:** `ts-rs` is required by the `start_core` consumer; `arbitrary` is used by `json-patch`

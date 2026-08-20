@@ -9,6 +9,8 @@ import {
   SetHealth,
   BindParams,
   BindRangeParams,
+  RetireHostParams,
+  RetireBindingParams,
   HostId,
   NetInfo,
   Host,
@@ -165,16 +167,49 @@ export type Effects = {
    * external ports is a hard error. Capped at 500 ports per call.
    */
   bindRange(options: BindRangeParams): Promise<null>
-  /** Get the port address for a service */
+  /**
+   * The external ports assigned to a binding, or `null` if the host or the
+   * binding does not exist. Raw allocator metadata — to reach a dependency,
+   * use `sdk.host.getBridgeAddress`, which is correct regardless of how the
+   * dependency terminates TLS.
+   */
   getServicePortForward(options: {
     packageId?: PackageId
     hostId: HostId
     internalPort: number
-  }): Promise<NetInfo>
-  /** Removes all network bindings, called in the setupInputSpec */
+  }): Promise<NetInfo | null>
+  /**
+   * Disables every network binding except those listed, keeping each row, its
+   * external port claim and the operator's per-address choices. Called at the
+   * end of a `setupInterfaces` pass. To delete one for good, see `retireHost` /
+   * `retireBinding`.
+   */
   clearBindings(options: {
     except: { id: HostId; internalPort: number }[]
   }): Promise<null>
+  /**
+   * Permanently removes a host and everything under it: every binding and port
+   * range, their exported service interfaces, the operator's public and private
+   * domains for the host, and their per-address enable/disable choices. The
+   * external ports return to the server's pool.
+   *
+   * Where `clearBindings` disables — keeping the row, its port claim and the
+   * operator's choices so the address survives a pass that did not declare it —
+   * this deletes. Binding the same id afterwards starts a fresh host that may
+   * be assigned a different external port.
+   *
+   * Resolves `false` if there was no such host, so a migration re-run is safe.
+   */
+  retireHost(options: RetireHostParams): Promise<boolean>
+  /**
+   * Permanently removes whichever of the single-port binding and the port range
+   * is bound at `internalPort` — and both, if both are — along with their
+   * exported service interfaces. The external ports return to the server's
+   * pool. The host survives, keeping its domains.
+   *
+   * Resolves `false` if nothing was bound at `internalPort`.
+   */
+  retireBinding(options: RetireBindingParams): Promise<boolean>
   // host
   /** Returns information about the specified host, if it exists */
   getHostInfo(options: {

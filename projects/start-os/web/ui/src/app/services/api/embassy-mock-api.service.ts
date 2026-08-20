@@ -1278,8 +1278,10 @@ export class MockApiService extends ApiService {
     this.mockRevision(patch)
 
     // return Mock.ActionResGroup
-    return Mock.ActionResMessage
     // return Mock.ActionResSingle
+    return params.actionId === 'big-qr'
+      ? Mock.ActionResBigQr
+      : Mock.ActionResMessage
   }
 
   async clearTask(params: T.ClearTaskParams): Promise<null> {

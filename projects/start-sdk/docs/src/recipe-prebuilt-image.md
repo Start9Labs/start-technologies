@@ -2,7 +2,7 @@
 
 The most common packaging task is wrapping an existing upstream Docker image — `linuxserver/*`, an official `org/app` image, a community image — rather than building your own from a `Dockerfile`. It looks simple, and the happy path is. But the same handful of mistakes sink these packages over and over: the image name is guessed instead of verified, only one of the image's data paths gets mounted, non-UI ports are forgotten, an image with its own init system crashes because it isn't PID 1, and credentials are "set" by hand-editing a config format that was never confirmed. This recipe is the checklist that keeps those from happening.
 
-This page assumes the service shape from [Set Up a Basic Service](recipe-basic-service.md) — daemon, interface, health check, backup — and covers only what's different when you don't control the image. If you're starting a brand-new package, scaffold first (`start-cli s9pk init-package "My Service"`) and work its `TODO.md` top to bottom; this recipe expands the "replace the hello-world image" line of that checklist.
+This page assumes the service shape from [Set Up a Basic Service](recipe-basic-service.md) — daemon, interface, health check, backup — and covers only what's different when you don't control the image. If you're starting a brand-new package, scaffold first (`start-cli s9pk init-package "My Service"`) and work the [New Package Checklist](new-package-checklist.md) top to bottom; this recipe expands the "replace the hello-world image" line of that checklist.
 
 ## Solution
 

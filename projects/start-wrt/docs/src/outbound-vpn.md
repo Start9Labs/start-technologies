@@ -64,7 +64,7 @@ To delete a VPN, click "Delete" on its detail page. If any Security Profiles rou
 
 ## Enabling and Disabling
 
-Each VPN has an enable/disable toggle in the table view. When a VPN is disabled, profiles that route through it will fall back to the WAN (direct Internet).
+Each VPN has an enable/disable toggle in the table view. When a VPN is disabled, profiles that route through it will fall back to the WAN (direct Internet). A disabled VPN is not offered when choosing a [Security Profile's](security-profiles.md) outbound routing, nor as another VPN's **Connects to** target — re-enable it first.
 
 > [!NOTE]
 > You cannot disable a VPN if other VPNs use it as a target. Change their target first.

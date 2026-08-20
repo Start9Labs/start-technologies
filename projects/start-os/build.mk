@@ -120,7 +120,7 @@ start-os-wormhole-squashfs: results/$(BASENAME).squashfs
 	$(eval SQFS_SIZE := $(shell du -s --bytes results/$(BASENAME).squashfs | awk '{print $$1}'))
 	@echo "Paste the following command into the shell of your StartOS server:"
 	@echo
-	@wormhole send results/$(BASENAME).squashfs 2>&1 | awk -Winteractive '/wormhole receive/ { printf "sudo sh -c '"'"'/usr/lib/startos/scripts/prune-images $(SQFS_SIZE) && /usr/lib/startos/scripts/prune-boot && cd /media/startos/images && wormhole receive --accept-file %s && CHECKSUM=$(SQFS_SUM) /usr/lib/startos/scripts/upgrade ./$(BASENAME).squashfs'"'"'\n", $$3 }'
+	@wormhole send results/$(BASENAME).squashfs 2>&1 | awk -Winteractive '/wormhole receive/ { printf "sudo sh -c '"'"'/usr/lib/startos/scripts/prune-images $(SQFS_SIZE) && /usr/lib/startos/scripts/prune-boot && cd /media/startos/images && wormhole receive --accept-file %s && CHECKSUM=$(SQFS_SUM) /usr/lib/startos/scripts/upgrade ./$(BASENAME).squashfs $(SQFS_SUM)'"'"'\n", $$3 }'
 
 start-os-update: $(STARTOS_TARGETS)
 	@if [ -z "$(REMOTE)" ]; then >&2 echo "Must specify REMOTE" && false; fi
@@ -148,7 +148,11 @@ start-os-update-squashfs: results/$(BASENAME).squashfs
 	$(call ssh,'sudo /usr/lib/startos/scripts/prune-images $(SQFS_SIZE)')
 	$(call ssh,'sudo /usr/lib/startos/scripts/prune-boot')
 	$(call cp,results/$(BASENAME).squashfs,/media/startos/images/next.rootfs)
-	$(call ssh,'sudo CHECKSUM=$(SQFS_SUM) /usr/lib/startos/scripts/upgrade /media/startos/images/next.rootfs')
+	$(call ssh,'sudo CHECKSUM=$(SQFS_SUM) /usr/lib/startos/scripts/upgrade /media/startos/images/next.rootfs $(SQFS_SUM)')
+
+start-os-update-from-gha: # update from a CI build rather than a local one (RUN_ID=<id|url>, or BRANCH=<name> for that branch's latest)
+	@if [ -z "$(REMOTE)" ]; then >&2 echo "Must specify REMOTE" && false; fi
+	./scripts/update-from-gha.sh $(if $(RUN_ID),--run "$(RUN_ID)") $(if $(BRANCH),--branch "$(BRANCH)") $(REMOTE)
 
 start-os-emulate-reflash: $(STARTOS_TARGETS)
 	@if [ -z "$(REMOTE)" ]; then >&2 echo "Must specify REMOTE" && false; fi

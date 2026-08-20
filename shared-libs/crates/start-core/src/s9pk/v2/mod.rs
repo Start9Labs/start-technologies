@@ -36,6 +36,7 @@ pub mod recipe;
     ├── icon.<ext>
     ├── LICENSE.md
     ├── instructions.md
+    ├── README.md (optional)
     ├── dependencies
     │   └── <id>
     │       ├── metadata.json
@@ -59,10 +60,11 @@ fn priority(s: &str) -> Option<usize> {
         a if Path::new(a).file_stem() == Some(OsStr::new("icon")) => Some(1),
         "LICENSE.md" => Some(2),
         "instructions.md" => Some(3),
-        "dependencies" => Some(4),
-        "javascript.squashfs" => Some(5),
-        "assets.squashfs" => Some(6),
-        "images" => Some(7),
+        "README.md" => Some(4),
+        "dependencies" => Some(5),
+        "javascript.squashfs" => Some(6),
+        "assets.squashfs" => Some(7),
+        "images" => Some(8),
         _ => None,
     }
 }
@@ -205,6 +207,17 @@ impl<S: FileSource + Clone> S9pk<S> {
 
     pub async fn instructions(&self) -> Result<Option<String>, Error> {
         let Some(entry) = self.archive.contents().get_path("instructions.md") else {
+            return Ok(None);
+        };
+        let bytes = entry.expect_file()?.to_vec(entry.hash()).await?;
+        Ok(Some(String::from_utf8(bytes)?))
+    }
+
+    /// The package's technical reference, as packed at build time. `None` for a package
+    /// built before READMEs were packed, or one whose repository has no README — callers
+    /// must handle its absence rather than assume it.
+    pub async fn readme(&self) -> Result<Option<String>, Error> {
+        let Some(entry) = self.archive.contents().get_path("README.md") else {
             return Ok(None);
         };
         let bytes = entry.expect_file()?.to_vec(entry.hash()).await?;

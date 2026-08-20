@@ -116,7 +116,7 @@ All branding is a **`--tui-*` design-token override sheet**, nothing else:
 
 - Monorepo brand apps: `shared-libs/ts-modules/shared/styles/taiga.scss` — the Start9 dark theme
   as a `[tuiTheme='dark']` block (backgrounds, statuses with `color-mix()` pale variants, text
-  tiers), Proxima Nova `@font-face` + `--tui-typography-family-*`, a custom
+  tiers), Hanken Grotesk `@font-face` + `--tui-typography-family-*`, a custom
   `[tuiAppearance][data-appearance='primary-success']` built with Taiga's SCSS mixins
   (`@use '@taiga-ui/styles/utils'`), and shrinking upstream shims (pruned as Taiga absorbs fixes).
 - start-wrt: dual-theme — tokens under both `[tuiTheme='dark']` and `:root, [tuiTheme='light']`;

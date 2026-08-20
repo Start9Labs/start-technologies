@@ -8,6 +8,266 @@ Full per-release notes are published on the
 [GitHub releases page](https://github.com/Start9Labs/start-technologies/releases). This
 file tracks notable changes since the move to the monorepo.
 
+## [0.4.0.2]
+
+### Added
+
+- **A service can permanently retire a network host or a port it no longer
+  uses, and the port numbers it held become available again.** A service that
+  reorganizes its interfaces across an update — renaming a host, dropping a
+  port — could previously only switch the old one off, which keeps its port
+  number reserved for as long as the service is installed. Retiring removes it
+  outright and releases its port forwards, proxy entries, local DNS records and
+  any port mapping StartOS asked your router for. A domain you had assigned to
+  a retired host is removed with it, so check the service's release notes and
+  assign it to one of the service's current interfaces.
+
+- **A gateway can be marked secure, so services' plaintext addresses are offered
+  over it.** `start-cli net gateway set-secure <GATEWAY>` records that you trust
+  the network on the other side of a gateway; `unset-secure` hands the decision
+  back to StartOS, which trusts only the loopback and container-bridge gateways.
+  `net gateway list` shows the current setting. This is one switch for the whole
+  server: every installed service's non-SSL addresses — the server's LAN IP
+  addresses, its `.local` name and its private domains — are offered on that
+  network at once and enabled immediately. An address unlocked this way reaches
+  only devices on that gateway's own network segment; it is never opened to the
+  public internet. Mark a gateway secure only when you control every device on
+  the network it reaches: anything on it can read and alter traffic to a
+  plaintext address, including the passwords typed into it. See
+  [Gateways](https://docs.start9.com/start-os/gateways.html).
+
+### Changed
+
+- **The NVIDIA images now use NVIDIA's open kernel modules, which support GeForce
+  RTX 20-series, Quadro RTX and newer.** This is what makes current cards work at
+  all — an RTX 50-series, an RTX PRO 6000 or an NVIDIA GB10 can only be driven by
+  these modules. The trade is at the other end of the range: **a GeForce GTX
+  900-series or 10-series card, a Titan X or Xp, or a Tesla M40, P40, P100 or
+  V100 will no longer be driven by the NVIDIA images.** If you rely on one of
+  those, stay on 0.4.0.1 or use the Standard image, whose open-source `nouveau`
+  driver still provides display output without GPU compute.
+
+### Fixed
+
+- **Apps that hold a connection open — desktop sync clients, API pollers — stop
+  dropping in and out.** Nextcloud Desktop and clients like it showed a
+  recurring "Network error" that cleared itself a few seconds later. A service
+  routinely closes a connection once it has sat idle for a few seconds, and a
+  client is built to notice that and open a fresh one. StartOS's reverse proxy
+  kept the client's half of the pair open after the service had closed its own,
+  so the client went on holding a connection it had every reason to believe was
+  good, and the next request it sent over that connection was cut off with no
+  reply. The proxy now closes the client's half as soon as the service closes
+  its own, which is the signal the client is waiting for.
+
+- Trim whitespace on form inputs.
+
+- **Helper processes a service starts are cleared away once they finish.** A
+  service that shells out to other programs — a media downloader calling
+  `yt-dlp` and `ffmpeg`, an agent running tool subprocesses — orphans a helper
+  whenever the program that started it exits first. Those finished helpers
+  stayed listed inside the service's container as `<defunct>`, each still
+  holding a process slot, for as long as the service ran — so a service that
+  starts many of them built them up without limit, and only a restart cleared
+  them. The container's first process now collects them as they finish.
+
+- **A Let's Encrypt domain works on an interface served on a port other than
+  `443`** — an Electrum server on `50002`, a TURN server on `5349`. Let's
+  Encrypt proves you control a name by connecting to it on port `443` whatever
+  port the service behind it uses, and nothing on your server answered there for
+  that name: the certificate was never issued, so the address served your
+  server's Root CA instead and clients that validate against public authorities
+  could not connect at all. StartOS now answers the challenge on whichever port
+  it arrives at, and over StartTunnel claims port `443` for that domain
+  automatically, routing it to the port the interface uses. On a router, forward
+  `443` to your server as you would for a standard domain — the domain's own
+  port is not enough on its own.
+
+- **A service that presents its own TLS certificate is shown as presenting
+  it.** StartOS does not terminate such a connection, so the certificate the
+  client checks is the service's — but a domain on that interface reported
+  whichever certificate authority had been chosen for it. Those addresses now
+  report `Self signed`.
+
+- **Services that run their own containers or a VPN can reach the devices they
+  were granted.** A service opting into `userspaceFilesystems` or
+  `virtualNetworking` is handed `/dev/fuse` and `/dev/net/tun` inside its
+  container. Those nodes are now created with the same permissions the host
+  gives them, so a service running as a non-root user can open them. Previously
+  the permissions were left to whatever StartOS's own file-creation mask
+  produced, and only the container's boot-time device pass — which races with
+  the grant — widened them; on the losing side of that race a CI runner's jobs
+  failed to start with `Failed to open() /dev/net/tun: Permission denied`.
+
+- **Reinstalling with "Preserve" copies your server's configuration before it
+  rewrites the drive, so the configuration survives.** The copy used to be taken
+  afterwards, by which point there was nothing left to read — so the server came
+  back with its configuration reset, and said nothing about it. Among the things
+  lost was the key your server uses to sign its add-on drivers, which on a
+  machine with Secure Boot left hardware such as an NVIDIA GPU unavailable
+  afterwards. A reinstall that cannot read the configuration it was asked to keep
+  now stops and says so, rather than continuing and discarding it.
+
+- **On a server with Secure Boot enabled, hardware that needs an add-on driver —
+  an NVIDIA GPU, most commonly — works after setup.** Secure Boot only loads such
+  a driver once you approve the key your server signs it with, and approving that
+  key is protected by your master password. Your server only ever asked the
+  firmware to trust the key while starting up, which on a new server happens
+  before you have set a password, so the request was never made and you were
+  never shown the prompt — leaving the driver unable to load, with nothing to say
+  why. Your server now asks as soon as you set your password, so the prompt
+  appears on the next restart. See
+  [Initial Setup](https://docs.start9.com/start-os/initial-setup.html).
+
+- **The 64-bit ARM NVIDIA image boots on NVIDIA GB10 hardware again, such as the
+  DGX Spark, GPU workloads like Ollama and vLLM run on it, and the image is
+  considerably smaller.** Four separate faults were involved, two of which each
+  stopped the machine on the last line the bootloader printed — so fixing either
+  one alone changed nothing. These images drive the GPU with NVIDIA's own driver
+  and turn nouveau off, yet were still built with graphics firmware they cannot
+  use — nouveau's, for every chip it supports, along with an older driver
+  series' — and 152 MB of it sat inside the initramfs that the bootloader must
+  read in full before the kernel starts. Separately, a Tegra fabric driver that
+  recent kernels build in claims one of the GB10's internal buses and reads a
+  protected register on it, stopping the machine during hardware detection before
+  it can display anything. Third, the image built NVIDIA's driver in the flavour
+  that does not support this generation of GPU, so the driver found the card but
+  could never bring it up. Last, the GPU came up and reported itself correctly
+  while every CUDA program still failed at startup, because NVIDIA's driver
+  declines a GPU whose address-translation support does not match what the kernel
+  offers, and this kernel is built without the support that an integrated GPU
+  like the GB10 advertises. The images now carry only the graphics firmware they
+  can use, switch that driver off, build the kernel modules NVIDIA supports here
+  — which is what NVIDIA's own operating system does on the same hardware — and
+  accept the GPU rather than turning it away.
+
+- **Your server answers to its own addresses and no others.** A name that
+  resolved to your server but was never configured on it — a domain you pointed
+  at its LAN IP, or its `.local` name typed without the `.local` — was served
+  your dashboard, along with a certificate for that name signed by your server's
+  Root CA. Logging in was never possible under those names, so the page could
+  not be used for anything, but it should not have been reachable. Your server
+  now serves its `.local` address, the domains you have assigned to it, and
+  direct connections to its IP address.
+
+- **Image upgrades verify their checksum again.** `upgrade` compared the image's
+  blake3 hash only when it was given a second positional argument, which no
+  caller passed — so the comparison never ran and a corrupt but still mountable
+  image would be installed without complaint. It now verifies whenever
+  `CHECKSUM` is set.
+
+- **Large QR codes render instead of coming up blank.** The encoder was pinned
+  to correction level `M`, which has no version left past about 2.3 kB — so a
+  longer value threw and the dialog opened empty, with only a console error to
+  say why. Those codes now encode at level `L`, which carries about 2.9 kB.
+
+- **Removing a domain from a service leaves its network settings otherwise
+  untouched.** Naming a network host the service does not have — a stale id, or
+  a typo — added that host to the service as an empty entry, which then stayed
+  in its network settings with nothing to remove it.
+
+- **A service whose startup routine throws now reports the failure in its own
+  logs, and StartOS names the failure for what it is.** The container runtime
+  handed the exception back to StartOS over its socket without also printing
+  it, so a service that failed to start went quiet in `Logs` at the moment it
+  needed to speak, while restarting every ten seconds. The exception now
+  appears in the service's own log next to the procedure that raised it, and
+  StartOS labels a failure that came from the runtime `Service Runtime Error`
+  rather than `Unknown Error`.
+
+- **A service that adds an SSL port keeps the address you already had.** When a
+  service gained an SSL port alongside a plaintext one it already had, the new
+  SSL port took over the existing number and the plaintext port was moved to an
+  arbitrary one — changing an address you may have saved. Each now keeps its
+  own: the port you already had stays where it is, and the one being added takes
+  the port the service asks for.
+
+- **The StartOS UI is served over plain HTTP on port 80.** Servers set up before
+  0.4.0.1 gave the interface a high-numbered port instead, and nothing answered
+  on it — so a service that reached the StartOS API over the container bridge,
+  and any address StartOS reported for its own plaintext interface, pointed
+  somewhere dead. Existing servers move to port 80 on update, and the high port
+  goes back to the pool for services to use.
+
+- **The login banner reports system status for every user, not just the first
+  one to log in.** It staged its database snapshot at a fixed path in `/tmp`,
+  which `pam_motd` created as root at login — so any subsequent non-root run
+  could not write it and the banner fell back to `Services: Unknown`,
+  `WAN: N/A` and `NTP: Unknown`. It now uses a private temporary file and
+  removes it on every exit path.
+- **A failed or cancelled service update can no longer lose that service's data.**
+  Rolling an update back replaces the service's data with the copy taken before the
+  update started. That replacement used to delete the current data before putting the
+  copy in place, so an interruption in between — a restart, a power loss, or a second
+  failure — could leave the service with neither, and the next update attempt would
+  discard the surviving copy as stale. The rollback now moves the current data aside
+  and only drops it once the copy is fully in place, so an interruption at any point
+  leaves a state StartOS can finish on the next boot, and a rollback that cannot be
+  completed is reported instead of passing silently. A failed first-time install over
+  data that was already there no longer deletes that data either.
+- **The copy taken before an update is now made with the service stopped**, so it can
+  no longer capture a database mid-write.
+
+- **A service reached over IPv6 through a tunnel now answers.** StartOS sends a
+  reply back out the interface its connection arrived on by restoring a
+  connection mark, but the kernel routes the reply that _opens_ a connection
+  before that mark is restored. On a server whose gateway carries no IPv6 of its
+  own, that reply fell to the gateway's routing table — which drops IPv6 to keep
+  it from leaking out the wrong interface — and was discarded before it was ever
+  sent, so an inbound IPv6 connection to a tunnel-delegated address hung until
+  it timed out. A reply from an interface's own global IPv6 address now leaves
+  by that interface. IPv4, and traffic forwarded to a service container, were
+  unaffected.
+
+- **Notification selection checkboxes no longer cover text on phones.** When
+  notification selection is active, each checkbox replaces its notification
+  icon while preserving the title's spacing.
+
+- **A service that uses UDP is reachable from the Internet on a public IP
+  address.** StartOS already passed UDP through to the service, but the mapping
+  it asked your gateway for over PCP, NAT-PMP or UPnP covered TCP only, and a
+  router maps each protocol separately — so a VPN, a video-call relay or a game
+  server needed a UDP rule added to the router by hand. StartOS now asks for
+  both protocols: on a public IP address, over IPv4 and IPv6 alike, and on a
+  published port range. It withdraws both when the address is disabled or
+  deleted.
+
+- **An interface a service update moves to a different internal port is listed
+  once, not twice.** StartOS keeps a service's former port binding dormant so
+  its addresses and external port survive if the service returns to it — but
+  the interface record exported from that binding lingered too, so after an
+  update like Jitsi's (Web UI moved from port 80 to 8000) the service showed
+  the same interface twice. Exporting an interface now removes the record of
+  its previous export, wherever it lived; a lingering duplicate clears the next
+  time its service initializes — at the reboot this update performs.
+
+- **A port a service asks StartOS to keep off insecure networks stays off them,
+  even when the service also publishes a port range.** A range and a single port
+  could both claim one container port, and a range carries its own exposure
+  rules — so the range's rule could reach the port on gateways the port's own
+  settings excluded. StartOS now rejects the overlapping claim and names both
+  ports, so the service reports the conflict instead of serving it.
+
+### Security
+
+- **Service mount paths are validated and confined to their intended
+  directories.**
+
+- **An address you assigned to a public certificate authority serves that
+  authority's certificate and nothing else.** When StartOS could not obtain the
+  certificate, the address fell back to one signed by your server's Root CA
+  while still listing Let's Encrypt as its authority — so the fallback was
+  invisible from the server itself, whose own trust store contains that Root CA.
+  Your Root CA chain is the same on every address your server exposes, which
+  makes it a value that links them all to one server, handed to anyone who
+  connects. Such an address now refuses the connection until its certificate is
+  available, and tells you so: a notification names the domain and why issuance
+  failed, once per domain until a certificate lands. A certificate already
+  issued keeps being served through its last 30 days while renewal is retried,
+  so a renewal that begins failing does not take the address down, and a domain
+  you also reach on your local network keeps answering there with your server's
+  own certificate.
+
 ## [0.4.0.1]
 
 ### Changed
