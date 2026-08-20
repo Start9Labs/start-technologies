@@ -224,6 +224,7 @@ export type SetUciRes<T extends string[]> = {
 
 export type SystemInfoRes = {
   version: string
+  gitHash: string
   language: string
   date: string
   theme: 'dark' | 'light' | 'system'

@@ -535,4 +535,8 @@ export default {
   542: 'Port wird von diesem Router verwendet',
   543: 'Die Ports {ports} werden von diesem Router selbst verwendet — für den Fernzugriff auf seine Weboberfläche, SSH oder einen VPN-Server. Werden sie veröffentlicht, geht dieser Datenverkehr stattdessen an das ausgewählte Gerät, wodurch diese Dienste von außerhalb Ihres Netzwerks nicht mehr erreichbar sind. Trotzdem veröffentlichen?',
   544: 'Trotzdem veröffentlichen',
+  545: 'Aktualisierung erforderlich',
+  546: 'Die Router-Firmware wurde aktualisiert, aber diese Seite verwendet noch die vorherige Oberfläche. Laden Sie die Seite neu, um die neueste Version zu erhalten.',
+  547: 'Neu laden',
+  548: 'Auf v{version} aktualisiert',
 } satisfies i18n

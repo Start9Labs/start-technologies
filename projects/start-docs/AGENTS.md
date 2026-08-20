@@ -31,7 +31,7 @@ The StartOS, StartTunnel, Packaging, and StartWRT books are NOT here — they mo
 
 - Always re-read a file before subsequent edits — a linter/formatter may auto-modify files after changes.
 - Never use custom admonition titles. `> [!WARNING] Custom Title` is broken in mdBook; use plain `> [!WARNING]` and put context in the body.
-- Keep the outer OS picker flat with the canonical `global="platform"` label set (`Mac`, `Windows`, `Linux`, `iOS`, `Android / Graphene`) — don't split distros into top-level `platform` tabs. The only sanctioned nesting is a single distro/version sub-group (its own `global`) inside a platform tab; see CONTRIBUTING for the tab rules.
+- Keep the outer OS picker flat with the canonical `global="platform"` label set (`Mac`, `Windows`, `Linux`, `iOS`, `Android / Graphene`, `ChromeOS`) — don't split distros into top-level `platform` tabs. The only sanctioned nesting is a single distro/version sub-group (its own `global`) inside a platform tab; see CONTRIBUTING for the tab rules.
 - Cross-book links must use absolute paths (`/start-tunnel/devices.html`), not relative paths — mdBook only validates intra-book links.
 - All pages are flat in each book's `src/` — no subdirectory nesting. Sidebar sections use `# Part Title` in `SUMMARY.md`.
 - Every page should have introductory prose between the H1 and the first H2. It's auto-extracted for `llms.txt`.

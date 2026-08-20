@@ -19,6 +19,7 @@ use tokio::net::TcpListener;
 use tokio::signal::unix::SignalKind;
 use tokio::sync::mpsc;
 use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer};
+use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::instrument;
 use visit_rs::Visit;
 
@@ -280,6 +281,12 @@ async fn inner_main() -> Result<(), Error> {
         if let Err(e) = crate::system::apply_remote_access(ServerContext::default()).await {
             tracing::error!("Remote access rule apply failed: {e}");
         }
+        // Install the DHCP-fingerprint hook (script + `dhcpscript` on every
+        // dnsmasq section) — daemon-side so OTA-updated routers converge on
+        // first boot. Reloads dnsmasq only when something actually changed.
+        if let Err(e) = crate::device_ident::ensure_dhcp_fingerprint_hook().await {
+            tracing::error!("DHCP fingerprint hook setup failed: {e}");
+        }
         // Apply WAN schedule enforcement (UCI firewall rules)
         if let Err(e) =
             crate::profiles::evaluate_and_apply_schedules(&ServerContext::default()).await
@@ -367,15 +374,29 @@ async fn inner_main() -> Result<(), Error> {
             .expect("failed to build proxy HTTP client"),
     );
 
+    // Firmware build stamp on every RPC response. The UI checks it against its
+    // baked-in config.json gitHash on each response, so an open tab notices a
+    // firmware update within one background poll (~5s) even when the daemon
+    // restart was too quick to drop any request (e.g. a CLI deploy). Exposed
+    // through CORS for the cross-origin dev serve.
+    let git_hash_header = header::HeaderName::from_static("x-startwrt-git-hash");
+
     let cors = CorsLayer::new()
         .allow_origin(AllowOrigin::mirror_request())
         .allow_methods(AllowMethods::mirror_request())
         .allow_headers(AllowHeaders::mirror_request())
+        .expose_headers([git_hash_header.clone()])
         .allow_credentials(true);
 
     let app = Router::new()
         // RPC API at /rpc/v1 (matches frontend's RELATIVE_URL)
-        .route("/rpc/v1", post(handler))
+        .route(
+            "/rpc/v1",
+            post(handler).layer(SetResponseHeaderLayer::overriding(
+                git_hash_header,
+                header::HeaderValue::from_static(env!("STARTWRT_GIT_HASH")),
+            )),
+        )
         // RPC continuation endpoint (binary I/O for backup/restore/diagnostics)
         .route(
             "/rest/rpc/{guid}",

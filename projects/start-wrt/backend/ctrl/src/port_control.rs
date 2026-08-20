@@ -1416,7 +1416,10 @@ pub async fn auto_list(ctx: ServerContext) -> Result<Vec<AutoForward>, Error> {
 
     // Device display names: UCI static host names win, cached learned names
     // fill the gaps.
-    let mut names: HashMap<String, String> = crate::device_names::load_all();
+    let mut names: HashMap<String, String> = crate::device_names::load_all()
+        .into_iter()
+        .filter_map(|(mac, cached)| cached.hostname.map(|name| (mac, name)))
+        .collect();
     cfgs["dhcp"].each::<DhcpHost, Error>(|_, host| {
         if let Some(name) = host.name.as_ref().filter(|n| !n.is_empty()) {
             names.insert(host.mac.to_uppercase(), name.clone());

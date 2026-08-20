@@ -4,6 +4,8 @@ Complete RPC API contract for the StartWRT backend. All endpoints use **JSON-RPC
 
 **Goal:** The frontend should never touch UCI files, run shell commands, or read raw files. Every operation goes through a purpose-built RPC method. The backend handles all UCI manipulation, service restarts, and system queries internally.
 
+Every `/rpc/v1` response carries an `x-startwrt-git-hash` header with the firmware's build stamp (full git hash, `-modified` suffix on dirty builds — same value as `system.info`'s `gitHash`, exposed through CORS). The UI compares it against its baked-in `config.json` gitHash on every response, so an open tab detects a firmware update from its next request (including the periodic background form polls) even when the daemon restart was too quick to drop a connection.
+
 ---
 
 ## Shared Types
@@ -167,6 +169,9 @@ No auth required.
 #[serde(rename_all = "camelCase")]
 struct SystemInfoResponse {
     version: String,
+    git_hash: String,  // firmware build stamp (full git hash, "-modified" suffix on dirty builds);
+                       // the UI compares this against its baked-in config.json gitHash to detect
+                       // a stale cached bundle and prompt/perform a reload
     language: String,
     date: String,  // ISO 8601
     theme: Theme,
@@ -769,7 +774,10 @@ enum DeviceStatus {
 struct Device {
     mac: Option<String>,
     /// Fully-resolved display name: UCI static name → live DHCP hostname →
-    /// remembered hostname (name cache) → `device-<mac>` placeholder. Always set.
+    /// live mDNS name → remembered hostname (name cache) → derived label
+    /// (OS from the DHCP fingerprint, e.g. `Windows device (b2c3d4)`, else
+    /// vendor from the MAC's OUI, e.g. `Apple device (b2c3d4)`) →
+    /// `device-<mac>` placeholder. Always set.
     name: String,
     /// Raw DHCP lease hostname ("*" when unset); a hint for the rename form.
     hostname: Option<String>,
@@ -797,10 +805,14 @@ struct SpeedData {
     down: f64,
 }
 // Response: Vec<Device>
-// Backend: reads DHCP hosts, firewall rules, ARP table, DHCP leases, and a
-// persistent name cache (/etc/startwrt/device_names.json) that remembers
-// DHCP-advertised hostnames per MAC. The backend resolves the full name
-// fallback chain server-side and returns a single `name`.
+// Backend: reads DHCP hosts, firewall rules, ARP table, DHCP leases, a
+// persistent identity cache (/etc/startwrt/device_names.json) that remembers
+// DHCP/mDNS-advertised hostnames and DHCP fingerprints per MAC, live DHCP
+// fingerprints captured by a dnsmasq dhcp-script hook
+// (/var/run/dnsmasq/dhcp.fingerprints), and an embedded IEEE OUI registry
+// snapshot — the last two label devices that never advertise a name. The
+// backend resolves the full name fallback chain server-side and returns a
+// single `name`.
 ```
 
 ### `devices.update`

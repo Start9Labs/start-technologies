@@ -535,4 +535,8 @@ export default {
   542: 'Port utilisé par ce routeur',
   543: 'Les ports {ports} sont utilisés par ce routeur lui-même — pour l’accès à distance à son interface web, SSH ou un serveur VPN. En les publiant, ce trafic sera envoyé vers l’appareil sélectionné, rendant ces services inaccessibles depuis l’extérieur de votre réseau. Publier quand même ?',
   544: 'Publier quand même',
+  545: 'Actualisation requise',
+  546: "Le micrologiciel du routeur a été mis à jour, mais cette page exécute encore l'interface précédente. Rechargez la page pour obtenir la dernière version.",
+  547: 'Recharger',
+  548: 'Mise à jour vers la v{version} effectuée',
 } satisfies i18n

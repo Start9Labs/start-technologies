@@ -535,4 +535,8 @@ export default {
   542: 'Port używany przez ten router',
   543: 'Porty {ports} są używane przez sam ten router — do zdalnego dostępu do jego interfejsu WWW, SSH lub serwera VPN. Ich opublikowanie przekieruje ten ruch do wybranego urządzenia, odcinając te usługi od dostępu spoza Twojej sieci. Opublikować mimo to?',
   544: 'Opublikuj mimo to',
+  545: 'Wymagane odświeżenie',
+  546: 'Oprogramowanie routera zostało zaktualizowane, ale ta strona nadal używa poprzedniego interfejsu. Załaduj stronę ponownie, aby uzyskać najnowszą wersję.',
+  547: 'Załaduj ponownie',
+  548: 'Zaktualizowano do v{version}',
 } satisfies i18n

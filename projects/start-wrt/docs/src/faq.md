@@ -35,7 +35,7 @@ You have two options:
 
 ## What if I lose my Wi-Fi sticker password?
 
-The Wi-Fi password is printed on the sticker on the bottom of the router and stored in the router's EEPROM — it can also be displayed in the StartWRT GUI on the WiFi tab as the Admin Profile 'Default' label. The EEPROM value is only re-read on a [factory reset](factory-reset.md); if you have replaced the **Default** password with your own, that new password is what's in effect. On a DIY or unprogrammed board with no EEPROM Wi-Fi password, set one via the GUI (if connected via ethernet) or with `startwrt-cli set-wifi-password`. See [Installing StartWRT](installing.md#diy-and-unprogrammed-boards) for the full procedure.
+The Wi-Fi password is printed on the sticker on the bottom of the router and stored in the router's EEPROM — it can also be displayed in the StartWRT GUI on the WiFi tab as the Admin Profile 'Default' label. The EEPROM value is only re-read on a [factory reset](factory-reset.md); if you have replaced the **Default** password with your own, that new password is what's in effect. On a DIY or unprogrammed board with no EEPROM Wi-Fi password, connect via Ethernet and set one in the web interface. See [Installing StartWRT](installing.md#diy-and-unprogrammed-boards) for the full procedure.
 
 ## Why doesn't one of my profiles have IPv6 Internet access?
 

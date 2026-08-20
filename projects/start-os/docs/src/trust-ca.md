@@ -109,6 +109,25 @@ This guide applies to Android 13+, GrapheneOS, CalyxOS, and LineageOS.
 1. If using Firefox, you must use [Firefox Beta](https://play.google.com/store/apps/details?id=org.mozilla.firefox_beta), then complete [this final step](#android--graphene).
 
 {{#endtab }}
+{{#tab name="ChromeOS" }}
+
+1. Open Chrome and enter `chrome://certificate-manager` in the address bar. (Equivalently: `Settings > Privacy and security > Security > Manage certificates`.)
+
+1. Under "Local certificates", select "Custom", then expand "Installed by you".
+
+1. Click "Import" and select your `your-server-name.crt` certificate from your Downloads folder.
+
+1. Verify that your server's `<your-server-name> Local Root CA` certificate now appears in the list and is trusted for identifying websites.
+
+> [!NOTE]
+> On older ChromeOS versions, "Manage certificates" opens a dialog with an "Authorities" tab instead. Click "Import" there, select the certificate, and check "Trust this certificate for identifying websites".
+
+> [!TIP]
+> ChromeOS only imports PEM-encoded certificates. Your Root CA is already PEM-encoded despite its `.crt` extension, so it imports as-is — but if you see a "file type unsupported" error, rename the file's extension to `.pem` and try again.
+
+Certificates imported here are trusted by the Chrome browser. If you use the Linux development environment (Crostini) on your Chromebook, it keeps its own certificate store — to trust the CA there too, follow the "Debian / Ubuntu" instructions on the Linux tab from inside the Linux terminal.
+
+{{#endtab }}
 {{#tab name="Linux" }}
 
 First, open a terminal, move into the directory where you downloaded your Root CA (usually `~/Downloads`), and set a variable to the name of the certificate so the commands below can reference it:

@@ -540,4 +540,8 @@ export const ENGLISH: Record<string, number> = {
   'Port Used by This Router': 542,
   'Port(s) {ports} are used by this router itself — for remote access to its web interface, SSH, or a VPN server. Publishing them will send that traffic to the selected device instead, cutting those services off from outside your network. Publish anyway?': 543,
   'Publish Anyway': 544,
+  'Refresh Needed': 545,
+  'The router firmware has been updated, but this page is still running the previous interface. Reload the page to get the latest version.': 546,
+  'Reload': 547,
+  'Updated to v{version}': 548,
 }

@@ -50,6 +50,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   advertises the Start9 HOSTNAME capability only on gateways that really
   implement it (StartTunnel), so StartOS clients fall back to plain forwards
   here instead of recording hostname mappings that would route nothing.
+- The UI now detects when the running firmware ships a newer interface than
+  the page is displaying (every RPC response and `system.info` report the
+  firmware's build stamp and the UI compares it to its own). An update
+  installed from the current tab reloads the page automatically once the
+  router is back (the "Updated to vX" confirmation follows after login); an
+  update applied any other way — CLI deploy, another device — shows a
+  "Refresh Needed" dialog with a Reload button rather than reloading out from
+  under unsaved work. Detection rides an `x-startwrt-git-hash` header on every
+  RPC response, so an open tab notices within seconds of its next request even
+  when the update restarted the daemon too quickly to drop a connection; pages
+  that make no requests while idle re-check every 30 seconds.
 
 ### Changed
 
@@ -63,6 +74,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   port deliberately, and you're asked once per rule. Detection follows the
   live configuration (nothing is asked for ports no router service uses) and
   matches transports, so e.g. a UDP-only forward on 443 doesn't warn.
+- The firmware build stamp is now identical everywhere it appears: the
+  `startwrt` binary (UI `ETag`, `system.info`, `startwrt verify`) now carries
+  the same full-hash `-modified`-suffixed stamp the Settings → General
+  **Build** field bakes in via `config.json`, instead of a separate
+  short-hash `-dirty` stamp.
 
 ### Removed
 
@@ -167,6 +183,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rows in an arbitrary order, so the table visibly jumped around. Published
   ports now appear in a stable order, sorted by label.
 
+- **A device that missed its one chance to share its name over mDNS/Bonjour is
+  no longer stuck with a generic label until the router reboots.** The name
+  lookup was attempted exactly once per device, and it usually fired at the
+  worst moment — the instant the device first appeared (before its Bonjour
+  service finished starting), or during the reconnection rush right after a
+  router reboot — and sleeping phones and laptops don't answer at all. The
+  router now retries silent devices on a backoff schedule (about a minute
+  after the first miss, stretching to a day) before concluding the device has
+  no name to share; a device that answers is remembered permanently.
+
 - **IPv6 published-port rules now follow the target device when it changes
   its address.** Devices assign their own IPv6 addresses and change them
   routinely — privacy addresses rotate daily, and most operating systems
@@ -178,6 +204,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   address happened to be observed first, which could be a short-lived
   privacy address that expired within days. The **Endpoints** column shows
   that same stable address, so the endpoint you copy always matches the rule.
+
+- Browsers could keep serving a stale, cached copy of the web UI after a
+  firmware update — the router previously sent no cache headers, leaving cache
+  behavior to per-browser heuristics (Firefox/Safari could silently run an old
+  UI against the new backend). The embedded UI is now served with explicit
+  headers: stable-named files (`index.html`, `assets/`) revalidate on every
+  load against a per-build `ETag` (a cheap `304 Not Modified` when unchanged),
+  while Angular's content-hashed bundles are cached as `immutable`. Requests
+  for assets from an older build now get a `404` instead of a mis-typed
+  `index.html` fallback.
+- The "Updated to vX" confirmation shown after a firmware update is now
+  translated instead of always appearing in English.
 
 - **Documentation corrected against the code in a full docs-vs-code audit.** The
   user guide no longer misstates product behavior: backups _do_ preserve assigned

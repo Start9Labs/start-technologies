@@ -535,4 +535,8 @@ export default {
   542: 'Puerto utilizado por este router',
   543: 'Los puertos {ports} los utiliza este propio router — para el acceso remoto a su interfaz web, SSH o un servidor VPN. Si los publica, ese tráfico se enviará al dispositivo seleccionado, dejando esos servicios inaccesibles desde fuera de su red. ¿Publicar de todos modos?',
   544: 'Publicar de todos modos',
+  545: 'Actualización necesaria',
+  546: 'El firmware del router se ha actualizado, pero esta página sigue ejecutando la interfaz anterior. Recarga la página para obtener la versión más reciente.',
+  547: 'Recargar',
+  548: 'Actualizado a la v{version}',
 } satisfies i18n
