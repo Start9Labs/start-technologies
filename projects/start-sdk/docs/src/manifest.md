@@ -27,6 +27,36 @@ export const long = {
 }
 ```
 
+### How long each one may be
+
+|         | limit           |
+| ------- | --------------- |
+| `short` | 120 characters  |
+| `long`  | 2000 characters |
+
+Every locale gets the same limit, and it is enforced when the package is
+validated, so a description that overruns fails the build.
+
+`short` is not truncated when it overruns — the marketplace tile clamps it to
+two lines with `overflow: hidden`, so the remainder is silently cut off in the
+one place users browse. **Two lines is about 80 characters**, and it is the same
+two lines whatever language the tile renders in. The limit sits above that so a
+translation isn't failed over a few characters' growth — German and Polish
+routinely run 20-30% longer than the same English sentence — not as permission
+to run long. Write the English well inside 80 and every locale still fits the
+tile.
+
+Two more characters' worth of advice:
+
+- **Don't open with the service's name.** The tile renders the title in bold on
+  the line directly above, so "Foo is a self-hosted bar" spends its first words
+  on something the reader can already see.
+- **Say what it is, not what it is like.** Comparisons and superlatives cost
+  more characters than they earn at this size.
+
+`long` has no such budget — it is rendered unclamped on the service's details
+page — so its limit is about the reader's patience rather than the layout.
+
 ## manifest/index.ts
 
 ```typescript

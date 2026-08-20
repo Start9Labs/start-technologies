@@ -87,4 +87,4 @@ test suite.
   [install guide](https://docs.start9.com/start-os/installing-startos.html).
 - Browse services on the [Start9 Marketplace](https://marketplace.start9.com/).
 
-To report security issues, email [security@start9.com](mailto:security@start9.com).
+To report security issues, email [security@start9.com](mailto:security@start9.com). See [SECURITY.md](../../SECURITY.md) for what is in scope and what happens next.

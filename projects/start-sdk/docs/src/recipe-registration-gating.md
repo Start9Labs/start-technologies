@@ -10,4 +10,4 @@ Use `sdk.Action.withoutInput()` with an async metadata function (not a static ob
 
 ## Examples
 
-See `startos/actions/` in: [gitea](https://github.com/Start9Labs/gitea-startos), [synapse](https://github.com/Start9Labs/synapse-startos), [vaultwarden](https://github.com/Start9Labs/vaultwarden-startos), [mcaptcha](https://github.com/Start9Labs/mcaptcha-startos)
+See `startos/actions/` in: [gitea](https://github.com/Start9Labs/gitea-startos), [synapse](https://github.com/Start9Labs/synapse-startos), [vaultwarden](https://github.com/Start9Labs/vaultwarden-startos)

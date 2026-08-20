@@ -157,7 +157,7 @@ See `routes/published-ports/` for the best complete example of the table + dialo
 When you're unsure how to use a Taiga component:
 
 1. **Check existing code** — search the codebase for usage examples.
-2. **Fetch llms-full.txt** — `https://taiga-ui.dev/llms-full.txt` has all components with code examples (~2200 lines). For Claude Code: `WebFetch url=https://taiga-ui.dev/llms-full.txt prompt="How to use TuiTextfield with a select dropdown"`.
+2. **Fetch llms-full.txt** — `https://taiga-ui.dev/llms-full.txt` has all components with code examples. For Claude Code: `WebFetch url=https://taiga-ui.dev/llms-full.txt prompt="How to use TuiTextfield with a select dropdown"`.
 3. **MCP server (beta)** — `taiga-family/taiga-ui-mcp` exposes `get_list_components` (fuzzy search) and `get_component_example` (docs + code). Add to your Claude config:
 
    ```json

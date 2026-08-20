@@ -12,9 +12,10 @@ my-service-startos/
 │   └── workflows/
 │       ├── build.yml          # CI build on PR
 │       ├── tagAndRelease.yml  # Version check, tag, and release on merge
-│       └── release.yml        # Release on manual tag push
+│       ├── release.yml        # Release on manual tag push
+│       └── syncNext.yml       # Carry the base branch onto `next` on merge
 ├── assets/                 # Supplementary files (required, can be empty)
-│   └── ABOUT.md
+│   └── .gitkeep
 ├── startos/                # Primary development directory
 │   ├── actions/            # User-facing action scripts
 │   ├── fileModels/         # Type-safe config file representations
@@ -30,10 +31,10 @@ my-service-startos/
 │   ├── backups.ts          # Backup volumes and exclusions
 │   ├── dependencies.ts     # Service dependencies
 │   ├── index.ts            # Exports (boilerplate)
-│   ├── interfaces.ts       # Network interface definitions (optional - not in barebones scaffold)
+│   ├── interfaces.ts       # Network interface definitions (optional)
 │   ├── main.ts             # Daemon runtime and health checks
 │   ├── sdk.ts              # SDK initialization (boilerplate)
-│   ├── utils.ts            # Package-specific utilities (empty in barebones scaffold)
+│   ├── utils.ts            # Package-specific utilities
 │   └── versions/           # Version management and migrations
 ├── .gitignore
 ├── AGENTS.md               # Agent context: repo identity + how to work in this repo
@@ -46,7 +47,6 @@ my-service-startos/
 ├── package.json
 ├── package-lock.json
 ├── README.md               # Service documentation (see Writing READMEs)
-├── TODO.md                 # Pending work on the package
 ├── tsconfig.json
 ├── UPDATING.md             # Per-package upstream-version tracking
 └── upstream-project/       # Git submodule (optional)
@@ -65,11 +65,12 @@ These files typically require minimal modification:
 
 ### .github/workflows/
 
-Every package should include three GitHub Actions workflows that delegate to the reusable CI workflows in this monorepo (`.github/workflows/`, migrated from the old `shared-workflows` repo). The CI pipeline has two automatic stages, plus an optional manual path:
+Every package should include four GitHub Actions workflows that delegate to the reusable CI workflows in this monorepo (`.github/workflows/`). The CI pipeline has two automatic stages, plus an optional manual path, and a branch-hygiene job that runs alongside them:
 
 ```
 PR opened/updated ──> Build
 PR merged to master ──> Version check ──> Tag ──> Build ──> Release ──> Publish
+                   └─> Sync next
 Manual tag push ──> Build ──> Release ──> Publish (bypasses version check)
 ```
 
@@ -155,11 +156,45 @@ jobs:
       contents: write
 ```
 
+**syncNext.yml** -- carries every change that lands on the base branch onto the paired `next` iteration branch, so `next` never falls behind what has already shipped:
+
+```yaml
+name: Sync next
+
+on:
+  push:
+    branches: ['master']
+  workflow_dispatch:
+
+jobs:
+  sync:
+    uses: Start9Labs/start-technologies/.github/workflows/syncNext.yml@master
+    permissions:
+      contents: write
+      pull-requests: write
+```
+
+The paired branch is derived rather than configured: an explicit `next/<base>` is used where one exists — that is how the multi-branch packages keep one iteration branch per major line or flavor — and otherwise the repo's default branch pairs with a plain `next`. **A repo with no `next` gets one created at the base tip on the first run**, so a package never has to be seeded by hand.
+
+Neither `next` nor the base branch is force-pushed or rewritten. `next` is fast-forwarded when it is merely behind, given a merge commit when it carries unmerged work, and left untouched with a pull request opened for a human only when that merge conflicts. That pull request is headed by a throwaway `sync-next/<base>` branch rather than the base itself, so resolving its conflicts in GitHub's web editor — which commits to the head branch — cannot land on the base. **Merge it with a merge commit rather than a squash**, so `next` comes out with the base as an ancestor; a squash leaves equivalent content under a fresh commit and the following sync conflicts all over again. `workflow_dispatch` is there so a package can be brought into line without waiting for its next merge.
+
+List every base branch the package maintains under `branches:`, and note this is one of the two workflows whose branch list must match the branch the repo actually uses — a package on `main` that still says `master` here silently never syncs.
+
 ### AGENTS.md and CLAUDE.md
 
-`AGENTS.md` is the package's agent-context file. Generic packaging knowledge — SDK patterns, the disciplines on the [Development Workflow](./workflow.md) page, the rules throughout this guide — lives in one canonical place: the packaging guide, **not** copied into each package repo where 40+ duplicates would drift out of sync. `AGENTS.md` carries only what's specific to _this_ repo.
+`AGENTS.md` is the package's agent-context file. Generic packaging knowledge — SDK patterns, the disciplines on the [Development Workflow](./workflow.md) page, the rules throughout this guide — lives in one canonical place: the packaging guide, **not** copied into each package repo where duplicates would drift out of sync. `AGENTS.md` carries only what's specific to _this_ repo.
 
-Keep it short and repo-specific: state that this is a StartOS service package, point at the repo's `TODO.md` as the worklist, give the doc-sync rule (keep `README.md` and `instructions.md` in step with every change), and capture any package-specific gotchas — in short, how to work in _this_ repo. Do **not** restate generic guide content or turn it into a web-fetch driver (don't instruct the agent to pull guide pages over the web up front). Developers work with the guide checked out locally alongside the package (see [Environment Setup](./environment-setup.md)); the local-first navigation — read `start-technologies/projects/start-sdk/docs/src/` directly, fall back to <https://docs.start9.com/packaging> only when no local copy exists — is set up once by the workspace-level `CLAUDE.md`, not repeated per repo.
+Keep it short and repo-specific: state that this is a StartOS service package, give the doc-sync rule (keep `README.md` and `instructions.md` in step with every change), and capture any package-specific gotchas — in short, how to work in _this_ repo. Do **not** restate generic guide content or turn it into a web-fetch driver (don't instruct the agent to pull guide pages over the web up front).
+
+It is also the one package document with a single reader, so it must not restate `README.md` or `instructions.md` either — anyone changing the package has both. That leaves it carrying only what has no home in them:
+
+- **Repo mechanics** — parallel version branches, a worktree layout, a vendored tree.
+- **Prohibitions** — a change that looks right and is not, with the one clause that says why. Inline these rather than linking: an imperative behind a pointer is a suggestion.
+- **Extension points** — where the next backend, interface, or migration gets added.
+- **Naming traps** — a package id that differs from the repo directory, for instance.
+- **Build or test invocations** specific to this package.
+
+Most packages need one to four bullets here; a simple one needs none. Explaining _how the package works_ is `README.md`'s job — see [Writing READMEs — Who reads this file](./writing-readmes.md#who-reads-this-file) for who reads which file. Developers work with the guide checked out locally alongside the package (see [Environment Setup](./environment-setup.md)); the local-first navigation — read `start-technologies/projects/start-sdk/docs/src/` directly, fall back to <https://docs.start9.com/packaging> only when no local copy exists — is set up once by the workspace-level `CLAUDE.md`, not repeated per repo.
 
 `CLAUDE.md` is a one-line import of that same file:
 
@@ -197,9 +232,7 @@ If you are pulling a pre-built Docker image (no submodule), copy the license tex
 
 Service documentation following the structure described in [Writing READMEs](./writing-readmes.md). Every README should document how the StartOS package differs from the upstream service.
 
-### TODO.md
-
-A running list of pending work on this package. Add items when you defer work; remove them when complete. An empty `TODO.md` (just the `# TODO` heading) is fine — keep the file present so contributors know where to record items.
+It is **packed into the `.s9pk`** alongside `instructions.md`, so an AI assistant administering the server reads the README for the version actually installed, offline, rather than fetching whatever a repository's default branch has since moved to. Unlike `instructions.md` it is optional — a package without one still builds — but nothing on the server can fall back to a copy that isn't there, so ship one.
 
 ### UPDATING.md
 
@@ -214,7 +247,7 @@ Packages with multiple upstream sources (e.g. a service plus its database sideca
 
 ## assets/
 
-Stores supplementary files and scripts needed by the service, such as configuration generators or entrypoint scripts. **Required** -- the `assets/` directory must exist and contain at least one file (e.g. `ABOUT.md`) for git to track it and for the build to succeed.
+Stores supplementary files and scripts needed by the service, such as configuration generators or entrypoint scripts. **Required** -- the `assets/` directory must exist and contain at least one file for git to track it and for the build to succeed, so it carries a `.gitkeep` even when the package has no assets of its own. Keep the `.gitkeep` when you add real assets; it costs nothing and keeps every package's layout identical.
 
 ## startos/
 
@@ -247,8 +280,6 @@ This file is plumbing, used for exporting package functions to StartOS.
 #### interfaces.ts (optional)
 
 `setupInterfaces()` is where you define the service interfaces and determine how they are exposed. This function executes on service install, update, and config save. It takes the user's config input as an argument, which will be `null` for install and update.
-
-The barebones scaffold ships no `interfaces.ts` — many services (background workers, sidecars) expose nothing on the network. When a service does, add this file and wire its `setInterfaces` into `init/index.ts` (conventionally before `setDependencies`).
 
 #### main.ts
 
@@ -296,9 +327,12 @@ Each action receives its own file and is also passed into `Actions.of()` in `act
 
 ```
 fileModels/
+├── .gitkeep
 ├── store.json.ts
 └── config.json.ts
 ```
+
+Like `assets/`, this directory carries a `.gitkeep` so it survives in git when a package declares no file models.
 
 In the `fileModels/` directory, you can create separate `.ts` files from which you export a file model for each file from the file system you want to represent. Supported file formats are `.yaml`, `.toml`, `.json`, `.env`, `.ini`, `.txt`. For alternative file formats, you can use the `raw` method and provide custom serialization and parser functions.
 

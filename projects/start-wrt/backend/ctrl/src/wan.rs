@@ -672,6 +672,10 @@ pub async fn ipv6_set<C: CtrlContext>(
                     None,
                 );
                 if ctx.effectful() {
+                    // Disabling WAN IPv6 (or switching mode) drops the delegated
+                    // prefix the LAN was subnetting; withdraw it from clients
+                    // while it still exists. See deprecate_odhcpd_prefixes.
+                    crate::deprecate_odhcpd_prefixes().await;
                     restart_network().await;
                     let _ = crate::run_quiet_async(
                         tokio::process::Command::new("/etc/init.d/odhcpd").arg("restart"),
@@ -1275,6 +1279,30 @@ config service 'wan'
         let res = ipv6_get(ctx).await.unwrap();
         // Default wan6 proto=dhcpv6 with no reqaddress → SLAAC
         assert_eq!(res.mode, WanIpv6Mode::Slaac);
+    }
+
+    #[tokio::test]
+    async fn ipv6_get_unmanaged_proto() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("network"),
+            "\
+config interface 'wan'
+\toption device 'eth1'
+\toption proto 'dhcp'
+
+config interface 'wan6'
+\toption device '@wan'
+\toption proto '6in4'
+",
+        )
+        .unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        // A hand-configured proto startwrt doesn't manage reads back as
+        // Disabled — it used to fail typed parsing and error the endpoint.
+        let res = ipv6_get(ctx).await.unwrap();
+        assert_eq!(res.mode, WanIpv6Mode::Disabled);
     }
 
     #[tokio::test]

@@ -33,6 +33,9 @@ Each table has the following columns:
 > The Settings button appears for addresses that require external configuration: [public domains](clearnet.md) (DNS + port forwarding), [private domains](private-domains.md) (DNS), and [public IP addresses](public-ip.md) (port forwarding).
 
 > [!NOTE]
+> An address whose Certificate Authority is **Let's Encrypt** serves a Let's Encrypt certificate and nothing else. While StartOS has yet to obtain one — the DNS record has not propagated yet, or port `443` does not reach your server for that domain — the address does not answer, rather than presenting your server's Root CA under a name you asked a public authority to sign. See [Configure Port Forwarding](clearnet.md#configure-port-forwarding), which covers what a domain on a port other than `443` needs.
+
+> [!NOTE]
 > The port-forwarding and firewall tests need the service **running** only for an address it serves directly — a raw public IP, or another non-SSL binding. StartOS SSL-terminates every HTTP interface behind its always-on reverse proxy, so those stay testable even while the service is stopped (as do DNS tests). A non-SSL address's Test buttons are therefore disabled while its service is stopped; and because that service often restarts when a domain is added or an address is enabled, StartOS then shows its reachability tests as untested (not failed) and still opens the setup modal, so you can set up forwarding and re-test once it is running.
 
 > [!NOTE]

@@ -11,6 +11,17 @@ or the CLI's externally observable behavior.
 
 ## [1.1.1]
 
+### Added
+
+- **`s9pk pack` packs the package's `README.md`.** It sits beside `instructions.md` in the
+  archive and is readable with `S9pk::readme()`. The point is what runs on the server: an AI
+  assistant administering a service can now read the package's technical reference from the
+  installed `.s9pk` — offline, and describing the version actually installed — instead of
+  fetching a repository's default branch, which has usually moved on. Unlike `instructions.md`
+  it is **optional**, so a package without one still builds; it is simply absent from the
+  archive and the accessor returns `None`. Nothing is packed for an s9pk built before this,
+  and v1 packages migrated forward carry no README either.
+
 ### Fixed
 
 - **`registry os asset remove` can be run.** Its `iso`/`img`/`squashfs` handlers were registered

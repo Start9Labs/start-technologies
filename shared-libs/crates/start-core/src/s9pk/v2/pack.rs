@@ -279,6 +279,17 @@ impl PackParams {
             }
         }
     }
+    /// Unlike `instructions`, a README is optional: it is a repository document, and an
+    /// existing package that lacks one must keep building. When present it is packed so an
+    /// agent administering the service can read it from the installed s9pk — version-matched,
+    /// and without reaching the network.
+    async fn readme(&self) -> Result<Option<PathBuf>, Error> {
+        let candidate = self.path().join("README.md");
+        Ok(tokio::fs::metadata(&candidate)
+            .await
+            .is_ok()
+            .then_some(candidate))
+    }
     fn assets(&self) -> PathBuf {
         self.assets
             .as_ref()
@@ -698,6 +709,12 @@ pub async fn pack(ctx: CliContext, params: PackParams) -> Result<(), Error> {
             PackSource::File(params.instructions().await?),
         )),
     );
+    if let Some(readme) = params.readme().await? {
+        files.insert(
+            "README.md".into(),
+            Entry::file(TmpSource::new(tmp_dir.clone(), PackSource::File(readme))),
+        );
+    }
     files.insert(
         "javascript.squashfs".into(),
         Entry::file(TmpSource::new(
@@ -909,7 +926,10 @@ pub async fn list_ingredients(_: CliContext, params: PackParams) -> Result<Vec<P
                 params.icon().await?,
                 params.license().await?,
                 params.instructions().await?,
-            ]);
+            ]
+            .into_iter()
+            .chain(params.readme().await?)
+            .collect());
         }
     };
     let mut ingredients = vec![
@@ -918,6 +938,7 @@ pub async fn list_ingredients(_: CliContext, params: PackParams) -> Result<Vec<P
         params.license().await?,
         params.instructions().await?,
     ];
+    ingredients.extend(params.readme().await?);
 
     for (_, dependency) in manifest.dependencies.0 {
         match dependency.metadata {

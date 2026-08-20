@@ -12,7 +12,7 @@ import { injectContext } from '@taiga-ui/polymorpheus'
 import { Operation } from 'fast-json-patch'
 import { FormGroupComponent } from 'src/app/routes/portal/components/form/containers/group.component'
 import { InvalidService } from 'src/app/routes/portal/components/form/containers/control.directive'
-import { FormService } from 'src/app/services/form.service'
+import { FormService, trim } from 'src/app/services/form.service'
 
 export interface ActionButton<T> {
   text: string
@@ -144,6 +144,7 @@ export class FormComponent<T extends Record<string, any>> implements OnInit {
   }
 
   async onClick(handler: Required<ActionButton<T>>['handler']) {
+    trim(this.form)
     tuiMarkControlAsTouchedAndValidate(this.form)
     this.invalidService.scrollIntoView()
 

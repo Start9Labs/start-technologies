@@ -1,5 +1,8 @@
 import { inject, Injectable } from '@angular/core'
 import {
+  AbstractControl,
+  FormArray,
+  FormGroup,
   UntypedFormArray,
   UntypedFormBuilder,
   UntypedFormControl,
@@ -516,45 +519,10 @@ function isListObject(
   return 'uniqueBy' in spec
 }
 
-export function convertValuesRecursive(
-  configSpec: IST.InputSpec,
-  group: UntypedFormGroup,
-) {
-  Object.entries(configSpec).forEach(([key, valueSpec]) => {
-    const control = group.get(key)
-
-    if (!control) return
-
-    if (valueSpec.type === 'number') {
-      control.setValue(
-        control.value || control.value === 0 ? Number(control.value) : null,
-      )
-    } else if (valueSpec.type === 'text' || valueSpec.type === 'textarea') {
-      if (!control.value) control.setValue(null)
-    } else if (valueSpec.type === 'object') {
-      convertValuesRecursive(valueSpec.spec, group.get(key) as UntypedFormGroup)
-    } else if (valueSpec.type === 'union') {
-      const formGr = group.get(key) as UntypedFormGroup
-      const value = formGr.controls['selection']?.value
-      const spec = !!value && valueSpec.variants[value]?.spec
-
-      if (spec) {
-        convertValuesRecursive(spec, formGr)
-      }
-    } else if (valueSpec.type === 'list') {
-      const formArr = group.get(key) as UntypedFormArray
-      const { controls } = formArr
-
-      if (valueSpec.spec.type === 'text') {
-        controls.forEach(control => {
-          if (!control.value) control.setValue(null)
-        })
-      } else if (valueSpec.spec.type === 'object') {
-        controls.forEach(formGroup => {
-          const objectSpec = valueSpec.spec as IST.ListValueSpecObject
-          convertValuesRecursive(objectSpec.spec, formGroup as UntypedFormGroup)
-        })
-      }
-    }
-  })
+export function trim(control: AbstractControl) {
+  if (control instanceof FormGroup || control instanceof FormArray) {
+    Object.values(control.controls).forEach(trim)
+  } else if (typeof control.value === 'string') {
+    control.setValue(control.value.trim() || null)
+  }
 }

@@ -111,8 +111,7 @@ rebuilds. Every setup run:
    provide (`dl/`, `feeds/`, `build_dir/`, `staging_dir/`, `bin/`, `files/`, `.config`,
    signing keys, …) is carried over, so caches and staged files are preserved.
 2. Applies [`openwrt-patches/`](openwrt-patches/) with `patch -p1` — the Start9 modifications
-   to upstream files (currently 3 small build-infra patches for the git-cloned vendor kernel
-   - a 6.18 module rename).
+   to upstream files.
 3. Rsyncs [`openwrt-overlay/`](openwrt-overlay/) over the tree — the _added_ files
    (mirroring upstream layout): `target/linux/spacemit/` (the K1 target, including its
    `patches-6.18/` kernel patches), `package/boot/{opensbi,uboot}-spacemit/`, the generic

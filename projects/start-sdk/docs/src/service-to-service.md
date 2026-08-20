@@ -63,9 +63,6 @@ Three things make this correct, and each matters:
 
 `getBridgeAddress` returns the same `Watchable` as `sdk.host.get`, so it carries every read strategy. Use `.const()` in `setupMain` and `setupOnInit`; use `.once()` only inside an action, where a live snapshot rather than a subscription is what you want.
 
-> [!NOTE]
-> Packages written before start-sdk 2.0.8 carry a local `bridgeAddress` helper in their `utils.ts` doing this by hand. Delete it and call `sdk.host.getBridgeAddress` instead.
-
 When a dependency [retires](interfaces.md#retiring-a-host-or-binding) the host or binding you resolve, it disappears from the database and `getBridgeAddress` resolves `null` — the same path as the dependency not being installed, so rule 3 above already covers it. With `fallbackPort` you get the fallback instead, as always.
 
 ## The Tor exception: always-on flags

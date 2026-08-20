@@ -94,6 +94,12 @@ elif [ "${IB_TARGET_ARCH}" = "riscv64" ]; then
 fi
 
 
+BOOTAPPEND_LIVE="boot=live noautologin console=tty0"
+if [ "${IB_TARGET_PLATFORM}" = "aarch64-nvidia" ]; then
+	# Same GB10 hang the installed system guards against — see debian/postinst.
+	BOOTAPPEND_LIVE="$BOOTAPPEND_LIVE initcall_blacklist=tegra234_cbb_init"
+fi
+
 cat > /etc/wgetrc << EOF
 retry_connrefused = on
 tries = 100
@@ -104,7 +110,7 @@ lb config \
 	--iso-preparer "START9 LABS; HTTPS://START9.COM" \
 	--iso-publisher "START9 LABS; HTTPS://START9.COM" \
 	--backports true \
-	--bootappend-live "boot=live noautologin console=tty0" \
+	--bootappend-live "$BOOTAPPEND_LIVE" \
 	--bootloaders $BOOTLOADERS \
 	--cache false \
 	--mirror-bootstrap "https://deb.debian.org/debian/" \
@@ -304,16 +310,35 @@ if [ "${NVIDIA}" = "1" ]; then
     wget -O "\${RUN_PATH}" "\${RUN_URL}"
     chmod +x "\${RUN_PATH}"
 
+    SRC_PATH="/root/nvidia-\${NVIDIA_DRIVER_VERSION}"
+    echo "[nvidia-hook] Extracting installer to \${SRC_PATH}" >&2
+    sh "\${RUN_PATH}" --extract-only --target "\${SRC_PATH}"
+
+    # UVM refuses to register a GPU whose ATS capability disagrees with the VA space's.
+    # Debian builds no CONFIG_IOMMU_SVA, so UVM pins every VA space to ATS_UNSUPPORTED
+    # while an integrated part like GB10 still advertises ATS — registration then fails
+    # with NV_ERR_INVALID_DEVICE, which UVM never logs, and cuInit reports only
+    # CUDA_ERROR_NOT_INITIALIZED. Dropping the guard forfeits mixing coherent and
+    # non-coherent GPUs in one process, which these images do not support anyway.
+    UVM_VA_SPACE="\${SRC_PATH}/kernel-open/nvidia-uvm/uvm_va_space.c"
+    ATS_GUARD='if (!uvm_va_space_ats_unset(va_space) &&'
+    if ! grep -qF "\${ATS_GUARD}" "\${UVM_VA_SPACE}"; then
+        echo "[nvidia-hook] ATS guard not found in \${UVM_VA_SPACE} — re-verify against this driver" >&2
+        exit 1
+    fi
+    sed -i "s|\${ATS_GUARD}|if (0 \&\& !uvm_va_space_ats_unset(va_space) \&\&|" "\${UVM_VA_SPACE}"
+
     echo "[nvidia-hook] Running NVIDIA installer for kernel \${KVER}" >&2
 
-    # Otherwise the installer picks the flavour from the build host's own GPUs.
-    if ! sh "\${RUN_PATH}" \
+    # Pinned, or the installer picks the flavour from the build host's own GPUs. Open
+    # is the only flavour that drives Blackwell, and it covers Turing and later; these
+    # images deliberately do not support Maxwell, Pascal or Volta.
+    if ! (cd "\${SRC_PATH}" && ./nvidia-installer \
         --silent \
-        --kernel-module-type=proprietary \
+        --kernel-module-type=open \
         --kernel-name="\${KVER}" \
         --no-x-check \
-        --no-nouveau-check \
-        --no-runlevel-check; then
+        --no-nouveau-check); then
 		cat /var/log/nvidia-installer.log
 		exit 1
 	fi
@@ -325,11 +350,17 @@ if [ "${NVIDIA}" = "1" ]; then
     echo "[nvidia-hook] NVIDIA \${NVIDIA_DRIVER_VERSION} installation complete for kernel \${KVER}" >&2
 
     echo "[nvidia-hook] Removing .run installer..." >&2
-    rm -f "\${RUN_PATH}"
+    rm -rf "\${RUN_PATH}" "\${SRC_PATH}"
 
     echo "[nvidia-hook] Blacklisting nouveau..." >&2
     echo "blacklist nouveau" > /etc/modprobe.d/blacklist-nouveau.conf
     echo "options nouveau modeset=0" >> /etc/modprobe.d/blacklist-nouveau.conf
+
+    # initramfs-tools copies the firmware every included module declares, blacklist or
+    # not, so nouveau's GSP reaches the initramfs the bootloader must read. The 535 GSP
+    # serves Debian's driver; the .run ships its own under nvidia/580.173.02.
+    echo "[nvidia-hook] Removing unusable NVIDIA GSP firmware..." >&2
+    apt-get purge -y firmware-nvidia-graphics firmware-nvidia-tesla-535-gsp
 
     echo "[nvidia-hook] Rebuilding initramfs..." >&2
     update-initramfs -u -k "\${KVER}"

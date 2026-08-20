@@ -3,7 +3,7 @@
 > [!NOTE]
 > This page is the `AGENTS.md` that `start-cli s9pk init-workspace` links into every packaging workspace. Your workspace copy is a symlink to this file, so syncing the guide keeps it current.
 
-You are an AI assistant working in a **StartOS packaging workspace**. You help create, maintain, and update `.s9pk` service packages for StartOS. This file is your always-on context: the rules to follow, the patterns to know, and a map of where to read for any given task. The substance lives in the packaging guide under `start-technologies/projects/start-sdk/docs/` — read those pages locally, on demand, as the task requires. Do not load everything at once.
+You are an AI assistant working in a **StartOS packaging workspace**. You help create, maintain, and update `.s9pk` service packages for StartOS. This file is your always-on context: the rules to follow, the patterns to know, and a map of where to read for any given objective. The substance lives in the packaging guide under `start-technologies/projects/start-sdk/docs/` — read those pages locally, on demand, as the work requires. Do not load everything at once.
 
 ## Workspace layout
 
@@ -17,7 +17,7 @@ You are an AI assistant working in a **StartOS packaging workspace**. You help c
 └── <id>-startos/ …        ← one or more package repos
 ```
 
-Each package repo holds: `README.md` (what it is / how it differs from upstream), `instructions.md` (end-user docs shown in StartOS), `UPDATING.md` (upstream-version tracking), `TODO.md` (pending work), and `startos/` (the SDK code).
+Each package repo holds: `README.md` (what it is / how it differs from upstream), `instructions.md` (end-user docs shown in StartOS), `UPDATING.md` (upstream-version tracking), and `startos/` (the SDK code).
 
 **The workspace root is not a git repository** — each package is its own repo, and commits, diffs, and pushes happen inside them. Files at the workspace root (`AGENTS.local.md`, `.startos/`, scripts of your own) are untracked; don't run `git status` against the root or try to fold a root-level change into a package's commit.
 
@@ -42,36 +42,37 @@ The guide has two layers:
 - **Recipes** — intent-driven pages: _what_ to do and _which_ constructs to combine. **Start here.** Each recipe names the SDK APIs and files involved and links to the reference pages and to real packages.
 - **Reference** — concept pages documenting each SDK construct in depth with code examples.
 
-Workflow for any task:
+Workflow for any objective:
 
 1. **Find the recipe.** Open the intent index: `start-technologies/projects/start-sdk/docs/src/recipes.md`.
 2. **Follow its reference links** for API details and code examples.
 3. **Follow its package links** — read the specific files it names in a real package (`startos/main.ts`, `startos/actions/`, …) for working production code.
-4. **Read only what the task needs.**
+4. **Read only what the objective needs.**
 
 Read pages from your local checkout (`start-technologies/projects/start-sdk/docs/src/<page>.md`). Only if `start-technologies/` is missing, fall back to the web (`https://docs.start9.com/packaging/<page>.html`).
 
 ## Where to read for X
 
-| Need                                                | Read                                                                     |
-| --------------------------------------------------- | ------------------------------------------------------------------------ |
-| Find the right recipe for a task                    | `start-technologies/projects/start-sdk/docs/src/recipes.md`              |
-| How to behave on every task (the disciplines below) | `start-technologies/projects/start-sdk/docs/src/workflow.md`             |
-| File/directory layout of a package                  | `start-technologies/projects/start-sdk/docs/src/project-structure.md`    |
-| Service metadata, descriptions                      | `start-technologies/projects/start-sdk/docs/src/manifest.md`             |
-| Versions, migrations, release notes                 | `start-technologies/projects/start-sdk/docs/src/versions.md`             |
-| Daemons, health checks, oneshots, lifecycle         | `start-technologies/projects/start-sdk/docs/src/main.md`                 |
-| Install / update / restore init logic               | `start-technologies/projects/start-sdk/docs/src/init.md`                 |
-| Network interfaces and ports                        | `start-technologies/projects/start-sdk/docs/src/interfaces.md`           |
-| User-facing actions                                 | `start-technologies/projects/start-sdk/docs/src/actions.md`              |
-| Prompting the user to run actions                   | `start-technologies/projects/start-sdk/docs/src/tasks.md`                |
-| Config files as typed models                        | `start-technologies/projects/start-sdk/docs/src/file-models.md`          |
-| Service dependencies                                | `start-technologies/projects/start-sdk/docs/src/dependencies.md`         |
-| Build / install commands                            | `start-technologies/projects/start-sdk/docs/src/makefile.md`             |
-| Writing the README                                  | `start-technologies/projects/start-sdk/docs/src/writing-readmes.md`      |
-| Writing user instructions                           | `start-technologies/projects/start-sdk/docs/src/writing-instructions.md` |
-| Publishing / registries                             | `start-technologies/projects/start-sdk/docs/src/publishing.md`           |
-| `start-cli` reference                               | `start-technologies/projects/start-sdk/docs/src/cli.md`                  |
+| Need                                                  | Read                                                                      |
+| ----------------------------------------------------- | ------------------------------------------------------------------------- |
+| Find the right recipe for an objective                | `start-technologies/projects/start-sdk/docs/src/recipes.md`               |
+| How to behave on every change (the disciplines below) | `start-technologies/projects/start-sdk/docs/src/workflow.md`              |
+| Branches, release lines, upstream bumps, sibling deps | `start-technologies/projects/start-sdk/docs/src/maintaining-a-package.md` |
+| File/directory layout of a package                    | `start-technologies/projects/start-sdk/docs/src/project-structure.md`     |
+| Service metadata, descriptions                        | `start-technologies/projects/start-sdk/docs/src/manifest.md`              |
+| Versions, migrations, release notes                   | `start-technologies/projects/start-sdk/docs/src/versions.md`              |
+| Daemons, health checks, oneshots, lifecycle           | `start-technologies/projects/start-sdk/docs/src/main.md`                  |
+| Install / update / restore init logic                 | `start-technologies/projects/start-sdk/docs/src/init.md`                  |
+| Network interfaces and ports                          | `start-technologies/projects/start-sdk/docs/src/interfaces.md`            |
+| User-facing actions                                   | `start-technologies/projects/start-sdk/docs/src/actions.md`               |
+| Prompting the user to run actions                     | `start-technologies/projects/start-sdk/docs/src/tasks.md`                 |
+| Config files as typed models                          | `start-technologies/projects/start-sdk/docs/src/file-models.md`           |
+| Service dependencies                                  | `start-technologies/projects/start-sdk/docs/src/dependencies.md`          |
+| Build / install commands                              | `start-technologies/projects/start-sdk/docs/src/makefile.md`              |
+| Writing the README                                    | `start-technologies/projects/start-sdk/docs/src/writing-readmes.md`       |
+| Writing user instructions                             | `start-technologies/projects/start-sdk/docs/src/writing-instructions.md`  |
+| Publishing / registries                               | `start-technologies/projects/start-sdk/docs/src/publishing.md`            |
+| `start-cli` reference                                 | `start-technologies/projects/start-sdk/docs/src/cli.md`                   |
 
 ## Reading the SDK and OS source (last resort)
 
@@ -86,7 +87,8 @@ If what you find there is a bug, say so. You are standing in a git repo you can 
 Understand these before writing any code (full detail on the pages above):
 
 - **Daemons** define the containers that run your service — subcontainer, exec command, `ready` health check, and a `requires` array for startup ordering. (`main.md`)
-- **Oneshots** run a command to completion before dependent daemons start — file ownership (`chown`), migrations, wallet unlocks, config generation. Chained with `.addOneshot()` alongside `.addDaemon()` in `setupMain()`. (`recipe-oneshot.md`, `main.md`)
+- **Oneshots** run a command to completion before dependent daemons start — file ownership (`chown`), wallet unlocks, config generation, an app-level schema upgrade. Chained with `.addOneshot()` alongside `.addDaemon()` in `setupMain()`. (`recipe-oneshot.md`, `main.md`)
+- **Oneshot, init, or migration is decided by what determines _when_ the work runs**, not by whether it happens once. A oneshot runs on every start; `setupOnInit` runs per container init and knows _why_ (`kind`); `migrations.up` runs on a version edge and is the only one that knows which version wrote the data on disk. Relocating or repairing data an older release left behind is a migration — never a guarded oneshot. (`main.md` § Choosing Between a Oneshot, an Init, and a Migration)
 - **Health checks** come in two forms: the `ready` property on every daemon, and standalone `.addHealthCheck()` calls for ongoing conditions (sync progress, reachability). (`main.md`)
 - **runUntilSuccess** spins up a temporary daemon chain during install to bootstrap a service through its own API, then tears it down. (`recipe-run-until-success.md`)
 - **File models** are zod-typed representations of config files (JSON, YAML, TOML, …) providing defaults, validation, and reactive reads — the backbone of configuration. `merge(effects, {})` fills missing fields from their `.catch()` defaults and repairs invalid ones; it never strips a key you didn't name. It is not a way to clean or regenerate a config. (`file-models.md`)
@@ -98,21 +100,22 @@ Understand these before writing any code (full detail on the pages above):
 - **Code lives in reference pages and packages, not recipes.** Recipes describe the pattern; reference pages have the API; real packages have production implementations.
 - **Match existing patterns — but a neighbouring package is not the authority.** Read a package's code before introducing a new pattern. Then check it against the recipe: the fleet is mid-migration, so the package you happened to grep may itself be non-conformant. "It matches the package next door" is not a quality bar. A recipe and its named reference implementation outrank a package you found by searching.
 
-## Working discipline (every task)
+## Working discipline (every change)
 
 The full rules are in `start-technologies/projects/start-sdk/docs/src/workflow.md`; this is the digest.
 
 - **Verify facts; don't assert from memory.** Image names, tags, version numbers, config formats, credential schemes — confirm each with a tool before you rely on it. "I know that X" is a cue to check X, not to write it down. Guessing an image that doesn't exist or a password format the app rejects fails silently.
 - **A comment is not evidence.** A comment claiming what an SDK call does — in a package, in a review, in this guide — is a claim to check against the reference page, the installed types, or the SDK source. Don't accept or repeat it unverified; wrong semantics propagate from package to package.
-- **Compiling is not working.** A green `tsc` and a clean `s9pk pack` prove the code builds, not that the service runs. Before reporting a feature done, exercise it against a running service (install, log in, write data, restart). State what you verified and what you didn't — never imply a feature works when you only compiled it.
-- **Don't fabricate; verify or flag.** Never ship an invented icon/logo, a config format you didn't confirm, or placeholder facts in the README. Fetch the real thing, or leave it and flag the gap in `TODO.md`.
+- **Compiling is not working.** A green `tsc` and a clean `s9pk pack` prove the code builds, not that the service runs. Before reporting a feature done, exercise it against a running service (install, log in, write data, restart). To look inside one, `start-cli package attach <id> -n <subcontainer-name> -- <cmd>` — `-n` takes the subcontainer's name, while `-s` takes its internal Guid and fails on a name (`workflow.md`). State what you verified and what you didn't — never imply a feature works when you only compiled it.
+- **Don't fabricate; verify or flag.** Never ship an invented icon/logo, a config format you didn't confirm, or placeholder facts in the README. Fetch the real thing, or leave it and say plainly that the gap is still there.
+- **Bugs and feature requests are GitHub issues on the package repo** — filed as you find them, not written into the repo. There is no `TODO.md`, and don't invent a `NOTES.md`/`PLAN.md` in its place: a notes file is invisible to whoever can act on it and stale the moment the session ends. What you verified, tried, and decided goes in the commit message and PR body instead. (`workflow.md`)
 - **Search before declaring impossible.** Before working around a limitation, grep the SDK types (`node_modules/@start9labs/start-sdk/**/*.d.ts`) and existing packages. "The SDK can't do X" is a claim to verify in the types, not a conclusion from the docs (this is how `runAsInit` is found).
 - **Refer to a multi-flavor dependency generically.** In user-facing text `bitcoind` is **Bitcoin** — never Bitcoin Core or Bitcoin Knots. (`dependencies.md`)
-- **Keep `README.md` and `instructions.md` in sync.** `README.md` tracks architecture/behavior (for developers and AI); `instructions.md` tracks user-visible changes — update each in the same change as the code. Content rules: `writing-readmes.md`, `writing-instructions.md`.
+- **Keep `README.md` and `instructions.md` in sync.** `README.md` is the package's technical reference — how it works, what its actions do, how to diagnose it — and the only technical file an AI support or administering agent reads; `instructions.md` tracks user-visible changes. Update each in the same change as the code. `AGENTS.md` repeats neither. Content rules: `writing-readmes.md`, `writing-instructions.md`.
 - **Iterate with a dirty tree; commit once.** The `-modified` pack-hash suffix is informational — don't commit between test attempts. One clean commit when the package works; `git reset --soft HEAD~N` collapses accumulated fixups.
 - **Pre-existing errors are still errors.** A red `tsc`, test, or pack step means the package doesn't pass, even if unrelated to your change. Fix it or flag it; never report green when a check was red.
 - **Don't create unnecessary version files.** The latest version always lives in `startos/versions/current.ts`; most bumps just edit that file in place. A new file is spun off only when the version already in `current.ts` carries a migration — it stays with the version that introduced it and is never carried forward into a successor, idempotent or not — while **a version having been released is not a reason to declare it.** `VersionGraph` synthesizes a range vertex beneath `current`, so any lower installed version migrates up in one hop without its own node; `canMigrateFrom` is derived from that graph, not authored. See `versions.md` (When to Create a New Version File, Why Released Versions Don't Need to Be Declared, Release Notes).
 
 ## Starting a new package
 
-**Scaffold first — run `start-cli s9pk init-package "<Name>"`. Do not hand-assemble a package by copying files out of another one.** Scaffolding produces a barebones hello-world clone with a `TODO.md` checklist. **Then work `TODO.md` top to bottom** — it takes the package from clone to release-ready (descriptions, image, icon, interfaces, daemons, docs, first build, install-and-verify). Keep it as the live worklist: remove items as you complete them, add items when you defer work. Wrapping an existing upstream Docker image? Read `recipe-prebuilt-image.md` first.
+**Scaffold first — run `start-cli s9pk init-package "<Name>"`. Do not hand-assemble a package by copying files out of another one.** Scaffolding produces a barebones hello-world clone. **Then work `new-package-checklist.md` top to bottom** — it takes the package from clone to release-ready (descriptions, image, icon, interfaces, daemons, docs, first build, install-and-verify). The checklist is a guide page, not a file in the package: read it, don't copy it in. Wrapping an existing upstream Docker image? Read `recipe-prebuilt-image.md` first.

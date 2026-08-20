@@ -415,6 +415,8 @@ enum WanIpv6Mode {
 
 #[derive(Serialize)]
 struct WanIpv6Response {
+    /// A wan6 proto startwrt doesn't manage (e.g. a hand-configured `6in4`)
+    /// is reported as Disabled, not an error; the config is left untouched.
     mode: WanIpv6Mode,
     /// Static mode
     address: Option<String>,

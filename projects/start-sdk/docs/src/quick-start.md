@@ -13,7 +13,7 @@ From the root of the workspace you created during Environment Setup, scaffold a 
 start-cli s9pk init-package "Hello World"
 ```
 
-`init-package` normalizes the display name to a package ID, creates `hello-world-startos/` from the bundled template — a barebones, buildable Hello World clone — and runs `npm install` for you. It leaves a `TODO.md` checklist that takes the package from clone to release-ready.
+`init-package` normalizes the display name to a package ID, creates `hello-world-startos/` from the bundled template — a barebones, buildable Hello World clone — and runs `npm install` for you.
 
 Your workspace now looks like:
 
@@ -70,6 +70,6 @@ See [Sideloading](/start-os/sideloading.html) for details.
 
 ## Next Steps
 
-With Hello World running on your server, you're ready to package your own service. Open `hello-world-startos/` in your AI assistant and point it at the `TODO.md` checklist — it takes the package from Hello World clone to a real service (descriptions, image, icon, interfaces, daemons, docs).
+With Hello World running on your server, you're ready to package your own service. Open `hello-world-startos/` in your AI assistant and point it at the [New Package Checklist](./new-package-checklist.md) — it takes the package from Hello World clone to a real service (descriptions, image, icon, interfaces, daemons, docs).
 
 Then browse the [Recipes](./recipes.md) to find the patterns your service needs — each describes an approach and points you to reference docs and real package code.

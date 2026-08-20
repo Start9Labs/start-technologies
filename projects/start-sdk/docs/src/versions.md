@@ -161,7 +161,7 @@ A released version is **not** a reason to add it to `other`. Only a migration is
 <1.0.0:3  --[up]-->  1.0.0:3
 ```
 
-Any installed version below `current` falls inside that range and migrates to `current` **in a single hop**, running `current`'s `up` migration once. This holds whether or not that version was ever declared, and whether or not it was ever released — including versions you shipped as sideloadable `.s9pk`s outside a registry. Most packages in the Start9 registry carry `other: []` and have upgraded across dozens of downstream revisions on exactly this path.
+Any installed version below `current` falls inside that range and migrates to `current` **in a single hop**, running `current`'s `up` migration once. This holds whether or not that version was ever declared, and whether or not it was ever released — including versions you shipped as sideloadable `.s9pk`s outside a registry.
 
 A version earns a declared node **only** when it introduced a migration. Declaring migration-less versions adds files that must be read, kept compiling, and reasoned about forever, and buys no behavior. Don't do it to record release history — git history of `current.ts` already is that record.
 

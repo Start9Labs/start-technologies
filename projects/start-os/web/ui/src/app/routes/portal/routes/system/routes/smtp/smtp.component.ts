@@ -1,6 +1,10 @@
 import { CommonModule } from '@angular/common'
 import { Component, inject } from '@angular/core'
-import { FormControl, ReactiveFormsModule } from '@angular/forms'
+import {
+  FormControl,
+  ReactiveFormsModule,
+  UntypedFormGroup,
+} from '@angular/forms'
 import { RouterLink } from '@angular/router'
 import {
   DialogService,
@@ -10,13 +14,14 @@ import {
   TaskService,
 } from '@start9labs/shared'
 import { inputSpec, ISB, utils } from '@start9labs/start-core'
+import { tuiMarkControlAsTouchedAndValidate } from '@taiga-ui/cdk'
 import { TuiButton, TuiError, TuiInput, TuiTitle } from '@taiga-ui/core'
 import { TuiHeader } from '@taiga-ui/layout'
 import { PatchDB } from 'patch-db-client'
 import { switchMap } from 'rxjs'
 import { FormGroupComponent } from 'src/app/routes/portal/components/form/containers/group.component'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
-import { FormService } from 'src/app/services/form.service'
+import { FormService, trim } from 'src/app/services/form.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { TitleDirective } from 'src/app/services/title.service'
 import { configBuilderToSpec } from 'src/app/utils/configBuilderToSpec'
@@ -88,8 +93,8 @@ function detectProviderKey(host: string | undefined): string {
           <button
             tuiButton
             size="l"
-            [disabled]="data.form.invalid || data.form.pristine"
-            (click)="save(data.form.value)"
+            [disabled]="data.form.pristine"
+            (click)="save(data.form)"
           >
             {{ 'Save' | i18n }}
           </button>
@@ -122,9 +127,7 @@ function detectProviderKey(host: string | undefined): string {
               tuiButton
               type="button"
               size="l"
-              [disabled]="
-                !testEmailControl.value || isEmailInvalid || data.form.invalid
-              "
+              [disabled]="!testEmail || isEmailInvalid || data.form.invalid"
               (click)="sendTestEmail(data.form.value)"
             >
               {{ 'Send' | i18n }}
@@ -180,9 +183,12 @@ export default class SystemEmailComponent {
   private readonly emailRegex = new RegExp(utils.Patterns.email.regex)
   readonly testEmailControl = new FormControl('')
 
+  get testEmail(): string {
+    return this.testEmailControl.value?.trim() || ''
+  }
+
   get isEmailInvalid(): boolean {
-    const value = this.testEmailControl.value
-    return !!value && !this.emailRegex.test(value)
+    return !!this.testEmail && !this.emailRegex.test(this.testEmail)
   }
 
   private readonly smtpSpec = ISB.InputSpec.of({
@@ -243,7 +249,14 @@ export default class SystemEmailComponent {
     }
   }
 
-  async save(formValue: Record<string, any>): Promise<void> {
+  async save(form: UntypedFormGroup): Promise<void> {
+    trim(form)
+    tuiMarkControlAsTouchedAndValidate(form)
+
+    if (form.invalid) return
+
+    const formValue = form.value as Record<string, any>
+
     this.tasks.run(async () => {
       if (formValue['smtp'].selection === 'disabled') {
         await this.api.clearSmtp({})
@@ -262,7 +275,7 @@ export default class SystemEmailComponent {
 
   async sendTestEmail(formValue: Record<string, any>) {
     const smtpValue = this.getSmtpValue(formValue)
-    const address = this.testEmailControl.value!
+    const address = this.testEmail
     const success =
       `${this.i18n.transform('A test email has been sent to')} ${address}. <i>${this.i18n.transform('Check your spam folder and mark as not spam.')}</i>` as i18nKey
 

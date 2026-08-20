@@ -6,6 +6,8 @@
 
 Your package declares _what_ it exposes. The **user** decides _where_ it is reachable. An interface is bound to the server's [gateways](/start-os/gateways.html), and the user enables or disables each resulting address individually from the service's **Interfaces** tab. LAN addresses (the `.local` hostname, the LAN IP) are enabled by default; public IPv4 addresses are **off** by default.
 
+**A public domain belongs to the host, but is enabled per binding.** The user adds it naming one internal port, and its addresses — the plain one and, where the binding has `addSsl`, the TLS one — are enabled on **that** binding straight away. Every other binding on the same `MultiHost` also gains the domain, but **off by default**, to be switched on individually like any other address. So a host that binds two ports needs the domain enabled twice, and a package that starts binding a second port later does not inherit the user's earlier choice for it.
+
 Two consequences worth internalizing before you write any interface code:
 
 - **`type` is a label, not a control.** `'ui'`, `'api'`, and `'p2p'` tell the user what an interface is _for_. They do not select a transport, grant public access, or imply anything about how the interface is reached.
@@ -178,6 +180,8 @@ The key steps are:
 | `addSsl.auth`                   | `ProxyAuth` \| `null`                                 | Optional auth gate enforced by the OS reverse proxy. See [Authenticating at the Proxy](#authenticating-at-the-proxy).                                                                                                       |
 | `addSsl.upstreamCertValidation` | `'disable'` \| `{ certificate: string }` \| _omitted_ | How the OS validates your container's TLS cert when it [rewraps SSL](#rewrapping-ssl-to-a-tls-container). Omit to validate against the StartOS root CA (default). See [Rewrapping SSL](#rewrapping-ssl-to-a-tls-container). |
 | `secure`                        | `{ ssl: boolean }` \| `null`                          | For non-HTTP protocols, whether the connection is secure. `{ ssl: true }` with `addSsl: null` serves your container's own TLS end to end — see [Serving Your Own TLS](#serving-your-own-tls-passthrough).                   |
+
+An `addSsl` binding on any port can carry a Let's Encrypt certificate — issuance is per name, not per port. The user's side of that is one extra requirement: Let's Encrypt validates on port `443` whatever port you bind, so StartOS asks their gateway to route `443` for the domain as well. On a gateway that cannot do it automatically they forward `443` by hand. Worth a line in your instructions for an interface on a non-standard port that users will reach from software validating against public roots — an Electrum client, say.
 
 ## Interface Options
 

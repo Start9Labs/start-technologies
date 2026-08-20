@@ -870,6 +870,12 @@ pub async fn reload_system_full() -> Result<(), Error> {
 }
 
 async fn reload_system_inner(restart_network: bool) -> Result<(), Error> {
+    // Before the network is touched: if this edit turned a profile's RA off
+    // (moved it onto an IPv4-only VPN, say), this is the only moment its clients
+    // can be told to drop the prefix — once netifd removes it there is nothing
+    // left to withdraw. See deprecate_odhcpd_prefixes. A no-op when nothing
+    // about IPv6 changed, beyond one extra RA.
+    crate::deprecate_odhcpd_prefixes().await;
     let network_action = if restart_network { "restart" } else { "reload" };
     let _ = crate::run_quiet_async(
         tokio::process::Command::new("/etc/init.d/network").arg(network_action),
@@ -909,6 +915,12 @@ pub async fn reload_system_and_wifi_full() -> Result<(), Error> {
 }
 
 async fn reload_system_and_wifi_inner(restart_network: bool) -> Result<(), Error> {
+    // Before the network is touched: deleting a profile removes its interface
+    // and `ip6assign`, so this is the only moment its clients (still associated
+    // until `wifi` tears the SSID down, or wired on the VLAN) can be told to
+    // drop the prefix. See deprecate_odhcpd_prefixes. A no-op on profile
+    // create, beyond one extra RA.
+    crate::deprecate_odhcpd_prefixes().await;
     let network_action = if restart_network { "restart" } else { "reload" };
     let _ = crate::run_quiet_async(
         tokio::process::Command::new("/etc/init.d/network").arg(network_action),
@@ -2971,6 +2983,136 @@ pub async fn bootstrap_admin_profile(uci_root: &str) -> Result<(), Error> {
     Ok(())
 }
 
+/// Repair IPv6 state that a pre-1.0.2 router could be left in, where the LAN
+/// says IPv6 is off while individual profiles carry on advertising it.
+///
+/// Before the `!profile.owns_lan` guard in [`rewrite_dhcp`], any profile rewrite
+/// re-derived `dhcp.lan.ra` from the *Admin* profile's outbound, and would write
+/// `disabled` there while touching nothing else. The result is a router where
+/// `dhcp.lan.ra = 'disabled'` — which is what `is_ipv6_enabled`, the LAN IPv6
+/// page, and the IPv6 published-port guard all read — but the profile VLANs
+/// still hold `ra 'server'` and their `ip6assign`, so they keep handing out
+/// addresses. The UI says one thing and the network does another, and nothing
+/// converges them: the guard stops the divergence arising, it cannot undo one
+/// that already has.
+///
+/// Detection is deliberately narrow. On current code this combination is
+/// unreachable: [`lan::ipv6_set`](crate::lan::ipv6_set) writes the LAN and every
+/// profile in one transaction, and [`rewrite_dhcp`] derives each profile's `ra`
+/// from [`is_ipv6_enabled`], which reads `dhcp.lan.ra`. Firing only on the
+/// impossible state therefore cannot clobber a legitimate configuration.
+///
+/// The repair reconciles *down*, toward off — the direction every other part of
+/// the system already believes. That makes reality match what the product is
+/// already asserting, and it is fully recoverable: the LAN IPv6 toggle now works
+/// correctly and turns everything back on together. Reconciling *up* would be a
+/// guess at intent that silently resumes advertising on VLANs the user has been
+/// told are quiet.
+///
+/// NOTE: if a per-profile IPv6 toggle is ever introduced (the ULA→GUA redesign
+/// contemplates one), "LAN off, profile on" becomes a legitimate state and this
+/// heal must be revisited or removed — it would otherwise silently fight it.
+///
+/// Idempotent: a no-op, with no reload, once the state is consistent.
+pub async fn heal_ipv6_state(uci_root: &str) -> Result<(), Error> {
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root, &arena, &["network", "dhcp", "startwrt"]).await?;
+    let repaired = heal_ipv6_state_in_cfgs(&mut cfgs)?;
+
+    if repaired.is_empty() {
+        return Ok(());
+    }
+
+    dump_all(uci_root, cfgs).await?;
+    drop(arena);
+
+    crate::activity::log(
+        "lan",
+        "ipv6-repaired",
+        true,
+        &format!(
+            "Turned IPv6 off for {} — the LAN IPv6 setting was off but these were still advertising",
+            repaired.join(", ")
+        ),
+        None,
+    );
+
+    // reload_system_full withdraws the prefixes from clients before netifd
+    // removes them (see deprecate_odhcpd_prefixes) and does the `network
+    // restart` netifd needs to actually drop an `ip6assign`. Only ever reached
+    // on the repair path, so a healthy router pays nothing.
+    reload_system_full().await?;
+
+    Ok(())
+}
+
+/// The config half of [`heal_ipv6_state`], split out so it can be tested
+/// without spawning init scripts. Returns the interfaces it changed, sorted;
+/// empty means the state was already consistent and nothing should be applied.
+fn heal_ipv6_state_in_cfgs(cfgs: &mut Configs) -> Result<Vec<String>, Error> {
+    // Nothing to repair while the LAN is serving IPv6: profiles advertising
+    // alongside it is the normal, consistent state.
+    if is_ipv6_enabled(cfgs) {
+        return Ok(Vec::new());
+    }
+
+    // Profile interfaces, minus the admin LAN — its `ip6assign` is handled
+    // separately below and its RA is what we just tested.
+    let profile_interfaces: BTreeSet<String> = cfgs["startwrt"]
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<UciProfile>().ok())
+        .map(|p| p.interface)
+        .filter(|i| i != crate::lan::LAN_INTERFACE)
+        .collect();
+
+    let mut repaired = Vec::new();
+
+    for section in &mut cfgs["dhcp"].sections {
+        let Some(name) = section.name().map(|n| n.to_string()) else {
+            continue;
+        };
+        if !profile_interfaces.contains(&name) {
+            continue;
+        }
+        let Some(mut dhcp) = section.get_typed::<Dhcp>()? else {
+            continue;
+        };
+        if dhcp.ra.as_deref() == Some("server") || dhcp.dhcpv6.as_deref() == Some("server") {
+            dhcp.ra = Some("disabled".to_string());
+            dhcp.dhcpv6 = Some("disabled".to_string());
+            section.set(&dhcp)?;
+            repaired.push(name);
+        }
+    }
+
+    // Clear every stranded prefix assignment, the admin LAN's included: with RA
+    // off it serves no client, but it still holds an address on the bridge and
+    // would silently come back as a live prefix the moment RA returned.
+    for section in &mut cfgs["network"].sections {
+        let Some(name) = section.name().map(|n| n.to_string()) else {
+            continue;
+        };
+        let is_lan = name == crate::lan::LAN_INTERFACE;
+        if !is_lan && !profile_interfaces.contains(&name) {
+            continue;
+        }
+        let Some(mut iface) = section.get_typed::<NetworkInterface>()? else {
+            continue;
+        };
+        if iface.ip6assign.is_some() {
+            iface.ip6assign = None;
+            section.set(&iface)?;
+            if !repaired.contains(&name) {
+                repaired.push(name);
+            }
+        }
+    }
+
+    repaired.sort();
+    Ok(repaired)
+}
+
 #[derive(Debug, Parser, Serialize, Deserialize)]
 pub struct EditArgs {
     #[clap(flatten)]
@@ -3476,6 +3618,171 @@ mod tests {
     use rpc_toolkit::Context;
 
     use super::*;
+
+    /// Write a network/dhcp/startwrt fixture, run the config half of the IPv6
+    /// heal over it, and hand back what it changed plus the resulting files.
+    /// Uses the pure inner function, so no init script is ever spawned.
+    async fn run_ipv6_heal(
+        network: &str,
+        dhcp: &str,
+        startwrt: &str,
+    ) -> (Vec<String>, String, String) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("network"), network).unwrap();
+        std::fs::write(dir.path().join("dhcp"), dhcp).unwrap();
+        std::fs::write(dir.path().join("startwrt"), startwrt).unwrap();
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "dhcp", "startwrt"])
+            .await
+            .unwrap();
+        let repaired = heal_ipv6_state_in_cfgs(&mut cfgs).unwrap();
+        dump_all(dir.path(), cfgs).await.unwrap();
+        drop(arena);
+
+        (
+            repaired,
+            std::fs::read_to_string(dir.path().join("network")).unwrap(),
+            std::fs::read_to_string(dir.path().join("dhcp")).unwrap(),
+        )
+    }
+
+    /// A router left in the pre-1.0.2 diverged state: the LAN says IPv6 is off,
+    /// both profile VLANs are still advertising, every ip6assign survives.
+    const HEAL_NETWORK_DIVERGED: &str = "\
+config interface 'lan'
+\toption device 'br-lan.1'
+\toption proto 'static'
+\toption ipaddr '192.168.1.1'
+\toption ip6assign '60'
+
+config interface 'guest'
+\toption device 'br-lan.101'
+\toption proto 'static'
+\toption ipaddr '192.168.101.1'
+\toption ip6assign '64'
+
+config interface 'iot'
+\toption device 'br-lan.102'
+\toption proto 'static'
+\toption ipaddr '192.168.102.1'
+\toption ip6assign '64'
+";
+
+    const HEAL_STARTWRT: &str = "\
+config profile lan
+\toption fullname 'Admin'
+\toption interface 'lan'
+\toption vlan_tag '1'
+\toption outbound 'wan'
+
+config profile guest
+\toption fullname 'Guest'
+\toption interface 'guest'
+\toption vlan_tag '101'
+\toption outbound 'wan'
+
+config profile iot
+\toption fullname 'IoT'
+\toption interface 'iot'
+\toption vlan_tag '102'
+\toption outbound 'wan'
+";
+
+    fn heal_dhcp(lan_ra: &str, profile_ra: &str) -> String {
+        format!(
+            "\
+config dhcp 'lan'
+\toption interface 'lan'
+\toption start '2'
+\toption limit '198'
+\toption leasetime '12h'
+\toption ra '{lan_ra}'
+\toption dhcpv6 '{lan_ra}'
+
+config dhcp 'guest'
+\toption interface 'guest'
+\toption start '2'
+\toption limit '198'
+\toption leasetime '12h'
+\toption ra '{profile_ra}'
+\toption dhcpv6 '{profile_ra}'
+
+config dhcp 'iot'
+\toption interface 'iot'
+\toption start '2'
+\toption limit '198'
+\toption leasetime '12h'
+\toption ra '{profile_ra}'
+\toption dhcpv6 '{profile_ra}'
+"
+        )
+    }
+
+    #[tokio::test]
+    async fn heal_ipv6_converges_the_diverged_state() {
+        let (repaired, network, dhcp) = run_ipv6_heal(
+            HEAL_NETWORK_DIVERGED,
+            &heal_dhcp("disabled", "server"),
+            HEAL_STARTWRT,
+        )
+        .await;
+
+        assert_eq!(repaired, vec!["guest", "iot", "lan"]);
+        assert!(
+            !network.contains("ip6assign"),
+            "every stranded prefix assignment must go, the admin LAN's included:\n{network}"
+        );
+        assert!(
+            !dhcp.contains("'server'"),
+            "no VLAN may still be advertising:\n{dhcp}"
+        );
+    }
+
+    #[tokio::test]
+    async fn heal_ipv6_leaves_a_working_configuration_alone() {
+        // The critical negative case. LAN IPv6 on, profiles advertising, every
+        // ip6assign in place — the normal consistent state, which the heal must
+        // never touch or it would break IPv6 for everyone on every boot.
+        let (repaired, network, dhcp) = run_ipv6_heal(
+            HEAL_NETWORK_DIVERGED,
+            &heal_dhcp("server", "server"),
+            HEAL_STARTWRT,
+        )
+        .await;
+
+        assert!(repaired.is_empty(), "healed a healthy router: {repaired:?}");
+        assert_eq!(network.matches("ip6assign").count(), 3);
+        assert_eq!(dhcp.matches("'server'").count(), 6);
+    }
+
+    #[tokio::test]
+    async fn heal_ipv6_is_a_noop_when_already_off_everywhere() {
+        let network = HEAL_NETWORK_DIVERGED.replace("\toption ip6assign '60'\n", "");
+        let network = network.replace("\toption ip6assign '64'\n", "");
+        let (repaired, network_out, dhcp) =
+            run_ipv6_heal(&network, &heal_dhcp("disabled", "disabled"), HEAL_STARTWRT).await;
+
+        assert!(repaired.is_empty(), "nothing to repair: {repaired:?}");
+        assert!(!network_out.contains("ip6assign"));
+        assert!(!dhcp.contains("'server'"));
+    }
+
+    #[tokio::test]
+    async fn heal_ipv6_is_idempotent() {
+        // Feed the first run's own output back in: the second pass must report
+        // no change, or the heal would restart the network on every boot.
+        let (first, network, dhcp) = run_ipv6_heal(
+            HEAL_NETWORK_DIVERGED,
+            &heal_dhcp("disabled", "server"),
+            HEAL_STARTWRT,
+        )
+        .await;
+        assert!(!first.is_empty());
+
+        let (second, _, _) = run_ipv6_heal(&network, &dhcp, HEAL_STARTWRT).await;
+        assert!(second.is_empty(), "second pass repaired again: {second:?}");
+    }
 
     #[test]
     fn test_window_contains_non_wrap() {

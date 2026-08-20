@@ -36,7 +36,110 @@ file tracks notable changes since the move to the monorepo.
   plaintext address, including the passwords typed into it. See
   [Gateways](https://docs.start9.com/start-os/gateways.html).
 
+### Changed
+
+- **The NVIDIA images now use NVIDIA's open kernel modules, which support GeForce
+  RTX 20-series, Quadro RTX and newer.** This is what makes current cards work at
+  all — an RTX 50-series, an RTX PRO 6000 or an NVIDIA GB10 can only be driven by
+  these modules. The trade is at the other end of the range: **a GeForce GTX
+  900-series or 10-series card, a Titan X or Xp, or a Tesla M40, P40, P100 or
+  V100 will no longer be driven by the NVIDIA images.** If you rely on one of
+  those, stay on 0.4.0.1 or use the Standard image, whose open-source `nouveau`
+  driver still provides display output without GPU compute.
+
 ### Fixed
+
+- **Apps that hold a connection open — desktop sync clients, API pollers — stop
+  dropping in and out.** Nextcloud Desktop and clients like it showed a
+  recurring "Network error" that cleared itself a few seconds later. A service
+  routinely closes a connection once it has sat idle for a few seconds, and a
+  client is built to notice that and open a fresh one. StartOS's reverse proxy
+  kept the client's half of the pair open after the service had closed its own,
+  so the client went on holding a connection it had every reason to believe was
+  good, and the next request it sent over that connection was cut off with no
+  reply. The proxy now closes the client's half as soon as the service closes
+  its own, which is the signal the client is waiting for.
+
+- Trim whitespace on form inputs.
+
+- **Helper processes a service starts are cleared away once they finish.** A
+  service that shells out to other programs — a media downloader calling
+  `yt-dlp` and `ffmpeg`, an agent running tool subprocesses — orphans a helper
+  whenever the program that started it exits first. Those finished helpers
+  stayed listed inside the service's container as `<defunct>`, each still
+  holding a process slot, for as long as the service ran — so a service that
+  starts many of them built them up without limit, and only a restart cleared
+  them. The container's first process now collects them as they finish.
+
+- **A Let's Encrypt domain works on an interface served on a port other than
+  `443`** — an Electrum server on `50002`, a TURN server on `5349`. Let's
+  Encrypt proves you control a name by connecting to it on port `443` whatever
+  port the service behind it uses, and nothing on your server answered there for
+  that name: the certificate was never issued, so the address served your
+  server's Root CA instead and clients that validate against public authorities
+  could not connect at all. StartOS now answers the challenge on whichever port
+  it arrives at, and over StartTunnel claims port `443` for that domain
+  automatically, routing it to the port the interface uses. On a router, forward
+  `443` to your server as you would for a standard domain — the domain's own
+  port is not enough on its own.
+
+- **A service that presents its own TLS certificate is shown as presenting
+  it.** StartOS does not terminate such a connection, so the certificate the
+  client checks is the service's — but a domain on that interface reported
+  whichever certificate authority had been chosen for it. Those addresses now
+  report `Self signed`.
+
+- **Services that run their own containers or a VPN can reach the devices they
+  were granted.** A service opting into `userspaceFilesystems` or
+  `virtualNetworking` is handed `/dev/fuse` and `/dev/net/tun` inside its
+  container. Those nodes are now created with the same permissions the host
+  gives them, so a service running as a non-root user can open them. Previously
+  the permissions were left to whatever StartOS's own file-creation mask
+  produced, and only the container's boot-time device pass — which races with
+  the grant — widened them; on the losing side of that race a CI runner's jobs
+  failed to start with `Failed to open() /dev/net/tun: Permission denied`.
+
+- **Reinstalling with "Preserve" copies your server's configuration before it
+  rewrites the drive, so the configuration survives.** The copy used to be taken
+  afterwards, by which point there was nothing left to read — so the server came
+  back with its configuration reset, and said nothing about it. Among the things
+  lost was the key your server uses to sign its add-on drivers, which on a
+  machine with Secure Boot left hardware such as an NVIDIA GPU unavailable
+  afterwards. A reinstall that cannot read the configuration it was asked to keep
+  now stops and says so, rather than continuing and discarding it.
+
+- **On a server with Secure Boot enabled, hardware that needs an add-on driver —
+  an NVIDIA GPU, most commonly — works after setup.** Secure Boot only loads such
+  a driver once you approve the key your server signs it with, and approving that
+  key is protected by your master password. Your server only ever asked the
+  firmware to trust the key while starting up, which on a new server happens
+  before you have set a password, so the request was never made and you were
+  never shown the prompt — leaving the driver unable to load, with nothing to say
+  why. Your server now asks as soon as you set your password, so the prompt
+  appears on the next restart. See
+  [Initial Setup](https://docs.start9.com/start-os/initial-setup.html).
+
+- **The 64-bit ARM NVIDIA image boots on NVIDIA GB10 hardware again, such as the
+  DGX Spark, GPU workloads like Ollama and vLLM run on it, and the image is
+  considerably smaller.** Four separate faults were involved, two of which each
+  stopped the machine on the last line the bootloader printed — so fixing either
+  one alone changed nothing. These images drive the GPU with NVIDIA's own driver
+  and turn nouveau off, yet were still built with graphics firmware they cannot
+  use — nouveau's, for every chip it supports, along with an older driver
+  series' — and 152 MB of it sat inside the initramfs that the bootloader must
+  read in full before the kernel starts. Separately, a Tegra fabric driver that
+  recent kernels build in claims one of the GB10's internal buses and reads a
+  protected register on it, stopping the machine during hardware detection before
+  it can display anything. Third, the image built NVIDIA's driver in the flavour
+  that does not support this generation of GPU, so the driver found the card but
+  could never bring it up. Last, the GPU came up and reported itself correctly
+  while every CUDA program still failed at startup, because NVIDIA's driver
+  declines a GPU whose address-translation support does not match what the kernel
+  offers, and this kernel is built without the support that an integrated GPU
+  like the GB10 advertises. The images now carry only the graphics firmware they
+  can use, switch that driver off, build the kernel modules NVIDIA supports here
+  — which is what NVIDIA's own operating system does on the same hardware — and
+  accept the GPU rather than turning it away.
 
 - **Your server answers to its own addresses and no others.** A name that
   resolved to your server but was never configured on it — a domain you pointed
@@ -149,6 +252,21 @@ file tracks notable changes since the move to the monorepo.
 
 - **Service mount paths are validated and confined to their intended
   directories.**
+
+- **An address you assigned to a public certificate authority serves that
+  authority's certificate and nothing else.** When StartOS could not obtain the
+  certificate, the address fell back to one signed by your server's Root CA
+  while still listing Let's Encrypt as its authority — so the fallback was
+  invisible from the server itself, whose own trust store contains that Root CA.
+  Your Root CA chain is the same on every address your server exposes, which
+  makes it a value that links them all to one server, handed to anyone who
+  connects. Such an address now refuses the connection until its certificate is
+  available, and tells you so: a notification names the domain and why issuance
+  failed, once per domain until a certificate lands. A certificate already
+  issued keeps being served through its last 30 days while renewal is retried,
+  so a renewal that begins failing does not take the address down, and a domain
+  you also reach on your local network keeps answering there with your server's
+  own certificate.
 
 ## [0.4.0.1]
 
