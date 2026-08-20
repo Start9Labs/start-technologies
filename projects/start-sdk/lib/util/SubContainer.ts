@@ -741,14 +741,21 @@ export class SubContainerEager<
           reject(e)
         }
       })
-      await new Promise<null>((resolve, reject) => {
-        try {
-          child.stdin.end(resolve)
-        } catch (e) {
-          reject(e)
-        }
-      })
     }
+    // Close stdin whether or not anything was written to it. No stdio override
+    // is passed to cp.spawn, so the child always gets a pipe; leaving it open
+    // makes any command that reads stdin to EOF block until `timeout` kills it,
+    // and the caller sees only a SIGKILL that points nowhere near stdin. That
+    // covers `input: ''` as much as no input at all — both are "this command
+    // gets nothing", not "this command gets a stdin that never ends".
+    await new Promise<null>((resolve, reject) => {
+      try {
+        if (!child.stdin) return resolve(null)
+        child.stdin.end(() => resolve(null))
+      } catch (e) {
+        reject(e)
+      }
+    })
     const stdout = { data: '' as string }
     const stderr = { data: '' as string }
     const appendData =
