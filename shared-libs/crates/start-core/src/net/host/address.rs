@@ -11,7 +11,7 @@ use crate::GatewayId;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::DatabaseModel;
 use crate::hostname::ServerHostname;
-use crate::net::acme::AcmeProvider;
+use crate::net::acme::{AcmeProvider, CheckChallengeParams, CheckChallengeRes, check_challenge};
 use crate::net::dns::QueryDnsRes;
 use crate::net::gateway::{
     CheckDnsParams, CheckPortParams, CheckPortRes, CheckPortV6Res, check_dns, check_port,
@@ -231,6 +231,10 @@ pub struct AddPublicDomainRes {
     pub dns: QueryDnsRes,
     pub port: CheckPortRes,
     pub port_v6: Option<CheckPortV6Res>,
+    /// The certificate authority's own reachability requirement, where the
+    /// domain has one the checks above do not cover. Absent when the domain
+    /// needs nothing beyond its own port.
+    pub challenge: Option<CheckChallengeRes>,
 }
 
 /// Reconcile a public domain on a *sibling* binding or range — one the domain
@@ -395,6 +399,7 @@ pub async fn add_public_domain<Kind: HostApiKind>(
     // Domains are matched byte-for-byte against the browser's lowercased
     // `location.hostname` — normalize at the boundary (covers UI and CLI).
     let fqdn = InternedString::intern(fqdn.to_ascii_lowercase());
+    let authority = acme.clone();
     let ext_port = ctx
         .db
         .mutate(|db| {
@@ -560,7 +565,7 @@ pub async fn add_public_domain<Kind: HostApiKind>(
     let ctx2 = ctx.clone();
     let fqdn2 = fqdn.clone();
 
-    let (dns_result, port_result, port_v6_result) = tokio::join!(
+    let (dns_result, port_result, port_v6_result, challenge_result) = tokio::join!(
         async {
             tokio::task::spawn_blocking(move || {
                 crate::net::dns::query_dns(ctx2, crate::net::dns::QueryDnsParams { fqdn: fqdn2 })
@@ -581,6 +586,17 @@ pub async fn add_public_domain<Kind: HostApiKind>(
                 port: ext_port,
                 gateway: gateway.clone(),
             },
+        ),
+        // An ACME authority validates at its own port, which the two probes
+        // above never touch when the domain is served somewhere else.
+        check_challenge(
+            ctx.clone(),
+            CheckChallengeParams {
+                fqdn: fqdn.clone(),
+                gateway: gateway.clone(),
+                port: ext_port,
+                acme: authority,
+            },
         )
     );
 
@@ -588,6 +604,7 @@ pub async fn add_public_domain<Kind: HostApiKind>(
         dns: dns_result?,
         port: port_result?,
         port_v6: port_v6_result?,
+        challenge: challenge_result?,
     })
 }
 

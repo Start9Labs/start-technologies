@@ -80,6 +80,19 @@ function getCertificate(
   return toAuthorityName(null)
 }
 
+// The authority StartOS will obtain this address's certificate from, when that
+// authority is ACME. Null on an address StartOS does not terminate TLS for: the
+// service is then its own ACME client, and a plaintext address has no
+// certificate at all.
+function getAcmeProvider(
+  h: T.HostnameInfo,
+  host: T.Host,
+  addSsl: T.AddSslOptions | null,
+): T.AcmeProvider | null {
+  if (!h.ssl || !addSsl || h.metadata.kind !== 'public-domain') return null
+  return host.publicDomains[h.hostname]?.acme ?? null
+}
+
 function sortDomainsFirst(a: GatewayAddress, b: GatewayAddress): number {
   const isDomain = (addr: GatewayAddress) =>
     addr.hostnameInfo.metadata.kind === 'public-domain' ||
@@ -300,6 +313,7 @@ export class InterfaceService {
             h.metadata.kind === 'private-domain' ||
             h.metadata.kind === 'public-domain',
           certificate: getCertificate(h, host, addSsl, secure),
+          acme: getAcmeProvider(h, host, addSsl),
           count,
         })
       }
@@ -494,6 +508,10 @@ export type GatewayAddress = {
   ui: boolean
   deletable: boolean
   certificate: string
+  // The ACME provider this address's certificate comes from, or null when no
+  // authority validates it. A domain with one needs the authority's own port
+  // reachable, which the address's own port does not imply.
+  acme: T.AcmeProvider | null
   // Number of forwarded ports: 1 for a single-port binding, the range span for
   // a port range. Drives the port-span shown in forwarding rules.
   count: number

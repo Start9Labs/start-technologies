@@ -106,11 +106,14 @@ file tracks notable changes since the move to the monorepo.
   port the service behind it uses, and nothing on your server answered there for
   that name: the certificate was never issued, so the address served your
   server's Root CA instead and clients that validate against public authorities
-  could not connect at all. StartOS now answers the challenge on whichever port
-  it arrives at, and over StartTunnel claims port `443` for that domain
-  automatically, routing it to the port the interface uses. On a router, forward
-  `443` to your server as you would for a standard domain — the domain's own
-  port is not enough on its own.
+  could not connect at all. StartOS now answers the challenge on port `443` for
+  every domain it holds an authority for, and claims that port automatically
+  wherever the domain is public — over StartTunnel, and as an IPv6 firewall
+  pinhole on a gateway that opens one. On a router, forward `443` to your server
+  as you would for a standard domain — the domain's own port is not enough on
+  its own. The checks that run when you add or enable such a domain now cover
+  port `443` as well, so a domain that would refuse every connection is reported
+  before you go looking for it, with its own row in the setup modal.
 
 - **A service that presents its own TLS certificate is shown as presenting
   it.** StartOS does not terminate such a connection, so the certificate the

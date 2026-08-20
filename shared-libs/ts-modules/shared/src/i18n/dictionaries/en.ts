@@ -807,4 +807,5 @@ export const ENGLISH: Record<string, number> = {
   'The StartOS data on the selected data drive spans the entire drive, so the OS cannot be installed to the same drive without erasing it. To preserve your data, select a different OS drive. To erase it, choose "Overwrite".': 913,
   'Login succeeded, but the server rejected the new device key. Try again.': 914,
   'Too long for a QR code': 915,
+  'Your certificate authority proves you control this domain by connecting to it on port 443, whatever port the address itself uses. Forward 443 to your server as well, or enable automatic port forwarding on the gateway.': 916,
 }

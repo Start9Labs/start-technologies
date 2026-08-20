@@ -301,6 +301,15 @@ export class LiveApiService extends ApiService {
     })
   }
 
+  async checkChallenge(
+    params: T.CheckChallengeParams,
+  ): Promise<T.CheckChallengeRes | null> {
+    return this.rpcRequest({
+      method: 'net.acme.check-challenge',
+      params,
+    })
+  }
+
   async checkDns(params: T.CheckDnsParams): Promise<CheckDnsRes> {
     return this.rpcRequest({
       method: 'net.gateway.check-dns',

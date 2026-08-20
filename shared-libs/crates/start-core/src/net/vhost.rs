@@ -271,6 +271,10 @@ pub struct VHostController {
     /// on a shared port.
     port_mappings:
         SyncMutex<BTreeMap<HostMapOwner, BTreeSet<(IpAddr, u16, Option<InternedString>)>>>,
+    /// Per-owner port-443 bind requirements contributed by ACME domains served
+    /// on another port. Keyed by owner so a host that drops its ACME domains
+    /// withdraws its contribution.
+    challenge_binds: SyncMutex<BTreeMap<HostMapOwner, VHostBindRequirements>>,
 }
 impl VHostController {
     pub fn new(
@@ -293,6 +297,7 @@ impl VHostController {
             passthrough_handles: SyncMutex::new(BTreeMap::new()),
             port_map,
             port_mappings: SyncMutex::new(BTreeMap::new()),
+            challenge_binds: SyncMutex::new(BTreeMap::new()),
         };
         for pt in passthroughs {
             if let Err(e) = controller.add_passthrough(
@@ -485,7 +490,37 @@ impl VHostController {
         targets: &BTreeMap<VHostKey, ProxyTarget>,
     ) {
         let ip_info = self.interfaces.watcher.ip_info();
-        self.sync_port_maps(owner, desired_port_maps(targets, &ip_info));
+        self.sync_port_maps(owner.clone(), desired_port_maps(targets, &ip_info));
+        self.sync_challenge_binds(owner, challenge_bind_reqs(targets));
+    }
+
+    /// Fold this owner's port-443 challenge requirements into the 443 server,
+    /// creating it if nothing else has, and dropping it once the last
+    /// requirement goes away and nothing is served there.
+    fn sync_challenge_binds(&self, owner: HostMapOwner, reqs: VHostBindRequirements) {
+        let union = self.challenge_binds.mutate(|owners| {
+            if reqs.is_empty() {
+                owners.remove(&owner);
+            } else {
+                owners.insert(owner, reqs);
+            }
+            let mut union = VHostBindRequirements::default();
+            for reqs in owners.values() {
+                union.extend(reqs);
+            }
+            union
+        });
+        self.servers.mutate(|writable| {
+            let existing = writable.remove(&ACME_CHALLENGE_PORT);
+            if existing.is_none() && union.is_empty() {
+                return;
+            }
+            let server = existing.unwrap_or_else(|| self.create_server(ACME_CHALLENGE_PORT));
+            server.set_challenge_bind_reqs(union);
+            if !server.is_empty() {
+                writable.insert(ACME_CHALLENGE_PORT, server);
+            }
+        });
     }
 
     fn sync_port_maps(&self, owner: HostMapOwner, desired: DesiredPortMaps) {
@@ -535,7 +570,7 @@ impl VHostController {
 pub type VHostKey = (Option<InternedString>, u16, bool);
 
 /// Where TLS-ALPN-01 is validated, whatever port the name is served on.
-const ACME_CHALLENGE_PORT: u16 = 443;
+pub const ACME_CHALLENGE_PORT: u16 = 443;
 
 /// `(box IP, external port) -> (gateway candidates in preference order,
 /// hostname -> box-side port)`. `Some(hostname)` is a PCP HOSTNAME mapping the
@@ -576,7 +611,8 @@ fn desired_port_maps(
                     .or_insert_with(|| (gateways.clone(), BTreeMap::new()))
                     .1
                     .insert(maybe_host.clone(), *external);
-                // Nothing answers the challenge on the domain's own port. By
+                // Every listener answers a challenge out of the same cache, and
+                // 443 always has one, so the challenge route is 443 -> 443. By
                 // name only: the unnamed forward there is the OS's own, and
                 // `or_insert` leaves a real binding on it alone.
                 if let Some(hostname) = maybe_host
@@ -588,13 +624,13 @@ fn desired_port_maps(
                         .or_insert_with(|| (gateways.clone(), BTreeMap::new()))
                         .1
                         .entry(Some(hostname.clone()))
-                        .or_insert(*external);
+                        .or_insert(ACME_CHALLENGE_PORT);
                 }
             }
         }
         // IPv6: the box's own GUA is the listener (no NAT), so open a firewall
         // pinhole for GUA:port. No SNI demux over v6, so these are always
-        // hostname-less — and a GUA is shared, so no challenge port either.
+        // hostname-less.
         for gua in &target.public_v6 {
             let Some(info) = ip_info.iter().map(|(_, i)| i).find(|info| {
                 info.ip_info.as_ref().map_or(false, |i| {
@@ -612,9 +648,19 @@ fn desired_port_maps(
             }
             desired
                 .entry((IpAddr::V6(*gua), *external))
-                .or_insert_with(|| (v6_gateways, BTreeMap::new()))
+                .or_insert_with(|| (v6_gateways.clone(), BTreeMap::new()))
                 .1
                 .insert(None, *external);
+            // A challenge reaches the GUA on 443 like it reaches the IPv4 side,
+            // so open that pinhole too.
+            if maybe_host.is_some() && target.acme.is_some() && *external != ACME_CHALLENGE_PORT {
+                desired
+                    .entry((IpAddr::V6(*gua), ACME_CHALLENGE_PORT))
+                    .or_insert_with(|| (v6_gateways, BTreeMap::new()))
+                    .1
+                    .entry(None)
+                    .or_insert(ACME_CHALLENGE_PORT);
+            }
         }
     }
     // v6 HTTP->HTTPS redirect: for a GUA exposing 443, ask the gateway for an
@@ -641,6 +687,34 @@ fn desired_port_maps(
 pub struct VHostBindRequirements {
     pub public_gateways: BTreeSet<GatewayId>,
     pub private_ips: BTreeSet<IpAddr>,
+}
+impl VHostBindRequirements {
+    fn extend(&mut self, other: &Self) {
+        self.public_gateways
+            .extend(other.public_gateways.iter().cloned());
+        self.private_ips.extend(other.private_ips.iter().copied());
+    }
+
+    fn is_empty(&self) -> bool {
+        self.public_gateways.is_empty() && self.private_ips.is_empty()
+    }
+}
+
+/// What port 443 must bind for the challenges these `targets` will be validated
+/// with. Port 443's own targets do not account for an ACME domain served on
+/// another port, and a challenge arrives wherever that domain is public.
+fn challenge_bind_reqs(targets: &BTreeMap<VHostKey, ProxyTarget>) -> VHostBindRequirements {
+    let mut reqs = VHostBindRequirements::default();
+    for ((maybe_host, external, _), target) in targets {
+        if maybe_host.is_none() || target.acme.is_none() || *external == ACME_CHALLENGE_PORT {
+            continue;
+        }
+        reqs.public_gateways
+            .extend(target.public_v4.iter().cloned());
+        reqs.private_ips
+            .extend(target.public_v6.iter().map(|v6| IpAddr::V6(*v6)));
+    }
+    reqs
 }
 
 fn compute_bind_reqs<A: Accept + 'static>(mapping: &Mapping<A>) -> VHostBindRequirements {
@@ -1828,6 +1902,9 @@ where
 struct VHostServer<A: Accept + 'static> {
     mapping: Watch<Mapping<A>>,
     bind_reqs: Watch<VHostBindRequirements>,
+    /// Bind requirements this server's own mapping cannot see. Port 443 carries
+    /// the ACME challenges of domains served on other ports.
+    challenge_bind_reqs: SyncMutex<VHostBindRequirements>,
     _thread: NonDetachingJoinHandle<()>,
 }
 
@@ -1862,6 +1939,7 @@ impl<A: Accept> VHostServer<A> {
         Self {
             mapping: mapping.clone(),
             bind_reqs,
+            challenge_bind_reqs: SyncMutex::new(VHostBindRequirements::default()),
             _thread: tokio::spawn(async move {
                 let mut listener = VHostListener(TlsListener::new(
                     listener,
@@ -1970,7 +2048,9 @@ impl<A: Accept> VHostServer<A> {
         });
     }
     fn update_bind_reqs(&self, mapping: &Mapping<A>) {
-        let new_reqs = compute_bind_reqs(mapping);
+        let mut new_reqs = compute_bind_reqs(mapping);
+        self.challenge_bind_reqs
+            .peek(|extra| new_reqs.extend(extra));
         self.bind_reqs.send_if_modified(|reqs| {
             if *reqs != new_reqs {
                 *reqs = new_reqs;
@@ -1980,8 +2060,15 @@ impl<A: Accept> VHostServer<A> {
             }
         });
     }
+    fn set_challenge_bind_reqs(&self, reqs: VHostBindRequirements) {
+        self.challenge_bind_reqs.replace(reqs);
+        self.mapping.peek(|mapping| self.update_bind_reqs(mapping));
+    }
+    /// A server with nothing left to serve *and* no challenge to bind for. The
+    /// challenge requirements have no mapping entry of their own, so a 443
+    /// server held open by them alone still counts as in use.
     fn is_empty(&self) -> bool {
-        self.mapping.peek(|m| m.is_empty())
+        self.mapping.peek(|m| m.is_empty()) && self.challenge_bind_reqs.peek(|r| r.is_empty())
     }
 }
 
@@ -2170,12 +2257,12 @@ mod port_map_tests {
         );
         assert_eq!(
             routes(&desired, BOX_IP, 443),
-            [("electrum.example.com".to_string(), 50002)],
+            [("electrum.example.com".to_string(), 443)],
         );
     }
 
     #[test]
-    fn each_acme_domain_keeps_its_own_challenge_route() {
+    fn every_acme_domain_takes_the_same_challenge_route() {
         let desired = desired_port_maps(
             &targets([
                 (Some("electrum.example.com"), 50002, target(true, false)),
@@ -2187,8 +2274,8 @@ mod port_map_tests {
         assert_eq!(
             routes(&desired, BOX_IP, 443),
             [
-                ("electrum.example.com".to_string(), 50002),
-                ("turn.example.com".to_string(), 5349),
+                ("electrum.example.com".to_string(), 443),
+                ("turn.example.com".to_string(), 443),
             ],
         );
     }
@@ -2231,6 +2318,52 @@ mod port_map_tests {
 
         assert_eq!(routes(&desired, GUA, 443), [("*".to_string(), 443)]);
         assert_eq!(routes(&desired, GUA, 80), [("*".to_string(), 443)]);
+    }
+
+    #[test]
+    fn an_acme_domain_off_443_pinholes_the_challenge_port_over_ipv6() {
+        let desired = desired_port_maps(
+            &targets([(Some("electrum.example.com"), 50002, target(true, true))]),
+            &ip_info(),
+        );
+
+        assert_eq!(routes(&desired, GUA, 50002), [("*".to_string(), 50002)]);
+        assert_eq!(routes(&desired, GUA, 443), [("*".to_string(), 443)]);
+        // The 443 pinhole pulls in the 80->443 redirect a real 443 binding gets.
+        assert_eq!(routes(&desired, GUA, 80), [("*".to_string(), 443)]);
+    }
+
+    fn challenge_reqs(
+        entries: impl IntoIterator<Item = (Option<&'static str>, u16, ProxyTarget)>,
+    ) -> VHostBindRequirements {
+        challenge_bind_reqs(&targets(entries))
+    }
+
+    #[test]
+    fn an_acme_domain_off_443_binds_the_challenge_port_where_it_is_public() {
+        let reqs = challenge_reqs([(Some("electrum.example.com"), 50002, target(true, true))]);
+
+        assert_eq!(
+            reqs.public_gateways,
+            [GatewayId::from(InternedString::intern(GATEWAY))]
+                .into_iter()
+                .collect(),
+        );
+        assert_eq!(
+            reqs.private_ips,
+            [GUA.parse::<IpAddr>().unwrap()].into_iter().collect(),
+        );
+    }
+
+    #[test]
+    fn only_an_acme_domain_off_443_binds_the_challenge_port() {
+        // A plain domain has no challenge; an ACME domain already on 443 binds
+        // through its own target; a bare `*` vhost is not challengeable.
+        assert!(
+            challenge_reqs([(Some("plain.example.com"), 50002, target(false, true))]).is_empty()
+        );
+        assert!(challenge_reqs([(Some("example.com"), 443, target(true, true))]).is_empty());
+        assert!(challenge_reqs([(None, 8443, target(true, true))]).is_empty());
     }
 }
 

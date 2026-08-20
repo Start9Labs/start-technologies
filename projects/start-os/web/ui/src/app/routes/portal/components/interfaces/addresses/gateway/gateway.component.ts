@@ -306,6 +306,7 @@ export class GatewayComponent {
           {
             packageId: this.packageId(),
             addSsl: iface?.addSsl ?? false,
+            acme: params.acme,
             watch,
           },
         )

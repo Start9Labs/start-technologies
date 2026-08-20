@@ -11,7 +11,11 @@ import {
 import { renderPkgStatus } from 'src/app/services/pkg-status-rendering.service'
 import { dnsAllPass, getGua, portAllPass } from 'src/app/utils/gua'
 import { GatewayAddress, MappedServiceInterface } from '../../interface.service'
-import { DOMAIN_VALIDATION, DnsGateway } from './domain-validation.component'
+import {
+  DOMAIN_VALIDATION,
+  DnsGateway,
+  DomainValidationData,
+} from './domain-validation.component'
 import { PORT_FORWARD_VALIDATION } from './port-forward.component'
 import { PRIVATE_DNS_VALIDATION } from './private-dns.component'
 
@@ -22,6 +26,10 @@ import { PRIVATE_DNS_VALIDATION } from './private-dns.component'
 export type AddressCheckContext = {
   packageId: string
   addSsl: boolean
+  // The ACME authority of the domain being checked, when it has one. Such an
+  // authority validates on port 443 whatever port the address is served on, so
+  // the domain carries a reachability requirement its own port does not cover.
+  acme?: T.AcmeProvider | null
   watch?: ServiceStatusWatch
 }
 
@@ -113,7 +121,7 @@ export class DomainHealthService {
         if (!enabled) return
 
         const kind = addr.hostnameInfo.metadata.kind
-        const ctx = { packageId, addSsl: iface.addSsl, watch }
+        const ctx = { packageId, addSsl: iface.addSsl, acme: addr.acme, watch }
         if (kind === 'public-domain' && addr.hostnameInfo.port !== null) {
           await this.checkPublicDomain(
             addr.hostnameInfo.hostname,
@@ -160,10 +168,11 @@ export class DomainHealthService {
       let port: number
       let portResult: T.CheckPortRes | null
       let portV6Result: T.CheckPortV6Res | null
+      let challenge: T.CheckChallengeRes | null
 
       if (typeof portOrRes === 'number') {
         port = portOrRes
-        const [dnsRes, portRes, portV6Res] = await Promise.all([
+        const [dnsRes, portRes, portV6Res, challengeRes] = await Promise.all([
           this.api.queryDns({ fqdn }).catch((): null => null),
           isRange
             ? Promise.resolve(null)
@@ -175,15 +184,27 @@ export class DomainHealthService {
             : this.api
                 .checkPortV6({ gateway: gatewayId, port: portOrRes })
                 .catch((): null => null),
+          isRange || !ctx.acme
+            ? Promise.resolve(null)
+            : this.api
+                .checkChallenge({
+                  fqdn,
+                  gateway: gatewayId,
+                  port: portOrRes,
+                  acme: ctx.acme,
+                })
+                .catch((): null => null),
         ])
         dns = dnsRes
         portResult = portRes
         portV6Result = portV6Res
+        challenge = challengeRes
       } else {
         dns = portOrRes.dns
         port = portOrRes.port.port
         portResult = isRange ? null : portOrRes.port
         portV6Result = isRange ? null : portOrRes.portV6
+        challenge = isRange ? null : portOrRes.challenge
       }
 
       // A non-SSL binding is served directly by the service, so if the service
@@ -202,19 +223,25 @@ export class DomainHealthService {
 
       const dnsPass = dnsAllPass(dns, gateway.ipInfo.wanIp, gua)
       const portOk = isRange || portAllPass(portResult, portV6Result, gua)
+      // A challenge result is present only where the domain needs one; the
+      // address refuses every connection until that port answers.
+      const challengeOk =
+        !challenge || portAllPass(challenge.port, challenge.portV6, gua)
 
-      if (!dnsPass || !portOk) {
+      if (!dnsPass || !portOk || !challengeOk) {
         setTimeout(
           () =>
-            this.openPublicDomainModal(
+            this.openPublicDomainModal({
               fqdn,
               gateway,
               port,
               count,
-              ctx.packageId,
-              ctx.addSsl,
-              { dns, portResult, portV6Result },
-            ),
+              packageId: ctx.packageId,
+              addSsl: ctx.addSsl,
+              acme: ctx.acme ?? null,
+              challenge,
+              initialResults: { dns, portResult, portV6Result },
+            }),
           250,
         )
       }
@@ -260,14 +287,15 @@ export class DomainHealthService {
       const gateway = await this.getGatewayData(gatewayId)
       if (!gateway) return
 
-      this.openPublicDomainModal(
+      this.openPublicDomainModal({
         fqdn,
         gateway,
         port,
         count,
-        ctx.packageId,
-        ctx.addSsl,
-      )
+        packageId: ctx.packageId,
+        addSsl: ctx.addSsl,
+        acme: ctx.acme ?? null,
+      })
     } catch (e: any) {
       this.errorService.handleError(e)
     }
@@ -356,24 +384,12 @@ export class DomainHealthService {
     return { id: gatewayId, ...gateway, ipInfo: gateway.ipInfo }
   }
 
-  private openPublicDomainModal(
-    fqdn: string,
-    gateway: DnsGateway,
-    port: number,
-    count: number,
-    packageId: string,
-    addSsl: boolean,
-    initialResults?: {
-      dns: T.QueryDnsRes | null
-      portResult: T.CheckPortRes | null
-      portV6Result: T.CheckPortV6Res | null
-    },
-  ) {
+  private openPublicDomainModal(data: DomainValidationData) {
     this.dialog
       .openComponent(DOMAIN_VALIDATION, {
         label: 'Address Requirements',
         size: 'm',
-        data: { fqdn, gateway, port, count, packageId, addSsl, initialResults },
+        data,
       })
       .subscribe()
   }

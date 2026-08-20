@@ -28,6 +28,10 @@ export type DnsGateway = T.NetworkInterfaceInfo & {
   ipInfo: T.IpInfo
 }
 
+// Where a certificate authority validates a domain, whatever port the address
+// itself is served on. Mirrors `ACME_CHALLENGE_PORT` in the backend.
+const CHALLENGE_PORT = 443
+
 export type DomainValidationData = {
   fqdn: string
   gateway: DnsGateway
@@ -35,6 +39,14 @@ export type DomainValidationData = {
   count: number
   packageId: string
   addSsl: boolean
+  // The authority that validates this domain, when it is an ACME one. Such an
+  // authority is reached on its own port whatever port the address is served
+  // on, so the domain has a second reachability requirement.
+  acme: T.AcmeProvider | null
+  // The authority's port as the backend found it. Null where the domain does
+  // not need it right now — it already holds a certificate it can serve — and
+  // absent where nothing has probed it yet.
+  challenge?: T.CheckChallengeRes | null
   initialResults?: {
     dns: T.QueryDnsRes | null
     portResult: T.CheckPortRes | null
@@ -145,6 +157,32 @@ export type DomainValidationData = {
         [disabled]="testDisabled()"
         (test)="testPortV6()"
       />
+    }
+
+    @if (showChallenge) {
+      <h3 tuiHeader="h6">{{ 'Certificate Authority' | i18n }}</h3>
+      <p>
+        {{
+          'Your certificate authority proves you control this domain by connecting to it on port 443, whatever port the address itself uses. Forward 443 to your server as well, or enable automatic port forwarding on the gateway.'
+            | i18n
+        }}
+      </p>
+
+      <port-check-test
+        [fields]="challengeFields"
+        [result]="challengeResult()"
+        [loading]="challengeLoading()"
+        (test)="testChallenge()"
+      />
+
+      @if (gua) {
+        <port-check-test
+          [fields]="challengeV6Fields"
+          [result]="challengeV6Result()"
+          [loading]="challengeV6Loading()"
+          (test)="testChallengeV6()"
+        />
+      }
     }
 
     @if (!isRange && testDisabled()) {
@@ -282,12 +320,34 @@ export class DomainValidationComponent {
     { label: 'Address', value: this.ipv6Addr },
   ]
 
+  // The authority's port is a requirement of the domain, not of the interface,
+  // so it is shown for as long as the domain names an ACME authority and is
+  // served somewhere other than that port.
+  readonly showChallenge =
+    !this.isRange &&
+    !!this.context.data.acme &&
+    this.context.data.port !== CHALLENGE_PORT
+  readonly challengeFields: readonly PortCheckField[] = [
+    { label: 'External Port', value: `${CHALLENGE_PORT}` },
+    { label: 'Internal Port', value: `${CHALLENGE_PORT}` },
+  ]
+  readonly challengeV6Fields: readonly PortCheckField[] = [
+    {
+      label: 'Address',
+      value: this.gua ? `[${this.gua}]:${CHALLENGE_PORT}` : '',
+    },
+  ]
+
   readonly dnsLoading = signal(false)
   readonly portLoading = signal(false)
   readonly portV6Loading = signal(false)
+  readonly challengeLoading = signal(false)
+  readonly challengeV6Loading = signal(false)
   readonly dnsResult = signal<T.QueryDnsRes | undefined>(undefined)
   readonly portResult = signal<T.CheckPortRes | undefined>(undefined)
   readonly portV6Result = signal<T.CheckPortV6Res | undefined>(undefined)
+  readonly challengeResult = signal<T.CheckPortRes | undefined>(undefined)
+  readonly challengeV6Result = signal<T.CheckPortV6Res | undefined>(undefined)
 
   readonly dnsV4Pass = computed(() => {
     const dns = this.dnsResult()
@@ -298,16 +358,33 @@ export class DomainValidationComponent {
     return dns && this.gua ? dns.ipv6 === this.gua : undefined
   })
 
+  // A domain already holding a certificate it can serve does not need the
+  // authority's port reachable right now, and is not held to it. Only the
+  // backend can tell, so an unprobed domain is not held to it either.
+  private readonly challengeOutstanding = !!this.context.data.challenge
+
   readonly allPass = computed(
     () =>
       dnsAllPass(this.dnsResult(), this.wanIp, this.gua) &&
       (this.isRange ||
-        portAllPass(this.portResult(), this.portV6Result(), this.gua)),
+        portAllPass(this.portResult(), this.portV6Result(), this.gua)) &&
+      (!this.challengeOutstanding ||
+        portAllPass(
+          this.challengeResult(),
+          this.challengeV6Result(),
+          this.gua,
+        )),
   )
 
   readonly isManualMode = !this.context.data.initialResults
 
   constructor() {
+    const challenge = this.context.data.challenge
+    if (challenge) {
+      this.challengeResult.set(challenge.port)
+      this.challengeV6Result.set(challenge.portV6 ?? undefined)
+    }
+
     const initial = this.context.data.initialResults
     if (initial) {
       if (initial.dns) this.dnsResult.set(initial.dns)
@@ -363,6 +440,42 @@ export class DomainValidationComponent {
       this.errorService.handleError(e)
     } finally {
       this.portV6Loading.set(false)
+    }
+  }
+
+  // StartOS answers the authority's port itself, so these two probe it directly
+  // and stay available while the service is down.
+  async testChallenge() {
+    this.challengeLoading.set(true)
+
+    try {
+      this.challengeResult.set(
+        await this.api.checkPort({
+          gateway: this.context.data.gateway.id,
+          port: CHALLENGE_PORT,
+        }),
+      )
+    } catch (e: any) {
+      this.errorService.handleError(e)
+    } finally {
+      this.challengeLoading.set(false)
+    }
+  }
+
+  async testChallengeV6() {
+    this.challengeV6Loading.set(true)
+
+    try {
+      this.challengeV6Result.set(
+        (await this.api.checkPortV6({
+          gateway: this.context.data.gateway.id,
+          port: CHALLENGE_PORT,
+        })) ?? undefined,
+      )
+    } catch (e: any) {
+      this.errorService.handleError(e)
+    } finally {
+      this.challengeV6Loading.set(false)
     }
   }
 }

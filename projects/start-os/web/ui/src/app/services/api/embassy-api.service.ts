@@ -139,6 +139,10 @@ export abstract class ApiService {
     params: T.CheckPortParams,
   ): Promise<T.CheckPortV6Res | null>
 
+  abstract checkChallenge(
+    params: T.CheckChallengeParams,
+  ): Promise<T.CheckChallengeRes | null>
+
   abstract checkDns(params: T.CheckDnsParams): Promise<CheckDnsRes>
 
   // smtp

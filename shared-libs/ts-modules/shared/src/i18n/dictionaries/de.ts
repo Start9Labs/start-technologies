@@ -806,4 +806,5 @@ export default {
   913: 'Die StartOS-Daten auf dem ausgewählten Datenlaufwerk erstrecken sich über das gesamte Laufwerk, sodass das OS nicht auf demselben Laufwerk installiert werden kann, ohne sie zu löschen. Um Ihre Daten zu behalten, wählen Sie ein anderes OS-Laufwerk. Um sie zu löschen, wählen Sie "Überschreiben".',
   914: 'Anmeldung erfolgreich, aber der Server hat den neuen Geräteschlüssel abgelehnt. Versuchen Sie es erneut.',
   915: 'Zu lang für einen QR-Code',
+  916: 'Ihre Zertifizierungsstelle weist Ihre Kontrolle über diese Domain nach, indem sie sich auf Port 443 mit ihr verbindet — unabhängig davon, welchen Port die Adresse selbst verwendet. Leiten Sie 443 ebenfalls an Ihren Server weiter, oder aktivieren Sie die automatische Portweiterleitung auf dem Gateway.',
 } satisfies i18n

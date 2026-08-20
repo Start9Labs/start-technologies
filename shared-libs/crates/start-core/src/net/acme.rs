@@ -25,17 +25,22 @@ use tokio_rustls::rustls::sign::CertifiedKey;
 use ts_rs::TS;
 use url::Url;
 
+use crate::GatewayId;
 use crate::context::{CliContext, RpcContext};
-use crate::db::model::Database;
 use crate::db::model::public::AcmeSettings;
+use crate::db::model::{Database, DatabaseModel};
 use crate::db::{DbAccess, DbAccessByKey, DbAccessMut};
 use crate::error::ErrorData;
+use crate::net::gateway::{
+    CheckPortParams, CheckPortRes, CheckPortV6Res, check_port, check_port_v6,
+};
 use crate::net::ssl::{cert_is_unexpired, should_use_cert};
 use crate::net::tls::{SingleCertResolver, TlsHandler, TlsHandlerAction};
+use crate::net::vhost::ACME_CHALLENGE_PORT;
 use crate::net::web_server::Accept;
 use crate::prelude::*;
 use crate::util::FromStrParser;
-use crate::util::serde::{Pem, Pkcs8Doc};
+use crate::util::serde::{HandlerExtSerde, Pem, Pkcs8Doc};
 use crate::util::sync::{SyncMutex, Watch};
 
 /// Names with an order in flight. Written only by the order path, which starts
@@ -554,6 +559,104 @@ pub fn acme_api<C: Context>() -> ParentHandler<C> {
                 .with_about("about.remove-acme-certificate-acquisition-configuration")
                 .with_call_remote::<CliContext>(),
         )
+        .subcommand(
+            "check-challenge",
+            from_fn_async(check_challenge)
+                .with_display_serializable()
+                .with_about("about.check-acme-challenge-reachability")
+                .with_call_remote::<CliContext>(),
+        )
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct CheckChallengeParams {
+    #[arg(help = "help.arg.fqdn")]
+    pub fqdn: InternedString,
+    #[arg(help = "help.arg.gateway-id")]
+    pub gateway: GatewayId,
+    #[arg(help = "help.arg.port")]
+    pub port: u16,
+    #[arg(long, help = "help.arg.acme-provider")]
+    pub acme: Option<AcmeProvider>,
+}
+
+/// Reachability of the port a certificate authority validates on, for a domain
+/// served on some other port. The domain's own port says nothing about it, and
+/// the address refuses every connection until a certificate is issued.
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct CheckChallengeRes {
+    pub port: CheckPortRes,
+    pub port_v6: Option<CheckPortV6Res>,
+}
+
+/// Probe the challenge port for a domain that needs one, or report `None` when
+/// it does not: the authority is not ACME, the address is already served on the
+/// challenge port, or a certificate is on hand that still has life in it.
+pub async fn check_challenge(
+    ctx: RpcContext,
+    CheckChallengeParams {
+        fqdn,
+        gateway,
+        port,
+        acme,
+    }: CheckChallengeParams,
+) -> Result<Option<CheckChallengeRes>, Error> {
+    let Some(acme) = acme else {
+        return Ok(None);
+    };
+    if port == ACME_CHALLENGE_PORT {
+        return Ok(None);
+    }
+    if !challenge_pending(&ctx.db.peek().await, &fqdn, &acme)? {
+        return Ok(None);
+    }
+
+    let params = CheckPortParams {
+        port: ACME_CHALLENGE_PORT,
+        gateway,
+    };
+    let (port_res, port_v6_res) = tokio::join!(
+        check_port(ctx.clone(), params.clone()),
+        check_port_v6(ctx.clone(), params),
+    );
+
+    Ok(Some(CheckChallengeRes {
+        port: port_res?,
+        port_v6: port_v6_res?,
+    }))
+}
+
+/// Whether `fqdn` has to pass a challenge under `acme` before it can serve.
+/// [`should_use_cert`] is the same predicate the cert resolver applies, so this
+/// turns true at the start of the renewal window — when the challenge port has
+/// to work again — rather than on the last day of validity.
+pub fn challenge_pending(
+    db: &DatabaseModel,
+    fqdn: &InternedString,
+    acme: &AcmeProvider,
+) -> Result<bool, Error> {
+    let sans: BTreeSet<InternedString> = [fqdn.clone()].into_iter().collect();
+    let Some(cert) = db
+        .as_private()
+        .as_key_store()
+        .as_acme()
+        .as_certs()
+        .as_idx(&acme.0)
+        .and_then(|p| p.as_idx(JsonKey::new_ref(&sans)))
+    else {
+        return Ok(true);
+    };
+    Ok(!cert
+        .de()?
+        .fullchain
+        .first()
+        .and_then(|c| should_use_cert(&c.0).log_err())
+        .unwrap_or(false))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, TS)]
