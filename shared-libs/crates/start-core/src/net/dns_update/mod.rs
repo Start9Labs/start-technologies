@@ -23,6 +23,9 @@ use hickory_server::proto::op::{Message, ResponseCode};
 use hickory_server::proto::rr::rdata::tsig::TsigAlgorithm;
 use hickory_server::proto::rr::rdata::{A, AAAA};
 use hickory_server::proto::rr::{Name, RData, Record, RecordSet, RecordType, TSigner};
+use hickory_server::resolver::config::{NameServerConfig, ResolverOpts};
+use hickory_server::store::forwarder::{ForwardConfig, ForwardZoneHandler};
+use hickory_server::zone_handler::{Catalog, ZoneHandler};
 use hkdf::Hkdf;
 use imbl::OrdMap;
 use imbl_value::InternedString;
@@ -59,8 +62,9 @@ pub(crate) fn tsig_key_name() -> Name {
 
 /// Per-device TSIG HMAC key derived from the WireGuard PSK. Both sides derive it
 /// identically; a sandboxed service can't read the root-only PSK, so it can't
-/// forge a valid signature.
-pub(crate) fn derive_tsig_key(psk: &[u8; 32]) -> [u8; 32] {
+/// forge a valid signature. `pub` for StartWRT's gateway, which derives keys
+/// for its own inbound WireGuard peers.
+pub fn derive_tsig_key(psk: &[u8; 32]) -> [u8; 32] {
     let mut out = [0u8; 32];
     Hkdf::<Sha256>::new(None, psk)
         .expand(TSIG_INFO, &mut out)
@@ -77,6 +81,34 @@ pub(crate) fn tsig_signer(key: [u8; 32]) -> TSigner {
         TSIG_FUDGE,
     )
     .expect("HmacSha256 supported; static name valid")
+}
+
+/// A `Catalog` whose root zone is a single `ForwardAuthority` pointed at
+/// `upstreams` (UDP + TCP per server). `Catalog` itself implements
+/// `RequestHandler`, so no custom handler is needed for a pure forwarder.
+/// The miss path of every [`rfc2136::InjectingHandler`] deployment (the
+/// tunnel's per-subnet proxies, StartWRT's per-profile UPDATE listeners).
+pub fn forwarding_catalog(
+    upstreams: Vec<SocketAddr>,
+    forward_timeout: Duration,
+) -> Result<Catalog, Error> {
+    let name_servers: Vec<NameServerConfig> = upstreams
+        .into_iter()
+        .map(crate::net::dns::forward_name_server)
+        .collect();
+    let mut opts = ResolverOpts::default();
+    opts.timeout = forward_timeout;
+    let authority = ForwardZoneHandler::builder_tokio(ForwardConfig {
+        name_servers,
+        options: Some(opts),
+    })
+    .build()
+    .map_err(|e| Error::new(eyre!("{e}"), ErrorKind::Network))?;
+
+    let mut catalog = Catalog::new();
+    let auth: Vec<Arc<dyn ZoneHandler>> = vec![Arc::new(authority)];
+    catalog.upsert(Name::root().into(), auth);
+    Ok(catalog)
 }
 
 /// (gateway this target belongs to, DNS server to update, our address on that
