@@ -272,10 +272,11 @@ file tracks notable changes since the move to the monorepo.
   opens a fresh TLS connection to a service that encrypts its own end, and
   offers it the client's own list of application protocols. Where the service
   chose HTTP/2 from that list, every request on that connection ended in a
-  connection error. The client's own connection had been offered nothing and settled on
-  HTTP/1.1, so StartOS wrote HTTP/1 requests onto a connection the service was
-  reading as HTTP/2. StartOS now offers the client exactly the protocol the
-  service chose, so both halves of the connection carry the same one.
+  connection error. The client's own connection had been offered nothing and
+  settled on HTTP/1.1, so StartOS wrote HTTP/1 requests onto a connection the
+  service was reading as HTTP/2. StartOS now offers the client exactly the
+  protocol the service chose, so both halves of the connection carry the same
+  one.
 
 ### Security
 

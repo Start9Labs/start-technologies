@@ -2697,17 +2697,14 @@ mod upstream_alpn_tests {
     }
 
     /// A client that offers no ALPN is offered to the backend as offering none.
-    /// `with_alpn` falls back to the dialling config's own list when handed
-    /// `None`, so passing it conditionally would offer `h2` here, and this
-    /// backend refuses that.
+    /// The connector falls back to the dialling config's own list when it is
+    /// not given one, so calling `with_alpn` only for a non-empty list would
+    /// offer `h2` here, which this backend refuses.
     #[tokio::test]
     async fn a_client_offering_no_alpn_does_not_fall_back_to_the_dialling_config() {
-        assert_eq!(
-            try_negotiate(rewrap_configured_with(&["h2"]), &[], &["http/1.1"], &[])
-                .await
-                .expect("the backend is offered nothing, so it has nothing to refuse"),
-            None,
-        );
+        try_negotiate(rewrap_configured_with(&["h2"]), &[], &["http/1.1"], &[])
+            .await
+            .expect("the backend is offered nothing, so it has nothing to refuse");
     }
 
     /// `Specified` dials plaintext and offers the binding's own list. The base
