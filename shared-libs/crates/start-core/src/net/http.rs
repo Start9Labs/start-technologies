@@ -524,20 +524,24 @@ mod tests {
         let (mut client, client_facing) = tokio::io::duplex(4096);
         let (backend_facing, mut backend) = tokio::io::duplex(4096);
 
+        // `add_forwarded` is true because `handle_stream` only reaches
+        // `run_http_proxy` for an HTTP-aware target.
         tokio::spawn(run_http_proxy(
             client_facing,
             backend_facing,
             alpn.map(|a| MaybeUtf8String(a.as_bytes().to_vec())),
             None,
-            false,
+            true,
             None,
         ));
-        // HTTP/2 sends its preface as soon as the connection opens; HTTP/1
-        // writes nothing until a request arrives.
-        client
-            .write_all(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")
-            .await
-            .ok();
+        if alpn.is_none() {
+            // HTTP/1 writes nothing upstream until a request arrives, so send
+            // one. HTTP/2 opens with its preface and needs no prompting.
+            client
+                .write_all(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+                .await
+                .unwrap();
+        }
 
         let mut head = [0u8; 14];
         tokio::time::timeout(Duration::from_secs(5), backend.read_exact(&mut head))
@@ -557,7 +561,7 @@ mod tests {
 
     /// A backend closing its idle keep-alive leg (Apache's `KeepAliveTimeout`
     /// is 5s) must reach the client as an EOF, not as an abort on its next
-    /// request. See #3731.
+    /// request.
     #[tokio::test]
     async fn upstream_close_is_relayed_to_the_client() {
         let (mut client, client_facing) = tokio::io::duplex(4096);

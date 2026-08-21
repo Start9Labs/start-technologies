@@ -268,13 +268,15 @@ file tracks notable changes since the move to the monorepo.
   settings excluded. StartOS now rejects the overlapping claim and names both
   ports, so the service reports the conflict instead of serving it.
 
-- **A service that serves its own TLS is reached over the protocol it chose.**
-  StartOS opens a fresh TLS connection to such a service and offers it the
-  browser's list of application protocols, so a service that speaks HTTP/2
-  selects it. The browser's own connection was offered nothing and settled on
-  HTTP/1.1, and StartOS then wrote HTTP/1 requests onto a connection the service
-  was reading as HTTP/2. StartOS now offers the browser exactly the protocol the
-  service selected, so both halves of the connection carry the same one.
+- **A service that serves its own TLS and speaks HTTP/2 now loads.** Such a
+  service was unreachable — a browser showed a connection error on every
+  request, and an app talking to it got nothing back. StartOS opens a fresh TLS
+  connection to a service like this and offers it the client's own list of
+  application protocols, so the service picked HTTP/2 from it; the client's own
+  connection was offered nothing and settled on HTTP/1.1, and StartOS then wrote
+  HTTP/1 requests onto a connection the service was reading as HTTP/2. StartOS
+  now offers the client exactly the protocol the service picked, so both halves
+  of the connection carry the same one.
 
 ### Security
 

@@ -168,8 +168,8 @@ where
                             }
                         };
 
-                    // Phase 2: Resolve TLS config (scoped timeout so mid
-                    // remains accessible for sending a TLS alert on timeout)
+                    // Phase 2: Resolve TLS config. `mid` stays in scope so a
+                    // handler that declines can be answered with a TLS alert.
                     let hello = mid.client_hello();
                     let sni = hello.server_name().map(InternedString::intern);
                     let action = tls_handler.get_config(&hello, &metadata).await;
