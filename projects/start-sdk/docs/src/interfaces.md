@@ -174,7 +174,7 @@ The key steps are:
 | `protocol`                      | `'http'` \| `'https'` \| `null`                       | The protocol. Use `null` for raw TCP (non-HTTP).                                                                                                                                                                            |
 | `preferredExternalPort`         | `number`                                              | The port users will see in their URLs.                                                                                                                                                                                      |
 | `addSsl`                        | `object` \| `null`                                    | SSL termination options for HTTPS. Set to `null` for no SSL.                                                                                                                                                                |
-| `addSsl.alpn`                   | `string` \| `null`                                    | ALPN protocol negotiation (e.g., `'h2'`). Usually `null`.                                                                                                                                                                   |
+| `addSsl.alpn`                   | `'reflect'` \| `{ specified: string[] }` \| `null`    | Sets the client-facing ALPN _and_ dials your container over plain TCP. Leave `null` whenever your container serves its own TLS — see [Rewrapping SSL](#rewrapping-ssl-to-a-tls-container).                                  |
 | `addSsl.preferredExternalPort`  | `number`                                              | External port for SSL connections.                                                                                                                                                                                          |
 | `addSsl.addXForwardedHeaders`   | `boolean`                                             | Whether to add `X-Forwarded-*` headers.                                                                                                                                                                                     |
 | `addSsl.auth`                   | `ProxyAuth` \| `null`                                 | Optional auth gate enforced by the OS reverse proxy. See [Authenticating at the Proxy](#authenticating-at-the-proxy).                                                                                                       |
@@ -370,7 +370,11 @@ const origin = await multi.bindPort(443, {
 > [!NOTE]
 > For `{ certificate }`, StartOS connects to the container by IP, so the pinned certificate must be valid for that internal IP (present in its SANs). If it isn't, use `'disable'` instead.
 
-The rewrap carries the application protocol across both legs. StartOS offers your container the client's own ALPN list and then offers the client whatever your container selected, so a container whose TLS advertises `h2` is reached over `h2`, and one that selects nothing leaves the client on HTTP/1.1. Advertise every protocol you can serve on the container's own listener — that list is what the client can be given.
+The rewrap carries the application protocol across both legs. StartOS offers your container the client's own ALPN list, then offers the client whatever your container selected from it — so a container advertising `h2` is reached over `h2` by a client that asked for `h2`, and a container that selects nothing leaves the client with no negotiated protocol, which an HTTP client treats as HTTP/1.1.
+
+Advertise every protocol your container can serve on its own listener: the client can only be given one your container selects, and a container advertising a non-empty list that the client's list does not intersect refuses the connection outright — which reaches the client as a TLS alert naming the hostname, not the protocol.
+
+Leave `addSsl.alpn` unset for a container that serves its own TLS. Setting it takes the binding off this path entirely: StartOS then dials your container over **plain TCP** and applies the given strategy to the client-facing handshake, so a TLS listener receives plaintext.
 
 ## Serving Your Own TLS (Passthrough)
 

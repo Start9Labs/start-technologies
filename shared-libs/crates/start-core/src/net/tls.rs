@@ -378,7 +378,7 @@ impl ServerCertVerifier for NoCertVerifier {
 }
 
 #[cfg(test)]
-mod test {
+pub(crate) mod test {
     use std::collections::BTreeSet;
     use std::net::Ipv4Addr;
 
@@ -393,18 +393,18 @@ mod test {
     use super::*;
     use crate::net::ssl::{CertBranding, SANInfo, gen_nistp256, make_self_signed};
 
-    fn provider() -> Arc<CryptoProvider> {
+    pub(crate) fn provider() -> Arc<CryptoProvider> {
         Arc::new(tokio_rustls::rustls::crypto::ring::default_provider())
     }
 
-    fn self_signed_for_loopback() -> (PKey<Private>, X509) {
+    pub(crate) fn self_signed_for_loopback() -> (PKey<Private>, X509) {
         let key = gen_nistp256().unwrap();
         let san = SANInfo::new(&BTreeSet::from([InternedString::intern("127.0.0.1")]));
         let cert = make_self_signed((&key, &san), &CertBranding::start_os("test")).unwrap();
         (key, cert)
     }
 
-    fn server_config(key: &PKey<Private>, cert: &X509) -> ServerConfig {
+    pub(crate) fn server_config(key: &PKey<Private>, cert: &X509) -> ServerConfig {
         let cert_der = CertificateDer::from(cert.to_der().unwrap());
         let key_der = PrivatePkcs8KeyDer::from(key.private_key_to_pkcs8().unwrap());
         ServerConfig::builder_with_provider(provider())

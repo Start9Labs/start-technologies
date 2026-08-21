@@ -547,9 +547,8 @@ mod tests {
         String::from_utf8_lossy(&head).into_owned()
     }
 
-    /// One negotiated ALPN frames both legs, so a client-facing handshake that
-    /// settles on nothing speaks HTTP/1 to a backend that may have chosen h2
-    /// on the other side of an `add_ssl` rewrap. See #3739.
+    /// The negotiated ALPN frames the upstream leg: the proxy writes h2 framing
+    /// only when the client-facing handshake selected h2.
     #[tokio::test]
     async fn the_negotiated_alpn_frames_the_upstream_leg() {
         assert_eq!(upstream_framing(Some("h2")).await, "PRI * HTTP/2.0");
