@@ -524,8 +524,8 @@ mod tests {
         let (mut client, client_facing) = tokio::io::duplex(4096);
         let (backend_facing, mut backend) = tokio::io::duplex(4096);
 
-        // `add_forwarded` is true because `handle_stream` only reaches
-        // `run_http_proxy` for an HTTP-aware target.
+        // A target reaches `run_http_proxy` by adding forwarded headers or by
+        // gating auth; this picks the first.
         tokio::spawn(run_http_proxy(
             client_facing,
             backend_facing,
@@ -534,9 +534,9 @@ mod tests {
             true,
             None,
         ));
-        if alpn.is_none() {
-            // HTTP/1 writes nothing upstream until a request arrives, so send
-            // one. HTTP/2 opens with its preface and needs no prompting.
+        if alpn != Some("h2") {
+            // Only h2 opens with a preface. Every other value proxies as
+            // HTTP/1, which writes nothing upstream until a request arrives.
             client
                 .write_all(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")
                 .await
@@ -551,11 +551,12 @@ mod tests {
         String::from_utf8_lossy(&head).into_owned()
     }
 
-    /// The negotiated ALPN frames the upstream leg: the proxy writes h2 framing
-    /// only when the client-facing handshake selected h2.
+    /// The proxy writes h2 framing upstream only when the client-facing
+    /// handshake selected h2.
     #[tokio::test]
     async fn the_negotiated_alpn_frames_the_upstream_leg() {
         assert_eq!(upstream_framing(Some("h2")).await, "PRI * HTTP/2.0");
+        assert_eq!(upstream_framing(Some("http/1.1")).await, "GET / HTTP/1.1");
         assert_eq!(upstream_framing(None).await, "GET / HTTP/1.1");
     }
 

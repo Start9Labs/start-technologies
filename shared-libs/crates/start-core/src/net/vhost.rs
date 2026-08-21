@@ -1216,18 +1216,18 @@ where
             tracing::error!("Failed to set tcp keepalive: {e}");
             tracing::debug!("{e:?}");
         }
-        // rustls picks the client-facing protocol by this list's order, so each
-        // arm sets it outright: an inherited entry would outrank the choice.
+        let client_alpn: Vec<Vec<u8>> = hello
+            .alpn()
+            .into_iter()
+            .flatten()
+            .map(|proto| proto.to_vec())
+            .collect();
+        // rustls picks by this list's order, so each arm replaces it outright
+        // rather than appending to whatever the base config carried.
         match &self.connect_ssl {
             Ok(client_cfg) => {
-                let mut client_cfg = (&**client_cfg).clone();
-                client_cfg.alpn_protocols = hello
-                    .alpn()
-                    .into_iter()
-                    .flatten()
-                    .map(|x| x.to_vec())
-                    .collect();
-                let target_stream = TlsConnector::from(Arc::new(client_cfg))
+                let target_stream = TlsConnector::from(client_cfg.clone())
+                    .with_alpn(client_alpn)
                     .connect(ServerName::IpAddress(self.addr.ip().into()), tcp_stream)
                     .await
                     .with_ctx(|_| (ErrorKind::Network, self.addr))
@@ -1236,21 +1236,16 @@ where
                     .get_ref()
                     .1
                     .alpn_protocol()
-                    .map(|p| p.to_vec())
+                    .map(|proto| proto.to_vec())
                     .into_iter()
                     .collect();
                 return Some((prev, Box::pin(target_stream)));
             }
             Err(AlpnInfo::Reflect) => {
-                prev.alpn_protocols = hello
-                    .alpn()
-                    .into_iter()
-                    .flatten()
-                    .map(|a| a.to_vec())
-                    .collect();
+                prev.alpn_protocols = client_alpn;
             }
-            Err(AlpnInfo::Specified(a)) => {
-                prev.alpn_protocols = a.iter().map(|a| a.0.clone()).collect();
+            Err(AlpnInfo::Specified(protos)) => {
+                prev.alpn_protocols = protos.iter().map(|proto| proto.0.clone()).collect();
             }
         }
         Some((prev, Box::pin(tcp_stream)))
@@ -2543,7 +2538,15 @@ mod upstream_alpn_tests {
         }
     }
 
-    fn rewrapping_target(backend: SocketAddr) -> ProxyTarget {
+    /// The rewrap strategy: dial the backend over TLS and carry its choice.
+    fn rewrap() -> Result<Arc<ClientConfig>, AlpnInfo> {
+        Ok(Arc::new(client_config_no_verify(provider()).unwrap()))
+    }
+
+    fn target(
+        backend: SocketAddr,
+        connect_ssl: Result<Arc<ClientConfig>, AlpnInfo>,
+    ) -> ProxyTarget {
         ProxyTarget {
             public_v4: BTreeSet::new(),
             public_v6: BTreeSet::new(),
@@ -2553,40 +2556,32 @@ mod upstream_alpn_tests {
             addr_v6: None,
             add_x_forwarded_headers: true,
             auth: None,
-            connect_ssl: Ok(Arc::new(client_config_no_verify(provider()).unwrap())),
+            connect_ssl,
             passthrough: false,
             preserve_source_ip: false,
         }
     }
 
     /// The protocol the client and the vhost listener settle on for one
-    /// connection offering `client_alpn`, in front of a backend advertising
-    /// `backend_alpn`.
+    /// connection offering `client_alpn`, in front of a rewrapped backend
+    /// advertising `backend_alpn`.
     async fn negotiate(backend_alpn: &[&str], client_alpn: &[&str]) -> Option<String> {
-        negotiate_from(&[], backend_alpn, client_alpn).await
-    }
-
-    /// As [`negotiate`], but the config handed to `preprocess` already carries
-    /// `base_alpn`.
-    async fn negotiate_from(
-        base_alpn: &[&str],
-        backend_alpn: &[&str],
-        client_alpn: &[&str],
-    ) -> Option<String> {
-        try_negotiate(base_alpn, backend_alpn, client_alpn)
+        try_negotiate(rewrap(), &[], backend_alpn, client_alpn)
             .await
             .expect("the client completes its handshake with the listener")
     }
 
-    /// As [`negotiate_from`], but surfaces the client handshake's error instead
-    /// of panicking, so a refused connection can be asserted on.
+    /// As [`negotiate`], but for any `connect_ssl` strategy, with `base_alpn`
+    /// already on the config handed to `preprocess`, and surfacing the client
+    /// handshake's error rather than panicking on it.
     async fn try_negotiate(
+        connect_ssl: Result<Arc<ClientConfig>, AlpnInfo>,
         base_alpn: &[&str],
         backend_alpn: &[&str],
         client_alpn: &[&str],
     ) -> Result<Option<String>, std::io::Error> {
         let handler = Rewrap {
-            target: rewrapping_target(spawn_backend(backend_alpn).await),
+            target: target(spawn_backend(backend_alpn).await, connect_ssl),
             base_alpn: base_alpn.iter().map(|a| a.to_string()).collect(),
         };
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
@@ -2602,9 +2597,8 @@ mod upstream_alpn_tests {
         let mut client = client_config_no_verify(provider()).unwrap();
         client.alpn_protocols = client_alpn.iter().map(|a| a.as_bytes().to_vec()).collect();
         let tcp = TcpStream::connect(addr).await.unwrap();
-        // Bounded because nothing under the client handshake has a timeout of
-        // its own, so a regression that stalls the listener would hang the test
-        // rather than fail it.
+        // Neither the client's connect nor `get_config` is bounded, so a stall
+        // would hang this test instead of failing it.
         let handshake = tokio::time::timeout(
             Duration::from_secs(10),
             TlsConnector::from(Arc::new(client))
@@ -2656,17 +2650,49 @@ mod upstream_alpn_tests {
     #[tokio::test]
     async fn a_protocol_on_the_base_config_does_not_outrank_the_backend() {
         assert_eq!(
-            negotiate_from(&["http/1.1"], &["h2", "http/1.1"], &["h2", "http/1.1"]).await,
+            try_negotiate(
+                rewrap(),
+                &["http/1.1"],
+                &["h2", "http/1.1"],
+                &["h2", "http/1.1"]
+            )
+            .await
+            .expect("the client completes its handshake with the listener"),
             Some("h2".to_owned()),
         );
     }
 
-    /// A backend that shares no protocol with the client refuses the upstream
-    /// leg, and the listener has no session to hand back.
+    /// A failed upstream leg declines the client. Falling through to the
+    /// plaintext stream would hand it a session the backend never agreed to.
     #[tokio::test]
-    async fn a_backend_sharing_no_protocol_with_the_client_refuses_the_connection() {
-        try_negotiate(&[], &["h2"], &["http/1.1"])
+    async fn a_failed_upstream_leg_declines_the_client() {
+        try_negotiate(rewrap(), &[], &["h2"], &["http/1.1"])
             .await
             .expect_err("the listener cannot serve a client the backend refused");
+    }
+
+    /// `Reflect` dials plaintext, so the client's own list is what it gets
+    /// back, in its own order.
+    #[tokio::test]
+    async fn reflect_gives_the_client_its_own_list() {
+        assert_eq!(
+            try_negotiate(Err(AlpnInfo::Reflect), &[], &[], &["h2", "http/1.1"])
+                .await
+                .expect("a reflected binding completes the client handshake"),
+            Some("h2".to_owned()),
+        );
+    }
+
+    /// `Specified` replaces the list outright, so the binding's own protocol is
+    /// what the client is offered.
+    #[tokio::test]
+    async fn specified_offers_the_bindings_own_list() {
+        let http1 = AlpnInfo::Specified(vec![MaybeUtf8String(b"http/1.1".to_vec())]);
+        assert_eq!(
+            try_negotiate(Err(http1), &[], &[], &["h2", "http/1.1"])
+                .await
+                .expect("a specified binding completes the client handshake"),
+            Some("http/1.1".to_owned()),
+        );
     }
 }
