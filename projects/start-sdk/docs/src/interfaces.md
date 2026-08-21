@@ -370,6 +370,8 @@ const origin = await multi.bindPort(443, {
 > [!NOTE]
 > For `{ certificate }`, StartOS connects to the container by IP, so the pinned certificate must be valid for that internal IP (present in its SANs). If it isn't, use `'disable'` instead.
 
+The rewrap carries the application protocol across both legs. StartOS offers your container the client's own ALPN list and then offers the client whatever your container selected, so a container whose TLS advertises `h2` is reached over `h2`, and one that selects nothing leaves the client on HTTP/1.1. Advertise every protocol you can serve on the container's own listener — that list is what the client can be given.
+
 ## Serving Your Own TLS (Passthrough)
 
 There is a third arrangement, distinct from both plain termination and the rewrap: **passthrough**, where your container's certificate reaches the client unmodified. Set `secure: { ssl: true }` with **no** `addSsl`:
@@ -390,7 +392,7 @@ StartOS still fronts the port with one of its TLS listeners, but that listener p
 Reach for passthrough only when the rewrap genuinely cannot serve, which is one of two cases:
 
 1. **The client must verify your container's own certificate.** A wallet that pins a certificate carried in a connection URI can only do so if the certificate it pins is the one actually served.
-2. **The handshake carries something a rewrap does not.** ALPN is the concrete case: StartOS negotiates no ALPN with the client across an `addSsl` rewrap, and gRPC-go rejects a connection with no selected ALPN (`missing selected ALPN property`). LND binds its gRPC interface this way for exactly that reason.
+2. **The client needs a protocol your container does not select.** A rewrap gives the client whatever ALPN your container chose on the inner leg, so a client that requires one — gRPC-go rejects a connection with no selected ALPN (`missing selected ALPN property`) — is served only if the container's own listener advertises it. LND binds its gRPC interface as a passthrough.
 
 Otherwise prefer `addSsl`. Passthrough gives up everything the proxy does on your behalf:
 

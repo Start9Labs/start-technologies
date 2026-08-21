@@ -1223,16 +1223,18 @@ where
                     .map(|x| x.to_vec())
                     .collect();
                 let target_stream = TlsConnector::from(Arc::new(client_cfg))
-                    .connect_with(
-                        ServerName::IpAddress(self.addr.ip().into()),
-                        tcp_stream,
-                        |conn| {
-                            prev.alpn_protocols
-                                .extend(conn.alpn_protocol().into_iter().map(|p| p.to_vec()))
-                        },
-                    )
+                    .connect(ServerName::IpAddress(self.addr.ip().into()), tcp_stream)
                     .await
                     .log_err()?;
+                // The client handshakes on this config after `preprocess`
+                // returns, so it can still be offered what the backend chose.
+                prev.alpn_protocols.extend(
+                    target_stream
+                        .get_ref()
+                        .1
+                        .alpn_protocol()
+                        .map(|p| p.to_vec()),
+                );
                 return Some((prev, Box::pin(target_stream)));
             }
             Err(AlpnInfo::Reflect) => {
@@ -2469,5 +2471,169 @@ mod conn_cap_tests {
             .unwrap()
             .unwrap();
         assert!(outcome == "target" || outcome == "conn", "got {outcome}");
+    }
+}
+
+/// One negotiated ALPN frames both legs of a rewrapped connection, and the
+/// backend is offered the client's own list, so the client has to land on
+/// whichever protocol the backend chose.
+#[cfg(test)]
+mod upstream_alpn_tests {
+    use std::collections::BTreeSet;
+    use std::net::Ipv4Addr;
+    use std::sync::Mutex;
+
+    use tokio_rustls::TlsAcceptor;
+    use tokio_rustls::rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
+
+    use super::*;
+    use crate::net::ssl::{SANInfo, gen_nistp256, make_self_signed};
+    use crate::net::tls::client_config_no_verify;
+
+    fn provider() -> Arc<CryptoProvider> {
+        Arc::new(tokio_rustls::rustls::crypto::ring::default_provider())
+    }
+
+    fn server_config(alpn: &[&str]) -> ServerConfig {
+        let key = gen_nistp256().unwrap();
+        let san = SANInfo::new(&BTreeSet::from([InternedString::intern("127.0.0.1")]));
+        let cert = make_self_signed((&key, &san), &CertBranding::start_os("test")).unwrap();
+        let mut cfg = ServerConfig::builder_with_provider(provider())
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_no_client_auth()
+            .with_single_cert(
+                vec![CertificateDer::from(cert.to_der().unwrap())],
+                PrivatePkcs8KeyDer::from(key.private_key_to_pkcs8().unwrap()).into(),
+            )
+            .unwrap();
+        cfg.alpn_protocols = alpn.iter().map(|a| a.as_bytes().to_vec()).collect();
+        cfg
+    }
+
+    /// A TLS backend advertising `alpn`, standing in for a container serving
+    /// its own TLS behind an `https` binding.
+    async fn spawn_backend(alpn: &[&str]) -> SocketAddr {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let acceptor = TlsAcceptor::from(Arc::new(server_config(alpn)));
+        tokio::spawn(async move {
+            while let Ok((tcp, _)) = listener.accept().await {
+                let acceptor = acceptor.clone();
+                tokio::spawn(async move {
+                    if let Ok(tls) = acceptor.accept(tcp).await {
+                        // The assertion is about the handshake, so the backend
+                        // just holds its side open rather than closing under it.
+                        tokio::time::sleep(Duration::from_secs(30)).await;
+                        drop(tls);
+                    }
+                });
+            }
+        });
+        addr
+    }
+
+    /// Serves the client-facing config that the real [`ProxyTarget::preprocess`]
+    /// produces for an accepted ClientHello.
+    #[derive(Clone)]
+    struct Rewrap {
+        target: ProxyTarget,
+        upstream: Arc<Mutex<Vec<AcceptStream>>>,
+    }
+    impl<'a> TlsHandler<'a, TcpListener> for Rewrap {
+        async fn get_config(
+            &'a mut self,
+            hello: &'a ClientHello<'a>,
+            metadata: &'a TcpMetadata,
+        ) -> Option<TlsHandlerAction> {
+            let base = server_config(&[]);
+            let (cfg, upstream) =
+                VHostTarget::<TcpListener>::preprocess(&self.target, base, hello, metadata).await?;
+            self.upstream.lock().unwrap().push(upstream);
+            Some(TlsHandlerAction::Tls(cfg))
+        }
+    }
+
+    fn rewrapping_target(backend: SocketAddr) -> ProxyTarget {
+        ProxyTarget {
+            public_v4: BTreeSet::new(),
+            public_v6: BTreeSet::new(),
+            private: BTreeSet::new(),
+            acme: None,
+            addr: backend,
+            addr_v6: None,
+            add_x_forwarded_headers: true,
+            auth: None,
+            connect_ssl: Ok(Arc::new(client_config_no_verify(provider()).unwrap())),
+            passthrough: false,
+            preserve_source_ip: false,
+        }
+    }
+
+    /// The protocol the client and our listener settle on for one connection
+    /// offering `client_alpn`, in front of a backend advertising `backend_alpn`.
+    async fn negotiate(backend_alpn: &[&str], client_alpn: &[&str]) -> Option<String> {
+        let upstream = Arc::new(Mutex::new(Vec::new()));
+        let handler = Rewrap {
+            target: rewrapping_target(spawn_backend(backend_alpn).await),
+            upstream: upstream.clone(),
+        };
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut vhost = TlsListener::new(listener, handler);
+
+        let accepted = tokio::spawn(async move {
+            futures::future::poll_fn(|cx| vhost.poll_accept(cx))
+                .await
+                .map(|(metadata, stream)| (metadata.tls_info.alpn, stream))
+        });
+
+        let mut client = client_config_no_verify(provider()).unwrap();
+        client.alpn_protocols = client_alpn.iter().map(|a| a.as_bytes().to_vec()).collect();
+        let tcp = TcpStream::connect(addr).await.unwrap();
+        let client_stream = TlsConnector::from(Arc::new(client))
+            .connect(ServerName::IpAddress(Ipv4Addr::LOCALHOST.into()), tcp)
+            .await
+            .expect("the client completes its handshake with the listener");
+
+        let (alpn, server_stream) = tokio::time::timeout(Duration::from_secs(10), accepted)
+            .await
+            .expect("the listener finishes its handshake")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            client_stream
+                .get_ref()
+                .1
+                .alpn_protocol()
+                .map(|p| p.to_vec()),
+            alpn.as_ref().map(|a| a.0.clone()),
+            "the client and the listener read the same negotiated protocol",
+        );
+        drop((client_stream, server_stream, upstream));
+        alpn.map(|a| String::from_utf8(a.0).unwrap())
+    }
+
+    #[tokio::test]
+    async fn the_client_lands_on_the_protocol_the_backend_chose() {
+        assert_eq!(
+            negotiate(&["h2", "http/1.1"], &["h2", "http/1.1"]).await,
+            Some("h2".to_owned()),
+            "the backend picks h2 out of the client's own list, so proxying \
+             the pair as HTTP/1 writes h1 framing onto an h2 connection",
+        );
+    }
+
+    #[tokio::test]
+    async fn a_backend_that_declines_alpn_leaves_the_client_without_it() {
+        assert_eq!(negotiate(&[], &["h2", "http/1.1"]).await, None);
+    }
+
+    #[tokio::test]
+    async fn a_backend_limited_to_http1_holds_the_client_there() {
+        assert_eq!(
+            negotiate(&["http/1.1"], &["h2", "http/1.1"]).await,
+            Some("http/1.1".to_owned()),
+        );
     }
 }
