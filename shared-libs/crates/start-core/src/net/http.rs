@@ -524,8 +524,8 @@ mod tests {
         let (mut client, client_facing) = tokio::io::duplex(4096);
         let (backend_facing, mut backend) = tokio::io::duplex(4096);
 
-        // A target reaches `run_http_proxy` by adding forwarded headers or by
-        // gating auth; this picks the first.
+        // A target reaches `run_http_proxy` only when it adds forwarded headers
+        // or gates auth, so this test sets the first.
         tokio::spawn(run_http_proxy(
             client_facing,
             backend_facing,

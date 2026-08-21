@@ -980,8 +980,8 @@ pub struct ProxyTarget {
     /// requests. Implies HTTP-aware proxying (same path as forwarded headers).
     pub auth: Option<crate::net::host::binding::ProxyAuth>,
     /// `Ok` dials the container over TLS and carries the ALPN it negotiated
-    /// across to the client. `Err` dials it in plaintext and applies the given
-    /// strategy to the client-facing ALPN.
+    /// across to the client. `Err` dials it in plaintext, and on a terminating
+    /// target applies the given strategy to the client-facing ALPN.
     pub connect_ssl: Result<Arc<ClientConfig>, AlpnInfo>,
     pub passthrough: bool,
     /// Open the internal leg with the client's source IP (`IP_TRANSPARENT`).
@@ -1222,8 +1222,8 @@ where
             .flatten()
             .map(|proto| proto.to_vec())
             .collect();
-        // rustls picks by this list's order, so each arm replaces it outright
-        // rather than appending to whatever the base config carried.
+        // rustls selects the client-facing protocol by the server list's order,
+        // so an entry left on the base config would outrank what these arms set.
         match &self.connect_ssl {
             Ok(client_cfg) => {
                 let target_stream = TlsConnector::from(client_cfg.clone())
@@ -2572,8 +2572,7 @@ mod upstream_alpn_tests {
     }
 
     /// As [`negotiate`], but for any `connect_ssl` strategy, with `base_alpn`
-    /// already on the config handed to `preprocess`, and surfacing the client
-    /// handshake's error rather than panicking on it.
+    /// already on the config handed to `preprocess`.
     async fn try_negotiate(
         connect_ssl: Result<Arc<ClientConfig>, AlpnInfo>,
         base_alpn: &[&str],
@@ -2662,34 +2661,41 @@ mod upstream_alpn_tests {
         );
     }
 
-    /// A failed upstream leg declines the client. Falling through to the
-    /// plaintext stream would hand it a session the backend never agreed to.
+    /// `preprocess` returns `None` when the upstream handshake fails, and the
+    /// listener turns that into a TLS alert rather than a session.
     #[tokio::test]
-    async fn a_failed_upstream_leg_declines_the_client() {
+    async fn a_backend_refusing_the_clients_alpn_declines_the_connection() {
         try_negotiate(rewrap(), &[], &["h2"], &["http/1.1"])
             .await
             .expect_err("the listener cannot serve a client the backend refused");
     }
 
-    /// `Reflect` dials plaintext, so the client's own list is what it gets
-    /// back, in its own order.
+    /// `Reflect` dials plaintext and hands the client back its own list, in its
+    /// own order. The base carries `http/1.1`, which would win on server order
+    /// if the arm appended to it instead.
     #[tokio::test]
     async fn reflect_gives_the_client_its_own_list() {
         assert_eq!(
-            try_negotiate(Err(AlpnInfo::Reflect), &[], &[], &["h2", "http/1.1"])
-                .await
-                .expect("a reflected binding completes the client handshake"),
+            try_negotiate(
+                Err(AlpnInfo::Reflect),
+                &["http/1.1"],
+                &[],
+                &["h2", "http/1.1"]
+            )
+            .await
+            .expect("a reflected binding completes the client handshake"),
             Some("h2".to_owned()),
         );
     }
 
-    /// `Specified` replaces the list outright, so the binding's own protocol is
-    /// what the client is offered.
+    /// `Specified` dials plaintext and offers the binding's own list. The base
+    /// carries `h2`, which the client prefers and which would win if the arm
+    /// appended to it instead.
     #[tokio::test]
     async fn specified_offers_the_bindings_own_list() {
         let http1 = AlpnInfo::Specified(vec![MaybeUtf8String(b"http/1.1".to_vec())]);
         assert_eq!(
-            try_negotiate(Err(http1), &[], &[], &["h2", "http/1.1"])
+            try_negotiate(Err(http1), &["h2"], &[], &["h2", "http/1.1"])
                 .await
                 .expect("a specified binding completes the client handshake"),
             Some("http/1.1".to_owned()),
