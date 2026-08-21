@@ -76,8 +76,9 @@ export class PublishedPortsService extends FormService<PublishedPortDisplay[]> {
 
   /**
    * If `pending` is non-empty, prompt the user to confirm publishing port(s)
-   * the router itself answers on from the WAN (remote access to its web
-   * interface, SSH, or a VPN server) — the forward would capture that traffic.
+   * something else already answers on from the WAN, naming the actual holder:
+   * the router's own services (remote access to its web interface, SSH, a VPN
+   * server), a device's SNI hostname routes, or both on a shared port.
    * Returns true when there is nothing to confirm or the user confirmed, false
    * when they cancelled.
    */
@@ -85,17 +86,50 @@ export class PublishedPortsService extends FormService<PublishedPortDisplay[]> {
     pending: RouterPortCollision[],
   ): Promise<boolean> {
     if (!pending.length) return true
-    const ports = [...new Set(pending.flatMap(c => c.router_ports))].join(', ')
+    const routerPorts = [...new Set(pending.flatMap(c => c.router_ports))]
+    const sni = pending.flatMap(c => c.sni_ports)
+    const parts: string[] = []
+    if (routerPorts.length) {
+      parts.push(
+        fill(
+          this.i18n.transform(
+            'Port(s) {ports} are used by this router itself — for remote access to its web interface, SSH, or a VPN server. Publishing them will send that traffic to the selected device instead, cutting those services off from outside your network.',
+          ),
+          { ports: routerPorts.join(', ') },
+        ),
+      )
+    }
+    if (sni.length) {
+      const hostnames = [...new Set(sni.flatMap(s => s.hostnames))]
+      const devices = [...new Set(sni.flatMap(s => s.devices))]
+      const vars = {
+        ports: [...new Set(sni.map(s => s.ports))].join(', '),
+        list:
+          hostnames.slice(0, 3).join(', ') +
+          (hostnames.length > 3 ? ` (+${hostnames.length - 3})` : ''),
+        devices: devices.join(', '),
+      }
+      parts.push(
+        fill(
+          this.i18n.transform(
+            devices.length
+              ? 'Port(s) {ports} currently carry hostname routes ({list}) registered by {devices}. Publishing them will send all traffic on these ports to the selected device instead — those hostname routes will stop working until this rule is removed.'
+              : 'Port(s) {ports} currently carry hostname routes ({list}). Publishing them will send all traffic on these ports to the selected device instead — those hostname routes will stop working until this rule is removed.',
+          ),
+          vars,
+        ),
+      )
+    }
+    parts.push(this.i18n.transform('Publish anyway?'))
     return firstValueFrom(
       this.dialogs.open<boolean>(TUI_CONFIRM, {
-        label: this.i18n.transform('Port Used by This Router'),
+        label: this.i18n.transform(
+          routerPorts.length
+            ? 'Port Used by This Router'
+            : 'Port Used for Hostname Routes',
+        ),
         data: {
-          content: fill(
-            this.i18n.transform(
-              'Port(s) {ports} are used by this router itself — for remote access to its web interface, SSH, or a VPN server. Publishing them will send that traffic to the selected device instead, cutting those services off from outside your network. Publish anyway?',
-            ),
-            { ports },
-          ),
+          content: parts.join(' '),
           yes: this.i18n.transform('Publish Anyway'),
           no: this.i18n.transform('Cancel'),
         },

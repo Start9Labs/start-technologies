@@ -680,6 +680,21 @@ export interface RouterPortCollision {
   label: string
   /** The colliding router-service port spec(s), e.g. ["443", "22"]. */
   router_ports: string[]
+  /**
+   * Colliding ports whose holder is a device's SNI hostname routes rather
+   * than a router service, so the dialog can name the actual use. The
+   * override semantics are the same.
+   */
+  sni_ports: SniPortUse[]
+}
+
+/** One colliding port held by hostname routes: the spec plus who is using it. */
+export interface SniPortUse {
+  ports: string
+  /** The routed hostnames on the port, deduped and sorted. */
+  hostnames: string[]
+  /** Display names (or MACs) of the devices the routes deliver to. */
+  devices: string[]
 }
 
 // A non-empty collision list means nothing was applied — confirm and re-save.

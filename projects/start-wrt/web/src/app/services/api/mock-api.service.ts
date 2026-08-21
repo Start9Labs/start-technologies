@@ -1374,29 +1374,42 @@ export class MockApiService extends ApiService {
 
     // Router-port collision handshake (matches the real backend): an enabled,
     // unconfirmed IPv4 forward capturing a port the router answers on itself
-    // (Remote Access 80/443/22, TCP — active unless remote access is off)
-    // reports the collision and applies nothing.
-    if (this.mockSystemInfo.remoteAccess !== 'never') {
-      const pending = params.ports
-        .filter(
-          p =>
-            p.enabled &&
-            p.ipv4 &&
-            !p.override_router_ports &&
-            p.protocol !== 'udp',
-        )
-        .map(p => {
-          const spec = p.ipv4_public_port || p.ports
-          const [lo, hi = lo] = spec.split('-').map(Number)
-          const routerPorts = ['80', '443', '22'].filter(
-            rp => Number(rp) >= lo && Number(rp) <= hi,
-          )
-          return { id: p.id, label: p.label, router_ports: routerPorts }
-        })
-        .filter(c => c.router_ports.length)
-      if (pending.length) {
-        return { pending_router_port_collisions: pending }
-      }
+    // (Remote Access 80/443/22, TCP — active unless remote access is off) or
+    // one held by the mock SNI hostname route on 443 (see
+    // publishedPortsAutoList) reports the collision and applies nothing.
+    const sniMac = '00:1A:2B:3C:4D:5E'
+    const pending = params.ports
+      .filter(
+        p =>
+          p.enabled &&
+          p.ipv4 &&
+          !p.override_router_ports &&
+          p.protocol !== 'udp',
+      )
+      .map(p => {
+        const spec = p.ipv4_public_port || p.ports
+        const [lo, hi = lo] = spec.split('-').map(Number)
+        const router_ports =
+          this.mockSystemInfo.remoteAccess !== 'never'
+            ? ['80', '443', '22'].filter(
+                rp => Number(rp) >= lo && Number(rp) <= hi,
+              )
+            : []
+        const sni_ports =
+          this.autoForwardAllowed.has(sniMac) && lo <= 443 && 443 <= hi
+            ? [
+                {
+                  ports: '443',
+                  hostnames: ['nextcloud.example.com'],
+                  devices: [this.lookupDeviceByMac(sniMac).name || sniMac],
+                },
+              ]
+            : []
+        return { id: p.id, label: p.label, router_ports, sni_ports }
+      })
+      .filter(c => c.router_ports.length || c.sni_ports.length)
+    if (pending.length) {
+      return { pending_router_port_collisions: pending }
     }
 
     // Auto-reserve static IPv4 for enabled ports (matches real backend

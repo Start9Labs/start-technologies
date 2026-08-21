@@ -158,6 +158,21 @@ pub struct RouterPortCollision {
     pub label: String,
     /// The colliding router-service port spec(s), e.g. ["443", "22"].
     pub router_ports: Vec<String>,
+    /// Colliding ports whose holder is a device's SNI hostname routes rather
+    /// than a router service — the dialog names the actual use instead of
+    /// blaming the router. Informational: the override semantics are the same.
+    pub sni_ports: Vec<SniPortUse>,
+}
+
+/// One colliding port held by hostname routes: the port spec plus who is
+/// using it, for the confirm dialog's copy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SniPortUse {
+    pub ports: String,
+    /// The routed hostnames on the port, deduped and sorted.
+    pub hostnames: Vec<String>,
+    /// Display names (or MACs) of the devices the routes deliver to.
+    pub devices: Vec<String>,
 }
 
 /// [`set`] response. A non-empty collision list means nothing was applied —
@@ -972,8 +987,19 @@ pub async fn set<C: CtrlContext>(
         // mode has no dialog: the CLI editor confirms implicitly, matching
         // `ethernet::set` / `wifi::set`.
         if ctx.effectful() {
-            let pending = router_port_collisions(&cfgs["firewall"], &req.ports);
+            let mut pending = router_port_collisions(&cfgs["firewall"], &req.ports);
             if !pending.is_empty() {
+                // Name each SNI-held port's holder (hostnames + devices) so
+                // the dialog can say what the port is really carrying; the
+                // demux and the dhcp config are only at hand here.
+                for collision in &mut pending {
+                    for sni in &mut collision.sni_ports {
+                        if let Some(want) = crate::port_control::parse_port_range(&sni.ports) {
+                            (sni.hostnames, sni.devices) =
+                                crate::port_control::sni_route_holders(&cfgs["dhcp"], want).await;
+                        }
+                    }
+                }
                 return Ok(PublishedPortsSetResult {
                     pending_router_port_collisions: pending,
                 });
@@ -1270,12 +1296,24 @@ fn router_port_collisions(
                 Protocol::Udp => (false, true),
                 Protocol::TcpUdp => (true, true),
             };
-            let router_ports =
-                crate::port_control::router_reserved_overlaps(firewall, range, tcp, udp);
-            (!router_ports.is_empty()).then(|| RouterPortCollision {
-                id: p.id.clone(),
-                label: p.label.clone(),
-                router_ports,
+            let overlaps = crate::port_control::router_reserved_overlaps(firewall, range, tcp, udp);
+            (!overlaps.is_empty()).then(|| {
+                let (sni, router): (Vec<_>, Vec<_>) = overlaps.into_iter().partition(|o| o.sni);
+                RouterPortCollision {
+                    id: p.id.clone(),
+                    label: p.label.clone(),
+                    router_ports: router.into_iter().map(|o| o.ports).collect(),
+                    // Holder details are filled in by [`set`], which has the
+                    // dhcp config and the live demux at hand.
+                    sni_ports: sni
+                        .into_iter()
+                        .map(|o| SniPortUse {
+                            ports: o.ports,
+                            hostnames: Vec::new(),
+                            devices: Vec::new(),
+                        })
+                        .collect(),
+                }
             })
         })
         .collect()
@@ -2729,6 +2767,22 @@ config rule 'disabled_rule'
 \tlist proto 'tcp'
 \toption target 'ACCEPT'
 \toption enabled '0'
+
+config rule 'apf_sni_443'
+\toption name 'SNI demux (hostname routes)'
+\toption src 'wan'
+\toption dest_port '443'
+\tlist proto 'tcp'
+\toption target 'ACCEPT'
+\toption _apf_label 'SNI'
+
+config rule 'apf_sni_8444'
+\toption name 'SNI demux (hostname routes)'
+\toption src 'wan'
+\toption dest_port '8444'
+\tlist proto 'tcp'
+\toption target 'ACCEPT'
+\toption _apf_label 'SNI'
 ";
 
     async fn collisions_for(ports: Vec<PublishedPortInput>) -> Vec<RouterPortCollision> {
@@ -2757,6 +2811,28 @@ config rule 'disabled_rule'
         })])
         .await;
         assert_eq!(hits[0].router_ports, vec!["443", "22", "51820"]);
+    }
+
+    #[tokio::test]
+    async fn sni_admit_rules_are_reported_as_hostname_holders() {
+        // A port held only by hostname routes still collides, but lands in
+        // `sni_ports` so the dialog names the real holder instead of blaming
+        // the router. Holder details stay empty here — the demux isn't
+        // running in unit tests; `set` fills them in the daemon.
+        let hits = collisions_for(vec![make_input(|p| p.ports = "8444".into())]).await;
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].router_ports.is_empty());
+        assert_eq!(hits[0].sni_ports.len(), 1);
+        assert_eq!(hits[0].sni_ports[0].ports, "8444");
+        assert!(hits[0].sni_ports[0].hostnames.is_empty());
+        assert!(hits[0].sni_ports[0].devices.is_empty());
+
+        // Remote Access and hostname routes share 443: both kinds reported,
+        // each under its own heading.
+        let hits = collisions_for(vec![make_input(|p| p.ports = "443".into())]).await;
+        assert_eq!(hits[0].router_ports, vec!["443"]);
+        assert_eq!(hits[0].sni_ports.len(), 1);
+        assert_eq!(hits[0].sni_ports[0].ports, "443");
     }
 
     #[tokio::test]

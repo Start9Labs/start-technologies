@@ -1039,22 +1039,33 @@ fn reserves_router_port(firewall: &uciedit::Config<'_>, want: (u16, u16)) -> boo
     !router_reserved_overlaps(firewall, want, true, true).is_empty()
 }
 
+/// One overlapping WAN-input rule from [`router_reserved_overlaps`]: the
+/// rule's port spec, and whether the rule is an SNI-demux admit rule — i.e.
+/// the port's real holder is a device's hostname routes, not one of the
+/// router's own services. The distinction only changes what the confirm
+/// dialog tells the user; either way the port counts as router-reserved.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ReservedOverlap {
+    pub ports: String,
+    pub sni: bool,
+}
+
 /// The ports the router itself answers on from the WAN — input-chain rules
 /// (`src wan`, no `dest` zone, `ACCEPT`) — whose port range overlaps `want`
 /// over a requested transport (`tcp`/`udp`). Returns each overlapping rule's
-/// `dest_port` spec, deduped. Reading the live rules rather than a hardcoded
-/// list means a port stops being reserved when its feature is turned off, and
-/// any future WAN-exposed service is covered without touching this code.
-/// IPv6-only rules are ignored — they share no port space with an IPv4
-/// redirect. Transport matters: Remote Access (80/443/22) is TCP, WireGuard
-/// is UDP, so e.g. a UDP-only forward on 443 collides with nothing.
+/// `dest_port` spec, deduped per kind. Reading the live rules rather than a
+/// hardcoded list means a port stops being reserved when its feature is
+/// turned off, and any future WAN-exposed service is covered without touching
+/// this code. IPv6-only rules are ignored — they share no port space with an
+/// IPv4 redirect. Transport matters: Remote Access (80/443/22) is TCP,
+/// WireGuard is UDP, so e.g. a UDP-only forward on 443 collides with nothing.
 pub(crate) fn router_reserved_overlaps(
     firewall: &uciedit::Config<'_>,
     want: (u16, u16),
     tcp: bool,
     udp: bool,
-) -> Vec<String> {
-    let mut overlaps: Vec<String> = Vec::new();
+) -> Vec<ReservedOverlap> {
+    let mut overlaps: Vec<ReservedOverlap> = Vec::new();
     for sec in &firewall.sections {
         let Ok(rule) = sec.get::<FirewallRule>() else {
             continue;
@@ -1086,10 +1097,14 @@ pub(crate) fn router_reserved_overlaps(
         let Some(spec) = rule.dest_port.as_deref() else {
             continue;
         };
+        let sni = rule._apf_label.as_deref() == Some(LABEL_SNI);
         if parse_port_range(spec).is_some_and(|range| ranges_overlap(want, range))
-            && !overlaps.iter().any(|p| p == spec)
+            && !overlaps.iter().any(|p| p.ports == spec && p.sni == sni)
         {
-            overlaps.push(spec.to_string());
+            overlaps.push(ReservedOverlap {
+                ports: spec.to_string(),
+                sni,
+            });
         }
     }
     overlaps
@@ -1778,22 +1793,84 @@ pub struct AutoForward {
 }
 
 #[instrument(skip_all)]
+/// Device display names by uppercased MAC: UCI static host names win, cached
+/// learned names fill the gaps.
+pub(crate) fn device_display_names(
+    dhcp: &uciedit::Config<'_>,
+) -> Result<HashMap<String, String>, Error> {
+    let mut names: HashMap<String, String> = crate::device_names::load_all()
+        .into_iter()
+        .filter_map(|(mac, cached)| cached.hostname.map(|name| (mac, name)))
+        .collect();
+    dhcp.each::<DhcpHost, Error>(|_, host| {
+        if let Some(name) = host.name.as_ref().filter(|n| !n.is_empty()) {
+            names.insert(host.mac.to_uppercase(), name.clone());
+        }
+    })?;
+    Ok(names)
+}
+
+/// LAN IPv4 → uppercased MAC: live DHCP leases, overridden by static
+/// reservations (the reservation is where the device is supposed to be, so it
+/// wins on disagreement).
+pub(crate) async fn ip_to_mac_map(
+    dhcp: &uciedit::Config<'_>,
+) -> Result<HashMap<String, String>, Error> {
+    let mut ip_to_mac: HashMap<String, String> = HashMap::new();
+    if let Some(leases) = crate::devices::current_lease_ips().await {
+        for (mac, ip) in leases {
+            ip_to_mac.insert(ip, mac);
+        }
+    }
+    dhcp.each::<DhcpHost, Error>(|_, host| {
+        if let Some(ip) = host.ip.clone().filter(|ip| !ip.is_empty()) {
+            ip_to_mac.insert(ip, host.mac.to_uppercase());
+        }
+    })?;
+    Ok(ip_to_mac)
+}
+
+/// The hostname routes whose external port overlaps `want`, for naming a
+/// port's holder in the router-port confirm dialog: the routed hostnames and
+/// the owning devices' display names (name, else MAC; an unresolvable target
+/// is skipped), each deduped and sorted. Informational only, so lookup
+/// failures degrade to empty lists rather than failing the caller.
+pub(crate) async fn sni_route_holders(
+    dhcp: &uciedit::Config<'_>,
+    want: (u16, u16),
+) -> (Vec<String>, Vec<String>) {
+    let Some(pc) = PORT_CONTROL.get() else {
+        return (Vec::new(), Vec::new());
+    };
+    let names = device_display_names(dhcp).unwrap_or_default();
+    let ip_to_mac = ip_to_mac_map(dhcp).await.unwrap_or_default();
+    let mut hostnames = Vec::new();
+    let mut devices = Vec::new();
+    for route in pc.sni.snapshot() {
+        if !ranges_overlap(want, (route.ext_port, route.ext_port)) {
+            continue;
+        }
+        if !hostnames.contains(&route.hostname) {
+            hostnames.push(route.hostname.clone());
+        }
+        if let Some(mac) = ip_to_mac.get(&route.target.ip().to_string()) {
+            let display = names.get(mac).cloned().unwrap_or_else(|| mac.clone());
+            if !devices.contains(&display) {
+                devices.push(display);
+            }
+        }
+    }
+    hostnames.sort();
+    devices.sort();
+    (hostnames, devices)
+}
+
 pub async fn auto_list(ctx: ServerContext) -> Result<Vec<AutoForward>, Error> {
     let uci_root = ctx.uci_root();
     let arena = Arena::new();
     let cfgs = parse_all(&uci_root, &arena, &["firewall", "dhcp"]).await?;
 
-    // Device display names: UCI static host names win, cached learned names
-    // fill the gaps.
-    let mut names: HashMap<String, String> = crate::device_names::load_all()
-        .into_iter()
-        .filter_map(|(mac, cached)| cached.hostname.map(|name| (mac, name)))
-        .collect();
-    cfgs["dhcp"].each::<DhcpHost, Error>(|_, host| {
-        if let Some(name) = host.name.as_ref().filter(|n| !n.is_empty()) {
-            names.insert(host.mac.to_uppercase(), name.clone());
-        }
-    })?;
+    let names = device_display_names(&cfgs["dhcp"])?;
 
     let mut out = Vec::new();
     for sec in &cfgs["firewall"].sections {
@@ -1822,17 +1899,7 @@ pub async fn auto_list(ctx: ServerContext) -> Result<Vec<AutoForward>, Error> {
     // The owning device is whoever holds the target address: a static
     // reservation first, then the live DHCP lease.
     if let Some(pc) = PORT_CONTROL.get() {
-        let mut ip_to_mac: HashMap<String, String> = HashMap::new();
-        if let Some(leases) = crate::devices::current_lease_ips().await {
-            for (mac, ip) in leases {
-                ip_to_mac.insert(ip, mac);
-            }
-        }
-        cfgs["dhcp"].each::<DhcpHost, Error>(|_, host| {
-            if let Some(ip) = host.ip.clone().filter(|ip| !ip.is_empty()) {
-                ip_to_mac.insert(ip, host.mac.to_uppercase());
-            }
-        })?;
+        let ip_to_mac = ip_to_mac_map(&cfgs["dhcp"]).await?;
         for route in pc.sni.snapshot() {
             let target_ip = route.target.ip().to_string();
             let device_mac = ip_to_mac.get(&target_ip).cloned().unwrap_or_default();

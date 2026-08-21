@@ -992,6 +992,19 @@ struct RouterPortCollision {
     label: String,
     /// The colliding router-service port spec(s), e.g. ["443", "22"].
     router_ports: Vec<String>,
+    /// Colliding ports whose holder is a device's SNI hostname routes rather
+    /// than a router service — informational, so the dialog names the actual
+    /// use; the override semantics are the same.
+    sni_ports: Vec<SniPortUse>,
+}
+
+#[derive(Serialize)]
+struct SniPortUse {
+    ports: String,
+    /// The routed hostnames on the port, deduped and sorted.
+    hostnames: Vec<String>,
+    /// Display names (or MACs) of the devices the routes deliver to.
+    devices: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -1011,6 +1024,13 @@ device (issue #3451). In that case nothing is applied and
 `pending_router_port_collisions` names the offending ports; the UI shows a
 confirmation dialog and re-saves with `override_router_ports: true` on the
 named ports. An empty list in the response means the request was applied.
+A colliding port whose WAN-input rule is an SNI-demux admit rule is reported
+under `sni_ports` instead of `router_ports`, with the routed hostnames and
+owning devices filled in from the live demux — the real holder is a device's
+hostname routes, and the dialog names them rather than blaming the router.
+The split is informational only: the override works identically, and after an
+override the displaced hostname routes are refused at renewal and expire
+within their lease.
 Detection is transport-aware (Remote Access is TCP, WireGuard is UDP — a
 UDP-only forward on 443 collides with nothing) and skipped in configs-only
 mode (the CLI editor confirms implicitly, like `ethernet.set` / `wifi.set`).
