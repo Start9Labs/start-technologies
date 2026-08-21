@@ -198,4 +198,3 @@ async fn bind_proxy(
     .into();
     Ok(ProxyHandle { shutdown, task })
 }
-

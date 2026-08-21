@@ -6773,10 +6773,9 @@ config zone
 
         // Injection alone must not start hijacking port-53 traffic.
         assert!(
-            !cfgs["firewall"]
-                .sections
-                .iter()
-                .any(|s| s.get::<FirewallRedirect>().is_ok_and(|r| r.name.contains("DNS-Override"))),
+            !cfgs["firewall"].sections.iter().any(|s| s
+                .get::<FirewallRedirect>()
+                .is_ok_and(|r| r.name.contains("DNS-Override"))),
             "no DNS-Override redirect from the inject flag"
         );
     }

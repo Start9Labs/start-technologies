@@ -265,13 +265,19 @@ async fn refresh(di: &Arc<DnsInject>) -> Result<(), Error> {
     let uci_root = di.uci_root.clone();
     let snapshot = uci_task(move || async move {
         let arena = Arena::new();
-        let cfgs = parse_all(&uci_root, &arena, &["startwrt", "network", "dhcp", "firewall"])
-            .await?;
+        let cfgs = parse_all(
+            &uci_root,
+            &arena,
+            &["startwrt", "network", "dhcp", "firewall"],
+        )
+        .await?;
         read_snapshot(&cfgs)
     })
     .await?;
 
-    let leases = crate::devices::current_lease_ips().await.unwrap_or_default();
+    let leases = crate::devices::current_lease_ips()
+        .await
+        .unwrap_or_default();
     let neigh = tokio::process::Command::new("ip")
         .args(["neigh", "show"])
         .invoke(ErrorKind::Network.into())
@@ -465,9 +471,7 @@ fn read_snapshot(cfgs: &Configs) -> Result<NetSnapshot, Error> {
             snapshot.allowed_macs.insert(host.mac.to_uppercase());
         }
         if let Some(ip) = host.ip.as_deref().and_then(|ip| ip.parse().ok()) {
-            snapshot
-                .reserved
-                .insert(host.mac.to_uppercase(), ip);
+            snapshot.reserved.insert(host.mac.to_uppercase(), ip);
         }
     })?;
 
@@ -671,10 +675,7 @@ fn bind_listener(injector: Arc<DnsInjector>, p: &ProfileNet) -> Result<Listener,
     // The miss path (an UPDATE-shaped probe that turns out to be a query, or
     // anything unauthorized) still gets sane answers from the profile's own
     // dnsmasq.
-    let catalog = forwarding_catalog(
-        vec![SocketAddr::from((p.gateway, 53))],
-        FORWARD_TIMEOUT,
-    )?;
+    let catalog = forwarding_catalog(vec![SocketAddr::from((p.gateway, 53))], FORWARD_TIMEOUT)?;
     let mut server = Server::new(InjectingHandler::new(injector, catalog));
     server.register_socket(bind_device_udp(p.gateway, DNS_UPDATE_PORT_LAN, &p.device)?);
     if let Some(wg) = &p.wg_device {
@@ -702,7 +703,11 @@ fn bind_listener(injector: Arc<DnsInjector>, p: &ProfileNet) -> Result<Listener,
 /// A UDP socket bound to `addr:port` on exactly one kernel device, so the
 /// arrival interface is guaranteed structurally — the closest a LAN can come
 /// to StartTunnel's peer-key-binds-address property.
-fn bind_device_udp(addr: Ipv4Addr, port: u16, device: &str) -> Result<tokio::net::UdpSocket, Error> {
+fn bind_device_udp(
+    addr: Ipv4Addr,
+    port: u16,
+    device: &str,
+) -> Result<tokio::net::UdpSocket, Error> {
     let socket = socket2::Socket::new(
         socket2::Domain::IPV4,
         socket2::Type::DGRAM,
@@ -712,9 +717,7 @@ fn bind_device_udp(addr: Ipv4Addr, port: u16, device: &str) -> Result<tokio::net
     socket
         .bind_device(Some(device.as_bytes()))
         .with_kind(ErrorKind::Network)?;
-    socket
-        .set_nonblocking(true)
-        .with_kind(ErrorKind::Network)?;
+    socket.set_nonblocking(true).with_kind(ErrorKind::Network)?;
     socket
         .bind(&SocketAddrV4::new(addr, port).into())
         .with_kind(ErrorKind::Network)?;
@@ -911,9 +914,7 @@ pub async fn injected_list(ctx: ServerContext) -> Result<Vec<InjectedDnsRecord>,
     let arena = Arena::new();
     let cfgs = parse_all(ctx.uci_root(), &arena, &["dhcp"]).await?;
     let names = crate::port_control::device_display_names(&cfgs["dhcp"]).unwrap_or_default();
-    let owners = di
-        .directory
-        .peek(|d| d.owners.clone());
+    let owners = di.directory.peek(|d| d.owners.clone());
     let profiles = di.directory.peek(|d| {
         d.by_ip
             .iter()
@@ -1058,8 +1059,9 @@ async fn rewrite_instances<C: CtrlContext>(ctx: &C) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use hickory_server::proto::rr::rdata::{A, CNAME};
+
+    use super::*;
 
     fn fqdn(s: &str) -> Name {
         let mut n = Name::from_utf8(s).unwrap();
@@ -1215,16 +1217,31 @@ mod tests {
         let first = IpAddr::V4(lan_ip(50));
         let second = IpAddr::V4(lan_ip(51));
         assert_eq!(
-            policy(&dir, first, &[a_record("nas.example.com", lan_ip(50))], false),
+            policy(
+                &dir,
+                first,
+                &[a_record("nas.example.com", lan_ip(50))],
+                false
+            ),
             ResponseCode::NoError
         );
         assert_eq!(
-            policy(&dir, second, &[a_record("nas.example.com", lan_ip(51))], false),
+            policy(
+                &dir,
+                second,
+                &[a_record("nas.example.com", lan_ip(51))],
+                false
+            ),
             ResponseCode::Refused,
             "a held name refuses a different identity"
         );
         assert_eq!(
-            policy(&dir, first, &[a_record("nas.example.com", lan_ip(50))], false),
+            policy(
+                &dir,
+                first,
+                &[a_record("nas.example.com", lan_ip(50))],
+                false
+            ),
             ResponseCode::NoError,
             "the owner may re-assert"
         );
@@ -1244,7 +1261,12 @@ mod tests {
             ResponseCode::NoError
         );
         assert_eq!(
-            policy(&dir, second, &[a_record("nas.example.com", lan_ip(51))], false),
+            policy(
+                &dir,
+                second,
+                &[a_record("nas.example.com", lan_ip(51))],
+                false
+            ),
             ResponseCode::NoError,
             "released name is claimable again"
         );
@@ -1464,9 +1486,7 @@ mod tests {
             InjectedRecord {
                 name: fqdn("txt.example.com"),
                 rtype: RecordType::TXT,
-                rdata: RData::TXT(hickory_server::proto::rr::rdata::TXT::new(vec![
-                    "x".into(),
-                ])),
+                rdata: RData::TXT(hickory_server::proto::rr::rdata::TXT::new(vec!["x".into()])),
                 ttl: 300,
                 source: IpAddr::V4(lan_ip(50)),
             },

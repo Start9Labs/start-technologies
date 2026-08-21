@@ -441,9 +441,13 @@ mod tests {
     use super::*;
 
     fn injector() -> Arc<DnsInjector> {
-        DnsInjector::new(Vec::new(), |_| true, |_| None, |_| {}, |_, _, _| {
-            ResponseCode::NoError
-        })
+        DnsInjector::new(
+            Vec::new(),
+            |_| true,
+            |_| None,
+            |_| {},
+            |_, _, _| ResponseCode::NoError,
+        )
     }
 
     /// The policy StartTunnel installs: a valid TSIG or nothing.
@@ -609,13 +613,20 @@ mod tests {
         assert_eq!(fired.load(Ordering::SeqCst), 1, "re-assert is a no-op");
 
         let other = a_record("host.example.com", [10, 59, 0, 3]);
-        assert_eq!(inj.apply_update(src, &[other], false), ResponseCode::NoError);
+        assert_eq!(
+            inj.apply_update(src, &[other], false),
+            ResponseCode::NoError
+        );
         assert_eq!(fired.load(Ordering::SeqCst), 2, "a real change notifies");
 
         let mut name = Name::from_utf8("host.example.com").unwrap();
         name.set_fqdn(true);
         inj.delete(&name, Some(RecordType::AAAA));
-        assert_eq!(fired.load(Ordering::SeqCst), 2, "deleting nothing is a no-op");
+        assert_eq!(
+            fired.load(Ordering::SeqCst),
+            2,
+            "deleting nothing is a no-op"
+        );
         inj.delete(&name, None);
         assert_eq!(fired.load(Ordering::SeqCst), 3, "a real delete notifies");
     }
