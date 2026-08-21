@@ -57,6 +57,10 @@ Absolutely. StartWRT and [StartOS](/start-os/) are complementary products. Start
 
 Automatic port forwarding (UPnP/PCP) is off for every device until you allow it. Open the device's [detail page](devices.md#device-detail-page) and turn on **Allow automatic port forwarding**. A device can only ever forward ports to itself, and the router refuses requests for ports a manual [Published Ports](published-ports.md) rule or the router itself uses — remote access to its web interface, SSH, or an inbound VPN. See [Automatic port forwarding](published-ports.md#automatic-port-forwarding).
 
+## Why can't my phone resolve `.local` names over the VPN?
+
+`.local` names are resolved by mDNS, which does not cross a VPN — Android in particular excludes VPN connections from `.local` resolution entirely. A StartOS server joined to your router over the [Inbound VPN](inbound-vpn.md) fixes its own name automatically: it publishes its `.local` name into the router's DNS through the tunnel, so VPN devices resolve it like any other name. No toggle is needed for this case — records arriving over the inbound VPN are authenticated by the VPN connection itself. For other `.local` names, connect the device to the network directly or use a name the router serves, such as a [published DNS record](devices.md#device-detail-page) or the device's `.lan` hostname.
+
 ## Where can I report bugs or request features?
 
 Open an issue on the [start-technologies GitHub repository](https://github.com/Start9Labs/start-technologies/issues) — StartWRT lives in the monorepo alongside the other Start9 products.

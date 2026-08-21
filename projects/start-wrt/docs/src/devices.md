@@ -29,7 +29,9 @@ Click a device name to open its detail page:
 
 - **Allow automatic port forwarding** — Under **Permissions**. Off by default. Toggle on to let this device open and renew its own port forwards using the standard UPnP and PCP protocols. Used by StartOS servers (which configure themselves automatically), game consoles, and similar devices. See [Automatic port forwarding](published-ports.md#automatic-port-forwarding).
 
-- **Forget** — Remove an offline device from the list. Custom name, reserved IP settings, and the device's cached name are lost, and any automatic port forwards it holds are closed. If the device reconnects, it will appear as a new entry.
+- **Allow DNS record publishing** — Off by default. Toggle on to let this device publish DNS names for itself into the router, so every device on your network can resolve them. Used by StartOS servers: enable a **private domain** on the server and it publishes the name here automatically, making the domain reachable from your whole network instead of only from the server itself. The device can only publish names that point at its own address, and only devices whose Security Profile can reach it are given the name — so a guest network never learns names it cannot connect to anyway. Because published names resolve network-wide, enabling this asks for confirmation; grant it only to a device you trust. Published names appear in a read-only table below the toggle: the device renews or withdraws its own records, they lapse if the device loses the address they point at, and turning the toggle off removes them immediately.
+
+- **Forget** — Remove an offline device from the list. Custom name, reserved IP settings, granted permissions, and the device's cached name are lost; any automatic port forwards it holds are closed and any DNS records it published are removed. If the device reconnects, it will appear as a new entry.
 
 > [!TIP]
 > Reserve an IPv4 address for any device you plan to use with [Published Ports](published-ports.md). IPv4 port forwarding rules require a stable address to ensure traffic always reaches the correct device (publishing a port reserves one automatically).
