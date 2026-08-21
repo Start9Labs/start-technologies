@@ -1,5 +1,5 @@
 use std::future::Future;
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::{fs, io};
@@ -1629,6 +1629,186 @@ fn sparse_file_omits_hole_blocks() {
             assert_eq!(
                 &got[2 * CHUNK_OFFSET as usize + 123..][..18],
                 b"hello sparse world"
+            );
+        },
+        None,
+    );
+}
+
+/// A run of reads inside one block decodes that block once. Deleting both
+/// block files partway through is what makes the cache visible: the reads
+/// that follow keep working only if they are served from the decoded copy,
+/// while the block that was never read comes back as the hole it now is.
+#[test_log::test]
+fn repeated_reads_in_one_block_decode_it_once() {
+    let data = TempDir::new("backupfs_data").unwrap();
+    let chunk = CHUNK_OFFSET as usize;
+    let mut payload = vec![0u8; 2 * chunk];
+    pattern_fill(0, &mut payload);
+
+    let ino = capture(data.path(), "ohea", move |mnt| {
+        fs::write(mnt.join("two_blocks"), &payload).unwrap();
+        fs::metadata(mnt.join("two_blocks")).unwrap().ino()
+    });
+
+    let ctrl = Controller::new(opts(data.path(), "ohea")).unwrap();
+    let block0 = ctrl.resolve_block_path(ContentId(ino), 0);
+    let block1 = ctrl.resolve_block_path(ContentId(ino), 1);
+    drop(ctrl);
+
+    with_backupfs(
+        data.path(),
+        "ohea".to_owned(),
+        |mnt| {
+            let mut f = fs::File::open(mnt.join("two_blocks")).unwrap();
+            let mut head = vec![0u8; 4096];
+            f.read_exact(&mut head).unwrap();
+            pattern_check(0, &head);
+
+            fs::remove_file(&block0).unwrap();
+            fs::remove_file(&block1).unwrap();
+
+            let mut rest = vec![0u8; chunk - 4096];
+            f.read_exact(&mut rest).unwrap();
+            pattern_check(4096, &rest);
+
+            let mut second = vec![0u8; chunk];
+            f.read_exact(&mut second).unwrap();
+            assert!(
+                second.iter().all(|&b| b == 0),
+                "block 1 was never read, so its deleted file must read back as a hole"
+            );
+        },
+        None,
+    );
+}
+
+/// Reading the gap after a pending write reads zeros. The written block holds
+/// only the bytes written so far, so a read landing past them has no stored
+/// byte to copy — and indexing the block there panics, which poisons the
+/// file's lock and, once the file is closed, the whole session's.
+#[test_log::test]
+fn read_past_a_short_pending_write_reads_zeros() {
+    let data = TempDir::new("backupfs_data").unwrap();
+    let chunk = CHUNK_OFFSET;
+
+    with_backupfs(
+        data.path(),
+        "ohea".to_owned(),
+        move |mnt| {
+            let mut f = fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(mnt.join("short_dirty"))
+                .unwrap();
+            // Two 100-byte writes a block apart. Both blocks stay in the
+            // dirty map — well under the write-buffer budget — and the
+            // second carries the file's size past the first.
+            f.seek(SeekFrom::Start(5 * chunk)).unwrap();
+            f.write_all(&[0xCDu8; 100]).unwrap();
+            f.seek(SeekFrom::Start(6 * chunk)).unwrap();
+            f.write_all(&[0xCDu8; 100]).unwrap();
+
+            let mut buf = vec![0xFFu8; 4096];
+            f.seek(SeekFrom::Start(5 * chunk + 32768)).unwrap();
+            f.read_exact(&mut buf).unwrap();
+            assert!(
+                buf.iter().all(|&b| b == 0),
+                "the gap after a pending write must read as zeros"
+            );
+
+            f.seek(SeekFrom::Start(5 * chunk)).unwrap();
+            f.read_exact(&mut buf[..150]).unwrap();
+            assert_eq!(&buf[..100], &[0xCDu8; 100]);
+            assert!(buf[100..150].iter().all(|&b| b == 0));
+        },
+        None,
+    );
+}
+
+/// A write into a block that has already been read supersedes the decoded
+/// copy — both while the write is still pending and after an fsync has
+/// written it out and emptied the dirty map.
+#[test_log::test]
+fn write_supersedes_a_previously_read_block() {
+    let data = TempDir::new("backupfs_data").unwrap();
+    let mut payload = vec![0u8; 2 * CHUNK_OFFSET as usize];
+    pattern_fill(0, &mut payload);
+
+    with_backupfs(
+        data.path(),
+        "ohea".to_owned(),
+        move |mnt| {
+            let path = mnt.join("rmw");
+            fs::write(&path, &payload).unwrap();
+            let mut f = fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&path)
+                .unwrap();
+
+            let mut buf = vec![0u8; 4096];
+            f.read_exact(&mut buf).unwrap();
+            pattern_check(0, &buf);
+
+            f.seek(SeekFrom::Start(1024)).unwrap();
+            f.write_all(&[0xABu8; 64]).unwrap();
+
+            f.seek(SeekFrom::Start(1024)).unwrap();
+            f.read_exact(&mut buf[..64]).unwrap();
+            assert_eq!(&buf[..64], &[0xABu8; 64], "read missed the pending write");
+
+            f.sync_all().unwrap();
+
+            f.seek(SeekFrom::Start(1024)).unwrap();
+            f.read_exact(&mut buf[..64]).unwrap();
+            assert_eq!(
+                &buf[..64],
+                &[0xABu8; 64],
+                "read served bytes from before the flush"
+            );
+        },
+        None,
+    );
+}
+
+/// Truncating below a block that has been read unlinks its block file at the
+/// next flush, so growing the file back reads that region as a hole.
+#[test_log::test]
+fn truncate_below_a_read_block_then_grow_reads_zeros() {
+    let data = TempDir::new("backupfs_data").unwrap();
+    let chunk = CHUNK_OFFSET;
+    let mut payload = vec![0u8; 2 * chunk as usize];
+    pattern_fill(0, &mut payload);
+
+    with_backupfs(
+        data.path(),
+        "ohea".to_owned(),
+        move |mnt| {
+            let path = mnt.join("shrink_grow");
+            fs::write(&path, &payload).unwrap();
+            let mut f = fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&path)
+                .unwrap();
+
+            let mut buf = vec![0u8; 4096];
+            f.seek(SeekFrom::Start(chunk)).unwrap();
+            f.read_exact(&mut buf).unwrap();
+            pattern_check(chunk, &buf);
+
+            f.set_len(chunk / 2).unwrap();
+            f.sync_all().unwrap();
+            f.set_len(2 * chunk).unwrap();
+
+            f.seek(SeekFrom::Start(chunk)).unwrap();
+            f.read_exact(&mut buf).unwrap();
+            assert!(
+                buf.iter().all(|&b| b == 0),
+                "block 1 was truncated away, so it must read back as a hole"
             );
         },
         None,

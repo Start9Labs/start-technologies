@@ -62,6 +62,26 @@ file tracks notable changes since the move to the monorepo.
 
 - Trim whitespace on form inputs.
 
+- **Restoring a service from a backup is many times faster.** A restore reads
+  the service's whole package out of the backup, and the encrypted backup
+  filesystem stores file contents as sealed 1 MiB blocks that it fetches and
+  decodes whole. It kept none of them, so each 8 KiB read along the package
+  fetched and decoded the enclosing block over again — dragging roughly 72 GB
+  across a network share to deliver a 480 MB package, and turning a restore
+  that should take a couple of minutes into 42. A block is now decoded once
+  for the run of reads inside it, which for reading a file start to finish is
+  once per block.
+
+- **A service that reads back a region of a file it has only partly written
+  no longer fails its backup.** Inside a backup or restore, a service's own
+  procedure works against the encrypted backup filesystem directly, and a
+  program that writes at one offset and then reads a little further on —
+  a database extending a file, an image being assembled — asked for bytes
+  that the pending write had not reached. That read failed with an I/O
+  error, and closing the file afterwards left the whole backup filesystem
+  unresponsive, so the operation hung rather than finishing. Such a read
+  now returns the zeros it should.
+
 - **Helper processes a service starts are cleared away once they finish.** A
   service that shells out to other programs — a media downloader calling
   `yt-dlp` and `ffmpeg`, an agent running tool subprocesses — orphans a helper

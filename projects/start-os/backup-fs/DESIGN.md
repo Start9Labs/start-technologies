@@ -56,6 +56,20 @@ atomically renamed into place. This is the core of the redesign:
   a huge file is many independent blocks written/verified in parallel.
 - **Sparse files** cost nothing for holes — unwritten blocks have no file on
   disk and read back as zeros.
+- **A decoded block is kept for the reads that follow it.** A handle from
+  `open` is served `FOPEN_DIRECT_IO` and the backing store is read
+  `O_DIRECT`, so a read of that handle reaches us at no more than the
+  caller's own size, with no page cache and no readahead behind it. (The
+  transport caps one request at just under a chunk, so a 1 MiB read arrives
+  as two.) Reading 8 KiB at a time would otherwise fetch and decode the whole
+  enclosing block once per read — 154× the file's own bytes off the backing
+  store, since each fetch carries the block's parity shards too. One block is
+  held per open inode, shared by
+  every handle on it, and freed when the last one closes; a file being read
+  therefore costs one block of memory. A write moves the block into the dirty
+  map and takes it out of the cache, and a flush drops a cached block its
+  trailing-block prune is about to unlink, so no cached copy outlives the
+  version on disk.
 
 ## Cache-deadlock avoidance
 

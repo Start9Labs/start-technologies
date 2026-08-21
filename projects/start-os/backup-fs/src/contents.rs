@@ -1,19 +1,21 @@
 //! Per-file content access.
 //!
-//! [`Contents`] presents a regular file's byte stream over one of two
+//! [`Contents`] presents a regular file's byte stream over one of three
 //! storage bodies:
 //!
 //! * **Inline** — a small file (≤ the inline threshold,
 //!   [`Controller::inline_threshold`]) whose bytes live directly in its inode
 //!   record in the log. No separate content file at all: a tiny file costs
 //!   zero extra backing-store objects.
+//! * **Packed** — a file up to [`Controller::pack_max`], stored as a single
+//!   extent in the shared content log rather than a block file of its own.
 //! * **Blocks** — a larger file split into [`CHUNK_SIZE`] sealed block files
 //!   (see [`crate::blockstore`]), read-modify-written a whole block at a time
 //!   so a partial write never rewrites a sub-region of an on-disk object.
 //!
-//! A file is created inline and transitions to block storage the first time
-//! it grows past the threshold (one-way; a file that was large stays
-//! block-backed even if later truncated small).
+//! A file is created inline and moves up to the smallest tier that can hold
+//! it the first time it outgrows its current one (one-way; a file that was
+//! large stays block-backed even if later truncated small).
 
 use std::collections::BTreeMap;
 use std::io;
@@ -74,7 +76,19 @@ enum Body {
         dirty_bytes: usize,
         /// Blocks believed to exist on disk (for trailing-block prune).
         disk_blocks: u64,
+        /// The most recently decoded clean block (see [`CachedBlock`]).
+        cached: Option<CachedBlock>,
     },
+}
+
+/// One decoded block, kept so a run of reads inside it decodes once.
+///
+/// A block is never both dirty and cached.
+struct CachedBlock {
+    idx: u64,
+    /// The block exactly as stored, neither clipped nor padded to the file's
+    /// current size.
+    bytes: Vec<u8>,
 }
 
 pub struct Contents {
@@ -138,6 +152,7 @@ impl Contents {
                 dirty: BTreeMap::new(),
                 dirty_bytes: 0,
                 disk_blocks: blockstore::block_count(inode.attrs.size),
+                cached: None,
             },
             FileData::Directory(_) => return BkfsResult::errno(libc::EISDIR),
             _ => return BkfsResult::errno(libc::EINVAL),
@@ -199,7 +214,7 @@ impl Contents {
         Ok(())
     }
 
-    fn read_blocks_at(&self, buf: &mut [u8], offset: u64) -> BkfsResult<()> {
+    fn read_blocks_at(&mut self, buf: &mut [u8], offset: u64) -> BkfsResult<()> {
         let mut filled = 0usize;
         while filled < buf.len() {
             let pos = offset + filled as u64;
@@ -207,9 +222,12 @@ impl Contents {
             let block = self.load_block(idx)?;
             let take = (buf.len() - filled).min(CHUNK_SIZE as usize - within);
             let dst = &mut buf[filled..filled + take];
-            let avail = block.len().saturating_sub(within);
-            let copy = take.min(avail);
-            dst[..copy].copy_from_slice(&block[within..within + copy]);
+            // A hole, a file grown without a write, and a short pending write
+            // all leave a block that stops before `within`, where indexing it
+            // would panic.
+            let src = block.get(within..).unwrap_or_default();
+            let copy = take.min(src.len());
+            dst[..copy].copy_from_slice(&src[..copy]);
             for b in &mut dst[copy..] {
                 *b = 0;
             }
@@ -228,22 +246,33 @@ impl Contents {
         }
     }
 
-    fn load_block(&self, idx: u64) -> BkfsResult<Vec<u8>> {
+    /// The stored bytes of block `idx`, decoded from the backing store only
+    /// when neither the dirty map nor the cache already holds it. The slice
+    /// is neither clipped nor padded to the block's logical length, so a
+    /// caller must bound it to the file's size itself.
+    fn load_block(&mut self, idx: u64) -> BkfsResult<&[u8]> {
         let Body::Blocks {
-            content_id, dirty, ..
-        } = &self.body
+            content_id,
+            dirty,
+            cached,
+            ..
+        } = &mut self.body
         else {
-            return Ok(Vec::new());
+            return Ok(&[]);
         };
-        if let Some(buf) = dirty.get(&idx) {
-            return Ok(buf.clone());
+        if !dirty.contains_key(&idx) && cached.as_ref().is_none_or(|c| c.idx != idx) {
+            let bytes = blockstore::read_block(&self.ctrl, *content_id, idx)?.unwrap_or_default();
+            *cached = Some(CachedBlock { idx, bytes });
         }
-        let valid = self.valid_len(idx);
-        let mut buf = blockstore::read_block(&self.ctrl, *content_id, idx)?.unwrap_or_default();
-        if buf.len() < valid {
-            buf.resize(valid, 0);
-        }
-        Ok(buf)
+        Ok(match dirty.get(&idx) {
+            Some(buf) => buf,
+            // The fill above already matched the index, so this check is
+            // deliberate redundancy against a future edit.
+            None => cached
+                .as_ref()
+                .filter(|c| c.idx == idx)
+                .map_or(&[], |c| c.bytes.as_slice()),
+        })
     }
 
     // ── writes ─────────────────────────────────────────────
@@ -345,6 +374,7 @@ impl Contents {
             dirty,
             dirty_bytes,
             disk_blocks: 0,
+            cached: None,
         };
         self.inode.attrs.contents = FileData::File(content_id);
         Ok(())
@@ -362,7 +392,10 @@ impl Contents {
             let take = (buf.len() - written).min(CHUNK_SIZE as usize - within);
             let valid = self.valid_len(idx);
             let Body::Blocks {
-                dirty, dirty_bytes, ..
+                dirty,
+                dirty_bytes,
+                cached,
+                ..
             } = &mut self.body
             else {
                 unreachable!()
@@ -372,9 +405,15 @@ impl Contents {
                     *dirty_bytes -= b.len();
                     b
                 }
+                // Taking the cached copy keeps this block out of the cache
+                // while it is dirty.
                 None => {
-                    let mut b =
-                        blockstore::read_block(&self.ctrl, content_id, idx)?.unwrap_or_default();
+                    let mut b = match cached.take_if(|c| c.idx == idx) {
+                        Some(c) => c.bytes,
+                        None => {
+                            blockstore::read_block(&self.ctrl, content_id, idx)?.unwrap_or_default()
+                        }
+                    };
                     b.truncate(valid);
                     b
                 }
@@ -415,6 +454,7 @@ impl Contents {
             dirty,
             dirty_bytes,
             disk_blocks: 0,
+            cached: None,
         };
         self.inode.attrs.contents = FileData::File(content_id);
         Ok(())
@@ -574,8 +614,13 @@ impl Contents {
                 dirty,
                 dirty_bytes,
                 disk_blocks,
+                cached,
             } => {
                 *dirty_bytes = 0;
+                // The prune below unlinks every block at or past `required`.
+                // Forget a cached one so that growing the file again reads
+                // it back as the hole it has become.
+                cached.take_if(|c| c.idx >= required);
                 (*content_id, std::mem::take(dirty), *disk_blocks)
             }
             _ => return Ok(()),
