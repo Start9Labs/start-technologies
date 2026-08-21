@@ -525,7 +525,7 @@ mod tests {
         let (backend_facing, mut backend) = tokio::io::duplex(4096);
 
         // A target reaches `run_http_proxy` only when it adds forwarded headers
-        // or gates auth, so this test sets the first.
+        // or gates auth, so this sets the first.
         tokio::spawn(run_http_proxy(
             client_facing,
             backend_facing,

@@ -2474,9 +2474,9 @@ mod conn_cap_tests {
     }
 }
 
-/// One negotiated ALPN frames both legs of a rewrapped connection. StartOS
-/// offers the backend the client's own list, then offers the client whatever
-/// the backend selected from it.
+/// What `preprocess` offers the client for each `connect_ssl` strategy. On a
+/// rewrap StartOS offers the backend the client's own list and hands back
+/// whatever it selected; the plaintext strategies set the list themselves.
 #[cfg(test)]
 mod upstream_alpn_tests {
     use std::net::Ipv4Addr;
@@ -2518,11 +2518,11 @@ mod upstream_alpn_tests {
     /// Serves the client-facing config that the real [`ProxyTarget::preprocess`]
     /// produces for an accepted `ClientHello`.
     #[derive(Clone)]
-    struct Rewrap {
+    struct Preprocessing {
         target: ProxyTarget,
         base_alpn: Vec<String>,
     }
-    impl<'a> TlsHandler<'a, TcpListener> for Rewrap {
+    impl<'a> TlsHandler<'a, TcpListener> for Preprocessing {
         async fn get_config(
             &'a mut self,
             hello: &'a ClientHello<'a>,
@@ -2540,7 +2540,15 @@ mod upstream_alpn_tests {
 
     /// The rewrap strategy: dial the backend over TLS and carry its choice.
     fn rewrap() -> Result<Arc<ClientConfig>, AlpnInfo> {
-        Ok(Arc::new(client_config_no_verify(provider()).unwrap()))
+        rewrap_configured_with(&[])
+    }
+
+    /// A rewrap whose own config carries `alpn`. The dial offers the client's
+    /// list, so this one is never what the backend is asked to choose from.
+    fn rewrap_configured_with(alpn: &[&str]) -> Result<Arc<ClientConfig>, AlpnInfo> {
+        let mut cfg = client_config_no_verify(provider()).unwrap();
+        cfg.alpn_protocols = alpn.iter().map(|a| a.as_bytes().to_vec()).collect();
+        Ok(Arc::new(cfg))
     }
 
     fn target(
@@ -2579,7 +2587,7 @@ mod upstream_alpn_tests {
         backend_alpn: &[&str],
         client_alpn: &[&str],
     ) -> Result<Option<String>, std::io::Error> {
-        let handler = Rewrap {
+        let handler = Preprocessing {
             target: target(spawn_backend(backend_alpn).await, connect_ssl),
             base_alpn: base_alpn.iter().map(|a| a.to_string()).collect(),
         };
@@ -2661,8 +2669,8 @@ mod upstream_alpn_tests {
         );
     }
 
-    /// `preprocess` returns `None` when the upstream handshake fails, and the
-    /// listener turns that into a TLS alert rather than a session.
+    /// A failed upstream handshake makes `preprocess` decline, and the client's
+    /// own handshake fails with it.
     #[tokio::test]
     async fn a_backend_refusing_the_clients_alpn_declines_the_connection() {
         try_negotiate(rewrap(), &[], &["h2"], &["http/1.1"])
@@ -2688,9 +2696,23 @@ mod upstream_alpn_tests {
         );
     }
 
+    /// A client that offers no ALPN is offered to the backend as offering none.
+    /// `with_alpn` falls back to the dialling config's own list when handed
+    /// `None`, so passing it conditionally would offer `h2` here, and this
+    /// backend refuses that.
+    #[tokio::test]
+    async fn a_client_offering_no_alpn_does_not_fall_back_to_the_dialling_config() {
+        assert_eq!(
+            try_negotiate(rewrap_configured_with(&["h2"]), &[], &["http/1.1"], &[])
+                .await
+                .expect("the backend is offered nothing, so it has nothing to refuse"),
+            None,
+        );
+    }
+
     /// `Specified` dials plaintext and offers the binding's own list. The base
-    /// carries `h2`, which the client prefers and which would win if the arm
-    /// appended to it instead.
+    /// carries `h2`, which would win on server order if the arm appended to it
+    /// instead.
     #[tokio::test]
     async fn specified_offers_the_bindings_own_list() {
         let http1 = AlpnInfo::Specified(vec![MaybeUtf8String(b"http/1.1".to_vec())]);
