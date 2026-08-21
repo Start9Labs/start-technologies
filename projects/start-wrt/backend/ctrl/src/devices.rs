@@ -1589,8 +1589,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             ipv6,
             ipv4_static: host.map(|h| h.ip.is_some()).unwrap_or(false),
             allow_auto_port_forward: host.is_some_and(|h| h._allow_pcp.as_deref() == Some("1")),
-            allow_dns_injection: host
-                .is_some_and(|h| h._allow_dns_inject.as_deref() == Some("1")),
+            allow_dns_injection: host.is_some_and(|h| h._allow_dns_inject.as_deref() == Some("1")),
             security_profile,
             speed,
             data_usage,
@@ -1998,6 +1997,12 @@ pub async fn forget<C: CtrlContext>(
                 );
                 crate::device_names::forget(&mac_upper).await;
                 crate::port_control::close_device_forwards(&mac_upper, &removed_static_ips).await;
+                // Same for `_allow_dns_inject`: the refresher's sweep drops
+                // the device's published DNS records now instead of on its
+                // next interval.
+                if let Some(di) = crate::dns_inject::DNS_INJECT.get() {
+                    di.invalidate();
+                }
                 // Drop the mDNS attempt history too: a forgotten device that
                 // reconnects "appears as a new entry" (per the user docs), so
                 // it starts a fresh retry schedule.
