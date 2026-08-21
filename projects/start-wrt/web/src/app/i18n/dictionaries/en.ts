@@ -552,4 +552,13 @@ export const ENGLISH: Record<string, number> = {
   'Country': 555,
   'Select the country this router operates in to unlock the Wi-Fi channels and transmit power permitted there. Until then it uses a conservative worldwide subset.': 556,
   'Not set': 557,
+  'Allow DNS record publishing': 558,
+  'Lets this device publish DNS names for itself into the router, so every device on your network can resolve them (used by StartOS servers for private domains). Off by default; published names appear below.': 559,
+  'Allow DNS Record Publishing?': 560,
+  'This device will be able to publish DNS names that resolve on your whole network. Grant this only to a device you trust, such as your own StartOS server.': 561,
+  'Allow': 562,
+  'Published DNS records': 563,
+  'Names this device has published into the router. They expire on their own when the device stops publishing them; turning the permission off removes them immediately.': 564,
+  'Type': 565,
+  'Resolves to': 566,
 }

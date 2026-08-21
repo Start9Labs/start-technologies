@@ -547,4 +547,13 @@ export default {
   555: 'Kraj',
   556: 'Wybierz kraj, w którym działa ten router, aby odblokować dozwolone tam kanały Wi-Fi i moc nadawania. Do tego czasu używany jest ostrożny podzbiór obowiązujący na całym świecie.',
   557: 'Nie ustawiono',
+  558: 'Zezwól na publikowanie rekordów DNS',
+  559: 'Pozwala temu urządzeniu publikować w routerze nazwy DNS wskazujące na nie samo, dzięki czemu każde urządzenie w Twojej sieci może je rozwiązywać (używane przez serwery StartOS dla domen prywatnych). Domyślnie wyłączone; opublikowane nazwy pojawiają się poniżej.',
+  560: 'Zezwolić na publikowanie rekordów DNS?',
+  561: 'To urządzenie będzie mogło publikować nazwy DNS rozwiązywane w całej Twojej sieci. Przyznawaj to tylko zaufanemu urządzeniu, na przykład własnemu serwerowi StartOS.',
+  562: 'Zezwól',
+  563: 'Opublikowane rekordy DNS',
+  564: 'Nazwy opublikowane przez to urządzenie w routerze. Wygasają samoczynnie, gdy urządzenie przestaje je publikować; wyłączenie uprawnienia usuwa je natychmiast.',
+  565: 'Typ',
+  566: 'Wskazuje na',
 } satisfies i18n

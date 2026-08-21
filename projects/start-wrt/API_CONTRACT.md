@@ -794,6 +794,11 @@ struct Device {
     /// (default off; toggled via `devices.set-auto-forward`). Always false for
     /// VPN peers (no MAC to authorize).
     allow_auto_port_forward: bool,
+    /// Whether this device may publish DNS records into the router's resolver
+    /// via RFC 2136 (default off; toggled via `devices.set-dns-injection`).
+    /// Always false for VPN peers: they hold a WireGuard PSK instead of a
+    /// toggle, and their signed UPDATEs are admitted on the TSIG signature.
+    allow_dns_injection: bool,
     security_profile: Option<String>,
     /// Live throughput (MB/s, 1 decimal), computed from conntrack byte deltas
     /// between polls. Only set for online devices with a previous sample.
@@ -859,6 +864,24 @@ struct SetAutoForwardRequest {
 // never create forwards via PCP/UPnP. Setting `allow: false` also closes the
 // forwards the device already holds, rather than leaving them open until their
 // leases lapse (up to a week).
+```
+
+### `devices.set-dns-injection`
+
+```rust
+#[derive(Deserialize)]
+struct SetDnsInjectionRequest {
+    mac: String,
+    allow: bool,
+}
+// Response: null
+// Backend: stores the flag on the device's DHCP host section
+// (`_allow_dns_inject`), creating one if needed, rewrites the per-profile
+// dnsmasq instances (the first grant creates them; the last revocation removes
+// them), and wakes the injection service so the change applies immediately.
+// Default is off: a device with no flag gets Refused on every RFC 2136 UPDATE.
+// Setting `allow: false` also drops the records the device already published
+// and withdraws them from every profile's hosts file.
 ```
 
 ### `devices.forget`
@@ -1901,6 +1924,46 @@ struct DiagnosticsCreateRes {
 
 ---
 
+## 17. DNS Injection
+
+### `dns.injected-list`
+
+Read-only view of the DNS records permitted devices have published into the
+router's resolver via RFC 2136 (see `devices.set-dns-injection` for the
+permission). There is deliberately no manual add/remove counterpart: records
+are client-managed — the device re-asserts every few minutes and the router
+drops a record whose owner loses the address it points at — and a manual
+router-side name already exists as a static DHCP lease with a hostname.
+
+```rust
+// Request: {}
+
+#[derive(Serialize)]
+struct InjectedDnsRecord {
+    name: String,
+    /// "A", "AAAA", "CNAME", or "TXT".
+    rtype: String,
+    value: String,
+    ttl: u32,
+    /// The injecting device's address, when known.
+    source: Option<String>,
+    /// Owning LAN device MAC (uppercase); absent for a WireGuard peer.
+    owner_mac: Option<String>,
+    /// Owning inbound-VPN peer public key; absent for a LAN device.
+    owner_peer: Option<String>,
+    /// Display name of the owning LAN device, when one is known.
+    device_name: Option<String>,
+    /// Profile interface whose subnet the record was injected from.
+    profile: Option<String>,
+}
+// Response: Vec<InjectedDnsRecord>
+// Backend: the daemon's in-memory record store plus its injector directory
+// (nothing is persisted; an empty list is normal right after a restart until
+// devices re-assert).
+```
+
+---
+
 ## HTTP Routes
 
 Every RPC method above is a JSON-RPC 2.0 call to a single endpoint: **`POST /rpc/v1`**.
@@ -1960,6 +2023,7 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `devices.list`                 | Devices         |                             |
 | `devices.update`               | Devices         |                             |
 | `devices.set-auto-forward`     | Devices         |                             |
+| `devices.set-dns-injection`    | Devices         |                             |
 | `devices.forget`               | Devices         |                             |
 | `devices.data-usage`           | Devices         |                             |
 | `published-ports.list`         | Published Ports |                             |
@@ -2002,8 +2066,9 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `backup.create`                | Backup          |                             |
 | `backup.restore`               | Backup          |                             |
 | `diagnostics.create`           | Diagnostics     |                             |
+| `dns.injected-list`            | DNS Injection   |                             |
 
-**Totals:** 77 RPC methods across 16 categories, plus the HTTP/WebSocket routes
+**Totals:** 79 RPC methods across 17 categories, plus the HTTP/WebSocket routes
 table above and the deprecated generic endpoints below.
 
 ---

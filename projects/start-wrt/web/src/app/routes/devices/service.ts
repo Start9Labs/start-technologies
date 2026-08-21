@@ -38,6 +38,10 @@ export class DevicesApiService {
     await this.api.devicesSetAutoForward({ mac, allow })
   }
 
+  async setDnsInjection(mac: string, allow: boolean): Promise<void> {
+    await this.api.devicesSetDnsInjection({ mac, allow })
+  }
+
   async forget(mac: string): Promise<void> {
     await this.api.devicesForget({ mac })
   }
@@ -61,6 +65,7 @@ export class DevicesApiService {
       ipv6: d.ipv6 || undefined,
       ipv4Static: d.ipv4_static,
       allowAutoPortForward: d.allow_auto_port_forward,
+      allowDnsInjection: d.allow_dns_injection,
       securityProfile: d.security_profile || undefined,
       speed: d.speed || undefined,
       dataUsage: d.data_usage ?? undefined,
@@ -81,16 +86,24 @@ export class DevicesService extends FormService<Device[]> {
     // List doesn't have a single store operation
   }
 
-  // Update device settings. The automatic-port-forwarding permission is a
-  // separate endpoint but the same Save, so it rides along in one action —
-  // otherwise one click would raise two loaders and two success toasts.
-  // `allowAutoForward` is undefined when the permission didn't change.
-  update(mac: string, data: DeviceUpdateData, allowAutoForward?: boolean) {
+  // Update device settings. The permissions are separate endpoints but the
+  // same Save, so they ride along in one action — otherwise one click would
+  // raise several loaders and success toasts. A permission argument is
+  // undefined when it didn't change.
+  update(
+    mac: string,
+    data: DeviceUpdateData,
+    allowAutoForward?: boolean,
+    allowDnsInjection?: boolean,
+  ) {
     return this.actions.run(
       async () => {
         await this.devicesApi.update(mac, data)
         if (allowAutoForward !== undefined) {
           await this.devicesApi.setAutoForward(mac, allowAutoForward)
+        }
+        if (allowDnsInjection !== undefined) {
+          await this.devicesApi.setDnsInjection(mac, allowDnsInjection)
         }
         await this.refreshAndWait()
       },

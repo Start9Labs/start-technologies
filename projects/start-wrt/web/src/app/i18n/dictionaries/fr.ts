@@ -547,4 +547,13 @@ export default {
   555: 'Pays',
   556: 'Sélectionnez le pays dans lequel ce routeur fonctionne pour débloquer les canaux Wi-Fi et la puissance d’émission autorisés sur place. En attendant, il utilise un sous-ensemble prudent valable dans le monde entier.',
   557: 'Non défini',
+  558: 'Autoriser la publication d’enregistrements DNS',
+  559: 'Permet à cet appareil de publier dans le routeur des noms DNS pointant vers lui-même, afin que chaque appareil de votre réseau puisse les résoudre (utilisé par les serveurs StartOS pour les domaines privés). Désactivé par défaut ; les noms publiés apparaissent ci-dessous.',
+  560: 'Autoriser la publication d’enregistrements DNS ?',
+  561: 'Cet appareil pourra publier des noms DNS résolus sur l’ensemble de votre réseau. N’accordez ceci qu’à un appareil de confiance, comme votre propre serveur StartOS.',
+  562: 'Autoriser',
+  563: 'Enregistrements DNS publiés',
+  564: 'Noms que cet appareil a publiés dans le routeur. Ils expirent d’eux-mêmes quand l’appareil cesse de les publier ; désactiver l’autorisation les supprime immédiatement.',
+  565: 'Type',
+  566: 'Pointe vers',
 } satisfies i18n

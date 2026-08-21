@@ -547,4 +547,13 @@ export default {
   555: 'Land',
   556: 'Wählen Sie das Land, in dem dieser Router betrieben wird, um die dort zulässigen WLAN-Kanäle und Sendeleistungen freizuschalten. Bis dahin wird eine konservative weltweite Teilmenge verwendet.',
   557: 'Nicht festgelegt',
+  558: 'DNS-Einträge veröffentlichen erlauben',
+  559: 'Erlaubt diesem Gerät, DNS-Namen für sich selbst im Router zu veröffentlichen, sodass jedes Gerät in Ihrem Netzwerk sie auflösen kann (von StartOS-Servern für private Domains genutzt). Standardmäßig aus; veröffentlichte Namen erscheinen unten.',
+  560: 'Veröffentlichen von DNS-Einträgen erlauben?',
+  561: 'Dieses Gerät kann dann DNS-Namen veröffentlichen, die in Ihrem gesamten Netzwerk aufgelöst werden. Gewähren Sie dies nur einem Gerät, dem Sie vertrauen, etwa Ihrem eigenen StartOS-Server.',
+  562: 'Erlauben',
+  563: 'Veröffentlichte DNS-Einträge',
+  564: 'Namen, die dieses Gerät im Router veröffentlicht hat. Sie laufen von selbst ab, wenn das Gerät sie nicht mehr veröffentlicht; wird die Berechtigung deaktiviert, werden sie sofort entfernt.',
+  565: 'Typ',
+  566: 'Verweist auf',
 } satisfies i18n
