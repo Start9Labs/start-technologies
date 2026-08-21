@@ -408,18 +408,19 @@ impl NetServiceData {
 
             // How our listener dials the container when it terminates TLS
             // (add_ssl); a self-TLS passthrough never dials TLS — it pipes raw.
-            let connect_ssl: Result<Arc<TlsClientConfig>, AlpnInfo> =
-                if let Some(ssl) = &bind.options.add_ssl {
-                    if let Some(alpn) = ssl.alpn.clone() {
-                        Err(alpn)
-                    } else if bind.options.secure.as_ref().map_or(false, |s| s.ssl) {
-                        Ok(ctrl.upstream_client_config(&ssl.upstream_cert_validation))
-                    } else {
-                        Err(AlpnInfo::Reflect)
-                    }
-                } else {
-                    Err(AlpnInfo::Reflect)
-                };
+            let connect_ssl: Option<Arc<TlsClientConfig>> =
+                bind.options.add_ssl.as_ref().and_then(|ssl| {
+                    bind.options
+                        .secure
+                        .as_ref()
+                        .map_or(false, |s| s.ssl)
+                        .then(|| ctrl.upstream_client_config(&ssl.upstream_cert_validation))
+                });
+            let alpn = bind
+                .options
+                .add_ssl
+                .as_ref()
+                .and_then(|ssl| ssl.alpn.clone());
 
             // `*` vhost: every assigned_ssl_port is answered by a listener of
             // ours — terminating (add_ssl), or an SNI-agnostic passthrough when
@@ -475,6 +476,7 @@ impl NetServiceData {
                                 .map_or(false, |s| s.add_x_forwarded_headers),
                             auth: bind.options.add_ssl.as_ref().and_then(|s| s.auth.clone()),
                             connect_ssl: connect_ssl.clone(),
+                            alpn: alpn.clone(),
                             passthrough,
                             // The container handles its own TLS and the box is
                             // its gateway, so preserve the client source IP.
@@ -534,6 +536,7 @@ impl NetServiceData {
                             .map_or(false, |s| s.add_x_forwarded_headers),
                         auth: bind.options.add_ssl.as_ref().and_then(|s| s.auth.clone()),
                         connect_ssl: connect_ssl.clone(),
+                        alpn: alpn.clone(),
                         passthrough,
                         preserve_source_ip: passthrough,
                     });

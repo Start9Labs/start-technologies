@@ -376,7 +376,7 @@ Advertise exactly the protocols your container can serve on its own listener. Th
 
 Advertising `h2` is the case to think about twice. It commits your container to serving every HTTP/2 client, including WebSockets. On an `https` or `wss` binding StartOS advertises HTTP/2 extended CONNECT ([RFC 8441](https://www.rfc-editor.org/rfc/rfc8441)) to the client whether or not your container implements it, so a browser opens its WebSocket that way and your container has to answer it. A container that advertises only `http/1.1` keeps those clients on HTTP/1.1, where a WebSocket is an ordinary `Upgrade`.
 
-None of this is what `addSsl.alpn` is for. Setting that option takes the binding off the rewrap path altogether: StartOS dials your container over **plain TCP**, so a container serving its own TLS receives plaintext on its TLS port. Leave it unset and configure ALPN on your container's own listener.
+`addSsl.alpn` overrides all of this: it sets the client-facing list outright instead of carrying what your container chose. Leave it unset unless you need the client offered something your container does not select for itself.
 
 ## Serving Your Own TLS (Passthrough)
 
