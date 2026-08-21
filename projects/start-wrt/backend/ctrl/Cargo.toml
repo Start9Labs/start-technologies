@@ -42,6 +42,8 @@ flate2 = "1"
 form_urlencoded = "1"
 futures = "0.3.31"
 futures-util = "0.3"
+# Must match start-core's pin so hickory types interoperate across the crates.
+hickory-server = { version = "0.26.1", features = ["resolver", "dnssec-ring"] }
 http = "1.0"
 imbl-value = { path = "../../../../shared-libs/crates/imbl-value" }
 include_dir = "0.7"
@@ -102,6 +104,7 @@ tokio = { version = "1.41.1", features = [
   "signal",
 ] }
 tokio-rustls = "0.26"
+tokio-util = "0.7.9"
 tower-http = { version = "0.6", features = ["cors", "set-header"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

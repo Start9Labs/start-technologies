@@ -50,6 +50,26 @@ start_service() {
 INITEOF
 chmod +x "${FILES_DIR}/etc/init.d/startwrt"
 
+# Pre-create the DNS-injection addn-hosts files before dnsmasq starts.
+# dnsmasq's ujail bind-mounts each addn-hosts file when an instance starts,
+# and a file that does not exist is silently left unmounted — that instance
+# can then never see it, SIGHUP or not. startwrt-ctrld (START=99) renders
+# these files long after dnsmasq (START=19), so this creates them empty first;
+# the daemon only ever rewrites them in place, keeping the mounted inode.
+cat > "${FILES_DIR}/etc/init.d/startwrt-dnsinject" << 'DNSINJEOF'
+#!/bin/sh /etc/rc.common
+
+START=18
+
+start() {
+    uci -q show dhcp | sed -n "s/.*'\(\/tmp\/startwrt-dns-inject\.[^']*\)'.*/\1/p" \
+        | while read -r f; do
+        [ -e "$f" ] || : > "$f"
+    done
+}
+DNSINJEOF
+chmod +x "${FILES_DIR}/etc/init.d/startwrt-dnsinject"
+
 # Custom SmartDNS init script — uses our generated config instead of the
 # stock UCI-generated one. The stock init script generates its own config
 # from UCI at /var/etc/smartdns/smartdns.conf, ignoring ours.

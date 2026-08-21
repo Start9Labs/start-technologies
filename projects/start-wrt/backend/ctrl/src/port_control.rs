@@ -1081,7 +1081,8 @@ impl GatewayBackend for Via {
 }
 
 /// Runs !Send uciedit work on a dedicated current-thread runtime.
-async fn uci_task<T, F, Fut>(f: F) -> Result<T, Error>
+/// `pub(crate)` so `dns_inject` shares the same boundary.
+pub(crate) async fn uci_task<T, F, Fut>(f: F) -> Result<T, Error>
 where
     T: Send + 'static,
     F: FnOnce() -> Fut + Send + 'static,
@@ -1650,18 +1651,20 @@ pub async fn run(pc: Arc<PortControl>) {
 
 /// Run one server for the life of the daemon. Each already retries its own
 /// errors internally, so the only way out is a panic — and sharing one task
-/// would let that panic take the other three with it. Losing the sweep is the
+/// would let that panic take the others with it. Losing the sweep is the
 /// case that matters: forwards would stay open with nothing left to close them.
-async fn supervise<F, Fut>(name: &'static str, pc: Arc<PortControl>, start: F)
+/// Generic over the shared state so `dns_inject`'s tasks reuse it.
+pub(crate) async fn supervise<S, F, Fut>(name: &'static str, state: S, start: F)
 where
-    F: Fn(Arc<PortControl>) -> Fut,
+    S: Clone,
+    F: Fn(S) -> Fut,
     Fut: Future<Output = ()> + Send + 'static,
 {
     loop {
-        match tokio::spawn(start(pc.clone())).await {
+        match tokio::spawn(start(state.clone())).await {
             Ok(()) => return,
             Err(e) => {
-                tracing::error!("port-control {name} server panicked ({e}); restarting");
+                tracing::error!("{name} server panicked ({e}); restarting");
                 tokio::time::sleep(Duration::from_secs(5)).await;
             }
         }

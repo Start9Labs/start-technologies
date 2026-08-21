@@ -27,6 +27,10 @@ pub fn devices<C: CtrlContext>() -> ParentHandler<C> {
             "set-auto-forward",
             from_fn_async_local(crate::port_control::set_auto_forward::<C>).no_display(),
         )
+        .subcommand(
+            "set-dns-injection",
+            from_fn_async_local(crate::dns_inject::set_dns_injection::<C>).no_display(),
+        )
         .subcommand("forget", from_fn_async_local(forget::<C>).no_display())
         .subcommand(
             "data-usage",
@@ -64,6 +68,9 @@ pub struct Device {
     /// Whether this device may auto-create port forwards via PCP/UPnP
     /// (default off; set via `devices set-auto-forward`).
     pub allow_auto_port_forward: bool,
+    /// Whether this device may publish DNS records into the router's resolver
+    /// (default off; set via `devices set-dns-injection`).
+    pub allow_dns_injection: bool,
     pub security_profile: Option<String>,
     pub speed: Option<SpeedData>,
     pub data_usage: Option<f64>,
@@ -1582,6 +1589,8 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             ipv6,
             ipv4_static: host.map(|h| h.ip.is_some()).unwrap_or(false),
             allow_auto_port_forward: host.is_some_and(|h| h._allow_pcp.as_deref() == Some("1")),
+            allow_dns_injection: host
+                .is_some_and(|h| h._allow_dns_inject.as_deref() == Some("1")),
             security_profile,
             speed,
             data_usage,
@@ -1689,6 +1698,9 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
                 ipv4_static: true,
                 // No MAC to authorize, so a VPN peer can never be auto-forward capable.
                 allow_auto_port_forward: false,
+                // A VPN peer holds a PSK instead of a toggle: its UPDATEs are
+                // admitted on a valid TSIG signature (the signed tier).
+                allow_dns_injection: false,
                 security_profile: Some(server.profile_fullname.clone()),
                 speed,
                 data_usage,

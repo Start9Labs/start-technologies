@@ -14,6 +14,7 @@ pub mod device_names;
 pub mod devices;
 pub mod diagnostics;
 pub mod dns;
+pub mod dns_inject;
 pub mod eeprom;
 pub mod embedded_web;
 pub mod ethernet;
@@ -457,6 +458,7 @@ pub fn main_api<C: CtrlContext + Clone>() -> ParentHandler<C> {
         .subcommand("setup", setup::setup::<C>())
         .subcommand("system", system::system::<C>())
         .subcommand("devices", devices::devices::<C>())
+        .subcommand("dns", dns_inject::dns::<C>())
         .subcommand("wan", wan::wan::<C>())
         .subcommand("lan", lan::lan::<C>())
         .subcommand("published-ports", published_ports::published_ports::<C>())
