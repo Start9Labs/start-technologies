@@ -312,10 +312,11 @@ fn ssl_vhost_public_v4<'a>(
 }
 
 /// The box's own LAN addresses that a binding's SSL `*` vhost answers on: each
-/// enabled bare IP, and nothing else. A name is answered by a vhost entry of its
-/// own, so an address the operator switched off stays off even while a name on
-/// the same gateway is served. Scoped to the SSL exposure (`a.ssl`) like its
-/// public twin: a bare IP on the *plain* port is served by the forward.
+/// enabled bare IP, and nothing else. A `.local` name or a domain is answered by
+/// a vhost entry of its own, so an address the operator switched off stays off
+/// while a name on the same gateway is served. Scoped to the SSL exposure
+/// (`a.ssl`) like its public twin: a bare IP on the *plain* port is served by
+/// the forward.
 fn ssl_vhost_private_ips<'a>(
     enabled_addresses: impl IntoIterator<Item = &'a HostnameInfo>,
 ) -> BTreeSet<IpAddr> {
@@ -435,9 +436,7 @@ impl NetServiceData {
             // ours — terminating (add_ssl), or an SNI-agnostic passthrough when
             // the container serves its own TLS.
             if let Some(assigned_ssl_port) = bind.net.assigned_ssl_port {
-                // The `*` entry answers a connection that named no host, so it
-                // answers on every enabled LAN address (a GUA set to LAN+WAN is
-                // WAN, so it lands in the public set).
+                // A GUA set to LAN+WAN is WAN, so it lands in the public set below.
                 let server_private_ips = ssl_vhost_private_ips(enabled_addresses.iter().copied());
 
                 // Public gateways, split by family: a bare public IPv4 (WAN IP)
@@ -1628,12 +1627,12 @@ mod tests {
         s.parse().unwrap()
     }
 
-    /// #3628: a name on the gateway must not put back a bare IP the operator
-    /// switched off. The `.local` row is the one that did, since the Interfaces
-    /// page has no switch for it.
+    /// A name on the gateway must not put back a bare IP the operator switched
+    /// off, and the `.local` name has no switch of its own to stop it.
     #[test]
     fn a_name_does_not_serve_the_bare_ip_its_gateway_switched_off() {
-        // eth0's bare IPv4 is switched off; its `.local` name stays on.
+        // eth0's bare IPv4 is switched off, while the two rows that carry no
+        // switch — its link-local address and its `.local` name — stay on.
         let addrs = [
             lan_ip("fe80::1", true, 443, "eth0"),
             mdns(443, ["eth0"]),
@@ -1667,8 +1666,6 @@ mod tests {
         );
     }
 
-    /// A bare IP can have a row on both ports; the plain one is served by the
-    /// forward.
     #[test]
     fn a_plain_port_bare_ip_is_not_served_by_the_ssl_vhost() {
         let addrs = [lan_ip("192.168.1.5", false, 80, "eth0")];
@@ -1690,19 +1687,20 @@ mod tests {
     }
 
     /// A binding with no exported interface is restricted to its `is_internal`
-    /// addresses, so both of the bridge's have to qualify or a container loses
-    /// the one it dials.
+    /// addresses, so every address the bridge carries has to qualify or a
+    /// container loses the one it dials.
     #[test]
-    fn both_of_the_container_bridges_addresses_are_internal() {
+    fn every_address_on_the_container_bridge_is_internal() {
         assert!(lan_ip("10.0.3.1", true, 443, "lxcbr0").is_internal());
         assert!(lan_ip("fd00:3::1", true, 443, "lxcbr0").is_internal());
+        assert!(lan_ip("fe80::1", true, 443, "lxcbr0").is_internal());
         assert!(lan_ip("127.0.0.1", true, 443, "lo").is_internal());
         assert!(lan_ip("::1", true, 443, "lo").is_internal());
 
         assert!(!lan_ip("192.168.1.5", true, 443, "eth0").is_internal());
         assert!(
-            !lan_ip("fd12:3456::1", true, 443, "eth0").is_internal(),
-            "a ULA the operator's own router hands out is not the bridge"
+            !lan_ip("fd00:3::1", true, 443, "eth0").is_internal(),
+            "the gateway decides, so the bridge's prefix elsewhere is not the bridge"
         );
     }
 

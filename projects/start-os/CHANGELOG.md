@@ -224,14 +224,16 @@ file tracks notable changes since the move to the monorepo.
 - **Switching an IP address off on an interface's gateway table stops that
   address being served.** The switch took effect for the address's own row but
   not for the connection itself: any other address on the same gateway put it
-  back, and two of those — your server's `.local` name and its link-local IPv6
-  address — are not switchable, so a switched-off address went on serving the
-  interface over HTTPS. It is now refused, while the names on that gateway carry
-  on being served: a domain and a `.local` name are separate addresses with
-  switches of their own. An address on a gateway carrying an enabled public IPv4
-  address is the exception, and stays reachable from the local network — your
-  router hides the public address behind the same local one, so your server
-  cannot tell the two apart.
+  back, including the two your server keeps for itself — its `.local` name and
+  its link-local IPv6 address — so a switched-off address went on serving the
+  interface over HTTPS. It is now refused, while the domains you have assigned
+  to that gateway and your server's `.local` name carry on being served: those
+  are addresses in their own right, and switching an IP address off is not a way
+  to take them down. An **IPv4** address on a gateway that also has an enabled
+  public IPv4 address is the exception, and stays reachable from the local
+  network — your router presents traffic from the Internet under the same local
+  address, so your server cannot tell the two apart. Switch the public IPv4
+  address off as well to take that gateway's IPv4 addresses down.
 
 - **Image upgrades verify their checksum again.** `upgrade` compared the image's
   blake3 hash only when it was given a second positional argument, which no

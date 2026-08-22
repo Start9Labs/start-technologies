@@ -62,15 +62,14 @@ impl HostnameInfo {
     }
 
     /// True for the always-on internal interfaces — loopback (`lo`) and the
-    /// `lxcbr0` bridge (`HOST_IP` and the bridge's ULA). These are how the host
-    /// and other containers reach the service; they are never
-    /// operator-disablable, and a binding with no exported interface is
-    /// restricted to them.
+    /// `lxcbr0` bridge. These are how the host and other containers reach the
+    /// service; they are never operator-disablable, and a binding with no
+    /// exported interface is restricted to them.
     pub fn is_internal(&self) -> bool {
         match self.hostname.parse::<IpAddr>() {
             Ok(IpAddr::V4(v4)) => v4.is_loopback() || v4 == Ipv4Addr::from(crate::HOST_IP),
-            // lxc-net assigns the bridge's ULA prefix, so the gateway names the
-            // bridge's own v6 address where `HOST_IP` names its v4 one.
+            // lxc-net assigns the bridge's v6 addresses, so the gateway names
+            // every one of them where `HOST_IP` names its single v4 address.
             Ok(IpAddr::V6(v6)) => {
                 v6.is_loopback()
                     || matches!(&self.metadata, HostnameMetadata::Ipv6 { gateway, .. }
