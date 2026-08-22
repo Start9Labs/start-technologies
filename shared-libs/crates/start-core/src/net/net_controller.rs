@@ -297,6 +297,13 @@ impl NetController {
     }
 }
 
+/// Whether our listener dials the container over TLS, which it does when the
+/// container serves its own. `add_ssl.alpn` names protocols rather than a
+/// transport, so it has no say here.
+fn dials_container_tls(options: &BindOptions) -> bool {
+    options.add_ssl.is_some() && options.secure.as_ref().map_or(false, |s| s.ssl)
+}
+
 /// Public bare-IPv4 gateways for a binding's SSL `*` vhost: only SSL-port
 /// addresses count — a bare IP enabled on the *plain* port must not mark the
 /// SSL vhost public (that would request a pinhole for a port the operator
@@ -406,14 +413,9 @@ impl NetServiceData {
                 }
             }
 
-            // How our listener dials the container when it terminates TLS
-            // (add_ssl); a self-TLS passthrough never dials TLS — it pipes raw.
             let connect_ssl: Option<Arc<TlsClientConfig>> =
                 bind.options.add_ssl.as_ref().and_then(|ssl| {
-                    bind.options
-                        .secure
-                        .as_ref()
-                        .map_or(false, |s| s.ssl)
+                    dials_container_tls(&bind.options)
                         .then(|| ctrl.upstream_client_config(&ssl.upstream_cert_validation))
                 });
             let alpn = bind
@@ -1504,6 +1506,48 @@ mod tests {
     use imbl_value::InternedString;
 
     use super::*;
+    use crate::net::host::binding::Security;
+
+    fn bind_options(
+        add_ssl: bool,
+        secure_ssl: Option<bool>,
+        alpn: Option<AlpnInfo>,
+    ) -> BindOptions {
+        BindOptions {
+            preferred_external_port: 443,
+            add_ssl: add_ssl.then(|| AddSslOptions {
+                preferred_external_port: 443,
+                add_x_forwarded_headers: false,
+                alpn,
+                upstream_cert_validation: None,
+                auth: None,
+            }),
+            secure: secure_ssl.map(|ssl| Security { ssl }),
+        }
+    }
+
+    /// `alpn` names protocols, not a transport. Letting it decide the dial is
+    /// what sent plaintext to a container serving its own TLS.
+    #[test]
+    fn alpn_does_not_decide_whether_the_container_is_dialled_over_tls() {
+        let pinned = || Some(AlpnInfo::Specified(vec![MaybeUtf8String(b"h2".to_vec())]));
+        for alpn in [None, Some(AlpnInfo::Reflect), pinned()] {
+            assert!(
+                dials_container_tls(&bind_options(true, Some(true), alpn.clone())),
+                "a container serving its own TLS is dialled over TLS, whatever `alpn` says",
+            );
+            for secure in [None, Some(false)] {
+                assert!(
+                    !dials_container_tls(&bind_options(true, secure, alpn.clone())),
+                    "a container that does not serve TLS is dialled plainly",
+                );
+            }
+            assert!(
+                !dials_container_tls(&bind_options(false, Some(true), alpn.clone())),
+                "a passthrough has no leg of ours to dial",
+            );
+        }
+    }
 
     fn bare_v4(ssl: bool, port: u16, gateway: &GatewayId) -> HostnameInfo {
         HostnameInfo {

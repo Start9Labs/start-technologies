@@ -376,7 +376,9 @@ Advertise exactly the protocols your container can serve on its own listener. Th
 
 Advertising `h2` is the case to think about twice. It commits your container to serving every HTTP/2 client, including WebSockets. On an `https` or `wss` binding StartOS advertises HTTP/2 extended CONNECT ([RFC 8441](https://www.rfc-editor.org/rfc/rfc8441)) to the client whether or not your container implements it, so a browser opens its WebSocket that way and your container has to answer it. A container that advertises only `http/1.1` keeps those clients on HTTP/1.1, where a WebSocket is an ordinary `Upgrade`.
 
-`addSsl.alpn` narrows the protocols the binding puts forward. Your container is offered those of them the client also asked for, and the client is offered whatever your container picks, so the two ends stay on one protocol. A client that asks for none of them is refused; a client that asks for none at all is served as it would be without ALPN. A container that selects none of them leaves the client without a protocol rather than refusing it, so a container that ignores ALPN entirely makes the setting inert. Leave it unset unless you need to keep this binding off a protocol your container would otherwise select.
+`addSsl.alpn` narrows the protocols the binding puts forward. A client that asks for protocols and shares none of them is refused; a client that asks for none at all is served as it would be without ALPN.
+
+What the list means beyond that depends on whether your container serves TLS of its own. Where it does — `secure: { ssl: true }` alongside `addSsl` — your container is offered those protocols the client also asked for, and the client is offered whatever your container picks, so the two ends stay on one protocol and a container that ignores ALPN entirely leaves the client without one. Where it does not, StartOS negotiates with the client itself and the list is simply what the client is offered, which is how `protocol: 'http'` puts `http/1.1` forward. Leave it unset unless you need to keep this binding off a protocol your container would otherwise select.
 
 ## Serving Your Own TLS (Passthrough)
 

@@ -983,7 +983,8 @@ pub struct ProxyTarget {
     /// The config StartOS dials the container with when the container serves
     /// its own TLS. `None` dials it in plaintext.
     pub connect_ssl: Option<Arc<ClientConfig>>,
-    /// Narrows the protocols this binding puts forward. `None` and
+    /// Narrows the protocols this binding puts forward — to the container when
+    /// one is dialled over TLS, to the client directly when none is. `None` and
     /// `Some(AlpnInfo::Reflect)` both put forward the client's own list.
     pub alpn: Option<AlpnInfo>,
     pub passthrough: bool,
@@ -1236,17 +1237,30 @@ where
             Some(AlpnInfo::Reflect) | None => client_alpn.clone(),
         };
         // The container is only put through protocols the client also offered,
-        // since its choice is what the client gets handed back. A client that
-        // named none leaves it named none too, so neither end negotiates one.
+        // since its choice is what the client gets handed back.
         let dialled: Vec<Vec<u8>> = offered
             .iter()
             .filter(|proto| client_alpn.contains(proto))
             .cloned()
             .collect();
+        // The binding and the client share no protocol, so there is nothing to
+        // put to the container: offering the client the binding's list is how
+        // rustls turns it away. A binding that named nothing has nothing to
+        // turn anyone away with, so it goes on to dial.
+        if self.connect_ssl.is_some()
+            && !offered.is_empty()
+            && !client_alpn.is_empty()
+            && dialled.is_empty()
+        {
+            prev.alpn_protocols = offered;
+            return Some((prev, Box::pin(tcp_stream)));
+        }
         let (stream, negotiated): (AcceptStream, _) = match &self.connect_ssl {
             Some(client_cfg) => {
+                // Call this even for an empty list: without it the connector
+                // falls back to the protocols baked into `client_cfg`.
                 let target_stream = TlsConnector::from(client_cfg.clone())
-                    .with_alpn(dialled.clone())
+                    .with_alpn(dialled)
                     .connect(ServerName::IpAddress(self.addr.ip().into()), tcp_stream)
                     .await
                     .with_ctx(|_| (ErrorKind::Network, self.addr))
@@ -1262,10 +1276,6 @@ where
         };
         // rustls picks by this list's order, so assign rather than append.
         prev.alpn_protocols = match &self.connect_ssl {
-            // The binding and the client share no protocol. Offering the
-            // client the binding's list is how rustls tells it so, the same
-            // refusal it gets without a TLS leg.
-            Some(_) if dialled.is_empty() && !client_alpn.is_empty() => offered,
             // One protocol frames both legs, so the container's own choice is
             // what the client is offered.
             Some(_) => negotiated.into_iter().collect(),
@@ -2500,9 +2510,10 @@ mod conn_cap_tests {
 }
 
 /// Which protocols `preprocess` offers the container and the client. A dialled
-/// container chooses out of the binding's protocols and the client is offered
-/// its choice; without a TLS leg the client is offered them directly. Also
-/// covers `alpn`'s part in a target's identity.
+/// container chooses out of the protocols the binding and the client both name,
+/// and the client is offered its choice; without a TLS leg the client is
+/// offered the binding's directly. Also covers `alpn`'s part in a target's
+/// identity.
 #[cfg(test)]
 mod upstream_alpn_tests {
     use std::net::Ipv4Addr;
@@ -2778,6 +2789,34 @@ mod upstream_alpn_tests {
         );
     }
 
+    /// An empty pin names nothing, so it turns nobody away — and the container
+    /// is still reached over its own TLS. Taking the refusal path here would
+    /// hand the client a plaintext connection to a TLS listener, since rustls
+    /// only alerts when the list it was given is non-empty.
+    #[tokio::test]
+    async fn an_empty_pin_still_reaches_the_container_over_tls() {
+        let (backend, negotiated) = spawn_backend_reporting(&["h2", "http/1.1"]).await;
+        assert_eq!(
+            try_negotiate(
+                rewrap(),
+                Some(AlpnInfo::Specified(Vec::new())),
+                &[],
+                backend,
+                &["h2", "http/1.1"],
+            )
+            .await
+            .expect("an empty pin turns nobody away"),
+            None,
+        );
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(10), negotiated)
+                .await
+                .expect("the container's handshake settles within 10s")
+                .expect("the container is dialled over TLS, so its handshake completes"),
+            None,
+        );
+    }
+
     /// A client that shares no protocol with the pin is refused, as it is on a
     /// binding with no TLS leg. Serving it without a protocol instead would
     /// make the pin advisory.
@@ -2818,12 +2857,12 @@ mod upstream_alpn_tests {
         );
     }
 
-    /// A pinned list is what the container is offered, so its choice comes out
-    /// of that list rather than the client's. One protocol frames both legs, so
-    /// offering the container the client's list instead would let it pick `h2`
-    /// while the client was held to `http/1.1`.
+    /// The container is offered the pinned protocols the client also named, so
+    /// a protocol the pin leaves out is off the table even where both ends
+    /// speak it. Offering the container the client's list instead would let it
+    /// pick `h2` and the pin would count for nothing.
     #[tokio::test]
-    async fn a_pinned_protocol_is_what_the_container_is_offered() {
+    async fn a_pin_keeps_the_container_off_the_protocols_it_excludes() {
         let (backend, negotiated) = spawn_backend_reporting(&["h2", "http/1.1"]).await;
         let http1 = AlpnInfo::Specified(vec![MaybeUtf8String(b"http/1.1".to_vec())]);
         assert_eq!(
