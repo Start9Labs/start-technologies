@@ -1253,12 +1253,26 @@ hostname.empty:
   fr_FR: "Le nom d'hôte ne peut pas être vide"
   pl_PL: "Nazwa hosta nie może być pusta"
 
+hostname.hyphen-edge:
+  en_US: "Hostname cannot start or end with a hyphen"
+  de_DE: "Der Hostname darf nicht mit einem Bindestrich beginnen oder enden"
+  es_ES: "El nombre de host no puede empezar ni terminar con un guion"
+  fr_FR: "Le nom d'hôte ne peut pas commencer ni finir par un trait d'union"
+  pl_PL: "Nazwa hosta nie może zaczynać się ani kończyć myślnikiem"
+
 hostname.invalid-character:
   en_US: "Invalid character in hostname: %{char}"
   de_DE: "Ungültiges Zeichen im Hostnamen: %{char}"
   es_ES: "Carácter no válido en el nombre de host: %{char}"
   fr_FR: "Caractère invalide dans le nom d'hôte : %{char}"
   pl_PL: "Nieprawidłowy znak w nazwie hosta: %{char}"
+
+hostname.too-long:
+  en_US: "Hostname must be %{max} characters or fewer"
+  de_DE: "Der Hostname darf höchstens %{max} Zeichen lang sein"
+  es_ES: "El nombre de host debe tener %{max} caracteres o menos"
+  fr_FR: "Le nom d'hôte doit comporter au maximum %{max} caractères"
+  pl_PL: "Nazwa hosta może mieć maksymalnie %{max} znaków"
 
 # init.rs
 init.running-preinit:
@@ -3444,6 +3458,13 @@ help.arg.host-url:
   es_ES: "URL del servidor StartOS"
   fr_FR: "URL du serveur StartOS"
   pl_PL: "URL serwera StartOS"
+
+help.arg.hostname:
+  en_US: "The server's .local hostname: lowercase letters, numbers, and hyphens"
+  de_DE: "Der .local-Hostname des Servers: Kleinbuchstaben, Ziffern und Bindestriche"
+  es_ES: "El nombre de host .local del servidor: letras minúsculas, números y guiones"
+  fr_FR: "Le nom d'hôte .local du serveur : lettres minuscules, chiffres et traits d'union"
+  pl_PL: "Nazwa hosta .local serwera: małe litery, cyfry i myślniki"
 
 help.arg.hostnames:
   en_US: "Hostnames to include in the certificate"

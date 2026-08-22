@@ -11,6 +11,15 @@ or the CLI's externally observable behavior.
 
 ## [1.1.1]
 
+### Changed
+
+- **`server set-hostname` takes one required hostname, and `setup execute` no
+  longer takes `--name`.** A StartOS server carries a single name — its `.local`
+  hostname — where it used to carry a separate display label as well. Setting it
+  moves the address the server answers to. A provisioning script that passes
+  `--name` to `setup execute`, or a name and a hostname to `server set-hostname`,
+  needs updating.
+
 ### Added
 
 - **`s9pk pack` packs the package's `README.md`.** It sits beside `instructions.md` in the

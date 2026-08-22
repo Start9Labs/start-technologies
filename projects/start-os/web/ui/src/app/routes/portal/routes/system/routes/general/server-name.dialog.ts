@@ -1,9 +1,5 @@
 import { Component, inject } from '@angular/core'
-import {
-  NonNullableFormBuilder,
-  ReactiveFormsModule,
-  Validators,
-} from '@angular/forms'
+import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms'
 import {
   hostnameValidationErrors,
   hostnameValidator,
@@ -35,7 +31,7 @@ import { injectContext } from '@taiga-ui/polymorpheus'
       </tui-textfield>
       <tui-error formControlName="hostname" />
       @if (form.valid) {
-        <p class="hostname-preview">{{ form.value.hostname }}.local</p>
+        <p class="hostname-preview">{{ hostname() }}.local</p>
       }
       <footer>
         <button
@@ -76,17 +72,18 @@ export class ServerNameDialog {
     injectContext<TuiDialogContext<string | null, { hostname: string }>>()
 
   protected readonly form = inject(NonNullableFormBuilder).group({
-    hostname: [
-      this.context.data.hostname,
-      [Validators.required, hostnameValidator],
-    ],
+    hostname: [this.context.data.hostname, hostnameValidator],
   })
+
+  protected hostname(): string {
+    return this.form.getRawValue().hostname.trim()
+  }
 
   protected randomize() {
     this.form.controls.hostname.setValue(randomHostname())
   }
 
   protected save() {
-    this.context.completeWith(this.form.value.hostname!)
+    this.context.completeWith(this.hostname())
   }
 }

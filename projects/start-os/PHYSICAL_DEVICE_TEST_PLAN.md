@@ -213,12 +213,12 @@ In the setup wizard on the laptop browser:
 
 - [ ] A warning dialog appears containing the text "do not attempt to boot into it again as a Start9 Server"
 
-3. Click **Continue**. Enter `QaTestPass!1` as the new admin password and `qa-test-xfer` as the new server name. Submit.
+3. Click **Continue**. Enter `QaTestPass!1` as the new admin password. Submit. (A transfer offers no server-name field — the transferred server keeps the name it had.)
 
 - [ ] Transfer progresses, no errors
 - [ ] Device reboots into the admin UI on completion
 
-4. Browse to `http://qa-test-xfer.local` and log in with `QaTestPass!1`.
+4. Browse to `http://qa-test.local` — the transferred server keeps the source's name — and log in with `QaTestPass!1`.
 
 - [ ] Login succeeds with the new password (not the old source password)
 - [ ] Services page lists the same service that was on the source device

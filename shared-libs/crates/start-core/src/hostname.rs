@@ -27,6 +27,9 @@ impl AsRef<str> for ServerHostname {
     }
 }
 
+/// The longest label DNS allows, and so the longest a `.local` name can be.
+const MAX_LEN: usize = 63;
+
 impl ServerHostname {
     fn validate(&self) -> Result<(), Error> {
         if self.0.is_empty() {
@@ -54,16 +57,32 @@ impl ServerHostname {
         Ok(res)
     }
 
+    /// Reads a hostname the operator just chose, holding it to the rest of the
+    /// rules a DNS label follows. `new` stays looser, so a hostname stored before
+    /// a rule existed still loads and the server still boots.
+    pub fn new_from_input(hostname: InternedString) -> Result<Self, Error> {
+        let res = Self::new(hostname)?;
+        if res.0.chars().count() > MAX_LEN {
+            return Err(Error::new(
+                eyre!("{}", t!("hostname.too-long", max = MAX_LEN)),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+        if res.0.starts_with('-') || res.0.ends_with('-') {
+            return Err(Error::new(
+                eyre!("{}", t!("hostname.hyphen-edge")),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+        Ok(res)
+    }
+
     /// Treats an empty hostname as absent rather than invalid.
     pub fn new_opt(hostname: Option<InternedString>) -> Result<Option<Self>, Error> {
         hostname
             .filter(|h| !h.is_empty())
-            .map(Self::new)
+            .map(Self::new_from_input)
             .transpose()
-    }
-
-    pub fn lan_address(&self) -> InternedString {
-        InternedString::from_display(&lazy_format!("https://{}.local", self.0))
     }
 
     pub fn local_domain_name(&self) -> InternedString {
@@ -152,6 +171,7 @@ pub async fn sync_hostname(hostname: &ServerHostname) -> Result<(), Error> {
 #[ts(export)]
 pub struct SetServerHostnameParams {
     /// The server's `.local` hostname: lowercase letters, numbers, and hyphens
+    #[arg(help = "help.arg.hostname")]
     hostname: InternedString,
 }
 
@@ -159,7 +179,7 @@ pub async fn set_hostname_rpc(
     ctx: RpcContext,
     SetServerHostnameParams { hostname }: SetServerHostnameParams,
 ) -> Result<(), Error> {
-    let hostname = ServerHostname::new(hostname)?;
+    let hostname = ServerHostname::new_from_input(hostname)?;
     ctx.db
         .mutate(|db| {
             let server_info = db.as_public_mut().as_server_info_mut();
@@ -185,6 +205,10 @@ mod test {
         ServerHostname::new(InternedString::intern(hostname)).map(|_| ())
     }
 
+    fn validate_input(hostname: &str) -> Result<(), Error> {
+        ServerHostname::new_from_input(InternedString::intern(hostname)).map(|_| ())
+    }
+
     #[test]
     fn test_generate_hostname() {
         let generated = dbg!(generate_hostname());
@@ -202,5 +226,27 @@ mod test {
         validate("").unwrap_err();
         validate("My Cool Server").unwrap_err();
         validate("my_cool_server").unwrap_err();
+    }
+
+    #[test]
+    fn input_rejects_a_label_no_dns_would_carry() {
+        validate_input(&"a".repeat(MAX_LEN)).unwrap();
+        validate_input(&"a".repeat(MAX_LEN + 1)).unwrap_err();
+        validate_input("-my-server").unwrap_err();
+        validate_input("my-server-").unwrap_err();
+        validate_input("-").unwrap_err();
+    }
+
+    // A hostname stored before those rules existed still loads, so `sync_hostname`
+    // on the next boot does not strand the server in diagnostic mode.
+    #[test]
+    fn stored_hostnames_are_held_to_the_charset_alone() {
+        validate(&"a".repeat(MAX_LEN + 1)).unwrap();
+        validate("-my-server").unwrap();
+    }
+
+    #[test]
+    fn generated_hostnames_are_valid_input() {
+        validate_input(&generate_hostname()).unwrap();
     }
 }

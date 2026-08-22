@@ -59,10 +59,7 @@ import { StateService } from '../services/state.service'
         </tui-textfield>
         <tui-error formControlName="hostname" />
         @if (form.controls.hostname.valid) {
-          <tui-error
-            class="g-secondary"
-            error="{{ form.controls.hostname.value }}.local"
-          />
+          <tui-error class="g-secondary" error="{{ hostname() }}.local" />
         }
       }
 
@@ -128,13 +125,17 @@ import { StateService } from '../services/state.service'
     i18nPipe,
   ],
   providers: [
-    tuiValidationErrorsProvider(() => ({
-      required: 'Required',
-      minlength: 'Must be 12 characters or greater',
-      maxlength: 'Must be 64 character or less',
-      match: 'Passwords do not match',
-      ...hostnameValidationErrors(),
-    })),
+    tuiValidationErrorsProvider(() => {
+      const i18n = inject(i18nPipe)
+
+      return {
+        required: i18n.transform('Required'),
+        minlength: i18n.transform('Must be 12 characters or greater'),
+        maxlength: i18n.transform('Must be 64 character or less'),
+        match: i18n.transform('Passwords do not match'),
+        ...hostnameValidationErrors(),
+      }
+    }),
   ],
 })
 export default class PasswordPage {
@@ -154,7 +155,7 @@ export default class PasswordPage {
     confirm: new FormControl(''),
     hostname: new FormControl(
       this.isFresh ? randomHostname() : '',
-      this.isFresh ? [Validators.required, hostnameValidator] : [],
+      this.isFresh ? [hostnameValidator] : [],
     ),
   })
 
@@ -163,12 +164,15 @@ export default class PasswordPage {
       ? null
       : { match: this.i18n.transform('Passwords do not match') }
 
+  hostname(): string {
+    return (this.form.controls.hostname.value || '').trim()
+  }
+
   randomizeHostname() {
     this.form.controls.hostname.setValue(randomHostname())
   }
 
   async skip() {
-    // Skip means no new password - pass null
     await this.executeSetup(null)
   }
 
@@ -177,7 +181,7 @@ export default class PasswordPage {
   }
 
   private async executeSetup(password: string | null) {
-    const hostname = this.form.controls.hostname.value || ''
+    const hostname = this.hostname()
 
     this.tasks.run(async () => {
       if (this.stateService.setupType === 'attach') {

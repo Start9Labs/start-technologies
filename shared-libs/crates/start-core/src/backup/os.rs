@@ -128,13 +128,13 @@ impl OsBackupV1 {
 #[serde(rename = "kebab-case")]
 
 struct OsBackupV2 {
-    server_id: String,                               // uuidv4
-    hostname: InternedString,                        // <adjective>-<noun>
-    root_ca_key: Pem<PKey<Private>>,                 // PEM Encoded OpenSSL Key
-    root_ca_cert: Pem<X509>,                         // PEM Encoded OpenSSL X509 Certificate
-    ssh_key: Pem<ssh_key::PrivateKey>,               // PEM Encoded OpenSSH Key
+    server_id: String, // uuidv4
+    hostname: InternedString,
+    root_ca_key: Pem<PKey<Private>>,   // PEM Encoded OpenSSL Key
+    root_ca_cert: Pem<X509>,           // PEM Encoded OpenSSL X509 Certificate
+    ssh_key: Pem<ssh_key::PrivateKey>, // PEM Encoded OpenSSH Key
     compat_s9pk_key: Pem<ed25519_dalek::SigningKey>, // PEM Encoded ED25519 Key
-    ui: Value,                                       // JSON Value
+    ui: Value,                         // JSON Value
 }
 impl OsBackupV2 {
     fn project(self) -> Result<OsBackup, Error> {

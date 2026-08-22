@@ -362,7 +362,7 @@ export default class SystemGeneralComponent {
           data: { hostname: server.hostname },
         },
       )
-      .pipe(filter((hostname): hostname is string => hostname !== null))
+      .pipe(filter(Boolean))
       .subscribe(hostname => {
         if (this.config.accessType === 'mdns') {
           this.confirmNameChange(hostname)
