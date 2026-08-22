@@ -510,7 +510,7 @@ pub struct ServiceRefReloadCancelGuard(
 impl Drop for ServiceRefReloadCancelGuard {
     fn drop(&mut self) {
         if let Some(info) = self.0.take() {
-            tokio::spawn(info.reload(None));
+            tokio::spawn(async move { info.reload(None).await.log_err() });
         }
     }
 }
@@ -572,35 +572,40 @@ struct ServiceRefReloadInfo {
 }
 impl ServiceRefReloadInfo {
     async fn reload(self, error: Option<Error>) -> Result<(), Error> {
+        if let Some(error) = error {
+            // Rolling back can take minutes, so the notification goes out before it starts.
+            self.notify_failure(&error).await.log_err();
+        }
         self.ctx
             .services
             .load(&self.ctx, &self.id, LoadDisposition::Undo)
-            .await?;
-        if let Some(error) = error {
-            let error_string = error.to_string();
-            let title = match self.operation {
-                "Installing" => t!("service.service-map.installing-failed"),
-                "Updating" => t!("service.service-map.updating-failed"),
-                "Restoring" => t!("service.service-map.restoring-failed"),
-                "Uninstall" => t!("service.service-map.uninstall-failed"),
-                other => t!("service.service-map.operation-failed", operation = other),
-            }
-            .to_string();
-            self.ctx
-                .db
-                .mutate(|db| {
-                    notify(
-                        db,
-                        Some(self.id.clone()),
-                        NotificationLevel::Error,
-                        title,
-                        error_string,
-                        (),
-                    )
-                })
-                .await
-                .result?;
+            .await
+    }
+
+    async fn notify_failure(&self, error: &Error) -> Result<(), Error> {
+        let id = self.id.clone();
+        let error_string = error.to_string();
+        let title = match self.operation {
+            "Installing" => t!("service.service-map.installing-failed"),
+            "Updating" => t!("service.service-map.updating-failed"),
+            "Restoring" => t!("service.service-map.restoring-failed"),
+            "Uninstall" => t!("service.service-map.uninstall-failed"),
+            other => t!("service.service-map.operation-failed", operation = other),
         }
-        Ok(())
+        .to_string();
+        self.ctx
+            .db
+            .mutate(move |db| {
+                notify(
+                    db,
+                    Some(id),
+                    NotificationLevel::Error,
+                    title,
+                    error_string,
+                    (),
+                )
+            })
+            .await
+            .result
     }
 }
