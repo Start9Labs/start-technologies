@@ -45,7 +45,7 @@ With `userspaceFilesystems` and `virtualNetworking` set, the per-service LXC get
 - `/dev/fuse` — char device 10:229, world-RW (via `userspaceFilesystems`). Required by `fuse-overlayfs` for rootless layered storage. Kernel overlayfs-on-overlayfs is denied for unprivileged users, so fuse-overlayfs is the only viable rootless storage driver inside a userns LXC.
 - `/dev/net/tun` — char device 10:200, world-RW (via `virtualNetworking`). Required by `slirp4netns` and `pasta` for rootless container networking.
 
-`virtualNetworking` additionally grants `CAP_NET_ADMIN` (scoped to the container's user namespace). A rootless OCI engine using `slirp4netns`/`pasta` doesn't strictly need it, but the tun device and the capability are bundled under the one flag; the grant is namespaced and harmless here.
+Setting these flags does not change the container's capabilities. Each one adds a device node and nothing else.
 
 Both devices are bind-mounted from the host (via the same machinery that handles `hardwareAcceleration` for GPU nodes). The host's `fuse` and `tun` kernel modules are auto-loaded at boot.
 
@@ -174,4 +174,4 @@ Once dockerd is running (rootful, since `dockerd-rootless.sh` requires the calli
 - **Subordinate-UID range overlap.** `/etc/subuid` / `/etc/subgid` ranges must live inside the subcontainer's userns (UIDs 0..65535) AND must not overlap with the calling user's own UID. With `useradd --uid 1000`, the subordinate range must skip 1000 — `app:1001:64535` works, `app:1:65535` does not.
 - **`fuse-overlayfs` only.** Kernel overlayfs-on-overlayfs is denied for unprivileged users, so don't try `--storage-driver=overlay2`. `fuse-overlayfs` is the only rootless option.
 - **No bridge IPv6 by default.** Rootless networking via slirp4netns is IPv4-only out of the box. If you need IPv6 inside nested containers, configure pasta (`--network=pasta`) instead.
-- **The capability flags are independent.** `userspaceFilesystems`, `virtualNetworking`, and `hardwareAcceleration` are orthogonal opt-ins. A nested OCI engine needs the first two; an LLM-driven CI runner that also wants GPU access sets all three.
+- **The device flags are independent.** `userspaceFilesystems`, `virtualNetworking`, and `hardwareAcceleration` are orthogonal opt-ins. A nested OCI engine needs the first two; an LLM-driven CI runner that also wants GPU access sets all three.
