@@ -27,6 +27,8 @@ The following services cannot be migrated automatically. Review these before sta
 
 - **Ghost** — Completely redesigned for StartOS 0.4.0 and incompatible with the old version. Before updating, open your old Ghost admin UI and use Ghost's built-in **Export** tool to download your content. After updating, install the new Ghost from the marketplace and use Ghost's built-in **Import** tool to restore your content.
 
+- **Monero** — Carried over as **Monero (Legacy)**, which will not be offered an update. The 0.4.0 Monero is a separate package that installs alongside it and does not pick up the old blockchain or the built-in wallet: it syncs from scratch. Before updating, if you use Monero's built-in wallet (the Wallet RPC interface), record its seed and move any funds you cannot afford to have stranded. After updating, install Monero from the marketplace, and uninstall Monero (Legacy) only once the new node is running and you have everything you need from it.
+
 - **Synapse** — The old Synapse was Tor-only. The new Synapse is clearnet-only. These are different services now with no migration path.
 
 - **Jam** — Jam's backend, JoinMarket, is being replaced by a separate reimplementation (JoinMarket NG) for technical and security reasons, making Jam defunct on StartOS v0.3.5.1 and unavailable on v0.4.0 until that backend matures and a new version of Jam is built for it. You should back up your seed, move out any spendable funds (fidelity-bond funds stay locked until expiry), and uninstall Jam prior to updating to v0.4.0.
