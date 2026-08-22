@@ -1,4 +1,4 @@
-// Auto-generated from core/src/assets/{adjectives,nouns}.txt
+// Word lists for suggesting a server hostname.
 // prettier-ignore
 export const ADJECTIVES = [
   'ominous',

@@ -263,7 +263,6 @@ export const mockPatchData: DataModel = {
       backupProgress: null,
       restart: null,
     },
-    name: 'Random Words',
     hostname: 'random-words',
     pubkey: 'npub1sg6plzptd64u62a878hep2kev88swjh3tw00gjsfl8f237lmu63q0uf63m',
     caFingerprint: '63:2B:11:99:44:40:17:DF:37:FC:C3:DF:0F:3D:15',

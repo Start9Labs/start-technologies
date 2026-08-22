@@ -22,7 +22,7 @@ use crate::backup::target::cifs::CifsTargets;
 use crate::context::RpcContext;
 use crate::disk::mount::filesystem::cifs::Cifs;
 use crate::disk::mount::util::unmount;
-use crate::hostname::{ServerHostname, ServerHostnameInfo};
+use crate::hostname::ServerHostname;
 use crate::net::forward::AvailablePorts;
 use crate::net::keys::KeyStore;
 use crate::notifications::{NotificationLevel, Notifications, notify};
@@ -733,12 +733,12 @@ async fn previous_account_info(pg: &sqlx::Pool<sqlx::Postgres>) -> Result<Accoun
             server_id: account_query
                 .try_get("server_id")
                 .with_ctx(|_| (ErrorKind::Database, "server_id"))?,
-            hostname: ServerHostnameInfo::from_hostname(ServerHostname::new(
+            hostname: ServerHostname::new(
                 account_query
                     .try_get::<String, _>("hostname")
                     .with_ctx(|_| (ErrorKind::Database, "hostname"))?
                     .into(),
-            )?),
+            )?,
             root_ca_key: PKey::private_key_from_pem(
                 &account_query
                     .try_get::<String, _>("root_ca_key_pem")

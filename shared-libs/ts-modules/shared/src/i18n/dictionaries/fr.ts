@@ -808,4 +808,7 @@ export default {
   915: 'Trop long pour un QR code',
   916: "Votre autorité de certification prouve que vous contrôlez ce domaine en s'y connectant sur le port 443, quel que soit le port utilisé par l'adresse elle-même.",
   917: "En IPv6 il n'y a rien à rediriger — le pare-feu de votre passerelle doit à la place autoriser les connexions entrantes vers ce port.",
+  918: 'Doit comporter au maximum 63 caractères',
+  919: 'Uniquement des lettres minuscules, des chiffres et des traits d’union',
+  920: 'Ne peut pas commencer ni finir par un trait d’union',
 } satisfies i18n

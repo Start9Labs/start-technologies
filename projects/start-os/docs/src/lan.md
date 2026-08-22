@@ -8,7 +8,7 @@ Connect to your server over your local network using its [mDNS address](mdns.md)
 
 ## mDNS, IP Address, and Private Domains
 
-- **[mDNS](mdns.md)** — Your server's `.local` address (e.g. `my-cool-server.local`) is derived from your [server name](server-name.md) and resolves to your server's LAN IP address automatically.
+- **[mDNS](mdns.md)** — Your server's `.local` address (e.g. `my-cool-server.local`) is your [server name](server-name.md) with `.local` on the end, and resolves to your server's LAN IP address automatically.
 
 - **IP address** — Connect using your server's LAN IP directly. The address can be found in your StartOS dashboard at `System -> StartOS UI`, in your router dashboard, or by pinging your server's mDNS address from a computer on the same network.
 

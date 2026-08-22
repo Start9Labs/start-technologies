@@ -472,11 +472,6 @@ export class MockApiService extends ApiService {
     this.mockRevision([
       {
         op: PatchOp.REPLACE,
-        path: '/serverInfo/name',
-        value: params.name,
-      },
-      {
-        op: PatchOp.REPLACE,
         path: '/serverInfo/hostname',
         value: params.hostname,
       },

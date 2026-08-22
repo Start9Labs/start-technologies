@@ -8,7 +8,6 @@ import type { SmtpValue } from './SmtpValue'
 
 export type ServerInfo = {
   id: string
-  name: string
   hostname: string
   version: string
   packageVersionCompat: string

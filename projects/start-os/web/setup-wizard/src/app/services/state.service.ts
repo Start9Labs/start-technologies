@@ -84,11 +84,7 @@ export class StateService {
    * Called for fresh, restore, and transfer flows
    * Password is required for fresh, optional for restore/transfer
    */
-  async executeSetup(
-    password: string | null,
-    name: string,
-    hostname: string,
-  ): Promise<void> {
+  async executeSetup(password: string | null, hostname: string): Promise<void> {
     let recoverySource: T.RecoverySource<T.EncryptedWire> | null = null
 
     if (this.recoverySource) {
@@ -108,7 +104,6 @@ export class StateService {
     await this.api.execute({
       guid: this.dataDriveGuid,
       password: password ? await this.api.encrypt(password) : null,
-      name,
       hostname,
       recoverySource,
       kiosk: this.kiosk,

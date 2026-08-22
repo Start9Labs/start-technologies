@@ -1,44 +1,54 @@
-import { Component } from '@angular/core'
-import { FormsModule } from '@angular/forms'
+import { Component, inject } from '@angular/core'
 import {
+  NonNullableFormBuilder,
+  ReactiveFormsModule,
+  Validators,
+} from '@angular/forms'
+import {
+  hostnameValidationErrors,
+  hostnameValidator,
   i18nPipe,
-  normalizeHostname,
-  normalizeHostnameRaw,
-  randomServerName,
+  randomHostname,
 } from '@start9labs/shared'
-import { TuiButton, TuiDialogContext, TuiError, TuiInput } from '@taiga-ui/core'
+import {
+  TuiButton,
+  TuiDialogContext,
+  TuiError,
+  TuiInput,
+  tuiValidationErrorsProvider,
+} from '@taiga-ui/core'
 import { injectContext } from '@taiga-ui/polymorpheus'
 
 @Component({
   template: `
-    <tui-textfield>
-      <label tuiLabel>{{ 'Server Name' | i18n }}</label>
-      <input tuiInput [(ngModel)]="name" />
-      <button
-        tuiIconButton
-        type="button"
-        appearance="icon"
-        iconStart="@tui.refresh-cw"
-        (click)="randomizeName()"
-      ></button>
-    </tui-textfield>
-    @if (hostnameError) {
-      <tui-error [error]="hostnameError" />
-    } @else if (name.trim()) {
-      <p class="hostname-preview">{{ normalizeHostname(name) }}.local</p>
-    }
-    <footer>
-      <button tuiButton appearance="secondary" (click)="cancel()">
-        {{ 'Cancel' | i18n }}
-      </button>
-      <button
-        tuiButton
-        [disabled]="!name.trim() || hostnameError"
-        (click)="confirm()"
-      >
-        {{ 'Save' | i18n }}
-      </button>
-    </footer>
+    <form [formGroup]="form" (submit.prevent)="save()">
+      <tui-textfield>
+        <label tuiLabel>{{ 'Server Name' | i18n }}</label>
+        <input tuiInput autocapitalize="off" formControlName="hostname" />
+        <button
+          tuiIconButton
+          type="button"
+          appearance="icon"
+          iconStart="@tui.refresh-cw"
+          (click)="randomize()"
+        ></button>
+      </tui-textfield>
+      <tui-error formControlName="hostname" />
+      @if (form.valid) {
+        <p class="hostname-preview">{{ form.value.hostname }}.local</p>
+      }
+      <footer>
+        <button
+          tuiButton
+          type="button"
+          appearance="secondary"
+          (click)="context.completeWith(null)"
+        >
+          {{ 'Cancel' | i18n }}
+        </button>
+        <button tuiButton [disabled]="form.invalid">{{ 'Save' | i18n }}</button>
+      </footer>
+    </form>
   `,
   styles: `
     .hostname-preview {
@@ -53,45 +63,30 @@ import { injectContext } from '@taiga-ui/polymorpheus'
       margin-top: 1.5rem;
     }
   `,
-  imports: [FormsModule, TuiButton, TuiError, TuiInput, i18nPipe],
+  imports: [ReactiveFormsModule, TuiButton, TuiError, TuiInput, i18nPipe],
+  providers: [
+    tuiValidationErrorsProvider(() => ({
+      required: inject(i18nPipe).transform('Required'),
+      ...hostnameValidationErrors(),
+    })),
+  ],
 })
 export class ServerNameDialog {
-  private readonly context =
-    injectContext<
-      TuiDialogContext<
-        { name: string; hostname: string } | null,
-        { initialName: string }
-      >
-    >()
+  protected readonly context =
+    injectContext<TuiDialogContext<string | null, { hostname: string }>>()
 
-  name = this.context.data.initialName
-  readonly normalizeHostname = normalizeHostname
+  protected readonly form = inject(NonNullableFormBuilder).group({
+    hostname: [
+      this.context.data.hostname,
+      [Validators.required, hostnameValidator],
+    ],
+  })
 
-  get hostnameError(): string | null {
-    const name = this.name.trim()
-    if (!name) return null
-
-    const hostname = normalizeHostnameRaw(name)
-
-    if (hostname.length < 4) return 'Hostname must be at least 4 characters'
-    if (hostname.length > 63) return 'Hostname must be 63 characters or less'
-
-    return null
+  protected randomize() {
+    this.form.controls.hostname.setValue(randomHostname())
   }
 
-  randomizeName() {
-    this.name = randomServerName()
-  }
-
-  cancel() {
-    this.context.completeWith(null)
-  }
-
-  confirm() {
-    const name = this.name.trim()
-    this.context.completeWith({
-      name,
-      hostname: normalizeHostname(name),
-    })
+  protected save() {
+    this.context.completeWith(this.form.value.hostname!)
   }
 }

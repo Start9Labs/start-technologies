@@ -1260,13 +1260,6 @@ hostname.invalid-character:
   fr_FR: "Caractère invalide dans le nom d'hôte : %{char}"
   pl_PL: "Nieprawidłowy znak w nazwie hosta: %{char}"
 
-hostname.must-provide-name-or-hostname:
-  en_US: "Must provide at least one of: name, hostname"
-  de_DE: "Es muss mindestens eines angegeben werden: name, hostname"
-  es_ES: "Se debe proporcionar al menos uno de: name, hostname"
-  fr_FR: "Vous devez fournir au moins l'un des éléments suivants : name, hostname"
-  pl_PL: "Należy podać co najmniej jedno z: name, hostname"
-
 # init.rs
 init.running-preinit:
   en_US: "Running preinit.sh"

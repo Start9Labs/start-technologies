@@ -57,8 +57,7 @@ impl Public {
             server_info: ServerInfo {
                 id: account.server_id.clone(),
                 version: Current::default().semver(),
-                name: account.hostname.name.clone(),
-                hostname: (*account.hostname.hostname).clone(),
+                hostname: (*account.hostname).clone(),
                 last_backup: None,
                 package_version_compat: Current::default().compat().clone(),
                 post_init_migration_todos: BTreeMap::new(),
@@ -174,7 +173,6 @@ pub fn default_echoip_urls() -> Vec<Url> {
 #[ts(export)]
 pub struct ServerInfo {
     pub id: String,
-    pub name: InternedString,
     pub hostname: InternedString,
     #[ts(type = "string")]
     pub version: Version,

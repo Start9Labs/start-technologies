@@ -4,7 +4,7 @@
 .SH NAME
 start\-cli\-setup\-execute \- Run the initial setup against an installed OS or fresh data drive
 .SH SYNOPSIS
-\fBstart\-cli setup execute\fR <\fB\-\-guid\fR> [\fB\-\-kiosk\fR] [\fB\-\-name\fR] [\fB\-\-hostname\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+\fBstart\-cli setup execute\fR <\fB\-\-guid\fR> [\fB\-\-kiosk\fR] [\fB\-\-hostname\fR] [\fB\-h\fR|\fB\-\-help\fR] 
 .SH DESCRIPTION
 Run the initial setup against an installed OS or fresh data drive
 .SH OPTIONS
@@ -15,11 +15,8 @@ Disk GUID returned by `setup install\-os` (or an existing data drive)
 \fB\-\-kiosk\fR
 Enable kiosk mode
 .TP
-\fB\-\-name\fR \fI<NAME>\fR
-Friendly server name
-.TP
 \fB\-\-hostname\fR \fI<HOSTNAME>\fR
-Hostname (LAN advertised) — generated if unset; changeable later
+The server\*(Aqs `.local` hostname — defaults to a generated one
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help

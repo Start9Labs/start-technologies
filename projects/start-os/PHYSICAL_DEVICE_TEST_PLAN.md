@@ -98,7 +98,7 @@ In the laptop browser at `http://start.local`.
 ### 2.3 Mode: Start Fresh
 
 - [ ] Enter password `QaTestPass!1`, confirm, and submit
-- [ ] Enter server name `QA Test` and submit
+- [ ] Enter server name `qa-test` and submit
 - [ ] Success page shows "Setup complete"
 
 ### 2.4 Post-setup reachability
@@ -213,7 +213,7 @@ In the setup wizard on the laptop browser:
 
 - [ ] A warning dialog appears containing the text "do not attempt to boot into it again as a Start9 Server"
 
-3. Click **Continue**. Enter `QaTestPass!1` as the new admin password and `QA Test Xfer` as the new server name. Submit.
+3. Click **Continue**. Enter `QaTestPass!1` as the new admin password and `qa-test-xfer` as the new server name. Submit.
 
 - [ ] Transfer progresses, no errors
 - [ ] Device reboots into the admin UI on completion

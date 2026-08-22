@@ -101,9 +101,6 @@ import { UPDATE } from './update.component'
         <tui-icon icon="@tui.server" />
         <span tuiTitle>
           <strong>{{ 'Server Name' | i18n }}</strong>
-          <span tuiSubtitle>
-            {{ server.name }}
-          </span>
           <span tuiSubtitle>{{ server.hostname }}.local</span>
         </span>
         <button tuiButton (click)="onName()">
@@ -357,30 +354,25 @@ export default class SystemGeneralComponent {
     if (!server) return
 
     this.dialog
-      .openComponent<{ name: string; hostname: string } | null>(
+      .openComponent<string | null>(
         new PolymorpheusComponent(ServerNameDialog, this.injector),
         {
           label: 'Server Name',
           size: 's',
-          data: { initialName: server.name },
+          data: { hostname: server.hostname },
         },
       )
-      .pipe(
-        filter(
-          (result): result is { name: string; hostname: string } =>
-            result !== null,
-        ),
-      )
-      .subscribe(result => {
+      .pipe(filter((hostname): hostname is string => hostname !== null))
+      .subscribe(hostname => {
         if (this.config.accessType === 'mdns') {
-          this.confirmNameChange(result)
+          this.confirmNameChange(hostname)
         } else {
-          this.saveName(result)
+          this.saveName(hostname)
         }
       })
   }
 
-  private confirmNameChange(result: { name: string; hostname: string }) {
+  private confirmNameChange(hostname: string) {
     this.dialog
       .openConfirm({
         label: 'Warning',
@@ -392,15 +384,12 @@ export default class SystemGeneralComponent {
         },
       })
       .pipe(filter(Boolean))
-      .subscribe(() => this.saveName(result, true))
+      .subscribe(() => this.saveName(hostname, true))
   }
 
-  private async saveName(
-    { name, hostname }: { name: string; hostname: string },
-    wasLocal = false,
-  ) {
+  private async saveName(hostname: string, wasLocal = false) {
     const success = await this.tasks.run(
-      async () => await this.api.setHostname({ name, hostname }),
+      async () => await this.api.setHostname({ hostname }),
       'Saving',
     )
 

@@ -70,8 +70,7 @@ async fn inner_main(
     };
 
     let (rpc_ctx, shutdown) = async {
-        crate::hostname::sync_hostname(&rpc_ctx.account.peek(|a| a.hostname.hostname.clone()))
-            .await?;
+        crate::hostname::sync_hostname(&rpc_ctx.account.peek(|a| a.hostname.clone())).await?;
 
         let mut shutdown_recv = rpc_ctx.shutdown.subscribe();
 

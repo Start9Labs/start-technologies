@@ -22,7 +22,7 @@ After [installing StartOS](installing-startos.md), follow these steps to initial
 
 1. Set a strong master password. _Make it good. Write it down_. Resetting your password is non-trivial, but your data will be preserved.
 
-1. Set your [server name](server-name.md). Your server's [mDNS address](mdns.md) is derived from this name.
+1. Set your [server name](server-name.md). This is your server's [mDNS address](mdns.md) without the `.local` on the end.
 
 1. Once initialization completes, open your server's permanent local address, then follow the instructions for [Trusting your Root CA](./trust-ca.md) to establish a secure connection with your server.
 

@@ -33,7 +33,7 @@ use crate::disk::mount::filesystem::ReadWrite;
 use crate::disk::mount::filesystem::cifs::Cifs;
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::disk::util::{DiskInfo, StartOsRecoveryInfo, pvscan, recovery_info};
-use crate::hostname::ServerHostnameInfo;
+use crate::hostname::ServerHostname;
 use crate::init::{InitPhases, InitResult, init};
 use crate::net::ssl::root_ca_start_time;
 use crate::prelude::*;
@@ -179,7 +179,7 @@ async fn setup_init(
     ctx: &SetupContext,
     password: Option<String>,
     kiosk: bool,
-    hostname: Option<ServerHostnameInfo>,
+    hostname: Option<ServerHostname>,
     init_phases: InitPhases,
 ) -> Result<(AccountInfo, InitResult), Error> {
     let init_result = init(&ctx.webserver, &ctx.config.peek(|c| c.clone()), init_phases).await?;
@@ -335,7 +335,7 @@ pub async fn attach(
 
         Ok((
             SetupResult {
-                hostname: account.hostname.hostname,
+                hostname: account.hostname,
                 root_ca: Pem(account.root_ca_cert),
                 needs_restart: setup_ctx.install_rootfs.peek(|a| a.is_some()),
             },
@@ -507,7 +507,6 @@ pub struct SetupExecuteParams {
     password: Option<EncryptedWire>,
     recovery_source: Option<RecoverySource<EncryptedWire>>,
     kiosk: bool,
-    name: Option<InternedString>,
     hostname: Option<InternedString>,
 }
 
@@ -527,10 +526,7 @@ pub struct SetupExecuteCliParams {
     /// Enable kiosk mode
     #[arg(long)]
     kiosk: bool,
-    /// Friendly server name
-    #[arg(long)]
-    name: Option<InternedString>,
-    /// Hostname (LAN advertised) — generated if unset; changeable later
+    /// The server's `.local` hostname — defaults to a generated one
     #[arg(long)]
     hostname: Option<InternedString>,
 }
@@ -691,7 +687,6 @@ async fn cli_execute(
             SetupExecuteCliParams {
                 guid,
                 kiosk,
-                name,
                 hostname,
             },
         ..
@@ -707,7 +702,6 @@ async fn cli_execute(
                 "guid": guid,
                 "password": password,
                 "kiosk": kiosk,
-                "name": name,
                 "hostname": hostname,
             }),
         )
@@ -723,7 +717,6 @@ pub async fn execute(
         password,
         recovery_source,
         kiosk,
-        name,
         hostname,
     }: SetupExecuteParams,
 ) -> Result<SetupProgress, Error> {
@@ -756,7 +749,7 @@ pub async fn execute(
         None => None,
     };
 
-    let hostname = ServerHostnameInfo::new_opt(name, hostname)?;
+    let hostname = ServerHostname::new_opt(hostname)?;
 
     let setup_ctx = ctx.clone();
     ctx.run_setup(move || execute_inner(setup_ctx, guid, password, recovery, kiosk, hostname))?;
@@ -848,7 +841,7 @@ pub async fn execute_inner(
     password: Option<String>,
     recovery_source: Option<RecoverySource<String>>,
     kiosk: bool,
-    hostname: Option<ServerHostnameInfo>,
+    hostname: Option<ServerHostname>,
 ) -> Result<(SetupResult, RpcContext), Error> {
     let progress = &ctx.progress;
 
@@ -953,7 +946,7 @@ async fn fresh_setup(
     guid: InternedString,
     password: &str,
     kiosk: bool,
-    hostname: Option<ServerHostnameInfo>,
+    hostname: Option<ServerHostname>,
     SetupExecuteProgress {
         init_phases,
         rpc_ctx_phases,
@@ -997,7 +990,7 @@ async fn fresh_setup(
 
     Ok((
         SetupResult {
-            hostname: account.hostname.hostname,
+            hostname: account.hostname,
             root_ca: Pem(account.root_ca_cert),
             needs_restart: ctx.install_rootfs.peek(|a| a.is_some()),
         },
@@ -1014,7 +1007,7 @@ async fn recover(
     server_id: String,
     recovery_password: String,
     kiosk: bool,
-    hostname: Option<ServerHostnameInfo>,
+    hostname: Option<ServerHostname>,
     progress: SetupExecuteProgress,
 ) -> Result<(SetupResult, RpcContext), Error> {
     let recovery_source = TmpMountGuard::mount(&recovery_source, ReadWrite).await?;
@@ -1039,7 +1032,7 @@ async fn migrate(
     old_guid: &str,
     password: Option<String>,
     kiosk: bool,
-    hostname: Option<ServerHostnameInfo>,
+    hostname: Option<ServerHostname>,
     SetupExecuteProgress {
         init_phases,
         restore_phase,
@@ -1130,7 +1123,7 @@ async fn migrate(
 
     Ok((
         SetupResult {
-            hostname: account.hostname.hostname,
+            hostname: account.hostname,
             root_ca: Pem(account.root_ca_cert),
             needs_restart: ctx.install_rootfs.peek(|a| a.is_some()),
         },

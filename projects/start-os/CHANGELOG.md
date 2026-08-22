@@ -44,6 +44,21 @@ file tracks notable changes since the move to the monorepo.
 
 ### Changed
 
+- **Your server's name is now its `.local` address, without the `.local` on the
+  end.** A server previously carried two names: a display label shown in the
+  browser tab, and the `.local` address derived from it by lowercasing and
+  hyphenating — so the tab could say "My Cool Server" while every address you
+  actually typed said `my-cool-server.local`. There is now one name. The
+  `Server Name` field under `System > General Settings` edits the `.local`
+  address directly, and accepts lowercase letters, numbers and hyphens, up to 63
+  characters. On an existing server the address is unchanged; the browser tab
+  now shows that address instead of the old display label. **Two `start-cli`
+  commands change with it**, so an unattended-install or provisioning script
+  needs updating: `setup execute` no longer takes `--name`, and
+  `server set-hostname` now takes one required hostname where it used to take an
+  optional name and hostname. Setting it moves the `.local` address, where
+  passing only a name used to change the label alone.
+
 - **The NVIDIA images now use NVIDIA's open kernel modules, which support GeForce
   RTX 20-series, Quadro RTX and newer.** This is what makes current cards work at
   all — an RTX 50-series, an RTX PRO 6000 or an NVIDIA GB10 can only be driven by
@@ -63,6 +78,10 @@ file tracks notable changes since the move to the monorepo.
   away.** The notification naming what went wrong was held back until StartOS had
   finished cleaning up after the attempt, which can take several minutes. It now
   arrives as soon as the operation fails, while that cleanup is still running.
+- **Restoring from a backup, or transferring to a new drive, keeps your server's
+  name.** Both flows renamed the server to `start9`, so the restored server
+  answered at `start9.local` rather than the address it had before — and two
+  servers restored on the same network collided on that one name.
 
 - **Apps that hold a connection open — desktop sync clients, API pollers — stop
   dropping in and out.** Nextcloud Desktop and clients like it showed a

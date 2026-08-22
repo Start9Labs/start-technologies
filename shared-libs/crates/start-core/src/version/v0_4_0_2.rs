@@ -29,6 +29,7 @@ impl VersionT for Version {
     #[instrument(skip_all)]
     fn up(self, db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
         rehome_admin_ui_port(db);
+        drop_server_name(db);
         for_each_alpn(db, |alpn| {
             if alpn.as_array().is_some() {
                 return;
@@ -43,6 +44,7 @@ impl VersionT for Version {
         Ok(Value::Null)
     }
     fn down(self, db: &mut Value) -> Result<(), Error> {
+        restore_server_name(db);
         // Every earlier version wants 80 here and keeps the port it finds.
         for_each_alpn(db, |alpn| {
             if let Some(list) = alpn.as_array() {
@@ -95,6 +97,52 @@ fn for_each_alpn(db: &mut Value, mut f: impl FnMut(&mut Value)) {
             }
         }
     }
+}
+
+fn drop_server_name(db: &mut Value) {
+    if let Some(server_info) = db
+        .get_mut("public")
+        .and_then(|p| p.get_mut("serverInfo"))
+        .and_then(Value::as_object_mut)
+    {
+        server_info.remove(&InternedString::intern("name"));
+    }
+}
+
+fn restore_server_name(db: &mut Value) {
+    let Some(server_info) = db
+        .get_mut("public")
+        .and_then(|p| p.get_mut("serverInfo"))
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    if server_info.contains_key(&InternedString::intern("name")) {
+        return;
+    }
+    let name = server_info
+        .get("hostname")
+        .and_then(Value::as_str)
+        .map_or_else(|| "StartOS".to_owned(), title_case);
+    server_info.insert(InternedString::intern("name"), Value::from(name));
+}
+
+fn title_case(hostname: &str) -> String {
+    let mut capitalize = true;
+    hostname
+        .chars()
+        .map(|c| {
+            if c == '-' {
+                capitalize = true;
+                ' '
+            } else if capitalize {
+                capitalize = false;
+                c.to_ascii_uppercase()
+            } else {
+                c
+            }
+        })
+        .collect()
 }
 
 /// Give the StartOS UI back its well-known plaintext port.
@@ -278,4 +326,25 @@ mod test {
         rehome_admin_ui_port(&mut db);
         assert_eq!(db, before);
     }
+    #[test]
+    fn drops_and_restores_the_display_name() {
+        let mut db = json!({ "public": { "serverInfo": {
+            "name": "My Cool Server", "hostname": "my-cool-server"
+        } } });
+        drop_server_name(&mut db);
+        assert_eq!(db["public"]["serverInfo"].get("name"), None);
+        restore_server_name(&mut db);
+        assert_eq!(db["public"]["serverInfo"]["name"], json!("My Cool Server"));
+    }
+
+    #[test]
+    fn restore_preserves_an_existing_display_name() {
+        let mut db = json!({ "public": { "serverInfo": {
+            "name": "Chosen Name", "hostname": "different-hostname"
+        } } });
+        let before = db.clone();
+        restore_server_name(&mut db);
+        assert_eq!(db, before);
+    }
+
 }

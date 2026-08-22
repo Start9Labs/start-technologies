@@ -18,7 +18,7 @@ use crate::db::model::Database;
 use crate::disk::mount::backup::BackupMountGuard;
 use crate::disk::mount::filesystem::ReadWrite;
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
-use crate::hostname::ServerHostnameInfo;
+use crate::hostname::ServerHostname;
 use crate::init::init;
 use crate::prelude::*;
 use crate::progress::ProgressUnits;
@@ -99,7 +99,7 @@ pub async fn recover_full_server(
     server_id: &str,
     recovery_password: &str,
     kiosk: bool,
-    hostname: Option<ServerHostnameInfo>,
+    hostname: Option<ServerHostname>,
     SetupExecuteProgress {
         init_phases,
         restore_phase,
@@ -198,7 +198,7 @@ pub async fn recover_full_server(
 
     Ok((
         SetupResult {
-            hostname: os_backup.account.hostname.hostname,
+            hostname: os_backup.account.hostname,
             root_ca: Pem(os_backup.account.root_ca_cert),
             needs_restart: ctx.install_rootfs.peek(|a| a.is_some()),
         },

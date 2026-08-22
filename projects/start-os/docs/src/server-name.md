@@ -1,8 +1,8 @@
 # Server Name
 
-Your server name is a custom label you choose during [initial setup](initial-setup.md). It is displayed in the browser tab title and is used to derive your server's [mDNS address](mdns.md).
+Your server name is its [mDNS address](mdns.md) without the `.local` on the end. A server named `my-cool-server` answers to `my-cool-server.local` on your local network, and shows `my-cool-server` in your browser tab. It is also the name the server calls itself over SSH and in its own logs.
 
-You can change your server name at any time under `System > General Settings > Server Name`. After saving a new name, your mDNS address will update accordingly.
+You choose the name during [initial setup](initial-setup.md), and you can change it at any time under `System > General Settings > Server Name`. A name may contain lowercase letters, numbers, and hyphens, and may be up to 63 characters long — the rules a DNS label follows. It cannot start or end with a hyphen.
 
 > [!WARNING]
 > If you are currently connected via your mDNS address, changing the server name will require you to switch to the new address. You will be prompted with the new address after saving.

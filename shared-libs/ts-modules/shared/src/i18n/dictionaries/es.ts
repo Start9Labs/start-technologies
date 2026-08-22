@@ -808,4 +808,7 @@ export default {
   915: 'Demasiado largo para un código QR',
   916: 'Tu autoridad certificadora demuestra que controlas este dominio conectándose a él en el puerto 443, sea cual sea el puerto que use la propia dirección.',
   917: 'Por IPv6 no hay nada que redirigir: en su lugar, el firewall de tu puerta de enlace debe permitir las conexiones entrantes a este puerto.',
+  918: 'Debe tener 63 caracteres o menos',
+  919: 'Solo letras minúsculas, números y guiones',
+  920: 'No puede empezar ni terminar con un guion',
 } satisfies i18n

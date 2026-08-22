@@ -104,9 +104,9 @@ Display hardware and device information.
 
 Tear down and rebuild all service containers.
 
-### `start-cli server set-hostname [NAME] [HOSTNAME]`
+### `start-cli server set-hostname <HOSTNAME>`
 
-Set the server's name and hostname.
+Set the server's name, which is its `.local` address without the `.local` on the end.
 
 ### `start-cli server set-smtp`
 

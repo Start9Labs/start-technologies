@@ -87,9 +87,8 @@ impl UiContext for RpcContext {
                 get(move || {
                     let ctx = ctx.clone();
                     async move {
-                        ctx.account.peek(|account| {
-                            cert_send(&account.root_ca_cert, &account.hostname.hostname)
-                        })
+                        ctx.account
+                            .peek(|account| cert_send(&account.root_ca_cert, &account.hostname))
                     }
                 })
             })
@@ -99,7 +98,7 @@ impl UiContext for RpcContext {
                     let ctx = self.clone();
                     async move {
                         ctx.account.peek(|account| {
-                            mobileconfig_send(&account.root_ca_cert, &account.hostname.hostname)
+                            mobileconfig_send(&account.root_ca_cert, &account.hostname)
                         })
                     }
                 }),
