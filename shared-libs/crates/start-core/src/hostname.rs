@@ -31,8 +31,12 @@ impl AsRef<str> for ServerHostname {
 /// Name at 64 characters.
 const MAX_LEN: usize = 50;
 
+/// The longest hostname `sethostname` accepts, `HOST_NAME_MAX`.
+const SYSTEM_MAX_LEN: usize = 64;
+
 impl ServerHostname {
-    /// Checks the character set, so a hostname stored under looser rules still loads.
+    /// Checks that a hostname is non-empty and in the character set, so one stored
+    /// under looser rules still loads.
     fn validate(&self) -> Result<(), Error> {
         if self.0.is_empty() {
             return Err(Error::new(
@@ -99,21 +103,24 @@ impl ServerHostname {
     }
 }
 
-/// Rewrites a hostname the system cannot carry into the nearest one it can.
+/// Returns a hostname the system can carry, rewriting one it cannot.
 ///
-/// The kernel refuses a hostname longer than it allows and `sync_hostname` runs on
-/// every boot, so a stored hostname that fails these rules leaves the server in
-/// diagnostic mode, where nothing can change it.
+/// `set_hostname` runs on every boot and fails on a hostname outside the character
+/// set or longer than `SYSTEM_MAX_LEN`, leaving the server in diagnostic mode where
+/// nothing can rename it. A hostname the system carries is returned untouched, even
+/// where `new_from_input` would now turn it down.
 pub fn repair_hostname(stored: &str) -> ServerHostname {
-    let mut repaired: String = stored
+    let stored = ServerHostname(InternedString::intern(stored));
+    if stored.validate().is_ok() && stored.0.len() <= SYSTEM_MAX_LEN {
+        return stored;
+    }
+    let usable: String = stored
+        .0
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
         .map(|c| c.to_ascii_lowercase())
-        .take(MAX_LEN)
         .collect();
-    while repaired.starts_with('-') {
-        repaired.remove(0);
-    }
+    let mut repaired: String = usable.trim_matches('-').chars().take(MAX_LEN).collect();
     while repaired.ends_with('-') {
         repaired.pop();
     }
@@ -286,17 +293,35 @@ mod test {
         validate_input(&generate_hostname()).unwrap();
     }
 
+    // Only a hostname the boot path rejects is rewritten. `new_from_input` turns down
+    // more than that, and a server already answering to such a name keeps it.
     #[test]
-    fn repair_keeps_as_much_of_the_stored_hostname_as_it_can() {
+    fn repair_leaves_a_hostname_the_system_carries_alone() {
         assert_eq!(&*repair_hostname("my-cool-server"), "my-cool-server");
+        assert_eq!(&*repair_hostname("-my-server-"), "-my-server-");
+        let long_but_usable = "a".repeat(SYSTEM_MAX_LEN);
+        assert_eq!(repair_hostname(&long_but_usable).as_ref(), long_but_usable);
+    }
+
+    #[test]
+    fn repair_keeps_as_much_of_an_unusable_hostname_as_it_can() {
         assert_eq!(&*repair_hostname("My_Cool Server"), "mycoolserver");
-        assert_eq!(&*repair_hostname("-my-server-"), "my-server");
-        assert_eq!(repair_hostname(&"a".repeat(70)).chars().count(), MAX_LEN);
+        assert_eq!(
+            repair_hostname(&"a".repeat(SYSTEM_MAX_LEN + 1))
+                .chars()
+                .count(),
+            MAX_LEN
+        );
+        // The hyphens go before the budget is spent, not after.
+        assert_eq!(
+            &*repair_hostname(&("-".repeat(MAX_LEN) + "my_server")),
+            "myserver"
+        );
     }
 
     #[test]
     fn repair_generates_a_hostname_when_nothing_usable_remains() {
-        validate_input(&repair_hostname("---")).unwrap();
+        validate_input(&repair_hostname(&"_".repeat(70))).unwrap();
         validate_input(&repair_hostname("")).unwrap();
     }
 }

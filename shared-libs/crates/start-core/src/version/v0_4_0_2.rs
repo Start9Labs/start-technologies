@@ -2,7 +2,7 @@ use exver::VersionRange;
 
 use super::v0_3_5::V0_3_0_COMPAT;
 use super::{VersionT, v0_4_0_1};
-use crate::hostname::{ServerHostname, repair_hostname};
+use crate::hostname::repair_hostname;
 use crate::prelude::*;
 
 lazy_static::lazy_static! {
@@ -109,38 +109,42 @@ fn for_each_alpn(db: &mut Value, mut f: impl FnMut(&mut Value)) {
 fn repair_unusable_hostname(db: &mut Value) {
     let Some(server_info) = db
         .get_mut("public")
+fn server_info_mut(db: &mut Value) -> Option<&mut imbl_value::InOMap<InternedString, Value>> {
+    db.get_mut("public")
         .and_then(|p| p.get_mut("serverInfo"))
         .and_then(|s| s.as_object_mut())
-    else {
+}
+
+/// Bring a hostname the system cannot carry back into range.
+///
+/// A hostname outside the character set, or longer than the kernel allows, fails
+/// `sync_hostname`, which runs on every boot, so such a server comes up in
+/// diagnostic mode where nothing can rename it. Diagnostic mode can still take an
+/// update, so this is where it heals.
+fn repair_unusable_hostname(db: &mut Value) {
+    let Some(server_info) = server_info_mut(db) else {
         return;
     };
     let Some(stored) = server_info.get("hostname").and_then(|h| h.as_str()) else {
         return;
     };
-    if ServerHostname::new_from_input(InternedString::intern(stored)).is_ok() {
+    let repaired = repair_hostname(stored);
+    if repaired.as_ref() == stored {
         return;
     }
-    let repaired = repair_hostname(stored).to_string();
+    let repaired = repaired.to_string();
     server_info.insert(InternedString::intern("hostname"), Value::from(repaired));
 }
 
 /// The hostname is the server's only name, so `serverInfo.name` is removed.
 fn drop_server_name(db: &mut Value) {
-    if let Some(server_info) = db
-        .get_mut("public")
-        .and_then(|p| p.get_mut("serverInfo"))
-        .and_then(Value::as_object_mut)
-    {
+    if let Some(server_info) = server_info_mut(db) {
         server_info.remove(&InternedString::intern("name"));
     }
 }
 
 fn restore_server_name(db: &mut Value) {
-    let Some(server_info) = db
-        .get_mut("public")
-        .and_then(|p| p.get_mut("serverInfo"))
-        .and_then(Value::as_object_mut)
-    else {
+    let Some(server_info) = server_info_mut(db) else {
         return;
     };
     if server_info.contains_key(&InternedString::intern("name")) {
@@ -389,6 +393,16 @@ mod test {
             db["public"]["serverInfo"]["hostname"],
             json!("a".repeat(50))
         );
+    }
+
+    // A name longer than the field now accepts still boots, and the server already
+    // answers to it, so the migration leaves it alone.
+    #[test]
+    fn leaves_a_long_but_working_hostname_alone() {
+        let mut db = json!({ "public": { "serverInfo": { "hostname": "a".repeat(55) } } });
+        let before = db.clone();
+        repair_unusable_hostname(&mut db);
+        assert_eq!(db, before);
     }
 
     #[test]

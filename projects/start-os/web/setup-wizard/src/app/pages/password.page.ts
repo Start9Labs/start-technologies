@@ -130,11 +130,11 @@ import { StateService } from '../services/state.service'
       const i18n = inject(i18nPipe)
 
       return {
+        ...hostnameValidationErrors(),
         required: i18n.transform('Required'),
         minlength: i18n.transform('Must be 12 characters or greater'),
         maxlength: i18n.transform('Must be 64 character or less'),
         match: i18n.transform('Passwords do not match'),
-        ...hostnameValidationErrors(),
       }
     }),
   ],

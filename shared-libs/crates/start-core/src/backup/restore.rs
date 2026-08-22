@@ -18,7 +18,7 @@ use crate::db::model::Database;
 use crate::disk::mount::backup::BackupMountGuard;
 use crate::disk::mount::filesystem::ReadWrite;
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
-use crate::hostname::ServerHostname;
+use crate::hostname::{ServerHostname, repair_hostname};
 use crate::init::init;
 use crate::prelude::*;
 use crate::progress::ProgressUnits;
@@ -130,6 +130,9 @@ pub async fn recover_full_server(
     if let Some(h) = hostname {
         os_backup.account.hostname = h;
     }
+    // `Database::init` stamps the current version, so this DB never meets a
+    // migration that would heal a hostname the backup carried.
+    os_backup.account.hostname = repair_hostname(os_backup.account.hostname.as_ref());
 
     sync_kiosk(kiosk).await?;
 

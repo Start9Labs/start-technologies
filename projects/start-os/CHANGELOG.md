@@ -52,8 +52,8 @@ file tracks notable changes since the move to the monorepo.
   `Server Name` field under `System > General Settings` edits the `.local`
   address directly, and accepts lowercase letters, numbers and hyphens — up to 50
   of them, not starting or ending with a hyphen. On an existing server the
-  address is unchanged; the browser tab now shows that address instead of the
-  old display label. **Two `start-cli`
+  address is unchanged; the browser tab now shows that address instead of the old
+  display label. **Two `start-cli`
   commands change with it**, so an unattended-install or provisioning script
   needs updating: `setup execute` no longer takes `--name`, and
   `server set-hostname` now takes one required hostname where it used to take an
