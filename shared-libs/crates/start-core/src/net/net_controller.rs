@@ -1612,7 +1612,7 @@ mod tests {
         HostnameInfo {
             ssl: true,
             public: false,
-            hostname: InternedString::intern("helix-master.local"),
+            hostname: InternedString::intern("start-9.local"),
             port: Some(port),
             metadata: HostnameMetadata::Mdns {
                 gateways: gateways.into_iter().map(gw).collect(),
