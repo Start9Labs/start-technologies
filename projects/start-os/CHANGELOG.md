@@ -222,7 +222,7 @@ file tracks notable changes since the move to the monorepo.
   direct connections to its IP address.
 
 - **Switching an IP address off on an interface's gateway table stops that
-  address serving the interface over HTTPS.** The switch took effect for the
+  address serving the interface over SSL.** The switch took effect for the
   address's own row but not for the connection itself: any other address on the
   same gateway put it back, including the two your server keeps for itself — its
   `.local` name and its link-local IPv6 address — so a switched-off address went
@@ -232,10 +232,11 @@ file tracks notable changes since the move to the monorepo.
   has an enabled public IPv4 address stays reachable from the local network —
   your router presents traffic from the Internet under the same local address,
   so your server cannot tell the two apart; switch the public IPv4 address off
-  as well to take that gateway's IPv4 addresses down. And an interface your
-  server does not serve over HTTPS — plain HTTP, or a raw-TCP endpoint such as a
-  P2P or ZMQ port — is reached without naming an address, so switching one of
-  its addresses off does not stop that interface answering there.
+  as well to take that gateway's IPv4 addresses down. And an address your server
+  serves without SSL — a plain-HTTP address, or one on a raw-TCP interface such
+  as a P2P or ZMQ endpoint — goes on answering: your server forwards a plaintext
+  port for a whole gateway at once, so every address on that gateway shares one
+  rule.
 
 - **Image upgrades verify their checksum again.** `upgrade` compared the image's
   blake3 hash only when it was given a second positional argument, which no
