@@ -62,6 +62,11 @@ pub trait UiContext: Context + AsRef<RpcContinuations> + Clone + Sized {
     fn extend_router(self, router: Router) -> Router {
         router
     }
+    /// Wrap the assembled router, so a layer added here applies to every route
+    /// and to the fallback.
+    fn wrap_router(self, router: Router) -> Router {
+        router
+    }
 }
 
 pub static UI_CELL: OnceLock<Dir<'static>> = OnceLock::new();
@@ -104,6 +109,9 @@ impl UiContext for RpcContext {
                     }
                 }),
             )
+    }
+    fn wrap_router(self, router: Router) -> Router {
+        crate::net::domain_redirect::layer(self, router)
     }
 }
 
@@ -226,14 +234,22 @@ async fn add_security_headers(mut res: Response) -> Response {
 }
 
 pub fn ui_router<C: UiContext>(ctx: C) -> Router {
-    ctx.clone()
-        .extend_router(rpc_router(
-            ctx.clone(),
-            C::middleware(Server::new(move || ready(Ok(ctx.clone())), C::api())),
-        ))
+    let server = C::middleware(Server::new(
+        {
+            let ctx = ctx.clone();
+            move || ready(Ok(ctx.clone()))
+        },
+        C::api(),
+    ));
+    let router = ctx
+        .clone()
+        .extend_router(rpc_router(ctx.clone(), server))
         .fallback(any(|request: Request| async move {
             serve_ui::<C>(request).unwrap_or_else(server_error)
-        }))
+        }));
+    // The security headers stay outermost, so they reach a response a wrapping
+    // layer writes itself.
+    ctx.wrap_router(router)
         .layer(axum::middleware::map_response(add_security_headers))
 }
 

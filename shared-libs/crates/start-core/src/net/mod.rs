@@ -3,6 +3,7 @@ use rpc_toolkit::{Context, HandlerExt, ParentHandler};
 pub mod acme;
 pub mod dns;
 pub mod dns_update;
+pub mod domain_redirect;
 pub mod forward;
 pub mod gateway;
 pub mod host;
