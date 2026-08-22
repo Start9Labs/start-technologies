@@ -2778,6 +2778,23 @@ mod upstream_alpn_tests {
         );
     }
 
+    /// A client that shares no protocol with the pin is refused, as it is on a
+    /// binding with no TLS leg. Serving it without a protocol instead would
+    /// make the pin advisory.
+    #[tokio::test]
+    async fn a_client_sharing_no_protocol_with_the_pin_is_refused() {
+        let h2 = AlpnInfo::Specified(vec![MaybeUtf8String(b"h2".to_vec())]);
+        try_negotiate(
+            rewrap(),
+            Some(h2),
+            &[],
+            spawn_backend(&["h2", "http/1.1"]).await,
+            &["http/1.1"],
+        )
+        .await
+        .expect_err("a client that cannot meet the pin is not served");
+    }
+
     /// A client that names no protocol leaves the container named none either,
     /// so neither end negotiates one. Putting the pin to the container anyway
     /// would frame it `h2` while the client stayed on HTTP/1.1.
