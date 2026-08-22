@@ -269,9 +269,9 @@ file tracks notable changes since the move to the monorepo.
   ports, so the service reports the conflict instead of serving it.
 
 - **An interface whose service encrypts its own end now loads when the binding
-  pins the protocols it offers.** Setting `alpn` changed how StartOS dialled the service
-  as well as which protocols it put forward, so the service received plaintext
-  on a port expecting TLS. The setting now narrows only the protocols on offer —
+  pins the protocols it offers.** Setting `alpn` changed how StartOS dialled
+  the service as well as which protocols it put forward, so the service
+  received plaintext on a port expecting TLS. The setting now narrows only the protocols on offer —
   the service chooses among the ones the client also asked for, and both ends of
   the connection carry the one it chose.
 

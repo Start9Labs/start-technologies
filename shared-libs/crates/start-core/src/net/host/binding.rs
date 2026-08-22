@@ -455,7 +455,7 @@ impl BindOptions {
 
     /// The container serves its own TLS behind a listener of ours that
     /// terminates the client's, so StartOS dials the container over TLS and
-    /// rewraps. Carries the options that leg is dialled with.
+    /// rewraps. Returns the binding's `add_ssl` options.
     pub fn rewrap(&self) -> Option<&AddSslOptions> {
         self.add_ssl
             .as_ref()
@@ -509,9 +509,10 @@ pub struct AddSslOptions {
     #[serde(default)]
     pub add_x_forwarded_headers: bool,
     /// Narrows the application protocols this binding puts forward. Where the
-    /// container serves its own TLS it is offered these, and the client is
-    /// offered whatever it picks; otherwise the client is offered these
-    /// directly. `None` and `'reflect'` both put the client's own list forward.
+    /// container serves its own TLS it is offered the ones the client also
+    /// asked for, and the client is offered whatever it picks; otherwise the
+    /// client is offered these directly. Unset and `reflect` both put the
+    /// client's own list forward.
     pub alpn: Option<AlpnInfo>,
     /// Certificate validation for the OS→container TLS leg when rewrapping.
     /// `None` (the default) validates against the StartOS root CA.

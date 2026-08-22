@@ -1242,7 +1242,9 @@ where
             .cloned()
             .collect();
         // Offering the client a list it shares nothing with is how rustls turns
-        // it away, so this hands back the socket it never dialled.
+        // it away, which it only does when both lists name something. So an
+        // empty one goes on to dial rather than handing back an unwrapped
+        // socket the client would be spliced onto.
         if self.connect_ssl.is_some()
             && !offered.is_empty()
             && !client_alpn.is_empty()
@@ -2508,7 +2510,7 @@ mod conn_cap_tests {
 /// Which protocols `preprocess` offers the container and the client. A dialled
 /// container chooses out of the protocols the binding and the client both name,
 /// and the client is offered its choice; without a TLS leg the client is
-/// offered the binding's directly.
+/// offered the binding's directly, and `alpn` tells two targets apart.
 #[cfg(test)]
 mod upstream_alpn_tests {
     use std::net::Ipv4Addr;
@@ -2566,15 +2568,16 @@ mod upstream_alpn_tests {
         let acceptor = TlsAcceptor::from(Arc::new(config_advertising(alpn)));
         let (tx, rx) = tokio::sync::oneshot::channel();
         tokio::spawn(async move {
-            let tx = Arc::new(std::sync::Mutex::new(Some(tx)));
+            let mut tx = Some(tx);
             while let Ok((tcp, _)) = listener.accept().await {
                 let acceptor = acceptor.clone();
-                let tx = tx.clone();
+                // Moved into the task, so a handshake that fails drops it and
+                // the test reads a closed channel rather than waiting out its
+                // timeout.
+                let report = tx.take();
                 tokio::spawn(async move {
                     if let Ok(tls) = acceptor.accept(tcp).await {
-                        // Taken here rather than on accept, so a failed
-                        // handshake leaves a later connection able to report.
-                        if let Some(report) = tx.lock().unwrap().take() {
+                        if let Some(report) = report {
                             let _ =
                                 report.send(tls.get_ref().1.alpn_protocol().map(|p| p.to_vec()));
                         }
@@ -2903,10 +2906,9 @@ mod upstream_alpn_tests {
     }
 
     /// A binding with no TLS leg refuses a client that shares no protocol with
-    /// the pin, and rustls is what
-    /// turns it away: the pin is the list the client is offered. Offering only
-    /// what the two share would leave rustls nothing to alert on, and the
-    /// client would be served with no protocol at all.
+    /// the pin, and rustls is what turns it away: the pin is the list the
+    /// client is offered. Offering only what the two share would leave rustls
+    /// nothing to alert on, and the client would be served with no protocol.
     #[tokio::test]
     async fn a_plaintext_binding_refuses_a_client_that_cannot_meet_the_pin() {
         let h2 = AlpnInfo::Specified(vec![MaybeUtf8String(b"h2".to_vec())]);
