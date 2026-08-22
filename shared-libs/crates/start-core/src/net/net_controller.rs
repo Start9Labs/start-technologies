@@ -297,13 +297,6 @@ impl NetController {
     }
 }
 
-/// Whether our listener dials the container over TLS, which it does when the
-/// container serves its own. `add_ssl.alpn` names protocols rather than a
-/// transport, so it has no say here.
-fn dials_container_tls(options: &BindOptions) -> bool {
-    options.add_ssl.is_some() && options.secure.as_ref().map_or(false, |s| s.ssl)
-}
-
 /// Public bare-IPv4 gateways for a binding's SSL `*` vhost: only SSL-port
 /// addresses count — a bare IP enabled on the *plain* port must not mark the
 /// SSL vhost public (that would request a pinhole for a port the operator
@@ -413,11 +406,10 @@ impl NetServiceData {
                 }
             }
 
-            let connect_ssl: Option<Arc<TlsClientConfig>> =
-                bind.options.add_ssl.as_ref().and_then(|ssl| {
-                    dials_container_tls(&bind.options)
-                        .then(|| ctrl.upstream_client_config(&ssl.upstream_cert_validation))
-                });
+            let connect_ssl: Option<Arc<TlsClientConfig>> = bind
+                .options
+                .rewrap()
+                .map(|ssl| ctrl.upstream_client_config(&ssl.upstream_cert_validation));
             let alpn = bind
                 .options
                 .add_ssl
@@ -1526,24 +1518,28 @@ mod tests {
         }
     }
 
-    /// `alpn` names protocols, not a transport. Letting it decide the dial is
-    /// what sent plaintext to a container serving its own TLS.
+    /// `alpn` names protocols, not a transport, so it has no say in whether the
+    /// container is dialled over TLS.
     #[test]
     fn alpn_does_not_decide_whether_the_container_is_dialled_over_tls() {
         let pinned = || Some(AlpnInfo::Specified(vec![MaybeUtf8String(b"h2".to_vec())]));
         for alpn in [None, Some(AlpnInfo::Reflect), pinned()] {
             assert!(
-                dials_container_tls(&bind_options(true, Some(true), alpn.clone())),
+                bind_options(true, Some(true), alpn.clone())
+                    .rewrap()
+                    .is_some(),
                 "a container serving its own TLS is dialled over TLS, whatever `alpn` says",
             );
             for secure in [None, Some(false)] {
                 assert!(
-                    !dials_container_tls(&bind_options(true, secure, alpn.clone())),
+                    bind_options(true, secure, alpn.clone()).rewrap().is_none(),
                     "a container that does not serve TLS is dialled plainly",
                 );
             }
             assert!(
-                !dials_container_tls(&bind_options(false, Some(true), alpn.clone())),
+                bind_options(false, Some(true), alpn.clone())
+                    .rewrap()
+                    .is_none(),
                 "a passthrough has no leg of ours to dial",
             );
         }

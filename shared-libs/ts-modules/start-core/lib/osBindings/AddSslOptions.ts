@@ -11,6 +11,12 @@ export type AddSslOptions = {
    * forwarding them upstream. Setting this implies HTTP-aware proxying.
    */
   addXForwardedHeaders: boolean
+  /**
+   * Narrows the application protocols this binding puts forward. Where the
+   * container serves its own TLS it is offered these, and the client is
+   * offered whatever it picks; otherwise the client is offered these
+   * directly. `None` and `'reflect'` both put the client's own list forward.
+   */
   alpn: AlpnInfo | null
   /**
    * Certificate validation for the OS→container TLS leg when rewrapping.

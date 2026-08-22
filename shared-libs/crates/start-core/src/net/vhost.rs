@@ -1228,8 +1228,6 @@ where
             .flatten()
             .map(|proto| proto.to_vec())
             .collect();
-        // The protocols this binding puts forward: whatever it pins, else the
-        // client's own list.
         let offered: Vec<Vec<u8>> = match &self.alpn {
             Some(AlpnInfo::Specified(protos)) => {
                 protos.iter().map(|proto| proto.0.clone()).collect()
@@ -1243,10 +1241,8 @@ where
             .filter(|proto| client_alpn.contains(proto))
             .cloned()
             .collect();
-        // The binding and the client share no protocol, so there is nothing to
-        // put to the container: offering the client the binding's list is how
-        // rustls turns it away. A binding that named nothing has nothing to
-        // turn anyone away with, so it goes on to dial.
+        // Offering the client a list it shares nothing with is how rustls turns
+        // it away, so this hands back the socket it never dialled.
         if self.connect_ssl.is_some()
             && !offered.is_empty()
             && !client_alpn.is_empty()
@@ -2512,8 +2508,7 @@ mod conn_cap_tests {
 /// Which protocols `preprocess` offers the container and the client. A dialled
 /// container chooses out of the protocols the binding and the client both name,
 /// and the client is offered its choice; without a TLS leg the client is
-/// offered the binding's directly. Also covers `alpn`'s part in a target's
-/// identity.
+/// offered the binding's directly.
 #[cfg(test)]
 mod upstream_alpn_tests {
     use std::net::Ipv4Addr;
@@ -2571,13 +2566,15 @@ mod upstream_alpn_tests {
         let acceptor = TlsAcceptor::from(Arc::new(config_advertising(alpn)));
         let (tx, rx) = tokio::sync::oneshot::channel();
         tokio::spawn(async move {
-            let mut tx = Some(tx);
+            let tx = Arc::new(std::sync::Mutex::new(Some(tx)));
             while let Ok((tcp, _)) = listener.accept().await {
                 let acceptor = acceptor.clone();
-                let report = tx.take();
+                let tx = tx.clone();
                 tokio::spawn(async move {
                     if let Ok(tls) = acceptor.accept(tcp).await {
-                        if let Some(report) = report {
+                        // Taken here rather than on accept, so a failed
+                        // handshake leaves a later connection able to report.
+                        if let Some(report) = tx.lock().unwrap().take() {
                             let _ =
                                 report.send(tls.get_ref().1.alpn_protocol().map(|p| p.to_vec()));
                         }
@@ -2766,8 +2763,9 @@ mod upstream_alpn_tests {
         );
     }
 
-    /// rustls selects by the server list's order, so a base config carrying a
-    /// protocol the client offered would outrank the backend's choice.
+    /// rustls selects by the server list's order, so a protocol left on the
+    /// base config would outrank the backend's choice if `preprocess` appended
+    /// to that list instead of assigning it.
     #[tokio::test]
     async fn a_protocol_on_the_base_config_does_not_outrank_the_backend() {
         assert_eq!(
@@ -2904,7 +2902,8 @@ mod upstream_alpn_tests {
         );
     }
 
-    /// A binding with no TLS leg refuses the same client, and rustls is what
+    /// A binding with no TLS leg refuses a client that shares no protocol with
+    /// the pin, and rustls is what
     /// turns it away: the pin is the list the client is offered. Offering only
     /// what the two share would leave rustls nothing to alert on, and the
     /// client would be served with no protocol at all.

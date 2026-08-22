@@ -268,8 +268,8 @@ file tracks notable changes since the move to the monorepo.
   settings excluded. StartOS now rejects the overlapping claim and names both
   ports, so the service reports the conflict instead of serving it.
 
-- **An interface whose service encrypts its own end now loads when it pins the
-  protocols it offers.** Setting `alpn` changed how StartOS dialled the service
+- **An interface whose service encrypts its own end now loads when the binding
+  pins the protocols it offers.** Setting `alpn` changed how StartOS dialled the service
   as well as which protocols it put forward, so the service received plaintext
   on a port expecting TLS. The setting now narrows only the protocols on offer —
   the service chooses among the ones the client also asked for, and both ends of
@@ -283,7 +283,9 @@ file tracks notable changes since the move to the monorepo.
   settled on HTTP/1.1, so StartOS wrote HTTP/1 requests onto a connection the
   service was reading as HTTP/2. StartOS now offers the client exactly the
   protocol the service chose, so both halves of the connection carry the same
-  one.
+  one. A service whose HTTP/2 listener does not answer extended CONNECT
+  (RFC 8441) should advertise only `http/1.1`, which keeps WebSocket clients on
+  HTTP/1.1 where a WebSocket is an ordinary upgrade.
 
 ### Security
 
