@@ -232,9 +232,10 @@ file tracks notable changes since the move to the monorepo.
   has an enabled public IPv4 address stays reachable from the local network —
   your router presents traffic from the Internet under the same local address,
   so your server cannot tell the two apart; switch the public IPv4 address off
-  as well to take that gateway's IPv4 addresses down. And an interface served
-  over plain HTTP is reached without naming an address, so switching one of its
-  addresses off does not stop that interface answering there.
+  as well to take that gateway's IPv4 addresses down. And an interface your
+  server does not serve over HTTPS — plain HTTP, or a raw-TCP endpoint such as a
+  P2P or ZMQ port — is reached without naming an address, so switching one of
+  its addresses off does not stop that interface answering there.
 
 - **Image upgrades verify their checksum again.** `upgrade` compared the image's
   blake3 hash only when it was given a second positional argument, which no

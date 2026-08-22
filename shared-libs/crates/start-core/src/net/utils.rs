@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::Path;
-use std::sync::LazyLock;
 use std::time::Duration;
 
 use async_stream::try_stream;
@@ -135,18 +134,6 @@ pub fn ipv6_is_link_local(addr: Ipv6Addr) -> bool {
 /// Unique-local address (`fc00::/7`) — the lxcbr0 bridge subnet lives here.
 pub fn ipv6_is_ula(addr: Ipv6Addr) -> bool {
     (addr.segments()[0] & 0xfe00) == 0xfc00
-}
-
-/// Whether `addr` sits in the lxcbr0 bridge's IPv6 subnet, where the containers
-/// are. lxc-net assigns out of that subnet, so unlike `HOST_IP` on the v4 side
-/// the bridge's own address is not a constant here.
-pub fn ipv6_on_container_bridge(addr: Ipv6Addr) -> bool {
-    static SUBNET: LazyLock<Ipv6Net> = LazyLock::new(|| {
-        crate::net::forward::START9_BRIDGE_V6_SUBNET
-            .parse()
-            .expect("const subnet")
-    });
-    SUBNET.contains(&addr)
 }
 
 pub fn ipv6_is_local(addr: Ipv6Addr) -> bool {

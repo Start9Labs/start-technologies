@@ -1696,8 +1696,9 @@ mod tests {
 
         assert!(!lan_ip("192.168.1.5", true, 443, "eth0").is_internal());
         assert!(
-            !lan_ip("fd12:3456::1", true, 443, "eth0").is_internal(),
-            "a ULA the operator's own router hands out is not the bridge"
+            !lan_ip("fd00:3::5", true, 443, "eth0").is_internal(),
+            "a router handing out the bridge's own prefix does not make its \
+             addresses internal, which would put them beyond the operator's reach"
         );
         assert!(
             !lan_ip("fe80::1", true, 443, "lxcbr0").is_internal(),

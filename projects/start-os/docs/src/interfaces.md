@@ -33,7 +33,7 @@ Each table has the following columns:
 > Switching an IP address off stops it serving the interface over HTTPS. An HTTPS connection names the address it is for, so a [public domain](clearnet.md) or a [private domain](private-domains.md) on the same gateway is unaffected — each is an address in its own right, with its own row. Two cases keep an address answering anyway:
 >
 > - A gateway that has an enabled **public IPv4** address goes on serving every IPv4 address there. Your router presents traffic from the Internet under the same local address that gateway already has, so your server cannot tell a local connection from a forwarded one. Switch the public IPv4 address off as well to take that gateway's IPv4 addresses down.
-> - An interface served over plain **HTTP** is reached without naming an address, so switching one of its addresses off does not stop that interface answering there.
+> - An interface whose **Certificate Authority** column reads `None` is not served over HTTPS — plain HTTP, and the raw-TCP interfaces such as a P2P or ZMQ endpoint. A connection to one of those names no address, so switching one of its addresses off does not stop that interface answering there.
 
 > [!NOTE]
 > The Settings button appears for addresses that require external configuration: [public domains](clearnet.md) (DNS + port forwarding), [private domains](private-domains.md) (DNS), and [public IP addresses](public-ip.md) (port forwarding).
