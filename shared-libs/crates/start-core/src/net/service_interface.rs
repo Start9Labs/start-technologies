@@ -68,12 +68,8 @@ impl HostnameInfo {
     pub fn is_internal(&self) -> bool {
         match self.hostname.parse::<IpAddr>() {
             Ok(IpAddr::V4(v4)) => v4.is_loopback() || v4 == Ipv4Addr::from(crate::HOST_IP),
-            // lxc-net assigns the bridge's v6 addresses, so the gateway names
-            // every one of them where `HOST_IP` names its single v4 address.
             Ok(IpAddr::V6(v6)) => {
-                v6.is_loopback()
-                    || matches!(&self.metadata, HostnameMetadata::Ipv6 { gateway, .. }
-                        if gateway.as_str() == crate::net::forward::START9_BRIDGE_IFACE)
+                v6.is_loopback() || crate::net::utils::ipv6_on_container_bridge(v6)
             }
             Err(_) => false,
         }

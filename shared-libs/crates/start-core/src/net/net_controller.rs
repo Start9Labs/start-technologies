@@ -311,12 +311,9 @@ fn ssl_vhost_public_v4<'a>(
         .collect()
 }
 
-/// The box's own LAN addresses that a binding's SSL `*` vhost answers on: each
-/// enabled bare IP, and nothing else. A `.local` name or a domain is answered by
-/// a vhost entry of its own, so an address the operator switched off stays off
-/// while a name on the same gateway is served. Scoped to the SSL exposure
-/// (`a.ssl`) like its public twin: a bare IP on the *plain* port is served by
-/// the forward.
+/// The box's own addresses that a binding's SSL `*` vhost answers on: each
+/// enabled bare IP, and nothing else. Scoped to the SSL exposure (`a.ssl`) like
+/// its public twin, since a bare IP on the *plain* port is served by the forward.
 fn ssl_vhost_private_ips<'a>(
     enabled_addresses: impl IntoIterator<Item = &'a HostnameInfo>,
 ) -> BTreeSet<IpAddr> {
@@ -1628,11 +1625,12 @@ mod tests {
     }
 
     /// A name on the gateway must not put back a bare IP the operator switched
-    /// off, and the `.local` name has no switch of its own to stop it.
+    /// off. The Interfaces page offers no switch for the `.local` row, so it is
+    /// always there to do it.
     #[test]
-    fn a_name_does_not_serve_the_bare_ip_its_gateway_switched_off() {
-        // eth0's bare IPv4 is switched off, while the two rows that carry no
-        // switch — its link-local address and its `.local` name — stay on.
+    fn a_name_contributes_no_address_to_the_ssl_vhost() {
+        // eth0's bare IPv4 is switched off. What is left is what the operator
+        // cannot switch: the link-local row, the `.local` name, and the bridge.
         let addrs = [
             lan_ip("fe80::1", true, 443, "eth0"),
             mdns(443, ["eth0"]),
@@ -1687,20 +1685,23 @@ mod tests {
     }
 
     /// A binding with no exported interface is restricted to its `is_internal`
-    /// addresses, so every address the bridge carries has to qualify or a
+    /// addresses, so both of the bridge's own addresses have to qualify or a
     /// container loses the one it dials.
     #[test]
-    fn every_address_on_the_container_bridge_is_internal() {
+    fn the_container_bridges_own_addresses_are_internal() {
         assert!(lan_ip("10.0.3.1", true, 443, "lxcbr0").is_internal());
         assert!(lan_ip("fd00:3::1", true, 443, "lxcbr0").is_internal());
-        assert!(lan_ip("fe80::1", true, 443, "lxcbr0").is_internal());
         assert!(lan_ip("127.0.0.1", true, 443, "lo").is_internal());
         assert!(lan_ip("::1", true, 443, "lo").is_internal());
 
         assert!(!lan_ip("192.168.1.5", true, 443, "eth0").is_internal());
         assert!(
-            !lan_ip("fd00:3::1", true, 443, "eth0").is_internal(),
-            "the gateway decides, so the bridge's prefix elsewhere is not the bridge"
+            !lan_ip("fd12:3456::1", true, 443, "eth0").is_internal(),
+            "a ULA the operator's own router hands out is not the bridge"
+        );
+        assert!(
+            !lan_ip("fe80::1", true, 443, "lxcbr0").is_internal(),
+            "a link-local address is the kernel's, not one the bridge is given"
         );
     }
 

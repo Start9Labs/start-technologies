@@ -16,7 +16,7 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use imbl::{OrdMap, OrdSet};
 use imbl_value::{InOMap, InternedString};
-use ipnet::{IpNet, Ipv4Net, Ipv6Net};
+use ipnet::{IpNet, Ipv4Net};
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn, from_fn_async};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
@@ -39,7 +39,6 @@ use crate::net::acme::{
     AcmeCertStore, AcmeProvider, AcmeTlsAlpnCache, AcmeTlsHandler, GetAcmeProvider,
     ReportOrderFailure,
 };
-use crate::net::forward::START9_BRIDGE_V6_SUBNET;
 use crate::net::gateway::{
     GatewayInfo, NetworkInterfaceController, NetworkInterfaceListenerAcceptMetadata,
 };
@@ -1109,8 +1108,6 @@ impl fmt::Debug for ProxyTarget {
 
 /// Whether `ip` sits on lxcbr0, where the containers are.
 fn on_container_bridge(ip: IpAddr) -> bool {
-    static V6: LazyLock<Ipv6Net> =
-        LazyLock::new(|| START9_BRIDGE_V6_SUBNET.parse().expect("const subnet"));
     static V4: LazyLock<Ipv4Net> = LazyLock::new(|| {
         Ipv4Net::new(HOST_IP.into(), 24)
             .expect("const prefix")
@@ -1118,7 +1115,7 @@ fn on_container_bridge(ip: IpAddr) -> bool {
     });
     match ip {
         IpAddr::V4(v4) => V4.contains(&v4),
-        IpAddr::V6(v6) => V6.contains(&v6),
+        IpAddr::V6(v6) => crate::net::utils::ipv6_on_container_bridge(v6),
     }
 }
 
