@@ -2518,6 +2518,7 @@ mod conn_cap_tests {
 mod upstream_alpn_tests {
     use std::net::Ipv4Addr;
 
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio_rustls::TlsAcceptor;
 
     use super::*;
@@ -2535,6 +2536,28 @@ mod upstream_alpn_tests {
     /// about what the container negotiated.
     async fn spawn_backend(alpn: &[&str]) -> SocketAddr {
         spawn_backend_reporting(alpn).await.0
+    }
+
+    /// A TLS backend that reports the first `len` bytes it reads through its
+    /// own session. Bytes that never went through that session arrive as a
+    /// malformed record, and the read fails instead.
+    async fn spawn_backend_reading(
+        len: usize,
+    ) -> (SocketAddr, tokio::sync::oneshot::Receiver<Vec<u8>>) {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let acceptor = TlsAcceptor::from(Arc::new(config_advertising(&[])));
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            if let Ok(mut tls) = acceptor.accept(tcp).await {
+                let mut read = vec![0; len];
+                if tls.read_exact(&mut read).await.is_ok() {
+                    let _ = tx.send(read);
+                }
+            }
+        });
+        (addr, rx)
     }
 
     /// A TLS backend advertising `alpn`, standing in for a container serving
@@ -2574,6 +2597,9 @@ mod upstream_alpn_tests {
     struct Preprocessing {
         target: ProxyTarget,
         base_alpn: Vec<String>,
+        /// Written to the stream `preprocess` hands back, which is where a
+        /// spliced client's bytes would go.
+        probe: &'static [u8],
     }
     impl<'a> TlsHandler<'a, TcpListener> for Preprocessing {
         async fn get_config(
@@ -2583,10 +2609,23 @@ mod upstream_alpn_tests {
         ) -> Option<TlsHandlerAction> {
             let base_alpn: Vec<&str> = self.base_alpn.iter().map(|a| a.as_str()).collect();
             let base = config_advertising(&base_alpn);
-            // The client handshakes off `cfg` alone, so the backend leg is free
-            // to close here.
-            let (cfg, _upstream) =
+            let (cfg, upstream) =
                 VHostTarget::<TcpListener>::preprocess(&self.target, base, hello, metadata).await?;
+            if self.probe.is_empty() {
+                // The client handshakes off `cfg` alone, so the backend leg is
+                // free to close here.
+                drop(upstream);
+            } else {
+                let probe = self.probe;
+                tokio::spawn(async move {
+                    let mut upstream = upstream;
+                    let _ = upstream.write_all(probe).await;
+                    let _ = upstream.flush().await;
+                    // The backend reads until it has the probe, so the stream
+                    // stays open under it.
+                    std::future::pending::<()>().await;
+                });
+            }
             Some(TlsHandlerAction::Tls(cfg))
         }
     }
@@ -2650,9 +2689,21 @@ mod upstream_alpn_tests {
         backend: SocketAddr,
         client_alpn: &[&str],
     ) -> Result<Option<String>, std::io::Error> {
+        try_negotiate_probing(connect_ssl, alpn, base_alpn, backend, client_alpn, b"").await
+    }
+
+    async fn try_negotiate_probing(
+        connect_ssl: Option<Arc<ClientConfig>>,
+        alpn: Option<AlpnInfo>,
+        base_alpn: &[&str],
+        backend: SocketAddr,
+        client_alpn: &[&str],
+        probe: &'static [u8],
+    ) -> Result<Option<String>, std::io::Error> {
         let handler = Preprocessing {
             target: target(backend, connect_ssl, alpn),
             base_alpn: base_alpn.iter().map(|a| a.to_string()).collect(),
+            probe,
         };
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -2687,8 +2738,8 @@ mod upstream_alpn_tests {
         let alpn = tokio::time::timeout(Duration::from_secs(10), accepted)
             .await
             .expect("the listener finishes its handshake within 10s")
-            .unwrap()
-            .unwrap();
+            .expect("the listener's accept task runs to completion")
+            .expect("the listener accepts the connection");
         Ok(alpn.map(|a| String::from_utf8(a.0).unwrap()))
     }
 
@@ -2811,15 +2862,14 @@ mod upstream_alpn_tests {
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(10), negotiated)
                 .await
-                .expect("the container's handshake settles within 10s")
-                .expect("the container is dialled over TLS, so its handshake completes"),
+                .expect("the container is dialled and its handshake settles within 10s")
+                .expect("the container completes its handshake"),
             None,
         );
     }
 
-    /// A client that shares no protocol with the pin is refused, as it is on a
-    /// binding with no TLS leg. Serving it without a protocol instead would
-    /// make the pin advisory.
+    /// A client that shares no protocol with the pin is refused. Serving it
+    /// without a protocol instead would make the pin advisory.
     #[tokio::test]
     async fn a_client_sharing_no_protocol_with_the_pin_is_refused() {
         let h2 = AlpnInfo::Specified(vec![MaybeUtf8String(b"h2".to_vec())]);
@@ -2832,6 +2882,38 @@ mod upstream_alpn_tests {
         )
         .await
         .expect_err("a client that cannot meet the pin is not served");
+    }
+
+    /// The stream `preprocess` hands back is the container's TLS session, and
+    /// the client's bytes are spliced onto it. Handing back the socket under
+    /// that session instead would put the client's plaintext on the wire where
+    /// the container expects records, and every rewrapped connection would die.
+    #[tokio::test]
+    async fn the_client_is_spliced_onto_the_containers_tls_session() {
+        let probe = b"start9";
+        let (backend, read) = spawn_backend_reading(probe.len()).await;
+        try_negotiate_probing(rewrap(), None, &[], backend, &["h2"], probe)
+            .await
+            .expect("a rewrap completes the client handshake");
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(10), read)
+                .await
+                .expect("the container reads the probe within 10s")
+                .expect("the container reads the probe through its own session"),
+            probe,
+        );
+    }
+
+    /// A binding with no TLS leg refuses the same client, and rustls is what
+    /// turns it away: the pin is the list the client is offered. Offering only
+    /// what the two share would leave rustls nothing to alert on, and the
+    /// client would be served with no protocol at all.
+    #[tokio::test]
+    async fn a_plaintext_binding_refuses_a_client_that_cannot_meet_the_pin() {
+        let h2 = AlpnInfo::Specified(vec![MaybeUtf8String(b"h2".to_vec())]);
+        try_negotiate(None, Some(h2), &[], spawn_backend(&[]).await, &["http/1.1"])
+            .await
+            .expect_err("a client that cannot meet the pin is not served");
     }
 
     /// A client that names no protocol leaves the container named none either,
@@ -2850,8 +2932,8 @@ mod upstream_alpn_tests {
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(10), negotiated)
                 .await
-                .expect("the container's handshake settles within 10s")
-                .expect("the container is dialled over TLS, so its handshake completes"),
+                .expect("the container is dialled and its handshake settles within 10s")
+                .expect("the container completes its handshake"),
             None,
             "the container was framed a protocol the client never named",
         );
@@ -2874,8 +2956,8 @@ mod upstream_alpn_tests {
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(10), negotiated)
                 .await
-                .expect("the container's handshake settles within 10s")
-                .expect("the container is dialled over TLS, so its handshake completes"),
+                .expect("the container is dialled and its handshake settles within 10s")
+                .expect("the container completes its handshake"),
             Some(b"http/1.1".to_vec()),
             "the container picked from the client's list instead of the pinned one",
         );
