@@ -60,12 +60,7 @@ import { injectContext } from '@taiga-ui/polymorpheus'
     }
   `,
   imports: [ReactiveFormsModule, TuiButton, TuiError, TuiInput, i18nPipe],
-  providers: [
-    tuiValidationErrorsProvider(() => ({
-      required: inject(i18nPipe).transform('Required'),
-      ...hostnameValidationErrors(),
-    })),
-  ],
+  providers: [tuiValidationErrorsProvider(hostnameValidationErrors)],
 })
 export class ServerNameDialog {
   protected readonly context =
@@ -74,6 +69,12 @@ export class ServerNameDialog {
   protected readonly form = inject(NonNullableFormBuilder).group({
     hostname: [this.context.data.hostname, hostnameValidator],
   })
+
+  constructor() {
+    // `tui-error` renders nothing until the control is touched, and a hostname
+    // stored before these rules existed opens invalid.
+    if (this.form.invalid) this.form.markAllAsTouched()
+  }
 
   protected hostname(): string {
     return this.form.getRawValue().hostname.trim()

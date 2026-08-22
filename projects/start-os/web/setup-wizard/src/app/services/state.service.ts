@@ -80,10 +80,7 @@ export class StateService {
     })
   }
 
-  /**
-   * Called for fresh, restore, and transfer flows
-   * Password is required for fresh, optional for restore/transfer
-   */
+  // A password is required for a fresh install and optional for restore and transfer.
   async executeSetup(password: string | null, hostname: string): Promise<void> {
     let recoverySource: T.RecoverySource<T.EncryptedWire> | null = null
 

@@ -27,10 +27,13 @@ impl AsRef<str> for ServerHostname {
     }
 }
 
-/// The longest label DNS allows, and so the longest a `.local` name can be.
-const MAX_LEN: usize = 63;
+/// The root CA's Common Name is `<hostname> Local Root CA`, and X.509 caps a Common
+/// Name at 64 characters.
+const MAX_LEN: usize = 50;
 
 impl ServerHostname {
+    /// Checks the charset alone, so a hostname stored before the other rules
+    /// existed still loads.
     fn validate(&self) -> Result<(), Error> {
         if self.0.is_empty() {
             return Err(Error::new(
@@ -57,9 +60,8 @@ impl ServerHostname {
         Ok(res)
     }
 
-    /// Reads a hostname the operator just chose, holding it to the rest of the
-    /// rules a DNS label follows. `new` stays looser, so a hostname stored before
-    /// a rule existed still loads and the server still boots.
+    /// Checks a hostname the operator supplied against every rule, including the
+    /// ones `new` leaves to this method so that an already-stored hostname loads.
     pub fn new_from_input(hostname: InternedString) -> Result<Self, Error> {
         let res = Self::new(hostname)?;
         if res.0.chars().count() > MAX_LEN {
@@ -170,7 +172,8 @@ pub async fn sync_hostname(hostname: &ServerHostname) -> Result<(), Error> {
 #[command(rename_all = "kebab-case")]
 #[ts(export)]
 pub struct SetServerHostnameParams {
-    /// The server's `.local` hostname: lowercase letters, numbers, and hyphens
+    /// The server's `.local` hostname: up to 50 lowercase letters, numbers, and
+    /// hyphens, not starting or ending with a hyphen
     #[arg(help = "help.arg.hostname")]
     hostname: InternedString,
 }
@@ -237,12 +240,20 @@ mod test {
         validate_input("-").unwrap_err();
     }
 
-    // A hostname stored before those rules existed still loads, so `sync_hostname`
-    // on the next boot does not strand the server in diagnostic mode.
+    // `new` checks the charset alone, so a hostname stored before the other rules
+    // existed still loads.
     #[test]
     fn stored_hostnames_are_held_to_the_charset_alone() {
         validate(&"a".repeat(MAX_LEN + 1)).unwrap();
         validate("-my-server").unwrap();
+    }
+
+    // `MAX_LEN` exists to keep the root CA's Common Name inside X.509's limit, so
+    // it has to move whenever the branding around the hostname does.
+    #[test]
+    fn the_longest_hostname_still_fits_the_root_ca_common_name() {
+        let cn = crate::net::ssl::CertBranding::start_os(&"a".repeat(MAX_LEN)).root_ca_cn;
+        assert!(cn.len() <= 64, "root CA CN is {} characters", cn.len());
     }
 
     #[test]

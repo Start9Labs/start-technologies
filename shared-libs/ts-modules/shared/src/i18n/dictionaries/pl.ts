@@ -808,7 +808,7 @@ export default {
   915: 'Za długie na kod QR',
   916: 'Twój urząd certyfikacji potwierdza kontrolę nad tą domeną, łącząc się z nią na porcie 443, niezależnie od portu używanego przez sam adres.',
   917: 'Przez IPv6 nie ma czego przekierowywać — zamiast tego zapora bramy musi zezwalać na połączenia przychodzące do tego portu.',
-  918: 'Może mieć maksymalnie 63 znaki',
+  918: 'Może mieć maksymalnie 50 znaków',
   919: 'Tylko małe litery, cyfry i myślniki',
   920: 'Nie może zaczynać się ani kończyć myślnikiem',
 } satisfies i18n

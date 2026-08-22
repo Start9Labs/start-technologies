@@ -808,7 +808,7 @@ export default {
   915: 'Zu lang für einen QR-Code',
   916: 'Ihre Zertifizierungsstelle weist Ihre Kontrolle über diese Domain nach, indem sie sich auf Port 443 mit ihr verbindet — unabhängig davon, welchen Port die Adresse selbst verwendet.',
   917: 'Über IPv6 gibt es nichts weiterzuleiten — stattdessen muss die Firewall Ihres Gateways eingehende Verbindungen zu diesem Port zulassen.',
-  918: 'Darf höchstens 63 Zeichen lang sein',
+  918: 'Darf höchstens 50 Zeichen lang sein',
   919: 'Nur Kleinbuchstaben, Ziffern und Bindestriche',
   920: 'Darf nicht mit einem Bindestrich beginnen oder enden',
 } satisfies i18n

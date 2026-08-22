@@ -1,4 +1,4 @@
-import { ADJECTIVES, NOUNS } from './server-name-words'
+import { ADJECTIVES, NOUNS } from './hostname-words'
 
 /** Suggests an "adjective-noun" hostname. */
 export function randomHostname(): string {

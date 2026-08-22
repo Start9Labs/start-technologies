@@ -3460,11 +3460,11 @@ help.arg.host-url:
   pl_PL: "URL serwera StartOS"
 
 help.arg.hostname:
-  en_US: "The server's .local hostname: lowercase letters, numbers, and hyphens"
-  de_DE: "Der .local-Hostname des Servers: Kleinbuchstaben, Ziffern und Bindestriche"
-  es_ES: "El nombre de host .local del servidor: letras minúsculas, números y guiones"
-  fr_FR: "Le nom d'hôte .local du serveur : lettres minuscules, chiffres et traits d'union"
-  pl_PL: "Nazwa hosta .local serwera: małe litery, cyfry i myślniki"
+  en_US: "The server's .local hostname: up to 50 lowercase letters, numbers, and hyphens, not starting or ending with a hyphen"
+  de_DE: "Der .local-Hostname des Servers: bis zu 50 Kleinbuchstaben, Ziffern und Bindestriche, nicht mit einem Bindestrich beginnend oder endend"
+  es_ES: "El nombre de host .local del servidor: hasta 50 letras minúsculas, números y guiones, sin empezar ni terminar con un guion"
+  fr_FR: "Le nom d'hôte .local du serveur : jusqu'à 50 lettres minuscules, chiffres et traits d'union, ne commençant ni ne finissant par un trait d'union"
+  pl_PL: "Nazwa hosta .local serwera: do 50 małych liter, cyfr i myślników, nierozpoczynająca się ani niekończąca myślnikiem"
 
 help.arg.hostnames:
   en_US: "Hostnames to include in the certificate"

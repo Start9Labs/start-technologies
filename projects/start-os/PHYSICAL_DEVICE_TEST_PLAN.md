@@ -218,9 +218,10 @@ In the setup wizard on the laptop browser:
 - [ ] Transfer progresses, no errors
 - [ ] Device reboots into the admin UI on completion
 
-4. Browse to `http://qa-test.local` — the transferred server keeps the source's name — and log in with `QaTestPass!1`.
+4. Browse to `http://<source-hostname>.local` — the transferred server keeps the source device's name — and log in with `QaTestPass!1`.
 
 - [ ] Login succeeds with the new password (not the old source password)
+- [ ] System → About shows the hostname of the source device
 - [ ] Services page lists the same service that was on the source device
 - [ ] The service's interface loads and the user-visible data noted in §4.1 is present
 

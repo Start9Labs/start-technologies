@@ -1,8 +1,7 @@
 import { Component, inject } from '@angular/core'
 import {
   AbstractControl,
-  FormControl,
-  FormGroup,
+  NonNullableFormBuilder,
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms'
@@ -129,7 +128,6 @@ import { StateService } from '../services/state.service'
       const i18n = inject(i18nPipe)
 
       return {
-        required: i18n.transform('Required'),
         minlength: i18n.transform('Must be 12 characters or greater'),
         maxlength: i18n.transform('Must be 64 character or less'),
         match: i18n.transform('Passwords do not match'),
@@ -146,17 +144,20 @@ export default class PasswordPage {
 
   readonly isFresh = this.stateService.setupType === 'fresh'
 
-  readonly form = new FormGroup({
-    password: new FormControl('', [
-      ...(this.isFresh ? [Validators.required] : []),
-      Validators.minLength(12),
-      Validators.maxLength(64),
-    ]),
-    confirm: new FormControl(''),
-    hostname: new FormControl(
+  readonly form = inject(NonNullableFormBuilder).group({
+    password: [
+      '',
+      [
+        ...(this.isFresh ? [Validators.required] : []),
+        Validators.minLength(12),
+        Validators.maxLength(64),
+      ],
+    ],
+    confirm: [''],
+    hostname: [
       this.isFresh ? randomHostname() : '',
       this.isFresh ? [hostnameValidator] : [],
-    ),
+    ],
   })
 
   readonly validator = (value: string) => (control: AbstractControl) =>
@@ -165,7 +166,7 @@ export default class PasswordPage {
       : { match: this.i18n.transform('Passwords do not match') }
 
   hostname(): string {
-    return (this.form.controls.hostname.value || '').trim()
+    return this.form.getRawValue().hostname.trim()
   }
 
   randomizeHostname() {
