@@ -221,6 +221,18 @@ file tracks notable changes since the move to the monorepo.
   now serves its `.local` address, the domains you have assigned to it, and
   direct connections to its IP address.
 
+- **Switching an IP address off on an interface's gateway table stops that
+  address being served.** The switch took effect for the address's own row but
+  not for the connection itself: any other address on the same gateway put it
+  back, and two of those — your server's `.local` name and its link-local IPv6
+  address — are not switchable, so a switched-off address went on serving the
+  interface over HTTPS. It is now refused, while the names on that gateway carry
+  on being served: a domain and a `.local` name are separate addresses with
+  switches of their own. An address on a gateway carrying an enabled public IPv4
+  address is the exception, and stays reachable from the local network — your
+  router hides the public address behind the same local one, so your server
+  cannot tell the two apart.
+
 - **Image upgrades verify their checksum again.** `upgrade` compared the image's
   blake3 hash only when it was given a second positional argument, which no
   caller passed — so the comparison never ran and a corrupt but still mountable
