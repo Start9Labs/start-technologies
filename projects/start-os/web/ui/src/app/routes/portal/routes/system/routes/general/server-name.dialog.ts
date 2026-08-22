@@ -1,4 +1,5 @@
 import { Component, inject } from '@angular/core'
+import { toSignal } from '@angular/core/rxjs-interop'
 import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms'
 import {
   hostnameValidationErrors,
@@ -14,6 +15,7 @@ import {
   tuiValidationErrorsProvider,
 } from '@taiga-ui/core'
 import { injectContext } from '@taiga-ui/polymorpheus'
+import { map } from 'rxjs'
 
 @Component({
   template: `
@@ -70,14 +72,14 @@ export class ServerNameDialog {
     hostname: [this.context.data.hostname, hostnameValidator],
   })
 
-  constructor() {
-    // `tui-error` renders nothing until the control is touched, and a hostname
-    // stored before these rules existed opens invalid.
-    if (this.form.invalid) this.form.markAllAsTouched()
-  }
+  protected readonly hostname = toSignal(
+    this.form.controls.hostname.valueChanges.pipe(map(value => value.trim())),
+    { initialValue: this.context.data.hostname.trim() },
+  )
 
-  protected hostname(): string {
-    return this.form.getRawValue().hostname.trim()
+  constructor() {
+    // `tui-error` renders nothing until the control is touched.
+    if (this.form.invalid) this.form.markAllAsTouched()
   }
 
   protected randomize() {

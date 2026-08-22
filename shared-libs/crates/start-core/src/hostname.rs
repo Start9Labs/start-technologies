@@ -32,8 +32,7 @@ impl AsRef<str> for ServerHostname {
 const MAX_LEN: usize = 50;
 
 impl ServerHostname {
-    /// Checks the charset alone, so a hostname stored before the other rules
-    /// existed still loads.
+    /// Checks the character set, so a hostname stored under looser rules still loads.
     fn validate(&self) -> Result<(), Error> {
         if self.0.is_empty() {
             return Err(Error::new(
@@ -61,7 +60,7 @@ impl ServerHostname {
     }
 
     /// Checks a hostname the operator supplied against every rule, including the
-    /// ones `new` leaves to this method so that an already-stored hostname loads.
+    /// length and hyphen rules `new` leaves out.
     pub fn new_from_input(hostname: InternedString) -> Result<Self, Error> {
         let res = Self::new(hostname)?;
         if res.0.chars().count() > MAX_LEN {
@@ -98,6 +97,28 @@ impl ServerHostname {
     pub fn save(&self, server_info: &mut Model<ServerInfo>) -> Result<(), Error> {
         server_info.as_hostname_mut().ser(&**self)
     }
+}
+
+/// Rewrites a hostname the system cannot carry into the nearest one it can.
+///
+/// The kernel refuses a hostname longer than it allows and `sync_hostname` runs on
+/// every boot, so a stored hostname that fails these rules leaves the server in
+/// diagnostic mode, where nothing can change it.
+pub fn repair_hostname(stored: &str) -> ServerHostname {
+    let mut repaired: String = stored
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .map(|c| c.to_ascii_lowercase())
+        .take(MAX_LEN)
+        .collect();
+    while repaired.starts_with('-') {
+        repaired.remove(0);
+    }
+    while repaired.ends_with('-') {
+        repaired.pop();
+    }
+    ServerHostname::new_from_input(InternedString::from_display(&repaired))
+        .unwrap_or_else(|_| generate_hostname())
 }
 
 pub fn generate_hostname() -> ServerHostname {
@@ -240,24 +261,42 @@ mod test {
         validate_input("-").unwrap_err();
     }
 
-    // `new` checks the charset alone, so a hostname stored before the other rules
-    // existed still loads.
     #[test]
     fn stored_hostnames_are_held_to_the_charset_alone() {
         validate(&"a".repeat(MAX_LEN + 1)).unwrap();
         validate("-my-server").unwrap();
     }
 
-    // `MAX_LEN` exists to keep the root CA's Common Name inside X.509's limit, so
-    // it has to move whenever the branding around the hostname does.
+    // `MAX_LEN` has to move whenever the branding around the hostname does.
     #[test]
     fn the_longest_hostname_still_fits_the_root_ca_common_name() {
-        let cn = crate::net::ssl::CertBranding::start_os(&"a".repeat(MAX_LEN)).root_ca_cn;
-        assert!(cn.len() <= 64, "root CA CN is {} characters", cn.len());
+        let root_cert = |len: usize| {
+            crate::net::ssl::make_root_cert(
+                &crate::net::ssl::gen_nistp256().unwrap(),
+                &crate::net::ssl::CertBranding::start_os(&"a".repeat(len)),
+                std::time::SystemTime::now(),
+            )
+        };
+        root_cert(MAX_LEN).unwrap();
+        root_cert(MAX_LEN + 1).unwrap_err();
     }
 
     #[test]
     fn generated_hostnames_are_valid_input() {
         validate_input(&generate_hostname()).unwrap();
+    }
+
+    #[test]
+    fn repair_keeps_as_much_of_the_stored_hostname_as_it_can() {
+        assert_eq!(&*repair_hostname("my-cool-server"), "my-cool-server");
+        assert_eq!(&*repair_hostname("My_Cool Server"), "mycoolserver");
+        assert_eq!(&*repair_hostname("-my-server-"), "my-server");
+        assert_eq!(repair_hostname(&"a".repeat(70)).chars().count(), MAX_LEN);
+    }
+
+    #[test]
+    fn repair_generates_a_hostname_when_nothing_usable_remains() {
+        validate_input(&repair_hostname("---")).unwrap();
+        validate_input(&repair_hostname("")).unwrap();
     }
 }

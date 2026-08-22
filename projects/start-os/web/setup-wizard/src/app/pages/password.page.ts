@@ -1,4 +1,5 @@
 import { Component, inject } from '@angular/core'
+import { toSignal } from '@angular/core/rxjs-interop'
 import {
   AbstractControl,
   NonNullableFormBuilder,
@@ -24,6 +25,7 @@ import {
 } from '@taiga-ui/core'
 import { TuiPassword } from '@taiga-ui/kit'
 import { TuiCardLarge, TuiForm, TuiHeader } from '@taiga-ui/layout'
+import { map } from 'rxjs'
 import { StateService } from '../services/state.service'
 
 @Component({
@@ -128,6 +130,7 @@ import { StateService } from '../services/state.service'
       const i18n = inject(i18nPipe)
 
       return {
+        required: i18n.transform('Required'),
         minlength: i18n.transform('Must be 12 characters or greater'),
         maxlength: i18n.transform('Must be 64 character or less'),
         match: i18n.transform('Passwords do not match'),
@@ -165,9 +168,10 @@ export default class PasswordPage {
       ? null
       : { match: this.i18n.transform('Passwords do not match') }
 
-  hostname(): string {
-    return this.form.getRawValue().hostname.trim()
-  }
+  readonly hostname = toSignal(
+    this.form.controls.hostname.valueChanges.pipe(map(value => value.trim())),
+    { initialValue: this.form.getRawValue().hostname.trim() },
+  )
 
   randomizeHostname() {
     this.form.controls.hostname.setValue(randomHostname())

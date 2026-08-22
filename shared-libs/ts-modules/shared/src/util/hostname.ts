@@ -8,7 +8,7 @@ const MAX_LENGTH = 50
 const CHARACTERS = /^[a-z0-9-]+$/
 
 /**
- * Applies the rules `ServerHostname::new_from_input` applies on the server,
+ * Applies the rules the server applies in `ServerHostname::new_from_input`,
  * ignoring surrounding whitespace, and reports an empty value as `required`.
  * Submit the trimmed value.
  */
@@ -28,7 +28,7 @@ export function hostnameValidator(
 }
 
 /**
- * The messages `hostnameValidator`'s errors render as. Call it inside an
+ * Maps `hostnameValidator`'s errors to their messages. Call it inside an
  * injection context — pass `tuiValidationErrorsProvider` a factory, not an object.
  */
 export function hostnameValidationErrors(): Record<string, string> {

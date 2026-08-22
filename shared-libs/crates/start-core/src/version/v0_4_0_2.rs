@@ -2,6 +2,7 @@ use exver::VersionRange;
 
 use super::v0_3_5::V0_3_0_COMPAT;
 use super::{VersionT, v0_4_0_1};
+use crate::hostname::{ServerHostname, repair_hostname};
 use crate::prelude::*;
 
 lazy_static::lazy_static! {
@@ -41,6 +42,7 @@ impl VersionT for Version {
                 // `reflect` said what an absent list says.
                 .unwrap_or(Value::Null);
         });
+        repair_unusable_hostname(db);
         Ok(Value::Null)
     }
     fn down(self, db: &mut Value) -> Result<(), Error> {
@@ -99,6 +101,30 @@ fn for_each_alpn(db: &mut Value, mut f: impl FnMut(&mut Value)) {
     }
 }
 
+/// Bring a hostname the system cannot carry back into range.
+///
+/// Earlier versions accepted a hostname the kernel then refused, and `sync_hostname`
+/// runs on every boot, so such a server comes up in diagnostic mode every time. An
+/// update is the one thing diagnostic mode can still do, so this is where it heals.
+fn repair_unusable_hostname(db: &mut Value) {
+    let Some(server_info) = db
+        .get_mut("public")
+        .and_then(|p| p.get_mut("serverInfo"))
+        .and_then(|s| s.as_object_mut())
+    else {
+        return;
+    };
+    let Some(stored) = server_info.get("hostname").and_then(|h| h.as_str()) else {
+        return;
+    };
+    if ServerHostname::new_from_input(InternedString::intern(stored)).is_ok() {
+        return;
+    }
+    let repaired = repair_hostname(stored).to_string();
+    server_info.insert(InternedString::intern("hostname"), Value::from(repaired));
+}
+
+/// The hostname is the server's only name, so `serverInfo.name` is removed.
 fn drop_server_name(db: &mut Value) {
     if let Some(server_info) = db
         .get_mut("public")
@@ -347,4 +373,36 @@ mod test {
         assert_eq!(db, before);
     }
 
+    #[test]
+    fn leaves_a_usable_hostname_alone() {
+        let mut db = json!({ "public": { "serverInfo": { "hostname": "my-cool-server" } } });
+        let before = db.clone();
+        repair_unusable_hostname(&mut db);
+        assert_eq!(db, before);
+    }
+
+    #[test]
+    fn brings_a_hostname_the_kernel_refuses_back_into_range() {
+        let mut db = json!({ "public": { "serverInfo": { "hostname": "a".repeat(70) } } });
+        repair_unusable_hostname(&mut db);
+        assert_eq!(
+            db["public"]["serverInfo"]["hostname"],
+            json!("a".repeat(50))
+        );
+    }
+
+    #[test]
+    fn repairing_a_db_without_a_hostname_is_harmless() {
+        let mut db = json!({ "public": { "serverInfo": {} } });
+        let before = db.clone();
+        repair_unusable_hostname(&mut db);
+        assert_eq!(db, before);
+    }
+
+    #[test]
+    fn rollback_names_a_server_whose_hostname_is_missing() {
+        let mut db = json!({ "public": { "serverInfo": {} } });
+        restore_server_name(&mut db);
+        assert_eq!(db["public"]["serverInfo"]["name"], json!("StartOS"));
+    }
 }

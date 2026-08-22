@@ -527,7 +527,7 @@ pub struct SetupExecuteCliParams {
     #[arg(long)]
     kiosk: bool,
     /// The server's `.local` hostname — up to 50 lowercase letters, numbers and
-    /// hyphens; defaults to a generated one
+    /// hyphens, not starting or ending with a hyphen; defaults to a generated one
     #[arg(long)]
     hostname: Option<InternedString>,
 }

@@ -29,7 +29,8 @@ or the CLI's externally observable behavior.
   hostname — where it used to carry a separate display label as well. Setting it
   moves the address the server answers to. A provisioning script that passes
   `--name` to `setup execute`, or a name and a hostname to `server set-hostname`,
-  needs updating.
+  needs updating. `server set-hostname` also rejects a name longer than 50
+  characters or starting or ending with a hyphen, which 1.1.0 accepted.
 
 ### Fixed
 

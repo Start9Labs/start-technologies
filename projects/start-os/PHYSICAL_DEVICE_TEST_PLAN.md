@@ -179,7 +179,7 @@ Plug the external USB backup drive into the target device. In the setup wizard o
 - [ ] Login succeeds
 - [ ] Services page lists the previously installed service from the source device in its previous state (running/stopped)
 - [ ] Clicking the service and opening its interface loads its UI, and the user-visible data noted in §4.1 is present
-- [ ] System → About shows the hostname of the source device
+- [ ] System → General Settings → Server Name shows the hostname of the source device
 
 ---
 
@@ -221,7 +221,7 @@ In the setup wizard on the laptop browser:
 4. Browse to `http://<source-hostname>.local` — the transferred server keeps the source device's name — and log in with `QaTestPass!1`.
 
 - [ ] Login succeeds with the new password (not the old source password)
-- [ ] System → About shows the hostname of the source device
+- [ ] System → General Settings → Server Name shows the hostname of the source device
 - [ ] Services page lists the same service that was on the source device
 - [ ] The service's interface loads and the user-visible data noted in §4.1 is present
 
