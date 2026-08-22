@@ -376,7 +376,7 @@ Advertise exactly the protocols your container can serve on its own listener. Th
 
 Advertising `h2` is the case to think about twice. It commits your container to serving every HTTP/2 client, including WebSockets. On an `https` or `wss` binding StartOS advertises HTTP/2 extended CONNECT ([RFC 8441](https://www.rfc-editor.org/rfc/rfc8441)) to the client whether or not your container implements it, so a browser opens its WebSocket that way and your container has to answer it. A container that advertises only `http/1.1` keeps those clients on HTTP/1.1, where a WebSocket is an ordinary `Upgrade`.
 
-`addSsl.alpn` overrides all of this: it sets the client-facing list outright instead of carrying what your container chose. Leave it unset unless you need the client offered something your container does not select for itself.
+`addSsl.alpn` narrows the protocols the binding puts forward. Your container still chooses out of that narrower list and the client is still offered its choice, so the two ends stay on one protocol — but a container that serves none of them refuses the connection, and so does a client that speaks none of them. Leave it unset unless you need to keep this binding off a protocol your container would otherwise select.
 
 ## Serving Your Own TLS (Passthrough)
 

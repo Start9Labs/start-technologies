@@ -980,12 +980,13 @@ pub struct ProxyTarget {
     /// Optional `Authorization` header value to inject on upstream
     /// requests. Implies HTTP-aware proxying (same path as forwarded headers).
     pub auth: Option<crate::net::host::binding::ProxyAuth>,
-    /// Dials the container over TLS, for a container that serves its own.
-    /// `None` dials it in plaintext.
+    /// The config StartOS dials the container with when the container serves
+    /// its own TLS. `None` dials it in plaintext.
     pub connect_ssl: Option<Arc<ClientConfig>>,
-    /// What to offer the client for ALPN. `None` carries whatever the container
-    /// negotiated over TLS, or the client's own list when there was no TLS leg
-    /// to negotiate on.
+    /// Narrows the protocols this binding puts forward. A dialled container
+    /// chooses out of them and the client is offered its choice; without a TLS
+    /// leg they are what the client is offered. `None` puts forward the
+    /// client's own list.
     pub alpn: Option<AlpnInfo>,
     pub passthrough: bool,
     /// Open the internal leg with the client's source IP (`IP_TRANSPARENT`).
@@ -1228,12 +1229,20 @@ where
             .flatten()
             .map(|proto| proto.to_vec())
             .collect();
-        // The container's own TLS decides how to dial it; `alpn` only decides
-        // what the client is offered.
+        // The protocols this binding puts forward: whatever it pins, else the
+        // client's own list.
+        let offered: Vec<Vec<u8>> = match &self.alpn {
+            Some(AlpnInfo::Specified(protos)) => {
+                protos.iter().map(|proto| proto.0.clone()).collect()
+            }
+            Some(AlpnInfo::Reflect) | None => client_alpn,
+        };
+        // The container's own TLS decides how it is dialled, and `alpn` decides
+        // what it is offered.
         let (stream, negotiated): (AcceptStream, _) = match &self.connect_ssl {
             Some(client_cfg) => {
                 let target_stream = TlsConnector::from(client_cfg.clone())
-                    .with_alpn(client_alpn.clone())
+                    .with_alpn(offered.clone())
                     .connect(ServerName::IpAddress(self.addr.ip().into()), tcp_stream)
                     .await
                     .with_ctx(|_| (ErrorKind::Network, self.addr))
@@ -1247,15 +1256,12 @@ where
             }
             None => (Box::pin(tcp_stream), None),
         };
-        // rustls selects the client-facing protocol by the server list's order,
-        // so an entry left on the base config would outrank what this sets.
-        prev.alpn_protocols = match &self.alpn {
-            Some(AlpnInfo::Specified(protos)) => {
-                protos.iter().map(|proto| proto.0.clone()).collect()
-            }
-            Some(AlpnInfo::Reflect) => client_alpn,
-            None if self.connect_ssl.is_some() => negotiated.into_iter().collect(),
-            None => client_alpn,
+        // One protocol frames both legs, so a dialled container's choice is what
+        // the client is offered — anything else lets the two ends disagree.
+        // rustls picks by this list's order, so assign rather than append.
+        prev.alpn_protocols = match &self.connect_ssl {
+            Some(_) => negotiated.into_iter().collect(),
+            None => offered,
         };
         Some((prev, stream))
     }
@@ -2485,9 +2491,9 @@ mod conn_cap_tests {
     }
 }
 
-/// What `preprocess` offers the client for each `connect_ssl` strategy. On a
-/// rewrap StartOS offers the backend the client's own list and hands back
-/// whatever it selected; the plaintext strategies set the list themselves.
+/// What `preprocess` puts to the container and what it offers the client. A
+/// dialled container chooses out of the binding's protocols and the client is
+/// offered its choice; without a TLS leg the client is offered them directly.
 #[cfg(test)]
 mod upstream_alpn_tests {
     use std::net::Ipv4Addr;
@@ -2508,29 +2514,14 @@ mod upstream_alpn_tests {
     /// A TLS backend advertising `alpn`, standing in for a container serving
     /// its own TLS behind an `https` binding.
     async fn spawn_backend(alpn: &[&str]) -> SocketAddr {
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let acceptor = TlsAcceptor::from(Arc::new(config_advertising(alpn)));
-        tokio::spawn(async move {
-            while let Ok((tcp, _)) = listener.accept().await {
-                let acceptor = acceptor.clone();
-                tokio::spawn(async move {
-                    if let Ok(_tls) = acceptor.accept(tcp).await {
-                        // The assertion is about the handshake, so the backend
-                        // holds its side open rather than closing under it.
-                        std::future::pending::<()>().await;
-                    }
-                });
-            }
-        });
-        addr
+        spawn_backend_reporting(alpn).await.0
     }
 
-    /// As [`spawn_backend`], but reports once a TLS handshake completes, so a
-    /// caller can tell a TLS dial from a plaintext one.
+    /// As [`spawn_backend`], but reports what the container negotiated on its
+    /// first connection — the only way to tell what the dial actually offered.
     async fn spawn_backend_reporting(
         alpn: &[&str],
-    ) -> (SocketAddr, tokio::sync::oneshot::Receiver<()>) {
+    ) -> (SocketAddr, tokio::sync::oneshot::Receiver<Option<Vec<u8>>>) {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
         let addr = listener.local_addr().unwrap();
         let acceptor = TlsAcceptor::from(Arc::new(config_advertising(alpn)));
@@ -2539,12 +2530,15 @@ mod upstream_alpn_tests {
             let mut tx = Some(tx);
             while let Ok((tcp, _)) = listener.accept().await {
                 let acceptor = acceptor.clone();
-                let done = tx.take();
+                let report = tx.take();
                 tokio::spawn(async move {
-                    if let Ok(_tls) = acceptor.accept(tcp).await {
-                        if let Some(done) = done {
-                            let _ = done.send(());
+                    if let Ok(tls) = acceptor.accept(tcp).await {
+                        if let Some(report) = report {
+                            let _ =
+                                report.send(tls.get_ref().1.alpn_protocol().map(|p| p.to_vec()));
                         }
+                        // The assertion is about the handshake, so the backend
+                        // holds its side open rather than closing under it.
                         std::future::pending::<()>().await;
                     }
                 });
@@ -2614,22 +2608,28 @@ mod upstream_alpn_tests {
     /// connection offering `client_alpn`, in front of a rewrapped backend
     /// advertising `backend_alpn`.
     async fn negotiate(backend_alpn: &[&str], client_alpn: &[&str]) -> Option<String> {
-        try_negotiate(rewrap(), None, &[], backend_alpn, client_alpn)
-            .await
-            .expect("the client completes its handshake with the listener")
+        try_negotiate(
+            rewrap(),
+            None,
+            &[],
+            spawn_backend(backend_alpn).await,
+            client_alpn,
+        )
+        .await
+        .expect("the client completes its handshake with the listener")
     }
 
-    /// As [`negotiate`], but for any `connect_ssl` strategy, with `base_alpn`
+    /// As [`negotiate`], but over any dial and `alpn`, and with `base_alpn`
     /// already on the config handed to `preprocess`.
     async fn try_negotiate(
         connect_ssl: Option<Arc<ClientConfig>>,
         alpn: Option<AlpnInfo>,
         base_alpn: &[&str],
-        backend_alpn: &[&str],
+        backend: SocketAddr,
         client_alpn: &[&str],
     ) -> Result<Option<String>, std::io::Error> {
         let handler = Preprocessing {
-            target: target(spawn_backend(backend_alpn).await, connect_ssl, alpn),
+            target: target(backend, connect_ssl, alpn),
             base_alpn: base_alpn.iter().map(|a| a.to_string()).collect(),
         };
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
@@ -2702,7 +2702,7 @@ mod upstream_alpn_tests {
                 rewrap(),
                 None,
                 &["http/1.1"],
-                &["h2", "http/1.1"],
+                spawn_backend(&["h2", "http/1.1"]).await,
                 &["h2", "http/1.1"],
             )
             .await
@@ -2715,51 +2715,62 @@ mod upstream_alpn_tests {
     /// own handshake fails with it.
     #[tokio::test]
     async fn a_backend_refusing_the_clients_alpn_declines_the_connection() {
-        try_negotiate(rewrap(), None, &[], &["h2"], &["http/1.1"])
-            .await
-            .expect_err("the listener cannot serve a client the backend refused");
-    }
-
-    /// `alpn` chooses what the client is offered, not how the container is
-    /// dialled: a container serving its own TLS is reached over TLS either way.
-    /// Dialling it in plaintext leaves its TLS listener waiting for a
-    /// `ClientHello` that never arrives, so the backend never reports.
-    #[tokio::test]
-    async fn setting_alpn_does_not_stop_the_container_being_dialled_over_tls() {
-        let (backend, handshaked) = spawn_backend_reporting(&["http/1.1"]).await;
-        let http1 = AlpnInfo::Specified(vec![MaybeUtf8String(b"http/1.1".to_vec())]);
-        let handler = Preprocessing {
-            target: target(backend, rewrap(), Some(http1)),
-            base_alpn: Vec::new(),
-        };
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let mut vhost = TlsListener::new(listener, handler);
-        let accepted =
-            tokio::spawn(async move { futures::future::poll_fn(|cx| vhost.poll_accept(cx)).await });
-
-        let mut client = client_config_no_verify(provider()).unwrap();
-        client.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-        let tcp = TcpStream::connect(addr).await.unwrap();
-        let _client_stream = tokio::time::timeout(
-            Duration::from_secs(10),
-            TlsConnector::from(Arc::new(client))
-                .connect(ServerName::IpAddress(Ipv4Addr::LOCALHOST.into()), tcp),
+        try_negotiate(
+            rewrap(),
+            None,
+            &[],
+            spawn_backend(&["h2"]).await,
+            &["http/1.1"],
         )
         .await
-        .expect("the client handshake settles within 10s")
-        .expect("the container serves TLS, so the dial has to speak it");
-
-        tokio::time::timeout(Duration::from_secs(10), handshaked)
-            .await
-            .expect("the container's handshake settles within 10s")
-            .expect("the container is dialled over TLS, so its handshake completes");
-        accepted.abort();
+        .expect_err("the listener cannot serve a client the backend refused");
     }
 
-    /// `Reflect` dials plaintext and hands the client back its own list, in its
-    /// own order. The base carries `http/1.1`, which would win on server order
-    /// if the arm appended to it instead.
+    /// `alpn` is part of a target's identity: the vhost keeps a live target
+    /// whose config still compares equal, so a binding that changes only its
+    /// protocols would otherwise never re-register.
+    #[test]
+    fn a_target_is_not_equal_to_one_that_pins_a_different_protocol() {
+        let addr: SocketAddr = "10.0.3.2:443".parse().unwrap();
+        let pinned =
+            |proto: &[u8]| Some(AlpnInfo::Specified(vec![MaybeUtf8String(proto.to_vec())]));
+        assert_ne!(
+            target(addr, None, pinned(b"h2")),
+            target(addr, None, pinned(b"http/1.1")),
+        );
+        assert_eq!(
+            target(addr, None, pinned(b"h2")),
+            target(addr, None, pinned(b"h2")),
+        );
+    }
+
+    /// A pinned list is what the container is offered, so its choice comes out
+    /// of that list rather than the client's. One protocol frames both legs, so
+    /// offering the container the client's list instead would let it pick `h2`
+    /// while the client was held to `http/1.1`.
+    #[tokio::test]
+    async fn a_pinned_protocol_is_what_the_container_is_offered() {
+        let (backend, negotiated) = spawn_backend_reporting(&["h2", "http/1.1"]).await;
+        let http1 = AlpnInfo::Specified(vec![MaybeUtf8String(b"http/1.1".to_vec())]);
+        assert_eq!(
+            try_negotiate(rewrap(), Some(http1), &[], backend, &["h2", "http/1.1"])
+                .await
+                .expect("a pinned rewrap completes the client handshake"),
+            Some("http/1.1".to_owned()),
+        );
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(10), negotiated)
+                .await
+                .expect("the container's handshake settles within 10s")
+                .expect("the container is dialled over TLS, so its handshake completes"),
+            Some(b"http/1.1".to_vec()),
+            "the container picked from the client's list instead of the pinned one",
+        );
+    }
+
+    /// `Reflect` puts the client's own list forward, in its own order. The base
+    /// carries `http/1.1`, which would win on server order if this appended to
+    /// it instead.
     #[tokio::test]
     async fn reflect_gives_the_client_its_own_list() {
         assert_eq!(
@@ -2767,7 +2778,7 @@ mod upstream_alpn_tests {
                 None,
                 Some(AlpnInfo::Reflect),
                 &["http/1.1"],
-                &[],
+                spawn_backend(&[]).await,
                 &["h2", "http/1.1"],
             )
             .await
@@ -2776,7 +2787,7 @@ mod upstream_alpn_tests {
         );
     }
 
-    /// A client that offers no ALPN is offered to the backend as offering none.
+    /// A client that offers no ALPN leaves the container offered none.
     /// The connector falls back to the dialling config's own list when it is
     /// not given one, so calling `with_alpn` only for a non-empty list would
     /// offer `h2` here, which this backend refuses.
@@ -2786,23 +2797,28 @@ mod upstream_alpn_tests {
             rewrap_configured_with(&["h2"]),
             None,
             &[],
-            &["http/1.1"],
+            spawn_backend(&["http/1.1"]).await,
             &[],
         )
         .await
         .expect("the backend is offered nothing, so it has nothing to refuse");
     }
 
-    /// `Specified` dials plaintext and offers the binding's own list. The base
-    /// carries `h2`, which would win on server order if the arm appended to it
-    /// instead.
+    /// `Specified` puts the binding's own list forward. The base carries `h2`,
+    /// which would win on server order if this appended to it instead.
     #[tokio::test]
     async fn specified_offers_the_bindings_own_list() {
         let http1 = AlpnInfo::Specified(vec![MaybeUtf8String(b"http/1.1".to_vec())]);
         assert_eq!(
-            try_negotiate(None, Some(http1), &["h2"], &[], &["h2", "http/1.1"])
-                .await
-                .expect("a specified binding completes the client handshake"),
+            try_negotiate(
+                None,
+                Some(http1),
+                &["h2"],
+                spawn_backend(&[]).await,
+                &["h2", "http/1.1"],
+            )
+            .await
+            .expect("a specified binding completes the client handshake"),
             Some("http/1.1".to_owned()),
         );
     }
