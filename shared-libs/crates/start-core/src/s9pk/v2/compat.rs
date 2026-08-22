@@ -256,6 +256,7 @@ impl TryFrom<ManifestV1> for Manifest {
                 },
                 userspace_filesystems: false,
                 virtual_networking: false,
+                hardware_virtualization: false,
                 plugins: BTreeSet::new(),
                 satisfies: BTreeSet::new(),
             },

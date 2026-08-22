@@ -636,6 +636,7 @@ fn check_matching_info_short() {
             hardware_acceleration: false,
             userspace_filesystems: false,
             virtual_networking: false,
+            hardware_virtualization: false,
             plugins: BTreeSet::new(),
             satisfies: BTreeSet::new(),
         },

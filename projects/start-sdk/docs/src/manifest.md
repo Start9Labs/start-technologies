@@ -282,6 +282,24 @@ virtualNetworking: true,     // /dev/net/tun for slirp4netns / pasta networking
 
 `userspaceFilesystems` exposes `/dev/fuse` so a rootless engine (Podman or Docker) can use `fuse-overlayfs` for layered storage. `virtualNetworking` exposes `/dev/net/tun` so it can use `slirp4netns` (or `pasta`) for networking. Both are opt-in. Service authors are still responsible for installing the OCI engine in the image and configuring it for rootless mode — see [Run a Nested OCI Runtime](./recipe-nested-oci-runtime.md) for the full recipe (subuid setup, daemon configuration, and the runc wrapper required when using Docker).
 
+### Hardware Virtualization (KVM)
+
+For services that run their own virtual machines — QEMU/KVM, Firecracker, or a device emulator such as the Android Emulator — set `hardwareVirtualization: true` at the manifest top level:
+
+```typescript
+hardwareVirtualization: true,
+```
+
+When set, StartOS exposes `/dev/kvm` inside the service's container, so the guest runs on the CPU's virtualization extensions instead of being interpreted in software. It grants the device and nothing else: the service stays unprivileged, user-namespace mapped, and AppArmor-confined.
+
+> [!IMPORTANT]
+> The granted node belongs to the container's root and carries the permissions the server gives it, which on `/dev/kvm` are `0660`. **Run the process that opens it as root**, as the GPU packages do for `hardwareAcceleration` — that is the only arrangement StartOS guarantees.
+
+The device appears only on a server whose CPU supports virtualization and whose kernel has KVM active for it. Where it does not, the service starts as normal with no `/dev/kvm` — so a service that can fall back to software emulation should test for the device and do so, and one that cannot should declare a health check saying this server does not support KVM. Give that check `gracePeriod: 0`, so it reports the reason instead of `starting`, and a `cooldownTrigger` — the default re-polls a failing check every second for the life of the service. See [Health Checks](./main.md#health-checks).
+
+> [!WARNING]
+> `/dev/kvm` is a direct interface to the host kernel's hypervisor, so it widens the kernel attack surface reachable from the service. Enable it only for a service that genuinely runs virtual machines.
+
 ### Multiple Images
 
 Services can define multiple images. Each image needs its own `arch` field:

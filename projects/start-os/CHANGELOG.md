@@ -22,6 +22,12 @@ file tracks notable changes since the move to the monorepo.
   a retired host is removed with it, so check the service's release notes and
   assign it to one of the service's current interfaces.
 
+- **Services that run virtual machines can use the CPU's virtualization
+  support.** Packages for emulators, CI runners, and development tools can
+  request the hardware interface (`/dev/kvm`) for QEMU, Firecracker, and similar
+  workloads. StartOS grants it only to packages that request it and only on
+  servers whose processors provide it.
+
 - **A gateway can be marked secure, so services' plaintext addresses are offered
   over it.** `start-cli net gateway set-secure <GATEWAY>` records that you trust
   the network on the other side of a gateway; `unset-secure` hands the decision

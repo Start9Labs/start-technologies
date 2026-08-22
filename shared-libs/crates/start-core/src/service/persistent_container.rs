@@ -100,6 +100,7 @@ impl PersistentContainer {
                     hardware_acceleration: s9pk.manifest.metadata.hardware_acceleration,
                     userspace_filesystems: s9pk.manifest.metadata.userspace_filesystems,
                     virtual_networking: s9pk.manifest.metadata.virtual_networking,
+                    hardware_virtualization: s9pk.manifest.metadata.hardware_virtualization,
                 },
             )
             .await?;

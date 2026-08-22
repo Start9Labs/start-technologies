@@ -40,15 +40,34 @@ pub const CONTAINER_RPC_SERVER_SOCKET: &str = "service.sock"; // must not be abs
 pub const HOST_RPC_SERVER_SOCKET: &str = "host.sock"; // must not be absolute path
 const CONTAINER_DHCP_TIMEOUT: Duration = Duration::from_secs(30);
 const HARDWARE_ACCELERATION_PATHS: &[&str] = &["/dev/dri", "/dev/nvidia*", "/dev/kfd"];
-// /dev/fuse: fuse-overlayfs storage, the only viable rootless storage driver
-// inside a userns LXC (kernel overlayfs-on-overlayfs is denied for
-// unprivileged users) — needed by rootless OCI engines (podman/docker) opted
-// in via `manifest.userspaceFilesystems`.
 const USERSPACE_FILESYSTEM_PATHS: &[&str] = &["/dev/fuse"];
-// /dev/net/tun: kernel tunnel interface for VPN / WireGuard / tun-class
-// services (and slirp4netns / pasta networking for nested containers) — opted
-// in via `manifest.virtualNetworking`.
 const VIRTUAL_NETWORKING_PATHS: &[&str] = &["/dev/net/tun"];
+const HARDWARE_VIRTUALIZATION_PATHS: &[&str] = &["/dev/kvm"];
+
+/// Patterns that can still match at or beneath `path`.
+#[cfg(target_os = "linux")]
+fn match_device_patterns<'a>(path: &Path, matches: &[&'a str]) -> Option<Vec<&'a str>> {
+    if matches.is_empty() {
+        return Some(Vec::new());
+    }
+    let mut new_matches = Vec::new();
+    for mut m in matches.iter().copied() {
+        let could_match = if let Some(prefix) = m.strip_suffix("*") {
+            m = prefix;
+            path.to_string_lossy().starts_with(m)
+        } else {
+            path.starts_with(m)
+        } || Path::new(m).starts_with(path);
+        if could_match {
+            new_matches.push(m);
+        }
+    }
+    if new_matches.is_empty() {
+        None
+    } else {
+        Some(new_matches)
+    }
+}
 
 #[derive(
     Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq, PartialOrd, Ord, Hash, TS,
@@ -301,30 +320,12 @@ impl LxcContainer {
             exited: false,
             log_mount,
         };
-        if res.config.hardware_acceleration {
+        for paths in res.config.granted_device_paths() {
             res.handle_devices(
                 tokio::fs::read_dir("/dev")
                     .await
                     .with_ctx(|_| (ErrorKind::Filesystem, "readdir /dev"))?,
-                HARDWARE_ACCELERATION_PATHS,
-            )
-            .await?;
-        }
-        if res.config.userspace_filesystems {
-            res.handle_devices(
-                tokio::fs::read_dir("/dev")
-                    .await
-                    .with_ctx(|_| (ErrorKind::Filesystem, "readdir /dev"))?,
-                USERSPACE_FILESYSTEM_PATHS,
-            )
-            .await?;
-        }
-        if res.config.virtual_networking {
-            res.handle_devices(
-                tokio::fs::read_dir("/dev")
-                    .await
-                    .with_ctx(|_| (ErrorKind::Filesystem, "readdir /dev"))?,
-                VIRTUAL_NETWORKING_PATHS,
+                paths,
             )
             .await?;
         }
@@ -347,27 +348,7 @@ impl LxcContainer {
         async move {
             while let Some(ent) = dir.next_entry().await? {
                 let path = ent.path();
-                if let Some(matches) = if matches.is_empty() {
-                    Some(Vec::new())
-                } else {
-                    let mut new_matches = Vec::new();
-                    for mut m in matches.iter().copied() {
-                        let could_match = if let Some(prefix) = m.strip_suffix("*") {
-                            m = prefix;
-                            path.to_string_lossy().starts_with(m)
-                        } else {
-                            path.starts_with(m)
-                        } || Path::new(m).starts_with(&path);
-                        if could_match {
-                            new_matches.push(m);
-                        }
-                    }
-                    if new_matches.is_empty() {
-                        None
-                    } else {
-                        Some(new_matches)
-                    }
-                } {
+                if let Some(matches) = match_device_patterns(&path, matches) {
                     let meta = ent.metadata().await?;
                     let ty = meta.file_type();
                     if ty.is_dir() {
@@ -730,6 +711,20 @@ pub struct LxcConfig {
     pub hardware_acceleration: bool,
     pub userspace_filesystems: bool,
     pub virtual_networking: bool,
+    pub hardware_virtualization: bool,
+}
+impl LxcConfig {
+    fn granted_device_paths(&self) -> Vec<&'static [&'static str]> {
+        [
+            (self.hardware_acceleration, HARDWARE_ACCELERATION_PATHS),
+            (self.userspace_filesystems, USERSPACE_FILESYSTEM_PATHS),
+            (self.virtual_networking, VIRTUAL_NETWORKING_PATHS),
+            (self.hardware_virtualization, HARDWARE_VIRTUALIZATION_PATHS),
+        ]
+        .into_iter()
+        .filter_map(|(granted, paths)| granted.then_some(paths))
+        .collect()
+    }
 }
 
 pub async fn connect(ctx: &RpcContext, container: &LxcContainer) -> Result<Guid, Error> {
@@ -807,4 +802,113 @@ pub async fn stats(ctx: RpcContext) -> Result<BTreeMap<PackageId, Option<Service
         stats.insert(id, Some(service_ref.stats().await?));
     }
     Ok(stats)
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod test {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    const DEV: &[&str] = &[
+        "/dev/dri/card0",
+        "/dev/dri/renderD128",
+        "/dev/fuse",
+        "/dev/kfd",
+        "/dev/kvm",
+        "/dev/net/tun",
+        "/dev/nvidia0",
+        "/dev/sda",
+    ];
+
+    fn granted<'a>(dev: &[&'a str], patterns: &[&str]) -> Vec<&'a str> {
+        dev.iter()
+            .copied()
+            .filter(|node| {
+                let mut matches: Vec<&str> = patterns.to_vec();
+                let mut walked = PathBuf::from("/dev");
+                for component in Path::new(node).strip_prefix("/dev").unwrap().components() {
+                    walked.push(component);
+                    match match_device_patterns(&walked, &matches) {
+                        Some(narrowed) => matches = narrowed,
+                        None => return false,
+                    }
+                }
+                true
+            })
+            .collect()
+    }
+
+    #[test]
+    fn hardware_virtualization_grants_kvm() {
+        assert_eq!(granted(DEV, HARDWARE_VIRTUALIZATION_PATHS), ["/dev/kvm"]);
+    }
+
+    #[test]
+    fn the_hardware_virtualization_flag_selects_the_kvm_paths() {
+        let config = LxcConfig {
+            hardware_virtualization: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            config.granted_device_paths(),
+            [HARDWARE_VIRTUALIZATION_PATHS]
+        );
+    }
+
+    #[test]
+    fn a_package_that_opts_into_nothing_is_granted_no_device() {
+        assert!(LxcConfig::default().granted_device_paths().is_empty());
+    }
+
+    #[test]
+    fn every_flag_selects_its_own_paths() {
+        let config = LxcConfig {
+            hardware_acceleration: true,
+            userspace_filesystems: true,
+            virtual_networking: true,
+            hardware_virtualization: true,
+        };
+        assert_eq!(
+            config.granted_device_paths(),
+            [
+                HARDWARE_ACCELERATION_PATHS,
+                USERSPACE_FILESYSTEM_PATHS,
+                VIRTUAL_NETWORKING_PATHS,
+                HARDWARE_VIRTUALIZATION_PATHS
+            ]
+        );
+    }
+
+    #[test]
+    fn kvm_is_absent_from_every_other_opt_in() {
+        for patterns in [
+            HARDWARE_ACCELERATION_PATHS,
+            USERSPACE_FILESYSTEM_PATHS,
+            VIRTUAL_NETWORKING_PATHS,
+        ] {
+            assert!(!granted(DEV, patterns).contains(&"/dev/kvm"));
+        }
+    }
+
+    #[test]
+    fn a_host_without_kvm_is_granted_nothing() {
+        let dev: Vec<&str> = DEV.iter().copied().filter(|n| *n != "/dev/kvm").collect();
+        assert!(granted(&dev, HARDWARE_VIRTUALIZATION_PATHS).is_empty());
+    }
+
+    #[test]
+    fn the_other_device_classes_are_unchanged() {
+        assert_eq!(
+            granted(DEV, HARDWARE_ACCELERATION_PATHS),
+            [
+                "/dev/dri/card0",
+                "/dev/dri/renderD128",
+                "/dev/kfd",
+                "/dev/nvidia0"
+            ]
+        );
+        assert_eq!(granted(DEV, USERSPACE_FILESYSTEM_PATHS), ["/dev/fuse"]);
+        assert_eq!(granted(DEV, VIRTUAL_NETWORKING_PATHS), ["/dev/net/tun"]);
+    }
 }

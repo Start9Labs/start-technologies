@@ -152,6 +152,11 @@ export type SDKManifest = {
   readonly virtualNetworking?: boolean
 
   /**
+   * @description Grants /dev/kvm when present. The opening process must run as container root.
+   */
+  readonly hardwareVirtualization?: boolean
+
+  /**
    * @description Enable OS plugins
    */
   readonly plugins?: T.PluginId[]

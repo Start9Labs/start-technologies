@@ -101,14 +101,15 @@ pub struct PackageMetadata {
     pub sdk_version: Option<Version>,
     #[serde(default)]
     pub hardware_acceleration: bool,
-    /// Mount /dev/fuse for fuse-overlayfs storage (the rootless storage
-    /// driver used by a nested OCI runtime).
+    /// Grants access to `/dev/fuse`.
     #[serde(default)]
     pub userspace_filesystems: bool,
-    /// Mount /dev/net/tun so the service can create kernel tunnel interfaces
-    /// (VPN / WireGuard / tun-class workloads).
+    /// Grants access to `/dev/net/tun`.
     #[serde(default)]
     pub virtual_networking: bool,
+    /// Grants /dev/kvm when present. The opening process must run as container root.
+    #[serde(default)]
+    pub hardware_virtualization: bool,
     #[serde(default)]
     pub plugins: BTreeSet<PluginId>,
     #[serde(default)]
@@ -297,4 +298,44 @@ impl Model<PackageVersionInfo> {
 
 pub async fn get_package_index(ctx: RegistryContext) -> Result<PackageIndex, Error> {
     ctx.db.peek().await.into_index().into_package().de()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_manifest_defaults_hardware_virtualization_to_false() {
+        let metadata = PackageMetadata {
+            title: "Test Package".into(),
+            description: Description {
+                short: LocaleString::Translated("Short".into()),
+                long: LocaleString::Translated("Long".into()),
+            },
+            release_notes: LocaleString::Translated("Notes".into()),
+            git_hash: None,
+            license: "MIT".into(),
+            package_repo: "https://example.com/package".parse().unwrap(),
+            upstream_repo: "https://example.com/upstream".parse().unwrap(),
+            marketing_url: None,
+            donation_url: None,
+            os_version: current_version(),
+            sdk_version: None,
+            hardware_acceleration: false,
+            userspace_filesystems: false,
+            virtual_networking: false,
+            hardware_virtualization: true,
+            plugins: BTreeSet::new(),
+            satisfies: BTreeSet::new(),
+        };
+        let mut old_manifest = serde_json::to_value(metadata).unwrap();
+        old_manifest
+            .as_object_mut()
+            .unwrap()
+            .remove("hardwareVirtualization");
+
+        let parsed: PackageMetadata = serde_json::from_value(old_manifest).unwrap();
+
+        assert!(!parsed.hardware_virtualization);
+    }
 }

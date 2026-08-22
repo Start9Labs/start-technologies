@@ -109,6 +109,7 @@ export function buildManifest<
     hardwareAcceleration: manifest.hardwareAcceleration ?? false,
     userspaceFilesystems: manifest.userspaceFilesystems ?? false,
     virtualNetworking: manifest.virtualNetworking ?? false,
+    hardwareVirtualization: manifest.hardwareVirtualization ?? false,
     plugins: manifest.plugins ?? [],
   }
 }

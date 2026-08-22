@@ -81,6 +81,12 @@
   service that has to dial a user-supplied LAN address over HTTPS. See
   [Trusting this server's certificates](https://docs.start9.com/packaging/service-to-service.html#trusting-this-servers-certificates)
 
+- **`hardwareVirtualization: true` in the manifest exposes `/dev/kvm`**, for a
+  service that runs its own virtual machines — QEMU/KVM, Firecracker, a device
+  emulator. The device appears only on a host whose CPU supports virtualization,
+  so handle its absence. See
+  [Hardware Virtualization (KVM)](https://docs.start9.com/packaging/manifest.html#hardware-virtualization-kvm)
+
 ### Fixed
 
 - **`VersionGraph` reports a missing migration path in terms a service owner can
