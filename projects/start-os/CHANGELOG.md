@@ -53,7 +53,7 @@ file tracks notable changes since the move to the monorepo.
   away.** The notification naming what went wrong was held back until StartOS had
   finished putting the service back the way it was, which can take several
   minutes. It now arrives as soon as the operation fails, while that recovery is
-  still running, and it arrives even when the recovery fails too.
+  still running.
 
 - **Apps that hold a connection open — desktop sync clients, API pollers — stop
   dropping in and out.** Nextcloud Desktop and clients like it showed a
