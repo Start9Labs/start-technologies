@@ -27,16 +27,19 @@ impl AsRef<str> for ServerHostname {
     }
 }
 
-/// The root CA's Common Name is `<hostname> Local Root CA`, and X.509 caps a Common
-/// Name at 64 characters.
-const MAX_LEN: usize = 50;
+/// X.509 caps a Common Name at 64 characters.
+const CN_MAX_LEN: usize = 64;
 
-/// The longest hostname `sethostname` accepts, `HOST_NAME_MAX`.
-const SYSTEM_MAX_LEN: usize = 64;
+/// The root CA is issued to `<hostname> Local Root CA`.
+const MAX_LEN: usize = CN_MAX_LEN - " Local Root CA".len();
+
+/// A leaf certificate is issued to `<hostname>.local`, so the server cannot serve its
+/// own address over TLS above this length.
+const MAX_SERVED_LEN: usize = CN_MAX_LEN - ".local".len();
 
 impl ServerHostname {
-    /// Checks that a hostname is non-empty and in the character set, so one stored
-    /// under looser rules still loads.
+    /// Checks the character set alone, so a hostname stored under looser rules still
+    /// boots.
     fn validate(&self) -> Result<(), Error> {
         if self.0.is_empty() {
             return Err(Error::new(
@@ -82,6 +85,15 @@ impl ServerHostname {
         Ok(res)
     }
 
+    /// Reports whether the server boots under this hostname and can serve
+    /// `<hostname>.local` over TLS.
+    fn is_usable(&self) -> bool {
+        self.validate().is_ok()
+            && self.0.len() <= MAX_SERVED_LEN
+            && !self.0.starts_with('-')
+            && !self.0.ends_with('-')
+    }
+
     /// Treats an empty hostname as absent rather than invalid.
     pub fn new_opt(hostname: Option<InternedString>) -> Result<Option<Self>, Error> {
         hostname
@@ -103,15 +115,16 @@ impl ServerHostname {
     }
 }
 
-/// Returns a hostname the system can carry, rewriting one it cannot.
+/// Returns a hostname the server can use, rewriting one it cannot.
 ///
-/// `set_hostname` runs on every boot and fails on a hostname outside the character
-/// set or longer than `SYSTEM_MAX_LEN`, leaving the server in diagnostic mode where
-/// nothing can rename it. A hostname the system carries is returned untouched, even
-/// where `new_from_input` would now turn it down.
+/// A hostname outside the character set fails `set_hostname`, which runs on every
+/// boot, and leaves the server in diagnostic mode where nothing can rename it. One
+/// too long or hyphen-edged for a `<hostname>.local` certificate leaves the server
+/// unreachable at its own address. A usable hostname is returned untouched, even
+/// where `new_from_input` would turn it down.
 pub fn repair_hostname(stored: &str) -> ServerHostname {
     let stored = ServerHostname(InternedString::intern(stored));
-    if stored.validate().is_ok() && stored.0.len() <= SYSTEM_MAX_LEN {
+    if stored.is_usable() {
         return stored;
     }
     let usable: String = stored
@@ -288,26 +301,48 @@ mod test {
         root_cert(MAX_LEN + 1).unwrap_err();
     }
 
+    // A leaf certificate is issued to `<hostname>.local`, and above `MAX_SERVED_LEN`
+    // it cannot be minted at all — so the server has no address of its own to serve.
+    #[test]
+    fn the_longest_served_hostname_still_fits_a_leaf_common_name() {
+        let root_key = crate::net::ssl::gen_nistp256().unwrap();
+        let branding = crate::net::ssl::CertBranding::start_os("startos");
+        let root =
+            crate::net::ssl::make_root_cert(&root_key, &branding, std::time::SystemTime::now())
+                .unwrap();
+        let leaf_key = crate::net::ssl::gen_nistp256().unwrap();
+        let leaf_cert = |len: usize| {
+            let hostname = ServerHostname(InternedString::from_display(&"a".repeat(len)));
+            let names = [hostname.local_domain_name()].into_iter().collect();
+            crate::net::ssl::make_leaf_cert(
+                (&root_key, &root),
+                (&leaf_key, &crate::net::ssl::SANInfo::new(&names)),
+                &branding,
+            )
+        };
+        leaf_cert(MAX_SERVED_LEN).unwrap();
+        leaf_cert(MAX_SERVED_LEN + 1).unwrap_err();
+    }
+
     #[test]
     fn generated_hostnames_are_valid_input() {
         validate_input(&generate_hostname()).unwrap();
     }
 
-    // Only a hostname the boot path rejects is rewritten. `new_from_input` turns down
-    // more than that, and a server already answering to such a name keeps it.
+    // A server already answering to a name `new_from_input` would turn down keeps it.
     #[test]
-    fn repair_leaves_a_hostname_the_system_carries_alone() {
+    fn repair_leaves_a_usable_hostname_alone() {
         assert_eq!(&*repair_hostname("my-cool-server"), "my-cool-server");
-        assert_eq!(&*repair_hostname("-my-server-"), "-my-server-");
-        let long_but_usable = "a".repeat(SYSTEM_MAX_LEN);
+        let long_but_usable = "a".repeat(MAX_SERVED_LEN);
         assert_eq!(repair_hostname(&long_but_usable).as_ref(), long_but_usable);
     }
 
     #[test]
     fn repair_keeps_as_much_of_an_unusable_hostname_as_it_can() {
         assert_eq!(&*repair_hostname("My_Cool Server"), "mycoolserver");
+        assert_eq!(&*repair_hostname("-my-server-"), "my-server");
         assert_eq!(
-            repair_hostname(&"a".repeat(SYSTEM_MAX_LEN + 1))
+            repair_hostname(&"a".repeat(MAX_SERVED_LEN + 1))
                 .chars()
                 .count(),
             MAX_LEN

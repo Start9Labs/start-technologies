@@ -115,12 +115,8 @@ fn server_info_mut(db: &mut Value) -> Option<&mut imbl_value::InOMap<InternedStr
         .and_then(|s| s.as_object_mut())
 }
 
-/// Bring a hostname the system cannot carry back into range.
-///
-/// A hostname outside the character set, or longer than the kernel allows, fails
-/// `sync_hostname`, which runs on every boot, so such a server comes up in
-/// diagnostic mode where nothing can rename it. Diagnostic mode can still take an
-/// update, so this is where it heals.
+/// Diagnostic mode can still take an update, so a hostname the server cannot use
+/// heals here.
 fn repair_unusable_hostname(db: &mut Value) {
     let Some(server_info) = server_info_mut(db) else {
         return;
@@ -136,7 +132,7 @@ fn repair_unusable_hostname(db: &mut Value) {
     server_info.insert(InternedString::intern("hostname"), Value::from(repaired));
 }
 
-/// The hostname is the server's only name, so `serverInfo.name` is removed.
+/// The hostname is the server's only name.
 fn drop_server_name(db: &mut Value) {
     if let Some(server_info) = server_info_mut(db) {
         server_info.remove(&InternedString::intern("name"));
@@ -395,7 +391,7 @@ mod test {
         );
     }
 
-    // A name longer than the field now accepts still boots, and the server already
+    // A name longer than the field accepts is still served, and the server already
     // answers to it, so the migration leaves it alone.
     #[test]
     fn leaves_a_long_but_working_hostname_alone() {
