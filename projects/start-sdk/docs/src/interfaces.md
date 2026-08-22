@@ -370,13 +370,13 @@ const origin = await multi.bindPort(443, {
 > [!NOTE]
 > For `{ certificate }`, StartOS connects to the container by IP, so the pinned certificate must be valid for that internal IP (present in its SANs). If it isn't, use `'disable'` instead.
 
-The rewrap carries the application protocol across both legs. StartOS offers your container the client's own ALPN list, then offers the client whatever your container selected from it — so a container advertising `h2` is reached over `h2` by a client that asked for `h2`, and a container that selects nothing leaves the client with no negotiated protocol, which an HTTP client treats as HTTP/1.1.
+The rewrap carries the application protocol across both legs. Unless the binding pins a list of its own, StartOS offers your container the client's own ALPN list, then offers the client whatever your container selected from it — so a container advertising `h2` is reached over `h2` by a client that asked for `h2`, and a container that selects nothing leaves the client with no negotiated protocol, which an HTTP client treats as HTTP/1.1.
 
 Advertise exactly the protocols your container can serve on its own listener. The client is only ever given one your container selects, so a list narrower than what your container speaks costs clients the better protocol — and a client whose own list shares nothing with yours may be refused, which reaches it as a TLS alert naming the hostname rather than the protocol.
 
 Advertising `h2` is the case to think about twice. It commits your container to serving every HTTP/2 client, including WebSockets. On an `https` or `wss` binding StartOS advertises HTTP/2 extended CONNECT ([RFC 8441](https://www.rfc-editor.org/rfc/rfc8441)) to the client whether or not your container implements it, so a browser opens its WebSocket that way and your container has to answer it. A container that advertises only `http/1.1` keeps those clients on HTTP/1.1, where a WebSocket is an ordinary `Upgrade`.
 
-`addSsl.alpn` narrows the protocols the binding puts forward. Your container still chooses out of that narrower list and the client is still offered its choice, so the two ends stay on one protocol — but a container that serves none of them refuses the connection, and so does a client that speaks none of them. Leave it unset unless you need to keep this binding off a protocol your container would otherwise select.
+`addSsl.alpn` narrows the protocols the binding puts forward. Your container is offered those of them the client also asked for, and the client is offered whatever your container picks, so the two ends stay on one protocol. A client that asks for none of them is refused; a client that asks for none at all is served as it would be without ALPN. A container that selects none of them leaves the client without a protocol rather than refusing it, so a container that ignores ALPN entirely makes the setting inert. Leave it unset unless you need to keep this binding off a protocol your container would otherwise select.
 
 ## Serving Your Own TLS (Passthrough)
 
@@ -398,7 +398,7 @@ StartOS still fronts the port with one of its TLS listeners, but that listener p
 Reach for passthrough only when the rewrap genuinely cannot serve, which is one of two cases:
 
 1. **The client must verify your container's own certificate.** A wallet that pins a certificate carried in a connection URI can only do so if the certificate it pins is the one actually served.
-2. **The client needs a protocol your container does not select.** A rewrap gives the client whatever ALPN your container chose on the inner leg, so a client that requires one — gRPC-go rejects a connection with no selected ALPN (`missing selected ALPN property`) — is served only if the container's own listener advertises it. LND binds its gRPC interface as a passthrough.
+2. **The client must see a protocol your container never selects.** A rewrap hands the client whatever your container chose, so a client that requires one — gRPC-go rejects a connection with no selected ALPN (`missing selected ALPN property`) — is served as long as your container's listener advertises it. Reach for passthrough here only when it cannot be made to. LND binds its gRPC interface as a passthrough.
 
 Otherwise prefer `addSsl`. Passthrough gives up everything the proxy does on your behalf:
 

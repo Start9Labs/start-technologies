@@ -268,12 +268,12 @@ file tracks notable changes since the move to the monorepo.
   settings excluded. StartOS now rejects the overlapping claim and names both
   ports, so the service reports the conflict instead of serving it.
 
-- **An interface that pins the protocols it offers now reaches a service that
-  encrypts its own end.** Setting `alpn` changed how StartOS dialled the service
-  as well as which protocols it put forward, so such a service received
-  plaintext on a port expecting TLS and nothing could connect to it. The setting
-  now narrows only the protocols on offer: the service still chooses among them,
-  and both ends of the connection carry the one it chose.
+- **An interface that pins the protocols it offers now loads.** Nothing could
+  connect to one whose service encrypts its own end: setting `alpn` changed how
+  StartOS dialled the service as well as which protocols it put forward, so the
+  service received plaintext on a port expecting TLS. The setting now narrows
+  only the protocols on offer — the service chooses among the ones the client
+  also asked for, and both ends of the connection carry the one it chose.
 
 - **A service that speaks HTTP/2 to StartOS now loads in a browser.** StartOS
   opens a fresh TLS connection to a service that encrypts its own end, and

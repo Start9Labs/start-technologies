@@ -983,10 +983,8 @@ pub struct ProxyTarget {
     /// The config StartOS dials the container with when the container serves
     /// its own TLS. `None` dials it in plaintext.
     pub connect_ssl: Option<Arc<ClientConfig>>,
-    /// Narrows the protocols this binding puts forward. A dialled container
-    /// chooses out of them and the client is offered its choice; without a TLS
-    /// leg they are what the client is offered. `None` puts forward the
-    /// client's own list.
+    /// Narrows the protocols this binding puts forward. `None` and
+    /// `Some(AlpnInfo::Reflect)` both put forward the client's own list.
     pub alpn: Option<AlpnInfo>,
     pub passthrough: bool,
     /// Open the internal leg with the client's source IP (`IP_TRANSPARENT`).
@@ -1235,14 +1233,20 @@ where
             Some(AlpnInfo::Specified(protos)) => {
                 protos.iter().map(|proto| proto.0.clone()).collect()
             }
-            Some(AlpnInfo::Reflect) | None => client_alpn,
+            Some(AlpnInfo::Reflect) | None => client_alpn.clone(),
         };
-        // The container's own TLS decides how it is dialled, and `alpn` decides
-        // what it is offered.
+        // The container is only put through protocols the client also offered,
+        // since its choice is what the client gets handed back. A client that
+        // named none leaves it named none too, so neither end negotiates one.
+        let dialled: Vec<Vec<u8>> = offered
+            .iter()
+            .filter(|proto| client_alpn.contains(proto))
+            .cloned()
+            .collect();
         let (stream, negotiated): (AcceptStream, _) = match &self.connect_ssl {
             Some(client_cfg) => {
                 let target_stream = TlsConnector::from(client_cfg.clone())
-                    .with_alpn(offered.clone())
+                    .with_alpn(dialled.clone())
                     .connect(ServerName::IpAddress(self.addr.ip().into()), tcp_stream)
                     .await
                     .with_ctx(|_| (ErrorKind::Network, self.addr))
@@ -1256,10 +1260,14 @@ where
             }
             None => (Box::pin(tcp_stream), None),
         };
-        // One protocol frames both legs, so a dialled container's choice is what
-        // the client is offered — anything else lets the two ends disagree.
         // rustls picks by this list's order, so assign rather than append.
         prev.alpn_protocols = match &self.connect_ssl {
+            // The binding and the client share no protocol. Offering the
+            // client the binding's list is how rustls tells it so, the same
+            // refusal it gets without a TLS leg.
+            Some(_) if dialled.is_empty() && !client_alpn.is_empty() => offered,
+            // One protocol frames both legs, so the container's own choice is
+            // what the client is offered.
             Some(_) => negotiated.into_iter().collect(),
             None => offered,
         };
@@ -2491,9 +2499,10 @@ mod conn_cap_tests {
     }
 }
 
-/// What `preprocess` puts to the container and what it offers the client. A
-/// dialled container chooses out of the binding's protocols and the client is
-/// offered its choice; without a TLS leg the client is offered them directly.
+/// Which protocols `preprocess` offers the container and the client. A dialled
+/// container chooses out of the binding's protocols and the client is offered
+/// its choice; without a TLS leg the client is offered them directly. Also
+/// covers `alpn`'s part in a target's identity.
 #[cfg(test)]
 mod upstream_alpn_tests {
     use std::net::Ipv4Addr;
@@ -2511,14 +2520,15 @@ mod upstream_alpn_tests {
         cfg
     }
 
-    /// A TLS backend advertising `alpn`, standing in for a container serving
-    /// its own TLS behind an `https` binding.
+    /// As [`spawn_backend_reporting`], for a caller with nothing to assert
+    /// about what the container negotiated.
     async fn spawn_backend(alpn: &[&str]) -> SocketAddr {
         spawn_backend_reporting(alpn).await.0
     }
 
-    /// As [`spawn_backend`], but reports what the container negotiated on its
-    /// first connection — the only way to tell what the dial actually offered.
+    /// A TLS backend advertising `alpn`, standing in for a container serving
+    /// its own TLS behind an `https` binding. Reports what it negotiated on its
+    /// first connection.
     async fn spawn_backend_reporting(
         alpn: &[&str],
     ) -> (SocketAddr, tokio::sync::oneshot::Receiver<Option<Vec<u8>>>) {
@@ -2575,8 +2585,8 @@ mod upstream_alpn_tests {
         rewrap_configured_with(&[])
     }
 
-    /// A rewrap whose own config carries `alpn`. The dial offers the client's
-    /// list, so this one is never what the backend is asked to choose from.
+    /// A rewrap whose own config carries `alpn`. The dial always supplies its
+    /// own list, so this one is never what the container chooses from.
     fn rewrap_configured_with(alpn: &[&str]) -> Option<Arc<ClientConfig>> {
         let mut cfg = client_config_no_verify(provider()).unwrap();
         cfg.alpn_protocols = alpn.iter().map(|a| a.as_bytes().to_vec()).collect();
@@ -2619,8 +2629,9 @@ mod upstream_alpn_tests {
         .expect("the client completes its handshake with the listener")
     }
 
-    /// As [`negotiate`], but over any dial and `alpn`, and with `base_alpn`
-    /// already on the config handed to `preprocess`.
+    /// As [`negotiate`], but against a given `backend`, for any dial strategy
+    /// and any `alpn`, and with `base_alpn` already on the config handed to
+    /// `preprocess`.
     async fn try_negotiate(
         connect_ssl: Option<Arc<ClientConfig>>,
         alpn: Option<AlpnInfo>,
@@ -2741,6 +2752,52 @@ mod upstream_alpn_tests {
         assert_eq!(
             target(addr, None, pinned(b"h2")),
             target(addr, None, pinned(b"h2")),
+        );
+    }
+
+    /// A pin is a narrowing, not a substitution: the container is only put
+    /// through protocols the client also named, so a client that speaks one of
+    /// them is served rather than handed a choice it cannot meet.
+    #[tokio::test]
+    async fn a_client_speaking_one_of_the_pinned_protocols_is_served() {
+        let both = AlpnInfo::Specified(vec![
+            MaybeUtf8String(b"h2".to_vec()),
+            MaybeUtf8String(b"http/1.1".to_vec()),
+        ]);
+        assert_eq!(
+            try_negotiate(
+                rewrap(),
+                Some(both),
+                &[],
+                spawn_backend(&["h2", "http/1.1"]).await,
+                &["http/1.1"],
+            )
+            .await
+            .expect("a client speaking one of the pinned protocols is served"),
+            Some("http/1.1".to_owned()),
+        );
+    }
+
+    /// A client that names no protocol leaves the container named none either,
+    /// so neither end negotiates one. Putting the pin to the container anyway
+    /// would frame it `h2` while the client stayed on HTTP/1.1.
+    #[tokio::test]
+    async fn a_pin_does_not_reach_a_container_when_the_client_names_nothing() {
+        let (backend, negotiated) = spawn_backend_reporting(&["h2", "http/1.1"]).await;
+        let h2 = AlpnInfo::Specified(vec![MaybeUtf8String(b"h2".to_vec())]);
+        assert_eq!(
+            try_negotiate(rewrap(), Some(h2), &[], backend, &[])
+                .await
+                .expect("a client that names no protocol is still served"),
+            None,
+        );
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(10), negotiated)
+                .await
+                .expect("the container's handshake settles within 10s")
+                .expect("the container is dialled over TLS, so its handshake completes"),
+            None,
+            "the container was framed a protocol the client never named",
         );
     }
 
