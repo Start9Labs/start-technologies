@@ -83,6 +83,14 @@ describe('checkDependencies version checks', () => {
     }
   })
 
+  test('an absent dependency is answered before the range is parsed', async () => {
+    const deps = await depsFor('not a range', {
+      installedVersion: null,
+      satisfies: [],
+    })
+    expect(deps.installedVersionSatisfied('filebrowser')).toBe(false)
+  })
+
   test('an absent dependency satisfies nothing, whatever it claims', async () => {
     const deps = await depsFor('^2.62.2:1', {
       installedVersion: null,
