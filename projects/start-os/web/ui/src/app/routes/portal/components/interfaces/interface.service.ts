@@ -1,5 +1,6 @@
 import { inject, Injectable } from '@angular/core'
 import { T, utils } from '@start9labs/start-core'
+import { selectLaunchableAddress } from '@start9labs/start-core/util/selectLaunchableAddress'
 import { tuiDefaultSort } from '@taiga-ui/cdk'
 import { ConfigService } from 'src/app/services/config.service'
 import { GatewayPlus } from 'src/app/services/gateway.service'
@@ -413,77 +414,10 @@ export class InterfaceService {
   }
 
   launchableAddress(ui: T.ServiceInterface, host: T.Host): string {
-    const addresses = utils.filledAddress(host, ui.addressInfo)
-
-    if (!addresses.hostnames.length) return ''
-
-    const publicDomains = addresses.filter({
-      kind: 'domain',
-      visibility: 'public',
+    return selectLaunchableAddress(ui, host, {
+      accessType: this.config.accessType,
+      hostname: this.config.hostname,
     })
-    const wanIp = addresses.filter({ kind: 'ipv4', visibility: 'public' })
-    const bestPublic = [publicDomains, wanIp].flatMap(h =>
-      h.format('urlstring'),
-    )[0]
-    const privateDomains = addresses.filter({
-      kind: 'domain',
-      visibility: 'private',
-    })
-    const mdns = addresses.filter({ kind: 'mdns' })
-    const bestPrivate = [privateDomains, mdns].flatMap(h =>
-      h.format('urlstring'),
-    )[0]
-
-    let matching
-    let onLan = false
-    switch (this.config.accessType) {
-      case 'ipv4':
-        matching = addresses.nonLocal
-          .filter({
-            kind: 'ipv4',
-            predicate: h => h.hostname === this.config.hostname,
-          })
-          .format('urlstring')[0]
-        onLan = true
-        break
-      case 'ipv6':
-        matching = addresses.nonLocal
-          .filter({
-            kind: 'ipv6',
-            predicate: h => h.hostname === this.config.hostname,
-          })
-          .format('urlstring')[0]
-        break
-      case 'localhost':
-        matching = addresses
-          .filter({ kind: 'localhost' })
-          .format('urlstring')[0]
-        onLan = true
-        break
-      case 'mdns':
-        matching = mdns.format('urlstring')[0]
-        onLan = true
-        break
-      case 'domain':
-        matching = publicDomains.format('urlstring')[0]
-        break
-      case 'tor':
-        matching = addresses
-          .filter({
-            pluginId: 'tor',
-          })
-          .format('urlstring')[0]
-        break
-      case 'wan-ipv4':
-        matching = wanIp.format('urlstring')[0]
-        break
-    }
-
-    if (matching) return matching
-    if (onLan && bestPrivate) return bestPrivate
-    if (bestPublic) return bestPublic
-    if (bestPrivate) return bestPrivate
-    return ''
   }
 }
 

@@ -10,6 +10,16 @@ A service interface is a network endpoint exposed by a service running on your s
 
 - **P2P** — A peer-to-peer endpoint for the service to communicate with other nodes on its network. Examples: Bitcoin P2P, Lightning P2P.
 
+## Opening a UI
+
+The **Open UI** button on a running service opens its web interface, and offers a menu of them when the service has more than one. StartOS picks which address to open from the way you are reaching StartOS itself — a `.local` name for a `.local` session, an onion address for a Tor session, a domain from outside your network — so it usually lands on an address your browser can resolve. A service reachable only on your local network has nothing else to offer a browser that is away from it, and you will get a local address that does not load.
+
+A few services work at only one address, the one they were configured with, and those tell StartOS which it is. **Open UI** then opens that address and keeps opening it, because for such a service any other address rejects you. So if it opens something you cannot reach from where you are, the address to change is the service's own, through whichever action it gives you for choosing a primary URL — that action is also how you point it somewhere else. Switching that address off in the tables below has the same effect, since StartOS only opens an address you have enabled.
+
+Which browser you are in still limits what a service can ask for. An onion address is opened from a Tor session and from no other, and from a Tor session StartOS honors only an onion or a public address, never one on your local network — Tor Browser cannot reach your LAN. Where a service's choice is ruled out this way, **Open UI** goes back to choosing for you.
+
+To open one particular address instead, open it from its own row in the gateway tables below. An onion address has no such control — copy its URL and paste it into Tor Browser.
+
 ## Viewing Interface Addresses
 
 Open the **Interfaces** tab to see every interface the service exposes. Each interface expands to reveal its **addresses** — all the ways that interface can be reached, organized by [gateway](gateways.md). When a service exposes only one interface, it is expanded by default.

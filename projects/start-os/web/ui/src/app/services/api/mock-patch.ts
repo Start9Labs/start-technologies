@@ -625,6 +625,7 @@ export const mockPatchData: DataModel = {
                   description:
                     'A launchable web app for you to interact with your Bitcoin node',
                   type: 'ui',
+                  preferredLauncherAddress: 'https://my-bitcoin.home:42443',
                   addressInfo: {
                     username: null,
                     hostId: 'abcdefg',

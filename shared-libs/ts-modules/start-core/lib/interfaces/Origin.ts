@@ -39,9 +39,6 @@ export class Origin {
    * @description A function to register a group of origins (<PROTOCOL> :// <HOSTNAME> : <PORT>) with StartOS
    *
    *   The returned addressReceipt serves as proof that the addresses were registered
-   *
-   * @param addressInfo
-   * @returns
    */
   async export(
     serviceInterfaces: ServiceInterfaceBuilder[],
@@ -58,6 +55,7 @@ export class Origin {
         query: search,
         schemeOverride,
         masked,
+        preferredLauncherAddress,
       } = serviceInterface.options
 
       const addressInfo = this.build({
@@ -74,6 +72,7 @@ export class Origin {
         addressInfo,
         type,
         masked,
+        preferredLauncherAddress,
       })
 
       addressesInfo.push(addressInfo)

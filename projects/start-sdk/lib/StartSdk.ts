@@ -560,6 +560,11 @@ export class StartSdk<Manifest extends T.SDKManifest> {
           schemeOverride: { ssl: Scheme; noSsl: Scheme } | null
           /** mask the url (recommended if it contains credentials such as an API key or password) */
           masked: boolean
+          /** An absolute interface URL that StartOS should prefer for Open UI.
+           *
+           * @see {@link https://docs.start9.com/packaging/interfaces.html#nominating-an-address-to-open Nominating an Address to Open}
+           */
+          preferredLauncherAddress?: string | null
         },
       ) => new ServiceInterfaceBuilder({ ...options, effects }),
       /**

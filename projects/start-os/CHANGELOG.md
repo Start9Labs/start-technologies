@@ -18,6 +18,10 @@ file tracks notable changes since the move to the monorepo.
   behavior. The server's own `.local` name remains reserved for StartOS. See
   [Private Domains](https://docs.start9.com/start-os/private-domains.html).
 
+- **Open UI can honor a service's configured address.** Services that depend on
+  one canonical origin can now direct Open UI to that address while it remains
+  enabled and compatible with the current browser session.
+
 - **A service can permanently retire a network host or a port it no longer
   uses, and the port numbers it held become available again.** A service that
   reorganizes its interfaces across an update — renaming a host, dropping a

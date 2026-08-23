@@ -87,6 +87,11 @@
   so handle its absence. See
   [Hardware Virtualization (KVM)](https://docs.start9.com/packaging/manifest.html#hardware-virtualization-kvm)
 
+- **`createInterface` accepts `preferredLauncherAddress`.** A UI interface can
+  nominate the absolute URL that StartOS should open when a service depends on
+  one canonical origin. See
+  [Nominating an Address to Open](https://docs.start9.com/packaging/interfaces.html#nominating-an-address-to-open).
+
 ### Fixed
 
 - **`VersionGraph` reports a missing migration path in terms a service owner can

@@ -10,4 +10,8 @@ export type ExportServiceInterfaceParams = {
   masked: boolean
   addressInfo: AddressInfo
   type: ServiceInterfaceType
+  /**
+   * The interface address Open UI should prefer.
+   */
+  preferredLauncherAddress?: string | null
 }

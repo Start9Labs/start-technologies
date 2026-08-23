@@ -238,23 +238,75 @@ sdk.createInterface(effects, {
   username: null, // Auth username embedded in URL
   path: '/some/path/', // URL path
   query: {}, // URL query params
+  preferredLauncherAddress: null, // Address Open UI should prefer (see below)
 })
 ```
 
-| Option           | Type                                                       | Description                                                                                                                                                                    |
-| ---------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `name`           | `string`                                                   | Display name shown to the user. Wrap with `i18n()`.                                                                                                                            |
-| `id`             | `string`                                                   | Unique identifier. How you find this interface at runtime, by walking the host from `sdk.host.getOwn()` (see [main.ts](./main.md)).                                            |
-| `description`    | `string`                                                   | Description shown to the user. Wrap with `i18n()`.                                                                                                                             |
-| `type`           | `'ui'`, `'api'`, or `'p2p'`                                | `'ui'` for browser interfaces, `'api'` for programmatic endpoints, `'p2p'` for peer-to-peer connections.                                                                       |
-| `masked`         | `boolean`                                                  | If `true`, the interface URL is shown as a copyable secret. Use for URLs containing credentials or tokens.                                                                     |
-| `schemeOverride` | `{ ssl: string \| null; noSsl: string \| null }` \| `null` | Override the URL scheme for custom protocols. For example, `{ ssl: 'lndconnect', noSsl: 'lndconnect' }` produces `lndconnect://` URLs. Use `null` for standard `http`/`https`. |
-| `username`       | `string` \| `null`                                         | Username embedded in the URL (e.g., for `smp://fingerprint:password@host`).                                                                                                    |
-| `path`           | `string`                                                   | URL path appended to the base address (e.g., `'/admin/'`).                                                                                                                     |
-| `query`          | `object`                                                   | URL query parameters as key-value pairs (e.g., `{ macaroon: 'abc123' }`).                                                                                                      |
+| Option                     | Type                                                       | Description                                                                                                                                                                    |
+| -------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `name`                     | `string`                                                   | Display name shown to the user. Wrap with `i18n()`.                                                                                                                            |
+| `id`                       | `string`                                                   | Unique identifier. How you find this interface at runtime, by walking the host from `sdk.host.getOwn()` (see [main.ts](./main.md)).                                            |
+| `description`              | `string`                                                   | Description shown to the user. Wrap with `i18n()`.                                                                                                                             |
+| `type`                     | `'ui'`, `'api'`, or `'p2p'`                                | `'ui'` for browser interfaces, `'api'` for programmatic endpoints, `'p2p'` for peer-to-peer connections.                                                                       |
+| `masked`                   | `boolean`                                                  | If `true`, the interface URL is shown as a copyable secret. Use for URLs containing credentials or tokens.                                                                     |
+| `schemeOverride`           | `{ ssl: string \| null; noSsl: string \| null }` \| `null` | Override the URL scheme for custom protocols. For example, `{ ssl: 'lndconnect', noSsl: 'lndconnect' }` produces `lndconnect://` URLs. Use `null` for standard `http`/`https`. |
+| `username`                 | `string` \| `null`                                         | Username embedded in the URL (e.g., for `smp://fingerprint:password@host`).                                                                                                    |
+| `path`                     | `string`                                                   | URL path appended to the base address (e.g., `'/admin/'`).                                                                                                                     |
+| `query`                    | `object`                                                   | URL query parameters as key-value pairs (e.g., `{ macaroon: 'abc123' }`).                                                                                                      |
+| `preferredLauncherAddress` | `string` \| `null` \| _omitted_                            | The URL of the address StartOS's **Open UI** control should prefer for this interface. See [Nominating an Address to Open](#nominating-an-address-to-open).                    |
 
 > [!TIP]
 > The `id` you assign to an interface is what you use in `main.ts` to retrieve hostnames for it. Interfaces are reached through their **host**: `sdk.host.getOwn(effects, hostId)` returns the host, and the interface lives at `host.bindings[internalPort].interfaces[id]`. See [Main](./main.md#getting-hostnames) for details.
+
+## Nominating an Address to Open
+
+StartOS's **Open UI** control picks the address that suits how the admin is reaching StartOS at that moment — a `.local` name for a `.local` session, an onion address for a Tor session — so it usually lands on a link that resolves in the browser they are already using.
+
+A few services work at exactly one origin. CryptPad derives account keys from the origin it is loaded at, so opening it at a second, perfectly reachable address rejects the right password; Ghost, Gitea and Vaultwarden each build links or callbacks from one configured URL. Such a service already asks the user which URL to treat as primary — see [Set a Primary URL](./recipe-primary-url.md) — and `preferredLauncherAddress` passes that answer on, so **Open UI** opens the address the service was configured for.
+
+Nominate on the interface the user opens, which is the one carrying the control: **Open UI** appears only for a `type: 'ui'` interface whose `scheme` is `http` or whose `sslScheme` is `https`, so a nomination on an `api` or `p2p` interface is stored and never acted on. Some services keep their canonical URL on an interface that is not the web UI — Synapse's server name belongs to its federation interface, and its admin UI is a separate one on another host. There the stored URL is not this interface's address and nominating it would match nothing, so nominate only where the URL the user picked is an address of the interface carrying the control.
+
+Read the user's choice reactively, so re-running the action re-runs `setupInterfaces` and re-nominates:
+
+```typescript
+export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
+  const primaryUrl = await storeJson.read(s => s.primaryUrl).const(effects)
+
+  const uiMulti = sdk.MultiHost.of(effects, 'ui-multi')
+  const uiOrigin = await uiMulti.bindPort(uiPort, { protocol: 'http' })
+
+  const ui = sdk.createInterface(effects, {
+    name: i18n('Web UI'),
+    id: 'ui',
+    description: i18n('The web interface'),
+    type: 'ui',
+    masked: false,
+    schemeOverride: null,
+    username: null,
+    path: '',
+    query: {},
+    preferredLauncherAddress: primaryUrl,
+  })
+
+  return [await uiOrigin.export([ui])]
+})
+```
+
+Pass an absolute URL carrying a scheme and a host. Omitting `preferredLauncherAddress`, setting it to `null`, or passing a blank, whitespace-only, or malformed value leaves **Open UI** on its usual address-selection behavior.
+
+StartOS compares the scheme, hostname and port of what you pass against the addresses this interface has right now, and opens the match. The nomination outranks the connection-based choice, because a service that works at one origin is better served by the address its user picked than by one derived from the admin's connection — so **Open UI** stays on it until the user disables that address, at which point the choice reverts.
+
+Some addresses are left out of the comparison, in the cases where StartOS can tell the session asking could not resolve them. Everywhere else it takes your word for it:
+
+- **An address a plugin publishes is honored only from a session on that plugin.** `accessType` recognizes Tor by the `.onion` the browser is on, and no other plugin's session, so an onion nomination is honored from a Tor session and every other plugin address reverts to the usual choice.
+- **A Tor session honors only an onion address or a public one.** Tor Browser reaches neither a `.local` name nor a LAN IP.
+- **Loopback, IPv6 link-local and the container bridge are never nominated.** The primary-URL select a user picks from can list them, and none is reachable from another machine.
+
+> [!WARNING]
+> Nominate an address the people who use the service can actually reach, because StartOS opens it rather than second-guessing them. A public domain nominated on a home network needs the router to loop LAN traffic back to it, and a `.local` name nominated for a service reached from outside resolves for nobody who is away.
+
+> [!NOTE]
+> Only the origin has to match. The path and query of the opened URL come from this interface's own `path` and `query`, so changing either leaves the nomination standing — what pins it is the scheme, hostname and port, which is the part an origin-sensitive app checks. That also means reassigning the interface's external port unseats the nomination, which is correct: the origin the app was configured for changed too. Give the user a way back to a working choice — the reactive variant of [Set a Primary URL](./recipe-primary-url.md) raises a task when the stored URL goes missing, and a service whose URL is permanent has no watcher to do that.
 
 ## Port Ranges
 
