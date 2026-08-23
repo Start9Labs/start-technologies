@@ -64,14 +64,12 @@ export async function checkDependencies<
     !!infoFor(packageId).result.installedVersion
   const installedVersionSatisfied = (packageId: DependencyId) => {
     const dep = infoFor(packageId)
-    // A flavored version fails every comparison against an unflavored anchor, so
-    // a flavor matches the range through the versions it declares in `satisfies`.
+    if (!dep.result.installedVersion) return false
+    // A flavored version is incomparable to an unflavored one, so the versions
+    // the dependency declares in `satisfies` stand in for it.
     const range = VersionRange.parse(dep.requirement.versionRange)
-    return (
-      !!dep.result.installedVersion &&
-      [dep.result.installedVersion, ...dep.result.satisfies].some(v =>
-        ExtendedVersion.parse(v).satisfies(range),
-      )
+    return [dep.result.installedVersion, ...dep.result.satisfies].some(v =>
+      ExtendedVersion.parse(v).satisfies(range),
     )
   }
   const runningSatisfied = (packageId: DependencyId) => {

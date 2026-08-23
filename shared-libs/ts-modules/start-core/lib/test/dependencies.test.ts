@@ -39,6 +39,13 @@ describe('checkDependencies version checks', () => {
       'a flavored version standing in for one in range',
       '^2.62.2:1',
       QUANTUM,
+      ['2.60.0:0', '2.63.23:0'],
+      true,
+    ],
+    [
+      'an unflavored version standing in for one in range',
+      '^2.62.2:1',
+      '2.60.0:0',
       ['2.63.23:0'],
       true,
     ],
@@ -70,7 +77,9 @@ describe('checkDependencies version checks', () => {
     if (expected) {
       expect(() => deps.throwIfNotSatisfied('filebrowser')).not.toThrow()
     } else {
-      expect(() => deps.throwIfNotSatisfied('filebrowser')).toThrow()
+      expect(() => deps.throwIfNotSatisfied('filebrowser')).toThrow(
+        'does not match expected version range',
+      )
     }
   })
 

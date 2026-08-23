@@ -71,7 +71,7 @@ npm run build:ui       # production build of a single app (build:setup / build:t
 
 ## Testing
 
-There is no unit-test runner wired up — type-checking (tsc, strict + strictTemplates) plus a successful build is the verification bar. Run from the repo root:
+`start-core` has a jest suite in `start-core/lib/test/`, run by `make -C shared-libs/ts-modules/start-core test` and reached by the root `make test` in CI. The Angular libs have no test runner — for them type-checking (tsc, strict + strictTemplates) plus a successful build is the verification bar. Run from the repo root:
 
 ```sh
 npm run check          # type-check every project (i18n, shared, marketplace, ui, setup, brochure)
