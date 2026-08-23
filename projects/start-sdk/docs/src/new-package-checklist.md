@@ -68,6 +68,6 @@ The scaffold names its arbitrary ids `example-*` (`example-volume`, `example-ima
 ## After that
 
 The checklist ends here, and it leaves nothing behind in the repo to maintain. From this point
-a defect or a wanted capability is **a GitHub issue on the package repo** — not a checklist, a
-worklist, or a notes file. See
-[Development Workflow — Bugs and feature requests are issues](workflow.md#bugs-and-feature-requests-are-issues).
+a defect you can fix is a fix, and one that needs a decision is **a GitHub issue on the package
+repo** — never a checklist, a worklist, or a notes file. See
+[Development Workflow — Fix what you find; file only what needs deciding](workflow.md#fix-what-you-find-file-only-what-needs-deciding).

@@ -69,11 +69,17 @@ When you don't know a fact, find it; don't invent it and move on. The failure mo
 
 When you can't verify something, say so — raise it as an open question, or open an issue if it needs tracking beyond this session. Don't paper over it with confident prose in the README.
 
-## Bugs and feature requests are issues
+## Fix what you find; file only what needs deciding
 
-A defect you found and a capability the package should grow both belong in **the package repo's GitHub issue tracker**, filed as you find them. Nothing else in the repo is a place to record work: no `TODO.md`, no `NOTES.md`, no `PLAN.md`, no results log at the bottom of a doc. A file like that is invisible to everyone who isn't reading the repo, it accumulates session notes nobody can act on, and it goes stale the moment the session ends.
+A defect you spot while you already have the package open is a fix in the branch you are already on, not a report for someone else to pick up. That holds whether or not it is related to what you came to do: you have the code in front of you and the context to be sure, and the next person has neither. Describe what you fixed, and why, in the PR body.
 
-What does not become an issue: what you verified, what you tried, what you decided and why. That is the commit message and the PR body's job, where it stays attached to the change that motivated it.
+Open **a GitHub issue on the package repo** when the call is not yours to make — you cannot pin the cause down, two defensible fixes exist and choosing between them needs a human, or the change is too large to ride on the work in hand. Say what you found and what you would need decided. Then reference the issue in a line of the PR body if a PR is open; don't write the finding out in full in both places, or the two copies immediately start to disagree.
+
+The tracker in the other direction is not an invitation. An open issue is somebody's report, not a queue you may pick from — take one on when you were asked to, or when it carries the `Approved` label, which is a maintainer saying it is ready for a PR. Then implement it in the branch you already have and put `Closes #<n>` in the PR body.
+
+Nothing else in the repo is a place to record work. Don't create a `TODO.md`, a `NOTES.md`, a `PLAN.md`, or a results log at the bottom of a doc: a file like that is invisible to everyone who isn't reading the repo, it accumulates session notes nobody can act on, and it goes stale the moment the session ends.
+
+What is neither a fix nor an issue: what you verified, what you tried, what you decided and why. That is the commit message and the PR body's job, where it stays attached to the change that motivated it.
 
 ## Search the SDK before deciding something is impossible
 
