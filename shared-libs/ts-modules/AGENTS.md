@@ -24,7 +24,7 @@ npm run build:ui             # prod build of a single app
 ## Gotchas
 
 - `@start9labs/start-sdk` and `patch-db-client` are `file:` deps built by `build:deps`; a fresh checkout won't type-check until you run it.
-- There is no unit-test runner wired up — `npm run check` (tsc, strict + strictTemplates) plus a successful `build:*` is the verification bar.
+- `start-core` has a jest suite in `start-core/lib/test/`, run by `make -C shared-libs/ts-modules/start-core test` and reached by the root `make test` in CI. The Angular libs have no test runner — for them `npm run check` (tsc, strict + strictTemplates) plus a successful `build:*` is the verification bar.
 - `shared-libs/crates/patch-db` is a first-party crate; `build:deps` runs `npm ci && npm run build` inside it.
 
 - **Frontend house style lives in the `start9-frontend` skill** at the repo root (`.claude/skills/start9-frontend/`): `SKILL.md` (doctrine, surprise index, review checklist) plus per-topic references (components, styling, forms, overlays, state, i18n, the antipattern catalog, a verified Taiga 5 API reference). Claude Code loads it automatically; other agents and humans read `SKILL.md` first, then the reference for the topic at hand. Where older docs or existing code disagree with the skill, the skill wins — and never guess a Taiga API: verify via the skill's `references/taiga.md`, the `taiga-ui-mcp` MCP server, or `https://taiga-ui.dev/llms-full.txt`. **Keep the skill current**: it is the fleet-wide frontend source of truth — `start9-store`, `ops-server`, and `support-server` reach this exact copy through committed symlinks, and stack-version facts live only in its fleet table — so when frontend conventions, versions, or idioms change, update the skill in the same change.

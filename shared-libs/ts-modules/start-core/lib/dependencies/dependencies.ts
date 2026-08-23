@@ -64,10 +64,13 @@ export async function checkDependencies<
     !!infoFor(packageId).result.installedVersion
   const installedVersionSatisfied = (packageId: DependencyId) => {
     const dep = infoFor(packageId)
+    // A flavored version fails every comparison against an unflavored anchor, so
+    // a flavor matches the range through the versions it declares in `satisfies`.
+    const range = VersionRange.parse(dep.requirement.versionRange)
     return (
       !!dep.result.installedVersion &&
-      ExtendedVersion.parse(dep.result.installedVersion).satisfies(
-        VersionRange.parse(dep.requirement.versionRange),
+      [dep.result.installedVersion, ...dep.result.satisfies].some(v =>
+        ExtendedVersion.parse(v).satisfies(range),
       )
     )
   }
@@ -123,13 +126,7 @@ export async function checkDependencies<
     if (!dep.result.installedVersion) {
       throw new Error(`${dep.result.title || packageId} is not installed`)
     }
-    if (
-      ![dep.result.installedVersion, ...dep.result.satisfies].find(v =>
-        ExtendedVersion.parse(v).satisfies(
-          VersionRange.parse(dep.requirement.versionRange),
-        ),
-      )
-    ) {
+    if (!installedVersionSatisfied(packageId)) {
       throw new Error(
         `Installed version ${dep.result.installedVersion} of ${dep.result.title || packageId} does not match expected version range ${dep.requirement.versionRange}`,
       )

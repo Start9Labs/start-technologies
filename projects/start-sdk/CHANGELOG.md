@@ -133,6 +133,13 @@
   out**, where the bare signal had read like an OOM kill. `exec`'s result
   carries `timedOutAfter` alongside `exitCode` and `exitSignal`
 
+- **`checkDependencies(...).satisfied()` accepts a dependency installed on a
+  flavor**, matching `throwIfNotSatisfied()` and the web UI. A flavored version
+  fails every comparison against an unflavored anchor, so a flavor stands in for
+  the versions it declares in `satisfies` — the boolean surface ignored those and
+  reported a `#knots` Bitcoin or a `#quantum` File Browser as unsatisfied while
+  the throwing surface passed
+
 ### Security
 
 - **The bundled ESLint and typescript-eslint trees carry patched
