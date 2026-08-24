@@ -807,5 +807,5 @@ export default {
   914: 'Anmeldung erfolgreich, aber der Server hat den neuen Geräteschlüssel abgelehnt. Versuchen Sie es erneut.',
   915: 'Zu lang für einen QR-Code',
   916: 'Ihre Zertifizierungsstelle weist Ihre Kontrolle über diese Domain nach, indem sie sich auf Port 443 mit ihr verbindet — unabhängig davon, welchen Port die Adresse selbst verwendet.',
-  917: 'Über IPv6 gibt es nichts weiterzuleiten — stattdessen muss die Firewall Ihres Gateways eingehende Verbindungen zu dieser Adresse zulassen.',
+  917: 'Über IPv6 gibt es nichts weiterzuleiten — stattdessen muss die Firewall Ihres Gateways eingehende Verbindungen zu diesem Port zulassen.',
 } satisfies i18n

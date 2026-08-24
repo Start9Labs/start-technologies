@@ -5,10 +5,5 @@ import type { GatewayId } from './GatewayId'
 export type CheckChallengeParams = {
   fqdn: string
   gateway: GatewayId
-  /**
-   * The external port the address itself is served on. Only decides whether
-   * the challenge port needs a probe of its own; it is never probed here.
-   */
-  port: number
   acme: AcmeProvider | null
 }

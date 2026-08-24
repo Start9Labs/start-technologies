@@ -192,10 +192,11 @@ export class DomainHealthService {
           isRange || !ctx.acme || portOrRes === CHALLENGE_PORT
             ? Promise.resolve(null)
             : this.api
+                // A domain served on 443 is covered by the probe above, so
+                // the request is not made rather than answered with nothing.
                 .checkChallenge({
                   fqdn,
                   gateway: gatewayId,
-                  port: portOrRes,
                   acme: ctx.acme,
                 })
                 // A failed probe is not a pass. A bare null means the domain

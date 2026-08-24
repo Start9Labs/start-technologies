@@ -3185,12 +3185,6 @@ help.arg.address:
   fr_FR: "Adresse réseau"
   pl_PL: "Adres sieciowy"
 
-help.arg.address-port:
-  en_US: "External port the address itself is served on"
-  de_DE: "Externer Port, über den die Adresse selbst bereitgestellt wird"
-  es_ES: "Puerto externo en el que se sirve la propia dirección"
-  fr_FR: "Port externe sur lequel l'adresse elle-même est servie"
-  pl_PL: "Port zewnętrzny, na którym udostępniany jest sam adres"
 
 help.arg.gua-wan:
   en_US: "Expose the IPv6 GUA to the WAN (false = LAN-only)"

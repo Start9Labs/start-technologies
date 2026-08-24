@@ -24,6 +24,7 @@ use crate::net::host::binding::{
 use crate::net::service_interface::{HostnameInfo, HostnameMetadata};
 use crate::net::vhost::ACME_CHALLENGE_PORT;
 use crate::prelude::*;
+use crate::util::serde::const_true;
 use crate::{GatewayId, HostId, PackageId};
 
 pub mod address;
@@ -48,10 +49,6 @@ fn default_port_forward_count() -> u16 {
     1
 }
 
-fn default_port_forward_local() -> bool {
-    true
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -71,7 +68,7 @@ pub struct PortForward {
     /// Whether devices on your own network dial this forward too. False for one
     /// only a certificate authority dials: no address is served on that port,
     /// so whether the router hairpins it back says nothing.
-    #[serde(default = "default_port_forward_local")]
+    #[serde(default = "const_true")]
     pub local: bool,
 }
 

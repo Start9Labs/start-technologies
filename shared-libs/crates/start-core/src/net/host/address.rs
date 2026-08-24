@@ -20,6 +20,7 @@ use crate::net::gateway::{
 use crate::net::host::binding::{DerivedAddressInfo, set_nonssl_lan_group, set_nonssl_wan_group};
 use crate::net::host::{Host, HostApiKind, all_hosts};
 use crate::net::service_interface::HostnameMetadata;
+use crate::net::vhost::ACME_CHALLENGE_PORT;
 use crate::prelude::*;
 use crate::util::serde::{HandlerExtSerde, display_serializable};
 
@@ -588,16 +589,22 @@ pub async fn add_public_domain<Kind: HostApiKind>(
             },
         ),
         // TLS-ALPN-01 is validated at 443, which the two probes above never
-        // touch when the domain is served somewhere else.
-        check_challenge(
-            ctx.clone(),
-            CheckChallengeParams {
-                fqdn: fqdn.clone(),
-                gateway: gateway.clone(),
-                port: ext_port,
-                acme: authority,
-            },
-        )
+        // touch when the domain is served somewhere else. A domain served
+        // there has just been probed by `check_port` above.
+        async {
+            if ext_port == ACME_CHALLENGE_PORT {
+                return Ok(None);
+            }
+            check_challenge(
+                ctx.clone(),
+                CheckChallengeParams {
+                    fqdn: fqdn.clone(),
+                    gateway: gateway.clone(),
+                    acme: authority,
+                },
+            )
+            .await
+        }
     );
 
     Ok(AddPublicDomainRes {

@@ -807,5 +807,5 @@ export default {
   914: 'Inicio de sesión correcto, pero el servidor rechazó la nueva clave del dispositivo. Inténtelo de nuevo.',
   915: 'Demasiado largo para un código QR',
   916: 'Tu autoridad certificadora demuestra que controlas este dominio conectándose a él en el puerto 443, sea cual sea el puerto que use la propia dirección.',
-  917: 'Por IPv6 no hay nada que redirigir: en su lugar, el firewall de tu puerta de enlace debe permitir las conexiones entrantes a esta dirección.',
+  917: 'Por IPv6 no hay nada que redirigir: en su lugar, el firewall de tu puerta de enlace debe permitir las conexiones entrantes a este puerto.',
 } satisfies i18n

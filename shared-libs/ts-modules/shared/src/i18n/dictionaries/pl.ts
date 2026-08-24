@@ -807,5 +807,5 @@ export default {
   914: 'Logowanie powiodło się, ale serwer odrzucił nowy klucz urządzenia. Spróbuj ponownie.',
   915: 'Za długie na kod QR',
   916: 'Twój urząd certyfikacji potwierdza kontrolę nad tą domeną, łącząc się z nią na porcie 443, niezależnie od portu używanego przez sam adres.',
-  917: 'Przez IPv6 nie ma czego przekierowywać — zamiast tego zapora bramy musi zezwalać na połączenia przychodzące do tego adresu.',
+  917: 'Przez IPv6 nie ma czego przekierowywać — zamiast tego zapora bramy musi zezwalać na połączenia przychodzące do tego portu.',
 } satisfies i18n

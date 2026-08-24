@@ -47,9 +47,9 @@ export type DomainValidationData = {
   // The ACME authority that issues this domain's certificate, if any. A domain
   // with one needs port 443 whatever port it is served on.
   acme: T.AcmeProvider | null
-  // Probe results for port 443. Null where nothing has probed it, or where the
-  // backend says the domain does not need it right now — it names no ACME
-  // authority, it is already served there, or its certificate has life left.
+  // Probe results for port 443. Null where nothing probed it, and where the
+  // domain does not need it: it names no ACME authority, it is already served
+  // there, or its certificate has life left.
   challenge: T.CheckChallengeRes | null
   initialResults?: {
     dns: T.QueryDnsRes | null
@@ -167,7 +167,7 @@ export type DomainValidationData = {
       <h3 tuiHeader="h6">{{ 'Certificate Authority' | i18n }}</h3>
       <p>
         {{
-          'Your certificate authority proves you control this domain by connecting to it on port 443, whatever port the address itself uses.'
+          'Your certificate authority proves you control this domain by connecting to it on port 443, regardless of which port the address itself uses.'
             | i18n
         }}
       </p>
@@ -193,7 +193,7 @@ export type DomainValidationData = {
       @if (gua) {
         <p>
           {{
-            'Over IPv6 there is nothing to forward — your gateway firewall must allow inbound connections to this address instead.'
+            'Over IPv6 there is nothing to forward — your gateway firewall must allow inbound connections to this port instead.'
               | i18n
           }}
         </p>
