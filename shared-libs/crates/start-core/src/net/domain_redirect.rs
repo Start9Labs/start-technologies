@@ -277,6 +277,16 @@ mod test {
     /// A binding serves its domains only through an exported interface, so
     /// every fixture needs one: `BindInfo::enabled_addresses` drops every
     /// address but the internal ones when `interfaces` is empty.
+    /// The plaintext half of the pair the SDK derives an interface's schemes
+    /// from, so a fixture names a configuration a package can actually produce.
+    fn plain_scheme(ssl_scheme: Option<&str>) -> Option<&'static str> {
+        match ssl_scheme {
+            Some("https") => Some("http"),
+            Some("wss") => Some("ws"),
+            _ => None,
+        }
+    }
+
     fn interface(ssl_scheme: Option<&str>, kind: ServiceInterfaceType) -> ServiceInterface {
         let id = ServiceInterfaceId::from(Id::try_from("ui".to_owned()).unwrap());
         ServiceInterface {
@@ -288,7 +298,7 @@ mod test {
                 username: None,
                 host_id: HostId::from(Id::try_from("ui".to_owned()).unwrap()),
                 internal_port: 80,
-                scheme: Some(InternedString::intern("http")),
+                scheme: plain_scheme(ssl_scheme).map(InternedString::intern),
                 ssl_scheme: ssl_scheme.map(InternedString::intern),
                 suffix: String::new(),
             },
