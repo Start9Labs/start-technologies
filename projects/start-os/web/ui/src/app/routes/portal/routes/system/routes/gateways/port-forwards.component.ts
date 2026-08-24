@@ -26,8 +26,7 @@ type PortForwardRow = {
   internalPort: string
   /** Start port — single-port forwards equal `externalPort`; range forwards expose the first port for the "Test" button. */
   testPort: number
-  /** Whether devices on your own network dial this forward too, which is what
-   *  makes the router's NAT loopback worth warning about. */
+  /** Whether this forward receives local traffic. Used to gate hairpinning check. */
   local: boolean
 }
 

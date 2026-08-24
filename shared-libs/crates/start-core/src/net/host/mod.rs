@@ -65,9 +65,7 @@ pub struct PortForward {
     /// existing single-port `PortForward`s.
     #[serde(default = "default_port_forward_count")]
     pub count: u16,
-    /// Whether devices on your own network dial this forward too. False for one
-    /// only a certificate authority dials: no address is served on that port,
-    /// so whether the router hairpins it back says nothing.
+    /// Whether this forward receives local traffic. Used to gate hairpinning check.
     #[serde(default = "const_true")]
     pub local: bool,
 }

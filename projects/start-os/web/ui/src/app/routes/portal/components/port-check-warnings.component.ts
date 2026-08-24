@@ -32,9 +32,7 @@ import { T } from '@start9labs/start-core'
 export class PortCheckWarningsComponent {
   // Either a full IPv4 check or the IPv6 sub-result.
   readonly result = input<T.CheckPortRes | T.CheckPortV6Res>()
-  // Whether devices on this network dial the port too. False for a port only
-  // something outside dials, such as a certificate authority's challenge, where
-  // the router having no NAT loopback costs nothing.
+  // Whether this port receives local traffic. Gates the hairpinning warning.
   readonly local = input(true)
 
   // Explains the icon's warning triangle, so it must match its condition: a

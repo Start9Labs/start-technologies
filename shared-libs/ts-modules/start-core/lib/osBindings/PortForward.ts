@@ -14,9 +14,7 @@ export type PortForward = {
    */
   count: number
   /**
-   * Whether devices on your own network dial this forward too. False for one
-   * only a certificate authority dials: no address is served on that port,
-   * so whether the router hairpins it back says nothing.
+   * Whether this forward receives local traffic. Used to gate hairpinning check.
    */
   local: boolean
 }
