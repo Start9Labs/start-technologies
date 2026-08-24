@@ -2526,6 +2526,20 @@ service.service-map.installing-failed:
   fr_FR: "Échec de l'installation"
   pl_PL: "Instalacja nie powiodła się"
 
+service.service-map.no-downgrade-path:
+  en_US: "This service cannot be downgraded from %{from} to %{to}: it provides no migration path back to %{to}, so the data it has now cannot be carried over. To return to %{to}, uninstall the service — which deletes its data — and restore a backup made while it was running %{to}."
+  de_DE: "Dieser Dienst kann nicht von %{from} auf %{to} herabgestuft werden: Es gibt keinen Migrationspfad zurück zu %{to}, sodass die vorhandenen Daten nicht übernommen werden können. Um zu %{to} zurückzukehren, deinstallieren Sie den Dienst — dabei werden seine Daten gelöscht — und stellen Sie eine Sicherung wieder her, die unter %{to} erstellt wurde."
+  es_ES: "Este servicio no puede volver de %{from} a %{to}: no ofrece una ruta de migración de regreso a %{to}, por lo que los datos actuales no se pueden conservar. Para volver a %{to}, desinstale el servicio — lo que borra sus datos — y restaure un respaldo hecho mientras ejecutaba %{to}."
+  fr_FR: "Ce service ne peut pas être rétrogradé de %{from} vers %{to} : il ne fournit aucun chemin de migration de retour vers %{to}, donc ses données actuelles ne peuvent pas être reprises. Pour revenir à %{to}, désinstallez le service — ce qui supprime ses données — puis restaurez une sauvegarde effectuée sous %{to}."
+  pl_PL: "Tej usługi nie można cofnąć z %{from} do %{to}: nie udostępnia ścieżki migracji z powrotem do %{to}, więc obecnych danych nie da się przenieść. Aby wrócić do %{to}, odinstaluj usługę — co usunie jej dane — i przywróć kopię zapasową wykonaną na wersji %{to}."
+
+service.service-map.no-migration-path:
+  en_US: "This service cannot go from %{from} to %{to}: it provides no migration path between those versions, so the data it has now cannot be carried over. Try a version in between, or uninstall the service — which deletes its data — and restore a backup made while it was running %{to}."
+  de_DE: "Dieser Dienst kann nicht von %{from} zu %{to} wechseln: Zwischen diesen Versionen gibt es keinen Migrationspfad, sodass die vorhandenen Daten nicht übernommen werden können. Versuchen Sie eine Version dazwischen oder deinstallieren Sie den Dienst — dabei werden seine Daten gelöscht — und stellen Sie eine Sicherung wieder her, die unter %{to} erstellt wurde."
+  es_ES: "Este servicio no puede pasar de %{from} a %{to}: no ofrece una ruta de migración entre esas versiones, por lo que los datos actuales no se pueden conservar. Pruebe una versión intermedia, o desinstale el servicio — lo que borra sus datos — y restaure un respaldo hecho mientras ejecutaba %{to}."
+  fr_FR: "Ce service ne peut pas passer de %{from} à %{to} : aucun chemin de migration n'existe entre ces versions, donc ses données actuelles ne peuvent pas être reprises. Essayez une version intermédiaire, ou désinstallez le service — ce qui supprime ses données — puis restaurez une sauvegarde effectuée sous %{to}."
+  pl_PL: "Ta usługa nie może przejść z %{from} do %{to}: nie udostępnia ścieżki migracji między tymi wersjami, więc obecnych danych nie da się przenieść. Spróbuj wersji pośredniej albo odinstaluj usługę — co usunie jej dane — i przywróć kopię zapasową wykonaną na wersji %{to}."
+
 service.service-map.operation-failed:
   en_US: "%{operation} Failed"
   de_DE: "%{operation} fehlgeschlagen"

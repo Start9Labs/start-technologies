@@ -256,6 +256,8 @@ Use `IMPOSSIBLE` for the `down` migration when:
 - It is the initial version (nothing to roll back to)
 - The migration involves breaking changes that cannot be reversed
 
+`IMPOSSIBLE` keeps the version out of `canMigrateTo`, and StartOS refuses a downgrade it cannot reach — telling the user to uninstall and restore a backup instead.
+
 ```typescript
 migrations: {
   up: async ({ effects }) => {

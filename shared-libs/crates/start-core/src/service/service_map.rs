@@ -25,7 +25,7 @@ use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
 use crate::progress::{FullProgressTracker, PhaseProgressTrackerHandle, ProgressTrackerWriter};
 use crate::s9pk::S9pk;
-use crate::s9pk::manifest::PackageId;
+use crate::s9pk::manifest::{Manifest, PackageId};
 use crate::s9pk::merkle_archive::source::FileSource;
 use crate::service::rpc::{ExitParams, InitKind};
 use crate::service::{LoadDisposition, Service, ServiceRef, get_data_version};
@@ -59,6 +59,47 @@ fn s9pk_installed_path(commitment: &MerkleArchiveCommitment) -> PathBuf {
         .join("installed")
         .join(Base32(commitment.root_sighash.0).to_lower_string())
         .with_extension("s9pk")
+}
+
+fn uninit_target(data_ver: &str, prev: &Manifest, next: &Manifest) -> Result<ExitParams, Error> {
+    let next_accepts_data_ver = if let Ok(data_ver_ev) = data_ver.parse::<exver::ExtendedVersion>()
+    {
+        data_ver_ev.satisfies(&next.can_migrate_from)
+    } else if let Ok(data_ver_range) = data_ver.parse::<VersionRange>() {
+        data_ver_range.intersects(&next.can_migrate_from)
+    } else {
+        false
+    };
+    if next_accepts_data_ver {
+        Ok(ExitParams::target_str(data_ver))
+    } else if next.version.satisfies(&prev.can_migrate_to) {
+        Ok(ExitParams::target_version(&next.version))
+    } else if prev.can_migrate_to.intersects(&next.can_migrate_from) {
+        Ok(ExitParams::target_range(&VersionRange::and(
+            prev.can_migrate_to.clone(),
+            next.can_migrate_from.clone(),
+        )))
+    } else {
+        Err(Error::new(
+            eyre!(
+                "{}",
+                if next.version < prev.version {
+                    t!(
+                        "service.service-map.no-downgrade-path",
+                        from = prev.version.as_str(),
+                        to = next.version.as_str()
+                    )
+                } else {
+                    t!(
+                        "service.service-map.no-migration-path",
+                        from = prev.version.as_str(),
+                        to = next.version.as_str()
+                    )
+                }
+            ),
+            ErrorKind::VersionIncompatible,
+        ))
+    }
 }
 
 /// This is the structure to contain all the services
@@ -189,6 +230,18 @@ impl ServiceMap {
         let icon = s9pk.icon_data_url().await?;
         let developer_key = s9pk.as_archive().signer();
         let mut service = self.get_mut(&id).await;
+        // Fail before the download and before the service is quiesced.
+        if recovery_source.is_none() {
+            if let Some(prev) = &*service {
+                if let Some(data_ver) = get_data_version(&id).await? {
+                    uninit_target(
+                        &data_ver,
+                        prev.seed.persistent_container.s9pk.as_manifest(),
+                        &manifest,
+                    )?;
+                }
+            }
+        }
         let size = s9pk.size();
         let op_name = if recovery_source.is_none() {
             if service.is_none() {
@@ -345,33 +398,11 @@ impl ServiceMap {
                         // A `.const()` re-run can move the data version while the container comes down.
                         data_version = get_data_version(&id).await?;
                         let uninit = if let Some(ref data_ver) = data_version {
-                            let prev_can_migrate_to = &service
-                                .seed
-                                .persistent_container
-                                .s9pk
-                                .as_manifest()
-                                .can_migrate_to;
-                            let next_version = &s9pk.as_manifest().version;
-                            let next_can_migrate_from = &s9pk.as_manifest().can_migrate_from;
-                            let next_accepts_data_ver = if let Ok(data_ver_ev) =
-                                data_ver.parse::<exver::ExtendedVersion>()
-                            {
-                                data_ver_ev.satisfies(next_can_migrate_from)
-                            } else if let Ok(data_ver_range) = data_ver.parse::<VersionRange>() {
-                                data_ver_range.intersects(next_can_migrate_from)
-                            } else {
-                                false
-                            };
-                            if next_accepts_data_ver {
-                                ExitParams::target_str(data_ver)
-                            } else if next_version.satisfies(prev_can_migrate_to) {
-                                ExitParams::target_version(&s9pk.as_manifest().version)
-                            } else {
-                                ExitParams::target_range(&VersionRange::and(
-                                    prev_can_migrate_to.clone(),
-                                    next_can_migrate_from.clone(),
-                                ))
-                            }
+                            uninit_target(
+                                data_ver,
+                                service.seed.persistent_container.s9pk.as_manifest(),
+                                s9pk.as_manifest(),
+                            )?
                         } else {
                             ExitParams::target_version(
                                 &*service.seed.persistent_container.s9pk.as_manifest().version,

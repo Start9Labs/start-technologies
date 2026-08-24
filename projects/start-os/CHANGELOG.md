@@ -49,6 +49,10 @@ file tracks notable changes since the move to the monorepo.
 
 ### Fixed
 
+- **A downgrade to a version that cannot take over the service's data is refused
+  before anything is downloaded or stopped**, with an explanation of what to do
+  instead.
+
 - **A service that fails to install, update, restore or uninstall says so right
   away.** The notification naming what went wrong was held back until StartOS had
   finished cleaning up after the attempt, which can take several minutes. It now

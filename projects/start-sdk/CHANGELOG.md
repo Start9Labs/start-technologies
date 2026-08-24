@@ -52,6 +52,10 @@
 
 ### Fixed
 
+- **`VersionGraph` reports a missing migration path in terms a service owner can
+  act on**, rather than as an assertion about the version range the host handed
+  it
+
 - `i18n()` no longer throws when a number or a `Date` is interpolated: a service
   container's `LANG=C.UTF-8` reduces to a locale `Intl` rejects
 

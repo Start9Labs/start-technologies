@@ -18,6 +18,8 @@ When newer versions of installed services are available, you can update them fro
 
 If a service listing shows an older version than what you have installed, the Marketplace will display a **Downgrade** button instead of Install or Update.
 
+Not every service can go back — the older version has to be able to take over the data the service has now, and StartOS refuses the downgrade when it cannot, leaving the running service untouched. To go back anyway, uninstall the service — which deletes its data — and [restore a backup](backup-restore.md) made while it was running that version.
+
 ## Switching Flavors
 
 If multiple [flavors](flavors.md) of a service exist, the Marketplace will display a **Switch** button when viewing a different flavor than the one currently installed.
