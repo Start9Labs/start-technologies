@@ -13,6 +13,20 @@
   compile error. To reach a single file, mount the directory holding it.
   `mountVolume` and `mountAssets` still take `type`
 
+- **`addSsl.alpn` takes a list of protocols, or nothing at all.** Setting it no
+  longer changes how StartOS dials the container, which left `'reflect'` and
+  leaving the option unset as two spellings of one state: filter nothing. The
+  `'reflect'` value is gone, so a binding that set it sets `null` instead.
+
+- **`effects.getServicePortForward` resolves `null` instead of throwing when
+  the binding does not exist.** It is the one host effect with no `callback`,
+  so a caller cannot react to a change — and throwing was the worst available
+  answer for exactly that caller. It also could not tell "no such binding" from
+  "the host itself is gone", and a binding merely disabled by `clearBindings`
+  still reported its stale ports, which retiring now makes an observable
+  difference. Prefer `sdk.host.getBridgeAddress` to reach a dependency; this is
+  raw allocator metadata
+
 - `effects.getServicePortForward` resolves `null` instead of throwing when the
   binding does not exist. Prefer `sdk.host.getBridgeAddress` to reach a
   dependency; this is raw allocator metadata

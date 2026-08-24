@@ -1523,7 +1523,7 @@ mod tests {
     #[test]
     fn alpn_does_not_decide_whether_the_container_is_dialled_over_tls() {
         let pinned = || Some(AlpnInfo::Specified(vec![MaybeUtf8String(b"h2".to_vec())]));
-        for alpn in [None, Some(AlpnInfo::Reflect), pinned()] {
+        for alpn in [None, pinned()] {
             assert!(
                 bind_options(true, Some(true), alpn.clone())
                     .rewrap()

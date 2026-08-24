@@ -983,8 +983,8 @@ pub struct ProxyTarget {
     /// The config StartOS dials the container with when the container serves
     /// its own TLS. `None` dials it in plaintext.
     pub connect_ssl: Option<Arc<ClientConfig>>,
-    /// Filters the protocols the client asks for. `None` and
-    /// `Some(AlpnInfo::Reflect)` filter none of them.
+    /// Filters the protocols the client asks for. `None` filters none of
+    /// them.
     pub alpn: Option<AlpnInfo>,
     pub passthrough: bool,
     /// Open the internal leg with the client's source IP (`IP_TRANSPARENT`).
@@ -1231,7 +1231,7 @@ where
             Some(AlpnInfo::Specified(protos)) => {
                 protos.iter().map(|proto| proto.0.clone()).collect()
             }
-            Some(AlpnInfo::Reflect) | None => client_alpn.clone(),
+            None => client_alpn.clone(),
         };
         // The container is only put through protocols the client also offered,
         // since its choice is what the client gets handed back.
@@ -1535,15 +1535,8 @@ impl ProxyContext {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub enum AlpnInfo {
-    /// Filter nothing.
-    Reflect,
     /// Keep only these.
     Specified(Vec<MaybeUtf8String>),
-}
-impl Default for AlpnInfo {
-    fn default() -> Self {
-        Self::Reflect
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -2965,21 +2958,21 @@ mod upstream_alpn_tests {
         );
     }
 
-    /// `Reflect` puts the client's own list forward, in its own order. The base
-    /// carries `http/1.1`, which would win on server order if this appended to
-    /// it instead.
+    /// An unset filter leaves the client its own list, in its own order. The
+    /// base carries `http/1.1`, which would win on server order if this
+    /// appended to it instead.
     #[tokio::test]
-    async fn reflect_gives_the_client_its_own_list() {
+    async fn an_unset_filter_gives_the_client_its_own_list() {
         assert_eq!(
             try_negotiate(
                 None,
-                Some(AlpnInfo::Reflect),
+                None,
                 &["http/1.1"],
                 spawn_backend(&[]).await,
                 &["h2", "http/1.1"],
             )
             .await
-            .expect("a reflected binding completes the client handshake"),
+            .expect("an unfiltered binding completes the client handshake"),
             Some("h2".to_owned()),
         );
     }
