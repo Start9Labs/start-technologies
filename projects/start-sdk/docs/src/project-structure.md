@@ -52,6 +52,29 @@ my-service-startos/
 └── upstream-project/       # Git submodule (optional)
 ```
 
+## The Package Repo Is Not a Fork of the Application
+
+A package repo holds **packaging** — `startos/`, the manifest, the docs, the CI. The
+application itself comes from one of three sources, and `UPDATING.md` records which one:
+
+- **A published upstream image**, pinned at `images.<id>.source.dockerTag`. The default, and
+  what most packages use — see [Package a Prebuilt Docker Image](recipe-prebuilt-image.md).
+- **A git submodule** at `upstream-project/`, built by the package's own `Dockerfile`, when
+  upstream publishes no image, or none for an architecture StartOS needs.
+- **A Start9-built image**, when the software needs a build only we produce.
+
+**Copying the application's source into the package repo and merging upstream releases into it
+is not a fourth option.** A fork turns every upstream release into a hand-merge, moves the
+application's tests, lockfiles, CI and dependency churn into a repo whose reviewers are
+packagers, and leaves the packaged version defined by a merge result instead of a pinned ref.
+It also breaks the property the layout exists for: every package reads the same way, so a
+reviewer or a tool that knows one knows all of them.
+
+Carrying a fix upstream has not taken does not require a fork. Use the submodule with a
+`patches/` directory, each patch stating the condition under which it retires —
+[`electrs-startos`](https://github.com/Start9-Community/electrs-startos) is the reference
+implementation.
+
 ## Core Files
 
 ### Boilerplate Files
