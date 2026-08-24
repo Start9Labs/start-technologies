@@ -12,11 +12,8 @@ export type AddSslOptions = {
    */
   addXForwardedHeaders: boolean
   /**
-   * Narrows the application protocols this binding puts forward. Where the
-   * container serves its own TLS it is offered the ones the client also
-   * asked for, and the client is offered whatever it picks; otherwise the
-   * client is offered these directly. Unset and `reflect` both put the
-   * client's own list forward.
+   * Application protocols to put forward, narrowed to the ones the client
+   * also asked for. Unset puts the client's own list forward.
    */
   alpn: AlpnInfo | null
   /**

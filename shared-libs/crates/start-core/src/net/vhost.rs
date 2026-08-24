@@ -1536,7 +1536,9 @@ impl ProxyContext {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub enum AlpnInfo {
+    /// Put the client's own list forward.
     Reflect,
+    /// Put these forward.
     Specified(Vec<MaybeUtf8String>),
 }
 impl Default for AlpnInfo {
