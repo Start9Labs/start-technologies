@@ -4,6 +4,10 @@ All notable changes to `start-registry` (the Start Registry server) are document
 
 ## [1.0.2]
 
+- **An indexed package version now advertises which installed versions can migrate into it**, so a
+  client asking for an upgrade path is offered a version it can actually install. Entries already
+  in an index keep their permissive value until that version is published again.
+
 - **`os asset remove` can be run.** Its `iso`/`img`/`squashfs` handlers were registered as
   RPC-only with no CLI counterpart, so `remove` parsed as a leaf that accepts no arguments — it
   listed with a blank description and rejected `os asset remove iso 0.4.0 x86_64` as an
