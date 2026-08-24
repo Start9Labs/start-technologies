@@ -165,7 +165,7 @@ impl fmt::Display for ActionResultV0 {
 pub struct ActionResultV1 {
     /// Primary text to display as the header of the response modal. e.g. "Success!", "Name Updated", or "Service Information", whatever makes sense
     pub title: String,
-    /// (optional) A general message for the user, just under the title
+    /// (optional) A general message for the user, just under the title. Line breaks are preserved.
     pub message: Option<String>,
     /// (optional) Structured data to present inside the modal
     pub result: Option<ActionResultValue>,
@@ -189,7 +189,8 @@ pub struct ActionResultMember {
 #[serde(tag = "type")]
 pub enum ActionResultValue {
     Single {
-        /// The actual string value to display
+        /// The actual string value to display. The UI renders it as a single-line field —
+        /// multi-line text belongs in the result's `message`.
         value: String,
         /// Whether or not to include a copy to clipboard icon to copy the value
         copyable: bool,

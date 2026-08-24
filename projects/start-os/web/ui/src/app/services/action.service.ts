@@ -63,16 +63,12 @@ export class ActionService {
 
       if (!res) return
 
-      if (res.result) {
+      if (res.result || res.message) {
         this.dialog
           .openComponent(new PolymorpheusComponent(ActionSuccessPage), {
             label: res.title as i18nKey,
             data: res,
           })
-          .subscribe()
-      } else if (res.message) {
-        this.dialog
-          .openAlert(res.message as i18nKey, { label: res.title as i18nKey })
           .subscribe()
       }
     } catch (e: any) {

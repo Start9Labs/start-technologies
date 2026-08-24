@@ -1,20 +1,8 @@
-import {
-  Component,
-  ElementRef,
-  inject,
-  Input,
-  TemplateRef,
-  ViewChild,
-} from '@angular/core'
+import { Component, inject, Input, TemplateRef } from '@angular/core'
 import { FormsModule } from '@angular/forms'
-import { DialogService, i18nPipe } from '@start9labs/shared'
+import { CopyService, DialogService, i18nPipe } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
-import {
-  TuiButton,
-  TuiInputDirective,
-  TuiTitle,
-  TuiInput,
-} from '@taiga-ui/core'
+import { TuiButton, TuiInput, TuiTitle } from '@taiga-ui/core'
 import { QRComponent } from 'src/app/components/qr.component'
 
 @Component({
@@ -51,7 +39,7 @@ import { QRComponent } from 'src/app/components/qr.component'
           tabindex="-1"
           iconStart="@tui.copy"
           [style.pointer-events]="'auto'"
-          (click)="copy()"
+          (click)="copy.copy(member.value)"
         >
           {{ 'Copy' | i18n }}
         </button>
@@ -109,9 +97,8 @@ import { QRComponent } from 'src/app/components/qr.component'
   imports: [FormsModule, TuiInput, TuiButton, QRComponent, TuiTitle, i18nPipe],
 })
 export class ActionSuccessMemberComponent {
-  @ViewChild(TuiInputDirective, { read: ElementRef })
-  private readonly input!: ElementRef<HTMLInputElement>
   private readonly dialog = inject(DialogService)
+  readonly copy = inject(CopyService)
 
   @Input()
   member!: T.ActionResultMember & { type: 'single' }
@@ -127,19 +114,5 @@ export class ActionSuccessMemberComponent {
       .subscribe({
         complete: () => (this.masked = masked),
       })
-  }
-
-  copy() {
-    const el = this.input.nativeElement
-
-    if (!el) {
-      return
-    }
-
-    el.type = 'text'
-    el.focus()
-    el.select()
-    el.ownerDocument.execCommand('copy')
-    el.type = this.masked && this.member.masked ? 'password' : 'text'
   }
 }

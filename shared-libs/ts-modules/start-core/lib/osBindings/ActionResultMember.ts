@@ -13,7 +13,8 @@ export type ActionResultMember = {
   | {
       type: 'single'
       /**
-       * The actual string value to display
+       * The actual string value to display. The UI renders it as a single-line field —
+       * multi-line text belongs in the result's `message`.
        */
       value: string
       /**

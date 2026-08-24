@@ -1502,7 +1502,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
     version: '1',
     title: 'New Password',
     message:
-      'Action was run successfully and smoothly and fully and all is good on the western front.',
+      'Action was run successfully and smoothly and fully and all is good on the western front.\n\nRestart the service for the new password to take effect.',
     result: null,
   }
 

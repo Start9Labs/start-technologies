@@ -7,7 +7,7 @@ export type ActionResultV1 = {
    */
   title: string
   /**
-   * (optional) A general message for the user, just under the title
+   * (optional) A general message for the user, just under the title. Line breaks are preserved.
    */
   message: string | null
   /**
