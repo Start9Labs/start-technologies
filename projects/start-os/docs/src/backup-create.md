@@ -23,6 +23,8 @@ Back up your server's data to a physical drive or a network folder.
 
 1. Upon completion, StartOS issues a backup report, indicating which services were backed up, as well as any errors.
 
+1. Wait for the `Backup Complete` notification before unplugging a backup drive. StartOS writes out the last of the backup and unmounts the drive before raising that notification, so the drive is safe to remove once it appears. The `Backup Progress` card reads `Complete` first, while StartOS is still finishing — the notification is the one to wait for.
+
 1. Backups are differential — each new backup to the same target overwrites the previous one. To maintain multiple backup points, use multiple backup targets.
 
 1. The backup targets list shows the free space available on each drive and network folder, so you can confirm your backup will fit before you start.
