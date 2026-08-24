@@ -513,7 +513,11 @@ mod test {
             )
             .unwrap();
         assert!(config.schema.is_some());
-        assert!(config.registry.is_some_and(|registry| !registry.0.is_empty()));
+        assert!(
+            config
+                .registry
+                .is_some_and(|registry| !registry.0.is_empty())
+        );
         // And it must scaffold no host at all. A placeholder is not inert: a `.local`
         // one is pinned eagerly by CliContext::init, whose failure aborts every
         // command — `s9pk pack` included, which never opens a socket.
