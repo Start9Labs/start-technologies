@@ -131,6 +131,7 @@ impl Public {
                     shutting_down: false,
                     restarting: false,
                     restart: None,
+                    deferred_power_action: None,
                 },
                 unread_notification_count: 0,
                 pubkey: ssh_key::PublicKey::from(&account.ssh_key)
@@ -216,6 +217,14 @@ pub enum RestartReason {
     Language,
     Kiosk,
     Update,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export)]
+pub enum PowerAction {
+    Restart,
+    Shutdown,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, HasModel, TS)]
@@ -451,6 +460,10 @@ pub struct ServerStatus {
     pub restarting: bool,
     #[serde(default)]
     pub restart: Option<RestartReason>,
+    /// A restart or shutdown that was asked for while a backup was running, and
+    /// which StartOS carries out once the backup finishes.
+    #[serde(default)]
+    pub deferred_power_action: Option<PowerAction>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, HasModel, TS)]

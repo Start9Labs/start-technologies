@@ -396,6 +396,7 @@ pub async fn init(
         shutting_down: false,
         restarting: false,
         restart: None,
+        deferred_power_action: None,
     };
     db.mutate(|v| {
         let server_info = v.as_public_mut().as_server_info_mut();

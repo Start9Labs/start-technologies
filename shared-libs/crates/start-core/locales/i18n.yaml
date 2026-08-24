@@ -3178,6 +3178,13 @@ help.arg.gua-wan:
   fr_FR: "Exposer la GUA IPv6 au WAN (false = LAN uniquement)"
   pl_PL: "Udostępnij GUA IPv6 w sieci WAN (false = tylko LAN)"
 
+help.arg.after-backup:
+  en_US: "Wait for a running backup to finish first"
+  de_DE: "Zuerst auf den Abschluss einer laufenden Sicherung warten"
+  es_ES: "Esperar primero a que termine una copia de seguridad en curso"
+  fr_FR: "Attendre d'abord la fin d'une sauvegarde en cours"
+  pl_PL: "Najpierw poczekaj na zakończenie trwającej kopii zapasowej"
+
 help.arg.allow-model-mismatch:
   en_US: "Allow database model mismatch"
   de_DE: "Datenbankmodell-Abweichung erlauben"
@@ -4770,6 +4777,13 @@ about.calculate-blake3-hash-for-file:
   es_ES: "Calcular hash blake3 para un archivo"
   fr_FR: "Calculer le hachage blake3 d'un fichier"
   pl_PL: "Oblicz hash blake3 dla pliku"
+
+about.cancel-deferred-power:
+  en_US: "Cancel a restart or shutdown that is waiting for a backup to finish"
+  de_DE: "Einen Neustart oder ein Herunterfahren abbrechen, der bzw. das auf den Abschluss einer Sicherung wartet"
+  es_ES: "Cancelar un reinicio o apagado que está esperando a que termine una copia de seguridad"
+  fr_FR: "Annuler un redémarrage ou un arrêt en attente de la fin d'une sauvegarde"
+  pl_PL: "Anuluj ponowne uruchomienie lub wyłączenie oczekujące na zakończenie kopii zapasowej"
 
 about.cancel-install-package:
   en_US: "Cancel an install of a package"

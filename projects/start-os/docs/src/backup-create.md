@@ -21,6 +21,8 @@ Back up your server's data to a physical drive or a network folder.
 
 1. To back up a service, StartOS first stops it (if it was running), performs the backup, then restarts it — but only if it was running beforehand. A service that was already stopped stays stopped. Consequently a service cannot be used while it is backing up, though you may continue to use your server and other services in the meantime.
 
+1. Restarting or shutting down mid-backup can corrupt the backup of whichever service is being written at that moment, so StartOS asks first. Choosing `Restart` or `Shutdown` while a backup is running offers to wait for the backup to finish instead, and takes that option for you if you do not choose within 30 seconds — to power down regardless, choose the "now" option in that prompt. Pressing the server's physical power button during a backup waits for the backup rather than powering off, without asking. Either way StartOS performs the restart or shutdown as soon as the backup completes, and until then a bar along the bottom of the screen says what is coming and lets you cancel it.
+
 1. Upon completion, StartOS issues a backup report, indicating which services were backed up, as well as any errors.
 
 1. Wait for the `Backup Complete` notification before unplugging a backup drive. StartOS writes out the last of the backup and unmounts the drive before raising that notification, so the drive is safe to remove once it appears. The `Backup Progress` card reads `Complete` first, while StartOS is still finishing — the notification is the one to wait for.

@@ -36,6 +36,20 @@ file tracks notable changes since the move to the monorepo.
   plaintext address, including the passwords typed into it. See
   [Gateways](https://docs.start9.com/start-os/gateways.html).
 
+- **Restarting or shutting down while a backup is running now asks first, and
+  can wait for the backup to finish.** Powering the server off part-way through
+  a backup can corrupt the backup of whichever service is being written at that
+  moment. Choosing `Restart` or `Shutdown` during a backup now offers to wait
+  for the backup instead, and waiting is what happens if you walk away — the
+  prompt counts down and takes that option for you. StartOS then carries out
+  the restart or shutdown as soon as the backup completes, and until then a bar
+  along the bottom of the screen says what is coming and lets you cancel it.
+  Pressing the server's physical power button during a backup waits for the
+  backup too, rather than powering off immediately. Over the CLI,
+  `start-cli server restart` and `server shutdown` take `--after-backup` for
+  the same behavior and `start-cli server cancel-deferred-power` calls it off.
+  See [Creating Backups](https://docs.start9.com/start-os/backup-create.html).
+
 ### Changed
 
 - **The NVIDIA images now use NVIDIA's open kernel modules, which support GeForce

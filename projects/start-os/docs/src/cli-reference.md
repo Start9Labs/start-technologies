@@ -54,11 +54,21 @@ Restart, shut down, update, and configure the server.
 
 ### `start-cli server restart`
 
-Restart the server.
+Restart the server. Without `--after-backup` this interrupts a running backup, unlike the web UI, which offers to wait.
+
+- `--after-backup` — Wait for a running backup to finish first
+- `--nowait` — Return immediately instead of waiting for graceful shutdown
 
 ### `start-cli server shutdown`
 
-Shut down the server.
+Shut down the server. Without `--after-backup` this interrupts a running backup, unlike the web UI, which offers to wait.
+
+- `--after-backup` — Wait for a running backup to finish first
+- `--nowait` — Return immediately instead of waiting for graceful shutdown
+
+### `start-cli server cancel-deferred-power`
+
+Cancel a restart or shutdown that is waiting for a backup to finish.
 
 ### `start-cli server update`
 

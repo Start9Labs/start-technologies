@@ -805,4 +805,9 @@ export default {
   912: 'Dane StartOS na wybranym dysku danych znajdują się na partycji obok starszej instalacji systemu i nie można ich zachować na tym urządzeniu. Aby wymazać dysk i zacząć od nowa, wybierz „Nadpisz”.',
   913: 'Dane StartOS na wybranym dysku danych zajmują cały dysk, więc systemu nie można zainstalować na tym samym dysku bez ich wymazania. Aby zachować dane, wybierz inny dysk systemowy. Aby je wymazać, wybierz „Nadpisz”.',
   914: 'Logowanie powiodło się, ale serwer odrzucił nowy klucz urządzenia. Spróbuj ponownie.',
+  915: 'Trwa tworzenie kopii zapasowej. Przerwanie jej teraz może uszkodzić kopię zapasową aktualnie zapisywanej usługi.',
+  916: 'Poczekaj na zakończenie kopii zapasowej',
+  917: 'Wyłącz teraz',
+  918: 'Trwa tworzenie kopii zapasowej. Serwer zostanie ponownie uruchomiony po jej zakończeniu.',
+  919: 'Trwa tworzenie kopii zapasowej. Serwer zostanie wyłączony po jej zakończeniu.',
 } satisfies i18n
