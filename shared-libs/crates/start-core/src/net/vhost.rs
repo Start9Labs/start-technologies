@@ -983,9 +983,8 @@ pub struct ProxyTarget {
     /// The config StartOS dials the container with when the container serves
     /// its own TLS. `None` dials it in plaintext.
     pub connect_ssl: Option<Arc<ClientConfig>>,
-    /// Filters the protocols the client asked for down to the ones this
-    /// binding puts forward. `None` and `Some(AlpnInfo::Reflect)` filter
-    /// nothing.
+    /// Filters the protocols the client asks for. `None` and
+    /// `Some(AlpnInfo::Reflect)` filter none of them.
     pub alpn: Option<AlpnInfo>,
     pub passthrough: bool,
     /// Open the internal leg with the client's source IP (`IP_TRANSPARENT`).
