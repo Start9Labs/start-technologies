@@ -94,7 +94,23 @@ export const actions = sdk.Actions.of().addAction(setAdminPassword)
 
 Actions return structured results that the StartOS UI renders for the user.
 
-`message` is prose shown under the title, and **line breaks in it are preserved** — put anything with its own line structure there. `result` holds discrete values the user acts on: each one is a single-line field with optional copy, QR and masking, so a newline in a `value` is not rendered. A multi-line report goes in `message`, not in a `value`.
+`message` is prose shown under the title. It is rendered as **Markdown** — headings, lists, tables, code blocks, emphasis and links all work — and a single newline is kept as a line break, so text written as plain lines arrives as plain lines. Anything with its own line structure goes here.
+
+`result` holds discrete values the user acts on: each one is a single-line field with optional copy, QR and masking, so a newline in a `value` is not rendered. A multi-line report goes in `message`, not in a `value`.
+
+```typescript
+return {
+  version: '1',
+  title: 'Diagnostics',
+  message: `### Checks
+
+- database: **ok**
+- search index: **rebuilding**
+
+Restart the service once the rebuild finishes.`,
+  result: null,
+}
+```
 
 ### Single Value
 

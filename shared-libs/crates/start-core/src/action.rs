@@ -165,7 +165,7 @@ impl fmt::Display for ActionResultV0 {
 pub struct ActionResultV1 {
     /// Primary text to display as the header of the response modal. e.g. "Success!", "Name Updated", or "Service Information", whatever makes sense
     pub title: String,
-    /// (optional) A general message for the user, just under the title. Line breaks are preserved.
+    /// (optional) A general message for the user, just under the title. Rendered as Markdown, with a single line break kept as a line break.
     pub message: Option<String>,
     /// (optional) Structured data to present inside the modal
     pub result: Option<ActionResultValue>,
