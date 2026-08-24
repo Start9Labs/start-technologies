@@ -3224,8 +3224,8 @@ pub fn lookup_info_by_addr(
     ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
     addr: SocketAddr,
 ) -> Option<(&GatewayId, &NetworkInterfaceInfo)> {
-    // A dual-stack listener reports an IPv4 peer's address in its mapped form,
-    // which is not equal to the IPv4 address a gateway holds.
+    // A dual-stack listener reports an IPv4 connection's addresses in mapped
+    // form, which never equals the IPv4 address a gateway holds.
     let ip = addr.ip().to_canonical();
     ip_info.iter().find(|(_, i)| {
         i.ip_info
@@ -3257,8 +3257,8 @@ impl<V: MetadataVisitor> Visit<V> for NetworkInterfaceListenerAcceptMetadata {
     }
 }
 
-/// A simple TCP listener on 0.0.0.0:port that looks up GatewayInfo from the
-/// connection's local address on each accepted connection.
+/// A TCP listener on `[::]:port` that resolves the connection's `GatewayInfo`
+/// from its local address on each accept.
 pub struct WildcardListener {
     listener: TcpListener,
     ip_info: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
@@ -3350,8 +3350,6 @@ mod lookup_tests {
         .collect()
     }
 
-    // The UI's port-80 listener is a dual-stack `[::]` bind, so an IPv4 client's
-    // local address arrives mapped into IPv6.
     #[test]
     fn an_ipv4_mapped_local_address_finds_its_gateway() {
         let ip_info = gateway_holding("192.168.1.5/24");
@@ -3362,11 +3360,26 @@ mod lookup_tests {
         );
     }
 
+    // A gateway answers for the address it holds, not for its whole subnet.
     #[test]
-    fn an_address_no_gateway_holds_finds_nothing() {
+    fn another_address_in_the_same_subnet_finds_nothing() {
         let ip_info = gateway_holding("192.168.1.5/24");
-        let other: SocketAddr = "10.0.3.1:80".parse().unwrap();
-        assert!(lookup_info_by_addr(&ip_info, other).is_none());
+        let neighbour: SocketAddr = "192.168.1.99:80".parse().unwrap();
+        assert!(lookup_info_by_addr(&ip_info, neighbour).is_none());
+    }
+
+    // Canonicalizing must unwrap only the mapped form. `to_ipv4` would read
+    // `::1` as `0.0.0.1` and hand a loopback connection someone's gateway.
+    #[test]
+    fn a_native_ipv6_address_is_left_alone() {
+        let ip_info = gateway_holding("fd00::1/64");
+        let native: SocketAddr = "[fd00::1]:80".parse().unwrap();
+        assert_eq!(
+            lookup_info_by_addr(&ip_info, native).map(|(id, _)| id.as_str()),
+            Some("eth0")
+        );
+        let loopback: SocketAddr = "[::1]:80".parse().unwrap();
+        assert!(lookup_info_by_addr(&ip_info, loopback).is_none());
     }
 }
 

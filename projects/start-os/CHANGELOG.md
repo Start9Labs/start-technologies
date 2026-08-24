@@ -16,8 +16,9 @@ file tracks notable changes since the move to the monorepo.
   browser given a bare name tries plain HTTP first, and port 80 belongs to the
   StartOS UI, so the address bar landed on your server's dashboard instead of
   the service — an encrypted request names the domain during the handshake and
-  your server routes on that, while a plain HTTP request arrives with nothing to
-  route on. StartOS now sends such a request on to the domain's HTTPS address,
+  your server routes on that, while a plain HTTP request reaches a port 80 that
+  answers for the whole server. StartOS now sends such a request on to the
+  domain's HTTPS address,
   which is what StartTunnel already does for a public domain at the edge. It
   does so only where the encrypted address answers: over a network the domain
   was added on, for an interface you open in a browser. Your server's own

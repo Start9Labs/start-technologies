@@ -1,10 +1,9 @@
 //! HTTP→HTTPS redirect for a service's domains on the StartOS UI's port.
 //!
 //! Port 80 belongs to the StartOS UI, whose listener answers on every address
-//! the server holds. A browser given a bare domain name tries port 80 first, so
-//! typing a service's private domain lands on the dashboard: a plaintext
-//! request carries no SNI, which is what tells the service apart from every
-//! other name this server answers to.
+//! the server holds, and a browser given a bare domain name tries it first. A
+//! plaintext request carries no SNI, so that listener has only the `Host`
+//! header to tell a service's domain from the names the dashboard answers to.
 
 use std::net::IpAddr;
 
@@ -56,10 +55,16 @@ pub fn layer(ctx: RpcContext, router: Router) -> Router {
 }
 
 /// Which of the server's networks the connection arrived on. The listener
-/// resolves it per connection and the router carries it in the request
-/// extensions, so a domain can be matched against the gateways it is served on.
+/// resolves it per accepted connection and the web server puts it in the
+/// request extensions.
+///
+/// The listener names a connection it cannot place with an empty gateway, which
+/// is no gateway at all.
 fn arrival_gateway(req: &Request) -> Option<GatewayId> {
-    req.extensions().get::<GatewayInfo>().map(|g| g.id.clone())
+    req.extensions()
+        .get::<GatewayInfo>()
+        .map(|g| g.id.clone())
+        .filter(|id| !id.as_str().is_empty())
 }
 
 /// The host the request named, lowercased and stripped of any port and of the
@@ -86,9 +91,9 @@ fn host(req: &Request) -> Option<String> {
     Some(name)
 }
 
-/// The character set a stored domain is matched on. A name outside it cannot be
-/// one, and would put whatever it does hold — userinfo, most of all — in a
-/// `Location` header this server signs its name to.
+/// The characters a `Host` may hold to be matched against a stored domain.
+/// Anything else — userinfo above all — would reach the `Location` header,
+/// where a browser reads everything after an `@` as the destination.
 fn is_name_char(c: char) -> bool {
     c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.' || c == '_'
 }
@@ -109,11 +114,11 @@ async fn redirect(
     }
     // The dashboard is reached by the server's own `.local` name, so answer that
     // before reading the database.
-    let own_mdns_name = ctx.account.peek(|a| {
+    let is_own_mdns_name = ctx.account.peek(|a| {
         name.strip_suffix(".local")
             .is_some_and(|host| host == &**a.hostname.hostname)
     });
-    if own_mdns_name {
+    if is_own_mdns_name {
         return Ok(None);
     }
     let Some(port) = service_tls_port(&ctx.db.peek().await, gateway, name)? else {
@@ -205,8 +210,8 @@ fn tls_port<'a>(
 
 /// Whether a browser can open this binding's TLS port. A binding that carries
 /// another protocol over TLS — an Electrum server, a TURN server — has a domain
-/// and a TLS port like any other. An interface the package typed `ui` counts
-/// even with no scheme declared, on the package's word that a browser opens it.
+/// and a TLS port like any other, so an `https` scheme or a `ui` interface is
+/// what separates the two.
 fn serves_https(bind: &BindInfo) -> bool {
     bind.interfaces
         .values()
@@ -499,8 +504,8 @@ mod test {
         })
     }
 
-    // A binding's address set outlives the domain record it came from, so the
-    // domain the operator configured is what decides.
+    // The host's domain map is the authority, so a derived address alone never
+    // qualifies a name.
     #[test]
     fn ignores_a_name_no_host_lists_as_a_domain() {
         let bind = binding([private("cloud.mydomain.com", true, HTTPS_PORT)]);
@@ -541,16 +546,25 @@ mod test {
             .unwrap()
     }
 
-    // The gateway comes out of the request extensions by type, so a wrong type
-    // would read as "no gateway" and switch the whole redirect off in silence.
-    #[test]
-    fn reads_the_gateway_the_listener_resolved() {
+    fn arriving_on(id: &'static str) -> Request {
         let mut req = request("cloud.mydomain.com");
         req.extensions_mut().insert(GatewayInfo {
-            id: gateway("eth0"),
+            id: gateway(id),
             info: Default::default(),
         });
-        assert_eq!(arrival_gateway(&req), Some(gateway("eth0")));
+        req
+    }
+
+    #[test]
+    fn reads_the_gateway_the_listener_resolved() {
+        assert_eq!(arrival_gateway(&arriving_on("eth0")), Some(gateway("eth0")));
+    }
+
+    // The listener hands on an empty gateway rather than nothing when it cannot
+    // place the connection, and no domain is served on it.
+    #[test]
+    fn reads_an_unplaced_connection_as_no_gateway() {
+        assert_eq!(arrival_gateway(&arriving_on("")), None);
         assert_eq!(arrival_gateway(&request("cloud.mydomain.com")), None);
     }
 
