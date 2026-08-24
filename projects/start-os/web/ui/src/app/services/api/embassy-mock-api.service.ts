@@ -1258,6 +1258,14 @@ export class MockApiService extends ApiService {
       }
     }
 
+    if (params.actionId === 'rpc') {
+      return {
+        eventId: 'ANZXNWIFRTTBZ6T52KQPZILIQQODDHXQ',
+        value: null,
+        spec: await Mock.getRpcSpec(),
+      }
+    }
+
     return {
       eventId: 'ANZXNWIFRTTBZ6T52KQPZILIQQODDHXQ',
       value: Mock.MockConfig,

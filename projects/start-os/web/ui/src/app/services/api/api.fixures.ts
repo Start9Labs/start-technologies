@@ -1629,6 +1629,25 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
       }),
     )
 
+  export const getRpcSpec = async (): Promise<IST.InputSpec> =>
+    configBuilderToSpec(
+      ISB.InputSpec.of({
+        rpcuser: ISB.Value.text({
+          name: 'RPC Username',
+          description: 'rpc username',
+          required: true,
+          default: 'defaultrpcusername',
+        }),
+        rpcpass: ISB.Value.text({
+          name: 'RPC User Password',
+          description: 'rpc password',
+          required: true,
+          default: { charset: 'a-z,A-Z,2-9', len: 20 },
+          masked: true,
+        }),
+      }),
+    )
+
   export const getActionInputSpec = async (): Promise<IST.InputSpec> =>
     configBuilderToSpec(
       ISB.InputSpec.of({
