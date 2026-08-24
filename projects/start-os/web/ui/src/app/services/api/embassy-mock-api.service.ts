@@ -578,8 +578,6 @@ export class MockApiService extends ApiService {
   ): Promise<T.CheckChallengeRes | null> {
     await pauseFor(2000)
 
-    if (!params.acme) return null
-
     return {
       port: {
         ip: '0.0.0.0',

@@ -578,7 +578,7 @@ pub struct CheckChallengeParams {
     #[arg(help = "help.arg.gateway-id")]
     pub gateway: GatewayId,
     #[arg(long, help = "help.arg.acme-provider")]
-    pub acme: Option<AcmeProvider>,
+    pub acme: AcmeProvider,
 }
 
 /// Reachability of the port a certificate authority validates on, for a domain
@@ -594,10 +594,9 @@ pub struct CheckChallengeRes {
     pub port_v6: Option<CheckPortV6Res>,
 }
 
-/// Probe the challenge port for a domain that needs one, or report `None` when
-/// it does not: the authority is not ACME, or a certificate is on hand that
-/// still has life in it. A domain already served on the challenge port has
-/// been probed there by whoever asked, so the answer is theirs to reuse.
+/// Probe the challenge port for `fqdn`, or report `None` when `acme` already
+/// holds a certificate for it with life left. A domain with no ACME authority,
+/// or one already served on the challenge port, has no question to ask here.
 ///
 /// A probe that errors is reported as an unprobed leg rather than failing the
 /// call, so a caller that adds a domain still gets its other results back.
@@ -611,9 +610,6 @@ pub async fn check_challenge(
         acme,
     }: CheckChallengeParams,
 ) -> Result<Option<CheckChallengeRes>, Error> {
-    let Some(acme) = acme else {
-        return Ok(None);
-    };
     if !challenge_pending(&ctx.db.peek().await, &fqdn, &acme)? {
         return Ok(None);
     }

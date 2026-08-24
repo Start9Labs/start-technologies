@@ -590,17 +590,18 @@ pub async fn add_public_domain<Kind: HostApiKind>(
         ),
         // TLS-ALPN-01 is validated at 443, which the two probes above never
         // touch when the domain is served somewhere else. A domain served
-        // there has just been probed by `check_port` above.
+        // there has just been probed by `check_port` above, and one with no
+        // ACME authority is never challenged at all.
         async {
-            if ext_port == ACME_CHALLENGE_PORT {
+            let Some(acme) = authority.filter(|_| ext_port != ACME_CHALLENGE_PORT) else {
                 return Ok(None);
-            }
+            };
             check_challenge(
                 ctx.clone(),
                 CheckChallengeParams {
                     fqdn: fqdn.clone(),
                     gateway: gateway.clone(),
-                    acme: authority,
+                    acme,
                 },
             )
             .await

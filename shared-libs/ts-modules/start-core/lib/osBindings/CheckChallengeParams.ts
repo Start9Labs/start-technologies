@@ -5,5 +5,5 @@ import type { GatewayId } from './GatewayId'
 export type CheckChallengeParams = {
   fqdn: string
   gateway: GatewayId
-  acme: AcmeProvider | null
+  acme: AcmeProvider
 }
