@@ -3224,10 +3224,13 @@ pub fn lookup_info_by_addr(
     ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
     addr: SocketAddr,
 ) -> Option<(&GatewayId, &NetworkInterfaceInfo)> {
+    // A dual-stack listener reports an IPv4 peer's address in its mapped form,
+    // which is not equal to the IPv4 address a gateway holds.
+    let ip = addr.ip().to_canonical();
     ip_info.iter().find(|(_, i)| {
         i.ip_info
             .as_ref()
-            .map_or(false, |i| i.subnets.iter().any(|i| i.addr() == addr.ip()))
+            .map_or(false, |i| i.subnets.iter().any(|i| i.addr() == ip))
     })
 }
 
@@ -3326,6 +3329,44 @@ impl Accept for WildcardListener {
             )));
         }
         Poll::Pending
+    }
+}
+
+#[cfg(test)]
+mod lookup_tests {
+    use super::*;
+
+    fn gateway_holding(addr: &str) -> OrdMap<GatewayId, NetworkInterfaceInfo> {
+        let mut ip_info = crate::db::model::public::IpInfo::default();
+        ip_info.subnets.insert(addr.parse().unwrap());
+        [(
+            GatewayId::from(InternedString::from_static("eth0")),
+            NetworkInterfaceInfo {
+                ip_info: Some(std::sync::Arc::new(ip_info)),
+                ..Default::default()
+            },
+        )]
+        .into_iter()
+        .collect()
+    }
+
+    // The UI's port-80 listener is a dual-stack `[::]` bind, so an IPv4 client's
+    // local address arrives mapped into IPv6.
+    #[test]
+    fn an_ipv4_mapped_local_address_finds_its_gateway() {
+        let ip_info = gateway_holding("192.168.1.5/24");
+        let mapped: SocketAddr = "[::ffff:192.168.1.5]:80".parse().unwrap();
+        assert_eq!(
+            lookup_info_by_addr(&ip_info, mapped).map(|(id, _)| id.as_str()),
+            Some("eth0")
+        );
+    }
+
+    #[test]
+    fn an_address_no_gateway_holds_finds_nothing() {
+        let ip_info = gateway_holding("192.168.1.5/24");
+        let other: SocketAddr = "10.0.3.1:80".parse().unwrap();
+        assert!(lookup_info_by_addr(&ip_info, other).is_none());
     }
 }
 

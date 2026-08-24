@@ -36,9 +36,7 @@ pub fn layer(ctx: RpcContext, router: Router) -> Router {
     router.layer(axum::middleware::from_fn(
         move |req: Request, next: Next| {
             let ctx = ctx.clone();
-            // The listener resolves which of the server's networks a connection
-            // arrived on, and a domain is only served over its own gateways.
-            let gateway = req.extensions().get::<GatewayInfo>().map(|g| g.id.clone());
+            let gateway = arrival_gateway(&req);
             async move {
                 if let (Some(name), Some(gateway)) = (host(&req), gateway) {
                     let uri = req.uri().clone();
@@ -46,9 +44,7 @@ pub fn layer(ctx: RpcContext, router: Router) -> Router {
                         Ok(Some(res)) => return res,
                         Ok(None) => (),
                         Err(e) => {
-                            // Per request, so a malformed record must not flood
-                            // the log at page-load rate.
-                            tracing::debug!("failed to check the host {name}: {e}");
+                            tracing::warn!("failed to check the host {name}: {e}");
                             tracing::debug!("{e:?}");
                         }
                     }
@@ -57,6 +53,13 @@ pub fn layer(ctx: RpcContext, router: Router) -> Router {
             }
         },
     ))
+}
+
+/// Which of the server's networks the connection arrived on. The listener
+/// resolves it per connection and the router carries it in the request
+/// extensions, so a domain can be matched against the gateways it is served on.
+fn arrival_gateway(req: &Request) -> Option<GatewayId> {
+    req.extensions().get::<GatewayInfo>().map(|g| g.id.clone())
 }
 
 /// The host the request named, lowercased and stripped of any port and of the
@@ -87,7 +90,7 @@ fn host(req: &Request) -> Option<String> {
 /// one, and would put whatever it does hold — userinfo, most of all — in a
 /// `Location` header this server signs its name to.
 fn is_name_char(c: char) -> bool {
-    c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.'
+    c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.' || c == '_'
 }
 
 async fn redirect(
@@ -106,11 +109,11 @@ async fn redirect(
     }
     // The dashboard is reached by the server's own `.local` name, so answer that
     // before reading the database.
-    if ctx
-        .account
-        .peek(|a| a.hostname.hostname.local_domain_name())
-        == name
-    {
+    let own_mdns_name = ctx.account.peek(|a| {
+        name.strip_suffix(".local")
+            .is_some_and(|host| host == &**a.hostname.hostname)
+    });
+    if own_mdns_name {
         return Ok(None);
     }
     let Some(port) = service_tls_port(&ctx.db.peek().await, gateway, name)? else {
@@ -202,8 +205,8 @@ fn tls_port<'a>(
 
 /// Whether a browser can open this binding's TLS port. A binding that carries
 /// another protocol over TLS — an Electrum server, a TURN server — has a domain
-/// and a TLS port like any other. A `ui` interface is browser-openable by
-/// definition, so it counts even when the package declared no scheme.
+/// and a TLS port like any other. An interface the package typed `ui` counts
+/// even with no scheme declared, on the package's word that a browser opens it.
 fn serves_https(bind: &BindInfo) -> bool {
     bind.interfaces
         .values()
@@ -496,6 +499,18 @@ mod test {
         })
     }
 
+    // A binding's address set outlives the domain record it came from, so the
+    // domain the operator configured is what decides.
+    #[test]
+    fn ignores_a_name_no_host_lists_as_a_domain() {
+        let bind = binding([private("cloud.mydomain.com", true, HTTPS_PORT)]);
+        let db = db(empty_host(), host_holding("other.example", &bind));
+        assert_eq!(
+            service_tls_port(&db, &gateway("eth0"), "cloud.mydomain.com").unwrap(),
+            None
+        );
+    }
+
     #[test]
     fn finds_a_service_domain_in_the_database() {
         let bind = binding([private("cloud.mydomain.com", true, HTTPS_PORT)]);
@@ -524,6 +539,19 @@ mod test {
             .header(http::header::HOST, host)
             .body(Body::empty())
             .unwrap()
+    }
+
+    // The gateway comes out of the request extensions by type, so a wrong type
+    // would read as "no gateway" and switch the whole redirect off in silence.
+    #[test]
+    fn reads_the_gateway_the_listener_resolved() {
+        let mut req = request("cloud.mydomain.com");
+        req.extensions_mut().insert(GatewayInfo {
+            id: gateway("eth0"),
+            info: Default::default(),
+        });
+        assert_eq!(arrival_gateway(&req), Some(gateway("eth0")));
+        assert_eq!(arrival_gateway(&request("cloud.mydomain.com")), None);
     }
 
     #[test]
@@ -574,7 +602,7 @@ mod test {
     #[test]
     fn skips_a_host_outside_the_name_character_set() {
         assert_eq!(host(&request("admin@evil.example")), None);
-        assert_eq!(host(&request("cloud.mydomain.com_")), None);
+        assert_eq!(host(&request("cloud.mydomain.com!")), None);
         assert_eq!(host(&request(&format!("{}.com", "a".repeat(250)))), None);
     }
 
