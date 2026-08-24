@@ -36,6 +36,7 @@ my-service-startos/
 │   ├── sdk.ts              # SDK initialization (boilerplate)
 │   ├── utils.ts            # Package-specific utilities
 │   └── versions/           # Version management and migrations
+├── .dockerignore           # Build-context filter (see below)
 ├── .gitignore
 ├── AGENTS.md               # Agent context: repo identity + how to work in this repo
 ├── CLAUDE.md               # One-line `@AGENTS.md` import for Claude Code
@@ -59,6 +60,7 @@ my-service-startos/
 These files typically require minimal modification:
 
 - `.gitignore`
+- `.dockerignore` - Docker does not read `.gitignore`, so a package that builds from source needs this to keep `node_modules`, `.git`, and built `.s9pk`s out of the build context that `s9pk pack` uploads on every arch
 - `Makefile` - Includes the SDK's `s9pk.mk` from `node_modules` (see [Makefile](./makefile.md))
 - `package.json` / `package-lock.json`
 - `tsconfig.json`
