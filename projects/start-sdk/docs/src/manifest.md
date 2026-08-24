@@ -239,7 +239,7 @@ For services that bring up their own kernel tunnel interface — VPNs, WireGuard
 virtualNetworking: true,
 ```
 
-When set, StartOS exposes `/dev/net/tun` inside the service's container **and grants `CAP_NET_ADMIN`** (scoped to the container's user namespace) so the service can create and configure tunnel interfaces. This is a meaningful privilege escalation — enable it only when the service genuinely needs a kernel tunnel interface.
+When set, StartOS exposes `/dev/net/tun` inside the service's container, so the service can create and configure tunnel interfaces. The flag grants that device and nothing else; it does not change the container's capabilities. Enable it only when the service genuinely needs a kernel tunnel interface.
 
 ### Nested OCI Runtimes (Docker / Podman inside a service)
 
@@ -250,7 +250,7 @@ userspaceFilesystems: true,  // /dev/fuse for fuse-overlayfs storage
 virtualNetworking: true,     // /dev/net/tun for slirp4netns / pasta networking
 ```
 
-`userspaceFilesystems` exposes `/dev/fuse` so a rootless engine (Podman or Docker) can use `fuse-overlayfs` for layered storage. `virtualNetworking` exposes `/dev/net/tun` so it can use `slirp4netns` (or `pasta`) for networking (and also grants `CAP_NET_ADMIN`). Both are opt-in. Service authors are still responsible for installing the OCI engine in the image and configuring it for rootless mode — see [Run a Nested OCI Runtime](./recipe-nested-oci-runtime.md) for the full recipe (subuid setup, daemon configuration, and the runc wrapper required when using Docker).
+`userspaceFilesystems` exposes `/dev/fuse` so a rootless engine (Podman or Docker) can use `fuse-overlayfs` for layered storage. `virtualNetworking` exposes `/dev/net/tun` so it can use `slirp4netns` (or `pasta`) for networking. Both are opt-in. Service authors are still responsible for installing the OCI engine in the image and configuring it for rootless mode — see [Run a Nested OCI Runtime](./recipe-nested-oci-runtime.md) for the full recipe (subuid setup, daemon configuration, and the runc wrapper required when using Docker).
 
 ### Multiple Images
 
