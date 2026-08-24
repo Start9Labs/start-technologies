@@ -152,6 +152,7 @@ Some pairs of files mirror each other by hand — nothing enforces them, so a ch
 Already enforced or checked elsewhere (listed here for completeness; documented at their own scope):
 
 - **Exported Rust types → `make start-core-ts-bindings` → SDK rebuild → web/container-runtime.** See [ARCHITECTURE.md](ARCHITECTURE.md#cross-layer-verification); editing `osBindings/*.ts` alone is not enough.
+- **CLI subcommands and their help strings → `make manpages`.** The committed pages under `projects/*/man/` are generated from the clap definitions in `start-core`; `Generated Artifacts` regenerates both these and the TS bindings and fails on any drift.
 - **User-facing strings ↔ all five locale dictionaries** (`en_US`/`de_DE`/`es_ES`/`fr_FR`/`pl_PL`) — compile-checked for `start-core`; `npm run check:i18n` for the web libs.
 - **`patchdb-ui-seed.json` ↔ `patchdb-ui-seed.beta.json`** — keep both seeds in sync (see [`projects/start-os/AGENTS.md`](projects/start-os/AGENTS.md)).
 - **A crate's `version` bump ↔ its `CHANGELOG.md`** — versions are read from each manifest; bump the changelog in the same change.
