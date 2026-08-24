@@ -152,7 +152,7 @@ impl PackageVersionInfo {
             metadata: manifest.metadata.clone(),
             icon,
             dependency_metadata,
-            source_version: None, // TODO
+            source_version: Some(manifest.can_migrate_from.clone()),
             s9pks: vec![(
                 manifest.hardware_requirements.clone(),
                 RegistryAsset {
