@@ -6,7 +6,6 @@
 //! request carries no SNI, which is what tells the service apart from every
 //! other name this server answers to.
 
-use std::collections::BTreeSet;
 use std::net::IpAddr;
 
 use axum::Router;
@@ -18,13 +17,18 @@ use http::uri::{Authority, Scheme};
 use http::{HeaderValue, StatusCode, Uri};
 use imbl_value::InternedString;
 
+use crate::GatewayId;
 use crate::context::RpcContext;
+use crate::db::model::DatabaseModel;
+use crate::net::gateway::GatewayInfo;
 use crate::net::host::binding::BindInfo;
-use crate::net::service_interface::HostnameMetadata;
+use crate::net::service_interface::{HostnameMetadata, ServiceInterfaceType};
 use crate::prelude::*;
 
 const HTTPS_PORT: u16 = 443;
-const HTTPS_SCHEME: &str = "https";
+
+/// The longest name DNS carries.
+const MAX_NAME_LEN: usize = 253;
 
 /// Bounce a request whose `Host` names a domain an installed service is served
 /// on.
@@ -32,16 +36,19 @@ pub fn layer(ctx: RpcContext, router: Router) -> Router {
     router.layer(axum::middleware::from_fn(
         move |req: Request, next: Next| {
             let ctx = ctx.clone();
+            // The listener resolves which of the server's networks a connection
+            // arrived on, and a domain is only served over its own gateways.
+            let gateway = req.extensions().get::<GatewayInfo>().map(|g| g.id.clone());
             async move {
-                if let Some(name) = host(&req) {
+                if let (Some(name), Some(gateway)) = (host(&req), gateway) {
                     let uri = req.uri().clone();
-                    match redirect(&ctx, &name, &uri).await {
+                    match redirect(&ctx, &gateway, &name, &uri).await {
                         Ok(Some(res)) => return res,
                         Ok(None) => (),
                         Err(e) => {
-                            tracing::warn!(
-                                "failed to check whether {name} is a service domain: {e}"
-                            );
+                            // Per request, so a malformed record must not flood
+                            // the log at page-load rate.
+                            tracing::debug!("failed to check the host {name}: {e}");
                             tracing::debug!("{e:?}");
                         }
                     }
@@ -53,38 +60,60 @@ pub fn layer(ctx: RpcContext, router: Router) -> Router {
 }
 
 /// The host the request named, lowercased and stripped of any port and of the
-/// root's trailing dot. `None` when the request names no host or names one by
-/// IP address, neither of which can be a configured domain.
+/// root's trailing dot.
+///
+/// `None` unless the result is a plausible domain name. An address, an
+/// over-long name, or anything outside the DNS character set is rejected here,
+/// so nothing else has to defend against a hostile `Host`.
 fn host(req: &Request) -> Option<String> {
-    let host = match req.headers().get(http::header::HOST) {
-        Some(host) => host.to_str().ok()?,
-        // An HTTP/2 request carries `:authority` instead, which hyper puts in
-        // the URI rather than in a header.
-        None => req.uri().host()?,
+    // The request target's authority wins over the header, and on HTTP/2 it is
+    // the only one of the two hyper fills in.
+    let host = match req.uri().host() {
+        Some(host) => host,
+        None => req.headers().get(http::header::HOST)?.to_str().ok()?,
     };
-    // A bracketed host is an IPv6 literal, and it carries the only other colon
-    // a host can hold.
-    if host.starts_with('[') {
+    let host = host.split_once(':').map_or(host, |(name, _)| name);
+    if host.parse::<IpAddr>().is_ok() {
         return None;
     }
-    let name = host.split_once(':').map_or(host, |(name, _)| name);
-    let name = name.trim_end_matches('.').to_ascii_lowercase();
-    if name.is_empty() || name.parse::<IpAddr>().is_ok() {
+    let name = host.trim_end_matches('.').to_ascii_lowercase();
+    if name.is_empty() || name.len() > MAX_NAME_LEN || !name.chars().all(is_name_char) {
         return None;
     }
     Some(name)
 }
 
-async fn redirect(ctx: &RpcContext, name: &str, uri: &Uri) -> Result<Option<Response>, Error> {
-    // Only a request in origin form carries a path to send across. `OPTIONS *`
-    // and the authority form of `CONNECT` do not.
+/// The character set a stored domain is matched on. A name outside it cannot be
+/// one, and would put whatever it does hold — userinfo, most of all — in a
+/// `Location` header this server signs its name to.
+fn is_name_char(c: char) -> bool {
+    c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.'
+}
+
+async fn redirect(
+    ctx: &RpcContext,
+    gateway: &GatewayId,
+    name: &str,
+    uri: &Uri,
+) -> Result<Option<Response>, Error> {
+    // A target that is not a path has nothing to send across: `CONNECT` names an
+    // authority, and `OPTIONS *` names nothing.
     if uri
         .path_and_query()
         .map_or(true, |p| !p.path().starts_with('/'))
     {
         return Ok(None);
     }
-    let Some(port) = service_tls_port(ctx, name).await? else {
+    // The dashboard is reached by the server's own `.local` name, so answer that
+    // before reading the database.
+    if ctx
+        .account
+        .peek(|a| a.hostname.hostname.local_domain_name())
+        == name
+    {
+        return Ok(None);
+    }
+    let Some(port) = service_tls_port(&ctx.db.peek().await, gateway, name)? else {
         return Ok(None);
     };
     https_redirect(uri, name, port).map(Some)
@@ -115,22 +144,25 @@ fn https_redirect(uri: &Uri, name: &str, port: u16) -> Result<Response, Error> {
         .with_kind(ErrorKind::Network)
 }
 
-/// The TLS port an installed service answers `name` on.
+/// The TLS port an installed service answers `name` on over `gateway`.
 ///
-/// The server's own host is not searched: its TLS listener proxies back to this
-/// very port, so redirecting a name it answers to would loop.
-async fn service_tls_port(ctx: &RpcContext, name: &str) -> Result<Option<u16>, Error> {
-    let db = ctx.db.peek().await;
+/// Only installed services are searched. The server's own host answers its names
+/// through a TLS listener that proxies back to this very port, so redirecting one
+/// of those would loop.
+fn service_tls_port(
+    db: &DatabaseModel,
+    gateway: &GatewayId,
+    name: &str,
+) -> Result<Option<u16>, Error> {
+    let key = InternedString::from(name);
     for (_, package) in db.as_public().as_package_data().as_entries()? {
         for (_, host) in package.as_hosts().as_entries()? {
-            let configured =
-                |domains: BTreeSet<InternedString>| domains.iter().any(|d| **d == *name);
-            if !configured(host.as_private_domains().keys()?)
-                && !configured(host.as_public_domains().keys()?)
+            if !host.as_private_domains().contains_key(&key)?
+                && !host.as_public_domains().contains_key(&key)?
             {
                 continue;
             }
-            if let Some(port) = tls_port(host.as_bindings().de()?.values(), name) {
+            if let Some(port) = tls_port(host.as_bindings().de()?.values(), gateway, name) {
                 return Ok(Some(port));
             }
         }
@@ -138,11 +170,16 @@ async fn service_tls_port(ctx: &RpcContext, name: &str) -> Result<Option<u16>, E
     Ok(None)
 }
 
-/// The port to send a browser that asked for `name` in plaintext.
+/// The port to send a browser that asked for `name` over `gateway` in plaintext.
 ///
-/// Only a domain qualifies. The server's IP addresses and its `.local` name are
-/// how the dashboard itself is reached, and every host carries them.
-fn tls_port<'a>(bindings: impl IntoIterator<Item = &'a BindInfo>, name: &str) -> Option<u16> {
+/// Only a domain qualifies, and only over a gateway it is served on. The
+/// server's IP addresses and its `.local` name are how the dashboard itself is
+/// reached, and every host carries them.
+fn tls_port<'a>(
+    bindings: impl IntoIterator<Item = &'a BindInfo>,
+    gateway: &GatewayId,
+    name: &str,
+) -> Option<u16> {
     bindings
         .into_iter()
         .filter(|bind| bind.enabled && serves_https(bind))
@@ -154,20 +191,26 @@ fn tls_port<'a>(bindings: impl IntoIterator<Item = &'a BindInfo>, name: &str) ->
                     addr.metadata,
                     HostnameMetadata::PrivateDomain { .. } | HostnameMetadata::PublicDomain { .. }
                 )
+                // A domain scoped to another gateway has no listener on this
+                // one, so sending a browser there ends in a refused handshake.
+                && addr.metadata.gateways().any(|g| g == gateway)
         })
         .filter_map(|addr| addr.port)
-        // A browser that reached this port named no port of its own, so it
-        // wants 443; any other port is a guess.
+        // A browser with no port in its address bar goes to 443, so prefer it.
         .min_by_key(|port| (*port != HTTPS_PORT, *port))
 }
 
 /// Whether a browser can open this binding's TLS port. A binding that carries
 /// another protocol over TLS — an Electrum server, a TURN server — has a domain
-/// and a TLS port like any other.
+/// and a TLS port like any other. A `ui` interface is browser-openable by
+/// definition, so it counts even when the package declared no scheme.
 fn serves_https(bind: &BindInfo) -> bool {
     bind.interfaces
         .values()
-        .any(|iface| iface.address_info.ssl_scheme.as_deref() == Some(HTTPS_SCHEME))
+        .any(|iface| match iface.address_info.ssl_scheme.as_deref() {
+            Some(scheme) => scheme == Scheme::HTTPS.as_str(),
+            None => matches!(iface.interface_type, ServiceInterfaceType::Ui),
+        })
 }
 
 #[cfg(test)]
@@ -176,15 +219,15 @@ mod test {
 
     use super::*;
     use crate::net::host::binding::{BindOptions, DerivedAddressInfo, NetInfo};
-    use crate::net::service_interface::{
-        AddressInfo, HostnameInfo, ServiceInterface, ServiceInterfaceType,
-    };
-    use crate::{GatewayId, HostId, Id, ServiceInterfaceId};
+    use crate::net::service_interface::{AddressInfo, HostnameInfo, ServiceInterface};
+    use crate::{HostId, Id, ServiceInterfaceId};
 
-    fn gateways() -> BTreeSet<GatewayId> {
-        [GatewayId::from(InternedString::from_static("eth0"))]
-            .into_iter()
-            .collect()
+    fn gateway(id: &'static str) -> GatewayId {
+        GatewayId::from(InternedString::from_static(id))
+    }
+
+    fn gateways() -> std::collections::BTreeSet<GatewayId> {
+        [gateway("eth0")].into_iter().collect()
     }
 
     fn private(hostname: &str, ssl: bool, port: u16) -> HostnameInfo {
@@ -206,7 +249,7 @@ mod test {
             hostname: InternedString::from(hostname),
             port: Some(port),
             metadata: HostnameMetadata::PublicDomain {
-                gateway: GatewayId::from(InternedString::from_static("eth0")),
+                gateway: gateway("eth0"),
             },
         }
     }
@@ -226,7 +269,7 @@ mod test {
     /// A binding serves its domains only through an exported interface, so
     /// every fixture needs one: `BindInfo::enabled_addresses` drops every
     /// address but the internal ones when `interfaces` is empty.
-    fn interface(ssl_scheme: Option<&str>) -> ServiceInterface {
+    fn interface(ssl_scheme: Option<&str>, kind: ServiceInterfaceType) -> ServiceInterface {
         let id = ServiceInterfaceId::from(Id::try_from("ui".to_owned()).unwrap());
         ServiceInterface {
             id,
@@ -241,15 +284,16 @@ mod test {
                 ssl_scheme: ssl_scheme.map(InternedString::intern),
                 suffix: String::new(),
             },
-            interface_type: ServiceInterfaceType::Ui,
+            interface_type: kind,
         }
     }
 
     fn binding_serving(
         ssl_scheme: Option<&str>,
+        kind: ServiceInterfaceType,
         available: impl IntoIterator<Item = HostnameInfo>,
     ) -> BindInfo {
-        let iface = interface(ssl_scheme);
+        let iface = interface(ssl_scheme, kind);
         BindInfo {
             enabled: true,
             options: BindOptions {
@@ -272,7 +316,11 @@ mod test {
     }
 
     fn binding(available: impl IntoIterator<Item = HostnameInfo>) -> BindInfo {
-        binding_serving(Some(HTTPS_SCHEME), available)
+        binding_serving(
+            Some(Scheme::HTTPS.as_str()),
+            ServiceInterfaceType::Ui,
+            available,
+        )
     }
 
     #[test]
@@ -282,7 +330,7 @@ mod test {
             private("cloud.mydomain.com", true, HTTPS_PORT),
         ])];
         assert_eq!(
-            tls_port(binds.iter(), "cloud.mydomain.com"),
+            tls_port(binds.iter(), &gateway("eth0"), "cloud.mydomain.com"),
             Some(HTTPS_PORT)
         );
     }
@@ -291,7 +339,7 @@ mod test {
     fn sends_a_public_domain_to_its_tls_port() {
         let binds = [binding([public("cloud.mydomain.com", HTTPS_PORT)])];
         assert_eq!(
-            tls_port(binds.iter(), "cloud.mydomain.com"),
+            tls_port(binds.iter(), &gateway("eth0"), "cloud.mydomain.com"),
             Some(HTTPS_PORT)
         );
     }
@@ -301,13 +349,19 @@ mod test {
     #[test]
     fn leaves_the_mdns_name_alone() {
         let binds = [binding([mdns("myserver.local", HTTPS_PORT)])];
-        assert_eq!(tls_port(binds.iter(), "myserver.local"), None);
+        assert_eq!(
+            tls_port(binds.iter(), &gateway("eth0"), "myserver.local"),
+            None
+        );
     }
 
     #[test]
     fn ignores_a_domain_served_only_in_plaintext() {
         let binds = [binding([private("cloud.mydomain.com", false, 8080)])];
-        assert_eq!(tls_port(binds.iter(), "cloud.mydomain.com"), None);
+        assert_eq!(
+            tls_port(binds.iter(), &gateway("eth0"), "cloud.mydomain.com"),
+            None
+        );
     }
 
     // An Electrum server's TLS port speaks its own protocol, and a browser sent
@@ -316,27 +370,64 @@ mod test {
     fn ignores_a_tls_port_that_is_not_https() {
         let binds = [binding_serving(
             Some("ssl"),
+            ServiceInterfaceType::Api,
             [private("electrum.mydomain.com", true, 50002)],
         )];
-        assert_eq!(tls_port(binds.iter(), "electrum.mydomain.com"), None);
+        assert_eq!(
+            tls_port(binds.iter(), &gateway("eth0"), "electrum.mydomain.com"),
+            None
+        );
     }
 
     #[test]
-    fn ignores_a_tls_port_with_no_declared_scheme() {
+    fn ignores_a_non_ui_port_with_no_declared_scheme() {
         let binds = [binding_serving(
             None,
+            ServiceInterfaceType::P2p,
             [private("p2p.mydomain.com", true, 8443)],
         )];
-        assert_eq!(tls_port(binds.iter(), "p2p.mydomain.com"), None);
+        assert_eq!(
+            tls_port(binds.iter(), &gateway("eth0"), "p2p.mydomain.com"),
+            None
+        );
     }
 
-    // A binding a service has retired keeps its domains in the database, but
-    // nothing serves them.
+    // A package may bind a port the SDK knows no protocol for and still export a
+    // ui from it, which leaves the scheme unset.
+    #[test]
+    fn sends_a_ui_with_no_declared_scheme() {
+        let binds = [binding_serving(
+            None,
+            ServiceInterfaceType::Ui,
+            [private("cloud.mydomain.com", true, 8443)],
+        )];
+        assert_eq!(
+            tls_port(binds.iter(), &gateway("eth0"), "cloud.mydomain.com"),
+            Some(8443)
+        );
+    }
+
+    // A domain is served only over the gateways it was added on, and the vhost
+    // refuses the handshake anywhere else.
+    #[test]
+    fn ignores_a_domain_scoped_to_another_gateway() {
+        let binds = [binding([private("cloud.mydomain.com", true, HTTPS_PORT)])];
+        assert_eq!(
+            tls_port(binds.iter(), &gateway("wg0"), "cloud.mydomain.com"),
+            None
+        );
+    }
+
+    // `setupInterfaces` ends by disabling every binding the pass did not
+    // declare, and a disabled binding keeps its domains in the database.
     #[test]
     fn ignores_a_disabled_binding() {
         let mut bind = binding([private("cloud.mydomain.com", true, HTTPS_PORT)]);
         bind.enabled = false;
-        assert_eq!(tls_port([&bind], "cloud.mydomain.com"), None);
+        assert_eq!(
+            tls_port([&bind], &gateway("eth0"), "cloud.mydomain.com"),
+            None
+        );
     }
 
     #[test]
@@ -346,7 +437,10 @@ mod test {
             InternedString::from_static("cloud.mydomain.com"),
             HTTPS_PORT,
         ));
-        assert_eq!(tls_port([&bind], "cloud.mydomain.com"), None);
+        assert_eq!(
+            tls_port([&bind], &gateway("eth0"), "cloud.mydomain.com"),
+            None
+        );
     }
 
     #[test]
@@ -356,7 +450,7 @@ mod test {
             binding([private("cloud.mydomain.com", true, HTTPS_PORT)]),
         ];
         assert_eq!(
-            tls_port(binds.iter(), "cloud.mydomain.com"),
+            tls_port(binds.iter(), &gateway("eth0"), "cloud.mydomain.com"),
             Some(HTTPS_PORT)
         );
     }
@@ -367,7 +461,61 @@ mod test {
             binding([private("cloud.mydomain.com", true, 9443)]),
             binding([private("cloud.mydomain.com", true, 8443)]),
         ];
-        assert_eq!(tls_port(binds.iter(), "cloud.mydomain.com"), Some(8443));
+        assert_eq!(
+            tls_port(binds.iter(), &gateway("eth0"), "cloud.mydomain.com"),
+            Some(8443)
+        );
+    }
+
+    fn host_holding(domain: &str, bind: &BindInfo) -> imbl_value::Value {
+        imbl_value::json!({
+            "bindings": { "80": imbl_value::to_value(bind).unwrap() },
+            "bindingRanges": {},
+            "publicDomains": {},
+            "privateDomains": { domain: ["eth0"] },
+            "portForwards": [],
+        })
+    }
+
+    fn db(server_host: imbl_value::Value, package_host: imbl_value::Value) -> DatabaseModel {
+        DatabaseModel::from(imbl_value::json!({
+            "public": {
+                "serverInfo": { "network": { "host": server_host } },
+                "packageData": { "nextcloud": { "hosts": { "ui": package_host } } },
+            }
+        }))
+    }
+
+    fn empty_host() -> imbl_value::Value {
+        imbl_value::json!({
+            "bindings": {},
+            "bindingRanges": {},
+            "publicDomains": {},
+            "privateDomains": {},
+            "portForwards": [],
+        })
+    }
+
+    #[test]
+    fn finds_a_service_domain_in_the_database() {
+        let bind = binding([private("cloud.mydomain.com", true, HTTPS_PORT)]);
+        let db = db(empty_host(), host_holding("cloud.mydomain.com", &bind));
+        assert_eq!(
+            service_tls_port(&db, &gateway("eth0"), "cloud.mydomain.com").unwrap(),
+            Some(HTTPS_PORT)
+        );
+    }
+
+    // The server's own TLS listener proxies back to the port this redirect runs
+    // on, so a name it answers to must never be redirected.
+    #[test]
+    fn does_not_search_the_servers_own_host() {
+        let bind = binding([private("home.mydomain.com", true, HTTPS_PORT)]);
+        let db = db(host_holding("home.mydomain.com", &bind), empty_host());
+        assert_eq!(
+            service_tls_port(&db, &gateway("eth0"), "home.mydomain.com").unwrap(),
+            None
+        );
     }
 
     fn request(host: &str) -> Request {
@@ -394,11 +542,21 @@ mod test {
         );
     }
 
-    // An HTTP/2 request has no `Host` header; hyper puts `:authority` in the URI.
     #[test]
     fn reads_the_authority_of_a_request_with_no_host_header() {
         let req = Request::builder()
             .uri("https://cloud.mydomain.com/photos")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(host(&req).as_deref(), Some("cloud.mydomain.com"));
+    }
+
+    // RFC 9112 gives the request target's authority precedence over the header.
+    #[test]
+    fn prefers_the_authority_to_the_header() {
+        let req = Request::builder()
+            .uri("http://cloud.mydomain.com/photos")
+            .header(http::header::HOST, "other.mydomain.com")
             .body(Body::empty())
             .unwrap();
         assert_eq!(host(&req).as_deref(), Some("cloud.mydomain.com"));
@@ -409,6 +567,15 @@ mod test {
         assert_eq!(host(&request("192.168.1.5")), None);
         assert_eq!(host(&request("192.168.1.5:80")), None);
         assert_eq!(host(&request("[fd00::1]:80")), None);
+    }
+
+    // Userinfo in the authority would otherwise reach a `Location` header, where
+    // the browser reads everything after the `@` as the destination.
+    #[test]
+    fn skips_a_host_outside_the_name_character_set() {
+        assert_eq!(host(&request("admin@evil.example")), None);
+        assert_eq!(host(&request("cloud.mydomain.com_")), None);
+        assert_eq!(host(&request(&format!("{}.com", "a".repeat(250)))), None);
     }
 
     fn location(uri: &str, port: u16) -> String {

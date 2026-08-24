@@ -15,13 +15,15 @@ file tracks notable changes since the move to the monorepo.
 - **Typing a service's domain without `https://` reaches the service.** A
   browser given a bare name tries plain HTTP first, and port 80 belongs to the
   StartOS UI, so the address bar landed on your server's dashboard instead of
-  the service — a plain HTTP request carries no server name, and the server name
-  is what tells your services apart on one shared address. StartOS now sends
-  such a request on to the domain's HTTPS address, which is what StartTunnel
-  already does for a public domain at the edge. Your server's own addresses are
-  untouched: its IP addresses, its `.local` name and any domain you added to the
-  StartOS UI itself still open the dashboard over plain HTTP. See
-  [Private Domains](https://docs.start9.com/start-os/private-domains.html).
+  the service — an encrypted request names the domain during the handshake and
+  your server routes on that, while a plain HTTP request arrives with nothing to
+  route on. StartOS now sends such a request on to the domain's HTTPS address,
+  which is what StartTunnel already does for a public domain at the edge. It
+  does so only where the encrypted address answers: over a network the domain
+  was added on, for an interface you open in a browser. Your server's own
+  addresses are untouched — its IP addresses, its `.local` name and any domain
+  you added to the StartOS UI itself still open the dashboard over plain HTTP.
+  See [Private Domains](https://docs.start9.com/start-os/private-domains.html).
 
 - **A service can permanently retire a network host or a port it no longer
   uses, and the port numbers it held become available again.** A service that
