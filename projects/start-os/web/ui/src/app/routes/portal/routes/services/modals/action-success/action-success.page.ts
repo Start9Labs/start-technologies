@@ -16,7 +16,7 @@ import { ActionResponse } from './types'
   template: `
     @if (message) {
       <div
-        class="message"
+        class="g-markdown"
         safeLinks
         [innerHTML]="message | i18n | markdown: options | dompurify"
       ></div>
@@ -26,31 +26,6 @@ import { ActionResponse } from './types'
     }
     @if (group) {
       <app-action-success-group [group]="group" />
-    }
-  `,
-  styles: `
-    .message {
-      ::ng-deep > :first-child {
-        margin-block-start: 0;
-      }
-
-      ::ng-deep > :last-child {
-        margin-block-end: 0;
-      }
-
-      ::ng-deep pre {
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-      }
-
-      ::ng-deep table {
-        border-collapse: collapse;
-      }
-
-      ::ng-deep :is(td, th) {
-        border: 1px solid var(--tui-border-normal);
-        padding: 0.25rem 0.75rem;
-      }
     }
   `,
   imports: [

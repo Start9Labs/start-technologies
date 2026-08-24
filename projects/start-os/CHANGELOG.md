@@ -248,17 +248,6 @@ file tracks notable changes since the move to the monorepo.
   settings excluded. StartOS now rejects the overlapping claim and names both
   ports, so the service reports the conflict instead of serving it.
 
-- **The message an action returns is rendered as Markdown, and its line breaks
-  are kept.** A service action that reports back over several lines — a
-  diagnostic report, a list of what succeeded and what failed — reads as the
-  service wrote it, and can use headings, lists, tables, code blocks, emphasis
-  and links.
-
-- **The copy button beside a value in a grouped action result copies the whole
-  value.** Copying from a group dropped any line breaks the value contained and
-  gave no confirmation that anything had been copied. It now copies exactly
-  what the action returned, and confirms, like every other copy button.
-
 ### Security
 
 - **Service mount paths are validated and confined to their intended

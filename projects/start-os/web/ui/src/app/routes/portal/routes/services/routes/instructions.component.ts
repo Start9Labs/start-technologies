@@ -16,7 +16,11 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
     @if (value() === undefined) {
       <tui-loader textContent="Loading" [style.height.%]="100" />
     } @else if (value(); as value) {
-      <article safeLinks [innerHTML]="value | markdown | dompurify"></article>
+      <article
+        class="g-markdown"
+        safeLinks
+        [innerHTML]="value | markdown | dompurify"
+      ></article>
     } @else {
       <div tuiNotification appearance="neutral">
         {{ 'This version has no instructions. Please update.' | i18n }}
@@ -27,22 +31,6 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
     article {
       max-width: 48rem;
       font: var(--tui-typography-body-l);
-
-      ::ng-deep pre {
-        padding: 0.75rem 1rem;
-        border-radius: var(--tui-radius-m);
-        background: var(--tui-background-neutral-1);
-        overflow-x: auto;
-      }
-
-      ::ng-deep table {
-        border-collapse: collapse;
-      }
-
-      ::ng-deep :is(td, th) {
-        border: 1px solid var(--tui-border-normal);
-        padding: 0.25rem 0.75rem;
-      }
     }
   `,
   host: { class: 'g-subpage' },
