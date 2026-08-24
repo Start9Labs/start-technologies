@@ -3368,18 +3368,24 @@ mod lookup_tests {
         assert!(lookup_info_by_addr(&ip_info, neighbour).is_none());
     }
 
-    // Canonicalizing must unwrap only the mapped form. `to_ipv4` would read
-    // `::1` as `0.0.0.1` and hand a loopback connection someone's gateway.
     #[test]
-    fn a_native_ipv6_address_is_left_alone() {
+    fn a_native_ipv6_address_finds_its_gateway() {
         let ip_info = gateway_holding("fd00::1/64");
         let native: SocketAddr = "[fd00::1]:80".parse().unwrap();
         assert_eq!(
             lookup_info_by_addr(&ip_info, native).map(|(id, _)| id.as_str()),
             Some("eth0")
         );
-        let loopback: SocketAddr = "[::1]:80".parse().unwrap();
-        assert!(lookup_info_by_addr(&ip_info, loopback).is_none());
+    }
+
+    // Only the mapped form may be unwrapped. `to_ipv4` would also unwrap the
+    // deprecated IPv4-compatible form and hand that connection a gateway that
+    // does not serve it.
+    #[test]
+    fn an_ipv4_compatible_address_is_left_alone() {
+        let ip_info = gateway_holding("192.168.1.5/24");
+        let compatible: SocketAddr = "[::192.168.1.5]:80".parse().unwrap();
+        assert!(lookup_info_by_addr(&ip_info, compatible).is_none());
     }
 }
 

@@ -18,12 +18,12 @@ file tracks notable changes since the move to the monorepo.
   the service — an encrypted request names the domain during the handshake and
   your server routes on that, while a plain HTTP request reaches a port 80 that
   answers for the whole server. StartOS now sends such a request on to the
-  domain's HTTPS address,
-  which is what StartTunnel already does for a public domain at the edge. It
-  does so only where the encrypted address answers: over a network the domain
-  was added on, for an interface you open in a browser. Your server's own
-  addresses are untouched — its IP addresses, its `.local` name and any domain
-  you added to the StartOS UI itself still open the dashboard over plain HTTP.
+  domain's HTTPS address, which is what StartTunnel already does for a public
+  domain at the edge. It does so only where the encrypted address answers: over
+  a network the domain was added on, for an interface you open in a browser.
+  Your server's own addresses are untouched — its IP addresses, its `.local`
+  name and any domain you added to the StartOS UI itself still open the
+  dashboard over plain HTTP.
   See [Private Domains](https://docs.start9.com/start-os/private-domains.html).
 
 - **A service can permanently retire a network host or a port it no longer

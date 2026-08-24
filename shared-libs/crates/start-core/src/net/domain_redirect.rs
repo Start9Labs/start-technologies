@@ -210,8 +210,8 @@ fn tls_port<'a>(
 
 /// Whether a browser can open this binding's TLS port. A binding that carries
 /// another protocol over TLS — an Electrum server, a TURN server — has a domain
-/// and a TLS port like any other, so an `https` scheme or a `ui` interface is
-/// what separates the two.
+/// and a TLS port like any other. An `https` scheme separates the two, and so
+/// does a `ui` interface where the package declared no scheme at all.
 fn serves_https(bind: &BindInfo) -> bool {
     bind.interfaces
         .values()
@@ -396,6 +396,21 @@ mod test {
         )];
         assert_eq!(
             tls_port(binds.iter(), &gateway("eth0"), "p2p.mydomain.com"),
+            None
+        );
+    }
+
+    // A declared scheme decides on its own: a `ws` interface is typed `ui` and
+    // carries `wss`, which a browser cannot navigate to.
+    #[test]
+    fn ignores_a_ui_that_declares_another_scheme() {
+        let binds = [binding_serving(
+            Some("wss"),
+            ServiceInterfaceType::Ui,
+            [private("socket.mydomain.com", true, HTTPS_PORT)],
+        )];
+        assert_eq!(
+            tls_port(binds.iter(), &gateway("eth0"), "socket.mydomain.com"),
             None
         );
     }
