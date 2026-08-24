@@ -983,9 +983,9 @@ pub struct ProxyTarget {
     /// The config StartOS dials the container with when the container serves
     /// its own TLS. `None` dials it in plaintext.
     pub connect_ssl: Option<Arc<ClientConfig>>,
-    /// Narrows the protocols this binding puts forward — to the container when
-    /// one is dialled over TLS, to the client directly when none is. `None` and
-    /// `Some(AlpnInfo::Reflect)` both put forward the client's own list.
+    /// Filters the protocols the client asked for down to the ones this
+    /// binding puts forward. `None` and `Some(AlpnInfo::Reflect)` filter
+    /// nothing.
     pub alpn: Option<AlpnInfo>,
     pub passthrough: bool,
     /// Open the internal leg with the client's source IP (`IP_TRANSPARENT`).
@@ -1536,9 +1536,9 @@ impl ProxyContext {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub enum AlpnInfo {
-    /// Put the client's own list forward.
+    /// Filter nothing.
     Reflect,
-    /// Put these forward.
+    /// Keep only these.
     Specified(Vec<MaybeUtf8String>),
 }
 impl Default for AlpnInfo {
