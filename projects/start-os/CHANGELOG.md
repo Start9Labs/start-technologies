@@ -204,12 +204,17 @@ file tracks notable changes since the move to the monorepo.
   StartOS labels a failure that came from the runtime `Service Runtime Error`
   rather than `Unknown Error`.
 
-- **A service that adds an SSL port keeps the address you already had.** When a
-  service gained an SSL port alongside a plaintext one it already had, the new
-  SSL port took over the existing number and the plaintext port was moved to an
-  arbitrary one — changing an address you may have saved. Each now keeps its
-  own: the port you already had stays where it is, and the one being added takes
-  the port the service asks for.
+- **A service that adds an SSL port keeps the address you already had, and a
+  server where the two were already exchanged is put back.** When a service
+  gained an SSL port alongside a plaintext one it already had, the new SSL port
+  took over the existing number and the plaintext port moved to an arbitrary
+  one — so an address you had saved kept its number but began requiring SSL,
+  and a client pointed at it failed with a timeout that named nothing.
+  Servers upgraded from 0.3.5.1 running Electrs or Fulcrum are where this
+  showed. Each port now keeps its own, and updating restores the pair on a
+  server where they had been exchanged, so a client that worked before this
+  works again — turn its SSL setting back off if you switched it on to get
+  around it.
 
 - **The StartOS UI is served over plain HTTP on port 80.** Servers set up before
   0.4.0.1 gave the interface a high-numbered port instead, and nothing answered
