@@ -184,16 +184,16 @@ Oneshots are commands that run to completion on every startup, before daemons. U
 
 All three can express work that happens once, so "it only needs to happen once" does not pick one. What picks one is **what determines when the work runs**.
 
-| Mechanism                                         | Runs                                      | Keyed to                    |
-| ------------------------------------------------- | ----------------------------------------- | --------------------------- |
-| [`migrations.up`](./recipe-version-migrations.md) | once per install, crossing a version edge | the stored **data version** |
-| [`setupOnInit`](./init.md)                        | every container init                      | **why** it came up (`kind`) |
-| `.addOneshot`                                     | every `main()` start, before its daemons  | nothing — it always runs    |
+| Mechanism                                         | Runs                                                                        | Keyed to                    |
+| ------------------------------------------------- | --------------------------------------------------------------------------- | --------------------------- |
+| [`migrations.up`](./recipe-version-migrations.md) | once per install, crossing a version edge                                   | the stored **data version** |
+| [`setupOnInit`](./init.md)                        | every container init, then again on every change to anything it `.const()`s | **why** it came up (`kind`) |
+| `.addOneshot`                                     | every `main()` start, before its daemons                                    | nothing — it always runs    |
 
 Ask what the work is a function of:
 
 - **The package version that wrote the data → `migrations.up`.** Only the version graph knows which version produced what is on disk. Relocating files an older release left in the wrong place, rewriting a config whose shape changed, repairing permissions an older release set — all of these. It also covers restoring a backup taken below the current version, because it dispatches off the restored data version, and it never runs on a fresh install.
-- **Why the container came up → `setupOnInit`.** Fresh install vs. restore vs. update vs. rebuild. Generating an internal secret must happen on install and never on restore; a `.const()` watcher must re-register on every rebuild. `kind` is the whole point, and no other mechanism has it.
+- **Why the container came up → `setupOnInit`.** Fresh install vs. restore vs. update vs. rebuild. Generating an internal secret must happen on install and never on restore. `kind` is the whole point, and no other mechanism has it. An init handler is also a reactive context in its own right — a `.const()` inside one re-invokes that handler for the life of the container — so ongoing work that keeps a file, a task, or a registration correct belongs there too, and does not need `main` ([Init Handlers Are Reactive](./init.md#init-handlers-are-reactive)).
 - **The app's or the volume's own state, re-asked every start → a oneshot.** `chown`, because StartOS mounts volumes root-owned every time. An app's schema upgrade, because which schema the data is in is the app's state and not the package's version.
 
 Two traps worth naming:

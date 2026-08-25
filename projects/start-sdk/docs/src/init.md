@@ -1,13 +1,25 @@
 # Initialization
 
-`setupOnInit` runs during container initialization. The `kind` parameter indicates why init is running:
+`setupOnInit` registers a handler that runs when the container initializes — and runs again, from the top, whenever a `.const()` read inside it sees a new value. An init handler is a live reactive context for the life of the container, the same as `setupMain`. It is not a script that runs once and exits. Read [Init Handlers Are Reactive](#init-handlers-are-reactive) before writing one.
 
-| Kind        | When                              | Use For                                                                                                              |
+`kind` says why the container came up, and every re-run of a handler carries the value the handler started with:
+
+| Kind        | The container came up because     | Use For                                                                                                              |
 | ----------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `'install'` | Fresh install                     | Generate internal secrets, seed file-model defaults, create critical tasks for user setup actions, bootstrap via API |
-| `'update'`  | After a package version upgrade   | Re-apply config, handle post-migration setup                                                                         |
-| `'restore'` | Restoring from backup             | Re-register triggers; credentials are already present from the restored store                                        |
-| `null`      | Container rebuild, server restart | Register long-lived triggers (e.g., `.const()` watchers)                                                             |
+| `'install'` | It was freshly installed          | Generate internal secrets, seed file-model defaults, create critical tasks for user setup actions, bootstrap via API |
+| `'update'`  | The package version changed       | Re-apply config, handle post-migration setup                                                                         |
+| `'restore'` | A backup was restored             | Re-establish external state; credentials are already present from the restored store                                 |
+| `null`      | Container rebuild, server restart | The work that has to happen every time, watchers included                                                            |
+
+## Init Handlers Are Reactive
+
+`setupInit` gives each handler its own effects context and points that context's retry at the handler. A `.const()` read subscribes to its value and **re-invokes the whole handler** when it changes, for as long as the container lives.
+
+The reactivity is opt-in, and `.const()` is the opt-in: a handler that reads nothing reactively runs once per container init and is done. Once one is present, three consequences follow:
+
+- **A watcher is not registered and left behind — the handler body _is_ the watcher.** Everything above the `.const()` runs again on every change, so a handler that watches something must be cheap and idempotent.
+- **`kind` does not change on a re-run.** A handler that first ran with `kind === 'install'` still sees `'install'` when its watched value changes weeks later. `kind` is why the container came up, never what is happening now.
+- **Reacting to another package's state belongs here as readily as in `setupMain`.** An init handler observes a dependency's files, bindings, and addresses changing exactly as `main` does. Re-running it does not rebuild your daemon spec, so prefer init for work that only has to keep a file, a task, or a registration correct.
 
 ## Init Kinds
 
@@ -44,23 +56,28 @@ export const reRegisterWebhook = sdk.setupOnInit(async (effects, kind) => {
 
 ### Always (Container Lifetime)
 
-For registering `.const()` triggers that need to persist for the container's lifetime. These re-register on container rebuild:
+An unguarded handler runs on every kind — and, once it reads something with `.const()`, on every change to that value as well:
 
 ```typescript
 export const registerWatchers = sdk.setupOnInit(async (effects, kind) => {
-  // Runs on install, restore, AND container rebuild
+  // Runs on install, restore, and container rebuild — and again from here on
+  // every change to `setting`, which re-invokes this handler from the top.
+  const setting = await someConfig.read(c => c.setting).const(effects)
+  await applySetting(effects, setting)
 
-  // Register a watcher that lives for the container lifetime
-  someConfig.read(c => c.setting).const(effects)
-
-  // Install-specific setup
-  if (kind === 'install') {
+  // `kind` is still 'install' on every one of those re-runs, so the guard alone
+  // does not make this happen once. Generate only when the secret is absent, or
+  // a change to `setting` rotates a secret the service is already using.
+  const store = await storeJson.read().once()
+  if (kind === 'install' && !store?.jwtSecret) {
     await storeJson.merge(effects, {
       jwtSecret: utils.getDefaultString({ charset: 'a-z,A-Z,0-9', len: 64 }),
     })
   }
 })
 ```
+
+Put install-only work in a handler of its own when you can. A handler with no `.const()` runs once, so the guard is the only thing it needs — which is what [Install Only](#install-only) above shows.
 
 ## Watch State and Prompt (the admin-credentials pattern)
 

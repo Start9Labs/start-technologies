@@ -127,6 +127,8 @@ export const networkXml = FileHelper.xml({ base: sdk.volumes.config, subpath: 'n
 > [!NOTE]
 > All read methods return `null` if the file doesn't exist. Do NOT use try-catch for missing files.
 
+The enclosing context is whichever handler made the read — `setupMain`, where a re-run rebuilds the daemon spec and restarts the daemons whose spec changed, or a `setupOnInit` handler, where it re-invokes that handler alone ([Init Handlers Are Reactive](./init.md#init-handlers-are-reactive)). The examples below say "daemon restarts" because they are written from `setupMain`; the mechanism is the same in both.
+
 ### Use the Map Function
 
 When reading file models, **always use the map function** to extract only the fields you need. This is critical for two reasons:
