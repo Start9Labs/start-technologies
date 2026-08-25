@@ -22,7 +22,7 @@ Both options hide your home IP address, and in both cases the provider knows who
 
 ## Set System-Wide Default Gateway
 
-By default, StartOS dynamically selects which gateway to use for outbound traffic for optimal performance ("Auto" mode). You can override this under `System > Gateways > Outbound Traffic` by switching from "Auto" to a specific gateway. This sets the system-wide default: every service uses it, except services with their own [per-service override](#route-individual-services-through-vpn), which keep their own gateway.
+By default, StartOS dynamically selects which gateway to use for outbound traffic for optimal performance ("Auto" mode). You can override this under `System > Gateways > Outbound Traffic` by switching from "Auto" to a specific gateway. This sets the system-wide default: it covers everything on the server — every service, and the OS itself (registry connections, package downloads) — except services with their own [per-service override](#route-individual-services-through-vpn), which keep their own gateway.
 
 ## IPv6 leak prevention
 
