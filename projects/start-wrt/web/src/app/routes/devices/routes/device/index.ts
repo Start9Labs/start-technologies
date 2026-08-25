@@ -1,5 +1,5 @@
-import { Component, computed, effect, inject, signal } from '@angular/core'
-import { toSignal } from '@angular/core/rxjs-interop'
+import { Component, computed, effect, inject } from '@angular/core'
+import { toObservable, toSignal } from '@angular/core/rxjs-interop'
 import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms'
 import { ActivatedRoute, Router, RouterLink } from '@angular/router'
 import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
@@ -14,7 +14,7 @@ import {
 import { provideTranslatedValidationErrors } from 'src/app/i18n/validation-errors'
 import { TUI_CONFIRM, TuiSkeleton, TuiSwitch } from '@taiga-ui/kit'
 import { TuiHeader } from '@taiga-ui/layout'
-import { filter, startWith } from 'rxjs'
+import { catchError, EMPTY, filter, from, startWith, switchMap } from 'rxjs'
 import { Footer } from 'src/app/components/footer'
 import { Form } from 'src/app/components/form'
 import { DevicesService } from 'src/app/routes/devices/service'
@@ -224,7 +224,17 @@ export default class DeviceDetail {
     { requireSync: true },
   )
 
-  private readonly allRecords = signal<InjectedDnsRecordFromApi[]>([])
+  // Re-read on every device poll so the table follows records as they arrive
+  // and expire, and empties right after the permission is turned off. A failed
+  // read keeps the last list; the device poll already reports unreachability.
+  private readonly allRecords = toSignal(
+    toObservable(this.service.data).pipe(
+      switchMap(() =>
+        from(this.api.dnsInjectedList()).pipe(catchError(() => EMPTY)),
+      ),
+    ),
+    { initialValue: [] as InjectedDnsRecordFromApi[] },
+  )
   readonly deviceRecords = computed(() =>
     this.allRecords().filter(
       r => r.owner_mac?.toUpperCase() === this.mac.toUpperCase(),
@@ -237,8 +247,6 @@ export default class DeviceDetail {
 
     // Load published port usage for this device
     this.loadDependencies()
-
-    this.loadRecords()
 
     // Reset form when data loads
     effect(() => {
@@ -261,10 +269,6 @@ export default class DeviceDetail {
     effect(() => {
       updateDeviceValidators(this.form, this.ipv4Static())
     })
-  }
-
-  private async loadRecords() {
-    this.allRecords.set(await this.api.dnsInjectedList())
   }
 
   // Publishing DNS names is a trust grant with network-wide effect, so
