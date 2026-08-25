@@ -136,7 +136,7 @@ const secretKey = await storeJson.read(s => s.secretKey).const(effects)
 
 ## Getting Hostnames
 
-Interfaces are reached through their **host**. `sdk.host.getOwn(effects, hostId)` returns the host (`hostId` is the id you passed to `sdk.MultiHost.of`); the interface you exported lives under one of the host's bindings, and its `addressInfo` comes back **pre-filled** — call `.format(...)` on it for resolvable hostnames/URLs (also `.filter(...)`, `.nonLocal`, `.public`, `.bridge`, `.toUrl`):
+Interfaces are reached through their **host**. `sdk.host.getOwn(effects, hostId)` returns the host (`hostId` is the id you passed to `sdk.MultiHost.of`); the interface you exported lives under one of the host's bindings, and its `addressInfo` comes back **pre-filled** — call `.format(...)` on it for resolvable hostnames/URLs (also `.filter(...)`, `.matchesAny(...)`, `.nonLocal`, `.public`, `.bridge`, `.toUrl`):
 
 ```typescript
 const host = await sdk.host.getOwn(effects, 'ui').const()
@@ -148,6 +148,24 @@ const allowedHosts = ui?.addressInfo.format('hostname-info').map(h => h.hostname
 ```
 
 `.const()` sets up a reactive watcher — `setupMain` re-runs whenever the host's bindings, addresses, or exported interfaces change.
+
+### Narrowing the set
+
+Reach for the shorthands first — `.nonLocal`, `.public`, `.bridge` — then `.filter({...})` for a declared `kind` / `visibility` / `pluginId`, then `.matchesAny([...])` when you want the union of several. `.filter()` calls compose as an intersection, so chaining narrows:
+
+```typescript
+addresses.nonLocal.filter({ kind: 'domain' }) // domains, minus loopback and link-local
+addresses.matchesAny([{ kind: 'mdns' }, { kind: 'domain' }]) // either one
+```
+
+`predicate` is the escape hatch for a condition the declared fields cannot express. Prefer a shorthand or a declared filter wherever one fits: a predicate is opaque to the type narrowing the other forms give you, and it hides the intent behind a lambda.
+
+**`exclude` removes anything matching _any_ field of the nested filter, not only what matches all of them.** `filter({ exclude: { kind: 'ipv4', visibility: 'public' } })` therefore drops every IPv4 _and_ every public address, not just the public IPv4s — usually a far smaller set than intended. To subtract one combination, take the union of its complements instead:
+
+```typescript
+// everything except a public IPv4
+addresses.matchesAny([{ visibility: 'private' }, { exclude: { kind: 'ipv4' } }])
+```
 
 To react to only a slice of the host, pass a `map` selector (and optional `eq`, default deep-equal) to `getOwn`/`get`. `.const()` then re-runs only when the mapped value changes rather than on any change to the whole host:
 
