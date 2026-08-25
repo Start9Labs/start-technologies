@@ -276,7 +276,7 @@ Cancel a pending install or download.
 
 ### `start-cli package set-outbound-gateway <PACKAGE> [GATEWAY]`
 
-Override the outbound gateway for a specific service.
+Override the outbound gateway for a specific service, taking precedence over the system-wide default.
 
 ### `start-cli package action run <PACKAGE_ID> <ACTION_ID> <INPUT>`
 
@@ -411,7 +411,7 @@ Rename a gateway.
 
 ### `start-cli net gateway set-default-outbound <GATEWAY>`
 
-Set the default outbound gateway for all services.
+Set the system-wide default outbound gateway, used by every service without its own override.
 
 ### `start-cli net gateway set-secure <GATEWAY> [SECURE]`
 
