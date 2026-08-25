@@ -135,8 +135,8 @@ struct ProfileNet {
     wg_device: Option<String>,
 }
 
-/// Everything the closures peek synchronously: hickory's `authorize` /
-/// `tsig_key` / `pre_update` run on the DNS request task and cannot await, so
+/// Everything the closures peek synchronously: hickory's `tsig_key` /
+/// `pre_update` run on the DNS request task and cannot await, so
 /// a refresher task maintains this from UCI, the DHCP leases, and the
 /// neighbor table (the same shape as StartTunnel's `dns_allowed` set, with a
 /// refresher instead of a DB write).
@@ -203,12 +203,14 @@ impl DnsInject {
         let (tx, rx) = tokio::sync::watch::channel(Vec::new());
         let render_tx = tx.clone();
         let injector = {
-            let auth_dir = directory.clone();
             let key_dir = directory.clone();
             let policy_dir = directory.clone();
             DnsInjector::new(
                 Vec::new(),
-                move |src| auth_dir.peek(|d| d.by_ip.contains_key(&src)),
+                // `policy` is the one gate: it refuses an unknown source
+                // itself, and logs why, where the injector's own gate would
+                // refuse silently.
+                |_| true,
                 move |src| key_dir.peek(|d| d.wg_keys.get(&src).copied()),
                 move |records| {
                     let _ = tx.send(records);
