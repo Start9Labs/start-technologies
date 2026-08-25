@@ -166,7 +166,7 @@ addresses.nonLocal.filter({ kind: 'domain' }) // domains, off-box only
 addresses.matchesAny([{ kind: 'mdns' }, { kind: 'domain' }]) // either one
 ```
 
-`predicate` is the escape hatch for what those cannot express; it is opaque to the type narrowing the declared forms give you.
+`predicate` is the escape hatch for what those cannot express; it hides its condition in a function body, where the declared forms state theirs inline.
 
 **`exclude` drops anything matching _any_ field of the nested filter**, so `exclude: { kind: 'ipv4', visibility: 'public' }` removes every IPv4 _and_ every public address, not just the public IPv4s. Union the complements instead:
 
