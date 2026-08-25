@@ -124,7 +124,7 @@ use startos::net::port_map::server::igd::{
     SCPD_PATH, SSDP_MULTICAST, SSDP_PORT,
 };
 use startos::net::port_map::server::{handle, GatewayBackend, MappingEntry, PCP_PORT};
-use startos::tunnel::forward::sni::{FallbackSource, SniDemux};
+use startos::tunnel::forward::sni::{FallbackSource, SniDemux, SniRoute};
 use tokio::io::Interest;
 use tokio::net::UdpSocket;
 use uciedit::openwrt::{DhcpHost, FirewallRedirect, FirewallRule, FirewallTarget};
@@ -292,23 +292,87 @@ impl PortControl {
             .and_then(|out| String::from_utf8(out).ok())?;
         let (mac, iface) = parse_neigh(&neigh, peer)?;
         let uci_root = self.uci_root.clone();
-        let mac_for_lookup = mac.clone();
         let allowed = uci_task(move || async move {
             let arena = Arena::new();
             let cfgs = parse_all(&uci_root, &arena, &["dhcp"]).await?;
-            let mut allowed = false;
-            cfgs["dhcp"].each::<DhcpHost, Error>(|_, host| {
-                if host.mac.to_uppercase() == mac_for_lookup
-                    && host._allow_pcp.as_deref() == Some("1")
-                {
-                    allowed = true;
-                }
-            })?;
-            Ok(allowed)
+            Ok(pcp_allowed_macs(&cfgs["dhcp"])?)
         })
         .await
+        .map(|allowed| allowed.contains(&mac))
         .unwrap_or(false);
         allowed.then_some(Client { mac, iface })
+    }
+
+    /// Drop every hostname route whose target address now belongs to a device
+    /// without the automatic-port-forwarding permission. Routes live in the
+    /// demux keyed by address, not by device, so the owner is re-derived the
+    /// way a grant derives it — the neighbor table, else the DHCP leases and
+    /// static hosts — and a target that resolves to no device at all is left
+    /// alone, its lease still bounding it. Runs on every permission revocation
+    /// and once a minute from the sweep, which also catches an address handed
+    /// on to a different, unauthorized device.
+    pub(crate) async fn reap_unauthorized_sni_routes(&self) {
+        let routes = self.sni.snapshot();
+        if routes.is_empty() {
+            return;
+        }
+        let uci_root = self.uci_root.clone();
+        let lookup = uci_task(move || async move {
+            let arena = Arena::new();
+            let cfgs = parse_all(&uci_root, &arena, &["dhcp"]).await?;
+            let ip_to_mac = ip_to_mac_map(&cfgs["dhcp"]).await?;
+            Ok((ip_to_mac, pcp_allowed_macs(&cfgs["dhcp"])?))
+        })
+        .await;
+        let (mut ip_to_mac, allowed) = match lookup {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!("port-control: SNI route ownership lookup failed: {e}");
+                return;
+            }
+        };
+        // The neighbor table is what a grant trusted, so it outranks a lease.
+        if let Some(neigh) = tokio::process::Command::new("ip")
+            .args(["neigh", "show"])
+            .invoke(ErrorKind::Network.into())
+            .await
+            .ok()
+            .and_then(|out| String::from_utf8(out).ok())
+        {
+            for e in crate::devices::parse_neigh_output(&neigh) {
+                if e.interface.starts_with("br-") {
+                    ip_to_mac.insert(e.ip, e.mac);
+                }
+            }
+        }
+        let doomed = unauthorized_sni_routes(routes, &ip_to_mac, &allowed);
+        if doomed.is_empty() {
+            return;
+        }
+        for route in &doomed {
+            tracing::warn!(
+                "port-control: dropping SNI route {} on {}:{} -> {}: its device is no longer \
+                 authorized",
+                route.hostname,
+                route.ext_ip,
+                route.ext_port,
+                route.target
+            );
+            self.sni.unregister(
+                route.ext_ip,
+                route.ext_port,
+                std::slice::from_ref(&route.hostname),
+                route.target,
+            );
+        }
+        {
+            let _serial = self.write_serial.lock().await;
+            self.sync_sni_rules().await;
+        }
+        let wans: std::collections::BTreeSet<Ipv4Addr> = doomed.iter().map(|r| r.ext_ip).collect();
+        for wan in wans {
+            self.sync_sni_fallback(wan).await;
+        }
     }
 
     /// The router's WAN IPv4 (via ubus), cached briefly.
@@ -761,6 +825,7 @@ impl PortControl {
     /// rules back in line with the live ports (heals a failed callback write,
     /// an external edit, or a stale rule from before a daemon restart).
     async fn sni_maintain(&self) {
+        self.reap_unauthorized_sni_routes().await;
         let wan = self.wan_ipv4().await;
         if let Some(ip) = wan {
             if self.sni.snapshot().iter().any(|r| r.ext_ip != ip) {
@@ -1450,6 +1515,37 @@ fn parse_neigh(neigh: &str, peer: Ipv4Addr) -> Option<(String, String)> {
         .map(|e| (e.mac, e.interface))
 }
 
+/// The uppercase MACs whose DHCP host entry grants automatic port forwarding.
+fn pcp_allowed_macs(
+    dhcp: &uciedit::Config<'_>,
+) -> Result<std::collections::HashSet<String>, Error> {
+    let mut allowed = std::collections::HashSet::new();
+    dhcp.each::<DhcpHost, Error>(|_, host| {
+        if host._allow_pcp.as_deref() == Some("1") {
+            allowed.insert(host.mac.to_uppercase());
+        }
+    })?;
+    Ok(allowed)
+}
+
+/// The routes among `routes` whose target address maps (via `ip_to_mac`) to a
+/// device outside `allowed`. An address that maps to no device is not
+/// evidence of anything, so its routes are kept.
+fn unauthorized_sni_routes(
+    routes: Vec<SniRoute>,
+    ip_to_mac: &HashMap<String, String>,
+    allowed: &std::collections::HashSet<String>,
+) -> Vec<SniRoute> {
+    routes
+        .into_iter()
+        .filter(|route| {
+            ip_to_mac
+                .get(&route.target.ip().to_string())
+                .is_some_and(|mac| !allowed.contains(&mac.to_uppercase()))
+        })
+        .collect()
+}
+
 /// The router's own `br-*` IPv4 addresses from `ip -j addr show`.
 fn parse_lan_addrs(json: &str) -> Vec<LanAddr> {
     let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -2004,9 +2100,9 @@ pub async fn set_auto_forward<C: CtrlContext>(
     Ok(())
 }
 
-/// Close every automatic forward owned by `mac` and drop its cached
-/// authorization. Called wherever a device loses the permission that created
-/// those forwards — the per-device toggle going off, or the device being
+/// Close every automatic forward and hostname route owned by `mac` and drop
+/// its cached authorization. Called wherever a device loses the permission
+/// that created them — the per-device toggle going off, or the device being
 /// forgotten outright. Without it the ports outlive the authorization by up to
 /// [`MAX_LEASE`], and the user's only control over an automatic forward
 /// wouldn't take effect for as much as a week. The client discovers the loss on
@@ -2019,6 +2115,7 @@ pub(crate) async fn close_device_forwards(mac: &str) {
     };
     pc.invalidate_clients();
     pc.remove_client_forwards(mac, |_| true).await;
+    pc.reap_unauthorized_sni_routes().await;
 }
 
 #[cfg(test)]
@@ -2592,6 +2689,117 @@ config redirect 'dns_override_lan'
         assert_eq!(pc.sni.snapshot().len(), 2);
         let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
         assert_eq!(written.matches("apf_sni_8443").count(), 1);
+    }
+
+    // Revocation is enforced by re-deriving each route's owner from the
+    // address it targets: a device that lost the permission loses its routes,
+    // a device that still holds it keeps them, and an address no device can be
+    // attributed to is left to its lease.
+    #[tokio::test]
+    async fn sni_routes_follow_the_permission() {
+        let dir = temp_root("");
+        std::fs::write(
+            dir.path().join("dhcp"),
+            "\
+config host
+\toption mac 'AA:AA:AA:AA:AA:AA'
+\toption ip '192.168.1.50'
+\toption _allow_pcp '1'
+
+config host
+\toption mac 'BB:BB:BB:BB:BB:BB'
+\toption ip '192.168.1.51'
+\toption _allow_pcp '1'
+",
+        )
+        .unwrap();
+        let pc = PortControl::new(dir.path().to_path_buf());
+        let source = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), 8443);
+        let a = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 50), 443);
+        let b = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 51), 443);
+        let stray = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 52), 443);
+        for (target, host) in [
+            (a, "a.example.com"),
+            (b, "b.example.com"),
+            (stray, "c.example.com"),
+        ] {
+            pc.add_sni_route(source, target, &[host.to_string()], Some(3600))
+                .await
+                .unwrap();
+        }
+        assert_eq!(pc.sni.snapshot().len(), 3);
+
+        // Everyone still authorized: nothing moves.
+        pc.reap_unauthorized_sni_routes().await;
+        assert_eq!(pc.sni.snapshot().len(), 3);
+
+        // A loses the permission the way the toggle revokes it.
+        std::fs::write(
+            dir.path().join("dhcp"),
+            "\
+config host
+\toption mac 'AA:AA:AA:AA:AA:AA'
+\toption ip '192.168.1.50'
+
+config host
+\toption mac 'BB:BB:BB:BB:BB:BB'
+\toption ip '192.168.1.51'
+\toption _allow_pcp '1'
+",
+        )
+        .unwrap();
+        pc.reap_unauthorized_sni_routes().await;
+        let left: Vec<String> = pc.sni.snapshot().into_iter().map(|r| r.hostname).collect();
+        assert_eq!(left, vec!["b.example.com", "c.example.com"]);
+
+        // The port still has holders, so its admit rule stays.
+        let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        assert!(written.contains("config rule apf_sni_8443"));
+
+        // Forgetting B drops its host entry outright. With no lease or
+        // neighbor entry left to attribute its address to anything, B's route
+        // is now — like the stray's — evidence of nothing, and both are left
+        // to their leases rather than reaped on a guess.
+        std::fs::write(
+            dir.path().join("dhcp"),
+            "\
+config host
+\toption mac 'AA:AA:AA:AA:AA:AA'
+\toption ip '192.168.1.50'
+",
+        )
+        .unwrap();
+        pc.reap_unauthorized_sni_routes().await;
+        let left: Vec<String> = pc.sni.snapshot().into_iter().map(|r| r.hostname).collect();
+        assert_eq!(left, vec!["b.example.com", "c.example.com"]);
+    }
+
+    #[test]
+    fn unauthorized_routes_need_a_resolved_owner() {
+        let route = |ip: [u8; 4], host: &str| SniRoute {
+            ext_ip: Ipv4Addr::new(203, 0, 113, 7),
+            ext_port: 443,
+            hostname: host.to_string(),
+            target: SocketAddrV4::new(Ipv4Addr::from(ip), 443),
+            remaining_secs: Some(60),
+        };
+        let routes = vec![
+            route([192, 168, 1, 50], "revoked"),
+            route([192, 168, 1, 51], "kept"),
+            route([192, 168, 1, 52], "unknown"),
+        ];
+        let ip_to_mac: HashMap<String, String> = [
+            ("192.168.1.50".to_string(), "aa:aa:aa:aa:aa:aa".to_string()),
+            ("192.168.1.51".to_string(), "BB:BB:BB:BB:BB:BB".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let allowed = std::collections::HashSet::from(["BB:BB:BB:BB:BB:BB".to_string()]);
+        let doomed: Vec<String> = unauthorized_sni_routes(routes, &ip_to_mac, &allowed)
+            .into_iter()
+            .map(|r| r.hostname)
+            .collect();
+        assert_eq!(doomed, vec!["revoked"]);
     }
 
     #[tokio::test]

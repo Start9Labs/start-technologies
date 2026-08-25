@@ -33,8 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lapsed, or it returned on a different address — so a forward can never
   quietly deliver Internet traffic to whichever device is given that address
   next (devices with a reserved address are unaffected). Turning the toggle
-  back off — or forgetting the device — closes that device's forwards
-  immediately.
+  back off — or forgetting the device — closes that device's forwards and
+  hostname routes immediately.
   The Published Ports page gains a read-only "Automatic" section showing each
   forward's device, protocol, and expiry. UPnP clients see a complete gateway:
   the router advertises the `WANCommonInterfaceConfig` service clients use to
