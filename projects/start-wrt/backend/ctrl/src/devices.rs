@@ -1876,6 +1876,12 @@ pub async fn update<C: CtrlContext>(
             if ctx.effectful() {
                 reload_dnsmasq();
             }
+            // A moved reservation must reach the DNS-injection directory
+            // before the device's next UPDATE arrives from its new address;
+            // a refusal there costs the client a five-minute back-off.
+            if let Some(di) = crate::dns_inject::DNS_INJECT.get() {
+                di.invalidate();
+            }
             Ok(())
         }
     }
