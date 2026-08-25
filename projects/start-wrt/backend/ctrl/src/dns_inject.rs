@@ -339,8 +339,10 @@ async fn refresh(di: &Arc<DnsInject>) -> Result<(), Error> {
         d.reach = snapshot.reach.clone();
         sweep_owners(d, &snapshot, &leases, &neighbors, &di.injector.list())
     });
+    // `warn`, not `info`: the daemon's default filter is `warn`, and a
+    // reaped record is a name that silently stopped resolving.
     for (name, rtype) in stale {
-        tracing::info!(
+        tracing::warn!(
             "DNS-inject sweep dropped {name} {rtype}: its owner no longer holds \
              the permission or the address the record points at"
         );
@@ -535,10 +537,11 @@ fn policy(
 ) -> ResponseCode {
     directory.mutate(|d| {
         // A refusal is otherwise invisible on both ends (the client shows only
-        // a generic capability failure), so name the reason. The divert chain
-        // rate-limits ingress to 20/s, which bounds this log under a flood.
+        // a generic capability failure), so name the reason at `warn`, the
+        // daemon's default filter level. The divert chain rate-limits ingress
+        // to 20/s, which bounds this log under a flood.
         let refuse = |why: String| {
-            tracing::info!("DNS UPDATE from {src} refused: {why}");
+            tracing::warn!("DNS UPDATE from {src} refused: {why}");
             ResponseCode::Refused
         };
         let Some(owner) = d.by_ip.get(&src).map(|i| i.owner.clone()) else {
