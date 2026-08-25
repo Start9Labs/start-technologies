@@ -51,20 +51,28 @@ type FilterKinds =
 /**
  * Describes which hostnames to include (or exclude) when filtering a `Filled` address.
  *
- * Every field is optional — omitted fields impose no constraint.
- * Filters are composable: the `.filter()` method intersects successive filters,
- * and the `exclude` field inverts a nested filter.
+ * Every field is optional — omitted fields impose no constraint. Fields set
+ * together are an intersection, and `.filter()` intersects successive filters;
+ * {@link Filled.matchesAny} is the union. Prefer the shorthands
+ * ({@link Filled.nonLocal}, {@link Filled.public}, {@link Filled.bridge}) and
+ * these declared fields over {@link Filter.predicate}.
  */
 export type Filter = {
   /** Keep only hostnames with the given visibility. `'public'` = externally reachable, `'private'` = LAN-only. */
   visibility?: 'public' | 'private'
-  /** Keep only hostnames whose metadata kind matches. A single kind or array of kinds. `'ip'` expands to `['ipv4','ipv6']`, `'domain'` matches both `'private-domain'` and `'public-domain'`. */
+  /** Keep only hostnames of the given kind — a single kind or an array; see {@link FilterKinds}. `'ip'` expands to `['ipv4','ipv6']`, `'domain'` matches both `'private-domain'` and `'public-domain'`. */
   kind?: FilterKinds | FilterKinds[]
-  /** Arbitrary predicate — hostnames for which this returns `false` are excluded. */
+  /** Escape hatch for a condition the declared fields cannot express — hostnames for which this returns `false` are excluded. */
   predicate?: (h: HostnameInfo) => boolean
   /** Keep only plugin hostnames provided by this package. Implies `kind: 'plugin'`. */
   pluginId?: PackageId
-  /** A nested filter whose matches are *removed* from the result (logical NOT). */
+  /**
+   * Drops every hostname matching **any** field of the nested filter, not only
+   * those matching all of them: `exclude: { kind: 'ipv4', visibility: 'public' }`
+   * removes every IPv4 *and* every public address. To subtract one combination,
+   * union its complements with {@link Filled.matchesAny} instead —
+   * `matchesAny([{ visibility: 'private' }, { exclude: { kind: 'ipv4' } }])`.
+   */
   exclude?: Filter
 }
 
@@ -153,7 +161,7 @@ type FormatReturnTy<
  * matching subset of hostnames:
  *
  * ```ts
- * addresses.nonLocal                         // exclude localhost & link-local
+ * addresses.nonLocal                         // drop loopback, link-local & bridge
  * addresses.public                           // only publicly-reachable hostnames
  * addresses.filter({ kind: 'domain' })       // only domain-name hostnames
  * addresses.filter({ visibility: 'private' }) // only LAN-reachable hostnames
@@ -198,7 +206,7 @@ export type Filled<F extends Filter = {}> = {
     filters: [...NewFilters],
   ) => Filled<NewFilters[number] & F>
 
-  /** Shorthand filter that excludes `localhost` and IPv6 link-local addresses — keeps only network-reachable hostnames. */
+  /** Shorthand filter that excludes loopback, IPv6 link-local, and LXC bridge addresses — keeps what a client off the box can reach. */
   nonLocal: Filled<typeof nonLocalFilter & Filter>
   /** Shorthand filter that keeps only publicly-reachable hostnames (those with `public: true`). */
   public: Filled<typeof publicFilter & Filter>
@@ -207,7 +215,7 @@ export type Filled<F extends Filter = {}> = {
 }
 export type FilledAddressInfo = AddressInfo & Filled
 
-/** A {@link ServiceInterface} whose `addressInfo` is a {@link Filled} address — carrying the `filter`/`format`/`nonLocal`/`public`/`toUrl` helpers. */
+/** A {@link ServiceInterface} whose `addressInfo` is a {@link Filled} address — carrying its filter, format and URL helpers. */
 export type FilledServiceInterface = Omit<ServiceInterface, 'addressInfo'> & {
   addressInfo: FilledAddressInfo
 }
@@ -359,7 +367,7 @@ function enabledAddresses(addr: DerivedAddressInfo): HostnameInfo[] {
 }
 
 /**
- * Filters out localhost and IPv6 link-local hostnames from a list.
+ * Filters out loopback, IPv6 link-local, and LXC bridge hostnames from a list.
  * Equivalent to the `nonLocal` filter on `Filled` addresses.
  */
 export function filterNonLocal(hostnames: HostnameInfo[]): HostnameInfo[] {
@@ -439,7 +447,7 @@ export const filledAddress = (
 
 /**
  * Enrich a raw {@link Host} so each single-port binding's exported interfaces
- * carry a {@link Filled} address (`filter`/`format`/`nonLocal`/`public`/`toUrl`).
+ * carry a {@link Filled} address, with its filter, format and URL helpers.
  * Backs the object returned by `sdk.host.get`/`getOwn`. Port-range bindings are
  * left untouched — a `RangeServiceInterface` has no per-address `AddressInfo`.
  */
