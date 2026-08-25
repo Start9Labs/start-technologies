@@ -350,11 +350,25 @@ Otherwise prefer `addSsl`. Passthrough gives up everything the proxy does on you
 - `sdk.getOsIp` (`10.0.3.1`) — the bridge, where other services reach you
 - `127.0.0.1` — your own subcontainers, which share the service's network namespace
 - `sdk.getContainerIp` — the container itself
-- any other address you expect a client to use
+- **every address the interface is published at** — LAN IPs, the server's `.local` name, private and public domains, and any onion a plugin has exported
+
+Those three constants are the internal half, and naming only them is the mistake to avoid: an off-box client dialing the LAN address or the `.local` name gets a certificate matching none of them. Take the external half from the interface itself, so it follows the addresses the operator adds and removes:
 
 ```typescript
 export const setupCerts = sdk.setupOnInit(async effects => {
-  const hostnames = [await sdk.getContainerIp(effects).const(), '127.0.0.1', await sdk.getOsIp(effects)]
+  const served = await sdk.host
+    .getOwn(effects, 'grpc', host => {
+      const iface =
+        host &&
+        Object.values(host.bindings)
+          .flatMap(b => Object.values(b.interfaces))
+          .find(i => i.id === 'grpc')
+      // everything except the WAN IPv4, which getSslCertificate refuses to sign
+      return iface ? iface.addressInfo.matchesAny([{ visibility: 'private' }, { exclude: { kind: 'ipv4' } }]).hostnames.map(h => h.hostname) : []
+    })
+    .const()
+
+  const hostnames = [await sdk.getContainerIp(effects).const(), '127.0.0.1', await sdk.getOsIp(effects), ...served]
   const cert = (await sdk.getSslCertificate(effects, hostnames).const()).join('')
   const key = await sdk.getSslKey(effects, { hostnames })
   await writeFile('/media/startos/volumes/main/tls.cert', cert)
@@ -362,7 +376,11 @@ export const setupCerts = sdk.setupOnInit(async effects => {
 })
 ```
 
+`getSslCertificate` signs a LAN address and rejects a routable one, so a WAN IPv4 in the list fails the whole call. See [Narrowing the set](main.md#narrowing-the-set) for why that exclusion is a union rather than a two-field `exclude`.
+
 Read the container IP with `.const()` rather than `.once()`: a container that comes back on a new IP must reissue the certificate, or every client dialing the old one fails verification.
+
+Most daemons read their TLS pair once at startup, so reissuing the file is only half the job — something has to restart the service, or it keeps serving the old certificate against the new address set.
 
 > [!WARNING]
 > Do **not** add a `<package-id>.startos` DNS name to the SANs. That overlay DNS is deprecated and slated for removal, and it resolves to the container IP rather than the bridge — so it bypasses the platform entirely. Dependents reach you through the bridge; see [Service-to-Service Networking](service-to-service.md).
