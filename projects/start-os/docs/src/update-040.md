@@ -141,7 +141,7 @@ Both methods converge here: your server is migrating, and shows its progress at 
    > [!TIP]
    > Expect progress to sit at **85%** for a long time — potentially hours. This is when your installed packages are being migrated to the 0.4.0 format, and the time scales with how many packages you have and how much data each one contains. It is not stuck.
 
-1. When the migration is complete, follow the on-screen instructions to reboot. If you updated from a USB installer, remove the drive first — a Pi's microSD card stays in.
+1. When the migration is complete, follow the on-screen instructions to reboot. If you updated from a USB installer, remove the USB thumb drive when prompted, before you reboot — a Pi's microSD card stays in.
 
 1. Once your server has rebooted, go to your server's own address (`https://server-name.local`) — the address you used on 0.3.5.1, not `start.local`.
 

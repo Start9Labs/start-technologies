@@ -36,9 +36,11 @@ Select your platform:
 
 1. Press Command + Spacebar to launch a program, type in Keychain Access and select the resulting Keychain Access program to open it.
 
+1. In the Keychain Access program, make sure **System** is selected on the left-hand side under **System Keychains**
+
 1. Your server's CA certificate will be displayed among the imported certificates in Keychain Access. Right-click on the imported CA cert and select _Get Info_:
 
-1. The details of your CA certificate will be displayed in a new dialog window. Click the "Trust" heading, then select "Always Trust" on **Secure Sockets Layer (SSL)** and **X.509 Basic Policy**.
+1. The details of your CA certificate will be displayed in a new dialog window. Expand the "Trust" heading, then select "Always Trust" on **Secure Sockets Layer (SSL)** and **X.509 Basic Policy**.
 
    Click the red (x) button at the top left of the Local Root CA dialog window.
 
