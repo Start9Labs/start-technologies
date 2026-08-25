@@ -4,7 +4,7 @@ Rust workspace powering the StartWRT router daemon and CLI. Three crates: `ctrl`
 
 ## Transport
 
-HTTP server on ports 80 (HTTP) and 443 (HTTPS, if TLS setup succeeds). JSON-RPC 2.0 at `POST /rpc/v1` via [rpc-toolkit](https://github.com/Start9Labs/rpc-toolkit). Session cookie authentication with rate limiting.
+HTTP server on ports 80 (HTTP) and 443 (HTTPS, if TLS setup succeeds). JSON-RPC 2.0 at `POST /rpc/v1` via [rpc-toolkit](../../../shared-libs/crates/rpc-toolkit). Session cookie authentication with rate limiting.
 
 Additional routes:
 
