@@ -213,6 +213,12 @@ li {
     border-radius: 0;
   }
 
+  // The footer hangs below the card without taking layout space, so the card
+  // reserves its height for whatever follows on the page.
+  &:has(> .g-footer) {
+    margin-block-end: calc(var(--tui-height-m) + 1rem);
+  }
+
   .g-footer {
     position: absolute;
     inset: 100% 0 auto;
