@@ -1525,6 +1525,33 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
     },
   }
 
+  /**
+   * A query string that carries a certificate, which puts any URL built on it
+   * past level `L`'s 2953-byte ceiling — no version-40 symbol holds it.
+   */
+  export const UNENCODABLE_QUERY =
+    `?cert=` +
+    'MIIBzjCCAXSgAwIBAgIIAt3ExklUy1UwCgYIKoZIzj0EAwIwSzEmMCQGA1UEAwwd'
+      .repeat(54)
+      .slice(0, 3431) +
+    `&macaroon=` +
+    'AgEDbG5kAvgBAwoQEVHLBwI63jhWsepa08235BIBMBoWCgdhZGRyZXNz'
+      .repeat(7)
+      .slice(0, 336)
+
+  export const ActionResUnencodableQr: ActionRes = {
+    version: '1',
+    title: 'gRPC Connect',
+    message: 'Pair your wallet with this address.',
+    result: {
+      type: 'single',
+      copyable: true,
+      qr: true,
+      masked: false,
+      value: `lndconnect://192.168.1.100:10009${UNENCODABLE_QUERY}`,
+    },
+  }
+
   export const ActionResSingle: ActionRes = {
     version: '1',
     title: 'New Password',

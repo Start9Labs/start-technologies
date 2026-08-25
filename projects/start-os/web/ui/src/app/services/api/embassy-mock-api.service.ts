@@ -1287,9 +1287,9 @@ export class MockApiService extends ApiService {
 
     // return Mock.ActionResGroup
     // return Mock.ActionResSingle
-    return params.actionId === 'big-qr'
-      ? Mock.ActionResBigQr
-      : Mock.ActionResMessage
+    if (params.actionId === 'big-qr') return Mock.ActionResBigQr
+    if (params.actionId === 'unencodable-qr') return Mock.ActionResUnencodableQr
+    return Mock.ActionResMessage
   }
 
   async clearTask(params: T.ClearTaskParams): Promise<null> {

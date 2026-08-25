@@ -805,4 +805,5 @@ export default {
   912: 'Los datos de StartOS en la unidad de datos seleccionada están en una partición junto a una instalación de SO anterior, y no pueden conservarse en este dispositivo. Para borrar la unidad y empezar de nuevo, elija "Sobrescribir".',
   913: 'Los datos de StartOS en la unidad de datos seleccionada ocupan toda la unidad, por lo que el SO no puede instalarse en la misma unidad sin borrarlos. Para conservar sus datos, seleccione otra unidad para el SO. Para borrarlos, elija "Sobrescribir".',
   914: 'Inicio de sesión correcto, pero el servidor rechazó la nueva clave del dispositivo. Inténtelo de nuevo.',
+  915: 'Demasiado largo para un código QR',
 } satisfies i18n

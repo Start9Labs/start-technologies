@@ -472,6 +472,16 @@ export const mockPatchData: DataModel = {
           hasInput: false,
           group: null,
         },
+        'unencodable-qr': {
+          name: 'Show Unencodable QR',
+          description:
+            'Returns a QR payload past correction level L, which no QR code can hold',
+          warning: null,
+          visibility: 'enabled',
+          allowedStatuses: 'any',
+          hasInput: false,
+          group: null,
+        },
         test: {
           name: 'Do Another Thing',
           description:
@@ -622,6 +632,22 @@ export const mockPatchData: DataModel = {
                     scheme: 'http',
                     sslScheme: 'https',
                     suffix: '',
+                  },
+                },
+                connect: {
+                  id: 'connect',
+                  masked: true,
+                  name: 'gRPC Connect',
+                  description:
+                    'A connection URI carrying a certificate — longer than any QR code holds',
+                  type: 'api',
+                  addressInfo: {
+                    username: null,
+                    hostId: 'abcdefg',
+                    internalPort: 80,
+                    scheme: 'lndconnect',
+                    sslScheme: 'lndconnect',
+                    suffix: Mock.UNENCODABLE_QUERY,
                   },
                 },
                 'admin-ui': {

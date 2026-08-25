@@ -3,7 +3,7 @@ import { FormsModule } from '@angular/forms'
 import { CopyService, DialogService, i18nPipe } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { TuiButton, TuiInput, TuiTitle } from '@taiga-ui/core'
-import { QRComponent } from 'src/app/components/qr.component'
+import { QRComponent } from 'src/app/routes/portal/components/qr.component'
 
 @Component({
   selector: 'app-action-success-member',

@@ -805,4 +805,5 @@ export default {
   912: 'Dane StartOS na wybranym dysku danych znajdują się na partycji obok starszej instalacji systemu i nie można ich zachować na tym urządzeniu. Aby wymazać dysk i zacząć od nowa, wybierz „Nadpisz”.',
   913: 'Dane StartOS na wybranym dysku danych zajmują cały dysk, więc systemu nie można zainstalować na tym samym dysku bez ich wymazania. Aby zachować dane, wybierz inny dysk systemowy. Aby je wymazać, wybierz „Nadpisz”.',
   914: 'Logowanie powiodło się, ale serwer odrzucił nowy klucz urządzenia. Spróbuj ponownie.',
+  915: 'Za długie na kod QR',
 } satisfies i18n

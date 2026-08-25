@@ -185,10 +185,8 @@ file tracks notable changes since the move to the monorepo.
   image would be installed without complaint. It now verifies whenever
   `CHECKSUM` is set.
 
-- **Large QR codes render instead of coming up blank.** The encoder was pinned
-  to correction level `M`, which has no version left past about 2.3 kB — so a
-  longer value threw and the dialog opened empty, with only a console error to
-  say why. Those codes now encode at level `L`, which carries about 2.9 kB.
+- **Large QR codes render, and a value too long for any QR code says so rather
+  than opening an empty dialog.** Copy that value instead of scanning it.
 
 - **Removing a domain from a service leaves its network settings otherwise
   untouched.** Naming a network host the service does not have — a stale id, or

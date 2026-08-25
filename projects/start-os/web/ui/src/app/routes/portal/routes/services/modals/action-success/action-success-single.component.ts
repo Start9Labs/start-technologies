@@ -3,7 +3,7 @@ import { Component, inject, Input } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { CopyService, i18nPipe } from '@start9labs/shared'
 import { TuiButton, TuiInput } from '@taiga-ui/core'
-import { QRComponent } from 'src/app/components/qr.component'
+import { QRComponent } from 'src/app/routes/portal/components/qr.component'
 import { SingleResult } from './types'
 
 @Component({
