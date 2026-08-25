@@ -117,13 +117,15 @@ file tracks notable changes since the move to the monorepo.
   reply. The proxy now closes the client's half as soon as the service closes
   its own, which is the signal the client is waiting for.
 
-- **Connections between your browser and a service that speak HTTP/2 behave
-  correctly when the service restarts.** StartOS's reverse proxy used to tell
-  the browser that WebSocket-over-HTTP/2 was available even when the service
-  would reject it, leaving WebSockets broken against such services — the fix
-  offers it only when the service supports it, so the browser falls back to
-  its ordinary HTTP/1.1 route. And when a service's HTTP/2 connection ended
-  unexpectedly, responses already on their way to the browser were cut off;
+- **WebSocket-over-HTTP/2 is offered only when a service actually supports
+  it.** StartOS's reverse proxy used to tell the browser it was available even
+  when the service would reject it, leaving WebSockets broken against such
+  services. The proxy now mirrors what the service itself advertises, so the
+  browser falls back to its ordinary HTTP/1.1 route where needed.
+
+- **Responses in flight survive a service's HTTP/2 connection dying.** When a
+  service's HTTP/2 connection ended unexpectedly — its container restarting,
+  say — responses already on their way to the browser were cut off mid-flight;
   they now finish instead.
 
 - Trim whitespace on form inputs.

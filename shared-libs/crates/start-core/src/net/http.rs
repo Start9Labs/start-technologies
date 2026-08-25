@@ -295,20 +295,8 @@ const H2_SETTINGS_FRAME: u8 = 0x4;
 /// `SETTINGS_ENABLE_CONNECT_PROTOCOL`, the RFC 8441 WebSocket setting.
 const ENABLE_CONNECT_PROTOCOL: u16 = 0x8;
 
-async fn take_initial_settings<S: AsyncRead + Unpin>(
-    io: &mut S,
-) -> std::io::Result<(Vec<(u16, u32)>, Vec<u8>)> {
-    let mut head = [0u8; 9];
-    io.read_exact(&mut head).await?;
-    let len = ((head[0] as usize) << 16) | ((head[1] as usize) << 8) | head[2] as usize;
-    if head[3] != H2_SETTINGS_FRAME || len > 4096 {
-        return Ok((Vec::new(), head.to_vec()));
-    }
-    let mut payload = vec![0u8; len];
-    io.read_exact(&mut payload).await?;
-    let mut raw = head.to_vec();
-    raw.extend_from_slice(&payload);
-    let entries = payload
+fn parse_settings_entries(payload: &[u8]) -> Vec<(u16, u32)> {
+    payload
         .chunks_exact(6)
         .map(|c| {
             (
@@ -316,7 +304,22 @@ async fn take_initial_settings<S: AsyncRead + Unpin>(
                 u32::from_be_bytes([c[2], c[3], c[4], c[5]]),
             )
         })
-        .collect();
+        .collect()
+}
+
+async fn take_initial_settings<S: AsyncRead + Unpin>(
+    io: &mut S,
+) -> std::io::Result<(Vec<(u16, u32)>, Vec<u8>)> {
+    let mut raw = vec![0u8; 9];
+    io.read_exact(&mut raw).await?;
+    let len = ((raw[0] as usize) << 16) | ((raw[1] as usize) << 8) | raw[2] as usize;
+    if raw[3] != H2_SETTINGS_FRAME || len > 4096 {
+        // The unread payload stays in the stream and flows through on its own.
+        return Ok((Vec::new(), raw));
+    }
+    raw.resize(9 + len, 0);
+    io.read_exact(&mut raw[9..]).await?;
+    let entries = parse_settings_entries(&raw[9..]);
     Ok((entries, raw))
 }
 
@@ -335,7 +338,7 @@ impl<S: AsyncRead + Unpin> AsyncRead for Replay<S> {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
         let this = &mut *self;
-        if this.taken < this.bytes.len() {
+        if this.taken < this.bytes.len() && buf.remaining() > 0 {
             let n = (this.bytes.len() - this.taken).min(buf.remaining());
             buf.put_slice(&this.bytes[this.taken..this.taken + n]);
             this.taken += n;
@@ -371,7 +374,12 @@ async fn goaway_only<F: ReadWriter + Unpin + Send + 'static>(from: F) -> Result<
     let mut conn = Box::pin(server.serve_connection(
         TokioIo::new(from),
         service_fn(|_| async {
-            Ok::<Response<ProxyBody>, hyper::Error>(Response::new(box_full(Bytes::new())))
+            Ok::<Response<ProxyBody>, hyper::Error>(
+                Response::builder()
+                    .status(http::StatusCode::BAD_GATEWAY)
+                    .body(box_full(Bytes::from_static(b"502 Bad Gateway")))
+                    .expect("static 502 response is well-formed"),
+            )
         }),
     ));
     conn.as_mut().graceful_shutdown();
@@ -396,7 +404,17 @@ where
     let sniff = tokio::time::timeout(Duration::from_secs(5), take_initial_settings(&mut to)).await;
     let (entries, replay) = match sniff {
         Ok(Ok(res)) => res,
-        _ => (Vec::new(), Vec::new()),
+        // A backend that cannot even deliver its opening frame is no good,
+        // and bytes already consumed must not reach the handshake.
+        Ok(Err(e)) => {
+            tracing::warn!("Backend http2 connection died before its opening SETTINGS: {e}");
+            tracing::debug!("{e:?}");
+            return goaway_only(from).await;
+        }
+        Err(_) => {
+            tracing::warn!("Backend http2 connection never sent its opening SETTINGS within 5s");
+            return goaway_only(from).await;
+        }
     };
     let extended_connect = entries
         .iter()
@@ -875,10 +893,11 @@ mod tests {
 
     // Minimal h2 frame plumbing for exercising run_http2_proxy without a
     // real backend.
+    use super::{
+        ENABLE_CONNECT_PROTOCOL, H2_SETTINGS_FRAME as SETTINGS_FRAME, parse_settings_entries,
+    };
     const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
-    const SETTINGS_FRAME: u8 = 0x4;
     const GOAWAY_FRAME: u8 = 0x7;
-    const ENABLE_CONNECT_PROTOCOL: u16 = 0x8;
 
     async fn write_frame(s: &mut DuplexStream, kind: u8, payload: &[u8]) {
         let len = payload.len() as u32;
@@ -914,18 +933,6 @@ mod tests {
         let mut payload = vec![0u8; len];
         s.read_exact(&mut payload).await?;
         Ok((head[3], payload))
-    }
-
-    fn settings_entries(payload: &[u8]) -> Vec<(u16, u32)> {
-        payload
-            .chunks_exact(6)
-            .map(|c| {
-                (
-                    u16::from_be_bytes([c[0], c[1]]),
-                    u32::from_be_bytes([c[2], c[3], c[4], c[5]]),
-                )
-            })
-            .collect()
     }
 
     /// RFC 8441 extended CONNECT is only advertised to the client once the
@@ -970,7 +977,7 @@ mod tests {
             .await
             .expect("the proxy never sent its client-facing SETTINGS");
             assert_eq!(
-                settings_entries(&frame)
+                parse_settings_entries(&frame)
                     .iter()
                     .any(|&(id, _)| id == ENABLE_CONNECT_PROTOCOL),
                 advertised,
