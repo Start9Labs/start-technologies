@@ -7,6 +7,12 @@
 - **Minimum StartOS version is now `0.4.0.2`**, which is what a package built
   with this SDK writes as its manifest `osVersion`
 
+- **Breaking — `mountDependency` no longer accepts `type`.** A dependency mount
+  has been a directory since StartOS 0.4.0-alpha.16 disabled file mounts on
+  dependencies, so the option was silently doing nothing; passing it is now a
+  compile error. To reach a single file, mount the directory holding it.
+  `mountVolume` and `mountAssets` still take `type`
+
 - `effects.getServicePortForward` resolves `null` instead of throwing when the
   binding does not exist. Prefer `sdk.host.getBridgeAddress` to reach a
   dependency; this is raw allocator metadata
