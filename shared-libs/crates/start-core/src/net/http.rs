@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::IpAddr;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -15,6 +17,7 @@ use hyper::body::{Body as HyperBody, Incoming};
 use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
 use tokio::sync::{Mutex, Notify};
 
 use crate::net::host::binding::ProxyAuth;
@@ -287,9 +290,97 @@ where
     }
 }
 
+/// SETTINGS frame type.
+const H2_SETTINGS_FRAME: u8 = 0x4;
+/// `SETTINGS_ENABLE_CONNECT_PROTOCOL`, the RFC 8441 WebSocket setting.
+const ENABLE_CONNECT_PROTOCOL: u16 = 0x8;
+
+async fn take_initial_settings<S: AsyncRead + Unpin>(
+    io: &mut S,
+) -> std::io::Result<(Vec<(u16, u32)>, Vec<u8>)> {
+    let mut head = [0u8; 9];
+    io.read_exact(&mut head).await?;
+    let len = ((head[0] as usize) << 16) | ((head[1] as usize) << 8) | head[2] as usize;
+    if head[3] != H2_SETTINGS_FRAME || len > 4096 {
+        return Ok((Vec::new(), head.to_vec()));
+    }
+    let mut payload = vec![0u8; len];
+    io.read_exact(&mut payload).await?;
+    let mut raw = head.to_vec();
+    raw.extend_from_slice(&payload);
+    let entries = payload
+        .chunks_exact(6)
+        .map(|c| {
+            (
+                u16::from_be_bytes([c[0], c[1]]),
+                u32::from_be_bytes([c[2], c[3], c[4], c[5]]),
+            )
+        })
+        .collect();
+    Ok((entries, raw))
+}
+
+/// Replays sniffed bytes to the reader before handing over to the inner
+/// stream.
+struct Replay<S> {
+    bytes: Vec<u8>,
+    taken: usize,
+    inner: S,
+}
+
+impl<S: AsyncRead + Unpin> AsyncRead for Replay<S> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let this = &mut *self;
+        if this.taken < this.bytes.len() {
+            let n = (this.bytes.len() - this.taken).min(buf.remaining());
+            buf.put_slice(&this.bytes[this.taken..this.taken + n]);
+            this.taken += n;
+            return Poll::Ready(Ok(()));
+        }
+        Pin::new(&mut this.inner).poll_read(cx, buf)
+    }
+}
+
+impl<S: AsyncWrite + Unpin> AsyncWrite for Replay<S> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        Pin::new(&mut self.inner).poll_write(cx, buf)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
+/// Serves the client leg only long enough to deliver GOAWAY, for when the
+/// backend died before the proxy could relay anything.
+async fn goaway_only<F: ReadWriter + Unpin + Send + 'static>(from: F) -> Result<(), Error> {
+    let mut server = hyper::server::conn::http2::Builder::new(TokioExecutor::new());
+    server.timer(TokioTimer::new()).adaptive_window(true);
+    let mut conn = Box::pin(server.serve_connection(
+        TokioIo::new(from),
+        service_fn(|_| async {
+            Ok::<Response<ProxyBody>, hyper::Error>(Response::new(box_full(Bytes::new())))
+        }),
+    ));
+    conn.as_mut().graceful_shutdown();
+    conn.await.map_err(|e| Error::new(e, ErrorKind::Network))
+}
+
 pub async fn run_http2_proxy<F, T>(
     from: F,
-    to: T,
+    mut to: T,
     src_ip: Option<IpAddr>,
     add_forwarded: bool,
     gate: Option<AuthGate>,
@@ -298,20 +389,51 @@ where
     F: ReadWriter + Unpin + Send + 'static,
     T: ReadWriter + Unpin + Send + 'static,
 {
-    let (client, to) = hyper::client::conn::http2::Builder::new(TokioExecutor::new())
+    // An extended CONNECT is forwarded verbatim, including its `:protocol`, so
+    // advertise RFC 8441 only once the backend's opening SETTINGS shows it
+    // will not reset such streams; otherwise the browser falls back to
+    // HTTP/1.1 for its WebSockets.
+    let sniff = tokio::time::timeout(Duration::from_secs(5), take_initial_settings(&mut to)).await;
+    let (entries, replay) = match sniff {
+        Ok(Ok(res)) => res,
+        _ => (Vec::new(), Vec::new()),
+    };
+    let extended_connect = entries
+        .iter()
+        .any(|&(id, value)| id == ENABLE_CONNECT_PROTOCOL && value == 1);
+    let to = Replay {
+        bytes: replay,
+        taken: 0,
+        inner: to,
+    };
+    let (client, to) = match hyper::client::conn::http2::Builder::new(TokioExecutor::new())
         .timer(TokioTimer::new())
         .adaptive_window(true)
         .keep_alive_interval(Duration::from_secs(25))
         .keep_alive_timeout(Duration::from_secs(300))
         .handshake(TokioIo::new(to))
-        .await?;
-    let from = hyper::server::conn::http2::Builder::new(TokioExecutor::new())
-        .timer(TokioTimer::new())
-        .enable_connect_protocol()
-        .adaptive_window(true)
-        .keep_alive_interval(Duration::from_secs(25)) // Add this
-        .keep_alive_timeout(Duration::from_secs(300))
-        .serve_connection(
+        .await
+    {
+        Ok(pair) => pair,
+        // Nothing was ever relayed, but the client still deserves GOAWAY
+        // rather than a bare abort.
+        Err(e) => {
+            tracing::warn!("Backend http2 connection failed during handshake: {e}");
+            tracing::debug!("{e:?}");
+            return goaway_only(from).await;
+        }
+    };
+    let from = {
+        let mut server = hyper::server::conn::http2::Builder::new(TokioExecutor::new());
+        server
+            .timer(TokioTimer::new())
+            .adaptive_window(true)
+            .keep_alive_interval(Duration::from_secs(25))
+            .keep_alive_timeout(Duration::from_secs(300));
+        if extended_connect {
+            server.enable_connect_protocol();
+        }
+        server.serve_connection(
             TokioIo::new(from),
             service_fn(move |mut req| {
                 let mut client = client.clone();
@@ -354,15 +476,21 @@ where
                     Ok::<_, hyper::Error>(res.map(box_incoming))
                 }
             }),
-        );
+        )
+    };
     let mut from = Box::pin(from);
     let mut to = Box::pin(to.fuse());
     loop {
         tokio::select! {
             res = from.as_mut() => return Ok(res?),
             res = to.as_mut() => {
-                res?;
-                // GOAWAY plus drain, so in-flight streams still finish.
+                // The upstream is gone whether it ended cleanly or errored;
+                // either way the client gets GOAWAY plus drain, so in-flight
+                // streams still finish instead of being aborted.
+                if let Err(e) = res {
+                    tracing::warn!("Error proxying http2 connection to backend: {e}");
+                    tracing::debug!("{e:?}");
+                }
                 from.as_mut().graceful_shutdown();
             }
         }
@@ -743,6 +871,149 @@ mod tests {
             .expect("tunnel stalled")
             .unwrap();
         assert_eq!(&echoed, b"ping");
+    }
+
+    // Minimal h2 frame plumbing for exercising run_http2_proxy without a
+    // real backend.
+    const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+    const SETTINGS_FRAME: u8 = 0x4;
+    const GOAWAY_FRAME: u8 = 0x7;
+    const ENABLE_CONNECT_PROTOCOL: u16 = 0x8;
+
+    async fn write_frame(s: &mut DuplexStream, kind: u8, payload: &[u8]) {
+        let len = payload.len() as u32;
+        let head = [
+            (len >> 16) as u8,
+            (len >> 8) as u8,
+            len as u8,
+            kind,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ];
+        s.write_all(&head).await.unwrap();
+        s.write_all(payload).await.unwrap();
+    }
+
+    async fn write_client_preface(s: &mut DuplexStream, settings: &[(u16, u32)]) {
+        s.write_all(H2_PREFACE).await.unwrap();
+        let mut payload = Vec::new();
+        for &(id, value) in settings {
+            payload.extend_from_slice(&id.to_be_bytes());
+            payload.extend_from_slice(&value.to_be_bytes());
+        }
+        write_frame(s, SETTINGS_FRAME, &payload).await;
+    }
+
+    async fn read_frame(s: &mut DuplexStream) -> std::io::Result<(u8, Vec<u8>)> {
+        let mut head = [0u8; 9];
+        s.read_exact(&mut head).await?;
+        let len = ((head[0] as usize) << 16) | ((head[1] as usize) << 8) | head[2] as usize;
+        let mut payload = vec![0u8; len];
+        s.read_exact(&mut payload).await?;
+        Ok((head[3], payload))
+    }
+
+    fn settings_entries(payload: &[u8]) -> Vec<(u16, u32)> {
+        payload
+            .chunks_exact(6)
+            .map(|c| {
+                (
+                    u16::from_be_bytes([c[0], c[1]]),
+                    u32::from_be_bytes([c[2], c[3], c[4], c[5]]),
+                )
+            })
+            .collect()
+    }
+
+    /// RFC 8441 extended CONNECT is only advertised to the client once the
+    /// backend advertises it too; against a backend that will reset such
+    /// streams, the client falls back to HTTP/1.1 for its WebSockets.
+    #[tokio::test]
+    async fn extended_connect_is_advertised_only_when_the_backend_advertises_it() {
+        for (backend_settings, advertised) in [
+            (&[][..], false),
+            (&[(ENABLE_CONNECT_PROTOCOL, 1u32)][..], true),
+        ] {
+            let (mut client, client_facing) = tokio::io::duplex(4096);
+            let (backend_facing, mut backend) = tokio::io::duplex(4096);
+
+            tokio::spawn(run_http2_proxy(
+                client_facing,
+                backend_facing,
+                None,
+                false,
+                None,
+            ));
+            tokio::spawn(async move {
+                // A conformant h2 server opens with its SETTINGS.
+                let mut payload = Vec::new();
+                for &(id, value) in backend_settings {
+                    payload.extend_from_slice(&id.to_be_bytes());
+                    payload.extend_from_slice(&value.to_be_bytes());
+                }
+                write_frame(&mut backend, SETTINGS_FRAME, &payload).await;
+                std::future::pending::<()>().await;
+            });
+
+            write_client_preface(&mut client, &[]).await;
+            let frame = tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    let (kind, payload) = read_frame(&mut client).await.unwrap();
+                    if kind == SETTINGS_FRAME {
+                        return payload;
+                    }
+                }
+            })
+            .await
+            .expect("the proxy never sent its client-facing SETTINGS");
+            assert_eq!(
+                settings_entries(&frame)
+                    .iter()
+                    .any(|&(id, _)| id == ENABLE_CONNECT_PROTOCOL),
+                advertised,
+                "backend settings {backend_settings:?}"
+            );
+        }
+    }
+
+    /// A backend dying mid-connection reaches the client as GOAWAY plus a
+    /// clean drain, not as an abort of everything still in flight.
+    #[tokio::test]
+    async fn an_upstream_error_reaches_the_client_as_goaway_not_a_bare_abort() {
+        let (mut client, client_facing) = tokio::io::duplex(4096);
+        let (backend_facing, mut backend) = tokio::io::duplex(4096);
+
+        tokio::spawn(run_http2_proxy(
+            client_facing,
+            backend_facing,
+            None,
+            false,
+            None,
+        ));
+        tokio::spawn(async move {
+            // A backend that answers the handshake and dies immediately,
+            // the way a restarting container does.
+            write_frame(&mut backend, SETTINGS_FRAME, &[]).await;
+            drop(backend);
+        });
+
+        write_client_preface(&mut client, &[]).await;
+        // The proxy answers the dead backend with GOAWAY rather than leaving
+        // the connection to abort. (The leg then lingers until the client
+        // acknowledges or closes, which a raw-socket test never does.)
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match read_frame(&mut client).await.unwrap() {
+                    (GOAWAY_FRAME, _) => break,
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .expect("no GOAWAY after the upstream errored");
     }
 
     fn req_with_auth(auth: Option<&str>) -> Request<()> {
