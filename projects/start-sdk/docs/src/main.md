@@ -151,20 +151,27 @@ const allowedHosts = ui?.addressInfo.format('hostname-info').map(h => h.hostname
 
 ### Narrowing the set
 
-Reach for the shorthands first — `.nonLocal`, `.public`, `.bridge` — then `.filter({...})` for a declared `kind` / `visibility` / `pluginId`, then `.matchesAny([...])` when you want the union of several. `.filter()` calls compose as an intersection, so chaining narrows:
+Three shorthands cover most needs:
+
+| shorthand   | keeps                                                                                 |
+| ----------- | ------------------------------------------------------------------------------------- |
+| `.nonLocal` | what a client off the box can reach — drops loopback, IPv6 link-local, and the bridge |
+| `.public`   | only addresses flagged `public` — WAN IPs, public domains, onions                     |
+| `.bridge`   | only the `lxcbr0` addresses other containers reach you on                             |
+
+Beyond those, `.filter({ kind, visibility, pluginId })` composes as an intersection and `.matchesAny([...])` unions:
 
 ```typescript
-addresses.nonLocal.filter({ kind: 'domain' }) // domains, minus loopback and link-local
+addresses.nonLocal.filter({ kind: 'domain' }) // domains, off-box only
 addresses.matchesAny([{ kind: 'mdns' }, { kind: 'domain' }]) // either one
 ```
 
-`predicate` is the escape hatch for a condition the declared fields cannot express. Prefer a shorthand or a declared filter wherever one fits: a predicate is opaque to the type narrowing the other forms give you, and it hides the intent behind a lambda.
+`predicate` is the escape hatch for what those cannot express; it is opaque to the type narrowing the declared forms give you.
 
-**`exclude` removes anything matching _any_ field of the nested filter, not only what matches all of them.** `filter({ exclude: { kind: 'ipv4', visibility: 'public' } })` therefore drops every IPv4 _and_ every public address, not just the public IPv4s — usually a far smaller set than intended. To subtract one combination, take the union of its complements instead:
+**`exclude` drops anything matching _any_ field of the nested filter**, so `exclude: { kind: 'ipv4', visibility: 'public' }` removes every IPv4 _and_ every public address, not just the public IPv4s. Union the complements instead:
 
 ```typescript
-// everything except a public IPv4
-addresses.matchesAny([{ visibility: 'private' }, { exclude: { kind: 'ipv4' } }])
+addresses.matchesAny([{ visibility: 'private' }, { exclude: { kind: 'ipv4' } }]) // everything but a public IPv4
 ```
 
 To react to only a slice of the host, pass a `map` selector (and optional `eq`, default deep-equal) to `getOwn`/`get`. `.const()` then re-runs only when the mapped value changes rather than on any change to the whole host:
