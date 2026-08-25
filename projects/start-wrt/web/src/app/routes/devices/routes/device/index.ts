@@ -174,6 +174,10 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
   styles: `
     header[tuiHeader='h6'] {
       align-items: center;
+    }
+
+    header[tuiHeader='h6'],
+    table {
       max-width: 50rem;
     }
   `,
