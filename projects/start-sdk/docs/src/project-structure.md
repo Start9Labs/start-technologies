@@ -11,6 +11,7 @@ my-service-startos/
 ├── .github/
 │   └── workflows/
 │       ├── build.yml          # CI build on PR
+│       ├── pr-retarget.yml    # CI rebuild when a PR's base changes
 │       ├── tagAndRelease.yml  # Version check, tag, and release on merge
 │       ├── release.yml        # Release on manual tag push
 │       └── syncNext.yml       # Carry the base branch onto `next` on merge
@@ -90,12 +91,13 @@ These files typically require minimal modification:
 
 ### .github/workflows/
 
-Every package should include four GitHub Actions workflows that delegate to the reusable CI workflows in this monorepo (`.github/workflows/`). The CI pipeline has two automatic stages, plus an optional manual path, and a branch-hygiene job that runs alongside them:
+Every package should include five GitHub Actions workflows that delegate to the reusable CI workflows in this monorepo (`.github/workflows/`). The CI pipeline has two automatic stages, plus an optional manual path, a retarget build, and a branch-hygiene job:
 
 ```
-PR opened/updated ──> Build
+PR opened/updated/marked ready ──> Build
+PR base changed ──> Retarget Build
 PR merged to master ──> Version check ──> Tag ──> Build ──> Release ──> Publish
-                   └─> Sync next
+                    └─> Sync next
 Manual tag push ──> Build ──> Release ──> Publish (bypasses version check)
 ```
 
@@ -109,19 +111,57 @@ name: Build
 on:
   workflow_dispatch:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: ['master']
     paths-ignore: ['*.md']
 
+permissions: {}
+
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  group: package-build-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
-    if: github.event.pull_request.draft == false
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    permissions:
+      contents: read
     uses: Start9Labs/start-technologies/.github/workflows/build.yml@master
     # No DEV_KEY — a PR build doesn't publish, so it doesn't need the signing key.
 ```
+
+GitHub's default `pull_request` activities cover opened, updated, and reopened PRs.
+`ready_for_review` is listed explicitly so a draft's first ready state runs the build.
+The job gate keeps subsequent draft updates out of the build matrix.
+
+**pr-retarget.yml** -- rebuilds the `.s9pk` against a PR's new base:
+
+```yaml
+name: Retarget Build
+
+on:
+  pull_request:
+    types: [edited]
+
+permissions: {}
+
+concurrency:
+  group: package-build-${{ github.event.changes.base && github.event.pull_request.number || format('metadata-{0}', github.event.pull_request.number) }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.event.changes.base && github.event.pull_request.draft == false
+    permissions:
+      contents: read
+    uses: Start9Labs/start-technologies/.github/workflows/build.yml@master
+```
+
+A base change is an `edited` event. The unfiltered listener receives it even when the new
+base or changed paths fall outside `build.yml`'s trigger filters. Base changes share the
+ordinary build's `package-build-<PR>` concurrency group, so the newest run replaces work
+against an obsolete base. Title and body edits use a separate metadata group and leave an
+active build alone.
 
 A PR build only compiles and packs; it never publishes. The reusable workflow falls back to
 `start-cli init-key` when no signing key is present, so passing `DEV_KEY` here would put the
@@ -143,7 +183,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  tag-and-release:
+  tag:
     uses: Start9Labs/start-technologies/.github/workflows/tagAndRelease.yml@master
     with:
       REFERENCE_REGISTRY: ${{ vars.REFERENCE_REGISTRY }}

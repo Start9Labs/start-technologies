@@ -1,0 +1,18 @@
+name: Retarget Build
+
+on:
+  pull_request:
+    types: [edited]
+
+permissions: {}
+
+concurrency:
+  group: package-build-${{ github.event.changes.base && github.event.pull_request.number || format('metadata-{0}', github.event.pull_request.number) }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.event.changes.base && github.event.pull_request.draft == false
+    permissions:
+      contents: read
+    uses: Start9Labs/start-technologies/.github/workflows/build.yml@master

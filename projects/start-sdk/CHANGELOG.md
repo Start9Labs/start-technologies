@@ -90,6 +90,10 @@
 
 ### Fixed
 
+- **Scaffolded package CI builds a draft PR when it becomes ready and rebuilds
+  against every new base after retargeting.** Metadata edits preserve active
+  builds and their conclusions
+
 - **`VersionGraph` reports a missing migration path in terms a service owner can
   act on**, rather than as an assertion about the version range the host handed
   it
