@@ -76,3 +76,8 @@ monorepo-wide rules, and [ARCHITECTURE.md](ARCHITECTURE.md) and
 User-facing changes (UI, CLI output/flags, install/setup flow) must update the
 matching page under `docs/` in the same change. Keep this AGENTS, README, and
 ARCHITECTURE current when you change structure, build steps, or conventions.
+
+The download links at the foot of `docs/src/installing-startos.md` are generated
+from the registry index — never hand-edit them; run
+`./scripts/manage-release.sh sync-docs start-os` from the repo root. The table
+that references them is hand-written, so a new image variant needs a row there.
