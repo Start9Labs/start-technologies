@@ -1,24 +1,24 @@
 import { z } from '@start9labs/start-sdk'
 
-const matchDataVolume = z.object({
+const matchDataVolume = z.looseObject({
   type: z.literal('data'),
   readonly: z.boolean().optional(),
 })
-const matchAssetVolume = z.object({
+const matchAssetVolume = z.looseObject({
   type: z.literal('assets'),
 })
-const matchPointerVolume = z.object({
+const matchPointerVolume = z.looseObject({
   type: z.literal('pointer'),
   'package-id': z.string(),
   'volume-id': z.string(),
   path: z.string(),
   readonly: z.boolean(),
 })
-const matchCertificateVolume = z.object({
+const matchCertificateVolume = z.looseObject({
   type: z.literal('certificate'),
   'interface-id': z.string(),
 })
-const matchBackupVolume = z.object({
+const matchBackupVolume = z.looseObject({
   type: z.literal('backup'),
   readonly: z.boolean(),
 })

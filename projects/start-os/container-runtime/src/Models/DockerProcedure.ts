@@ -1,7 +1,7 @@
 import { z } from '@start9labs/start-sdk'
 import { matchDuration } from './Duration'
 
-export const matchDockerProcedure = z.object({
+export const matchDockerProcedure = z.looseObject({
   type: z.literal('docker'),
   image: z.string(),
   system: z.boolean().optional(),

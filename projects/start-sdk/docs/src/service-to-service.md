@@ -94,7 +94,7 @@ A package keeps StartOS state in a single `store.json` file model (see [File Mod
 
 ```typescript
 // store.json.ts — StartOS state, kept out of the upstream config
-const shape = z.object({
+const shape = z.looseObject({
   indexer: z.enum(['electrs', 'fulcrum']).optional().catch(undefined),
 })
 export const storeJson = FileHelper.json({ base: sdk.volumes.startos, subpath: '/store.json' }, shape)

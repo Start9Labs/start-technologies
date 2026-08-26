@@ -137,13 +137,13 @@ const dependsOnFile = FileHelper.json(
   z.record(z.string(), z.array(z.string())),
 )
 
-const matchResult = z.object({
+const matchResult = z.looseObject({
   result: z.any(),
 })
-const matchError = z.object({
+const matchError = z.looseObject({
   error: z.string(),
 })
-const matchErrorCode = z.object({
+const matchErrorCode = z.looseObject({
   'error-code': z.tuple([z.number(), z.string()]),
 })
 
@@ -180,7 +180,7 @@ const fromReturnType = <A>(a: U.ResultType<A>): A => {
   return assertNever(a as never)
 }
 
-const matchSetResult = z.object({
+const matchSetResult = z.looseObject({
   'depends-on': z.record(z.string(), z.array(z.string())).nullable().optional(),
   dependsOn: z.record(z.string(), z.array(z.string())).nullable().optional(),
   signal: z.enum([
@@ -298,20 +298,22 @@ const asProperty = (x: PackagePropertiesV2): PropertiesReturn =>
   Object.fromEntries(
     Object.entries(x).map(([key, value]) => [key, asProperty_(value)]),
   )
-const matchPackagePropertyObject: z.ZodType<PackagePropertyObject> = z.object({
-  value: z.lazy(() => matchPackageProperties),
-  type: z.literal('object'),
-  description: z.string(),
-})
+const matchPackagePropertyObject: z.ZodType<PackagePropertyObject> =
+  z.looseObject({
+    value: z.lazy(() => matchPackageProperties),
+    type: z.literal('object'),
+    description: z.string(),
+  })
 
-const matchPackagePropertyString: z.ZodType<PackagePropertyString> = z.object({
-  type: z.literal('string'),
-  description: z.string().nullable().optional(),
-  value: z.string(),
-  copyable: z.boolean().nullable().optional(),
-  qr: z.boolean().nullable().optional(),
-  masked: z.boolean().nullable().optional(),
-})
+const matchPackagePropertyString: z.ZodType<PackagePropertyString> =
+  z.looseObject({
+    type: z.literal('string'),
+    description: z.string().nullable().optional(),
+    value: z.string(),
+    copyable: z.boolean().nullable().optional(),
+    qr: z.boolean().nullable().optional(),
+    masked: z.boolean().nullable().optional(),
+  })
 const matchPackageProperties: z.ZodType<PackagePropertiesV2> = z.lazy(() =>
   z.record(
     z.string(),
@@ -319,7 +321,7 @@ const matchPackageProperties: z.ZodType<PackagePropertiesV2> = z.lazy(() =>
   ),
 )
 
-const matchProperties = z.object({
+const matchProperties = z.looseObject({
   version: z.literal(2),
   data: matchPackageProperties,
 })
@@ -1180,27 +1182,29 @@ export class SystemForEmbassy implements System {
   }
 }
 
-const matchPointer = z.object({
+const matchPointer = z.looseObject({
   type: z.literal('pointer'),
 })
 
-const matchPointerPackage = z.object({
+const matchPointerPackage = z.looseObject({
   subtype: z.literal('package'),
   target: z.enum(['tor-key', 'tor-address', 'lan-address']),
   'package-id': z.string(),
   interface: z.string(),
 })
-const matchPointerConfig = z.object({
+const matchPointerConfig = z.looseObject({
   subtype: z.literal('package'),
   target: z.enum(['config']),
   'package-id': z.string(),
   selector: z.string(),
   multi: z.boolean(),
 })
-const matchSpec = z.object({
+const matchSpec = z.looseObject({
   spec: z.record(z.string(), z.unknown()),
 })
-const matchVariants = z.object({ variants: z.record(z.string(), z.unknown()) })
+const matchVariants = z.looseObject({
+  variants: z.record(z.string(), z.unknown()),
+})
 function isMatchPointer(v: unknown): v is z.infer<typeof matchPointer> {
   return matchPointer.safeParse(v).success
 }

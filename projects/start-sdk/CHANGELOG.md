@@ -7,6 +7,14 @@
 - **Minimum StartOS version is now `0.4.0.2`**, which is what a package built
   with this SDK writes as its manifest `osVersion`
 
+- **Breaking — `z.object` strips unknown keys.** Every file-model shape must use
+  `z.looseObject`, at every nesting level, or the next `merge()` discards
+  whatever the user's config file holds that the shape doesn't declare. Replace
+  `z.object(` with `z.looseObject(` throughout `startos/`, keeping `z.object`
+  only where unknown keys should be dropped. A `.loose()` or `.passthrough()`
+  already on a shape is now redundant and can go. Every other `z` export,
+  `z.deepLoose` and `z.deepPartial` included, is unchanged
+
 - **Breaking — `mountDependency` no longer accepts `type`.** A dependency mount
   has been a directory since StartOS 0.4.0-alpha.16 disabled file mounts on
   dependencies, so the option was silently doing nothing; passing it is now a

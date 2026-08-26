@@ -369,7 +369,7 @@ Use the SDK's `smtpShape` zod schema in your store's shape definition. See [File
 import { FileHelper, smtpShape, z } from '@start9labs/start-sdk'
 import { sdk } from '../sdk'
 
-const shape = z.object({
+const shape = z.looseObject({
   adminPassword: z.string().optional(),
   secretKey: z.string().optional(),
   smtp: smtpShape,

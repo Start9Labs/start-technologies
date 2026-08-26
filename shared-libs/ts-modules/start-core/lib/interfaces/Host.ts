@@ -87,7 +87,7 @@ export type BindOptionsByProtocol =
   | (BindOptions & { protocol: null })
 
 const hasStringProtocol = (v: unknown): v is { protocol: string } =>
-  z.object({ protocol: z.string() }).safeParse(v).success
+  z.looseObject({ protocol: z.string() }).safeParse(v).success
 
 /**
  * Hard cap on how many ports a single {@link MultiHost.bindPortRange} call

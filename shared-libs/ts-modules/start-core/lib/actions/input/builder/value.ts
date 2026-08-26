@@ -32,9 +32,9 @@ function literalKeysValidator(
 }
 
 /** Zod schema for a file upload result — validates `{ path, commitment: { hash, size } }`. */
-export const fileInfoParser = z.object({
+export const fileInfoParser = z.looseObject({
   path: z.string(),
-  commitment: z.object({ hash: z.string(), size: z.number() }),
+  commitment: z.looseObject({ hash: z.string(), size: z.number() }),
 })
 /** The parsed result of a file upload, containing the file path and its content commitment (hash + size). */
 export type FileInfo = z.infer<typeof fileInfoParser>
@@ -46,7 +46,7 @@ export type AsRequired<T, Required extends boolean> = Required extends true
 
 const testForAsRequiredParser = once(
   () => (v: unknown) =>
-    z.object({ required: z.literal(true) }).safeParse(v).success,
+    z.looseObject({ required: z.literal(true) }).safeParse(v).success,
 )
 function asRequiredParser<Type, Input extends { required: boolean }>(
   parser: z.ZodType<Type>,

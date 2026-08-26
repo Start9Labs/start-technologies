@@ -36,7 +36,7 @@ The most common file model is `store.json`, used to persist internal service sta
 import { FileHelper, z } from '@start9labs/start-sdk'
 import { sdk } from '../sdk'
 
-const shape = z.object({
+const shape = z.looseObject({
   adminPassword: z.string().optional().catch(undefined),
   secretKey: z.string().optional().catch(undefined),
   someNumber: z.number().catch(0),
@@ -52,12 +52,12 @@ export const storeJson = FileHelper.json({ base: sdk.volumes.main, subpath: './s
 import { FileHelper, z } from '@start9labs/start-sdk'
 import { sdk } from '../sdk'
 
-const serverSchema = z.object({
+const serverSchema = z.looseObject({
   host: z.string().catch('localhost'),
   port: z.number().catch(8080),
 })
 
-const shape = z.object({
+const shape = z.looseObject({
   server: serverSchema.catch(() => serverSchema.parse({})),
   features: z.array(z.string()).catch([]),
 })
@@ -71,7 +71,7 @@ export const configYaml = FileHelper.yaml({ base: sdk.volumes.main, subpath: 'co
 import { FileHelper, z } from '@start9labs/start-sdk'
 import { sdk } from '../sdk'
 
-const shape = z.object({
+const shape = z.looseObject({
   api_bind: z.literal('0.0.0.0').catch('0.0.0.0'),
   api_port: z.literal(9814).catch(9814),
   debug: z.literal(false).catch(false),
@@ -89,18 +89,18 @@ XML support includes options for controlling array detection during parsing:
 import { FileHelper, z } from '@start9labs/start-sdk'
 import { sdk } from '../sdk'
 
-const knownProxiesSchema = z.object({
+const knownProxiesSchema = z.looseObject({
   // 10.0.3.1 is the OS bridge gateway — the reverse proxy this container should
   // trust. It is the OS's own fixed address (see Service-to-Service Networking),
   // not a dependency dial, so the literal is correct here.
   string: z.literal('10.0.3.1').array().catch(['10.0.3.1']),
 })
 
-const networkConfigSchema = z.object({
+const networkConfigSchema = z.looseObject({
   KnownProxies: knownProxiesSchema.catch(() => knownProxiesSchema.parse({})),
 })
 
-const shape = z.object({
+const shape = z.looseObject({
   NetworkConfiguration: networkConfigSchema.catch(() => networkConfigSchema.parse({})),
 })
 
@@ -226,7 +226,7 @@ import { sdk } from '../sdk'
 
 export const defaultMaxUpload = '50M'
 
-const shape = z.object({
+const shape = z.looseObject({
   max_upload_size: z.string().catch(defaultMaxUpload),
   allow_registration: z.boolean().catch(false),
 })
@@ -256,7 +256,7 @@ This keeps the default defined in exactly one place.
 Give every key a `.catch()` default. This makes your file model self-healing — invalid or missing values are automatically corrected, and `merge(effects, {})` works for initialization.
 
 ```typescript
-const shape = z.object({
+const shape = z.looseObject({
   host: z.string().catch('localhost'),
   port: z.number().catch(8080),
   debug: z.boolean().catch(false),
@@ -273,8 +273,8 @@ const shape = z.object({
 
 ```typescript
 // BROKEN: inner .catch() values never fire when "server" is missing
-const shape = z.object({
-  server: z.object({
+const shape = z.looseObject({
+  server: z.looseObject({
     host: z.string().catch('localhost'),
     port: z.number().catch(8080),
   }),
@@ -287,12 +287,12 @@ shape.parse({})
 **The fix:** Extract child schemas into variables and use `.catch(() => childSchema.parse({}))`:
 
 ```typescript
-const serverSchema = z.object({
+const serverSchema = z.looseObject({
   host: z.string().catch('localhost'),
   port: z.number().catch(8080),
 })
 
-const shape = z.object({
+const shape = z.looseObject({
   server: serverSchema.catch(() => serverSchema.parse({})),
 })
 
@@ -316,7 +316,7 @@ import { sdk } from '../sdk'
 // Level 2: nested object
 const dbDefault = { path: '/data/app.db', journal_mode: 'wal' }
 const dbShape = z
-  .object({
+  .looseObject({
     path: z.literal('/data/app.db').catch(dbDefault.path),
     journal_mode: z.string().catch(dbDefault.journal_mode),
   })
@@ -325,14 +325,14 @@ const dbShape = z
 // Level 2: array item
 const endpointDefault = { port: 8080, tls: false }
 const endpointShape = z
-  .object({
+  .looseObject({
     port: z.number().catch(endpointDefault.port),
     tls: z.boolean().catch(endpointDefault.tls),
   })
   .catch(endpointDefault)
 
 // Top level
-const shape = z.object({
+const shape = z.looseObject({
   database: dbShape,
   endpoints: z.array(endpointShape).catch([endpointDefault]),
   log_level: z.string().catch('info'),
@@ -349,7 +349,7 @@ The key technique: define each nested level's default and shape separately, then
 For values that should always be a specific literal and never change (e.g., internal ports, paths, auth modes), use `z.literal().catch()`. If the file ends up with a different value (e.g., user edits it manually), it is corrected on the next `merge()`:
 
 ```typescript
-const shape = z.object({
+const shape = z.looseObject({
   // Enforced — always corrected back to these values
   api_bind: z.literal('0.0.0.0').catch('0.0.0.0'),
   api_port: z.literal(9814).catch(9814),
@@ -368,7 +368,7 @@ This pattern is especially useful for upstream config files where you need to lo
 When a `FileHelper.ini` uses an `InputSpec`'s `partialValidator` as its validator and exposes the raw file as `raw: Value.hidden(shape)`, `formToFile` must reparse `rawInput` through `shape` before spreading it. Otherwise, the first install seed writes an empty file — the enforced `.catch()` defaults in `shape` never fire, and the daemon starts with upstream defaults instead of the locked-down values.
 
 ```typescript
-export const shape = z.object({
+export const shape = z.looseObject({
   'rpc-bind-ip': z.literal('0.0.0.0').catch('0.0.0.0'),
   'rpc-bind-port': z.literal(18081).catch(18081),
   // ...more enforced + configurable keys
@@ -408,12 +408,12 @@ export const confFile = FileHelper.ini(
 
 ### Unknown Key Preservation
 
-The SDK patches `z.object()` to use loose mode by default — unknown keys in the parsed data are **preserved**, not stripped, at **every nesting level**. This is intentional: upstream config files often contain keys your schema doesn't model (auto-generated secrets, internal state, plugin settings, etc.), and stripping them would break the service.
+A file model must **preserve** unknown keys, not strip them: upstream config files carry keys your schema doesn't model (auto-generated secrets, internal state, plugin settings), and dropping them breaks the service.
 
 > [!IMPORTANT]
-> Import `z` from `@start9labs/start-sdk` and use `z.object`. **You never need `z.looseObject`.** Plain zod's `z.object` strips unknown keys, so a reader who knows zod reaches for `looseObject` to protect a two-way-bound config file — but the SDK's `z.object` already preserves them, deeply. `z.looseObject` is still exported and still compiles; it is not the convention.
+> **Build every file-model shape with `z.looseObject`, at every nesting level.** A shape built with `z.object` silently discards the rest of the user's file on the next `merge()`. Reach for `z.object` only where StartOS produces the data and you want unknown keys gone.
 
-This has two important consequences:
+Preserving unknown keys has two consequences:
 
 1. **`merge()` never removes keys you don't mention.** Only keys explicitly passed to `merge()` are updated. Everything else — including keys outside your schema — passes through untouched.
 2. **Stale keys from previous versions persist.** If an earlier version of your package wrote keys that the current version no longer uses, those keys survive across updates. They are not automatically cleaned up by `merge()` or by the zod schema.
@@ -428,12 +428,10 @@ await configToml.merge(effects, {
 })
 ```
 
-When stale keys are outside your schema's type, cast the merge data:
+A key outside your schema needs no cast:
 
 ```typescript
-await configToml.merge(effects, {
-  legacy_key: undefined,
-} as any)
+await configToml.merge(effects, { legacy_key: undefined })
 ```
 
 > [!WARNING]
@@ -465,7 +463,7 @@ For complex types like SMTP, use the SDK's built-in zod schemas. See [Actions](.
 ```typescript
 import { smtpShape, z } from '@start9labs/start-sdk'
 
-const shape = z.object({
+const shape = z.looseObject({
   adminPassword: z.string().optional().catch(undefined),
   smtp: smtpShape,
 })
@@ -473,7 +471,7 @@ const shape = z.object({
 
 ### Don't Call `.strip()` on Your Shape
 
-The SDK intentionally patches `z.object()` to loose mode (see [Unknown Key Preservation](#unknown-key-preservation)) so unknown keys from the upstream service survive. Calling `.strip()` on your shape disables that protection and will silently destroy user data on the next `merge()` — keys outside your schema get discarded. Leave the default alone; only use `.strict()` if you have a specific reason to reject unknowns.
+`.strip()` undoes `z.looseObject` (see [Unknown Key Preservation](#unknown-key-preservation)) and will silently destroy user data on the next `merge()` — keys outside your schema get discarded. Use `.strict()` only if you have a specific reason to reject unknowns.
 
 ## Migration Gotchas
 

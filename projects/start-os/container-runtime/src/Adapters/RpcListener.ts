@@ -18,13 +18,13 @@ import { System } from '../Interfaces/System'
 import { makeEffects } from './EffectCreator'
 type MaybePromise<T> = T | Promise<T>
 export const matchRpcResult = z.union([
-  z.object({ result: z.any() }),
-  z.object({
-    error: z.object({
+  z.looseObject({ result: z.any() }),
+  z.looseObject({
+    error: z.looseObject({
       code: z.number(),
       message: z.string(),
       data: z
-        .object({
+        .looseObject({
           details: z.string().optional(),
           debug: z.any().optional(),
         })
@@ -41,67 +41,67 @@ const SOCKET_PARENT = '/media/startos/rpc'
 const SOCKET_PATH = '/media/startos/rpc/service.sock'
 const jsonrpc = '2.0' as const
 
-const isResultSchema = z.object({ result: z.any() })
+const isResultSchema = z.looseObject({ result: z.any() })
 const isResult = (v: unknown): v is z.infer<typeof isResultSchema> =>
   isResultSchema.safeParse(v).success
 
 const idType = z.union([z.string(), z.number(), z.literal(null)])
 type IdType = null | string | number | undefined
-const runType = z.object({
+const runType = z.looseObject({
   id: idType.optional(),
   method: z.literal('execute'),
-  params: z.object({
+  params: z.looseObject({
     id: z.string(),
     procedure: z.string(),
     input: z.any(),
     timeout: z.number().nullable().optional(),
   }),
 })
-const sandboxRunType = z.object({
+const sandboxRunType = z.looseObject({
   id: idType.optional(),
   method: z.literal('sandbox'),
-  params: z.object({
+  params: z.looseObject({
     id: z.string(),
     procedure: z.string(),
     input: z.any(),
     timeout: z.number().nullable().optional(),
   }),
 })
-const callbackType = z.object({
+const callbackType = z.looseObject({
   method: z.literal('callback'),
-  params: z.object({
+  params: z.looseObject({
     id: z.number(),
     args: z.array(z.unknown()),
   }),
 })
-const initType = z.object({
+const initType = z.looseObject({
   id: idType.optional(),
   method: z.literal('init'),
-  params: z.object({
+  params: z.looseObject({
     id: z.string(),
     kind: z.enum(['install', 'update', 'restore']).nullable(),
   }),
 })
-const startType = z.object({
+const startType = z.looseObject({
   id: idType.optional(),
   method: z.literal('start'),
 })
-const stopType = z.object({
+const stopType = z.looseObject({
   id: idType.optional(),
   method: z.literal('stop'),
 })
-const exitType = z.object({
+const exitType = z.looseObject({
   id: idType.optional(),
   method: z.literal('exit'),
-  params: z.object({
+  params: z.looseObject({
     id: z.string(),
     target: z.string().nullable(),
   }),
 })
-const evalType = z.object({
+const evalType = z.looseObject({
   id: idType.optional(),
   method: z.literal('eval'),
-  params: z.object({
+  params: z.looseObject({
     script: z.string(),
   }),
 })
@@ -147,7 +147,7 @@ const handleRpc = (id: IdType, method: string, result: Promise<RpcResult>) =>
       }
     })
 
-const hasIdSchema = z.object({ id: idType })
+const hasIdSchema = z.looseObject({ id: idType })
 const hasId = (v: unknown): v is z.infer<typeof hasIdSchema> =>
   hasIdSchema.safeParse(v).success
 export class RpcListener {
@@ -251,7 +251,7 @@ export class RpcListener {
   }
 
   private dealWithInput(input: unknown): MaybePromise<SocketResponse> {
-    const parsed = z.object({ method: z.string() }).safeParse(input)
+    const parsed = z.looseObject({ method: z.string() }).safeParse(input)
     if (!parsed.success) {
       console.warn(
         `Couldn't parse the following input ${JSON.stringify(input)}`,
@@ -401,7 +401,7 @@ export class RpcListener {
       }
       default: {
         const { id, method } = z
-          .object({ id: idType.optional(), method: z.string() })
+          .looseObject({ id: idType.optional(), method: z.string() })
           .passthrough()
           .parse(input)
         return {
@@ -460,7 +460,7 @@ export class RpcListener {
           }
       }
     })().then(ensureResultTypeShape, error => {
-      const legacy = z.object({ error: z.string() }).safeParse(error)
+      const legacy = z.looseObject({ error: z.string() }).safeParse(error)
       return {
         error: {
           ...errorKind.serviceRuntime,

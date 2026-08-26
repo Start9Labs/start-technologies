@@ -586,7 +586,7 @@ export function getDefaultPgPassword(): string {
 **Store schema** (in `fileModels/store.json.ts`):
 
 ```typescript
-const shape = z.object({
+const shape = z.looseObject({
   pgPassword: z.string().catch(''),
   // ...other fields
 })
