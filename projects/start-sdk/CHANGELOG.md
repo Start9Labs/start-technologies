@@ -13,10 +13,13 @@
   compile error. To reach a single file, mount the directory holding it.
   `mountVolume` and `mountAssets` still take `type`
 
-- **`addSsl.alpn` takes a list of protocols, or nothing at all.** Setting it no
-  longer changes how StartOS dials the container, which left `'reflect'` and
-  leaving the option unset as two spellings of one state: filter nothing. The
-  `'reflect'` value is gone, so a binding that set it sets `null` instead.
+- **`addSsl.alpn` is written as the list of protocols itself: `['h2']`, or
+  `null` for no filter.** It used to be `{ specified: ['h2'] }` or the string
+  `'reflect'`, and setting either changed how StartOS dialled the container —
+  so `'reflect'` and leaving the option unset said the same thing once that
+  stopped being true. Both older forms are gone. A binding that wrote
+  `{ specified: [...] }` writes the list, and one that wrote `'reflect'` writes
+  `null`; bindings already stored on a server are converted on update.
 
 - **`effects.getServicePortForward` resolves `null` instead of throwing when
   the binding does not exist.** It is the one host effect with no `callback`,

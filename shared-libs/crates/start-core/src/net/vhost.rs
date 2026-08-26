@@ -1531,12 +1531,38 @@ impl ProxyContext {
     }
 }
 
+/// The protocols a binding keeps. Carried on the wire as the list itself.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[serde(untagged)]
 #[ts(export)]
 pub enum AlpnInfo {
-    /// Keep only these.
     Specified(Vec<MaybeUtf8String>),
+}
+
+#[cfg(test)]
+mod alpn_wire_format {
+    use super::*;
+
+    /// A manifest writes the list itself, and no list at all is `null`. The
+    /// binding a package is built against says `AlpnInfo | null`, so a wrapper
+    /// object here would reject every manifest that names a protocol.
+    #[test]
+    fn alpn_is_carried_as_the_list_itself() {
+        let pinned = Some(AlpnInfo::Specified(vec![
+            MaybeUtf8String(b"h2".to_vec()),
+            MaybeUtf8String(b"http/1.1".to_vec()),
+        ]));
+        let json = serde_json::json!(["h2", "http/1.1"]);
+        assert_eq!(serde_json::to_value(&pinned).unwrap(), json);
+        assert_eq!(
+            serde_json::from_value::<Option<AlpnInfo>>(json).unwrap(),
+            pinned,
+        );
+        assert_eq!(
+            serde_json::from_value::<Option<AlpnInfo>>(serde_json::Value::Null).unwrap(),
+            None,
+        );
+    }
 }
 
 #[derive(Debug, Clone)]

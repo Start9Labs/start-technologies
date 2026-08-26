@@ -24,7 +24,7 @@ export const knownProtocols = {
     secure: null,
     defaultPort: 80,
     withSsl: 'https',
-    alpn: { specified: ['http/1.1'] } as AlpnInfo,
+    alpn: ['http/1.1'] as AlpnInfo,
     addXForwardedHeaders: true,
   },
   https: {
@@ -36,7 +36,7 @@ export const knownProtocols = {
     secure: null,
     defaultPort: 80,
     withSsl: 'wss',
-    alpn: { specified: ['http/1.1'] } as AlpnInfo,
+    alpn: ['http/1.1'] as AlpnInfo,
     addXForwardedHeaders: true,
   },
   wss: {

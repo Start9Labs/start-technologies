@@ -29,11 +29,72 @@ impl VersionT for Version {
     #[instrument(skip_all)]
     fn up(self, db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
         rehome_admin_ui_port(db);
+        for_each_alpn(db, |alpn| {
+            if alpn.as_array().is_some() {
+                return;
+            }
+            *alpn = alpn
+                .as_object()
+                .and_then(|o| o.get("specified"))
+                .cloned()
+                // `reflect` said what an absent list says.
+                .unwrap_or(Value::Null);
+        });
         Ok(Value::Null)
     }
-    fn down(self, _db: &mut Value) -> Result<(), Error> {
+    fn down(self, db: &mut Value) -> Result<(), Error> {
         // Every earlier version wants 80 here and keeps the port it finds.
+        for_each_alpn(db, |alpn| {
+            if let Some(list) = alpn.as_array() {
+                let mut wrapped = imbl_value::InOMap::new();
+                wrapped.insert("specified".into(), Value::Array(list.clone()));
+                *alpn = Value::Object(wrapped);
+            }
+        });
         Ok(())
+    }
+}
+
+/// Every `addSsl.alpn` a host holds, on the server's own bindings and on every
+/// package's. A binding that never set one is skipped: `null` reads the same
+/// before and after.
+fn for_each_alpn(db: &mut Value, mut f: impl FnMut(&mut Value)) {
+    let mut visit = |host: &mut Value| {
+        let Some(bindings) = host.get_mut("bindings").and_then(|b| b.as_object_mut()) else {
+            return;
+        };
+        for (_, binding) in bindings.iter_mut() {
+            let Some(alpn) = binding
+                .get_mut("options")
+                .and_then(|o| o.get_mut("addSsl"))
+                .and_then(|s| s.get_mut("alpn"))
+                .filter(|a| !a.is_null())
+            else {
+                continue;
+            };
+            f(alpn);
+        }
+    };
+    if let Some(host) = db
+        .get_mut("public")
+        .and_then(|p| p.get_mut("serverInfo"))
+        .and_then(|s| s.get_mut("network"))
+        .and_then(|n| n.get_mut("host"))
+    {
+        visit(host);
+    }
+    if let Some(packages) = db
+        .get_mut("public")
+        .and_then(|p| p.get_mut("packageData"))
+        .and_then(|p| p.as_object_mut())
+    {
+        for (_, package) in packages.iter_mut() {
+            if let Some(hosts) = package.get_mut("hosts").and_then(|h| h.as_object_mut()) {
+                for (_, host) in hosts.iter_mut() {
+                    visit(host);
+                }
+            }
+        }
     }
 }
 
@@ -84,6 +145,64 @@ mod test {
     use imbl_value::json;
 
     use super::*;
+
+    /// A server binding and a package binding, each carrying `alpn` as given.
+    fn db_with_alpn(server: Value, package: Value) -> Value {
+        json!({
+            "public": {
+                "serverInfo": { "network": { "host": { "bindings": {
+                    "443": { "net": {}, "options": { "addSsl": { "alpn": server } } },
+                } } } },
+                "packageData": { "pkg": { "hosts": { "main": { "bindings": {
+                    "8443": { "net": {}, "options": { "addSsl": { "alpn": package } } },
+                } } } } },
+            },
+            "private": { "availablePorts": {} }
+        })
+    }
+
+    fn server_alpn(db: &Value) -> Value {
+        db["public"]["serverInfo"]["network"]["host"]["bindings"]["443"]["options"]["addSsl"]
+            ["alpn"]
+            .clone()
+    }
+
+    fn package_alpn(db: &Value) -> Value {
+        db["public"]["packageData"]["pkg"]["hosts"]["main"]["bindings"]["8443"]["options"]["addSsl"]
+            ["alpn"]
+            .clone()
+    }
+
+    /// A stored list is carried as the list itself, on the server's own
+    /// bindings and on a package's alike.
+    #[test]
+    fn a_stored_alpn_becomes_the_list_it_named() {
+        let mut d = db_with_alpn(
+            json!({ "specified": ["http/1.1", "h2"] }),
+            json!({ "specified": [] }),
+        );
+        Version.up(&mut d, ()).unwrap();
+        assert_eq!(server_alpn(&d), json!(["http/1.1", "h2"]));
+        assert_eq!(package_alpn(&d), json!([]));
+
+        // idempotent
+        Version.up(&mut d, ()).unwrap();
+        assert_eq!(server_alpn(&d), json!(["http/1.1", "h2"]));
+
+        Version.down(&mut d).unwrap();
+        assert_eq!(server_alpn(&d), json!({ "specified": ["http/1.1", "h2"] }));
+        assert_eq!(package_alpn(&d), json!({ "specified": [] }));
+    }
+
+    /// `reflect` named the client's own list, which is what no list at all
+    /// names now.
+    #[test]
+    fn a_stored_reflect_becomes_no_list() {
+        let mut d = db_with_alpn(json!("reflect"), Value::Null);
+        Version.up(&mut d, ()).unwrap();
+        assert_eq!(server_alpn(&d), Value::Null);
+        assert_eq!(package_alpn(&d), Value::Null);
+    }
 
     fn db(net: Value, available_ports: Value) -> Value {
         json!({

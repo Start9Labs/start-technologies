@@ -118,7 +118,7 @@ export class MainLoop {
           addSsl: lanConf?.ssl
             ? {
                 preferredExternalPort: lanConf.external,
-                alpn: { specified: ['http/1.1'] },
+                alpn: ['http/1.1'],
                 addXForwardedHeaders: false,
                 auth: null,
               }
