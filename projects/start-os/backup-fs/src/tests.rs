@@ -2747,3 +2747,111 @@ fn missing_superblock_over_existing_data_is_refused() {
     // And no fresh superblock was created over the data.
     assert!(!data.path().join("superblock").exists());
 }
+
+/// A read that starts past the end of a file returns no bytes rather than an
+/// I/O error. The reader clamps the request to what the file holds, so such a
+/// read asks for nothing at all, and a request for no bytes is satisfiable at
+/// any offset.
+#[test_log::test]
+fn read_starting_past_eof_returns_no_bytes() {
+    let data = TempDir::new("backupfs_data").unwrap();
+
+    with_backupfs(
+        data.path(),
+        "ohea".to_owned(),
+        |mnt| {
+            let mut buf = [0u8; 16];
+
+            // An inline body: the whole file lives in the inode record.
+            let inline = mnt.join("inline");
+            fs::write(&inline, b"0123456789").unwrap();
+            let mut f = fs::File::open(&inline).unwrap();
+            f.seek(SeekFrom::Start(4096)).unwrap();
+            assert_eq!(f.read(&mut buf).unwrap(), 0);
+            // Reading at exactly EOF is the same request with the offset on
+            // the boundary, and is how every read-to-end terminates.
+            f.seek(SeekFrom::Start(10)).unwrap();
+            assert_eq!(f.read(&mut buf).unwrap(), 0);
+
+            // A block-backed body takes the other branch of the read.
+            let blocks = mnt.join("blocks");
+            fs::write(&blocks, vec![3u8; 3 * CHUNK_OFFSET as usize]).unwrap();
+            let mut f = fs::File::open(&blocks).unwrap();
+            f.seek(SeekFrom::Start(4 * CHUNK_OFFSET)).unwrap();
+            assert_eq!(f.read(&mut buf).unwrap(), 0);
+        },
+        None,
+    );
+}
+
+/// `copy_file_range` out of a file that is shrinking under it copies no bytes
+/// rather than failing. The kernel clamps the request against the size it has
+/// cached, so a truncate landing after that check is what hands the handler a
+/// read starting past the end of the file — the one read path that reaches it,
+/// and the one that runs with the whole session's lock held.
+#[test_log::test]
+fn copy_file_range_from_a_shrinking_file_copies_no_bytes() {
+    use std::os::unix::io::AsRawFd;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let data = TempDir::new("backupfs_data").unwrap();
+    let size = 2 * CHUNK_OFFSET;
+
+    with_backupfs(
+        data.path(),
+        "ohea".to_owned(),
+        move |mnt| {
+            let src = mnt.join("shrinking");
+            fs::write(&src, vec![7u8; size as usize]).unwrap();
+            let reader = fs::File::open(&src).unwrap();
+            let dest = fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(mnt.join("copy"))
+                .unwrap();
+
+            let truncator = fs::OpenOptions::new().write(true).open(&src).unwrap();
+            let stop = Arc::new(AtomicBool::new(false));
+            let flapping = {
+                let stop = stop.clone();
+                std::thread::spawn(move || {
+                    while !stop.load(Ordering::Relaxed) {
+                        truncator.set_len(size).unwrap();
+                        truncator.set_len(0).unwrap();
+                    }
+                })
+            };
+
+            let mut failure = None;
+            for _ in 0..20_000 {
+                let mut from = (size - CHUNK_OFFSET / 2) as libc::loff_t;
+                let mut to: libc::loff_t = 0;
+                let copied = unsafe {
+                    libc::copy_file_range(
+                        reader.as_raw_fd(),
+                        &mut from,
+                        dest.as_raw_fd(),
+                        &mut to,
+                        4096,
+                        0,
+                    )
+                };
+                if copied < 0 {
+                    failure = Some(io::Error::last_os_error());
+                    break;
+                }
+            }
+
+            // Stop the truncator before reporting, so a failure unmounts
+            // cleanly instead of racing teardown against a live writer.
+            stop.store(true, Ordering::Relaxed);
+            flapping.join().unwrap();
+            if let Some(e) = failure {
+                panic!("copying from a file that shrank must copy fewer bytes, not fail: {e}");
+            }
+        },
+        None,
+    );
+}

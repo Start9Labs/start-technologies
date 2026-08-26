@@ -189,6 +189,11 @@ impl Contents {
     // ── reads ──────────────────────────────────────────────
 
     pub fn read_exact_at(&mut self, buf: &mut [u8], offset: u64) -> BkfsResult<()> {
+        // A read of no bytes is satisfiable at any offset, including one past
+        // the end of the file.
+        if buf.is_empty() {
+            return Ok(());
+        }
         let end = offset + buf.len() as u64;
         if end > self.size() {
             return Err(io::Error::from(io::ErrorKind::UnexpectedEof).into());

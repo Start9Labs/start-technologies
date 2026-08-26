@@ -1099,7 +1099,8 @@ impl Handler {
 
         let mut contents = fh.contents.lock().unwrap();
 
-        let size = min(size, (contents.inode.attrs.size - offset) as usize);
+        let available = contents.inode.attrs.size.saturating_sub(offset) as usize;
+        let size = min(size, available);
 
         let mut buf = vec![0_u8; size];
 
