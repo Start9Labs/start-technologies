@@ -101,4 +101,4 @@ If time sync still fails, please [contact support](https://start9.com/contact).
 
 ## Issue with a particular service
 
-If a service is misbehaving or crashing, check the logs for that service. Look for any errors that might explain the problem. Often, the solution is to restart the service by clicking "Restart". If the issue persist, [contact support](https://start9.com/contact).
+If a service is misbehaving or crashing, check the [logs](logs.md) for that service — open the service and select its **Logs** tab. Look for any errors that might explain the problem. Often, the solution is to restart the service by clicking "Restart". If the issue persist, [contact support](https://start9.com/contact).

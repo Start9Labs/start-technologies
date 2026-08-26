@@ -10,7 +10,7 @@ Every service on StartOS runs inside its own isolated LXC container. Within each
 There are several reasons you might want a shell inside a running service container:
 
 - **Running CLI tools** — Many services ship their own command-line utilities (e.g., `bitcoin-cli`, `lncli`) that can be invoked directly inside the container.
-- **Debugging** — Inspect logs, running processes, or file state when a service is misbehaving.
+- **Debugging** — Inspect running processes or file state when a service is misbehaving. Logs do not require a shell; they are on the service's [Logs](logs.md) tab in the UI.
 - **Querying a database** — Run ad-hoc queries against a service's database (e.g., `sqlite3`, `psql`, `redis-cli`) that aren't exposed through the UI.
 - **Inspecting configuration** — View the generated config files or environment variables a service is actually running with.
 - **Advanced recovery** — In rare cases, manually repair data or state that cannot be fixed through the StartOS UI.
