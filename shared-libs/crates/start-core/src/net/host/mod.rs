@@ -471,7 +471,7 @@ impl Model<Host> {
                     continue;
                 };
                 // A certificate authority validates at `ACME_CHALLENGE_PORT`,
-                // whatever port the address serves. `add_ssl` excludes a
+                // regardless of which port the address serves. `add_ssl` excludes a
                 // service that is its own ACME client.
                 let challenge = addr.ssl
                     && bind.options.add_ssl.is_some()

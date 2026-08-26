@@ -586,7 +586,7 @@ pub async fn add_public_domain<Kind: HostApiKind>(
                 gateway: gateway.clone(),
             },
         ),
-        // TLS-ALPN-01 is validated at 443, whatever port the address serves.
+        // TLS-ALPN-01 is validated at 443, regardless of which port the address serves.
         async {
             let Some(acme) = authority.filter(|_| ext_port != ACME_CHALLENGE_PORT) else {
                 return Ok(None);
