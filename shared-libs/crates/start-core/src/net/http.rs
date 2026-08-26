@@ -525,7 +525,7 @@ mod tests {
         let (backend_facing, mut backend) = tokio::io::duplex(4096);
 
         // A target reaches `run_http_proxy` only when it adds forwarded headers
-        // or gates auth, so this passes `add_forwarded: true`.
+        // or gates auth.
         tokio::spawn(run_http_proxy(
             client_facing,
             backend_facing,
@@ -535,8 +535,7 @@ mod tests {
             None,
         ));
         if alpn != Some("h2") {
-            // Only h2 opens with a preface. Every other value proxies as
-            // HTTP/1, which writes nothing upstream until a request arrives.
+            // Only h2 opens with a preface.
             client
                 .write_all(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")
                 .await

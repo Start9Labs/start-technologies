@@ -56,8 +56,7 @@ impl VersionT for Version {
 }
 
 /// Every `addSsl.alpn` a host holds, on the server's own bindings and on every
-/// package's. A binding that never set one is skipped: `null` reads the same
-/// before and after.
+/// package's.
 fn for_each_alpn(db: &mut Value, mut f: impl FnMut(&mut Value)) {
     let mut visit = |host: &mut Value| {
         let Some(bindings) = host.get_mut("bindings").and_then(|b| b.as_object_mut()) else {
@@ -173,8 +172,7 @@ mod test {
             .clone()
     }
 
-    /// A stored list is carried as the list itself, on the server's own
-    /// bindings and on a package's alike.
+    /// A stored list is carried as the list itself.
     #[test]
     fn a_stored_alpn_becomes_the_list_it_named() {
         let mut d = db_with_alpn(
@@ -194,8 +192,7 @@ mod test {
         assert_eq!(package_alpn(&d), json!({ "specified": [] }));
     }
 
-    /// `reflect` named the client's own list, which is what no list at all
-    /// names now.
+    /// `reflect` named the client's own list, which is what no list names now.
     #[test]
     fn a_stored_reflect_becomes_no_list() {
         let mut d = db_with_alpn(json!("reflect"), Value::Null);

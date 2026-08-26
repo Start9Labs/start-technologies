@@ -453,9 +453,8 @@ impl BindOptions {
         self.secure.map_or(false, |s| s.ssl) && self.add_ssl.is_none()
     }
 
-    /// The container serves its own TLS behind a listener of ours that
-    /// terminates the client's, so StartOS dials the container over TLS and
-    /// rewraps. Returns the binding's `add_ssl` options.
+    /// The `add_ssl` options for a binding StartOS rewraps: one whose container
+    /// serves its own TLS behind a listener of ours that terminates the client's.
     pub fn rewrap(&self) -> Option<&AddSslOptions> {
         self.add_ssl
             .as_ref()

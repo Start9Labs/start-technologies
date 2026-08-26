@@ -1233,17 +1233,15 @@ where
             }
             None => client_alpn.clone(),
         };
-        // The container is only put through protocols the client also offered,
-        // since its choice is what the client gets handed back.
+        // The container is offered only protocols the client also named, since
+        // its choice is what the client is handed back.
         let dialled: Vec<Vec<u8>> = offered
             .iter()
             .filter(|proto| client_alpn.contains(proto))
             .cloned()
             .collect();
-        // Offering the client a list it shares nothing with is how rustls turns
-        // it away, which it only does when both lists name something. So an
-        // empty one goes on to dial rather than handing back an unwrapped
-        // socket the client would be spliced onto.
+        // rustls turns a client away only when both its list and ours name
+        // something.
         if self.connect_ssl.is_some()
             && !offered.is_empty()
             && !client_alpn.is_empty()
@@ -1254,8 +1252,8 @@ where
         }
         let (stream, negotiated): (AcceptStream, _) = match &self.connect_ssl {
             Some(client_cfg) => {
-                // Call this even for an empty list: without it the connector
-                // falls back to the protocols baked into `client_cfg`.
+                // Called even for an empty list: without it the connector falls
+                // back to `client_cfg`'s own protocols.
                 let target_stream = TlsConnector::from(client_cfg.clone())
                     .with_alpn(dialled)
                     .connect(ServerName::IpAddress(self.addr.ip().into()), tcp_stream)
@@ -1271,10 +1269,10 @@ where
             }
             None => (Box::pin(tcp_stream), None),
         };
-        // rustls picks by this list's order, so assign rather than append.
+        // rustls picks by this list's order.
         prev.alpn_protocols = match &self.connect_ssl {
-            // One protocol frames both legs, so the container's own choice is
-            // what the client is offered.
+            // One protocol frames both legs, so the client is offered the
+            // container's choice.
             Some(_) => negotiated.into_iter().collect(),
             None => offered,
         };
@@ -1543,9 +1541,7 @@ pub enum AlpnInfo {
 mod alpn_wire_format {
     use super::*;
 
-    /// A manifest writes the list itself, and no list at all is `null`. The
-    /// binding a package is built against says `AlpnInfo | null`, so a wrapper
-    /// object here would reject every manifest that names a protocol.
+    /// A manifest writes the list itself, and no list at all is `null`.
     #[test]
     fn alpn_is_carried_as_the_list_itself() {
         let pinned = Some(AlpnInfo::Specified(vec![
@@ -2527,10 +2523,7 @@ mod conn_cap_tests {
     }
 }
 
-/// Which protocols `preprocess` offers the container and the client. A dialled
-/// container chooses out of the protocols the binding and the client both name,
-/// and the client is offered its choice; without a TLS leg the client is
-/// offered the binding's directly, and `alpn` tells two targets apart.
+/// Which protocols `preprocess` offers the container and the client.
 #[cfg(test)]
 mod upstream_alpn_tests {
     use std::net::Ipv4Addr;
@@ -2556,8 +2549,7 @@ mod upstream_alpn_tests {
     }
 
     /// A TLS backend that reports the first `len` bytes it reads through its
-    /// own session. Bytes that never went through that session arrive as a
-    /// malformed record, and the read fails instead.
+    /// own session.
     async fn spawn_backend_reading(
         len: usize,
     ) -> (SocketAddr, tokio::sync::oneshot::Receiver<Vec<u8>>) {
@@ -2591,9 +2583,8 @@ mod upstream_alpn_tests {
             let mut tx = Some(tx);
             while let Ok((tcp, _)) = listener.accept().await {
                 let acceptor = acceptor.clone();
-                // Moved into the task, so a handshake that fails drops it and
-                // the test reads a closed channel rather than waiting out its
-                // timeout.
+                // Moved into the task, so a failed handshake drops it and the
+                // receiver closes.
                 let report = tx.take();
                 tokio::spawn(async move {
                     if let Ok(tls) = acceptor.accept(tcp).await {
@@ -2601,8 +2592,7 @@ mod upstream_alpn_tests {
                             let _ =
                                 report.send(tls.get_ref().1.alpn_protocol().map(|p| p.to_vec()));
                         }
-                        // The assertion is about the handshake, so the backend
-                        // holds its side open rather than closing under it.
+                        // The backend holds its side open under the assertion.
                         std::future::pending::<()>().await;
                     }
                 });
@@ -2617,8 +2607,7 @@ mod upstream_alpn_tests {
     struct Preprocessing {
         target: ProxyTarget,
         base_alpn: Vec<String>,
-        /// Written to the stream `preprocess` hands back, which is where a
-        /// spliced client's bytes would go.
+        /// Written to the stream `preprocess` hands back.
         probe: &'static [u8],
     }
     impl<'a> TlsHandler<'a, TcpListener> for Preprocessing {
@@ -2632,8 +2621,7 @@ mod upstream_alpn_tests {
             let (cfg, upstream) =
                 VHostTarget::<TcpListener>::preprocess(&self.target, base, hello, metadata).await?;
             if self.probe.is_empty() {
-                // The client handshakes off `cfg` alone, so the backend leg is
-                // free to close here.
+                // The client handshakes off `cfg` alone.
                 drop(upstream);
             } else {
                 let probe = self.probe;
@@ -2641,8 +2629,7 @@ mod upstream_alpn_tests {
                     let mut upstream = upstream;
                     let _ = upstream.write_all(probe).await;
                     let _ = upstream.flush().await;
-                    // The backend reads until it has the probe, so the stream
-                    // stays open under it.
+                    // The stream stays open until the backend has the probe.
                     std::future::pending::<()>().await;
                 });
             }
@@ -2655,8 +2642,8 @@ mod upstream_alpn_tests {
         rewrap_configured_with(&[])
     }
 
-    /// A rewrap whose own config carries `alpn`. The dial always supplies its
-    /// own list, so this one is never what the container chooses from.
+    /// A rewrap whose own config carries `alpn`, which the dial always
+    /// overrides.
     fn rewrap_configured_with(alpn: &[&str]) -> Option<Arc<ClientConfig>> {
         let mut cfg = client_config_no_verify(provider()).unwrap();
         cfg.alpn_protocols = alpn.iter().map(|a| a.as_bytes().to_vec()).collect();
@@ -2738,8 +2725,7 @@ mod upstream_alpn_tests {
         let mut client = client_config_no_verify(provider()).unwrap();
         client.alpn_protocols = client_alpn.iter().map(|a| a.as_bytes().to_vec()).collect();
         let tcp = TcpStream::connect(addr).await.unwrap();
-        // Neither the client's connect nor `get_config` is bounded, so a stall
-        // would hang this test instead of failing it.
+        // Neither the client's connect nor `get_config` is bounded.
         let handshake = tokio::time::timeout(
             Duration::from_secs(10),
             TlsConnector::from(Arc::new(client))
@@ -2749,8 +2735,8 @@ mod upstream_alpn_tests {
         .expect("the client handshake settles within 10s");
 
         if let Err(e) = handshake {
-            // The listener answered with an alert rather than a session, so it
-            // has no metadata to report and would poll for another connection.
+            // The listener answered with an alert, so it has no metadata to
+            // report.
             accepted.abort();
             return Err(e);
         }
@@ -2786,9 +2772,7 @@ mod upstream_alpn_tests {
         );
     }
 
-    /// rustls selects by the server list's order, so a protocol left on the
-    /// base config would outrank the backend's choice if `preprocess` appended
-    /// to that list instead of assigning it.
+    /// rustls selects by the server list's order.
     #[tokio::test]
     async fn a_protocol_on_the_base_config_does_not_outrank_the_backend() {
         assert_eq!(
@@ -2806,7 +2790,7 @@ mod upstream_alpn_tests {
     }
 
     /// A failed upstream handshake makes `preprocess` decline, and the client's
-    /// own handshake fails with it.
+    /// handshake fails with it.
     #[tokio::test]
     async fn a_backend_refusing_the_clients_alpn_declines_the_connection() {
         try_negotiate(
@@ -2820,9 +2804,8 @@ mod upstream_alpn_tests {
         .expect_err("the listener cannot serve a client the backend refused");
     }
 
-    /// `alpn` is part of a target's identity: the vhost keeps a live target
-    /// whose config still compares equal, so a binding that changes only its
-    /// protocols would otherwise never re-register.
+    /// The vhost reuses a live target whose config compares equal, so `alpn`
+    /// has to be part of a target's identity.
     #[test]
     fn a_target_is_not_equal_to_one_that_pins_a_different_protocol() {
         let addr: SocketAddr = "10.0.3.2:443".parse().unwrap();
@@ -2838,9 +2821,7 @@ mod upstream_alpn_tests {
         );
     }
 
-    /// A pin is a narrowing, not a substitution: the container is only put
-    /// through protocols the client also named, so a client that speaks one of
-    /// them is served rather than handed a choice it cannot meet.
+    /// A pin narrows what the client asked for rather than replacing it.
     #[tokio::test]
     async fn a_client_speaking_one_of_the_pinned_protocols_is_served() {
         let both = AlpnInfo::Specified(vec![
@@ -2861,10 +2842,8 @@ mod upstream_alpn_tests {
         );
     }
 
-    /// An empty pin names nothing, so it turns nobody away — and the container
-    /// is still reached over its own TLS. Taking the refusal path here would
-    /// hand the client a plaintext connection to a TLS listener, since rustls
-    /// only alerts when the list it was given is non-empty.
+    /// rustls alerts only when the list it was given is non-empty, so an empty
+    /// pin turns nobody away and the container is still reached over TLS.
     #[tokio::test]
     async fn an_empty_pin_still_reaches_the_container_over_tls() {
         let (backend, negotiated) = spawn_backend_reporting(&["h2", "http/1.1"]).await;
@@ -2889,8 +2868,7 @@ mod upstream_alpn_tests {
         );
     }
 
-    /// A client that shares no protocol with the pin is refused. Serving it
-    /// without a protocol instead would make the pin advisory.
+    /// A client that shares no protocol with the pin is refused.
     #[tokio::test]
     async fn a_client_sharing_no_protocol_with_the_pin_is_refused() {
         let h2 = AlpnInfo::Specified(vec![MaybeUtf8String(b"h2".to_vec())]);
@@ -2906,9 +2884,7 @@ mod upstream_alpn_tests {
     }
 
     /// The stream `preprocess` hands back is the container's TLS session, and
-    /// the client's bytes are spliced onto it. Handing back the socket under
-    /// that session instead would put the client's plaintext on the wire where
-    /// the container expects records, and every rewrapped connection would die.
+    /// the client's bytes are spliced onto it.
     #[tokio::test]
     async fn the_client_is_spliced_onto_the_containers_tls_session() {
         let probe = b"start9";
@@ -2925,10 +2901,8 @@ mod upstream_alpn_tests {
         );
     }
 
-    /// A binding with no TLS leg refuses a client that shares no protocol with
-    /// the pin, and rustls is what turns it away: the pin is the list the
-    /// client is offered. Offering only what the two share would leave rustls
-    /// nothing to alert on, and the client would be served with no protocol.
+    /// The pin is the list a binding with no TLS leg offers the client, so
+    /// rustls is what turns away a client that shares none of it.
     #[tokio::test]
     async fn a_plaintext_binding_refuses_a_client_that_cannot_meet_the_pin() {
         let h2 = AlpnInfo::Specified(vec![MaybeUtf8String(b"h2".to_vec())]);
@@ -2937,9 +2911,7 @@ mod upstream_alpn_tests {
             .expect_err("a client that cannot meet the pin is not served");
     }
 
-    /// A client that names no protocol leaves the container named none either,
-    /// so neither end negotiates one. Putting the pin to the container anyway
-    /// would frame it `h2` while the client stayed on HTTP/1.1.
+    /// A client that names no protocol leaves the container named none either.
     #[tokio::test]
     async fn a_pin_does_not_reach_a_container_when_the_client_names_nothing() {
         let (backend, negotiated) = spawn_backend_reporting(&["h2", "http/1.1"]).await;
@@ -2960,10 +2932,8 @@ mod upstream_alpn_tests {
         );
     }
 
-    /// The container is offered the pinned protocols the client also named, so
-    /// a protocol the pin leaves out is off the table even where both ends
-    /// speak it. Offering the container the client's list instead would let it
-    /// pick `h2` and the pin would count for nothing.
+    /// A protocol the pin leaves out is off the table even where both ends
+    /// speak it.
     #[tokio::test]
     async fn a_pin_keeps_the_container_off_the_protocols_it_excludes() {
         let (backend, negotiated) = spawn_backend_reporting(&["h2", "http/1.1"]).await;
@@ -2984,9 +2954,7 @@ mod upstream_alpn_tests {
         );
     }
 
-    /// An unset filter leaves the client its own list, in its own order. The
-    /// base carries `http/1.1`, which would win on server order if this
-    /// appended to it instead.
+    /// An unset filter leaves the client its own list, in its own order.
     #[tokio::test]
     async fn an_unset_filter_gives_the_client_its_own_list() {
         assert_eq!(
@@ -3003,10 +2971,9 @@ mod upstream_alpn_tests {
         );
     }
 
-    /// A client that offers no ALPN leaves the container offered none.
-    /// The connector falls back to the dialling config's own list when it is
-    /// not given one, so calling `with_alpn` only for a non-empty list would
-    /// offer `h2` here, which this backend refuses.
+    /// A client that offers no ALPN leaves the container offered none. The
+    /// connector falls back to the dialling config's own list unless it is
+    /// given one.
     #[tokio::test]
     async fn a_client_offering_no_alpn_does_not_fall_back_to_the_dialling_config() {
         try_negotiate(
@@ -3020,8 +2987,7 @@ mod upstream_alpn_tests {
         .expect("the backend is offered nothing, so it has nothing to refuse");
     }
 
-    /// `Specified` puts the binding's own list forward. The base carries `h2`,
-    /// which would win on server order if this appended to it instead.
+    /// A pin is the list the client is offered.
     #[tokio::test]
     async fn specified_offers_the_bindings_own_list() {
         let http1 = AlpnInfo::Specified(vec![MaybeUtf8String(b"http/1.1".to_vec())]);
