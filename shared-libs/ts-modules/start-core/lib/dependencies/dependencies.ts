@@ -65,11 +65,10 @@ export async function checkDependencies<
   const installedVersionSatisfied = (packageId: DependencyId) => {
     const dep = infoFor(packageId)
     if (!dep.result.installedVersion) return false
-    // A flavored version is incomparable to an unflavored one, so the versions
-    // the dependency declares in `satisfies` stand in for it.
-    const range = VersionRange.parse(dep.requirement.versionRange)
-    return [dep.result.installedVersion, ...dep.result.satisfies].some(v =>
-      ExtendedVersion.parse(v).satisfies(range),
+    return VersionRange.parse(dep.requirement.versionRange).satisfiedByRelease(
+      [dep.result.installedVersion, ...dep.result.satisfies].map(v =>
+        ExtendedVersion.parse(v),
+      ),
     )
   }
   const runningSatisfied = (packageId: DependencyId) => {

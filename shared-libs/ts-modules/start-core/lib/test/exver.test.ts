@@ -457,4 +457,127 @@ describe('ExVer', () => {
       expect(eq('1.0.0:1').intersects(eq('1.0.0:1'))).toEqual(true)
     })
   })
+
+  describe('lexicographic ordering across flavors', () => {
+    const unflavored = ExtendedVersion.parse('1.0.0:0')
+    const flavored = ExtendedVersion.parse('#quantum:1.0.0:0')
+
+    test('orders a flavor against no flavor in both directions', () => {
+      expect(unflavored.compareLexicographic(flavored)).toEqual('less')
+      expect(flavored.compareLexicographic(unflavored)).toEqual('greater')
+    })
+
+    test('compareForSort stays inside its return type', () => {
+      expect(unflavored.compareForSort(flavored)).toEqual(-1)
+      expect(flavored.compareForSort(unflavored)).toEqual(1)
+    })
+
+    test('sorts a mixed-flavor list the same whatever order it arrives in', () => {
+      const fromFlavored = [flavored, unflavored].sort((a, b) =>
+        a.compareForSort(b),
+      )
+      const fromUnflavored = [unflavored, flavored].sort((a, b) =>
+        a.compareForSort(b),
+      )
+      expect(fromFlavored.map(v => v.toString())).toEqual([
+        '1.0.0:0',
+        '#quantum:1.0.0:0',
+      ])
+      expect(fromUnflavored.map(v => v.toString())).toEqual(
+        fromFlavored.map(v => v.toString()),
+      )
+    })
+  })
+
+  describe('prerelease segments', () => {
+    test('accepts a segment mixing letters, digits and hyphens', () => {
+      for (const v of [
+        '1.0.0-rc1:0',
+        '1.0.0-beta2:0',
+        '1.0.0-alpha-1:0',
+        '1.0.0-1a:0',
+        '1.0.0-x-y-z:0',
+      ]) {
+        expect(ExtendedVersion.parse(v).toString()).toEqual(v)
+      }
+    })
+
+    test('rejects a numeric segment with a leading zero', () => {
+      expect(() => ExtendedVersion.parse('1.0.0-01:0')).toThrow()
+    })
+
+    test('rejects an empty segment', () => {
+      expect(() => ExtendedVersion.parse('1.0.0-a..b:0')).toThrow()
+    })
+
+    test('orders a numeric segment below a string segment at any position', () => {
+      expect(
+        ExtendedVersion.parse('1.0.0-a.b.1:0').compare(
+          ExtendedVersion.parse('1.0.0-a.b.c:0'),
+        ),
+      ).toEqual('less')
+      expect(
+        ExtendedVersion.parse('1.0.0-a.b.c:0').compare(
+          ExtendedVersion.parse('1.0.0-a.b.1:0'),
+        ),
+      ).toEqual('greater')
+    })
+  })
+
+  describe('a release satisfies a range through the versions it declares', () => {
+    const release = (installed: string, satisfies: string[]) =>
+      [installed, ...satisfies].map(v => ExtendedVersion.parse(v))
+
+    test('an alias carries a positive range', () => {
+      expect(
+        VersionRange.parse('^2.62.2:1').satisfiedByRelease(
+          release('#quantum:1.5.2:0', ['2.63.23:0']),
+        ),
+      ).toEqual(true)
+    })
+
+    test('an alias does not escape an excluded revision', () => {
+      expect(
+        VersionRange.parse('>=2.0:0 && !=2.0:5').satisfiedByRelease(
+          release('2.0:5', ['2.0:4']),
+        ),
+      ).toEqual(false)
+    })
+
+    test('an alias does not escape a negated flavor', () => {
+      expect(
+        VersionRange.parse('!#knots && >=29.4:0').satisfiedByRelease(
+          release('#knots:29.4:5', ['29.4:5']),
+        ),
+      ).toEqual(false)
+    })
+
+    test('an exclusion matching nothing the release carries still passes', () => {
+      expect(
+        VersionRange.parse('^28.4:21 && !=28.4:22').satisfiedByRelease(
+          release('31.1:10', ['28.4:21']),
+        ),
+      ).toEqual(true)
+    })
+
+    test('a release of one version answers as that version does', () => {
+      for (const range of [
+        '>=2.0:0',
+        '!=2.0:5',
+        '^2.0:0',
+        '!(>=2.0:0)',
+        '#knots',
+        '!#knots',
+        '*',
+        '>=2.0:0 && !=2.0:5',
+      ]) {
+        for (const v of ['2.0:5', '2.0:4', '#knots:29.4:5']) {
+          const parsed = ExtendedVersion.parse(v)
+          expect(
+            VersionRange.parse(range).satisfiedByRelease([parsed]),
+          ).toEqual(parsed.satisfies(VersionRange.parse(range)))
+        }
+      }
+    })
+  })
 })

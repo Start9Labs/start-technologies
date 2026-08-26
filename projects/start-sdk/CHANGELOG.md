@@ -141,6 +141,20 @@
   version: a `#knots` Bitcoin or a `#quantum` File Browser read as unsatisfied
   while the throwing surface passed
 
+- **A `versionRange` exclusion holds against every version a release declares.**
+  `!=` and `!` were evaluated against each of a dependency's versions on its own,
+  so a release excluded by name slipped through on any in-range version it
+  declares in `satisfies` — a dependent blacklisting a broken revision got that
+  revision. `VersionRange.satisfiedByRelease` is the one evaluator behind the
+  SDK, the dependency warnings and the marketplace
+
+- **A prerelease segment may mix letters, digits and hyphens**, matching the
+  grammar StartOS parses. `1.0.0-rc1:0` and `1.0.0-alpha-1:0` threw a parse error
+  out of `ExtendedVersion.parse` where the OS accepted them, so a dependency
+  published on such a version crashed a dependent's `checkDependencies`. A
+  numeric segment with a leading zero is rejected, as it already was on the OS
+  side
+
 ### Security
 
 - **The bundled ESLint and typescript-eslint trees carry patched

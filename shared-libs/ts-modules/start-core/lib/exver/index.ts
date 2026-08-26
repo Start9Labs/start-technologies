@@ -821,6 +821,35 @@ export class VersionRange {
     return version.satisfies(this)
   }
 
+  /**
+   * Whether a release satisfies this range. A release is its own version together with the versions
+   * it declares in `satisfies`. A negation holds only when none of them matches.
+   */
+  satisfiedByRelease(versions: ExtendedVersion[]): boolean {
+    switch (this.atom.type) {
+      case 'And':
+        return (
+          this.atom.left.satisfiedByRelease(versions) &&
+          this.atom.right.satisfiedByRelease(versions)
+        )
+      case 'Or':
+        return (
+          this.atom.left.satisfiedByRelease(versions) ||
+          this.atom.right.satisfiedByRelease(versions)
+        )
+      case 'Not':
+        return !this.atom.value.satisfiedByRelease(versions)
+      case 'Anchor':
+        if (this.atom.operator === '!=') {
+          const excluded = this.atom.version
+          return !versions.some(v => v.equals(excluded))
+        }
+        return versions.some(v => v.satisfies(this))
+      default:
+        return versions.some(v => v.satisfies(this))
+    }
+  }
+
   tables(): VersionRangeTables {
     switch (this.atom.type) {
       case 'Anchor':
@@ -974,7 +1003,7 @@ export class Version {
           return 'less'
         }
       } else {
-        switch (`${typeof this.prerelease[1]}:${typeof other.prerelease[i]}`) {
+        switch (`${typeof this.prerelease[i]}:${typeof other.prerelease[i]}`) {
           case 'number:string':
             return 'less'
           case 'string:number':
@@ -1092,7 +1121,7 @@ export class ExtendedVersion {
   compareLexicographic(other: ExtendedVersion): 'greater' | 'equal' | 'less' {
     if ((this.flavor || '') > (other.flavor || '')) {
       return 'greater'
-    } else if ((this.flavor || '') > (other.flavor || '')) {
+    } else if ((this.flavor || '') < (other.flavor || '')) {
       return 'less'
     } else {
       return this.compare(other)!

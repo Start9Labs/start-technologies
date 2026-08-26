@@ -351,6 +351,16 @@ file tracks notable changes since the move to the monorepo.
   (RFC 8441) should advertise only `http/1.1`, which keeps WebSocket clients on
   HTTP/1.1 where a WebSocket is an ordinary upgrade.
 
+- **A dependency a service rules out by version stays ruled out.** A release
+  names the versions it stands in for, and each was checked against the required
+  range on its own — so a version the service excluded satisfied that range
+  through any other version the release names, and the dependency warning, the
+  update check and the marketplace all reported it as fine.
+
+- **Versions of different flavors sort in a stable order.** Comparing across
+  flavors produced no answer, so a list mixing Bitcoin Core with Bitcoin Knots
+  kept whatever order it arrived in.
+
 ### Security
 
 - **Service mount paths are validated and confined to their intended

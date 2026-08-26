@@ -126,8 +126,11 @@ export class DepErrorService {
 
     // incorrect version
     if (
-      !this.exver.satisfies(depManifest.version, expected) &&
-      !depManifest.satisfies.some(v => this.exver.satisfies(v, expected))
+      !this.exver.releaseSatisfies(
+        depManifest.version,
+        depManifest.satisfies,
+        expected,
+      )
     ) {
       return {
         expected,

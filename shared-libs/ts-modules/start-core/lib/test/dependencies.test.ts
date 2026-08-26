@@ -70,6 +70,13 @@ describe('checkDependencies version checks', () => {
       [],
       false,
     ],
+    [
+      'a version excluded by the range, standing in for one that is not',
+      '>=2.62.2:1 && !=2.63.23:0',
+      '2.63.23:0',
+      ['2.62.2:1'],
+      false,
+    ],
   ])('%s', async (_name, range, installedVersion, satisfies, expected) => {
     const deps = await depsFor(range, { installedVersion, satisfies })
     expect(deps.installedVersionSatisfied('filebrowser')).toBe(expected)
