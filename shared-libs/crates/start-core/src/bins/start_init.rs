@@ -6,7 +6,7 @@ use crate::context::rpc::InitRpcContextPhases;
 use crate::context::{DiagnosticContext, InitContext, RpcContext, SetupContext};
 use crate::disk::REPAIR_DISK_PATH;
 use crate::disk::fsck::RepairStrategy;
-use crate::disk::main::DEFAULT_PASSWORD;
+use crate::disk::main::{DEFAULT_PASSWORD, Ext4Conversion};
 use crate::firmware::{check_for_firmware_update, update_firmware};
 use crate::init::{InitPhases, STANDBY_MODE_PATH};
 use crate::net::gateway::WildcardListener;
@@ -154,6 +154,7 @@ async fn setup_or_init(
                 } else {
                     RepairStrategy::Preen
                 },
+                Ext4Conversion::Convert,
                 if disk_guid.ends_with("_UNENC") {
                     None
                 } else {

@@ -20,6 +20,15 @@ pub const PASSWORD_PATH: &'static str = "/run/startos/password";
 pub const DEFAULT_PASSWORD: &'static str = "password";
 pub const MAIN_FS_SIZE: FsSize = FsSize::Gigabytes(8);
 
+/// Whether mounting may convert an ext4 data partition to btrfs in place.
+/// Conversion rewrites the partition, so a caller that only reads a drive it is
+/// leaving behind must pass `Preserve`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ext4Conversion {
+    Convert,
+    Preserve,
+}
+
 #[instrument(skip_all)]
 pub async fn create<I, P>(
     disks: &I,
@@ -216,6 +225,7 @@ pub async fn import<P: AsRef<Path>>(
     guid: &str,
     datadir: P,
     repair: RepairStrategy,
+    conversion: Ext4Conversion,
     password: Option<&str>,
     progress: Option<&FullProgressTracker>,
 ) -> Result<RequiresReboot, Error> {
@@ -266,7 +276,7 @@ pub async fn import<P: AsRef<Path>>(
         .arg(guid)
         .invoke(crate::ErrorKind::DiskManagement)
         .await?;
-    mount_all_fs(guid, datadir, repair, password, progress).await
+    mount_all_fs(guid, datadir, repair, conversion, password, progress).await
 }
 
 #[instrument(skip_all)]
@@ -275,6 +285,7 @@ pub async fn mount_fs<P: AsRef<Path>>(
     datadir: P,
     name: &str,
     repair: RepairStrategy,
+    conversion: Ext4Conversion,
     password: Option<&str>,
     progress: Option<&FullProgressTracker>,
 ) -> Result<RequiresReboot, Error> {
@@ -305,9 +316,8 @@ pub async fn mount_fs<P: AsRef<Path>>(
         blockdev_path = Path::new("/dev/mapper").join(&full_name);
     }
 
-    // Convert ext4 → btrfs on the package-data partition if needed
     let fs_type = detect_filesystem(&blockdev_path).await?;
-    if fs_type == "ext2" {
+    if fs_type == "ext2" && conversion == Ext4Conversion::Convert {
         let mut convert_phase =
             progress.map(|p| p.add_phase(t!("disk.main.converting-to-btrfs").into(), Some(50)));
         if let Some(ref mut phase) = convert_phase {
@@ -401,12 +411,25 @@ pub async fn mount_all_fs<P: AsRef<Path>>(
     guid: &str,
     datadir: P,
     repair: RepairStrategy,
+    conversion: Ext4Conversion,
     password: Option<&str>,
     progress: Option<&FullProgressTracker>,
 ) -> Result<RequiresReboot, Error> {
     let mut reboot = RequiresReboot(false);
-    reboot |= mount_fs(guid, &datadir, "main", repair, password, progress).await?;
-    reboot |= mount_fs(guid, &datadir, "package-data", repair, password, progress).await?;
+    reboot |= mount_fs(
+        guid, &datadir, "main", repair, conversion, password, progress,
+    )
+    .await?;
+    reboot |= mount_fs(
+        guid,
+        &datadir,
+        "package-data",
+        repair,
+        conversion,
+        password,
+        progress,
+    )
+    .await?;
     Ok(reboot)
 }
 

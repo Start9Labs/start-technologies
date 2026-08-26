@@ -28,7 +28,7 @@ use crate::context::{CliContext, RpcContext, SetupContext};
 use crate::db::model::Database;
 use crate::disk::REPAIR_DISK_PATH;
 use crate::disk::fsck::RepairStrategy;
-use crate::disk::main::DEFAULT_PASSWORD;
+use crate::disk::main::{DEFAULT_PASSWORD, Ext4Conversion};
 use crate::disk::mount::filesystem::ReadWrite;
 use crate::disk::mount::filesystem::cifs::Cifs;
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
@@ -300,6 +300,7 @@ pub async fn attach(
             } else {
                 RepairStrategy::Preen
             },
+            Ext4Conversion::Convert,
             if disk_guid.ends_with("_UNENC") {
                 None
             } else {
@@ -493,6 +494,7 @@ pub async fn setup_data_drive(
         &*guid,
         DATA_DIR,
         RepairStrategy::Preen,
+        Ext4Conversion::Convert,
         encryption_password,
         None,
     )
@@ -896,6 +898,7 @@ pub async fn execute_inner(
             } else {
                 RepairStrategy::Preen
             },
+            Ext4Conversion::Convert,
             if guid.ends_with("_UNENC") {
                 None
             } else {
@@ -1083,10 +1086,12 @@ async fn migrate(
 
     restore_phase.start();
     restore_phase.set_units(Some(ProgressUnits::Bytes));
+    // A transfer only reads the source drive, so it stays as the user's fallback.
     let _ = crate::disk::main::import(
         &old_guid,
         "/media/startos/migrate",
         RepairStrategy::Preen,
+        Ext4Conversion::Preserve,
         if guid.ends_with("_UNENC") {
             None
         } else {
