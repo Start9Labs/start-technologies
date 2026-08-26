@@ -141,6 +141,8 @@ Install using the automated installer script:
 curl -fsSL https://start9.com/start-cli/install.sh | sh
 ```
 
+On Debian and its derivatives — Ubuntu, Raspberry Pi OS, Linux Mint — the script adds the Start9 apt repository and installs the `start-cli` package to `/usr/bin`, so `sudo apt update && sudo apt upgrade` picks up later releases. On macOS and every other Linux distribution it downloads the release binary into `~/.local/bin` and adds that directory to your `PATH`.
+
 ## Git
 
 [Git](https://git-scm.com/) is used by `start-cli s9pk init-workspace` to fetch the Start9 monorepo — the packaging guide, and the SDK and OS source behind it — and to keep it up to date afterward.
