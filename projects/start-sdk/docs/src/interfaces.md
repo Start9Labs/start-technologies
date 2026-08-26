@@ -174,7 +174,7 @@ The key steps are:
 | `protocol`                      | `'http'` \| `'https'` \| `null`                       | The protocol. Use `null` for raw TCP (non-HTTP).                                                                                                                                                                            |
 | `preferredExternalPort`         | `number`                                              | The port users will see in their URLs.                                                                                                                                                                                      |
 | `addSsl`                        | `object` \| `null`                                    | SSL termination options for HTTPS. Set to `null` for no SSL.                                                                                                                                                                |
-| `addSsl.alpn`                   | `string[]` \| `null`                                  | Filters the ALPN protocols the client asks for. `null`, the usual choice, filters none of them.                                                                                                                             |
+| `addSsl.alpn`                   | `string[]` \| `null`                                  | The ALPN protocols StartOS answers a client with, from those it asked for. `null`, the usual choice, answers with whatever it asked for.                                                                                    |
 | `addSsl.preferredExternalPort`  | `number`                                              | External port for SSL connections.                                                                                                                                                                                          |
 | `addSsl.addXForwardedHeaders`   | `boolean`                                             | Whether to add `X-Forwarded-*` headers.                                                                                                                                                                                     |
 | `addSsl.auth`                   | `ProxyAuth` \| `null`                                 | Optional auth gate enforced by the OS reverse proxy. See [Authenticating at the Proxy](#authenticating-at-the-proxy).                                                                                                       |
@@ -346,6 +346,14 @@ return 200 '{"api_url":"https://$host/api"}';
 
 This applies to any configuration file generated in `setupMain` or any runtime response that includes absolute URLs — not just nginx. When in doubt, hardcode `https://`.
 
+### Application protocols
+
+`addSsl.alpn` is the list of protocols StartOS will answer a client with, chosen from the ones that client asked for. Unset — the usual case — it answers with whatever the client asked for. A client left with nothing is refused; a client that asks for no protocol at all is served as it would be without ALPN.
+
+StartOS answers from that list itself, because it terminates the client's TLS and forwards plain HTTP. Your container never sees the negotiation, so the list is the only thing holding a client to a protocol your container can serve — which is why `protocol: 'http'` and `'ws'` set it to `http/1.1`.
+
+A container serving its own TLS does get a say; see [Rewrapping SSL to a TLS container](#rewrapping-ssl-to-a-tls-container).
+
 ## Rewrapping SSL to a TLS container
 
 The guidance above ("do not configure in-container HTTPS") applies when StartOS terminates TLS and forwards plain HTTP — the `http`/`ws` protocols. The `https`/`wss` protocols are different: the container serves its **own** TLS, StartOS terminates the client's TLS at the edge, and then opens a **fresh TLS connection to your container** (a "rewrap"). This happens whenever `addSsl` is set and the protocol's `secure.ssl` is `true`.
@@ -370,15 +378,11 @@ const origin = await multi.bindPort(443, {
 > [!NOTE]
 > For `{ certificate }`, StartOS connects to the container by IP, so the pinned certificate must be valid for that internal IP (present in its SANs). If it isn't, use `'disable'` instead.
 
-The rewrap carries the application protocol across both legs. Unless the binding pins a list of its own, StartOS offers your container the client's own ALPN list, then offers the client whatever your container selected from it — so a container advertising `h2` is reached over `h2` by a client that asked for `h2`, and a container that selects nothing leaves the client with no negotiated protocol, which an HTTP client treats as HTTP/1.1.
+Your container chooses the application protocol here, which is the one thing the rewrap adds to [Application protocols](#application-protocols) above. StartOS offers it whichever of `addSsl.alpn` the client also asked for and answers the client with its choice, so both ends of the connection carry one protocol — a container advertising `h2` is reached over `h2` by a client that asked for `h2`, and one that selects nothing leaves the client with no negotiated protocol, which an HTTP client treats as HTTP/1.1. Leave `alpn` unset unless you need to keep this binding off a protocol your container would otherwise select.
 
 Advertise exactly the protocols your container can serve on its own listener. The client is only ever given one your container selects, so a list narrower than what your container speaks costs clients the better protocol — and a client sharing none of them is refused by your container, which reaches the client as a TLS alert naming the hostname rather than the protocol.
 
 Advertising `h2` is the case to think about twice, and worth re-checking on a container that advertises it today: it has to answer extended CONNECT. It commits your container to serving every HTTP/2 client, including WebSockets. On an `https` or `wss` binding StartOS advertises HTTP/2 extended CONNECT ([RFC 8441](https://www.rfc-editor.org/rfc/rfc8441)) to the client whether or not your container implements it, so a browser opens its WebSocket that way and your container has to answer it. A container that advertises only `http/1.1` keeps those clients on HTTP/1.1, where a WebSocket is an ordinary `Upgrade`.
-
-`addSsl.alpn` filters the protocols the client asks for. Unset, it filters none of them, and a filter naming nothing turns nobody away. A client whose whole list is filtered out is refused; a client that asks for no protocol at all is served as it would be without ALPN.
-
-Where your container serves its own TLS — `secure: { ssl: true }` alongside `addSsl` — StartOS offers it whatever survives the filter and hands the client back the one it picks, so both ends of the connection carry the same protocol; a container that ignores ALPN leaves the client without one. Where StartOS terminates alone, what survives the filter is what the client gets and your container is never asked, so the filter is the only thing holding a client to what your container speaks — which is why `protocol: 'http'` sets it to `http/1.1`. Set it on a binding StartOS terminates alone; on a rewrap leave it unset unless you need to keep the binding off a protocol your container would otherwise select.
 
 ## Serving Your Own TLS (Passthrough)
 

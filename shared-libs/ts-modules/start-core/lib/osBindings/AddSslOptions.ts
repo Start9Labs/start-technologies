@@ -12,8 +12,8 @@ export type AddSslOptions = {
    */
   addXForwardedHeaders: boolean
   /**
-   * Filters the application protocols the client asks for. Unset filters
-   * none of them.
+   * The application protocols StartOS answers a client with, from those it
+   * asked for. Unset answers with whatever it asked for.
    */
   alpn: AlpnInfo | null
   /**

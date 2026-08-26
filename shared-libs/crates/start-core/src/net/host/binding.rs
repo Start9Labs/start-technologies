@@ -507,8 +507,8 @@ pub struct AddSslOptions {
     /// forwarding them upstream. Setting this implies HTTP-aware proxying.
     #[serde(default)]
     pub add_x_forwarded_headers: bool,
-    /// Filters the application protocols the client asks for. Unset filters
-    /// none of them.
+    /// The application protocols StartOS answers a client with, from those it
+    /// asked for. Unset answers with whatever it asked for.
     pub alpn: Option<AlpnInfo>,
     /// Certificate validation for the OS→container TLS leg when rewrapping.
     /// `None` (the default) validates against the StartOS root CA.
