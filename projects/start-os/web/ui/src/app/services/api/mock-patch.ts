@@ -125,7 +125,7 @@ export const mockPatchData: DataModel = {
               preferredExternalPort: 80,
               addSsl: {
                 preferredExternalPort: 443,
-                alpn: { specified: ['http/1.1', 'h2'] },
+                alpn: ['http/1.1', 'h2'],
                 addXForwardedHeaders: false,
                 auth: null,
               },
@@ -611,7 +611,7 @@ export const mockPatchData: DataModel = {
                 preferredExternalPort: 42443,
                 addSsl: {
                   preferredExternalPort: 42443,
-                  alpn: { specified: ['http/1.1', 'h2'] },
+                  alpn: ['http/1.1', 'h2'],
                   addXForwardedHeaders: false,
                   auth: null,
                 },
