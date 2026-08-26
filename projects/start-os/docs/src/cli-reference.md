@@ -70,7 +70,7 @@ Update the server firmware.
 
 ### `start-cli server logs`
 
-Display StartOS system logs.
+Display StartOS system logs. These are also readable and downloadable in the web interface under **System** — see [Logs](logs.md).
 
 - `-l, --limit <N>` — Max entries
 - `-f, --follow` — Stream in real-time
@@ -236,7 +236,7 @@ Remove a package and its data.
 
 ### `start-cli package logs <ID>`
 
-Display logs from a service.
+Display logs from a service. These are also readable and downloadable on the service's **Logs** tab in the web interface — see [Logs](logs.md).
 
 - `-l, --limit <N>` — Max entries
 - `-f, --follow` — Stream in real-time

@@ -67,6 +67,7 @@
 
 # System
 
+- [Logs](logs.md)
 - [Server Name](server-name.md)
 - [SSH](ssh.md)
 - [SMTP](smtp.md)
