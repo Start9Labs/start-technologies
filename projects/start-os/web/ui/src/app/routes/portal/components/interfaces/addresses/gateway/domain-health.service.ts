@@ -32,8 +32,7 @@ import { PRIVATE_DNS_VALIDATION } from './private-dns.component'
 export type AddressCheckContext = {
   packageId: string
   addSsl: boolean
-  // The ACME authority of the domain being checked, when it has one. Such a
-  // domain also needs port 443 reachable — see CHALLENGE_PORT.
+  // The domain's ACME authority. Such a domain also needs 443 reachable.
   acme?: T.AcmeProvider | null
   watch?: ServiceStatusWatch
 }
@@ -192,18 +191,17 @@ export class DomainHealthService {
           isRange || !ctx.acme || portOrRes === CHALLENGE_PORT
             ? Promise.resolve(null)
             : this.api
-                // A domain served on 443 is covered by the probe above, so
-                // the request is not made rather than answered with nothing.
                 .checkChallenge({
                   fqdn,
                   gateway: gatewayId,
                   acme: ctx.acme,
                 })
-                // A failed probe is not a pass. A bare null means the domain
-                // needs nothing, so report the failure as a probe that found
-                // nothing instead.
+                // Null means the domain needs nothing; a failure must not say that.
                 .catch(
-                  (): T.CheckChallengeRes => ({ port: null, portV6: null }),
+                  (): T.CheckChallengeRes => ({
+                    port: null,
+                    portV6: null,
+                  }),
                 ),
         ])
         dns = dnsRes
@@ -304,8 +302,7 @@ export class DomainHealthService {
         packageId: ctx.packageId,
         addSsl: ctx.addSsl,
         acme: ctx.acme ?? null,
-        // This view opens on a click and runs no probes; every section starts
-        // untested with a Test button, and it reaches no verdict.
+        // Nothing has probed 443 here.
         challenge: null,
       })
     } catch (e: any) {

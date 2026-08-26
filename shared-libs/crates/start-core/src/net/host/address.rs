@@ -232,9 +232,7 @@ pub struct AddPublicDomainRes {
     pub dns: QueryDnsRes,
     pub port: CheckPortRes,
     pub port_v6: Option<CheckPortV6Res>,
-    /// The certificate authority's own reachability requirement, where the
-    /// domain has one the checks above do not cover. Absent when the domain
-    /// needs nothing beyond its own port.
+    /// The authority's own reachability requirement, where the domain has one.
     pub challenge: Option<CheckChallengeRes>,
 }
 
@@ -588,10 +586,7 @@ pub async fn add_public_domain<Kind: HostApiKind>(
                 gateway: gateway.clone(),
             },
         ),
-        // TLS-ALPN-01 is validated at 443, which the two probes above never
-        // touch when the domain is served somewhere else. A domain served
-        // there has just been probed by `check_port` above, and one with no
-        // ACME authority is never challenged at all.
+        // TLS-ALPN-01 is validated at 443, whatever port the address serves.
         async {
             let Some(acme) = authority.filter(|_| ext_port != ACME_CHALLENGE_PORT) else {
                 return Ok(None);

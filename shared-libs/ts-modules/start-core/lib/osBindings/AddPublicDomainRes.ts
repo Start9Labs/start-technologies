@@ -9,9 +9,7 @@ export type AddPublicDomainRes = {
   port: CheckPortRes
   portV6: CheckPortV6Res | null
   /**
-   * The certificate authority's own reachability requirement, where the
-   * domain has one the checks above do not cover. Absent when the domain
-   * needs nothing beyond its own port.
+   * The authority's own reachability requirement, where the domain has one.
    */
   challenge: CheckChallengeRes | null
 }

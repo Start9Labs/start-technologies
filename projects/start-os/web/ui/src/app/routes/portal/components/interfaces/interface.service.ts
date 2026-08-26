@@ -75,9 +75,7 @@ function getCertificate(
   return toAuthorityName(getAcmeProvider(h, host, addSsl))
 }
 
-// The ACME authority that issues this address's certificate, or null. A
-// service on a binding StartOS does not terminate is its own ACME client, and a
-// plaintext address has no certificate at all, so neither has an authority here.
+// Null unless StartOS terminates this address's TLS and issues its certificate.
 function getAcmeProvider(
   h: T.HostnameInfo,
   host: T.Host,
@@ -502,9 +500,7 @@ export type GatewayAddress = {
   ui: boolean
   deletable: boolean
   certificate: string
-  // The ACME provider this address's certificate comes from, or null when no
-  // such authority issues it. An address with one also needs port 443
-  // reachable, whatever port the address itself is served on.
+  // The address's ACME authority. Such an address also needs 443 reachable.
   acme: T.AcmeProvider | null
   // Number of forwarded ports: 1 for a single-port binding, the range span for
   // a port range. Drives the port-span shown in forwarding rules.

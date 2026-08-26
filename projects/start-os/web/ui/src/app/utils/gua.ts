@@ -29,11 +29,7 @@ export function dnsAllPass(
   return (!wanIp || dns.ipv4 === wanIp) && (!gua || dns.ipv6 === gua)
 }
 
-/**
- * Whether the port is reachable from outside for every family the gateway
- * offers: IPv4, and (if a GUA exists) IPv6. For a port only something outside
- * dials — a certificate authority's challenge — this is the whole requirement.
- */
+/** Whether the port is reachable from outside for every family the gateway offers. */
 export function externalAllPass(
   port: T.CheckPortRes | null | undefined,
   portV6: T.CheckPortV6Res | null | undefined,
@@ -43,12 +39,7 @@ export function externalAllPass(
   return port.openExternally && (!gua || !!portV6?.openExternally)
 }
 
-/**
- * Whether the port is reachable for every family the gateway offers, and from
- * this network as well. An address is dialled by your own devices too, so IPv4
- * additionally needs the router to hairpin; v6 is NAT-free and has nothing to
- * hairpin.
- */
+/** Whether the port is reachable from outside and from this network. */
 export function portAllPass(
   port: T.CheckPortRes | null | undefined,
   portV6: T.CheckPortV6Res | null | undefined,

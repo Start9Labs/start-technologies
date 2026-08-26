@@ -470,12 +470,9 @@ impl Model<Host> {
                 let Some(wan_ip) = ip_info.wan_ip else {
                     continue;
                 };
-                // A certificate authority validates the name at
-                // `ACME_CHALLENGE_PORT` whatever port the address is served on,
-                // so that forward is required too — and stays required, because
-                // renewal is validated the same way. `add_ssl` is what makes
-                // the authority ours: a service that serves its own TLS is its
-                // own ACME client, and no challenge reaches the box for it.
+                // A certificate authority validates at `ACME_CHALLENGE_PORT`,
+                // whatever port the address serves. `add_ssl` excludes a
+                // service that is its own ACME client.
                 let challenge = addr.ssl
                     && bind.options.add_ssl.is_some()
                     && port != ACME_CHALLENGE_PORT

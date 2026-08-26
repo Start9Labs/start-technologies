@@ -581,11 +581,8 @@ pub struct CheckChallengeParams {
     pub acme: AcmeProvider,
 }
 
-/// Reachability of the port a certificate authority validates on, for a domain
-/// served on some other port, which the domain's own port says nothing about.
-/// A leg is null where nothing probed it: the probe errored, or — for `port_v6`
-/// — the gateway has no GUA. The caller decides what each means for its
-/// verdict.
+/// Reachability of the port a certificate authority validates on. A null leg
+/// went unprobed.
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -594,14 +591,7 @@ pub struct CheckChallengeRes {
     pub port_v6: Option<CheckPortV6Res>,
 }
 
-/// Probe the challenge port for `fqdn`, or report `None` when `acme` already
-/// holds a certificate for it with life left. A domain with no ACME authority,
-/// or one already served on the challenge port, has no question to ask here.
-///
-/// A probe that errors is reported as an unprobed leg rather than failing the
-/// call, so a caller that adds a domain still gets its other results back.
-/// Until the first certificate issues the address answers nothing; through a
-/// renewal window it keeps serving the one it holds.
+/// Probes the challenge port. `None` when the authority's certificate has life left.
 pub async fn check_challenge(
     ctx: RpcContext,
     CheckChallengeParams {
@@ -629,10 +619,7 @@ pub async fn check_challenge(
     }))
 }
 
-/// Whether `fqdn` has to pass a challenge under `acme` before it can serve.
-/// [`should_use_cert`] is the same predicate the cert resolver applies, so this
-/// turns true at the start of the renewal window — when the challenge port has
-/// to work again — rather than on the last day of validity.
+/// True from the start of the renewal window, not from expiry.
 fn challenge_pending(
     db: &DatabaseModel,
     fqdn: &InternedString,

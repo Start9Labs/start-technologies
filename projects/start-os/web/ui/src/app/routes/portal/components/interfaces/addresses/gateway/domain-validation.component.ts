@@ -33,8 +33,7 @@ export type DnsGateway = T.NetworkInterfaceInfo & {
   ipInfo: T.IpInfo
 }
 
-// Where a certificate authority validates a domain, whatever port the address
-// itself is served on. Mirrors `ACME_CHALLENGE_PORT` in the backend.
+// Mirrors `ACME_CHALLENGE_PORT` in the backend.
 export const CHALLENGE_PORT = 443
 
 export type DomainValidationData = {
@@ -44,12 +43,9 @@ export type DomainValidationData = {
   count: number
   packageId: string
   addSsl: boolean
-  // The ACME authority that issues this domain's certificate, if any. A domain
-  // with one needs port 443 whatever port it is served on.
+  // The domain's ACME authority. Such a domain also needs 443 reachable.
   acme: T.AcmeProvider | null
-  // Probe results for port 443. Null where nothing probed it, and where the
-  // domain does not need it: it names no ACME authority, it is already served
-  // there, or its certificate has life left.
+  // Probe results for 443. Null where the domain does not need it.
   challenge: T.CheckChallengeRes | null
   initialResults?: {
     dns: T.QueryDnsRes | null
@@ -343,20 +339,15 @@ export class DomainValidationComponent {
     { label: 'Address', value: this.ipv6Addr },
   ]
 
-  // No footer, so no verdict: see `showChallenge` and `allPass`.
   readonly isManualMode = !this.context.data.initialResults
 
-  // Whether this domain has a 443 requirement at all.
   private readonly challengeApplies =
     !this.isRange &&
     !!this.context.data.acme &&
     this.context.data.port !== CHALLENGE_PORT
-  // Whether it is outstanding right now. Only the backend can say: a
-  // certificate with life left covers the domain until its renewal window, and
-  // the store holding it never reaches the browser.
+  // Only the backend can say; the certificate store never reaches the browser.
   private readonly challengeOutstanding = !!this.context.data.challenge
-  // A view that reaches a verdict shows only what is outstanding. The manual
-  // view reaches none, so it shows the requirement whenever there is one.
+  // A view that reaches a verdict shows only what is outstanding.
   readonly showChallenge = this.isManualMode
     ? this.challengeApplies
     : this.challengeOutstanding
@@ -469,8 +460,6 @@ export class DomainValidationComponent {
     }
   }
 
-  // StartOS answers the authority's port itself, so these two probe it directly
-  // and stay available while the service is down.
   async testChallenge() {
     this.challengeLoading.set(true)
 
