@@ -5,7 +5,16 @@ name: Conflict Markers
 on:
   # A branch carrying markers should say so from its first push, so this check
   # has no draft gate.
+  #
+  # `edited` is not a default activity type, and it is the only one that fires
+  # when a pull request's base branch changes. This check diffs against the
+  # base, so retargeting changes the set of files it scans while the head SHA
+  # stands still. `edited` also fires on every title and body edit; unlike the
+  # heavier workflows this job does not gate those out, because a checkout and a
+  # grep are cheap enough to redo and skipping instead would replace a decided
+  # verdict with a grey one every time somebody reworded a description.
   pull_request:
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read

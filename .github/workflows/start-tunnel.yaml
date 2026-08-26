@@ -54,7 +54,15 @@ on:
   pull_request:
     # The jobs below skip drafts, and `ready_for_review` is not a default
     # activity type, so without it a draft marked ready is never checked.
-    types: [opened, synchronize, reopened, ready_for_review]
+    #
+    # `edited` is not a default either, and it is the only type that fires when
+    # a pull request's base branch changes. Retargeting moves what these checks
+    # measure while the head SHA stands still, so without it the conclusions
+    # computed against the old base stand as the verdict. `edited` also fires on
+    # every title and body edit, and rebuilding this workflow for a reworded
+    # description is not worth the runner time, so the jobs below take an
+    # `edited` event only when `github.event.changes.base` is present.
+    types: [opened, synchronize, reopened, ready_for_review, edited]
     branches:
       - master
       - integration/*
@@ -102,7 +110,9 @@ env:
 jobs:
   compile:
     name: Build Debian Package
-    if: github.event.pull_request.draft != true
+    if: >-
+      github.event.pull_request.draft != true
+      && (github.event.action != 'edited' || github.event.changes.base.ref.from != '')
     strategy:
       fail-fast: true
       matrix:
