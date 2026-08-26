@@ -1228,9 +1228,7 @@ where
             .map(|proto| proto.to_vec())
             .collect();
         let offered: Vec<Vec<u8>> = match &self.alpn {
-            Some(AlpnInfo::Specified(protos)) => {
-                protos.iter().map(|proto| proto.0.clone()).collect()
-            }
+            Some(AlpnInfo(protos)) => protos.iter().map(|proto| proto.0.clone()).collect(),
             None => client_alpn.clone(),
         };
         // The container is offered only protocols the client also named, since
@@ -1529,13 +1527,11 @@ impl ProxyContext {
     }
 }
 
-/// The protocols a binding keeps. Carried on the wire as the list itself.
+/// The protocols a binding answers with, carried on the wire as the list itself.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, TS)]
-#[serde(untagged)]
+#[serde(transparent)]
 #[ts(export)]
-pub enum AlpnInfo {
-    Specified(Vec<MaybeUtf8String>),
-}
+pub struct AlpnInfo(pub Vec<MaybeUtf8String>);
 
 #[cfg(test)]
 mod alpn_wire_format {
@@ -1544,7 +1540,7 @@ mod alpn_wire_format {
     /// A manifest writes the list itself, and no list at all is `null`.
     #[test]
     fn alpn_is_carried_as_the_list_itself() {
-        let pinned = Some(AlpnInfo::Specified(vec![
+        let pinned = Some(AlpnInfo(vec![
             MaybeUtf8String(b"h2".to_vec()),
             MaybeUtf8String(b"http/1.1".to_vec()),
         ]));
@@ -2809,8 +2805,7 @@ mod upstream_alpn_tests {
     #[test]
     fn a_target_is_not_equal_to_one_that_pins_a_different_protocol() {
         let addr: SocketAddr = "10.0.3.2:443".parse().unwrap();
-        let pinned =
-            |proto: &[u8]| Some(AlpnInfo::Specified(vec![MaybeUtf8String(proto.to_vec())]));
+        let pinned = |proto: &[u8]| Some(AlpnInfo(vec![MaybeUtf8String(proto.to_vec())]));
         assert_ne!(
             target(addr, None, pinned(b"h2")),
             target(addr, None, pinned(b"http/1.1")),
@@ -2824,7 +2819,7 @@ mod upstream_alpn_tests {
     /// A pin narrows what the client asked for rather than replacing it.
     #[tokio::test]
     async fn a_client_speaking_one_of_the_pinned_protocols_is_served() {
-        let both = AlpnInfo::Specified(vec![
+        let both = AlpnInfo(vec![
             MaybeUtf8String(b"h2".to_vec()),
             MaybeUtf8String(b"http/1.1".to_vec()),
         ]);
@@ -2850,7 +2845,7 @@ mod upstream_alpn_tests {
         assert_eq!(
             try_negotiate(
                 rewrap(),
-                Some(AlpnInfo::Specified(Vec::new())),
+                Some(AlpnInfo(Vec::new())),
                 &[],
                 backend,
                 &["h2", "http/1.1"],
@@ -2871,7 +2866,7 @@ mod upstream_alpn_tests {
     /// A client that shares no protocol with the pin is refused.
     #[tokio::test]
     async fn a_client_sharing_no_protocol_with_the_pin_is_refused() {
-        let h2 = AlpnInfo::Specified(vec![MaybeUtf8String(b"h2".to_vec())]);
+        let h2 = AlpnInfo(vec![MaybeUtf8String(b"h2".to_vec())]);
         try_negotiate(
             rewrap(),
             Some(h2),
@@ -2905,7 +2900,7 @@ mod upstream_alpn_tests {
     /// rustls is what turns away a client that shares none of it.
     #[tokio::test]
     async fn a_plaintext_binding_refuses_a_client_that_cannot_meet_the_pin() {
-        let h2 = AlpnInfo::Specified(vec![MaybeUtf8String(b"h2".to_vec())]);
+        let h2 = AlpnInfo(vec![MaybeUtf8String(b"h2".to_vec())]);
         try_negotiate(None, Some(h2), &[], spawn_backend(&[]).await, &["http/1.1"])
             .await
             .expect_err("a client that cannot meet the pin is not served");
@@ -2915,7 +2910,7 @@ mod upstream_alpn_tests {
     #[tokio::test]
     async fn a_pin_does_not_reach_a_container_when_the_client_names_nothing() {
         let (backend, negotiated) = spawn_backend_reporting(&["h2", "http/1.1"]).await;
-        let h2 = AlpnInfo::Specified(vec![MaybeUtf8String(b"h2".to_vec())]);
+        let h2 = AlpnInfo(vec![MaybeUtf8String(b"h2".to_vec())]);
         assert_eq!(
             try_negotiate(rewrap(), Some(h2), &[], backend, &[])
                 .await
@@ -2937,7 +2932,7 @@ mod upstream_alpn_tests {
     #[tokio::test]
     async fn a_pin_keeps_the_container_off_the_protocols_it_excludes() {
         let (backend, negotiated) = spawn_backend_reporting(&["h2", "http/1.1"]).await;
-        let http1 = AlpnInfo::Specified(vec![MaybeUtf8String(b"http/1.1".to_vec())]);
+        let http1 = AlpnInfo(vec![MaybeUtf8String(b"http/1.1".to_vec())]);
         assert_eq!(
             try_negotiate(rewrap(), Some(http1), &[], backend, &["h2", "http/1.1"])
                 .await
@@ -2990,7 +2985,7 @@ mod upstream_alpn_tests {
     /// A pin is the list the client is offered.
     #[tokio::test]
     async fn specified_offers_the_bindings_own_list() {
-        let http1 = AlpnInfo::Specified(vec![MaybeUtf8String(b"http/1.1".to_vec())]);
+        let http1 = AlpnInfo(vec![MaybeUtf8String(b"http/1.1".to_vec())]);
         assert_eq!(
             try_negotiate(
                 None,

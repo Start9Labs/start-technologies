@@ -2,6 +2,6 @@
 import type { MaybeUtf8String } from './MaybeUtf8String'
 
 /**
- * The protocols a binding keeps. Carried on the wire as the list itself.
+ * The protocols a binding answers with, carried on the wire as the list itself.
  */
 export type AlpnInfo = Array<MaybeUtf8String>

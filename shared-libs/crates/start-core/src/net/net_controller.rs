@@ -242,7 +242,7 @@ impl NetController {
                     add_ssl: Some(AddSslOptions {
                         preferred_external_port: 443,
                         add_x_forwarded_headers: false,
-                        alpn: Some(AlpnInfo::Specified(vec![
+                        alpn: Some(AlpnInfo(vec![
                             MaybeUtf8String("h2".into()),
                             MaybeUtf8String("http/1.1".into()),
                         ])),
@@ -1522,7 +1522,7 @@ mod tests {
     /// container is dialled over TLS.
     #[test]
     fn alpn_does_not_decide_whether_the_container_is_dialled_over_tls() {
-        let pinned = || Some(AlpnInfo::Specified(vec![MaybeUtf8String(b"h2".to_vec())]));
+        let pinned = || Some(AlpnInfo(vec![MaybeUtf8String(b"h2".to_vec())]));
         for alpn in [None, pinned()] {
             assert!(
                 bind_options(true, Some(true), alpn.clone())
