@@ -8,44 +8,33 @@ const zod_deep_partial_1 = require('zod-deep-partial')
 function deepLoose(schema) {
   const def = schema._zod?.def
   if (!def) return schema
-  let result
   switch (def.type) {
     case 'optional':
-      result = deepLoose(def.innerType).optional()
-      break
+      return deepLoose(def.innerType).optional()
     case 'nullable':
-      result = deepLoose(def.innerType).nullable()
-      break
+      return deepLoose(def.innerType).nullable()
     case 'object': {
       const newShape = {}
       for (const key in schema.shape) {
         newShape[key] = deepLoose(schema.shape[key])
       }
-      result = zod_1.z.looseObject(newShape)
-      break
+      return zod_1.z.looseObject(newShape)
     }
     case 'array':
-      result = zod_1.z.array(deepLoose(def.element))
-      break
+      return zod_1.z.array(deepLoose(def.element))
     case 'union':
-      result = zod_1.z.union(def.options.map(o => deepLoose(o)))
-      break
+      return zod_1.z.union(def.options.map(o => deepLoose(o)))
     case 'intersection':
-      result = zod_1.z.intersection(deepLoose(def.left), deepLoose(def.right))
-      break
+      return zod_1.z.intersection(deepLoose(def.left), deepLoose(def.right))
     case 'record':
-      result = zod_1.z.record(def.keyType, deepLoose(def.valueType))
-      break
+      return zod_1.z.record(def.keyType, deepLoose(def.valueType))
     case 'tuple':
-      result = zod_1.z.tuple(def.items.map(i => deepLoose(i)))
-      break
+      return zod_1.z.tuple(def.items.map(i => deepLoose(i)))
     case 'lazy':
-      result = zod_1.z.lazy(() => deepLoose(def.getter()))
-      break
+      return zod_1.z.lazy(() => deepLoose(def.getter()))
     default:
       return schema
   }
-  return result
 }
 
 zod_1.z.deepPartial = a => deepLoose((0, zod_deep_partial_1.zodDeepPartial)(a))
