@@ -14,10 +14,6 @@ for label, k in (('functions', 'functions'), ('cognitive', 'cognitive'),
                  ('fns over 25', 'over25')):
     print(f"  {label:<12}{tb[k]:>7} -> {th[k]:>7}   {th[k]-tb[k]:+d}")
 
-# Cognitive falls when a function is split, however badly; cyclomatic does not.
-if th['cognitive'] < tb['cognitive'] and th['cyclomatic'] > tb['cyclomatic']:
-    print("\n  cognitive fell while cyclomatic rose — branches were relocated, not removed")
-
 new = sorted((r for k, r in H.items() if k not in B), key=lambda r: -r['cognitive'])
 big = [r for r in new if r['cognitive'] > 10]
 if big:
@@ -46,9 +42,16 @@ gone = [r for k, r in B.items() if k not in H]
 if gone:
     print(f"\n  removed: {len(gone)} functions, {sum(r['cognitive'] for r in gone)} cognitive")
 
-single = [r for r in new if r.get('callers') == 1 and r['name'] != '<anonymous>']
-if single:
-    print(f"\n  new functions with one call site ({len(single)}) — each is an abstraction the diff does not yet reuse:")
-    for r in single[:10]:
-        print(f"    {r['name']}  {r['file']}:{r['line']}")
+# A helper whose only caller shares its file is the shape a shredded function takes.
+# One that anything else calls is a shared utility, and is not the target here.
+shared = [r for r in new if r.get('shared') and r['file'].startswith('shared-libs')]
+if shared:
+    print(f"\n  added to shared-libs and already called elsewhere: {len(shared)}")
+
+# A helper whose only caller shares its file is the shape a shredded function takes.
+# Informational: a first caller is where every utility starts.
+private = [r for r in new
+           if r.get('callers') == 1 and not r.get('shared') and r['name'] != '<anonymous>']
+if private:
+    print(f"  single-use helpers alongside their only caller: {len(private)}")
 

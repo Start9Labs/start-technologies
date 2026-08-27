@@ -13,8 +13,6 @@ QUESTIONS = (
     ('simplest alternative', r'[Ss]implest alternative[^\n]*:[^\S\n]*(\S[^\n]*)', None),
     ('existing helper', r'[Ee]xisting helper[^\n]*:[^\S\n]*(\S[^\n]*)', None),
     ('over-25 justification', r'over 25[^\n]*:[^\S\n]*(\S[^\n]*)', '<-- '),
-    ('single-call-site helpers', r'one call site[^\n]*:[^\S\n]*(\S[^\n]*)',
-     'new functions with one call site ('),
 )
 
 NOT_APPLICABLE = {'none', 'none.', 'n/a', 'na', 'nothing', 'not applicable'}

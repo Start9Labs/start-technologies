@@ -239,15 +239,39 @@ The three questions, chosen because a weak answer is visible to a human:
 - the simplest alternative considered, and what breaks if we take it
 - which existing helper was checked before adding a new one, by file
 - for any function pushed over 25, why the branching is intrinsic to the requirement
-- for each new function with exactly one call site, why it earns its own name
 
-The last one is the only question in the set an author cannot bluff, because the census counts
-the call sites itself. It also targets the most common real defect in agent-written code — the
-helper extracted for a reuse that never arrives. The portmap PR added 83 of them.
-
-**The last two questions are asked only when the census reports them.** Requiring all four on
-every PR would put a four-line section on the 61% of source PRs whose delta is near zero
+**The last question is asked only when the census reports a function over 25.** Requiring a
+justification on every PR would put a section on the 61% of source PRs whose delta is near zero
 against the 19% that are substantial, which is a rubber-stamping machine rather than a gate.
+
+## Building shared utilities is the point, so the gate must not tax it
+
+A general-purpose utility has exactly one call site on the day it is written. Any rule that
+makes an author defend a single-use function therefore charges a toll on the library we want,
+and pays it in the two currencies we least want: helpers left inlined, and helpers bent to fit
+their one caller so the justification writes itself.
+
+An earlier draft of this gate did exactly that, and measuring it showed the signal was not
+merely unhelpful but inverted. Against a base function that retried an HTTP call inline, two
+changes were compared: extracting a generic `retry_with_backoff` into `shared-libs`, and
+shredding the same logic in place into three helpers threading `&mut` state.
+
+|                                   |    extracted utility |     in-place shred |
+| --------------------------------- | -------------------: | -----------------: |
+| cognitive                         |            8 → **5** |         8 → **11** |
+| "branches were relocated" warning |            **fired** |             silent |
+| flagged as unreused abstraction   | `retry_with_backoff` | the three `step_*` |
+
+The warning fired on the good change and stayed quiet on the bad one, because a real extraction
+lowers cognitive and adds a function exactly as a bad split does. It is deleted.
+
+What separates them is not the call count but **where the callers are**. The census marks a
+function shared when anything outside its own file calls it; repo-wide that is 76% of named
+functions, against 9% single-use beside their only caller. So the report credits what lands in
+`shared-libs` and is called from elsewhere, counts private single-use helpers without demanding
+a defence of each, and asks no question about either. The question that does survive —
+which existing helper you checked before adding a new one — pushes toward reuse rather than away
+from it.
 
 27% of merged PR bodies already volunteer a rejected alternative, so the hardest of the three
 is culturally native here rather than an imposition.

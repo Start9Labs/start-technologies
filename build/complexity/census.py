@@ -56,24 +56,30 @@ def census(root, scopes, bca):
 
 
 def count_callers(rows, root, scopes):
-    """Call sites per function name across the tree. A definition is not a call site."""
-    used = collections.Counter()
+    """Marks each function with its call-site count and whether any caller sits outside its own file."""
+    per_file = collections.defaultdict(collections.Counter)
     for scope in scopes:
         for dirpath, dirs, names in os.walk(os.path.join(root, scope)):
             dirs[:] = [d for d in dirs if d not in
                        ('node_modules', 'target', 'dist', '.angular', 'out-tsc', 'osBindings', 'locales')]
             for name in names:
                 path = os.path.join(dirpath, name)
-                if not kept(os.path.relpath(path, root)):
+                rel = os.path.relpath(path, root)
+                if not kept(rel):
                     continue
                 try:
-                    used.update(CALL_SITE.findall(open(path, encoding='utf-8', errors='replace').read()))
+                    per_file[rel].update(CALL_SITE.findall(open(path, encoding='utf-8', errors='replace').read()))
                 except OSError:
                     pass
     defined = collections.Counter(r['name'] for r in rows)
     for r in rows:
-        if r['name'] != '<anonymous>':
-            r['callers'] = max(0, used[r['name']] - defined[r['name']])
+        name = r['name']
+        if name == '<anonymous>':
+            continue
+        total = sum(c[name] for c in per_file.values())
+        r['callers'] = max(0, total - defined[name])
+        elsewhere = sum(c[name] for f, c in per_file.items() if f != r['file'])
+        r['shared'] = elsewhere > 0
 
 
 def assert_parsed(bca, root, scopes, rows):
