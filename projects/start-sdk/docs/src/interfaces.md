@@ -408,7 +408,6 @@ export const setupCerts = sdk.setupOnInit(async effects => {
             // nothing dials loopback or link-local; 127.0.0.1 is added below
             .filter({ exclude: { kind: ['localhost', 'link-local'] } })
             .hostnames.map(h => h.hostname)
-            .sort()
         : [],
     )
     .const()
@@ -423,11 +422,9 @@ export const setupCerts = sdk.setupOnInit(async effects => {
 
 **Read the addresses off the binding, never off an exported interface.** They belong to the binding: `utils.filledAddress` looks the binding up by `internalPort` and derives the hostnames from it, and the `AddressInfo` you pass supplies nothing else unless you call `toUrl`/`format`. An interface is a _view_ of that list, and it disappears whenever a `setupInterfaces` pass does not export it — a handler that skips an export while a credential file is missing, or returns early when a config reads as null, revokes it (see [Conditional exports](#conditional-exports)). Walking `host.bindings[…].interfaces[…]` and falling back to `[]` therefore turns "I cannot see the interface right now" into "this host has no addresses", which silently narrows the certificate.
 
-That distinction has teeth here, because reissuing the certificate restarts the service. `lnd` shipped exactly this: a macaroon rotation deleted the file its `setInterfaces` watched, the gRPC interface came down for a few seconds, the SAN set collapsed, the daemon restarted — and the restart re-armed the rotation, so it never stopped.
+That distinction has teeth because reissuing the certificate restarts the service: a SAN set that collapses takes the daemon down with it.
 
 `getSslCertificate` signs an IP the **box itself holds** — one in the container bridge subnet, or an address on one of the server's own gateways. A WAN IPv4 fails the whole call because that address belongs to the router, not to you; an IPv6 GUA is configured on the box and is signed. See [Narrowing the set](main.md#narrowing-the-set) for why that exclusion is a union rather than a two-field `exclude`.
-
-Sort the list. The OS returns a `BTreeSet`, so its order is already deterministic — sorting is what keeps it that way if you map or concatenate it, since `.const()` compares with deep equality and a reordered array reads as a change.
 
 Read the container IP with `.const()` rather than `.once()`: a container that comes back on a new IP must reissue the certificate, or every client dialing the old one fails verification.
 
