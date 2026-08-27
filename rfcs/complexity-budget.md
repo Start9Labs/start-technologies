@@ -95,13 +95,18 @@ no branch or pull-request analysis, no decoration — so self-hosting buys post-
 no pre-merge gate. The tier that gates is the hosted one. Paying a SaaS to compute a number we
 can compute in a second locally is the wrong trade for this repo.
 
-**For TypeScript, Sonar's own implementation runs locally.** `eslint-plugin-sonarjs` is
-SonarSource's ESLint plugin from their SonarJS repository, and `sonarjs/cognitive-complexity` is
-the reference implementation of the metric. Measured here: 457 files in **1.4 s**, no server, no
-`tsconfig`, no type information. It ranks this repo's TypeScript at Spearman **0.954** against
-the census below and reports totals **27% lower**. Where the reference implementation runs
-locally, use it — the TypeScript half of any gate should be this plugin, not a third-party
-reimplementation.
+**Sonar's analyzers are not open source, and their licence excludes this use case.** Every
+language analyzer — `SonarJS`, `sonar-rust`, `sonar-python`, `sonar-java`, `sonar-dotnet` — is
+under the Sonar Source-Available License v1, whatever GitHub's "Other" badge implies; only the
+SonarQube platform itself is still LGPL-3.0. SSAL grants rights solely "for any Non-competitive
+Purpose", and that term excludes, verbatim, "(c) employing, using, or engaging artificial
+intelligence technology that is not part of the Program to ingest, interpret, analyze, train on,
+or interact with the data provided by the Program, or to engage with the Program in any manner."
+An agent reading a complexity report is the case this project exists to serve, so the grant does
+not cover it. `eslint-plugin-sonarjs` is the sharp edge: its `package.json` still declares
+`LGPL-3.0-only` while the shipped `LICENSE` and every source header are SSAL v1, so a scanner
+reading package metadata clears it. Sonar's analyzers are usable as a calibration oracle for a
+one-off comparison; they are not usable in this pipeline.
 
 **For Rust there is no local Sonar implementation**, and that is the whole reason anything is
 vendored here. Of what exists: Clippy is official and local but its `cognitive_complexity`
