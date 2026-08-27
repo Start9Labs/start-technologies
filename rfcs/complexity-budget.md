@@ -270,22 +270,23 @@ function shared when anything outside its own file calls it; repo-wide that is 7
 functions, against 9% single-use beside their only caller. So the report counts private
 single-use helpers without demanding a defence of each, and asks no question about either.
 
-**Credit attaches to reuse, never to creation.** Rewarding a new utility rewards writing a
-second one instead of finding the first, so a function earns its line in the report only once
-**two or more distinct subsystems** call it — a subsystem being a product or crate plus its
-first module segment. Of the 1,208 functions in util modules today, 59% clear that bar and the
-rest sit neutral. A utility written this week is not praised for existing; it is praised when
-the second caller arrives, which is the moment its generality stops being a claim.
+**Credit attaches to adoption, never to creation.** Rewarding a new utility rewards writing a
+second one instead of finding the first, so nothing is credited for existing. A function earns
+its line only when a **subsystem that did not call it before starts to** — a subsystem being a
+product or crate plus its first module segment — and only once the total reaches two. The first
+caller is the author; the second is where generality stops being a claim. Of the 1,208 functions
+in util modules today, 59% clear that bar.
 
-**Util-module complexity is reported apart, not zeroed.** Those two goals — don't tax utilities,
-don't reward duplicates — pull against each other, and making util complexity free is what
-resolves them the wrong way: it turns the util module into free parking for exactly the
-near-duplicate the rule was meant to discourage. Measured against a tree already holding a
-generic `retry_with_backoff`, a second product writing its own copy costs **+4 cognitive**
-whether that copy lands beside its caller or inside the util module, while calling the existing
-one costs **0**. Reuse is strictly cheaper than duplication wherever the duplicate is parked,
-and that property comes from counting util complexity rather than exempting it. The report
-separates the figure so an author can see it; nothing gates on it.
+That ordering makes reuse dominate duplication without any penalty on utilities. Against a tree
+already holding a generic `retry_with_backoff`, a second product writing its own near-copy
+reports its cost and earns nothing, because that copy reaches only one subsystem; calling the
+existing helper adds no code at all and credits `retry_with_backoff +projects/web (now 2)`.
+Duplicating is never cheaper than reusing, and the difference is credit rather than punishment.
+
+**Nothing gates on the totals.** The complexity figures are reported, and the only question the
+gate can require is the one about a function pushed over 25. So complexity arriving in a util
+module is already unpenalised in the only sense that operates — the report separates the figure
+so an author can see it, and no threshold, ratchet or check keys on it.
 
 **Nothing mechanical catches a re-implemented utility.** A copy-pasted one is findable — `jscpd`
 flags a renamed copy at 45% duplicated lines — but the same helper written afresh with a

@@ -44,12 +44,19 @@ if gone:
 
 # A helper whose only caller shares its file is the shape a shredded function takes.
 # One that anything else calls is a shared utility, and is not the target here.
-# A utility earns credit for being reused across subsystems, never for existing.
-reused = [r for r in new if len(r.get('scopes') or []) >= 2]
-if reused:
-    print(f"\n  new functions already reused across subsystems ({len(reused)}):")
-    for r in sorted(reused, key=lambda r: -len(r['scopes']))[:5]:
-        print(f"    {r['name']}  {len(r['scopes'])} subsystems  {r['file']}:{r['line']}")
+# A utility earns credit when a subsystem adopts it, not when it is written.
+adopted = []
+for k, r in H.items():
+    before = set((B[k].get('scopes') or []) if k in B else ())
+    after = set(r.get('scopes') or [])
+    # Two distinct subsystems is where generality stops being a claim; the first
+    # caller is just the author, so creating a utility earns nothing.
+    if after - before and len(after) >= 2:
+        adopted.append((r, sorted(after - before), len(after)))
+if adopted:
+    print(f"\n  utilities a second subsystem now depends on ({len(adopted)}):")
+    for r, gained, total in sorted(adopted, key=lambda x: -len(x[1]))[:8]:
+        print(f"    {r['name']}  +{', '.join(gained)}  (now {total})  {r['file']}")
 
 util_new = [r for r in new if r.get('util')]
 if util_new:
