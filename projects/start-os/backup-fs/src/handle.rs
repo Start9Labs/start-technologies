@@ -1363,8 +1363,7 @@ impl Handler {
             return BkfsResult::errno(libc::EINVAL);
         }
         let bytes = self.read(req, src_inode, src_fh, src_offset, size, 0, None)?;
-        // A write of no bytes still extends the destination to `dest_offset`
-        // and stamps its mtime.
+        // A write of no bytes extends the destination and stamps its mtime.
         if bytes.is_empty() {
             return Ok(0);
         }

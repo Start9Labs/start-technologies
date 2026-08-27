@@ -2749,8 +2749,7 @@ fn missing_superblock_over_existing_data_is_refused() {
 }
 
 /// A read that starts past the end of a file returns no bytes rather than an
-/// I/O error. The read path clamps the request to what the file holds, so such
-/// a read asks for nothing at all.
+/// I/O error. The read path clamps such a request to nothing.
 #[test_log::test]
 fn read_starting_past_eof_returns_no_bytes() {
     let data = TempDir::new("backupfs_data").unwrap();
@@ -2771,8 +2770,7 @@ fn read_starting_past_eof_returns_no_bytes() {
             f.seek(SeekFrom::Start(10)).unwrap();
             assert_eq!(f.read(&mut buf).unwrap(), 0);
 
-            // A block-backed body, so the answer does not depend on how the
-            // file is stored.
+            // A block-backed body, over the one-chunk inline threshold.
             let blocks = mnt.join("blocks");
             fs::write(&blocks, vec![3u8; 3 * CHUNK_OFFSET as usize]).unwrap();
             let mut f = fs::File::open(&blocks).unwrap();
@@ -2783,12 +2781,10 @@ fn read_starting_past_eof_returns_no_bytes() {
     );
 }
 
-/// `copy_file_range` out of a file that is shrinking under it copies no bytes
-/// and leaves the destination alone, rather than failing. The kernel clamps the
-/// request against the size it has cached, so a truncate landing after that
-/// check is what hands `Handler::read` an offset past the end of the file.
-/// `copy_file_range` is its only caller, and the one read that runs with the
-/// handler lock held for the whole copy.
+/// `copy_file_range` out of a shrinking file copies no bytes and leaves the
+/// destination alone. The kernel clamps the request against the size it has
+/// cached, and only a truncate landing after that check hands `Handler::read`
+/// an offset past the end of the file.
 #[test_log::test]
 fn copy_file_range_from_a_shrinking_file_copies_no_bytes() {
     use std::os::unix::fs::FileExt;
@@ -2798,8 +2794,7 @@ fn copy_file_range_from_a_shrinking_file_copies_no_bytes() {
 
     let data = TempDir::new("backupfs_data").unwrap();
     let size = 2 * CHUNK_OFFSET;
-    // Copy into a hole, so a copy that writes nothing is distinguishable from
-    // one that extends the destination out to this offset.
+    // Copying into a hole makes an extension out to this offset visible.
     let dest_offset = CHUNK_OFFSET;
 
     with_backupfs(
@@ -2816,8 +2811,7 @@ fn copy_file_range_from_a_shrinking_file_copies_no_bytes() {
                 .truncate(true)
                 .open(&dest_path)
                 .unwrap();
-            // A read goes to the filesystem, so it sees a length the kernel has
-            // not been told about.
+            // A stat here can be served from the kernel's cached size.
             let dest_reader = fs::File::open(&dest_path).unwrap();
 
             let truncator = fs::OpenOptions::new().write(true).open(&src).unwrap();
@@ -2825,8 +2819,7 @@ fn copy_file_range_from_a_shrinking_file_copies_no_bytes() {
             let flapping = {
                 let stop = stop.clone();
                 std::thread::spawn(move || {
-                    // Give up on the first error rather than panicking:
-                    // once the test unmounts, every truncate fails.
+                    // Every truncate fails once the test unmounts.
                     while !stop.load(Ordering::Relaxed) {
                         if truncator.set_len(size).is_err() || truncator.set_len(0).is_err() {
                             break;
@@ -2836,6 +2829,8 @@ fn copy_file_range_from_a_shrinking_file_copies_no_bytes() {
             };
 
             let mut failure = None;
+            let mut copies_that_moved_nothing = 0;
+            let mut copies_that_moved_bytes = 0;
             for _ in 0..500 {
                 let mut from = (size - CHUNK_OFFSET / 2) as libc::loff_t;
                 let mut to = dest_offset as libc::loff_t;
@@ -2857,33 +2852,50 @@ fn copy_file_range_from_a_shrinking_file_copies_no_bytes() {
                     break;
                 }
                 if copied == 0 {
+                    copies_that_moved_nothing += 1;
                     let mut probe = [0u8; 1];
-                    if dest_reader.read_at(&mut probe, 0).unwrap() != 0 {
-                        failure = Some(
-                            "a copy that moved no bytes must leave the destination alone"
-                                .to_owned(),
-                        );
-                        break;
+                    match dest_reader.read_at(&mut probe, 0) {
+                        Ok(0) => {}
+                        Ok(_) => {
+                            failure = Some(
+                                "a copy that moved no bytes must leave the destination alone"
+                                    .to_owned(),
+                            );
+                            break;
+                        }
+                        Err(e) => {
+                            failure = Some(format!("reading the destination back failed: {e}"));
+                            break;
+                        }
                     }
                 } else {
-                    // Empty the destination again, so the next copy that moves
-                    // nothing is measured against a file it must not touch.
-                    dest.set_len(0).unwrap();
+                    copies_that_moved_bytes += 1;
+                    // The next copy that moves nothing must be measured
+                    // against an empty file.
+                    if let Err(e) = dest.set_len(0) {
+                        failure = Some(format!("emptying the destination failed: {e}"));
+                        break;
+                    }
                 }
-                // Most iterations never reach the filesystem, because the
-                // kernel clamps the request away itself. Without a yield the
-                // truncator barely runs on a single-core machine and the race
-                // never opens.
+                // Without a yield the truncator barely runs on a single-core
+                // machine.
                 std::thread::yield_now();
             }
 
-            // Stop the truncator before reporting, so a failure unmounts
-            // cleanly instead of racing teardown against a live writer.
+            // Reporting while the truncator runs races teardown against a
+            // live writer.
             stop.store(true, Ordering::Relaxed);
             flapping.join().unwrap();
             if let Some(e) = failure {
                 panic!("{e}");
             }
+            // Both outcomes are what proves the source shrank under the copier.
+            assert!(
+                copies_that_moved_nothing > 0 && copies_that_moved_bytes > 0,
+                "the source never shrank under the copier, so nothing was raced: \
+                 {copies_that_moved_nothing} copies moved nothing, \
+                 {copies_that_moved_bytes} moved bytes"
+            );
         },
         None,
     );

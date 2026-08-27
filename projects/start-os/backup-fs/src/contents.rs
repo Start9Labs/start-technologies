@@ -188,9 +188,9 @@ impl Contents {
 
     // ── reads ──────────────────────────────────────────────
 
+    /// The caller must bound `buf` to what the file holds from `offset`.
     pub fn read_exact_at(&mut self, buf: &mut [u8], offset: u64) -> BkfsResult<()> {
-        // A read of no bytes is satisfiable at any offset, including one past
-        // the end of the file.
+        // A read of no bytes is satisfiable at any offset.
         if buf.is_empty() {
             return Ok(());
         }
