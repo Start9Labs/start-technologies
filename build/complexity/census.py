@@ -71,6 +71,18 @@ def collect(node, rel, out):
     for c in node.get('spaces', []):
         collect(c, rel, out)
 
+def error_ratio(rca, path):
+    """Share of AST nodes tree-sitter could not parse."""
+    out = subprocess.run([rca, '-C', 'ERROR', '-p', path],
+                         capture_output=True, text=True).stdout
+    total = found = 0
+    for line in out.splitlines():
+        digits = line.split(':')[-1].strip().replace(',', '')
+        if line.startswith('Total nodes'): total = int(digits or 0)
+        elif line.startswith('Found nodes'): found = int(digits or 0)
+    return (found / total) if total else 0.0
+
+
 def census(root, scopes, rca):
     staged = tempfile.mkdtemp(prefix='cx-src-')
     outdir = tempfile.mkdtemp(prefix='cx-json-')
@@ -97,6 +109,9 @@ def census(root, scopes, rca):
     # A file the parser cannot read yields no functions rather than an error.
     if files and parsed / files < 0.98:
         sys.exit(f"complexity: parser read {parsed} of {files} files — refusing to report a partial census")
+    bad = error_ratio(rca, staged)
+    if bad > 0.005:
+        sys.exit(f"complexity: {bad:.3%} of AST nodes are parse errors — the grammar has fallen behind the language")
     return rows
 
 def totals(rows):
