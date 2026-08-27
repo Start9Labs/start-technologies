@@ -7,6 +7,21 @@ EXCLUDE = ('/node_modules/', '/dist/', '/target/', '/.angular/', '/out-tsc/',
            '/osBindings/', '/locales/', '/__snapshots__/', '/__fixtures__/',
            '/patch-db/client/', '/exver/exver.ts')
 CALL_SITE = re.compile(r'\b([A-Za-z_]\w*)\s*[(:<]')
+UTIL_MODULE = re.compile(r'(^|/)(util|utils|helpers)(/|\.(rs|ts|js)$)')
+
+
+def subsystem(path):
+    """The product or crate a file belongs to, plus its first module segment."""
+    parts = path.split('/')
+    if parts[0] == 'shared-libs' and len(parts) > 3:
+        base = parts[:3]
+    elif parts[0] == 'projects' and len(parts) > 2:
+        base = parts[:2]
+    else:
+        base = parts[:1]
+    rest = [p for p in parts[len(base):] if p not in ('src', 'lib')]
+    head = rest[0] if rest and '.' not in rest[0] else ''
+    return '/'.join(base) + ('/' + head if head else '')
 
 
 def kept(path):
@@ -56,7 +71,7 @@ def census(root, scopes, bca):
 
 
 def count_callers(rows, root, scopes):
-    """Marks each function with its call-site count and whether any caller sits outside its own file."""
+    """Marks each function with its call-site count and the subsystems that call it."""
     per_file = collections.defaultdict(collections.Counter)
     for scope in scopes:
         for dirpath, dirs, names in os.walk(os.path.join(root, scope)):
@@ -72,14 +87,19 @@ def count_callers(rows, root, scopes):
                 except OSError:
                     pass
     defined = collections.Counter(r['name'] for r in rows)
+    callers_of = collections.defaultdict(set)
+    for path, counts in per_file.items():
+        for name in counts:
+            callers_of[name].add(subsystem(path))
     for r in rows:
         name = r['name']
         if name == '<anonymous>':
             continue
         total = sum(c[name] for c in per_file.values())
         r['callers'] = max(0, total - defined[name])
-        elsewhere = sum(c[name] for f, c in per_file.items() if f != r['file'])
-        r['shared'] = elsewhere > 0
+        r['shared'] = sum(c[name] for f, c in per_file.items() if f != r['file']) > 0
+        r['util'] = bool(UTIL_MODULE.search(r['file']))
+        r['scopes'] = sorted(callers_of[name] - {subsystem(r['file'])})
 
 
 def assert_parsed(bca, root, scopes, rows):

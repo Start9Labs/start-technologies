@@ -44,14 +44,21 @@ if gone:
 
 # A helper whose only caller shares its file is the shape a shredded function takes.
 # One that anything else calls is a shared utility, and is not the target here.
-shared = [r for r in new if r.get('shared') and r['file'].startswith('shared-libs')]
-if shared:
-    print(f"\n  added to shared-libs and already called elsewhere: {len(shared)}")
+# A utility earns credit for being reused across subsystems, never for existing.
+reused = [r for r in new if len(r.get('scopes') or []) >= 2]
+if reused:
+    print(f"\n  new functions already reused across subsystems ({len(reused)}):")
+    for r in sorted(reused, key=lambda r: -len(r['scopes']))[:5]:
+        print(f"    {r['name']}  {len(r['scopes'])} subsystems  {r['file']}:{r['line']}")
 
-# A helper whose only caller shares its file is the shape a shredded function takes.
-# Informational: a first caller is where every utility starts.
+util_new = [r for r in new if r.get('util')]
+if util_new:
+    print(f"  of the new functions, {len(util_new)} sit in util modules"
+          f" ({sum(r['cognitive'] for r in util_new)} cognitive)")
+
 private = [r for r in new
-           if r.get('callers') == 1 and not r.get('shared') and r['name'] != '<anonymous>']
+           if r.get('callers') == 1 and not r.get('shared')
+           and not r.get('util') and r['name'] != '<anonymous>']
 if private:
     print(f"  single-use helpers alongside their only caller: {len(private)}")
 

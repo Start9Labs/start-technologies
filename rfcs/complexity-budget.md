@@ -267,11 +267,32 @@ lowers cognitive and adds a function exactly as a bad split does. It is deleted.
 
 What separates them is not the call count but **where the callers are**. The census marks a
 function shared when anything outside its own file calls it; repo-wide that is 76% of named
-functions, against 9% single-use beside their only caller. So the report credits what lands in
-`shared-libs` and is called from elsewhere, counts private single-use helpers without demanding
-a defence of each, and asks no question about either. The question that does survive —
-which existing helper you checked before adding a new one — pushes toward reuse rather than away
-from it.
+functions, against 9% single-use beside their only caller. So the report counts private
+single-use helpers without demanding a defence of each, and asks no question about either.
+
+**Credit attaches to reuse, never to creation.** Rewarding a new utility rewards writing a
+second one instead of finding the first, so a function earns its line in the report only once
+**two or more distinct subsystems** call it — a subsystem being a product or crate plus its
+first module segment. Of the 1,208 functions in util modules today, 59% clear that bar and the
+rest sit neutral. A utility written this week is not praised for existing; it is praised when
+the second caller arrives, which is the moment its generality stops being a claim.
+
+**Util-module complexity is reported apart, not zeroed.** Those two goals — don't tax utilities,
+don't reward duplicates — pull against each other, and making util complexity free is what
+resolves them the wrong way: it turns the util module into free parking for exactly the
+near-duplicate the rule was meant to discourage. Measured against a tree already holding a
+generic `retry_with_backoff`, a second product writing its own copy costs **+4 cognitive**
+whether that copy lands beside its caller or inside the util module, while calling the existing
+one costs **0**. Reuse is strictly cheaper than duplication wherever the duplicate is parked,
+and that property comes from counting util complexity rather than exempting it. The report
+separates the figure so an author can see it; nothing gates on it.
+
+**Nothing mechanical catches a re-implemented utility.** A copy-pasted one is findable — `jscpd`
+flags a renamed copy at 45% duplicated lines — but the same helper written afresh with a
+different signature registers zero clones, because the duplication is semantic. The lever that
+actually addresses it is the surviving rubric question, which existing helper you checked before
+adding a new one, named by file. That question is in the gate precisely because no measurement
+replaces it.
 
 27% of merged PR bodies already volunteer a rejected alternative, so the hardest of the three
 is culturally native here rather than an imposition.
