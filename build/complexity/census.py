@@ -74,20 +74,30 @@ def sources(root, scopes):
                     continue
                 yield p, rel
 
-def collect(node, rel, out):
-    if node.get('kind') == 'function':
-        m = node.get('metrics', {})
-        cog = m.get('cognitive', {}).get('sum')
+def own(node, metric):
+    """A space's own score. The parser's `sum` folds in every nested space."""
+    total = node.get('metrics', {}).get(metric, {}).get('sum')
+    if total is None:
+        return None
+    nested = sum((c.get('metrics', {}).get(metric, {}).get('sum') or 0)
+                 for c in node.get('spaces', []))
+    return max(0, int(total - nested))
+
+
+def collect(node, rel, out, is_root=True):
+    # The outermost space is the file, not a function.
+    if node.get('kind') == 'function' and not is_root:
+        cog = own(node, 'cognitive')
         if cog is not None:
             name = node.get('name') or ''
             if not name or os.sep in name:
                 name = '<anonymous>'
             out.append({'file': rel, 'name': name,
-                        'line': node.get('start_line'), 'cognitive': int(cog),
-                        'cyclomatic': int(m.get('cyclomatic', {}).get('sum') or 0),
-                        'sloc': int(m.get('loc', {}).get('sloc') or 0)})
+                        'line': node.get('start_line'), 'cognitive': cog,
+                        'cyclomatic': own(node, 'cyclomatic') or 0,
+                        'sloc': int(node.get('metrics', {}).get('loc', {}).get('sloc') or 0)})
     for c in node.get('spaces', []):
-        collect(c, rel, out)
+        collect(c, rel, out, False)
 
 def error_ratio(rca, path):
     """Share of AST nodes tree-sitter could not parse."""

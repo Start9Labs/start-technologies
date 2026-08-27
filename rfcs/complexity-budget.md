@@ -81,63 +81,70 @@ in the other direction — it measures macro-_expanded_ HIR, so with 2,871 `t!()
 sites its ranking tracks i18n density rather than code, correlating with a real cognitive
 metric at Spearman 0.435 and sharing 9 of its top 50.
 
-## Why not SonarQube
+## Why not an off-the-shelf tool
 
-SonarQube is the obvious off-the-shelf answer and this RFC should have opened with it. Sonar
-defined cognitive complexity; `rust-code-analysis` implements their published spec, so the
-metric here is theirs either way — a sequence of like operators costs 1 rather than 1 per
-operator, verified against this build (a mixed sequence diverges: 3 where the spec says 2).
+Mostly we should, and this RFC should have opened with that. Sonar defined cognitive
+complexity, and the metric here is theirs: verified against this build, a sequence of like
+operators costs 1 rather than 1 per operator, which is their distinctive rule.
 
-What Sonar would give us, free: **SonarQube Cloud is free for public repositories**, and this
-repo is one. Rust and TypeScript are both supported, it computes cognitive and cyclomatic
-itself rather than only importing Clippy, and it adds duplication, a quality gate scoped to new
-code, and inline pull-request decoration. That is the whole measure-and-track half, maintained
-by the people who invented the metric, and it is strictly better than a local census for that
-job.
+**SonarQube is the wrong shape, though, and not because of the metric.** Complexity is a pure
+function of the tree — it needs no server. Sonar runs one because it is a platform: history,
+dashboard, quality profiles, PR decoration by webhook. The analysis itself already happens on
+the runner. And the free self-hosted tier, Community Build, analyzes the **main branch only** —
+no branch or pull-request analysis, no decoration — so self-hosting buys post-merge tracking and
+no pre-merge gate. The tier that gates is the hosted one. Paying a SaaS to compute a number we
+can compute in a second locally is the wrong trade for this repo.
 
-Three things decide whether it replaces this:
+**For TypeScript, Sonar's own implementation runs locally.** `eslint-plugin-sonarjs` is
+SonarSource's ESLint plugin from their SonarJS repository, and `sonarjs/cognitive-complexity` is
+the reference implementation of the metric. Measured here: 457 files in **1.4 s**, no server, no
+`tsconfig`, no type information. It ranks this repo's TypeScript at Spearman **0.954** against
+the census below and reports totals **27% lower**. Where the reference implementation runs
+locally, use it — the TypeScript half of any gate should be this plugin, not a third-party
+reimplementation.
 
-- **Self-hosting does not get you the gate.** SonarQube Community Build analyzes the main
-  branch only — no branch or pull-request analysis, no decoration. Free and self-hosted gives
-  post-merge tracking; pre-merge confrontation exists only in the cloud tier. Whether a SaaS
-  belongs in the development loop of a self-sovereignty company is a question for the team,
-  not a technical one.
-- **Inline tests are unmeasured.** Sonar identifies test code by path, and this repo keeps
-  1,150 `#[test]` functions inline against 6,249 lines in dedicated test files. If the Rust
-  analyzer counts `#[cfg(test)]` items, a PR that adds tests reads as one that adds complexity.
-  The documentation does not say either way. This is answerable in an afternoon against a
-  throwaway project and has not been answered here.
-- **A quality gate is not a justification.** Sonar reports; it does not make an author state
-  the number and defend it, and the questions in the protocol below are not a Sonar feature.
+**For Rust there is no local Sonar implementation**, and that is the whole reason anything is
+vendored here. Of what exists: Clippy is official and local but its `cognitive_complexity`
+measures macro-_expanded_ HIR, so against this repo's 2,871 `t!()` sites it ranks by i18n
+density (Spearman 0.435, 9 of 50 top-50 shared); lizard's Rust reader never counts match arms
+while counting every `?` and `where`; `scc` and `tokei` are per-file or have no complexity
+metric at all. `rust-code-analysis` is Mozilla's, tree-sitter based, peer-reviewed in SoftwareX,
+and the only local tool that computes cognitive complexity for Rust — with the caveat that its
+last release is January 2023.
 
-The honest reading: if Sonar handles `#[cfg(test)]` and ranks this repo sensibly, the census in
-this PR should be deleted and only the protocol kept. That test comes first.
+**Comparing the two implementations found a bug in this one.** Reading `cognitive.sum` per
+space counts the file-level container as a function and folds every nested closure into its
+parent. Agreement with the reference implementation was Spearman 0.822; taking each space's own
+score instead — `sum` minus its children — moves it to **0.954** and drops the repo total by
+33%. `list_conffiles` now scores 70, matching an independent measurement of the same function.
+That is the argument for the vetted tool, made concrete: a reimplementation is wrong in ways you
+only find by diffing it against the reference.
 
-## Baseline
+## Baseline## Baseline
 
-| scope | functions | total cognitive | p90 | p99 | max |    over 25 |
-| ----- | --------: | --------------: | --: | --: | --: | ---------: |
-| Rust  |    11,687 |          20,685 |   5 |  26 | 165 | 125 (1.1%) |
-| TS    |     5,169 |           8,820 |   4 |  22 | 152 |  33 (0.6%) |
+| scope | functions | total cognitive | p95 | p99 | max |   over 25 |
+| ----- | --------: | --------------: | --: | --: | --: | --------: |
+| Rust  |    11,686 |          16,210 |   7 |  23 | 150 | 88 (0.8%) |
+| TS    |     5,166 |           5,926 |   6 |  14 |  72 | 15 (0.3%) |
 
-`> 25` is the actionable line: about 1% of functions, 158 repo-wide.
+`> 25` is the actionable line: under 1% of functions, 103 repo-wide.
 
 Worst ten, which is the standing pay-down list:
 
 ```
-165  update                 shared-libs/crates/start-core/src/net/net_controller.rs:358
-157  add_public_domain      shared-libs/crates/start-core/src/net/host/address.rs:388
-157  <anonymous>            shared-libs/crates/start-core/src/net/host/address.rs:404
-152  <anonymous>            shared-libs/ts-modules/start-core/lib/exver/index.ts:207
-145  <anonymous>            shared-libs/crates/start-core/src/net/host/address.rs:472
+150  update                 shared-libs/crates/start-core/src/net/net_controller.rs:358
 144  update_addresses       shared-libs/crates/start-core/src/net/host/mod.rs:141
 135  update_profile_ips_…   projects/start-wrt/backend/ctrl/src/lan.rs:668
-128  set                    projects/start-wrt/backend/ctrl/src/published_ports.rs:849
-119  ipv6_set               projects/start-wrt/backend/ctrl/src/lan.rs:395
- 97  cmp                    shared-libs/crates/jsonpath/src/select/expr_term.rs:21
+125  <anonymous>            shared-libs/crates/start-core/src/net/host/address.rs:472
+118  ipv6_set               projects/start-wrt/backend/ctrl/src/lan.rs:395
+ 98  set                    projects/start-wrt/backend/ctrl/src/published_ports.rs:849
+ 97  rebase                 shared-libs/crates/patch-db/core/src/patch.rs:105
+ 80  up                     shared-libs/crates/start-core/src/version/v0_4_0_alpha_20.rs:37
+ 72  <anonymous>            projects/start-sdk/lib/version/VersionGraph.ts:98
+ 70  list_conffiles         projects/start-wrt/backend/ctrl/src/setup.rs:249
 ```
 
-`net/host/address.rs` holds three of the top five — one function and two closures inside it.
+The closure at `net/host/address.rs:472` outranks every named function but four.
 
 ## The tooling
 
