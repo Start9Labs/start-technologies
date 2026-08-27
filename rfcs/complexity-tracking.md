@@ -220,11 +220,10 @@ of them is that they look.
 function it pushed higher, every one it simplified, what it added to a util module, and which
 utilities a second subsystem now depends on. It is a mirror, not a score.
 
-An unexpected rise is a **symptom**. It usually means one of a small number of things — a
-function grew a branch it did not need, a helper was shredded rather than extracted, a special
-case was threaded through a call chain instead of handled at the edge — and the per-function
-lines are there so the author can tell which. The right response to a symptom is to look, and
-then either fix the mess or explain why the number is wrong about it.
+An unexpected rise is a **symptom**. It is usually a condition that did not need adding, one
+clear function chopped into worse ones, or a special case passed down through layers that should
+have handled it at the top — and the per-function lines are there so the author can tell which.
+The right response is to look, then either fix the mess or explain why the number is wrong.
 
 **A rise that the author stands behind should be defensible, and the report is built to let it
 be defended.** Complexity that is intrinsic to a requirement is still complexity: a protocol
