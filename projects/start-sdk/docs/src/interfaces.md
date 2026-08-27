@@ -167,6 +167,48 @@ The key steps are:
 2. Create one or more interfaces using `sdk.createInterface()`
 3. Export the interfaces from the origin and return the receipt(s)
 
+## Conditional exports
+
+A `setupInterfaces` handler is not additive. It runs your body, then revokes everything the body did **not** export on that pass — `clearBindings({ except })` followed by `clearServiceInterfaces({ except })`. Re-exporting an interface with the same id is an in-place update with no gap, but an id you skip is removed.
+
+That makes a conditional export a live piece of state, not a one-time decision, because the handler re-runs on every change to anything it `.const()`s:
+
+```typescript
+// the interface disappears whenever this file does
+const rune = await FileHelper.string(runePath).read().const(effects)
+if (rune) {
+  receipts.push(
+    await origin.export([
+      sdk.createInterface(effects, {
+        /* … query: { rune } */
+      }),
+    ]),
+  )
+}
+```
+
+If that file is deleted and rewritten — a credential rotation, an action that mints a replacement — the interface is revoked for as long as the gap lasts. Anything reactive downstream sees it vanish and then reappear: your own init handlers, and dependents in other packages, which read your interfaces across the package boundary.
+
+Two rules follow.
+
+**Gate on the narrowest thing.** An early return at the top of the handler (`if (!conf) return []`) revokes _every_ interface on the host, including ones that never read `conf`. Put the guard on the exports that actually need the value.
+
+**Watch for a replacement, not for the gap.** Where the export depends on a file that is deleted before it is rewritten, pass an equality that treats an absent value as unchanged, so the deletion does not re-run the handler at all:
+
+```typescript
+const rune = await FileHelper.string(runePath)
+  .read(
+    v => v,
+    (prev, next) => next === null || prev === next,
+  )
+  .const(effects)
+```
+
+The handler then re-runs when the new value lands, updating the interface in place, and never for the moment in between. A first run still sees `null` and correctly exports nothing.
+
+> [!WARNING]
+> Reading another package's interface has the same hazard from the other side. `sdk.host.get(…)` mapped through `host.bindings[…].interfaces[…]` with a `?? null` fallback cannot tell "not exported right now" from "gone", and a `.const()` on it in `main` restarts your service when the dependency rotates a credential. Take an address from `sdk.host.getBridgeAddress`, which resolves off the binding and works with no exported interface at all; only where you need something the interface alone publishes — a scheme, or a credential in its `suffix` — read the interface, and pass the same null-tolerant equality.
+
 ## bindPort Options
 
 | Option                          | Type                                                  | Description                                                                                                                                                                                                                 |
@@ -352,20 +394,23 @@ Otherwise prefer `addSsl`. Passthrough gives up everything the proxy does on you
 - `sdk.getContainerIp` — the container itself
 - **every address the interface is published at** — LAN IPs, the server's `.local` name, private and public domains, and any onion a plugin has exported
 
-Those three constants are the internal half, and naming only them is the mistake to avoid: an off-box client dialing the LAN address or the `.local` name gets a certificate matching none of them. Take the external half from the interface itself, so it follows the addresses the operator adds and removes:
+Those three constants are the internal half, and naming only them is the mistake to avoid: an off-box client dialing the LAN address or the `.local` name gets a certificate matching none of them. Take the external half from the **binding**, so it follows the addresses the operator adds and removes:
 
 ```typescript
 export const setupCerts = sdk.setupOnInit(async effects => {
   const served = await sdk.host
-    .getOwn(effects, 'grpc', host => {
-      const iface =
-        host &&
-        Object.values(host.bindings)
-          .flatMap(b => Object.values(b.interfaces))
-          .find(i => i.id === 'grpc')
-      // everything except the WAN IPv4, which getSslCertificate refuses to sign
-      return iface ? iface.addressInfo.matchesAny([{ visibility: 'private' }, { exclude: { kind: 'ipv4' } }]).hostnames.map(h => h.hostname) : []
-    })
+    .getOwn(effects, 'grpc', host =>
+      host
+        ? utils
+            .filledAddress(host, { hostId: 'grpc', internalPort: 10009, username: null, scheme: null, sslScheme: null, suffix: '' })
+            // everything except the WAN IPv4, which the box does not hold
+            .matchesAny([{ visibility: 'private' }, { exclude: { kind: 'ipv4' } }])
+            // nothing dials loopback or link-local; 127.0.0.1 is added below
+            .filter({ exclude: { kind: ['localhost', 'link-local'] } })
+            .hostnames.map(h => h.hostname)
+            .sort()
+        : [],
+    )
     .const()
 
   const hostnames = [await sdk.getContainerIp(effects).const(), '127.0.0.1', await sdk.getOsIp(effects), ...served]
@@ -376,11 +421,17 @@ export const setupCerts = sdk.setupOnInit(async effects => {
 })
 ```
 
-`getSslCertificate` signs a LAN address and rejects a routable one, so a WAN IPv4 in the list fails the whole call. See [Narrowing the set](main.md#narrowing-the-set) for why that exclusion is a union rather than a two-field `exclude`.
+**Read the addresses off the binding, never off an exported interface.** They belong to the binding: `utils.filledAddress` looks the binding up by `internalPort` and derives the hostnames from it, and the `AddressInfo` you pass supplies nothing else unless you call `toUrl`/`format`. An interface is a _view_ of that list, and it disappears whenever a `setupInterfaces` pass does not export it — a handler that skips an export while a credential file is missing, or returns early when a config reads as null, revokes it (see [Conditional exports](#conditional-exports)). Walking `host.bindings[…].interfaces[…]` and falling back to `[]` therefore turns "I cannot see the interface right now" into "this host has no addresses", which silently narrows the certificate.
+
+That distinction has teeth here, because reissuing the certificate restarts the service. `lnd` shipped exactly this: a macaroon rotation deleted the file its `setInterfaces` watched, the gRPC interface came down for a few seconds, the SAN set collapsed, the daemon restarted — and the restart re-armed the rotation, so it never stopped.
+
+`getSslCertificate` signs an IP the **box itself holds** — one in the container bridge subnet, or an address on one of the server's own gateways. A WAN IPv4 fails the whole call because that address belongs to the router, not to you; an IPv6 GUA is configured on the box and is signed. See [Narrowing the set](main.md#narrowing-the-set) for why that exclusion is a union rather than a two-field `exclude`.
+
+Sort the list. The OS returns a `BTreeSet`, so its order is already deterministic — sorting is what keeps it that way if you map or concatenate it, since `.const()` compares with deep equality and a reordered array reads as a change.
 
 Read the container IP with `.const()` rather than `.once()`: a container that comes back on a new IP must reissue the certificate, or every client dialing the old one fails verification.
 
-Most daemons read their TLS pair once at startup, so reissuing the file is only half the job — something has to restart the service, or it keeps serving the old certificate against the new address set.
+Most daemons read their TLS pair once at startup, so reissuing the file is only half the job — something has to restart the service, or it keeps serving the old certificate against the new address set. Whatever you key that restart on must not blink: a value that momentarily reads empty will restart the daemon for nothing, and if the restart can feed back into the value, it will not converge.
 
 > [!WARNING]
 > Do **not** add a `<package-id>.startos` DNS name to the SANs. That overlay DNS is deprecated and slated for removal, and it resolves to the container IP rather than the bridge — so it bypasses the platform entirely. Dependents reach you through the bridge; see [Service-to-Service Networking](service-to-service.md).
