@@ -1,7 +1,6 @@
 #!/bin/bash
-# Cognitive-complexity census. `census` prints the totals and the worst 25; `diff <base>`
-# prints this branch's delta against its merge-base; `check <body-file> <base>` fails when
-# a PR body's block is absent, unanswered, or disagrees with a fresh run.
+# Cognitive-complexity census. `census` prints the totals and the worst 25; `top` the worst N;
+# `diff <base>` what this branch did to them. Nothing here exits non-zero on a number.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 export BCA="${BCA:-$HERE/bin/bca}"
@@ -20,11 +19,5 @@ case "${1:-census}" in
     python3 "$HERE/census.py" --root .      --json > "$tmp/.head.json"
     python3 "$HERE/delta.py" "$tmp/.base.json" "$tmp/.head.json" "$mb"
     ;;
-  check)
-    body="$2"; base="${3:-origin/master}"
-    fresh="$(mktemp)"; trap 'rm -f "$fresh"' EXIT
-    "$0" diff "$base" > "$fresh"
-    python3 "$HERE/check.py" "$body" "$fresh"
-    ;;
-  *) echo "usage: census.sh {census|top [n]|diff <base>|check <body> <base>}" >&2; exit 2 ;;
+  *) echo "usage: census.sh {census|top [n]|diff <base>}" >&2; exit 2 ;;
 esac

@@ -44,7 +44,8 @@ if gone:
 
 # A helper whose only caller shares its file is the shape a shredded function takes.
 # One that anything else calls is a shared utility, and is not the target here.
-# A utility earns credit when a subsystem adopts it, not when it is written.
+# Adoption is the counterweight to a rising number: complexity that moved into a
+# shared helper a second subsystem now calls reads differently from complexity added.
 adopted = []
 for k, r in H.items():
     before = set((B[k].get('scopes') or []) if k in B else ())

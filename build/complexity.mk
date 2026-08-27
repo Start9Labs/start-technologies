@@ -2,7 +2,7 @@
 COMPLEXITY := ./build/complexity/census.sh
 BASE ?= origin/master
 
-.PHONY: complexity complexity-top complexity-diff complexity-check
+.PHONY: complexity complexity-top complexity-diff complexity-record
 
 # Totals plus the worst 25 functions in the tree.
 complexity:
@@ -16,6 +16,6 @@ complexity-top:
 complexity-diff:
 	@$(COMPLEXITY) diff $(BASE)
 
-# Fail when a PR body's pasted block is missing, unanswered, or stale.
-complexity-check:
-	@$(COMPLEXITY) check "$(PR_BODY_FILE)" $(BASE)
+# Appends one row for HEAD to the log. Master CI runs this; a PR never writes it.
+complexity-record:
+	@./build/complexity/record.sh $(LOG)
