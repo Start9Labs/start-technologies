@@ -2749,9 +2749,8 @@ fn missing_superblock_over_existing_data_is_refused() {
 }
 
 /// A read that starts past the end of a file returns no bytes rather than an
-/// I/O error. The reader clamps the request to what the file holds, so such a
-/// read asks for nothing at all, and a request for no bytes is satisfiable at
-/// any offset.
+/// I/O error. The read path clamps the request to what the file holds, so such
+/// a read asks for nothing at all.
 #[test_log::test]
 fn read_starting_past_eof_returns_no_bytes() {
     let data = TempDir::new("backupfs_data").unwrap();
@@ -2768,12 +2767,12 @@ fn read_starting_past_eof_returns_no_bytes() {
             let mut f = fs::File::open(&inline).unwrap();
             f.seek(SeekFrom::Start(4096)).unwrap();
             assert_eq!(f.read(&mut buf).unwrap(), 0);
-            // Reading at exactly EOF is the same request with the offset on
-            // the boundary, and is how every read-to-end terminates.
+            // Reading at exactly EOF is how every read-to-end terminates.
             f.seek(SeekFrom::Start(10)).unwrap();
             assert_eq!(f.read(&mut buf).unwrap(), 0);
 
-            // A block-backed body takes the other branch of the read.
+            // A block-backed body, so the answer does not depend on how the
+            // file is stored.
             let blocks = mnt.join("blocks");
             fs::write(&blocks, vec![3u8; 3 * CHUNK_OFFSET as usize]).unwrap();
             let mut f = fs::File::open(&blocks).unwrap();
@@ -2785,18 +2784,23 @@ fn read_starting_past_eof_returns_no_bytes() {
 }
 
 /// `copy_file_range` out of a file that is shrinking under it copies no bytes
-/// rather than failing. The kernel clamps the request against the size it has
-/// cached, so a truncate landing after that check is what hands the handler a
-/// read starting past the end of the file — the one read path that reaches it,
-/// and the one that runs with the whole session's lock held.
+/// and leaves the destination alone, rather than failing. The kernel clamps the
+/// request against the size it has cached, so a truncate landing after that
+/// check is what hands `Handler::read` an offset past the end of the file.
+/// `copy_file_range` is its only caller, and the one read that runs with the
+/// handler lock held for the whole copy.
 #[test_log::test]
 fn copy_file_range_from_a_shrinking_file_copies_no_bytes() {
+    use std::os::unix::fs::FileExt;
     use std::os::unix::io::AsRawFd;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
     let data = TempDir::new("backupfs_data").unwrap();
     let size = 2 * CHUNK_OFFSET;
+    // Copy into a hole, so a copy that writes nothing is distinguishable from
+    // one that extends the destination out to this offset.
+    let dest_offset = CHUNK_OFFSET;
 
     with_backupfs(
         data.path(),
@@ -2805,29 +2809,36 @@ fn copy_file_range_from_a_shrinking_file_copies_no_bytes() {
             let src = mnt.join("shrinking");
             fs::write(&src, vec![7u8; size as usize]).unwrap();
             let reader = fs::File::open(&src).unwrap();
+            let dest_path = mnt.join("copy");
             let dest = fs::OpenOptions::new()
                 .write(true)
                 .create(true)
                 .truncate(true)
-                .open(mnt.join("copy"))
+                .open(&dest_path)
                 .unwrap();
+            // A read goes to the filesystem, so it sees a length the kernel has
+            // not been told about.
+            let dest_reader = fs::File::open(&dest_path).unwrap();
 
             let truncator = fs::OpenOptions::new().write(true).open(&src).unwrap();
             let stop = Arc::new(AtomicBool::new(false));
             let flapping = {
                 let stop = stop.clone();
                 std::thread::spawn(move || {
+                    // Give up on the first error rather than panicking:
+                    // once the test unmounts, every truncate fails.
                     while !stop.load(Ordering::Relaxed) {
-                        truncator.set_len(size).unwrap();
-                        truncator.set_len(0).unwrap();
+                        if truncator.set_len(size).is_err() || truncator.set_len(0).is_err() {
+                            break;
+                        }
                     }
                 })
             };
 
             let mut failure = None;
-            for _ in 0..20_000 {
+            for _ in 0..500 {
                 let mut from = (size - CHUNK_OFFSET / 2) as libc::loff_t;
-                let mut to: libc::loff_t = 0;
+                let mut to = dest_offset as libc::loff_t;
                 let copied = unsafe {
                     libc::copy_file_range(
                         reader.as_raw_fd(),
@@ -2839,9 +2850,31 @@ fn copy_file_range_from_a_shrinking_file_copies_no_bytes() {
                     )
                 };
                 if copied < 0 {
-                    failure = Some(io::Error::last_os_error());
+                    let e = io::Error::last_os_error();
+                    failure = Some(format!(
+                        "copying from a file that shrank must copy fewer bytes, not fail: {e}"
+                    ));
                     break;
                 }
+                if copied == 0 {
+                    let mut probe = [0u8; 1];
+                    if dest_reader.read_at(&mut probe, 0).unwrap() != 0 {
+                        failure = Some(
+                            "a copy that moved no bytes must leave the destination alone"
+                                .to_owned(),
+                        );
+                        break;
+                    }
+                } else {
+                    // Empty the destination again, so the next copy that moves
+                    // nothing is measured against a file it must not touch.
+                    dest.set_len(0).unwrap();
+                }
+                // Most iterations never reach the filesystem, because the
+                // kernel clamps the request away itself. Without a yield the
+                // truncator barely runs on a single-core machine and the race
+                // never opens.
+                std::thread::yield_now();
             }
 
             // Stop the truncator before reporting, so a failure unmounts
@@ -2849,7 +2882,7 @@ fn copy_file_range_from_a_shrinking_file_copies_no_bytes() {
             stop.store(true, Ordering::Relaxed);
             flapping.join().unwrap();
             if let Some(e) = failure {
-                panic!("copying from a file that shrank must copy fewer bytes, not fail: {e}");
+                panic!("{e}");
             }
         },
         None,

@@ -95,10 +95,9 @@ file tracks notable changes since the move to the monorepo.
   shrinking, no longer fails its backup.** Inside a backup or restore, a
   program reading from an offset its file no longer reaches — seeking beyond
   the end, or copying from a file that another part of the program is
-  truncating — got an I/O error where the read should simply come back empty.
-  Copying that way could additionally leave the whole backup filesystem
-  unresponsive, so the operation hung rather than finishing. Such a read now
-  returns no bytes, as it does on any other filesystem.
+  truncating — got an I/O error where the read should come back empty. Such a
+  read now returns no bytes, as it does on any other filesystem, and a copy
+  that moves no bytes leaves the destination file alone.
 
 - **Helper processes a service starts are cleared away once they finish.** A
   service that shells out to other programs — a media downloader calling
