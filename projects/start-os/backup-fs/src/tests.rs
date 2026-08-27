@@ -1580,7 +1580,7 @@ fn incremental_overwrite_touches_one_block() {
     );
 }
 
-const CHUNK_OFFSET: u64 = 1024 * 1024; // one CHUNK_SIZE
+const CHUNK_OFFSET: u64 = crate::blockstore::CHUNK_SIZE;
 
 /// A sparse file (size set, middle written) stores only the touched
 /// blocks: holes occupy no block files on disk and read back as zeros.
@@ -2748,8 +2748,7 @@ fn missing_superblock_over_existing_data_is_refused() {
     assert!(!data.path().join("superblock").exists());
 }
 
-/// A read that starts past the end of a file returns no bytes rather than an
-/// I/O error. The read path clamps such a request to nothing.
+/// Both storage tiers clamp a read that starts past the end.
 #[test_log::test]
 fn read_starting_past_eof_returns_no_bytes() {
     let data = TempDir::new("backupfs_data").unwrap();
@@ -2760,13 +2759,13 @@ fn read_starting_past_eof_returns_no_bytes() {
         |mnt| {
             let mut buf = [0u8; 16];
 
-            // An inline body: the whole file lives in the inode record.
+            // Ten bytes stay in the inline tier.
             let inline = mnt.join("inline");
             fs::write(&inline, b"0123456789").unwrap();
             let mut f = fs::File::open(&inline).unwrap();
             f.seek(SeekFrom::Start(4096)).unwrap();
             assert_eq!(f.read(&mut buf).unwrap(), 0);
-            // Reading at exactly EOF is how every read-to-end terminates.
+            // Offset ten is exactly the end of this file.
             f.seek(SeekFrom::Start(10)).unwrap();
             assert_eq!(f.read(&mut buf).unwrap(), 0);
 
@@ -2781,8 +2780,6 @@ fn read_starting_past_eof_returns_no_bytes() {
     );
 }
 
-/// `copy_file_range` copies a multi-chunk range, and every byte lands at the
-/// offset the caller asked for.
 #[test_log::test]
 fn copy_file_range_spanning_chunks_lands_at_the_right_offsets() {
     use std::os::unix::fs::FileExt;
@@ -2821,7 +2818,10 @@ fn copy_file_range_spanning_chunks_lands_at_the_right_offsets() {
                     0,
                 )
             };
-            assert_eq!(copied, size as isize, "{}", io::Error::last_os_error());
+            if copied < 0 {
+                panic!("copy_file_range failed: {}", io::Error::last_os_error());
+            }
+            assert_eq!(copied, size as isize, "copied {copied} of {size} bytes");
 
             let dest_reader = fs::File::open(&dest_path).unwrap();
             assert_eq!(
@@ -2831,7 +2831,6 @@ fn copy_file_range_spanning_chunks_lands_at_the_right_offsets() {
             let mut got = vec![0u8; size];
             dest_reader.read_exact_at(&mut got, dest_offset).unwrap();
             assert!(got == src_bytes, "the copy landed at the wrong offset");
-            // The bytes before the copy are a hole, not source data.
             let mut head = vec![0u8; dest_offset as usize];
             dest_reader.read_exact_at(&mut head, 0).unwrap();
             assert!(head.iter().all(|b| *b == 0), "the hole was overwritten");
@@ -2840,9 +2839,8 @@ fn copy_file_range_spanning_chunks_lands_at_the_right_offsets() {
     );
 }
 
-/// `copy_file_range` out of a shrinking file copies no bytes and leaves the
-/// destination alone. Only a truncate landing between the kernel's size check
-/// and the read reaches that path, which this test opens opportunistically.
+/// Only a truncate landing between the kernel's size check and the read
+/// reaches this path, so the test opens the window opportunistically.
 #[test_log::test]
 fn copy_file_range_from_a_shrinking_file_copies_no_bytes() {
     use std::os::unix::fs::FileExt;
@@ -2875,12 +2873,12 @@ fn copy_file_range_from_a_shrinking_file_copies_no_bytes() {
             let stop = Arc::new(AtomicBool::new(false));
             let flapping = {
                 let stop = stop.clone();
-                std::thread::spawn(move || {
+                std::thread::spawn(move || -> io::Result<()> {
                     while !stop.load(Ordering::Relaxed) {
-                        if truncator.set_len(size).is_err() || truncator.set_len(0).is_err() {
-                            break;
-                        }
+                        truncator.set_len(size)?;
+                        truncator.set_len(0)?;
                     }
+                    Ok(())
                 })
             };
 
@@ -2940,16 +2938,44 @@ fn copy_file_range_from_a_shrinking_file_copies_no_bytes() {
             // Reporting while the truncator runs races teardown against a
             // live writer.
             stop.store(true, Ordering::Relaxed);
-            flapping.join().unwrap();
+            let flapped = flapping.join().unwrap();
             if let Some(e) = failure {
                 panic!("{e}");
             }
-            assert!(
-                copies_that_moved_bytes > 0,
-                "every copy was answered from the kernel's cached size, so the \
-                 filesystem never ran one"
-            );
+            flapped.expect("the truncator failed, so the source never shrank");
+            assert!(copies_that_moved_bytes > 0, "no copy moved any bytes");
         },
         None,
     );
+}
+
+/// The kernel issues no zero-length request, so these guards are reachable
+/// only by driving `Contents` directly.
+#[test_log::test]
+fn empty_reads_and_writes_leave_a_file_untouched() {
+    let data = TempDir::new("backupfs_data").unwrap();
+    let ino = capture(data.path(), "ohea", |mnt| {
+        fs::write(mnt.join("f.bin"), b"0123456789").unwrap();
+        fs::metadata(mnt.join("f.bin")).unwrap().ino()
+    });
+
+    let ctrl = Controller::new(opts(data.path(), "ohea")).unwrap();
+    let mut handler = crate::handle::Handler::new(ctrl);
+    let fh = handler
+        .fopen(Inode(ino), true, true, |_, _| Ok(()))
+        .unwrap();
+    let contents = handler.handle(fh).unwrap().contents.clone();
+    let mut c = contents.lock().unwrap();
+
+    let (mtime, atime) = (c.inode.attrs.mtime, c.inode.attrs.atime);
+    c.read_exact_at(&mut [], 4096).unwrap();
+    c.write_all_at(&[], 4096).unwrap();
+
+    assert_eq!(c.inode.attrs.size, 10, "an empty write extended the file");
+    assert_eq!(c.inode.attrs.mtime, mtime, "an empty write stamped mtime");
+    assert_eq!(c.inode.attrs.atime, atime, "an empty read stamped atime");
+
+    drop(c);
+    drop(contents);
+    handler.fclose(fh).unwrap();
 }

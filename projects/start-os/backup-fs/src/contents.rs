@@ -188,7 +188,7 @@ impl Contents {
 
     // ── reads ──────────────────────────────────────────────
 
-    /// The caller must bound `buf` to what the file holds from `offset`.
+    /// A read reaching past the end of the file fails.
     pub fn read_exact_at(&mut self, buf: &mut [u8], offset: u64) -> BkfsResult<()> {
         // A read of no bytes is satisfiable at any offset.
         if buf.is_empty() {
@@ -289,8 +289,6 @@ impl Contents {
             return Ok(());
         }
         let end = offset + buf.len() as u64;
-        // Promote the body to the smallest tier that can hold `end`:
-        // inline (≤ inline_threshold) → packed (≤ one chunk) → blocks.
         self.promote_for(end)?;
 
         if matches!(self.body, Body::Blocks { .. }) {
@@ -320,7 +318,7 @@ impl Contents {
             self.inode.attrs.size = end;
         }
         self.changed = true;
-        self.spill_to_budget()?; // no-op unless Blocks
+        self.spill_to_budget()?;
         Ok(())
     }
 

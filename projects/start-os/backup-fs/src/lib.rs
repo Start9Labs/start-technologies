@@ -458,9 +458,8 @@ impl Filesystem for BackupFS {
             reply.error(errno(libc::EACCES));
             return;
         }
-        // Copy the bytes now (the kernel's buffer is reused after
-        // return) and move ownership into the worker.
-        let mut buf = data.to_vec();
+        // The kernel reuses its buffer once this returns.
+        let buf = data.to_vec();
         let key = handle.inode.0;
         pool::global().submit_for(key, move || {
             let mut contents = handle.contents.lock().unwrap();

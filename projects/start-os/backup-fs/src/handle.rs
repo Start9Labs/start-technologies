@@ -1361,16 +1361,19 @@ impl Handler {
         if flags != 0 {
             return BkfsResult::errno(libc::EINVAL);
         }
-        // An unchunked read holds the whole forwarded copy in memory.
+        // A copy that has already moved bytes reports the count, not the error.
         let mut copied = 0;
         while copied < size {
             let take = min(size - copied, CHUNK_SIZE as usize);
             let at = copied as u64;
-            let bytes = self.read(req, src_inode, src_fh, src_offset + at, take, 0, None)?;
+            let bytes = match self.read(req, src_inode, src_fh, src_offset + at, take, 0, None) {
+                Ok(bytes) => bytes,
+                Err(e) => return if copied > 0 { Ok(copied) } else { Err(e) },
+            };
             if bytes.is_empty() {
                 break;
             }
-            let wrote = self.write(
+            match self.write(
                 req,
                 dest_inode,
                 dest_fh,
@@ -1379,11 +1382,10 @@ impl Handler {
                 0,
                 0,
                 None,
-            )?;
-            if wrote == 0 {
-                break;
+            ) {
+                Ok(wrote) => copied += wrote,
+                Err(e) => return if copied > 0 { Ok(copied) } else { Err(e) },
             }
-            copied += wrote;
         }
         Ok(copied)
     }
