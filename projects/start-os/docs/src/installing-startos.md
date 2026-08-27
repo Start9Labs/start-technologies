@@ -15,14 +15,9 @@ This guide is for flashing StartOS to a USB drive, then installing it onto a des
 
     - **Slim (FOSS-only)**: 100% open source, containing **no** proprietary firmware or drivers. Only compatible with certain hardware, such as the Start9 Server Pure.
 
-<<<<<<< HEAD
     An **NVIDIA** variant is also published for x86_64 and aarch64. Choose it only if your server has an NVIDIA GPU you want services to use for computation — it adds NVIDIA's driver and container toolkit on top of the Standard image. It supports GeForce RTX 20-series, Quadro RTX and newer; older cards such as the GeForce GTX 900- and 10-series, or Tesla M40, P40, P100 and V100, are not supported and should use the Standard image.
 
-1.  Verify the SHA256 checksum against the one listed on GitHub (optional but recommended).
-    - **Mac**. Open a terminal and run:
-=======
 ## Verify your download
->>>>>>> 45d049def (docs(start-os): give the download checks a result to read (#3846))
 
 Before you flash it, check that the file on your computer is exactly the file Start9 published — that nothing was damaged on the way down, and nothing was swapped for it. It takes about a minute, and it is worth doing before you erase a drive.
 
@@ -30,7 +25,7 @@ You do not need to understand what any of this means. Follow the three steps and
 
 ### 1. Find your file on the release page
 
-On the [release page](https://github.com/Start9Labs/start-technologies/releases/tag/start-os/v0.4.0.1), scroll down to **OS Images Checksums**, then to the block under **SHA-256**. It holds one line per image: a long code, then the filename it belongs to.
+On the [release page](https://github.com/Start9Labs/start-technologies/releases/tag/start-os/v0.4.0.2), scroll down to **OS Images Checksums**, then to the block under **SHA-256**. It holds one line per image: a long code, then the filename it belongs to.
 
 ```text
 37b63c86197150866809d34b5824ae22c5fc705d4f8dc9e9750b8fa23485441a  startos-0.4.0.1-fdb27c7_x86_64-nonfree.iso
