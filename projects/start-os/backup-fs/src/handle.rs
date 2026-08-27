@@ -1394,9 +1394,9 @@ impl Handler {
         }
         match stopped {
             Some(e) if copied == 0 => Err(e),
-            // A copy that has already moved bytes reports the count.
+            // The caller receives a success and never sees this error.
             Some(e) => {
-                e.log();
+                warn!("copy_file_range stopped after {copied} bytes: {e}");
                 Ok(copied)
             }
             None => Ok(copied),

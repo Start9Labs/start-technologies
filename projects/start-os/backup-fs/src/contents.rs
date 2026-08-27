@@ -190,7 +190,6 @@ impl Contents {
 
     /// A read of one or more bytes must lie within the file.
     pub fn read_exact_at(&mut self, buf: &mut [u8], offset: u64) -> BkfsResult<()> {
-        // A read of no bytes is satisfiable at any offset.
         if buf.is_empty() {
             return Ok(());
         }
@@ -384,6 +383,9 @@ impl Contents {
             cached: None,
         };
         self.inode.attrs.contents = FileData::File(content_id);
+        // The `File` record must reach disk even when the write that
+        // prompted this migration fails.
+        self.changed = true;
         Ok(())
     }
 

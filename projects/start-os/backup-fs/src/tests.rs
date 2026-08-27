@@ -2748,7 +2748,74 @@ fn missing_superblock_over_existing_data_is_refused() {
     assert!(!data.path().join("superblock").exists());
 }
 
-/// A read starting past the end returns no bytes, inline or block-backed.
+/// A copy that fails partway reports the bytes it moved.
+///
+/// A directory standing where the source's second block file belongs makes
+/// that block unreadable, so the copy stops one chunk in.
+#[test_log::test]
+fn copy_file_range_that_fails_partway_reports_the_bytes_it_moved() {
+    use std::os::unix::io::AsRawFd;
+
+    let data = TempDir::new("backupfs_data").unwrap();
+    let size = 3 * CHUNK_OFFSET as usize;
+    let src_bytes: Vec<u8> = (0..size as u64).map(pattern_byte).collect();
+
+    let ino = {
+        let src_bytes = src_bytes.clone();
+        capture(data.path(), "ohea", move |mnt| {
+            fs::write(mnt.join("src"), &src_bytes).unwrap();
+            fs::metadata(mnt.join("src")).unwrap().ino()
+        })
+    };
+    {
+        let ctrl = Controller::new(opts(data.path(), "ohea")).unwrap();
+        let block = ctrl.resolve_block_path(ContentId(ino), 1);
+        fs::remove_file(&block).unwrap();
+        fs::create_dir(&block).unwrap();
+    }
+
+    with_backupfs(
+        data.path(),
+        "ohea".to_owned(),
+        move |mnt| {
+            let src = fs::File::open(mnt.join("src")).unwrap();
+            let dest = fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(mnt.join("dest"))
+                .unwrap();
+            let mut from = 0 as libc::loff_t;
+            let mut to = 0 as libc::loff_t;
+            let copied = unsafe {
+                libc::copy_file_range(
+                    src.as_raw_fd(),
+                    &mut from,
+                    dest.as_raw_fd(),
+                    &mut to,
+                    size,
+                    0,
+                )
+            };
+            assert_eq!(
+                copied,
+                CHUNK_OFFSET as isize,
+                "the copy must report the one chunk it moved: {}",
+                io::Error::last_os_error()
+            );
+            drop(dest);
+            let got = fs::read(mnt.join("dest")).unwrap();
+            assert_eq!(
+                got,
+                src_bytes[..CHUNK_OFFSET as usize],
+                "the reported bytes are not the ones on disk"
+            );
+        },
+        None,
+    );
+}
+
+/// A read starting at or past the end returns no bytes, inline or block-backed.
 #[test_log::test]
 fn read_starting_past_eof_returns_no_bytes() {
     let data = TempDir::new("backupfs_data").unwrap();
@@ -2978,4 +3045,56 @@ fn empty_reads_and_writes_leave_a_file_untouched() {
     drop(c);
     drop(contents);
     handler.fclose(fh).unwrap();
+}
+
+/// A write that fails after a packed→blocks migration leaves the file readable.
+///
+/// The migration drops the superseded packed extent whether or not the write
+/// that prompted it succeeds, so the replacement `File` inode record has to be
+/// persisted either way. Without that the durable inode stays `Packed`,
+/// pointing at an extent that has been tombstoned, and the file reads back as
+/// a hole.
+#[test_log::test]
+fn a_write_that_fails_after_a_tier_migration_leaves_the_file_readable() {
+    let data = TempDir::new("backupfs_data").unwrap();
+
+    // Session 1: a packed file (> inline_threshold, <= pack_max), durable.
+    let small = vec![0xABu8; 200 * 1024];
+    let ino = {
+        let small = small.clone();
+        capture(data.path(), "ohea", move |mnt| {
+            fs::write(mnt.join("m.bin"), &small).unwrap();
+            fs::metadata(mnt.join("m.bin")).unwrap().ino()
+        })
+    };
+
+    // Session 2: overwrite with 2 MiB. That migrates packed→blocks and then
+    // fails reading the second block, whose path a directory now occupies.
+    let big: Vec<u8> = (0..2 * 1024 * 1024u64).map(pattern_byte).collect();
+    {
+        let ctrl = Controller::new(opts(data.path(), "ohea")).unwrap();
+        fs::create_dir_all(ctrl.resolve_block_path(ContentId(ino), 1)).unwrap();
+        let mut handler = crate::handle::Handler::new(ctrl);
+        let fh = handler
+            .fopen(Inode(ino), true, true, |_, _| Ok(()))
+            .unwrap();
+        {
+            // Scoped clone so it is dropped before fclose — otherwise
+            // Arc::try_unwrap in close() would fail and take the fsync path.
+            let c = handler.handle(fh).unwrap().contents.clone();
+            c.lock()
+                .unwrap()
+                .write_all_at(&big, 0)
+                .expect_err("the blocked second block must fail the write");
+        }
+        handler.fclose(fh).unwrap();
+        handler.flush_all_dirty().unwrap();
+    }
+
+    // Session 3: the bytes the failed write did land are still there.
+    let got = capture(data.path(), "ohea", move |mnt| {
+        fs::read(mnt.join("m.bin")).unwrap()
+    });
+    assert_eq!(got.len(), small.len(), "the file changed size");
+    assert_eq!(got, big[..got.len()], "the file reads back as a hole");
 }
