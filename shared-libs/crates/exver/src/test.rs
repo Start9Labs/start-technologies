@@ -189,6 +189,20 @@ proptest! {
     }
 
     #[test]
+    fn release_of_one_agrees_with_satisfies(a in range_gen(), obs in ex_version_gen()) {
+        assert!(a.satisfied_by_release(&[obs.clone()]) == obs.satisfies(&a))
+    }
+
+    #[test]
+    fn release_negation_is_universal(a in range_gen(), x in ex_version_gen(), y in ex_version_gen()) {
+        let versions = [x, y];
+        assert!(
+            VersionRange::not(a.clone()).satisfied_by_release(&versions)
+                == !a.satisfied_by_release(&versions)
+        )
+    }
+
+    #[test]
     fn witness_implies_satisfiable(a in range_gen(), obs in ex_version_gen()) {
         // If a concrete version satisfies the range, the range is satisfiable.
         if obs.satisfies(&a) {
@@ -267,4 +281,39 @@ fn caret() {
 #[test]
 fn deser() {
     let _v: ExtendedVersion = serde_yaml::from_str("---\n0.2.5:0\n").unwrap();
+}
+
+fn release(versions: &[&str]) -> Vec<ExtendedVersion> {
+    versions.iter().map(|v| v.parse().unwrap()).collect()
+}
+
+fn range(r: &str) -> VersionRange {
+    r.parse().unwrap()
+}
+
+#[test]
+fn alias_carries_a_positive_range() {
+    assert!(range("^2.62.2:1").satisfied_by_release(&release(&["#quantum:1.5.2:0", "2.63.23:0"])));
+}
+
+#[test]
+fn alias_does_not_escape_an_excluded_revision() {
+    assert!(!range(">=2.0:0 && !=2.0:5").satisfied_by_release(&release(&["2.0:5", "2.0:4"])));
+}
+
+#[test]
+fn alias_does_not_escape_a_negated_flavor() {
+    assert!(
+        !range("!#knots && >=29.4:0").satisfied_by_release(&release(&["#knots:29.4:5", "29.4:5"]))
+    );
+}
+
+#[test]
+fn exclusion_matching_nothing_the_release_carries_still_passes() {
+    assert!(range("^28.4:21 && !=28.4:22").satisfied_by_release(&release(&["31.1:10", "28.4:21"])));
+}
+
+#[test]
+fn exclusion_ignores_trailing_zeroes() {
+    assert!(!range("!=1.0:0").satisfied_by_release(&release(&["1.0.0:0"])));
 }

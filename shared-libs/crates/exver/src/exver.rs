@@ -605,6 +605,23 @@ impl VersionRange {
     pub fn intersects(&self, other: &Self) -> bool {
         sat::Tables::and(sat::tables_of(self), sat::tables_of(other)).satisfiable()
     }
+
+    /// Whether a release satisfies this range. A release is its own version together with the
+    /// versions it declares in `satisfies`. A negation holds only when none of them matches.
+    ///
+    /// For a single version this agrees with [`ExtendedVersion::satisfies`].
+    pub fn satisfied_by_release(&self, versions: &[ExtendedVersion]) -> bool {
+        use VersionRange::*;
+        match self {
+            And(a, b) => a.satisfied_by_release(versions) && b.satisfied_by_release(versions),
+            Or(a, b) => a.satisfied_by_release(versions) || b.satisfied_by_release(versions),
+            Not(a) => !a.satisfied_by_release(versions),
+            Anchor(op, v) if op == &NEQ => !versions
+                .iter()
+                .any(|version| version.partial_cmp(v) == Some(Ordering::Equal)),
+            _ => versions.iter().any(|version| version.satisfies(self)),
+        }
+    }
 }
 
 mod sat {
