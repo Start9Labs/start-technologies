@@ -95,18 +95,32 @@ no branch or pull-request analysis, no decoration — so self-hosting buys post-
 no pre-merge gate. The tier that gates is the hosted one. Paying a SaaS to compute a number we
 can compute in a second locally is the wrong trade for this repo.
 
-**Sonar's analyzers are not open source, and their licence excludes this use case.** Every
-language analyzer — `SonarJS`, `sonar-rust`, `sonar-python`, `sonar-java`, `sonar-dotnet` — is
-under the Sonar Source-Available License v1, whatever GitHub's "Other" badge implies; only the
-SonarQube platform itself is still LGPL-3.0. SSAL grants rights solely "for any Non-competitive
-Purpose", and that term excludes, verbatim, "(c) employing, using, or engaging artificial
-intelligence technology that is not part of the Program to ingest, interpret, analyze, train on,
-or interact with the data provided by the Program, or to engage with the Program in any manner."
-An agent reading a complexity report is the case this project exists to serve, so the grant does
-not cover it. `eslint-plugin-sonarjs` is the sharp edge: its `package.json` still declares
-`LGPL-3.0-only` while the shipped `LICENSE` and every source header are SSAL v1, so a scanner
-reading package metadata clears it. Sonar's analyzers are usable as a calibration oracle for a
-one-off comparison; they are not usable in this pipeline.
+**Sonar's analyzers are not open source, but their licence does not block this.** Every language
+analyzer — `SonarJS`, `sonar-rust`, `sonar-python`, `sonar-java`, `sonar-dotnet` — is under the
+Sonar Source-Available License v1; only the SonarQube platform is still LGPL-3.0. SSAL grants
+rights solely "for any Non-competitive Purpose", and that term excludes "(c) employing, using, or
+engaging artificial intelligence technology that is not part of the Program to ingest, interpret,
+analyze, train on, or interact with the data provided by the Program". Read bare, that captures an
+agent reading a complexity report.
+
+It is not read bare. SonarSource's own MCP server exists to hand analyzer output to third-party
+LLM agents, ships under byte-identical SSAL v1.0, and carries a sentence its VP Legal added in a
+pull request titled "Clarify SSAL language with regards to MCP usage": "Using the SonarQube MCP
+Server in compliance with this documentation is a Non-Competitive Purpose and so is allowed under
+the SSAL." That is a declaratory construction of a defined term rather than an additional
+permission, and "Non-competitive Purpose" is defined by purpose, not by product, so it reads
+across. The honest caveat is that no analyzer repository carries the same sentence, and the
+licensor's 2024 announcement glosses (c) broadly and has never been retracted — so the narrow
+reading rests on the licensor's later conduct and construction, not on the text.
+
+Two things would change that answer and neither applies here: redistributing anything containing
+an analyzer triggers the source-availability duty in §3.1, and shipping a code-quality product of
+our own would engage (a) and (b) directly.
+
+`eslint-plugin-sonarjs` still carries a metadata defect worth knowing about: `package.json`
+declares `LGPL-3.0-only` while the shipped `LICENSE` and every source header are SSAL v1, so an
+SBOM built from package metadata asserts the wrong licence. We gate Cargo licences with
+`cargo-deny` and gate npm licences not at all.
 
 **For Rust there is no local Sonar implementation**, and that is the whole reason anything is
 vendored here. Of what exists: Clippy is official and local but its `cognitive_complexity`
