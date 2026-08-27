@@ -28,8 +28,8 @@ Zero of 566 merged PR bodies contain the string `complexit`.
 
 ## What gets measured
 
-**Cognitive complexity per function**, via `rust-code-analysis` (tree-sitter, real Rust and
-TypeScript grammars). Not cyclomatic complexity, and the difference is the whole argument.
+**Cognitive complexity per function**, via `bca` (tree-sitter, real Rust and TypeScript
+grammars). Not cyclomatic complexity, and the difference is the whole argument.
 
 Probing both against a synthetic file settles it:
 
@@ -63,14 +63,13 @@ Three deliberate exclusions: inline `#[cfg(test)]` items are stripped before mea
 repo has 1,150 `#[test]` functions and only 6,249 lines in dedicated test files, so a
 path-based rule would fail and a PR adding good tests would read as adding complexity);
 generated trees are skipped (`osBindings`, `locales`, `exver.ts`, `dist`, `target`); and the
-census refuses to report if the parser reads under 98% of files or if over 0.5% of AST nodes
-are parse errors, because grammar rot is otherwise silent.
+census refuses to report when over 0.5% of AST nodes are parse errors, because grammar rot is
+otherwise silent — a file the parser cannot read yields no functions rather than an error.
 
-Today every one of 530 Rust files yields metrics, and 240 of 2,553,851 AST nodes — 0.009% —
-are parse errors. They cluster in six Rust files, on modern trait syntax the pinned grammar
-predates: generic associated types (`type Extended<'ext> where Self: 'ext`) and `impl Trait`
-in argument and return position. That is the shape grammar rot takes, and it is what the
-second guard watches: fifty times the current rate still passes.
+The margin there is large. `bca` finds **1 parse error in 2,681,337 nodes** across this repo.
+The engine it forked finds 240, clustered in six Rust files on generic associated types and
+`impl Trait` in argument position — syntax that postdates its January 2023 grammars. Keeping
+current with the language is most of what the fork buys.
 
 **The parser does not expand macros, and that is a hole.** Wrapping a body in `macro_rules!`
 takes it from cognitive 15 to **0** and cyclomatic 11 to 1 — measured, identical logic. The
@@ -273,9 +272,9 @@ branches were moved, not removed.
 
 Known limits, stated rather than hidden: Angular templates are invisible — 278 components use
 inline `template:` backticks holding 831 control-flow constructs, and those sit inside string
-literals that no per-function metric sees. `rust-code-analysis`'s last release is v0.0.25 from
-January 2023, though its grammar parses 100% of this repo today and the coverage assertion
-above is what catches it if that changes. And the length check on the prose answers catches
+literals that no per-function metric sees. `bca` is four months old and carried by a single
+maintainer, which is the trade for it being maintained at all — its parent's last release is
+January 2023 and Mozilla no longer uses it. And the length check on the prose answers catches
 laziness, not sophistry: an LLM writes a fluent post-hoc justification easily, so do not sell
 the gate as catching bad reasoning. It catches an unexamined change. Only the numbers and the
 call-site count are self-verifying.

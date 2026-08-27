@@ -24,9 +24,11 @@ def spaces(node, root=True):
 
 def census(root, scopes, bca):
     out = tempfile.mkdtemp(prefix='cx-')
-    subprocess.run([bca, 'metrics', '-O', 'json', '--exclude-tests', '--output-dir', out,
-                    *(os.path.join(root, s) for s in scopes)],
-                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    run = subprocess.run([bca, 'metrics', '-O', 'json', '--exclude-tests', '--output-dir', out,
+                          *(os.path.join(root, s) for s in scopes)],
+                         capture_output=True, text=True)
+    if run.returncode != 0:
+        sys.exit(f"complexity: {bca} failed ({run.returncode}): {run.stderr.strip().splitlines()[-1] if run.stderr.strip() else 'no output'}")
     rows = []
     for dirpath, _, names in os.walk(out):
         for name in names:
@@ -74,6 +76,24 @@ def count_callers(rows, root, scopes):
             r['callers'] = max(0, used[r['name']] - defined[r['name']])
 
 
+def assert_parsed(bca, root, scopes, rows):
+    """Grammar rot is silent: a file the parser cannot read yields no functions, not an error."""
+    if not rows:
+        sys.exit('complexity: the census found no functions at all — the analyzer did not run')
+    out = subprocess.run([bca, 'count', '--type', 'ERROR', *(os.path.join(root, s) for s in scopes)],
+                         capture_output=True, text=True).stdout
+    total = found = 0
+    for line in out.splitlines():
+        digits = line.split(':')[-1].strip().replace(',', '')
+        if line.startswith('Total nodes'):
+            total = int(digits or 0)
+        elif line.startswith('Found nodes'):
+            found = int(digits or 0)
+    if total and found / total > 0.005:
+        sys.exit(f"complexity: {found / total:.3%} of AST nodes are parse errors — "
+                 "the grammar has fallen behind the language")
+
+
 def totals(rows):
     return {'functions': len(rows),
             'cognitive': sum(r['cognitive'] for r in rows),
@@ -92,6 +112,7 @@ def main():
     a = ap.parse_args()
     scopes = a.scope or SCOPES
     rows = census(a.root, scopes, a.bca)
+    assert_parsed(a.bca, a.root, scopes, rows)
     if a.json:
         count_callers(rows, a.root, scopes)
         json.dump({'totals': totals(rows), 'functions': rows}, sys.stdout, sort_keys=True)
