@@ -2750,8 +2750,7 @@ fn missing_superblock_over_existing_data_is_refused() {
 
 /// A copy that fails partway reports the bytes it moved.
 ///
-/// A directory standing where the source's second block file belongs makes
-/// that block unreadable, so the copy stops one chunk in.
+/// A directory occupies the source's second block file, so nothing can read it.
 #[test_log::test]
 fn copy_file_range_that_fails_partway_reports_the_bytes_it_moved() {
     use std::os::unix::io::AsRawFd;
@@ -2797,19 +2796,21 @@ fn copy_file_range_that_fails_partway_reports_the_bytes_it_moved() {
                     0,
                 )
             };
+            if copied < 0 {
+                panic!("copy_file_range failed: {}", io::Error::last_os_error());
+            }
             assert_eq!(
-                copied,
-                CHUNK_OFFSET as isize,
-                "the copy must report the one chunk it moved: {}",
-                io::Error::last_os_error()
+                copied, CHUNK_OFFSET as isize,
+                "the copy must report the one chunk it moved, not {copied} bytes"
             );
             drop(dest);
             let got = fs::read(mnt.join("dest")).unwrap();
             assert_eq!(
-                got,
-                src_bytes[..CHUNK_OFFSET as usize],
-                "the reported bytes are not the ones on disk"
+                got.len(),
+                CHUNK_OFFSET as usize,
+                "the destination holds a count the copy did not report"
             );
+            pattern_check(0, &got);
         },
         None,
     );
@@ -2836,11 +2837,14 @@ fn read_starting_past_eof_returns_no_bytes() {
             f.seek(SeekFrom::Start(10)).unwrap();
             assert_eq!(f.read(&mut buf).unwrap(), 0);
 
-            // A block-backed body, over the packed tier's one-chunk maximum.
+            // Three chunks put this body over the packed tier's one-chunk maximum.
             let blocks = mnt.join("blocks");
             fs::write(&blocks, vec![3u8; 3 * CHUNK_OFFSET as usize]).unwrap();
             let mut f = fs::File::open(&blocks).unwrap();
             f.seek(SeekFrom::Start(4 * CHUNK_OFFSET)).unwrap();
+            assert_eq!(f.read(&mut buf).unwrap(), 0);
+            // Three chunks in is exactly the end of this file.
+            f.seek(SeekFrom::Start(3 * CHUNK_OFFSET)).unwrap();
             assert_eq!(f.read(&mut buf).unwrap(), 0);
         },
         None,
@@ -2897,7 +2901,7 @@ fn copy_file_range_spanning_chunks_lands_at_the_right_offsets() {
             );
             let mut got = vec![0u8; size];
             dest_reader.read_exact_at(&mut got, dest_offset).unwrap();
-            assert!(got == src_bytes, "the copy landed at the wrong offset");
+            assert!(got == src_bytes, "the copied bytes differ from the source");
             let mut head = vec![0u8; dest_offset as usize];
             dest_reader.read_exact_at(&mut head, 0).unwrap();
             assert!(head.iter().all(|b| *b == 0), "the hole was overwritten");
@@ -2906,8 +2910,7 @@ fn copy_file_range_spanning_chunks_lands_at_the_right_offsets() {
     );
 }
 
-/// Only a truncate landing between the kernel's size check and the read
-/// reaches this path, so the test opens the window opportunistically.
+/// The truncate must land between the kernel's size check and the read.
 #[test_log::test]
 fn copy_file_range_from_a_shrinking_file_copies_no_bytes() {
     use std::os::unix::fs::FileExt;
@@ -3007,17 +3010,20 @@ fn copy_file_range_from_a_shrinking_file_copies_no_bytes() {
             stop.store(true, Ordering::Relaxed);
             let flapped = flapping.join().unwrap();
             // A truncator that died leaves every other observation meaningless.
-            flapped.expect("the truncator failed, so the source stopped shrinking");
+            flapped.expect("the truncator failed");
             if let Some(e) = failure {
                 panic!("{e}");
             }
-            assert!(copies_that_moved_bytes > 0, "no copy moved any bytes");
+            assert!(
+                copies_that_moved_bytes > 0,
+                "500 attempts, every one against an already-truncated source"
+            );
         },
         None,
     );
 }
 
-/// Only a direct `Contents` call reaches the write guard.
+/// The kernel forwards no empty write; this test calls `Contents` directly.
 #[test_log::test]
 fn empty_reads_and_writes_leave_a_file_untouched() {
     let data = TempDir::new("backupfs_data").unwrap();
@@ -3048,12 +3054,6 @@ fn empty_reads_and_writes_leave_a_file_untouched() {
 }
 
 /// A write that fails after a packed→blocks migration leaves the file readable.
-///
-/// The migration drops the superseded packed extent whether or not the write
-/// that prompted it succeeds, so the replacement `File` inode record has to be
-/// persisted either way. Without that the durable inode stays `Packed`,
-/// pointing at an extent that has been tombstoned, and the file reads back as
-/// a hole.
 #[test_log::test]
 fn a_write_that_fails_after_a_tier_migration_leaves_the_file_readable() {
     let data = TempDir::new("backupfs_data").unwrap();
@@ -3091,10 +3091,10 @@ fn a_write_that_fails_after_a_tier_migration_leaves_the_file_readable() {
         handler.flush_all_dirty().unwrap();
     }
 
-    // Session 3: the bytes the failed write did land are still there.
+    // Session 3: a fresh mount reads the file back.
     let got = capture(data.path(), "ohea", move |mnt| {
         fs::read(mnt.join("m.bin")).unwrap()
     });
     assert_eq!(got.len(), small.len(), "the file changed size");
-    assert_eq!(got, big[..got.len()], "the file reads back as a hole");
+    pattern_check(0, &got);
 }

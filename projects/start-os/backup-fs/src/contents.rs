@@ -383,8 +383,7 @@ impl Contents {
             cached: None,
         };
         self.inode.attrs.contents = FileData::File(content_id);
-        // The `File` record must reach disk even when the write that
-        // prompted this migration fails.
+        // The `File` record must reach disk even if the prompting write fails.
         self.changed = true;
         Ok(())
     }

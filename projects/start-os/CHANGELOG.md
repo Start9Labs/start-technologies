@@ -106,9 +106,9 @@ file tracks notable changes since the move to the monorepo.
   restore in progress. Such a copy now moves a megabyte at a time.
 
 - **A write that fails inside a backup no longer empties the file it was
-  writing to.** Inside a backup or restore, a service growing a file past a few
-  hundred kilobytes moves it onto the backup filesystem's larger storage
-  layout, and the layout it came from is released once the move is recorded.
+  writing to.** Inside a backup or restore, a service growing a file past a
+  megabyte moves it onto the backup filesystem's larger storage layout, and the
+  layout it came from is released once the move is recorded.
   A write that met an error while making that move released the old layout
   without recording the new one, so the whole file read back as zeros. Such a
   write now leaves the file holding the bytes that reached the disk.

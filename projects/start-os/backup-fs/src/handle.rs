@@ -14,7 +14,7 @@ use fuser::{FileType, Request, TimeOrNow};
 use crate::FUSE_ROOT_ID;
 
 const FUSE_WRITE_KILL_PRIV: u32 = 1 << 2;
-use log::{debug, warn};
+use log::{debug, log, warn, Level};
 
 use crate::blockstore::CHUNK_SIZE;
 use crate::contents::Contents;
@@ -1363,7 +1363,7 @@ impl Handler {
         }
         let mut copied = 0;
         let mut stopped = None;
-        // A chunk at a time bounds the buffer a multi-gigabyte request allocates.
+        // One request can forward the whole source file.
         while copied < size {
             let take = min(size - copied, CHUNK_SIZE as usize);
             let at = copied as u64;
@@ -1394,9 +1394,13 @@ impl Handler {
         }
         match stopped {
             Some(e) if copied == 0 => Err(e),
-            // The caller receives a success and never sees this error.
+            // This log is the only record of the error.
             Some(e) => {
-                warn!("copy_file_range stopped after {copied} bytes: {e}");
+                let level = match &e.kind {
+                    BkfsErrorKind::Io(_) | BkfsErrorKind::Multiple(_) => Level::Warn,
+                    _ => Level::Error,
+                };
+                log!(level, "copy_file_range stopped after {copied} bytes: {e}");
                 Ok(copied)
             }
             None => Ok(copied),
