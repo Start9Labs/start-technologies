@@ -99,6 +99,12 @@ file tracks notable changes since the move to the monorepo.
   read now returns no bytes, as it does on any other filesystem, and a copy
   that moves no bytes leaves the destination file alone.
 
+- **Copying a large file inside a backup no longer exhausts memory.** A copy
+  made in a single step — what `cp` does on a current system — was read into
+  memory whole, so copying a multi-gigabyte file within a mounted backup could
+  take the backup filesystem down with it and interrupt the backup or restore
+  in progress. Such a copy now moves a megabyte at a time.
+
 - **Helper processes a service starts are cleared away once they finish.** A
   service that shells out to other programs — a media downloader calling
   `yt-dlp` and `ffmpeg`, an agent running tool subprocesses — orphans a helper

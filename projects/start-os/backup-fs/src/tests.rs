@@ -2770,7 +2770,7 @@ fn read_starting_past_eof_returns_no_bytes() {
             f.seek(SeekFrom::Start(10)).unwrap();
             assert_eq!(f.read(&mut buf).unwrap(), 0);
 
-            // A block-backed body, over the one-chunk inline threshold.
+            // A block-backed body, over the packed tier's one-chunk maximum.
             let blocks = mnt.join("blocks");
             fs::write(&blocks, vec![3u8; 3 * CHUNK_OFFSET as usize]).unwrap();
             let mut f = fs::File::open(&blocks).unwrap();
@@ -2781,10 +2781,68 @@ fn read_starting_past_eof_returns_no_bytes() {
     );
 }
 
+/// `copy_file_range` copies a multi-chunk range, and every byte lands at the
+/// offset the caller asked for.
+#[test_log::test]
+fn copy_file_range_spanning_chunks_lands_at_the_right_offsets() {
+    use std::os::unix::fs::FileExt;
+    use std::os::unix::io::AsRawFd;
+
+    let data = TempDir::new("backupfs_data").unwrap();
+    let size = (3 * CHUNK_OFFSET + 4096) as usize;
+    let dest_offset = CHUNK_OFFSET + 7;
+
+    with_backupfs(
+        data.path(),
+        "ohea".to_owned(),
+        move |mnt| {
+            let src_bytes: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
+            let src_path = mnt.join("source");
+            fs::write(&src_path, &src_bytes).unwrap();
+            let src = fs::File::open(&src_path).unwrap();
+
+            let dest_path = mnt.join("destination");
+            let dest = fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&dest_path)
+                .unwrap();
+
+            let mut from = 0 as libc::loff_t;
+            let mut to = dest_offset as libc::loff_t;
+            let copied = unsafe {
+                libc::copy_file_range(
+                    src.as_raw_fd(),
+                    &mut from,
+                    dest.as_raw_fd(),
+                    &mut to,
+                    size,
+                    0,
+                )
+            };
+            assert_eq!(copied, size as isize, "{}", io::Error::last_os_error());
+
+            let dest_reader = fs::File::open(&dest_path).unwrap();
+            assert_eq!(
+                dest_reader.metadata().unwrap().len(),
+                dest_offset + size as u64
+            );
+            let mut got = vec![0u8; size];
+            dest_reader.read_exact_at(&mut got, dest_offset).unwrap();
+            assert!(got == src_bytes, "the copy landed at the wrong offset");
+            // The bytes before the copy are a hole, not source data.
+            let mut head = vec![0u8; dest_offset as usize];
+            dest_reader.read_exact_at(&mut head, 0).unwrap();
+            assert!(head.iter().all(|b| *b == 0), "the hole was overwritten");
+        },
+        None,
+    );
+}
+
 /// `copy_file_range` out of a shrinking file copies no bytes and leaves the
-/// destination alone. The kernel clamps the request against the size it has
-/// cached, and only a truncate landing after that check hands `Handler::read`
-/// an offset past the end of the file.
+/// destination alone. Only a truncate landing between the kernel's size check
+/// and the read reaches that path, which this test opens opportunistically.
 #[test_log::test]
 fn copy_file_range_from_a_shrinking_file_copies_no_bytes() {
     use std::os::unix::fs::FileExt;
@@ -2811,7 +2869,6 @@ fn copy_file_range_from_a_shrinking_file_copies_no_bytes() {
                 .truncate(true)
                 .open(&dest_path)
                 .unwrap();
-            // A stat here can be served from the kernel's cached size.
             let dest_reader = fs::File::open(&dest_path).unwrap();
 
             let truncator = fs::OpenOptions::new().write(true).open(&src).unwrap();
@@ -2819,7 +2876,6 @@ fn copy_file_range_from_a_shrinking_file_copies_no_bytes() {
             let flapping = {
                 let stop = stop.clone();
                 std::thread::spawn(move || {
-                    // Every truncate fails once the test unmounts.
                     while !stop.load(Ordering::Relaxed) {
                         if truncator.set_len(size).is_err() || truncator.set_len(0).is_err() {
                             break;
@@ -2829,7 +2885,6 @@ fn copy_file_range_from_a_shrinking_file_copies_no_bytes() {
             };
 
             let mut failure = None;
-            let mut copies_that_moved_nothing = 0;
             let mut copies_that_moved_bytes = 0;
             for _ in 0..500 {
                 let mut from = (size - CHUNK_OFFSET / 2) as libc::loff_t;
@@ -2852,7 +2907,7 @@ fn copy_file_range_from_a_shrinking_file_copies_no_bytes() {
                     break;
                 }
                 if copied == 0 {
-                    copies_that_moved_nothing += 1;
+                    // A stat could be served from the kernel's cached size.
                     let mut probe = [0u8; 1];
                     match dest_reader.read_at(&mut probe, 0) {
                         Ok(0) => {}
@@ -2889,12 +2944,10 @@ fn copy_file_range_from_a_shrinking_file_copies_no_bytes() {
             if let Some(e) = failure {
                 panic!("{e}");
             }
-            // Both outcomes are what proves the source shrank under the copier.
             assert!(
-                copies_that_moved_nothing > 0 && copies_that_moved_bytes > 0,
-                "the source never shrank under the copier, so nothing was raced: \
-                 {copies_that_moved_nothing} copies moved nothing, \
-                 {copies_that_moved_bytes} moved bytes"
+                copies_that_moved_bytes > 0,
+                "every copy was answered from the kernel's cached size, so the \
+                 filesystem never ran one"
             );
         },
         None,

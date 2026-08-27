@@ -16,6 +16,7 @@ use crate::FUSE_ROOT_ID;
 const FUSE_WRITE_KILL_PRIV: i32 = 1 << 2;
 use log::{debug, warn};
 
+use crate::blockstore::CHUNK_SIZE;
 use crate::contents::Contents;
 use crate::ctrl::Controller;
 use crate::directory::{DirectoryContents, DirectoryEntry};
@@ -1130,15 +1131,13 @@ impl Handler {
 
         let mut contents = fh.contents.lock().unwrap();
 
-        let mut buf = data.to_vec();
-
-        contents.write_all_at(&mut buf, offset)?;
+        contents.write_all_at(data, offset)?;
 
         if flags & FUSE_WRITE_KILL_PRIV as i32 != 0 {
             contents.inode.attrs.clear_suid_sgid();
         }
 
-        Ok(buf.len())
+        Ok(data.len())
     }
 
     pub fn fsync(&mut self, _req: &Request, _inode: Inode, fh: FileHandleId) -> BkfsResult<()> {
@@ -1362,12 +1361,31 @@ impl Handler {
         if flags != 0 {
             return BkfsResult::errno(libc::EINVAL);
         }
-        let bytes = self.read(req, src_inode, src_fh, src_offset, size, 0, None)?;
-        // A write of no bytes extends the destination and stamps its mtime.
-        if bytes.is_empty() {
-            return Ok(0);
+        // An unchunked read holds the whole forwarded copy in memory.
+        let mut copied = 0;
+        while copied < size {
+            let take = min(size - copied, CHUNK_SIZE as usize);
+            let at = copied as u64;
+            let bytes = self.read(req, src_inode, src_fh, src_offset + at, take, 0, None)?;
+            if bytes.is_empty() {
+                break;
+            }
+            let wrote = self.write(
+                req,
+                dest_inode,
+                dest_fh,
+                dest_offset + at,
+                &bytes,
+                0,
+                0,
+                None,
+            )?;
+            if wrote == 0 {
+                break;
+            }
+            copied += wrote;
         }
-        self.write(req, dest_inode, dest_fh, dest_offset, &bytes, 0, 0, None)
+        Ok(copied)
     }
 
     pub fn fallocate(

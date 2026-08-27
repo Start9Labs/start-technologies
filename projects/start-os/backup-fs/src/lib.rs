@@ -464,7 +464,7 @@ impl Filesystem for BackupFS {
         let key = handle.inode.0;
         pool::global().submit_for(key, move || {
             let mut contents = handle.contents.lock().unwrap();
-            match contents.write_all_at(&mut buf, offset) {
+            match contents.write_all_at(&buf, offset) {
                 Ok(()) => {
                     if write_flags.contains(WriteFlags::FUSE_WRITE_KILL_SUIDGID) {
                         contents.inode.attrs.clear_suid_sgid();

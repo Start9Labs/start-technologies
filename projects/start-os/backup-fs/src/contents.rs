@@ -284,6 +284,10 @@ impl Contents {
 
     pub fn write_all_at(&mut self, buf: &[u8], offset: u64) -> BkfsResult<()> {
         self.ctrl.check_rw()?;
+        // A write of no bytes neither extends the file nor stamps its mtime.
+        if buf.is_empty() {
+            return Ok(());
+        }
         let end = offset + buf.len() as u64;
         // Promote the body to the smallest tier that can hold `end`:
         // inline (≤ inline_threshold) → packed (≤ one chunk) → blocks.
