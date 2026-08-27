@@ -81,6 +81,38 @@ in the other direction — it measures macro-_expanded_ HIR, so with 2,871 `t!()
 sites its ranking tracks i18n density rather than code, correlating with a real cognitive
 metric at Spearman 0.435 and sharing 9 of its top 50.
 
+## Why not SonarQube
+
+SonarQube is the obvious off-the-shelf answer and this RFC should have opened with it. Sonar
+defined cognitive complexity; `rust-code-analysis` implements their published spec, so the
+metric here is theirs either way — a sequence of like operators costs 1 rather than 1 per
+operator, verified against this build (a mixed sequence diverges: 3 where the spec says 2).
+
+What Sonar would give us, free: **SonarQube Cloud is free for public repositories**, and this
+repo is one. Rust and TypeScript are both supported, it computes cognitive and cyclomatic
+itself rather than only importing Clippy, and it adds duplication, a quality gate scoped to new
+code, and inline pull-request decoration. That is the whole measure-and-track half, maintained
+by the people who invented the metric, and it is strictly better than a local census for that
+job.
+
+Three things decide whether it replaces this:
+
+- **Self-hosting does not get you the gate.** SonarQube Community Build analyzes the main
+  branch only — no branch or pull-request analysis, no decoration. Free and self-hosted gives
+  post-merge tracking; pre-merge confrontation exists only in the cloud tier. Whether a SaaS
+  belongs in the development loop of a self-sovereignty company is a question for the team,
+  not a technical one.
+- **Inline tests are unmeasured.** Sonar identifies test code by path, and this repo keeps
+  1,150 `#[test]` functions inline against 6,249 lines in dedicated test files. If the Rust
+  analyzer counts `#[cfg(test)]` items, a PR that adds tests reads as one that adds complexity.
+  The documentation does not say either way. This is answerable in an afternoon against a
+  throwaway project and has not been answered here.
+- **A quality gate is not a justification.** Sonar reports; it does not make an author state
+  the number and defend it, and the questions in the protocol below are not a Sonar feature.
+
+The honest reading: if Sonar handles `#[cfg(test)]` and ranks this repo sensibly, the census in
+this PR should be deleted and only the protocol kept. That test comes first.
+
 ## Baseline
 
 | scope | functions | total cognitive | p90 | p99 | max |    over 25 |
