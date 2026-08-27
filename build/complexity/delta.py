@@ -10,8 +10,13 @@ tb, th = base['totals'], head['totals']
 
 print(f"Complexity vs {ref[:10]}")
 for label, k in (('functions', 'functions'), ('cognitive', 'cognitive'),
-                 ('sloc', 'sloc'), ('fns over 25', 'over25')):
+                 ('cyclomatic', 'cyclomatic'), ('sloc', 'sloc'),
+                 ('macro lines', 'macro_lines'), ('fns over 25', 'over25')):
     print(f"  {label:<12}{tb[k]:>7} -> {th[k]:>7}   {th[k]-tb[k]:+d}")
+
+# Cognitive falls when a function is split, however badly; cyclomatic does not.
+if th['cognitive'] < tb['cognitive'] and th['cyclomatic'] > tb['cyclomatic']:
+    print("\n  cognitive fell while cyclomatic rose — branches were relocated, not removed")
 
 new = sorted((r for k, r in H.items() if k not in B), key=lambda r: -r['cognitive'])
 big = [r for r in new if r['cognitive'] > 10]
@@ -40,3 +45,10 @@ if better:
 gone = [r for k, r in B.items() if k not in H]
 if gone:
     print(f"\n  removed: {len(gone)} functions, {sum(r['cognitive'] for r in gone)} cognitive")
+
+single = [r for r in new if r.get('callers') == 1 and r['name'] != '<anonymous>']
+if single:
+    print(f"\n  new functions with one call site ({len(single)}) — each is an abstraction the diff does not yet reuse:")
+    for r in single[:10]:
+        print(f"    {r['name']}  {r['file']}:{r['line']}")
+

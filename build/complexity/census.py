@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Cognitive-complexity census over the tree. Emits JSON, or a table."""
-import argparse, json, os, re, subprocess, sys, tempfile
+import argparse, collections, json, os, re, subprocess, sys, tempfile
 
 CFG_TEST = re.compile(r'#\[cfg\(test\)\]')
+MACRO_RULES = re.compile(r'macro_rules!\s*\w+\s*\{')
+CALL_SITE = re.compile(r'\b([A-Za-z_]\w*)\s*[(:<]')
 EXCLUDE = ('/node_modules/', '/dist/', '/target/', '/.angular/', '/out-tsc/',
            '/osBindings/', '/locales/', '/__snapshots__/', '/__fixtures__/',
            '/patch-db/client/', '/exver/exver.ts')
@@ -41,6 +43,22 @@ def strip_rust_tests(src):
             k += 1
         i = k
     return ''.join(out)
+
+def macro_body_lines(src):
+    """Lines inside `macro_rules!` bodies. Control flow there is invisible to the metrics."""
+    total = 0
+    for m in MACRO_RULES.finditer(src):
+        depth, k, n = 0, src.index('{', m.start()), len(src)
+        start = k
+        while k < n:
+            if src[k] == '{': depth += 1
+            elif src[k] == '}':
+                depth -= 1
+                if depth == 0: break
+            k += 1
+        total += src.count('\n', start, k)
+    return total
+
 
 def sources(root, scopes):
     for scope in scopes:
@@ -86,12 +104,13 @@ def error_ratio(rca, path):
 def census(root, scopes, rca):
     staged = tempfile.mkdtemp(prefix='cx-src-')
     outdir = tempfile.mkdtemp(prefix='cx-json-')
-    files = 0
+    files = macro_lines = 0
     for src, rel in sources(root, scopes):
         try: text = open(src, encoding='utf-8', errors='replace').read()
         except OSError: continue
         if rel.endswith('.rs'):
             text = strip_rust_tests(text)
+            macro_lines += macro_body_lines(text)
         dst = os.path.join(staged, rel)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         open(dst, 'w', encoding='utf-8').write(text)
@@ -112,12 +131,29 @@ def census(root, scopes, rca):
     bad = error_ratio(rca, staged)
     if bad > 0.005:
         sys.exit(f"complexity: {bad:.3%} of AST nodes are parse errors — the grammar has fallen behind the language")
-    return rows
+    return rows, macro_lines
 
-def totals(rows):
+def count_callers(rows, root, scopes):
+    """Call sites for each function, counted across the tree. The definition is not one."""
+    used = collections.Counter()
+    for src, _ in sources(root, scopes):
+        try: text = open(src, encoding='utf-8', errors='replace').read()
+        except OSError: continue
+        used.update(CALL_SITE.findall(text))
+    defs = collections.Counter(r['name'] for r in rows)
+    for r in rows:
+        name = r['name']
+        if name == '<anonymous>':
+            continue
+        r['callers'] = max(0, used[name] - defs[name])
+
+
+def totals(rows, macro_lines):
     return {'functions': len(rows),
             'cognitive': sum(r['cognitive'] for r in rows),
+            'cyclomatic': sum(r['cyclomatic'] for r in rows),
             'sloc': sum(r['sloc'] for r in rows),
+            'macro_lines': macro_lines,
             'over25': sum(1 for r in rows if r['cognitive'] > 25)}
 
 def main():
@@ -128,12 +164,15 @@ def main():
     ap.add_argument('--json', action='store_true')
     ap.add_argument('--top', type=int, default=25)
     a = ap.parse_args()
-    rows = census(a.root, a.scope or ['shared-libs', 'projects'], a.rca)
+    scopes = a.scope or ['shared-libs', 'projects']
+    rows, macro_lines = census(a.root, scopes, a.rca)
     if a.json:
-        json.dump({'totals': totals(rows), 'functions': rows}, sys.stdout, sort_keys=True)
+        count_callers(rows, a.root, scopes)
+        json.dump({'totals': totals(rows, macro_lines), 'functions': rows}, sys.stdout, sort_keys=True)
         return
-    t = totals(rows)
-    print(f"functions {t['functions']}  cognitive {t['cognitive']}  sloc {t['sloc']}  over25 {t['over25']}")
+    t = totals(rows, macro_lines)
+    print(f"functions {t['functions']}  cognitive {t['cognitive']}  cyclomatic {t['cyclomatic']}  "
+          f"sloc {t['sloc']}  macro-lines {t['macro_lines']}  over25 {t['over25']}")
     for r in sorted(rows, key=lambda r: -r['cognitive'])[:a.top]:
         print(f"  {r['cognitive']:>5} {r['sloc']:>5}  {r['name'][:34]:<34} {r['file']}:{r['line']}")
 

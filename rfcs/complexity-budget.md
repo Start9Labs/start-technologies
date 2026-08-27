@@ -67,10 +67,19 @@ census refuses to report if the parser reads under 98% of files or if over 0.5% 
 are parse errors, because grammar rot is otherwise silent.
 
 Today every one of 530 Rust files yields metrics, and 240 of 2,553,851 AST nodes — 0.009% —
-are parse errors. They cluster in six Rust files, all on generic associated types
-(`type Extended<'ext> where Self: 'ext`), which stabilized in Rust 1.65 two months before the
-pinned grammar was cut. That is the shape grammar rot takes, and it is what the second guard
-watches: fifty times the current rate still passes.
+are parse errors. They cluster in six Rust files, on modern trait syntax the pinned grammar
+predates: generic associated types (`type Extended<'ext> where Self: 'ext`) and `impl Trait`
+in argument and return position. That is the shape grammar rot takes, and it is what the
+second guard watches: fifty times the current rate still passes.
+
+**The parser does not expand macros, and that is a hole.** Wrapping a body in `macro_rules!`
+takes it from cognitive 15 to **0** and cyclomatic 11 to 1 — measured, identical logic. The
+repo already carries `macro_rules!`, so the evasion would read as native. There is no fix
+inside this tool; the report therefore prints the total number of lines inside macro bodies
+(368 today) so that moving code there is at least visible. Note clippy has the mirror defect
+in the other direction — it measures macro-_expanded_ HIR, so with 2,871 `t!()` i18n call
+sites its ranking tracks i18n density rather than code, correlating with a real cognitive
+metric at Spearman 0.435 and sharing 9 of its top 50.
 
 ## Baseline
 
@@ -179,7 +188,8 @@ while humans left 28 of 198 and 26 of 75 empty.
 
 Documentation alone is not enough. The closest measurable precedent is the "Label every PR"
 rule — inlined, bolded, with the literal command — which landed eight days before this
-snapshot and has 60% agent compliance. So the rule is paired with a check.
+snapshot and runs at 60% agent compliance in that window and 28% across the last 90 merged
+PRs. So the rule is paired with a check.
 
 `make complexity-diff`'s output goes under a `## Complexity` heading, followed by three
 questions. CI recomputes the census from `base.sha..head.sha` and fails when the section is
@@ -192,6 +202,15 @@ The three questions, chosen because a weak answer is visible to a human:
 - the simplest alternative considered, and what breaks if we take it
 - which existing helper was checked before adding a new one, by file
 - for any function pushed over 25, why the branching is intrinsic to the requirement
+- for each new function with exactly one call site, why it earns its own name
+
+The last one is the only question in the set an author cannot bluff, because the census counts
+the call sites itself. It also targets the most common real defect in agent-written code — the
+helper extracted for a reuse that never arrives. The portmap PR added 83 of them.
+
+**The last two questions are asked only when the census reports them.** Requiring all four on
+every PR would put a four-line section on the 61% of source PRs whose delta is near zero
+against the 19% that are substantial, which is a rubber-stamping machine rather than a gate.
 
 27% of merged PR bodies already volunteer a rejected alternative, so the hardest of the three
 is culturally native here rather than an imposition.
@@ -203,10 +222,14 @@ commits and falls on 5, so a hard ratchet would block two commits in three and b
 during the first release crunch, never to return. The gate asks for a number and a reason,
 not for the number to stay flat.
 
-**It does not reward shredding.** Splitting one clear function into six poorly-named ones
-lowers per-function scores while making the code worse. Function count and total cognitive are
-printed next to the per-function lines precisely so that reads as what it is: total flat,
-count up.
+**It reports cyclomatic next to cognitive, because cognitive alone rewards shredding.** This
+was the first version's mistake. Cognitive complexity penalises nesting superlinearly, so
+pulling nested blocks out into separate functions lowers the total however bad the split is.
+Measured on a deliberately worse six-way split that threads loop state through `&mut`
+parameters, total cognitive falls **26 → 9** while total cyclomatic rises **10 → 16**.
+Cognitive ranks a single function; cyclomatic is close to additive and so survives relocation.
+The report prints both and says so outright when cognitive falls while cyclomatic rises —
+branches were moved, not removed.
 
 **It does not count tests**, so there is never a reason to thin one.
 
@@ -214,8 +237,10 @@ Known limits, stated rather than hidden: Angular templates are invisible — 278
 inline `template:` backticks holding 831 control-flow constructs, and those sit inside string
 literals that no per-function metric sees. `rust-code-analysis`'s last release is v0.0.25 from
 January 2023, though its grammar parses 100% of this repo today and the coverage assertion
-above is what catches it if that changes. And the length check on the three answers catches
-laziness, not sophistry — a determined bluff still needs a human to catch it.
+above is what catches it if that changes. And the length check on the prose answers catches
+laziness, not sophistry: an LLM writes a fluent post-hoc justification easily, so do not sell
+the gate as catching bad reasoning. It catches an unexamined change. Only the numbers and the
+call-site count are self-verifying.
 
 ## Open questions
 
