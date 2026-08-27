@@ -3,7 +3,8 @@
 //! and splices to the internal host. TLS is never terminated; the ClientHello
 //! bytes are forwarded verbatim. The internal leg is opened from the client's
 //! own source address (source-address preservation, RFC §4.6) via
-//! [`crate::net::transparent`].
+//! [`crate::net::transparent`], except where the reply would never come back
+//! through this host (see [`LocalPrefix`]).
 //!
 //! QUIC (§4.5) and wildcards beyond a single leading `*` label are out of scope.
 
@@ -12,6 +13,8 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use futures::future::BoxFuture;
+use ipnet::Ipv4Net;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, copy_bidirectional};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
@@ -114,27 +117,44 @@ pub struct SniRoute {
 /// can open/close inbound access (e.g. a StartWRT firewall ACCEPT rule).
 type OnChange = Box<dyn Fn(u16, bool) + Send + Sync>;
 
+/// Resolves the prefix length of the local subnet holding an address, or `None`
+/// where the host has no such subnet — the demux's equivalent of the DNAT
+/// path's `target_prefix` (`crate::net::forward::add_forward`).
+///
+/// A host supplies this when a client and a target can share a broadcast
+/// segment, because a hairpinned connection between two such addresses returns
+/// over that segment and never reaches this host again. Leave it unset where
+/// every internal path routes through the host regardless (the tunnel's
+/// hub-and-spoke WireGuard mesh), since source preservation works there.
+pub type LocalPrefix = Arc<dyn Fn(Ipv4Addr) -> BoxFuture<'static, Option<u8>> + Send + Sync>;
+
 pub struct SniDemux {
     ports: Arc<SyncMutex<BTreeMap<PortKey, PortBindings>>>,
     listeners: SyncMutex<BTreeMap<PortKey, NonDetachingJoinHandle<()>>>,
     on_change: Option<OnChange>,
+    local_prefix: Option<LocalPrefix>,
 }
 
 impl SniDemux {
     pub fn new() -> Arc<Self> {
-        Self::build(None)
+        Self::build(None, None)
     }
 
-    /// Like [`new`](Self::new) but invokes `on_change` on listener create/teardown.
-    pub fn with_on_change(on_change: impl Fn(u16, bool) + Send + Sync + 'static) -> Arc<Self> {
-        Self::build(Some(Box::new(on_change)))
+    /// Like [`new`](Self::new) but invokes `on_change` on listener
+    /// create/teardown and consults `local_prefix` to spot a hairpinned client.
+    pub fn with_on_change(
+        on_change: impl Fn(u16, bool) + Send + Sync + 'static,
+        local_prefix: Option<LocalPrefix>,
+    ) -> Arc<Self> {
+        Self::build(Some(Box::new(on_change)), local_prefix)
     }
 
-    fn build(on_change: Option<OnChange>) -> Arc<Self> {
+    fn build(on_change: Option<OnChange>, local_prefix: Option<LocalPrefix>) -> Arc<Self> {
         let this = Arc::new(Self {
             ports: Arc::new(SyncMutex::new(BTreeMap::new())),
             listeners: SyncMutex::new(BTreeMap::new()),
             on_change,
+            local_prefix,
         });
         let weak = Arc::downgrade(&this);
         tokio::spawn(async move {
@@ -484,7 +504,12 @@ impl SniDemux {
             SocketAddrV4::new(key.0, key.1).into(),
         )?;
         let ports = self.ports.clone();
-        let handle = NonDetachingJoinHandle::from(tokio::spawn(run_listener(listener, key, ports)));
+        let handle = NonDetachingJoinHandle::from(tokio::spawn(run_listener(
+            listener,
+            key,
+            ports,
+            self.local_prefix.clone(),
+        )));
         self.listeners.mutate(|l| {
             l.insert(key, handle);
         });
@@ -499,6 +524,7 @@ async fn run_listener(
     listener: tokio::net::TcpListener,
     key: PortKey,
     ports: Arc<SyncMutex<BTreeMap<PortKey, PortBindings>>>,
+    local_prefix: Option<LocalPrefix>,
 ) {
     if let Err(e) = crate::net::transparent::ensure_divert_infra_once().await {
         tracing::warn!(
@@ -510,8 +536,9 @@ async fn run_listener(
         match listener.accept().await {
             Ok((conn, peer)) => {
                 let ports = ports.clone();
+                let local_prefix = local_prefix.clone();
                 tokio::spawn(async move {
-                    handle_conn(conn, peer, key, ports).await;
+                    handle_conn(conn, peer, key, ports, local_prefix).await;
                 });
             }
             // Transient (EMFILE, ECONNABORTED): never tear down the listener.
@@ -528,6 +555,7 @@ async fn handle_conn(
     peer: SocketAddr,
     key: PortKey,
     ports: Arc<SyncMutex<BTreeMap<PortKey, PortBindings>>>,
+    local_prefix: Option<LocalPrefix>,
 ) {
     // Reap silently-vanished peers, else copy_bidirectional pins the fd pair forever.
     if let Err(e) =
@@ -564,6 +592,13 @@ async fn handle_conn(
     let Some((target, transparent)) = selected else {
         return; // no match and no admissible fallback: close
     };
+    // A client on the target's own segment is hairpinning — it dialed our
+    // external address from inside — and the target answers it directly over
+    // that segment, so a source-preserved leg leaves the client waiting on a
+    // reply it discards as coming from the wrong address. Dial from our own
+    // address there instead, the same trade the DNAT path makes with its
+    // hairpin masquerade (`build/lib/scripts/forward-port`).
+    let transparent = transparent && !is_hairpin(&local_prefix, *peer.ip(), *target.ip()).await;
     let mut upstream = if transparent {
         // Open the internal leg from the client's own source address (RFC
         // §4.6). No plain-connect fallback on failure: the backend gates
@@ -583,7 +618,7 @@ async fn handle_conn(
             }
         }
     } else {
-        // Gateway-self fallback: plain connect to our own listener.
+        // A gateway-self fallback or a hairpinned client: dial as ourselves.
         match TcpStream::connect(SocketAddr::V4(target)).await {
             Ok(upstream) => upstream,
             Err(e) => {
@@ -596,6 +631,21 @@ async fn handle_conn(
         return;
     }
     let _ = copy_bidirectional(&mut conn, &mut upstream).await;
+}
+
+/// Whether `peer` reaches `target` without traversing this host, because both
+/// sit in the same local subnet. `false` whenever the host declines to say
+/// (no [`LocalPrefix`], or no local subnet holds `target`) — source
+/// preservation is the safe answer, since losing it hands every client the
+/// gateway's own address.
+async fn is_hairpin(local_prefix: &Option<LocalPrefix>, peer: Ipv4Addr, target: Ipv4Addr) -> bool {
+    let Some(resolve) = local_prefix else {
+        return false;
+    };
+    let Some(prefix) = resolve(target).await else {
+        return false;
+    };
+    Ipv4Net::new(target, prefix).is_ok_and(|net| net.contains(&peer))
 }
 
 /// Whether `buf` holds at least one complete TLS handshake record.
@@ -629,6 +679,7 @@ impl Default for SniDemux {
             ports: Arc::new(SyncMutex::new(BTreeMap::new())),
             listeners: SyncMutex::new(BTreeMap::new()),
             on_change: None,
+            local_prefix: None,
         }
     }
 }
@@ -773,9 +824,10 @@ mod tests {
     async fn bind_failure_refuses_grant_and_rolls_back() {
         let events = Arc::new(SyncMutex::new(Vec::<(u16, bool)>::new()));
         let recorded = events.clone();
-        let demux = SniDemux::with_on_change(move |port, active| {
-            recorded.mutate(|e| e.push((port, active)))
-        });
+        let demux = SniDemux::with_on_change(
+            move |port, active| recorded.mutate(|e| e.push((port, active))),
+            None,
+        );
         // Plain bind (no SO_REUSEPORT) — the demux's reuseport bind cannot join.
         let blocker = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let port = blocker.local_addr().unwrap().port();
@@ -896,9 +948,10 @@ mod tests {
     async fn rekey_moves_bindings_and_never_fires_teardown() {
         let events = Arc::new(SyncMutex::new(Vec::<(u16, bool)>::new()));
         let recorded = events.clone();
-        let demux = SniDemux::with_on_change(move |port, active| {
-            recorded.mutate(|e| e.push((port, active)))
-        });
+        let demux = SniDemux::with_on_change(
+            move |port, active| recorded.mutate(|e| e.push((port, active))),
+            None,
+        );
         let old_ip = Ipv4Addr::new(203, 0, 113, 1);
         let new_ip = Ipv4Addr::new(203, 0, 113, 2);
         let t1 = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 443);
@@ -952,5 +1005,36 @@ mod tests {
         let before = events.peek(|e| e.len());
         demux.rekey_ipv4(new_ip);
         assert_eq!(events.peek(|e| e.len()), before);
+    }
+
+    // Only a client sharing the target's subnet is hairpinning. A client on
+    // another of the gateway's subnets still routes its replies through the
+    // gateway, so it keeps source preservation, and so does everyone when the
+    // host supplies no prefix or knows no subnet holding the target.
+    #[tokio::test]
+    async fn hairpin_is_scoped_to_the_targets_own_subnet() {
+        let lan = Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap();
+        let resolver: LocalPrefix = Arc::new(move |ip: Ipv4Addr| {
+            Box::pin(async move { lan.contains(&ip).then_some(lan.prefix_len()) })
+                as BoxFuture<'static, Option<u8>>
+        });
+        let host = Some(resolver);
+        let target = Ipv4Addr::new(192, 168, 1, 10);
+
+        assert!(is_hairpin(&host, Ipv4Addr::new(192, 168, 1, 50), target).await);
+        // Another VLAN, and the WAN: both reach the target through us.
+        assert!(!is_hairpin(&host, Ipv4Addr::new(192, 168, 9, 50), target).await);
+        assert!(!is_hairpin(&host, Ipv4Addr::new(203, 0, 113, 50), target).await);
+        // No local subnet holds the target — the host cannot say, so preserve.
+        assert!(
+            !is_hairpin(
+                &host,
+                Ipv4Addr::new(10, 0, 0, 5),
+                Ipv4Addr::new(10, 0, 0, 9)
+            )
+            .await
+        );
+        // A host that supplies no prefix at all preserves unconditionally.
+        assert!(!is_hairpin(&None, Ipv4Addr::new(192, 168, 1, 50), target).await);
     }
 }

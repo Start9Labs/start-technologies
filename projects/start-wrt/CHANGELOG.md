@@ -63,6 +63,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   router by IP address) still reaches the router interface, accepted from
   exactly the sources your Remote Access setting allows, so enabling one
   feature never silently disables the other.
+  A routed hostname works from inside your own network too — a laptop on your
+  LAN can open the same public address and reach the device — with one
+  consequence worth knowing: because the device answers a local client
+  directly rather than through the router, the router puts its own address on
+  those connections, so the device cannot tell one local client from another
+  in its logs. Connections from another Security Profile, and from the
+  Internet, still carry the original address.
 - The UI now detects when the running firmware ships a newer interface than
   the page is displaying (every RPC response and `system.info` report the
   firmware's build stamp and the UI compares it to its own). An update

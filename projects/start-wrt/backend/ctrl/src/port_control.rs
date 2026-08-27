@@ -201,6 +201,7 @@ impl PortControl {
     /// Requires a tokio runtime: the demux's constructor spawns its prune task.
     pub fn new(uci_root: PathBuf) -> Arc<Self> {
         Arc::new_cyclic(|weak: &std::sync::Weak<Self>| {
+            let hairpin_weak = weak.clone();
             let weak = weak.clone();
             Self {
                 uci_root,
@@ -215,11 +216,20 @@ impl PortControl {
                 // Creation is inline in `add_sni_route` (under the write lock,
                 // so the rule exists before any concurrent conflict scan runs);
                 // for `(port, true)` this is just an idempotent upsert.
-                sni: SniDemux::with_on_change(move |port, active| {
-                    if let Some(pc) = weak.upgrade() {
-                        tokio::spawn(on_sni_change(pc, port, active));
-                    }
-                }),
+                sni: SniDemux::with_on_change(
+                    move |port, active| {
+                        if let Some(pc) = weak.upgrade() {
+                            tokio::spawn(on_sni_change(pc, port, active));
+                        }
+                    },
+                    // A routed device shares its bridge with the clients on
+                    // that segment, so the demux needs the bridge's prefix to
+                    // tell a hairpinning client from a routed one.
+                    Some(Arc::new(move |ip| {
+                        let weak = hairpin_weak.clone();
+                        Box::pin(async move { weak.upgrade()?.lan_prefix_for(ip).await })
+                    })),
+                ),
             }
         })
     }
@@ -418,13 +428,26 @@ impl PortControl {
         addrs
     }
 
+    /// The router's own bridged address on the subnet containing `ip`.
+    async fn lan_addr_for(&self, ip: Ipv4Addr) -> Option<LanAddr> {
+        self.lan_addrs().await.iter().find_map(|a| {
+            let mask = prefix_mask(a.prefix);
+            (u32::from(a.addr) & mask == u32::from(ip) & mask).then(|| a.clone())
+        })
+    }
+
     /// The router's LAN address on the subnet containing `peer` — the address
     /// SSDP advertises as the IGD location.
     async fn lan_ip_for(&self, peer: Ipv4Addr) -> Option<Ipv4Addr> {
-        self.lan_addrs().await.iter().find_map(|a| {
-            let mask = prefix_mask(a.prefix);
-            (u32::from(a.addr) & mask == u32::from(peer) & mask).then_some(a.addr)
-        })
+        self.lan_addr_for(peer).await.map(|a| a.addr)
+    }
+
+    /// The prefix length of the bridged subnet containing `ip` — how the SNI
+    /// demux tells a hairpinning client from a routed one. Only `br-*`
+    /// interfaces are considered (see [`parse_lan_addrs`]), so this answers for
+    /// exactly the segments on which two hosts reach each other directly.
+    async fn lan_prefix_for(&self, ip: Ipv4Addr) -> Option<u8> {
+        self.lan_addr_for(ip).await.map(|a| a.prefix)
     }
 
     async fn add_forward_labeled(
