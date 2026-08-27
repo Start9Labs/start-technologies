@@ -38,10 +38,6 @@
   difference. Prefer `sdk.host.getBridgeAddress` to reach a dependency; this is
   raw allocator metadata
 
-- `effects.getServicePortForward` resolves `null` instead of throwing when the
-  binding does not exist. Prefer `sdk.host.getBridgeAddress` to reach a
-  dependency; this is raw allocator metadata
-
 - **The scaffolded `build.yml` no longer passes `DEV_KEY`** — a PR build only
   compiles and packs, so it never needed the signing key. Existing packages
   should drop the `secrets:` block from their own `build.yml`
