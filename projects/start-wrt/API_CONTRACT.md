@@ -1058,7 +1058,9 @@ struct AutoForward {
     /// port) — UPnP's mapping identity, so one device may hold several
     /// external ports to the same internal port.
     id: String,
-    /// Which protocol created it: "PCP" or "UPnP".
+    /// Which protocol last granted or renewed it: "PCP" or "UPnP". A forward
+    /// one protocol created and another later renews reports the renewer, so
+    /// the protocol and `expires_secs` always describe the same grant.
     label: String,
     device_mac: String,
     device_name: Option<String>,

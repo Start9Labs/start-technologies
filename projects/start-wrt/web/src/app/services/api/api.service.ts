@@ -693,7 +693,11 @@ export type PublishedPortsSetResult = {
  */
 export interface AutoForwardFromApi {
   id: string
-  /** Which protocol created it: "PCP" or "UPnP". */
+  /**
+   * Which protocol last granted or renewed it: "PCP" or "UPnP". A forward
+   * one protocol created and another later renews reports the renewer, so
+   * the protocol and `expires_secs` always describe the same grant.
+   */
   label: string
   device_mac: string
   device_name: string | null

@@ -146,12 +146,25 @@ pub struct PortControl {
     /// Serializes every lease/UCI mutation (create/renew, remove, sweep), so a
     /// renewal can't be granted while the sweep is collecting its section.
     write_serial: tokio::sync::Mutex<()>,
-    /// Auto-forward section name → lease expiry. In-memory only; see module doc.
-    leases: Mutex<HashMap<String, Instant>>,
+    /// Auto-forward section name → its lease. In-memory only; see module doc.
+    leases: Mutex<HashMap<String, Lease>>,
     wan_cache: Mutex<Option<(Instant, Option<Ipv4Addr>)>>,
     lan_cache: Mutex<Option<(Instant, Arc<Vec<LanAddr>>)>>,
     /// Requesting IP → resolved+authorized device (None = unauthorized).
     client_cache: Mutex<HashMap<Ipv4Addr, (Instant, Option<Client>)>>,
+}
+
+/// A tracked auto-forward: when its lease runs out, and which protocol granted
+/// it. Both live here rather than in UCI, so the protocol reported for a
+/// forward and the expiry beside it always describe the same grant — a device
+/// that falls back from PCP to UPnP reads as UPnP-held from its next request
+/// on, even though the redirect it renews is unchanged.
+struct Lease {
+    expires: Instant,
+    /// The granting protocol, or `None` for a section the daemon adopted
+    /// without seeing a request (boot, external edit) — `_apf_label` in UCI is
+    /// the only witness then.
+    label: Option<&'static str>,
 }
 
 #[derive(Clone, Debug)]
@@ -184,9 +197,21 @@ impl PortControl {
     /// Seconds remaining on a section's lease, if the daemon is tracking one.
     pub fn lease_remaining(&self, section: &str) -> Option<u64> {
         let leases = self.leases.lock().unwrap();
-        leases
+        leases.get(section).map(|l| {
+            l.expires
+                .saturating_duration_since(Instant::now())
+                .as_secs()
+        })
+    }
+
+    /// The protocol that last granted or renewed a section's forward, if the
+    /// daemon saw the request that did so.
+    pub fn lease_label(&self, section: &str) -> Option<&'static str> {
+        self.leases
+            .lock()
+            .unwrap()
             .get(section)
-            .map(|t| t.saturating_duration_since(Instant::now()).as_secs())
+            .and_then(|l| l.label)
     }
 
     /// Drop cached authorization results so a toggle change applies immediately.
@@ -207,11 +232,14 @@ impl PortControl {
         self.started.elapsed().as_secs() as u32
     }
 
-    fn bump_lease(&self, section: String, lease: Duration) {
-        self.leases
-            .lock()
-            .unwrap()
-            .insert(section, Instant::now() + lease);
+    fn bump_lease(&self, section: String, lease: Duration, label: &'static str) {
+        self.leases.lock().unwrap().insert(
+            section,
+            Lease {
+                expires: Instant::now() + lease,
+                label: Some(label),
+            },
+        );
     }
 
     fn reload_firewall(&self) {
@@ -363,7 +391,7 @@ impl PortControl {
         match outcome {
             ApplyOutcome::Conflict => Err(IGD_CONFLICT),
             ApplyOutcome::Unchanged => {
-                self.bump_lease(section, lease);
+                self.bump_lease(section, lease, label);
                 Ok(())
             }
             ApplyOutcome::Written => {
@@ -371,7 +399,7 @@ impl PortControl {
                     "port-control: {label} forward {}#{count} -> {target} ({section})",
                     source
                 );
-                self.bump_lease(section, lease);
+                self.bump_lease(section, lease, label);
                 self.reload_firewall();
                 Ok(())
             }
@@ -461,12 +489,6 @@ impl PortControl {
         removed.len()
     }
 
-    /// One sweep: grant a grace lease to any auto section the daemon isn't
-    /// tracking yet (boot, external edit), drop lease entries for vanished
-    /// sections, and collect sections whose lease has expired. Holds the write
-    /// lock throughout, so a renewal either lands before the expiry decision or
-    /// re-creates its section afterwards — it can never be granted and then
-    /// collected by the same sweep.
     /// The auto forwards pointing at `peer`, as IGD mapping entries. Each
     /// forward opens both transports, so it reports as one TCP and one UDP
     /// entry — a client asks about a single protocol at a time and must find
@@ -503,12 +525,13 @@ impl PortControl {
         found
             .into_iter()
             .flat_map(|(section, external_port, internal_port, label)| {
+                let tracked = leases.get(&section);
                 // An untracked section (fresh boot) reports 0 = permanent
                 // rather than "already expired".
-                let lease_seconds = leases
-                    .get(&section)
-                    .map(|t| t.saturating_duration_since(now).as_secs() as u32)
+                let lease_seconds = tracked
+                    .map(|l| l.expires.saturating_duration_since(now).as_secs() as u32)
                     .unwrap_or(0);
+                let label = tracked.and_then(|l| l.label).map_or(label, str::to_string);
                 ["TCP", "UDP"]
                     .into_iter()
                     .map(move |protocol| MappingEntry {
@@ -522,6 +545,12 @@ impl PortControl {
             .collect()
     }
 
+    /// One sweep: grant a grace lease to any auto section the daemon isn't
+    /// tracking yet (boot, external edit), drop lease entries for vanished
+    /// sections, and collect sections whose lease has expired. Holds the write
+    /// lock throughout, so a renewal either lands before the expiry decision or
+    /// re-creates its section afterwards — it can never be granted and then
+    /// collected by the same sweep.
     async fn sweep(&self) -> Result<(), Error> {
         let _serial = self.write_serial.lock().await;
         let uci_root = self.uci_root.clone();
@@ -561,9 +590,15 @@ impl PortControl {
             for section in &sections {
                 match leases.get(&section.name) {
                     None => {
-                        leases.insert(section.name.clone(), now + GRACE_LEASE);
+                        leases.insert(
+                            section.name.clone(),
+                            Lease {
+                                expires: now + GRACE_LEASE,
+                                label: None,
+                            },
+                        );
                     }
-                    Some(t) if *t <= now => expired.push(section.name.clone()),
+                    Some(l) if l.expires <= now => expired.push(section.name.clone()),
                     Some(_) => {}
                 }
             }
@@ -1393,7 +1428,7 @@ async fn run_sweep(pc: Arc<PortControl>) {
 pub struct AutoForward {
     /// UCI section name (`apf_<mac>_<extport>`).
     pub id: String,
-    /// Which protocol created it ("PCP" or "UPnP").
+    /// Which protocol last granted or renewed it ("PCP" or "UPnP").
     pub label: String,
     pub device_mac: String,
     pub device_name: Option<String>,
@@ -1435,6 +1470,10 @@ pub async fn auto_list(ctx: ServerContext) -> Result<Vec<AutoForward>, Error> {
             continue;
         };
         let id = sec.name().unwrap_or_default().to_string();
+        let label = PORT_CONTROL
+            .get()
+            .and_then(|pc| pc.lease_label(&id))
+            .map_or(label, str::to_string);
         let device_mac = r._apf_mac.clone().unwrap_or_default().to_uppercase();
         out.push(AutoForward {
             expires_secs: PORT_CONTROL.get().and_then(|pc| pc.lease_remaining(&id)),
@@ -2019,7 +2058,7 @@ config redirect 'dns_override_lan'
         .unwrap();
 
         let pc = PortControl::new(dir.path().to_path_buf());
-        pc.bump_lease("apf_aabbccddeeff_8443".to_string(), MAX_LEASE);
+        pc.bump_lease("apf_aabbccddeeff_8443".to_string(), MAX_LEASE, LABEL_PCP);
         let removed = pc
             .remove_client_forwards("AA:BB:CC:DD:EE:FF", |_| true)
             .await;
@@ -2039,6 +2078,29 @@ config redirect 'dns_override_lan'
             pc.lease_remaining("apf_aabbccddeeff_8443"),
             None,
             "its lease is dropped too, so the sweep won't re-grace it"
+        );
+    }
+
+    // A protocol reclaiming another's forward leaves the redirect untouched, so
+    // only the lease records the change of holder.
+    #[test]
+    fn reclaim_by_another_protocol_reports_the_new_holder() {
+        let dir = tempfile::tempdir().unwrap();
+        let pc = PortControl::new(dir.path().to_path_buf());
+        let section = "apf_aabbccddeeff_8443".to_string();
+
+        pc.bump_lease(section.clone(), Duration::from_secs(3600), LABEL_PCP);
+        assert_eq!(pc.lease_label(&section), Some(LABEL_PCP));
+
+        pc.bump_lease(section.clone(), MAX_LEASE, LABEL_UPNP);
+        assert_eq!(
+            pc.lease_label(&section),
+            Some(LABEL_UPNP),
+            "a UPnP re-assert of a PCP-created forward reports UPnP"
+        );
+        assert!(
+            pc.lease_remaining(&section).unwrap() > 3600,
+            "and the lease it reports is the one UPnP was granted"
         );
     }
 
