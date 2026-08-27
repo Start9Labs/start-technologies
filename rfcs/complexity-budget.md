@@ -1,0 +1,207 @@
+# Complexity budget
+
+A way to track complexity in this repo, and a protocol that makes an agent state and defend
+what its change cost. Every number below was measured on `7e58f9d45`.
+
+## Why now
+
+Same code, path-normalized across three directory reorgs, so the monorepo consolidation is
+excluded — this is the StartOS Rust backend plus the web UI and nothing else:
+
+| date       | backend KB | web UI KB |  sum | delta |
+| ---------- | ---------: | --------: | ---: | ----: |
+| 2025-03-01 |       1686 |       869 | 2555 |     — |
+| 2025-09-01 |       1779 |       956 | 2735 |   +0% |
+| 2025-12-01 |       2107 |       989 | 3096 |  +13% |
+| 2026-04-01 |       2334 |      1033 | 3367 |   +3% |
+| 2026-06-01 |       2513 |      1076 | 3589 |   +6% |
+| 2026-08-27 |       3382 |      1098 | 4480 |  +24% |
+
+Fifteen months to 2026-06 added 40%. The eleven weeks after it added 25%. The growth is
+organic — no new top-level module, file count 324 → 356 — and concentrated: `net` went
+468 → 965 KB, `tunnel` 90 → 310 KB. Over the same window commit volume went from roughly
+20/month to 130–300/month, and Helix became the third-largest author, 208 of about 1,100
+commits in twelve months.
+
+None of that argues against the work. It argues that nobody is asked what it costs.
+Zero of 566 merged PR bodies contain the string `complexit`.
+
+## What gets measured
+
+**Cognitive complexity per function**, via `rust-code-analysis` (tree-sitter, real Rust and
+TypeScript grammars). Not cyclomatic complexity, and the difference is the whole argument.
+
+Probing both against a synthetic file settles it:
+
+| construct              | cyclomatic | cognitive | which is right                        |
+| ---------------------- | ---------: | --------: | ------------------------------------- |
+| 20-arm `match`         |         21 |     **1** | cognitive — a flat table is read once |
+| generic `where` bounds |          1 |     **0** | cognitive                             |
+| five `?` operators     |          6 |     **0** | cognitive — `?` is not cognitive load |
+| four-deep nested `if`  |          5 |    **10** | cognitive — nesting is superlinear    |
+
+Cyclomatic complexity ranks `error.rs::as_str` — an 84-line enum-to-string `match` — as the
+worst function in the repo. It is the least risky code we have. Cognitive complexity does not
+rank it at all. Lizard, the obvious cheap alternative, is worse still on Rust: its reader
+never counts match arms and does count every `?` and every `where`, so adopting it would push
+authors away from idiomatic error propagation and toward giant match statements. It also drops
+functions silently when a TypeScript object key is named `interface`.
+
+For TypeScript alone, eslint is a real alternative and cheaper than it looks — eslint 9 and
+typescript-eslint are already bundled dependencies of `@start9labs/start-sdk`, with a flat
+config at `projects/start-sdk/eslint.config.base.mjs` and a lint gate in `s9pk.mk`, so the
+dependency is shipped, just never aimed at this repo's own sources. It lints 1,146 TS files in
+2.3 s with no tsconfig and no parse errors. One binary covering both languages still wins here
+(the two agree closely, Spearman 0.94), but if the TS half is ever split out, eslint is the
+tool and `sonarjs/cognitive-complexity` is the rule.
+
+The census covers `shared-libs/` and `projects/` — the code that ships. Build tooling,
+`scripts/`, CI and the repo docs are outside it, which is why this RFC's own branch reports a
+delta of zero.
+
+Three deliberate exclusions: inline `#[cfg(test)]` items are stripped before measuring (this
+repo has 1,150 `#[test]` functions and only 6,249 lines in dedicated test files, so a
+path-based rule would fail and a PR adding good tests would read as adding complexity);
+generated trees are skipped (`osBindings`, `locales`, `exver.ts`, `dist`, `target`); and the
+census refuses to report at all if the parser reads under 98% of files, because grammar rot
+is otherwise silent. Parse coverage today is 530/530 Rust files.
+
+## Baseline
+
+| scope | functions | total cognitive | p90 | p99 | max |    over 25 |
+| ----- | --------: | --------------: | --: | --: | --: | ---------: |
+| Rust  |    11,687 |          20,685 |   5 |  26 | 165 | 125 (1.1%) |
+| TS    |     5,169 |           8,820 |   4 |  22 | 152 |  33 (0.6%) |
+
+`> 25` is the actionable line: about 1% of functions, 158 repo-wide.
+
+Worst ten, which is the standing pay-down list:
+
+```
+165  update                 shared-libs/crates/start-core/src/net/net_controller.rs:358
+157  add_public_domain      shared-libs/crates/start-core/src/net/host/address.rs:388
+157  <anonymous>            shared-libs/crates/start-core/src/net/host/address.rs:404
+152  <anonymous>            shared-libs/ts-modules/start-core/lib/exver/index.ts:207
+145  <anonymous>            shared-libs/crates/start-core/src/net/host/address.rs:472
+144  update_addresses       shared-libs/crates/start-core/src/net/host/mod.rs:141
+135  update_profile_ips_…   projects/start-wrt/backend/ctrl/src/lan.rs:668
+128  set                    projects/start-wrt/backend/ctrl/src/published_ports.rs:849
+119  ipv6_set               projects/start-wrt/backend/ctrl/src/lan.rs:395
+ 97  cmp                    shared-libs/crates/jsonpath/src/select/expr_term.rs:21
+```
+
+`net/host/address.rs` holds three of the top five — one function and two closures inside it.
+
+## The tooling
+
+`make complexity` (totals + worst 25), `make complexity-top` (pay-down list), and
+`make complexity-diff` (this branch against its merge-base). No build; the census is a
+tree-sitter pass, 0.5 s for the whole repo, and a full delta including the base checkout is
+about 3 s. It lives in `build/complexity/`, matching `build/fmt/`.
+
+Real output, for the portmap gateway PR:
+
+```
+Complexity vs 93d0c3cc4e
+  functions     16017 ->   16856   +839
+  cognitive     28504 ->   29505   +1001
+  sloc         190229 ->  199347   +9118
+  fns over 25     156 ->     158   +2
+
+  new functions over cognitive 10 (29 of 599 new):
+    cog   53  try_apply  .../net/port_map/client.rs:677
+    cog   33  desired_port_maps  .../net/vhost.rs:592
+
+  existing functions made more complex (108):
+    cog 36 -> 62  poll_ip_info  .../net/gateway.rs:2340  <-- already over 25
+    cog 24 -> 39  gc_policy_routing  .../net/gateway.rs:1487  <-- now over 25
+
+  simplified (52):
+    cog 212 -> 165  update  .../net/net_controller.rs:358
+    cog  42 ->   2  apply   .../net/port_map/client.rs:658
+```
+
+The aggregate is unremarkable, and that is the point. Measured across 30 real PRs, the
+threshold _counts_ — how many functions sit over a line — moved on 0 of 30, and total
+cognitive tracks the LOC delta closely enough (Spearman 0.82) that it is mostly line count
+wearing a hat. Neither is a budget worth defending.
+
+What a reviewer wants is the third block: a function already at 36 went to 62, and another
+crossed 25. That list moves on nearly every PR, is not derivable from the diff size, and is
+the thing a human would have flagged by hand. The report is per-function for that reason, and
+it credits the 52 functions this PR simplified for the same one.
+
+## Three numbers that are not line count
+
+Per-function complexity is the headline, but it correlates with diff size. Three cheap
+measures carry signal that LOC does not, and all three are things an agent inflates without
+noticing:
+
+- **Duplication.** 10.67% of lines repo-wide by union-of-ranges (`jscpd`, one 4.4 MB binary,
+  under a second). `rpc-toolkit` is worst at 39.2%. Copy-paste is the most common way an agent
+  adds volume without adding capability.
+- **Unused dependencies.** `cargo-machete` finds **28 unused direct Cargo dependencies** today,
+  in 0.26 s and without compiling. Cargo.lock sits at 994 crates.
+- **Public surface.** The count of exported items — 923 `pub fn` in start-core alone. Widening
+  an API is a permanent cost that no per-function metric registers.
+
+These are reported alongside the delta rather than gated, at least to start.
+
+## The protocol
+
+The confrontation belongs in the PR body, because that is the artifact an agent always
+produces: helix-nine wrote a body on 188 of 188 merged PRs with a median of 2,850 characters,
+while humans left 28 of 198 and 26 of 75 empty.
+
+Documentation alone is not enough. The closest measurable precedent is the "Label every PR"
+rule — inlined, bolded, with the literal command — which landed eight days before this
+snapshot and has 60% agent compliance. So the rule is paired with a check.
+
+`make complexity-diff`'s output goes under a `## Complexity` heading, followed by three
+questions. CI recomputes the census from `base.sha..head.sha` and fails when the section is
+missing, unanswered, or carries numbers that disagree. **Prose can be bluffed; a number CI
+recomputes cannot.** That is the load-bearing part of the design — the agent cannot write the
+block without having run the tool.
+
+The three questions, chosen because a weak answer is visible to a human:
+
+- the simplest alternative considered, and what breaks if we take it
+- which existing helper was checked before adding a new one, by file
+- for any function pushed over 25, why the branching is intrinsic to the requirement
+
+27% of merged PR bodies already volunteer a rejected alternative, so the hardest of the three
+is culturally native here rather than an imposition.
+
+## What this deliberately does not do
+
+**It does not ratchet.** Features cost complexity. A ratchet on a shipping repo gets suspended
+during the first release crunch and never comes back. The gate asks for a number and a reason,
+not for the number to stay flat.
+
+**It does not reward shredding.** Splitting one clear function into six poorly-named ones
+lowers per-function scores while making the code worse. Function count and total cognitive are
+printed next to the per-function lines precisely so that reads as what it is: total flat,
+count up.
+
+**It does not count tests**, so there is never a reason to thin one.
+
+Known limits, stated rather than hidden: Angular templates are invisible — 278 components use
+inline `template:` backticks holding 831 control-flow constructs, and those sit inside string
+literals that no per-function metric sees. `rust-code-analysis`'s last release is v0.0.25 from
+January 2023, though its grammar parses 100% of this repo today and the coverage assertion
+above is what catches it if that changes. And the length check on the three answers catches
+laziness, not sophistry — a determined bluff still needs a human to catch it.
+
+## Open questions
+
+1. **Advisory or required?** There is no `required_status_checks` rule on `master` today, so a
+   red check does not literally block; the approval does. Nothing has merged red in the last
+   30 PRs, so an advisory gate is honored in practice. Making it required is a one-line
+   ruleset change — worth doing, or not yet?
+2. **Should the gate apply to humans, or only to agent-authored PRs?** As written it applies to
+   everyone, which is the honest version, but it lands hardest on the author who already writes
+   the longest PR bodies.
+3. **Is `> 25` the right line?** It flags 1% of functions today. `> 15` would flag 2.4%.
+4. **Pay-down.** 75% of the twenty densest files were touched in the last 200 commits, so
+   "pay some down when your change already puts you in one of these files" would fire often.
+   Standing rule, or left to judgement?
