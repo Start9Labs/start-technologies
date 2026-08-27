@@ -1,17 +1,18 @@
 #!/bin/bash
-# Fetches the pinned rust-code-analysis binary. Upstream releases linux and windows only;
-# every other platform builds it with `cargo install`.
+# Fetches the pinned big-code-analysis binary and verifies it against the release checksum.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-VERSION=v0.0.25
-SHA256=9ec2a217b8ff191e02dab5d5f2eee6158b63fd975c532b2c5d67c2e6c7249894
+VERSION=2.1.0
+case "$(uname -s)-$(uname -m)" in
+  Linux-x86_64)   TRIPLE=x86_64-unknown-linux-gnu;  SHA256=6904518ff57968408dd3fa46a3fb533b8ac42cd035d5dd503090e24e19d5232a ;;
+  Linux-aarch64)  TRIPLE=aarch64-unknown-linux-gnu; SHA256=6400d71fb8b436ee71a984a605172680eacf3ad9d4fb2046e24d2d1972f669d0 ;;
+  Darwin-arm64)   TRIPLE=aarch64-apple-darwin;      SHA256=94faaa8f6f20952147e263222df4f65a11c8994af1da2e9d7882b3caae598212 ;;
+  *) echo "complexity: no pinned bca build for $(uname -s)-$(uname -m); build it with 'cargo install big-code-analysis --version $VERSION --root $HERE'" >&2; exit 1 ;;
+esac
+url="https://github.com/dekobon/big-code-analysis/releases/download/v$VERSION/big-code-analysis-$VERSION-$TRIPLE.tar.gz"
+tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+curl -fsSL "$url" -o "$tmp/bca.tar.gz"
+echo "$SHA256  $tmp/bca.tar.gz" | sha256sum -c - >/dev/null
+tar -xzf "$tmp/bca.tar.gz" -C "$tmp"
 mkdir -p "$HERE/bin"
-if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
-  url="https://github.com/mozilla/rust-code-analysis/releases/download/$VERSION/rust-code-analysis-linux-cli-x86_64.tar.gz"
-  tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
-  curl -fsSL "$url" -o "$tmp/rca.tar.gz"
-  echo "$SHA256  $tmp/rca.tar.gz" | sha256sum -c -
-  tar -xzf "$tmp/rca.tar.gz" -C "$HERE/bin"
-else
-  cargo install rust-code-analysis-cli --version "${VERSION#v}" --root "$HERE"
-fi
+install -m 0755 "$tmp/big-code-analysis-$VERSION-$TRIPLE/bca" "$HERE/bin/bca"

@@ -81,86 +81,66 @@ in the other direction — it measures macro-_expanded_ HIR, so with 2,871 `t!()
 sites its ranking tracks i18n density rather than code, correlating with a real cognitive
 metric at Spearman 0.435 and sharing 9 of its top 50.
 
-## Why not an off-the-shelf tool
+## The tool
 
-Mostly we should, and this RFC should have opened with that. Sonar defined cognitive
-complexity, and the metric here is theirs: verified against this build, a sequence of like
-operators costs 1 rather than 1 per operator, which is their distinctive rule.
+**`big-code-analysis` (`bca`)**, MPL-2.0 — a maintained fork of Mozilla's `rust-code-analysis`,
+which is the only lineage that computes cognitive complexity locally for both Rust and
+TypeScript. One binary, one pass, both languages: 527 Rust files and 759 TypeScript in 0.35 s
+with no build and no `npm install`. It is pinned by sha256 against the upstream release
+checksums and fetched into `build/complexity/bin/`, never committed; `cargo install` covers
+platforms with no published binary.
 
-**SonarQube is the wrong shape, though, and not because of the metric.** Complexity is a pure
-function of the tree — it needs no server. Sonar runs one because it is a platform: history,
-dashboard, quality profiles, PR decoration by webhook. The analysis itself already happens on
-the runner. And the free self-hosted tier, Community Build, analyzes the **main branch only** —
-no branch or pull-request analysis, no decoration — so self-hosting buys post-merge tracking and
-no pre-merge gate. The tier that gates is the hosted one. Paying a SaaS to compute a number we
-can compute in a second locally is the wrong trade for this repo.
+Three of its flags do work this repo would otherwise need bespoke code for. `--exclude-tests`
+skips `#[test]`, `#[cfg(test)]`, `#[tokio::test]` and `#[rstest]` subtrees, which matters here
+because tests are inline — 1,150 test functions against 6,249 lines in dedicated test files, so
+a path rule would make a PR that adds tests read as one that adds complexity. `cognitive.value`
+is a space's own score rather than `sum`, which folds in every nested closure. And
+`--cyclomatic-count-try` decides whether Rust's `?` counts as a branch.
 
-**Sonar's analyzers are not open source, but their licence does not block this.** Every language
-analyzer — `SonarJS`, `sonar-rust`, `sonar-python`, `sonar-java`, `sonar-dotnet` — is under the
-Sonar Source-Available License v1; only the SonarQube platform is still LGPL-3.0. SSAL grants
-rights solely "for any Non-competitive Purpose", and that term excludes "(c) employing, using, or
-engaging artificial intelligence technology that is not part of the Program to ingest, interpret,
-analyze, train on, or interact with the data provided by the Program". Read bare, that captures an
-agent reading a complexity report.
+**Not Sonar, and not on licence grounds.** Sonar defined cognitive complexity, their analyzers
+implement it best, and their licence turns out not to block internal agentic use — SonarSource's
+own MCP server hands analyzer output to third-party agents under byte-identical SSAL and carries
+a clarification from their VP Legal that doing so is a Non-competitive Purpose. The reasons to
+pass are simpler: the platform needs a server we do not want to run, the free self-hosted tier
+analyzes the main branch only and so cannot gate a pull request at all, and the analyzers are
+source-available rather than open source, where `bca` is MPL-2.0 and already on the `deny.toml`
+allowlist. On our TypeScript `bca` tracks Sonar's own implementation at Spearman 0.951, and
+Sonar's worst eight functions all land inside `bca`'s top twenty-five — immaterial for a
+threshold gate.
 
-It is not read bare. SonarSource's own MCP server exists to hand analyzer output to third-party
-LLM agents, ships under byte-identical SSAL v1.0, and carries a sentence its VP Legal added in a
-pull request titled "Clarify SSAL language with regards to MCP usage": "Using the SonarQube MCP
-Server in compliance with this documentation is a Non-Competitive Purpose and so is allowed under
-the SSAL." That is a declaratory construction of a defined term rather than an additional
-permission, and "Non-competitive Purpose" is defined by purpose, not by product, so it reads
-across. The honest caveat is that no analyzer repository carries the same sentence, and the
-licensor's 2024 announcement glosses (c) broadly and has never been retracted — so the narrow
-reading rests on the licensor's later conduct and construction, not on the text.
+Rejected after measurement: Clippy's `cognitive_complexity` runs on macro-expanded HIR, so
+against this repo's 2,871 `t!()` sites it ranks by i18n density (Spearman 0.435 against a real
+cognitive metric, sharing 9 of its top 50). lizard's Rust reader never counts match arms while
+counting every `?` and `where`, and its TypeScript reader silently drops functions from any file
+with an object key named `interface`. `scc` and `tokei` are per-file or carry no complexity
+metric at all.
 
-Two things would change that answer and neither applies here: redistributing anything containing
-an analyzer triggers the source-availability duty in §3.1, and shipping a code-quality product of
-our own would engage (a) and (b) directly.
+**One blind spot, and it is universal.** A body inside `macro_rules!` scores zero — in `bca`, in
+`rust-code-analysis`, and in SonarSource's own analyzer. Macro bodies are 0.19% of this repo's
+Rust lines, so it is disclosed rather than instrumented.
 
-`eslint-plugin-sonarjs` still carries a metadata defect worth knowing about: `package.json`
-declares `LGPL-3.0-only` while the shipped `LICENSE` and every source header are SSAL v1, so an
-SBOM built from package metadata asserts the wrong licence. We gate Cargo licences with
-`cargo-deny` and gate npm licences not at all.
+## Baseline## Baseline## Baseline
 
-**For Rust there is no local Sonar implementation**, and that is the whole reason anything is
-vendored here. Of what exists: Clippy is official and local but its `cognitive_complexity`
-measures macro-_expanded_ HIR, so against this repo's 2,871 `t!()` sites it ranks by i18n
-density (Spearman 0.435, 9 of 50 top-50 shared); lizard's Rust reader never counts match arms
-while counting every `?` and `where`; `scc` and `tokei` are per-file or have no complexity
-metric at all. `rust-code-analysis` is Mozilla's, tree-sitter based, peer-reviewed in SoftwareX,
-and the only local tool that computes cognitive complexity for Rust — with the caveat that its
-last release is January 2023.
+| scope | functions | total cognitive | p95 | p99 | max |    over 25 |
+| ----- | --------: | --------------: | --: | --: | --: | ---------: |
+| Rust  |    11,282 |          16,823 |   7 |  24 | 155 | 101 (0.9%) |
+| TS/JS |     5,436 |           6,816 |   6 |  15 |  72 |  15 (0.3%) |
 
-**Comparing the two implementations found a bug in this one.** Reading `cognitive.sum` per
-space counts the file-level container as a function and folds every nested closure into its
-parent. Agreement with the reference implementation was Spearman 0.822; taking each space's own
-score instead — `sum` minus its children — moves it to **0.954** and drops the repo total by
-33%. `list_conffiles` now scores 70, matching an independent measurement of the same function.
-That is the argument for the vetted tool, made concrete: a reimplementation is wrong in ways you
-only find by diffing it against the reference.
-
-## Baseline## Baseline
-
-| scope | functions | total cognitive | p95 | p99 | max |   over 25 |
-| ----- | --------: | --------------: | --: | --: | --: | --------: |
-| Rust  |    11,686 |          16,210 |   7 |  23 | 150 | 88 (0.8%) |
-| TS    |     5,166 |           5,926 |   6 |  14 |  72 | 15 (0.3%) |
-
-`> 25` is the actionable line: under 1% of functions, 103 repo-wide.
+`> 25` is the actionable line: under 1% of functions, 116 repo-wide.
 
 Worst ten, which is the standing pay-down list:
 
 ```
+155  ipv6_set               projects/start-wrt/backend/ctrl/src/lan.rs:395
 150  update                 shared-libs/crates/start-core/src/net/net_controller.rs:358
 144  update_addresses       shared-libs/crates/start-core/src/net/host/mod.rs:141
 135  update_profile_ips_…   projects/start-wrt/backend/ctrl/src/lan.rs:668
+133  set                    projects/start-wrt/backend/ctrl/src/published_ports.rs:867
 125  <anonymous>            shared-libs/crates/start-core/src/net/host/address.rs:472
-118  ipv6_set               projects/start-wrt/backend/ctrl/src/lan.rs:395
- 98  set                    projects/start-wrt/backend/ctrl/src/published_ports.rs:849
  97  rebase                 shared-libs/crates/patch-db/core/src/patch.rs:105
  80  up                     shared-libs/crates/start-core/src/version/v0_4_0_alpha_20.rs:37
+ 76  set                    projects/start-wrt/backend/ctrl/src/profiles.rs:1027
  72  <anonymous>            projects/start-sdk/lib/version/VersionGraph.ts:98
- 70  list_conffiles         projects/start-wrt/backend/ctrl/src/setup.rs:249
 ```
 
 The closure at `net/host/address.rs:472` outranks every named function but four.

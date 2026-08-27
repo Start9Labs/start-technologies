@@ -11,7 +11,7 @@ tb, th = base['totals'], head['totals']
 print(f"Complexity vs {ref[:10]}")
 for label, k in (('functions', 'functions'), ('cognitive', 'cognitive'),
                  ('cyclomatic', 'cyclomatic'), ('sloc', 'sloc'),
-                 ('macro lines', 'macro_lines'), ('fns over 25', 'over25')):
+                 ('fns over 25', 'over25')):
     print(f"  {label:<12}{tb[k]:>7} -> {th[k]:>7}   {th[k]-tb[k]:+d}")
 
 # Cognitive falls when a function is split, however badly; cyclomatic does not.

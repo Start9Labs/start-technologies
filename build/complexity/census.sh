@@ -4,9 +4,9 @@
 # a PR body's block is absent, unanswered, or disagrees with a fresh run.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-export RCA="${RCA:-$HERE/bin/rust-code-analysis-cli}"
+export BCA="${BCA:-$HERE/bin/bca}"
 
-[ -x "$RCA" ] || "$HERE/fetch-tool.sh"
+[ -x "$BCA" ] || "$HERE/fetch-tool.sh"
 
 case "${1:-census}" in
   census) python3 "$HERE/census.py" --root . ;;
