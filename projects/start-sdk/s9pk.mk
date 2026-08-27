@@ -33,9 +33,19 @@ else
 BASE_NAME := $(PACKAGE_ID)
 endif
 
-.PHONY: all arches aarch64 x86_64 riscv64 arm arm64 x86 riscv arch/* clean install check-deps check-init package ingredients
+.PHONY: all arches aarch64 x86_64 riscv64 arm arm64 x86 riscv arch/* clean install check-deps check-init package ingredients format
 .DELETE_ON_ERROR:
 .SECONDARY:
+
+SDK_DIR := node_modules/@start9labs/start-sdk
+PRETTIER_CONFIG := $(SDK_DIR)/prettier.config.json
+
+# The SDK supplies typescript, prettier and ncc, so these resolve from your
+# node_modules without the package declaring them. Override any of them in
+# ./Makefile above the include to customize a step.
+TS_CHECK ?= npx tsc --noEmit
+FORMAT_CHECK ?= npx prettier --config $(PRETTIER_CONFIG) --check startos
+JS_BUNDLE ?= rm -rf javascript && npx ncc build startos/index.ts -o javascript
 
 define SUMMARY
 	@manifest=$$(start-cli s9pk inspect $(1) manifest); \
@@ -128,9 +138,13 @@ check-init:
 	@start-cli init-key
 
 javascript/index.js: $(shell find startos -type f) tsconfig.json node_modules
-	npm run check
-	@if [ -f node_modules/@start9labs/start-sdk/lint.mjs ]; then node node_modules/@start9labs/start-sdk/lint.mjs; else echo "   ⚠ SDK lint runner not found; skipping (update @start9labs/start-sdk)"; fi
-	npm run build
+	$(TS_CHECK)
+	@if [ -f $(SDK_DIR)/lint.mjs ]; then node $(SDK_DIR)/lint.mjs; else echo "   ⚠ SDK lint runner not found; skipping (update @start9labs/start-sdk)"; fi
+	$(FORMAT_CHECK)
+	$(JS_BUNDLE)
+
+format: | node_modules
+	npx prettier --config $(PRETTIER_CONFIG) --write startos
 
 node_modules: package-lock.json package.json
 	npm ci

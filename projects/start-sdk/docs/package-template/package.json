@@ -1,26 +1,9 @@
 {
   "name": "{{id}}-startos",
-  "scripts": {
-    "build": "rm -rf ./javascript && ncc build startos/index.ts -o ./javascript",
-    "prettier": "prettier --write startos",
-    "check": "tsc --noEmit"
-  },
   "dependencies": {
     "@start9labs/start-sdk": "2.0.9"
   },
   "overrides": {
     "@start9labs/start-sdk": "$@start9labs/start-sdk"
-  },
-  "devDependencies": {
-    "@types/node": "^22.19.0",
-    "@vercel/ncc": "^0.38.4",
-    "prettier": "^3.6.2",
-    "typescript": "^6.0.3"
-  },
-  "prettier": {
-    "trailingComma": "all",
-    "tabWidth": 2,
-    "semi": false,
-    "singleQuote": true
   }
 }

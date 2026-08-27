@@ -28,7 +28,7 @@ bundle: dist/package.json
 
 # The sentinel is dist/package.json, not the dist/ dir: make can't see content
 # changes under a directory target, so a stale dist/ once published 2.0.5 as 2.0.4.
-dist/package.json: $(TS_FILES) package.json .npmignore node_modules README.md LICENSE CHANGELOG.md s9pk.mk tsconfig.base.json eslint.config.base.mjs lint.mjs $(START_CORE_DIST)/package.json
+dist/package.json: $(TS_FILES) package.json .npmignore node_modules README.md LICENSE CHANGELOG.md s9pk.mk tsconfig.base.json eslint.config.base.mjs lint.mjs prettier.config.json $(START_CORE_DIST)/package.json
 	rm -rf dist
 	npm run tsc
 	# Don't stage npm's hidden lockfile: it pins start-core to an out-of-tree path.
@@ -47,6 +47,7 @@ dist/package.json: $(TS_FILES) package.json .npmignore node_modules README.md LI
 	cp tsconfig.base.json dist/tsconfig.base.json
 	cp eslint.config.base.mjs dist/eslint.config.base.mjs
 	cp lint.mjs dist/lint.mjs
+	cp prettier.config.json dist/prettier.config.json
 	touch dist/package.json
 
 full-bundle: bundle

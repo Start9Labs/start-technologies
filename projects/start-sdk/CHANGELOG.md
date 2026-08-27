@@ -15,6 +15,25 @@
   already on a shape is now redundant and can go. Every other `z` export,
   `z.deepLoose` and `z.deepPartial` included, is unchanged
 
+- **Breaking — the SDK supplies the package toolchain.** TypeScript, Prettier,
+  ESLint and `@vercel/ncc` install with `@start9labs/start-sdk`, so a package
+  declares the SDK and nothing else. Drop `typescript`, `@types/node`,
+  `@vercel/ncc` and `prettier` from `devDependencies`, drop the `build`,
+  `check` and `prettier` scripts and the `prettier` config block, and add a
+  `.prettierrc` containing `"@start9labs/start-sdk/prettier.config.json"` so
+  your editor formats the way the build gate checks. `s9pk.mk` runs each step
+  itself through `TS_CHECK`, `FORMAT_CHECK` and `JS_BUNDLE`, any of which a
+  `Makefile` can override above the include
+
+- **The build gate rejects unformatted `startos/`.** `make format` writes. The
+  shared config is the four settings every package already declared, so nothing
+  that was formatted needs reformatting
+
+- **`@start9labs/start-core` is the only bundled dependency.** Everything else
+  installs normally, so a package can clear a security advisory anywhere in the
+  SDK's dependency tree with its own `overrides` entry rather than waiting for
+  an SDK release
+
 - **Breaking — `mountDependency` no longer accepts `type`.** A dependency mount
   has been a directory since StartOS 0.4.0-alpha.16 disabled file mounts on
   dependencies, so the option was silently doing nothing; passing it is now a
