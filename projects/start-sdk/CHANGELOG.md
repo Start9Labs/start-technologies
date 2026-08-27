@@ -148,6 +148,12 @@
   revision. `VersionRange.satisfiedByRelease` is the one evaluator behind the
   SDK, the dependency warnings and the marketplace
 
+- **`checkDependencies(...)`'s `satisfied()` takes an optional package id, and
+  `healthCheckSatisfied()`'s is optional.** Both were declared narrower than the
+  functions behind them, so `deps.satisfied('bitcoind')` was a compile error for
+  a call that has always worked, and the only way to check one dependency was to
+  reimplement the predicate
+
 - **A prerelease segment may mix letters, digits and hyphens**, matching the
   grammar StartOS parses. `1.0.0-rc1:0` and `1.0.0-alpha-1:0` threw a parse error
   out of `ExtendedVersion.parse` where the OS accepted them, so a dependency

@@ -19,9 +19,9 @@ export type CheckDependencies<DependencyId extends PackageId = PackageId> = {
   tasksSatisfied: (packageId: DependencyId) => boolean
   healthCheckSatisfied: (
     packageId: DependencyId,
-    healthCheckId: HealthCheckId,
+    healthCheckId?: HealthCheckId,
   ) => boolean
-  satisfied: () => boolean
+  satisfied: (packageId?: DependencyId) => boolean
 
   throwIfInstalledNotSatisfied: (packageId: DependencyId) => null
   throwIfInstalledVersionNotSatisfied: (packageId: DependencyId) => null

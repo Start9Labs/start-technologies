@@ -90,6 +90,16 @@ describe('checkDependencies version checks', () => {
     }
   })
 
+  test('the per-package and whole-set boolean checks are both callable', async () => {
+    const deps = await depsFor('^2.62.2:1', {
+      installedVersion: '2.63.23:0',
+      satisfies: [],
+    })
+    expect(deps.satisfied('filebrowser')).toBe(true)
+    expect(deps.satisfied()).toBe(true)
+    expect(deps.healthCheckSatisfied('filebrowser')).toBe(true)
+  })
+
   test('an absent dependency is answered before the range is parsed', async () => {
     const deps = await depsFor('not a range', {
       installedVersion: null,
