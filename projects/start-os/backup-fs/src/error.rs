@@ -68,8 +68,8 @@ impl BkfsError {
         }
     }
 
-    pub fn to_errno_log(&self) -> c_int {
-        let no = self.to_errno();
+    /// The severity follows the error's kind.
+    pub fn log(&self) {
         match &self.kind {
             BkfsErrorKind::Io(io) if io.raw_os_error().is_some() => {
                 debug!("{self:?}");
@@ -81,7 +81,11 @@ impl BkfsError {
                 error!("{self:?}");
             }
         }
-        no
+    }
+
+    pub fn to_errno_log(&self) -> c_int {
+        self.log();
+        self.to_errno()
     }
 
     pub fn to_errno(&self) -> c_int {

@@ -2748,7 +2748,7 @@ fn missing_superblock_over_existing_data_is_refused() {
     assert!(!data.path().join("superblock").exists());
 }
 
-/// Both storage tiers clamp a read that starts past the end.
+/// A read starting past the end returns no bytes, inline or block-backed.
 #[test_log::test]
 fn read_starting_past_eof_returns_no_bytes() {
     let data = TempDir::new("backupfs_data").unwrap();
@@ -2939,18 +2939,18 @@ fn copy_file_range_from_a_shrinking_file_copies_no_bytes() {
             // live writer.
             stop.store(true, Ordering::Relaxed);
             let flapped = flapping.join().unwrap();
+            // A truncator that died leaves every other observation meaningless.
+            flapped.expect("the truncator failed, so the source stopped shrinking");
             if let Some(e) = failure {
                 panic!("{e}");
             }
-            flapped.expect("the truncator failed, so the source never shrank");
             assert!(copies_that_moved_bytes > 0, "no copy moved any bytes");
         },
         None,
     );
 }
 
-/// The kernel issues no zero-length request, so these guards are reachable
-/// only by driving `Contents` directly.
+/// Only a direct `Contents` call reaches the write guard.
 #[test_log::test]
 fn empty_reads_and_writes_leave_a_file_untouched() {
     let data = TempDir::new("backupfs_data").unwrap();

@@ -188,7 +188,7 @@ impl Contents {
 
     // ── reads ──────────────────────────────────────────────
 
-    /// A read reaching past the end of the file fails.
+    /// A read of one or more bytes must lie within the file.
     pub fn read_exact_at(&mut self, buf: &mut [u8], offset: u64) -> BkfsResult<()> {
         // A read of no bytes is satisfiable at any offset.
         if buf.is_empty() {
@@ -284,7 +284,7 @@ impl Contents {
 
     pub fn write_all_at(&mut self, buf: &[u8], offset: u64) -> BkfsResult<()> {
         self.ctrl.check_rw()?;
-        // A write of no bytes neither extends the file nor stamps its mtime.
+        // A write of no bytes leaves the file's size and mtime alone.
         if buf.is_empty() {
             return Ok(());
         }

@@ -13,7 +13,7 @@ use fuser::{FileType, Request, TimeOrNow};
 
 use crate::FUSE_ROOT_ID;
 
-const FUSE_WRITE_KILL_PRIV: i32 = 1 << 2;
+const FUSE_WRITE_KILL_PRIV: u32 = 1 << 2;
 use log::{debug, warn};
 
 use crate::blockstore::CHUNK_SIZE;
@@ -1117,8 +1117,8 @@ impl Handler {
         fh: FileHandleId,
         offset: u64,
         data: &[u8],
-        _write_flags: u32,
-        flags: i32,
+        write_flags: u32,
+        _flags: i32,
         _lock_owner: Option<u64>,
     ) -> BkfsResult<usize> {
         let fh = self
@@ -1133,7 +1133,7 @@ impl Handler {
 
         contents.write_all_at(data, offset)?;
 
-        if flags & FUSE_WRITE_KILL_PRIV as i32 != 0 {
+        if write_flags & FUSE_WRITE_KILL_PRIV != 0 {
             contents.inode.attrs.clear_suid_sgid();
         }
 
@@ -1361,19 +1361,23 @@ impl Handler {
         if flags != 0 {
             return BkfsResult::errno(libc::EINVAL);
         }
-        // A copy that has already moved bytes reports the count, not the error.
         let mut copied = 0;
+        let mut stopped = None;
+        // A chunk at a time bounds the buffer a multi-gigabyte request allocates.
         while copied < size {
             let take = min(size - copied, CHUNK_SIZE as usize);
             let at = copied as u64;
             let bytes = match self.read(req, src_inode, src_fh, src_offset + at, take, 0, None) {
                 Ok(bytes) => bytes,
-                Err(e) => return if copied > 0 { Ok(copied) } else { Err(e) },
+                Err(e) => {
+                    stopped = Some(e);
+                    break;
+                }
             };
             if bytes.is_empty() {
                 break;
             }
-            match self.write(
+            if let Err(e) = self.write(
                 req,
                 dest_inode,
                 dest_fh,
@@ -1383,11 +1387,20 @@ impl Handler {
                 0,
                 None,
             ) {
-                Ok(wrote) => copied += wrote,
-                Err(e) => return if copied > 0 { Ok(copied) } else { Err(e) },
+                stopped = Some(e);
+                break;
             }
+            copied += bytes.len();
         }
-        Ok(copied)
+        match stopped {
+            Some(e) if copied == 0 => Err(e),
+            // A copy that has already moved bytes reports the count.
+            Some(e) => {
+                e.log();
+                Ok(copied)
+            }
+            None => Ok(copied),
+        }
     }
 
     pub fn fallocate(
