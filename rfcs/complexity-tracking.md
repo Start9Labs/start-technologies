@@ -239,6 +239,14 @@ cognitive, cyclomatic, sloc, and the count over 25. It is seeded with 28 sampled
 history. `make complexity-record` prints the delta and appends a row; whoever opens a PR runs it
 and commits the result.
 
+**The check reads the branch head, not the merge commit.** A `pull_request` event checks out
+head merged into the current base by default, so its numbers move every time master does —
+numbers no author could have recorded. The first green run of this job proved the point by
+passing for the wrong reason: master had moved seven commits, CI measured a tree the author
+never saw, and its figures happened to match a backfilled row from two days earlier. The job
+now pins `ref: github.event.pull_request.head.sha`, and the check compares the **last** row
+rather than searching the whole log, so a coincidental historical match cannot pass it.
+
 **CI checks that a row describes the tree being shipped, and nothing else.** That is the whole
 enforcement: it proves the census was run on what is actually being merged. It does not look at
 whether the numbers went up, because a threshold is the thing that would make the metric worth

@@ -186,7 +186,12 @@ jobs:
       && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
     runs-on: ubuntu-latest
     steps:
+      # The author recorded their branch, so measure that. A pull_request event
+      # checks out head merged into the current base by default, and its numbers
+      # move whenever master does — numbers no author can predict.
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13'

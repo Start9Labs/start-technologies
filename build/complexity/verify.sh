@@ -13,11 +13,12 @@ read -r functions cognitive cyclomatic sloc over25 < <(
     | python3 -c 'import json,sys; t=json.load(sys.stdin)["totals"]; print(t["functions"],t["cognitive"],t["cyclomatic"],t["sloc"],t["over25"])'
 )
 fresh="$functions	$cognitive	$cyclomatic	$sloc	$over25"
-if ! cut -f3-7 "$LOG" | grep -qxF "$fresh"; then
-  echo "complexity: no row in $LOG describes this tree." >&2
+last="$(tail -1 "$LOG" | cut -f3-7)"
+if [ "$last" != "$fresh" ]; then
+  echo "complexity: the last row of $LOG does not describe this tree." >&2
   echo "  tree:     $fresh" >&2
-  echo "  last row: $(tail -1 "$LOG" | cut -f3-7)" >&2
+  echo "  last row: $last" >&2
   echo "Run 'make complexity-record' and commit the result." >&2
   exit 1
 fi
-echo "complexity: the log describes this tree ($fresh)"
+echo "complexity: the last row describes this tree ($fresh)"
