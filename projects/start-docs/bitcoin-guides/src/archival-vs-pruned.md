@@ -27,8 +27,8 @@ A pruned node validates every block but discards block data after processing, ke
 
 **Trade-offs:**
 
-- **Cannot serve old blocks** — On most platforms, if a service requests a block the node has already pruned, the request fails. StartOS solves this with [on-demand block fetching](#pruned-nodes-on-startos).
-- **No block explorers** — Services like Mempool that need full blockchain history will not work with a pruned node, even on StartOS.
+- **Cannot serve old blocks** — On most platforms, if a service requests a block the node has already pruned, the request fails. StartOS solves this, for services that read blocks over Bitcoin's RPC interface, with [on-demand block fetching](#pruned-nodes-on-startos).
+- **Not every service is covered** — Electrum servers and block explorers still need an archival node, even on StartOS. See [What on-demand fetching does not cover](#what-on-demand-fetching-does-not-cover).
 
 ## Pruned Nodes on StartOS
 
@@ -36,15 +36,25 @@ On most platforms, running a pruned node introduces a practical limitation: down
 
 StartOS solves this with **on-demand block fetching**. The Bitcoin package on StartOS integrates btc-rpc-proxy, which intercepts block requests from downstream services. If a service asks for a block the pruned node has already discarded, btc-rpc-proxy fetches that block from the Bitcoin peer-to-peer network on the fly and serves it to the requesting service. From the service's perspective, it appears to be talking to an archival node.
 
+A fetched block is not taken on trust. Before it is served, the proxy checks that it hashes to the block that was asked for, that its merkle root commits to the transactions it carries, and that its witness commitment is satisfied — so a peer can neither substitute a different block nor strip data out of one.
+
 This means:
 
-- **Multiple downstream services work simultaneously** — LND, BTCPay Server, Fulcrum, and any other service can all connect to a single pruned node without conflict.
+- **Multiple downstream services work simultaneously** — LND, Core Lightning, BTCPay Server, and any other service that reads blocks over Bitcoin's RPC interface can all connect to a single pruned node without conflict.
 - **No manual pruning management** — You don't need to coordinate which blocks each service needs. btc-rpc-proxy handles it transparently.
 - **Significant disk savings** — You get most of the benefits of an archival node with a fraction of the disk usage.
 
 > [!NOTE]
 >
-> On-demand block fetching adds a small delay when a service requests a pruned block, since the block must be downloaded from the network before it can be served. In practice this is rare — most services only need recent blocks during normal operation.
+> On-demand block fetching adds a small delay when a service requests a pruned block, since the block must be downloaded from the network before it can be served. Recently fetched blocks are held in memory, so asking for the same one again is answered without going back out to the network. In practice this is rare — most services only need recent blocks during normal operation.
+
+### What on-demand fetching does not cover
+
+The proxy answers over Bitcoin's RPC interface. Three things read the chain some other way, and all of them need an archival node on StartOS — each raises a task on the Bitcoin service asking you to turn pruning off.
+
+- **Fulcrum** — it finds transactions through Bitcoin's transaction index, which records where in a block file each one sits. A pruned node cannot keep that index; Bitcoin refuses to run the two together. Fulcrum's author requires it deliberately: without it the node reads and searches an entire block for every transaction a wallet asks for, which does not hold up when several wallets are syncing at once.
+- **electrs** — it pulls whole blocks over Bitcoin's peer-to-peer interface rather than its RPC, so the proxy is not in that path. Upstream has kept it that way partly on privacy grounds: on a pruned node, the blocks the server went out to fetch would track which addresses your wallet had asked about.
+- **Block explorers** — Mempool answers arbitrary queries across the whole chain and needs it on disk.
 
 ## Managing Pruning on StartOS
 
@@ -58,17 +68,19 @@ If your disk is 900 GB or larger, pruning is off by default and you can enable o
 
 ## Which Should You Choose?
 
-For most StartOS users, a **pruned node** is the best choice. Thanks to on-demand block fetching, you get compatibility with all major downstream services while using a fraction of the disk space.
+For most StartOS users, a **pruned node** is the best choice. Thanks to on-demand block fetching, a wallet that talks to Bitcoin directly and a Lightning node beside it both work against a pruned node exactly as they would against an archival one, at a fraction of the disk usage.
 
 Choose an **archival node** if:
 
-- You want to run a **block explorer** like Mempool — this is the one major use case that requires full historical block data and cannot be served by on-demand fetching.
+- You want to run an **Electrum server** — Fulcrum or electrs. Most wallets reach a node through one, so this is the common reason to need an archival node.
+- You want to run a **block explorer** like Mempool.
 - You have the disk space (900 GB or more) and prefer having a complete local copy of the blockchain for its own sake.
 
-| Feature                          | Archival            | Pruned (on StartOS)                |
-| -------------------------------- | ------------------- | ---------------------------------- |
-| **Validates all blocks**         | Yes                 | Yes                                |
-| **Disk usage**                   | 600+ GB and growing | 5-10 GB (configurable)             |
-| **LND, BTCPay, Fulcrum**         | Yes                 | Yes (via on-demand block fetching) |
-| **Multiple downstream services** | Yes                 | Yes (via on-demand block fetching) |
-| **Block explorer (Mempool)**     | Yes                 | No                                 |
+| Feature                                | Archival            | Pruned (on StartOS)                |
+| -------------------------------------- | ------------------- | ---------------------------------- |
+| **Validates all blocks**               | Yes                 | Yes                                |
+| **Disk usage**                         | 600+ GB and growing | 5-10 GB (configurable)             |
+| **LND, Core Lightning, BTCPay**        | Yes                 | Yes (via on-demand block fetching) |
+| **Multiple downstream services**       | Yes                 | Yes (via on-demand block fetching) |
+| **Electrum server (Fulcrum, electrs)** | Yes                 | No                                 |
+| **Block explorer (Mempool)**           | Yes                 | No                                 |
