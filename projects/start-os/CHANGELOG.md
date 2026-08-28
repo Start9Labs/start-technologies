@@ -77,6 +77,22 @@ file tracks notable changes since the move to the monorepo.
 
 ### Fixed
 
+- **An app that remembers your server's certificate sees the same certificate
+  across every route to that name.** Wallets and other apps that pin the first
+  certificate they are shown — Sparrow and the Electrum clients most visibly —
+  raised a man-in-the-middle warning when the same name resolved through a
+  different address or the server's public IP changed. StartOS now reuses one
+  certificate per name until renewal.
+
+  This changes how one address behaves, on a server reached through a NAT
+  router: typing its public IP address while on the same network as the server
+  now produces a certificate warning, because the router rewrites such a
+  connection to the LAN address and the server cannot see which of the two you
+  asked for. Reach it from inside your own network by its `.local` name, by a
+  domain you have assigned to it, or by its LAN IP address. A server that holds
+  its public address directly, or that is reached over StartTunnel, is
+  unaffected. See [Public IP](https://docs.start9.com/start-os/public-ip.html).
+
 - **A downgrade to a version that cannot take over the service's data is refused
   before anything is downloaded or stopped**, with an explanation of what to do
   instead.

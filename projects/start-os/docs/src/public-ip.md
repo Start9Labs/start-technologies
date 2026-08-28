@@ -4,6 +4,9 @@ Access a service interface directly using a gateway's public IP address and port
 
 For hosting websites or APIs that people access in a browser, use a [public domain](clearnet.md) instead. Public IPs accessed in a browser will display certificate warnings because Let's Encrypt does not sign certificates for IP addresses. Visitors would need to [trust your Root CA](trust-ca.md), which is not reasonable for public access.
 
+> [!NOTE]
+> A public IP address reaches your server from the Internet. If your server is behind a NAT router, typing that address from a device on the same network as the server produces a certificate warning: the router rewrites the connection to your server's LAN address, so your server sees a local connection and presents the certificate for that address instead. Use its [`.local` address, a private domain, or its LAN IP](lan.md) from inside your own network. A server that holds its public address directly, or that you reach over [StartTunnel](/start-tunnel/), is unaffected.
+
 ## Watch The Video
 
 <div class="yt-video" data-id="xKYhCMNN3gw" data-title="Public IP"></div>

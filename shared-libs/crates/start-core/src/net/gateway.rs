@@ -39,7 +39,9 @@ use crate::net::forward::{START9_BRIDGE_IFACE, nft_ensure_base};
 use crate::net::gateway::device::DeviceProxy;
 use crate::net::host::all_hosts;
 use crate::net::port_map::{candidate_gateways, probe};
-use crate::net::utils::{bind_mio_listener, find_wifi_iface, ipv6_is_link_local, ipv6_is_local};
+use crate::net::utils::{
+    bind_mio_listener, find_wifi_iface, ipv6_is_link_local, ipv6_is_local, is_global_ip,
+};
 use crate::net::web_server::{Accept, AcceptStream, MetadataVisitor, TcpMetadata};
 use crate::prelude::*;
 use crate::util::Invoke;
@@ -1469,11 +1471,19 @@ async fn get_wan_ipv4(
         .error_for_status()?
         .text()
         .await?;
+    parse_echoip(&text)
+}
+
+/// A routable WAN address from an echoip response.
+fn parse_echoip(text: &str) -> Result<Option<Ipv4Addr>, Error> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return Ok(None);
     }
-    Ok(Some(trimmed.parse()?))
+    let ip: Ipv4Addr = trimmed.parse()?;
+    Ok(Some(ip).filter(|&ip| {
+        crate::net::port_map::upnp::is_wan_candidate(ip) && is_global_ip(IpAddr::V4(ip))
+    }))
 }
 
 struct PolicyRoutingGuard {
@@ -3380,6 +3390,42 @@ mod lookup_tests {
         let ip_info = gateway_holding("192.168.1.5/24");
         let compatible: SocketAddr = "[::192.168.1.5]:80".parse().unwrap();
         assert!(lookup_info_by_addr(&ip_info, compatible).is_none());
+    }
+}
+
+#[cfg(test)]
+mod parse_echoip_tests {
+    use super::*;
+
+    #[test]
+    fn an_unroutable_echoip_answer_is_no_wan_address() {
+        for text in [
+            "0.0.0.0",
+            "255.255.255.255",
+            "100.100.1.5",
+            "192.0.2.1",
+            "192.168.1.10",
+        ] {
+            assert_eq!(parse_echoip(text).unwrap(), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn a_routable_echoip_answer_is_the_wan_address() {
+        assert_eq!(
+            parse_echoip(" 8.8.8.8\n").unwrap(),
+            Some(Ipv4Addr::new(8, 8, 8, 8))
+        );
+    }
+
+    #[test]
+    fn an_empty_echoip_answer_is_no_wan_address() {
+        assert_eq!(parse_echoip("\n").unwrap(), None);
+    }
+
+    #[test]
+    fn a_malformed_echoip_answer_is_an_error() {
+        assert!(parse_echoip("<html>oops</html>").is_err());
     }
 }
 
