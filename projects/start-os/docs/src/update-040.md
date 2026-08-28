@@ -95,7 +95,7 @@ Pick your method below. Everything above applies to both, and the two paths rejo
 1. Flash the 0.4.0 installer to a USB drive from any computer, following the [Download](installing-startos.md#download) and [Flash](installing-startos.md#flash) sections of the install guide. Your server can keep running while you do this.
 
    > [!NOTE]
-   > On a Raspberry Pi, there is no USB installer — flash the 0.4.0 Raspberry Pi image to the Pi's microSD card instead. Follow the [Raspberry Pi flashing instructions](installing-startos.md#raspberry-pi) in place of the steps below, then continue with [Step 8](#step-8-wait-for-the-migration) — a Pi reaches the same migration progress screen.
+   > On a Raspberry Pi, there is no USB installer — flash the 0.4.0 Raspberry Pi image to the Pi's microSD card instead, following the [Raspberry Pi flashing instructions](installing-startos.md#raspberry-pi). Power the Pi on and rejoin the steps below at the language selection. The microSD card is already the OS drive, so you select a data drive only; everything after that is the same.
 
 1. Shut down your server through the StartOS UI.
 
@@ -111,7 +111,9 @@ Pick your method below. Everything above applies to both, and the two paths rejo
    > [!WARNING]
    > You must select the **same drive layout** you had on 0.3.5.1. If 0.3.5.1 (OS and data) lived on a single drive, select **that same drive for both** the OS drive and the data drive. If your 0.3.5.1 data was on a separate drive, select a different drive for the OS. Choosing a different layout than your existing install cannot preserve your data, and the installer will refuse rather than erase the drive.
 
-1. When prompted, select **Preserve** to keep your existing data.
+1. Selecting a data drive that holds StartOS data opens the **StartOS Data Detected** dialog. Choose **Preserve** to keep your existing data.
+
+   A 0.3.5.1 data drive is formatted ext4, which 0.4.0 converts to btrfs. Because of that conversion the dialog asks you to confirm you have a backup, and **Preserve** stays greyed out until you check **I have a backup of my data** — the backup you made in [Step 6](#step-6-create-a-full-system-backup).
 
    > [!WARNING]
    > If you do not select "Preserve", all data on the drive will be erased.
