@@ -217,9 +217,11 @@ impl<T> BkfsResultExt<T> for BkfsResult<T> {
 
 #[cfg(test)]
 mod non_fuse_tests {
-    use super::BkfsErrorKind;
-    use log::Level;
     use std::io;
+
+    use log::Level;
+
+    use super::BkfsErrorKind;
 
     #[test]
     fn multiple_uses_its_highest_error_severity_recursively() {

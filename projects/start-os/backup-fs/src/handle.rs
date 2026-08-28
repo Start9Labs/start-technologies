@@ -10,10 +10,9 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::SystemTime;
 
 use fuser::{FileType, Request, TimeOrNow};
+use log::{debug, log, warn};
 
 use crate::FUSE_ROOT_ID;
-
-use log::{debug, log, warn};
 
 const FUSE_WRITE_KILL_PRIV: i32 = 1 << 2;
 
@@ -31,15 +30,17 @@ fn readable_size(file_size: u64, offset: u64, requested: usize) -> usize {
 
 #[cfg(test)]
 mod non_fuse_tests {
+    use std::ffi::OsString;
+    use std::fs;
+
+    use tempdir::TempDir;
+
     use super::{readable_size, Handler};
     use crate::blockstore::CHUNK_SIZE;
     use crate::contents::Contents;
     use crate::ctrl::Controller;
     use crate::inode::{ContentId, FileData, Inode, InodeAttributes};
     use crate::{BackupFSOptions, FUSE_ROOT_ID};
-    use std::ffi::OsString;
-    use std::fs;
-    use tempdir::TempDir;
 
     fn controller(data: &TempDir) -> Controller {
         Controller::new(BackupFSOptions {
