@@ -90,9 +90,13 @@ export abstract class Watchable<Raw, Mapped = Raw> {
             constRetry()
           }
         },
-        () => {
+        e => {
           abort.abort()
           cleanup?.()
+          console.error(
+            `watch aborted, no longer reacting to changes @ ${this.label}.const`,
+            e,
+          )
         },
       )
     } else {

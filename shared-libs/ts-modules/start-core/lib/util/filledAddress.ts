@@ -374,6 +374,16 @@ export function filterNonLocal(hostnames: HostnameInfo[]): HostnameInfo[] {
   return filterRec(hostnames, nonLocalFilter, false)
 }
 
+const HELPER_KEYS = [
+  'toUrl',
+  'format',
+  'filter',
+  'matchesAny',
+  'nonLocal',
+  'public',
+  'bridge',
+] as const
+
 export const filledAddress = (
   host: Host,
   addressInfo: AddressInfo,
@@ -400,7 +410,7 @@ export const filledAddress = (
         filterRec(hostnames, bridgeFilter, false),
       ),
     )
-    return {
+    const filled = {
       ...addressInfo,
       hostnames,
       toUrl,
@@ -440,6 +450,14 @@ export const filledAddress = (
         return getBridge()
       },
     }
+
+    // Non-enumerable so a filled address compares and serializes as the data
+    // it wraps: the derived getters are otherwise an endless walk for deepEqual.
+    for (const key of HELPER_KEYS) {
+      Object.defineProperty(filled, key, { enumerable: false })
+    }
+
+    return filled
   }
 
   return filledAddressFromHostnames<{}>(hostnames)
