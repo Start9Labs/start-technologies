@@ -816,4 +816,8 @@ export default {
   923: 'Lokalny adres każdej zainstalowanej usługi',
   924: 'Karta przeglądarki i nazwa zainstalowanej aplikacji',
   925: 'SSH i dzienniki systemowe',
+  926: 'Widok listy',
+  927: 'Widok siatki',
+  928: 'Rosnąco',
+  929: 'Malejąco',
 } satisfies i18n

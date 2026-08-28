@@ -1,6 +1,5 @@
 import { Component, computed, input } from '@angular/core'
 import { RouterLink } from '@angular/router'
-import { i18nPipe } from '@start9labs/shared'
 import { TuiAvatar } from '@taiga-ui/kit'
 import { ServiceUptimeComponent } from 'src/app/routes/portal/routes/services/components/uptime.component'
 import { PkgDependencyErrors } from 'src/app/services/dep-error.service'
@@ -11,7 +10,7 @@ import { StatusComponent } from './status.component'
 @Component({
   selector: 'tr[appService]',
   template: `
-    <td [style.width.rem]="3" [style.grid-area]="'1 / 1 / 4'">
+    <td [style.width.rem]="3">
       <i tuiAvatar size="s" [round]="false">
         <img alt="logo" [src]="pkg().icon" />
       </i>
@@ -19,13 +18,12 @@ import { StatusComponent } from './status.component'
     <td class="title">
       <a [routerLink]="'/services/' + manifest().id">{{ manifest().title }}</a>
     </td>
-    <td class="status" [style.grid-area]="'3 / 2'">
+    <td class="status">
       <app-status [pkg]="pkg()" [hasDepErrors]="hasError()" />
     </td>
     <td class="version">{{ manifest().version }}</td>
     <td class="uptime">
       @if (pkg().statusInfo.started; as started) {
-        <span>{{ 'Uptime' | i18n }}:</span>
         <service-uptime [started]="started" />
       } @else {
         -
@@ -53,10 +51,6 @@ import { StatusComponent } from './status.component'
       font-weight: bold;
     }
 
-    span {
-      display: none;
-    }
-
     .title {
       width: 21rem;
     }
@@ -72,72 +66,8 @@ import { StatusComponent } from './status.component'
     .version {
       width: 21rem;
     }
-
-    :host-context(tui-root._mobile) {
-      position: relative;
-      display: grid;
-      grid-template: 1.25rem 2rem 1.5rem/4rem 1fr;
-      align-items: center;
-      padding: 1rem;
-
-      &:hover {
-        background: none;
-      }
-
-      [tuiAvatar] {
-        height: 2.5rem;
-        width: 2.5rem;
-      }
-
-      td {
-        padding: 0;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        color: var(--tui-text-secondary);
-
-        &::before {
-          display: inline;
-        }
-
-        &:empty {
-          display: none;
-        }
-      }
-
-      .title {
-        grid-area: 2 / 2;
-        font: var(--tui-typography-heading-h6);
-      }
-
-      .version {
-        grid-area: 1 / 2;
-        font: var(--tui-typography-body-s);
-      }
-
-      .uptime {
-        grid-area: 4 / 2;
-        display: flex;
-        align-items: baseline;
-        gap: 0.5rem;
-
-        &:not(:has(service-uptime)) {
-          display: none;
-        }
-
-        span {
-          display: inline-block;
-        }
-      }
-    }
   `,
-  imports: [
-    RouterLink,
-    StatusComponent,
-    ServiceUptimeComponent,
-    i18nPipe,
-    TuiAvatar,
-  ],
+  imports: [RouterLink, ServiceUptimeComponent, StatusComponent, TuiAvatar],
 })
 export class ServiceComponent {
   readonly pkg = input.required<PackageDataEntry>()

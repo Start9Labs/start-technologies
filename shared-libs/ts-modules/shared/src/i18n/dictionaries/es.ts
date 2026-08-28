@@ -816,4 +816,8 @@ export default {
   923: 'La dirección local de cada servicio instalado',
   924: 'La pestaña del navegador y el nombre de la aplicación instalada',
   925: 'SSH y los registros del sistema',
+  926: 'Vista de lista',
+  927: 'Vista de cuadrícula',
+  928: 'Ascendente',
+  929: 'Descendente',
 } satisfies i18n

@@ -8,5 +8,9 @@
   },
   "startosRegistry": "https://beta-registry.start9.com/",
   "snakeHighScore": 0,
-  "hiddenUpdates": {}
+  "hiddenUpdates": {},
+  "servicesView": {
+    "desktopLayout": "list",
+    "asc": true
+  }
 }

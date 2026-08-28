@@ -817,4 +817,8 @@ export const ENGLISH: Record<string, number> = {
   'The local address of every installed service': 923,
   'The browser tab and the name of the installed app': 924,
   'SSH and system logs': 925,
+  'List view': 926,
+  'Grid view': 927,
+  'Ascending': 928,
+  'Descending': 929,
 }

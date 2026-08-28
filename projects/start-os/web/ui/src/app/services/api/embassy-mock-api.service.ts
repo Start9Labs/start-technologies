@@ -1,4 +1,5 @@
 import { inject, Injectable } from '@angular/core'
+import { WA_SESSION_STORAGE } from '@ng-web-apis/common'
 import { GetPackageRes, GetPackagesRes } from '@start9labs/marketplace'
 import {
   FullKeyboard,
@@ -9,6 +10,7 @@ import {
 import { T } from '@start9labs/start-core'
 import {
   AddOperation,
+  applyOperation,
   Dump,
   Operation,
   PatchOp,
@@ -24,6 +26,7 @@ import {
   InstallingState,
   PackageDataEntry,
   StateInfo,
+  UIData,
   UpdatingState,
 } from 'src/app/services/patch-db/data-model'
 import { toAuthorityUrl } from 'src/app/utils/acme'
@@ -55,6 +58,8 @@ import { ApiService } from './embassy-api.service'
 import { mockPatchData } from './mock-patch'
 
 import markdown from './md-sample.md'
+
+const UI_KEY = '_startos/mock-ui'
 
 const PROGRESS: T.FullProgress = {
   overall: {
@@ -100,6 +105,7 @@ const INIT_PROGRESS: T.FullProgress = {
 @Injectable()
 export class MockApiService extends ApiService {
   readonly mockWsSource$ = new Subject<Revision>()
+  private readonly storage = inject(WA_SESSION_STORAGE)
   private readonly revertTime = 1800
   sequence = 0
 
@@ -187,6 +193,13 @@ export class MockApiService extends ApiService {
     guid: string
   }> {
     await pauseFor(2000)
+
+    const stored = this.storage?.getItem(UI_KEY)
+
+    if (stored) {
+      mockPatchData.ui = { ...mockPatchData.ui, ...JSON.parse(stored) }
+    }
+
     return {
       dump: { id: 1, value: mockPatchData },
       guid: 'db-guid',
@@ -198,16 +211,14 @@ export class MockApiService extends ApiService {
     value: T,
   ): Promise<null> {
     const pointer = pathFromArray(pathArr)
-    const params = { pointer, value }
     await pauseFor(2000)
-    const patch = [
-      {
-        op: PatchOp.REPLACE,
-        path: '/ui' + params.pointer,
-        value: params.value,
-      },
-    ]
-    this.mockRevision(patch)
+
+    const ui: Dump<UIData> = { id: 0, value: mockPatchData.ui }
+
+    applyOperation(ui, { op: PatchOp.REPLACE, path: pointer, value })
+    mockPatchData.ui = ui.value
+    this.storage?.setItem(UI_KEY, JSON.stringify(ui.value))
+    this.mockRevision([{ op: PatchOp.REPLACE, path: '/ui' + pointer, value }])
 
     return null
   }

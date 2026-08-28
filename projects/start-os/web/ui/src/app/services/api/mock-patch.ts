@@ -1,7 +1,44 @@
-import { DataModel } from 'src/app/services/patch-db/data-model'
+import { T } from '@start9labs/start-core'
+import {
+  DataModel,
+  InstalledState,
+  PackageDataEntry,
+} from 'src/app/services/patch-db/data-model'
 import { knownAuthorities } from 'src/app/utils/acme'
 import { Mock } from './api.fixures'
 const version = require('../../../../../../../../package.json').version
+
+function mockService(
+  id: string,
+  title: string,
+  pkgVersion: string,
+  statusInfo: T.StatusInfo,
+): PackageDataEntry<InstalledState> {
+  return {
+    stateInfo: {
+      state: 'installed',
+      manifest: {
+        ...Mock.MockManifestBitcoind,
+        id,
+        title,
+        version: pkgVersion,
+      },
+    },
+    s9pk: `/media/startos/data/package-data/archive/installed/${id}.s9pk`,
+    icon: '/assets/img/service-icons/fallback.png',
+    lastBackup: null,
+    statusInfo,
+    actions: {},
+    currentDependencies: {},
+    hosts: {},
+    storeExposedDependents: [],
+    outboundGateway: null,
+    registry: 'https://registry.start9.com/',
+    developerKey: 'developer-key',
+    plugin: { url: null },
+    tasks: {},
+  }
+}
 
 export const mockPatchData: DataModel = {
   ui: {
@@ -12,6 +49,7 @@ export const mockPatchData: DataModel = {
     startosRegistry: 'https://registry.start9.com/',
     snakeHighScore: 0,
     hiddenUpdates: {},
+    servicesView: { desktopLayout: 'list', asc: true },
   },
   serverInfo: {
     id: 'abcdefgh',
@@ -973,5 +1011,54 @@ export const mockPatchData: DataModel = {
       plugin: { url: { tableAction: 'create-onion-service' } },
       tasks: {},
     },
+    nextcloud: mockService('nextcloud', 'Nextcloud', '30.0.2:0', {
+      desired: { main: 'running' },
+      error: null,
+      health: {
+        web: { name: 'Web Interface', result: 'success', message: null },
+      },
+      started: new Date(Date.now() - 86400000).toISOString(),
+    }),
+    vaultwarden: mockService('vaultwarden', 'Vaultwarden', '1.32.7:0', {
+      desired: { main: 'running' },
+      error: null,
+      health: {
+        web: { name: 'Web Vault', result: 'loading', message: 'Starting up' },
+      },
+      started: new Date(Date.now() - 30000).toISOString(),
+    }),
+    jellyfin: mockService('jellyfin', 'Jellyfin', '10.10.3:0', {
+      desired: { main: 'stopped' },
+      error: null,
+      health: {},
+      started: null,
+    }),
+    electrs: mockService('electrs', 'Electrs', '0.10.5:0', {
+      desired: { main: 'running' },
+      error: null,
+      health: {
+        rpc: {
+          name: 'RPC',
+          result: 'failure',
+          message: 'Cannot reach bitcoind',
+        },
+      },
+      started: new Date(Date.now() - 3600000).toISOString(),
+    }),
+    'home-assistant': mockService(
+      'home-assistant',
+      'Home Assistant',
+      '2024.11.3:0',
+      {
+        desired: { main: 'running' },
+        error: {
+          details: 'Container exited unexpectedly',
+          debug: 'exit code 137',
+          info: null,
+        },
+        health: {},
+        started: null,
+      },
+    ),
   },
 }

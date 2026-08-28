@@ -15,6 +15,14 @@ export type UIData = {
   snakeHighScore: number
   startosRegistry: string
   hiddenUpdates: Record<string, string[]>
+  // Absent on upgraded servers — the seed only applies at first boot.
+  servicesView?: ServicesView
+}
+
+export type ServicesView = {
+  // Narrow viewports always render the grid, so the layout is desktop-only.
+  desktopLayout: 'list' | 'grid'
+  asc: boolean
 }
 
 export type PackageDataEntry<T extends StateInfo = StateInfo> =

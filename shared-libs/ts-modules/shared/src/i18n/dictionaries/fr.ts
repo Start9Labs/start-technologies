@@ -816,4 +816,8 @@ export default {
   923: 'L’adresse locale de chaque service installé',
   924: 'L’onglet du navigateur et le nom de l’application installée',
   925: 'SSH et les journaux système',
+  926: 'Vue liste',
+  927: 'Vue grille',
+  928: 'Croissant',
+  929: 'Décroissant',
 } satisfies i18n

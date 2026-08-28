@@ -816,4 +816,8 @@ export default {
   923: 'Die lokale Adresse jedes installierten Dienstes',
   924: 'Der Browser-Tab und der Name der installierten App',
   925: 'SSH und Systemprotokolle',
+  926: 'Listenansicht',
+  927: 'Rasteransicht',
+  928: 'Aufsteigend',
+  929: 'Absteigend',
 } satisfies i18n

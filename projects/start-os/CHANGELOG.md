@@ -65,6 +65,11 @@ file tracks notable changes since the move to the monorepo.
   service returns a URL — an authorization link, an admin panel — the result
   shows an open-in-new-tab button beside it.
 
+- **Installed services can be shown as a grid of tiles.** A toggle at the top of
+  the page switches between the grid and the list, and your choice follows you to
+  any browser pointed at this server. Narrow windows and phones always show the
+  grid.
+
 ### Changed
 
 - **Your server's name is now its `.local` address, without the `.local` on the
