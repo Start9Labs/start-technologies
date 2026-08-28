@@ -1,6 +1,7 @@
 name: Automated Tests
 
 on:
+  workflow_call:
   push:
     branches:
       - master
@@ -13,19 +14,13 @@ on:
   pull_request:
     # The jobs below skip drafts, and `ready_for_review` is not a default
     # activity type, so without it a draft marked ready is never checked.
-    # `edited` is the only activity type that fires when a pull request's base
-    # branch changes, which moves what these checks measure while the head SHA
-    # stands still. It also fires on every title and body edit, which the job
-    # guard and the `concurrency` suffix below filter back out.
-    types: [opened, synchronize, reopened, ready_for_review, edited]
+    types: [opened, synchronize, reopened, ready_for_review]
     branches:
       - master
       - integration/*
 
 concurrency:
-  # An `edited` event that left the base alone skips every job below, so it gets
-  # its own group: sharing the real run's group would cancel a build in flight.
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}${{ github.event.action == 'edited' && !github.event.changes.base && '-noop' || '' }}
+  group: automated-tests-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -39,12 +34,12 @@ jobs:
   # a formatting slip short-circuits them instead of burning the full matrix.
   prettier:
     name: Prettier
-    if: >-
-      github.event.pull_request.draft != true
-      && (github.event.action != 'edited' || github.event.changes.base)
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Check pull request retarget coverage
+        run: .github/scripts/check-pr-retarget-workflows.py
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODEJS_VERSION }}
@@ -59,9 +54,7 @@ jobs:
   # push/dispatch this guard is bypassed and they always run.
   changes:
     name: Detect non-docs changes
-    if: >-
-      github.event_name == 'pull_request' && github.event.pull_request.draft != true
-      && (github.event.action != 'edited' || github.event.changes.base)
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     permissions:
       pull-requests: read

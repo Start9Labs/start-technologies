@@ -54,11 +54,7 @@ on:
   pull_request:
     # The jobs below skip drafts, and `ready_for_review` is not a default
     # activity type, so without it a draft marked ready is never checked.
-    # `edited` is the only activity type that fires when a pull request's base
-    # branch changes, which moves what these checks measure while the head SHA
-    # stands still. It also fires on every title and body edit, which the job
-    # guard and the `concurrency` suffix below filter back out.
-    types: [opened, synchronize, reopened, ready_for_review, edited]
+    types: [opened, synchronize, reopened, ready_for_review]
     branches:
       - master
       - integration/*
@@ -87,9 +83,7 @@ on:
 # publishes to alpha, so master pushes queue behind each other rather than
 # aborting a publish half-done.
 concurrency:
-  # An `edited` event that left the base alone skips every job below, so it gets
-  # its own group: sharing the real run's group would cancel a build in flight.
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref }}${{ github.event.action == 'edited' && !github.event.changes.base && '-noop' || '' }}
+  group: start-tunnel-${{ github.event_name }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -108,9 +102,7 @@ env:
 jobs:
   compile:
     name: Build Debian Package
-    if: >-
-      github.event.pull_request.draft != true
-      && (github.event.action != 'edited' || github.event.changes.base)
+    if: github.event.pull_request.draft != true
     strategy:
       fail-fast: true
       matrix:
