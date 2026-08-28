@@ -183,7 +183,7 @@ Anything else is a failure. **`BAD signature`** means the file is not what Start
 
 1. At the Select Drives dialog, select the disk(s) you want to use as your OS and data drives.
 
-1. If a previous StartOS install is detected, it will ask whether you want to Overwrite or Preserve the existing StartOS data. Select Overwrite to start fresh, or Preserve to flash the OS on the booted USB thumb drive over the old installation, while preserving your data. After install is complete, you will be prompted to Continue to Setup.
+1. If a previous StartOS install is detected, it will ask whether you want to Overwrite or Preserve the existing StartOS data. Select Overwrite to start fresh, or Preserve to flash the OS on the booted USB thumb drive over the old installation, while preserving your data. If that data is on an ext4 drive, it will be converted to btrfs, and Preserve stays greyed out until you check "I have a backup of my data". After install is complete, you will be prompted to Continue to Setup.
 
 ## Raspberry Pi
 
