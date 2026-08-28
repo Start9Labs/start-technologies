@@ -172,4 +172,17 @@ jobs:
       - name: Check man pages up to date
         run: make manpages-check
       - name: Check TS bindings up to date
+        if: '!cancelled()'
         run: make start-core-ts-bindings-check
+      # A failed gate leaves its regenerated files in the working tree.
+      - name: Upload regenerated artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: generated-artifacts
+          path: |
+            shared-libs/ts-modules/start-core/lib/osBindings
+            projects/start-cli/man
+            projects/start-registry/man
+            projects/start-tunnel/man
+            projects/start-os/man
