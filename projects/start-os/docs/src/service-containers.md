@@ -55,3 +55,22 @@ lxc-attach <CONTAINER-ID>
 
 > [!WARNING]
 > This bypasses StartOS's managed access layer. Only use this if you have a specific reason that `start-cli package attach` cannot fulfill.
+
+## Service Data on the Host
+
+A service's volumes live on the host at:
+
+```
+/media/startos/data/package-data/volumes/<PACKAGE>/data/<VOLUME>
+```
+
+Inside the container, the same volume is mounted at `/media/startos/volumes/<VOLUME>`. That shorter path is the container's view of it and does not exist on the host.
+
+To see how much disk space each service is using, [SSH](ssh.md) in and run:
+
+```bash
+sudo du -h --max-depth=1 /media/startos/data/package-data/volumes/
+```
+
+> [!WARNING]
+> Do not modify files under this path while the service is running.
