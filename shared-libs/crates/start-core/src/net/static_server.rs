@@ -62,6 +62,7 @@ pub trait UiContext: Context + AsRef<RpcContinuations> + Clone + Sized {
     fn extend_router(self, router: Router) -> Router {
         router
     }
+    /// Applies layers after the UI fallback is installed.
     fn apply_outer_layers(self, router: Router) -> Router {
         router
     }

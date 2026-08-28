@@ -4,8 +4,6 @@ A private domain works like your server's [mDNS address](mdns.md), except it als
 
 Private domains can be added to any gateway: wired (Ethernet), wireless (WiFi), or WireGuard ([StartTunnel](/start-tunnel/)). They can only be accessed when connected to the same network as your server — your LAN, or a VPN / tunnel — and they require trusting your server's Root CA.
 
-Type the private domain on its own — `nextcloud.private` — to open the service over HTTPS. This works for service web interfaces on each network where the domain is assigned.
-
 ## Adding a Private Domain
 
 > [!NOTE]

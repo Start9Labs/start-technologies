@@ -46,7 +46,7 @@ pub fn redirect_service_domains(ctx: RpcContext, router: Router) -> Router {
     ))
 }
 
-/// An empty `GatewayId` represents an unplaced connection.
+/// An empty `GatewayId` represents a connection from an unknown origin.
 fn arrival_gateway_id(req: &Request) -> Option<GatewayId> {
     req.extensions()
         .get::<GatewayInfo>()
@@ -55,7 +55,7 @@ fn arrival_gateway_id(req: &Request) -> Option<GatewayId> {
 }
 
 fn request_domain(req: &Request) -> Option<String> {
-    // RFC 9112 gives the request-target authority precedence.
+    // Absolute-form requests use the URI authority instead of `Host`.
     let host = match req.uri().host() {
         Some(host) => host,
         None => req.headers().get(http::header::HOST)?.to_str().ok()?,
@@ -82,41 +82,43 @@ async fn redirect(
     name: &str,
     uri: &Uri,
 ) -> Result<Option<Response>, Error> {
-    // Authority- and asterisk-form targets have no redirectable path.
-    if uri
-        .path_and_query()
-        .map_or(true, |p| !p.path().starts_with('/'))
-    {
-        return Ok(None);
-    }
-    // The server's mDNS name belongs to the dashboard.
-    let is_own_mdns_name = ctx.account.peek(|a| {
-        name.strip_suffix(".local")
-            .is_some_and(|host| host == &**a.hostname.hostname)
-    });
-    if is_own_mdns_name {
-        return Ok(None);
-    }
     let Some(port) = package_service_tls_port(&ctx.db.peek().await, gateway, name)? else {
         return Ok(None);
     };
-    https_redirect(uri, name, port).map(Some)
+    let is_dashboard = ctx
+        .account
+        .peek(|a| is_dashboard_mdns(name, port, &a.hostname.hostname));
+    if is_dashboard {
+        return Ok(None);
+    }
+    let path_and_query = uri.path_and_query().filter(|path| path.as_str() != "*");
+    https_redirect(path_and_query, name, port).map(Some)
 }
 
-fn https_redirect(uri: &Uri, name: &str, port: u16) -> Result<Response, Error> {
+fn is_dashboard_mdns(name: &str, port: u16, hostname: &str) -> bool {
+    port == HTTPS_PORT && name.strip_suffix(".local") == Some(hostname)
+}
+
+fn https_redirect(
+    path_and_query: Option<&http::uri::PathAndQuery>,
+    name: &str,
+    port: u16,
+) -> Result<Response, Error> {
     let authority = if port == HTTPS_PORT {
         name.to_owned()
     } else {
         format!("{name}:{port}")
     };
-    let mut parts = uri.to_owned().into_parts();
-    parts.scheme = Some(Scheme::HTTPS);
-    parts.authority = Some(
-        authority
-            .parse::<Authority>()
-            .with_kind(ErrorKind::ParseUrl)?,
-    );
-    let target = Uri::from_parts(parts).with_kind(ErrorKind::ParseUrl)?;
+    let target = Uri::builder()
+        .scheme(Scheme::HTTPS)
+        .authority(
+            authority
+                .parse::<Authority>()
+                .with_kind(ErrorKind::ParseUrl)?,
+        )
+        .path_and_query(path_and_query.map_or("/", |path| path.as_str()))
+        .build()
+        .with_kind(ErrorKind::ParseUrl)?;
     Response::builder()
         .status(StatusCode::TEMPORARY_REDIRECT)
         .header(
@@ -588,8 +590,17 @@ mod test {
         );
     }
 
-    fn location(uri: &str, port: u16) -> String {
-        let target = https_redirect(&uri.parse().unwrap(), "cloud.mydomain.com", port).unwrap();
+    #[test]
+    fn leaves_the_servers_mdns_name_on_the_dashboard_only_on_443() {
+        assert!(is_dashboard_mdns("myserver.local", HTTPS_PORT, "myserver"));
+        assert!(!is_dashboard_mdns("myserver.local", 8443, "myserver"));
+    }
+
+    fn location(uri: Option<&str>, port: u16) -> String {
+        let path_and_query = uri
+            .filter(|path| *path != "*")
+            .map(|uri| uri.parse().unwrap());
+        let target = https_redirect(path_and_query.as_ref(), "cloud.mydomain.com", port).unwrap();
         assert_eq!(target.status(), StatusCode::TEMPORARY_REDIRECT);
         target
             .headers()
@@ -603,15 +614,24 @@ mod test {
     #[test]
     fn keeps_the_path_and_query() {
         assert_eq!(
-            location("/photos?share=1", HTTPS_PORT),
+            location(Some("/photos?share=1"), HTTPS_PORT),
             "https://cloud.mydomain.com/photos?share=1"
+        );
+    }
+
+    #[test]
+    fn redirects_a_target_without_a_path_to_the_root() {
+        assert_eq!(location(None, HTTPS_PORT), "https://cloud.mydomain.com/");
+        assert_eq!(
+            location(Some("*"), HTTPS_PORT),
+            "https://cloud.mydomain.com/"
         );
     }
 
     #[test]
     fn names_a_tls_port_that_is_not_443() {
         assert_eq!(
-            location("/photos", 8443),
+            location(Some("/photos"), 8443),
             "https://cloud.mydomain.com:8443/photos"
         );
     }
