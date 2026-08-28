@@ -234,16 +234,23 @@ one thing that would make it a verdict is a gate.
 
 ## Tracking across changes
 
-`build/complexity/history.tsv` holds one row per master commit: commit, date, functions,
+`build/complexity/history.tsv` holds one row per recorded tree: commit, date, functions,
 cognitive, cyclomatic, sloc, and the count over 25. It is seeded with 28 sampled points from
-history and appended by `make complexity-record`.
+history. `make complexity-record` prints the delta and appends a row; whoever opens a PR runs it
+and commits the result.
 
-**Only master CI ever writes it**, which is what keeps it free. Simulating real merges over 60
-code commits, a totals file that pull requests edit conflicts on **75.4%** of median-lifetime
-branches; the same file written only after merge conflicts on none, because no branch ever
-touches it.
+**CI checks that a row describes the tree being shipped, and nothing else.** That is the whole
+enforcement: it proves the census was run on what is actually being merged. It does not look at
+whether the numbers went up, because a threshold is the thing that would make the metric worth
+gaming. Push another commit and the row goes stale, and the check says so.
 
-Read the log for shape, not for precision. Step changes in it are usually imports rather than
+Requiring every PR to append to one file is normally how you manufacture the conflict this repo
+already suffers from its append-only i18n dictionaries — two branches adding different rows at
+the same tail collide on every merge, which I confirmed on a scratch repo. One line of
+`.gitattributes` removes it: the log is `merge=union`, so git keeps both sides. Three concurrent
+branches each appending a distinct row merged cleanly, with all rows preserved.
+
+Read the log for shape, not precision. Step changes in it are usually imports rather than
 growth — the jump from 16,188 to 22,032 on 2026-07-02 is start-wrt and start-cli arriving in the
 monorepo, not a bad week.
 
