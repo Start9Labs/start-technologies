@@ -37,15 +37,57 @@ impl fmt::Display for ParseError {
 }
 impl std::error::Error for ParseError {}
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug)]
 pub enum PreReleaseSegment {
     Number(usize),
+    Numeric(InternedString),
     String(InternedString),
+}
+impl PartialEq for PreReleaseSegment {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Number(left), Self::Number(right)) => left == right,
+            (Self::Numeric(left), Self::Numeric(right)) => left == right,
+            (Self::String(left), Self::String(right)) => left == right,
+            _ => false,
+        }
+    }
+}
+impl Eq for PreReleaseSegment {}
+impl Hash for PreReleaseSegment {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        match self {
+            Self::Number(value) => value.hash(state),
+            Self::Numeric(value) | Self::String(value) => value.hash(state),
+        }
+    }
+}
+impl Ord for PreReleaseSegment {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Self::Number(left), Self::Number(right)) => left.cmp(right),
+            (Self::Numeric(left), Self::Numeric(right)) => {
+                left.len().cmp(&right.len()).then_with(|| left.cmp(right))
+            }
+            (Self::Number(_), Self::Numeric(_)) => Ordering::Less,
+            (Self::Numeric(_), Self::Number(_)) => Ordering::Greater,
+            (Self::String(left), Self::String(right)) => left.cmp(right),
+            (Self::Number(_) | Self::Numeric(_), Self::String(_)) => Ordering::Less,
+            (Self::String(_), _) => Ordering::Greater,
+        }
+    }
+}
+impl PartialOrd for PreReleaseSegment {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 impl fmt::Display for PreReleaseSegment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Number(a) => write!(f, "{a}"),
+            Self::Numeric(a) => write!(f, "{a}"),
             Self::String(a) => write!(f, "{a}"),
         }
     }
@@ -217,9 +259,9 @@ impl std::str::FromStr for Version {
                                     "numeric prerelease identifier may not have leading zero",
                                 ))
                             } else {
-                                Ok(PreReleaseSegment::Number(
-                                    seg.parse()
-                                        .map_err(|_| err_fn("invalid numeric identifier"))?,
+                                Ok(seg.parse().map_or_else(
+                                    |_| PreReleaseSegment::Numeric(seg.into()),
+                                    PreReleaseSegment::Number,
                                 ))
                             }
                         } else if let Some(_c) = seg
@@ -553,8 +595,6 @@ impl VersionRange {
         match a {
             Anchor(EQ, v) => Anchor(NEQ, v),
             Anchor(NEQ, v) => Anchor(EQ, v),
-            And(a, b) => Or(Box::new(Self::not(*a)), Box::new(Self::not(*b))),
-            Or(a, b) => And(Box::new(Self::not(*a)), Box::new(Self::not(*b))),
             Not(a) => *a,
             Any => None,
             None => Any,
@@ -606,20 +646,43 @@ impl VersionRange {
         sat::Tables::and(sat::tables_of(self), sat::tables_of(other)).satisfiable()
     }
 
-    /// Whether a release satisfies this range. A release is its own version together with the
-    /// versions it declares in `satisfies`. A negation holds only when none of them matches.
+    /// Whether one declared version satisfies the complete range.
     ///
-    /// For a single version this agrees with [`ExtendedVersion::satisfies`].
+    /// Negative literals veto their branch when any declared version matches the positive literal.
+    /// An empty release satisfies no range.
     pub fn satisfied_by_release(&self, versions: &[ExtendedVersion]) -> bool {
+        self.release_matches(versions, false)
+            .into_iter()
+            .any(|matched| matched)
+    }
+
+    fn release_matches(&self, versions: &[ExtendedVersion], negated: bool) -> Vec<bool> {
         use VersionRange::*;
-        match self {
-            And(a, b) => a.satisfied_by_release(versions) && b.satisfied_by_release(versions),
-            Or(a, b) => a.satisfied_by_release(versions) || b.satisfied_by_release(versions),
-            Not(a) => !a.satisfied_by_release(versions),
-            Anchor(op, v) if op == &NEQ => !versions
+        match (self, negated) {
+            (And(a, b), false) | (Or(a, b), true) => a
+                .release_matches(versions, negated)
+                .into_iter()
+                .zip(b.release_matches(versions, negated))
+                .map(|(a, b)| a && b)
+                .collect(),
+            (Or(a, b), false) | (And(a, b), true) => a
+                .release_matches(versions, negated)
+                .into_iter()
+                .zip(b.release_matches(versions, negated))
+                .map(|(a, b)| a || b)
+                .collect(),
+            (Not(a), _) => a.release_matches(versions, !negated),
+            (Anchor(op, v), _) if op == &NEQ => {
+                Self::Anchor(EQ, v.clone()).release_matches(versions, !negated)
+            }
+            (_, false) => versions
                 .iter()
-                .any(|version| version.partial_cmp(v) == Some(Ordering::Equal)),
-            _ => versions.iter().any(|version| version.satisfies(self)),
+                .map(|version| version.satisfies(self))
+                .collect(),
+            (_, true) => {
+                let matched = versions.iter().any(|version| version.satisfies(self));
+                vec![!matched; versions.len()]
+            }
         }
     }
 }

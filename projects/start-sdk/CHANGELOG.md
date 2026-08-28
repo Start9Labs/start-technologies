@@ -137,12 +137,13 @@
   version: a `#knots` Bitcoin or a `#quantum` File Browser read as unsatisfied
   while the throwing surface passed
 
-- **A `versionRange` exclusion holds against every version a release declares.**
-  `!=` and `!` were evaluated against each of a dependency's versions on its own,
-  so a release excluded by name slipped through on any in-range version it
-  declares in `satisfies` — a dependent blacklisting a broken revision got that
-  revision. `VersionRange.satisfiedByRelease` is the one evaluator behind the
-  SDK, the dependency warnings and the marketplace
+- **A dependency release is matched against `versionRange` as one set of declared versions.**
+  One installed or aliased version must satisfy a complete conjunction, while
+  `!=` and negated ranges exclude the release when any declared version matches.
+  `VersionRange.satisfiedByRelease` is the evaluator behind the SDK, dependency
+  warnings and marketplace, and `normalize()` preserves the same answer. Numeric
+  prerelease identifiers retain exact ordering and serialization beyond
+  JavaScript's safe-integer limit
 
 - **`checkDependencies(...)`'s `satisfied()` takes an optional package id, and
   `healthCheckSatisfied()`'s is optional.** Both were declared narrower than the

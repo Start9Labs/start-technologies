@@ -351,11 +351,11 @@ file tracks notable changes since the move to the monorepo.
   (RFC 8441) should advertise only `http/1.1`, which keeps WebSocket clients on
   HTTP/1.1 where a WebSocket is an ordinary upgrade.
 
-- **A dependency a service rules out by version stays ruled out.** A release
-  names the versions it stands in for, and each was checked against the required
-  range on its own — so a version the service excluded satisfied that range
-  through any other version the release names, and the dependency warning, the
-  update check and the marketplace all reported it as fine.
+- **Dependency releases satisfy one complete version-range branch.** A release
+  may use an installed or aliased version, but one version must satisfy every
+  term in a conjunction, and an exclusion matching any declared version rules
+  out that branch. Dependency warnings, update checks and marketplace filtering
+  now agree on that evaluation.
 
 - **Versions of different flavors sort in a stable order.** Comparing across
   flavors produced no answer, so a list mixing Bitcoin Core with Bitcoin Knots

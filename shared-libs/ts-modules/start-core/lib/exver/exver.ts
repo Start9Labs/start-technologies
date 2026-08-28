@@ -460,7 +460,11 @@ function peg$parse(input, options) {
 
   var peg$f26 = function(segment) {
 // @ts-ignore
-    return /^[0-9]+$/.test(segment) ? parseInt(segment, 10) : segment;
+    if (!/^[0-9]+$/.test(segment)) return segment;
+// @ts-ignore
+    const value = Number(segment);
+// @ts-ignore
+    return Number.isSafeInteger(value) ? value : segment;
   };// @ts-ignore
 
   var peg$f27 = function(first, rest) {

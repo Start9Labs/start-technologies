@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use proptest::prelude::*;
 use yasi::InternedString;
 
@@ -194,12 +196,9 @@ proptest! {
     }
 
     #[test]
-    fn release_negation_is_universal(a in range_gen(), x in ex_version_gen(), y in ex_version_gen()) {
+    fn release_reduce_preserves_satisfaction(a in range_gen(), x in ex_version_gen(), y in ex_version_gen()) {
         let versions = [x, y];
-        assert!(
-            VersionRange::not(a.clone()).satisfied_by_release(&versions)
-                == !a.satisfied_by_release(&versions)
-        )
+        assert!(a.clone().reduce().satisfied_by_release(&versions) == a.satisfied_by_release(&versions))
     }
 
     #[test]
@@ -292,28 +291,151 @@ fn range(r: &str) -> VersionRange {
 }
 
 #[test]
-fn alias_carries_a_positive_range() {
-    assert!(range("^2.62.2:1").satisfied_by_release(&release(&["#quantum:1.5.2:0", "2.63.23:0"])));
+fn unbounded_numeric_prerelease_vectors() {
+    let vectors = [
+        ("1-a:0", "1-0:0", Ordering::Greater),
+        (
+            "1-9007199254740991:0",
+            "1-9007199254740992:0",
+            Ordering::Less,
+        ),
+        (
+            "1-9007199254740992:0",
+            "1-9007199254740993:0",
+            Ordering::Less,
+        ),
+        (
+            "1-18446744073709551616000000000000000000:0",
+            "1-18446744073709551616000000000000000001:0",
+            Ordering::Less,
+        ),
+    ];
+
+    for (left, right, ordering) in vectors {
+        let left_text = left;
+        let left: ExtendedVersion = left_text.parse().unwrap();
+        let right: ExtendedVersion = right.parse().unwrap();
+        assert_eq!(left.to_string(), left_text);
+        assert_eq!(left.partial_cmp(&right), Some(ordering));
+        assert_ne!(left, right);
+    }
+
+    let exact = "1-18446744073709551616000000000000000000:0";
+    let version: ExtendedVersion = exact.parse().unwrap();
+    assert_eq!(version.to_string(), exact);
+    assert_eq!(version, exact.parse().unwrap());
+
+    let bounded = range(">=1-9007199254740992:0 && <1-9007199254740993:0");
+    assert!("1-9007199254740992:0"
+        .parse::<ExtendedVersion>()
+        .unwrap()
+        .satisfies(&bounded));
+    assert!(!"1-9007199254740993:0"
+        .parse::<ExtendedVersion>()
+        .unwrap()
+        .satisfies(&bounded));
+
+    for expression in [
+        ">=1-9007199254740992:0 && <1-9007199254740993:0",
+        "=1-18446744073709551616000000000000000000:0",
+    ] {
+        let range = range(expression);
+        assert_eq!(
+            range.satisfied_by_release(&[version.clone()]),
+            version.satisfies(&range),
+        );
+        assert_eq!(
+            range
+                .clone()
+                .reduce()
+                .satisfied_by_release(&[version.clone()]),
+            range.satisfied_by_release(&[version.clone()]),
+        );
+    }
 }
 
 #[test]
-fn alias_does_not_escape_an_excluded_revision() {
-    assert!(!range(">=2.0:0 && !=2.0:5").satisfied_by_release(&release(&["2.0:5", "2.0:4"])));
+fn release_range_vectors() {
+    let vectors: &[(&str, &[&str], bool)] = &[
+        ("^2.62.2:1", &["#quantum:1.5.2:0", "2.63.23:0"], true),
+        ("^0", &["0.9:0"], true),
+        ("^0", &["1:0"], false),
+        ("^0.0.0", &["0.9:0"], true),
+        ("^0.0.0", &["1:0"], false),
+        ("0", &["0.9:0"], true),
+        ("0", &["1:0"], false),
+        ("~0", &["0.0.9:0"], true),
+        ("~0", &["0.1:0"], false),
+        ("~0.0.0", &["0.0.9:0"], true),
+        ("~0.0.0", &["0.1:0"], false),
+        ("~1", &["1.0.9:0"], true),
+        ("~1", &["1.1:0"], false),
+        ("^0.0.3-beta", &["0.0.3:0"], true),
+        ("^0.0.3-beta", &["0.0.4-alpha:0"], true),
+        ("^0.0.3-beta", &["0.0.4-beta:0"], false),
+        ("~1.2-beta", &["1.2:0"], true),
+        ("~1.2-beta", &["1.3-alpha:0"], true),
+        ("~1.2-beta", &["1.3-beta:0"], false),
+        ("!^1:0", &["0.5:0", "3:0"], false),
+        ("!~1.2:0", &["1.1:0", "1.3:0"], false),
+        ("!(!^1:0)", &["0.5:0", "3:0"], false),
+        (">=2:0 && <3:0", &["2.5:0", "4:0"], true),
+        (">=2:0 && <2:0", &["2:0", "1:0"], false),
+        (">=2:0 || <2:0", &["2:0", "1:0"], true),
+        ("!(>=2:0 && <2:0)", &["2:0", "1:0"], false),
+        ("!(!>=2:0)", &["2:0", "1:0"], true),
+        ("!(!>=2:0) && <2:0", &["2:0", "1:0"], false),
+        ("!(!(>=2:0 && <3:0))", &["2.5:0", "4:0"], true),
+        ("!(>=2:0 || <2:0)", &["2:0", "1:0"], false),
+        ("!(!(!>=2:0))", &["2:0", "1:0"], false),
+        ("!#knots && >=29.4:0", &["#knots:29.4:5", "29.4:5"], false),
+        (">=2.0:0 && !=2.0:5", &["2.0:5", "2.0:4"], false),
+        ("^28.4:21 && !=28.4:22", &["31.1:10", "28.4:21"], true),
+        ("!=1.0:0", &["1.0.0:0"], false),
+        ("#foo && >=2:0", &["#foo:1:0", "2:0"], false),
+        ("(#foo && >=2:0) || =1:0", &["#foo:2:0", "1:0"], true),
+        ("*", &[], false),
+        ("!", &[], false),
+        ("!*", &[], false),
+    ];
+
+    for (expression, versions, expected) in vectors {
+        assert_eq!(
+            range(expression).satisfied_by_release(&release(versions)),
+            *expected,
+            "{expression} against {versions:?}",
+        );
+    }
 }
 
 #[test]
-fn alias_does_not_escape_a_negated_flavor() {
-    assert!(
-        !range("!#knots && >=29.4:0").satisfied_by_release(&release(&["#knots:29.4:5", "29.4:5"]))
-    );
-}
+fn range_sugar_is_expanded_before_release_evaluation() {
+    let cases = [
+        ("^0", ">=0:0 && <1:0"),
+        ("^0.0.0", ">=0.0.0:0 && <1:0"),
+        ("0", ">=0:0 && <1:0"),
+        ("~0", ">=0:0 && <0.1:0"),
+        ("~0.0.0", ">=0.0.0:0 && <0.1:0"),
+        ("~1", ">=1:0 && <1.1:0"),
+        ("^0.0.3-beta", ">=0.0.3-beta:0 && <0.0.4-beta:0"),
+        ("~1.2-beta", ">=1.2-beta:0 && <1.3-beta:0"),
+        ("1:0", ">=1:0 && <2:0"),
+        ("^1:0", ">=1:0 && <2:0"),
+        ("~1.2:0", ">=1.2:0 && <1.3:0"),
+    ];
 
-#[test]
-fn exclusion_matching_nothing_the_release_carries_still_passes() {
-    assert!(range("^28.4:21 && !=28.4:22").satisfied_by_release(&release(&["31.1:10", "28.4:21"])));
-}
+    for (expression, expanded) in cases {
+        assert_eq!(range(expression), range(expanded), "{expression}");
+    }
 
-#[test]
-fn exclusion_ignores_trailing_zeroes() {
-    assert!(!range("!=1.0:0").satisfied_by_release(&release(&["1.0.0:0"])));
+    for expression in ["^1:0", "~1.2:0", "!^1:0", "!~1.2:0"] {
+        let range = range(expression);
+        for version in release(&["0.5:0", "1.2:0", "1.3:0", "3:0"]) {
+            assert_eq!(
+                range.satisfied_by_release(&[version.clone()]),
+                version.satisfies(&range),
+                "{expression} against {version}",
+            );
+        }
+    }
 }

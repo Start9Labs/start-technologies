@@ -103,7 +103,9 @@ PreRelease
 
 PreReleaseSegment
   = segment:$([0-9a-zA-Z-]+) &{ return !/^0[0-9]+$/.test(segment); } {
-    return /^[0-9]+$/.test(segment) ? parseInt(segment, 10) : segment;
+    if (!/^[0-9]+$/.test(segment)) return segment;
+    const value = Number(segment);
+    return Number.isSafeInteger(value) ? value : segment;
   }
 
 VersionNumber
