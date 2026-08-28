@@ -221,22 +221,9 @@ file tracks notable changes since the move to the monorepo.
   now serves its `.local` address, the domains you have assigned to it, and
   direct connections to its IP address.
 
-- **Switching an IP address off on an interface's gateway table stops that
-  address serving the interface over SSL.** The switch took effect for the
-  address's own row but not for the connection itself: any other address on the
-  same gateway put it back, including the two your server keeps for itself — its
-  `.local` name and its link-local IPv6 address — so a switched-off address went
-  on being served. It is now refused, and the domains you have assigned to that
-  gateway are unaffected, since an HTTPS connection names the address it is for.
-  Two cases keep an address reachable. An **IPv4** address on a gateway that also
-  has an enabled public IPv4 address stays reachable from the local network —
-  your router presents traffic from the Internet under the same local address,
-  so your server cannot tell the two apart; switch the public IPv4 address off
-  as well to take that gateway's IPv4 addresses down. And an address your server
-  serves without SSL — a plain-HTTP address, or one on a raw-TCP interface such
-  as a P2P or ZMQ endpoint — goes on answering: your server forwards a plaintext
-  port for a whole gateway at once, so every address on that gateway shares one
-  rule.
+- **Interface address switches now apply to SSL connections.** Switching off a
+  private IP address stops that address from accepting new SSL connections while
+  other enabled addresses on the gateway remain available.
 
 - **Image upgrades verify their checksum again.** `upgrade` compared the image's
   blake3 hash only when it was given a second positional argument, which no

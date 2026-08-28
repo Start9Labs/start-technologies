@@ -31,21 +31,6 @@ function isGua(h: T.HostnameInfo): boolean {
   return !isUla && !isLinkLocal
 }
 
-function isEnabled(addr: T.DerivedAddressInfo, h: T.HostnameInfo): boolean {
-  if (isPublicIp(h)) {
-    if (h.port === null) return true
-    const sa =
-      h.metadata.kind === 'ipv6'
-        ? `[${h.hostname}]:${h.port}`
-        : `${h.hostname}:${h.port}`
-    return addr.enabled.includes(sa)
-  } else {
-    return !addr.disabled.some(
-      ([hostname, port]) => hostname === h.hostname && port === (h.port ?? 0),
-    )
-  }
-}
-
 function getGatewayIds(h: T.HostnameInfo): string[] {
   switch (h.metadata.kind) {
     case 'ipv4':
@@ -287,7 +272,7 @@ export class InterfaceService {
         const list = groupMap.get(gid)
         if (!list) continue
         list.push({
-          enabled: isEnabled(addr, h),
+          enabled: utils.addressDisplayEnabled(addr, h, gid),
           gua: isGua(h),
           type: getAddressType(h),
           access: h.public ? 'public' : 'private',
@@ -315,16 +300,6 @@ export class InterfaceService {
       .filter(g => (groupMap.get(g.id)?.length ?? 0) > 0)
       .map(g => {
         const addresses = groupMap.get(g.id)!.sort(sortDomainsFirst)
-
-        // mDNS resolves only via enabled LAN IPs on this gateway
-        const enabledHostnames = addresses
-          .filter(a => a.enabled)
-          .map(a => a.hostnameInfo)
-        for (const a of addresses) {
-          if (a.hostnameInfo.metadata.kind === 'mdns') {
-            a.enabled = utils.mdnsResolvable(a.hostnameInfo, enabledHostnames)
-          }
-        }
 
         return {
           gatewayId: g.id,

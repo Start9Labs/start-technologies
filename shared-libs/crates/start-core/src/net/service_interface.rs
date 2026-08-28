@@ -61,11 +61,7 @@ impl HostnameInfo {
         self.hostname.clone()
     }
 
-    /// True for the always-on internal interfaces — loopback (`lo`) and the
-    /// `lxcbr0` bridge's own two addresses (`HOST_IP` and its IPv6 twin). These
-    /// are how the host and other containers reach the service; they are never
-    /// operator-disablable, and a binding with no exported interface is
-    /// restricted to them.
+    /// True for loopback and the bridge's own addresses.
     pub fn is_internal(&self) -> bool {
         match self.hostname.parse::<IpAddr>() {
             Ok(IpAddr::V4(v4)) => v4.is_loopback() || v4 == Ipv4Addr::from(crate::HOST_IP),
