@@ -67,6 +67,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reaching IPv6 on an ISP that provides none. There is no UI for this yet.
   Previously these packages had to be built and sideloaded by hand after every
   update, since a sysupgrade does not preserve separately installed packages.
+- **Hardware documentation.** A new Hardware page in the user guide lists the
+  router's specifications and publishes the SpacemiT K1 reference schematic the
+  board descends from, noting where the shipped router differs from that
+  reference design and why.
 
 ### Changed
 

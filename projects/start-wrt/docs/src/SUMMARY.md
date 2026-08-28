@@ -58,4 +58,5 @@
 
 - [CGNAT](cgnat.md)
 - [Architecture](architecture.md)
+- [Hardware](hardware.md)
 - [FAQ](faq.md)

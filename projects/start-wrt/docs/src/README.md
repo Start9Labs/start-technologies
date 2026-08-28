@@ -44,4 +44,5 @@ StartWRT is a router operating system designed specifically for home-based self-
 
 - [CGNAT](cgnat.md)
 - [Architecture](architecture.md)
+- [Hardware](hardware.md)
 - [FAQ](faq.md)
