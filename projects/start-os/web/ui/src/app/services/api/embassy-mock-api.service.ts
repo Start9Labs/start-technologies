@@ -1312,6 +1312,11 @@ export class MockApiService extends ApiService {
     // return Mock.ActionResSingle
     if (params.actionId === 'big-qr') return Mock.ActionResBigQr
     if (params.actionId === 'unencodable-qr') return Mock.ActionResUnencodableQr
+    if (params.actionId === 'multiline') return Mock.ActionResMultiline
+    if (params.actionId === 'multiline-secret')
+      return Mock.ActionResMultilineSecret
+    if (params.actionId === 'multiline-group')
+      return Mock.ActionResMultilineGroup
     return Mock.ActionResMessage
   }
 

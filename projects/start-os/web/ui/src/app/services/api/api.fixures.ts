@@ -1648,6 +1648,114 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
     },
   }
 
+  const DOCTOR_REPORT = `Vikunja Doctor
+==============
+
+Checked against https://vikunja.embassy at 2026-08-28T14:02:11Z
+
+Component          Status    Detail
+-----------------  --------  ---------------------------------------
+Database           ok        postgres 16.3, 41 tables, 0 pending
+Typesense index    degraded  4812 of 5104 tasks indexed
+Attachment store   ok        1.2 GiB across 318 files
+Mailer             skipped   no SMTP credentials configured
+Public URL         ok        resolves to 10.0.1.24:3456
+
+2 warnings
+  - The search index is behind. Run "Reindex" to rebuild it.
+  - The mailer is unconfigured, so reminders and invitations are
+    silently dropped.`
+
+  const DEVICE_CONFIG = `[Interface]
+PrivateKey = qNSHDgIkG9Bo0dnjBRAmvIBaU0MI/ADoWfDaCu9uWFo=
+Address = 10.13.13.4/32
+DNS = 10.13.13.1
+
+[Peer]
+PublicKey = HIgo9xNzJMWLKASShiTqIybxZ0U3wGLiUeJ1PKf8ykw=
+PresharedKey = uUYtV+HDNU9kZ0eDDBTBQfLuIJfHIPRSRfBWMWFBAgk=
+Endpoint = tunnel.start9.com:51820
+AllowedIPs = 0.0.0.0/0, ::/0
+PersistentKeepalive = 25`
+
+  export const ActionResMultiline: ActionRes = {
+    version: '1',
+    title: 'Diagnostics',
+    message: 'Send this report along if you open a support ticket.',
+    result: {
+      type: 'multiline',
+      copyable: true,
+      qr: false,
+      masked: false,
+      filename: 'vikunja-doctor.txt',
+      value: DOCTOR_REPORT,
+    },
+  }
+
+  export const ActionResMultilineSecret: ActionRes = {
+    version: '1',
+    title: 'Device Added',
+    message: 'Scan this from the WireGuard app, or save it as a file.',
+    result: {
+      type: 'multiline',
+      copyable: true,
+      qr: true,
+      masked: true,
+      filename: 'start-tunnel.conf',
+      value: DEVICE_CONFIG,
+    },
+  }
+
+  export const ActionResMultilineGroup: ActionRes = {
+    version: '1',
+    title: 'Service Information',
+    message: 'Everything StartOS could collect about this service.',
+    result: {
+      type: 'group',
+      value: [
+        {
+          type: 'single',
+          name: 'Version',
+          description: null,
+          copyable: false,
+          qr: false,
+          masked: false,
+          value: '0.24.6',
+        },
+        {
+          type: 'multiline',
+          name: 'Doctor Report',
+          description: 'The full output of `vikunja doctor`.',
+          copyable: true,
+          qr: false,
+          masked: false,
+          filename: 'vikunja-doctor.txt',
+          value: DOCTOR_REPORT,
+        },
+        {
+          type: 'multiline',
+          name: 'Device Config',
+          description: 'The WireGuard config for the device you just added.',
+          copyable: true,
+          qr: true,
+          masked: true,
+          filename: 'start-tunnel.conf',
+          value: DEVICE_CONFIG,
+        },
+        {
+          type: 'multiline',
+          name: 'Recovery Phrase',
+          description: 'Write this down. It is shown only once.',
+          copyable: true,
+          qr: false,
+          masked: true,
+          value:
+            'shrug cinnamon plunge oyster\nharbor velvet timber acorn\nglisten fossil marble rooster',
+        },
+      ],
+    },
+  }
+
   export const getCreateOnionServiceSpec = async (): Promise<IST.InputSpec> =>
     configBuilderToSpec(
       ISB.InputSpec.of({

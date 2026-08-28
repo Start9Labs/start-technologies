@@ -6,7 +6,7 @@ export type ActionResultValue =
       type: 'single'
       /**
        * The actual string value to display. The UI renders it as a single-line field —
-       * multi-line text belongs in the result's `message`.
+       * multi-line text belongs in a `multiline` value.
        */
       value: string
       /**
@@ -25,6 +25,29 @@ export type ActionResultValue =
        * (optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL
        */
       launchable?: boolean
+    }
+  | {
+      type: 'multiline'
+      /**
+       * The actual string value to display. The UI renders it verbatim in a read-only monospace field that keeps its line breaks
+       */
+      value: string
+      /**
+       * (optional) Whether or not to include a copy to clipboard icon to copy the value
+       */
+      copyable?: boolean
+      /**
+       * (optional) Whether or not to also display the value as a QR code
+       */
+      qr?: boolean
+      /**
+       * (optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information
+       */
+      masked?: boolean
+      /**
+       * (optional) Also offer the value as a download under this file name, such as "diagnostics.txt"
+       */
+      filename?: string
     }
   | {
       type: 'group'

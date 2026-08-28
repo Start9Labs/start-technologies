@@ -70,6 +70,11 @@ file tracks notable changes since the move to the monorepo.
   any browser pointed at this server. Narrow windows and phones always show the
   grid.
 
+- **An action can return a multi-line value** — a diagnostic report, a
+  generated config file, an exported key block. It appears as a read-only
+  monospace box that keeps its line breaks, and, where the service asks for it,
+  can be copied, shown as a QR code, or saved to a file.
+
 ### Changed
 
 - **Your server's name is now its `.local` address, without the `.local` on the

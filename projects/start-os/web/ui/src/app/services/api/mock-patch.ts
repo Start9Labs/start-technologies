@@ -521,6 +521,36 @@ export const mockPatchData: DataModel = {
           hasInput: false,
           group: null,
         },
+        multiline: {
+          name: 'Show Report',
+          description:
+            'Returns a multi-line value with a copy button and a download',
+          warning: null,
+          visibility: 'enabled',
+          allowedStatuses: 'any',
+          hasInput: false,
+          group: null,
+        },
+        'multiline-secret': {
+          name: 'Show Device Config',
+          description:
+            'Returns a masked multi-line value that can also be shown as a QR code',
+          warning: null,
+          visibility: 'enabled',
+          allowedStatuses: 'any',
+          hasInput: false,
+          group: null,
+        },
+        'multiline-group': {
+          name: 'Show Mixed Group',
+          description:
+            'Returns a group whose members mix single-line and multi-line values',
+          warning: null,
+          visibility: 'enabled',
+          allowedStatuses: 'any',
+          hasInput: false,
+          group: null,
+        },
         test: {
           name: 'Do Another Thing',
           description:

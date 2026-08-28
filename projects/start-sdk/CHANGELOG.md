@@ -117,6 +117,12 @@
   alongside it and default to `false`. See
   [Single Value](https://docs.start9.com/packaging/actions.html#single-value)
 
+- **An action result can be a `multiline` value**: a read-only monospace box
+  that keeps its line breaks, taking the same optional `copyable` / `qr` /
+  `masked` flags as `single`, plus an optional `filename` that offers it as a
+  download. A `single` value is one line, and a newline in one is not rendered.
+  See [Result Types](https://docs.start9.com/packaging/actions.html#result-types)
+
 ### Fixed
 
 - **Scaffolded package CI builds a draft PR when it becomes ready and rebuilds

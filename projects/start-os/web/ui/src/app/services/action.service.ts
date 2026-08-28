@@ -1,5 +1,6 @@
 import { inject, Injectable } from '@angular/core'
 import { DialogService, getErrorMessage, i18nKey } from '@start9labs/shared'
+import { T } from '@start9labs/start-core'
 import { TuiNotificationMiddleService } from '@taiga-ui/kit'
 import { PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { filter } from 'rxjs'
@@ -68,6 +69,7 @@ export class ActionService {
           .openComponent(new PolymorpheusComponent(ActionSuccessPage), {
             label: res.title as i18nKey,
             data: res,
+            size: res.result && hasMultiline(res.result) ? 'l' : 'm',
           })
           .subscribe()
       }
@@ -79,4 +81,10 @@ export class ActionService {
       loader.unsubscribe()
     }
   }
+}
+
+function hasMultiline(value: T.ActionResultValue): boolean {
+  return value.type === 'group'
+    ? value.value.some(hasMultiline)
+    : value.type === 'multiline'
 }

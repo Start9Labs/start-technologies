@@ -191,7 +191,7 @@ pub struct ActionResultMember {
 pub enum ActionResultValue {
     Single {
         /// The actual string value to display. The UI renders it as a single-line field —
-        /// multi-line text belongs in the result's `message`.
+        /// multi-line text belongs in a `multiline` value.
         value: String,
         /// (optional) Whether or not to include a copy to clipboard icon to copy the value
         #[ts(optional)]
@@ -206,6 +206,22 @@ pub enum ActionResultValue {
         #[ts(optional)]
         launchable: Option<bool>,
     },
+    Multiline {
+        /// The actual string value to display. The UI renders it verbatim in a read-only monospace field that keeps its line breaks
+        value: String,
+        /// (optional) Whether or not to include a copy to clipboard icon to copy the value
+        #[ts(optional)]
+        copyable: Option<bool>,
+        /// (optional) Whether or not to also display the value as a QR code
+        #[ts(optional)]
+        qr: Option<bool>,
+        /// (optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information
+        #[ts(optional)]
+        masked: Option<bool>,
+        /// (optional) Also offer the value as a download under this file name, such as "diagnostics.txt"
+        #[ts(optional)]
+        filename: Option<String>,
+    },
     Group {
         /// An new group of nested values, experienced by the user as an accordion dropdown
         value: Vec<ActionResultMember>,
@@ -214,11 +230,16 @@ pub enum ActionResultValue {
 impl ActionResultValue {
     fn fmt_rec(&self, f: &mut fmt::Formatter<'_>, indent: usize) -> fmt::Result {
         match self {
-            Self::Single { value, qr, .. } => {
-                for _ in 0..indent {
-                    write!(f, "  ")?;
+            Self::Single { value, qr, .. } | Self::Multiline { value, qr, .. } => {
+                for (i, line) in value.lines().enumerate() {
+                    if i > 0 {
+                        writeln!(f)?;
+                    }
+                    for _ in 0..indent {
+                        write!(f, "  ")?;
+                    }
+                    write!(f, "{line}")?;
                 }
-                write!(f, "{value}")?;
                 if qr.unwrap_or_default() {
                     use qrcode::render::unicode;
                     writeln!(f)?;

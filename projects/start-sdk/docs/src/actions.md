@@ -94,9 +94,7 @@ export const actions = sdk.Actions.of().addAction(setAdminPassword)
 
 Actions return structured results that the StartOS UI renders for the user.
 
-`message` is prose shown under the title. It is rendered as **Markdown** — headings, lists, tables, code blocks, emphasis and links all work — and a single newline is kept as a line break, so text written as plain lines arrives as plain lines. Anything with its own line structure goes here.
-
-`result` holds discrete values the user acts on: each one is a single-line field with optional copy, QR, masking and link-opening, so a newline in a `value` is not rendered. A multi-line report goes in `message`, not in a `value`.
+`message` is prose shown under the title. It is rendered as **Markdown** — headings, lists, tables, code blocks, emphasis and links all work — and a single newline is kept as a line break, so text written as plain lines arrives as plain lines. Guidance and next steps go here.
 
 ```typescript
 return {
@@ -111,6 +109,16 @@ Restart the service once the rebuild finishes.`,
   result: null,
 }
 ```
+
+`result` holds the values the user acts on — copies, scans, or saves. It takes one of three types:
+
+| `type`      | Renders as                                                         | Takes                                                           |
+| ----------- | ------------------------------------------------------------------ | --------------------------------------------------------------- |
+| `single`    | a one-line field                                                   | `value`, plus optional `copyable`, `qr`, `masked`, `launchable` |
+| `multiline` | a read-only monospace box that keeps its line breaks               | `value`, plus optional `copyable`, `qr`, `masked`, `filename`   |
+| `group`     | an accordion of named members, each of which is any of these three | `value`, the array of members                                   |
+
+A newline in a `single` value is not rendered — the browser strips it from the field — so anything with its own line structure is a `multiline` value. `filename` is what separates "here is some text" from "here is a file": set it and the value is also offered as a download under that name; omit it for no download button.
 
 ### Single Value
 
@@ -140,7 +148,20 @@ result: {
 
 The value must be an `http(s)` URL for the button to go anywhere.
 
+### Multi-line Value
+
+```typescript
+result: {
+  type: 'multiline',
+  value: report,
+  copyable: true,
+  filename: 'vikunja-doctor.txt',
+}
+```
+
 ### Group of Values
+
+A member carries a `name`, and an optional `description`, on top of whatever its own type takes:
 
 ```typescript
 result: {
@@ -148,6 +169,7 @@ result: {
   value: [
     { type: 'single', name: 'Username', description: null, value: 'admin', masked: false, copyable: true, qr: false },
     { type: 'single', name: 'Password', description: null, value: 'secret', masked: true, copyable: true, qr: false },
+    { type: 'multiline', name: 'Device Config', description: null, value: config, masked: true, copyable: true, qr: true, filename: 'start-tunnel.conf' },
   ],
 }
 ```
