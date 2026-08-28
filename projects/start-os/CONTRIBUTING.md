@@ -131,6 +131,7 @@ Then follow the screenshot walkthrough in [`assets/create-vm/`](assets/create-vm
 ```sh
 make test                      # Rust + SDK + container-runtime
 make start-core-test                 # backend only
+make backup-fs-test                  # backup-fs non-FUSE unit tests
 ```
 
 The container-runtime has its own test suite — see [container-runtime/CONTRIBUTING.md](container-runtime/CONTRIBUTING.md). Note CI builds a multi-platform matrix (apple-darwin + aarch64/x86_64/riscv64 musl); local `cargo check` is linux-only, so consider platform-specific impact.

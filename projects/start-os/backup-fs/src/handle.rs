@@ -13,8 +13,9 @@ use fuser::{FileType, Request, TimeOrNow};
 
 use crate::FUSE_ROOT_ID;
 
-const FUSE_WRITE_KILL_PRIV: u32 = 1 << 2;
-use log::{debug, log, warn, Level};
+use log::{debug, log, warn};
+
+const FUSE_WRITE_KILL_PRIV: i32 = 1 << 2;
 
 use crate::blockstore::CHUNK_SIZE;
 use crate::contents::Contents;
@@ -23,6 +24,22 @@ use crate::directory::{DirectoryContents, DirectoryEntry};
 use crate::error::{BkfsError, BkfsErrorKind, BkfsResult, BkfsResultExt};
 use crate::inode::{FileData, Inode, InodeAttributes};
 use crate::MAX_NAME_LENGTH;
+
+fn readable_size(file_size: u64, offset: u64, requested: usize) -> usize {
+    min(requested, file_size.saturating_sub(offset) as usize)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::readable_size;
+
+    #[test]
+    fn readable_size_clamps_offsets_at_and_past_eof() {
+        assert_eq!(readable_size(10, 4, 20), 6);
+        assert_eq!(readable_size(10, 10, 20), 0);
+        assert_eq!(readable_size(10, 11, 20), 0);
+    }
+}
 
 /// True if `e` is "the inode's backing file isn't on disk" — either
 /// from a same-session create+delete that never touched disk, or a
@@ -1100,8 +1117,7 @@ impl Handler {
 
         let mut contents = fh.contents.lock().unwrap();
 
-        let available = contents.inode.attrs.size.saturating_sub(offset) as usize;
-        let size = min(size, available);
+        let size = readable_size(contents.inode.attrs.size, offset, size);
 
         let mut buf = vec![0_u8; size];
 
@@ -1117,8 +1133,8 @@ impl Handler {
         fh: FileHandleId,
         offset: u64,
         data: &[u8],
-        write_flags: u32,
-        _flags: i32,
+        _write_flags: u32,
+        flags: i32,
         _lock_owner: Option<u64>,
     ) -> BkfsResult<usize> {
         let fh = self
@@ -1133,7 +1149,7 @@ impl Handler {
 
         contents.write_all_at(data, offset)?;
 
-        if write_flags & FUSE_WRITE_KILL_PRIV != 0 {
+        if flags & FUSE_WRITE_KILL_PRIV != 0 {
             contents.inode.attrs.clear_suid_sgid();
         }
 
@@ -1363,10 +1379,11 @@ impl Handler {
         }
         let mut copied = 0;
         let mut stopped = None;
-        // One request can forward the whole source file.
         while copied < size {
-            let take = min(size - copied, CHUNK_SIZE as usize);
             let at = copied as u64;
+            let src_remaining = CHUNK_SIZE - (src_offset + at) % CHUNK_SIZE;
+            let dest_remaining = CHUNK_SIZE - (dest_offset + at) % CHUNK_SIZE;
+            let take = min(size - copied, min(src_remaining, dest_remaining) as usize);
             let bytes = match self.read(req, src_inode, src_fh, src_offset + at, take, 0, None) {
                 Ok(bytes) => bytes,
                 Err(e) => {
@@ -1394,13 +1411,11 @@ impl Handler {
         }
         match stopped {
             Some(e) if copied == 0 => Err(e),
-            // This log is the only record of the error.
             Some(e) => {
-                let level = match &e.kind {
-                    BkfsErrorKind::Io(_) | BkfsErrorKind::Multiple(_) => Level::Warn,
-                    _ => Level::Error,
-                };
-                log!(level, "copy_file_range stopped after {copied} bytes: {e}");
+                log!(
+                    e.kind.severity(),
+                    "copy_file_range stopped after {copied} bytes: {e}"
+                );
                 Ok(copied)
             }
             None => Ok(copied),

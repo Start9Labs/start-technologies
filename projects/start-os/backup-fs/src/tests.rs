@@ -2748,9 +2748,6 @@ fn missing_superblock_over_existing_data_is_refused() {
     assert!(!data.path().join("superblock").exists());
 }
 
-/// A copy that fails partway reports the bytes it moved.
-///
-/// A directory occupies the source's second block file, so nothing can read it.
 #[test_log::test]
 fn copy_file_range_that_fails_partway_reports_the_bytes_it_moved() {
     use std::os::unix::io::AsRawFd;
@@ -2816,7 +2813,65 @@ fn copy_file_range_that_fails_partway_reports_the_bytes_it_moved() {
     );
 }
 
-/// A read starting at or past the end returns no bytes, inline or block-backed.
+#[test_log::test]
+fn copy_file_range_counts_only_complete_writes_before_an_unaligned_error() {
+    use std::os::unix::io::AsRawFd;
+
+    let data = TempDir::new("backupfs_data").unwrap();
+    let size = 2 * CHUNK_OFFSET as usize;
+    let src_bytes: Vec<u8> = (0..size as u64).map(pattern_byte).collect();
+    let dest_ino = {
+        let src_bytes = src_bytes.clone();
+        capture(data.path(), "ohea", move |mnt| {
+            fs::write(mnt.join("src"), &src_bytes).unwrap();
+            fs::write(mnt.join("dest"), vec![0u8; 3 * CHUNK_OFFSET as usize]).unwrap();
+            fs::metadata(mnt.join("dest")).unwrap().ino()
+        })
+    };
+    {
+        let ctrl = Controller::new(opts(data.path(), "ohea")).unwrap();
+        let block = ctrl.resolve_block_path(ContentId(dest_ino), 1);
+        fs::remove_file(&block).unwrap();
+        fs::create_dir(&block).unwrap();
+    }
+
+    with_backupfs(
+        data.path(),
+        "ohea".to_owned(),
+        move |mnt| {
+            let src = fs::File::open(mnt.join("src")).unwrap();
+            let dest = fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(mnt.join("dest"))
+                .unwrap();
+            let mut from = 0 as libc::loff_t;
+            let mut to = 7 as libc::loff_t;
+            let copied = unsafe {
+                libc::copy_file_range(
+                    src.as_raw_fd(),
+                    &mut from,
+                    dest.as_raw_fd(),
+                    &mut to,
+                    size,
+                    0,
+                )
+            };
+            if copied < 0 {
+                panic!("copy_file_range failed: {}", io::Error::last_os_error());
+            }
+
+            let expected = CHUNK_OFFSET as usize - 7;
+            assert_eq!(copied as usize, expected);
+            let mut got = vec![0u8; expected];
+            use std::os::unix::fs::FileExt;
+            dest.read_exact_at(&mut got, 7).unwrap();
+            pattern_check(0, &got);
+        },
+        None,
+    );
+}
+
 #[test_log::test]
 fn read_starting_past_eof_returns_no_bytes() {
     let data = TempDir::new("backupfs_data").unwrap();
@@ -2910,7 +2965,6 @@ fn copy_file_range_spanning_chunks_lands_at_the_right_offsets() {
     );
 }
 
-/// The truncate must land between the kernel's size check and the read.
 #[test_log::test]
 fn copy_file_range_from_a_shrinking_file_copies_no_bytes() {
     use std::os::unix::fs::FileExt;
@@ -3023,7 +3077,6 @@ fn copy_file_range_from_a_shrinking_file_copies_no_bytes() {
     );
 }
 
-/// The kernel forwards no empty write; this test calls `Contents` directly.
 #[test_log::test]
 fn empty_reads_and_writes_leave_a_file_untouched() {
     let data = TempDir::new("backupfs_data").unwrap();

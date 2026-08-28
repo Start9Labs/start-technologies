@@ -91,33 +91,11 @@ file tracks notable changes since the move to the monorepo.
   unresponsive, so the operation hung rather than finishing. Such a read
   now returns the zeros it should.
 
-- **A service that reads past the end of a file, or copies out of one that is
-  shrinking, no longer fails its backup.** Inside a backup or restore, a
-  program reading from an offset its file no longer reaches — seeking beyond
-  the end, or copying from a file that another part of the program is
-  truncating — got an I/O error where the read should come back empty. Such a
-  read now returns no bytes, as it does on any other filesystem, and a copy
-  that moves no bytes leaves the destination file alone.
-
-- **Copying a large file inside a backup no longer exhausts memory.** The
-  kernel forwards such a copy in pieces of up to four gigabytes, and each piece
-  was read into memory entire, so copying a large file within a mounted backup
-  could take the backup filesystem down with it and interrupt the backup or
-  restore in progress. Such a copy now moves a megabyte at a time.
-
-- **A write that fails inside a backup no longer empties the file it was
-  writing to.** Inside a backup or restore, a service growing a file past a
-  megabyte moves it onto the backup filesystem's larger storage layout, and the
-  layout it came from is released once the move is recorded.
-  A write that met an error while making that move released the old layout
-  without recording the new one, so the whole file read back as zeros. Such a
-  write now leaves the file holding the bytes that reached the disk.
-
-- **A copy that fails partway through reports the bytes it moved.** Copying
-  within a mounted backup reported total failure when it met an error after
-  writing part of the file, so the bytes already written were invisible to the
-  program that asked for the copy. Such a copy now returns the count, and the
-  next one reports the error.
+- **File operations within a backup handle end-of-file and partial failures
+  correctly.** Reads past the end return no bytes, large copies use bounded
+  memory, and a copy interrupted by an error reports the bytes it completed.
+  A failed write during a storage-layout change preserves the file's recorded
+  contents.
 
 - **Helper processes a service starts are cleared away once they finish.** A
   service that shells out to other programs — a media downloader calling
