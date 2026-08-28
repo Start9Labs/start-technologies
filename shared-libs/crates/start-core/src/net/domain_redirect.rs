@@ -7,8 +7,8 @@ use axum::body::Body;
 use axum::extract::Request;
 use axum::middleware::Next;
 use axum::response::Response;
+use http::Uri;
 use http::uri::{Authority, Scheme};
-use http::{HeaderValue, StatusCode, Uri};
 use imbl_value::InternedString;
 
 use crate::GatewayId;
@@ -16,11 +16,11 @@ use crate::context::RpcContext;
 use crate::db::model::DatabaseModel;
 use crate::net::gateway::GatewayInfo;
 use crate::net::host::binding::BindInfo;
-use crate::net::service_interface::{HostnameMetadata, ServiceInterfaceType};
+use crate::net::http::{https_redirect_uri, request_authority};
+use crate::net::service_interface::ServiceInterfaceType;
 use crate::prelude::*;
 
 const HTTPS_PORT: u16 = 443;
-
 const MAX_DNS_NAME_LEN: usize = 253;
 
 pub fn redirect_service_domains(ctx: RpcContext, router: Router) -> Router {
@@ -55,17 +55,15 @@ fn arrival_gateway_id(req: &Request) -> Option<GatewayId> {
 }
 
 fn request_domain(req: &Request) -> Option<String> {
-    // Absolute-form requests use the URI authority instead of `Host`.
-    let host = match req.uri().host() {
-        Some(host) => host,
-        None => req.headers().get(http::header::HOST)?.to_str().ok()?,
-    };
-    let host = host.split_once(':').map_or(host, |(name, _)| name);
+    let authority = request_authority(req)?;
+    if authority.as_str().contains('@') {
+        return None;
+    }
+    let host = authority.host();
     if host.parse::<IpAddr>().is_ok() {
         return None;
     }
     let name = host.trim_end_matches('.').to_ascii_lowercase();
-    // The redirect authority excludes userinfo and URI delimiters.
     if name.is_empty() || name.len() > MAX_DNS_NAME_LEN || !name.chars().all(is_safe_domain_char) {
         return None;
     }
@@ -85,51 +83,26 @@ async fn redirect(
     let Some(port) = package_service_tls_port(&ctx.db.peek().await, gateway, name)? else {
         return Ok(None);
     };
-    let is_dashboard = ctx
-        .account
-        .peek(|a| is_dashboard_mdns(name, port, &a.hostname.hostname));
-    if is_dashboard {
-        return Ok(None);
-    }
-    let path_and_query = uri.path_and_query().filter(|path| path.as_str() != "*");
-    https_redirect(path_and_query, name, port).map(Some)
-}
-
-fn is_dashboard_mdns(name: &str, port: u16, hostname: &str) -> bool {
-    port == HTTPS_PORT && name.strip_suffix(".local") == Some(hostname)
-}
-
-fn https_redirect(
-    path_and_query: Option<&http::uri::PathAndQuery>,
-    name: &str,
-    port: u16,
-) -> Result<Response, Error> {
     let authority = if port == HTTPS_PORT {
         name.to_owned()
     } else {
         format!("{name}:{port}")
     };
-    let target = Uri::builder()
-        .scheme(Scheme::HTTPS)
-        .authority(
-            authority
-                .parse::<Authority>()
-                .with_kind(ErrorKind::ParseUrl)?,
-        )
-        .path_and_query(path_and_query.map_or("/", |path| path.as_str()))
-        .build()
-        .with_kind(ErrorKind::ParseUrl)?;
+    let target = https_redirect_uri(
+        uri,
+        authority
+            .parse::<Authority>()
+            .with_kind(ErrorKind::ParseUrl)?,
+    )
+    .with_kind(ErrorKind::ParseUrl)?;
     Response::builder()
-        .status(StatusCode::TEMPORARY_REDIRECT)
-        .header(
-            http::header::LOCATION,
-            HeaderValue::from_str(&target.to_string()).with_kind(ErrorKind::ParseUrl)?,
-        )
+        .status(http::StatusCode::TEMPORARY_REDIRECT)
+        .header(http::header::LOCATION, target.to_string())
         .body(Body::empty())
         .with_kind(ErrorKind::Network)
+        .map(Some)
 }
 
-/// Excludes server-owned domains to avoid the TLS proxy redirect loop.
 fn package_service_tls_port(
     db: &DatabaseModel,
     gateway: &GatewayId,
@@ -162,13 +135,7 @@ fn browser_https_port<'a>(
         .filter(|bind| bind.enabled && has_browser_https_interface(bind))
         .flat_map(|bind| bind.enabled_addresses())
         .filter(|addr| {
-            addr.ssl
-                && *addr.hostname == *name
-                && matches!(
-                    addr.metadata,
-                    HostnameMetadata::PrivateDomain { .. } | HostnameMetadata::PublicDomain { .. }
-                )
-                && addr.metadata.gateways().any(|g| g == gateway)
+            addr.ssl && *addr.hostname == *name && addr.metadata.gateways().any(|g| g == gateway)
         })
         .filter_map(|addr| addr.port)
         .min_by_key(|port| (*port != HTTPS_PORT, *port))
@@ -190,7 +157,9 @@ mod test {
 
     use super::*;
     use crate::net::host::binding::{BindOptions, DerivedAddressInfo, NetInfo};
-    use crate::net::service_interface::{AddressInfo, HostnameInfo, ServiceInterface};
+    use crate::net::service_interface::{
+        AddressInfo, HostnameInfo, HostnameMetadata, ServiceInterface,
+    };
     use crate::{HostId, Id, ServiceInterfaceId};
 
     fn gateway(id: &'static str) -> GatewayId {
@@ -221,18 +190,6 @@ mod test {
             port: Some(port),
             metadata: HostnameMetadata::PublicDomain {
                 gateway: gateway("eth0"),
-            },
-        }
-    }
-
-    fn mdns(hostname: &str, port: u16) -> HostnameInfo {
-        HostnameInfo {
-            ssl: true,
-            public: false,
-            hostname: InternedString::from(hostname),
-            port: Some(port),
-            metadata: HostnameMetadata::Mdns {
-                gateways: gateways(),
             },
         }
     }
@@ -317,15 +274,6 @@ mod test {
         assert_eq!(
             browser_https_port(binds.iter(), &gateway("eth0"), "cloud.mydomain.com"),
             Some(HTTPS_PORT)
-        );
-    }
-
-    #[test]
-    fn leaves_the_mdns_name_alone() {
-        let binds = [binding([mdns("myserver.local", HTTPS_PORT)])];
-        assert_eq!(
-            browser_https_port(binds.iter(), &gateway("eth0"), "myserver.local"),
-            None
         );
     }
 
@@ -590,48 +538,33 @@ mod test {
         );
     }
 
-    #[test]
-    fn leaves_the_servers_mdns_name_on_the_dashboard_only_on_443() {
-        assert!(is_dashboard_mdns("myserver.local", HTTPS_PORT, "myserver"));
-        assert!(!is_dashboard_mdns("myserver.local", 8443, "myserver"));
-    }
-
-    fn location(uri: Option<&str>, port: u16) -> String {
-        let path_and_query = uri
-            .filter(|path| *path != "*")
-            .map(|uri| uri.parse().unwrap());
-        let target = https_redirect(path_and_query.as_ref(), "cloud.mydomain.com", port).unwrap();
-        assert_eq!(target.status(), StatusCode::TEMPORARY_REDIRECT);
-        target
-            .headers()
-            .get(http::header::LOCATION)
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_owned()
+    fn location(uri: &str, port: u16) -> String {
+        let authority = if port == HTTPS_PORT {
+            "cloud.mydomain.com".to_owned()
+        } else {
+            format!("cloud.mydomain.com:{port}")
+        };
+        let target = https_redirect_uri(&uri.parse().unwrap(), authority.parse().unwrap()).unwrap();
+        target.to_string()
     }
 
     #[test]
     fn keeps_the_path_and_query() {
         assert_eq!(
-            location(Some("/photos?share=1"), HTTPS_PORT),
+            location("/photos?share=1", HTTPS_PORT),
             "https://cloud.mydomain.com/photos?share=1"
         );
     }
 
     #[test]
     fn redirects_a_target_without_a_path_to_the_root() {
-        assert_eq!(location(None, HTTPS_PORT), "https://cloud.mydomain.com/");
-        assert_eq!(
-            location(Some("*"), HTTPS_PORT),
-            "https://cloud.mydomain.com/"
-        );
+        assert_eq!(location("*", HTTPS_PORT), "https://cloud.mydomain.com/");
     }
 
     #[test]
     fn names_a_tls_port_that_is_not_443() {
         assert_eq!(
-            location(Some("/photos"), 8443),
+            location("/photos", 8443),
             "https://cloud.mydomain.com:8443/photos"
         );
     }

@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures::FutureExt;
+use http::uri::{Authority, Scheme};
 use http::{HeaderMap, HeaderValue};
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
@@ -199,11 +200,33 @@ fn apply_request_policy<B>(
     Ok(())
 }
 
+pub fn request_authority<B>(req: &Request<B>) -> Option<Authority> {
+    req.uri().authority().cloned().or_else(|| {
+        req.headers()
+            .get(http::header::HOST)?
+            .to_str()
+            .ok()?
+            .parse()
+            .ok()
+    })
+}
+
+pub fn https_redirect_uri(uri: &http::Uri, authority: Authority) -> Result<http::Uri, http::Error> {
+    let path_and_query = uri
+        .path_and_query()
+        .filter(|path| path.as_str() != "*")
+        .map_or("/", |path| path.as_str());
+    http::Uri::builder()
+        .scheme(Scheme::HTTPS)
+        .authority(authority)
+        .path_and_query(path_and_query)
+        .build()
+}
+
 pub async fn handle_http_on_https(stream: impl ReadWriter + Unpin + 'static) -> Result<(), Error> {
     use axum::body::Body;
     use axum::extract::Request;
     use axum::response::Response;
-    use http::Uri;
 
     use crate::net::static_server::server_error;
 
@@ -213,20 +236,11 @@ pub async fn handle_http_on_https(stream: impl ReadWriter + Unpin + 'static) -> 
             hyper_util::service::TowerToHyperService::new(axum::Router::new().fallback(
                 axum::routing::method_routing::any(move |req: Request| async move {
                     match async move {
-                        let host = req
-                            .headers()
-                            .get(http::header::HOST)
-                            .and_then(|host| host.to_str().ok());
-                        if let Some(host) = host {
-                            let uri = Uri::from_parts({
-                                let mut parts = req.uri().to_owned().into_parts();
-                                parts.scheme = Some("https".parse()?);
-                                parts.authority = Some(host.parse()?);
-                                parts
-                            })?;
+                        if let Some(authority) = request_authority(&req) {
+                            let target = https_redirect_uri(req.uri(), authority)?;
                             Response::builder()
                                 .status(http::StatusCode::TEMPORARY_REDIRECT)
-                                .header(http::header::LOCATION, uri.to_string())
+                                .header(http::header::LOCATION, target.to_string())
                                 .body(Body::default())
                         } else {
                             Response::builder()
