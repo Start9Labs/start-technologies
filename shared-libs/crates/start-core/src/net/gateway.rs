@@ -3224,8 +3224,7 @@ pub fn lookup_info_by_addr(
     ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
     addr: SocketAddr,
 ) -> Option<(&GatewayId, &NetworkInterfaceInfo)> {
-    // A dual-stack listener reports an IPv4 connection's addresses in mapped
-    // form, which never equals the IPv4 address a gateway holds.
+    // Canonicalize IPv4-mapped listener addresses before matching gateways.
     let ip = addr.ip().to_canonical();
     ip_info.iter().find(|(_, i)| {
         i.ip_info
@@ -3257,8 +3256,7 @@ impl<V: MetadataVisitor> Visit<V> for NetworkInterfaceListenerAcceptMetadata {
     }
 }
 
-/// A TCP listener on `[::]:port` that resolves the connection's `GatewayInfo`
-/// from its local address on each accept.
+/// Accepts wildcard TCP connections with their matching `GatewayInfo`.
 pub struct WildcardListener {
     listener: TcpListener,
     ip_info: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
@@ -3360,7 +3358,6 @@ mod lookup_tests {
         );
     }
 
-    // A gateway answers for the address it holds, not for its whole subnet.
     #[test]
     fn another_address_in_the_same_subnet_finds_nothing() {
         let ip_info = gateway_holding("192.168.1.5/24");
@@ -3378,9 +3375,6 @@ mod lookup_tests {
         );
     }
 
-    // Only the mapped form may be unwrapped. `to_ipv4` would also unwrap the
-    // deprecated IPv4-compatible form and hand that connection a gateway that
-    // does not serve it.
     #[test]
     fn an_ipv4_compatible_address_is_left_alone() {
         let ip_info = gateway_holding("192.168.1.5/24");

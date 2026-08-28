@@ -62,9 +62,7 @@ pub trait UiContext: Context + AsRef<RpcContinuations> + Clone + Sized {
     fn extend_router(self, router: Router) -> Router {
         router
     }
-    /// Wrap the assembled router, so a layer added here applies to every route
-    /// and to the fallback.
-    fn wrap_router(self, router: Router) -> Router {
+    fn apply_outer_layers(self, router: Router) -> Router {
         router
     }
 }
@@ -110,8 +108,8 @@ impl UiContext for RpcContext {
                 }),
             )
     }
-    fn wrap_router(self, router: Router) -> Router {
-        crate::net::domain_redirect::layer(self, router)
+    fn apply_outer_layers(self, router: Router) -> Router {
+        crate::net::domain_redirect::redirect_service_domains(self, router)
     }
 }
 
@@ -247,9 +245,8 @@ pub fn ui_router<C: UiContext>(ctx: C) -> Router {
         .fallback(any(|request: Request| async move {
             serve_ui::<C>(request).unwrap_or_else(server_error)
         }));
-    // The security headers stay outermost, so they reach a response a wrapping
-    // layer writes itself.
-    ctx.wrap_router(router)
+    // Security headers cover responses produced by context layers.
+    ctx.apply_outer_layers(router)
         .layer(axum::middleware::map_response(add_security_headers))
 }
 
