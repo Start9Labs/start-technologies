@@ -3224,7 +3224,7 @@ pub fn lookup_info_by_addr(
     ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
     addr: SocketAddr,
 ) -> Option<(&GatewayId, &NetworkInterfaceInfo)> {
-    // Canonicalize IPv4-mapped listener addresses before matching gateways.
+    // IPv4 clients arrive mapped through the dual-stack listener.
     let ip = addr.ip().to_canonical();
     ip_info.iter().find(|(_, i)| {
         i.ip_info
