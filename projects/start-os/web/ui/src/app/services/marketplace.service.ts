@@ -1,9 +1,12 @@
 import { inject, Injectable } from '@angular/core'
 import {
   AbstractMarketplaceService,
+  findKnown,
   GetPackageRes,
+  identityMatches,
   Marketplace,
   MarketplacePkg,
+  resolveIdentity,
   StoreDataWithUrl,
   StoreIdentity,
 } from '@start9labs/marketplace'
@@ -52,17 +55,25 @@ export class MarketplaceService extends AbstractMarketplaceService {
   private readonly storage = inject(StorageService)
   private readonly i18n = inject(i18nPipe)
 
-  readonly registries$: Observable<StoreIdentity[]> = this.patch
-    .watch$('ui', 'registries')
-    .pipe(
-      map(registries => [
-        toStoreIdentity(start9, registries[start9]),
-        toStoreIdentity(community, registries[community]),
-        ...Object.entries(registries)
-          .filter(([u, _]) => !sameUrl(start9, u) && !sameUrl(community, u))
-          .map(([url, name]) => toStoreIdentity(url, name)),
-      ]),
-    )
+  readonly knownRegistries$: Observable<T.KnownRegistry[]> = from(
+    this.api.getKnownRegistries(),
+  ).pipe(
+    catchError(() => of<T.KnownRegistry[]>([])),
+    shareReplay(1),
+  )
+
+  readonly registries$: Observable<StoreIdentity[]> = combineLatest([
+    this.patch.watch$('ui', 'registries'),
+    this.knownRegistries$.pipe(startWith<T.KnownRegistry[]>([])),
+  ]).pipe(
+    map(([registries, known]) => [
+      resolveIdentity(start9, registries[start9] || null, known),
+      resolveIdentity(community, registries[community] || null, known),
+      ...Object.entries(registries)
+        .filter(([u, _]) => !sameUrl(start9, u) && !sameUrl(community, u))
+        .map(([url, name]) => resolveIdentity(url, name, known)),
+    ]),
+  )
 
   readonly newRegistry$ = this.registries$.pipe(
     startWith<StoreIdentity[]>([]),
@@ -286,8 +297,18 @@ export class MarketplaceService extends AbstractMarketplaceService {
     }
 
     // validates the registry is reachable and provides a display name
-    const { name } = await firstValueFrom(this.fetchInfo$(url))
-    await this.api.setDbValue<string | null>(['registries', url], name)
+    const info = await firstValueFrom(this.fetchInfo$(url))
+    const pin = findKnown(url, await firstValueFrom(this.knownRegistries$))
+
+    if (pin && !identityMatches(pin, info)) {
+      throw new Error(
+        this.i18n.transform(
+          'This registry no longer presents the name and icon Start9 published for it, so it cannot be added from the list. It may have changed hands.',
+        ),
+      )
+    }
+
+    await this.api.setDbValue<string | null>(['registries', url], info.name)
 
     return url
   }
@@ -315,12 +336,5 @@ export class MarketplaceService extends AbstractMarketplaceService {
     if (oldName !== newName) {
       this.api.setDbValue<string>(['registries', url], newName)
     }
-  }
-}
-
-function toStoreIdentity(url: string, name?: string | null): StoreIdentity {
-  return {
-    url,
-    name: name || url,
   }
 }

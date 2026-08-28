@@ -27,7 +27,6 @@ import { WA_WINDOW } from '@ng-web-apis/common'
 import {
   AbstractMarketplaceService,
   FilterPackagesPipe,
-  MARKETPLACE_REGISTRY_ALERTS,
 } from '@start9labs/marketplace'
 import { z } from '@start9labs/start-core'
 import {
@@ -62,7 +61,6 @@ import {
 } from '@taiga-ui/kit'
 import { PatchDB } from 'patch-db-client'
 import { filter, identity, merge, pairwise } from 'rxjs'
-import { MarketplaceAlertsService } from 'src/app/routes/portal/routes/marketplace/services/alerts.service'
 import { FilterUpdatesPipe } from 'src/app/routes/portal/routes/updates/filter-updates.pipe'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { LiveApiService } from 'src/app/services/api/embassy-live-api.service'
@@ -138,7 +136,6 @@ export const APP_CONFIG: ApplicationConfig = {
       useClass: PatchDB,
     },
     tuiProvide(AbstractMarketplaceService, MarketplaceService),
-    tuiProvide(MARKETPLACE_REGISTRY_ALERTS, MarketplaceAlertsService),
     provideAppInitializer(() => {
       const i18n = inject(i18nService)
       const clientStorage = inject(ClientStorageService)

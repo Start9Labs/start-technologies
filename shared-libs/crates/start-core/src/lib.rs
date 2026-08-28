@@ -63,6 +63,7 @@ pub mod init;
 pub mod install;
 pub mod logs;
 pub mod lxc;
+pub mod marketplace;
 pub mod middleware;
 pub mod net;
 pub mod notifications;
@@ -198,6 +199,7 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
             "backup",
             backup::backup::<C>().with_about("about.commands-backup"),
         )
+        .subcommand("marketplace", marketplace::marketplace_api::<C>())
         .subcommand(
             "registry",
             CallRemoteHandler::<RpcContext, _, _, RegistryUrlParams>::new(

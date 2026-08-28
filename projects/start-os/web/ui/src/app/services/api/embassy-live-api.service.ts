@@ -354,6 +354,13 @@ export class LiveApiService extends ApiService {
     })
   }
 
+  async getKnownRegistries(): Promise<T.KnownRegistry[]> {
+    return this.rpcRequest({
+      method: 'marketplace.known-registries',
+      params: {},
+    })
+  }
+
   // notification
 
   async getNotifications(

@@ -821,4 +821,10 @@ export const ENGLISH: Record<string, number> = {
   'Grid view': 927,
   'Ascending': 928,
   'Descending': 929,
+  'Add a Registry': 930,
+  'Start9 does not operate these registries or support the services they distribute.': 931,
+  'Known Registries': 932,
+  'This registry no longer presents the name and icon Start9 published for it, so it cannot be added from the list. It may have changed hands.': 933,
+  'Custom Registry': 934,
+  'Select a registry': 935,
 }

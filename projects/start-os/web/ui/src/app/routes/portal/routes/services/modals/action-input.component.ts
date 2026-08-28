@@ -80,10 +80,6 @@ export type PackageActionData = {
     }
   `,
   styles: `
-    tui-notification {
-      margin-bottom: 1.5rem;
-    }
-
     .service-title {
       display: inline-flex;
       align-items: center;

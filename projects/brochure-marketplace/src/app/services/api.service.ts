@@ -16,6 +16,8 @@ export abstract class ApiService {
 
   abstract getRegistryPackages(registryUrl: string): Promise<GetPackagesRes>
 
+  abstract getKnownRegistries(): Promise<T.KnownRegistry[]>
+
   abstract getStaticProxy(
     pkg: MarketplacePkg,
     path: 'LICENSE.md' | 'instructions.md',

@@ -36,6 +36,12 @@ file tracks notable changes since the move to the monorepo.
   Existing StartTunnel configs remain recognizable by their StartTunnel header;
   configs without either marker are classified as outbound-only.
 
+- **Adding a registry now offers a list Start9 publishes, alongside the URL
+  field.** Each listed registry appears under the name and icon Start9 published
+  for it, and a registry that is not on the list can no longer display a listed
+  one's name. See
+  [Alternative Registries](https://docs.start9.com/start-os/alternative-registries.html).
+
 - **A service can permanently retire a network host or a port it no longer
   uses, and the port numbers it held become available again.** A service that
   reorganizes its interfaces across an update — renaming a host, dropping a
@@ -103,6 +109,9 @@ file tracks notable changes since the move to the monorepo.
   with the server name in place of `StartOS`. An app installed before this
   update, or before a rename, may keep the name it was installed with — remove
   it and install it again to pick up the current one.
+
+- **Switching registries no longer opens a warning dialog.** The caveat appears
+  once, in the dialog where a registry is added.
 
 - **The NVIDIA images now use NVIDIA's open kernel modules, which support GeForce
   RTX 20-series, Quadro RTX and newer.** This is what makes current cards work at

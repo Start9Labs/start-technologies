@@ -50,6 +50,11 @@ tui-textfield:has(tui-icon[tuiPassword], input[type='password'])
   );
 }
 
+// Taiga 5's notification is a host directive and carries no margin of its own.
+tui-dialog :not([tuiForm]) > [tuiNotification]:not(:last-child) {
+  margin-block-end: 1rem;
+}
+
 // Global utility classes the shared @start9labs/marketplace lib relies on.
 // They live here (loaded by every host) rather than in a single app's
 // stylesheet so the lib's components render identically across the OS UI and

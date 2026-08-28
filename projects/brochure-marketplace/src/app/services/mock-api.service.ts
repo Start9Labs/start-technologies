@@ -12,9 +12,14 @@ export class MockApiService extends ApiService {
     super()
   }
 
-  async getRegistryInfo(): Promise<T.RegistryInfo> {
+  async getRegistryInfo(registryUrl: string): Promise<T.RegistryInfo> {
     await this.pauseFor(1000)
-    return Mock.RegistryInfo
+
+    const known = Mock.KnownRegistries.find(k => k.url === registryUrl)
+
+    return known
+      ? { ...Mock.RegistryInfo, name: known.name, icon: known.icon }
+      : Mock.RegistryInfo
   }
 
   async getRegistryPackage(
@@ -29,6 +34,11 @@ export class MockApiService extends ApiService {
   async getRegistryPackages(): Promise<GetPackagesRes> {
     await this.pauseFor(1000)
     return Mock.RegistryPackages
+  }
+
+  async getKnownRegistries(): Promise<T.KnownRegistry[]> {
+    await this.pauseFor(1000)
+    return Mock.KnownRegistries
   }
 
   async getStaticProxy(): Promise<string> {

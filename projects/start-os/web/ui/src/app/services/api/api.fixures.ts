@@ -223,6 +223,14 @@ export namespace Mock {
     },
   }
 
+  export const KnownRegistries: T.KnownRegistry[] = [
+    {
+      url: 'https://registry.example.com/',
+      name: 'Example Registry',
+      icon: REGISTRY_ICON,
+    },
+  ]
+
   export const MockManifestBitcoind: T.Manifest = {
     id: 'bitcoind',
     title: 'Bitcoin Core',

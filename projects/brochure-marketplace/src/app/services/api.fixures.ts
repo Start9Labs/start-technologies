@@ -44,6 +44,14 @@ export namespace Mock {
     },
   }
 
+  export const KnownRegistries: T.KnownRegistry[] = [
+    {
+      url: 'https://registry.example.com/',
+      name: 'Example Registry',
+      icon: REGISTRY_ICON,
+    },
+  ]
+
   export const BitcoinDep: T.DependencyMetadata = {
     title: 'Bitcoin',
     icon: BTC_ICON,
