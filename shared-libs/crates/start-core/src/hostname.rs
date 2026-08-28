@@ -8,6 +8,7 @@ use ts_rs::TS;
 
 use crate::context::RpcContext;
 use crate::db::model::public::{RestartReason, ServerInfo};
+use crate::net::host::all_hosts;
 use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::io::{copy_file, write_file_atomic};
@@ -60,6 +61,19 @@ impl ServerHostname {
 
     pub fn local_domain_name(&self) -> InternedString {
         InternedString::from_display(&lazy_format!("{}.local", self.0))
+    }
+
+    pub fn reject_private_domain(&self, domain: &str) -> Result<(), Error> {
+        if domain.trim_end_matches('.') == &*self.local_domain_name() {
+            return Err(Error::new(
+                eyre!(
+                    "{}",
+                    t!("net.host.private-domain-is-server-mdns", domain = domain)
+                ),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+        Ok(())
     }
 
     pub fn load(server_info: &Model<ServerInfo>) -> Result<Self, Error> {
@@ -277,6 +291,14 @@ pub async fn set_hostname_rpc(
     let info = ctx
         .db
         .mutate(|db| {
+            if let Some(hostname) = &hostname {
+                let reserved = hostname.local_domain_name();
+                for host in all_hosts(db) {
+                    if host?.as_private_domains().contains_key(&reserved)? {
+                        hostname.reject_private_domain(&reserved)?;
+                    }
+                }
+            }
             let server_info = db.as_public_mut().as_server_info_mut();
             if let Some(name) = name {
                 server_info.as_name_mut().ser(&name)?;

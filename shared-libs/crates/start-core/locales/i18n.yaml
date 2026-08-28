@@ -1609,6 +1609,14 @@ net.plugin.binding-not-found:
   fr_FR: "liaison introuvable : %{binding}"
   pl_PL: "powiązanie nie znalezione: %{binding}"
 
+# net/host/address.rs
+net.host.private-domain-is-server-mdns:
+  en_US: '"%{domain}" is the server mDNS name and cannot be assigned as a private domain'
+  de_DE: '„%{domain}“ ist der mDNS-Name des Servers und kann nicht als private Domain zugewiesen werden'
+  es_ES: '«%{domain}» es el nombre mDNS del servidor y no se puede asignar como dominio privado'
+  fr_FR: '« %{domain} » est le nom mDNS du serveur et ne peut pas être attribué comme domaine privé'
+  pl_PL: '„%{domain}” jest nazwą mDNS serwera i nie może zostać przypisana jako domena prywatna'
+
 # net/ssl.rs
 net.ssl.unreachable:
   en_US: "unreachable"

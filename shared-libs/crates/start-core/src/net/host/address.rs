@@ -661,9 +661,11 @@ pub async fn add_private_domain<Kind: HostApiKind>(
     AddPrivateDomainParams { fqdn, gateway }: AddPrivateDomainParams,
     inheritance: Kind::Inheritance,
 ) -> Result<bool, Error> {
-    let fqdn = InternedString::intern(fqdn.to_ascii_lowercase());
+    let fqdn = InternedString::intern(fqdn.trim_end_matches('.').to_ascii_lowercase());
     ctx.db
         .mutate(|db| {
+            let hostname = ServerHostname::load(db.as_public().as_server_info())?;
+            hostname.reject_private_domain(&fqdn)?;
             let is_new = !Kind::host_for(&inheritance, db)?
                 .as_private_domains()
                 .de()?
@@ -674,7 +676,6 @@ pub async fn add_private_domain<Kind: HostApiKind>(
                 .upsert(&fqdn, || Ok(BTreeSet::new()))?
                 .mutate(|d| Ok(d.insert(gateway.clone())))?;
             handle_duplicates(db)?;
-            let hostname = ServerHostname::load(db.as_public().as_server_info())?;
             let gateways = db
                 .as_public()
                 .as_server_info()
@@ -912,6 +913,15 @@ mod test {
             domain_disabled(&a, 42000),
             "an enabled IP on a different gateway must not honor the domain"
         );
+    }
+
+    #[test]
+    fn rejects_the_servers_mdns_name_as_a_private_domain() {
+        let hostname = ServerHostname::new(InternedString::intern("myserver")).unwrap();
+
+        assert!(hostname.reject_private_domain("myserver.local").is_err());
+        assert!(hostname.reject_private_domain("myserver.local.").is_err());
+        assert!(hostname.reject_private_domain("service.local").is_ok());
     }
 
     #[test]

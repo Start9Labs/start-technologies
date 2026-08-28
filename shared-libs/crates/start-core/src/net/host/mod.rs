@@ -145,6 +145,7 @@ impl Model<Host> {
         available_ports: &AvailablePorts,
     ) -> Result<(), Error> {
         let this = self.destructure_mut();
+        this.private_domains.remove(&mdns.local_domain_name())?;
 
         // ips
         for (_, bind) in this.bindings.as_entries_mut()? {
