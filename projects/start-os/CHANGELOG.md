@@ -71,6 +71,10 @@ file tracks notable changes since the move to the monorepo.
 
 - Trim whitespace on form inputs.
 
+- **Marketplace search matches anywhere in a package's name, ID or
+  description, and ranks results by how closely they match.** Searching
+  `cloud` finds Nextcloud.
+
 - **Restoring a service from a backup is many times faster.** A restore reads
   the service's whole package out of the backup, and the encrypted backup
   filesystem stores file contents as sealed 1 MiB blocks that it fetches and
