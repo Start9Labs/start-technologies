@@ -216,7 +216,7 @@ impl<T> BkfsResultExt<T> for BkfsResult<T> {
 }
 
 #[cfg(test)]
-mod tests {
+mod non_fuse_tests {
     use super::BkfsErrorKind;
     use log::Level;
     use std::io;

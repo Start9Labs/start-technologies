@@ -23,8 +23,7 @@ STARTOS_TARGETS := $(STARTD_SRC) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_
 start-os: $(STARTOS_TARGETS)
 
 backup-fs-test: $(call ls-files, projects/start-os/backup-fs/src) projects/start-os/backup-fs/Cargo.toml
-	cargo test -p startos-backup-fs --lib error::tests
-	cargo test -p startos-backup-fs --lib handle::tests
+	cargo test -p startos-backup-fs --lib -- --skip mount_tests
 
 container-runtime-test: projects/start-os/container-runtime/node_modules/.package-lock.json $(call ls-files, projects/start-os/container-runtime/src) projects/start-os/container-runtime/package.json projects/start-os/container-runtime/tsconfig.json
 	cd projects/start-os/container-runtime && npm test

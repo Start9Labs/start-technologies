@@ -94,8 +94,8 @@ file tracks notable changes since the move to the monorepo.
 - **File operations within a backup handle end-of-file and partial failures
   correctly.** Reads past the end return no bytes, large copies use bounded
   memory, and a copy interrupted by an error reports the bytes it completed.
-  A failed write during a storage-layout change preserves the file's recorded
-  contents.
+  A failed write during a storage-layout change preserves a readable inode,
+  its length, and every successfully written prefix byte.
 
 - **Helper processes a service starts are cleared away once they finish.** A
   service that shells out to other programs — a media downloader calling
