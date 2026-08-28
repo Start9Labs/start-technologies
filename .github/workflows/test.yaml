@@ -173,3 +173,27 @@ jobs:
         run: make manpages-check
       - name: Check TS bindings up to date
         run: make start-core-ts-bindings-check
+
+  # The log's last row must describe the tree being shipped, which is only true if
+  # the author ran `make complexity-record`. This checks that the census was run,
+  # never what it said — no number here fails a build.
+  complexity:
+    name: Complexity
+    needs: [prettier, changes]
+    if: >-
+      !cancelled() && needs.prettier.result == 'success'
+      && github.event.pull_request.draft != true
+      && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      # The author recorded their branch, so measure that. A pull_request event
+      # checks out head merged into the current base by default, and its numbers
+      # move whenever master does — numbers no author can predict.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Check the complexity log describes this tree
+        run: make complexity-verify

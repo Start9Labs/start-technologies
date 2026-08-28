@@ -14,8 +14,9 @@ include projects/start-tunnel/build.mk
 include projects/start-os/build.mk
 include projects/start-wrt/build.mk
 include projects/start-docs/build.mk
+include build/complexity.mk
 
-.PHONY: help start-os metadata start-os-install clean format format-check start-cli-install start-cli start-cli-deb start-os-uis start-os-ui start-os-emulate-reflash start-os-deb start-os-$(IMAGE_TYPE) start-os-squashfs start-os-wormhole start-os-wormhole-deb start-os-update start-os-update-from-gha test start-core-test start-sdk-test container-runtime-test start-wrt-test start-registry start-registry-install start-tunnel start-tunnel-install start-core-ts-bindings
+.PHONY: help start-os metadata start-os-install clean format format-check complexity complexity-top complexity-diff complexity-record complexity-verify start-cli-install start-cli start-cli-deb start-os-uis start-os-ui start-os-emulate-reflash start-os-deb start-os-$(IMAGE_TYPE) start-os-squashfs start-os-wormhole start-os-wormhole-deb start-os-update start-os-update-from-gha test start-core-test start-sdk-test container-runtime-test start-wrt-test start-registry start-registry-install start-tunnel start-tunnel-install start-core-ts-bindings
 
 help:
 	@echo "No default target — specify one. Common targets:"
@@ -23,6 +24,7 @@ help:
 	@echo "  start-cli start-cli-deb start-registry start-tunnel start-wrt start-wrt-image        (other products)"
 	@echo "  test start-core-test start-sdk-test container-runtime-test start-wrt-test            (tests)"
 	@echo "  format format-check start-core-ts-bindings clean                                     (tooling)"
+	@echo "  complexity complexity-top complexity-diff                                            (complexity)"
 	@echo "See CONTRIBUTING.md for the full list."
 
 touch:

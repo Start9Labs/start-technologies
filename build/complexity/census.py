@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+"""Per-function cognitive complexity for the tree, as JSON or a table."""
+import argparse, collections, json, os, re, subprocess, sys, tempfile
+
+SCOPES = ['shared-libs', 'projects']
+EXCLUDE = ('/node_modules/', '/dist/', '/target/', '/.angular/', '/out-tsc/',
+           '/osBindings/', '/locales/', '/__snapshots__/', '/__fixtures__/',
+           '/patch-db/client/', '/exver/exver.ts')
+CALL_SITE = re.compile(r'\b([A-Za-z_]\w*)\s*[(:<]')
+UTIL_MODULE = re.compile(r'(^|/)(util|utils|helpers)(/|\.(rs|ts|js)$)')
+
+
+def subsystem(path):
+    """The product or crate a file belongs to, plus its first module segment."""
+    parts = path.split('/')
+    if parts[0] == 'shared-libs' and len(parts) > 3:
+        base = parts[:3]
+    elif parts[0] == 'projects' and len(parts) > 2:
+        base = parts[:2]
+    else:
+        base = parts[:1]
+    rest = [p for p in parts[len(base):] if p not in ('src', 'lib')]
+    head = rest[0] if rest and '.' not in rest[0] else ''
+    return '/'.join(base) + ('/' + head if head else '')
+
+
+def kept(path):
+    return (path.endswith(('.rs', '.ts', '.js'))
+            and not path.endswith(('.spec.ts', '.d.ts'))
+            and not any(x in '/' + path for x in EXCLUDE))
+
+
+def spaces(node, root=True):
+    if node.get('kind') == 'function' and not root:
+        yield node
+    for child in node.get('spaces', []):
+        yield from spaces(child, False)
+
+
+def census(root, scopes, bca):
+    out = tempfile.mkdtemp(prefix='cx-')
+    run = subprocess.run([bca, 'metrics', '-O', 'json', '--exclude-tests', '--output-dir', out,
+                          *(os.path.join(root, s) for s in scopes)],
+                         capture_output=True, text=True)
+    if run.returncode != 0:
+        sys.exit(f"complexity: {bca} failed ({run.returncode}): {run.stderr.strip().splitlines()[-1] if run.stderr.strip() else 'no output'}")
+    rows = []
+    for dirpath, _, names in os.walk(out):
+        for name in names:
+            if not name.endswith('.json'):
+                continue
+            try:
+                doc = json.load(open(os.path.join(dirpath, name)))
+            except (OSError, ValueError):
+                continue
+            rel = os.path.relpath(doc.get('name', ''), root)
+            if not kept(rel):
+                continue
+            for fn in spaces(doc):
+                m = fn.get('metrics', {})
+                label = fn.get('name') or ''
+                rows.append({
+                    'file': rel,
+                    'name': '<anonymous>' if not label or os.sep in label else label,
+                    'line': fn.get('start_line'),
+                    'cognitive': int(m.get('cognitive', {}).get('value') or 0),
+                    'cyclomatic': int(m.get('cyclomatic', {}).get('value') or 0),
+                    'sloc': int(m.get('loc', {}).get('sloc') or 0),
+                })
+    return rows
+
+
+def count_callers(rows, root, scopes):
+    """Marks each function with its call-site count and the subsystems that call it."""
+    per_file = collections.defaultdict(collections.Counter)
+    for scope in scopes:
+        for dirpath, dirs, names in os.walk(os.path.join(root, scope)):
+            dirs[:] = [d for d in dirs if d not in
+                       ('node_modules', 'target', 'dist', '.angular', 'out-tsc', 'osBindings', 'locales')]
+            for name in names:
+                path = os.path.join(dirpath, name)
+                rel = os.path.relpath(path, root)
+                if not kept(rel):
+                    continue
+                try:
+                    per_file[rel].update(CALL_SITE.findall(open(path, encoding='utf-8', errors='replace').read()))
+                except OSError:
+                    pass
+    defined = collections.Counter(r['name'] for r in rows)
+    callers_of = collections.defaultdict(set)
+    for path, counts in per_file.items():
+        for name in counts:
+            callers_of[name].add(subsystem(path))
+    for r in rows:
+        name = r['name']
+        if name == '<anonymous>':
+            continue
+        total = sum(c[name] for c in per_file.values())
+        r['callers'] = max(0, total - defined[name])
+        r['shared'] = sum(c[name] for f, c in per_file.items() if f != r['file']) > 0
+        r['util'] = bool(UTIL_MODULE.search(r['file']))
+        r['scopes'] = sorted(callers_of[name] - {subsystem(r['file'])})
+
+
+def assert_parsed(bca, root, scopes, rows):
+    """Grammar rot is silent: a file the parser cannot read yields no functions, not an error."""
+    if not rows:
+        sys.exit('complexity: the census found no functions at all — the analyzer did not run')
+    out = subprocess.run([bca, 'count', '--type', 'ERROR', *(os.path.join(root, s) for s in scopes)],
+                         capture_output=True, text=True).stdout
+    total = found = 0
+    for line in out.splitlines():
+        digits = line.split(':')[-1].strip().replace(',', '')
+        if line.startswith('Total nodes'):
+            total = int(digits or 0)
+        elif line.startswith('Found nodes'):
+            found = int(digits or 0)
+    if total and found / total > 0.005:
+        sys.exit(f"complexity: {found / total:.3%} of AST nodes are parse errors — "
+                 "the grammar has fallen behind the language")
+
+
+def totals(rows):
+    return {'functions': len(rows),
+            'cognitive': sum(r['cognitive'] for r in rows),
+            'cyclomatic': sum(r['cyclomatic'] for r in rows),
+            'sloc': sum(r['sloc'] for r in rows),
+            'over25': sum(1 for r in rows if r['cognitive'] > 25)}
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--root', default='.')
+    ap.add_argument('--bca', default=os.environ.get('BCA', 'bca'))
+    ap.add_argument('--scope', action='append')
+    ap.add_argument('--json', action='store_true')
+    ap.add_argument('--top', type=int, default=25)
+    a = ap.parse_args()
+    scopes = a.scope or SCOPES
+    rows = census(a.root, scopes, a.bca)
+    assert_parsed(a.bca, a.root, scopes, rows)
+    if a.json:
+        count_callers(rows, a.root, scopes)
+        json.dump({'totals': totals(rows), 'functions': rows}, sys.stdout, sort_keys=True)
+        return
+    t = totals(rows)
+    print(f"functions {t['functions']}  cognitive {t['cognitive']}  cyclomatic {t['cyclomatic']}  "
+          f"sloc {t['sloc']}  over25 {t['over25']}")
+    for r in sorted(rows, key=lambda r: -r['cognitive'])[:a.top]:
+        print(f"  {r['cognitive']:>5} {r['sloc']:>5}  {r['name'][:34]:<34} {r['file']}:{r['line']}")
+
+
+main()
