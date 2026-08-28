@@ -332,7 +332,7 @@ const shape = z.object({
   smtp: smtpShape,
 })
 
-export const storeJson = FileHelper.json({ base: sdk.volumes.main, subpath: './store.json' }, shape)
+export const storeJson = FileHelper.json({ base: sdk.volumes.startos, subpath: 'store.json' }, shape)
 ```
 
 ### 2. Create the manageSmtp Action

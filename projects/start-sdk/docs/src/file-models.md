@@ -30,7 +30,9 @@ When done correctly, the shape itself eliminates the need for separate default c
 
 ### store.json.ts (Common Pattern)
 
-The most common file model is `store.json`, used to persist internal service state:
+`store.json` holds StartOS-side state that the upstream service's own configuration has no place for — a generated database password, a secret key, a backend the user selected, a flag an action toggles. Where the service does read a config file of its own, model that file directly instead: see [Prefer Direct FileModel Over store.json](#prefer-direct-filemodel-over-storejson--environment-variables).
+
+**It belongs on a volume of its own, named `startos`, that no subcontainer mounts.** Nothing inside the container reads it, and keeping it off the data volume keeps package-generated credentials out of a directory the application can read.
 
 ```typescript
 import { FileHelper, z } from '@start9labs/start-sdk'
@@ -43,8 +45,11 @@ const shape = z.object({
   someFlag: z.boolean().catch(false),
 })
 
-export const storeJson = FileHelper.json({ base: sdk.volumes.main, subpath: './store.json' }, shape)
+export const storeJson = FileHelper.json({ base: sdk.volumes.startos, subpath: 'store.json' }, shape)
 ```
+
+- **Declare the volume** in the manifest — `volumes: ['main', 'startos']` — and give it no mountpoint.
+- **Back it up.** `sdk.Backups.ofVolumes('main', 'startos')`. Restoring the data volume alone brings back an install whose generated secrets are gone; where one of them is an encryption key, the restored data is unreadable.
 
 ### YAML Configuration
 
@@ -498,7 +503,7 @@ When an upstream service reads a config file (TOML, YAML, JSON, XML, etc.), mode
 - **Simpler main.ts**: Mount the config file from the volume into the subcontainer. No need to read and regenerate it.
 - **Easy user configuration**: Exposing config options via Actions is as simple as `configToml.merge(effects, { key: newValue })`.
 
-Use `store.json` only for internal package state that has no upstream config file equivalent (e.g., a generated PostgreSQL password that the upstream service doesn't read from its own config file).
+Use `store.json` only for internal package state that has no upstream config file equivalent (e.g., a generated PostgreSQL password that the upstream service doesn't read from its own config file) — on [its own `startos` volume](#storejsonts-common-pattern), not the data volume.
 
 ```typescript
 // GOOD: Model the upstream config directly
