@@ -1,4 +1,3 @@
-// Word lists for suggesting a server hostname.
 // prettier-ignore
 export const ADJECTIVES = [
   'ominous',

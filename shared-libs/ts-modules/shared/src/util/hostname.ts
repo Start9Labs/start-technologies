@@ -2,16 +2,11 @@ import { inject } from '@angular/core'
 import { AbstractControl, ValidationErrors } from '@angular/forms'
 import { i18nPipe } from '../i18n/i18n.pipe'
 
-// The root CA's Common Name is `<hostname> Local Root CA`, and X.509 caps a
-// Common Name at 64 characters.
+// The root CA Common Name is `<hostname> Local Root CA` within X.509's 64-character limit.
 const MAX_LENGTH = 50
 const CHARACTERS = /^[a-z0-9-]+$/
 
-/**
- * Applies the rules the server applies in `ServerHostname::new_from_input`,
- * ignoring surrounding whitespace, and reports an empty value as `required`.
- * Submit the trimmed value.
- */
+/** Validates after trimming; callers must submit the trimmed value. */
 export function hostnameValidator(
   control: AbstractControl,
 ): ValidationErrors | null {
@@ -27,10 +22,7 @@ export function hostnameValidator(
   return null
 }
 
-/**
- * Maps `hostnameValidator`'s errors to their messages. Call it inside an
- * injection context — pass `tuiValidationErrorsProvider` a factory, not an object.
- */
+/** Returns localized hostname errors. Must run within an injection context. */
 export function hostnameValidationErrors(): Record<string, string> {
   const i18n = inject(i18nPipe)
 

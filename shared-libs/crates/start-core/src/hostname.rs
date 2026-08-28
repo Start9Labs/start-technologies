@@ -27,19 +27,15 @@ impl AsRef<str> for ServerHostname {
     }
 }
 
-/// X.509 caps a Common Name at 64 characters.
 const CN_MAX_LEN: usize = 64;
 
-/// The root CA is issued to `<hostname> Local Root CA`.
+// The root CA Common Name is `<hostname> Local Root CA`.
 const MAX_LEN: usize = CN_MAX_LEN - " Local Root CA".len();
 
-/// A leaf certificate is issued to `<hostname>.local`, so the server cannot serve its
-/// own address over TLS above this length.
+// The leaf certificate Common Name is `<hostname>.local`.
 const MAX_SERVED_LEN: usize = CN_MAX_LEN - ".local".len();
 
 impl ServerHostname {
-    /// Checks the character set alone, so a hostname stored under looser rules still
-    /// boots.
     fn validate(&self) -> Result<(), Error> {
         if self.0.is_empty() {
             return Err(Error::new(
@@ -66,8 +62,7 @@ impl ServerHostname {
         Ok(res)
     }
 
-    /// Checks a hostname the operator supplied against every rule, including the
-    /// length and hyphen rules `new` leaves out.
+    /// Validates a user-supplied hostname.
     pub fn new_from_input(hostname: InternedString) -> Result<Self, Error> {
         let res = Self::new(hostname)?;
         if res.0.chars().count() > MAX_LEN {
@@ -85,8 +80,6 @@ impl ServerHostname {
         Ok(res)
     }
 
-    /// Reports whether the server boots under this hostname and can serve
-    /// `<hostname>.local` over TLS.
     fn is_usable(&self) -> bool {
         self.validate().is_ok()
             && self.0.len() <= MAX_SERVED_LEN
@@ -94,7 +87,7 @@ impl ServerHostname {
             && !self.0.ends_with('-')
     }
 
-    /// Treats an empty hostname as absent rather than invalid.
+    /// Treats an empty hostname as absent.
     pub fn new_opt(hostname: Option<InternedString>) -> Result<Option<Self>, Error> {
         hostname
             .filter(|h| !h.is_empty())
@@ -115,13 +108,7 @@ impl ServerHostname {
     }
 }
 
-/// Returns a hostname the server can use, rewriting one it cannot.
-///
-/// A hostname outside the character set fails `set_hostname`, which runs on every
-/// boot, and leaves the server in diagnostic mode where nothing can rename it. One
-/// too long or hyphen-edged for a `<hostname>.local` certificate leaves the server
-/// unreachable at its own address. A usable hostname is returned untouched, even
-/// where `new_from_input` would turn it down.
+/// Returns a bootable, TLS-servable hostname, preserving usable stored names.
 pub fn repair_hostname(stored: &str) -> ServerHostname {
     let stored = ServerHostname(InternedString::intern(stored));
     if stored.is_usable() {
@@ -166,12 +153,7 @@ pub async fn get_current_hostname() -> Result<InternedString, Error> {
 pub async fn set_hostname(hostname: &ServerHostname) -> Result<(), Error> {
     hostname.validate()?;
     let hostname = &***hostname;
-    // Set the hostname ourselves rather than via `hostnamectl`: it delegates the
-    // static-file write to sandboxed systemd-hostnamed, which can't copy-up
-    // /etc/hostname from the read-only squashfs lower (EACCES on the Pi kernel).
-    // We already own /etc/hosts and persistence below, so the only thing we'd
-    // lose is hostnamed's D-Bus change signal, whose one consumer (avahi) we
-    // restart explicitly in sync_hostname.
+    // `systemd-hostnamed` cannot copy up `/etc/hostname` from the squashfs lower.
     write_file_atomic("/etc/hostname", format!("{hostname}\n")).await?;
     nix::unistd::sethostname(hostname).map_err(|e| {
         Error::new(
@@ -287,7 +269,6 @@ mod test {
         validate("-my-server").unwrap();
     }
 
-    // `MAX_LEN` has to move whenever the branding around the hostname does.
     #[test]
     fn the_longest_hostname_still_fits_the_root_ca_common_name() {
         let root_cert = |len: usize| {
@@ -301,8 +282,6 @@ mod test {
         root_cert(MAX_LEN + 1).unwrap_err();
     }
 
-    // A leaf certificate is issued to `<hostname>.local`, and above `MAX_SERVED_LEN`
-    // it cannot be minted at all — so the server has no address of its own to serve.
     #[test]
     fn the_longest_served_hostname_still_fits_a_leaf_common_name() {
         let root_key = crate::net::ssl::gen_nistp256().unwrap();
@@ -329,7 +308,6 @@ mod test {
         validate_input(&generate_hostname()).unwrap();
     }
 
-    // A server already answering to a name `new_from_input` would turn down keeps it.
     #[test]
     fn repair_leaves_a_usable_hostname_alone() {
         assert_eq!(&*repair_hostname("my-cool-server"), "my-cool-server");
@@ -347,7 +325,6 @@ mod test {
                 .count(),
             MAX_LEN
         );
-        // The hyphens go before the budget is spent, not after.
         assert_eq!(
             &*repair_hostname(&("-".repeat(MAX_LEN) + "my_server")),
             "myserver"

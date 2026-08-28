@@ -174,6 +174,10 @@ pub async fn list_disks(_ctx: SetupContext) -> Result<Vec<DiskInfo>, Error> {
     Ok(disks)
 }
 
+fn setup_hostname(existing: ServerHostname, requested: Option<ServerHostname>) -> ServerHostname {
+    requested.unwrap_or(existing)
+}
+
 #[instrument(skip_all)]
 async fn setup_init(
     ctx: &SetupContext,
@@ -194,9 +198,7 @@ async fn setup_init(
             if let Some(password) = &password {
                 account.set_password(password)?;
             }
-            if let Some(hostname) = hostname {
-                account.hostname = hostname;
-            }
+            account.hostname = setup_hostname(account.hostname, hostname);
             account.save(m)?;
             let info = m.as_public_mut().as_server_info_mut();
             info.as_kiosk_mut()
@@ -520,13 +522,13 @@ pub struct SetupExecuteParams {
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct SetupExecuteCliParams {
-    /// Disk GUID returned by `setup install-os` (or an existing data drive)
+    /// Disk GUID returned by setup install-os, or an existing data drive
     #[arg(long)]
     guid: InternedString,
     /// Enable kiosk mode
     #[arg(long)]
     kiosk: bool,
-    /// The server's `.local` hostname — up to 50 lowercase letters, numbers and
+    /// The server's .local hostname — up to 50 lowercase letters, numbers and
     /// hyphens, not starting or ending with a hyphen; defaults to a generated one
     #[arg(long)]
     hostname: Option<InternedString>,
@@ -708,6 +710,35 @@ async fn cli_execute(
         )
         .await?;
     print_remote_result(res)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn hostname(value: &str) -> ServerHostname {
+        ServerHostname::new(InternedString::intern(value)).unwrap()
+    }
+
+    #[test]
+    fn transfer_preserves_the_existing_hostname() {
+        assert_eq!(
+            setup_hostname(hostname("preserved-host"), None).as_ref(),
+            "preserved-host"
+        );
+    }
+
+    #[test]
+    fn transfer_uses_an_explicit_replacement_hostname() {
+        assert_eq!(
+            setup_hostname(
+                hostname("preserved-host"),
+                Some(hostname("replacement-host"))
+            )
+            .as_ref(),
+            "replacement-host"
+        );
+    }
 }
 
 // #[command(rpc_only)]

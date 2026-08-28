@@ -14,15 +14,15 @@ After [installing StartOS](installing-startos.md), follow these steps to initial
 1. From a computer connected to the same Local Area Network (LAN) as your server, open a browser and visit [http://start.local](http://start.local).
 
 1. Select a setup option:
-   - **Start fresh**: Select this option if you are setting up a new server.
+   - **Start fresh**: Select this option if you are setting up a new server. You will choose its [server name](server-name.md).
 
-   - **Restore from Backup**: Select this option _only_ if your existing StartOS data drive has been lost or corrupted. This is for disaster recovery only.
+   - **Restore from Backup**: Select this option _only_ if your existing StartOS data drive has been lost or corrupted. This is for disaster recovery only. The restored server keeps the source server's name.
 
-   - **Transfer**: Select this option if you are transferring your existing data from one drive to another.
+   - **Transfer**: Select this option if you are transferring your existing data from one drive to another. The transferred server keeps the source server's name.
 
 1. Set a strong master password. _Make it good. Write it down_. Resetting your password is non-trivial, but your data will be preserved.
 
-1. Set your [server name](server-name.md). This is your server's [mDNS address](mdns.md) without the `.local` on the end.
+1. If you selected **Start fresh**, set your server name. This is your server's [mDNS address](mdns.md) without the `.local` on the end.
 
 1. Once initialization completes, open your server's permanent local address, then follow the instructions for [Trusting your Root CA](./trust-ca.md) to establish a secure connection with your server.
 

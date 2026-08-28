@@ -22,7 +22,7 @@ export type RecoverySource =
             password: string | null
           }
       serverId: string
-      password: string // plaintext, will be encrypted before sending
+      password: string // Plaintext until `executeSetup` encrypts it.
     }
 
 @Injectable({
@@ -32,30 +32,21 @@ export class StateService {
   private readonly api = inject(ApiService)
   private readonly router = inject(Router)
 
-  // Determined at app init
   kiosk = false
 
-  // Set during install flow, or loaded from status response
   language = ''
   keyboard = ''
 
-  // From install response or status response (incomplete)
   dataDriveGuid = ''
   attach = false
   mokEnrolled = false
 
-  // Set when the device is pre-installed: the OS drive is fixed to the disk
-  // the running OS booted from, and the wizard only asks for a data drive.
+  // A pre-installed system fixes this to its boot disk.
   osDrive = ''
 
-  // Set during setup flow
   setupType?: SetupType
   recoverySource?: RecoverySource
 
-  /**
-   * Navigate to the appropriate step after language/keyboard selection.
-   * Keyboard selection is only needed in kiosk mode.
-   */
   async navigateAfterLocale(): Promise<void> {
     if (this.dataDriveGuid) {
       if (this.attach) {
@@ -69,9 +60,6 @@ export class StateService {
     }
   }
 
-  /**
-   * Called for attach flow (existing data drive)
-   */
   async attachDrive(password: string | null): Promise<void> {
     await this.api.attach({
       guid: this.dataDriveGuid,
@@ -80,7 +68,6 @@ export class StateService {
     })
   }
 
-  // A password is required for a fresh install and optional for restore and transfer.
   async executeSetup(password: string | null, hostname: string): Promise<void> {
     let recoverySource: T.RecoverySource<T.EncryptedWire> | null = null
 
@@ -88,7 +75,6 @@ export class StateService {
       if (this.recoverySource.type === 'migrate') {
         recoverySource = this.recoverySource
       } else {
-        // backup type - need to encrypt the backup password
         recoverySource = {
           type: 'backup',
           target: this.recoverySource.target,
@@ -107,9 +93,6 @@ export class StateService {
     })
   }
 
-  /**
-   * Reset state for a fresh start
-   */
   reset(): void {
     this.language = ''
     this.keyboard = ''

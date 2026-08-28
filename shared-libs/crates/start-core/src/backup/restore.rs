@@ -90,6 +90,13 @@ pub async fn restore_packages_rpc(
     Ok(())
 }
 
+fn restored_hostname(
+    backup_hostname: ServerHostname,
+    requested_hostname: Option<ServerHostname>,
+) -> ServerHostname {
+    requested_hostname.unwrap_or_else(|| repair_hostname(backup_hostname.as_ref()))
+}
+
 #[instrument(skip_all)]
 pub async fn recover_full_server(
     ctx: &SetupContext,
@@ -127,12 +134,7 @@ pub async fn recover_full_server(
         .with_kind(ErrorKind::PasswordHashGeneration)?;
     }
 
-    if let Some(h) = hostname {
-        os_backup.account.hostname = h;
-    }
-    // `Database::init` stamps the current version, so this DB never meets a
-    // migration that would heal a hostname the backup carried.
-    os_backup.account.hostname = repair_hostname(os_backup.account.hostname.as_ref());
+    os_backup.account.hostname = restored_hostname(os_backup.account.hostname, hostname);
 
     sync_kiosk(kiosk).await?;
 
@@ -234,4 +236,33 @@ async fn restore_packages(
     }
 
     Ok(tasks)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn hostname(value: &str) -> ServerHostname {
+        ServerHostname::new(InternedString::intern(value)).unwrap()
+    }
+
+    #[test]
+    fn restore_preserves_the_backup_hostname() {
+        assert_eq!(
+            restored_hostname(hostname("preserved-host"), None).as_ref(),
+            "preserved-host"
+        );
+    }
+
+    #[test]
+    fn restore_uses_an_explicit_replacement_hostname() {
+        assert_eq!(
+            restored_hostname(
+                hostname("preserved-host"),
+                Some(hostname("replacement-host"))
+            )
+            .as_ref(),
+            "replacement-host"
+        );
+    }
 }

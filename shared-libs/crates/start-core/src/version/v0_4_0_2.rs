@@ -59,8 +59,6 @@ impl VersionT for Version {
     }
 }
 
-/// Every `addSsl.alpn` a host holds, on the server's own bindings and on every
-/// package's.
 fn for_each_alpn(db: &mut Value, mut f: impl FnMut(&mut Value)) {
     let mut visit = |host: &mut Value| {
         let Some(bindings) = host.get_mut("bindings").and_then(|b| b.as_object_mut()) else {
@@ -101,22 +99,12 @@ fn for_each_alpn(db: &mut Value, mut f: impl FnMut(&mut Value)) {
     }
 }
 
-/// Bring a hostname the system cannot carry back into range.
-///
-/// Earlier versions accepted a hostname the kernel then refused, and `sync_hostname`
-/// runs on every boot, so such a server comes up in diagnostic mode every time. An
-/// update is the one thing diagnostic mode can still do, so this is where it heals.
-fn repair_unusable_hostname(db: &mut Value) {
-    let Some(server_info) = db
-        .get_mut("public")
 fn server_info_mut(db: &mut Value) -> Option<&mut imbl_value::InOMap<InternedString, Value>> {
     db.get_mut("public")
         .and_then(|p| p.get_mut("serverInfo"))
         .and_then(|s| s.as_object_mut())
 }
 
-/// Diagnostic mode can still take an update, so a hostname the server cannot use
-/// heals here.
 fn repair_unusable_hostname(db: &mut Value) {
     let Some(server_info) = server_info_mut(db) else {
         return;
@@ -132,7 +120,6 @@ fn repair_unusable_hostname(db: &mut Value) {
     server_info.insert(InternedString::intern("hostname"), Value::from(repaired));
 }
 
-/// The hostname is the server's only name.
 fn drop_server_name(db: &mut Value) {
     if let Some(server_info) = server_info_mut(db) {
         server_info.remove(&InternedString::intern("name"));
@@ -171,16 +158,6 @@ fn title_case(hostname: &str) -> String {
         .collect()
 }
 
-/// Give the StartOS UI back its well-known plaintext port.
-///
-/// `Public::init` plants the admin binding already holding `assignedSslPort`
-/// but not `assignedPort`, so `os_bindings` reaches it through `BindInfo::update`,
-/// which before #3558 could only fall through to a port at or above 49152 —
-/// and then kept it, since `update` prefers the port it already holds.
-///
-/// Nothing else can hold 80: it was unclaimable for everyone until #3558 and is
-/// privileged-only after it. Writing it also clears the unheld 80 that installs
-/// before #3558 were seeded with.
 fn rehome_admin_ui_port(db: &mut Value) {
     let Some(net) = db
         .get_mut("public")
@@ -219,7 +196,6 @@ mod test {
 
     use super::*;
 
-    /// A server binding and a package binding, each carrying `alpn` as given.
     fn db_with_alpn(server: Value, package: Value) -> Value {
         json!({
             "public": {
@@ -246,7 +222,6 @@ mod test {
             .clone()
     }
 
-    /// A stored list is carried as the list itself.
     #[test]
     fn a_stored_alpn_becomes_the_list_it_named() {
         let mut d = db_with_alpn(
@@ -266,7 +241,6 @@ mod test {
         assert_eq!(package_alpn(&d), json!({ "specified": [] }));
     }
 
-    /// `reflect` named the client's own list, which is what no list names now.
     #[test]
     fn a_stored_reflect_becomes_no_list() {
         let mut d = db_with_alpn(json!("reflect"), Value::Null);
@@ -288,9 +262,6 @@ mod test {
         &db["public"]["serverInfo"]["network"]["host"]["bindings"]["80"]["net"]
     }
 
-    // The shape a box installed before #3558 upgrades from: the plaintext leg
-    // drifted to an ephemeral port, and `availablePorts` still carries the 80
-    // that `Database::init` seeded but no binding ever held.
     #[test]
     fn rehomes_a_drifted_port_and_frees_it() {
         let mut db = db(
@@ -306,8 +277,6 @@ mod test {
         );
     }
 
-    // A box that came up through v0_4_0_alpha_20 had `availablePorts` rebuilt
-    // from its bindings, so it has no unheld 80 to clear.
     #[test]
     fn claims_80_when_no_seed_is_present() {
         let mut db = db(
@@ -353,6 +322,37 @@ mod test {
         assert_eq!(db, before);
     }
     #[test]
+    fn migrates_port_alpn_and_hostname_together() {
+        let mut db = db_with_alpn(json!({ "specified": ["h2"] }), json!("reflect"));
+        db["public"]["serverInfo"]["name"] = json!("Old Name");
+        db["public"]["serverInfo"]["hostname"] = json!("a".repeat(70));
+        db["public"]["serverInfo"]["network"]["host"]["bindings"]["80"] =
+            json!({ "net": { "assignedPort": 55543, "assignedSslPort": 443 } });
+        db["private"]["availablePorts"] = json!({ "80": false, "443": true, "55543": false });
+
+        Version.up(&mut db, ()).unwrap();
+
+        assert_eq!(db["public"]["serverInfo"].get("name"), None);
+        assert_eq!(
+            db["public"]["serverInfo"]["hostname"],
+            json!("a".repeat(50))
+        );
+        assert_eq!(net_of(&db)["assignedPort"], json!(80));
+        assert_eq!(server_alpn(&db), json!(["h2"]));
+        assert_eq!(package_alpn(&db), Value::Null);
+
+        Version.down(&mut db).unwrap();
+
+        assert_eq!(
+            db["public"]["serverInfo"]["name"],
+            json!(format!("A{}", "a".repeat(49)))
+        );
+        assert_eq!(server_alpn(&db), json!({ "specified": ["h2"] }));
+        assert_eq!(package_alpn(&db), Value::Null);
+        assert_eq!(net_of(&db)["assignedPort"], json!(80));
+    }
+
+    #[test]
     fn drops_and_restores_the_display_name() {
         let mut db = json!({ "public": { "serverInfo": {
             "name": "My Cool Server", "hostname": "my-cool-server"
@@ -391,8 +391,6 @@ mod test {
         );
     }
 
-    // A name longer than the field accepts is still served, and the server already
-    // answers to it, so the migration leaves it alone.
     #[test]
     fn leaves_a_long_but_working_hostname_alone() {
         let mut db = json!({ "public": { "serverInfo": { "hostname": "a".repeat(55) } } });
