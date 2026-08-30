@@ -183,6 +183,16 @@ file tracks notable changes since the move to the monorepo.
   starts many of them built them up without limit, and only a restart cleared
   them. The container's first process now collects them as they finish.
 
+- **A Let's Encrypt certificate is issued even when the authority takes longer
+  than a second to check your domain.** StartOS asked Let's Encrypt to run the
+  check and then, one second later, asked it to run the check again — which
+  Let's Encrypt refuses, because the one it was already running had not
+  finished. The whole request failed there, and the retry a minute later failed
+  the same way, so a domain could sit without a certificate indefinitely. Let's
+  Encrypt validates from several vantage points around the world and routinely
+  takes longer than a second, so this affected almost every domain. StartOS now
+  waits for the answer instead of asking again.
+
 - **A Let's Encrypt domain works on an interface served on a port other than
   `443`** — an Electrum server on `50002`, a TURN server on `5349`. Let's
   Encrypt proves you control a name by connecting to it on port `443` whatever
