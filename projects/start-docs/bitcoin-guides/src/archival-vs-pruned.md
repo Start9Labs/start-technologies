@@ -56,6 +56,10 @@ The proxy answers over Bitcoin's RPC interface. Three things read the chain some
 - **electrs** — it pulls whole blocks over Bitcoin's peer-to-peer interface rather than its RPC, so the proxy is not in that path. Upstream has kept it that way partly on privacy grounds: on a pruned node, the blocks the server went out to fetch would track which addresses your wallet had asked about.
 - **Block explorers** — Mempool answers arbitrary queries across the whole chain and needs it on disk.
 
+> [!NOTE]
+>
+> A community-maintained fork of electrs, [electrs-pruned](https://github.com/paulscode/electrs-pruned), routes the reads the proxy can answer through it and does work against a pruned node. It is **not a Start9 package** — not in the marketplace, not audited by us, and installed by sideloading. It carries the privacy trade-off above, and its first index build against an already-pruned node takes over a day, considerably longer if Bitcoin reaches the network only over Tor.
+
 ## Managing Pruning on StartOS
 
 Pruning is controlled from the Bitcoin service's Actions menu: **Services > Bitcoin > Actions > Other**. From there you can enable or disable pruning and set the prune target (the amount of block data to retain, in MB).
