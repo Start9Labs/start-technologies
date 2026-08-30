@@ -1,12 +1,12 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use imbl_value::Value;
 use rpc_toolkit::{from_fn_async_local, HandlerExt as _, ParentHandler};
 use serde::{Deserialize, Serialize};
 use uciedit::openwrt::{
-    DhcpHost, FirewallRedirect, FirewallRule, FirewallTarget, FirewallZone, InterfaceProto,
-    NetworkInterface,
+    DhcpHost, FirewallForwarding, FirewallRedirect, FirewallRule, FirewallTarget, FirewallZone,
+    InterfaceProto, NetworkInterface,
 };
 use uciedit::{dump_all, parse_all, Arena, Configs};
 
@@ -1121,6 +1121,15 @@ pub async fn set<C: CtrlContext>(
 
             // IPv4 redirect (DNAT)
             if port.ipv4 {
+                // fw4's reflection redirect drops `src_ip` and matches the whole
+                // reflection zone, so a source restriction is honored only by
+                // declining to reflect.
+                let reflect = port.source == "any";
+                let reflection_zone = if reflect {
+                    reflection_zones(&cfgs["firewall"], &dest_zone)
+                } else {
+                    Vec::new()
+                };
                 let redirect = FirewallRedirect {
                     name: port.label.clone(),
                     src: "wan".into(),
@@ -1140,6 +1149,8 @@ pub async fn set<C: CtrlContext>(
                         None
                     },
                     enabled: Some(if port.enabled { "1" } else { "0" }.into()),
+                    reflection: (!reflect).then(|| "0".into()),
+                    reflection_zone,
                     _pp_id: Some(port.id.clone()),
                     _pp_mac: Some(port.device_mac.clone()),
                     _apf_label: None,
@@ -1736,6 +1747,31 @@ async fn resolve_device_zones(
     }
 
     mac_zones
+}
+
+/// Zones that get NAT reflection (hairpin) into `dest_zone`: that zone plus
+/// every zone a `config forwarding` section already permits to forward into it.
+/// fw4 defaults to `dest_zone` alone, which leaves a permitted client on
+/// another Security Profile hitting the router's own INPUT chain.
+///
+/// Each zone returned here takes fw4's blanket `ct status dnat accept` on its
+/// forward chain, ahead of the zone policy: a reflected flow cannot be rejected
+/// afterwards, and that accept passes every DNAT'd flow out of the zone, not
+/// just published ports. Widening this set widens that.
+fn reflection_zones(firewall: &uciedit::Config<'_>, dest_zone: &str) -> Vec<String> {
+    let mut zones: BTreeSet<String> = BTreeSet::new();
+    zones.insert(dest_zone.to_string());
+    for fwd in firewall
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<FirewallForwarding>().ok())
+    {
+        // `wan` is the redirect's own src zone, never a reflection source.
+        if fwd.dest == dest_zone && fwd.src != "wan" {
+            zones.insert(fwd.src);
+        }
+    }
+    zones.into_iter().collect()
 }
 
 /// Apply firewall config changes.
@@ -2655,6 +2691,103 @@ config redirect 'pp_del1'
         assert!(
             !content.contains("src_ip"),
             "source 'any' should not produce src_ip"
+        );
+    }
+
+    // ── NAT reflection scoping ──
+
+    /// Firewall seeded with the `config forwarding` sections a three-profile
+    /// setup would carry: `lan_guest` and `lan_iot` may reach `lan`, `lan` may
+    /// reach `wan`, and nothing forwards *from* `wan`.
+    const FORWARDINGS: &str = "\
+config forwarding 'fwd_guest_lan'
+\toption src 'lan_guest'
+\toption dest 'lan'
+
+config forwarding 'fwd_iot_lan'
+\toption src 'lan_iot'
+\toption dest 'lan'
+
+config forwarding 'fwd_guest_wan'
+\toption src 'lan_guest'
+\toption dest 'wan'
+
+config forwarding 'fwd_lan_wan'
+\toption src 'lan'
+\toption dest 'wan'
+";
+
+    #[test]
+    fn reflection_zones_covers_permitted_sources_only() {
+        let arena = Arena::new();
+        let cfg = uciedit::Config::parse_str(&arena, FORWARDINGS).unwrap();
+        assert_eq!(
+            reflection_zones(&cfg, "lan"),
+            vec!["lan".to_string(), "lan_guest".into(), "lan_iot".into()],
+        );
+        // A zone nothing forwards into reflects to itself alone.
+        assert_eq!(
+            reflection_zones(&cfg, "lan_iot"),
+            vec!["lan_iot".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn set_scopes_reflection_to_permitted_zones() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_firewall(dir.path(), FORWARDINGS);
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        set(
+            ctx,
+            DeserializeStdin(PublishedPortsSetRequest {
+                ports: vec![make_port("refl1", true, false)],
+            }),
+        )
+        .await
+        .unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        for zone in ["lan", "lan_guest", "lan_iot"] {
+            assert!(
+                content.contains(&format!("list reflection_zone '{zone}'\n")),
+                "missing reflection_zone {zone} in:\n{content}"
+            );
+        }
+        assert!(
+            !content.contains("list reflection_zone 'wan'"),
+            "wan must never be a reflection zone:\n{content}"
+        );
+        assert!(
+            !content.contains("option reflection "),
+            "unrestricted port should leave fw4's reflection default:\n{content}"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_source_restriction_disables_reflection() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_firewall(dir.path(), FORWARDINGS);
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        let mut port = make_port("refl2", true, false);
+        port.source = "203.0.113.0/24".to_string();
+
+        set(
+            ctx,
+            DeserializeStdin(PublishedPortsSetRequest { ports: vec![port] }),
+        )
+        .await
+        .unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        assert!(
+            content.contains("option reflection '0'"),
+            "source-restricted port must disable reflection:\n{content}"
+        );
+        assert!(
+            !content.contains("list reflection_zone"),
+            "no reflection means no reflection zones:\n{content}"
         );
     }
 

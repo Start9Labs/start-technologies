@@ -1167,6 +1167,8 @@ fn desired_redirect(
         dest_ip: Some(target.ip().to_string()),
         dest_port: Some(range_string(target.port(), count)),
         enabled: Some("1".into()),
+        reflection: None,
+        reflection_zone: Vec::new(),
         _pp_id: None,
         _pp_mac: None,
         _apf_label: Some(kind.into()),

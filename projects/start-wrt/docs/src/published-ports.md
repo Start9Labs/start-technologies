@@ -58,6 +58,15 @@ Each published port rule shows a status indicator in the table:
 
 The status reflects the rule and the device's addresses on your LAN — it does not test whether traffic actually arrives from the Internet.
 
+## Reaching a Published Port from Your Own Network
+
+A device on your own network can reach a published port at the router's public address — or at a domain name that points there — instead of at the target device's LAN address. The router recognizes those connections and sends them on to the published device, so one address works from both sides of your Internet connection. This matters for anything configured with a single address, such as a phone app or a bookmarked domain name. (This is commonly called NAT loopback, or hairpinning.)
+
+It works from the target device's own [Security Profile](security-profiles.md) and from every other profile that profile permits to reach it — the same access the profiles already grant on the LAN, just by a different address. A profile that is not allowed to reach the device is not given this route either: its connections to the router's public address are answered by the router itself.
+
+> [!NOTE]
+> A rule whose **Source** is restricted to specific addresses is never served this way. That route cannot distinguish one local device from another, so serving the rule over it would let any device on your network past the restriction. Reach a restricted rule from inside your network at the device's own LAN address instead.
+
 ## Automatic Port Forwarding
 
 Some devices can configure port forwarding for themselves using the standard UPnP and PCP protocols instead of you creating rules by hand — StartOS servers do this automatically, and game consoles and torrent clients commonly support it too.

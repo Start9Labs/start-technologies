@@ -296,6 +296,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   WAN setting independently, so one failure can no longer blank out the
   endpoint list.
 
+- **A published port is now reachable from your other Security Profiles at the
+  router's public address.** Reaching a published port by the router's public
+  address — or a domain name pointing at it — rather than the device's LAN
+  address only worked from the target device's own profile. From any other
+  profile, even one permitted to reach that device, the router answered instead
+  of the published service, so an app or bookmark holding a public address
+  worked on one network and not another. Those connections are now delivered to
+  the device for every profile permitted to reach its profile, and only those.
+
+### Security
+
+- **A published port restricted by Source is no longer reachable from your own
+  network at the router's public address.** The restriction applied to
+  connections arriving from the Internet, but a device on your own network
+  could reach the port through the router's public address regardless of it.
+  Restricted rules are no longer served that way; reach them from inside your
+  network at the device's own LAN address.
+
 ## [1.0.1]
 
 ### Added

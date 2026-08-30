@@ -104,6 +104,12 @@ pub struct FirewallRedirect {
     pub target: String,
     #[uci(default)]
     pub enabled: Option<String>,
+    /// NAT reflection (hairpin). Unset is fw4's default of enabled.
+    #[uci(default)]
+    pub reflection: Option<String>,
+    /// Zones whose clients get hairpin rules. Empty is fw4's default of the
+    /// `dest` zone alone.
+    pub reflection_zone: Vec<String>,
     /// Published-port metadata: links IPv4 redirect + IPv6 rule
     #[uci(default)]
     pub _pp_id: Option<String>,
