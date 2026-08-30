@@ -967,7 +967,7 @@ pub async fn set<C: CtrlContext>(
         }
 
         let arena = Arena::new();
-        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["firewall", "dhcp"]).await?;
+        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["firewall", "dhcp", "network"]).await?;
 
         // Effectful saves require explicit confirmation for occupied WAN ports.
         if ctx.effectful() {
@@ -1114,17 +1114,49 @@ pub async fn set<C: CtrlContext>(
             let info = device_info.get(&mac_upper);
             let ipv4_addr = info.and_then(|i| i.ipv4.clone());
             let ipv6_addr = info.and_then(|i| i.ipv6.clone());
-            let dest_zone = mac_zones
-                .get(&mac_upper)
-                .cloned()
-                .unwrap_or_else(|| "lan".into());
+            // The device's zone, resolved from its IPv4 against the profile
+            // subnets. The neighbor table only cross-checks: it requires the
+            // device to be online, and a `set` while one target was offline
+            // used to silently rewrite that target's rule around a guessed
+            // "lan". The live address wins; the static reservation (kept
+            // current by the auto-reserve above) covers an offline device,
+            // and configs-only mode.
+            let reserved_ipv4 = cfgs["dhcp"].sections.iter().find_map(|s| {
+                let host = s.get::<DhcpHost>().ok()?;
+                if host.mac.eq_ignore_ascii_case(&mac_upper) {
+                    host.ip
+                } else {
+                    None
+                }
+            });
+            let subnet_zone = ipv4_addr
+                .as_deref()
+                .or(reserved_ipv4.as_deref())
+                .and_then(|ip| ip.parse::<Ipv4Addr>().ok())
+                .and_then(|ip| zone_for_ipv4(&cfgs, ip));
+            if let (Some(by_subnet), Some(by_neigh)) = (
+                subnet_zone.as_deref(),
+                mac_zones.get(&mac_upper).map(String::as_str),
+            ) {
+                if by_subnet != by_neigh {
+                    tracing::warn!(
+                        "published-ports: device {mac_upper} sits in zone {by_subnet} by address but {by_neigh} by neighbor table; using {by_subnet}"
+                    );
+                }
+            }
+            let dest_zone = subnet_zone.clone().unwrap_or_else(|| "lan".into());
 
             // IPv4 redirect (DNAT)
             if port.ipv4 {
                 // fw4's reflection redirect drops `src_ip` and matches the whole
                 // reflection zone, so a source restriction is honored only by
-                // declining to reflect.
-                let reflect = port.source == "any";
+                // declining to reflect. An unresolvable device (offline with
+                // no reservation, or outside every profile subnet) keeps its
+                // WAN-side DNAT on the "lan" guess but is never hairpinned:
+                // reflecting into a guessed zone could hand other profiles a
+                // route they were never granted — and one offline device must
+                // not block saving the rest, so refuse nothing.
+                let reflect = subnet_zone.is_some() && port.source == "any";
                 let redirect = FirewallRedirect {
                     name: port.label.clone(),
                     src: "wan".into(),
@@ -1724,6 +1756,47 @@ pub(crate) fn zone_for_arp_iface(cfgs: &uciedit::Configs, arp_iface: &str) -> Op
         })
         .ok();
     zone
+}
+
+/// Firewall zone whose subnet contains `ip`: each non-masquerading zone's
+/// `network` members are looked up as static interfaces and matched by
+/// address and netmask (every profile is a /24 at its gateway; the netmask
+/// defaults to /24 when absent). The by-address sibling of
+/// [`zone_for_arp_iface`]: it needs no neighbor entry, so an offline device
+/// with a static reservation still resolves. `cfgs` must contain "network"
+/// and "firewall".
+pub(crate) fn zone_for_ipv4(cfgs: &uciedit::Configs, ip: Ipv4Addr) -> Option<String> {
+    let mut interface_zone: Vec<(String, String)> = Vec::new();
+    for z in cfgs["firewall"]
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<FirewallZone>().ok())
+    {
+        if z.masq == Some(true) {
+            continue;
+        }
+        for iface in z.network {
+            interface_zone.push((iface, z.name.clone()));
+        }
+    }
+    for section in &cfgs["network"].sections {
+        let Ok(iface) = section.get::<NetworkInterface>() else {
+            continue;
+        };
+        if iface.proto != InterfaceProto::STATIC {
+            continue;
+        }
+        let Some(addr) = iface.ipaddr else { continue };
+        let mask = u32::from(iface.netmask.unwrap_or(Ipv4Addr::new(255, 255, 255, 0)));
+        if u32::from(ip) & mask != u32::from(addr) & mask {
+            continue;
+        }
+        let Some(name) = section.name() else { continue };
+        if let Some((_, zone)) = interface_zone.iter().find(|(i, _)| *i == name) {
+            return Some(zone.clone());
+        }
+    }
+    None
 }
 
 /// Resolve MAC addresses to firewall zone names via ARP interface → VLAN tag → profile → zone.
@@ -2778,6 +2851,44 @@ config redirect 'pp_del1'
 
     // ── NAT reflection scoping ──
 
+    /// Interface addresses matching the FORWARDINGS zones: `lan`, `guest`,
+    /// and `iot` are /24s at .1.1/.101.1/.102.1; the WAN is not static.
+    const NETWORK: &str = "\
+config interface 'lan'
+\toption device 'br-lan'
+\toption proto 'static'
+\toption ipaddr '192.168.1.1'
+\toption netmask '255.255.255.0'
+
+config interface 'guest'
+\toption device 'br-lan.101'
+\toption proto 'static'
+\toption ipaddr '192.168.101.1'
+\toption netmask '255.255.255.0'
+
+config interface 'iot'
+\toption device 'br-lan.102'
+\toption proto 'static'
+\toption ipaddr '192.168.102.1'
+\toption netmask '255.255.255.0'
+
+config interface 'wan'
+\toption device 'eth1'
+\toption proto 'dhcp'
+";
+
+    /// Give `make_port`'s device a resolvable zone: the interface subnets
+    /// plus a static reservation at `ip`. Tests are never effectful, so the
+    /// reservation is the only address source the resolver can see.
+    fn seed_device(dir: &std::path::Path, ip: &str) {
+        std::fs::write(dir.join("network"), NETWORK).unwrap();
+        std::fs::write(
+            dir.join("dhcp"),
+            format!("config host\n\toption mac 'AA:BB:CC:DD:EE:FF'\n\toption ip '{ip}'\n"),
+        )
+        .unwrap();
+    }
+
     /// Firewall seeded the way a three-profile setup would be: zones for the
     /// admin `lan`, `lan_guest`, `lan_iot`, and a masquerading `wan`, plus the
     /// `config forwarding` sections such a setup would carry: `lan_guest` and
@@ -2889,6 +3000,7 @@ config forwarding
     async fn set_scopes_reflection_to_permitted_zones() {
         let dir = tempfile::tempdir().unwrap();
         setup_firewall(dir.path(), FORWARDINGS);
+        seed_device(dir.path(), "192.168.1.50");
         let ctx = TestContext(dir.path().to_path_buf());
 
         set(
@@ -2901,6 +3013,10 @@ config forwarding
         .unwrap();
 
         let content = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        assert!(
+            content.contains("option dest 'lan'"),
+            "reserved 192.168.1.50 must resolve to the lan zone:\n{content}"
+        );
         for zone in ["lan", "lan_guest", "lan_iot"] {
             assert!(
                 content.contains(&format!("list reflection_zone '{zone}'\n")),
@@ -2921,6 +3037,7 @@ config forwarding
     async fn set_source_restriction_disables_reflection() {
         let dir = tempfile::tempdir().unwrap();
         setup_firewall(dir.path(), FORWARDINGS);
+        seed_device(dir.path(), "192.168.1.50");
         let ctx = TestContext(dir.path().to_path_buf());
 
         let mut port = make_port("refl2", true, false);
@@ -2937,6 +3054,83 @@ config forwarding
         assert!(
             content.contains("option reflection '0'"),
             "source-restricted port must disable reflection:\n{content}"
+        );
+        assert!(
+            !content.contains("list reflection_zone"),
+            "no reflection means no reflection zones:\n{content}"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_resolves_dest_zone_from_subnet() {
+        let dir = tempfile::tempdir().unwrap();
+        // lan may also reach the guest zone (Admin has Access All); iot may
+        // not, so a guest-zone port must list lan_guest + lan and never
+        // lan_iot — the permitted set of the *resolved* zone, not lan's.
+        setup_firewall(
+            dir.path(),
+            &format!(
+                "{FORWARDINGS}
+config forwarding 'fwd_lan_guest'
+\toption src 'lan'
+\toption dest 'lan_guest'
+"
+            ),
+        );
+        seed_device(dir.path(), "192.168.101.50");
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        set(
+            ctx,
+            DeserializeStdin(PublishedPortsSetRequest {
+                ports: vec![make_port("refl3", true, false)],
+            }),
+        )
+        .await
+        .unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        assert!(
+            content.contains("option dest 'lan_guest'"),
+            "a device in the guest subnet must land in the guest zone:\n{content}"
+        );
+        for zone in ["lan_guest", "lan"] {
+            assert!(
+                content.contains(&format!("list reflection_zone '{zone}'\n")),
+                "missing reflection_zone {zone} in:\n{content}"
+            );
+        }
+        assert!(
+            !content.contains("list reflection_zone 'lan_iot'"),
+            "lan_iot has no access to the guest zone:\n{content}"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_unresolvable_device_zone_disables_reflection() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_firewall(dir.path(), FORWARDINGS);
+        // No neighbor entry (tests are never effectful), no reservation, no
+        // interface subnets: the device's zone cannot be known.
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        set(
+            ctx,
+            DeserializeStdin(PublishedPortsSetRequest {
+                ports: vec![make_port("refl4", true, false)],
+            }),
+        )
+        .await
+        .unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        assert!(
+            content.contains("option dest 'lan'"),
+            "an unresolvable device keeps the lan guess for its WAN DNAT:\n{content}"
+        );
+        assert!(
+            content.contains("option reflection '0'"),
+            "never reflect into a guessed zone:\n{content}"
         );
         assert!(
             !content.contains("list reflection_zone"),
