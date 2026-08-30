@@ -303,7 +303,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   profile, even one permitted to reach that device, the router answered instead
   of the published service, so an app or bookmark holding a public address
   worked on one network and not another. Those connections are now delivered to
-  the device for every profile permitted to reach its profile, and only those.
+  the device for every profile permitted to reach its profile, and only those —
+  the routes follow your Security Profile access settings as you change them,
+  and ports opened through automatic port forwarding (UPnP/PCP) are covered the
+  same way.
 
 ### Security
 

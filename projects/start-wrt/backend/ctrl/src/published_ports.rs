@@ -1125,11 +1125,6 @@ pub async fn set<C: CtrlContext>(
                 // reflection zone, so a source restriction is honored only by
                 // declining to reflect.
                 let reflect = port.source == "any";
-                let reflection_zone = if reflect {
-                    reflection_zones(&cfgs["firewall"], "wan", &dest_zone)
-                } else {
-                    Vec::new()
-                };
                 let redirect = FirewallRedirect {
                     name: port.label.clone(),
                     src: "wan".into(),
@@ -1150,7 +1145,8 @@ pub async fn set<C: CtrlContext>(
                     },
                     enabled: Some(if port.enabled { "1" } else { "0" }.into()),
                     reflection: (!reflect).then_some(false),
-                    reflection_zone,
+                    // Filled by the sync pass below (skipped for '0').
+                    reflection_zone: Vec::new(),
                     _pp_id: Some(port.id.clone()),
                     _pp_mac: Some(port.device_mac.clone()),
                     _apf_label: None,
@@ -1203,6 +1199,11 @@ pub async fn set<C: CtrlContext>(
                 cfgs["firewall"].append(&rule, Some(&section_name))?;
             }
         }
+
+        // One derivation for every hairpin list: the freshly written published
+        // ports and any automatic (PCP/UPnP) forwards alike get their
+        // `reflection_zone` recomputed from the current forwarding set.
+        sync_reflection_zones(&mut cfgs["firewall"])?;
 
         match dump_all(ctx.uci_root(), cfgs).await {
             Err(uciedit::Error::Conflict { .. }) if retries > 0 => {
@@ -1801,6 +1802,58 @@ fn reflection_zones(
         }
     }
     zones.into_iter().collect()
+}
+
+/// Re-derive `reflection_zone` on every published-port (`_pp_id`) and
+/// automatic-forward (`_apf_label`) redirect from the current `config
+/// forwarding` set. Returns whether anything changed.
+///
+/// The list is derived state, so every path that changes the zone/forwarding
+/// set must re-run this before the firewall is reloaded: otherwise a redirect
+/// keeps reflecting for a zone whose Access was just revoked, and a deleted
+/// zone leaves behind a name fw4 rejects by dropping the whole redirect.
+/// Redirects with `reflection '0'` carry no list and are left alone.
+pub(crate) fn sync_reflection_zones(firewall: &mut uciedit::Config<'_>) -> Result<bool, Error> {
+    let mut changed = false;
+    for i in 0..firewall.sections.len() {
+        let Ok(mut redirect) = firewall.sections[i].get::<FirewallRedirect>() else {
+            continue;
+        };
+        if redirect._pp_id.is_none() && redirect._apf_label.is_none() {
+            continue;
+        }
+        if redirect.reflection == Some(false) {
+            continue;
+        }
+        let Some(dest) = redirect.dest.clone() else {
+            continue;
+        };
+        let zones = reflection_zones(firewall, &redirect.src, &dest);
+        if redirect.reflection_zone != zones {
+            redirect.reflection_zone = zones;
+            firewall.sections[i].set(&redirect)?;
+            changed = true;
+        }
+    }
+    Ok(changed)
+}
+
+/// Boot heal: a router that carried published ports before the resync pass
+/// existed (or whose config was edited by hand) can hold stale
+/// `reflection_zone` lists — reflecting for zones whose Access was revoked,
+/// or naming deleted zones fw4 rejects whole redirects over. Re-derive them
+/// once, reloading the firewall only if something actually changed.
+pub async fn heal_reflection_zones(uci_root: impl AsRef<std::path::Path>) -> Result<(), Error> {
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root.as_ref(), &arena, &["firewall"]).await?;
+    if !sync_reflection_zones(&mut cfgs["firewall"])? {
+        return Ok(());
+    }
+    dump_all(uci_root.as_ref(), cfgs).await?;
+    drop(arena);
+    tracing::info!("published-ports: re-derived stale reflection zone lists; reloading firewall");
+    reload_firewall();
+    Ok(())
 }
 
 /// Apply firewall config changes.

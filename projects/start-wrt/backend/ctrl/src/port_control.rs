@@ -1321,6 +1321,9 @@ async fn apply_forward_uci(
             .sections
             .retain(|s| s.name().as_deref() != Some(section));
         cfgs["firewall"].append(&desired, Some(section))?;
+        // Scope this forward's hairpin exactly like a manual published port —
+        // and refresh every other tagged redirect while the file is open.
+        crate::published_ports::sync_reflection_zones(&mut cfgs["firewall"])?;
         match dump_all(uci_root, cfgs).await {
             Err(uciedit::Error::Conflict { .. }) if retries > 0 => {
                 retries -= 1;
@@ -2277,6 +2280,86 @@ config redirect 'pp_a'
         let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
         assert!(written.contains("option dest_ip '192.168.1.51'"));
         assert!(!written.contains("option dest_ip '192.168.1.50'"));
+    }
+
+    /// An automatic forward's hairpin is scoped exactly like a manual
+    /// published port: the dest zone plus every zone already permitted to
+    /// forward into it — and the write refreshes stale lists on other tagged
+    /// redirects in the same transaction.
+    #[tokio::test]
+    async fn apply_scopes_reflection_like_published_ports() {
+        let dir = temp_root(
+            "\
+config zone 'z_lan'
+\toption name 'lan'
+\tlist network 'lan'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config zone 'z_guest'
+\toption name 'lan_guest'
+\tlist network 'guest'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config zone 'z_wan'
+\toption name 'wan'
+\tlist network 'wan'
+\toption input 'REJECT'
+\toption output 'ACCEPT'
+\toption forward 'REJECT'
+\toption masq '1'
+
+config forwarding
+\toption src 'lan_guest'
+\toption dest 'lan'
+
+config redirect 'pp_stale'
+\toption name 'NAS'
+\toption src 'wan'
+\toption dest 'lan'
+\toption target 'DNAT'
+\tlist proto 'tcp'
+\toption src_dport '443'
+\toption dest_port '443'
+\toption dest_ip '192.168.1.50'
+\toption enabled '1'
+\toption _pp_id 'a'
+\toption _pp_mac 'AA:AA:AA:AA:AA:AA'
+\tlist reflection_zone 'lan'
+\tlist reflection_zone 'vlan_gone'
+",
+        );
+        let source = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), 8443);
+        let target = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 50), 8443);
+        let outcome = apply_forward_uci(
+            dir.path(),
+            "apf_aabbccddeeff_8443",
+            LABEL_PCP,
+            "AA:BB:CC:DD:EE:FF",
+            Some("br-lan"),
+            source,
+            target,
+            1,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(outcome, ApplyOutcome::Written));
+        let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        let apf = written.split("config redirect").last().unwrap();
+        assert!(
+            apf.contains("list reflection_zone 'lan'")
+                && apf.contains("list reflection_zone 'lan_guest'"),
+            "auto forward must carry the scoped list:\n{written}"
+        );
+        // The stale manual list was healed in the same write: the deleted
+        // zone name would have made fw4 drop that whole redirect.
+        assert!(
+            !written.contains("vlan_gone"),
+            "stale zone must be dropped:\n{written}"
+        );
     }
 
     #[tokio::test]

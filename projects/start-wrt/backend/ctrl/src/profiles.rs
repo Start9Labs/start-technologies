@@ -826,6 +826,11 @@ fn delete_config(
     // Clean up orphaned VPN interfaces from WAN zone
     cleanup_orphaned_vpn_zones(cfgs);
 
+    // The zone and its forwardings are gone; drop them from every
+    // published-port/auto-forward hairpin list, or fw4 rejects those
+    // redirects outright over the now-unknown name.
+    crate::published_ports::sync_reflection_zones(&mut cfgs["firewall"])?;
+
     Ok(())
 }
 
@@ -2110,6 +2115,10 @@ fn rewrite_firewall(
             }
         }
     }
+
+    // The forwarding set just changed; every published-port and auto-forward
+    // redirect's `reflection_zone` is derived from it.
+    crate::published_ports::sync_reflection_zones(&mut cfgs["firewall"])?;
 
     Ok(())
 }
@@ -4011,6 +4020,165 @@ config wifi-vlan
 ",
         )
         .unwrap();
+    }
+
+    /// `setup_configs`' firewall plus the reflection fixtures: optionally the
+    /// forwarding that grants Guest Access to the admin LAN, a published port
+    /// into `lan`, and an automatic (UPnP) forward — both hairpin lists
+    /// matching the granted state.
+    fn seed_reflection_firewall(dir: &std::path::Path, with_guest_access: bool) {
+        let mut fw = std::fs::read_to_string(dir.join("firewall")).unwrap();
+        if with_guest_access {
+            fw.push_str(
+                "\nconfig forwarding 'fwd_guest_lan'\n\toption src 'vlan_guest'\n\toption dest 'lan'\n",
+            );
+        }
+        let zones = if with_guest_access {
+            "\tlist reflection_zone 'lan'\n\tlist reflection_zone 'vlan_guest'\n"
+        } else {
+            "\tlist reflection_zone 'lan'\n"
+        };
+        fw.push_str(&format!(
+            "\nconfig redirect 'pp_x'\n\toption name 'Server'\n\toption src 'wan'\n\toption dest 'lan'\n\toption target 'DNAT'\n\tlist proto 'tcp'\n\toption src_dport '8443'\n\toption dest_ip '192.168.1.10'\n\toption dest_port '8443'\n\toption _pp_id 'x'\n\toption _pp_mac 'AA:BB:CC:DD:EE:FF'\n{zones}"
+        ));
+        fw.push_str(&format!(
+            "\nconfig redirect 'apf_aabbccddeeff_9000'\n\toption name 'Auto forward (UPnP)'\n\toption src 'wan'\n\toption dest 'lan'\n\toption target 'DNAT'\n\tlist proto 'tcp'\n\tlist proto 'udp'\n\toption src_dport '9000'\n\toption dest_ip '192.168.1.10'\n\toption dest_port '9000'\n\toption enabled '1'\n\toption _apf_label 'UPnP'\n\toption _apf_mac 'AA:BB:CC:DD:EE:FF'\n{zones}"
+        ));
+        std::fs::write(dir.join("firewall"), fw).unwrap();
+    }
+
+    fn reflection_list(cfgs: &Configs, section: &str) -> Vec<String> {
+        cfgs["firewall"]
+            .sections
+            .iter()
+            .find(|s| s.name().as_deref() == Some(section))
+            .and_then(|s| s.get::<FirewallRedirect>().ok())
+            .map(|r| r.reflection_zone)
+            .unwrap_or_else(|| panic!("missing redirect section {section}"))
+    }
+
+    fn guest_profile(lan_access: LanAccess<ProfileIdOpt>) -> Profile<ProfileIdOpt> {
+        Profile {
+            id: ProfileIdOpt {
+                fullname: Some("Guest".into()),
+                interface: Some("guest".into()),
+                vlan_tag: Some(101),
+            },
+            gateway_ip: Ipv4Addr::new(192, 168, 101, 1),
+            outbound: "wan".into(),
+            lan_access,
+            wan_access: WanAccess::All,
+            dns_override: Vec::new(),
+            dns_source: String::new(),
+            access_to_new_profiles: false,
+            owns_lan: false,
+        }
+    }
+
+    /// Revoking a profile's Access must strip its zone from every hairpin
+    /// list — published ports and automatic forwards alike — or that profile
+    /// keeps reaching the port via the WAN address after the revocation.
+    #[tokio::test]
+    async fn revoking_access_resyncs_reflection_zones() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        seed_reflection_firewall(dir.path(), true);
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp"],
+        )
+        .await
+        .unwrap();
+
+        set_config(
+            ctx.clone(),
+            &mut cfgs,
+            &guest_profile(LanAccess::SameProfile),
+        )
+        .unwrap();
+
+        assert_eq!(reflection_list(&cfgs, "pp_x"), vec!["lan".to_string()]);
+        assert_eq!(
+            reflection_list(&cfgs, "apf_aabbccddeeff_9000"),
+            vec!["lan".to_string()]
+        );
+    }
+
+    /// Deleting a profile removes its zone; every hairpin list naming it must
+    /// be rewritten in the same transaction — fw4 treats one unknown name as
+    /// an invalid option and drops the whole redirect, WAN DNAT included.
+    #[tokio::test]
+    async fn deleting_profile_resyncs_reflection_zones() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        seed_reflection_firewall(dir.path(), true);
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp", "wireless"],
+        )
+        .await
+        .unwrap();
+
+        delete_config(
+            ctx.clone(),
+            &mut cfgs,
+            &ProfileIdOpt {
+                fullname: None,
+                interface: Some("guest".into()),
+                vlan_tag: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(reflection_list(&cfgs, "pp_x"), vec!["lan".to_string()]);
+        assert_eq!(
+            reflection_list(&cfgs, "apf_aabbccddeeff_9000"),
+            vec!["lan".to_string()]
+        );
+    }
+
+    /// The reverse transition: granting a profile Access to the LAN must add
+    /// its zone to the hairpin lists of ports already published there, so the
+    /// feature applies to profiles reconfigured after the port was created.
+    #[tokio::test]
+    async fn granting_access_resyncs_reflection_zones() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        seed_reflection_firewall(dir.path(), false);
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp"],
+        )
+        .await
+        .unwrap();
+
+        let access = LanAccess::OtherProfiles(BTreeSet::from([ProfileIdOpt {
+            fullname: None,
+            interface: Some("lan".into()),
+            vlan_tag: None,
+        }]));
+        set_config(ctx.clone(), &mut cfgs, &guest_profile(access)).unwrap();
+
+        assert_eq!(
+            reflection_list(&cfgs, "pp_x"),
+            vec!["lan".to_string(), "vlan_guest".into()]
+        );
+        assert_eq!(
+            reflection_list(&cfgs, "apf_aabbccddeeff_9000"),
+            vec!["lan".to_string(), "vlan_guest".into()]
+        );
     }
 
     #[tokio::test]
