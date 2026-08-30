@@ -1149,7 +1149,7 @@ pub async fn set<C: CtrlContext>(
                         None
                     },
                     enabled: Some(if port.enabled { "1" } else { "0" }.into()),
-                    reflection: (!reflect).then(|| "0".into()),
+                    reflection: (!reflect).then_some(false),
                     reflection_zone,
                     _pp_id: Some(port.id.clone()),
                     _pp_mac: Some(port.device_mac.clone()),

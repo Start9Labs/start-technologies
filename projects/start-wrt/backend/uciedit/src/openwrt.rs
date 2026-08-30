@@ -106,7 +106,7 @@ pub struct FirewallRedirect {
     pub enabled: Option<String>,
     /// NAT reflection (hairpin). Unset is fw4's default of enabled.
     #[uci(default)]
-    pub reflection: Option<String>,
+    pub reflection: Option<bool>,
     /// Zones whose clients get hairpin rules. Empty is fw4's default of the
     /// `dest` zone alone.
     pub reflection_zone: Vec<String>,
