@@ -107,6 +107,10 @@
   one canonical origin. See
   [Nominating an Address to Open](https://docs.start9.com/packaging/interfaces.html#nominating-an-address-to-open).
 
+- **`Value.select`, `Value.dynamicSelect`, `Value.union` and `Value.dynamicUnion`
+  accept `default: null`**, which renders the field unselected and holds the form
+  unsubmittable until the user picks one
+
 ### Fixed
 
 - **Scaffolded package CI builds a draft PR when it becomes ready and rebuilds
