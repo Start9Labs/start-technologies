@@ -1126,7 +1126,7 @@ pub async fn set<C: CtrlContext>(
                 // declining to reflect.
                 let reflect = port.source == "any";
                 let reflection_zone = if reflect {
-                    reflection_zones(&cfgs["firewall"], &dest_zone)
+                    reflection_zones(&cfgs["firewall"], "wan", &dest_zone)
                 } else {
                     Vec::new()
                 };
@@ -1758,16 +1758,45 @@ async fn resolve_device_zones(
 /// forward chain, ahead of the zone policy: a reflected flow cannot be rejected
 /// afterwards, and that accept passes every DNAT'd flow out of the zone, not
 /// just published ports. Widening this set widens that.
-fn reflection_zones(firewall: &uciedit::Config<'_>, dest_zone: &str) -> Vec<String> {
+///
+/// Only names that exist as `config zone` sections are emitted: fw4 treats an
+/// unknown name (or a `src '*'` copied from a forwarding) as an invalid
+/// `reflection_zone` value and drops the *whole* redirect, WAN-side DNAT
+/// included. Masquerading zones are excluded by that property rather than by
+/// the name "wan" (an adopted config may spell its upstream differently), and
+/// so is the redirect's own `src` zone: reflection substitutes each emitted
+/// zone for `src`, and the original ingress side must never be one of them.
+///
+/// Cross-zone hairpin is DNAT-only, and that is intentional — don't "fix" it.
+/// fw4 places each reflection SNAT in the emitted zone's own srcnat chain,
+/// entered only on egress *into* that zone, but a hairpinned flow egresses
+/// into the target's zone — so for a cross-zone client the SNAT never fires.
+/// The server sees the client's real address and replies via the router (its
+/// gateway to the off-link client), where conntrack reverses the DNAT. Only
+/// the same-zone SNAT ever matches, and only there is it needed to keep the
+/// reply from short-circuiting past the router.
+fn reflection_zones(
+    firewall: &uciedit::Config<'_>,
+    redirect_src: &str,
+    dest_zone: &str,
+) -> Vec<String> {
+    let eligible: HashSet<String> = firewall
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<FirewallZone>().ok())
+        .filter(|z| z.masq != Some(true) && z.name != redirect_src)
+        .map(|z| z.name)
+        .collect();
     let mut zones: BTreeSet<String> = BTreeSet::new();
-    zones.insert(dest_zone.to_string());
+    if eligible.contains(dest_zone) {
+        zones.insert(dest_zone.to_string());
+    }
     for fwd in firewall
         .sections
         .iter()
         .filter_map(|s| s.get::<FirewallForwarding>().ok())
     {
-        // `wan` is the redirect's own src zone, never a reflection source.
-        if fwd.dest == dest_zone && fwd.src != "wan" {
+        if fwd.dest == dest_zone && eligible.contains(&fwd.src) {
             zones.insert(fwd.src);
         }
     }
@@ -2696,10 +2725,40 @@ config redirect 'pp_del1'
 
     // ── NAT reflection scoping ──
 
-    /// Firewall seeded with the `config forwarding` sections a three-profile
-    /// setup would carry: `lan_guest` and `lan_iot` may reach `lan`, `lan` may
-    /// reach `wan`, and nothing forwards *from* `wan`.
+    /// Firewall seeded the way a three-profile setup would be: zones for the
+    /// admin `lan`, `lan_guest`, `lan_iot`, and a masquerading `wan`, plus the
+    /// `config forwarding` sections such a setup would carry: `lan_guest` and
+    /// `lan_iot` may reach `lan`, and nothing forwards *from* `wan`.
     const FORWARDINGS: &str = "\
+config zone 'z_lan'
+\toption name 'lan'
+\tlist network 'lan'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config zone 'z_guest'
+\toption name 'lan_guest'
+\tlist network 'guest'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config zone 'z_iot'
+\toption name 'lan_iot'
+\tlist network 'iot'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config zone 'z_wan'
+\toption name 'wan'
+\tlist network 'wan'
+\toption input 'REJECT'
+\toption output 'ACCEPT'
+\toption forward 'REJECT'
+\toption masq '1'
+
 config forwarding 'fwd_guest_lan'
 \toption src 'lan_guest'
 \toption dest 'lan'
@@ -2722,14 +2781,55 @@ config forwarding 'fwd_lan_wan'
         let arena = Arena::new();
         let cfg = uciedit::Config::parse_str(&arena, FORWARDINGS).unwrap();
         assert_eq!(
-            reflection_zones(&cfg, "lan"),
+            reflection_zones(&cfg, "wan", "lan"),
             vec!["lan".to_string(), "lan_guest".into(), "lan_iot".into()],
         );
         // A zone nothing forwards into reflects to itself alone.
         assert_eq!(
-            reflection_zones(&cfg, "lan_iot"),
+            reflection_zones(&cfg, "wan", "lan_iot"),
             vec!["lan_iot".to_string()]
         );
+    }
+
+    #[test]
+    fn reflection_zones_skips_nonzones_and_masq_sources() {
+        // Hazards an adopted config can carry: a forwarding from a name that
+        // is no zone, a wildcard src (legal fw4), and one from a masquerading
+        // (WAN-like) zone. None may reach the list — fw4 rejects an unknown
+        // name by dropping the whole redirect, and a masq'd zone is the WAN
+        // side by definition.
+        let hazards = format!(
+            "{FORWARDINGS}
+config zone 'z_upstream'
+\toption name 'upstream'
+\tlist network 'wan2'
+\toption input 'REJECT'
+\toption output 'ACCEPT'
+\toption forward 'REJECT'
+\toption masq '1'
+
+config forwarding
+\toption src 'ghost'
+\toption dest 'lan'
+
+config forwarding
+\toption src '*'
+\toption dest 'lan'
+
+config forwarding
+\toption src 'upstream'
+\toption dest 'lan'
+"
+        );
+        let arena = Arena::new();
+        let cfg = uciedit::Config::parse_str(&arena, &hazards).unwrap();
+        assert_eq!(
+            reflection_zones(&cfg, "wan", "lan"),
+            vec!["lan".to_string(), "lan_guest".into(), "lan_iot".into()],
+        );
+        // A dest that is not an existing zone gets no list at all (fw4 would
+        // reject the section on its `dest` before reflection matters).
+        assert_eq!(reflection_zones(&cfg, "wan", "ghost"), Vec::<String>::new());
     }
 
     #[tokio::test]
