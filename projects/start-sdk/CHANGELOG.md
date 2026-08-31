@@ -117,6 +117,11 @@
   against every new base after retargeting.** Metadata edits preserve active
   builds and their conclusions
 
+- **`merge()` given a value of `undefined` removes the key from an `.env` file
+  model**, the way it already did for every other format. It wrote the literal
+  `KEY=undefined`, which a shape's `.catch()` then masked on read — so the file
+  the service actually parses held the word while the model reported the default
+
 - **`VersionGraph` reports a missing migration path in terms a service owner can
   act on**, rather than as an assertion about the version range the host handed
   it

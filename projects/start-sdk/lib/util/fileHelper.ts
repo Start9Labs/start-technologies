@@ -226,11 +226,17 @@ class FileHelperImpl<A> implements FileHelper<A> {
     return null
   }
 
+  /** Renders to the file format. A key whose value is `undefined` is dropped, so
+   * merging `undefined` removes it rather than serializing the word. */
+  private serialize(data: A): string {
+    return this.writeData(filterUndefined(data))
+  }
+
   /**
    * Accepts structured data and overwrites the existing file on disk.
    */
   private async writeFile(data: A): Promise<null> {
-    return await this.writeFileRaw(this.writeData(data))
+    return await this.writeFileRaw(this.serialize(data))
   }
 
   private async readFileRaw(): Promise<string | null> {
@@ -408,7 +414,7 @@ class FileHelperImpl<A> implements FileHelper<A> {
       fileData = this.validate(fileData)
     } catch (_) {}
     const mergeData = this.validate(fileMerge({}, fileData, data))
-    const toWrite = this.writeData(mergeData)
+    const toWrite = this.serialize(mergeData)
     if (toWrite !== fileDataRaw) {
       await this.writeFile(mergeData)
       if (!options.allowWriteAfterConst && effects.constRetry) {
@@ -655,7 +661,7 @@ export const FileHelper: FileHelperStatic = {
   ): FileHelper<A> {
     return rawTransformed<A, Record<string, unknown>, Transformed>(
       path,
-      inData => INI.stringify(filterUndefined(inData), options),
+      inData => INI.stringify(inData, options),
       inString => INI.parse(inString, options),
       deepLooseParse(shape),
       transformers,
