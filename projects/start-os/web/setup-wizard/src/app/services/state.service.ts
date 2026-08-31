@@ -32,11 +32,13 @@ export class StateService {
   private readonly api = inject(ApiService)
   private readonly router = inject(Router)
 
+  // Initialized from the browser hostname during app startup.
   kiosk = false
 
   language = ''
   keyboard = ''
 
+  // Populated by OS installation or a resumed incomplete setup.
   dataDriveGuid = ''
   attach = false
   mokEnrolled = false
@@ -47,6 +49,7 @@ export class StateService {
   setupType?: SetupType
   recoverySource?: RecoverySource
 
+  // Kiosk callers must collect the keyboard before calling this.
   async navigateAfterLocale(): Promise<void> {
     if (this.dataDriveGuid) {
       if (this.attach) {
@@ -68,6 +71,7 @@ export class StateService {
     })
   }
 
+  // Fresh setup requires a password; restore and transfer allow null.
   async executeSetup(password: string | null, hostname: string): Promise<void> {
     let recoverySource: T.RecoverySource<T.EncryptedWire> | null = null
 
