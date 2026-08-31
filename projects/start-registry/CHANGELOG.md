@@ -4,6 +4,11 @@ All notable changes to `start-registry` (the Start Registry server) are document
 
 ## [1.0.2]
 
+- **A client can follow the package index over a websocket instead of re-fetching it.** `db.subscribe`
+  returns the index as it stands plus a continuation id; connecting to `/ws/rpc/<id>` then streams a
+  JSON patch each time a package or version is added, removed, or recategorized. It is
+  unauthenticated and carries only the subtree `package.index` already serves.
+
 - **An indexed package version now advertises which installed versions can migrate into it**, so a
   client asking for an upgrade path is offered a version it can actually install. Entries already
   in an index keep their permissive value until that version is published again.

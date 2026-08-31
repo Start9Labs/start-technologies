@@ -1,5 +1,7 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
+use axum::extract::ws;
 use clap::Parser;
 use itertools::Itertools;
 use patch_db::Dump;
@@ -14,7 +16,13 @@ use crate::context::CliContext;
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::context::RegistryContext;
+use crate::rpc_continuations::{Guid, RpcContinuation};
 use crate::util::serde::{HandlerExtSerde, apply_expr};
+
+lazy_static::lazy_static! {
+    /// Must stay within what `package.index` already serves unauthenticated.
+    static ref PACKAGE_INDEX: JsonPointer = "/index/package".parse().unwrap();
+}
 
 pub fn db_api<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
@@ -28,6 +36,12 @@ pub fn db_api<C: Context>() -> ParentHandler<C> {
             "dump",
             from_fn_async(dump)
                 .with_metadata("admin", Value::Bool(true))
+                .no_cli(),
+        )
+        .subcommand(
+            "subscribe",
+            from_fn_async(subscribe)
+                .with_metadata("authenticated", Value::Bool(false))
                 .no_cli(),
         )
         .subcommand(
@@ -94,6 +108,61 @@ pub async fn dump(ctx: RegistryContext, DumpParams { pointer }: DumpParams) -> R
         .db
         .dump(&pointer.as_ref().map_or(ROOT, |p| p.borrowed()))
         .await)
+}
+
+#[derive(Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SubscribeRes {
+    #[ts(type = "{ id: number; value: unknown }")]
+    pub dump: Dump,
+    pub guid: Guid,
+}
+
+pub async fn subscribe(ctx: RegistryContext) -> Result<SubscribeRes, Error> {
+    let (dump, mut sub) = ctx.db.dump_and_sub(PACKAGE_INDEX.clone()).await;
+    let guid = Guid::new();
+    ctx.rpc_continuations
+        .add(
+            guid.clone(),
+            RpcContinuation::ws(
+                |mut ws| async move {
+                    if let Err(e) = async {
+                        loop {
+                            tokio::select! {
+                                rev = sub.recv() => {
+                                    let Some(rev) = rev else {
+                                        return ws.normal_close("complete").await;
+                                    };
+                                    ws.send(ws::Message::Text(
+                                        serde_json::to_string(&rev)
+                                            .with_kind(ErrorKind::Serialization)?
+                                            .into(),
+                                    ))
+                                    .await
+                                    .with_kind(ErrorKind::Network)?;
+                                }
+                                msg = ws.recv() => {
+                                    if msg.transpose().with_kind(ErrorKind::Network)?.is_none() {
+                                        return Ok(())
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .await
+                    {
+                        if !crate::util::net::is_ws_reset_without_close(&e) {
+                            tracing::error!("Error in registry db websocket: {e}");
+                            tracing::debug!("{e:?}");
+                        }
+                    }
+                },
+                Duration::from_secs(30),
+            ),
+        )
+        .await;
+
+    Ok(SubscribeRes { dump, guid })
 }
 
 #[derive(Deserialize, Serialize, Parser)]
