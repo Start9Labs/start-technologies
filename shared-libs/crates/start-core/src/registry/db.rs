@@ -13,6 +13,7 @@ use tracing::instrument;
 use ts_rs::TS;
 
 use crate::context::CliContext;
+use crate::db::SubscribeRes;
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::context::RegistryContext;
@@ -108,14 +109,6 @@ pub async fn dump(ctx: RegistryContext, DumpParams { pointer }: DumpParams) -> R
         .db
         .dump(&pointer.as_ref().map_or(ROOT, |p| p.borrowed()))
         .await)
-}
-
-#[derive(Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct SubscribeRes {
-    #[ts(type = "{ id: number; value: unknown }")]
-    pub dump: Dump,
-    pub guid: Guid,
 }
 
 pub async fn subscribe(ctx: RegistryContext) -> Result<SubscribeRes, Error> {
