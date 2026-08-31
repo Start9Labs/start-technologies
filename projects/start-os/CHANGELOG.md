@@ -221,9 +221,10 @@ file tracks notable changes since the move to the monorepo.
   now serves its `.local` address, the domains you have assigned to it, and
   direct connections to its IP address.
 
-- **Disabled SSL addresses are no longer restored by another address on the
-  same gateway.** Switching off a private IP now closes SSL access through it
-  even while another IP or `.local` address on that gateway remains enabled.
+- **Disabled addresses are no longer restored by another address on the same
+  gateway.** Switching off a private IP now closes access through it for both
+  SSL and directly forwarded interfaces, even while another IP or `.local`
+  address on that gateway remains enabled.
 
 - **Image upgrades verify their checksum again.** `upgrade` compared the image's
   blake3 hash only when it was given a second positional argument, which no

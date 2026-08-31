@@ -321,6 +321,19 @@ fn ssl_vhost_private_ips<'a>(
         .collect()
 }
 
+fn direct_forward_private_ips<'a>(
+    enabled_addresses: impl IntoIterator<Item = &'a HostnameInfo>,
+    port: u16,
+) -> BTreeSet<IpAddr> {
+    enabled_addresses
+        .into_iter()
+        .filter(|a| {
+            !a.public && a.port == Some(port) && matches!(a.metadata, HostnameMetadata::Ipv4 { .. })
+        })
+        .filter_map(|a| a.hostname.parse::<Ipv4Addr>().ok().map(IpAddr::V4))
+        .collect()
+}
+
 fn mdns_vhost_private_ips<'a>(
     mdns: &HostnameInfo,
     enabled_addresses: impl IntoIterator<Item = &'a HostnameInfo>,
@@ -622,8 +635,7 @@ impl NetServiceData {
                 }
             }
 
-            // Direct forward — the plaintext port, the only external port with
-            // no listener of ours in front (every TLS port is a vhost above).
+            // The assigned port is forwarded directly; assigned SSL ports use vhosts.
             if let Some(external) = bind.net.assigned_port {
                 // Only addresses at this port drive its forward (a vhost's port has its own).
                 let fwd_public: BTreeSet<GatewayId> = enabled_addresses
@@ -645,13 +657,8 @@ impl NetServiceData {
                         a.metadata.gateways().collect::<Vec<_>>(),
                     );
                 }
-                let fwd_private: BTreeSet<IpAddr> = enabled_addresses
-                    .iter()
-                    .filter(|a| !a.public && a.port == Some(external))
-                    .flat_map(|a| a.metadata.gateways())
-                    .filter_map(|gw| net_ifaces.get(gw).and_then(|i| i.ip_info.as_ref()))
-                    .flat_map(|ip| ip.subnets.iter().map(|s| s.addr()))
-                    .collect();
+                let fwd_private =
+                    direct_forward_private_ips(enabled_addresses.iter().copied(), external);
                 // StartOS answers these addresses itself, and a loopback DNAT is martian-dropped on ingress.
                 if !self.ip.is_loopback() {
                     forwards.insert(
@@ -679,8 +686,7 @@ impl NetServiceData {
                         let Some(gua) = a.gua().filter(|g| g.port() == external) else {
                             continue;
                         };
-                        // Secure only when the underlying protocol is itself secure —
-                        // this is the plaintext port, so we never terminate TLS here.
+                        // `secure` describes the backend protocol; StartOS does not terminate TLS here.
                         // The WAN is never secure, so an insecure exposure that
                         // requested public serves the LAN instead.
                         let secure_exposure = bind.options.secure.is_some();
@@ -766,13 +772,10 @@ impl NetServiceData {
                 .flat_map(|a| a.metadata.gateways())
                 .cloned()
                 .collect();
-            let private_ips: BTreeSet<IpAddr> = enabled_addresses
-                .iter()
-                .filter(|a| !a.public)
-                .flat_map(|a| a.metadata.gateways())
-                .filter_map(|gw| net_ifaces.get(gw).and_then(|i| i.ip_info.as_ref()))
-                .flat_map(|ip| ip.subnets.iter().map(|s| s.addr()))
-                .collect();
+            let private_ips = direct_forward_private_ips(
+                enabled_addresses.iter().copied(),
+                range.external_start_port,
+            );
             if public_gateways.is_empty() && private_ips.is_empty() {
                 continue;
             }
@@ -1669,6 +1672,18 @@ mod tests {
         }
     }
 
+    fn private_domain(port: u16, gateways: impl IntoIterator<Item = &'static str>) -> HostnameInfo {
+        HostnameInfo {
+            ssl: false,
+            public: false,
+            hostname: InternedString::intern("service.home"),
+            port: Some(port),
+            metadata: HostnameMetadata::PrivateDomain {
+                gateways: gateways.into_iter().map(gw).collect(),
+            },
+        }
+    }
+
     fn ip(s: &str) -> IpAddr {
         s.parse().unwrap()
     }
@@ -1685,6 +1700,32 @@ mod tests {
             ssl_vhost_private_ips(addrs.iter()),
             BTreeSet::from([ip("fe80::1"), ip("10.0.3.1")]),
             "only the addresses still enabled are served"
+        );
+    }
+
+    #[test]
+    fn direct_forward_uses_enabled_private_ipv4_rows() {
+        let enabled = lan_ip("192.168.1.5", false, 80, "eth0");
+        let same_gateway_name = private_domain(80, ["eth0"]);
+        let same_gateway_mdns = mdns(false, 80, ["eth0"]);
+
+        assert_eq!(
+            direct_forward_private_ips([&enabled, &same_gateway_name, &same_gateway_mdns], 80),
+            BTreeSet::from([ip("192.168.1.5")]),
+            "names do not restore another IP on their gateway"
+        );
+    }
+
+    #[test]
+    fn direct_forward_private_ips_match_port_and_private_ipv4() {
+        let selected = lan_ip("192.168.1.5", false, 5000, "eth0");
+        let other_port = lan_ip("192.168.1.6", false, 5001, "eth0");
+        let ipv6 = lan_ip("fd00::5", false, 5000, "eth0");
+        let public = bare_v4(false, 5000, &gw("eth0"));
+
+        assert_eq!(
+            direct_forward_private_ips([&selected, &other_port, &ipv6, &public], 5000),
+            BTreeSet::from([ip("192.168.1.5")]),
         );
     }
 
