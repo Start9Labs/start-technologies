@@ -1,4 +1,6 @@
 use std::cmp::Ordering;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 use proptest::prelude::*;
 use yasi::InternedString;
@@ -71,6 +73,12 @@ fn version_pair_gen() -> impl Strategy<Value = (Version, Version)> {
             }
         },
     )
+}
+
+fn hash_of(value: &impl Hash) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
 }
 
 prop_compose! {
@@ -225,6 +233,17 @@ proptest! {
     fn version_equality_agrees_with_ordering((left, right) in version_pair_gen()) {
         // Ordered collections require `Eq` and `Ord` to agree.
         assert_eq!(left == right, left.cmp(&right) == Ordering::Equal);
+    }
+
+    #[test]
+    fn numeric_prerelease_storage_agrees(value in any::<usize>()) {
+        let number = PreReleaseSegment::Number(value);
+        let big_number = PreReleaseSegment::BigNumber(value.to_string().into());
+        assert_eq!(number, big_number);
+        assert_eq!(big_number, number);
+        assert_eq!(number.cmp(&big_number), Ordering::Equal);
+        assert_eq!(big_number.cmp(&number), Ordering::Equal);
+        assert_eq!(hash_of(&number), hash_of(&big_number));
     }
 
     #[test]

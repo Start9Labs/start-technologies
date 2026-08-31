@@ -45,33 +45,39 @@ pub enum PreReleaseSegment {
 }
 impl PartialEq for PreReleaseSegment {
     fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Number(left), Self::Number(right)) => left == right,
-            (Self::BigNumber(left), Self::BigNumber(right)) => left == right,
-            (Self::String(left), Self::String(right)) => left == right,
-            _ => false,
-        }
+        self.cmp(other) == Ordering::Equal
     }
 }
 impl Eq for PreReleaseSegment {}
 impl Hash for PreReleaseSegment {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        std::mem::discriminant(self).hash(state);
         match self {
-            Self::Number(value) => value.hash(state),
-            Self::BigNumber(value) | Self::String(value) => value.hash(state),
+            Self::Number(value) => {
+                0u8.hash(state);
+                value.to_string().hash(state);
+            }
+            Self::BigNumber(value) => {
+                0u8.hash(state);
+                value.hash(state);
+            }
+            Self::String(value) => {
+                1u8.hash(state);
+                value.hash(state);
+            }
         }
     }
 }
 impl Ord for PreReleaseSegment {
     fn cmp(&self, other: &Self) -> Ordering {
+        fn cmp_numeric(left: &str, right: &str) -> Ordering {
+            left.len().cmp(&right.len()).then_with(|| left.cmp(right))
+        }
+
         match (self, other) {
             (Self::Number(left), Self::Number(right)) => left.cmp(right),
-            (Self::BigNumber(left), Self::BigNumber(right)) => {
-                left.len().cmp(&right.len()).then_with(|| left.cmp(right))
-            }
-            (Self::Number(_), Self::BigNumber(_)) => Ordering::Less,
-            (Self::BigNumber(_), Self::Number(_)) => Ordering::Greater,
+            (Self::BigNumber(left), Self::BigNumber(right)) => cmp_numeric(left, right),
+            (Self::Number(left), Self::BigNumber(right)) => cmp_numeric(&left.to_string(), right),
+            (Self::BigNumber(left), Self::Number(right)) => cmp_numeric(left, &right.to_string()),
             (Self::String(left), Self::String(right)) => left.cmp(right),
             (Self::Number(_) | Self::BigNumber(_), Self::String(_)) => Ordering::Less,
             (Self::String(_), _) => Ordering::Greater,
