@@ -1,7 +1,8 @@
 use exver::VersionRange;
 
 use super::v0_3_5::V0_3_0_COMPAT;
-use super::{VersionT, repair_current_hostname, v0_4_0_1};
+use super::{VersionT, v0_4_0_1};
+use crate::hostname::repair_hostname;
 use crate::prelude::*;
 
 lazy_static::lazy_static! {
@@ -41,7 +42,7 @@ impl VersionT for Version {
                 // `reflect` said what an absent list says.
                 .unwrap_or(Value::Null);
         });
-        repair_current_hostname(db);
+        repair_unusable_hostname(db);
         Ok(Value::Null)
     }
     fn down(self, db: &mut Value) -> Result<(), Error> {
@@ -102,6 +103,21 @@ fn server_info_mut(db: &mut Value) -> Option<&mut imbl_value::InOMap<InternedStr
     db.get_mut("public")
         .and_then(|p| p.get_mut("serverInfo"))
         .and_then(|s| s.as_object_mut())
+}
+
+fn repair_unusable_hostname(db: &mut Value) {
+    let Some(server_info) = server_info_mut(db) else {
+        return;
+    };
+    let Some(stored) = server_info.get("hostname").and_then(|h| h.as_str()) else {
+        return;
+    };
+    let repaired = repair_hostname(stored);
+    if repaired.as_ref() == stored {
+        return;
+    }
+    let repaired = repaired.to_string();
+    server_info.insert(InternedString::intern("hostname"), Value::from(repaired));
 }
 
 fn drop_server_name(db: &mut Value) {
@@ -361,14 +377,14 @@ mod test {
     fn leaves_a_usable_hostname_alone() {
         let mut db = json!({ "public": { "serverInfo": { "hostname": "my-cool-server" } } });
         let before = db.clone();
-        repair_current_hostname(&mut db);
+        repair_unusable_hostname(&mut db);
         assert_eq!(db, before);
     }
 
     #[test]
     fn brings_a_hostname_the_kernel_refuses_back_into_range() {
         let mut db = json!({ "public": { "serverInfo": { "hostname": "a".repeat(70) } } });
-        repair_current_hostname(&mut db);
+        repair_unusable_hostname(&mut db);
         assert_eq!(
             db["public"]["serverInfo"]["hostname"],
             json!("a".repeat(32))
@@ -378,7 +394,7 @@ mod test {
     #[test]
     fn trims_a_hostname_over_the_limit() {
         let mut db = json!({ "public": { "serverInfo": { "hostname": "a".repeat(55) } } });
-        repair_current_hostname(&mut db);
+        repair_unusable_hostname(&mut db);
         assert_eq!(
             db["public"]["serverInfo"]["hostname"],
             json!("a".repeat(32))
@@ -389,7 +405,7 @@ mod test {
     fn repairing_a_db_without_a_hostname_is_harmless() {
         let mut db = json!({ "public": { "serverInfo": {} } });
         let before = db.clone();
-        repair_current_hostname(&mut db);
+        repair_unusable_hostname(&mut db);
         assert_eq!(db, before);
     }
 
