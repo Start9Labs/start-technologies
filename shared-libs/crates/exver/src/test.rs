@@ -23,10 +23,21 @@ prop_compose! {
         string in "[a-zA-Z0-9-]{1,25}"
     ) -> PreReleaseSegment {
         if string.chars().all(|c| c.is_ascii_digit()) {
-            PreReleaseSegment::Number(string.parse().unwrap())
+            string.parse().map_or_else(
+                |_| PreReleaseSegment::BigNumber(string.into()),
+                PreReleaseSegment::Number,
+            )
         } else {
             PreReleaseSegment::String(string.into())
         }
+    }
+}
+
+prop_compose! {
+    fn big_prerelease_number()(
+        string in "[1-9][0-9]{40,64}"
+    ) -> PreReleaseSegment {
+        PreReleaseSegment::BigNumber(string.into())
     }
 }
 
@@ -35,11 +46,31 @@ prop_compose! {
         number in prop::collection::vec(any::<usize>(), 1..10),
         prerelease in prop::collection::vec(prop_oneof![
             any::<usize>().prop_map(PreReleaseSegment::Number),
+            big_prerelease_number(),
             prerelease_string(),
         ], 0..3),
     ) -> Version {
         Version::new(number, prerelease)
     }
+}
+
+fn version_pair_gen() -> impl Strategy<Value = (Version, Version)> {
+    (version_gen(), version_gen(), any::<bool>(), 1usize..4).prop_map(
+        |(left, right, make_equal, trailing_zeros)| {
+            if make_equal {
+                let right = Version::new(
+                    left.number()
+                        .iter()
+                        .copied()
+                        .chain(std::iter::repeat(0).take(trailing_zeros)),
+                    left.prerelease().iter().cloned(),
+                );
+                (left, right)
+            } else {
+                (left, right)
+            }
+        },
+    )
 }
 
 prop_compose! {
@@ -188,6 +219,12 @@ proptest! {
             }
             Err(e) => panic!("parse after display failed {}", e),
         }
+    }
+
+    #[test]
+    fn version_equality_agrees_with_ordering((left, right) in version_pair_gen()) {
+        // Ordered collections require `Eq` and `Ord` to agree.
+        assert_eq!(left == right, left.cmp(&right) == Ordering::Equal);
     }
 
     #[test]

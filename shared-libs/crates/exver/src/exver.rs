@@ -40,14 +40,14 @@ impl std::error::Error for ParseError {}
 #[derive(Clone, Debug)]
 pub enum PreReleaseSegment {
     Number(usize),
-    Numeric(InternedString),
+    BigNumber(InternedString),
     String(InternedString),
 }
 impl PartialEq for PreReleaseSegment {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Number(left), Self::Number(right)) => left == right,
-            (Self::Numeric(left), Self::Numeric(right)) => left == right,
+            (Self::BigNumber(left), Self::BigNumber(right)) => left == right,
             (Self::String(left), Self::String(right)) => left == right,
             _ => false,
         }
@@ -59,7 +59,7 @@ impl Hash for PreReleaseSegment {
         std::mem::discriminant(self).hash(state);
         match self {
             Self::Number(value) => value.hash(state),
-            Self::Numeric(value) | Self::String(value) => value.hash(state),
+            Self::BigNumber(value) | Self::String(value) => value.hash(state),
         }
     }
 }
@@ -67,13 +67,13 @@ impl Ord for PreReleaseSegment {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
             (Self::Number(left), Self::Number(right)) => left.cmp(right),
-            (Self::Numeric(left), Self::Numeric(right)) => {
+            (Self::BigNumber(left), Self::BigNumber(right)) => {
                 left.len().cmp(&right.len()).then_with(|| left.cmp(right))
             }
-            (Self::Number(_), Self::Numeric(_)) => Ordering::Less,
-            (Self::Numeric(_), Self::Number(_)) => Ordering::Greater,
+            (Self::Number(_), Self::BigNumber(_)) => Ordering::Less,
+            (Self::BigNumber(_), Self::Number(_)) => Ordering::Greater,
             (Self::String(left), Self::String(right)) => left.cmp(right),
-            (Self::Number(_) | Self::Numeric(_), Self::String(_)) => Ordering::Less,
+            (Self::Number(_) | Self::BigNumber(_), Self::String(_)) => Ordering::Less,
             (Self::String(_), _) => Ordering::Greater,
         }
     }
@@ -87,7 +87,7 @@ impl fmt::Display for PreReleaseSegment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Number(a) => write!(f, "{a}"),
-            Self::Numeric(a) => write!(f, "{a}"),
+            Self::BigNumber(a) => write!(f, "{a}"),
             Self::String(a) => write!(f, "{a}"),
         }
     }
@@ -260,7 +260,7 @@ impl std::str::FromStr for Version {
                                 ))
                             } else {
                                 Ok(seg.parse().map_or_else(
-                                    |_| PreReleaseSegment::Numeric(seg.into()),
+                                    |_| PreReleaseSegment::BigNumber(seg.into()),
                                     PreReleaseSegment::Number,
                                 ))
                             }
