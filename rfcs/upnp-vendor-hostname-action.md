@@ -1,7 +1,9 @@
 # UPnP Vendor-Defined Action for SNI Hostname Mappings
 
-Status: accepted; implemented (server + StartOS client, branch
-`wrt/upnp-hostname-action`).
+Status: accepted as a Start9-internal design; implemented (server + StartOS
+client, branch `wrt/upnp-hostname-action`). Not a standards submission: unlike
+the PCP companion (`draft-start9-pcp-hostname`), a UPnP vendor-defined action
+has no standards venue — the SCPD is the external documentation.
 
 A second front door onto the existing SNI demux: today a client binds a hostname
 to a shared external port only over PCP (the `HOSTNAME` private-use option,
