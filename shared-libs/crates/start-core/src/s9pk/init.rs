@@ -55,6 +55,10 @@ const DOCS_URL: &str = "https://docs.start9.com/packaging/environment-setup.html
 const MONOREPO_URL: &str = "https://github.com/Start9Labs/start-technologies.git";
 /// Workspace-relative path to the monorepo checkout that carries the guide.
 const MONOREPO_DIR: &str = "start-technologies";
+/// Branch the workspace tracks: what every product has published. master carries the
+/// SDK that has not shipped, whose guide and template describe a version npm cannot
+/// resolve.
+const MONOREPO_BRANCH: &str = "live-docs";
 /// Symlink target for the workspace `AGENTS.md` — the guide's canonical copy, so
 /// a sync keeps the workspace context current with no extra step. It is also a page
 /// of the published guide, so packagers can read it without scaffolding a workspace.
@@ -137,7 +141,7 @@ pub async fn init_workspace(
             .arg("clone")
             .arg("--filter=blob:none")
             .arg("--branch")
-            .arg("master")
+            .arg(MONOREPO_BRANCH)
             .arg(MONOREPO_URL)
             .arg(&docs)
             .capture(false)

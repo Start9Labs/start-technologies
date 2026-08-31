@@ -33,6 +33,11 @@ or the CLI's externally observable behavior.
   reject a name longer than 32 characters, or one starting or ending with a
   hyphen, which 1.1.0 accepted.
 
+- **`s9pk init-workspace` clones the monorepo's `live-docs` branch** rather than `master`, so a
+  workspace's packaging guide, package template, and SDK source describe the
+  `@start9labs/start-sdk` its packages install, and match the pages on docs.start9.com. An
+  existing workspace moves over with `git -C start-technologies checkout live-docs`.
+
 ### Fixed
 
 - **`s9pk init-workspace` no longer scaffolds a placeholder host** — `dev-vm.local` resolved

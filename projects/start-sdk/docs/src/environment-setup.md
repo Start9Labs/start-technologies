@@ -233,22 +233,15 @@ start9-workspace/
 
 You get the **whole** monorepo, not just the guide. That's deliberate: when the guide can't settle a question, the SDK source (`projects/start-sdk/lib`) and the StartOS source (`projects/start-os`, `shared-libs/`) are right there to read — and if you find a bug, you're already in a repo you can open a pull request from. The clone is `--filter=blob:none`, so file contents are fetched on demand: it lands in a few seconds and takes ~75 MB, while `git log`, `git blame`, and rebase all behave normally.
 
+The checkout tracks **`live-docs`**, not `master`. That branch is what every product has published: each release moves it to the tagged tree for the product being released, so the guide you read, the template `init-package` scaffolds from, and the SDK source all describe the `@start9labs/start-sdk` that `npm install` resolves. `master` carries what hasn't shipped, where a page can document a call your package cannot import. It is also the branch docs.start9.com serves, and corrections to published pages land there first — so your local copy and the site are the same thing, and you get a fix the moment it goes live.
+
 The context lives once, at the workspace root — it is never copied into your package repos. Open the workspace in your AI tool and it picks up `AGENTS.md` / `CLAUDE.md` automatically. You can read exactly what it contains on the [Agent Context](./agent-context.md) page.
 
 ### Already have the monorepo?
 
-If you already keep a `start-technologies` checkout — you work on StartOS itself, or you've cloned it for another reason — don't let the workspace clone a second copy. Point at the one you have **before** running `init-workspace`, and it will use it:
+Let the workspace clone its own anyway. A checkout you develop in sits on `master` and moves with your branches; the workspace's sits on `live-docs` and is only ever fast-forwarded — one checkout cannot be both, and pointing the workspace at yours would put the guide, the template, and the SDK source ahead of what your packages can install. The second copy is blobless, so it costs ~75 MB.
 
-```sh
-mkdir start9-workspace && cd start9-workspace
-ln -s /path/to/your/start-technologies start-technologies
-start-cli s9pk init-workspace .
-```
-
-`init-workspace` skips the clone whenever `start-technologies` already resolves to a directory, so the symlink is left alone and everything else is provisioned around it. The workspace `AGENTS.md` links through it, and `s9pk init-package` scaffolds from its package template, exactly as with a fresh clone.
-
-> [!IMPORTANT]
-> A symlinked checkout is **yours to maintain**. Skip the `git pull` in [Keep it current](#keep-it-current): that repo has its own branches and its own work in progress, and a blind pull would fast-forward whatever branch happens to be checked out rather than refresh the guide. Update it on your own schedule instead.
+To open a pull request against the monorepo, use your development checkout. Without one, branch the workspace's from `origin/master` and switch it back to `live-docs` when you're done.
 
 ### Nested workspaces and config resolution
 
@@ -304,11 +297,13 @@ With no flag, the `default` entry is used. `start-cli` finds this config by walk
 
 ### Keep it current
 
-The guide, the package template, and the agent context all live in `start-technologies/`, so syncing it refreshes everything at once. Pull it at the start of each session:
+The guide, the package template, the agent context, and the SDK source all live in `start-technologies/`, so syncing it refreshes everything at once. Pull it at the start of each session:
 
 ```sh
 git -C start-technologies pull --ff-only
 ```
+
+`live-docs` only ever moves forward, so this is always a fast-forward. It brings in two things: corrections to already-published pages, as soon as they go live on docs.start9.com, and — when a product is released — that product's whole tree at the release.
 
 There's no separate update command — re-running `init-workspace` on an existing workspace just fills in anything missing, and your `AGENTS.local.md` is never touched.
 

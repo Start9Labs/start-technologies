@@ -727,7 +727,7 @@ Build, inspect, edit, and publish service packages.
 
 ### `start-cli s9pk init-workspace [PATH]`
 
-Initialize a StartOS packaging workspace in PATH (default: the current directory). Clones the packaging guide, writes the agent-context files (`AGENTS.md`, `AGENTS.local.md`, `CLAUDE.md`), and creates a `.startos/` directory holding the workspace signing key and host/registry config. Nesting is allowed; it refuses to run inside a package repo. See [Set Up Your Packaging Workspace](/packaging/environment-setup.html#set-up-your-packaging-workspace).
+Initialize a StartOS packaging workspace in PATH (default: the current directory). Clones the monorepo's `live-docs` branch — what every product has published — writes the agent-context files (`AGENTS.md`, `AGENTS.local.md`, `CLAUDE.md`), and creates a `.startos/` directory holding the workspace signing key and host/registry config. Nesting is allowed; it refuses to run inside a package repo. See [Set Up Your Packaging Workspace](/packaging/environment-setup.html#set-up-your-packaging-workspace).
 
 ### `start-cli s9pk init-package <NAME>`
 

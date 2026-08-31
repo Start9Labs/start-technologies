@@ -101,7 +101,7 @@ Your workspace's `start-technologies/` is a checkout of the whole Start9 monorep
 
 This is a **last resort, not a starting point.** Drop into the source only to answer a specific question those layers can't — exactly what an SDK call does, how an OS effect behaves — and read the one file that settles it instead of browsing.
 
-When the answer turns out to be a bug rather than a misunderstanding, fix it there: that checkout is a full git repo, so you can branch, commit, and open a pull request without leaving the workspace.
+When the answer turns out to be a bug rather than a misunderstanding, fix it there: that checkout is a full git repo, so you can branch, commit, and open a pull request without leaving the workspace. Branch from `origin/master` — the checkout itself sits on `live-docs`, which carries what is published — and switch it back when you're done.
 
 ## Don't create unnecessary version files
 

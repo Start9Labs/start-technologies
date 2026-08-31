@@ -13,7 +13,7 @@ You are an AI assistant working in a **StartOS packaging workspace**. You help c
 ├── AGENTS.md              ← this file (symlink → start-technologies/projects/start-sdk/docs/src/agent-context.md)
 ├── AGENTS.local.md        ← your workspace-specific notes (never overwritten by a sync)
 ├── CLAUDE.md              ← loads AGENTS.md + AGENTS.local.md (Claude Code bridge)
-├── start-technologies/    ← checkout of the Start9 monorepo: the packaging guide, plus the SDK and OS source
+├── start-technologies/    ← checkout of the Start9 monorepo on `live-docs` (what is published): the packaging guide, plus the SDK and OS source
 └── <id>-startos/ …        ← one or more package repos
 ```
 
@@ -29,11 +29,13 @@ The guide, the package template, and this file all live in `start-technologies/`
 git -C start-technologies pull --ff-only
 ```
 
+**The checkout is on `live-docs`, the branch that carries what every product has published — never `master`.** That is what keeps the guide, the template, and the SDK source describing the `@start9labs/start-sdk` a package installs; `master` carries what hasn't shipped, where a page can document a call npm cannot resolve. It is also the branch docs.start9.com serves, so the pages on disk are the published ones. Don't move the checkout to `master` to see something newer — what is newer there is not what your package builds against.
+
 To track a different source (e.g. a fork), repoint `start-technologies`'s remote first — the sync follows whatever remote is configured.
 
 Keep workspace-specific notes in `AGENTS.local.md`; a sync never touches it. That file is for what is true of _your_ setup — your box, your registry, your packages, any departure from the scaffolded layout. Anything that would help **every** packager belongs in the guide instead: open a PR against `start-technologies` rather than letting it drift in one workspace.
 
-If `start-technologies/` is a **symlink** to a checkout maintained outside this workspace, skip the sync: that repo has its own branches and its own work in progress, so its state is the owner's to manage, not this workspace's.
+If `start-technologies/` is a **symlink** to a checkout maintained outside this workspace, skip the sync — its branches are the owner's to manage, not this workspace's. Say so rather than pulling it: a development checkout sits on `master`, so everything read through it is ahead of what packages install. The workspace wants its own (remove the symlink and re-run `start-cli s9pk init-workspace`).
 
 ## How to use the guide (local-first)
 
@@ -80,7 +82,7 @@ Read pages from your local checkout (`start-technologies/projects/start-sdk/docs
 
 Reach for them **only when the recipes, reference pages, real packages, and the installed SDK types (`node_modules/@start9labs/start-sdk`) don't answer the question** — e.g. to confirm exactly what an SDK call does, or how an OS effect behaves. Open one file to settle one question; don't browse the monorepo to "understand the system."
 
-If what you find there is a bug, say so. You are standing in a git repo you can branch from and open a pull request against.
+If what you find there is a bug, say so. You are standing in a git repo you can open a pull request against — branch from `origin/master`, not from the `live-docs` checkout, and switch back to `live-docs` when you're done.
 
 ## Key patterns
 
