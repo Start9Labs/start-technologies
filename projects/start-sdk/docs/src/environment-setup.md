@@ -141,7 +141,9 @@ Install using the automated installer script:
 curl -fsSL https://start9.com/start-cli/install.sh | sh
 ```
 
-On Debian and its derivatives — Ubuntu, Raspberry Pi OS, Linux Mint — the script adds the Start9 apt repository and installs the `start-cli` package to `/usr/bin`, so `sudo apt update && sudo apt upgrade` picks up later releases. On macOS and every other Linux distribution it downloads the release binary into `~/.local/bin` and adds that directory to your `PATH`.
+On Debian and its derivatives — Ubuntu, Raspberry Pi OS, Linux Mint — the script adds the Start9 apt repository and installs the `start-cli` package to `/usr/bin`, so `sudo apt update && sudo apt upgrade` picks up later releases. On macOS and every other Linux distribution it downloads the release binary into `~/.local/bin` and adds that directory to your `PATH`; re-running the same command is how you update it there.
+
+`start-cli` installs outside your workspace, so [Keep it current](#keep-it-current) does not touch it. You don't have to track it yourself either: an `s9pk` command run inside a workspace whose checkout names a newer release prints a one-line notice saying so.
 
 ## Git
 

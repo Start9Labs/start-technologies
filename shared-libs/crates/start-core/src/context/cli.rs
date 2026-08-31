@@ -223,7 +223,10 @@ impl CliContext {
             // silently stepping past it (`exists()`) or surfacing the error
             // (`try_exists()?`).
             match candidate.try_exists() {
-                Ok(true) => return load_signing_key(candidate),
+                Ok(true) => {
+                    crate::s9pk::init::warn_if_start_cli_outdated(&dir);
+                    return load_signing_key(candidate);
+                }
                 Ok(false) => {}
                 Err(_) => break,
             }

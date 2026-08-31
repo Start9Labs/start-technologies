@@ -239,6 +239,13 @@ s9pk.init.no-workspace-in-package-repo:
   fr_FR: "Aucun espace de travail d'empaquetage trouvé. %{repo} est un dépôt de paquet ; un espace de travail est le répertoire qui *contient* vos dépôts de paquets (et fournit le guide d'empaquetage pour l'IA). Créez-en un dans son répertoire parent, puis réessayez : `cd %{parent} && start-cli s9pk init-workspace`. Guide de configuration : %{docs}"
   pl_PL: "Nie znaleziono obszaru roboczego pakowania. %{repo} to repozytorium pakietu; obszar roboczy to katalog, który *zawiera* twoje repozytoria pakietów (i udostępnia przewodnik pakowania dla AI). Utwórz jeden w jego katalogu nadrzędnym, a następnie spróbuj ponownie: `cd %{parent} && start-cli s9pk init-workspace`. Przewodnik konfiguracji: %{docs}"
 
+s9pk.init.start-cli-outdated:
+  en_US: "start-cli %{running} is behind the published %{published}. Update it with `apt upgrade` on Debian, or by re-running `curl -fsSL https://start9.com/start-cli/install.sh | sh`."
+  de_DE: "start-cli %{running} liegt hinter der veröffentlichten Version %{published}. Aktualisiere es unter Debian mit `apt upgrade`, sonst durch erneutes Ausführen von `curl -fsSL https://start9.com/start-cli/install.sh | sh`."
+  es_ES: "start-cli %{running} está por detrás de la versión publicada %{published}. Actualízalo con `apt upgrade` en Debian, o volviendo a ejecutar `curl -fsSL https://start9.com/start-cli/install.sh | sh`."
+  fr_FR: "start-cli %{running} est en retard sur la version publiée %{published}. Mettez-le à jour avec `apt upgrade` sous Debian, ou en relançant `curl -fsSL https://start9.com/start-cli/install.sh | sh`."
+  pl_PL: "start-cli %{running} jest starszy niż opublikowana wersja %{published}. Zaktualizuj go poleceniem `apt upgrade` w Debianie lub uruchamiając ponownie `curl -fsSL https://start9.com/start-cli/install.sh | sh`."
+
 # s9pk/v2/pack.rs
 s9pk.pack.git-hash-omitted:
   en_US: "No git commit found in %{path} — building without a commit hash in the manifest. Commit your work (or check that git is set up) to include it."

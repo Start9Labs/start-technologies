@@ -31,6 +31,8 @@ git -C start-technologies pull --ff-only
 
 **The checkout is on `live-docs`, the branch that carries what every product has published — never `master`.** That is what keeps the guide, the template, and the SDK source describing the `@start9labs/start-sdk` a package installs; `master` carries what hasn't shipped, where a page can document a call npm cannot resolve. It is also the branch docs.start9.com serves, so the pages on disk are the published ones. Don't move the checkout to `master` to see something newer — what is newer there is not what your package builds against.
 
+`start-cli` is installed outside the workspace, so the sync does not touch it. When an `s9pk` command warns that yours is behind the published release, update it before going further — the guide on disk describes the newer one.
+
 To track a different source (e.g. a fork), repoint `start-technologies`'s remote first — the sync follows whatever remote is configured.
 
 Keep workspace-specific notes in `AGENTS.local.md`; a sync never touches it. That file is for what is true of _your_ setup — your box, your registry, your packages, any departure from the scaffolded layout. Anything that would help **every** packager belongs in the guide instead: open a PR against `start-technologies` rather than letting it drift in one workspace.
