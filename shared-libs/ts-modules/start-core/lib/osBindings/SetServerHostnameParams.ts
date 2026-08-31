@@ -2,7 +2,7 @@
 
 export type SetServerHostnameParams = {
   /**
-   * The server's `.local` hostname: up to 50 lowercase letters, numbers, and
+   * The server's `.local` hostname: up to 32 lowercase letters, numbers, and
    * hyphens, not starting or ending with a hyphen
    */
   hostname: string

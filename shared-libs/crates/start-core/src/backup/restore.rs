@@ -255,6 +255,14 @@ mod test {
     }
 
     #[test]
+    fn restore_repairs_a_backup_hostname_over_the_limit() {
+        assert_eq!(
+            restored_hostname(hostname(&"a".repeat(50)), None).as_ref(),
+            "a".repeat(32)
+        );
+    }
+
+    #[test]
     fn restore_uses_an_explicit_replacement_hostname() {
         assert_eq!(
             restored_hostname(

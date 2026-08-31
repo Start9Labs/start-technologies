@@ -27,13 +27,7 @@ impl AsRef<str> for ServerHostname {
     }
 }
 
-const CN_MAX_LEN: usize = 64;
-
-// The root CA Common Name is `<hostname> Local Root CA`.
-const MAX_LEN: usize = CN_MAX_LEN - " Local Root CA".len();
-
-// The leaf certificate Common Name is `<hostname>.local`.
-const MAX_SERVED_LEN: usize = CN_MAX_LEN - ".local".len();
+const MAX_LEN: usize = 32;
 
 impl ServerHostname {
     fn validate(&self) -> Result<(), Error> {
@@ -82,7 +76,7 @@ impl ServerHostname {
 
     fn is_usable(&self) -> bool {
         self.validate().is_ok()
-            && self.0.len() <= MAX_SERVED_LEN
+            && self.0.len() <= MAX_LEN
             && !self.0.starts_with('-')
             && !self.0.ends_with('-')
     }
@@ -195,7 +189,7 @@ pub async fn sync_hostname(hostname: &ServerHostname) -> Result<(), Error> {
 #[command(rename_all = "kebab-case")]
 #[ts(export)]
 pub struct SetServerHostnameParams {
-    /// The server's `.local` hostname: up to 50 lowercase letters, numbers, and
+    /// The server's `.local` hostname: up to 32 lowercase letters, numbers, and
     /// hyphens, not starting or ending with a hyphen
     #[arg(help = "help.arg.hostname")]
     hostname: InternedString,
@@ -255,22 +249,22 @@ mod test {
     }
 
     #[test]
-    fn input_rejects_a_label_no_dns_would_carry() {
-        validate_input(&"a".repeat(MAX_LEN)).unwrap();
-        validate_input(&"a".repeat(MAX_LEN + 1)).unwrap_err();
+    fn input_enforces_the_operator_length_and_dns_label_edges() {
+        validate_input(&"a".repeat(32)).unwrap();
+        validate_input(&"a".repeat(33)).unwrap_err();
         validate_input("-my-server").unwrap_err();
         validate_input("my-server-").unwrap_err();
         validate_input("-").unwrap_err();
     }
 
     #[test]
-    fn stored_hostnames_are_held_to_the_charset_alone() {
+    fn legacy_hostnames_load_before_repair() {
         validate(&"a".repeat(MAX_LEN + 1)).unwrap();
         validate("-my-server").unwrap();
     }
 
     #[test]
-    fn the_longest_hostname_still_fits_the_root_ca_common_name() {
+    fn the_longest_allowed_hostname_fits_the_root_ca_common_name() {
         let root_cert = |len: usize| {
             crate::net::ssl::make_root_cert(
                 &crate::net::ssl::gen_nistp256().unwrap(),
@@ -279,11 +273,10 @@ mod test {
             )
         };
         root_cert(MAX_LEN).unwrap();
-        root_cert(MAX_LEN + 1).unwrap_err();
     }
 
     #[test]
-    fn the_longest_served_hostname_still_fits_a_leaf_common_name() {
+    fn the_longest_allowed_hostname_fits_a_leaf_common_name() {
         let root_key = crate::net::ssl::gen_nistp256().unwrap();
         let branding = crate::net::ssl::CertBranding::start_os("startos");
         let root =
@@ -299,8 +292,7 @@ mod test {
                 &branding,
             )
         };
-        leaf_cert(MAX_SERVED_LEN).unwrap();
-        leaf_cert(MAX_SERVED_LEN + 1).unwrap_err();
+        leaf_cert(MAX_LEN).unwrap();
     }
 
     #[test]
@@ -311,8 +303,6 @@ mod test {
     #[test]
     fn repair_leaves_a_usable_hostname_alone() {
         assert_eq!(&*repair_hostname("my-cool-server"), "my-cool-server");
-        let long_but_usable = "a".repeat(MAX_SERVED_LEN);
-        assert_eq!(repair_hostname(&long_but_usable).as_ref(), long_but_usable);
     }
 
     #[test]
@@ -320,9 +310,7 @@ mod test {
         assert_eq!(&*repair_hostname("My_Cool Server"), "mycoolserver");
         assert_eq!(&*repair_hostname("-my-server-"), "my-server");
         assert_eq!(
-            repair_hostname(&"a".repeat(MAX_SERVED_LEN + 1))
-                .chars()
-                .count(),
+            repair_hostname(&"a".repeat(MAX_LEN + 1)).chars().count(),
             MAX_LEN
         );
         assert_eq!(

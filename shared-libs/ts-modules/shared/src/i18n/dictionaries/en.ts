@@ -809,7 +809,7 @@ export const ENGLISH: Record<string, number> = {
   'Too long for a QR code': 915,
   'Your certificate authority proves you control this domain by connecting to it on port 443, regardless of which port the address itself uses.': 916,
   'Over IPv6 there is nothing to forward — your gateway firewall must allow inbound connections to this port instead.': 917,
-  'Must be 50 characters or less': 918,
+  'Must be 32 characters or less': 918,
   'Lowercase letters, numbers, and hyphens only': 919,
   'Cannot start or end with a hyphen': 920,
 }

@@ -11,6 +11,7 @@ use patch_db::json_ptr::ROOT;
 use crate::Error;
 use crate::context::RpcContext;
 use crate::db::model::Database;
+use crate::hostname::repair_hostname;
 use crate::prelude::*;
 use crate::progress::PhaseProgressTrackerHandle;
 
@@ -108,8 +109,9 @@ impl Current {
                 .result?;
             }
             Ordering::Equal => {
-                db.apply_function(|db| {
-                    Ok::<_, Error>((to_value(&from_value::<Database>(db.clone())?)?, ()))
+                db.apply_function(|mut db| {
+                    repair_current_hostname(&mut db);
+                    Ok::<_, Error>((to_value(&from_value::<Database>(db)?)?, ()))
                 })
                 .await
                 .result?;
@@ -378,6 +380,26 @@ impl Version {
             Version::V0_4_0_2(Wrapper(x)) => x.semver(), // VERSION_BUMP
             Version::Other(x) => x.clone(),
         }
+    }
+}
+
+fn repair_current_hostname(db: &mut Value) {
+    let Some(server_info) = db
+        .get_mut("public")
+        .and_then(|p| p.get_mut("serverInfo"))
+        .and_then(|s| s.as_object_mut())
+    else {
+        return;
+    };
+    let Some(stored) = server_info.get("hostname").and_then(|h| h.as_str()) else {
+        return;
+    };
+    let repaired = repair_hostname(stored);
+    if repaired.as_ref() != stored {
+        server_info.insert(
+            InternedString::intern("hostname"),
+            Value::from(repaired.to_string()),
+        );
     }
 }
 
@@ -716,9 +738,13 @@ pub fn git_info() -> Result<InternedString, Error> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::SystemTime;
+
     use proptest::prelude::*;
 
     use super::*;
+    use crate::account::AccountInfo;
+    use crate::hostname::ServerHostname;
 
     /// Root `package.json` is the OS version's source of truth and `Current` is what actually
     /// migrates the db; nothing else forces them to agree, and a mismatch is silent — the
@@ -729,6 +755,34 @@ mod tests {
             Current::default().semver().to_string(),
             crate::bins::startos_version(),
         );
+    }
+
+    #[tokio::test]
+    async fn same_version_startup_repairs_a_hostname_over_the_limit() {
+        let path = std::env::temp_dir().join(format!(
+            "start-core-same-version-hostname-{}-{}",
+            std::process::id(),
+            rand::random::<u64>(),
+        ));
+        let hostname =
+            ServerHostname::new_from_input(InternedString::intern(&"a".repeat(32))).unwrap();
+        let account = AccountInfo::new("password", SystemTime::now(), Some(hostname)).unwrap();
+        let mut initial = Database::init(&account, false, None, None).unwrap();
+        initial.public.server_info.hostname = InternedString::intern(&"a".repeat(33));
+        initial.public.server_info.version = Current::default().semver();
+
+        let db = PatchDb::open(&path).await.unwrap();
+        db.put(&ROOT, &initial).await.unwrap();
+        Current::default().pre_init(&db).await.unwrap();
+
+        let current = from_value::<Database>(db.dump(&ROOT).await.value).unwrap();
+        assert_eq!(
+            current.public.server_info.hostname.to_string(),
+            "a".repeat(32)
+        );
+
+        drop(db);
+        let _ = tokio::fs::remove_file(path).await;
     }
 
     fn em_version() -> impl Strategy<Value = exver::Version> {

@@ -33,7 +33,7 @@ use crate::disk::mount::filesystem::ReadWrite;
 use crate::disk::mount::filesystem::cifs::Cifs;
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::disk::util::{DiskInfo, StartOsRecoveryInfo, pvscan, recovery_info};
-use crate::hostname::ServerHostname;
+use crate::hostname::{ServerHostname, repair_hostname};
 use crate::init::{InitPhases, InitResult, init};
 use crate::net::ssl::root_ca_start_time;
 use crate::prelude::*;
@@ -175,7 +175,7 @@ pub async fn list_disks(_ctx: SetupContext) -> Result<Vec<DiskInfo>, Error> {
 }
 
 fn setup_hostname(existing: ServerHostname, requested: Option<ServerHostname>) -> ServerHostname {
-    requested.unwrap_or(existing)
+    requested.unwrap_or_else(|| repair_hostname(existing.as_ref()))
 }
 
 #[instrument(skip_all)]
@@ -528,7 +528,7 @@ pub struct SetupExecuteCliParams {
     /// Enable kiosk mode
     #[arg(long)]
     kiosk: bool,
-    /// The server's .local hostname — up to 50 lowercase letters, numbers and
+    /// The server's .local hostname — up to 32 lowercase letters, numbers and
     /// hyphens, not starting or ending with a hyphen; defaults to a generated one
     #[arg(long)]
     hostname: Option<InternedString>,
@@ -725,6 +725,14 @@ mod test {
         assert_eq!(
             setup_hostname(hostname("preserved-host"), None).as_ref(),
             "preserved-host"
+        );
+    }
+
+    #[test]
+    fn transfer_repairs_an_existing_hostname_over_the_limit() {
+        assert_eq!(
+            setup_hostname(hostname(&"a".repeat(50)), None).as_ref(),
+            "a".repeat(32)
         );
     }
 

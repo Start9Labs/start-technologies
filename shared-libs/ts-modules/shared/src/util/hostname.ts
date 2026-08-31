@@ -2,8 +2,7 @@ import { inject } from '@angular/core'
 import { AbstractControl, ValidationErrors } from '@angular/forms'
 import { i18nPipe } from '../i18n/i18n.pipe'
 
-// The root CA Common Name is `<hostname> Local Root CA` within X.509's 64-character limit.
-const MAX_LENGTH = 50
+const MAX_LENGTH = 32
 const CHARACTERS = /^[a-z0-9-]+$/
 
 /** Validates after trimming; callers must submit the trimmed value. */
@@ -31,7 +30,7 @@ export function hostnameValidationErrors(): Record<string, string> {
     hostnameCharacters: i18n.transform(
       'Lowercase letters, numbers, and hyphens only',
     ),
-    hostnameMaxLength: i18n.transform('Must be 50 characters or less'),
+    hostnameMaxLength: i18n.transform('Must be 32 characters or less'),
     hostnameHyphenEdge: i18n.transform('Cannot start or end with a hyphen'),
   }
 }
