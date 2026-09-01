@@ -213,7 +213,9 @@ range.satisfiedBy(version) // boolean (convenience)
 
 Also available on `Version` (wraps in `ExtendedVersion` with downstream=0).
 
-A release may be tested against its installed version and every version in its manifest's `satisfies` list with Rust's `VersionRange::satisfied_by_release` or TypeScript's `range.satisfiedByRelease`. Evaluation first puts the range in negation normal form: De Morgan's laws push `!` to literals and double negations cancel. One declared version must satisfy every literal in a conjunction. Disjunctions may match different declared versions. A negative literal passes only when no declared version matches its positive form. An empty version list satisfies no range.
+A release may be tested against its installed version and every version in its manifest's `satisfies` list with Rust's `VersionRange::satisfied_by_release` or TypeScript's `range.satisfiedByRelease`. Evaluation first puts the range in negation normal form: De Morgan's laws push `!` to literals and double negations cancel. One declared version must satisfy every literal in a conjunction. Disjunctions may match different declared versions. An empty version list satisfies no range.
+
+A literal is an atomic range: a comparison, a flavor test, or `*`. A negative literal is an atomic range preceded by `!`; `!=v` is evaluated as `!(=v)`. For example, `!=2:0`, `!>=2:0`, and `!#knots` are negative literals. Its positive form is the same atomic range without negation: `=2:0`, `>=2:0`, or `#knots`, respectively. A negative literal passes only when no declared version matches that positive form.
 
 When no operator is specified in a range string, `^` (caret) is the default.
 

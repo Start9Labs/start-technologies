@@ -654,7 +654,8 @@ impl VersionRange {
 
     /// Whether one declared version satisfies the complete range.
     ///
-    /// Negative literals veto their branch when any declared version matches the positive literal.
+    /// A negated atomic range vetoes its branch when any declared version matches the same range
+    /// without negation. `!=v` is evaluated as `!(=v)`.
     /// An empty release satisfies no range.
     pub fn satisfied_by_release(&self, versions: &[ExtendedVersion]) -> bool {
         self.release_matches(versions, false)

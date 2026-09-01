@@ -836,7 +836,8 @@ export class VersionRange {
   /**
    * Whether one declared version satisfies the complete range.
    *
-   * Negative literals veto their branch when any declared version matches the positive literal.
+   * A negated atomic range vetoes its branch when any declared version matches the same range
+   * without negation. `!=v` is evaluated as `!(=v)`.
    * An empty release satisfies no range.
    */
   satisfiedByRelease(versions: ExtendedVersion[]): boolean {
