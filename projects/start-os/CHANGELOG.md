@@ -77,6 +77,14 @@ file tracks notable changes since the move to the monorepo.
 
 ### Fixed
 
+- **The port-forwarding test reports a port as open to the Internet only where
+  it is reachable from the Internet.** Where StartOS's port-forward request was
+  granted by a router that sits behind another router, the test could pass a
+  port that nothing outside could reach, and two otherwise identical setups
+  could disagree depending on which forwarding protocol the router spoke.
+  StartOS now measures the port from the Internet in that case and reports
+  what it finds.
+
 - **A downgrade to a version that cannot take over the service's data is refused
   before anything is downloaded or stopped**, with an explanation of what to do
   instead.

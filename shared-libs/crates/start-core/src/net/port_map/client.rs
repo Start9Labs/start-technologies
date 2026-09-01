@@ -371,6 +371,9 @@ impl PortMapController {
     /// Gateway-assigned external IP if a TCP mapping is active for
     /// `(local_ip, external_port)`, else `None`. `Some` means the TCP port was
     /// forwarded automatically, so a remote reachability check can be skipped.
+    /// A v4 address the gateway reports from outside publicly routable space
+    /// yields `None`: the gateway is itself behind a NAT, and only a probe can
+    /// say whether anything reaches it.
     pub async fn mapped_external_ip(&self, local_ip: IpAddr, external_port: u16) -> Option<IpAddr> {
         let (resp, rx) = oneshot::channel();
         self.shard(local_ip)
@@ -408,6 +411,10 @@ fn spawn_shard(
                             .and_then(|(_, a)| match a {
                                 Active::Pcp(m) => m.external_ip(),
                                 Active::Upnp { external_ip } => external_ip.map(IpAddr::V4),
+                            })
+                            .filter(|ip| match ip {
+                                IpAddr::V4(v4) => upnp::is_wan_candidate(*v4),
+                                IpAddr::V6(_) => true,
                             });
                         let _ = resp.send(ip);
                     }
