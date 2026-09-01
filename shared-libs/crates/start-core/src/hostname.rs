@@ -216,12 +216,10 @@ pub async fn set_hostname_rpc(
     let hostname = ServerHostname::new_from_input(hostname)?;
     ctx.db
         .mutate(|db| {
-            if let Some(hostname) = &hostname {
-                let reserved = hostname.local_domain_name();
-                for host in all_hosts(db) {
-                    if host?.as_private_domains().contains_key(&reserved)? {
-                        hostname.reject_private_domain(&reserved)?;
-                    }
+            let reserved = hostname.local_domain_name();
+            for host in all_hosts(db) {
+                if host?.as_private_domains().contains_key(&reserved)? {
+                    hostname.reject_private_domain(&reserved)?;
                 }
             }
             let server_info = db.as_public_mut().as_server_info_mut();
