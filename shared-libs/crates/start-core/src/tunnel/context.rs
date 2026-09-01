@@ -189,6 +189,7 @@ pub struct TunnelContextSeed {
     /// Per-injector TSIG keys, read live so the injector can verify UPDATEs.
     pub dns_keys: Arc<SyncMutex<BTreeMap<IpAddr, [u8; 32]>>>,
     pub active_forwards: SyncMutex<BTreeMap<SocketAddrV4, Arc<()>>>,
+    pub forward_write_lock: tokio::sync::Mutex<()>,
     /// In-memory leases for auto (PCP-created) forwards/pinholes/SNI routes,
     /// reaped by [`crate::tunnel::forward::lease`] when a client stops renewing.
     pub leases: SyncMutex<crate::tunnel::forward::lease::Leases>,
@@ -390,6 +391,7 @@ impl TunnelContext {
             dns_allowed,
             dns_keys,
             active_forwards: SyncMutex::new(active_forwards),
+            forward_write_lock: tokio::sync::Mutex::new(()),
             leases: SyncMutex::new(BTreeMap::new()),
             lease_wake: tokio::sync::Notify::new(),
             forward_ifindex: tokio::sync::watch::channel(current_ifindex()).0,

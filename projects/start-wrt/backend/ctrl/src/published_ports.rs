@@ -1752,32 +1752,33 @@ async fn resolve_device_zones(
 /// so fall back to it there, and only there.
 pub(crate) fn reload_firewall() {
     tokio::spawn(async {
-        // `run_quiet_async` reports the exit status rather than failing on it,
-        // so a non-zero reload has to be checked explicitly — otherwise the
-        // fallback below would never run.
-        match crate::run_quiet_async(
-            tokio::process::Command::new("/etc/init.d/firewall").arg("reload"),
-        )
-        .await
-        {
-            Ok(status) if status.success() => return,
-            Ok(status) => tracing::warn!(
-                "firewall reload exited {status} (not loaded?); falling back to restart"
-            ),
-            Err(e) => {
-                tracing::warn!("could not run firewall reload ({e}); falling back to restart")
-            }
-        }
-        match crate::run_quiet_async(
-            tokio::process::Command::new("/etc/init.d/firewall").arg("restart"),
-        )
-        .await
-        {
-            Ok(status) if status.success() => {}
-            Ok(status) => tracing::error!("firewall restart exited {status}"),
-            Err(e) => tracing::error!("failed to restart firewall: {e}"),
+        if let Err(e) = reload_firewall_wait().await {
+            tracing::error!("failed to activate firewall changes: {e}");
         }
     });
+}
+
+pub(crate) async fn reload_firewall_wait() -> Result<(), Error> {
+    match crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/firewall").arg("reload"))
+        .await
+    {
+        Ok(status) if status.success() => return Ok(()),
+        Ok(status) => {
+            tracing::warn!("firewall reload exited {status}; falling back to restart")
+        }
+        Err(e) => tracing::warn!("could not reload firewall ({e}); falling back to restart"),
+    }
+    let status =
+        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/firewall").arg("restart"))
+            .await?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(Error::new(
+            eyre!("firewall restart exited {status}"),
+            ErrorKind::Network,
+        ))
+    }
 }
 
 pub(crate) fn reload_dnsmasq() {

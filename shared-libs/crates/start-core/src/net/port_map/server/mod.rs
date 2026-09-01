@@ -167,6 +167,7 @@ pub trait GatewayBackend: Send + Sync {
             let Some(sni) = self.sni() else {
                 return Err(RESULT_UNSUPP_HOSTNAME);
             };
+            sni.prepare().await?;
             sni.register(*source.ip(), source.port(), hostnames, target, lifetime)
         }
     }

@@ -153,6 +153,7 @@ impl GatewayBackend for TunnelContext {
     }
 
     async fn remove_forward_by_source(&self, source: SocketAddrV4, peer: Ipv4Addr) -> bool {
+        let _guard = self.forward_write_lock.lock().await;
         match crate::tunnel::forward::igd::current_forward(self, source).await {
             Some(PortForward::Dnat { target, .. }) if *target.ip() == peer => {
                 if self
@@ -176,7 +177,8 @@ impl GatewayBackend for TunnelContext {
                 fallback: Some(fallback),
                 ..
             }) if *fallback.target.ip() == peer => {
-                self.remove_sni_fallback(source, fallback.target).await;
+                self.remove_sni_fallback_locked(source, fallback.target)
+                    .await;
                 true
             }
             _ => false,
@@ -266,6 +268,7 @@ impl GatewayBackend for TunnelContext {
         target: SocketAddrV4,
         hostnames: &[String],
     ) {
+        let _guard = self.forward_write_lock.lock().await;
         self.sni
             .unregister(*source.ip(), source.port(), hostnames, target);
         for h in hostnames {
@@ -310,7 +313,13 @@ impl TunnelContext {
         auto: bool,
         label: Option<String>,
     ) -> Result<(), u8> {
-        let default_label = if auto { Some("PCP".to_string()) } else { label };
+        let _guard = self.forward_write_lock.lock().await;
+        self.sni.prepare().await?;
+        let default_label = if auto {
+            Some("Automatic".to_string())
+        } else {
+            label
+        };
         // Reject conflicts before displacing a working DNAT.
         let hostnames_owned = hostnames.to_vec();
         let persisted = self
@@ -469,7 +478,25 @@ impl TunnelContext {
         auto: bool,
         label: Option<String>,
     ) -> Result<(), u8> {
-        let default_label = if auto { Some("PCP".to_string()) } else { label };
+        let _guard = self.forward_write_lock.lock().await;
+        self.persist_fallback_forward_locked(source, target, lifetime, auto, label)
+            .await
+    }
+
+    pub(super) async fn persist_fallback_forward_locked(
+        &self,
+        source: SocketAddrV4,
+        target: SocketAddrV4,
+        lifetime: Option<u32>,
+        auto: bool,
+        label: Option<String>,
+    ) -> Result<(), u8> {
+        self.sni.prepare().await?;
+        let default_label = if auto {
+            Some("Automatic".to_string())
+        } else {
+            label
+        };
         let persisted = self
             .db
             .mutate(|db| {
@@ -510,7 +537,7 @@ impl TunnelContext {
             .register_fallback(*source.ip(), source.port(), target)
             .is_err()
         {
-            self.remove_sni_fallback(source, target).await;
+            self.remove_sni_fallback_locked(source, target).await;
             return Err(crate::net::port_map::pcp::hostname::RESULT_HOSTNAME_TAKEN);
         }
         if let Some(lt) = lifetime {
@@ -522,6 +549,15 @@ impl TunnelContext {
     /// Remove the hostname-less fallback on `source`, only if held by `target`.
     /// Drops the shared port entirely if no SNI routes remain either.
     pub async fn remove_sni_fallback(&self, source: SocketAddrV4, target: SocketAddrV4) {
+        let _guard = self.forward_write_lock.lock().await;
+        self.remove_sni_fallback_locked(source, target).await;
+    }
+
+    pub(super) async fn remove_sni_fallback_locked(
+        &self,
+        source: SocketAddrV4,
+        target: SocketAddrV4,
+    ) {
         self.sni
             .unregister_fallback(*source.ip(), source.port(), target);
         lease::forget(self, &LeaseKey::SniFallback(source));
@@ -634,6 +670,7 @@ fn peer_forward_matches(entry: &PortForward, target: &SocketAddrV4) -> bool {
 /// Remove the peer's forward to `(peer, internal_port)`, if any. We forward both
 /// protocols on one entry, so match by target rather than PCP's (proto, port, client).
 async fn remove_peer_forward(ctx: &TunnelContext, peer: Ipv4Addr, internal_port: u16) {
+    let _guard = ctx.forward_write_lock.lock().await;
     let target = SocketAddrV4::new(peer, internal_port);
     let source = ctx
         .db
@@ -651,7 +688,7 @@ async fn remove_peer_forward(ctx: &TunnelContext, peer: Ipv4Addr, internal_port:
         return;
     };
     if is_sni {
-        ctx.remove_sni_fallback(source, target).await;
+        ctx.remove_sni_fallback_locked(source, target).await;
         return;
     }
     ctx.db

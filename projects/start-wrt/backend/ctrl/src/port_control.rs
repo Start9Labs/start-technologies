@@ -241,6 +241,20 @@ impl PortControl {
         crate::published_ports::reload_firewall();
     }
 
+    async fn reload_firewall_wait(&self) -> Result<(), Error> {
+        #[cfg(test)]
+        return Ok(());
+        #[cfg(not(test))]
+        crate::published_ports::reload_firewall_wait().await
+    }
+
+    async fn prepare_sni(&self) -> Result<(), u8> {
+        #[cfg(test)]
+        return Ok(());
+        #[cfg(not(test))]
+        self.sni.prepare().await
+    }
+
     pub(crate) async fn lock_writes(&self) -> tokio::sync::MutexGuard<'_, ()> {
         self.write_serial.lock().await
     }
@@ -719,6 +733,9 @@ impl PortControl {
         lifetime: Option<u32>,
     ) -> Result<(), u8> {
         let _serial = self.write_serial.lock().await;
+        self.prepare_sni().await?;
+        let source =
+            SocketAddrV4::new(self.wan_ipv4().await.unwrap_or(*source.ip()), source.port());
         let port = source.port();
         let uci_root = self.uci_root.clone();
         let conflicts = uci_task(move || async move {
@@ -735,30 +752,12 @@ impl PortControl {
             return Err(RESULT_HOSTNAME_TAKEN);
         }
 
-        let existing: std::collections::BTreeSet<_> = self
-            .sni
-            .snapshot()
-            .into_iter()
-            .filter(|route| {
-                route.ext_ip == *source.ip()
-                    && route.ext_port == port
-                    && route.target == target
-                    && hostnames.contains(&route.hostname)
-            })
-            .map(|route| route.hostname)
-            .collect();
-        self.sni
-            .register(*source.ip(), port, hostnames, target, lifetime)?;
+        let registration =
+            self.sni
+                .register_transaction(*source.ip(), port, hostnames, target, lifetime)?;
 
         if let Err(e) = self.sync_sni_rules().await {
-            let added: Vec<_> = hostnames
-                .iter()
-                .filter(|hostname| !existing.contains(*hostname))
-                .cloned()
-                .collect();
-            if !added.is_empty() {
-                self.sni.unregister(*source.ip(), port, &added, target);
-            }
+            self.sni.rollback(registration);
             if let Err(rollback) = self.sync_sni_rules().await {
                 tracing::warn!("port-control: rolling back SNI admission failed: {rollback}");
             }
@@ -781,8 +780,24 @@ impl PortControl {
         hostnames: &[String],
     ) {
         let _serial = self.write_serial.lock().await;
-        self.sni
-            .unregister(*source.ip(), source.port(), hostnames, target);
+        let routes: Vec<_> = self
+            .sni
+            .snapshot()
+            .into_iter()
+            .filter(|route| {
+                route.ext_port == source.port()
+                    && route.target == target
+                    && hostnames.contains(&route.hostname)
+            })
+            .collect();
+        for route in routes {
+            self.sni.unregister(
+                route.ext_ip,
+                route.ext_port,
+                std::slice::from_ref(&route.hostname),
+                target,
+            );
+        }
         if let Err(e) = self.sync_sni_rules().await {
             tracing::warn!("port-control: reconciling SNI admission failed: {e}");
         }
@@ -902,7 +917,7 @@ impl PortControl {
     async fn sync_sni_rules_to(&self, want: std::collections::BTreeSet<u16>) -> Result<(), Error> {
         let uci_root = self.uci_root.clone();
         if uci_task(move || async move { reconcile_sni_rules_uci(&uci_root, want).await }).await? {
-            self.reload_firewall();
+            self.reload_firewall_wait().await?;
         }
         Ok(())
     }
@@ -911,17 +926,15 @@ impl PortControl {
     async fn sni_maintain(&self) {
         self.reap_unauthorized_sni_routes().await;
         let wan = self.wan_ipv4().await;
+        let _serial = self.write_serial.lock().await;
         if let Some(ip) = wan {
             if self.sni.snapshot().iter().any(|r| r.ext_ip != ip) {
                 tracing::info!("port-control: re-keying SNI routes onto WAN address {ip}");
                 self.sni.rekey_ipv4(ip);
             }
         }
-        {
-            let _serial = self.write_serial.lock().await;
-            if let Err(e) = self.sync_sni_rules().await {
-                tracing::warn!("port-control: reconciling SNI admission failed: {e}");
-            }
+        if let Err(e) = self.sync_sni_rules().await {
+            tracing::warn!("port-control: reconciling SNI admission failed: {e}");
         }
         if let Some(ip) = wan {
             self.sync_sni_fallback(ip).await;

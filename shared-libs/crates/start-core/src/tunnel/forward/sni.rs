@@ -1,12 +1,7 @@
-//! SNI demultiplexer for the PCP HOSTNAME extension: a per-port TCP listener
-//! reads the TLS ClientHello, selects a binding (exact → wildcard → fallback),
-//! and splices to the internal host. TLS is never terminated; the ClientHello
-//! bytes are forwarded verbatim. The internal leg is opened from the client's
-//! own source address (source-address preservation, RFC §4.6) via
-//! [`crate::net::transparent`], except where the reply would never come back
-//! through this host (see [`LocalPrefix`]).
+//! SNI demultiplexing for hostname-based shared-port mappings.
 //!
-//! QUIC (§4.5) and wildcards beyond a single leading `*` label are out of scope.
+//! Exact names take precedence over leading-label wildcards. An optional
+//! fallback receives unmatched SNI, no-SNI TLS, and non-TLS traffic.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -31,7 +26,7 @@ const CLIENTHELLO_CAP: usize = 16384;
 const CLIENTHELLO_TIMEOUT: Duration = Duration::from_secs(5);
 const ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(100);
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct Binding {
     target: SocketAddrV4,
     /// `None` for a permanent (DB-backed/manual) binding that never expires.
@@ -110,6 +105,13 @@ type OnChange = Box<dyn Fn(u16, bool) + Send + Sync>;
 /// `None` preserves the client source address.
 pub type LocalPrefix = Arc<dyn Fn(Ipv4Addr) -> BoxFuture<'static, Option<u8>> + Send + Sync>;
 
+/// A registration that can restore the exact prior bindings.
+pub struct SniRegistration {
+    key: PortKey,
+    previous: Vec<(String, Option<Binding>)>,
+    applied: Binding,
+}
+
 pub struct SniDemux {
     ports: Arc<SyncMutex<BTreeMap<PortKey, PortBindings>>>,
     listeners: SyncMutex<BTreeMap<PortKey, NonDetachingJoinHandle<()>>>,
@@ -170,6 +172,19 @@ impl SniDemux {
         this
     }
 
+    /// Installs reply-path diversion before a route is granted.
+    pub async fn prepare(&self) -> Result<(), u8> {
+        #[cfg(test)]
+        return Ok(());
+        #[cfg(not(test))]
+        crate::net::transparent::ensure_divert_infra_once()
+            .await
+            .map_err(|e| {
+                tracing::warn!("SNI demux reply-path diversion failed: {e}");
+                RESULT_NO_RESOURCES
+            })
+    }
+
     /// Registers all hostnames atomically and starts their shared listener.
     /// Returns `RESULT_HOSTNAME_TAKEN` for an occupied name or
     /// `RESULT_NO_RESOURCES` when the listener cannot bind.
@@ -181,8 +196,24 @@ impl SniDemux {
         target: SocketAddrV4,
         lifetime_secs: Option<u32>,
     ) -> Result<(), u8> {
+        self.register_transaction(ext_ip, ext_port, hostnames, target, lifetime_secs)
+            .map(|_| ())
+    }
+
+    /// Registers hostnames and returns their prior state.
+    pub fn register_transaction(
+        self: &Arc<Self>,
+        ext_ip: Ipv4Addr,
+        ext_port: u16,
+        hostnames: &[String],
+        target: SocketAddrV4,
+        lifetime_secs: Option<u32>,
+    ) -> Result<SniRegistration, u8> {
         let now = Instant::now();
-        let expiry = lifetime_secs.map(|s| now + Duration::from_secs(s as u64));
+        let applied = Binding {
+            target,
+            expiry: lifetime_secs.map(|s| now + Duration::from_secs(s as u64)),
+        };
         let key = (ext_ip, ext_port);
         let previous = self.ports.mutate(|ports| {
             let entry = ports.entry(key).or_default();
@@ -196,42 +227,54 @@ impl SniDemux {
             }
             let previous = hostnames
                 .iter()
-                .map(|name| entry.hostnames.get(name).cloned())
+                .map(|name| (name.clone(), entry.hostnames.get(name).cloned()))
                 .collect::<Vec<_>>();
             for name in hostnames {
-                entry
-                    .hostnames
-                    .insert(name.clone(), Binding { target, expiry });
+                entry.hostnames.insert(name.clone(), applied.clone());
             }
             Ok(previous)
         })?;
+        let registration = SniRegistration {
+            key,
+            previous,
+            applied,
+        };
         if let Err(e) = self.ensure_listener(key) {
             tracing::warn!(
                 "SNI demux bind on {}:{} failed; refusing the grant: {e}",
                 key.0,
                 key.1
             );
-            self.ports.mutate(|ports| {
-                if let Some(entry) = ports.get_mut(&key) {
-                    for (name, previous) in hostnames.iter().zip(previous) {
-                        match previous {
-                            Some(binding) => {
-                                entry.hostnames.insert(name.clone(), binding);
-                            }
-                            None => {
-                                entry.hostnames.remove(name);
-                            }
-                        }
-                    }
-                }
-            });
-            self.reap_if_empty(key);
+            self.rollback(registration);
             return Err(RESULT_NO_RESOURCES);
         }
-        Ok(())
+        Ok(registration)
     }
 
-    /// Delete the named bindings (lifetime-0 MAP), only those held by `target`.
+    /// Restores bindings unchanged since the registration.
+    pub fn rollback(&self, registration: SniRegistration) {
+        self.ports.mutate(|ports| {
+            let Some(entry) = ports.get_mut(&registration.key) else {
+                return;
+            };
+            for (name, previous) in registration.previous {
+                if entry.hostnames.get(&name) != Some(&registration.applied) {
+                    continue;
+                }
+                match previous {
+                    Some(binding) => {
+                        entry.hostnames.insert(name, binding);
+                    }
+                    None => {
+                        entry.hostnames.remove(&name);
+                    }
+                }
+            }
+        });
+        self.reap_if_empty(registration.key);
+    }
+
+    /// Removes bindings held by the target.
     pub fn unregister(
         &self,
         ext_ip: Ipv4Addr,
@@ -821,6 +864,42 @@ mod tests {
         demux
             .listeners
             .peek(|l| assert!(l.contains_key(&(Ipv4Addr::LOCALHOST, port))));
+    }
+
+    #[tokio::test]
+    async fn rollback_restores_a_renewed_binding() {
+        let probe = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+        let demux = SniDemux::new();
+        let hostname = "a.example.com".to_string();
+        let target = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 443);
+        demux
+            .register(
+                Ipv4Addr::LOCALHOST,
+                port,
+                std::slice::from_ref(&hostname),
+                target,
+                Some(30),
+            )
+            .unwrap();
+        let before = demux
+            .ports
+            .peek(|ports| ports[&(Ipv4Addr::LOCALHOST, port)].hostnames[&hostname].clone());
+        let registration = demux
+            .register_transaction(
+                Ipv4Addr::LOCALHOST,
+                port,
+                std::slice::from_ref(&hostname),
+                target,
+                Some(3600),
+            )
+            .unwrap();
+        demux.rollback(registration);
+        let after = demux
+            .ports
+            .peek(|ports| ports[&(Ipv4Addr::LOCALHOST, port)].hostnames[&hostname].clone());
+        assert_eq!(after, before);
     }
 
     #[test]

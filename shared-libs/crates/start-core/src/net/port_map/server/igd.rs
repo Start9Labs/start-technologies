@@ -158,7 +158,7 @@ fn soap_u32(body: &str, arg: &str) -> Option<u32> {
     soap_arg(body, arg)
 }
 
-fn soap_text(body: &str, arg: &str) -> Option<String> {
+fn soap_raw_text(body: &str, arg: &str) -> Option<String> {
     let root = xmltree::Element::parse(body.as_bytes()).ok()?;
     let action = root
         .get_child("Body")?
@@ -166,12 +166,30 @@ fn soap_text(body: &str, arg: &str) -> Option<String> {
         .iter()
         .find_map(|n| n.as_element())?;
     let element = action.get_child(arg)?;
+    let open = format!("<{arg}>");
+    let close = format!("</{arg}>");
+    if let Some(start) = body.find(&open) {
+        let raw = &body[start + open.len()..];
+        let raw = &raw[..raw.find(&close)?];
+        if raw.trim() != raw {
+            return Some(raw.to_string());
+        }
+    } else if ![format!("<{arg}/>"), format!("<{arg} />")]
+        .iter()
+        .any(|tag| body.contains(tag))
+    {
+        return None;
+    }
     Some(
         element
             .get_text()
-            .map(|text| text.trim().to_string())
+            .map(|text| text.to_string())
             .unwrap_or_default(),
     )
+}
+
+fn soap_text(body: &str, arg: &str) -> Option<String> {
+    Some(soap_raw_text(body, arg)?.trim().to_string())
 }
 
 fn soap_arg<T: std::str::FromStr>(body: &str, arg: &str) -> Option<T> {
@@ -541,7 +559,7 @@ async fn add_hostname_mapping<B: GatewayBackend + ?Sized>(
         return fault(402, "Invalid Args");
     };
     let (Some(remote_host), Some(_internal_client), Some(enabled), Some(_description)) = (
-        soap_text(body, "NewRemoteHost"),
+        soap_raw_text(body, "NewRemoteHost"),
         soap_text(body, "NewInternalClient"),
         soap_text(body, "NewEnabled"),
         soap_text(body, "NewPortMappingDescription"),
@@ -558,7 +576,7 @@ async fn add_hostname_mapping<B: GatewayBackend + ?Sized>(
     {
         return fault(402, "Invalid Args");
     }
-    let Some(hostname) = soap_arg::<String>(body, "NewHostname")
+    let Some(hostname) = soap_raw_text(body, "NewHostname")
         .filter(|h| validate_hostname(h))
         .map(|h| h.to_ascii_lowercase())
     else {
@@ -606,7 +624,7 @@ async fn delete_hostname_mapping<B: GatewayBackend + ?Sized>(
     let (Some(external_port), Some(internal_port), Some(remote_host)) = (
         soap_u16(body, "NewExternalPort"),
         soap_u16(body, "NewInternalPort"),
-        soap_text(body, "NewRemoteHost"),
+        soap_raw_text(body, "NewRemoteHost"),
     ) else {
         return fault(402, "Invalid Args");
     };
@@ -616,7 +634,7 @@ async fn delete_hostname_mapping<B: GatewayBackend + ?Sized>(
     if external_port == 0 || internal_port == 0 || soap_protocol(body) != Some("TCP") {
         return fault(402, "Invalid Args");
     }
-    let Some(hostname) = soap_arg::<String>(body, "NewHostname")
+    let Some(hostname) = soap_raw_text(body, "NewHostname")
         .filter(|h| validate_hostname(h))
         .map(|h| h.to_ascii_lowercase())
     else {
@@ -1413,6 +1431,13 @@ mod tests {
                 801,
             ),
             (
+                valid.replace(
+                    "<NewRemoteHost></NewRemoteHost>",
+                    "<NewRemoteHost> </NewRemoteHost>",
+                ),
+                801,
+            ),
+            (
                 valid.replace("<NewEnabled>1</NewEnabled>", "<NewEnabled>0</NewEnabled>"),
                 402,
             ),
@@ -1459,7 +1484,13 @@ mod tests {
 
     #[tokio::test]
     async fn hostname_mapping_rejects_malformed_hostname() {
-        for bad in ["ex ample.com", ".example.com", ""] {
+        for bad in [
+            "ex ample.com",
+            ".example.com",
+            "192.168.1.1",
+            " git.example.com ",
+            "",
+        ] {
             let stub = HostnameStub::new(true);
             let resp = control(&stub, PEER, &add_hostname_body("0", bad)).await;
             assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR, "{bad:?}");

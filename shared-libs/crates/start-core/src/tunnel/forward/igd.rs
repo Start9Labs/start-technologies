@@ -262,6 +262,7 @@ pub(super) async fn apply_peer_forward_range(
     protocol_label: &str,
     lifetime: Option<u32>,
 ) -> Result<(), u16> {
+    let _guard = ctx.forward_write_lock.lock().await;
     // Port 80 is reserved for the tunnel's HTTP→HTTPS redirect; never
     // automatically create a forward that would take it (PCP/UPnP alike).
     let lo = source.port();
@@ -285,7 +286,7 @@ pub(super) async fn apply_peer_forward_range(
                 return Err(718); // ConflictInMappingEntry
             }
             return ctx
-                .persist_fallback_forward(source, target, lifetime, true, None)
+                .persist_fallback_forward_locked(source, target, lifetime, true, None)
                 .await
                 .map_err(|_| 718u16);
         }
