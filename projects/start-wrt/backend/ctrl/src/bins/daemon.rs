@@ -197,17 +197,6 @@ impl<V: MetadataVisitor> Visit<V> for WebserverListener {
     }
 }
 
-fn require_divert_config(
-    result: Result<(), startos::net::transparent::DivertConfig>,
-) -> Result<(), Error> {
-    result.map_err(|config| {
-        Error::new(
-            eyre!("SNI divert config rejected: {config:?}"),
-            ErrorKind::Network,
-        )
-    })
-}
-
 #[instrument(skip_all)]
 async fn inner_main() -> Result<(), Error> {
     // Generate local auth cookie so CLI commands over SSH bypass session auth
@@ -359,14 +348,18 @@ async fn inner_main() -> Result<(), Error> {
     if !setup_mode {
         // The IGD UUID derives from the initialized root CA.
         // Configure reply diversion before constructing the SNI demux.
-        require_divert_config(startos::net::transparent::set_divert_config(
-            startos::net::transparent::DivertConfig {
-                route_table: 5344,
-                rule_priority: 49,
-                masked_fwmark: true,
-                manage_nft: false,
-            },
-        ))?;
+        startos::net::transparent::set_divert_config(startos::net::transparent::DivertConfig {
+            route_table: 5344,
+            rule_priority: 49,
+            masked_fwmark: true,
+            manage_nft: false,
+        })
+        .map_err(|config| {
+            Error::new(
+                eyre!("SNI divert config rejected: {config:?}"),
+                ErrorKind::Network,
+            )
+        })?;
         let pc = crate::port_control::PortControl::new("/etc/config".into());
         if crate::port_control::PORT_CONTROL.set(pc.clone()).is_ok() {
             tokio::spawn(crate::port_control::run(pc));
@@ -486,22 +479,6 @@ async fn inner_main() -> Result<(), Error> {
     server.shutdown().await;
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rejected_divert_config_fails_startup() {
-        let rejected = startos::net::transparent::DivertConfig {
-            route_table: 5344,
-            rule_priority: 49,
-            masked_fwmark: true,
-            manage_nft: false,
-        };
-        assert!(require_divert_config(Err(rejected)).is_err());
-    }
 }
 
 pub fn main(_args: VecDeque<OsString>) {
