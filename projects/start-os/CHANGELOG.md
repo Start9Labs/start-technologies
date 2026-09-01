@@ -77,6 +77,10 @@ file tracks notable changes since the move to the monorepo.
 
 ### Fixed
 
+- **HTTP and WebSocket interfaces from services built for StartOS 0.4.0 and
+  0.4.0.1 load after updating the server.** StartOS accepts their application
+  protocol settings when establishing the service's network bindings.
+
 - **A downgrade to a version that cannot take over the service's data is refused
   before anything is downloaded or stopped**, with an explanation of what to do
   instead.

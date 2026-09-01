@@ -509,6 +509,7 @@ pub struct AddSslOptions {
     pub add_x_forwarded_headers: bool,
     /// The application protocols StartOS answers a client with, from those it
     /// asked for. Unset answers with whatever it asked for.
+    #[serde(default, deserialize_with = "legacy_alpn::deserialize")]
     pub alpn: Option<AlpnInfo>,
     /// Certificate validation for the OS→container TLS leg when rewrapping.
     /// `None` (the default) validates against the StartOS root CA.
@@ -524,6 +525,42 @@ pub struct AddSslOptions {
     /// Setting this implies HTTP-aware proxying.
     #[serde(default)]
     pub auth: Option<ProxyAuth>,
+}
+
+mod legacy_alpn {
+    use serde::{Deserialize, Deserializer};
+
+    use crate::net::vhost::AlpnInfo;
+    use crate::util::serde::MaybeUtf8String;
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    enum LegacyAlpnInfo {
+        Reflect,
+        Specified(Vec<MaybeUtf8String>),
+    }
+
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum CompatibleAlpnInfo {
+        Current(Vec<MaybeUtf8String>),
+        Legacy(LegacyAlpnInfo),
+    }
+
+    pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<Option<AlpnInfo>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(
+            match Option::<CompatibleAlpnInfo>::deserialize(deserializer)? {
+                None | Some(CompatibleAlpnInfo::Legacy(LegacyAlpnInfo::Reflect)) => None,
+                Some(CompatibleAlpnInfo::Current(protocols))
+                | Some(CompatibleAlpnInfo::Legacy(LegacyAlpnInfo::Specified(protocols))) => {
+                    Some(AlpnInfo(protocols))
+                }
+            },
+        )
+    }
 }
 
 /// Auth gate enforced by the OS reverse proxy on incoming requests.
@@ -1107,6 +1144,7 @@ mod test {
     use super::*;
     use crate::GatewayId;
     use crate::net::service_interface::{HostnameInfo, HostnameMetadata};
+    use crate::util::serde::MaybeUtf8String;
 
     fn ipv6_addr(host: &str, port: u16) -> HostnameInfo {
         HostnameInfo {
@@ -1132,6 +1170,43 @@ mod test {
                 auth: None,
             }),
             secure: ssl.map(|ssl| Security { ssl }),
+        }
+    }
+
+    fn add_ssl_with_alpn(alpn: serde_json::Value) -> AddSslOptions {
+        serde_json::from_value(serde_json::json!({
+            "preferredExternalPort": 443,
+            "alpn": alpn,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn add_ssl_accepts_current_and_legacy_alpn_formats() {
+        let protocols = AlpnInfo(vec![
+            MaybeUtf8String(b"h2".to_vec()),
+            MaybeUtf8String(b"http/1.1".to_vec()),
+        ]);
+
+        for json in [
+            serde_json::json!(["h2", "http/1.1"]),
+            serde_json::json!({ "specified": ["h2", "http/1.1"] }),
+        ] {
+            let options = add_ssl_with_alpn(json);
+            assert_eq!(options.alpn, Some(protocols.clone()));
+            assert_eq!(
+                serde_json::to_value(options).unwrap()["alpn"],
+                serde_json::json!(["h2", "http/1.1"]),
+            );
+        }
+
+        for json in [serde_json::Value::Null, serde_json::json!("reflect")] {
+            let options = add_ssl_with_alpn(json);
+            assert_eq!(options.alpn, None);
+            assert_eq!(
+                serde_json::to_value(options).unwrap()["alpn"],
+                serde_json::Value::Null,
+            );
         }
     }
 
