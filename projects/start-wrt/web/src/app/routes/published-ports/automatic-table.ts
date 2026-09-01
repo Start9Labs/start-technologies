@@ -2,17 +2,11 @@ import { Component, inject, input } from '@angular/core'
 import { RouterLink } from '@angular/router'
 import { TuiTable, TuiTableDirective } from '@taiga-ui/addon-table'
 import { TuiLink } from '@taiga-ui/core'
-import { AutoForwardDisplay } from './types'
+import { AutomaticPortUseDisplay } from './types'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 
-/**
- * Read-only table of forwards trusted devices opened for themselves via
- * PCP/UPnP. There are no actions: the device renews or withdraws its own
- * forwards, and an unrenewed forward expires on its own. To stop a device
- * creating them, turn off its toggle on the device page.
- */
 @Component({
-  selector: '[autoForwards]',
+  selector: '[automaticPortUses]',
   template: `
     <thead tuiThead>
       <tr>
@@ -36,29 +30,33 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
         <th tuiTh [sorter]="'hostname' | tuiSorter" [style.min-width.rem]="10">
           {{ 'Hostname' | i18n }}
         </th>
-        <th tuiTh [sorter]="'label' | tuiSorter" [style.min-width.rem]="8">
-          {{ 'Protocol' | i18n }}
+        <th tuiTh [sorter]="'kind' | tuiSorter" [style.min-width.rem]="8">
+          {{ 'Kind' | i18n }}
         </th>
         <th tuiTh [style.min-width.rem]="7">{{ 'Expires' | i18n }}</th>
       </tr>
     </thead>
     <tbody>
-      @for (item of autoForwards() | tuiTableSort; track item.id) {
+      @for (item of automaticPortUses() | tuiTableSort; track item.id) {
         <tr>
           <td tuiTd>
-            <a
-              tuiLink
-              routerLink="/devices/device"
-              [queryParams]="{ mac: item.deviceMac }"
-              [state]="{ returnUrl: '/published-ports' }"
-            >
-              {{ item.deviceName || item.deviceMac }}
-            </a>
+            @if (item.deviceMac) {
+              <a
+                tuiLink
+                routerLink="/devices/device"
+                [queryParams]="{ mac: item.deviceMac }"
+                [state]="{ returnUrl: '/published-ports' }"
+              >
+                {{ item.deviceName || item.deviceMac }}
+              </a>
+            } @else {
+              {{ 'Unknown' | i18n }}
+            }
           </td>
           <td tuiTd>{{ item.ports }}</td>
           <td tuiTd>{{ item.publicPorts }}</td>
           <td tuiTd>{{ item.hostname || '—' }}</td>
-          <td tuiTd>{{ item.label }}</td>
+          <td tuiTd>{{ item.kind }}</td>
           <td tuiTd>{{ expiry(item) }}</td>
         </tr>
       }
@@ -68,12 +66,12 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
   host: { class: 'g-table' },
   imports: [RouterLink, TuiTable, TuiLink, i18nPipe],
 })
-export class AutoForwardsTable {
-  public readonly autoForwards = input<AutoForwardDisplay[]>([])
+export class AutomaticPortUsesTable {
+  public readonly automaticPortUses = input<AutomaticPortUseDisplay[]>([])
 
   private readonly i18n = inject(i18nPipe)
 
-  protected expiry(item: AutoForwardDisplay): string {
+  protected expiry(item: AutomaticPortUseDisplay): string {
     return item.expiresSecs === undefined
       ? '—'
       : `${Math.max(1, Math.round(item.expiresSecs / 60))} ${this.i18n.transform('min')}`

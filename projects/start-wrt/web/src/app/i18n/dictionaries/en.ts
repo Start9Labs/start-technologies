@@ -548,4 +548,5 @@ export const ENGLISH: Record<string, number> = {
   'Port(s) {ports} currently carry hostname routes ({list}). Publishing them will send all traffic on these ports to the selected device instead — those hostname routes will stop working until this rule is removed.': 551,
   'Publish anyway?': 552,
   'Port Used for Hostname Routes': 553,
+  'Kind': 554,
 }

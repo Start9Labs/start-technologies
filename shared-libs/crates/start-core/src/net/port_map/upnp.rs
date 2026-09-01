@@ -17,8 +17,7 @@ use crate::net::port_map::server::igd::{
 use crate::prelude::*;
 
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(4);
-/// IGD SOAP control calls are unbounded in igd-next; without this a gateway that
-/// accepts TCP but never answers would wedge the single-threaded port-map daemon.
+/// Bounds IGD SOAP calls that otherwise have no timeout.
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(5);
 /// `0` requests an indefinite lease; the controller re-asserts periodically.
 const LEASE_DURATION: u32 = 0;
@@ -90,21 +89,15 @@ pub async fn remove_port(
     }
 }
 
-/// Lease we request for a hostname mapping; the server clamps to its own max
-/// (3600s) and the controller re-asserts every refresh tick, well within it.
 const HOSTNAME_LEASE_SECONDS: u32 = 3600;
 
-/// Whether `gateway` advertises the Start9 hostname vendor action. A plain
-/// lookup: `discover()` already parsed the SCPD into `control_schema`, so
-/// capability detection costs no extra round trip.
+/// Whether `gateway` advertises both Start9 hostname vendor actions.
 pub fn supports_hostname(gateway: &Gateway<Tokio>) -> bool {
     gateway.control_schema.contains_key(ADD_HOSTNAME_ACTION)
+        && gateway.control_schema.contains_key(DELETE_HOSTNAME_ACTION)
 }
 
-/// SOAP envelope for [`ADD_HOSTNAME_ACTION`], shaped like igd-next's
-/// `format_add_port_mapping_message` (which the server's parser is tested
-/// against). The caller has validated the hostname to `[A-Za-z0-9.*-]`
-/// ([`add_hostname_mapping`]), so interpolation needs no XML escaping.
+/// SOAP envelope for [`ADD_HOSTNAME_ACTION`].
 pub(crate) fn add_hostname_body(
     external_port: u16,
     local_ip: Ipv4Addr,
@@ -132,8 +125,7 @@ pub(crate) fn add_hostname_body(
     )
 }
 
-/// SOAP envelope for [`DELETE_HOSTNAME_ACTION`]. Carries the internal port so
-/// the server can reconstruct the peer-scoped route target it is deleting.
+/// SOAP envelope for [`DELETE_HOSTNAME_ACTION`].
 pub(crate) fn delete_hostname_body(
     external_port: u16,
     internal_port: u16,
@@ -156,9 +148,7 @@ pub(crate) fn delete_hostname_body(
     )
 }
 
-/// POST a vendor-action SOAP request to `gateway`'s control endpoint.
-/// igd-next's own `perform_request` is private, so this hand-rolls the same
-/// HTTP shape (`SOAPAction: "<service>#<action>"`, text/xml body).
+/// Sends a vendor SOAP action to the discovered control endpoint.
 async fn vendor_control_call(
     gateway: &Gateway<Tokio>,
     action: &str,
@@ -167,9 +157,7 @@ async fn vendor_control_call(
     let url = format!("http://{}{}", gateway.addr, gateway.control_url);
     let soap_action = format!("\"{WANIP_SERVICE}#{action}\"");
     let call = async {
-        // no_proxy: this is a LAN control call; reqwest otherwise honors
-        // HTTP_PROXY/ALL_PROXY, which igd-next's transport ignores — a proxy
-        // env would break (or leak) only the vendor actions.
+        // LAN control traffic must bypass environment proxies.
         let resp = reqwest::Client::builder()
             .no_proxy()
             .build()
@@ -183,12 +171,10 @@ async fn vendor_control_call(
             .map_err(|e| Error::new(eyre!("UPnP {action} failed: {e}"), ErrorKind::Network))?;
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        // Require the action's own <...Response> element, not just a 2xx — an
-        // intercepting middlebox answering 200 is not a created mapping.
+        // A 2xx without the matching response body does not prove mutation.
         if status.is_success() && text.contains(&format!("{action}Response")) {
             Ok(())
         } else {
-            // A fault body carries <errorCode>; surface it for diagnostics.
             let code = text
                 .split("<errorCode>")
                 .nth(1)
@@ -209,9 +195,8 @@ async fn vendor_control_call(
     }
 }
 
-/// Bind `hostname` on `external_port` -> `local_ip:internal_port` via the
-/// Start9 vendor action. The gateway SNI-demuxes the shared external port; the
-/// granted lease is finite, so the caller must re-assert before expiry.
+/// Binds a hostname to a target through the Start9 vendor action.
+/// The caller must renew the finite lease.
 pub async fn add_hostname_mapping(
     gateway: &Gateway<Tokio>,
     external_port: u16,
@@ -219,9 +204,7 @@ pub async fn add_hostname_mapping(
     internal_port: u16,
     hostname: &str,
 ) -> Result<(), Error> {
-    // Nothing upstream character-validates a configured domain, and the
-    // envelope interpolates it unescaped — reject here rather than emit
-    // malformed XML the server can only 402.
+    // Hostnames are interpolated without XML escaping.
     if !validate_hostname(hostname) {
         return Err(Error::new(
             eyre!("invalid hostname for SNI mapping: {hostname:?}"),
@@ -236,8 +219,7 @@ pub async fn add_hostname_mapping(
     .await
 }
 
-/// Remove the SNI route for `hostname` on `external_port` targeting
-/// `internal_port` on the caller.
+/// Removes a hostname mapping through the Start9 vendor action.
 pub async fn remove_hostname_mapping(
     gateway: &Gateway<Tokio>,
     external_port: u16,
@@ -298,7 +280,38 @@ pub async fn get_external_ipv4(local_ip: Ipv4Addr) -> Result<Option<Ipv4Addr>, E
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
+
+    fn gateway_with_actions(actions: &[&str]) -> Gateway<Tokio> {
+        Gateway {
+            addr: "127.0.0.1:49001".parse().unwrap(),
+            root_url: String::new(),
+            control_url: String::new(),
+            control_schema_url: String::new(),
+            control_schema: actions
+                .iter()
+                .map(|action| ((*action).to_owned(), Vec::new()))
+                .collect::<HashMap<_, _>>(),
+            provider: Tokio,
+        }
+    }
+
+    #[test]
+    fn hostname_support_requires_add_and_delete_actions() {
+        assert!(!supports_hostname(&gateway_with_actions(&[])));
+        assert!(!supports_hostname(&gateway_with_actions(&[
+            ADD_HOSTNAME_ACTION,
+        ])));
+        assert!(!supports_hostname(&gateway_with_actions(&[
+            DELETE_HOSTNAME_ACTION,
+        ])));
+        assert!(supports_hostname(&gateway_with_actions(&[
+            ADD_HOSTNAME_ACTION,
+            DELETE_HOSTNAME_ACTION,
+        ])));
+    }
 
     #[test]
     fn private_external_ips_trigger_echoip_fallback() {

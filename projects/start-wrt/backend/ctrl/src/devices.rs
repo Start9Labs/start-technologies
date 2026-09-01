@@ -1795,6 +1795,18 @@ pub async fn update<C: CtrlContext>(
     }
 }
 
+fn static_ips_for_mac(dhcp: &uciedit::Config<'_>, mac: &str) -> Vec<String> {
+    dhcp.sections
+        .iter()
+        .filter_map(|section| {
+            let host = section.get::<DhcpHost>().ok()?;
+            (host.mac.eq_ignore_ascii_case(mac))
+                .then_some(host.ip)
+                .flatten()
+        })
+        .collect()
+}
+
 #[instrument(skip_all)]
 pub async fn forget<C: CtrlContext>(
     ctx: C,
@@ -1805,8 +1817,8 @@ pub async fn forget<C: CtrlContext>(
     loop {
         let arena = Arena::new();
         let mut cfgs = parse_all(ctx.uci_root(), &arena, &["dhcp"]).await?;
+        let removed_static_ips = static_ips_for_mac(&cfgs["dhcp"], &mac_upper);
 
-        // Remove DHCP host
         cfgs["dhcp"].sections.retain(|section| {
             if let Ok(host) = section.get::<DhcpHost>() {
                 if host.mac.to_uppercase() == mac_upper {
@@ -1840,11 +1852,7 @@ pub async fn forget<C: CtrlContext>(
                     None,
                 );
                 crate::device_names::forget(&mac_upper).await;
-                // Forgetting a device drops the `_allow_pcp` flag with its DHCP
-                // host entry, so it can no longer create forwards — but the
-                // ones it already holds are ordinary firewall sections that
-                // would otherwise stay open until their leases lapse.
-                crate::port_control::close_device_forwards(&mac_upper).await;
+                crate::port_control::close_device_forwards(&mac_upper, &removed_static_ips).await;
                 // Drop the mDNS attempt history too: a forgotten device that
                 // reconnects "appears as a new entry" (per the user docs), so
                 // it starts a fresh retry schedule.
@@ -2070,6 +2078,23 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn forget_preserves_removed_static_ip_for_route_reaping() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("dhcp"),
+            "config host\n\toption mac 'AA:BB:CC:DD:EE:FF'\n\toption ip '192.168.1.50'\n",
+        )
+        .unwrap();
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["dhcp"]).await.unwrap();
+
+        assert_eq!(
+            static_ips_for_mac(&cfgs["dhcp"], "aa:bb:cc:dd:ee:ff"),
+            vec!["192.168.1.50"]
+        );
+    }
 
     #[test]
     fn mdns_retry_schedule() {

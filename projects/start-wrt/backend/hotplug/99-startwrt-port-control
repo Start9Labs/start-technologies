@@ -1,7 +1,5 @@
 #!/bin/sh
-# Re-key live SNI hostname routes when the WAN IPv4 changes: demux listeners
-# bind the WAN address itself, so a new address strands them until re-keyed.
-# The daemon's sweep would catch it within a minute; this makes it immediate.
+# Re-key SNI listeners after WAN address changes.
 [ "$ACTION" = "ifup" -o "$ACTION" = "ifupdate" ] && [ "$INTERFACE" = "wan" ] && {
     /usr/bin/startwrt-cli published-ports wan-changed 2>/dev/null &
 }

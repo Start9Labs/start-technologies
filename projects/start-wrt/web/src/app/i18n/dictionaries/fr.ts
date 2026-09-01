@@ -543,4 +543,5 @@ export default {
   551: 'Les ports {ports} portent actuellement des routes par nom d’hôte ({list}). En les publiant, tout le trafic de ces ports sera envoyé vers l’appareil sélectionné — ces routes par nom d’hôte cesseront de fonctionner tant que cette règle ne sera pas supprimée.',
   552: 'Publier quand même ?',
   553: 'Port utilisé par des routes par nom d’hôte',
+  554: 'Type',
 } satisfies i18n

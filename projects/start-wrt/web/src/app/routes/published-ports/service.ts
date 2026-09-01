@@ -5,7 +5,7 @@ import { firstValueFrom } from 'rxjs'
 import { fill } from 'src/app/i18n/validation-errors'
 import { FormService } from 'src/app/services/form.service'
 import {
-  AutoForwardDisplay,
+  AutomaticPortUseDisplay,
   PublishedPort,
   PublishedPortDisplay,
 } from './types'
@@ -13,10 +13,10 @@ import { DevicesApiService } from 'src/app/routes/devices/service'
 import { Device, DeviceUpdateData } from 'src/app/routes/devices/utils'
 import {
   ApiService,
-  AutoForwardFromApi,
+  AutomaticPortUseFromApi,
   PublishedPortFromApi,
   PublishedPortsSetRequest,
-  RouterPortCollision,
+  WanPortCollision,
 } from 'src/app/services/api/api.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 
@@ -29,11 +29,9 @@ export class PublishedPortsService extends FormService<PublishedPortDisplay[]> {
 
   private devices: Device[] = []
 
-  /** Automatic (PCP/UPnP-created) forwards; refreshed alongside the manual list. */
-  readonly autoForwards = signal<AutoForwardDisplay[]>([])
+  readonly automaticPortUses = signal<AutomaticPortUseDisplay[]>([])
 
   async load(): Promise<PublishedPortDisplay[]> {
-    // Load devices (for reserveDeviceIpv4) and both port lists in parallel
     const [devices, portsFromApi, autoFromApi] = await Promise.all([
       this.devicesApi.get(),
       this.api.publishedPortsList(),
@@ -41,53 +39,37 @@ export class PublishedPortsService extends FormService<PublishedPortDisplay[]> {
     ])
 
     this.devices = devices
-    this.autoForwards.set(autoFromApi.map(autoFromApiToDisplay))
+    this.automaticPortUses.set(
+      autoFromApi.map(automaticPortUseFromApiToDisplay),
+    )
 
     return portsFromApi.map(fromApiToDisplay)
   }
 
-  /**
-   * The backend applies the request unless an unconfirmed forward captures a
-   * port the router itself answers on from the WAN (remote access, SSH, VPN)
-   * — then it reports the collisions and applies nothing. Surface those for
-   * confirmation and re-save with the override set on the named ports, so the
-   * question is asked once per port (the override is persisted). The re-save
-   * recurses through this same path: a collision that appears between attempts
-   * (the config changed while the dialog was open) gets its own prompt rather
-   * than a silently unapplied save. Overriding save() here covers every call
-   * site: dialog save, toggle, delete.
-   */
   override async save(data: PublishedPortDisplay[]): Promise<boolean> {
-    let pending: RouterPortCollision[] = []
+    let pending: WanPortCollision[] = []
     const ok = await this.actions.run(async () => {
       const result = await this.api.publishedPortsSet(this.buildRequest(data))
-      pending = result.pending_router_port_collisions
+      pending = result.pending_wan_port_collisions
       if (!pending.length) await this.refreshAndWait()
     })
     if (!ok || !pending.length) return ok
-    if (!(await this.confirmRouterPortOverride(pending))) {
-      return false
-    }
+    if (!(await this.confirmWanPortOverride(pending))) return false
+
     const ids = new Set(pending.map(c => c.id))
     return this.save(
-      data.map(p => (ids.has(p.id) ? { ...p, overrideRouterPorts: true } : p)),
+      data.map(p => (ids.has(p.id) ? { ...p, overrideWanPorts: true } : p)),
     )
   }
 
-  /**
-   * If `pending` is non-empty, prompt the user to confirm publishing port(s)
-   * something else already answers on from the WAN, naming the actual holder:
-   * the router's own services (remote access to its web interface, SSH, a VPN
-   * server), a device's SNI hostname routes, or both on a shared port.
-   * Returns true when there is nothing to confirm or the user confirmed, false
-   * when they cancelled.
-   */
-  private async confirmRouterPortOverride(
-    pending: RouterPortCollision[],
+  private async confirmWanPortOverride(
+    pending: WanPortCollision[],
   ): Promise<boolean> {
     if (!pending.length) return true
-    const routerPorts = [...new Set(pending.flatMap(c => c.router_ports))]
-    const sni = pending.flatMap(c => c.sni_ports)
+    const routerPorts = [
+      ...new Set(pending.flatMap(c => c.router_service_ports)),
+    ]
+    const sni = pending.flatMap(c => c.hostname_route_ports)
     const parts: string[] = []
     if (routerPorts.length) {
       parts.push(
@@ -156,7 +138,7 @@ export class PublishedPortsService extends FormService<PublishedPortDisplay[]> {
         ipv6: item.ipv6,
         ipv4_public_port: item.ipv4PublicPort,
         source: item.source,
-        override_router_ports: item.overrideRouterPorts ?? false,
+        override_wan_ports: item.overrideWanPorts ?? false,
       })),
     }
   }
@@ -169,11 +151,6 @@ export class PublishedPortsService extends FormService<PublishedPortDisplay[]> {
     return this.devices.find(d => d.mac?.toUpperCase() === mac.toUpperCase())
   }
 
-  /**
-   * Reserve the device's current IPv4 address as a static lease. There is no
-   * IPv6 counterpart: the device chooses its own IPv6 address (SLAAC), so the
-   * router cannot reserve one.
-   */
   async reserveDeviceIpv4(mac: string): Promise<void> {
     const device = this.getDevice(mac)
     if (!device) return
@@ -189,9 +166,6 @@ export class PublishedPortsService extends FormService<PublishedPortDisplay[]> {
     device.ipv4Static = true
   }
 
-  /**
-   * Check if a device has any published ports
-   */
   deviceHasPublishedPorts(mac: string): boolean {
     const data = this.data()
     if (!data) return false
@@ -199,20 +173,21 @@ export class PublishedPortsService extends FormService<PublishedPortDisplay[]> {
   }
 }
 
-function autoFromApiToDisplay(a: AutoForwardFromApi): AutoForwardDisplay {
+function automaticPortUseFromApiToDisplay(
+  portUse: AutomaticPortUseFromApi,
+): AutomaticPortUseDisplay {
   return {
-    id: a.id,
-    label: a.label,
-    deviceMac: a.device_mac,
-    deviceName: a.device_name ?? undefined,
-    ports: a.ports,
-    publicPorts: a.public_ports,
-    expiresSecs: a.expires_secs ?? undefined,
-    hostname: a.hostname ?? undefined,
+    id: portUse.id,
+    kind: portUse.kind,
+    deviceMac: portUse.device_mac,
+    deviceName: portUse.device_name ?? undefined,
+    ports: portUse.ports,
+    publicPorts: portUse.public_ports,
+    expiresSecs: portUse.expires_secs ?? undefined,
+    hostname: portUse.hostname ?? undefined,
   }
 }
 
-/** Map backend snake_case response to frontend camelCase types */
 function fromApiToDisplay(p: PublishedPortFromApi): PublishedPortDisplay {
   return {
     id: p.id,
@@ -225,7 +200,7 @@ function fromApiToDisplay(p: PublishedPortFromApi): PublishedPortDisplay {
     ipv6: p.ipv6,
     ipv4PublicPort: p.ipv4_public_port ?? undefined,
     source: p.source,
-    overrideRouterPorts: p.override_router_ports,
+    overrideWanPorts: p.override_wan_ports,
     status: p.status,
     statusReason: p.status_reason ?? undefined,
     deviceName: p.device_name ?? undefined,

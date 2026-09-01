@@ -543,4 +543,5 @@ export default {
   551: 'Porty {ports} obsługują obecnie trasy po nazwie hosta ({list}). Ich opublikowanie przekieruje cały ruch na tych portach do wybranego urządzenia — te trasy przestaną działać, dopóki ta reguła nie zostanie usunięta.',
   552: 'Opublikować mimo to?',
   553: 'Port używany przez trasy po nazwie hosta',
+  554: 'Rodzaj',
 } satisfies i18n

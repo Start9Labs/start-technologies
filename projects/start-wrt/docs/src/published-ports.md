@@ -64,7 +64,7 @@ Some devices can configure port forwarding for themselves using the standard UPn
 
 This is **off by default** for every device. To allow it, open the device's [detail page](devices.md#device-detail-page) and turn on **Allow automatic port forwarding**. From then on, that device — and only that device — can ask the router to forward ports, and only to itself: a device can never open a port that routes traffic to another device.
 
-Forwards created this way appear in the **Automatic** section of the Published Ports page, showing which device opened them, which protocol was used (PCP or UPnP), and when they expire. They are read-only:
+Port uses created this way appear in the **Automatic** section of the Published Ports page, showing which device opened them, their kind (PCP, UPnP, or SNI), and when they expire. They are read-only:
 
 - The device itself creates, renews, and removes its forwards.
 - A forward the device stops renewing expires and is removed automatically once the lifetime the device asked for runs out — about an hour for typical clients, and never longer than a week even for a device that asks to keep the port indefinitely.
@@ -79,7 +79,7 @@ Ports the router answers on itself are protected the same way. If you have [Remo
 
 A device can also ask for a **hostname route** instead of a whole port: the router inspects each incoming TLS connection's requested hostname (SNI) and delivers it to whichever device registered that hostname, so several devices — or several services on one StartOS server — can share a single external port such as 443. StartOS servers use this automatically when you give services on a shared port their own domains.
 
-Hostname routes appear in the same **Automatic** section with `SNI` in the Protocol column and the hostname shown alongside. They follow the same rules as other automatic forwards — per-device permission, the device renews them, they expire on their own — with two differences: a shared port is claimed whole (an ordinary forward on that port is refused while hostname routes hold it, and publishing it manually asks you to confirm), and hostname routes do not survive a router restart — the device simply re-registers them within a few minutes, so no action is needed.
+Hostname routes appear in the same **Automatic** section with `SNI` in the Kind column and the hostname shown alongside. They follow the same rules as other automatic forwards — per-device permission, the device renews them, they expire on their own — with two differences: a shared port is claimed whole (an ordinary forward on that port is refused while hostname routes hold it, and publishing it manually asks you to confirm), and hostname routes do not survive a router restart — the device simply re-registers them within a few minutes, so no action is needed.
 
 A routed hostname also works from inside your own network, not only from the Internet: a laptop on your LAN can open the same public address and reach the device, with the router turning the connection around. The device sees those connections as coming from the router itself rather than from the laptop, so its own access logs and any per-client rules it applies won't tell one local device from another. Connections from a different [Security Profile](security-profiles.md), and from the Internet, still arrive with the original address intact.
 

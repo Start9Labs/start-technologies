@@ -5,9 +5,7 @@ pub mod capability;
 pub mod hostname;
 pub mod portset;
 
-/// Base PCP NO_RESOURCES result code (RFC 6887 §7.4): the server lacks the
-/// resources to honor an otherwise-valid request — e.g. the SNI demux cannot
-/// bind the port a grant would open.
+/// PCP NO_RESOURCES result code (RFC 6887 §7.4).
 pub const RESULT_NO_RESOURCES: u8 = 8;
 
 /// Walk the PCP option area (RFC 6887 §7.3): each option is code(1),

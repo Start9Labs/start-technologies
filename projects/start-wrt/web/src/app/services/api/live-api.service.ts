@@ -54,7 +54,7 @@ import {
   PublishedPortFromApi,
   PublishedPortsSetRequest,
   PublishedPortsSetResult,
-  AutoForwardFromApi,
+  AutomaticPortUseFromApi,
   OutboundVpn,
   OutboundVpnCreateRequest,
   OutboundVpnCreateResponse,
@@ -346,7 +346,7 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'published-ports.set', params })
   }
 
-  async publishedPortsAutoList(): Promise<AutoForwardFromApi[]> {
+  async publishedPortsAutoList(): Promise<AutomaticPortUseFromApi[]> {
     return this.rpc.request({
       method: 'published-ports.auto-list',
       params: {},

@@ -8,7 +8,7 @@ use chrono::Utc;
 use imbl_value::Value;
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
-use rpc_toolkit::{from_fn, from_fn_async, from_fn_async_local, HandlerExt, ParentHandler};
+use rpc_toolkit::{from_fn_async, from_fn_async_local, HandlerExt, ParentHandler};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use uciedit::openwrt::{FirewallRule, FirewallTarget};
@@ -565,9 +565,7 @@ pub async fn apply_remote_access<C: CtrlContext>(ctx: C) -> Result<Value, Error>
             Ok(()) => {
                 if ctx.effectful() {
                     reload_firewall(wan_ipv4, wan_ipv6s);
-                    // The SNI demux's remote-access fallback mirrors the rules
-                    // just written — re-sync it so a mode change takes effect
-                    // on a shared 443 without waiting for the sweep.
+                    // Apply mode changes to the shared SNI fallback.
                     if let (Some(pc), Some(wan)) =
                         (crate::port_control::PORT_CONTROL.get(), wan_ipv4)
                     {

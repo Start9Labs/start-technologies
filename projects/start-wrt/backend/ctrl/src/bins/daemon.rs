@@ -197,6 +197,17 @@ impl<V: MetadataVisitor> Visit<V> for WebserverListener {
     }
 }
 
+fn require_divert_config(
+    result: Result<(), startos::net::transparent::DivertConfig>,
+) -> Result<(), Error> {
+    result.map_err(|config| {
+        Error::new(
+            eyre!("SNI divert config rejected: {config:?}"),
+            ErrorKind::Network,
+        )
+    })
+}
+
 #[instrument(skip_all)]
 async fn inner_main() -> Result<(), Error> {
     // Generate local auth cookie so CLI commands over SSH bypass session auth
@@ -346,22 +357,16 @@ async fn inner_main() -> Result<(), Error> {
     let tls_ready = init_ssl().await;
 
     if !setup_mode {
-        // Port-control servers (PCP + UPnP IGD): automatic port forwarding for
-        // per-device-authorized LAN clients. After init_ssl so the IGD device
-        // UUID (derived from the root CA) is stable.
-        //
-        // SNI-demux divert parameters, before anything can run the demux: the
-        // nft mark rule ships as an fw4 include (12-startwrt-sni-divert.nft,
-        // `mark or` — hence the masked match), so only the iproute2 half is
-        // managed in-process; table 5344 clears the VLAN-tag (1-4094) table
-        // namespace; priority 49 sits below the 100/150/200 rule ladder.
-        let _ =
-            startos::net::transparent::set_divert_config(startos::net::transparent::DivertConfig {
+        // The IGD UUID derives from the initialized root CA.
+        // Configure reply diversion before constructing the SNI demux.
+        require_divert_config(startos::net::transparent::set_divert_config(
+            startos::net::transparent::DivertConfig {
                 route_table: 5344,
                 rule_priority: 49,
                 masked_fwmark: true,
                 manage_nft: false,
-            });
+            },
+        ))?;
         let pc = crate::port_control::PortControl::new("/etc/config".into());
         if crate::port_control::PORT_CONTROL.set(pc.clone()).is_ok() {
             tokio::spawn(crate::port_control::run(pc));
@@ -446,19 +451,7 @@ async fn inner_main() -> Result<(), Error> {
         .layer(Extension(proxy_client))
         .layer(Extension(app_state));
 
-    // Build the listener map. start-os's `WebServer` provides the connection-
-    // lifecycle defenses we used to need to hand-roll: TCP keepalive on each
-    // accepted socket, HTTP/2 PING keepalives (25s/300s), accept retry with
-    // backoff on transient errors (EMFILE/ENFILE), GracefulShutdown tracking
-    // of in-flight connections, and RFC 8441 extended CONNECT for h2
-    // WebSocket upgrades. `TlsListener` adds slow-loris-resistant handshake
-    // timeouts (5s ClientHello, 15s full handshake) and runs each handshake
-    // in a per-connection task so a stalled client cannot block accept.
-    // SO_REUSEPORT on the UI wildcards: the SNI demux binds `(wan_ip, 443)`
-    // *specific* alongside these when hostname routes share the port, and a
-    // reuseport group admits a member only if every socket on the port opted
-    // in. TCP delivery prefers the most-specific bound address, so the demux
-    // takes WAN-IP-destined connections and these wildcards keep the LAN.
+    // WAN-specific demux listeners require every wildcard listener to use SO_REUSEPORT.
     let http_addr = SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], 80));
     let http_listener = startos::net::utils::bind_tokio_listener_reuse_port(http_addr)
         .with_kind(ErrorKind::Network)?;
@@ -493,6 +486,22 @@ async fn inner_main() -> Result<(), Error> {
     server.shutdown().await;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejected_divert_config_fails_startup() {
+        let rejected = startos::net::transparent::DivertConfig {
+            route_table: 5344,
+            rule_priority: 49,
+            masked_fwmark: true,
+            manage_nft: false,
+        };
+        assert!(require_divert_config(Err(rejected)).is_err());
+    }
 }
 
 pub fn main(_args: VecDeque<OsString>) {

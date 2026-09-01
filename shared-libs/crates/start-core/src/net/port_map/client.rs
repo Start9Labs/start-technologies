@@ -52,29 +52,20 @@ use crate::prelude::*;
 use crate::util::collections::OrdMapIterMut;
 use crate::util::sync::{SyncMutex, Watch};
 
-/// Cadence for the refresh tick: re-assert UPnP and retry not-yet-active
-/// mappings whose backoff has elapsed, and check whether each active PCP
-/// mapping has crossed half its lease (the point it's renewed). Well under the
-/// PCP lease so a renewal that's come due is caught with ample margin before
-/// expiry.
+/// Refresh cadence for active mappings and backoff-eligible retries.
 const REFRESH_INTERVAL: Duration = Duration::from_secs(180);
-/// Initial retry delay for a desired-but-not-active mapping; doubles per
-/// consecutive failure up to [`BACKOFF_MAX`], so boot/tunnel-restart races
-/// still recover in seconds while a permanently-failing mapping quiets down.
+/// Initial retry delay; doubles to [`BACKOFF_MAX`].
 const RETRY_INTERVAL: Duration = Duration::from_secs(15);
 const BACKOFF_MAX: Duration = Duration::from_secs(960);
 const GATEWAY_CACHE_TTL: Duration = Duration::from_secs(600);
 const PCP_LIFETIME_SECONDS: u32 = 3600;
-/// Fail fast onto UPnP instead of the crate's multi-minute RFC backoff when a
-/// gateway doesn't speak PCP/NAT-PMP.
+/// Short probe timeout before falling back to UPnP.
 const PCP_TIMEOUTS: TimeoutConfig = TimeoutConfig {
     initial_timeout: Duration::from_millis(250),
     max_retries: 1,
     max_retry_timeout: Some(Duration::from_secs(1)),
 };
 
-/// Delay before the next apply after `failures` consecutive failures: 15s,
-/// 30s, 60s, … capped at 16 minutes.
 fn retry_delay(failures: u32) -> Duration {
     (RETRY_INTERVAL * 2u32.pow(failures.saturating_sub(1).min(6))).min(BACKOFF_MAX)
 }
@@ -101,10 +92,7 @@ impl TransportProtocol {
     }
 }
 
-/// (local IP, external port, optional SNI hostname, transport protocol).
-/// Hostname is part of the identity: many hostnames share one external port via
-/// gateway SNI demux, each an independent mapping. Protocol is also part of the
-/// identity so a raw TCP+UDP forward can be renewed and removed independently.
+/// Mapping identity, including independent hostname and transport bindings.
 type MappingKey = (IpAddr, u16, Option<String>, TransportProtocol);
 
 /// Candidate PCP/NAT-PMP servers for a gateway interface: the NM default
@@ -114,10 +102,7 @@ type MappingKey = (IpAddr, u16, Option<String>, TransportProtocol);
 /// the tunnel server's address, the subnet's first host, where its PCP server
 /// listens.
 pub fn candidate_gateways(info: &NetworkInterfaceInfo) -> Vec<(IpAddr, Option<u32>)> {
-    // Port mapping is inbound-only: an OutboundOnly gateway (e.g. a commercial
-    // VPN) exposes no PCP/NAT-PMP server we'd ever ask for a pinhole. Return no
-    // candidates so every port-map call site — this is the one they all funnel
-    // through — never attempts PCP against it.
+    // Outbound-only gateways cannot accept inbound mappings.
     if info.gateway_type == GatewayType::OutboundOnly {
         return Vec::new();
     }
@@ -138,11 +123,7 @@ pub fn candidate_gateways(info: &NetworkInterfaceInfo) -> Vec<(IpAddr, Option<u3
     };
 
     for ip in &ip_info.lan_ip {
-        // The gateway must sit within one of our own subnets. A link-local v6
-        // gateway is never a PCP server we can reach — a StartTunnel peer owns
-        // none on the wg link, and its own fe80::/64 nominally "contains" any
-        // fe80::, so a subnet check can't distinguish it — so skip it. On a
-        // tunnel the host_v6-derived server fills the v6 slot below.
+        // StartTunnel derives its IPv6 server from the routed prefix, not fe80::/64.
         match ip {
             IpAddr::V4(_) => {
                 if ip_info.subnets.iter().any(|s| s.contains(ip)) {
@@ -160,12 +141,7 @@ pub fn candidate_gateways(info: &NetworkInterfaceInfo) -> Vec<(IpAddr, Option<u3
         }
     }
 
-    // StartTunnel fallback: the tunnel is on-link (routed by AllowedIPs, no
-    // next-hop) so NM reports no gateway and `lan_ip` is empty. The server's PCP
-    // listener is at the subnet's first host — `.1` for v4, and the v6 that host
-    // takes under the delegated prefix, which the client now carries on its own
-    // /prefix v6 so `host_v6` is exact. Fill a family only when NM gave none, so
-    // a real gateway always wins.
+    // StartTunnel has no next-hop; derive its server from each routed prefix.
     if info.gateway_type == GatewayType::InboundOutbound {
         let have_v4 = out.iter().any(|(g, _)| g.is_ipv4());
         let have_v6 = out.iter().any(|(g, _)| g.is_ipv6());
@@ -177,12 +153,9 @@ pub fn candidate_gateways(info: &NetworkInterfaceInfo) -> Vec<(IpAddr, Option<u3
             if !have_v4 {
                 push(&mut out, IpAddr::V4(server_v4), None);
             }
-            // Skip a bare /128 (a legacy config with no prefix): `host_v6` would
-            // resolve to the client's own address, not the server's.
+            // A bare /128 identifies the client rather than the server.
             if !have_v6 {
                 if let Some(prefix) = ip_info.subnets.iter().find_map(|s| match s {
-                    // Derive the server from the routed prefix, never the wg
-                    // iface's own fe80::/64 — that would yield a link-local server.
                     IpNet::V6(n) if n.prefix_len() < 128 && !ipv6_is_link_local(n.network()) => {
                         Some(*n)
                     }
@@ -212,9 +185,7 @@ enum Active {
     Pcp(PortMapping),
     Upnp {
         external_ip: Option<Ipv4Addr>,
-        /// Kept for teardown: a hostname mapping's delete action must name the
-        /// internal port to identify the peer-scoped SNI route, and the spec it
-        /// came from is already gone by then.
+        /// Needed by owner-scoped hostname deletion.
         internal_port: u16,
     },
 }
@@ -281,9 +252,7 @@ impl PortMapController {
         }
     }
 
-    /// Like [`ensure`](Self::ensure) but binds one FQDN via PCP HOSTNAME so the
-    /// gateway SNI-demuxes this external port. PCP-only; each hostname is an
-    /// independent mapping sharing the port.
+    /// Binds one FQDN through the gateway's hostname mapping extension.
     pub fn ensure_hostname(
         &self,
         local_ip: IpAddr,
@@ -578,6 +547,18 @@ struct State {
 }
 
 impl State {
+    fn external_ip(&self, external_port: u16) -> Option<IpAddr> {
+        self.active
+            .iter()
+            .find(|(key, _)| {
+                key.1 == external_port && key.2.is_none() && key.3 == TransportProtocol::Tcp
+            })
+            .and_then(|(_, active)| match active {
+                Active::Pcp(mapping) => mapping.external_ip(),
+                Active::Upnp { external_ip, .. } => external_ip.map(IpAddr::V4),
+            })
+    }
+
     async fn ensure(
         &mut self,
         interfaces: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
@@ -590,8 +571,7 @@ impl State {
                 || s.count != spec.count
         });
         self.desired.insert(key.clone(), spec);
-        // A spec change is new information (operator or config) — retry
-        // promptly, ignoring any accumulated backoff.
+        // A changed request bypasses accumulated backoff.
         if changed {
             self.failures.remove(&key);
         }
@@ -615,11 +595,9 @@ impl State {
 
     async fn refresh(&mut self, interfaces: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>) {
         for key in self.desired.keys().cloned().collect::<Vec<_>>() {
+            let retry_ready = self.backoff_elapsed(&key);
             match self.active.get_mut(&key) {
-                // expiration()/lifetime() reflect the gateway's last grant
-                // (crab_nat uses std::time::Instant), so renewal self-corrects if
-                // the gateway caps the lease below what we asked for, and the
-                // ticks before it's due are skipped.
+                // Renew against the lifetime granted by the gateway.
                 Some(Active::Pcp(m))
                     if renew_due(std::time::Instant::now(), m.expiration(), m.lifetime()) =>
                 {
@@ -632,24 +610,18 @@ impl State {
                         self.apply(interfaces, key).await;
                     }
                 }
-                // A PCP mapping not yet at its renewal point: leave it be.
                 Some(Active::Pcp(_)) => {}
-                // Re-assert UPnP in case a gateway reboot dropped it. A
-                // hostname key re-registers idempotently (the same target
-                // reclaims), so skip the remote delete — deleting first would
-                // leave the route down until the backoff-gated retry if the
-                // re-add fails, and churn the gateway's persisted state every
-                // tick. Only the local entry is dropped so apply() sees an
-                // inactive key.
-                Some(Active::Upnp { .. }) if key.2.is_some() => {
-                    self.active.remove(&key);
-                    self.apply(interfaces, key).await;
+                // Re-register hostname routes without deleting the live mapping first.
+                Some(Active::Upnp { .. }) if key.2.is_some() && retry_ready => {
+                    let previous = self.active.remove(&key).expect("active mapping");
+                    self.apply(interfaces, key.clone()).await;
+                    self.active.entry(key).or_insert(previous);
                 }
+                Some(Active::Upnp { .. }) if key.2.is_some() => {}
                 Some(Active::Upnp { .. }) => {
                     self.teardown(key.clone()).await;
                     self.apply(interfaces, key).await;
                 }
-                // A prior failure: retry once its backoff has elapsed.
                 None => {
                     if self.backoff_elapsed(&key) {
                         self.apply(interfaces, key).await;
@@ -674,7 +646,6 @@ impl State {
                 if let IpAddr::V4(local_v4) = local_ip {
                     if let Some(gw) = self.gateway_for(local_v4).await {
                         match &hostname {
-                            // A hostname key is an SNI route, not a port forward.
                             Some(host) => {
                                 upnp::remove_hostname_mapping(
                                     gw,
@@ -698,10 +669,7 @@ impl State {
         }
     }
 
-    /// Wrapper around the attempt paths: on success any backoff is cleared;
-    /// after a real (network) attempt that left the key inactive the failure
-    /// count grows. An attempt fully short-circuited by capability verdicts
-    /// does no I/O and counts neither as success nor failure.
+    /// Updates retry backoff after a mapping attempt.
     async fn apply(
         &mut self,
         interfaces: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
@@ -739,10 +707,7 @@ impl State {
         };
         let now = Utc::now();
 
-        // HOSTNAME (SNI-demux) mapping: PCP first, falling back to the UPnP
-        // vendor action (X_START9_AddHostnameMapping) when no gateway grants it
-        // over PCP. NAT-PMP has no way to carry a hostname. Other hostnames on
-        // the same port are separate mappings.
+        // Try PCP HOSTNAME before the UPnP vendor action.
         if let Some(hostname) = &hostname {
             let options = [pcp::PcpOption {
                 code: OPTION_HOSTNAME,
@@ -752,9 +717,6 @@ impl State {
                 if gw.is_ipv4() != local_ip.is_ipv4() {
                     continue;
                 }
-                // Skip a gateway whose HOSTNAME support is fresh-known-absent;
-                // probe only when the verdict is unknown or stale, and feed the
-                // result back to the interface's capability state.
                 let caps = capabilities_for(interfaces, *gw);
                 match caps.and_then(|c| c.pcp_hostname.fresh(now)) {
                     Some(false) => {
@@ -796,8 +758,7 @@ impl State {
                 )
                 .await
                 {
-                    // Require the gateway to echo the HOSTNAME option too: it
-                    // confirms the binding took, independent of the ANNOUNCE marker.
+                    // The echoed option confirms the gateway applied HOSTNAME.
                     Ok(m)
                         if m.external_port() == ext
                             && m.response_options()
@@ -811,7 +772,6 @@ impl State {
                         self.active.insert(key.clone(), Active::Pcp(m));
                         return true;
                     }
-                    // Answered but didn't echo HOSTNAME: doesn't honor it.
                     Ok(m) => {
                         report(interfaces, *gw, |caps, now| {
                             set_verdict(&mut caps.pcp, true, now)
@@ -829,9 +789,6 @@ impl State {
                 }
             }
 
-            // No gateway granted the mapping over PCP: fall back to the UPnP
-            // vendor action if the IGD's SCPD advertises it (IPv4 only, like
-            // the plain UPnP path).
             if let IpAddr::V4(local_v4) = local_ip {
                 let upnp_dead = capabilities_for_local(interfaces, local_ip)
                     .and_then(|c| c.upnp.fresh(now))
@@ -844,14 +801,8 @@ impl State {
                     return attempted;
                 }
                 attempted = true;
-                // (added, drop_cache): the cache is shared with every other
-                // mapping on this local IP, so only evict it when the gateway
-                // is gone or misbehaving — an IGD that answers but doesn't
-                // advertise the vendor action is a stable condition, and
-                // evicting for it would force sibling mappings to re-discover.
-                let (added, drop_cache) = match self.gateway_for(local_v4).await {
+                let (added, invalidate_upnp_cache) = match self.gateway_for(local_v4).await {
                     Some(gw) => {
-                        // Discovery alone proves the IGD, whatever the call says.
                         report_local(interfaces, local_ip, true);
                         if !upnp::supports_hostname(gw) {
                             crate::dev_log!(
@@ -892,8 +843,6 @@ impl State {
                     }
                 };
                 if added {
-                    // Best-effort external IP from the cached discovery so a
-                    // reachability check can short-circuit.
                     let external_ip = match self.gateway_for(local_v4).await {
                         Some(gw) => upnp::external_ipv4(gw).await.ok().flatten(),
                         None => None,
@@ -905,8 +854,7 @@ impl State {
                             internal_port: spec.internal_port,
                         },
                     );
-                } else if drop_cache {
-                    // Re-discover next time in case the gateway went away.
+                } else if invalidate_upnp_cache {
                     self.upnp_cache.remove(&local_v4);
                 }
             }

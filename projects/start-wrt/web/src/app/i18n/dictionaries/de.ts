@@ -543,4 +543,5 @@ export default {
   551: 'Über die Ports {ports} laufen derzeit Hostnamen-Routen ({list}). Werden sie veröffentlicht, geht der gesamte Datenverkehr auf diesen Ports stattdessen an das ausgewählte Gerät — diese Hostnamen-Routen funktionieren nicht mehr, bis diese Regel entfernt wird.',
   552: 'Trotzdem veröffentlichen?',
   553: 'Port für Hostnamen-Routen verwendet',
+  554: 'Art',
 } satisfies i18n

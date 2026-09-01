@@ -36,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   back off — or forgetting the device — closes that device's forwards and
   hostname routes immediately.
   The Published Ports page gains a read-only "Automatic" section showing each
-  forward's device, protocol, and expiry. UPnP clients see a complete gateway:
+  port use's device, kind (PCP, UPnP, or SNI), and expiry. UPnP clients see a complete gateway:
   the router advertises the `WANCommonInterfaceConfig` service clients use to
   recognize an Internet Gateway Device, answers the status actions they check
   before mapping anything, and supports reading mappings back

@@ -40,29 +40,9 @@
 //!
 //! # SNI hostname routes
 //!
-//! Besides plain forwards, an authorized device can register TLS-SNI hostname
-//! routes on a shared external port (PCP HOSTNAME options, or the UPnP
-//! `X_START9_AddHostnameMapping` vendor action): the shared [`SniDemux`] reads
-//! each connection's ClientHello on the WAN address and splices it to whichever
-//! device owns that hostname, so several devices share one port. Unlike plain
-//! forwards, these routes are *not* UCI sections: they live in demux memory
-//! with the finite lease both protocols grant (≤1h, self-expiring — the demux
-//! prunes them, not the sweep), and a daemon restart drops them until the
-//! client's next re-assertion. What does touch UCI is admission: each demuxed
-//! port gets a WAN-input ACCEPT rule (`apf_sni_<port>`, tagged
-//! `_apf_label 'SNI'`) so fw4 lets the listener's traffic in — written inline
-//! with registration, removed by the demux's `on_change` teardown callback,
-//! healed by the sweep, and purged at daemon start (rules must not outlive the
-//! in-memory routes they admit). That rule also makes the port read as
-//! router-reserved, so plain forwards can't grab a demuxed port out from under
-//! its hostnames. Conversely a hostname route is refused on a port already
-//! DNAT-forwarded or answered by the router itself (Remote Access, VPN) — the
-//! demux's specific `(wan_ip, port)` bind would beat the router service's
-//! wildcard bind and capture traffic it has no route for. The reply-path
-//! divert's nft half ships declaratively as an fw4 include
-//! (`/etc/nftables.d/12-startwrt-sni-divert.nft`); the iproute2 half is
-//! configured at daemon init (`set_divert_config`) and re-asserted by the
-//! demux.
+//! Hostname routes live in [`SniDemux`] memory and share one IPv4 WAN admission
+//! rule per port. The sweep reconciles those rules and re-keys routes when the
+//! WAN address changes. Protocol leases bound every device-created route.
 //!
 //! # LAN source-address spoofing: cross-segment closed, same-segment open
 //!
@@ -118,6 +98,7 @@ use nix::sys::socket::{recvmsg, setsockopt, ControlMessageOwned, MsgFlags, Socka
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use startos::net::port_map::pcp::hostname::RESULT_HOSTNAME_TAKEN;
+use startos::net::port_map::pcp::RESULT_NO_RESOURCES;
 use startos::net::port_map::server::igd::{
     format_uuid, handle_control, header_value, render_root_desc, serve_static, ssdp_response,
     st_matches, CIF_SCPD, CIF_SCPD_PATH, CONTROL_PATH, IGD_HTTP_PORT, ROOT_DESC_PATH, SCPD,
@@ -151,11 +132,9 @@ const WAN_CACHE_TTL: Duration = Duration::from_secs(30);
 const LAN_CACHE_TTL: Duration = Duration::from_secs(30);
 const UCI_RETRIES: usize = 4;
 
-pub const LABEL_PCP: &str = "PCP";
-pub const LABEL_UPNP: &str = "UPnP";
-/// `_apf_label` tag on the WAN-input ACCEPT rules admitting SNI-demux
-/// listeners (and the `label` of SNI rows in `auto-list`).
-pub const LABEL_SNI: &str = "SNI";
+pub const KIND_PCP: &str = "PCP";
+pub const KIND_UPNP: &str = "UPnP";
+pub const KIND_SNI: &str = "SNI";
 
 // UPnP IGD error codes, reused verbatim by the shared PCP core.
 const IGD_ACTION_FAILED: u16 = 501;
@@ -179,7 +158,6 @@ pub struct PortControl {
     lan_cache: Mutex<Option<(Instant, Arc<Vec<LanAddr>>)>>,
     /// Requesting IP → resolved+authorized device (None = unauthorized).
     client_cache: Mutex<HashMap<Ipv4Addr, (Instant, Option<Client>)>>,
-    /// SNI hostname-route dataplane; see the module doc.
     sni: Arc<SniDemux>,
 }
 
@@ -211,20 +189,13 @@ impl PortControl {
                 wan_cache: Mutex::new(None),
                 lan_cache: Mutex::new(None),
                 client_cache: Mutex::new(HashMap::new()),
-                // The teardown half of the ACCEPT-rule lifecycle: expiry/
-                // unregister reaps a port's listener and this drops its rule.
-                // Creation is inline in `add_sni_route` (under the write lock,
-                // so the rule exists before any concurrent conflict scan runs);
-                // for `(port, true)` this is just an idempotent upsert.
+                // Reconcile all live ports because callbacks may arrive out of order.
                 sni: SniDemux::with_on_change(
                     move |port, active| {
                         if let Some(pc) = weak.upgrade() {
                             tokio::spawn(on_sni_change(pc, port, active));
                         }
                     },
-                    // A routed device shares its bridge with the clients on
-                    // that segment, so the demux needs the bridge's prefix to
-                    // tell a hairpinning client from a routed one.
                     Some(Arc::new(move |ip| {
                         let weak = hairpin_weak.clone();
                         Box::pin(async move { weak.upgrade()?.lan_prefix_for(ip).await })
@@ -247,8 +218,7 @@ impl PortControl {
         self.client_cache.lock().unwrap().clear();
     }
 
-    /// Stop tracking leases for sections something else removed from UCI
-    /// (manual published-ports taking over an auto-held external port).
+    /// Stop tracking leases for sections removed outside port control.
     pub fn forget_leases(&self, sections: &[String]) {
         let mut leases = self.leases.lock().unwrap();
         for section in sections {
@@ -269,6 +239,10 @@ impl PortControl {
 
     fn reload_firewall(&self) {
         crate::published_ports::reload_firewall();
+    }
+
+    pub(crate) async fn lock_writes(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.write_serial.lock().await
     }
 
     /// Resolve the requesting IP to an authorized device: a neighbor-table
@@ -313,14 +287,8 @@ impl PortControl {
         allowed.then_some(Client { mac, iface })
     }
 
-    /// Drop every hostname route whose target address now belongs to a device
-    /// without the automatic-port-forwarding permission. Routes live in the
-    /// demux keyed by address, not by device, so the owner is re-derived the
-    /// way a grant derives it — the neighbor table, else the DHCP leases and
-    /// static hosts — and a target that resolves to no device at all is left
-    /// alone, its lease still bounding it. Runs on every permission revocation
-    /// and once a minute from the sweep, which also catches an address handed
-    /// on to a different, unauthorized device.
+    /// Drops hostname routes attributed to unauthorized devices.
+    /// Unattributed routes expire with their leases.
     pub(crate) async fn reap_unauthorized_sni_routes(&self) {
         let routes = self.sni.snapshot();
         if routes.is_empty() {
@@ -341,7 +309,7 @@ impl PortControl {
                 return;
             }
         };
-        // The neighbor table is what a grant trusted, so it outranks a lease.
+        // Live neighbors override DHCP records.
         if let Some(neigh) = tokio::process::Command::new("ip")
             .args(["neigh", "show"])
             .invoke(ErrorKind::Network.into())
@@ -377,7 +345,9 @@ impl PortControl {
         }
         {
             let _serial = self.write_serial.lock().await;
-            self.sync_sni_rules().await;
+            if let Err(e) = self.sync_sni_rules().await {
+                tracing::warn!("port-control: reconciling SNI admission failed: {e}");
+            }
         }
         let wans: std::collections::BTreeSet<Ipv4Addr> = doomed.iter().map(|r| r.ext_ip).collect();
         for wan in wans {
@@ -400,8 +370,7 @@ impl PortControl {
         ip
     }
 
-    /// Drop the cached WAN address so the next read sees a change immediately
-    /// (the wan hotplug hook fires this ahead of an SNI re-key).
+    /// Forces the next WAN lookup to bypass the cache.
     pub fn invalidate_wan(&self) {
         *self.wan_cache.lock().unwrap() = None;
     }
@@ -428,7 +397,7 @@ impl PortControl {
         addrs
     }
 
-    /// The router's own bridged address on the subnet containing `ip`.
+    /// The router address on the matching bridged subnet.
     async fn lan_addr_for(&self, ip: Ipv4Addr) -> Option<LanAddr> {
         self.lan_addrs().await.iter().find_map(|a| {
             let mask = prefix_mask(a.prefix);
@@ -436,28 +405,24 @@ impl PortControl {
         })
     }
 
-    /// The router's LAN address on the subnet containing `peer` — the address
-    /// SSDP advertises as the IGD location.
+    /// The IGD address advertised to the peer.
     async fn lan_ip_for(&self, peer: Ipv4Addr) -> Option<Ipv4Addr> {
         self.lan_addr_for(peer).await.map(|a| a.addr)
     }
 
-    /// The prefix length of the bridged subnet containing `ip` — how the SNI
-    /// demux tells a hairpinning client from a routed one. Only `br-*`
-    /// interfaces are considered (see [`parse_lan_addrs`]), so this answers for
-    /// exactly the segments on which two hosts reach each other directly.
+    /// The prefix length of the matching bridged subnet.
     async fn lan_prefix_for(&self, ip: Ipv4Addr) -> Option<u8> {
         self.lan_addr_for(ip).await.map(|a| a.prefix)
     }
 
-    async fn add_forward_labeled(
+    async fn add_forward_for_kind(
         &self,
         source: SocketAddrV4,
         target: SocketAddrV4,
         count: u16,
         peer: Ipv4Addr,
         lifetime: Option<u32>,
-        label: &'static str,
+        kind: &'static str,
     ) -> Result<(), u16> {
         if count == 0
             || source.port().checked_add(count - 1).is_none()
@@ -465,8 +430,7 @@ impl PortControl {
         {
             return Err(IGD_ACTION_FAILED);
         }
-        // The shared cores force target = peer; re-assert it here so a future
-        // caller can't route one device's traffic to another.
+        // The forwarding target must be the requesting peer.
         if *target.ip() != peer {
             return Err(IGD_ACTION_FAILED);
         }
@@ -481,7 +445,7 @@ impl PortControl {
             apply_forward_uci(
                 &uci_root,
                 &section_task,
-                label,
+                kind,
                 &client.mac,
                 Some(&client.iface),
                 source,
@@ -504,7 +468,7 @@ impl PortControl {
             }
             ApplyOutcome::Written => {
                 tracing::info!(
-                    "port-control: {label} forward {}#{count} -> {target} ({section})",
+                    "port-control: {kind} forward {}#{count} -> {target} ({section})",
                     source
                 );
                 self.bump_lease(section, lease);
@@ -618,13 +582,13 @@ impl PortControl {
                 .iter()
                 .filter_map(|sec| {
                     let r = sec.get::<FirewallRedirect>().ok()?;
-                    let label = r._apf_label?;
+                    let kind = r._apf_label?;
                     if r.dest_ip.as_deref() != Some(target.as_str()) {
                         return None;
                     }
                     let external = r.src_dport.as_deref().and_then(parse_port_range)?.0;
                     let internal = r.dest_port.as_deref().and_then(parse_port_range)?.0;
-                    Some((sec.name()?.to_string(), external, internal, label))
+                    Some((sec.name()?.to_string(), external, internal, kind))
                 })
                 .collect())
         })
@@ -638,7 +602,7 @@ impl PortControl {
         let leases = self.leases.lock().unwrap();
         found
             .into_iter()
-            .flat_map(|(section, external_port, internal_port, label)| {
+            .flat_map(|(section, external_port, internal_port, kind)| {
                 // An untracked section (fresh boot) reports 0 = permanent
                 // rather than "already expired".
                 let lease_seconds = leases
@@ -651,7 +615,7 @@ impl PortControl {
                         external_port,
                         internal: SocketAddrV4::new(peer, internal_port),
                         protocol,
-                        description: format!("Auto forward ({label})"),
+                        description: format!("Automatic port use ({kind})"),
                         lease_seconds,
                     })
             })
@@ -746,13 +710,7 @@ impl PortControl {
         Ok(())
     }
 
-    /// Register SNI hostname routes on `source` for `target` (the shared cores
-    /// force `target` to the requesting device and gate on `is_known_client`
-    /// before we're called). Refuses a port whose traffic already has another
-    /// consumer — see [`sni_port_conflicts`]. The write lock is held across
-    /// scan → demux registration → admit-rule write, so a concurrent plain
-    /// forward can't DNAT the port between the scan and the rule landing (and
-    /// its own scan sees our rule as router-reserved).
+    /// Refuses a grant unless its listener and WAN admission both succeed.
     async fn add_sni_route(
         &self,
         source: SocketAddrV4,
@@ -771,32 +729,132 @@ impl PortControl {
         .await
         .map_err(|e| {
             tracing::warn!("port-control: SNI conflict scan failed: {e}");
-            RESULT_HOSTNAME_TAKEN
+            RESULT_NO_RESOURCES
         })?;
         if conflicts {
             return Err(RESULT_HOSTNAME_TAKEN);
         }
+
+        let existing: std::collections::BTreeSet<_> = self
+            .sni
+            .snapshot()
+            .into_iter()
+            .filter(|route| {
+                route.ext_ip == *source.ip()
+                    && route.ext_port == port
+                    && route.target == target
+                    && hostnames.contains(&route.hostname)
+            })
+            .map(|route| route.hostname)
+            .collect();
         self.sni
             .register(*source.ip(), port, hostnames, target, lifetime)?;
+
+        if let Err(e) = self.sync_sni_rules().await {
+            let added: Vec<_> = hostnames
+                .iter()
+                .filter(|hostname| !existing.contains(*hostname))
+                .cloned()
+                .collect();
+            if !added.is_empty() {
+                self.sni.unregister(*source.ip(), port, &added, target);
+            }
+            if let Err(rollback) = self.sync_sni_rules().await {
+                tracing::warn!("port-control: rolling back SNI admission failed: {rollback}");
+            }
+            tracing::warn!("port-control: SNI admission failed: {e}");
+            return Err(RESULT_NO_RESOURCES);
+        }
+
         tracing::info!(
             "port-control: SNI route(s) {hostnames:?} on {source} -> {target} \
              (lease {lifetime:?}s)"
         );
-        // Best-effort: the demux routes regardless, and the sweep heals a
-        // missed rule within a minute.
-        self.sync_sni_rules().await;
         self.sync_sni_fallback(*source.ip()).await;
         Ok(())
     }
 
-    /// Keep the demux's remote-access fallback in step with the Remote Access
-    /// setting: while hostname routes share 443 — the one port both the demux
-    /// and the router's WAN UI can serve — no-SNI/unknown-SNI connections pipe
-    /// to the router's own UI listener, scoped to the same sources the
-    /// setting's firewall rules admit, so taking the port never breaks (or
-    /// widens) remote access. Registered on route add and a Remote Access
-    /// change, swept once a minute as the backstop (which also clears it once
-    /// the last 443 route expires).
+    async fn remove_sni_route(
+        &self,
+        source: SocketAddrV4,
+        target: SocketAddrV4,
+        hostnames: &[String],
+    ) {
+        let _serial = self.write_serial.lock().await;
+        self.sni
+            .unregister(*source.ip(), source.port(), hostnames, target);
+        if let Err(e) = self.sync_sni_rules().await {
+            tracing::warn!("port-control: reconciling SNI admission failed: {e}");
+        }
+        self.sync_sni_fallback(*source.ip()).await;
+    }
+
+    async fn remove_sni_routes_for_ips(&self, ips: &[String]) {
+        if ips.is_empty() {
+            return;
+        }
+        let routes: Vec<SniRoute> = self
+            .sni
+            .snapshot()
+            .into_iter()
+            .filter(|route| ips.iter().any(|ip| ip == &route.target.ip().to_string()))
+            .collect();
+        if routes.is_empty() {
+            return;
+        }
+        let _serial = self.write_serial.lock().await;
+        for route in &routes {
+            self.sni.unregister(
+                route.ext_ip,
+                route.ext_port,
+                std::slice::from_ref(&route.hostname),
+                route.target,
+            );
+        }
+        if let Err(e) = self.sync_sni_rules().await {
+            tracing::warn!("port-control: reconciling SNI admission failed: {e}");
+        }
+        let wans: std::collections::BTreeSet<Ipv4Addr> =
+            routes.iter().map(|route| route.ext_ip).collect();
+        for wan in wans {
+            self.sync_sni_fallback(wan).await;
+        }
+    }
+
+    pub(crate) async fn displace_sni_routes(&self, ranges: &[(u16, u16)]) {
+        let routes: Vec<SniRoute> = self
+            .sni
+            .snapshot()
+            .into_iter()
+            .filter(|route| {
+                ranges
+                    .iter()
+                    .any(|range| ranges_overlap(*range, (route.ext_port, route.ext_port)))
+            })
+            .collect();
+        if routes.is_empty() {
+            return;
+        }
+        let _serial = self.write_serial.lock().await;
+        for route in &routes {
+            self.sni.unregister(
+                route.ext_ip,
+                route.ext_port,
+                std::slice::from_ref(&route.hostname),
+                route.target,
+            );
+        }
+        if let Err(e) = self.sync_sni_rules().await {
+            tracing::warn!("port-control: reconciling SNI admission failed: {e}");
+        }
+        let wans: std::collections::BTreeSet<Ipv4Addr> =
+            routes.iter().map(|route| route.ext_ip).collect();
+        for wan in wans {
+            self.sync_sni_fallback(wan).await;
+        }
+    }
+
+    /// Mirrors Remote Access source policy for unknown SNI on port 443.
     pub(crate) async fn sync_sni_fallback(&self, wan: Ipv4Addr) {
         let has_443 = self
             .sni
@@ -811,10 +869,16 @@ impl PortControl {
                 Ok(crate::system::preferences(&cfgs["startwrt"])?.remote_access)
             })
             .await
-            .unwrap_or_else(|_| "default".to_string())
         };
         let ui = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 443);
-        match (has_443, remote_access_fallback_source(&mode, wan)) {
+        let source = match mode.as_ref() {
+            Ok(mode) => remote_access_fallback_source(Ok(mode), wan),
+            Err(e) => {
+                tracing::warn!("port-control: reading Remote Access preference failed: {e}");
+                remote_access_fallback_source(Err(()), wan)
+            }
+        };
+        match (has_443, source) {
             (true, Some(source)) => {
                 if let Err(code) = self.sni.register_local_fallback(wan, 443, ui, source) {
                     tracing::warn!("port-control: remote-access fallback on 443 refused ({code})");
@@ -824,29 +888,26 @@ impl PortControl {
         }
     }
 
-    /// Reconcile the `apf_sni_*` WAN-admit rules against the demux's live port
-    /// set, reloading the firewall when anything changed. Callers must hold
-    /// `write_serial`.
-    async fn sync_sni_rules(&self) {
-        let want: std::collections::BTreeSet<u16> = self
+    /// Reconciles WAN admission against the demux's live ports.
+    async fn sync_sni_rules(&self) -> Result<(), Error> {
+        let want = self
             .sni
             .snapshot()
             .into_iter()
-            .map(|r| r.ext_port)
+            .map(|route| route.ext_port)
             .collect();
-        let uci_root = self.uci_root.clone();
-        match uci_task(move || async move { reconcile_sni_rules_uci(&uci_root, want).await }).await
-        {
-            Ok(true) => self.reload_firewall(),
-            Ok(false) => {}
-            Err(e) => tracing::warn!("port-control: reconciling SNI admit rules failed: {e}"),
-        }
+        self.sync_sni_rules_to(want).await
     }
 
-    /// Sweep companion for the SNI dataplane: re-key live routes onto a changed
-    /// WAN address (backstop for the wan hotplug hook), then bring the admit
-    /// rules back in line with the live ports (heals a failed callback write,
-    /// an external edit, or a stale rule from before a daemon restart).
+    async fn sync_sni_rules_to(&self, want: std::collections::BTreeSet<u16>) -> Result<(), Error> {
+        let uci_root = self.uci_root.clone();
+        if uci_task(move || async move { reconcile_sni_rules_uci(&uci_root, want).await }).await? {
+            self.reload_firewall();
+        }
+        Ok(())
+    }
+
+    /// Re-keys routes and reconciles WAN admission.
     async fn sni_maintain(&self) {
         self.reap_unauthorized_sni_routes().await;
         let wan = self.wan_ipv4().await;
@@ -858,7 +919,9 @@ impl PortControl {
         }
         {
             let _serial = self.write_serial.lock().await;
-            self.sync_sni_rules().await;
+            if let Err(e) = self.sync_sni_rules().await {
+                tracing::warn!("port-control: reconciling SNI admission failed: {e}");
+            }
         }
         if let Some(ip) = wan {
             self.sync_sni_fallback(ip).await;
@@ -866,18 +929,16 @@ impl PortControl {
     }
 }
 
-/// [`SniDemux`] `on_change` body: a port's listener started or stopped —
-/// reconcile the admit rules against the live port set rather than acting on
-/// the edge itself, which makes the spawned callback idempotent and immune to
-/// reordering. Creation is additionally done inline in
-/// [`PortControl::add_sni_route`]; this is the expiry/teardown path.
+/// Reconciles live ports so reordered callbacks remain idempotent.
 async fn on_sni_change(pc: Arc<PortControl>, port: u16, active: bool) {
     tracing::debug!(
         "port-control: SNI listener on port {port} {}",
         if active { "started" } else { "stopped" }
     );
     let _serial = pc.write_serial.lock().await;
-    pc.sync_sni_rules().await;
+    if let Err(e) = pc.sync_sni_rules().await {
+        tracing::warn!("port-control: reconciling SNI admission failed: {e}");
+    }
 }
 
 /// Which interface a request physically arrived on, for the arrival-interface
@@ -933,7 +994,7 @@ fn arrival_matches(arrival: Arrival, neigh_iface: &str) -> bool {
 /// can't distinguish a PCP MAP from a UPnP AddPortMapping.
 struct Via {
     pc: Arc<PortControl>,
-    label: &'static str,
+    kind: &'static str,
     /// Interface the request arrived on, for the PCP arrival-interface check.
     arrival: Arrival,
 }
@@ -948,7 +1009,7 @@ impl GatewayBackend for Via {
         lifetime: Option<u32>,
     ) -> Result<(), u16> {
         self.pc
-            .add_forward_labeled(source, target, count, peer, lifetime, self.label)
+            .add_forward_for_kind(source, target, count, peer, lifetime, self.kind)
             .await
     }
 
@@ -980,15 +1041,10 @@ impl GatewayBackend for Via {
         self.pc.forwards_for(peer).await
     }
 
-    /// The ANNOUNCE capability marker is advertised and HOSTNAME-bound
-    /// mappings accepted; see the module doc's "SNI hostname routes".
     fn sni(&self) -> Option<&Arc<SniDemux>> {
         Some(&self.pc.sni)
     }
 
-    /// Overridden (vs the default demux-only registration) to gate admission
-    /// on this gateway's port ownership and to open the WAN firewall for the
-    /// listener; see [`PortControl::add_sni_route`].
     async fn add_sni_forward(
         &self,
         source: SocketAddrV4,
@@ -1000,14 +1056,18 @@ impl GatewayBackend for Via {
             .add_sni_route(source, target, hostnames, lifetime)
             .await
     }
+
+    async fn remove_sni_forward(
+        &self,
+        source: SocketAddrV4,
+        target: SocketAddrV4,
+        hostnames: &[String],
+    ) {
+        self.pc.remove_sni_route(source, target, hostnames).await
+    }
 }
 
-// ── UCI plumbing ──────────────────────────────────────────────
-
-/// Run !Send uciedit work from a Send context. uciedit's `Arena` is !Send, but
-/// `GatewayBackend` futures must be Send — so the closure's future runs to
-/// completion on a scratch current-thread runtime inside `spawn_blocking`
-/// (the same pattern as the daemon's setup-flash thread).
+/// Runs !Send uciedit work on a dedicated current-thread runtime.
 async fn uci_task<T, F, Fut>(f: F) -> Result<T, Error>
 where
     T: Send + 'static,
@@ -1025,9 +1085,7 @@ where
     .map_err(|e| Error::new(eyre!("uci task panicked: {e}"), ErrorKind::Filesystem))?
 }
 
-/// Section name for a device's forward at `external_port` — external because
-/// that's a mapping's identity in UPnP (and what conflicts are judged by), so
-/// one device can hold several external ports to the same internal port.
+/// Stable section key scoped by device and external port.
 fn section_name(mac: &str, external_port: u16) -> String {
     format!(
         "apf_{}_{}",
@@ -1036,12 +1094,7 @@ fn section_name(mac: &str, external_port: u16) -> String {
     )
 }
 
-/// How long to hold a forward for a client granted `lifetime` seconds — the
-/// schedule the protocol layer reported to the client, clamped so the sweep can
-/// always see it. `None` (a UPnP client asking for a *permanent* mapping) is
-/// granted [`MAX_LEASE`] rather than kept forever: an unattended router must
-/// not hold a WAN port open with nothing scheduled to close it, and a client
-/// that still wants the port renews long before a week is out.
+/// Clamps permanent and short requests to a sweepable finite lease.
 fn lease_for(lifetime: Option<u32>) -> Duration {
     lifetime
         .map(|s| Duration::from_secs(u64::from(s)))
@@ -1050,20 +1103,14 @@ fn lease_for(lifetime: Option<u32>) -> Duration {
         .min(MAX_LEASE)
 }
 
-/// An auto-forward section as the sweep sees it: enough to decide whether it
-/// has expired and whether it still points at its owner's address.
 struct AutoSection {
     name: String,
     mac: Option<String>,
     dest_ip: Option<String>,
 }
 
-/// The sections whose owner no longer holds the address they forward to —
-/// either the device was given a different one or its lease is gone, and in
-/// both cases the traffic would now land on some other host. A statically
-/// reserved address pins the forward regardless: nobody else can be given it.
-/// Sections missing their `_apf_mac`/`dest_ip` tags are left alone; there's
-/// nothing to check them against.
+/// Sections whose tagged owner no longer holds the destination address.
+/// Untagged sections are ignored.
 fn unbound_sections(
     sections: &[AutoSection],
     reserved: &HashMap<String, String>,
@@ -1083,16 +1130,13 @@ fn unbound_sections(
 }
 
 enum ApplyOutcome {
-    /// The external range is held by someone else (718 to the client).
     Conflict,
-    /// An identical forward already exists — renewal, nothing written.
     Unchanged,
-    /// Created or updated; the firewall needs a restart.
     Written,
 }
 
 fn desired_redirect(
-    label: &str,
+    kind: &str,
     mac: &str,
     zone: String,
     source: SocketAddrV4,
@@ -1100,12 +1144,10 @@ fn desired_redirect(
     count: u16,
 ) -> FirewallRedirect {
     FirewallRedirect {
-        name: format!("Auto forward ({label})"),
+        name: format!("Automatic port use ({kind})"),
         src: "wan".into(),
         dest: Some(zone),
         target: "DNAT".into(),
-        // The protocol cores are transport-agnostic (`add_forward` carries no
-        // protocol), matching the tunnel's both-transports forwards.
         proto: vec!["tcp".into(), "udp".into()],
         src_dport: Some(range_string(source.port(), count)),
         src_ip: None,
@@ -1114,40 +1156,25 @@ fn desired_redirect(
         enabled: Some("1".into()),
         _pp_id: None,
         _pp_mac: None,
-        _apf_label: Some(label.into()),
+        _apf_label: Some(kind.into()),
         _apf_mac: Some(mac.into()),
-        _pp_router_override: None,
+        _pp_wan_override: None,
     }
 }
 
-/// Whether `want` (a requested external range) overlaps a port the router
-/// itself answers on from the WAN. Auto forwards are always tcp+udp, so any
-/// transport overlap reserves the port.
-fn reserves_router_port(firewall: &uciedit::Config<'_>, want: (u16, u16)) -> bool {
-    !router_reserved_overlaps(firewall, want, true, true).is_empty()
+/// Whether the requested range overlaps a router-owned WAN port.
+fn reserves_wan_port(firewall: &uciedit::Config<'_>, want: (u16, u16)) -> bool {
+    !wan_reserved_overlaps(firewall, want, true, true).is_empty()
 }
 
-/// One overlapping WAN-input rule from [`router_reserved_overlaps`]: the
-/// rule's port spec, and whether the rule is an SNI-demux admit rule — i.e.
-/// the port's real holder is a device's hostname routes, not one of the
-/// router's own services. The distinction only changes what the confirm
-/// dialog tells the user; either way the port counts as router-reserved.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ReservedOverlap {
     pub ports: String,
-    pub sni: bool,
+    pub held_by_sni: bool,
 }
 
-/// The ports the router itself answers on from the WAN — input-chain rules
-/// (`src wan`, no `dest` zone, `ACCEPT`) — whose port range overlaps `want`
-/// over a requested transport (`tcp`/`udp`). Returns each overlapping rule's
-/// `dest_port` spec, deduped per kind. Reading the live rules rather than a
-/// hardcoded list means a port stops being reserved when its feature is
-/// turned off, and any future WAN-exposed service is covered without touching
-/// this code. IPv6-only rules are ignored — they share no port space with an
-/// IPv4 redirect. Transport matters: Remote Access (80/443/22) is TCP,
-/// WireGuard is UDP, so e.g. a UDP-only forward on 443 collides with nothing.
-pub(crate) fn router_reserved_overlaps(
+/// Enabled IPv4 WAN-input rules overlapping the requested ports and transports.
+pub(crate) fn wan_reserved_overlaps(
     firewall: &uciedit::Config<'_>,
     want: (u16, u16),
     tcp: bool,
@@ -1164,9 +1191,7 @@ pub(crate) fn router_reserved_overlaps(
         if rule.src != "wan" || rule.dest.is_some() || rule.family.as_deref() == Some("ipv6") {
             continue;
         }
-        // fw4's default proto for a rule is tcp+udp; "all"/"tcpudp" also match
-        // either transport. A rule reachable over neither requested transport
-        // (e.g. proto icmp) shares nothing with this forward.
+        // fw4 treats an empty protocol list as TCP and UDP.
         let (rule_tcp, rule_udp) = if rule.proto.is_empty() {
             (true, true)
         } else {
@@ -1185,22 +1210,22 @@ pub(crate) fn router_reserved_overlaps(
         let Some(spec) = rule.dest_port.as_deref() else {
             continue;
         };
-        let sni = rule._apf_label.as_deref() == Some(LABEL_SNI);
+        let held_by_sni = rule._apf_label.as_deref() == Some(KIND_SNI);
         if parse_port_range(spec).is_some_and(|range| ranges_overlap(want, range))
-            && !overlaps.iter().any(|p| p.ports == spec && p.sni == sni)
+            && !overlaps
+                .iter()
+                .any(|p| p.ports == spec && p.held_by_sni == held_by_sni)
         {
             overlaps.push(ReservedOverlap {
                 ports: spec.to_string(),
-                sni,
+                held_by_sni,
             });
         }
     }
     overlaps
 }
 
-/// Renewal detection: same external range, target, zone, and owner. The label
-/// is ignored so a PCP renewal of a UPnP-created forward (or vice versa)
-/// doesn't churn the config.
+/// Matches renewals across PCP and UPnP.
 fn redirect_matches(existing: &FirewallRedirect, desired: &FirewallRedirect) -> bool {
     existing.src_dport == desired.src_dport
         && existing.dest_port == desired.dest_port
@@ -1215,7 +1240,7 @@ fn redirect_matches(existing: &FirewallRedirect, desired: &FirewallRedirect) -> 
 async fn apply_forward_uci(
     uci_root: &Path,
     section: &str,
-    label: &str,
+    kind: &str,
     mac: &str,
     arp_iface: Option<&str>,
     source: SocketAddrV4,
@@ -1230,7 +1255,7 @@ async fn apply_forward_uci(
         let zone = arp_iface
             .and_then(|iface| crate::published_ports::zone_for_arp_iface(&cfgs, iface))
             .unwrap_or_else(|| "lan".into());
-        let desired = desired_redirect(label, mac, zone, source, target, count);
+        let desired = desired_redirect(kind, mac, zone, source, target, count);
 
         // Any *other* enabled WAN-ingress DNAT redirect overlapping the
         // requested external range blocks the mapping — manual published ports
@@ -1268,7 +1293,7 @@ async fn apply_forward_uci(
         // override — see `published_ports::set`). A protocol client can't be
         // asked, so refuse, as StartTunnel reserves the port its HTTP→HTTPS
         // redirect owns.
-        if reserves_router_port(&cfgs["firewall"], want) {
+        if reserves_wan_port(&cfgs["firewall"], want) {
             return Ok(ApplyOutcome::Conflict);
         }
         if let Some(ours) = &ours {
@@ -1328,53 +1353,43 @@ async fn remove_auto_sections(uci_root: &Path, names: &[String]) -> Result<usize
     }
 }
 
-// ── SNI admit rules ──────────────────────────────────────────────
-
-/// Section name of the WAN-input ACCEPT rule admitting the SNI listener on
-/// `port`.
 fn sni_section_name(port: u16) -> String {
     format!("apf_sni_{port}")
 }
 
-/// The WAN-input ACCEPT rule admitting the SNI-demux listener on `port`.
-/// tcp-only — the demux reads TLS ClientHellos. Its presence also makes
-/// [`router_reserved_overlaps`] count the port as router-held, which is what
-/// keeps plain forwards off a demuxed port.
 fn desired_sni_rule(port: u16) -> FirewallRule {
     FirewallRule {
         name: "SNI demux (hostname routes)".into(),
         src: "wan".into(),
-        // No dest zone: input chain — traffic terminates on the router.
         proto: vec!["tcp".into()],
         dest_port: Some(port.to_string()),
         target: FirewallTarget::ACCEPT,
+        family: Some("ipv4".into()),
         enabled: Some("1".into()),
-        _apf_label: Some(LABEL_SNI.into()),
+        _apf_label: Some(KIND_SNI.into()),
         ..Default::default()
     }
 }
 
-/// Which sources the remote-access fallback admits, mirroring exactly the
-/// firewall rules `apply_remote_access_config` writes for the mode: "always"
-/// is unscoped; "default" behind NAT (RFC1918 WAN — std's `is_private` matches
-/// `system::is_private_ipv4`) admits private sources only; a public WAN in
-/// "default", or "never", writes no WAN rules and so gets no fallback.
-fn remote_access_fallback_source(mode: &str, wan: Ipv4Addr) -> Option<FallbackSource> {
+/// Mirrors Remote Access firewall source policy.
+fn remote_access_fallback_source(mode: Result<&str, ()>, wan: Ipv4Addr) -> Option<FallbackSource> {
     match mode {
-        "always" => Some(FallbackSource::Any),
-        "default" if wan.is_private() => Some(FallbackSource::PrivateOnly),
+        Ok("always") => Some(FallbackSource::Any),
+        Ok("default") if wan.is_private() => Some(FallbackSource::PrivateOnly),
         _ => None,
     }
 }
 
-/// Whether tcp `port` is unavailable to the SNI demux: an enabled WAN-ingress
-/// DNAT redirect overlaps it (that traffic already goes wholesale to one
-/// device), or the router itself answers on it from the WAN (Remote Access,
-/// the VPN server — the demux's specific `(wan_ip, port)` bind would beat
-/// their wildcard binds and capture traffic it has no route for). The demux's
-/// own admit rules are excluded, so a second hostname on an already-demuxed
-/// port is not a self-conflict — and Remote Access's 443 rules are excluded
-/// in favor of the UI fallback (see `sync_sni_fallback`).
+fn protocols_include_tcp(protocols: &[String]) -> bool {
+    protocols.is_empty()
+        || protocols.iter().any(|protocol| {
+            protocol.eq_ignore_ascii_case("tcp")
+                || protocol.eq_ignore_ascii_case("all")
+                || protocol.eq_ignore_ascii_case("tcpudp")
+        })
+}
+
+/// Whether the TCP port is held by a DNAT or incompatible router service.
 fn sni_port_conflicts(firewall: &uciedit::Config<'_>, port: u16) -> bool {
     let want = (port, port);
     for sec in &firewall.sections {
@@ -1382,6 +1397,7 @@ fn sni_port_conflicts(firewall: &uciedit::Config<'_>, port: u16) -> bool {
             if r.target == "DNAT"
                 && r.enabled.as_deref() != Some("0")
                 && r.src == "wan"
+                && protocols_include_tcp(&r.proto)
                 && r.src_dport
                     .as_deref()
                     .and_then(parse_port_range)
@@ -1394,15 +1410,10 @@ fn sni_port_conflicts(firewall: &uciedit::Config<'_>, port: u16) -> bool {
         let Ok(rule) = sec.get::<FirewallRule>() else {
             continue;
         };
-        if rule._apf_label.as_deref() == Some(LABEL_SNI) {
+        if rule._apf_label.as_deref() == Some(KIND_SNI) {
             continue;
         }
-        // Remote Access's own 443 rules don't conflict: the daemon registers
-        // its web UI as the demuxed port's fallback with the same source
-        // scoping (see `sync_sni_fallback`), so remote access rides the shared
-        // port instead of losing it. Only 443 — the UI's TLS port — can do
-        // this: SSH (22) is server-speaks-first and the port-80 redirect is
-        // plain HTTP, neither of which an SNI peek can serve.
+        // Remote Access on 443 is served through the SNI fallback.
         if port == 443
             && (rule.name.starts_with(crate::system::REMOTE_RULE_PREFIX)
                 || sec
@@ -1417,14 +1428,7 @@ fn sni_port_conflicts(firewall: &uciedit::Config<'_>, port: u16) -> bool {
         if rule.src != "wan" || rule.dest.is_some() || rule.family.as_deref() == Some("ipv6") {
             continue;
         }
-        // Default proto is tcp+udp; only tcp reachability matters to the demux.
-        let tcp = rule.proto.is_empty()
-            || rule.proto.iter().any(|p| {
-                p.eq_ignore_ascii_case("tcp")
-                    || p.eq_ignore_ascii_case("all")
-                    || p.eq_ignore_ascii_case("tcpudp")
-            });
-        if !tcp {
+        if !protocols_include_tcp(&rule.proto) {
             continue;
         }
         if rule
@@ -1439,11 +1443,8 @@ fn sni_port_conflicts(firewall: &uciedit::Config<'_>, port: u16) -> bool {
     false
 }
 
-/// Make the set of `_apf_label 'SNI'` rules exactly match `want` (one rule per
-/// port): strays — a port no longer demuxed, a duplicate, an unparseable
-/// section — are removed, missing ports appended. Returns whether anything was
-/// written. `want = ∅` is the daemon-start purge (in-memory routes did not
-/// survive, so neither may the rules admitting them).
+/// Replaces SNI admission rules with one per requested port.
+/// Returns whether UCI changed.
 async fn reconcile_sni_rules_uci(
     uci_root: &Path,
     want: std::collections::BTreeSet<u16>,
@@ -1458,7 +1459,7 @@ async fn reconcile_sni_rules_uci(
             let Ok(rule) = sec.get::<FirewallRule>() else {
                 return true;
             };
-            if rule._apf_label.as_deref() != Some(LABEL_SNI) {
+            if rule._apf_label.as_deref() != Some(KIND_SNI) {
                 return true;
             }
             let port = rule
@@ -1489,8 +1490,6 @@ async fn reconcile_sni_rules_uci(
         }
     }
 }
-
-// ── Parsing helpers ──────────────────────────────────────────────
 
 /// "443" → (443, 443); "1000-1009" → (1000, 1009). None on garbage.
 pub(crate) fn parse_port_range(s: &str) -> Option<(u16, u16)> {
@@ -1538,7 +1537,6 @@ fn parse_neigh(neigh: &str, peer: Ipv4Addr) -> Option<(String, String)> {
         .map(|e| (e.mac, e.interface))
 }
 
-/// The uppercase MACs whose DHCP host entry grants automatic port forwarding.
 fn pcp_allowed_macs(
     dhcp: &uciedit::Config<'_>,
 ) -> Result<std::collections::HashSet<String>, Error> {
@@ -1551,9 +1549,8 @@ fn pcp_allowed_macs(
     Ok(allowed)
 }
 
-/// The routes among `routes` whose target address maps (via `ip_to_mac`) to a
-/// device outside `allowed`. An address that maps to no device is not
-/// evidence of anything, so its routes are kept.
+/// Unauthorized routes with identifiable owners.
+/// Unattributed routes are retained.
 fn unauthorized_sni_routes(
     routes: Vec<SniRoute>,
     ip_to_mac: &HashMap<String, String>,
@@ -1612,17 +1609,15 @@ fn device_uuid() -> String {
     format_uuid(&Sha256::digest(seed.as_bytes()))
 }
 
-// ── Listeners ──────────────────────────────────────────────
-
 /// Run all port-control servers for the life of the daemon. Each half
 /// self-restarts on error, and each runs in its own supervised task.
 pub async fn run(pc: Arc<PortControl>) {
-    // SNI routes are in-memory and did not survive the restart; drop any admit
-    // rules left behind so no port stays open with nothing routing it. Clients
-    // that still want their routes re-assert within their lease.
+    // In-memory routes do not survive restart.
     {
         let _serial = pc.write_serial.lock().await;
-        pc.sync_sni_rules().await;
+        if let Err(e) = pc.sync_sni_rules().await {
+            tracing::warn!("port-control: purging SNI admission failed: {e}");
+        }
     }
     tokio::join!(
         supervise("PCP", pc.clone(), run_pcp),
@@ -1730,7 +1725,7 @@ async fn serve_pcp(pc: &Arc<PortControl>) -> Result<(), Error> {
         let socket = socket.clone();
         let via = Via {
             pc: pc.clone(),
-            label: LABEL_PCP,
+            kind: KIND_PCP,
             arrival,
         };
         tokio::spawn(async move {
@@ -1792,7 +1787,7 @@ async fn igd_control(
     }
     let via = Via {
         pc,
-        label: LABEL_UPNP,
+        kind: KIND_UPNP,
         // UPnP is TCP: the handshake proves the source address.
         arrival: Arrival::Unchecked,
     };
@@ -1886,15 +1881,13 @@ async fn run_sweep(pc: Arc<PortControl>) {
     }
 }
 
-// ── RPC handlers ──────────────────────────────────────────────
-
-/// One automatic (PCP/UPnP-created) forward, for the published-ports UI.
+/// One automatic port use for the published-ports UI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AutoForward {
+pub struct AutomaticPortUse {
     /// UCI section name (`apf_<mac>_<extport>`).
     pub id: String,
-    /// Which protocol created it ("PCP" or "UPnP").
-    pub label: String,
+    /// Which mechanism created it ("PCP", "UPnP", or "SNI").
+    pub kind: String,
     pub device_mac: String,
     pub device_name: Option<String>,
     /// Forward target address on the LAN.
@@ -1906,14 +1899,11 @@ pub struct AutoForward {
     /// Seconds until the lease expires if not renewed (None when the daemon
     /// isn't tracking it yet, e.g. right after boot).
     pub expires_secs: Option<u64>,
-    /// The TLS-SNI hostname, for an SNI hostname route (label "SNI") sharing
-    /// its external port with other hostnames. None for plain forwards.
+    /// Hostname for an SNI route; absent for plain forwards.
     pub hostname: Option<String>,
 }
 
-#[instrument(skip_all)]
-/// Device display names by uppercased MAC: UCI static host names win, cached
-/// learned names fill the gaps.
+/// Display names keyed by uppercase MAC; static UCI names take precedence.
 pub(crate) fn device_display_names(
     dhcp: &uciedit::Config<'_>,
 ) -> Result<HashMap<String, String>, Error> {
@@ -1929,9 +1919,7 @@ pub(crate) fn device_display_names(
     Ok(names)
 }
 
-/// LAN IPv4 → uppercased MAC: live DHCP leases, overridden by static
-/// reservations (the reservation is where the device is supposed to be, so it
-/// wins on disagreement).
+/// LAN IPv4 to uppercase MAC; static reservations override live leases.
 pub(crate) async fn ip_to_mac_map(
     dhcp: &uciedit::Config<'_>,
 ) -> Result<HashMap<String, String>, Error> {
@@ -1949,11 +1937,8 @@ pub(crate) async fn ip_to_mac_map(
     Ok(ip_to_mac)
 }
 
-/// The hostname routes whose external port overlaps `want`, for naming a
-/// port's holder in the router-port confirm dialog: the routed hostnames and
-/// the owning devices' display names (name, else MAC; an unresolvable target
-/// is skipped), each deduped and sorted. Informational only, so lookup
-/// failures degrade to empty lists rather than failing the caller.
+/// Sorted hostname and device labels for routes overlapping the requested range.
+/// Lookup failures produce empty labels.
 pub(crate) async fn sni_route_holders(
     dhcp: &uciedit::Config<'_>,
     want: (u16, u16),
@@ -1984,7 +1969,8 @@ pub(crate) async fn sni_route_holders(
     (hostnames, devices)
 }
 
-pub async fn auto_list(ctx: ServerContext) -> Result<Vec<AutoForward>, Error> {
+#[instrument(skip_all)]
+pub async fn auto_list(ctx: ServerContext) -> Result<Vec<AutomaticPortUse>, Error> {
     let uci_root = ctx.uci_root();
     let arena = Arena::new();
     let cfgs = parse_all(&uci_root, &arena, &["firewall", "dhcp"]).await?;
@@ -1996,16 +1982,16 @@ pub async fn auto_list(ctx: ServerContext) -> Result<Vec<AutoForward>, Error> {
         let Ok(r) = sec.get::<FirewallRedirect>() else {
             continue;
         };
-        let Some(label) = r._apf_label.clone() else {
+        let Some(kind) = r._apf_label.clone() else {
             continue;
         };
         let id = sec.name().unwrap_or_default().to_string();
         let device_mac = r._apf_mac.clone().unwrap_or_default().to_uppercase();
-        out.push(AutoForward {
+        out.push(AutomaticPortUse {
             expires_secs: PORT_CONTROL.get().and_then(|pc| pc.lease_remaining(&id)),
             device_name: names.get(&device_mac).cloned(),
             id,
-            label,
+            kind,
             device_mac,
             internal_ip: r.dest_ip.clone(),
             ports: r.dest_port.clone().unwrap_or_default(),
@@ -2014,17 +2000,14 @@ pub async fn auto_list(ctx: ServerContext) -> Result<Vec<AutoForward>, Error> {
         });
     }
 
-    // SNI hostname routes live in the demux, not UCI — one row per hostname.
-    // The owning device is whoever holds the target address: a static
-    // reservation first, then the live DHCP lease.
     if let Some(pc) = PORT_CONTROL.get() {
         let ip_to_mac = ip_to_mac_map(&cfgs["dhcp"]).await?;
         for route in pc.sni.snapshot() {
             let target_ip = route.target.ip().to_string();
             let device_mac = ip_to_mac.get(&target_ip).cloned().unwrap_or_default();
-            out.push(AutoForward {
+            out.push(AutomaticPortUse {
                 id: format!("sni_{}_{}", route.ext_port, route.hostname),
-                label: LABEL_SNI.into(),
+                kind: KIND_SNI.into(),
                 device_name: names.get(&device_mac).cloned(),
                 device_mac,
                 internal_ip: Some(target_ip),
@@ -2038,9 +2021,7 @@ pub async fn auto_list(ctx: ServerContext) -> Result<Vec<AutoForward>, Error> {
     Ok(out)
 }
 
-/// Hidden: the wan hotplug hook. The WAN IPv4 may have changed — re-key live
-/// SNI routes onto it immediately rather than waiting for the sweep's
-/// once-a-minute backstop. Runs in the daemon (the demux is daemon memory).
+/// Re-keys live SNI routes after a WAN address change.
 #[instrument(skip_all)]
 pub async fn wan_changed(ctx: ServerContext) -> Result<Value, Error> {
     if !ctx.effectful() {
@@ -2054,21 +2035,18 @@ pub async fn wan_changed(ctx: ServerContext) -> Result<Value, Error> {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct SetAutoForwardReq {
+pub struct SetAutoForwardRequest {
     pub mac: String,
     pub allow: bool,
 }
 
-/// Set a device's "may auto-create port forwards" toggle (default off). Stored
-/// on the device's DHCP host entry so it survives sysupgrade with the rest of
-/// the device config.
+/// Changes a device's default-off automatic port-use permission.
 #[instrument(skip_all)]
 pub async fn set_auto_forward<C: CtrlContext>(
     ctx: C,
-    DeserializeStdin(req): DeserializeStdin<SetAutoForwardReq>,
+    DeserializeStdin(req): DeserializeStdin<SetAutoForwardRequest>,
 ) -> Result<(), Error> {
-    // A bad MAC would otherwise be written into a new `config host` section
-    // that dnsmasq may refuse to load — taking the rest of the file with it.
+    // Reject malformed UCI host identifiers.
     if !crate::published_ports::validate_mac(&req.mac) {
         return Err(Error::new(
             eyre!("invalid mac: {}", req.mac),
@@ -2080,7 +2058,7 @@ pub async fn set_auto_forward<C: CtrlContext>(
     let written =
         crate::devices::upsert_dhcp_host(&ctx.uci_root(), &req.mac, move |host, existed| {
             if !existed && !allow {
-                return false; // nothing to do: absent = denied
+                return false;
             }
             host._allow_pcp = allow.then(|| "1".to_string());
             true
@@ -2107,15 +2085,12 @@ pub async fn set_auto_forward<C: CtrlContext>(
             ),
             None,
         );
-        // The write may have created the device's host section; dnsmasq owns
-        // that file, so let it re-read rather than pick the change up at some
-        // arbitrary later reload.
+        // The write may create a host section that dnsmasq must reload.
         if ctx.effectful() {
             crate::devices::reload_dnsmasq();
         }
-        // Apply immediately: drop cached (un)authorization results.
         if !allow {
-            close_device_forwards(&req.mac).await;
+            close_device_forwards(&req.mac, &[]).await;
         } else if let Some(pc) = PORT_CONTROL.get() {
             pc.invalidate_clients();
         }
@@ -2123,21 +2098,15 @@ pub async fn set_auto_forward<C: CtrlContext>(
     Ok(())
 }
 
-/// Close every automatic forward and hostname route owned by `mac` and drop
-/// its cached authorization. Called wherever a device loses the permission
-/// that created them — the per-device toggle going off, or the device being
-/// forgotten outright. Without it the ports outlive the authorization by up to
-/// [`MAX_LEASE`], and the user's only control over an automatic forward
-/// wouldn't take effect for as much as a week. The client discovers the loss on
-/// its next refresh and stops re-asserting, since it is no longer authorized.
-///
-/// A no-op outside daemon mode, where [`PORT_CONTROL`] is unset.
-pub(crate) async fn close_device_forwards(mac: &str) {
+/// Revokes a device's automatic forwards and cached authorization.
+/// No-op outside daemon mode.
+pub(crate) async fn close_device_forwards(mac: &str, known_ips: &[String]) {
     let Some(pc) = PORT_CONTROL.get() else {
         return;
     };
     pc.invalidate_clients();
     pc.remove_client_forwards(mac, |_| true).await;
+    pc.remove_sni_routes_for_ips(known_ips).await;
     pc.reap_unauthorized_sni_routes().await;
 }
 
@@ -2241,7 +2210,7 @@ config redirect 'pp_a'
         let outcome = apply_forward_uci(
             dir.path(),
             "apf_aabbccddeeff_8443",
-            LABEL_PCP,
+            KIND_PCP,
             "AA:BB:CC:DD:EE:FF",
             Some("br-lan"),
             source,
@@ -2262,7 +2231,7 @@ config redirect 'pp_a'
         let outcome = apply_forward_uci(
             dir.path(),
             "apf_aabbccddeeff_8443",
-            LABEL_PCP,
+            KIND_PCP,
             "AA:BB:CC:DD:EE:FF",
             Some("br-lan"),
             source,
@@ -2280,7 +2249,7 @@ config redirect 'pp_a'
         let outcome = apply_forward_uci(
             dir.path(),
             "apf_aabbccddeeff_8443",
-            LABEL_PCP,
+            KIND_PCP,
             "AA:BB:CC:DD:EE:FF",
             Some("br-lan"),
             source,
@@ -2303,7 +2272,7 @@ config redirect 'pp_a'
         let outcome = apply_forward_uci(
             dir.path(),
             "apf_112233445566_443",
-            LABEL_UPNP,
+            KIND_UPNP,
             "11:22:33:44:55:66",
             Some("br-lan"),
             source,
@@ -2374,7 +2343,7 @@ config rule 'wan_to_lan'
         apply_forward_uci(
             dir.path(),
             &section_name("11:22:33:44:55:66", port),
-            LABEL_PCP,
+            KIND_PCP,
             "11:22:33:44:55:66",
             Some("br-lan"),
             SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), port),
@@ -2452,7 +2421,7 @@ config rule 'wan_to_lan'
         let outcome = apply_forward_uci(
             dir.path(),
             "apf_112233445566_440",
-            LABEL_PCP,
+            KIND_PCP,
             "11:22:33:44:55:66",
             Some("br-lan"),
             source,
@@ -2468,7 +2437,7 @@ config rule 'wan_to_lan'
         let outcome = apply_forward_uci(
             dir.path(),
             "apf_112233445566_450",
-            LABEL_PCP,
+            KIND_PCP,
             "11:22:33:44:55:66",
             Some("br-lan"),
             source,
@@ -2495,7 +2464,7 @@ config rule 'wan_to_lan'
             let outcome = apply_forward_uci(
                 dir.path(),
                 &section_name("AA:BB:CC:DD:EE:FF", ext),
-                LABEL_UPNP,
+                KIND_UPNP,
                 "AA:BB:CC:DD:EE:FF",
                 Some("br-lan"),
                 source,
@@ -2533,7 +2502,7 @@ config redirect 'dns_override_lan'
         let outcome = apply_forward_uci(
             dir.path(),
             &section_name("AA:BB:CC:DD:EE:FF", 53),
-            LABEL_PCP,
+            KIND_PCP,
             "AA:BB:CC:DD:EE:FF",
             Some("br-lan"),
             source,
@@ -2553,7 +2522,7 @@ config redirect 'dns_override_lan'
         apply_forward_uci(
             dir.path(),
             "apf_aabbccddeeff_8443",
-            LABEL_PCP,
+            KIND_PCP,
             "AA:BB:CC:DD:EE:FF",
             Some("br-lan"),
             source,
@@ -2598,7 +2567,7 @@ config redirect 'dns_override_lan'
         apply_forward_uci(
             dir.path(),
             "apf_aabbccddeeff_8443",
-            LABEL_PCP,
+            KIND_PCP,
             "AA:BB:CC:DD:EE:FF",
             Some("br-lan"),
             source,
@@ -2612,7 +2581,7 @@ config redirect 'dns_override_lan'
         apply_forward_uci(
             dir.path(),
             "apf_112233445566_9000",
-            LABEL_UPNP,
+            KIND_UPNP,
             "11:22:33:44:55:66",
             Some("br-lan"),
             other_source,
@@ -2672,8 +2641,6 @@ config redirect 'dns_override_lan'
         assert!(!arrival_matches(Arrival::Indeterminate, "lo"));
     }
 
-    // ── SNI hostname routes ──
-
     #[tokio::test]
     async fn sni_route_registers_and_admits_inline() {
         let dir = temp_root("");
@@ -2689,17 +2656,14 @@ config redirect 'dns_override_lan'
         assert_eq!(snap[0].hostname, "nas.example.com");
         assert_eq!(snap[0].target, target);
 
-        // The WAN-admit rule is written inline with registration (under the
-        // write lock), not deferred to the spawned callback.
         let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
         assert!(written.contains("config rule apf_sni_8443"));
         assert!(written.contains("option _apf_label 'SNI'"));
         assert!(written.contains("option dest_port '8443'"));
         assert!(written.contains("option target 'ACCEPT'"));
+        assert!(written.contains("option family 'ipv4'"));
         assert!(written.contains("list proto 'tcp'"));
 
-        // A second hostname on the same port is the point of the demux, not a
-        // conflict — and the port still has exactly one admit rule.
         let target2 = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 51), 443);
         pc.add_sni_route(
             source,
@@ -2714,10 +2678,6 @@ config redirect 'dns_override_lan'
         assert_eq!(written.matches("apf_sni_8443").count(), 1);
     }
 
-    // Revocation is enforced by re-deriving each route's owner from the
-    // address it targets: a device that lost the permission loses its routes,
-    // a device that still holds it keeps them, and an address no device can be
-    // attributed to is left to its lease.
     #[tokio::test]
     async fn sni_routes_follow_the_permission() {
         let dir = temp_root("");
@@ -2752,11 +2712,9 @@ config host
         }
         assert_eq!(pc.sni.snapshot().len(), 3);
 
-        // Everyone still authorized: nothing moves.
         pc.reap_unauthorized_sni_routes().await;
         assert_eq!(pc.sni.snapshot().len(), 3);
 
-        // A loses the permission the way the toggle revokes it.
         std::fs::write(
             dir.path().join("dhcp"),
             "\
@@ -2775,14 +2733,9 @@ config host
         let left: Vec<String> = pc.sni.snapshot().into_iter().map(|r| r.hostname).collect();
         assert_eq!(left, vec!["b.example.com", "c.example.com"]);
 
-        // The port still has holders, so its admit rule stays.
         let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
         assert!(written.contains("config rule apf_sni_8443"));
 
-        // Forgetting B drops its host entry outright. With no lease or
-        // neighbor entry left to attribute its address to anything, B's route
-        // is now — like the stray's — evidence of nothing, and both are left
-        // to their leases rather than reaped on a guess.
         std::fs::write(
             dir.path().join("dhcp"),
             "\
@@ -2827,7 +2780,6 @@ config host
 
     #[tokio::test]
     async fn sni_route_refused_on_owned_ports() {
-        // A DNAT'd port already sends its traffic wholesale to one device.
         let dir = temp_root(MANUAL_FW);
         let pc = PortControl::new(dir.path().to_path_buf());
         let source = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), 443);
@@ -2842,9 +2794,6 @@ config host
             "nothing registered on refusal"
         );
 
-        // A non-443 port the router answers on itself (Remote Access SSH):
-        // still refused — SSH is server-speaks-first, so it can't ride the
-        // demux's fallback the way the 443 UI does.
         let dir = temp_root(ROUTER_FW);
         let pc = PortControl::new(dir.path().to_path_buf());
         let ssh = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), 22);
@@ -2859,7 +2808,6 @@ config host
             .unwrap_err();
         assert_eq!(err, RESULT_HOSTNAME_TAKEN);
 
-        // ...but a UDP-only router port (WireGuard) shares nothing with TLS.
         let wg = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), 51820);
         pc.add_sni_route(
             wg,
@@ -2871,9 +2819,6 @@ config host
         .unwrap();
     }
 
-    // Remote Access's own rules stop conflicting exactly on 443 — the port
-    // whose traffic the UI fallback can serve — while every other
-    // router-answered or forwarded port keeps refusing.
     #[tokio::test]
     async fn remote_access_coexists_on_443_only() {
         let dir = temp_root(ROUTER_FW);
@@ -2895,26 +2840,51 @@ config host
         );
     }
 
-    // The fallback's source scoping mirrors apply_remote_access_config's rule
-    // emission case-for-case.
+    #[tokio::test]
+    async fn udp_dnat_does_not_block_sni() {
+        let dir = temp_root(
+            "config redirect\n\
+             \toption src 'wan'\n\
+             \toption target 'DNAT'\n\
+             \tlist proto 'udp'\n\
+             \toption src_dport '8443'\n\
+             \toption dest_port '8443'\n\
+             \toption dest_ip '192.168.1.50'\n",
+        );
+        let pc = PortControl::new(dir.path().to_path_buf());
+        pc.add_sni_route(
+            SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), 8443),
+            SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 60), 8443),
+            &["tcp.example.com".to_string()],
+            Some(3600),
+        )
+        .await
+        .unwrap();
+    }
+
     #[test]
     fn fallback_source_mirrors_remote_access_modes() {
         let private_wan = Ipv4Addr::new(192, 168, 10, 92);
         let public_wan = Ipv4Addr::new(203, 0, 113, 7);
         assert_eq!(
-            remote_access_fallback_source("default", private_wan),
+            remote_access_fallback_source(Ok("default"), private_wan),
             Some(FallbackSource::PrivateOnly)
         );
-        assert_eq!(remote_access_fallback_source("default", public_wan), None);
         assert_eq!(
-            remote_access_fallback_source("always", public_wan),
+            remote_access_fallback_source(Ok("default"), public_wan),
+            None
+        );
+        assert_eq!(
+            remote_access_fallback_source(Ok("always"), public_wan),
             Some(FallbackSource::Any)
         );
-        assert_eq!(remote_access_fallback_source("never", private_wan), None);
+        assert_eq!(
+            remote_access_fallback_source(Ok("never"), private_wan),
+            None
+        );
+        assert_eq!(remote_access_fallback_source(Err(()), private_wan), None);
     }
 
-    // The admit rule makes a demuxed port read as router-held, so a plain auto
-    // forward can't DNAT it out from under its hostnames.
     #[tokio::test]
     async fn sni_admit_rule_reserves_the_port() {
         let dir = temp_root("");
@@ -2928,7 +2898,7 @@ config host
         let outcome = apply_forward_uci(
             dir.path(),
             &section_name("11:22:33:44:55:66", 8443),
-            LABEL_PCP,
+            KIND_PCP,
             "11:22:33:44:55:66",
             Some("br-lan"),
             source,
@@ -2941,7 +2911,7 @@ config host
     }
 
     #[tokio::test]
-    async fn sni_teardown_removes_the_admit_rule() {
+    async fn sni_teardown_removes_the_admit_rule_inline() {
         let dir = temp_root("");
         let pc = PortControl::new(dir.path().to_path_buf());
         let source = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), 8443);
@@ -2951,22 +2921,80 @@ config host
             .await
             .unwrap();
 
-        // Unregistering the last hostname reaps the listener; the demux's
-        // teardown callback (spawned) drops the admit rule.
-        pc.sni
-            .unregister(*source.ip(), source.port(), &hostnames, target);
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
-            if !written.contains("apf_sni_8443") {
-                break;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "teardown callback never removed the admit rule"
-            );
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        let via = Via {
+            pc: pc.clone(),
+            kind: KIND_PCP,
+            arrival: Arrival::Unchecked,
+        };
+        via.remove_sni_forward(source, target, &hostnames).await;
+
+        let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        assert!(!written.contains("apf_sni_8443"));
+    }
+
+    #[tokio::test]
+    async fn failed_sni_admission_preserves_an_existing_binding() {
+        let dir = temp_root("");
+        let pc = PortControl::new(dir.path().to_path_buf());
+        let source = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), 8443);
+        let target = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 50), 443);
+        let hostnames = vec!["nas.example.com".to_string()];
+        pc.add_sni_route(source, target, &hostnames, Some(3600))
+            .await
+            .unwrap();
+        std::fs::remove_file(dir.path().join("firewall")).unwrap();
+        std::fs::create_dir(dir.path().join("firewall")).unwrap();
+
+        assert!(pc
+            .add_sni_route(source, target, &hostnames, Some(3600))
+            .await
+            .is_err());
+        assert_eq!(pc.sni.snapshot().len(), 1);
+
+        let missing = temp_root("");
+        std::fs::remove_file(missing.path().join("firewall")).unwrap();
+        std::fs::create_dir(missing.path().join("firewall")).unwrap();
+        let fresh = PortControl::new(missing.path().to_path_buf());
+        assert!(fresh
+            .add_sni_route(source, target, &hostnames, Some(3600))
+            .await
+            .is_err());
+        assert!(fresh.sni.snapshot().is_empty());
+    }
+
+    #[tokio::test]
+    async fn manual_port_use_displaces_sni_routes() {
+        let dir = temp_root("");
+        let pc = PortControl::new(dir.path().to_path_buf());
+        let source = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), 8443);
+        let target = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 50), 443);
+        pc.add_sni_route(source, target, &["nas.example.com".to_string()], Some(3600))
+            .await
+            .unwrap();
+
+        pc.displace_sni_routes(&[(8443, 8443)]).await;
+
+        assert!(pc.sni.snapshot().is_empty());
+        let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        assert!(!written.contains("apf_sni_8443"));
+    }
+
+    #[tokio::test]
+    async fn removed_static_ip_identifies_offline_sni_routes() {
+        let dir = temp_root("");
+        let pc = PortControl::new(dir.path().to_path_buf());
+        let source = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), 8443);
+        let target = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 50), 443);
+        pc.add_sni_route(source, target, &["nas.example.com".to_string()], Some(3600))
+            .await
+            .unwrap();
+
+        pc.remove_sni_routes_for_ips(&["192.168.1.50".to_string()])
+            .await;
+
+        assert!(pc.sni.snapshot().is_empty());
+        let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        assert!(!written.contains("apf_sni_8443"));
     }
 
     #[tokio::test]
@@ -2974,8 +3002,6 @@ config host
         let dir = temp_root("");
         let pc = PortControl::new(dir.path().to_path_buf());
 
-        // A stale admit rule from a previous daemon life (its in-memory route
-        // did not survive) is purged; unrelated rules are untouched.
         std::fs::write(
             dir.path().join("firewall"),
             "config rule 'apf_sni_9443'\n\
@@ -3003,8 +3029,6 @@ config host
             "non-SNI rules survive the purge"
         );
 
-        // A live route whose admit rule went missing (failed write, external
-        // edit) is healed.
         let source = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), 8443);
         let target = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 50), 443);
         pc.add_sni_route(source, target, &["nas.example.com".to_string()], Some(3600))

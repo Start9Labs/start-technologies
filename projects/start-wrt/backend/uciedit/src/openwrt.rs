@@ -80,9 +80,7 @@ pub struct FirewallRule {
     /// Published-port metadata: device MAC
     #[uci(default)]
     pub _pp_mac: Option<String>,
-    /// Auto port-control metadata: marks a rule owned by the port-control
-    /// server ("SNI" on the WAN-input ACCEPT admitting an SNI-demux listener).
-    /// Mirrors [`FirewallRedirect::_apf_label`].
+    /// Port-control rule owner.
     #[uci(default)]
     pub _apf_label: Option<String>,
 }
@@ -124,7 +122,7 @@ pub struct FirewallRedirect {
     /// port the router itself answers on from the WAN (remote access, SSH,
     /// VPN), so later saves don't re-prompt for the same collision.
     #[uci(default)]
-    pub _pp_router_override: Option<String>,
+    pub _pp_wan_override: Option<String>,
 }
 
 #[derive(Debug, TypedSection)]

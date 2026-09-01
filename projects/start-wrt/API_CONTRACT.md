@@ -943,9 +943,9 @@ struct PublishedPort {
     ipv4_public_port: Option<String>,
     /// "any" or CIDR like "203.0.113.0/24"
     source: String,
-    /// The user confirmed capturing a port the router answers on itself (see
+    /// The user confirmed capturing a WAN port already in use (see
     /// `published-ports.set`); round-tripped so later saves don't re-prompt.
-    override_router_ports: bool,
+    override_wan_ports: bool,
     // --- Enriched by backend ---
     status: PublishedPortStatus,
     status_reason: Option<String>,
@@ -974,11 +974,11 @@ struct PublishedPortInput {
     ipv6: bool,
     ipv4_public_port: Option<String>,
     source: String,
-    /// Confirms forwarding a port the router itself answers on from the WAN
-    /// (persisted as `_pp_router_override` on the redirect and round-tripped
-    /// through `list`, so the confirmation is asked once per port).
+    /// Confirms forwarding a WAN port already used by a router service or
+    /// hostname route. Round-tripped through `list` so confirmation is asked
+    /// once per port.
     #[serde(default)]
-    override_router_ports: bool,
+    override_wan_ports: bool,
 }
 
 #[derive(Deserialize)]
@@ -987,15 +987,13 @@ struct PublishedPortsSetRequest {
 }
 
 #[derive(Serialize)]
-struct RouterPortCollision {
+struct WanPortCollision {
     id: String,
     label: String,
     /// The colliding router-service port spec(s), e.g. ["443", "22"].
-    router_ports: Vec<String>,
-    /// Colliding ports whose holder is a device's SNI hostname routes rather
-    /// than a router service — informational, so the dialog names the actual
-    /// use; the override semantics are the same.
-    sni_ports: Vec<SniPortUse>,
+    router_service_ports: Vec<String>,
+    /// Colliding ports held by hostname routes.
+    hostname_route_ports: Vec<SniPortUse>,
 }
 
 #[derive(Serialize)]
@@ -1009,28 +1007,26 @@ struct SniPortUse {
 
 #[derive(Serialize)]
 struct PublishedPortsSetResult {
-    pending_router_port_collisions: Vec<RouterPortCollision>,
+    pending_wan_port_collisions: Vec<WanPortCollision>,
 }
 // Backend: rebuilds firewall redirect+rule sections, resolves device IPs, restarts firewall
 ```
 
 The request is applied **unless** an enabled IPv4 forward without
-`override_router_ports` would capture a port the router itself answers on from
-the WAN — a live input-chain ACCEPT rule: Remote Access (80/443/22, including
+`override_wan_ports` would capture a port already in use on the WAN — a live input-chain ACCEPT rule: Remote Access (80/443/22, including
 "When behind NAT" mode whenever the WAN address is private) or the VPN
 server's listen port. nftables applies prerouting DNAT before the routing
 decision, so such a forward silently diverts those router services to the
 device (issue #3451). In that case nothing is applied and
-`pending_router_port_collisions` names the offending ports; the UI shows a
-confirmation dialog and re-saves with `override_router_ports: true` on the
-named ports. An empty list in the response means the request was applied.
+`pending_wan_port_collisions` names the offending ports; the UI shows a
+confirmation dialog and re-saves with `override_wan_ports: true` on the named
+ports. An empty list in the response means the request was applied.
 A colliding port whose WAN-input rule is an SNI-demux admit rule is reported
-under `sni_ports` instead of `router_ports`, with the routed hostnames and
-owning devices filled in from the live demux — the real holder is a device's
+under `hostname_route_ports` instead of `router_service_ports`, with the routed
+hostnames and owning devices filled in from the live demux — the real holder is a device's
 hostname routes, and the dialog names them rather than blaming the router.
-The split is informational only: the override works identically, and after an
-override the displaced hostname routes are refused at renewal and expire
-within their lease.
+The split is informational only: the override works identically and removes
+the displaced hostname routes when the manual rule is saved.
 Detection is transport-aware (Remote Access is TCP, WireGuard is UDP — a
 UDP-only forward on 443 collides with nothing) and skipped in configs-only
 mode (the CLI editor confirms implicitly, like `ethernet.set` / `wifi.set`).
@@ -1060,8 +1056,8 @@ serve as a last-resort reconcile fallback.
 
 ### `published-ports.auto-list`
 
-Automatic forwards created by authorized LAN devices themselves via PCP or UPnP
-IGD (the server half of StartOS's gateway autoconfiguration). Read-only from
+Automatic port uses created by authorized LAN devices themselves via PCP or
+UPnP IGD (the server half of StartOS's gateway autoconfiguration). Read-only from
 the UI: the requesting device creates, renews, and withdraws them; unrenewed
 forwards expire on the lifetime the protocol granted the client (the daemon
 sweeps leases every minute). Distinct from manual published ports — they never
@@ -1088,15 +1084,11 @@ leave the port open with nothing serving it.
 // Request: {}
 
 #[derive(Serialize)]
-struct AutoForward {
-    /// UCI section name (`apf_<mac>_<extport>`), stable per (device, external
-    /// port) — UPnP's mapping identity, so one device may hold several
-    /// external ports to the same internal port. SNI rows use the synthetic
-    /// `sni_<extport>_<hostname>` instead.
+struct AutomaticPortUse {
+    /// Stable per automatic port use.
     id: String,
-    /// Which protocol created it: "PCP" or "UPnP" — or "SNI" for a hostname
-    /// route (created over either protocol).
-    label: String,
+    /// "PCP", "UPnP", or "SNI" for a hostname route.
+    kind: String,
     /// May be empty on an SNI row whose target address matches no known device.
     device_mac: String,
     device_name: Option<String>,
@@ -1112,8 +1104,8 @@ struct AutoForward {
     /// TLS-SNI hostname for an SNI route; None for plain forwards.
     hostname: Option<String>,
 }
-// Response: Vec<AutoForward>
-// Backend: reads `_apf_*`-tagged firewall redirects plus the SNI demux's live
+// Response: Vec<AutomaticPortUse>
+// Backend: reads automatic firewall redirects plus the SNI demux's live
 // routes; names enriched from DHCP host entries and the persistent
 // device-name cache.
 ```
