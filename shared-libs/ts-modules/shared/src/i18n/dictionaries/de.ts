@@ -811,4 +811,9 @@ export default {
   918: 'Darf höchstens 32 Zeichen lang sein',
   919: 'Nur Kleinbuchstaben, Ziffern und Bindestriche',
   920: 'Darf nicht mit einem Bindestrich beginnen oder enden',
+  921: 'Verwendet für:',
+  922: 'Die Adresse Ihres Servers',
+  923: 'Die lokale Adresse jedes installierten Dienstes',
+  924: 'Der Browser-Tab und der Name der installierten App',
+  925: 'SSH und Systemprotokolle',
 } satisfies i18n

@@ -79,6 +79,12 @@ file tracks notable changes since the move to the monorepo.
   optional name and hostname. Setting it moves the `.local` address, where
   passing only a name used to change the label alone.
 
+- **Installing the StartOS UI as an app names it after your server.** Adding it
+  to a phone's home screen or installing it from a desktop browser labels it
+  with the server name in place of `StartOS`. An app installed before this
+  update, or before a rename, may keep the name it was installed with — remove
+  it and install it again to pick up the current one.
+
 - **The NVIDIA images now use NVIDIA's open kernel modules, which support GeForce
   RTX 20-series, Quadro RTX and newer.** This is what makes current cards work at
   all — an RTX 50-series, an RTX PRO 6000 or an NVIDIA GB10 can only be driven by

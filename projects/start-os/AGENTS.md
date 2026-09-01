@@ -66,6 +66,10 @@ monorepo-wide rules and [ARCHITECTURE.md](ARCHITECTURE.md) for how this product 
 - **Ask before destructive `make` recipes** — `update*`, `reflash`, `wormhole*`,
   image flashing, and `make clean*` consume hours/disk and may touch a live
   device.
+- **The UI's `manifest.webmanifest` is rewritten before it is served** —
+  `RpcContext`'s router replaces `name` and `short_name` with the server's
+  hostname. Keep it out of `ngsw-config.json`: an asset group makes the service
+  worker hash-check it against a body it never receives and drop out of service.
 - **The `beta` feature swaps the UI seed** (`patchdb-ui-seed.beta.json`) and
   forwards to `start-core`'s `beta` feature — keep both seeds in sync when you
   change seed shape.

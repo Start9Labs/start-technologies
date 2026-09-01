@@ -812,4 +812,9 @@ export const ENGLISH: Record<string, number> = {
   'Must be 32 characters or less': 918,
   'Lowercase letters, numbers, and hyphens only': 919,
   'Cannot start or end with a hyphen': 920,
+  'Used for:': 921,
+  'The address of your server': 922,
+  'The local address of every installed service': 923,
+  'The browser tab and the name of the installed app': 924,
+  'SSH and system logs': 925,
 }

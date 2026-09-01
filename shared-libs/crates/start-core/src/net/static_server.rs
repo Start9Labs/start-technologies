@@ -96,6 +96,16 @@ impl UiContext for RpcContext {
                     }
                 })
             })
+            .route("/manifest.webmanifest", {
+                let ctx = self.clone();
+                get(move || {
+                    let ctx = ctx.clone();
+                    async move {
+                        ctx.account
+                            .peek(|account| webmanifest_send(Self::ui_dir(), &account.hostname))
+                    }
+                })
+            })
             .route(
                 "/static/local-root-ca.mobileconfig",
                 get(move || {
@@ -455,6 +465,30 @@ pub fn bad_request() -> Response {
         .status(StatusCode::BAD_REQUEST)
         .body(Body::empty())
         .unwrap()
+}
+
+fn webmanifest_send(
+    ui_dir: &'static Dir<'static>,
+    hostname: &ServerHostname,
+) -> Result<Response, Error> {
+    let mut manifest: serde_json::Map<String, serde_json::Value> = serde_json::from_slice(
+        ui_dir
+            .get_file("manifest.webmanifest")
+            .or_not_found("manifest.webmanifest")?
+            .contents(),
+    )
+    .with_kind(ErrorKind::Deserialization)?;
+    manifest.insert("name".into(), hostname.as_ref().into());
+    manifest.insert("short_name".into(), hostname.as_ref().into());
+    let body = serde_json::to_vec(&manifest).with_kind(ErrorKind::Serialization)?;
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, "application/manifest+json")
+        .header(CACHE_CONTROL, "no-cache")
+        .header(CONTENT_LENGTH, body.len())
+        .body(Body::from(body))
+        .with_kind(ErrorKind::Network)
 }
 
 fn cert_send(cert: &X509, hostname: &ServerHostname) -> Result<Response, Error> {

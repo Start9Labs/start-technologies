@@ -811,4 +811,9 @@ export default {
   918: 'Debe tener 32 caracteres o menos',
   919: 'Solo letras minúsculas, números y guiones',
   920: 'No puede empezar ni terminar con un guion',
+  921: 'Se usa para:',
+  922: 'La dirección de su servidor',
+  923: 'La dirección local de cada servicio instalado',
+  924: 'La pestaña del navegador y el nombre de la aplicación instalada',
+  925: 'SSH y los registros del sistema',
 } satisfies i18n

@@ -811,4 +811,9 @@ export default {
   918: 'Może mieć maksymalnie 32 znaki',
   919: 'Tylko małe litery, cyfry i myślniki',
   920: 'Nie może zaczynać się ani kończyć myślnikiem',
+  921: 'Używana do:',
+  922: 'Adres Twojego serwera',
+  923: 'Lokalny adres każdej zainstalowanej usługi',
+  924: 'Karta przeglądarki i nazwa zainstalowanej aplikacji',
+  925: 'SSH i dzienniki systemowe',
 } satisfies i18n

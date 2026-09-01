@@ -811,4 +811,9 @@ export default {
   918: 'Doit comporter au maximum 32 caractères',
   919: 'Uniquement des lettres minuscules, des chiffres et des traits d’union',
   920: 'Ne peut pas commencer ni finir par un trait d’union',
+  921: 'Utilisé pour :',
+  922: 'L’adresse de votre serveur',
+  923: 'L’adresse locale de chaque service installé',
+  924: 'L’onglet du navigateur et le nom de l’application installée',
+  925: 'SSH et les journaux système',
 } satisfies i18n
