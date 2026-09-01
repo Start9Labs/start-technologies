@@ -381,7 +381,7 @@ fn reconcile_vhosts(
     current: &mut BTreeMap<VHostKey, (ProxyTarget, Arc<()>)>,
     desired: &mut BTreeMap<VHostKey, ProxyTarget>,
     mut add: impl FnMut(&VHostKey, ProxyTarget) -> Result<Arc<()>, Error>,
-    mut replace: impl FnMut(&VHostKey, (ProxyTarget, Arc<()>), ProxyTarget) -> Result<Arc<()>, Error>,
+    mut replace: impl FnMut(&VHostKey, &(ProxyTarget, Arc<()>), ProxyTarget) -> Result<Arc<()>, Error>,
     mut remove: impl FnMut(&VHostKey, (ProxyTarget, Arc<()>)),
 ) -> Result<(), Error> {
     let all = current
@@ -390,16 +390,25 @@ fn reconcile_vhosts(
         .cloned()
         .collect::<BTreeSet<_>>();
     for key in all {
-        let previous = current.remove(&key);
-        if let Some(target) = desired.remove(&key) {
-            let handle = match previous {
-                Some((previous, handle)) if previous == target => handle,
-                Some(previous) => replace(&key, previous, target.clone())?,
-                None => add(&key, target.clone())?,
-            };
-            current.insert(key, (target, handle));
-        } else if let Some(previous) = previous {
-            remove(&key, previous);
+        match (current.get(&key), desired.get(&key)) {
+            (Some((previous, _)), Some(target)) if previous == target => {
+                desired.remove(&key);
+            }
+            (Some(previous), Some(target)) => {
+                let handle = replace(&key, previous, target.clone())?;
+                let target = desired.remove(&key).unwrap();
+                current.insert(key, (target, handle));
+            }
+            (None, Some(target)) => {
+                let handle = add(&key, target.clone())?;
+                let target = desired.remove(&key).unwrap();
+                current.insert(key, (target, handle));
+            }
+            (Some(_), None) => {
+                let previous = current.remove(&key).unwrap();
+                remove(&key, previous);
+            }
+            (None, None) => unreachable!(),
         }
     }
     Ok(())
@@ -927,7 +936,10 @@ impl NetServiceData {
                 ctrl.vhost
                     .add(key.0.clone(), key.1, DynVHostTarget::new(target))
             },
-            |key, previous, target| ctrl.vhost.replace(key.0.clone(), key.1, previous, target),
+            |key, previous, target| {
+                ctrl.vhost
+                    .replace(key.0.clone(), key.1, (&previous.0, &previous.1), target)
+            },
             |key, (_, handle)| {
                 drop(handle);
                 ctrl.vhost.gc(key.0.clone(), key.1);
@@ -1851,7 +1863,7 @@ mod tests {
         let mut current =
             BTreeMap::from([(key.clone(), (original.clone(), original_handle.clone()))]);
         let mut desired = BTreeMap::from([(key.clone(), proxy_target(&["10.13.13.2"]))]);
-        let mut replaced_previous = None;
+        let mut replaced_previous = false;
 
         reconcile_vhosts(
             &mut current,
@@ -1859,7 +1871,7 @@ mod tests {
             |_, _| panic!("an existing route must be replaced"),
             |_, previous, target| {
                 assert!(Arc::ptr_eq(&previous.1, &original_handle));
-                replaced_previous = Some(previous);
+                replaced_previous = true;
                 assert!(VHostTarget::<VHostBindListener>::same_lifecycle(
                     &original, &target
                 ));
@@ -1868,7 +1880,7 @@ mod tests {
             |_, _| panic!("the route remains present"),
         )
         .unwrap();
-        assert!(replaced_previous.is_some());
+        assert!(replaced_previous);
         assert!(Arc::ptr_eq(&current[&key].1, &original_handle));
         assert_eq!(
             current[&key].0.private,
@@ -1909,6 +1921,45 @@ mod tests {
             .unwrap();
             assert!(!Arc::ptr_eq(&current[&key].1, &previous_handle));
         }
+    }
+
+    #[test]
+    fn vhost_reconciliation_keeps_the_failed_key_unchanged() {
+        let key = (None, 443, false);
+        let original = proxy_target(&["192.168.1.2"]);
+        let original_handle = Arc::new(());
+        let replacement = proxy_target(&["10.13.13.2"]);
+        let mut current =
+            BTreeMap::from([(key.clone(), (original.clone(), original_handle.clone()))]);
+        let mut desired = BTreeMap::from([(key.clone(), replacement.clone())]);
+
+        assert!(
+            reconcile_vhosts(
+                &mut current,
+                &mut desired,
+                |_, _| unreachable!(),
+                |_, _, _| Err(Error::new(eyre!("replace failed"), ErrorKind::Network)),
+                |_, _| unreachable!(),
+            )
+            .is_err()
+        );
+        assert_eq!(current[&key].0, original);
+        assert!(Arc::ptr_eq(&current[&key].1, &original_handle));
+        assert_eq!(desired[&key], replacement);
+
+        let mut current = BTreeMap::new();
+        assert!(
+            reconcile_vhosts(
+                &mut current,
+                &mut desired,
+                |_, _| Err(Error::new(eyre!("add failed"), ErrorKind::Network)),
+                |_, _, _| unreachable!(),
+                |_, _| unreachable!(),
+            )
+            .is_err()
+        );
+        assert!(current.is_empty());
+        assert_eq!(desired[&key], replacement);
     }
 
     #[test]

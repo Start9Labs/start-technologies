@@ -332,7 +332,7 @@ impl VHostController {
         &self,
         hostname: Option<InternedString>,
         external: u16,
-        previous: (ProxyTarget, Arc<()>),
+        previous: (&ProxyTarget, &Arc<()>),
         target: ProxyTarget,
     ) -> Result<Arc<()>, Error> {
         self.servers.mutate(|writable| {
@@ -341,7 +341,7 @@ impl VHostController {
                 .ok_or_else(|| Error::new(eyre!("VHost server is missing"), ErrorKind::Network))?;
             let rc = server.replace(
                 hostname.clone(),
-                (DynVHostTarget::new(previous.0), previous.1),
+                (DynVHostTarget::new(previous.0.clone()), previous.1),
                 DynVHostTarget::new(target),
                 self.max_proxy_conns_per_target,
             );
@@ -1685,26 +1685,18 @@ mod alpn_wire_format {
 
 #[derive(Debug, Clone)]
 pub struct TargetEntry {
-    owners: Vec<Weak<()>>,
+    owner: Weak<()>,
     ctx: ProxyContext,
 }
 impl TargetEntry {
     fn new(owner: Weak<()>, max_conns: usize) -> Self {
         Self {
-            owners: vec![owner],
+            owner,
             ctx: ProxyContext::new(max_conns),
         }
     }
     fn alive(&self) -> bool {
-        self.owners.iter().any(|owner| owner.strong_count() > 0)
-    }
-    fn remove_owner(&mut self, owner: &Arc<()>) -> bool {
-        self.owners.retain(|candidate| {
-            candidate
-                .upgrade()
-                .is_some_and(|candidate| !Arc::ptr_eq(&candidate, owner))
-        });
-        self.alive()
+        self.owner.strong_count() > 0
     }
 }
 
@@ -1726,18 +1718,21 @@ fn add_target<A: Accept + 'static>(
     max_conns: usize,
 ) -> (Arc<()>, bool) {
     let existing = targets.remove(&target);
-    let rc = Arc::new(());
-    let (entry, changed) = match existing {
-        Some(mut entry) if entry.alive() => {
-            entry.owners.retain(|owner| owner.strong_count() > 0);
-            entry.owners.push(Arc::downgrade(&rc));
-            (entry, false)
+    let (rc, entry, changed) = match existing {
+        Some(entry) => match entry.owner.upgrade() {
+            Some(owner) => (owner, entry, false),
+            None => {
+                entry.ctx.cancel.cancel();
+                let owner = Arc::new(());
+                let entry = TargetEntry::new(Arc::downgrade(&owner), max_conns);
+                (owner, entry, true)
+            }
+        },
+        None => {
+            let owner = Arc::new(());
+            let entry = TargetEntry::new(Arc::downgrade(&owner), max_conns);
+            (owner, entry, true)
         }
-        Some(entry) => {
-            entry.ctx.cancel.cancel();
-            (TargetEntry::new(Arc::downgrade(&rc), max_conns), true)
-        }
-        None => (TargetEntry::new(Arc::downgrade(&rc), max_conns), true),
     };
     cancel_dead(targets);
     targets.insert(target, entry);
@@ -1751,50 +1746,50 @@ fn replace_target<A: Accept + 'static>(
     target: DynVHostTarget<A>,
     max_conns: usize,
 ) -> Result<Arc<()>, Error> {
-    let mut previous_entry = targets.remove(&previous).ok_or_else(|| {
-        Error::new(
+    let previous_exists = targets
+        .get(&previous)
+        .and_then(|entry| entry.owner.upgrade())
+        .is_some_and(|owner| Arc::ptr_eq(&owner, previous_owner));
+    if !previous_exists {
+        return Err(Error::new(
             eyre!("Previous VHost target is missing"),
             ErrorKind::Network,
-        )
-    })?;
-    let previous_remains = previous_entry.remove_owner(previous_owner);
-    let rc = Arc::new(());
+        ));
+    }
     if previous == target {
-        previous_entry.owners.push(Arc::downgrade(&rc));
-        targets.insert(previous, previous_entry);
-        cancel_dead(targets);
-        return Ok(rc);
+        return Ok(previous_owner.clone());
     }
 
-    let same_lifecycle = previous.same_lifecycle(&target);
-    let mut reused_previous_context = false;
-    let entry = match targets.remove(&target) {
-        Some(mut entry) if entry.alive() => {
-            entry.owners.retain(|owner| owner.strong_count() > 0);
-            entry.owners.push(Arc::downgrade(&rc));
-            entry
+    let previous_remains = Arc::strong_count(previous_owner) > 1;
+    if let Some(owner) = targets.get(&target).and_then(|entry| entry.owner.upgrade()) {
+        if !previous_remains {
+            let previous_entry = targets.remove(&previous).unwrap();
+            previous_entry.ctx.cancel.cancel();
         }
-        Some(entry) => {
-            entry.ctx.cancel.cancel();
-            TargetEntry::new(Arc::downgrade(&rc), max_conns)
-        }
-        None if same_lifecycle && !previous_remains => {
-            reused_previous_context = true;
-            TargetEntry {
-                owners: vec![Arc::downgrade(&rc)],
-                ctx: previous_entry.ctx.clone(),
-            }
-        }
-        None => TargetEntry::new(Arc::downgrade(&rc), max_conns),
-    };
-    if previous_remains {
-        targets.insert(previous, previous_entry);
-    } else if !reused_previous_context {
-        previous_entry.ctx.cancel.cancel();
+        cancel_dead(targets);
+        return Ok(owner);
     }
+
+    if let Some(entry) = targets.remove(&target) {
+        entry.ctx.cancel.cancel();
+    }
+    let owner = Arc::new(());
+    let entry = if previous.same_lifecycle(&target) && !previous_remains {
+        let previous_entry = targets.remove(&previous).unwrap();
+        TargetEntry {
+            owner: Arc::downgrade(&owner),
+            ctx: previous_entry.ctx,
+        }
+    } else {
+        if !previous_remains {
+            let previous_entry = targets.remove(&previous).unwrap();
+            previous_entry.ctx.cancel.cancel();
+        }
+        TargetEntry::new(Arc::downgrade(&owner), max_conns)
+    };
     cancel_dead(targets);
     targets.insert(target, entry);
-    Ok(rc)
+    Ok(owner)
 }
 
 /// The [`Mapping`] key for a connection's SNI.
@@ -2159,6 +2154,12 @@ impl<A: Accept> VHostServer<A> {
         target: DynVHostTarget<A>,
         max_proxy_conns_per_target: usize,
     ) -> Result<Arc<()>, Error> {
+        if self.mapping.watcher_count() <= 1 {
+            return Err(Error::new(
+                eyre!("VHost Service Thread has exited"),
+                crate::ErrorKind::Network,
+            ));
+        }
         let target = target.into();
         let mut res = Ok(Arc::new(()));
         self.mapping.send_if_modified(|writable| {
@@ -2173,22 +2174,21 @@ impl<A: Accept> VHostServer<A> {
             }
             changed
         });
-        if self.mapping.watcher_count() > 1 {
-            res
-        } else {
-            Err(Error::new(
-                eyre!("VHost Service Thread has exited"),
-                crate::ErrorKind::Network,
-            ))
-        }
+        res
     }
     fn replace(
         &self,
         hostname: Option<InternedString>,
-        previous: (DynVHostTarget<A>, Arc<()>),
+        previous: (DynVHostTarget<A>, &Arc<()>),
         target: DynVHostTarget<A>,
         max_proxy_conns_per_target: usize,
     ) -> Result<Arc<()>, Error> {
+        if self.mapping.watcher_count() <= 1 {
+            return Err(Error::new(
+                eyre!("VHost Service Thread has exited"),
+                crate::ErrorKind::Network,
+            ));
+        }
         let mut res = Err(Error::new(
             eyre!("VHost replacement was not attempted"),
             ErrorKind::Network,
@@ -2198,7 +2198,7 @@ impl<A: Accept> VHostServer<A> {
             res = replace_target(
                 &mut targets,
                 previous.0,
-                &previous.1,
+                previous.1,
                 target,
                 max_proxy_conns_per_target,
             );
@@ -2210,14 +2210,7 @@ impl<A: Accept> VHostServer<A> {
                 false
             }
         });
-        if self.mapping.watcher_count() > 1 {
-            res
-        } else {
-            Err(Error::new(
-                eyre!("VHost Service Thread has exited"),
-                crate::ErrorKind::Network,
-            ))
-        }
+        res
     }
     fn gc(&self, hostname: Option<InternedString>) {
         self.mapping.send_if_modified(|writable| {
@@ -2292,7 +2285,7 @@ mod lifecycle_tests {
         assert!(private_changed);
         assert!(public_changed);
         assert_eq!(targets.len(), 2);
-        let private_cancel = targets.get(&private_before).unwrap().ctx.cancel.clone();
+        let private_ctx = targets.get(&private_before).unwrap().ctx.clone();
         let public_cancel = targets.get(&public).unwrap().ctx.cancel.clone();
 
         let replacement = replace_target(
@@ -2308,12 +2301,19 @@ mod lifecycle_tests {
         assert!(targets.contains_key(&private_after));
         assert!(targets.contains_key(&public));
         assert!(!Arc::ptr_eq(&private_handle, &replacement));
-        assert!(targets.get(&public).unwrap().owners.iter().any(|owner| {
-            owner
+        assert!(
+            targets
+                .get(&public)
+                .unwrap()
+                .owner
                 .upgrade()
                 .is_some_and(|owner| Arc::ptr_eq(&public_handle, &owner))
-        }));
-        assert!(!private_cancel.is_cancelled());
+        );
+        assert!(!private_ctx.cancel.is_cancelled());
+        assert!(Arc::ptr_eq(
+            &private_ctx.registry,
+            &targets.get(&private_after).unwrap().ctx.registry,
+        ));
         assert!(!public_cancel.is_cancelled());
     }
 
@@ -2326,6 +2326,7 @@ mod lifecycle_tests {
         let (replaced_owner, _) = add_target(&mut targets, before.clone(), 4);
         let (remaining_owner, changed) = add_target(&mut targets, before.clone(), 4);
         assert!(!changed);
+        assert!(Arc::ptr_eq(&replaced_owner, &remaining_owner));
         assert_eq!(targets.len(), 1);
 
         let replacement = replace_target(
@@ -2377,6 +2378,76 @@ mod lifecycle_tests {
         drop(replacement);
         cancel_dead(&mut targets);
         assert!(targets.is_empty());
+    }
+
+    #[test]
+    fn replacement_joins_an_existing_target() {
+        let before = DynVHostTarget::<VHostBindListener>::new(target(&["192.168.1.2"]));
+        let after = DynVHostTarget::<VHostBindListener>::new(target(&["10.13.13.2"]));
+        let mut targets = InOMap::new();
+
+        let (before_owner, _) = add_target(&mut targets, before.clone(), 4);
+        let before_cancel = targets.get(&before).unwrap().ctx.cancel.clone();
+        let (after_owner, _) = add_target(&mut targets, after.clone(), 4);
+        let after_registry = targets.get(&after).unwrap().ctx.registry.clone();
+
+        let replacement =
+            replace_target(&mut targets, before, &before_owner, after.clone(), 4).unwrap();
+
+        assert!(Arc::ptr_eq(&after_owner, &replacement));
+        assert!(before_cancel.is_cancelled());
+        assert_eq!(targets.len(), 1);
+        assert!(Arc::ptr_eq(
+            &after_registry,
+            &targets.get(&after).unwrap().ctx.registry,
+        ));
+    }
+
+    #[test]
+    fn a_dead_destination_does_not_prevent_lifecycle_transfer() {
+        let before = DynVHostTarget::<VHostBindListener>::new(target(&["192.168.1.2"]));
+        let after = DynVHostTarget::<VHostBindListener>::new(target(&["10.13.13.2"]));
+        let mut targets = InOMap::new();
+
+        let (owner, _) = add_target(&mut targets, before.clone(), 4);
+        let previous_ctx = targets.get(&before).unwrap().ctx.clone();
+        let stale_owner = Arc::new(());
+        targets.insert(
+            after.clone(),
+            TargetEntry::new(Arc::downgrade(&stale_owner), 4),
+        );
+        let stale_cancel = targets.get(&after).unwrap().ctx.cancel.clone();
+        drop(stale_owner);
+
+        let replacement = replace_target(&mut targets, before, &owner, after.clone(), 4).unwrap();
+
+        assert!(!Arc::ptr_eq(&owner, &replacement));
+        assert!(stale_cancel.is_cancelled());
+        assert!(!previous_ctx.cancel.is_cancelled());
+        assert!(Arc::ptr_eq(
+            &previous_ctx.registry,
+            &targets.get(&after).unwrap().ctx.registry,
+        ));
+    }
+
+    #[test]
+    fn a_missing_predecessor_leaves_targets_unchanged() {
+        let existing = DynVHostTarget::<VHostBindListener>::new(target(&["192.168.1.2"]));
+        let missing = DynVHostTarget::<VHostBindListener>::new(target(&["192.168.1.3"]));
+        let after = DynVHostTarget::<VHostBindListener>::new(target(&["10.13.13.2"]));
+        let mut targets = InOMap::new();
+
+        let (owner, _) = add_target(&mut targets, existing.clone(), 4);
+        let existing_ctx = targets.get(&existing).unwrap().ctx.clone();
+
+        assert!(replace_target(&mut targets, missing, &owner, after, 4).is_err());
+        assert_eq!(targets.len(), 1);
+        assert!(targets.contains_key(&existing));
+        assert!(!existing_ctx.cancel.is_cancelled());
+        assert!(Arc::ptr_eq(
+            &existing_ctx.registry,
+            &targets.get(&existing).unwrap().ctx.registry,
+        ));
     }
 
     #[test]
