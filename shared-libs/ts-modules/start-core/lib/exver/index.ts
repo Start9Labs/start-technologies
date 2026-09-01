@@ -834,11 +834,10 @@ export class VersionRange {
   }
 
   /**
-   * Whether one declared version satisfies the complete range.
+   * Whether the declared versions collectively satisfy the complete range.
    *
-   * A negated atomic range vetoes its branch when any declared version matches the same range
-   * without negation. `!=v` is evaluated as `!(=v)`.
-   * An empty release satisfies no range.
+   * A negated range passes only when no declared version satisfies its complete operand.
+   * `!=v` is evaluated as `!(=v)`. An empty release satisfies no range.
    */
   satisfiedByRelease(versions: ExtendedVersion[]): boolean {
     return this.releaseMatches(versions, false).some(Boolean)
@@ -848,38 +847,34 @@ export class VersionRange {
     versions: ExtendedVersion[],
     negated: boolean,
   ): boolean[] {
-    switch (this.atom.type) {
-      case 'And': {
-        const left = this.atom.left.releaseMatches(versions, negated)
-        const right = this.atom.right.releaseMatches(versions, negated)
-        return left.map((matched, i) =>
-          negated ? matched || right[i] : matched && right[i],
-        )
-      }
-      case 'Or': {
-        const left = this.atom.left.releaseMatches(versions, negated)
-        const right = this.atom.right.releaseMatches(versions, negated)
-        return left.map((matched, i) =>
-          negated ? matched && right[i] : matched || right[i],
-        )
-      }
-      case 'Not':
-        return this.atom.value.releaseMatches(versions, !negated)
-      case 'Anchor': {
-        const { operator, version } = this.atom
-        if (operator === '!=') {
-          return VersionRange.anchor('=', version).releaseMatches(
-            versions,
-            !negated,
-          )
-        }
-        break
-      }
+    if (this.atom.type === 'Not') {
+      return this.atom.value.releaseMatches(versions, !negated)
+    }
+    if (this.atom.type === 'Anchor' && this.atom.operator === '!=') {
+      return VersionRange.anchor('=', this.atom.version).releaseMatches(
+        versions,
+        !negated,
+      )
+    }
+    if (negated) {
+      const matched = versions.some(v => v.satisfies(this))
+      return versions.map(() => !matched)
     }
 
-    if (!negated) return versions.map(v => v.satisfies(this))
-    const matched = versions.some(v => v.satisfies(this))
-    return versions.map(() => !matched)
+    switch (this.atom.type) {
+      case 'And': {
+        const left = this.atom.left.releaseMatches(versions, false)
+        const right = this.atom.right.releaseMatches(versions, false)
+        return left.map((matched, i) => matched && right[i])
+      }
+      case 'Or': {
+        const left = this.atom.left.releaseMatches(versions, false)
+        const right = this.atom.right.releaseMatches(versions, false)
+        return left.map((matched, i) => matched || right[i])
+      }
+      default:
+        return versions.map(v => v.satisfies(this))
+    }
   }
 
   tables(): VersionRangeTables {

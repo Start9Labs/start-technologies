@@ -652,11 +652,10 @@ impl VersionRange {
         sat::Tables::and(sat::tables_of(self), sat::tables_of(other)).satisfiable()
     }
 
-    /// Whether one declared version satisfies the complete range.
+    /// Whether the declared versions collectively satisfy the complete range.
     ///
-    /// A negated atomic range vetoes its branch when any declared version matches the same range
-    /// without negation. `!=v` is evaluated as `!(=v)`.
-    /// An empty release satisfies no range.
+    /// A negated range passes only when no declared version satisfies its complete operand.
+    /// `!=v` is evaluated as `!(=v)`. An empty release satisfies no range.
     pub fn satisfied_by_release(&self, versions: &[ExtendedVersion]) -> bool {
         self.release_matches(versions, false)
             .into_iter()
@@ -666,30 +665,30 @@ impl VersionRange {
     fn release_matches(&self, versions: &[ExtendedVersion], negated: bool) -> Vec<bool> {
         use VersionRange::*;
         match (self, negated) {
-            (And(a, b), false) | (Or(a, b), true) => a
-                .release_matches(versions, negated)
-                .into_iter()
-                .zip(b.release_matches(versions, negated))
-                .map(|(a, b)| a && b)
-                .collect(),
-            (Or(a, b), false) | (And(a, b), true) => a
-                .release_matches(versions, negated)
-                .into_iter()
-                .zip(b.release_matches(versions, negated))
-                .map(|(a, b)| a || b)
-                .collect(),
             (Not(a), _) => a.release_matches(versions, !negated),
             (Anchor(op, v), _) if op == &NEQ => {
                 Self::Anchor(EQ, v.clone()).release_matches(versions, !negated)
             }
-            (_, false) => versions
-                .iter()
-                .map(|version| version.satisfies(self))
-                .collect(),
             (_, true) => {
                 let matched = versions.iter().any(|version| version.satisfies(self));
                 vec![!matched; versions.len()]
             }
+            (And(a, b), false) => a
+                .release_matches(versions, false)
+                .into_iter()
+                .zip(b.release_matches(versions, false))
+                .map(|(a, b)| a && b)
+                .collect(),
+            (Or(a, b), false) => a
+                .release_matches(versions, false)
+                .into_iter()
+                .zip(b.release_matches(versions, false))
+                .map(|(a, b)| a || b)
+                .collect(),
+            (_, false) => versions
+                .iter()
+                .map(|version| version.satisfies(self))
+                .collect(),
         }
     }
 }

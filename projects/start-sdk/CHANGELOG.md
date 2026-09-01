@@ -138,10 +138,11 @@
   while the throwing surface passed
 
 - **A dependency release is matched against `versionRange` as one set of declared versions.**
-  One installed or aliased version must satisfy a complete conjunction, while
-  `!=` and negated ranges exclude the release when any declared version matches.
-  `VersionRange.satisfiedByRelease` is the evaluator behind the SDK, dependency
-  warnings and marketplace, and `normalize()` preserves the same answer. Numeric
+  One installed or aliased version must satisfy a complete conjunction. `!=`
+  and negated ranges exclude the release when a declared version satisfies the
+  complete excluded range. `VersionRange.satisfiedByRelease` is the evaluator
+  behind the SDK, dependency warnings and marketplace, and `normalize()`
+  preserves the same answer. Numeric
   prerelease identifiers retain exact ordering and serialization beyond
   JavaScript's safe-integer limit
 

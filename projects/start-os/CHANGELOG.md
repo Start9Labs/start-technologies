@@ -353,9 +353,9 @@ file tracks notable changes since the move to the monorepo.
 
 - **Dependency releases satisfy one complete version-range branch.** A release
   may use an installed or aliased version, but one version must satisfy every
-  term in a conjunction, and an exclusion matching any declared version rules
-  out that branch. Dependency warnings, update checks and marketplace filtering
-  now agree on that evaluation.
+  term in a conjunction. An exclusion rules out its branch when a declared
+  version satisfies the complete excluded range. Dependency warnings, update
+  checks and marketplace filtering now agree on that evaluation.
 
 - **Versions of different flavors sort in a stable order.** Comparing across
   flavors produced no answer, so a list mixing Bitcoin Core with Bitcoin Knots

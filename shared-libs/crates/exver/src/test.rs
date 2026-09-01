@@ -432,18 +432,31 @@ fn release_range_vectors() {
         ("~1.2-beta", &["1.2:0"], true),
         ("~1.2-beta", &["1.3-alpha:0"], true),
         ("~1.2-beta", &["1.3-beta:0"], false),
-        ("!^1:0", &["0.5:0", "3:0"], false),
-        ("!~1.2:0", &["1.1:0", "1.3:0"], false),
+        ("!^1:0", &["0.5:0", "3:0"], true),
+        ("!~1.2:0", &["1.1:0", "1.3:0"], true),
         ("!(!^1:0)", &["0.5:0", "3:0"], false),
         (">=2:0 && <3:0", &["2.5:0", "4:0"], true),
+        (">=2:0 && <3:0", &["1:0", "4:0"], false),
         (">=2:0 && <2:0", &["2:0", "1:0"], false),
         (">=2:0 || <2:0", &["2:0", "1:0"], true),
-        ("!(>=2:0 && <2:0)", &["2:0", "1:0"], false),
+        ("<2:0 || >=3:0", &["2.5:0", "4:0"], true),
+        (
+            "(>=1:0 && <2:0) || (>=3:0 && <5:0)",
+            &["1.5:0", "4:0"],
+            true,
+        ),
+        ("!(>=2:0 && <3:0)", &["1:0", "4:0"], true),
+        ("!(>=2:0 && <3:0)", &["2.5:0", "4:0"], false),
+        ("!(>=2:0 && <3:0)", &["2.5:0"], false),
+        ("!(>=2:0 && <3:0)", &[], false),
+        ("!(>=2:0 && <2:0)", &["2:0", "1:0"], true),
         ("!(!>=2:0)", &["2:0", "1:0"], true),
         ("!(!>=2:0) && <2:0", &["2:0", "1:0"], false),
+        ("!(!(>=2:0 && <3:0))", &["1:0", "4:0"], false),
         ("!(!(>=2:0 && <3:0))", &["2.5:0", "4:0"], true),
         ("!(>=2:0 || <2:0)", &["2:0", "1:0"], false),
         ("!(!(!>=2:0))", &["2:0", "1:0"], false),
+        ("!(!=2.5:0)", &["2.5:0", "2.6:0"], true),
         ("!#knots && >=29.4:0", &["#knots:29.4:5", "29.4:5"], false),
         (">=2.0:0 && !=2.0:5", &["2.0:5", "2.0:4"], false),
         ("^28.4:21 && !=28.4:22", &["31.1:10", "28.4:21"], true),
@@ -461,6 +474,52 @@ fn release_range_vectors() {
             *expected,
             "{expression} against {versions:?}",
         );
+    }
+}
+
+#[test]
+fn raw_negations_preserve_complete_exclusions() {
+    let interval = range(">=2:0 && <3:0");
+    let exclusion = VersionRange::Not(Box::new(interval.clone()));
+    let double_negation = VersionRange::Not(Box::new(exclusion.clone()));
+    let inequality = VersionRange::Anchor(NEQ, "2.5:0".parse().unwrap());
+    let negated_inequality = VersionRange::Not(Box::new(inequality));
+
+    assert!(exclusion.satisfied_by_release(&release(&["1:0", "4:0"])));
+    assert!(!exclusion.satisfied_by_release(&release(&["2.5:0", "4:0"])));
+    assert!(!double_negation.satisfied_by_release(&release(&["1:0", "4:0"])));
+    assert!(double_negation.satisfied_by_release(&release(&["2.5:0", "4:0"])));
+    assert!(negated_inequality.satisfied_by_release(&release(&["2.5:0", "2.6:0"])));
+    assert!(!negated_inequality.satisfied_by_release(&release(&["2.6:0"])));
+}
+
+#[test]
+fn reduce_preserves_raw_release_rewrites() {
+    let interval = range(">=2:0 && <3:0");
+    let raw_ranges = [
+        VersionRange::And(Box::new(VersionRange::Any), Box::new(interval.clone())),
+        VersionRange::Or(Box::new(VersionRange::None), Box::new(interval.clone())),
+        VersionRange::Not(Box::new(VersionRange::Not(Box::new(interval)))),
+        VersionRange::Not(Box::new(VersionRange::Anchor(
+            NEQ,
+            "2.5:0".parse().unwrap(),
+        ))),
+    ];
+    let releases = [
+        release(&[]),
+        release(&["1:0", "4:0"]),
+        release(&["2.5:0", "4:0"]),
+        release(&["2.5:0", "2.6:0"]),
+    ];
+
+    for raw in raw_ranges {
+        for versions in &releases {
+            assert_eq!(
+                raw.satisfied_by_release(versions),
+                raw.clone().reduce().satisfied_by_release(versions),
+                "{raw} against {versions:?}",
+            );
+        }
     }
 }
 
