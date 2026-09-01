@@ -117,17 +117,6 @@ file tracks notable changes since the move to the monorepo.
   reply. The proxy now closes the client's half as soon as the service closes
   its own, which is the signal the client is waiting for.
 
-- **WebSocket-over-HTTP/2 is offered only when a service actually supports
-  it.** StartOS's reverse proxy used to tell the browser it was available even
-  when the service would reject it, leaving WebSockets broken against such
-  services. The proxy now mirrors what the service itself advertises, so the
-  browser falls back to its ordinary HTTP/1.1 route where needed.
-
-- **Responses in flight survive a service's HTTP/2 connection dying.** When a
-  service's HTTP/2 connection ended unexpectedly — its container restarting,
-  say — responses already on their way to the browser were cut off mid-flight;
-  they now finish instead.
-
 - Trim whitespace on form inputs.
 
 - **Marketplace search matches anywhere in a package's name, ID or
@@ -358,9 +347,9 @@ file tracks notable changes since the move to the monorepo.
   settled on HTTP/1.1, so StartOS wrote HTTP/1 requests onto a connection the
   service was reading as HTTP/2. StartOS now offers the client exactly the
   protocol the service chose, so both halves of the connection carry the same
-  one. A service whose HTTP/2 listener does not answer extended CONNECT
-  (RFC 8441) should advertise only `http/1.1`, which keeps WebSocket clients on
-  HTTP/1.1 where a WebSocket is an ordinary upgrade.
+  one. For HTTP/2, StartOS advertises WebSocket extended CONNECT when the
+  service includes support in its opening settings. If the service connection
+  ends, StartOS sends GOAWAY so the browser follows HTTP/2's orderly shutdown.
 
 ### Security
 
