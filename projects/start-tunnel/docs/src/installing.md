@@ -28,26 +28,22 @@ Rent a cheap VPS with a dedicated public IP. Minimum CPU, RAM, and disk are fine
 
 ### Network speed and monthly transfer
 
-A VPS plan may list both a network speed, such as 1 Gbps, and a monthly transfer allowance, such as 1 TB. Network speed limits throughput at any moment. The monthly allowance limits the total data the provider records during a billing period.
+Choose a network speed that supports the traffic you expect to send through StartTunnel. Monthly transfer rules vary by provider.
 
-StartTunnel relays data between two network legs: traffic enters the VPS from a public client or WireGuard peer and leaves toward the destination. This applies to published services, private connections between devices, and traffic sent through StartTunnel as an outbound gateway. Selecting StartTunnel as a StartOS system or per-service outbound gateway increases usage by sending that Internet traffic through the VPS; it does not create the two-leg behavior.
+Traffic routed through StartTunnel enters and leaves the VPS. Check how your provider counts transfer:
 
-Estimate the total uploads and downloads that StartTunnel will relay each month, then check how the VPS provider measures transfer:
+- If it counts only outbound transfer, plan for roughly your expected uploads plus downloads.
+- If it counts both inbound and outbound transfer, plan for roughly twice that amount.
 
-- If the provider counts only outbound transfer, it records approximately one copy of the relayed data.
-- If the provider adds inbound and outbound transfer together, it records approximately two copies.
+Leave extra capacity for network overhead. Selecting StartTunnel as a StartOS system or per-service [outbound gateway](/start-os/outbound-vpn.html) adds that Internet traffic to your estimate. Standard IPv4 device configurations leave unrelated Internet traffic on the device's normal connection.
 
-Leave additional capacity for WireGuard, IP, transport, and encryption overhead, acknowledgements, retransmissions, handshakes, and keepalives. The provider's dashboard is the authority for billable usage.
-
-Only traffic routed through StartTunnel belongs in this estimate. Standard StartTunnel IPv4 device configurations use split tunneling, so unrelated Internet traffic from those devices bypasses the VPS. A StartOS server sends Internet traffic through the VPS when StartTunnel is selected as its system or per-service [outbound gateway](/start-os/outbound-vpn.html). Devices with a [StartTunnel IPv6 address](ipv6.md#how-it-works) send all IPv6 traffic through the VPS.
-
-The provider's dashboard supplies the persistent monthly usage total and quota alerts. To compare current WireGuard activity by peer, connect to the VPS over SSH and run:
+Use your provider's dashboard to monitor monthly transfer. To compare current usage between WireGuard peers, connect to the VPS over SSH and run:
 
 ```sh
 wg show wg-start-tunnel
 ```
 
-The output has one peer section per device, identified by its WireGuard public key, with transfer received and sent from the VPS's perspective. These counters cover the WireGuard leg only and reset when the WireGuard interface is recreated. The provider calculates its total under its own ingress and egress policy and includes outer IP and UDP headers that these counters omit.
+The counters show data received and sent for each peer. They reset when the WireGuard interface is recreated, so they are not a monthly total.
 
 > [!IMPORTANT]
 > StartTunnel is designed to be the sole application on your VPS. The installer disables UFW and manages its own firewall rules via iptables. Do not run other Internet-facing services on the same VPS.
