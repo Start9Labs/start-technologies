@@ -18,13 +18,36 @@ Your public key will be at `~/.ssh/id_ed25519.pub`. You'll paste its contents in
 
 ## Get a VPS
 
-Rent a cheap VPS with a dedicated public IP. Minimum CPU/RAM/disk is fine. For bandwidth, no need to exceed your home Internet's upload speed.
+Rent a cheap VPS with a dedicated public IP. Minimum CPU, RAM, and disk are fine. Choose the network speed and monthly transfer allowance based on the traffic you expect StartTunnel to relay.
 
 ### Requirements
 
 - Debian 13
 - Root access
 - Dedicated public IPv4 address (required for publishing ports to the clearnet)
+
+### Network speed and monthly transfer
+
+A VPS plan may list both a network speed, such as 1 Gbps, and a monthly transfer allowance, such as 1 TB. Network speed limits throughput at any moment. The monthly allowance limits the total data the provider records during a billing period.
+
+StartTunnel relays data between two network legs: traffic enters the VPS from a public client or WireGuard peer and leaves toward the destination. This applies to published services, private connections between devices, and traffic sent through StartTunnel as an outbound gateway. Selecting StartTunnel as a StartOS system or per-service outbound gateway increases usage by sending that Internet traffic through the VPS; it does not create the two-leg behavior.
+
+Estimate the total uploads and downloads that StartTunnel will relay each month, then check how the VPS provider measures transfer:
+
+- If the provider counts only outbound transfer, it records approximately one copy of the relayed data.
+- If the provider adds inbound and outbound transfer together, it records approximately two copies.
+
+Leave additional capacity for WireGuard, IP, transport, and encryption overhead, acknowledgements, retransmissions, handshakes, and keepalives. The provider's dashboard is the authority for billable usage.
+
+Only traffic routed through StartTunnel belongs in this estimate. Standard StartTunnel IPv4 device configurations use split tunneling, so unrelated Internet traffic from those devices bypasses the VPS. A StartOS server sends Internet traffic through the VPS when StartTunnel is selected as its system or per-service [outbound gateway](/start-os/outbound-vpn.html). Devices with a [StartTunnel IPv6 address](ipv6.md#how-it-works) send all IPv6 traffic through the VPS.
+
+The provider's dashboard supplies the persistent monthly usage total and quota alerts. To compare current WireGuard activity by peer, connect to the VPS over SSH and run:
+
+```sh
+wg show wg-start-tunnel
+```
+
+The output has one peer section per device, identified by its WireGuard public key, with transfer received and sent from the VPS's perspective. These counters cover the WireGuard leg only and reset when the WireGuard interface is recreated. The provider calculates its total under its own ingress and egress policy and includes outer IP and UDP headers that these counters omit.
 
 > [!IMPORTANT]
 > StartTunnel is designed to be the sole application on your VPS. The installer disables UFW and manages its own firewall rules via iptables. Do not run other Internet-facing services on the same VPS.
