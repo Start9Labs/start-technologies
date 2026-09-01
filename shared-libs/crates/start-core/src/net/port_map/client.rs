@@ -386,6 +386,30 @@ impl PortMapController {
     }
 }
 
+/// Gateway-reported external address of the active TCP mapping on
+/// `external_port`, kept only where the public Internet can reach it.
+fn external_ip_of(active: &BTreeMap<MappingKey, Active>, external_port: u16) -> Option<IpAddr> {
+    active
+        .iter()
+        .find(|(k, _)| k.1 == external_port && k.3 == TransportProtocol::Tcp)
+        .and_then(|(_, a)| {
+            routable_external_ip(match a {
+                Active::Pcp(m) => m.external_ip(),
+                Active::Upnp { external_ip } => external_ip.map(IpAddr::V4),
+            })
+        })
+}
+
+/// Discards a v4 address outside publicly routable space: the gateway is itself
+/// behind a NAT, and only a probe can say whether anything reaches it. A v6
+/// mapping is on the host's own address and is kept as reported.
+fn routable_external_ip(reported: Option<IpAddr>) -> Option<IpAddr> {
+    reported.filter(|ip| match ip {
+        IpAddr::V4(v4) => upnp::is_wan_candidate(*v4),
+        IpAddr::V6(_) => true,
+    })
+}
+
 fn spawn_shard(
     interfaces: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
 ) -> mpsc::UnboundedSender<Command> {
@@ -402,21 +426,7 @@ fn spawn_shard(
                     Some(Command::Ensure { key, spec }) => state.ensure(&interfaces, key, spec).await,
                     Some(Command::Remove { key }) => state.remove(key).await,
                     Some(Command::ExternalIp { external_port, resp }) => {
-                        let ip = state
-                            .active
-                            .iter()
-                            .find(|(k, _)| {
-                                k.1 == external_port && k.3 == TransportProtocol::Tcp
-                            })
-                            .and_then(|(_, a)| match a {
-                                Active::Pcp(m) => m.external_ip(),
-                                Active::Upnp { external_ip } => external_ip.map(IpAddr::V4),
-                            })
-                            .filter(|ip| match ip {
-                                IpAddr::V4(v4) => upnp::is_wan_candidate(*v4),
-                                IpAddr::V6(_) => true,
-                            });
-                        let _ = resp.send(ip);
+                        let _ = resp.send(external_ip_of(&state.active, external_port));
                     }
                     None => break,
                 },
@@ -1036,6 +1046,84 @@ mod tests {
 
     fn interfaces() -> Watch<OrdMap<GatewayId, NetworkInterfaceInfo>> {
         Watch::new(OrdMap::new())
+    }
+
+    // The filter both protocols' reported addresses funnel through. PCP grants
+    // cannot be built here (`crab_nat::PortMapping` has private fields), so the
+    // Pcp arm reaches this only by construction: `external_ip_of` has the one
+    // call site, and it wraps the match over both arms.
+    #[test]
+    fn a_gateway_behind_another_nat_reports_no_usable_address() {
+        for ip in ["192.168.1.1", "10.0.0.1", "172.16.0.1"] {
+            let reported: IpAddr = ip.parse::<Ipv4Addr>().unwrap().into();
+            assert_eq!(
+                routable_external_ip(Some(reported)),
+                None,
+                "{ip} is not reachable from the public Internet"
+            );
+        }
+    }
+
+    #[test]
+    fn a_routable_address_is_reported_as_given() {
+        for ip in ["1.2.3.4", "93.184.216.34"] {
+            let reported: IpAddr = ip.parse::<Ipv4Addr>().unwrap().into();
+            assert_eq!(routable_external_ip(Some(reported)), Some(reported), "{ip}");
+        }
+    }
+
+    // v6 has no NAT: the mapping is on the host's own GUA, and `check_gua_port`
+    // only asks whether a pinhole exists.
+    #[test]
+    fn a_v6_pinhole_is_kept_as_reported() {
+        let gua: IpAddr = "2001:470:1f0b:1::1".parse().unwrap();
+        assert_eq!(routable_external_ip(Some(gua)), Some(gua));
+    }
+
+    // NAT-PMP grants carry no external address.
+    #[test]
+    fn an_addressless_grant_has_no_answer() {
+        assert_eq!(routable_external_ip(None), None);
+    }
+
+    #[test]
+    fn a_upnp_mapping_answers_only_for_its_own_tcp_port() {
+        let ip: IpAddr = Ipv4Addr::new(10, 59, 0, 2).into();
+        let public = Ipv4Addr::new(1, 2, 3, 4);
+        let mut active = BTreeMap::new();
+        active.insert(
+            (ip, 443, None, TransportProtocol::Tcp),
+            Active::Upnp {
+                external_ip: Some(public),
+            },
+        );
+        active.insert(
+            (ip, 8080, None, TransportProtocol::Udp),
+            Active::Upnp {
+                external_ip: Some(public),
+            },
+        );
+
+        assert_eq!(external_ip_of(&active, 443), Some(IpAddr::V4(public)));
+        assert_eq!(external_ip_of(&active, 8080), None, "UDP is not TCP");
+        assert_eq!(
+            external_ip_of(&active, 444),
+            None,
+            "no mapping on that port"
+        );
+    }
+
+    #[test]
+    fn a_upnp_mapping_behind_another_nat_answers_nothing() {
+        let ip: IpAddr = Ipv4Addr::new(10, 59, 0, 2).into();
+        let mut active = BTreeMap::new();
+        active.insert(
+            (ip, 443, None, TransportProtocol::Tcp),
+            Active::Upnp {
+                external_ip: Some(Ipv4Addr::new(192, 168, 8, 1)),
+            },
+        );
+        assert_eq!(external_ip_of(&active, 443), None);
     }
 
     // Distinct hostnames on the same external port are independent mappings;
