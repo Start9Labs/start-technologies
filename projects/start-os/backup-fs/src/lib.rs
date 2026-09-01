@@ -40,12 +40,13 @@ mod ecc;
 pub mod error;
 mod handle;
 mod inode;
+#[cfg(test)]
+#[path = "tests.rs"]
+mod mount_tests;
 mod pool;
 mod seglog;
 mod serde;
 mod superblock;
-#[cfg(test)]
-mod tests;
 #[allow(dead_code)]
 mod util;
 mod vault;
@@ -458,18 +459,17 @@ impl Filesystem for BackupFS {
             reply.error(errno(libc::EACCES));
             return;
         }
-        // Copy the bytes now (the kernel's buffer is reused after
-        // return) and move ownership into the worker.
-        let mut buf = data.to_vec();
+        // The kernel reuses its buffer once this returns.
+        let buf = data.to_vec();
         let key = handle.inode.0;
         pool::global().submit_for(key, move || {
             let mut contents = handle.contents.lock().unwrap();
-            match contents.write_all_at(&mut buf, offset) {
-                Ok(()) => {
-                    if write_flags.contains(WriteFlags::FUSE_WRITE_KILL_SUIDGID) {
+            match contents.write_at(&buf, offset) {
+                Ok(written) => {
+                    if written > 0 && write_flags.contains(WriteFlags::FUSE_WRITE_KILL_SUIDGID) {
                         contents.inode.attrs.clear_suid_sgid();
                     }
-                    reply.written(buf.len() as u32);
+                    reply.written(written as u32);
                 }
                 Err(e) => reply.error(errno(e.to_errno_log())),
             }
@@ -808,7 +808,7 @@ impl Filesystem for BackupFS {
 
     fn copy_file_range(
         &self,
-        req: &Request,
+        _req: &Request,
         ino_in: INodeNo,
         fh_in: FileHandle,
         offset_in: u64,
@@ -821,7 +821,6 @@ impl Filesystem for BackupFS {
     ) {
         let mut h = self.handler.lock().unwrap();
         match h.copy_file_range(
-            req,
             Inode(ino_in.into()),
             FileHandleId(fh_in.into()),
             offset_in,

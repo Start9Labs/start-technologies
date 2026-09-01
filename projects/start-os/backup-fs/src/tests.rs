@@ -1580,7 +1580,7 @@ fn incremental_overwrite_touches_one_block() {
     );
 }
 
-const CHUNK_OFFSET: u64 = 1024 * 1024; // one CHUNK_SIZE
+const CHUNK_OFFSET: u64 = crate::blockstore::CHUNK_SIZE;
 
 /// A sparse file (size set, middle written) stores only the touched
 /// blocks: holes occupy no block files on disk and read back as zeros.
@@ -2480,8 +2480,7 @@ fn compression_shrinks_compressible_content() {
 fn packed_to_blocks_on_close_survives_crash_before_flush() {
     let data = TempDir::new("backupfs_data").unwrap();
 
-    // Session 1: create a packed file (> inline_threshold, <= pack_max) and
-    // clean-unmount, so a durable `Packed` inode + extent exist. Grab its ino.
+    // The clean unmount makes the packed inode and extent durable.
     let small = vec![0xABu8; 200 * 1024];
     let ino = {
         let small = small.clone();
@@ -2491,9 +2490,7 @@ fn packed_to_blocks_on_close_survives_crash_before_flush() {
         })
     };
 
-    // Session 2 (unclean): open, overwrite with 2 MiB so it migrates
-    // packed→blocks, close the fd (commits the migration + tombstones the old
-    // extent), then drop the Handler without flush_all_dirty — the "crash".
+    // Dropping the handler after close discards its unflushed dirty cache.
     let big: Vec<u8> = (0..2 * 1024 * 1024u64).map(pattern_byte).collect();
     {
         let ctrl = Controller::new(opts(data.path(), "ohea")).unwrap();
@@ -2505,14 +2502,16 @@ fn packed_to_blocks_on_close_survives_crash_before_flush() {
             // Scoped clone so it is dropped before fclose — otherwise
             // Arc::try_unwrap in close() would fail and take the fsync path.
             let c = handler.handle(fh).unwrap().contents.clone();
-            c.lock().unwrap().write_all_at(&big, 0).unwrap();
+            c.lock()
+                .unwrap()
+                .write_at(&big, 0)
+                .map(|n| assert_eq!(n, big.len()))
+                .unwrap();
         }
         handler.fclose(fh).unwrap();
         drop(handler); // crash: discards the in-RAM dirty cache
     }
 
-    // Session 3: remount and read back. With the fix the file is the full
-    // 2 MiB; the bug surfaced as a zero-filled / truncated read.
     let got = capture(data.path(), "ohea", move |mnt| {
         fs::read(mnt.join("m.bin")).unwrap()
     });
@@ -2746,4 +2745,292 @@ fn missing_superblock_over_existing_data_is_refused() {
     );
     // And no fresh superblock was created over the data.
     assert!(!data.path().join("superblock").exists());
+}
+
+#[test_log::test]
+fn copy_file_range_that_fails_partway_reports_the_bytes_it_moved() {
+    use std::os::unix::io::AsRawFd;
+
+    let data = TempDir::new("backupfs_data").unwrap();
+    let size = 3 * CHUNK_OFFSET as usize;
+    let src_bytes: Vec<u8> = (0..size as u64).map(pattern_byte).collect();
+
+    let ino = {
+        let src_bytes = src_bytes.clone();
+        capture(data.path(), "ohea", move |mnt| {
+            fs::write(mnt.join("src"), &src_bytes).unwrap();
+            fs::metadata(mnt.join("src")).unwrap().ino()
+        })
+    };
+    {
+        let ctrl = Controller::new(opts(data.path(), "ohea")).unwrap();
+        let block = ctrl.resolve_block_path(ContentId(ino), 1);
+        fs::remove_file(&block).unwrap();
+        fs::create_dir(&block).unwrap();
+    }
+
+    with_backupfs(
+        data.path(),
+        "ohea".to_owned(),
+        move |mnt| {
+            let src = fs::File::open(mnt.join("src")).unwrap();
+            let dest = fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(mnt.join("dest"))
+                .unwrap();
+            let mut from = 0 as libc::loff_t;
+            let mut to = 0 as libc::loff_t;
+            let copied = unsafe {
+                libc::copy_file_range(
+                    src.as_raw_fd(),
+                    &mut from,
+                    dest.as_raw_fd(),
+                    &mut to,
+                    size,
+                    0,
+                )
+            };
+            if copied < 0 {
+                panic!("copy_file_range failed: {}", io::Error::last_os_error());
+            }
+            assert_eq!(
+                copied, CHUNK_OFFSET as isize,
+                "the copy must report the one chunk it moved, not {copied} bytes"
+            );
+            drop(dest);
+            let got = fs::read(mnt.join("dest")).unwrap();
+            assert_eq!(
+                got.len(),
+                CHUNK_OFFSET as usize,
+                "the destination holds a count the copy did not report"
+            );
+            pattern_check(0, &got);
+        },
+        None,
+    );
+}
+
+#[test_log::test]
+fn copy_file_range_counts_only_complete_writes_before_an_unaligned_error() {
+    use std::os::unix::io::AsRawFd;
+
+    let data = TempDir::new("backupfs_data").unwrap();
+    let size = 2 * CHUNK_OFFSET as usize;
+    let src_bytes: Vec<u8> = (0..size as u64).map(pattern_byte).collect();
+    let dest_ino = {
+        let src_bytes = src_bytes.clone();
+        capture(data.path(), "ohea", move |mnt| {
+            fs::write(mnt.join("src"), &src_bytes).unwrap();
+            fs::write(mnt.join("dest"), vec![0u8; 3 * CHUNK_OFFSET as usize]).unwrap();
+            fs::metadata(mnt.join("dest")).unwrap().ino()
+        })
+    };
+    {
+        let ctrl = Controller::new(opts(data.path(), "ohea")).unwrap();
+        let block = ctrl.resolve_block_path(ContentId(dest_ino), 1);
+        fs::remove_file(&block).unwrap();
+        fs::create_dir(&block).unwrap();
+    }
+
+    with_backupfs(
+        data.path(),
+        "ohea".to_owned(),
+        move |mnt| {
+            let src = fs::File::open(mnt.join("src")).unwrap();
+            let dest = fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(mnt.join("dest"))
+                .unwrap();
+            let mut from = 0 as libc::loff_t;
+            let mut to = 7 as libc::loff_t;
+            let copied = unsafe {
+                libc::copy_file_range(
+                    src.as_raw_fd(),
+                    &mut from,
+                    dest.as_raw_fd(),
+                    &mut to,
+                    size,
+                    0,
+                )
+            };
+            if copied < 0 {
+                panic!("copy_file_range failed: {}", io::Error::last_os_error());
+            }
+
+            let expected = CHUNK_OFFSET as usize - 7;
+            assert_eq!(copied as usize, expected);
+            let mut got = vec![0u8; expected];
+            use std::os::unix::fs::FileExt;
+            dest.read_exact_at(&mut got, 7).unwrap();
+            pattern_check(0, &got);
+        },
+        None,
+    );
+}
+
+#[test_log::test]
+fn read_starting_past_eof_returns_no_bytes() {
+    let data = TempDir::new("backupfs_data").unwrap();
+
+    with_backupfs(
+        data.path(),
+        "ohea".to_owned(),
+        |mnt| {
+            let mut buf = [0u8; 16];
+
+            let inline = mnt.join("inline");
+            fs::write(&inline, b"0123456789").unwrap();
+            let mut f = fs::File::open(&inline).unwrap();
+            f.seek(SeekFrom::Start(4096)).unwrap();
+            assert_eq!(f.read(&mut buf).unwrap(), 0);
+            f.seek(SeekFrom::Start(10)).unwrap();
+            assert_eq!(f.read(&mut buf).unwrap(), 0);
+
+            let blocks = mnt.join("blocks");
+            fs::write(&blocks, vec![3u8; 3 * CHUNK_OFFSET as usize]).unwrap();
+            let mut f = fs::File::open(&blocks).unwrap();
+            f.seek(SeekFrom::Start(4 * CHUNK_OFFSET)).unwrap();
+            assert_eq!(f.read(&mut buf).unwrap(), 0);
+            f.seek(SeekFrom::Start(3 * CHUNK_OFFSET)).unwrap();
+            assert_eq!(f.read(&mut buf).unwrap(), 0);
+        },
+        None,
+    );
+}
+
+#[test_log::test]
+fn copy_file_range_spanning_chunks_lands_at_the_right_offsets() {
+    use std::os::unix::fs::FileExt;
+    use std::os::unix::io::AsRawFd;
+
+    let data = TempDir::new("backupfs_data").unwrap();
+    let size = (3 * CHUNK_OFFSET + 4096) as usize;
+    let dest_offset = CHUNK_OFFSET + 7;
+
+    with_backupfs(
+        data.path(),
+        "ohea".to_owned(),
+        move |mnt| {
+            let src_bytes: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
+            let src_path = mnt.join("source");
+            fs::write(&src_path, &src_bytes).unwrap();
+            let src = fs::File::open(&src_path).unwrap();
+
+            let dest_path = mnt.join("destination");
+            let dest = fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&dest_path)
+                .unwrap();
+
+            let mut from = 0 as libc::loff_t;
+            let mut to = dest_offset as libc::loff_t;
+            let copied = unsafe {
+                libc::copy_file_range(
+                    src.as_raw_fd(),
+                    &mut from,
+                    dest.as_raw_fd(),
+                    &mut to,
+                    size,
+                    0,
+                )
+            };
+            if copied < 0 {
+                panic!("copy_file_range failed: {}", io::Error::last_os_error());
+            }
+            assert_eq!(copied, size as isize, "copied {copied} of {size} bytes");
+
+            let dest_reader = fs::File::open(&dest_path).unwrap();
+            assert_eq!(
+                dest_reader.metadata().unwrap().len(),
+                dest_offset + size as u64
+            );
+            let mut got = vec![0u8; size];
+            dest_reader.read_exact_at(&mut got, dest_offset).unwrap();
+            assert!(got == src_bytes, "the copied bytes differ from the source");
+            let mut head = vec![0u8; dest_offset as usize];
+            dest_reader.read_exact_at(&mut head, 0).unwrap();
+            assert!(head.iter().all(|b| *b == 0), "the hole was overwritten");
+        },
+        None,
+    );
+}
+
+#[test_log::test]
+fn empty_reads_and_writes_leave_a_file_untouched() {
+    let data = TempDir::new("backupfs_data").unwrap();
+    let ino = capture(data.path(), "ohea", |mnt| {
+        fs::write(mnt.join("f.bin"), b"0123456789").unwrap();
+        fs::metadata(mnt.join("f.bin")).unwrap().ino()
+    });
+
+    let ctrl = Controller::new(opts(data.path(), "ohea")).unwrap();
+    let mut handler = crate::handle::Handler::new(ctrl);
+    let fh = handler
+        .fopen(Inode(ino), true, true, |_, _| Ok(()))
+        .unwrap();
+    let contents = handler.handle(fh).unwrap().contents.clone();
+    let mut c = contents.lock().unwrap();
+
+    let (mtime, atime) = (c.inode.attrs.mtime, c.inode.attrs.atime);
+    c.read_exact_at(&mut [], 4096).unwrap();
+    assert_eq!(c.write_at(&[], 4096).unwrap(), 0);
+
+    assert_eq!(c.inode.attrs.size, 10, "an empty write extended the file");
+    assert_eq!(c.inode.attrs.mtime, mtime, "an empty write stamped mtime");
+    assert_eq!(c.inode.attrs.atime, atime, "an empty read stamped atime");
+
+    drop(c);
+    drop(contents);
+    handler.fclose(fh).unwrap();
+}
+
+#[test_log::test]
+fn a_write_that_fails_after_a_tier_migration_leaves_the_file_readable() {
+    let data = TempDir::new("backupfs_data").unwrap();
+
+    let small = vec![0xABu8; 200 * 1024];
+    let ino = {
+        let small = small.clone();
+        capture(data.path(), "ohea", move |mnt| {
+            fs::write(mnt.join("m.bin"), &small).unwrap();
+            fs::metadata(mnt.join("m.bin")).unwrap().ino()
+        })
+    };
+
+    // Blocking the first spill forces a partial packed-to-blocks migration.
+    let big: Vec<u8> = (0..17 * CHUNK_OFFSET).map(pattern_byte).collect();
+    {
+        let ctrl = Controller::new(opts(data.path(), "ohea")).unwrap();
+        let blocked = ctrl.resolve_block_path(ContentId(ino), 0);
+        fs::create_dir_all(&blocked).unwrap();
+        let mut handler = crate::handle::Handler::new(ctrl);
+        let fh = handler
+            .fopen(Inode(ino), true, true, |_, _| Ok(()))
+            .unwrap();
+        {
+            // Scoped clone so it is dropped before fclose — otherwise
+            // Arc::try_unwrap in close() would fail and take the fsync path.
+            let c = handler.handle(fh).unwrap().contents.clone();
+            let written = c
+                .lock()
+                .unwrap()
+                .write_at(&big, 0)
+                .expect("the successful prefix must be reported");
+            assert_eq!(written, 16 * CHUNK_OFFSET as usize);
+        }
+        fs::remove_dir(blocked).unwrap();
+        handler.fclose(fh).unwrap();
+        handler.flush_all_dirty().unwrap();
+    }
+
+    let got = capture(data.path(), "ohea", move |mnt| {
+        fs::read(mnt.join("m.bin")).unwrap()
+    });
+    assert_eq!(got.len(), 16 * CHUNK_OFFSET as usize);
+    pattern_check(0, &got);
 }

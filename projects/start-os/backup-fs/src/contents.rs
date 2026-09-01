@@ -27,7 +27,7 @@ use rand::{rng, Rng};
 use crate::blockstore::{self, CHUNK_SIZE};
 use crate::compress::{self, Codec};
 use crate::ctrl::Controller;
-use crate::error::{BkfsResult, BkfsResultExt};
+use crate::error::{BkfsError, BkfsResult, BkfsResultExt};
 use crate::handle::Handler;
 use crate::inode::{time_now, ContentId, FileData, Inode, InodeAttributes};
 
@@ -186,15 +186,15 @@ impl Contents {
         self.inode.attrs.size
     }
 
-    // ── reads ──────────────────────────────────────────────
-
     pub fn read_exact_at(&mut self, buf: &mut [u8], offset: u64) -> BkfsResult<()> {
+        if buf.is_empty() {
+            return Ok(());
+        }
         let end = offset + buf.len() as u64;
         if end > self.size() {
             return Err(io::Error::from(io::ErrorKind::UnexpectedEof).into());
         }
         match &self.body {
-            // Inline and Packed both serve from an in-memory buffer.
             Body::Inline(data) | Body::Packed { buf: data, .. } => {
                 // `off` is clamped to the stored length: bytes in
                 // [data.len(), size) are holes (e.g. after a truncate-grow)
@@ -266,53 +266,59 @@ impl Contents {
         }
         Ok(match dirty.get(&idx) {
             Some(buf) => buf,
-            // The fill above already matched the index, so this check is
-            // deliberate redundancy against a future edit.
-            None => cached
-                .as_ref()
-                .filter(|c| c.idx == idx)
-                .map_or(&[], |c| c.bytes.as_slice()),
+            None => cached.as_ref().map_or(&[], |c| c.bytes.as_slice()),
         })
     }
 
-    // ── writes ─────────────────────────────────────────────
-
-    pub fn write_all_at(&mut self, buf: &[u8], offset: u64) -> BkfsResult<()> {
+    pub fn write_at(&mut self, buf: &[u8], offset: u64) -> BkfsResult<usize> {
         self.ctrl.check_rw()?;
+        if buf.is_empty() {
+            return Ok(0);
+        }
         let end = offset + buf.len() as u64;
-        // Promote the body to the smallest tier that can hold `end`:
-        // inline (≤ inline_threshold) → packed (≤ one chunk) → blocks.
         self.promote_for(end)?;
 
         if matches!(self.body, Body::Blocks { .. }) {
-            self.write_blocks_at(buf, offset)?;
-        } else {
-            match &mut self.body {
-                Body::Inline(data) => {
-                    if (data.len() as u64) < end {
-                        data.resize(end as usize, 0);
-                    }
-                    data[offset as usize..end as usize].copy_from_slice(buf);
+            let (written, error) = self.write_blocks_at(buf, offset);
+            return match (written, error) {
+                (0, Some(error)) => Err(error),
+                (written, Some(error)) => {
+                    log::log!(
+                        error.kind.severity(),
+                        "write stopped after {written} bytes: {error}"
+                    );
+                    Ok(written)
                 }
-                Body::Packed {
-                    buf: data, dirty, ..
-                } => {
-                    if (data.len() as u64) < end {
-                        data.resize(end as usize, 0);
-                    }
-                    data[offset as usize..end as usize].copy_from_slice(buf);
-                    *dirty = true;
+                (written, None) => Ok(written),
+            };
+        }
+
+        match &mut self.body {
+            Body::Inline(data) => {
+                if (data.len() as u64) < end {
+                    data.resize(end as usize, 0);
                 }
-                Body::Blocks { .. } => unreachable!(),
+                data[offset as usize..end as usize].copy_from_slice(buf);
             }
+            Body::Packed {
+                buf: data, dirty, ..
+            } => {
+                if (data.len() as u64) < end {
+                    data.resize(end as usize, 0);
+                }
+                data[offset as usize..end as usize].copy_from_slice(buf);
+                *dirty = true;
+            }
+            Body::Blocks { .. } => unreachable!(),
         }
+        self.record_write(end);
+        Ok(buf.len())
+    }
+
+    fn record_write(&mut self, end: u64) {
         self.inode.attrs.modified();
-        if end > self.inode.attrs.size {
-            self.inode.attrs.size = end;
-        }
+        self.inode.attrs.size = self.inode.attrs.size.max(end);
         self.changed = true;
-        self.spill_to_budget()?; // no-op unless Blocks
-        Ok(())
     }
 
     /// Migrate the body up to the tier that can hold a file of `end` bytes.
@@ -377,16 +383,20 @@ impl Contents {
             cached: None,
         };
         self.inode.attrs.contents = FileData::File(content_id);
+        self.changed = true;
         Ok(())
     }
 
-    fn write_blocks_at(&mut self, buf: &[u8], offset: u64) -> BkfsResult<()> {
+    fn write_blocks_at(&mut self, buf: &[u8], offset: u64) -> (usize, Option<BkfsError>) {
         let content_id = match &self.body {
             Body::Blocks { content_id, .. } => *content_id,
             _ => unreachable!("must be migrated to Blocks before a block write"),
         };
         let mut written = 0usize;
         while written < buf.len() {
+            if let Err(error) = self.spill_for(CHUNK_SIZE as usize) {
+                return (written, Some(error));
+            }
             let pos = offset + written as u64;
             let (idx, within) = blockstore::locate(pos);
             let take = (buf.len() - written).min(CHUNK_SIZE as usize - within);
@@ -405,14 +415,14 @@ impl Contents {
                     *dirty_bytes -= b.len();
                     b
                 }
-                // Taking the cached copy keeps this block out of the cache
-                // while it is dirty.
+                None if within == 0 && take == CHUNK_SIZE as usize => Vec::new(),
                 None => {
                     let mut b = match cached.take_if(|c| c.idx == idx) {
                         Some(c) => c.bytes,
-                        None => {
-                            blockstore::read_block(&self.ctrl, content_id, idx)?.unwrap_or_default()
-                        }
+                        None => match blockstore::read_block(&self.ctrl, content_id, idx) {
+                            Ok(block) => block.unwrap_or_default(),
+                            Err(error) => return (written, Some(error)),
+                        },
                     };
                     b.truncate(valid);
                     b
@@ -431,8 +441,9 @@ impl Contents {
             *dirty_bytes += block.len();
             dirty.insert(idx, block);
             written += take;
+            self.record_write(offset + written as u64);
         }
-        Ok(())
+        (written, None)
     }
 
     /// Migrate an inline file to block storage, preserving its bytes as the
@@ -460,7 +471,7 @@ impl Contents {
         Ok(())
     }
 
-    fn spill_to_budget(&mut self) -> BkfsResult<()> {
+    fn spill_for(&mut self, additional: usize) -> BkfsResult<()> {
         let budget = write_buffer_budget();
         let content_id = match &self.body {
             Body::Blocks { content_id, .. } => *content_id,
@@ -474,7 +485,7 @@ impl Contents {
                 else {
                     return Ok(());
                 };
-                if *dirty_bytes <= budget || dirty.len() <= 1 {
+                if dirty_bytes.saturating_add(additional) <= budget || dirty.is_empty() {
                     return Ok(());
                 }
                 *dirty.keys().next().unwrap()
@@ -489,12 +500,13 @@ impl Contents {
             else {
                 return Ok(());
             };
-            let mut block = dirty.remove(&idx).unwrap();
-            *dirty_bytes -= block.len();
-            *disk_blocks = (*disk_blocks).max(idx + 1);
-            block.truncate(valid);
-            blockstore::write_block(&self.ctrl, content_id, idx, &block, self.codec, false)?;
+            let block = dirty.get(&idx).unwrap();
+            let stored = &block[..valid.min(block.len())];
+            blockstore::write_block(&self.ctrl, content_id, idx, stored, self.codec, false)?;
             self.ctrl.tick_save()?;
+            let removed = dirty.remove(&idx).unwrap();
+            *dirty_bytes -= removed.len();
+            *disk_blocks = (*disk_blocks).max(idx + 1);
         }
     }
 
@@ -515,7 +527,10 @@ impl Contents {
                 let take = (remaining as usize).min(CHUNK_SIZE as usize - within);
                 if pos < self.size() {
                     let cap = ((self.size() - pos) as usize).min(take);
-                    self.write_all_at(&zeros[..cap], pos)?;
+                    let written = self.write_at(&zeros[..cap], pos)?;
+                    if written != cap {
+                        return Err(io::Error::other("partial zero-range write").into());
+                    }
                 }
                 pos += take as u64;
                 remaining -= take as u64;
@@ -531,8 +546,6 @@ impl Contents {
         }
         Ok(())
     }
-
-    // ── flush / close ──────────────────────────────────────
 
     pub fn flush(&mut self) -> BkfsResult<()> {
         self.flush_content_only()?;

@@ -10,18 +10,222 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::SystemTime;
 
 use fuser::{FileType, Request, TimeOrNow};
+use log::{debug, log, warn};
 
 use crate::FUSE_ROOT_ID;
 
 const FUSE_WRITE_KILL_PRIV: i32 = 1 << 2;
-use log::{debug, warn};
 
+use crate::blockstore::CHUNK_SIZE;
 use crate::contents::Contents;
 use crate::ctrl::Controller;
 use crate::directory::{DirectoryContents, DirectoryEntry};
 use crate::error::{BkfsError, BkfsErrorKind, BkfsResult, BkfsResultExt};
 use crate::inode::{FileData, Inode, InodeAttributes};
 use crate::MAX_NAME_LENGTH;
+
+fn readable_size(file_size: u64, offset: u64, requested: usize) -> usize {
+    min(requested, file_size.saturating_sub(offset) as usize)
+}
+
+#[cfg(test)]
+mod non_fuse_tests {
+    use std::ffi::OsString;
+    use std::fs;
+
+    use tempdir::TempDir;
+
+    use super::{readable_size, Handler};
+    use crate::blockstore::CHUNK_SIZE;
+    use crate::contents::Contents;
+    use crate::ctrl::Controller;
+    use crate::inode::{ContentId, FileData, Inode, InodeAttributes};
+    use crate::{BackupFSOptions, FUSE_ROOT_ID};
+
+    fn controller(data: &TempDir) -> Controller {
+        Controller::new(BackupFSOptions {
+            data_dir: data.path().to_owned(),
+            setuid_support: false,
+            password: "ohea".to_owned(),
+            file_size_padding: None,
+            readonly: false,
+            idmapped: false,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn readable_size_clamps_offsets_at_and_past_eof() {
+        assert_eq!(readable_size(10, 4, 20), 6);
+        assert_eq!(readable_size(10, 10, 20), 0);
+        assert_eq!(readable_size(10, 11, 20), 0);
+    }
+
+    #[test]
+    fn handler_read_past_eof_returns_no_bytes() {
+        let data = TempDir::new("backupfs_data").unwrap();
+        let ctrl = controller(&data);
+        let inode = ctrl.next_inode().unwrap();
+        let mut attrs = InodeAttributes::new(inode, None, FileData::Inline(b"0123456789".to_vec()));
+        attrs.attrs.size = 10;
+        ctrl.save(&attrs).unwrap();
+
+        let mut handler = Handler::new(ctrl);
+        let fh = handler.fopen(inode, true, false, |_, _| Ok(())).unwrap();
+        assert!(handler
+            .read(inode, fh, 4096, 16, 0, None)
+            .unwrap()
+            .is_empty());
+        assert!(handler.read(inode, fh, 10, 16, 0, None).unwrap().is_empty());
+        handler.fclose(fh).unwrap();
+    }
+
+    fn create_file(ctrl: &Controller, bytes: &[u8]) -> crate::inode::Inode {
+        let inode = ctrl.next_inode().unwrap();
+        let attrs = InodeAttributes::new(
+            inode,
+            Some((Inode(FUSE_ROOT_ID), OsString::from("test"))),
+            FileData::Inline(Vec::new()),
+        );
+        ctrl.save(&attrs).unwrap();
+        let mut contents = Contents::open(ctrl.clone(), inode).unwrap();
+        assert_eq!(contents.write_at(bytes, 0).unwrap(), bytes.len());
+        contents.flush().unwrap();
+        inode
+    }
+
+    fn read_file(ctrl: Controller, inode: crate::inode::Inode) -> Vec<u8> {
+        let mut contents = Contents::open(ctrl, inode).unwrap();
+        let mut bytes = vec![0; contents.inode.attrs.size as usize];
+        contents.read_exact_at(&mut bytes, 0).unwrap();
+        bytes
+    }
+
+    fn bytes(len: usize) -> Vec<u8> {
+        (0..len).map(|i| (i % 251) as u8).collect()
+    }
+
+    #[test]
+    fn handler_empty_io_leaves_the_file_untouched() {
+        let data = TempDir::new("backupfs_data").unwrap();
+        let ctrl = controller(&data);
+        let inode = create_file(&ctrl, b"0123456789");
+        let mut handler = Handler::new(ctrl);
+        let fh = handler.fopen(inode, true, true, |_, _| Ok(())).unwrap();
+        let contents = handler.handle(fh).unwrap().contents.clone();
+        let attrs = contents.lock().unwrap().inode.attrs.clone();
+
+        assert!(handler
+            .read(inode, fh, 4096, 0, 0, None)
+            .unwrap()
+            .is_empty());
+        assert_eq!(handler.write(inode, fh, 4096, &[], 0, 0, None).unwrap(), 0);
+
+        let current = &contents.lock().unwrap().inode.attrs;
+        assert_eq!(current.size, attrs.size);
+        assert_eq!(current.atime, attrs.atime);
+        assert_eq!(current.mtime, attrs.mtime);
+    }
+
+    #[test]
+    fn handler_copy_range_reports_a_partial_read() {
+        let data = TempDir::new("backupfs_data").unwrap();
+        let ctrl = controller(&data);
+        let source_bytes = bytes(3 * CHUNK_SIZE as usize);
+        let source = create_file(&ctrl, &source_bytes);
+        let destination = create_file(&ctrl, &[]);
+        let blocked = ctrl.resolve_block_path(ContentId::from(source), 1);
+        fs::remove_file(&blocked).unwrap();
+        fs::create_dir(&blocked).unwrap();
+
+        let mut handler = Handler::new(ctrl.clone());
+        let source_fh = handler.fopen(source, true, false, |_, _| Ok(())).unwrap();
+        let destination_fh = handler
+            .fopen(destination, false, true, |_, _| Ok(()))
+            .unwrap();
+        let copied = handler
+            .copy_file_range(
+                source,
+                source_fh,
+                0,
+                destination,
+                destination_fh,
+                0,
+                source_bytes.len(),
+                0,
+            )
+            .unwrap();
+        assert_eq!(copied, CHUNK_SIZE as usize);
+        let contents = handler.handle(destination_fh).unwrap().contents.clone();
+        let mut result = vec![0; copied];
+        contents
+            .lock()
+            .unwrap()
+            .read_exact_at(&mut result, 0)
+            .unwrap();
+        assert_eq!(result, source_bytes[..copied]);
+        drop(contents);
+        fs::remove_dir(blocked).unwrap();
+        handler.fclose(source_fh).unwrap();
+        handler.fclose(destination_fh).unwrap();
+    }
+
+    #[test]
+    fn handler_copy_range_counts_a_partial_spill() {
+        let data = TempDir::new("backupfs_data").unwrap();
+        let ctrl = controller(&data);
+        let source_bytes = bytes(17 * CHUNK_SIZE as usize);
+        let source = create_file(&ctrl, &source_bytes);
+        let destination = create_file(&ctrl, &[]);
+        let blocked = ctrl.resolve_block_path(ContentId::from(destination), 0);
+        fs::create_dir_all(&blocked).unwrap();
+
+        let mut handler = Handler::new(ctrl.clone());
+        let source_fh = handler.fopen(source, true, false, |_, _| Ok(())).unwrap();
+        let destination_fh = handler
+            .fopen(destination, false, true, |_, _| Ok(()))
+            .unwrap();
+        let copied = handler
+            .copy_file_range(
+                source,
+                source_fh,
+                0,
+                destination,
+                destination_fh,
+                0,
+                source_bytes.len(),
+                0,
+            )
+            .unwrap();
+        assert_eq!(copied, 16 * CHUNK_SIZE as usize);
+        fs::remove_dir(blocked).unwrap();
+        handler.fclose(source_fh).unwrap();
+        handler.fclose(destination_fh).unwrap();
+        let result = read_file(ctrl, destination);
+        assert_eq!(result, source_bytes[..copied]);
+    }
+
+    #[test]
+    fn handler_write_preserves_a_partial_failed_migration() {
+        let data = TempDir::new("backupfs_data").unwrap();
+        let ctrl = controller(&data);
+        let inode = create_file(&ctrl, &vec![0xab; 200 * 1024]);
+        let blocked = ctrl.resolve_block_path(ContentId::from(inode), 0);
+        fs::create_dir_all(&blocked).unwrap();
+        let requested = 17 * CHUNK_SIZE as usize;
+        let requested_bytes = bytes(requested);
+
+        let mut handler = Handler::new(ctrl.clone());
+        let fh = handler.fopen(inode, true, true, |_, _| Ok(())).unwrap();
+        let written = handler
+            .write(inode, fh, 0, &requested_bytes, 0, 0, None)
+            .unwrap();
+        assert_eq!(written, 16 * CHUNK_SIZE as usize);
+        fs::remove_dir(blocked).unwrap();
+        handler.fclose(fh).unwrap();
+        assert_eq!(read_file(ctrl, inode), requested_bytes[..written]);
+    }
+}
 
 /// True if `e` is "the inode's backing file isn't on disk" — either
 /// from a same-session create+delete that never touched disk, or a
@@ -1081,7 +1285,6 @@ impl Handler {
 
     pub fn read(
         &mut self,
-        _req: &Request,
         _inode: Inode,
         fh: FileHandleId,
         offset: u64,
@@ -1099,7 +1302,7 @@ impl Handler {
 
         let mut contents = fh.contents.lock().unwrap();
 
-        let size = min(size, (contents.inode.attrs.size - offset) as usize);
+        let size = readable_size(contents.inode.attrs.size, offset, size);
 
         let mut buf = vec![0_u8; size];
 
@@ -1110,7 +1313,6 @@ impl Handler {
 
     pub fn write(
         &mut self,
-        _req: &Request,
         _inode: Inode,
         fh: FileHandleId,
         offset: u64,
@@ -1129,15 +1331,13 @@ impl Handler {
 
         let mut contents = fh.contents.lock().unwrap();
 
-        let mut buf = data.to_vec();
+        let written = contents.write_at(data, offset)?;
 
-        contents.write_all_at(&mut buf, offset)?;
-
-        if flags & FUSE_WRITE_KILL_PRIV as i32 != 0 {
+        if written > 0 && flags & FUSE_WRITE_KILL_PRIV != 0 {
             contents.inode.attrs.clear_suid_sgid();
         }
 
-        Ok(buf.len())
+        Ok(written)
     }
 
     pub fn fsync(&mut self, _req: &Request, _inode: Inode, fh: FileHandleId) -> BkfsResult<()> {
@@ -1348,7 +1548,6 @@ impl Handler {
 
     pub fn copy_file_range(
         &mut self,
-        req: &Request,
         src_inode: Inode,
         src_fh: FileHandleId,
         src_offset: u64,
@@ -1361,8 +1560,47 @@ impl Handler {
         if flags != 0 {
             return BkfsResult::errno(libc::EINVAL);
         }
-        let bytes = self.read(req, src_inode, src_fh, src_offset, size, 0, None)?;
-        self.write(req, dest_inode, dest_fh, dest_offset, &bytes, 0, 0, None)
+        let mut copied = 0;
+        let mut stopped = None;
+        while copied < size {
+            let at = copied as u64;
+            let src_remaining = CHUNK_SIZE - (src_offset + at) % CHUNK_SIZE;
+            let dest_remaining = CHUNK_SIZE - (dest_offset + at) % CHUNK_SIZE;
+            let take = min(size - copied, min(src_remaining, dest_remaining) as usize);
+            let bytes = match self.read(src_inode, src_fh, src_offset + at, take, 0, None) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    stopped = Some(e);
+                    break;
+                }
+            };
+            if bytes.is_empty() {
+                break;
+            }
+            let written =
+                match self.write(dest_inode, dest_fh, dest_offset + at, &bytes, 0, 0, None) {
+                    Ok(written) => written,
+                    Err(e) => {
+                        stopped = Some(e);
+                        break;
+                    }
+                };
+            copied += written;
+            if written < bytes.len() {
+                break;
+            }
+        }
+        match stopped {
+            Some(e) if copied == 0 => Err(e),
+            Some(e) => {
+                log!(
+                    e.kind.severity(),
+                    "copy_file_range stopped after {copied} bytes: {e}"
+                );
+                Ok(copied)
+            }
+            None => Ok(copied),
+        }
     }
 
     pub fn fallocate(

@@ -85,6 +85,22 @@ file tracks notable changes since the move to the monorepo.
   StartOS now measures the port from the Internet in that case and reports
   what it finds.
 
+- **An app that remembers your server's certificate sees the same certificate
+  across every route to that name.** Wallets and other apps that pin the first
+  certificate they are shown — Sparrow and the Electrum clients most visibly —
+  raised a man-in-the-middle warning when the same name resolved through a
+  different address or the server's public IP changed. StartOS now reuses one
+  certificate per name until renewal.
+
+  This changes how one address behaves, on a server reached through a NAT
+  router: typing its public IP address while on the same network as the server
+  now produces a certificate warning, because the router rewrites such a
+  connection to the LAN address and the server cannot see which of the two you
+  asked for. Reach it from inside your own network by its `.local` name, by a
+  domain you have assigned to it, or by its LAN IP address. A server that holds
+  its public address directly, or that is reached over StartTunnel, is
+  unaffected. See [Public IP](https://docs.start9.com/start-os/public-ip.html).
+
 - **A downgrade to a version that cannot take over the service's data is refused
   before anything is downloaded or stopped**, with an explanation of what to do
   instead.
@@ -134,6 +150,12 @@ file tracks notable changes since the move to the monorepo.
   error, and closing the file afterwards left the whole backup filesystem
   unresponsive, so the operation hung rather than finishing. Such a read
   now returns the zeros it should.
+
+- **File operations within a backup handle end-of-file and partial failures
+  correctly.** Reads past the end return no bytes, large copies use bounded
+  memory, and a copy interrupted by an error reports the bytes it completed.
+  A failed write during a storage-layout change preserves a readable inode,
+  its length, and every successfully written prefix byte.
 
 - **Helper processes a service starts are cleared away once they finish.** A
   service that shells out to other programs — a media downloader calling

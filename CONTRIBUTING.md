@@ -2,7 +2,7 @@
 
 This guide is for contributing to the Start9 monorepo (StartOS and the other products that live here). If you are interested in packaging a service for StartOS, visit the [packaging guide](https://docs.start9.com/packaging). If you are interested in promoting, providing technical support, creating tutorials, or helping in other ways, please visit the [Start9 website](https://start9.com/contribute).
 
-This file covers what is **common to the whole monorepo** — the shared toolchain, branch policy, the cross-cutting test/format entry points, and code/commit conventions. **Per-product system dependencies, build targets, deploy steps, and release procedure live in that product's own scope** — its `AGENTS.md` (e.g. [`projects/start-sdk/AGENTS.md`](projects/start-sdk/AGENTS.md)), or its `CONTRIBUTING.md` in scopes not yet migrated (e.g. [`projects/start-os/CONTRIBUTING.md`](projects/start-os/CONTRIBUTING.md) for building the StartOS OS image).
+This file covers what is **common to the whole monorepo** — the shared toolchain, branch policy, the cross-cutting test/format entry points, and code/commit conventions. **Per-product system dependencies, build targets, deploy steps, and release procedure live in that product's own scope** — its `AGENTS.md` (e.g. [`projects/start-os/AGENTS.md`](projects/start-os/AGENTS.md#contributor-workflow) for building the StartOS OS image), or its `CONTRIBUTING.md` in scopes not yet migrated.
 
 ## Documentation
 
@@ -111,7 +111,7 @@ This is a monorepo: one root Cargo workspace and one Angular workspace, both roo
 
 | Product                                | Primary build target                                                                                          | Build & deploy docs                                                                  |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| StartOS (OS image, UIs, device deploy) | `make start-os`                                                                                               | [`projects/start-os/CONTRIBUTING.md`](projects/start-os/CONTRIBUTING.md)             |
+| StartOS (OS image, UIs, device deploy) | `make start-os`                                                                                               | [`projects/start-os/AGENTS.md`](projects/start-os/AGENTS.md#contributor-workflow)    |
 | start-cli                              | `make start-cli`                                                                                              | [`projects/start-cli/CONTRIBUTING.md`](projects/start-cli/CONTRIBUTING.md)           |
 | start-registry                         | `make start-registry`                                                                                         | [`projects/start-registry/CONTRIBUTING.md`](projects/start-registry/CONTRIBUTING.md) |
 | StartTunnel                            | `make start-tunnel`                                                                                           | [`projects/start-tunnel/CONTRIBUTING.md`](projects/start-tunnel/CONTRIBUTING.md)     |
@@ -140,6 +140,7 @@ Each product's `CONTRIBUTING.md` documents the `PLATFORM` values and `ENVIRONMEN
 make test                    # all tests
 make start-core-test               # Rust (shared-libs/crates/start-core)
 make start-sdk-test                # SDK
+make backup-fs-test                # backup-fs library tests except the /dev/fuse suite
 make container-runtime-test  # container runtime
 make start-wrt-test           # StartWRT Rust crates
 
