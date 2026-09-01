@@ -182,10 +182,10 @@ When prompted for a certificate, you have two choices:
 
 If you already have a StartOS server and have [trusted its Root CA](/start-os/trust-ca.html), you can sign the StartTunnel certificate with that same CA. This means your browser will trust the StartTunnel web UI automatically — no additional certificate to manage.
 
-1. On your StartOS server, generate a certificate for your StartTunnel's hostname or IP:
+1. On your StartOS server, generate a certificate for your VPS's public IP address:
 
    ```bash
-   start-cli net ssl generate-certificate <HOSTNAME_OR_IP>
+   start-cli net ssl generate-certificate <VPS_IP>
    ```
 
    This outputs a private key and certificate chain in PEM format.
