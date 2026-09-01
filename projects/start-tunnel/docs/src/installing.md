@@ -18,13 +18,32 @@ Your public key will be at `~/.ssh/id_ed25519.pub`. You'll paste its contents in
 
 ## Get a VPS
 
-Rent a cheap VPS with a dedicated public IP. Minimum CPU/RAM/disk is fine. For bandwidth, no need to exceed your home Internet's upload speed.
+Rent a cheap VPS with a dedicated public IP. Minimum CPU, RAM, and disk are fine. Choose the network speed and monthly transfer allowance based on the traffic you expect StartTunnel to relay.
 
 ### Requirements
 
 - Debian 13
 - Root access
 - Dedicated public IPv4 address (required for publishing ports to the clearnet)
+
+### Network speed and monthly transfer
+
+Choose a network speed that supports the traffic you expect to send through StartTunnel. Monthly transfer rules vary by provider.
+
+Traffic routed through StartTunnel enters and leaves the VPS. Check how your provider counts transfer:
+
+- If it counts only outbound transfer, plan for roughly your expected uploads plus downloads.
+- If it counts both inbound and outbound transfer, plan for roughly twice that amount.
+
+Leave extra capacity for network overhead. Selecting StartTunnel as a StartOS system or per-service [outbound gateway](/start-os/outbound-vpn.html) adds that Internet traffic to your estimate. Standard IPv4 device configurations leave unrelated Internet traffic on the device's normal connection.
+
+Use your provider's dashboard to monitor monthly transfer. To compare current usage between WireGuard peers, connect to the VPS over SSH and run:
+
+```sh
+wg show wg-start-tunnel
+```
+
+The counters show data received and sent for each peer. They reset when the WireGuard interface is recreated, so they are not a monthly total.
 
 > [!IMPORTANT]
 > StartTunnel is designed to be the sole application on your VPS. The installer disables UFW and manages its own firewall rules via iptables. Do not run other Internet-facing services on the same VPS.
@@ -182,10 +201,10 @@ When prompted for a certificate, you have two choices:
 
 If you already have a StartOS server and have [trusted its Root CA](/start-os/trust-ca.html), you can sign the StartTunnel certificate with that same CA. This means your browser will trust the StartTunnel web UI automatically — no additional certificate to manage.
 
-1. On your StartOS server, generate a certificate for your StartTunnel's hostname or IP:
+1. On your StartOS server, generate a certificate for your VPS's public IP address:
 
    ```bash
-   start-cli net ssl generate-certificate <HOSTNAME_OR_IP>
+   start-cli net ssl generate-certificate <VPS_IP>
    ```
 
    This outputs a private key and certificate chain in PEM format.
