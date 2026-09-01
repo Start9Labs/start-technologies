@@ -18,17 +18,21 @@ export type ActionResultMember = {
        */
       value: string
       /**
-       * Whether or not to include a copy to clipboard icon to copy the value
+       * (optional) Whether or not to include a copy to clipboard icon to copy the value
        */
-      copyable: boolean
+      copyable?: boolean
       /**
-       * Whether or not to also display the value as a QR code
+       * (optional) Whether or not to also display the value as a QR code
        */
-      qr: boolean
+      qr?: boolean
       /**
-       * Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information
+       * (optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information
        */
-      masked: boolean
+      masked?: boolean
+      /**
+       * (optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL
+       */
+      launchable?: boolean
     }
   | {
       type: 'group'

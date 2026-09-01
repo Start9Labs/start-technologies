@@ -111,6 +111,12 @@
   accept `default: null`**, which renders the field unselected and holds the form
   unsubmittable until the user picks one
 
+- **`launchable` on a `single` action result opens the value in a new tab**, for
+  a result that hands the user a link — an authorization URL, an admin panel.
+  The value must be an `http(s)` URL. `copyable`, `qr` and `masked` are optional
+  alongside it and default to `false`. See
+  [Single Value](https://docs.start9.com/packaging/actions.html#single-value)
+
 ### Fixed
 
 - **Scaffolded package CI builds a draft PR when it becomes ready and rebuilds

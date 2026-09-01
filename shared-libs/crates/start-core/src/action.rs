@@ -114,9 +114,10 @@ impl ActionResult {
                 message: Some(message),
                 result: value.map(|value| ActionResultValue::Single {
                     value,
-                    copyable,
-                    qr,
-                    masked: false,
+                    copyable: Some(copyable),
+                    qr: Some(qr),
+                    masked: None,
+                    launchable: None,
                 }),
             }),
             Self::V1(a) => Self::V1(a),
@@ -192,12 +193,18 @@ pub enum ActionResultValue {
         /// The actual string value to display. The UI renders it as a single-line field —
         /// multi-line text belongs in the result's `message`.
         value: String,
-        /// Whether or not to include a copy to clipboard icon to copy the value
-        copyable: bool,
-        /// Whether or not to also display the value as a QR code
-        qr: bool,
-        /// Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information
-        masked: bool,
+        /// (optional) Whether or not to include a copy to clipboard icon to copy the value
+        #[ts(optional)]
+        copyable: Option<bool>,
+        /// (optional) Whether or not to also display the value as a QR code
+        #[ts(optional)]
+        qr: Option<bool>,
+        /// (optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information
+        #[ts(optional)]
+        masked: Option<bool>,
+        /// (optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL
+        #[ts(optional)]
+        launchable: Option<bool>,
     },
     Group {
         /// An new group of nested values, experienced by the user as an accordion dropdown
@@ -212,7 +219,7 @@ impl ActionResultValue {
                     write!(f, "  ")?;
                 }
                 write!(f, "{value}")?;
-                if *qr {
+                if qr.unwrap_or_default() {
                     use qrcode::render::unicode;
                     writeln!(f)?;
                     for _ in 0..indent {

@@ -96,7 +96,7 @@ Actions return structured results that the StartOS UI renders for the user.
 
 `message` is prose shown under the title. It is rendered as **Markdown** — headings, lists, tables, code blocks, emphasis and links all work — and a single newline is kept as a line break, so text written as plain lines arrives as plain lines. Anything with its own line structure goes here.
 
-`result` holds discrete values the user acts on: each one is a single-line field with optional copy, QR and masking, so a newline in a `value` is not rendered. A multi-line report goes in `message`, not in a `value`.
+`result` holds discrete values the user acts on: each one is a single-line field with optional copy, QR, masking and link-opening, so a newline in a `value` is not rendered. A multi-line report goes in `message`, not in a `value`.
 
 ```typescript
 return {
@@ -117,14 +117,28 @@ Restart the service once the rebuild finishes.`,
 ```typescript
 result: {
   type: 'single',
-  name: 'API Key',
-  description: null,
   value: 'abc123',
   masked: true,
   copyable: true,
   qr: false,
 }
 ```
+
+`copyable`, `qr`, `masked` and `launchable` are all optional and default to
+`false`. `launchable` puts an open-in-new-tab button beside the value, so a
+result that hands the user a link — an authorization URL, an admin panel — can
+be clicked straight through:
+
+```typescript
+result: {
+  type: 'single',
+  value: 'https://btcpay.example.com/api-keys/authorize?permissions=btcpay.store.cancreateinvoice',
+  copyable: true,
+  launchable: true,
+}
+```
+
+The value must be an `http(s)` URL for the button to go anywhere.
 
 ### Group of Values
 

@@ -1641,6 +1641,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
           copyable: false,
           qr: true,
           masked: false,
+          launchable: true,
           value: 'https://guessagain.com',
         },
       ],

@@ -47,6 +47,21 @@ import { SingleResult } from './types'
           {{ 'Copy' | i18n }}
         </button>
       }
+      @if (single.launchable) {
+        <a
+          tuiIconButton
+          appearance="icon"
+          size="s"
+          target="_blank"
+          rel="noreferrer"
+          tabindex="-1"
+          iconStart="@tui.external-link"
+          [href]="single.value"
+          [style.pointer-events]="'auto'"
+        >
+          {{ 'Open' | i18n }}
+        </a>
+      }
     </tui-textfield>
     <ng-template #qr>
       <app-qr

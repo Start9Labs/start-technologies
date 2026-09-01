@@ -61,6 +61,10 @@ file tracks notable changes since the move to the monorepo.
   plaintext address, including the passwords typed into it. See
   [Gateways](https://docs.start9.com/start-os/gateways.html).
 
+- **An action result that hands you a link can be opened in a new tab.** Where a
+  service returns a URL — an authorization link, an admin panel — the result
+  shows an open-in-new-tab button beside it.
+
 ### Changed
 
 - **Your server's name is now its `.local` address, without the `.local` on the
