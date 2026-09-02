@@ -18,7 +18,7 @@ After [installing StartOS](installing-startos.md), follow these steps to initial
 
    - **Restore from Backup**: Select this option _only_ if your existing StartOS data drive has been lost or corrupted. This is for disaster recovery only. The restored server keeps the source server's name.
 
-   - **Transfer**: Select this option if you are transferring your existing data from one drive to another. The transferred server keeps the source server's name.
+   - **Transfer**: Select this option if you are transferring your existing data from one drive to another. StartOS mounts the source filesystems read-only while copying. If an ext4 filesystem must be repaired before it can be mounted, StartOS repairs it and retries. The source drive remains a usable copy if the transfer fails. The transferred server keeps the source server's name. Once the new drive is running, do not boot the old one as a server again.
 
 1. Set a strong master password. _Make it good. Write it down_. Resetting your password is non-trivial, but your data will be preserved.
 

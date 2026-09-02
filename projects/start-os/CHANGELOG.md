@@ -81,6 +81,10 @@ file tracks notable changes since the move to the monorepo.
 
 ### Fixed
 
+- **Transfers preserve the source filesystem format.** StartOS mounts source
+  filesystems read-only while copying persistent data, repairing ext4 only when
+  needed to mount it. This leaves the source drive available as a fallback.
+
 - **An app that remembers your server's certificate sees the same certificate
   across every route to that name.** Wallets and other apps that pin the first
   certificate they are shown — Sparrow and the Electrum clients most visibly —
