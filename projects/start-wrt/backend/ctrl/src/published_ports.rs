@@ -1114,13 +1114,6 @@ pub async fn set<C: CtrlContext>(
             let info = device_info.get(&mac_upper);
             let ipv4_addr = info.and_then(|i| i.ipv4.clone());
             let ipv6_addr = info.and_then(|i| i.ipv6.clone());
-            // The device's zone, resolved from its IPv4 against the profile
-            // subnets. The neighbor table only cross-checks: it requires the
-            // device to be online, and a `set` while one target was offline
-            // used to silently rewrite that target's rule around a guessed
-            // "lan". The live address wins; the static reservation (kept
-            // current by the auto-reserve above) covers an offline device,
-            // and configs-only mode.
             let reserved_ipv4 = cfgs["dhcp"].sections.iter().find_map(|s| {
                 let host = s.get::<DhcpHost>().ok()?;
                 if host.mac.eq_ignore_ascii_case(&mac_upper) {
@@ -1129,34 +1122,24 @@ pub async fn set<C: CtrlContext>(
                     None
                 }
             });
-            let subnet_zone = ipv4_addr
-                .as_deref()
-                .or(reserved_ipv4.as_deref())
-                .and_then(|ip| ip.parse::<Ipv4Addr>().ok())
-                .and_then(|ip| zone_for_ipv4(&cfgs, ip));
-            if let (Some(by_subnet), Some(by_neigh)) = (
-                subnet_zone.as_deref(),
+            let resolved_zone = device_zone(
+                &cfgs,
+                &mac_upper,
+                ipv4_addr.as_deref().or(reserved_ipv4.as_deref()),
                 mac_zones.get(&mac_upper).map(String::as_str),
-            ) {
-                if by_subnet != by_neigh {
-                    tracing::warn!(
-                        "published-ports: device {mac_upper} sits in zone {by_subnet} by address but {by_neigh} by neighbor table; using {by_subnet}"
-                    );
-                }
-            }
-            let dest_zone = subnet_zone.clone().unwrap_or_else(|| "lan".into());
+            );
+            let dest_zone = resolved_zone.clone().unwrap_or_else(|| "lan".into());
 
             // IPv4 redirect (DNAT)
             if port.ipv4 {
                 // fw4's reflection redirect drops `src_ip` and matches the whole
                 // reflection zone, so a source restriction is honored only by
-                // declining to reflect. An unresolvable device (offline with
-                // no reservation, or outside every profile subnet) keeps its
+                // declining to reflect. An unresolvable device keeps its
                 // WAN-side DNAT on the "lan" guess but is never hairpinned:
                 // reflecting into a guessed zone could hand other profiles a
                 // route they were never granted — and one offline device must
                 // not block saving the rest, so refuse nothing.
-                let reflect = subnet_zone.is_some() && port.source == "any";
+                let reflect = resolved_zone.is_some() && port.source == "any";
                 let redirect = FirewallRedirect {
                     name: port.label.clone(),
                     src: "wan".into(),
@@ -1799,6 +1782,31 @@ pub(crate) fn zone_for_ipv4(cfgs: &uciedit::Configs, ip: Ipv4Addr) -> Option<Str
     None
 }
 
+/// The zone a published device sits in: by its IPv4 against the profile
+/// subnets, falling back to the neighbor table. The address needs no live
+/// entry, so an offline device with a static reservation still resolves and a
+/// `set` while one target is offline no longer rewrites that target's rule
+/// around a guessed zone; the neighbor table covers a device with no IPv4 at
+/// all. `None` is a device that cannot be placed.
+fn device_zone(
+    cfgs: &uciedit::Configs,
+    mac: &str,
+    ipv4: Option<&str>,
+    neighbor_zone: Option<&str>,
+) -> Option<String> {
+    let by_address = ipv4
+        .and_then(|ip| ip.parse::<Ipv4Addr>().ok())
+        .and_then(|ip| zone_for_ipv4(cfgs, ip));
+    if let (Some(by_addr), Some(by_neigh)) = (by_address.as_deref(), neighbor_zone) {
+        if by_addr != by_neigh {
+            tracing::warn!(
+                "published-ports: device {mac} sits in zone {by_addr} by address but {by_neigh} by neighbor table; using {by_addr}"
+            );
+        }
+    }
+    by_address.or_else(|| neighbor_zone.map(str::to_string))
+}
+
 /// Resolve MAC addresses to firewall zone names via ARP interface → VLAN tag → profile → zone.
 async fn resolve_device_zones(
     uci_root: &std::path::Path,
@@ -1885,7 +1893,8 @@ fn reflection_zones(
 /// set must re-run this before the firewall is reloaded: otherwise a redirect
 /// keeps reflecting for a zone whose Access was just revoked, and a deleted
 /// zone leaves behind a name fw4 rejects by dropping the whole redirect.
-/// Redirects with `reflection '0'` carry no list and are left alone.
+/// A redirect with `reflection '0'` gets an empty list: fw4 validates the
+/// names before it reads `reflection`.
 pub(crate) fn sync_reflection_zones(firewall: &mut uciedit::Config<'_>) -> Result<bool, Error> {
     let mut changed = false;
     for i in 0..firewall.sections.len() {
