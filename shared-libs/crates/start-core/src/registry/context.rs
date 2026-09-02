@@ -205,7 +205,8 @@ impl CallRemote<RegistryContext> for CliContext {
     ) -> Result<Value, RpcError> {
         let local_auth = local_auth_header::<RegistryContext>().await;
 
-        let (url, is_local) = if let Some(url) = self.registry_url.clone() {
+        let (url, is_local) = if let Some(url) = &self.registry_url {
+            let url = url.get()?.clone();
             let is_local = is_loopback(&url);
             (url, is_local)
         } else if local_auth.is_some() || !self.registry_hostname.is_empty() {
