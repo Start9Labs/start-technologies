@@ -1905,6 +1905,11 @@ pub(crate) fn sync_reflection_zones(firewall: &mut uciedit::Config<'_>) -> Resul
             continue;
         }
         if redirect.reflection == Some(false) {
+            if !redirect.reflection_zone.is_empty() {
+                redirect.reflection_zone.clear();
+                firewall.sections[i].set(&redirect)?;
+                changed = true;
+            }
             continue;
         }
         let Some(dest) = redirect.dest.clone() else {
@@ -3145,6 +3150,74 @@ config forwarding 'fwd_lan_guest'
             !content.contains("list reflection_zone"),
             "no reflection means no reflection zones:\n{content}"
         );
+    }
+
+    #[tokio::test]
+    async fn device_zone_prefers_address_and_falls_back_to_neighbor() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_firewall(dir.path(), FORWARDINGS);
+        std::fs::write(dir.path().join("network"), NETWORK).unwrap();
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["firewall", "network"])
+            .await
+            .unwrap();
+
+        // The address decides when it resolves, whatever the neighbor table says.
+        assert_eq!(
+            device_zone(&cfgs, "AA", Some("192.168.101.50"), Some("lan_iot")).as_deref(),
+            Some("lan_guest")
+        );
+        // A device with no IPv4 (IPv6-only) is placed by the neighbor table.
+        assert_eq!(
+            device_zone(&cfgs, "AA", None, Some("lan_iot")).as_deref(),
+            Some("lan_iot")
+        );
+        // An IPv4 outside every profile subnet falls back the same way.
+        assert_eq!(
+            device_zone(&cfgs, "AA", Some("10.9.8.7"), Some("lan_iot")).as_deref(),
+            Some("lan_iot")
+        );
+        assert_eq!(device_zone(&cfgs, "AA", Some("10.9.8.7"), None), None);
+        assert_eq!(device_zone(&cfgs, "AA", None, None), None);
+    }
+
+    #[test]
+    fn sync_clears_reflection_zones_on_reflection_off_redirect() {
+        // fw4 validates `reflection_zone` names before it reads `reflection`,
+        // so a stale name on a reflection-off redirect still drops it whole.
+        let arena = Arena::new();
+        let content = format!(
+            "{FORWARDINGS}
+config redirect 'pp_off'
+\toption name 'Restricted'
+\toption src 'wan'
+\toption dest 'lan'
+\toption target 'DNAT'
+\tlist proto 'tcp'
+\toption src_dport '443'
+\toption dest_ip '192.168.1.50'
+\toption dest_port '443'
+\toption src_ip '203.0.113.0/24'
+\toption reflection '0'
+\toption _pp_id 'off'
+\toption _pp_mac 'AA:BB:CC:DD:EE:FF'
+\tlist reflection_zone 'lan'
+\tlist reflection_zone 'vlan_gone'
+"
+        );
+        let mut cfg = uciedit::Config::parse_str(&arena, &content).unwrap();
+        assert!(sync_reflection_zones(&mut cfg).unwrap());
+        let redirect = cfg
+            .sections
+            .iter()
+            .find(|s| s.name().as_deref() == Some("pp_off"))
+            .unwrap()
+            .get::<FirewallRedirect>()
+            .unwrap();
+        assert_eq!(redirect.reflection, Some(false));
+        assert!(redirect.reflection_zone.is_empty());
+        // Already clean: nothing to write.
+        assert!(!sync_reflection_zones(&mut cfg).unwrap());
     }
 
     // ── uuid_v4 tests ──
