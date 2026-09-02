@@ -1147,12 +1147,7 @@ mod tests {
         let public = Ipv4Addr::new(1, 2, 3, 4);
         let mut active = BTreeMap::new();
         active.insert(
-            (
-                ip,
-                443,
-                Some("example.com".into()),
-                TransportProtocol::Tcp,
-            ),
+            (ip, 443, Some("example.com".into()), TransportProtocol::Tcp),
             Active::Upnp {
                 external_ip: Some(public),
                 internal_port: 443,
