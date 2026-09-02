@@ -547,18 +547,6 @@ struct State {
 }
 
 impl State {
-    fn external_ip(&self, external_port: u16) -> Option<IpAddr> {
-        self.active
-            .iter()
-            .find(|(key, _)| {
-                key.1 == external_port && key.2.is_none() && key.3 == TransportProtocol::Tcp
-            })
-            .and_then(|(_, active)| match active {
-                Active::Pcp(mapping) => mapping.external_ip(),
-                Active::Upnp { external_ip, .. } => external_ip.map(IpAddr::V4),
-            })
-    }
-
     async fn ensure(
         &mut self,
         interfaces: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
