@@ -741,6 +741,21 @@ fn compute_bind_reqs<A: Accept + 'static>(mapping: &Mapping<A>) -> VHostBindRequ
 /// still held by a torn-down listener — instead of latching the hole until the
 /// next network change.
 const BIND_RETRY_BACKOFF: Duration = Duration::from_secs(2);
+const BACKEND_DIAL_TIMEOUT: Duration = Duration::from_secs(15);
+
+async fn with_backend_deadline<T>(
+    deadline: tokio::time::Instant,
+    target: SocketAddr,
+    future: impl Future<Output = T>,
+) -> Option<T> {
+    match tokio::time::timeout_at(deadline, future).await {
+        Ok(value) => Some(value),
+        Err(_) => {
+            tracing::warn!("no usable connection to {target} within {BACKEND_DIAL_TIMEOUT:?}");
+            None
+        }
+    }
+}
 
 /// Listener that manages its own TCP listeners with IP-level precision.
 /// Binds ALL IPs of public gateways and ONLY matching private IPs.
@@ -1254,23 +1269,29 @@ where
     ) -> Option<(ServerConfig, Self::PreprocessRes)> {
         let peer = extract::<TcpMetadata, _>(metadata).map(|m| m.peer_addr);
         let plain_connect = || async {
-            TcpStream::connect(self.addr)
-                .await
+            let deadline = tokio::time::Instant::now() + BACKEND_DIAL_TIMEOUT;
+            let stream = with_backend_deadline(deadline, self.addr, TcpStream::connect(self.addr))
+                .await?
                 .with_ctx(|_| (ErrorKind::Network, self.addr))
-                .log_err()
+                .log_err()?;
+            Some((stream, deadline, self.addr))
         };
         // Source-preserving passthrough (container): open the internal leg from
         // the client's own address so the backend sees the real peer (RFC §4.6).
         // The box gateways the container, so replies transit it and the divert
         // routes them back. Manual LAN passthroughs and terminating targets
         // connect plainly — the box isn't their gateway.
-        let tcp_stream = match self.transparent_leg(peer) {
+        let (tcp_stream, deadline, backend_addr) = match self.transparent_leg(peer) {
             Some((client, target)) => {
                 crate::net::transparent::ensure_divert_infra_once()
                     .await
                     .log_err();
                 match crate::net::transparent::transparent_connect(client, target).await {
-                    Ok(stream) => stream,
+                    Ok(stream) => (
+                        stream,
+                        tokio::time::Instant::now() + BACKEND_DIAL_TIMEOUT,
+                        target,
+                    ),
                     // Degraded, not fatal: the backend sees this host rather than
                     // the client. Better than dropping a working connection.
                     Err(e) => {
@@ -1329,12 +1350,16 @@ where
             Some(client_cfg) => {
                 // Called even for an empty list: without it the connector falls
                 // back to `client_cfg`'s own protocols.
-                let target_stream = TlsConnector::from(client_cfg.clone())
-                    .with_alpn(dialled)
-                    .connect(ServerName::IpAddress(self.addr.ip().into()), tcp_stream)
-                    .await
-                    .with_ctx(|_| (ErrorKind::Network, self.addr))
-                    .log_err()?;
+                let target_stream = with_backend_deadline(
+                    deadline,
+                    backend_addr,
+                    TlsConnector::from(client_cfg.clone())
+                        .with_alpn(dialled)
+                        .connect(ServerName::IpAddress(self.addr.ip().into()), tcp_stream),
+                )
+                .await?
+                .with_ctx(|_| (ErrorKind::Network, backend_addr))
+                .log_err()?;
                 let negotiated = target_stream
                     .get_ref()
                     .1
@@ -2888,7 +2913,6 @@ mod upstream_alpn_tests {
         let mut client = client_config_no_verify(provider()).unwrap();
         client.alpn_protocols = client_alpn.iter().map(|a| a.as_bytes().to_vec()).collect();
         let tcp = TcpStream::connect(addr).await.unwrap();
-        // Neither the client's connect nor `get_config` is bounded.
         let handshake = tokio::time::timeout(
             Duration::from_secs(10),
             TlsConnector::from(Arc::new(client))
@@ -2965,6 +2989,51 @@ mod upstream_alpn_tests {
         )
         .await
         .expect_err("the listener cannot serve a client the backend refused");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_backend_stalling_its_tls_handshake_declines_the_connection() {
+        let backend = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let backend_addr = backend.local_addr().unwrap();
+        let (accepted_tx, accepted_rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let (socket, _) = backend.accept().await.unwrap();
+            let _ = accepted_tx.send(());
+            std::future::pending::<()>().await;
+            drop(socket);
+        });
+
+        let handler = Preprocessing {
+            target: target(backend_addr, rewrap(), None),
+            base_alpn: Vec::new(),
+            probe: b"",
+        };
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let listener_addr = listener.local_addr().unwrap();
+        let mut vhost = TlsListener::new(listener, handler);
+        tokio::spawn(async move {
+            let _ = futures::future::poll_fn(|cx| vhost.poll_accept(cx)).await;
+        });
+
+        assert_eq!(BACKEND_DIAL_TIMEOUT, Duration::from_secs(15));
+        let mut client = tokio::spawn(async move {
+            let tcp = TcpStream::connect(listener_addr).await.unwrap();
+            TlsConnector::from(Arc::new(client_config_no_verify(provider()).unwrap()))
+                .connect(ServerName::IpAddress(Ipv4Addr::LOCALHOST.into()), tcp)
+                .await
+        });
+        tokio::select! {
+            _ = &mut client => panic!("the client failed before the backend accepted TCP"),
+            accepted = accepted_rx => accepted.expect("the backend accepts TCP"),
+        }
+        let handshake = tokio::time::timeout(Duration::from_secs(20), client)
+            .await
+            .expect("the client handshake settles before the guard")
+            .expect("the client task runs to completion");
+        assert!(
+            handshake.is_err(),
+            "the listener declines a backend that stalls its TLS handshake"
+        );
     }
 
     /// The vhost reuses a live target whose config compares equal, so `alpn`

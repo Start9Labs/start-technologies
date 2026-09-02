@@ -49,6 +49,9 @@ Each table has the following columns:
 > The port-forwarding and firewall tests need the service **running** only for an address it serves directly — a raw public IP, or another non-SSL binding. StartOS SSL-terminates every HTTP interface behind its always-on reverse proxy, so those stay testable even while the service is stopped (as do DNS tests). A non-SSL address's Test buttons are therefore disabled while its service is stopped; and because that service often restarts when a domain is added or an address is enabled, StartOS then shows its reachability tests as untested (not failed) and still opens the setup modal, so you can set up forwarding and re-test once it is running.
 
 > [!NOTE]
+> For an interface whose TLS StartOS terminates, StartOS allows up to 15 seconds to connect to the service and complete any required TLS handshake with it. If that connection is not ready in time, the client connection ends.
+
+> [!NOTE]
 > Unlike a private LAN address, an IPv6 **global-unicast address (GUA)** is a single globally-routable address, so how far it reaches is a choice. A GUA row keeps the usual on/off toggle, and its **Access** column becomes a **Local / Public** dropdown:
 >
 > - **Local** (default) — reachable on the local network only; traffic from outside your subnet is rejected.

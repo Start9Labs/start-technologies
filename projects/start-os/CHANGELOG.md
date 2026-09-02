@@ -98,6 +98,10 @@ file tracks notable changes since the move to the monorepo.
   StartOS now measures the port from the Internet in that case and reports
   what it finds.
 
+- **Client connections through StartOS's TLS-terminating reverse proxy now fail
+  within 15 seconds if StartOS cannot connect to the service or complete a
+  required TLS handshake with it.**
+
 - **Transfers preserve the source filesystem format.** StartOS mounts source
   filesystems read-only while copying persistent data, repairing ext4 only when
   needed to mount it. This leaves the source drive available as a fallback.
