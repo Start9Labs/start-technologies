@@ -132,3 +132,9 @@ The `up()` and `down()` methods handle database migrations:
 - **`down()`** — rolls back
 
 If no migration is needed, return `Ok(Value::Null)` from `up()` and `Ok(())` from `down()`. For complex migrations, set `type PreUpRes` to pass data from `pre_up()` into `up()`.
+
+### Changing a migration that has already been published
+
+Every master push publishes `Current` to alpha, so a server can be sitting on a version whose `up()` or `post_up()` has since changed — and `pre_init` only migrates a db whose `version` is _behind_ `Current`. A change to either after that version has reached any channel therefore needs its **`migration_revision()`** bumped (it defaults to `0`). `commit` records the revision it applied in `serverInfo.latestMigrationRevision`, and a server already on that version whose stored revision differs re-runs `up()` and `commit()` on its next boot; `commit` re-queues the version in `postInitMigrationTodos`, so `post_up()` runs again too.
+
+**Bumping the revision requires the migration to be idempotent with the previous revision.** The re-run happens on a db the earlier `up()` already transformed, never on the pre-migration shape, so the new `up()` must produce the same result whether it follows the previous revision or starts from the version before — and the same holds for `post_up()`. A migration that cannot satisfy that gets a new version node instead, which starts back at revision `0`.

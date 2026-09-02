@@ -243,13 +243,33 @@ pub async fn copy_and_shutdown<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     Ok(())
 }
 
-pub fn dir_size<'a, P: AsRef<Path> + 'a + Send + Sync>(
+pub fn dir_size<'a, P: AsRef<Path>>(
     path: P,
     ctr: Option<&'a Counter>,
 ) -> BoxFuture<'a, Result<u64, std::io::Error>> {
+    dir_size_inner(path.as_ref().to_owned(), None, ctr)
+}
+
+pub(crate) fn dir_size_excluding<'a, P: AsRef<Path>>(
+    path: P,
+    excluded: &'a Path,
+    ctr: Option<&'a Counter>,
+) -> BoxFuture<'a, Result<u64, std::io::Error>> {
+    dir_size_inner(path.as_ref().to_owned(), Some(excluded), ctr)
+}
+
+fn dir_size_inner<'a>(
+    path: PathBuf,
+    excluded: Option<&'a Path>,
+    ctr: Option<&'a Counter>,
+) -> BoxFuture<'a, Result<u64, std::io::Error>> {
     async move {
-        tokio_stream::wrappers::ReadDirStream::new(tokio::fs::read_dir(path.as_ref()).await?)
+        tokio_stream::wrappers::ReadDirStream::new(tokio::fs::read_dir(&path).await?)
             .try_fold(0, |acc, e| async move {
+                let path = e.path();
+                if excluded.is_some_and(|excluded| excluded == path) {
+                    return Ok(acc);
+                }
                 let m = e.metadata().await?;
                 Ok(acc
                     + if m.is_file() {
@@ -258,7 +278,7 @@ pub fn dir_size<'a, P: AsRef<Path> + 'a + Send + Sync>(
                         }
                         m.len()
                     } else if m.is_dir() {
-                        dir_size(e.path(), ctr).await?
+                        dir_size_inner(path, excluded, ctr).await?
                     } else {
                         0
                     })
@@ -658,14 +678,37 @@ impl<'a, R: AsyncRead> AsyncRead for CountingReader<'a, R> {
     }
 }
 
-pub fn dir_copy<'a, P0: AsRef<Path> + 'a + Send + Sync, P1: AsRef<Path> + 'a + Send + Sync>(
+pub fn dir_copy<'a, P0: AsRef<Path>, P1: AsRef<Path>>(
     src: P0,
     dst: P1,
     ctr: Option<&'a Counter>,
 ) -> BoxFuture<'a, Result<(), crate::Error>> {
+    dir_copy_inner(src.as_ref().to_owned(), dst.as_ref().to_owned(), None, ctr)
+}
+
+pub(crate) fn dir_copy_excluding<'a, P0: AsRef<Path>, P1: AsRef<Path>>(
+    src: P0,
+    dst: P1,
+    excluded: &'a Path,
+    ctr: Option<&'a Counter>,
+) -> BoxFuture<'a, Result<(), crate::Error>> {
+    dir_copy_inner(
+        src.as_ref().to_owned(),
+        dst.as_ref().to_owned(),
+        Some(excluded),
+        ctr,
+    )
+}
+
+fn dir_copy_inner<'a>(
+    src: PathBuf,
+    dst: PathBuf,
+    excluded: Option<&'a Path>,
+    ctr: Option<&'a Counter>,
+) -> BoxFuture<'a, Result<(), crate::Error>> {
     async move {
         let m = tokio::fs::metadata(&src).await?;
-        let dst_path = dst.as_ref();
+        let dst_path = dst.as_path();
         tokio::fs::create_dir_all(&dst_path).await.with_ctx(|_| {
             (
                 crate::ErrorKind::Filesystem,
@@ -696,11 +739,14 @@ pub fn dir_copy<'a, P0: AsRef<Path> + 'a + Send + Sync, P1: AsRef<Path> + 'a + S
                 format!("chown {}", dst_path.display()),
             )
         })?;
-        tokio_stream::wrappers::ReadDirStream::new(tokio::fs::read_dir(src.as_ref()).await?)
+        tokio_stream::wrappers::ReadDirStream::new(tokio::fs::read_dir(&src).await?)
             .map_err(|e| crate::Error::new(e, crate::ErrorKind::Filesystem))
             .try_for_each(|e| async move {
-                let m = e.metadata().await?;
                 let src_path = e.path();
+                if excluded.is_some_and(|excluded| excluded == src_path) {
+                    return Ok(());
+                }
+                let m = e.metadata().await?;
                 let dst_path = dst_path.join(e.file_name());
                 if m.is_file() {
                     let mut dst_file = create_file(&dst_path).await.with_ctx(|_| {
@@ -747,7 +793,7 @@ pub fn dir_copy<'a, P0: AsRef<Path> + 'a + Send + Sync, P1: AsRef<Path> + 'a + S
                         )
                     })?;
                 } else if m.is_dir() {
-                    dir_copy(src_path, dst_path, ctr).await?;
+                    dir_copy_inner(src_path, dst_path, excluded, ctr).await?;
                 } else if m.file_type().is_symlink() {
                     tokio::fs::symlink(
                         tokio::fs::read_link(&src_path).await.with_ctx(|_| {
@@ -765,7 +811,6 @@ pub fn dir_copy<'a, P0: AsRef<Path> + 'a + Send + Sync, P1: AsRef<Path> + 'a + S
                             format!("cp -P {} -> {}", src_path.display(), dst_path.display()),
                         )
                     })?;
-                    // Do not set permissions (see https://unix.stackexchange.com/questions/87200/change-permissions-for-a-symbolic-link)
                 }
                 Ok(())
             })
@@ -1838,6 +1883,48 @@ impl Drop for AtomicFile {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[tokio::test]
+    async fn directory_helpers_exclude_source_path() {
+        let root = PathBuf::from(format!(
+            "/tmp/dir-copy-test-{}-{}",
+            std::process::id(),
+            rand::random::<u64>()
+        ));
+        let src = root.join("src");
+        let dst = root.join("dst");
+        let excluded = src.join("tmp");
+        tokio::fs::create_dir_all(&excluded).await.unwrap();
+        tokio::fs::write(src.join("keep"), b"keep").await.unwrap();
+        tokio::fs::write(excluded.join("skip"), b"skip")
+            .await
+            .unwrap();
+
+        let size = Counter::new(0, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(
+            dir_size_excluding(&src, &excluded, Some(&size))
+                .await
+                .unwrap(),
+            4
+        );
+        assert_eq!(size.load(), 4);
+
+        let copied = Counter::new(0, std::sync::atomic::Ordering::Relaxed);
+        dir_copy_excluding(&src, &dst, &excluded, Some(&copied))
+            .await
+            .unwrap();
+        assert_eq!(tokio::fs::read(dst.join("keep")).await.unwrap(), b"keep");
+        assert_eq!(copied.load(), 4);
+        assert_eq!(
+            tokio::fs::metadata(dst.join("tmp"))
+                .await
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::NotFound
+        );
+
+        tokio::fs::remove_dir_all(root).await.unwrap();
+    }
 
     #[tokio::test]
     async fn canonicalize_folds_parent_components_in_missing_tails() {

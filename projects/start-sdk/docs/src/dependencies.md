@@ -74,7 +74,7 @@ The object you return from `setupDependencies()` declares what state each depend
 It does **not** gate your service's startup. Your service starts whenever the user starts it, regardless of dependency state. The fields:
 
 - `kind: 'running'` — user should have this dependency running. `kind: 'exists'` — user only needs it installed.
-- `versionRange` — semver range the dependency must satisfy.
+- `versionRange` — semver range the dependency must satisfy. A release may match through its installed version or one of the versions in its manifest's `satisfies` list, which is how a flavored install such as Bitcoin Knots satisfies a range written against Bitcoin Core. One declared version must satisfy every term joined by `&&`; terms joined by `||` may match different declared versions. A negated term or `!=` vetoes its branch when any declared version matches the excluded range or version.
 - `healthChecks` — names of the dependency's daemons (their `ready` IDs) or standalone health checks (`addHealthCheck` IDs) that should be passing.
 
 If your service genuinely cannot operate before a dependency reaches a particular state (a file exists, an RPC responds, a config is generated), handle that at runtime in `setupMain` — poll the dependency, retry, or surface your own error. Don't rely on the dependency declaration to block startup for you.

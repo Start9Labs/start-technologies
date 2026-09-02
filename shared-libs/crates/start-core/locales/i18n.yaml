@@ -304,6 +304,13 @@ setup.restoring-backup:
   fr_FR: "Restauration de la sauvegarde"
   pl_PL: "Przywracanie kopii zapasowej"
 
+setup.transfer-source-is-destination:
+  en_US: "The transfer source and destination must be different drives"
+  de_DE: "Quell- und Ziellaufwerk der Übertragung müssen unterschiedlich sein"
+  es_ES: "Las unidades de origen y destino de la transferencia deben ser diferentes"
+  fr_FR: "Les disques source et destination du transfert doivent être différents"
+  pl_PL: "Dysk źródłowy i docelowy transferu muszą być różne"
+
 setup.transferring-data:
   en_US: "Transferring data"
   de_DE: "Daten werden übertragen"

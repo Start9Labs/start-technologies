@@ -255,6 +255,7 @@ export const mockPatchData: DataModel = {
     unreadNotificationCount: 5,
     packageVersionCompat: '>=0.3.0 <=0.3.6',
     postInitMigrationTodos: {},
+    latestMigrationRevision: 0,
     statusInfo: {
       // currentBackup: null,
       updateProgress: null,
@@ -625,6 +626,7 @@ export const mockPatchData: DataModel = {
                   description:
                     'A launchable web app for you to interact with your Bitcoin node',
                   type: 'ui',
+                  preferredLauncherAddress: 'https://my-bitcoin.home:42443',
                   addressInfo: {
                     username: null,
                     hostId: 'abcdefg',

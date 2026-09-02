@@ -18,6 +18,10 @@ file tracks notable changes since the move to the monorepo.
   behavior. The server's own `.local` name remains reserved for StartOS. See
   [Private Domains](https://docs.start9.com/start-os/private-domains.html).
 
+- **Open UI can honor a service's configured address.** Services that depend on
+  one canonical origin can now direct Open UI to that address while it remains
+  enabled and compatible with the current browser session.
+
 - **A service can permanently retire a network host or a port it no longer
   uses, and the port numbers it held become available again.** A service that
   reorganizes its interfaces across an update — renaming a host, dropping a
@@ -84,6 +88,10 @@ file tracks notable changes since the move to the monorepo.
   could disagree depending on which forwarding protocol the router spoke.
   StartOS now measures the port from the Internet in that case and reports
   what it finds.
+
+- **Transfers preserve the source filesystem format.** StartOS mounts source
+  filesystems read-only while copying persistent data, repairing ext4 only when
+  needed to mount it. This leaves the source drive available as a fallback.
 
 - **An app that remembers your server's certificate sees the same certificate
   across every route to that name.** Wallets and other apps that pin the first
@@ -355,9 +363,19 @@ file tracks notable changes since the move to the monorepo.
   settled on HTTP/1.1, so StartOS wrote HTTP/1 requests onto a connection the
   service was reading as HTTP/2. StartOS now offers the client exactly the
   protocol the service chose, so both halves of the connection carry the same
-  one. A service whose HTTP/2 listener does not answer extended CONNECT
-  (RFC 8441) should advertise only `http/1.1`, which keeps WebSocket clients on
-  HTTP/1.1 where a WebSocket is an ordinary upgrade.
+  one. For HTTP/2, StartOS advertises WebSocket extended CONNECT when the
+  service includes support in its opening settings. If the service connection
+  ends, StartOS sends GOAWAY so the browser follows HTTP/2's orderly shutdown.
+
+- **Dependency releases satisfy one complete version-range branch.** A release
+  may use an installed or aliased version, but one version must satisfy every
+  term in a conjunction. An exclusion rules out its branch when a declared
+  version satisfies the complete excluded range. Dependency warnings, update
+  checks and marketplace filtering now agree on that evaluation.
+
+- **Versions of different flavors sort in a stable order.** Comparing across
+  flavors produced no answer, so a list mixing Bitcoin Core with Bitcoin Knots
+  kept whatever order it arrived in.
 
 ### Security
 

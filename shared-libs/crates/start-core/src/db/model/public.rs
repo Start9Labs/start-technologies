@@ -61,6 +61,7 @@ impl Public {
                 last_backup: None,
                 package_version_compat: Current::default().compat().clone(),
                 post_init_migration_todos: BTreeMap::new(),
+                latest_migration_revision: Current::default().migration_revision(),
                 network: NetworkInfo {
                     host: Host {
                         bindings: Bindings(
@@ -180,6 +181,8 @@ pub struct ServerInfo {
     pub package_version_compat: VersionRange,
     #[ts(type = "Record<string, unknown>")]
     pub post_init_migration_todos: BTreeMap<Version, Value>,
+    #[serde(default)]
+    pub latest_migration_revision: usize,
     #[ts(type = "string | null")]
     pub last_backup: Option<DateTime<Utc>>,
     pub network: NetworkInfo,

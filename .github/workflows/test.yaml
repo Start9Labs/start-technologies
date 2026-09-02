@@ -1,6 +1,7 @@
 name: Automated Tests
 
 on:
+  workflow_call:
   push:
     branches:
       - master
@@ -19,7 +20,7 @@ on:
       - integration/*
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  group: automated-tests-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -37,6 +38,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Check pull request retarget coverage
+        run: .github/scripts/check-pr-retarget-workflows.py
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODEJS_VERSION }}

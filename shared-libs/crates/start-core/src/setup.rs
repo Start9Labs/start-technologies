@@ -28,7 +28,7 @@ use crate::context::{CliContext, RpcContext, SetupContext};
 use crate::db::model::Database;
 use crate::disk::REPAIR_DISK_PATH;
 use crate::disk::fsck::RepairStrategy;
-use crate::disk::main::DEFAULT_PASSWORD;
+use crate::disk::main::{DEFAULT_PASSWORD, ImportMode};
 use crate::disk::mount::filesystem::ReadWrite;
 use crate::disk::mount::filesystem::cifs::Cifs;
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
@@ -43,7 +43,10 @@ use crate::shutdown::Shutdown;
 use crate::system::{KeyboardOptions, SetLanguageParams, save_language, sync_kiosk};
 use crate::util::Invoke;
 use crate::util::crypto::EncryptedWire;
-use crate::util::io::{Counter, create_file, dir_copy, dir_size, read_file_to_string};
+use crate::util::io::{
+    Counter, create_file, dir_copy, dir_copy_excluding, dir_size, dir_size_excluding,
+    read_file_to_string,
+};
 use crate::util::serde::{HandlerExtSerde, IoFormat, Pem};
 use crate::{DATA_DIR, Error, ErrorKind, MAIN_DATA, PACKAGE_DATA, PLATFORM, ResultExt};
 
@@ -295,11 +298,11 @@ pub async fn attach(
         let requires_reboot = crate::disk::main::import(
             &*disk_guid,
             DATA_DIR,
-            if tokio::fs::metadata(REPAIR_DISK_PATH).await.is_ok() {
+            ImportMode::ReadWrite(if tokio::fs::metadata(REPAIR_DISK_PATH).await.is_ok() {
                 RepairStrategy::Aggressive
             } else {
                 RepairStrategy::Preen
-            },
+            }),
             if disk_guid.ends_with("_UNENC") {
                 None
             } else {
@@ -492,7 +495,7 @@ pub async fn setup_data_drive(
     let _ = crate::disk::main::import(
         &*guid,
         DATA_DIR,
-        RepairStrategy::Preen,
+        ImportMode::ReadWrite(RepairStrategy::Preen),
         encryption_password,
         None,
     )
@@ -760,6 +763,15 @@ pub async fn execute(
         hostname,
     }: SetupExecuteParams,
 ) -> Result<SetupProgress, Error> {
+    if let Some(RecoverySource::Migrate { guid: old_guid }) = &recovery_source {
+        if old_guid.as_str() == <InternedString as AsRef<str>>::as_ref(&guid) {
+            return Err(Error::new(
+                eyre!("{}", t!("setup.transfer-source-is-destination")),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+    }
+
     let password = password
         .map(|p| {
             p.decrypt(&ctx).ok_or_else(|| {
@@ -891,11 +903,11 @@ pub async fn execute_inner(
         let requires_reboot = crate::disk::main::import(
             &*guid,
             DATA_DIR,
-            if tokio::fs::metadata(REPAIR_DISK_PATH).await.is_ok() {
+            ImportMode::ReadWrite(if tokio::fs::metadata(REPAIR_DISK_PATH).await.is_ok() {
                 RepairStrategy::Aggressive
             } else {
                 RepairStrategy::Preen
-            },
+            }),
             if guid.ends_with("_UNENC") {
                 None
             } else {
@@ -1083,71 +1095,87 @@ async fn migrate(
 
     restore_phase.start();
     restore_phase.set_units(Some(ProgressUnits::Bytes));
-    let _ = crate::disk::main::import(
-        &old_guid,
-        "/media/startos/migrate",
-        RepairStrategy::Preen,
-        if guid.ends_with("_UNENC") {
-            None
-        } else {
-            Some(DEFAULT_PASSWORD)
-        },
-        Some(&ctx.progress),
-    )
-    .await?;
 
-    let main_transfer_args = ("/media/startos/migrate/main/", formatcp!("{MAIN_DATA}/"));
-    let package_data_transfer_args = (
-        "/media/startos/migrate/package-data/",
-        formatcp!("{PACKAGE_DATA}/"),
-    );
+    let transfer_result = async {
+        let requires_reboot = crate::disk::main::import(
+            old_guid,
+            "/media/startos/migrate",
+            ImportMode::ReadOnly,
+            None,
+            Some(&ctx.progress),
+        )
+        .await?;
+        if requires_reboot.0 {
+            return Err(Error::new(
+                eyre!("{}", t!("setup.disk-errors-corrected-restart-required")),
+                ErrorKind::DiskManagement,
+            ));
+        }
 
-    let tmpdir = Path::new(package_data_transfer_args.0).join("tmp");
-    crate::util::io::delete_dir(&tmpdir).await?;
+        let main_transfer_args = ("/media/startos/migrate/main/", formatcp!("{MAIN_DATA}/"));
+        let package_data_transfer_args = (
+            "/media/startos/migrate/package-data/",
+            formatcp!("{PACKAGE_DATA}/"),
+        );
+        let package_data_tmp = Path::new(package_data_transfer_args.0).join("tmp");
+        let ordering = std::sync::atomic::Ordering::Relaxed;
+        let transfer_size = Counter::new(0, ordering);
 
-    let ordering = std::sync::atomic::Ordering::Relaxed;
+        let size = tokio::select! {
+            res = async {
+                let (main_size, package_data_size) = try_join!(
+                    dir_size(main_transfer_args.0, Some(&transfer_size)),
+                    dir_size_excluding(
+                        package_data_transfer_args.0,
+                        &package_data_tmp,
+                        Some(&transfer_size),
+                    )
+                )?;
+                Ok::<_, Error>(main_size + package_data_size)
+            } => { res? },
+            res = async {
+                loop {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    restore_phase.set_total(transfer_size.load());
+                }
+            } => res,
+        };
 
-    let main_transfer_size = Counter::new(0, ordering);
-    let package_data_transfer_size = Counter::new(0, ordering);
+        restore_phase.set_total(size);
 
-    let size = tokio::select! {
-        res = async {
-            let (main_size, package_data_size) = try_join!(
-                dir_size(main_transfer_args.0, Some(&main_transfer_size)),
-                dir_size(package_data_transfer_args.0, Some(&package_data_transfer_size))
-            )?;
-            Ok::<_, Error>(main_size + package_data_size)
-        } => { res? },
-        res = async {
-            loop {
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                restore_phase.set_total(main_transfer_size.load() + package_data_transfer_size.load());
-            }
-        } => res,
-    };
+        let transfer_progress = Counter::new(0, ordering);
 
-    restore_phase.set_total(size);
-
-    let main_transfer_progress = Counter::new(0, ordering);
-    let package_data_transfer_progress = Counter::new(0, ordering);
-
-    tokio::select! {
-        res = async {
-            try_join!(
-                dir_copy(main_transfer_args.0, main_transfer_args.1, Some(&main_transfer_progress)),
-                dir_copy(package_data_transfer_args.0, package_data_transfer_args.1, Some(&package_data_transfer_progress))
-            )?;
-            Ok::<_, Error>(())
-        } => { res? },
-        res = async {
-            loop {
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                restore_phase.set_done(main_transfer_progress.load() + package_data_transfer_progress.load());
-            }
-        } => res,
+        tokio::select! {
+            res = async {
+                try_join!(
+                    dir_copy(main_transfer_args.0, main_transfer_args.1, Some(&transfer_progress)),
+                    dir_copy_excluding(
+                        package_data_transfer_args.0,
+                        package_data_transfer_args.1,
+                        &package_data_tmp,
+                        Some(&transfer_progress),
+                    )
+                )?;
+                Ok::<_, Error>(())
+            } => { res? },
+            res = async {
+                loop {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    restore_phase.set_done(transfer_progress.load());
+                }
+            } => res,
+        }
+        Command::new("sync").invoke(ErrorKind::Filesystem).await?;
+        Ok::<_, Error>(())
     }
+    .await;
 
-    crate::disk::main::export(&old_guid, "/media/startos/migrate").await?;
+    let deactivate_result = crate::disk::main::deactivate(old_guid, "/media/startos/migrate").await;
+    if let Err(error) = transfer_result {
+        deactivate_result.log_err();
+        return Err(error);
+    }
+    deactivate_result?;
     restore_phase.complete();
 
     let (account, net_ctrl) = setup_init(&ctx, password, kiosk, hostname, init_phases).await?;

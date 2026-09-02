@@ -17,6 +17,7 @@
  * ```
  */
 export function deepEqual(...args: unknown[]) {
+  if (args.every(x => x === args[0])) return true
   const objects = args.filter(
     (x): x is object => typeof x === 'object' && x !== null,
   )

@@ -83,7 +83,7 @@ on:
 # publishes to alpha, so master pushes queue behind each other rather than
 # aborting a publish half-done.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  group: start-tunnel-${{ github.event_name }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:

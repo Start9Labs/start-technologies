@@ -17,24 +17,11 @@ export function dryUpdate(
         Object.keys(pkg.currentDependencies || {}).some(
           pkgId => pkgId === id,
         ) &&
-        !versionSatisfies(
+        !exver.releaseSatisfies(
           version,
           satisfies,
           pkg.currentDependencies[id]?.versionRange || '',
-          exver,
         ),
     )
     .map(pkg => getManifest(pkg).title)
-}
-
-function versionSatisfies(
-  version: string,
-  satisfies: string[],
-  range: string,
-  exver: Exver,
-): boolean {
-  return (
-    exver.satisfies(version, range) ||
-    satisfies.some(v => exver.satisfies(v, range))
-  )
 }

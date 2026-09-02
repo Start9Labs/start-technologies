@@ -5,8 +5,7 @@ All six product bins (`startbox`/`startd`, `start-container`, `start-cli`, `regi
 `tunnelbox`, `startwrt`) link against it; all but `startwrt` are thin wrappers in the product
 crates (`startwrt` is a full backend of its own that imports this crate aliased as `startos`).
 
-`CLAUDE.md` is a one-line `@AGENTS.md` import. See [ARCHITECTURE.md](ARCHITECTURE.md) and
-[CONTRIBUTING.md](CONTRIBUTING.md).
+`CLAUDE.md` is a one-line `@AGENTS.md` import. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
 Topical references: [rpc-toolkit.md](rpc-toolkit.md), [patchdb.md](patchdb.md),
 [i18n-patterns.md](i18n-patterns.md), [core-rust-patterns.md](core-rust-patterns.md),
@@ -24,19 +23,34 @@ Topical references: [rpc-toolkit.md](rpc-toolkit.md), [patchdb.md](patchdb.md),
 
 ## Build & test (run from the repo root)
 
+Install stable Rust and Docker. `rust-analyzer` is recommended.
+
 - `cargo check -p start-core` — type-check the library.
 - `make start-core-test` — run the test suite (wraps `run-tests.sh`, which uses the `rust-zig-builder`
   container and the `test` feature; skips `export_` tests). Or run a single test directly:
   `cargo test -p start-core <name> --features=test`.
-- `make start-core-format` — format this crate (`make start-core-format-check` for the read-only CI check). Nightly is required for formatting.
+- `make start-core-format` — format the shared Rust crates with the pinned nightly container (`make start-core-format-check` checks formatting). Set `FMT_NATIVE=1` only when that nightly is installed locally.
 - `cargo build -p start-os --bin startbox` (or the other product crate/bin) to build a binary.
+
+Keep `README.md`, `ARCHITECTURE.md`, this file, and the topical references current when changing
+project structure, conventions, build process, or product context.
+
+## Adding an RPC endpoint
+
+1. Define serializable request and response types.
+2. Choose a handler type (`from_fn_async` for most cases).
+3. Write the async handler.
+4. Register it in the appropriate `ParentHandler` tree.
+5. Add `#[derive(TS)]` and `#[ts(export)]` where TypeScript needs the types.
+
+See [rpc-toolkit.md](rpc-toolkit.md) for handler patterns.
 
 ## Gotchas
 
 - **Process invocation: use `.invoke(ErrorKind::...)`, not `.status()`.** When running CLI commands via `tokio::process::Command`, the `Invoke` trait (from `crate::util::Invoke`) captures stdout/stderr and checks exit codes. `.status()` leaks stderr directly to system logs and creates noise in production. For check-then-act patterns (e.g. `iptables -C`), use `.invoke(...).await.is_ok()` / `.is_err()` instead of `.status().await.map_or(false, |s| s.success())`.
 - **File I/O: prefer `crate::util::io` over `tokio::fs`** when an equivalent helper exists. These helpers add error context and mount-aware behavior that `tokio::fs` doesn't.
-- **i18n is mandatory for any user-facing string** — including CLI subcommand descriptions (`about.<name>`), CLI arg help (`help.arg.<name>`), error messages, notifications, and setup messages. All 5 locales (`en_US`, `de_DE`, `es_ES`, `fr_FR`, `pl_PL`) must be filled in `locales/i18n.yaml` (i.e. `shared-libs/crates/start-core/locales/i18n.yaml`), alphabetically ordered within their section. See `i18n-patterns.md`. Compile-time validation catches missing keys.
-- **`#[ts(export)]` changes need a multi-step rebuild.** Editing a `#[ts(export)]` struct/enum in Rust does _not_ update web or container-runtime. From the repo root, run `make start-core-ts-bindings` (regenerates `shared-libs/crates/start-core/bindings/`, then rsyncs into `shared-libs/ts-modules/start-core/lib/osBindings/`) and then rebuild the affected TS lib(s): `cd shared-libs/ts-modules/start-core && make dist` (what web consumes) and/or `cd projects/start-sdk && make bundle` (the SDK bundle container-runtime consumes). See [ARCHITECTURE.md](ARCHITECTURE.md#cross-layer-verification).
+- **i18n is mandatory for any user-facing string** — including CLI subcommand descriptions (`about.<name>`), CLI arg help (`help.arg.<name>`), error messages, notifications, and setup messages. All 5 locales (`en_US`, `de_DE`, `es_ES`, `fr_FR`, `pl_PL`) must be filled in `locales/i18n.yaml` (i.e. `shared-libs/crates/start-core/locales/i18n.yaml`), alphabetically ordered within their section. Use `t!()`, match the key namespace to the module path, and use kebab-case for multi-word segments. See `i18n-patterns.md`. Compile-time validation catches missing keys.
+- **`#[ts(export)]` changes need a multi-step rebuild.** Use `#[serde(rename_all = "camelCase")]` for JavaScript field names. Add `#[ts(type = "string")]` for unsupported string-backed Rust types and `#[ts(type = "number")]` when a `u64` should not become `bigint`. Editing a `#[ts(export)]` struct/enum in Rust does _not_ update web or container-runtime. From the repo root, run `make start-core-ts-bindings` (regenerates `shared-libs/crates/start-core/bindings/`, then rsyncs into `shared-libs/ts-modules/start-core/lib/osBindings/`) and then rebuild the affected TS lib(s): `cd shared-libs/ts-modules/start-core && make dist` (what web consumes) and/or `cd projects/start-sdk && make bundle` (the SDK bundle container-runtime consumes). See [ARCHITECTURE.md](ARCHITECTURE.md#cross-layer-verification).
 - **A `///` doc comment on a `#[ts(export)]` type lands in the binding** as a TSDoc block (see `CheckPortV6Res.ts`). Adding or editing one changes the generated `.ts`, so it is not a comment-only change — regenerate.
 - **A change to the CLI surface needs `make manpages`.** Adding or renaming a subcommand, or editing the `about.*`/`help.arg.*` key behind one, changes the committed man pages under `projects/*/man/` — a new subcommand adds a page _and_ a line to its parent's. The `Generated Artifacts` CI job regenerates them and fails on any drift, in the same job as the TS bindings, so a CLI change and a `#[ts(export)]` change each need their own regeneration step. Note the gate reads `git status`, so staging the result is not enough — commit it.
 - **Bindings can only come from a compile.** ts-rs emits each binding from an `export_bindings_*` `#[test]` fn the derive macro generates inside this lib, so `make start-core-ts-bindings` necessarily builds the crate; there is no lighter command, and hand-editing a generated file just fails the CI gate. If the build does not fit locally, push the branch instead: the `Generated Artifacts` job regenerates the bindings and the man pages, and a failing gate uploads them as the `generated-artifacts` artifact to download and commit. It is heavier than it needs to be because the root `Cargo.toml` sets `[profile.test] opt-level = 3` — on a constrained machine, cap the container (`--cpus`/`--memory`) and pass `CARGO_BUILD_JOBS`, which doesn't change fingerprints and so reuses a warm `target/`.

@@ -19,9 +19,9 @@ export type CheckDependencies<DependencyId extends PackageId = PackageId> = {
   tasksSatisfied: (packageId: DependencyId) => boolean
   healthCheckSatisfied: (
     packageId: DependencyId,
-    healthCheckId: HealthCheckId,
+    healthCheckId?: HealthCheckId,
   ) => boolean
-  satisfied: () => boolean
+  satisfied: (packageId?: DependencyId) => boolean
 
   throwIfInstalledNotSatisfied: (packageId: DependencyId) => null
   throwIfInstalledVersionNotSatisfied: (packageId: DependencyId) => null
@@ -64,11 +64,11 @@ export async function checkDependencies<
     !!infoFor(packageId).result.installedVersion
   const installedVersionSatisfied = (packageId: DependencyId) => {
     const dep = infoFor(packageId)
-    return (
-      !!dep.result.installedVersion &&
-      ExtendedVersion.parse(dep.result.installedVersion).satisfies(
-        VersionRange.parse(dep.requirement.versionRange),
-      )
+    if (!dep.result.installedVersion) return false
+    return VersionRange.parse(dep.requirement.versionRange).satisfiedByRelease(
+      [dep.result.installedVersion, ...dep.result.satisfies].map(v =>
+        ExtendedVersion.parse(v),
+      ),
     )
   }
   const runningSatisfied = (packageId: DependencyId) => {
@@ -123,13 +123,7 @@ export async function checkDependencies<
     if (!dep.result.installedVersion) {
       throw new Error(`${dep.result.title || packageId} is not installed`)
     }
-    if (
-      ![dep.result.installedVersion, ...dep.result.satisfies].find(v =>
-        ExtendedVersion.parse(v).satisfies(
-          VersionRange.parse(dep.requirement.versionRange),
-        ),
-      )
-    ) {
+    if (!installedVersionSatisfied(packageId)) {
       throw new Error(
         `Installed version ${dep.result.installedVersion} of ${dep.result.title || packageId} does not match expected version range ${dep.requirement.versionRange}`,
       )

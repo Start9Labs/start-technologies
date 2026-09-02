@@ -15,6 +15,25 @@
   already on a shape is now redundant and can go. Every other `z` export,
   `z.deepLoose` and `z.deepPartial` included, is unchanged
 
+- **Breaking — the SDK supplies the package toolchain.** TypeScript, Prettier,
+  ESLint and `@vercel/ncc` install with `@start9labs/start-sdk`, so a package
+  declares the SDK and nothing else. Drop `typescript`, `@types/node`,
+  `@vercel/ncc` and `prettier` from `devDependencies`, drop the `build`,
+  `check` and `prettier` scripts and the `prettier` config block, and add a
+  `.prettierrc` containing `"@start9labs/start-sdk/prettier.config.json"` so
+  your editor formats the way the build gate checks. `s9pk.mk` runs each step
+  itself through `TS_CHECK`, `FORMAT_CHECK` and `JS_BUNDLE`, any of which a
+  `Makefile` can override above the include
+
+- **The build gate rejects unformatted `startos/`.** `make format` writes. The
+  shared config is the four settings every package already declared, so nothing
+  that was formatted needs reformatting
+
+- **`@start9labs/start-core` is the only bundled dependency.** Everything else
+  installs normally, so a package can clear a security advisory anywhere in the
+  SDK's dependency tree with its own `overrides` entry rather than waiting for
+  an SDK release
+
 - **Breaking — `mountDependency` no longer accepts `type`.** A dependency mount
   has been a directory since StartOS 0.4.0-alpha.16 disabled file mounts on
   dependencies, so the option was silently doing nothing; passing it is now a
@@ -37,10 +56,6 @@
   still reported its stale ports, which retiring now makes an observable
   difference. Prefer `sdk.host.getBridgeAddress` to reach a dependency; this is
   raw allocator metadata
-
-- `effects.getServicePortForward` resolves `null` instead of throwing when the
-  binding does not exist. Prefer `sdk.host.getBridgeAddress` to reach a
-  dependency; this is raw allocator metadata
 
 - **The scaffolded `build.yml` no longer passes `DEV_KEY`** — a PR build only
   compiles and packs, so it never needed the signing key. Existing packages
@@ -87,7 +102,25 @@
   so handle its absence. See
   [Hardware Virtualization (KVM)](https://docs.start9.com/packaging/manifest.html#hardware-virtualization-kvm)
 
+- **`createInterface` accepts `preferredLauncherAddress`.** A UI interface can
+  nominate the absolute URL that StartOS should open when a service depends on
+  one canonical origin. See
+  [Nominating an Address to Open](https://docs.start9.com/packaging/interfaces.html#nominating-an-address-to-open).
+
+- **`Value.select`, `Value.dynamicSelect`, `Value.union` and `Value.dynamicUnion`
+  accept `default: null`**, which renders the field unselected and holds the form
+  unsubmittable until the user picks one
+
 ### Fixed
+
+- **Scaffolded package CI builds a draft PR when it becomes ready and rebuilds
+  against every new base after retargeting.** Metadata edits preserve active
+  builds and their conclusions
+
+- **`merge()` given a value of `undefined` removes the key from an `.env` file
+  model**, the way it already did for every other format. It wrote the literal
+  `KEY=undefined`, which a shape's `.catch()` then masked on read — so the file
+  the service actually parses held the word while the model reported the default
 
 - **`VersionGraph` reports a missing migration path in terms a service owner can
   act on**, rather than as an assertion about the version range the host handed
@@ -132,6 +165,36 @@
 - **A command killed by `SubContainer.exec`'s own timeout now says it timed
   out**, where the bare signal had read like an OOM kill. `exec`'s result
   carries `timedOutAfter` alongside `exitCode` and `exitSignal`
+
+- **`checkDependencies(...)`'s boolean version check honours the dependency's
+  `satisfies` list**, matching `throwIfNotSatisfied()` and the web UI.
+  `satisfied()` and `installedVersionSatisfied()` compared only the installed
+  version against the declared range, ignoring the versions that release stands
+  in for. This matters most for a flavor, which is incomparable to an unflavored
+  version: a `#knots` Bitcoin or a `#quantum` File Browser read as unsatisfied
+  while the throwing surface passed
+
+- **A dependency release is matched against `versionRange` as one set of declared versions.**
+  One installed or aliased version must satisfy a complete conjunction. `!=`
+  and negated ranges exclude the release when a declared version satisfies the
+  complete excluded range. `VersionRange.satisfiedByRelease` is the evaluator
+  behind the SDK, dependency warnings and marketplace, and `normalize()`
+  preserves the same answer. Numeric
+  prerelease identifiers retain exact ordering and serialization beyond
+  JavaScript's safe-integer limit
+
+- **`checkDependencies(...)`'s `satisfied()` takes an optional package id, and
+  `healthCheckSatisfied()`'s is optional.** Both were declared narrower than the
+  functions behind them, so `deps.satisfied('bitcoind')` was a compile error for
+  a call that has always worked, and the only way to check one dependency was to
+  reimplement the predicate
+
+- **A prerelease segment may mix letters, digits and hyphens**, matching the
+  grammar StartOS parses. `1.0.0-rc1:0` and `1.0.0-alpha-1:0` threw a parse error
+  out of `ExtendedVersion.parse` where the OS accepted them, so a dependency
+  published on such a version crashed a dependent's `checkDependencies`. A
+  numeric segment with a leading zero is rejected, as it already was on the OS
+  side
 
 ### Security
 
