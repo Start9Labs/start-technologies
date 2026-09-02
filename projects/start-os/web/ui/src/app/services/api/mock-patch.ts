@@ -255,6 +255,7 @@ export const mockPatchData: DataModel = {
     unreadNotificationCount: 5,
     packageVersionCompat: '>=0.3.0 <=0.3.6',
     postInitMigrationTodos: {},
+    latestMigrationRevision: 0,
     statusInfo: {
       // currentBackup: null,
       updateProgress: null,

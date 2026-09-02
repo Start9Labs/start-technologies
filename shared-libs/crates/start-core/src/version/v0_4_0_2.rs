@@ -27,6 +27,9 @@ impl VersionT for Version {
     fn compat(self) -> &'static VersionRange {
         &V0_3_0_COMPAT
     }
+    fn migration_revision(self) -> usize {
+        1
+    }
     #[instrument(skip_all)]
     fn up(self, db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
         rehome_admin_ui_port(db);
