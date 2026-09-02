@@ -743,20 +743,6 @@ fn compute_bind_reqs<A: Accept + 'static>(mapping: &Mapping<A>) -> VHostBindRequ
 const BIND_RETRY_BACKOFF: Duration = Duration::from_secs(2);
 const BACKEND_DIAL_TIMEOUT: Duration = Duration::from_secs(15);
 
-async fn with_backend_deadline<T>(
-    deadline: tokio::time::Instant,
-    target: SocketAddr,
-    future: impl Future<Output = T>,
-) -> Option<T> {
-    match tokio::time::timeout_at(deadline, future).await {
-        Ok(value) => Some(value),
-        Err(_) => {
-            tracing::warn!("no usable connection to {target} within {BACKEND_DIAL_TIMEOUT:?}");
-            None
-        }
-    }
-}
-
 /// Listener that manages its own TCP listeners with IP-level precision.
 /// Binds ALL IPs of public gateways and ONLY matching private IPs.
 pub struct VHostBindListener {
@@ -1270,8 +1256,10 @@ where
         let peer = extract::<TcpMetadata, _>(metadata).map(|m| m.peer_addr);
         let plain_connect = || async {
             let deadline = tokio::time::Instant::now() + BACKEND_DIAL_TIMEOUT;
-            let stream = with_backend_deadline(deadline, self.addr, TcpStream::connect(self.addr))
-                .await?
+            let stream = tokio::time::timeout_at(deadline, TcpStream::connect(self.addr))
+                .await
+                .with_ctx(|_| (ErrorKind::Network, self.addr))
+                .log_err()?
                 .with_ctx(|_| (ErrorKind::Network, self.addr))
                 .log_err()?;
             Some((stream, deadline, self.addr))
@@ -1350,14 +1338,15 @@ where
             Some(client_cfg) => {
                 // Called even for an empty list: without it the connector falls
                 // back to `client_cfg`'s own protocols.
-                let target_stream = with_backend_deadline(
+                let target_stream = tokio::time::timeout_at(
                     deadline,
-                    backend_addr,
                     TlsConnector::from(client_cfg.clone())
                         .with_alpn(dialled)
                         .connect(ServerName::IpAddress(self.addr.ip().into()), tcp_stream),
                 )
-                .await?
+                .await
+                .with_ctx(|_| (ErrorKind::Network, backend_addr))
+                .log_err()?
                 .with_ctx(|_| (ErrorKind::Network, backend_addr))
                 .log_err()?;
                 let negotiated = target_stream
