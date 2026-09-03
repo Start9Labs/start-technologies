@@ -44,7 +44,7 @@ file tracks notable changes since the move to the monorepo.
   one's name. See
   [Alternative Registries](https://docs.start9.com/start-os/alternative-registries.html).
 
-- **`start-cli server experimental epp` shows and sets the CPU's
+- **`start-cli server epp` shows and sets the CPU's
   energy/performance preference**, persisted across reboots the way the governor
   is. On Librem Mini v2 systems without a saved preference, StartOS applies
   `balance_power` when available. Without a saved preference, all other systems
@@ -165,7 +165,7 @@ file tracks notable changes since the move to the monorepo.
   its public address directly, or that is reached over StartTunnel, is
   unaffected. See [Public IP](https://docs.start9.com/start-os/public-ip.html).
 
-- **`--format json` on `start-cli server experimental governor` and
+- **`--format json` on `start-cli server governor` and
   `start-cli ssh list` returns the result** it was asked for.
 
 - **A downgrade to a version that cannot take over the service's data is refused

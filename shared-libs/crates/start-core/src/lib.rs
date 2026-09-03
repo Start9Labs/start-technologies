@@ -287,6 +287,26 @@ pub fn server<C: Context>() -> ParentHandler<C> {
             ),
         )
         .subcommand(
+            "governor",
+            from_fn_async(system::governor)
+                .with_display_serializable()
+                .with_custom_display_fn(|handle, result| {
+                    system::display_governor_info(handle.params, result)
+                })
+                .with_about("about.show-cpu-governors")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "epp",
+            from_fn_async(system::epp)
+                .with_display_serializable()
+                .with_custom_display_fn(|handle, result| {
+                    system::display_epp_info(handle.params, result)
+                })
+                .with_about("about.show-cpu-epp")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
             "experimental",
             system::experimental::<C>().with_about("about.commands-experimental"),
         )

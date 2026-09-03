@@ -28,37 +28,18 @@ use crate::util::cpupower::{
     Epp, Governor, current_epp, get_available_epps, get_available_governors, set_epp, set_governor,
 };
 use crate::util::io::{copy_file, open_file, write_file_atomic};
-use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
+use crate::util::serde::{WithIoFormat, display_serializable};
 use crate::util::sync::Watch;
 use crate::{MAIN_DATA, PACKAGE_DATA};
 
 pub fn experimental<C: Context>() -> ParentHandler<C> {
-    ParentHandler::new()
-        .subcommand(
-            "zram",
-            from_fn_async(zram)
-                .no_display()
-                .with_about("about.enable-zram")
-                .with_call_remote::<CliContext>(),
-        )
-        .subcommand(
-            "governor",
-            from_fn_async(governor)
-                .with_display_serializable()
-                .with_custom_display_fn(|handle, result| {
-                    display_governor_info(handle.params, result)
-                })
-                .with_about("about.show-cpu-governors")
-                .with_call_remote::<CliContext>(),
-        )
-        .subcommand(
-            "epp",
-            from_fn_async(epp)
-                .with_display_serializable()
-                .with_custom_display_fn(|handle, result| display_epp_info(handle.params, result))
-                .with_about("about.show-cpu-epp")
-                .with_call_remote::<CliContext>(),
-        )
+    ParentHandler::new().subcommand(
+        "zram",
+        from_fn_async(zram)
+            .no_display()
+            .with_about("about.enable-zram")
+            .with_call_remote::<CliContext>(),
+    )
 }
 
 pub async fn enable_zram() -> Result<(), Error> {
@@ -184,7 +165,7 @@ pub struct GovernorInfo {
     available: BTreeSet<Governor>,
 }
 
-fn display_governor_info(
+pub(crate) fn display_governor_info(
     params: WithIoFormat<GovernorParams>,
     result: GovernorInfo,
 ) -> Result<(), Error> {
@@ -1477,7 +1458,10 @@ pub struct EppInfo {
     available: BTreeSet<Epp>,
 }
 
-fn display_epp_info(params: WithIoFormat<EppParams>, result: EppInfo) -> Result<(), Error> {
+pub(crate) fn display_epp_info(
+    params: WithIoFormat<EppParams>,
+    result: EppInfo,
+) -> Result<(), Error> {
     use prettytable::*;
 
     if let Some(format) = params.format {

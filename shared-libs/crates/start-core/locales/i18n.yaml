@@ -5054,11 +5054,11 @@ about.command-set-country:
   pl_PL: "Polecenie ustawienia kraju"
 
 about.commands-experimental:
-  en_US: "Commands related to configuring experimental options such as zram and cpu governor"
-  de_DE: "Befehle zur Konfiguration experimenteller Optionen wie zram und CPU-Governor"
-  es_ES: "Comandos relacionados con la configuración de opciones experimentales como zram y gobernador de CPU"
-  fr_FR: "Commandes liées à la configuration d'options expérimentales comme zram et le gouverneur CPU"
-  pl_PL: "Polecenia konfiguracji opcji eksperymentalnych jak zram i regulator CPU"
+  en_US: "Commands related to configuring experimental options"
+  de_DE: "Befehle zur Konfiguration experimenteller Optionen"
+  es_ES: "Comandos relacionados con la configuración de opciones experimentales"
+  fr_FR: "Commandes liées à la configuration d'options expérimentales"
+  pl_PL: "Polecenia konfiguracji opcji eksperymentalnych"
 
 about.commands-host-address-domain:
   en_US: "Commands for managing host address domains"

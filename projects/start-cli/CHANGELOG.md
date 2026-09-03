@@ -13,6 +13,9 @@ or the CLI's externally observable behavior.
 
 ### Added
 
+- **`server epp` shows or sets the CPU energy/performance preference.** The setting persists
+  across reboots and reports the values available on the server.
+
 - **`s9pk pack` packs the package's `README.md`.** It sits beside `instructions.md` in the
   archive and is readable with `S9pk::readme()`. The point is what runs on the server: an AI
   assistant administering a service can now read the package's technical reference from the
@@ -29,6 +32,9 @@ or the CLI's externally observable behavior.
   everywhere else re-running the installer is the only update path.
 
 ### Changed
+
+- **`server governor` replaces `server experimental governor`.** Scripts that set or inspect
+  the CPU governor need to use the direct `server` subcommand.
 
 - **`server set-hostname` takes one required hostname, and `setup execute` no
   longer takes `--name`.** A StartOS server carries a single name — its `.local`
