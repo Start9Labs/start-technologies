@@ -9,8 +9,11 @@ name: live-docs guard
 # into live-docs onto master unattended, so a PR that touched code would land a stale
 # tree on master with nobody reviewing it as a code change.
 on:
+  # `edited` covers a retarget: the branch filter sees the new base, so a PR
+  # moved onto live-docs is checked without waiting for its next push.
   pull_request:
     branches: ['live-docs']
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read

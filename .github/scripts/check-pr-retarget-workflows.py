@@ -15,6 +15,7 @@ TARGETS = {
 }
 EXPECTED_PULL_REQUEST_WORKFLOWS = {
     'conflict-markers.yml',
+    'live-docs-guard.yml',
     'start-cli.yaml',
     'start-registry.yaml',
     'start-tunnel.yaml',
@@ -79,6 +80,12 @@ marker_source = (WORKFLOWS / 'conflict-markers.yml').read_text()
 marker_trigger = marker_source.split('\npermissions:', 1)[0]
 assert 'types: [opened, synchronize, reopened, edited]' in marker_trigger
 assert not re.search(r'^  workflow_call:\s*$', marker_trigger, re.MULTILINE)
+
+guard_source = (WORKFLOWS / 'live-docs-guard.yml').read_text()
+guard_trigger = guard_source.split('\npermissions:', 1)[0]
+assert "branches: ['live-docs']" in guard_trigger
+assert 'types: [opened, synchronize, reopened, edited]' in guard_trigger
+assert not re.search(r'^  workflow_call:\s*$', guard_trigger, re.MULTILINE)
 
 groups = {}
 for filename in TARGETS:
