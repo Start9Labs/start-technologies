@@ -2169,6 +2169,14 @@ registry.context.unauthorized:
   fr_FR: "Non autorisé"
   pl_PL: "Brak autoryzacji"
 
+# registry/db.rs
+registry.db.pointer-outside-index:
+  en_US: "Subscription pointer must be at or below /index"
+  de_DE: "Der Abonnement-Zeiger muss auf oder unter /index liegen"
+  es_ES: "El puntero de suscripción debe estar en /index o por debajo"
+  fr_FR: "Le pointeur d'abonnement doit être situé au niveau ou en dessous de /index"
+  pl_PL: "Wskaźnik subskrypcji musi znajdować się w /index lub poniżej"
+
 # registry/os/asset/add.rs
 registry.os.asset.commitment-mismatch:
   en_US: "Commitment does not match"

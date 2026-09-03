@@ -43,15 +43,22 @@ Defined in `shared-libs/crates/start-core/src/registry/mod.rs`:
 
 Subcommands (same module), each available over RPC and to the `start-registry` CLI via `with_call_remote`:
 
-| Command   | Module                | Purpose                                                                |
-| --------- | --------------------- | ---------------------------------------------------------------------- |
-| `index`   | `mod::get_full_index` | full combined index (name, icon, packages, OS, signers)                |
-| `info`    | `registry/info.rs`    | set/get registry info and categories                                   |
-| `os`      | `registry/os/`        | OS version index + asset (image) management                            |
-| `package` | `registry/package/`   | add/get/list packages, versions, assets                                |
-| `admin`   | `registry/admin.rs`   | manage admins and signers                                              |
-| `db`      | `registry/db.rs`      | dump/inspect the registry database; subscribe to package-index changes |
-| `metrics` | `registry/metrics.rs` | download/user metrics summaries (admin-only)                           |
+| Command   | Module                | Purpose                                                                  |
+| --------- | --------------------- | ------------------------------------------------------------------------ |
+| `index`   | `mod::get_full_index` | full combined index (name, icon, packages, OS, signers)                  |
+| `info`    | `registry/info.rs`    | set/get registry info and categories                                     |
+| `os`      | `registry/os/`        | OS version index + asset (image) management                              |
+| `package` | `registry/package/`   | add/get/list packages, versions, assets                                  |
+| `admin`   | `registry/admin.rs`   | manage admins and signers                                                |
+| `db`      | `registry/db.rs`      | dump/inspect the registry database; subscribe to `/index` or any subpath |
+| `metrics` | `registry/metrics.rs` | download/user metrics summaries (admin-only)                             |
+
+### Registry index subscriptions
+
+The public `db.subscribe` RPC accepts `{ "pointer": <JSON Pointer> }`. The pointer may select
+`/index` or any descendant; omitting it or passing `null` selects `/index`. The response contains
+an initial `{ id, value }` dump and a continuation `guid`. Connecting to `/ws/rpc/<guid>` streams
+revisions whose JSON Patch paths are relative to the selected subtree.
 
 ## Data model
 
