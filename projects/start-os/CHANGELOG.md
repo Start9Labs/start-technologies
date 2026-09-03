@@ -44,6 +44,10 @@ file tracks notable changes since the move to the monorepo.
   one's name. See
   [Alternative Registries](https://docs.start9.com/start-os/alternative-registries.html).
 
+- **`start-cli server experimental epp` shows and sets the CPU's
+  energy/performance preference**, persisted across reboots the way the governor
+  is. Nothing is changed unless you set one.
+
 - **A service can permanently retire a network host or a port it no longer
   uses, and the port numbers it held become available again.** A service that
   reorganizes its interfaces across an update — renaming a host, dropping a
@@ -158,6 +162,9 @@ file tracks notable changes since the move to the monorepo.
   domain you have assigned to it, or by its LAN IP address. A server that holds
   its public address directly, or that is reached over StartTunnel, is
   unaffected. See [Public IP](https://docs.start9.com/start-os/public-ip.html).
+
+- **`--format json` on `start-cli server experimental governor` and
+  `start-cli ssh list` returns the result** it was asked for.
 
 - **A downgrade to a version that cannot take over the service's data is refused
   before anything is downloaded or stopped**, with an explanation of what to do

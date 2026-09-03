@@ -333,6 +333,13 @@ setup.password-required:
   pl_PL: "Hasło jest wymagane do nowej konfiguracji"
 
 # system.rs
+system.epp-not-available:
+  en_US: "Energy performance preference %{epp} not available"
+  de_DE: "Energie-Leistungs-Präferenz %{epp} nicht verfügbar"
+  es_ES: "La preferencia de energía/rendimiento %{epp} no está disponible"
+  fr_FR: "La préférence énergie/performance %{epp} n'est pas disponible"
+  pl_PL: "Preferencja energii/wydajności %{epp} nie jest dostępna"
+
 system.governor-not-available:
   en_US: "Governor %{governor} not available"
   de_DE: "Governor %{governor} nicht verfügbar"
@@ -1408,12 +1415,26 @@ init.error-running-script:
   fr_FR: "Erreur lors de l'exécution de %{script} : %{error}"
   pl_PL: "Błąd uruchamiania %{script}: %{error}"
 
+init.cpu-epp-not-available:
+  en_US: 'CPU Energy Performance Preference "%{epp}" Not Available'
+  de_DE: 'CPU-Energie-Leistungs-Präferenz "%{epp}" nicht verfügbar'
+  es_ES: 'Preferencia de energía/rendimiento de CPU "%{epp}" no disponible'
+  fr_FR: 'Préférence énergie/performance CPU "%{epp}" non disponible'
+  pl_PL: 'Preferencja energii/wydajności CPU "%{epp}" niedostępna'
+
 init.cpu-governor-not-available:
   en_US: 'CPU Governor "%{governor}" Not Available'
   de_DE: 'CPU-Governor "%{governor}" nicht verfügbar'
   es_ES: 'CPU Governor "%{governor}" no disponible'
   fr_FR: 'Gouverneur CPU "%{governor}" non disponible'
   pl_PL: 'Governor CPU "%{governor}" niedostępny'
+
+init.setting-cpu-epp:
+  en_US: 'Setting CPU Energy Performance Preference to "%{epp}"'
+  de_DE: 'Setze CPU-Energie-Leistungs-Präferenz auf "%{epp}"'
+  es_ES: 'Configurando la preferencia de energía/rendimiento de CPU a "%{epp}"'
+  fr_FR: 'Configuration de la préférence énergie/performance CPU à "%{epp}"'
+  pl_PL: 'Ustawianie preferencji energii/wydajności CPU na "%{epp}"'
 
 init.setting-cpu-governor:
   en_US: 'Setting CPU Governor to "%{governor}"'
@@ -3403,6 +3424,13 @@ help.arg.event-id:
   es_ES: "Identificador único de evento"
   fr_FR: "Identifiant unique de l'événement"
   pl_PL: "Unikalny identyfikator zdarzenia"
+
+help.arg.epp-name:
+  en_US: "CPU energy performance preference"
+  de_DE: "CPU-Energie-Leistungs-Präferenz"
+  es_ES: "Preferencia de energía/rendimiento de CPU"
+  fr_FR: "Préférence énergie/performance du CPU"
+  pl_PL: "Preferencja energii/wydajności CPU"
 
 help.arg.except-actions:
   en_US: "Action IDs to exclude"
@@ -6566,6 +6594,13 @@ about.setup-status:
   es_ES: "Mostrar el estado actual del asistente de configuración"
   fr_FR: "Afficher l'état actuel de l'assistant d'installation"
   pl_PL: "Wyświetl obecny stan kreatora konfiguracji"
+
+about.show-cpu-epp:
+  en_US: "Show CPU energy performance preferences"
+  de_DE: "CPU-Energie-Leistungs-Präferenzen anzeigen"
+  es_ES: "Mostrar preferencias de energía/rendimiento de CPU"
+  fr_FR: "Afficher les préférences énergie/performance du CPU"
+  pl_PL: "Pokaż preferencje energii/wydajności CPU"
 
 about.show-cpu-governors:
   en_US: "Show CPU governors"
