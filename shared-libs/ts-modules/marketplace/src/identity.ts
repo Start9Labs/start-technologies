@@ -93,12 +93,10 @@ function dataUrlBytes(url: string): Uint8Array | null {
 
   const body = url.slice(comma + 1)
 
-  if (!url.slice(5, comma).split(';').includes('base64')) {
-    return new TextEncoder().encode(decodeURIComponent(body))
-  }
-
   try {
-    return Uint8Array.from(atob(body), c => c.charCodeAt(0))
+    return url.slice(5, comma).split(';').includes('base64')
+      ? Uint8Array.from(atob(body), c => c.charCodeAt(0))
+      : new TextEncoder().encode(decodeURIComponent(body))
   } catch {
     return null
   }
