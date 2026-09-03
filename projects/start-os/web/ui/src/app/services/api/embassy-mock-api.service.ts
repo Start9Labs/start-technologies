@@ -615,6 +615,10 @@ export class MockApiService extends ApiService {
   async getRegistryInfo(params: { registry: string }): Promise<T.RegistryInfo> {
     await pauseFor(2000)
 
+    const drifted = Mock.DriftedRegistries[params.registry]
+
+    if (drifted) return { ...Mock.RegistryInfo, ...drifted }
+
     const known = Mock.KnownRegistries.find(k => k.url === params.registry)
 
     return known
