@@ -70,11 +70,17 @@ export function resolveIdentity(
 /** Whether a registry still presents the identity Start9 pinned for it. */
 export function identityMatches(
   known: T.KnownRegistry,
-  info: Pick<T.RegistryInfo, 'name' | 'icon'>,
+  info: Pick<T.RegistryInfo, 'name' | 'icon' | 'description'>,
 ): boolean {
   if (info.name !== known.name) return false
+  if (info.icon && known.icon && !iconsMatch(info.icon, known.icon))
+    return false
 
-  return !info.icon || !known.icon || iconsMatch(info.icon, known.icon)
+  return (
+    !info.description ||
+    !known.description ||
+    localeStringsMatch(info.description, known.description)
+  )
 }
 
 function pin(url: string, known: readonly T.KnownRegistry[]): Pin | undefined {
@@ -94,6 +100,14 @@ function host(url: string): string {
   } catch {
     return url
   }
+}
+
+function localeStringsMatch(a: T.LocaleString, b: T.LocaleString): boolean {
+  if (typeof a === 'string' || typeof b === 'string') return a === b
+
+  const keys = Object.keys(a)
+
+  return keys.length === Object.keys(b).length && keys.every(k => a[k] === b[k])
 }
 
 function iconsMatch(a: string | null, b: string | null): boolean {

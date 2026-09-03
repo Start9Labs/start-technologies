@@ -16,6 +16,8 @@ import {
   i18nPipe,
   knownRegistries as start9Registries,
   LocalizePipe,
+  MarkdownPipe,
+  SafeLinksDirective,
   sameUrl,
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
@@ -31,6 +33,7 @@ import {
   TuiScrollbar,
   TuiTitle,
 } from '@taiga-ui/core'
+import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import {
   TuiAvatar,
   TuiButtonSelect,
@@ -100,6 +103,15 @@ const ICONS: Record<string, string> = {
       </footer>
     </aside>
     <div class="content">
+      @if (description(); as description) {
+        <div
+          tuiNotification
+          appearance="info"
+          class="g-markdown"
+          safeLinks
+          [innerHTML]="description | localize | markdown | dompurify"
+        ></div>
+      }
       @if (warning(); as warning) {
         <div tuiNotification appearance="warning">{{ warning | localize }}</div>
       }
@@ -256,6 +268,9 @@ const ICONS: Record<string, string> = {
     NgTemplateOutlet,
     KeyValuePipe,
     LocalizePipe,
+    MarkdownPipe,
+    NgDompurifyPipe,
+    SafeLinksDirective,
     FormsModule,
     i18nPipe,
   ],
@@ -307,6 +322,15 @@ export class MarketplaceComponent {
     const pin = registry && findKnown(registry.url, this.known())
 
     return !!pin && !identityMatches(pin, registry.info)
+  })
+
+  protected readonly description = computed(() => {
+    const registry = this.current()
+
+    return registry
+      ? (findKnown(registry.url, this.known())?.description ??
+          registry.info.description)
+      : null
   })
   // Only categories that have at least one package are shown; 'all' is the
   // always-present pseudo-category injected by each app's service.

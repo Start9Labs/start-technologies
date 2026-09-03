@@ -41,9 +41,13 @@ file tracks notable changes since the move to the monorepo.
   and its published icon remains the fallback for the valid icon the registry
   serves. While a listed registry is selected, the marketplace shows the notice
   Start9 published for it. A banner atop the marketplace flags a listed registry
-  that presents a different name or icon. A registry that is not on the list
-  cannot display a listed one's name. See
+  that presents a different name, icon, or description. A registry that is not
+  on the list cannot display a listed one's name. See
   [Alternative Registries](https://docs.start9.com/start-os/alternative-registries.html).
+
+- **A registry's description appears at the top of the marketplace** while that
+  registry is selected. For a listed registry it is the description Start9
+  published.
 
 - **A service can permanently retire a network host or a port it no longer
   uses, and the port numbers it held become available again.** A service that

@@ -3790,6 +3790,13 @@ help.arg.registry-listen-address:
   fr_FR: "Adresse d'écoute du registre"
   pl_PL: "Adres nasłuchiwania rejestru"
 
+help.arg.registry-description:
+  en_US: "Description of the registry, as markdown"
+  de_DE: "Beschreibung des Registrys, als Markdown"
+  es_ES: "Descripción del registro, en Markdown"
+  fr_FR: "Description du registre, en Markdown"
+  pl_PL: "Opis rejestru, w formacie Markdown"
+
 help.arg.registry-name:
   en_US: "Name of the registry"
   de_DE: "Name des Registrys"
@@ -6440,6 +6447,13 @@ about.set-registry-icon:
   es_ES: "Establecer el icono del registro"
   fr_FR: "Définir l'icône du registre"
   pl_PL: "Ustaw ikonę rejestru"
+
+about.set-registry-description:
+  en_US: "Set the registry description"
+  de_DE: "Die Registry-Beschreibung festlegen"
+  es_ES: "Establecer la descripción del registro"
+  fr_FR: "Définir la description du registre"
+  pl_PL: "Ustaw opis rejestru"
 
 about.set-registry-name:
   en_US: "Set the registry name"

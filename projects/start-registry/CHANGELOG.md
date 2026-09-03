@@ -4,6 +4,10 @@ All notable changes to `start-registry` (the Start Registry server) are document
 
 ## [1.0.2]
 
+- **A registry can declare a description.** `info set-description` stores markdown (a
+  `LocaleString`, so it can carry translations), `info` returns it, and the marketplace shows it
+  above the registry's services while that registry is selected.
+
 - **A client can follow the package index over a websocket instead of re-fetching it.** `db.subscribe`
   returns the index as it stands plus a continuation id; connecting to `/ws/rpc/<id>` then streams a
   JSON patch each time a package or version is added, removed, or recategorized. It is

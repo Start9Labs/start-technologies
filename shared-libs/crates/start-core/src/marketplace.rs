@@ -19,6 +19,7 @@ pub struct KnownRegistry {
     pub url: Url,
     pub name: String,
     pub icon: Option<DataUrl<'static>>,
+    pub description: Option<LocaleString>,
     pub warning: Option<LocaleString>,
 }
 

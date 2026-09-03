@@ -818,7 +818,7 @@ export default {
   929: 'Décroissant',
   930: 'Ajouter une bibliothèque',
   932: 'Bibliothèques connues',
-  933: 'Cette bibliothèque ne présente pas le nom et l’icône que Start9 a publiés pour elle. Start9 n’a pas vérifié qu’elle est bien ce qu’elle prétend être.',
+  933: 'Cette bibliothèque ne présente pas le nom, l’icône et la description que Start9 a publiés pour elle. Start9 n’a pas vérifié qu’elle est bien ce qu’elle prétend être.',
   934: 'Bibliothèque personnalisée',
   935: 'Sélectionnez une bibliothèque',
   936: 'Start9 n’exploite pas cette bibliothèque et n’assure pas le support des services qu’elle distribue.',

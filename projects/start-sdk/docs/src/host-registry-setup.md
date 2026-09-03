@@ -10,7 +10,7 @@ On first install, StartOS surfaces two setup tasks under the service. **Both mus
 
 ## 2. Configure Registry
 
-Run the **Configure Registry** action to set the registry's display name (max 32 characters) and an optional icon. This is what users will see when they browse your registry from another StartOS device.
+Run the **Configure Registry** action to set the registry's display name (max 32 characters), an optional icon, and an optional description. This is what users will see when they browse your registry from another StartOS device; the description appears above the registry's services and may use markdown.
 
 The registry's hostnames, listen address, Tor proxy, and data directory are managed by StartOS automatically — you don't configure them by hand. As the service's network addresses change (e.g. you add a clearnet domain to the API interface), the configured hostnames update to match.
 

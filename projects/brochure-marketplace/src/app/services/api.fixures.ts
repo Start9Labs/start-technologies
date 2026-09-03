@@ -16,6 +16,8 @@ export namespace Mock {
   export const RegistryInfo: T.RegistryInfo = {
     name: 'Start9 Registry',
     icon: REGISTRY_ICON,
+    description:
+      'Every service here is packaged, tested, and supported by **Start9**. Read the [docs](https://docs.start9.com) before installing.',
     categories: {
       ai: {
         name: 'AI',
@@ -49,18 +51,21 @@ export namespace Mock {
       url: 'https://registry.example.com/',
       name: 'Example Registry',
       icon: REGISTRY_ICON,
+      description: null,
       warning: 'Example Registry is a demonstration. Install at your own risk.',
     },
     {
       url: 'https://renamed.example.com/',
       name: 'Renamed Registry',
       icon: REGISTRY_ICON,
+      description: null,
       warning: null,
     },
     {
       url: 'https://restyled.example.com/',
       name: 'Restyled Registry',
       icon: REGISTRY_ICON,
+      description: null,
       warning: {
         en_US: 'Restyled Registry distributes nightly builds.',
         de_DE: 'Restyled Registry verteilt Nightly-Builds.',

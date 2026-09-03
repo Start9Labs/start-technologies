@@ -4,7 +4,7 @@ The Marketplace is where you discover services to install on your StartOS server
 
 ## Registry System and Navigation
 
-Each registry in the Marketplace is maintained independently. When you open the Marketplace, you browse one registry at a time. To switch between registries, click the arrows underneath the current registry title.
+Each registry in the Marketplace is maintained independently. When you open the Marketplace, you browse one registry at a time. To switch between registries, click the arrows underneath the current registry title. A registry that declares a description shows it above its services.
 
 StartOS ships with two [default registries](default-registries.md): the **Start9 Registry** and the **Community Registry**. You can also add [alternative registries](alternative-registries.md) or [sideload](sideloading.md) packages directly.
 
