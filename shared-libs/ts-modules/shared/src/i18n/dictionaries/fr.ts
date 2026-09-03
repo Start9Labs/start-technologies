@@ -823,7 +823,7 @@ export default {
   930: 'Ajouter une bibliothèque',
   931: 'Start9 n’exploite pas ces bibliothèques et n’assure pas le support des services qu’elles distribuent.',
   932: 'Bibliothèques connues',
-  933: 'Cette bibliothèque ne présente plus le nom et l’icône que Start9 a publiés pour elle ; elle ne peut donc pas être ajoutée depuis la liste. Elle a peut-être changé de mains.',
+  933: 'Cette bibliothèque ne présente pas le nom et l’icône que Start9 a publiés pour elle. Elle a peut-être changé de mains.',
   934: 'Bibliothèque personnalisée',
   935: 'Sélectionnez une bibliothèque',
 } satisfies i18n

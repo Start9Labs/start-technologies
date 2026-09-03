@@ -18,6 +18,7 @@ import {
   sameUrl,
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
+import { TuiNotificationService } from '@taiga-ui/core'
 import { PatchDB } from 'patch-db-client'
 import {
   BehaviorSubject,
@@ -54,6 +55,7 @@ export class MarketplaceService extends AbstractMarketplaceService {
   private readonly exver = inject(Exver)
   private readonly storage = inject(StorageService)
   private readonly i18n = inject(i18nPipe)
+  private readonly alerts = inject(TuiNotificationService)
 
   readonly knownRegistries$: Observable<T.KnownRegistry[]> = from(
     this.api.getKnownRegistries(),
@@ -313,11 +315,18 @@ export class MarketplaceService extends AbstractMarketplaceService {
     const pin = findKnown(url, await firstValueFrom(this.knownRegistries$))
 
     if (pin && !identityMatches(pin, info)) {
-      throw new Error(
-        this.i18n.transform(
-          'This registry no longer presents the name and icon Start9 published for it, so it cannot be added from the list. It may have changed hands.',
-        ),
-      )
+      this.alerts
+        .open(
+          this.i18n.transform(
+            'This registry does not present the name and icon Start9 published for it. It may have changed hands.',
+          ),
+          {
+            label: this.i18n.transform('Warning'),
+            appearance: 'warning',
+            autoClose: 0,
+          },
+        )
+        .subscribe()
     }
 
     await this.api.setDbValue<string | null>(['registries', url], info.name)

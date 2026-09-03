@@ -823,7 +823,7 @@ export default {
   930: 'Ein Register hinzufügen',
   931: 'Start9 betreibt diese Register nicht und unterstützt die von ihnen bereitgestellten Dienste nicht.',
   932: 'Bekannte Register',
-  933: 'Dieses Register zeigt nicht mehr den Namen und das Symbol, die Start9 dafür veröffentlicht hat, und kann daher nicht aus der Liste hinzugefügt werden. Möglicherweise hat es den Besitzer gewechselt.',
+  933: 'Dieses Register zeigt nicht den Namen und das Symbol, die Start9 dafür veröffentlicht hat. Möglicherweise hat es den Besitzer gewechselt.',
   934: 'Benutzerdefiniertes Register',
   935: 'Register auswählen',
 } satisfies i18n

@@ -39,7 +39,8 @@ file tracks notable changes since the move to the monorepo.
 - **Adding a registry now offers a list Start9 publishes, alongside the URL
   field.** Each listed registry appears under the name Start9 published for it.
   Its published icon remains the fallback for the valid icon the registry serves.
-  A registry that is not on the list cannot display a listed one's name. See
+  An identity mismatch raises a persistent warning. A registry that is not on
+  the list cannot display a listed one's name. See
   [Alternative Registries](https://docs.start9.com/start-os/alternative-registries.html).
 
 - **A service can permanently retire a network host or a port it no longer

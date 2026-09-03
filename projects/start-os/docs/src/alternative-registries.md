@@ -6,7 +6,7 @@ Adding a registry offers two choices: pick one from the list Start9 publishes, o
 
 ## Listed Registries
 
-Start9 publishes a list of alternative registries, together with the name and icon each one is expected to present. StartOS shows the published name, then displays a valid icon served by the registry when it matches the published icon. The published icon remains the fallback. StartOS refuses to add a listed registry whose name and icon do not match. A registry that is not on the list cannot display a listed registry's name — including any of Start9's own.
+Start9 publishes a list of alternative registries, together with the name and icon each one is expected to present. StartOS shows the published name, then displays a valid icon served by the registry when it matches the published icon. The published icon remains the fallback. A persistent warning appears when a listed registry's name or icon does not match. A registry that is not on the list cannot display a listed registry's name — including any of Start9's own.
 
 > [!NOTE]
 > Listing is not an endorsement. Start9 does not operate listed registries, vet their services, or support them.
