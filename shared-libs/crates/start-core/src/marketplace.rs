@@ -5,6 +5,7 @@ use url::Url;
 
 use crate::context::RpcContext;
 use crate::prelude::*;
+use crate::s9pk::manifest::LocaleString;
 use crate::util::DataUrl;
 
 const MANIFEST_URL: &str = "https://marketplace.start9.com/.well-known/startos/registries.json";
@@ -18,6 +19,7 @@ pub struct KnownRegistry {
     pub url: Url,
     pub name: String,
     pub icon: Option<DataUrl<'static>>,
+    pub warning: Option<LocaleString>,
 }
 
 #[derive(Deserialize)]

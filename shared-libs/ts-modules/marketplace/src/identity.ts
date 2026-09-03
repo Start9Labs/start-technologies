@@ -74,7 +74,7 @@ export function identityMatches(
 ): boolean {
   if (info.name !== known.name) return false
 
-  return iconsMatch(info.icon, known.icon)
+  return !info.icon || !known.icon || iconsMatch(info.icon, known.icon)
 }
 
 function pin(url: string, known: readonly T.KnownRegistry[]): Pin | undefined {

@@ -100,13 +100,8 @@ const ICONS: Record<string, string> = {
       </footer>
     </aside>
     <div class="content">
-      @if (thirdParty()) {
-        <div tuiNotification appearance="warning">
-          {{
-            'Start9 does not operate this registry or support the services it distributes.'
-              | i18n
-          }}
-        </div>
+      @if (warning(); as warning) {
+        <div tuiNotification appearance="warning">{{ warning | localize }}</div>
       }
       @if (drifted()) {
         <div tuiNotification appearance="negative">
@@ -119,7 +114,7 @@ const ICONS: Record<string, string> = {
       <header tuiHeader="h4">
         <hgroup tuiTitle>
           <h2>
-            @if (registry()) {
+            @if (current()) {
               {{ name() | localize }}
             }
           </h2>
@@ -145,7 +140,7 @@ const ICONS: Record<string, string> = {
       </header>
       <tui-scrollbar>
         <section>
-          @if (registry()) {
+          @if (current()) {
             @for ($implicit of packages(); track $index) {
               <ng-container
                 *ngTemplateOutlet="template(); context: { $implicit }"
@@ -277,19 +272,38 @@ export class MarketplaceComponent {
   protected readonly icons = ICONS
   protected readonly asIs = () => 0
   protected readonly open = signal(!inject(WA_IS_MOBILE))
-  private readonly known = toSignal(
-    inject(AbstractMarketplaceService).knownRegistries$,
-    { initialValue: [] },
-  )
+  private readonly marketplace = inject(AbstractMarketplaceService)
+  private readonly known = toSignal(this.marketplace.knownRegistries$, {
+    initialValue: [],
+  })
+  private readonly selected = toSignal(this.marketplace.currentRegistryUrl$)
 
-  protected readonly thirdParty = computed(() => {
-    const url = this.registry()?.url
+  protected readonly current = computed(() => {
+    const registry = this.registry()
 
-    return !!url && !Object.values(start9Registries).some(u => sameUrl(u, url))
+    return registry && sameUrl(registry.url, this.selected())
+      ? registry
+      : undefined
+  })
+
+  protected readonly warning = computed(() => {
+    const url = this.selected()
+
+    if (!url) return null
+
+    const listed = findKnown(url, this.known())
+
+    if (listed) return listed.warning
+
+    return Object.values(start9Registries).some(u => sameUrl(u, url))
+      ? null
+      : this.i18n.transform(
+          'Start9 does not operate this registry or support the services it distributes.',
+        )
   })
 
   protected readonly drifted = computed(() => {
-    const registry = this.registry()
+    const registry = this.current()
     const pin = registry && findKnown(registry.url, this.known())
 
     return !!pin && !identityMatches(pin, registry.info)
@@ -297,11 +311,11 @@ export class MarketplaceComponent {
   // Only categories that have at least one package are shown; 'all' is the
   // always-present pseudo-category injected by each app's service.
   protected readonly categories = computed(() => {
-    const info = this.registry()?.info?.categories
+    const info = this.current()?.info?.categories
     if (!info) return undefined
 
     const used = new Set(
-      (this.registry()?.packages || []).flatMap(p => p.categories || []),
+      (this.current()?.packages || []).flatMap(p => p.categories || []),
     )
 
     return Object.fromEntries(
@@ -319,12 +333,12 @@ export class MarketplaceComponent {
 
   protected readonly name = computed(
     (c = this.effectiveCategory()) =>
-      this.registry()?.info?.categories?.[c]?.name || c,
+      this.current()?.info?.categories?.[c]?.name || c,
   )
 
   protected readonly packages = computed(() =>
     filterPackages(
-      this.registry()?.packages || [],
+      this.current()?.packages || [],
       this.query(),
       this.effectiveCategory(),
       this.sort(),

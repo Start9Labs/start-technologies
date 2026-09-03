@@ -37,11 +37,12 @@ file tracks notable changes since the move to the monorepo.
   configs without either marker are classified as outbound-only.
 
 - **Adding a registry now offers a list Start9 publishes, alongside the URL
-  field.** Each listed registry appears under the name Start9 published for it.
-  Its published icon remains the fallback for the valid icon the registry serves.
-  A banner atop the marketplace flags a listed registry whose name or icon no
-  longer matches. A registry that is not on the list cannot display a listed
-  one's name. See
+  field.** Each listed registry appears under the name Start9 published for it,
+  and its published icon remains the fallback for the valid icon the registry
+  serves. While a listed registry is selected, the marketplace shows the notice
+  Start9 published for it. A banner atop the marketplace flags a listed registry
+  that presents a different name or icon. A registry that is not on the list
+  cannot display a listed one's name. See
   [Alternative Registries](https://docs.start9.com/start-os/alternative-registries.html).
 
 - **A service can permanently retire a network host or a port it no longer

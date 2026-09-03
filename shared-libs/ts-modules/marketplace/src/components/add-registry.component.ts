@@ -1,6 +1,6 @@
-import { Component, computed, signal } from '@angular/core'
+import { Component, computed, inject, signal } from '@angular/core'
 import { FormsModule } from '@angular/forms'
-import { i18nPipe } from '@start9labs/shared'
+import { i18nPipe, LocalizePipe } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import {
   TuiButton,
@@ -23,12 +23,9 @@ import { StoreIconDirective } from './store-icon.directive'
 @Component({
   template: `
     <form tuiForm (submit.prevent)="submit()">
-      <div tuiNotification appearance="warning">
-        {{
-          'Start9 does not operate these registries or support the services they distribute.'
-            | i18n
-        }}
-      </div>
+      @if (warning(); as warning) {
+        <div tuiNotification appearance="warning">{{ warning | localize }}</div>
+      }
 
       @if (context.data.length) {
         <fieldset>
@@ -105,9 +102,11 @@ import { StoreIconDirective } from './store-icon.directive'
     TuiSelect,
     TuiTitle,
     i18nPipe,
+    LocalizePipe,
   ],
 })
 export class MarketplaceAddRegistryComponent {
+  private readonly i18n = inject(i18nPipe)
   protected readonly context =
     injectContext<TuiDialogContext<string, T.KnownRegistry[]>>()
 
@@ -116,6 +115,16 @@ export class MarketplaceAddRegistryComponent {
 
   protected readonly value = computed(
     () => this.selected()?.url || this.url().trim(),
+  )
+
+  protected readonly warning = computed(
+    () =>
+      this.selected()?.warning ??
+      (this.url().trim()
+        ? this.i18n.transform(
+            'Start9 does not operate this registry or support the services it distributes.',
+          )
+        : null),
   )
 
   protected readonly stringify = (registry: T.KnownRegistry | null) =>

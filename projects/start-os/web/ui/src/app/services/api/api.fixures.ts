@@ -228,16 +228,22 @@ export namespace Mock {
       url: 'https://registry.example.com/',
       name: 'Example Registry',
       icon: REGISTRY_ICON,
+      warning: 'Example Registry is a demonstration. Install at your own risk.',
     },
     {
       url: 'https://renamed.example.com/',
       name: 'Renamed Registry',
       icon: REGISTRY_ICON,
+      warning: null,
     },
     {
       url: 'https://restyled.example.com/',
       name: 'Restyled Registry',
       icon: REGISTRY_ICON,
+      warning: {
+        en_US: 'Restyled Registry distributes nightly builds.',
+        de_DE: 'Restyled Registry verteilt Nightly-Builds.',
+      },
     },
   ]
 
