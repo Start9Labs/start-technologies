@@ -28,7 +28,7 @@ use crate::net::vhost::{AlpnInfo, PassthroughInfo};
 use crate::prelude::*;
 use crate::progress::FullProgress;
 use crate::system::{KeyboardOptions, SmtpValue};
-use crate::util::cpupower::Governor;
+use crate::util::cpupower::{Epp, Governor};
 use crate::util::lshw::LshwDevice;
 use crate::util::serde::MaybeUtf8String;
 use crate::version::{Current, VersionT};
@@ -146,6 +146,7 @@ impl Public {
                 ntp_synced: false,
                 zram: true,
                 governor: None,
+                epp: None,
                 smtp: None,
                 echoip_urls: default_echoip_urls(),
                 ram: 0,
@@ -197,6 +198,8 @@ pub struct ServerInfo {
     #[serde(default)]
     pub zram: bool,
     pub governor: Option<Governor>,
+    #[serde(default)]
+    pub epp: Option<Epp>,
     pub smtp: Option<SmtpValue>,
     #[serde(default = "default_echoip_urls")]
     #[ts(type = "string[]")]

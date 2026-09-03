@@ -49,6 +49,12 @@ file tracks notable changes since the move to the monorepo.
   registry is selected. For a listed registry it is the description Start9
   published.
 
+- **`start-cli server epp` shows and sets the CPU's
+  energy/performance preference**, persisted across reboots the way the governor
+  is. On Librem Mini v2 systems without a saved preference, StartOS applies
+  `balance_power` when available. Without a saved preference, all other systems
+  retain their current value.
+
 - **A service can permanently retire a network host or a port it no longer
   uses, and the port numbers it held become available again.** A service that
   reorganizes its interfaces across an update — renaming a host, dropping a
@@ -163,6 +169,9 @@ file tracks notable changes since the move to the monorepo.
   domain you have assigned to it, or by its LAN IP address. A server that holds
   its public address directly, or that is reached over StartTunnel, is
   unaffected. See [Public IP](https://docs.start9.com/start-os/public-ip.html).
+
+- **`--format json` on `start-cli server governor` and
+  `start-cli ssh list` returns the result** it was asked for.
 
 - **A downgrade to a version that cannot take over the service's data is refused
   before anything is downloaded or stopped**, with an explanation of what to do

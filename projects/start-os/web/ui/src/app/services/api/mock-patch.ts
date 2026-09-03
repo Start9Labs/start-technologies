@@ -310,6 +310,7 @@ export const mockPatchData: DataModel = {
     echoipUrls: ['https://ipconfig.me', 'https://ifconfig.co'],
     zram: true,
     governor: 'performance',
+    epp: 'balance_power',
     ram: 8 * 1024 * 1024 * 1024,
     devices: [],
     kiosk: true,

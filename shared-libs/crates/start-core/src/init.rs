@@ -314,25 +314,44 @@ pub async fn init(
     let server_info = db.peek().await.into_public().into_server_info();
     set_governor.start();
     let selected_governor = server_info.as_governor().de()?;
-    let governor = if let Some(governor) = &selected_governor {
-        if cpupower::get_available_governors()
-            .await?
-            .contains(governor)
-        {
-            Some(governor)
-        } else {
+    let available_governors = cpupower::get_available_governors()
+        .await
+        .log_err()
+        .unwrap_or_default();
+    let governor = match &selected_governor {
+        Some(governor) if available_governors.contains(governor) => Some(governor),
+        Some(governor) => {
             tracing::warn!(
                 "{}",
                 t!("init.cpu-governor-not-available", governor = governor)
             );
             None
         }
-    } else {
-        cpupower::get_preferred_governor().await?
+        None => cpupower::preferred_governor(&available_governors),
     };
     if let Some(governor) = governor {
         tracing::info!("{}", t!("init.setting-cpu-governor", governor = governor));
-        cpupower::set_governor(governor).await?;
+        cpupower::set_governor(governor).await.log_err();
+    }
+
+    let selected_epp = server_info.as_epp().de()?;
+    let system_product_name = if selected_epp.is_none() {
+        crate::firmware::system_product_name().await.log_err()
+    } else {
+        None
+    };
+    let epp = cpupower::preferred_epp(selected_epp, system_product_name.as_deref());
+    if let Some(epp) = &epp {
+        let available_epps = cpupower::get_available_epps()
+            .await
+            .log_err()
+            .unwrap_or_default();
+        if available_epps.contains(epp) {
+            tracing::info!("{}", t!("init.setting-cpu-epp", epp = epp));
+            cpupower::set_epp(epp).await.log_err();
+        } else {
+            tracing::warn!("{}", t!("init.cpu-epp-not-available", epp = epp));
+        }
     }
     set_governor.complete();
 
