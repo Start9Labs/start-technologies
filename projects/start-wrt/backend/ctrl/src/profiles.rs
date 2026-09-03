@@ -827,9 +827,9 @@ fn delete_config(
     cleanup_orphaned_vpn_zones(cfgs);
 
     // The zone and its forwardings are gone; drop them from every
-    // published-port/auto-forward hairpin list, or fw4 rejects those
+    // published-port/auto-forward hairpin projection, or fw4 rejects those
     // redirects outright over the now-unknown name.
-    crate::published_ports::sync_reflection_zones(&mut cfgs["firewall"])?;
+    crate::published_ports::sync_hairpin(&mut cfgs["firewall"])?;
 
     Ok(())
 }
@@ -2116,9 +2116,9 @@ fn rewrite_firewall(
         }
     }
 
-    // The forwarding set just changed; every published-port and auto-forward
-    // redirect's `reflection_zone` is derived from it.
-    crate::published_ports::sync_reflection_zones(&mut cfgs["firewall"])?;
+    // The forwardings and egress rejects just changed; every hairpin
+    // projection is derived from them.
+    crate::published_ports::sync_hairpin(&mut cfgs["firewall"])?;
 
     Ok(())
 }
@@ -3449,6 +3449,7 @@ pub(crate) async fn regenerate_schedule_crontab(ctx: &impl CtrlContext) -> Resul
                      uci set firewall.{sec}.dest='{egress}'; \
                      uci set firewall.{sec}.target='REJECT'; \
                      uci commit firewall; \
+                     /usr/bin/startwrt-cli published-ports sync-hairpin; \
                      /etc/init.d/firewall reload \
                      {SCHEDULE_TAG}\n"
                 ));
@@ -3461,6 +3462,7 @@ pub(crate) async fn regenerate_schedule_crontab(ctx: &impl CtrlContext) -> Resul
                     "{end_m} {end_h} * * {days_str} \
                      uci -q delete firewall.{sec}; \
                      uci commit firewall; \
+                     /usr/bin/startwrt-cli published-ports sync-hairpin; \
                      /etc/init.d/firewall reload \
                      {SCHEDULE_TAG}\n"
                 ));
@@ -3586,6 +3588,9 @@ pub(crate) async fn evaluate_and_apply_schedules(ctx: &impl CtrlContext) -> Resu
             Some(&section_name),
         )?;
     }
+
+    // A blackout REJECT also takes the profile's hairpin away.
+    crate::published_ports::sync_hairpin(&mut cfgs["firewall"])?;
 
     dump_all(ctx.uci_root(), cfgs).await?;
     drop(arena);
@@ -4028,6 +4033,10 @@ config wifi-vlan
     /// matching the granted state.
     fn seed_reflection_firewall(dir: &std::path::Path, with_guest_access: bool) {
         let mut fw = std::fs::read_to_string(dir.join("firewall")).unwrap();
+        // The shipped wan zone masquerades; `setup_configs` leaves it out.
+        let wan = "\toption name 'wan'\n\tlist network 'wan'\n";
+        assert_eq!(fw.matches(wan).count(), 1);
+        fw = fw.replace(wan, &format!("{wan}\toption masq '1'\n"));
         if with_guest_access {
             fw.push_str(
                 "\nconfig forwarding 'fwd_guest_lan'\n\toption src 'vlan_guest'\n\toption dest 'lan'\n",
@@ -4058,6 +4067,13 @@ config wifi-vlan
     }
 
     fn guest_profile(lan_access: LanAccess<ProfileIdOpt>) -> Profile<ProfileIdOpt> {
+        guest_profile_with_wan(lan_access, WanAccess::All)
+    }
+
+    fn guest_profile_with_wan(
+        lan_access: LanAccess<ProfileIdOpt>,
+        wan_access: WanAccess,
+    ) -> Profile<ProfileIdOpt> {
         Profile {
             id: ProfileIdOpt {
                 fullname: Some("Guest".into()),
@@ -4067,7 +4083,7 @@ config wifi-vlan
             gateway_ip: Ipv4Addr::new(192, 168, 101, 1),
             outbound: "wan".into(),
             lan_access,
-            wan_access: WanAccess::All,
+            wan_access,
             dns_override: Vec::new(),
             dns_source: String::new(),
             access_to_new_profiles: false,
@@ -4075,16 +4091,11 @@ config wifi-vlan
         }
     }
 
-    /// Revoking a profile's Access must strip its zone from every hairpin
-    /// list — published ports and automatic forwards alike — or that profile
-    /// keeps reaching the port via the WAN address after the revocation.
-    #[tokio::test]
-    async fn revoking_access_resyncs_reflection_zones() {
-        let dir = tempfile::tempdir().unwrap();
-        let ctx = TestContext(dir.path().to_path_buf());
-        setup_configs(dir.path());
-        seed_reflection_firewall(dir.path(), true);
-
+    async fn guest_hairpin_after(
+        dir: &std::path::Path,
+        profile: &Profile<ProfileIdOpt>,
+    ) -> (Vec<String>, Vec<String>) {
+        let ctx = TestContext(dir.to_path_buf());
         let arena = Arena::new();
         let mut cfgs = parse_all(
             ctx.uci_root(),
@@ -4093,19 +4104,104 @@ config wifi-vlan
         )
         .await
         .unwrap();
+        set_config(ctx.clone(), &mut cfgs, profile).unwrap();
+        (
+            reflection_list(&cfgs, "pp_x"),
+            reflection_list(&cfgs, "apf_aabbccddeeff_9000"),
+        )
+    }
 
-        set_config(
-            ctx.clone(),
-            &mut cfgs,
-            &guest_profile(LanAccess::SameProfile),
+    /// A profile keeps the hairpin on either ground: Access to the target's
+    /// profile, or Internet access. Losing both strips its zone from every
+    /// hairpin list — published ports and automatic forwards alike — or that
+    /// profile keeps reaching the port via the WAN address.
+    #[tokio::test]
+    async fn hairpin_follows_access_and_internet_grounds() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_configs(dir.path());
+        seed_reflection_firewall(dir.path(), true);
+
+        let both = vec!["lan".to_string(), "vlan_guest".into()];
+        let lan_only = vec!["lan".to_string()];
+
+        // Access revoked, Internet kept: still eligible.
+        let profile = guest_profile(LanAccess::SameProfile);
+        assert_eq!(
+            guest_hairpin_after(dir.path(), &profile).await,
+            (both.clone(), both.clone())
+        );
+        // Internet revoked, Access kept: still eligible.
+        let access = LanAccess::OtherProfiles(BTreeSet::from([ProfileIdOpt {
+            fullname: None,
+            interface: Some("lan".into()),
+            vlan_tag: None,
+        }]));
+        let profile = guest_profile_with_wan(access, WanAccess::None);
+        assert_eq!(
+            guest_hairpin_after(dir.path(), &profile).await,
+            (both.clone(), both)
+        );
+        // Neither: gone.
+        let profile = guest_profile_with_wan(LanAccess::SameProfile, WanAccess::None);
+        assert_eq!(
+            guest_hairpin_after(dir.path(), &profile).await,
+            (lan_only.clone(), lan_only.clone())
+        );
+        // A Whitelist is not Internet access: its catch-all reject stands
+        // ahead of the forwarding.
+        let profile = guest_profile_with_wan(
+            LanAccess::SameProfile,
+            WanAccess::Whitelist(vec!["1.1.1.1".into()]),
+        );
+        assert_eq!(
+            guest_hairpin_after(dir.path(), &profile).await,
+            (lan_only.clone(), lan_only.clone())
+        );
+        // A Blacklist is: it only rejects named destinations.
+        let profile = guest_profile_with_wan(
+            LanAccess::SameProfile,
+            WanAccess::Blacklist(vec!["1.1.1.1".into()]),
+        );
+        let both = vec!["lan".to_string(), "vlan_guest".into()];
+        assert_eq!(
+            guest_hairpin_after(dir.path(), &profile).await,
+            (both.clone(), both)
+        );
+    }
+
+    /// The crontab edges rewrite the firewall behind the daemon's back, so
+    /// each must resync the hairpin projections before its reload.
+    #[tokio::test]
+    async fn schedule_crontab_resyncs_hairpin_on_both_edges() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        let startwrt = std::fs::read_to_string(dir.path().join("startwrt")).unwrap();
+        std::fs::write(
+            dir.path().join("startwrt"),
+            startwrt.replace(
+                "\toption vlan_tag '101'\n",
+                "\toption vlan_tag '101'\n\tlist wan_schedule '22:00|06:00|0,1,2,3,4,5,6'\n",
+            ),
         )
         .unwrap();
 
-        assert_eq!(reflection_list(&cfgs, "pp_x"), vec!["lan".to_string()]);
-        assert_eq!(
-            reflection_list(&cfgs, "apf_aabbccddeeff_9000"),
-            vec!["lan".to_string()]
-        );
+        regenerate_schedule_crontab(&ctx).await.unwrap();
+
+        let crontab = std::fs::read_to_string(dir.path().join("crontab_root")).unwrap();
+        let edges: Vec<&str> = crontab
+            .lines()
+            .filter(|l| l.contains(SCHEDULE_TAG))
+            .collect();
+        assert_eq!(edges.len(), 2, "{crontab}");
+        for edge in edges {
+            assert!(
+                edge.contains(
+                    "uci commit firewall; /usr/bin/startwrt-cli published-ports sync-hairpin; /etc/init.d/firewall reload"
+                ),
+                "{edge}"
+            );
+        }
     }
 
     /// Deleting a profile removes its zone; every hairpin list naming it must

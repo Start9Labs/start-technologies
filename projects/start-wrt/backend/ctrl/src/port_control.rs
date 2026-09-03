@@ -1322,8 +1322,8 @@ async fn apply_forward_uci(
             .retain(|s| s.name().as_deref() != Some(section));
         cfgs["firewall"].append(&desired, Some(section))?;
         // Scope this forward's hairpin exactly like a manual published port —
-        // and refresh every other tagged redirect while the file is open.
-        crate::published_ports::sync_reflection_zones(&mut cfgs["firewall"])?;
+        // and refresh every other projection while the file is open.
+        crate::published_ports::sync_hairpin(&mut cfgs["firewall"])?;
         match dump_all(uci_root, cfgs).await {
             Err(uciedit::Error::Conflict { .. }) if retries > 0 => {
                 retries -= 1;
@@ -2283,9 +2283,9 @@ config redirect 'pp_a'
     }
 
     /// An automatic forward's hairpin is scoped exactly like a manual
-    /// published port: the dest zone plus every zone already permitted to
-    /// forward into it — and the write refreshes stale lists on other tagged
-    /// redirects in the same transaction.
+    /// published port: the dest zone plus every zone with Access to it or
+    /// with Internet access — and the write refreshes stale lists on other
+    /// tagged redirects in the same transaction.
     #[tokio::test]
     async fn apply_scopes_reflection_like_published_ports() {
         let dir = temp_root(
@@ -2337,7 +2337,7 @@ config redirect 'pp_stale'
         let outcome = apply_forward_uci(
             dir.path(),
             "apf_aabbccddeeff_8443",
-            LABEL_PCP,
+            KIND_PCP,
             "AA:BB:CC:DD:EE:FF",
             Some("br-lan"),
             source,

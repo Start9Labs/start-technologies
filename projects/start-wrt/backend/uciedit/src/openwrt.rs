@@ -4,7 +4,7 @@ use std::net::Ipv4Addr;
 use inpt::Inpt;
 use uciedit_macros::TypedSection;
 
-#[derive(strum::EnumString, strum::Display, Default, PartialEq, Eq, Debug)]
+#[derive(strum::EnumString, strum::Display, Default, Clone, PartialEq, Eq, Debug)]
 pub enum FirewallTarget {
     #[default]
     ACCEPT,
@@ -37,7 +37,7 @@ pub struct FirewallZone {
     pub mtu_fix: Option<bool>,
 }
 
-#[derive(Debug, TypedSection, Default)]
+#[derive(Debug, Clone, PartialEq, TypedSection, Default)]
 #[uci(ty = "rule")]
 pub struct FirewallRule {
     /*
@@ -83,6 +83,10 @@ pub struct FirewallRule {
     /// Port-control rule owner.
     #[uci(default)]
     pub _apf_label: Option<String>,
+    /// "1" on a LAN-side copy of an IPv6 published-port rule, rebuilt from
+    /// the `wan` rule on every hairpin sync.
+    #[uci(default)]
+    pub _pp_hairpin: Option<String>,
 }
 
 #[derive(Debug, TypedSection, Default)]

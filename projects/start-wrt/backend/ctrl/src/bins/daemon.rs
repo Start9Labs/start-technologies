@@ -277,12 +277,11 @@ async fn inner_main() -> Result<(), Error> {
         if let Err(e) = crate::profiles::heal_ipv6_state("/etc/config").await {
             tracing::error!("IPv6 state repair failed: {e}");
         }
-        // Published-port/auto-forward hairpin lists are derived from the
-        // forwarding set; heal any router that accumulated stale ones before
-        // the resync pass existed (fw4 drops a redirect whose list names a
-        // deleted zone). Reloads the firewall only when something changed.
-        if let Err(e) = crate::published_ports::heal_reflection_zones("/etc/config").await {
-            tracing::error!("Reflection zone repair failed: {e}");
+        // Installs the hairpin accept and re-derives every hairpin projection
+        // (fw4 drops a redirect whose list names a deleted zone). Reloads the
+        // firewall only when something changed.
+        if let Err(e) = crate::published_ports::heal_hairpin("/etc/config").await {
+            tracing::error!("Hairpin repair failed: {e}");
         }
         if let Err(e) = crate::system::apply_remote_access(ServerContext::default()).await {
             tracing::error!("Remote access rule apply failed: {e}");

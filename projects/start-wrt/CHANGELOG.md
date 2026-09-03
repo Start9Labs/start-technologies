@@ -300,13 +300,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   router's public address.** Reaching a published port by the router's public
   address — or a domain name pointing at it — rather than the device's LAN
   address only worked from the target device's own profile. From any other
-  profile, even one permitted to reach that device, the router answered instead
-  of the published service, so an app or bookmark holding a public address
-  worked on one network and not another. Those connections are now delivered to
-  the device for every profile permitted to reach its profile, and only those —
-  the routes follow your Security Profile access settings as you change them,
-  and ports opened through automatic port forwarding (UPnP/PCP) are covered the
-  same way.
+  profile the router answered instead of the published service, so an app or
+  bookmark holding a public address worked on one network and not another. A
+  published port is a public resource, so those connections are now delivered
+  to the device from every profile that could reach it from the Internet (WAN
+  Access All or Blacklist, outside a blackout window) and from every profile
+  with Access to the device's profile — and from those only. The routes follow
+  your Security Profile settings as you change them, apply to the device's
+  global IPv6 address as well, and cover ports opened through automatic port
+  forwarding (UPnP/PCP) the same way. Nothing else on the device is opened: a
+  profile without Access still cannot reach it at its LAN address or on any
+  other port.
 
 ### Security
 
