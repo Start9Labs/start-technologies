@@ -94,8 +94,9 @@ file tracks notable changes since the move to the monorepo.
   [Start9's fork](https://github.com/Start9Labs/pureboot) of Purism's PureBoot,
   based on Purism's Release 30.1, and it sets the processor's energy-performance
   preference to `balance_power`. Under a server's usual light load the machine
-  draws less power and runs quieter, and a Server Pure on a Purism-built
-  PureBoot release updates on its next start. The manual flashing guide points at
+  draws less power and runs quieter, the startup and shutdown chimes keep
+  playing, and a Server Pure on a Purism-built PureBoot release updates on its
+  next start. The manual flashing guide points at
   the same image; see
   [Flashing Firmware - Server Pure](https://docs.start9.com/start-os/firmware-pure.html).
 

@@ -15,7 +15,7 @@ Generally, you do not need to manually flash your device using this guide, as th
 
 1. Connect a monitor and keyboard to your server using two of the USB3 (blue) ports.
 
-1. Download the firmware: [pureboot-librem_mini_v2-basic_usb_autoboot-start9-30.1.1.zip](https://github.com/Start9Labs/pureboot/releases/download/start9-30.1.1/pureboot-librem_mini_v2-basic_usb_autoboot-start9-30.1.1.zip), from the [Start9 PureBoot releases](https://github.com/Start9Labs/pureboot/releases).
+1. Download the firmware: [pureboot-librem_mini_v2-basic_usb_autoboot-start9-30.1.2.zip](https://github.com/Start9Labs/pureboot/releases/download/start9-30.1.2/pureboot-librem_mini_v2-basic_usb_autoboot-start9-30.1.2.zip), from the [Start9 PureBoot releases](https://github.com/Start9Labs/pureboot/releases).
 
    > [!NOTE]
    > This is the same image StartOS installs automatically. It boots without a display or keyboard, boots a StartOS installer from USB when one is present, powers the server back on after a power loss, sets the processor to favor efficiency over peak speed, and on models with an Intel AX200 WiFi card supplies that card's firmware in a jail so the card works with the WiFi-free StartOS image.
