@@ -9,9 +9,15 @@ import {
   signal,
   TemplateRef,
 } from '@angular/core'
+import { toSignal } from '@angular/core/rxjs-interop'
 import { FormsModule } from '@angular/forms'
 import { WA_IS_MOBILE } from '@ng-web-apis/platform'
-import { i18nPipe, LocalizePipe } from '@start9labs/shared'
+import {
+  i18nPipe,
+  knownRegistries as start9Registries,
+  LocalizePipe,
+  sameUrl,
+} from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import {
   TuiButton,
@@ -19,6 +25,7 @@ import {
   TuiCell,
   TuiDataListComponent,
   TuiInput,
+  TuiNotification,
   TuiOption,
   TuiOptionWithValue,
   TuiScrollbar,
@@ -32,7 +39,9 @@ import {
 } from '@taiga-ui/kit'
 import { TuiCardLarge, TuiHeader, TuiNavigation } from '@taiga-ui/layout'
 
+import { findKnown, identityMatches } from '../identity'
 import { filterPackages } from '../pipes/filter-packages.pipe'
+import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
 import { StoreDataWithUrl } from '../types'
 
 const ICONS: Record<string, string> = {
@@ -91,6 +100,22 @@ const ICONS: Record<string, string> = {
       </footer>
     </aside>
     <div class="content">
+      @if (thirdParty()) {
+        <div tuiNotification appearance="warning">
+          {{
+            'Start9 does not operate this registry or support the services it distributes.'
+              | i18n
+          }}
+        </div>
+      }
+      @if (drifted()) {
+        <div tuiNotification appearance="negative">
+          {{
+            'This registry does not present the name and icon Start9 published for it. Start9 has not validated that it is what it claims to be.'
+              | i18n
+          }}
+        </div>
+      }
       <header tuiHeader="h4">
         <hgroup tuiTitle>
           <h2>
@@ -182,6 +207,10 @@ const ICONS: Record<string, string> = {
       overflow: hidden;
     }
 
+    [tuiNotification] {
+      margin: 1rem 2rem 0;
+    }
+
     [tuiHeader] {
       white-space: nowrap;
       padding: 1rem 2rem 0;
@@ -199,8 +228,14 @@ const ICONS: Record<string, string> = {
       grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
     }
 
-    :host-context(tui-root._mobile) :is([tuiHeader], section) {
-      padding-inline: 1rem;
+    :host-context(tui-root._mobile) {
+      :is([tuiHeader], section) {
+        padding-inline: 1rem;
+      }
+
+      [tuiNotification] {
+        margin-inline: 1rem;
+      }
     }
   `,
   providers: [
@@ -209,6 +244,7 @@ const ICONS: Record<string, string> = {
   imports: [
     TuiNavigation,
     TuiInput,
+    TuiNotification,
     TuiSkeleton,
     TuiButton,
     TuiButtonSelect,
@@ -226,6 +262,7 @@ const ICONS: Record<string, string> = {
     KeyValuePipe,
     LocalizePipe,
     FormsModule,
+    i18nPipe,
   ],
 })
 export class MarketplaceComponent {
@@ -240,6 +277,23 @@ export class MarketplaceComponent {
   protected readonly icons = ICONS
   protected readonly asIs = () => 0
   protected readonly open = signal(!inject(WA_IS_MOBILE))
+  private readonly known = toSignal(
+    inject(AbstractMarketplaceService).knownRegistries$,
+    { initialValue: [] },
+  )
+
+  protected readonly thirdParty = computed(() => {
+    const url = this.registry()?.url
+
+    return !!url && !Object.values(start9Registries).some(u => sameUrl(u, url))
+  })
+
+  protected readonly drifted = computed(() => {
+    const registry = this.registry()
+    const pin = registry && findKnown(registry.url, this.known())
+
+    return !!pin && !identityMatches(pin, registry.info)
+  })
   // Only categories that have at least one package are shown; 'all' is the
   // always-present pseudo-category injected by each app's service.
   protected readonly categories = computed(() => {

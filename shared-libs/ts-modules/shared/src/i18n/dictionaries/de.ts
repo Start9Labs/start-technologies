@@ -826,4 +826,5 @@ export default {
   933: 'Dieses Register zeigt nicht den Namen und das Symbol, die Start9 dafür veröffentlicht hat. Start9 hat nicht bestätigt, dass es das ist, was es vorgibt zu sein.',
   934: 'Benutzerdefiniertes Register',
   935: 'Register auswählen',
+  936: 'Start9 betreibt dieses Register nicht und unterstützt die von ihm bereitgestellten Dienste nicht.',
 } satisfies i18n

@@ -2,9 +2,7 @@ import { inject, Injectable } from '@angular/core'
 import { WA_LOCAL_STORAGE } from '@ng-web-apis/common'
 import {
   AbstractMarketplaceService,
-  findKnown,
   GetPackageRes,
-  identityMatches,
   MarketplacePkg,
   resolveIdentity,
   StoreDataWithUrl,
@@ -19,7 +17,6 @@ import {
   sameUrl,
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
-import { TuiNotificationService } from '@taiga-ui/core'
 import {
   BehaviorSubject,
   combineLatest,
@@ -59,7 +56,6 @@ export class MarketplaceService extends AbstractMarketplaceService {
   private readonly storage = inject(WA_LOCAL_STORAGE)
   private readonly i18n = inject(i18nPipe)
   private readonly i18nService = inject(i18nService)
-  private readonly alerts = inject(TuiNotificationService)
 
   // Collapse LocaleString metadata to the active locale as it enters the app —
   // see localize.ts for why this static site must do it client-side.
@@ -161,23 +157,6 @@ export class MarketplaceService extends AbstractMarketplaceService {
 
     // validates the registry is reachable and provides a display name
     const info = await firstValueFrom(this.fetchInfo$(url))
-    const pin = findKnown(url, await firstValueFrom(this.knownRegistries$))
-
-    if (pin && !identityMatches(pin, info)) {
-      this.alerts
-        .open(
-          this.i18n.transform(
-            'This registry does not present the name and icon Start9 published for it. Start9 has not validated that it is what it claims to be.',
-          ),
-          {
-            label: this.i18n.transform('Warning'),
-            appearance: 'warning',
-            autoClose: 0,
-          },
-        )
-        .subscribe()
-    }
-
     this.setCustom({ ...this.custom$.value, [url]: info.name })
 
     return url

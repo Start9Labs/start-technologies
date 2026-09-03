@@ -39,8 +39,9 @@ file tracks notable changes since the move to the monorepo.
 - **Adding a registry now offers a list Start9 publishes, alongside the URL
   field.** Each listed registry appears under the name Start9 published for it.
   Its published icon remains the fallback for the valid icon the registry serves.
-  An identity mismatch raises a persistent warning. A registry that is not on
-  the list cannot display a listed one's name. See
+  A banner atop the marketplace flags a listed registry whose name or icon no
+  longer matches. A registry that is not on the list cannot display a listed
+  one's name. See
   [Alternative Registries](https://docs.start9.com/start-os/alternative-registries.html).
 
 - **A service can permanently retire a network host or a port it no longer
@@ -111,8 +112,9 @@ file tracks notable changes since the move to the monorepo.
   update, or before a rename, may keep the name it was installed with — remove
   it and install it again to pick up the current one.
 
-- **Switching registries no longer opens a warning dialog.** The caveat appears
-  once, in the dialog where a registry is added.
+- **Switching registries no longer opens a warning dialog.** A banner atop the
+  marketplace carries the caveat while a registry Start9 does not operate is
+  selected.
 
 - **The NVIDIA images now use NVIDIA's open kernel modules, which support GeForce
   RTX 20-series, Quadro RTX and newer.** This is what makes current cards work at

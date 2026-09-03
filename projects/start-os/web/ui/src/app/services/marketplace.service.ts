@@ -1,9 +1,7 @@
 import { inject, Injectable } from '@angular/core'
 import {
   AbstractMarketplaceService,
-  findKnown,
   GetPackageRes,
-  identityMatches,
   Marketplace,
   MarketplacePkg,
   resolveIdentity,
@@ -18,7 +16,6 @@ import {
   sameUrl,
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
-import { TuiNotificationService } from '@taiga-ui/core'
 import { PatchDB } from 'patch-db-client'
 import {
   BehaviorSubject,
@@ -55,7 +52,6 @@ export class MarketplaceService extends AbstractMarketplaceService {
   private readonly exver = inject(Exver)
   private readonly storage = inject(StorageService)
   private readonly i18n = inject(i18nPipe)
-  private readonly alerts = inject(TuiNotificationService)
 
   readonly knownRegistries$: Observable<T.KnownRegistry[]> = from(
     this.api.getKnownRegistries(),
@@ -312,23 +308,6 @@ export class MarketplaceService extends AbstractMarketplaceService {
 
     // validates the registry is reachable and provides a display name
     const info = await firstValueFrom(this.fetchInfo$(url))
-    const pin = findKnown(url, await firstValueFrom(this.knownRegistries$))
-
-    if (pin && !identityMatches(pin, info)) {
-      this.alerts
-        .open(
-          this.i18n.transform(
-            'This registry does not present the name and icon Start9 published for it. Start9 has not validated that it is what it claims to be.',
-          ),
-          {
-            label: this.i18n.transform('Warning'),
-            appearance: 'warning',
-            autoClose: 0,
-          },
-        )
-        .subscribe()
-    }
-
     await this.api.setDbValue<string | null>(['registries', url], info.name)
 
     return url
