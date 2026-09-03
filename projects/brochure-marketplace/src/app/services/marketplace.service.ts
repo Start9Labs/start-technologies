@@ -107,6 +107,10 @@ export class MarketplaceService extends AbstractMarketplaceService {
       shareReplay(1),
     )
 
+  readonly registryIcons$ = this.currentRegistry$.pipe(
+    map(registry => [{ url: registry.url, icon: registry.info.icon }]),
+  )
+
   getPackage$(
     id: string,
     version: string | null,

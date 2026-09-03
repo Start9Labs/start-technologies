@@ -130,6 +130,18 @@ export class MarketplaceService extends AbstractMarketplaceService {
     shareReplay(1),
   )
 
+  readonly registryIcons$ = combineLatest([
+    this.currentRegistry$,
+    this.marketplace$,
+  ]).pipe(
+    map(([current, marketplace]) => [
+      { url: current.url, icon: current.info.icon },
+      ...Object.values(marketplace).flatMap(registry =>
+        registry ? [{ url: registry.url, icon: registry.info.icon }] : [],
+      ),
+    ]),
+  )
+
   getPackage$(
     id: string,
     version: string | null,

@@ -19,6 +19,23 @@ export function pinnedIcon(
   return pin(url, known)?.icon || null
 }
 
+export function resolveIcon(
+  url: string,
+  liveIcon: string | null | undefined,
+  known: readonly T.KnownRegistry[],
+): string | null {
+  const fallback = pinnedIcon(url, known)
+  if (!liveIcon) return fallback
+
+  const live = dataUrl(liveIcon)
+  if (!live?.mime.startsWith('image/')) return fallback
+
+  const published = findKnown(url, known)
+  return !published || iconsMatch(published.icon, liveIcon)
+    ? liveIcon
+    : fallback
+}
+
 /**
  * Display identity for a registry: the pin where Start9 has one, otherwise the
  * name the registry reports — unless that name is claimed by a pin, in which
@@ -57,7 +74,7 @@ export function identityMatches(
 ): boolean {
   if (info.name !== known.name) return false
 
-  return !info.icon || !known.icon || sameBytes(info.icon, known.icon)
+  return iconsMatch(info.icon, known.icon)
 }
 
 function pin(url: string, known: readonly T.KnownRegistry[]): Pin | undefined {
@@ -79,24 +96,36 @@ function host(url: string): string {
   }
 }
 
-function sameBytes(a: string, b: string): boolean {
-  const x = dataUrlBytes(a)
-  const y = dataUrlBytes(b)
+function iconsMatch(a: string | null, b: string | null): boolean {
+  if (a === null || b === null) return a === null && b === null
 
-  return !!x && !!y && x.length === y.length && x.every((v, i) => v === y[i])
+  const x = dataUrl(a)
+  const y = dataUrl(b)
+
+  return (
+    !!x &&
+    !!y &&
+    x.mime === y.mime &&
+    x.bytes.length === y.bytes.length &&
+    x.bytes.every((value, i) => value === y.bytes[i])
+  )
 }
 
-function dataUrlBytes(url: string): Uint8Array | null {
+function dataUrl(url: string): { mime: string; bytes: Uint8Array } | null {
   const comma = url.indexOf(',')
 
   if (!url.startsWith('data:') || comma < 0) return null
 
+  const metadata = url.slice(5, comma).split(';')
+  const mime = metadata.shift()?.trim().toLowerCase() || ''
   const body = url.slice(comma + 1)
 
   try {
-    return url.slice(5, comma).split(';').includes('base64')
+    const bytes = metadata.some(value => value.toLowerCase() === 'base64')
       ? Uint8Array.from(atob(body), c => c.charCodeAt(0))
       : new TextEncoder().encode(decodeURIComponent(body))
+
+    return { mime, bytes }
   } catch {
     return null
   }
