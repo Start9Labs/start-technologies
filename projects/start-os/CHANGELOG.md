@@ -46,7 +46,9 @@ file tracks notable changes since the move to the monorepo.
 
 - **`start-cli server experimental epp` shows and sets the CPU's
   energy/performance preference**, persisted across reboots the way the governor
-  is. Nothing is changed unless you set one.
+  is. On Librem Mini v2 systems without a saved preference, StartOS applies
+  `balance_power` when available. Without a saved preference, all other systems
+  retain their current value.
 
 - **A service can permanently retire a network host or a port it no longer
   uses, and the port numbers it held become available again.** A service that

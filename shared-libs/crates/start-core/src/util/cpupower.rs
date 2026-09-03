@@ -151,14 +151,16 @@ pub async fn set_governor(governor: &Governor) -> Result<(), Error> {
 
 const CPU_ROOT: &str = "/sys/devices/system/cpu";
 
-/// An `intel_pstate` energy/performance preference. Under HWP this, not the
-/// governor, decides how hard a burst is chased: at `performance` the hardware
-/// jumps to maximum turbo on any load.
+/// Selects how aggressively an EPP-capable CPU pursues performance.
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize, TS,
 )]
 #[ts(export, type = "string")]
 pub struct Epp(Cow<'static, str>);
+
+const LIBREM_MINI_V2: &str = "librem_mini_v2";
+const LIBREM_MINI_V2_EPP: Epp = Epp(Cow::Borrowed("balance_power"));
+
 impl std::str::FromStr for Epp {
     type Err = std::convert::Infallible;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -186,8 +188,6 @@ fn epp_path(cpu: &Path) -> PathBuf {
     cpu.join("cpufreq/energy_performance_preference")
 }
 
-/// Every CPU exposing an EPP attribute. Empty on a driver that has none, which
-/// is every machine without `intel_pstate` in active mode.
 async fn epp_paths() -> Result<Vec<PathBuf>, Error> {
     let mut dir = match tokio::fs::read_dir(CPU_ROOT).await {
         Ok(dir) => dir,
@@ -226,6 +226,15 @@ pub async fn current_epp() -> Result<Option<Epp>, Error> {
     )
 }
 
+pub(crate) fn preferred_epp(
+    selected: Option<Epp>,
+    system_product_name: Option<&str>,
+) -> Option<Epp> {
+    selected.or_else(|| {
+        (system_product_name == Some(LIBREM_MINI_V2)).then(|| LIBREM_MINI_V2_EPP.clone())
+    })
+}
+
 pub async fn set_epp(epp: &Epp) -> Result<(), Error> {
     for path in epp_paths().await? {
         tokio::fs::write(&path, &*epp.0)
@@ -233,4 +242,32 @@ pub async fn set_epp(epp: &Epp) -> Result<(), Error> {
             .with_ctx(|_| (ErrorKind::CpuSettings, path.display().to_string()))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn librem_mini_v2_defaults_to_balance_power() {
+        assert_eq!(
+            preferred_epp(None, Some("librem_mini_v2")),
+            Some(Epp(Cow::Borrowed("balance_power")))
+        );
+    }
+
+    #[test]
+    fn selected_epp_overrides_the_librem_mini_v2_default() {
+        let selected = Epp(Cow::Borrowed("performance"));
+        assert_eq!(
+            preferred_epp(Some(selected.clone()), Some("librem_mini_v2")),
+            Some(selected)
+        );
+    }
+
+    #[test]
+    fn other_products_have_no_default_epp() {
+        assert_eq!(preferred_epp(None, Some("other")), None);
+        assert_eq!(preferred_epp(None, None), None);
+    }
 }

@@ -153,6 +153,13 @@ View or set the CPU governor (e.g., `performance`, `powersave`).
 
 - `--format` — Output format
 
+### `start-cli server experimental epp [SET]`
+
+View or set the CPU energy/performance preference. StartOS applies `balance_power`
+on Librem Mini v2 systems when no preference is saved and the setting is available.
+
+- `--format` — Output format
+
 ### `start-cli server experimental zram`
 
 Enable or disable ZRAM compressed swap.

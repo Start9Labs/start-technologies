@@ -335,7 +335,13 @@ pub async fn init(
     }
 
     let selected_epp = server_info.as_epp().de()?;
-    if let Some(epp) = &selected_epp {
+    let system_product_name = if selected_epp.is_none() {
+        crate::firmware::system_product_name().await.log_err()
+    } else {
+        None
+    };
+    let epp = cpupower::preferred_epp(selected_epp, system_product_name.as_deref());
+    if let Some(epp) = &epp {
         let available_epps = cpupower::get_available_epps()
             .await
             .log_err()
