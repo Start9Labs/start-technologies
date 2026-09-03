@@ -25,7 +25,11 @@ export interface PublishedPort {
   ipv6: boolean
   ipv4PublicPort?: string
   source: 'any' | string
-  /** Preserves prior WAN collision confirmation. */
+  /**
+   * Preserves prior WAN collision confirmation. An edit that changes the
+   * published range or the protocol drops it, re-validating what the user
+   * never confirmed.
+   */
   overrideWanPorts?: boolean
 }
 

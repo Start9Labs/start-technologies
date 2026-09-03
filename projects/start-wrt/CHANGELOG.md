@@ -101,8 +101,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   previously could be published to a device without warning, silently cutting
   that router service off from outside your network. Saving such a rule now
   surfaces the conflict in a confirmation dialog; you can still publish the
-  port deliberately, and you're asked once per rule. Detection follows the
-  live configuration (nothing is asked for ports no router service uses) and
+  port deliberately, and you're asked once per rule — again only if you
+  change which port that rule publishes, or its protocol. Detection follows
+  the live configuration (nothing is asked for ports no router service uses) and
   matches transports, so e.g. a UDP-only forward on 443 doesn't warn.
 - The firmware build stamp is now identical everywhere it appears: the
   `startwrt` binary (UI `ETag`, `system.info`, `startwrt verify`) now carries
