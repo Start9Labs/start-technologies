@@ -167,7 +167,7 @@ export class MarketplaceService extends AbstractMarketplaceService {
       this.alerts
         .open(
           this.i18n.transform(
-            'This registry does not present the name and icon Start9 published for it. It may have changed hands.',
+            'This registry does not present the name and icon Start9 published for it. Start9 has not validated that it is what it claims to be.',
           ),
           {
             label: this.i18n.transform('Warning'),

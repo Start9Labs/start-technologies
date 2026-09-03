@@ -823,7 +823,7 @@ export default {
   930: 'Dodaj katalog',
   931: 'Start9 nie prowadzi tych katalogów ani nie zapewnia wsparcia dla dystrybuowanych przez nie serwisów.',
   932: 'Znane katalogi',
-  933: 'Ten katalog nie prezentuje nazwy i ikony opublikowanych dla niego przez Start9. Mógł zmienić właściciela.',
+  933: 'Ten katalog nie prezentuje nazwy i ikony opublikowanych dla niego przez Start9. Start9 nie zweryfikował, czy jest tym, za co się podaje.',
   934: 'Katalog niestandardowy',
   935: 'Wybierz katalog',
 } satisfies i18n
