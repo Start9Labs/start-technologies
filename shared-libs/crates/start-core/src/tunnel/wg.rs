@@ -21,14 +21,7 @@ pub fn current_ifindex() -> u32 {
     nix::net::if_::if_nametoindex(WIREGUARD_INTERFACE_NAME).unwrap_or(0)
 }
 
-/// Brand token written into every StartTunnel client config's header (see
-/// client.conf.template, rendered as `# StartTunnel config for <name>`).
-/// `add_tunnel` looks for this token (case-insensitively) to classify a pasted
-/// config as an inbound/outbound StartTunnel gateway — vs outbound-only for
-/// plain WireGuard configs like Mullvad. Matching just the brand token keeps
-/// detection working across StartTunnel/StartOS version skew and any future
-/// rewording of the surrounding header, and stays backwards-compatible with
-/// configs generated before this check existed.
+/// Legacy marker retained for StartOS gateway auto-detection.
 pub const START_TUNNEL_MARKER: &str = "StartTunnel";
 
 #[derive(Deserialize, Serialize, HasModel, TS)]
@@ -352,6 +345,7 @@ impl std::fmt::Display for ClientConfig {
             f,
             include_str!("./client.conf.template"),
             marker = START_TUNNEL_MARKER,
+            inbound_marker = crate::net::tunnel::INBOUND_GATEWAY_MARKER,
             name = self.client_config.name,
             privkey = self.client_config.key.to_padded_string(),
             psk = self.client_config.psk.to_padded_string(),
@@ -384,6 +378,8 @@ mod tests {
                 None,
             )
             .to_string();
+        assert!(cfg.contains("# StartTunnel config for phone"));
+        assert!(cfg.contains(crate::net::tunnel::INBOUND_GATEWAY_MARKER));
         assert!(cfg.contains("Address = 10.59.0.2/24"));
         assert!(cfg.contains("DNS = 10.59.0.1"));
         assert!(cfg.contains("AllowedIPs = 10.59.0.0/24"));

@@ -30,8 +30,9 @@ Every gateway routes outbound traffic from your server to the Internet. Some gat
 1. Upload or paste a WireGuard configuration file from your VPN provider or StartTunnel instance.
 
    StartOS will automatically detect the gateway type:
-   - **StartTunnel** config files are recognized and marked as _inbound/outbound_ gateways.
-   - **All other** WireGuard configs are marked as _outbound-only_ gateways.
+   - Config files containing `# inbound: yes` are marked as _inbound/outbound_ gateways. StartTunnel adds this marker to the configs it generates.
+   - Older StartTunnel configs are also recognized by their StartTunnel header and marked as _inbound/outbound_ gateways.
+   - WireGuard configs without either marker are marked as _outbound-only_ gateways.
 
 ## Updating a Gateway's Config
 

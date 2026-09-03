@@ -31,6 +31,11 @@ file tracks notable changes since the move to the monorepo.
   the gateway advertises), so the route comes up either way; PCP remains
   preferred when it gets through.
 
+- **WireGuard configs can declare inbound gateway support.** A config containing
+  `# inbound: yes` is classified as an inbound/outbound gateway when imported.
+  Existing StartTunnel configs remain recognizable by their StartTunnel header;
+  configs without either marker are classified as outbound-only.
+
 - **A service can permanently retire a network host or a port it no longer
   uses, and the port numbers it held become available again.** A service that
   reorganizes its interfaces across an update — renaming a host, dropping a

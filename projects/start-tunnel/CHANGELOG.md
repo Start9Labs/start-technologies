@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the tunnel cannot bind the shared port's listener, instead of being
   acknowledged while routing nothing.
 
+- **Generated WireGuard configs identify their gateway as accepting inbound
+  connections.** Each config includes the `# inbound: yes` gateway marker while retaining its
+  StartTunnel header for compatibility with older StartOS versions.
+
 ### Fixed
 
 - **`start-tunnel` reaches a daemon that listens on a wildcard address.** With no
