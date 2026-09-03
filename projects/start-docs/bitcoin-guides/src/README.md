@@ -32,12 +32,12 @@ StartOS supports multiple Bitcoin and Lightning node implementations. You are no
 
 The Bitcoin service on StartOS is available in multiple flavors (implementations). The service is called **Bitcoin** regardless of which flavor you install — the flavor determines the underlying software.
 
-| Flavor            | Description                                                                                      |
-| ----------------- | ------------------------------------------------------------------------------------------------ |
-| **Bitcoin Core**  | The reference implementation — validates blocks, relays transactions, serves wallet data via RPC |
-| **Bitcoin Knots** | A Bitcoin Core derivative with additional configuration options and policy controls              |
+| Flavor                       | Registry           | Description                                                                                                                              |
+| ---------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **Bitcoin Core**             | Start9 Registry    | The reference implementation — validates blocks, relays transactions, serves wallet data via RPC                                         |
+| **Bitcoin Knots (pre-RDTS)** | Community Registry | A Bitcoin Core derivative with additional configuration options and policy controls, pinned to its last release before the RDTS softfork |
 
-Both flavors provide the same RPC interface used by wallets and Electrum servers.
+Both follow the same blockchain and expose the same RPC interface used by wallets and Electrum servers, so switching between them keeps the chain you have already synced. Both registries ship with StartOS — click "Switch" beneath the current registry title in the Marketplace sidebar to move between them. Community Registry services are [not maintained, recommended, or supported by Start9](/start-os/default-registries.html).
 
 ### Lightning Nodes
 
