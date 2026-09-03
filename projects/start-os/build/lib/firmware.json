@@ -1,13 +1,18 @@
 [
   {
-    "id": "pureboot-librem_mini_v2-basic_usb_autoboot_blob_jail-Release-29",
+    "id": "pureboot-librem_mini_v2-basic_usb_autoboot-start9-30.1.1",
     "platform": ["x86_64"],
     "system-product-name": "librem_mini_v2",
-    "bios-version": {
-      "semver-prefix": "PureBoot-Release-",
-      "semver-range": "<29"
-    },
-    "url": "https://source.puri.sm/firmware/releases/-/raw/75631ad6dcf7e6ee73e06a517ac7dc4e017518b7/librem_mini_v2/custom/pureboot-librem_mini_v2-basic_usb_autoboot_blob_jail-Release-29.rom.gz",
-    "shasum": "96ec04f21b1cfe8e28d9a2418f1ff533efe21f9bbbbf16e162f7c814761b068b"
+    "bios-version": [
+      {
+        "semver-prefix": "PureBoot-start9-",
+        "semver-range": "<30.1.1"
+      },
+      {
+        "semver-prefix": "PureBoot-Release-"
+      }
+    ],
+    "url": "https://github.com/Start9Labs/pureboot/releases/download/start9-30.1.1/pureboot-librem_mini_v2-basic_usb_autoboot-start9-30.1.1.rom.gz",
+    "shasum": "c3d2138c87d8fb3d36d2d54c75da9a1c92a7a98596e6af16897f87ac11a719ba"
   }
 ]

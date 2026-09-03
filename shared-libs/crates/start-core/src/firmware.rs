@@ -12,32 +12,59 @@ use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::io::open_file;
 
-/// Part of the Firmware, look there for more about
+/// One installed BIOS version string a [`Firmware`] replaces
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct VersionMatcher {
-    /// Strip this prefix on the version matcher
+    /// Required at the start of the version string; stripped before comparing
     semver_prefix: Option<String>,
-    /// Match the semver to this range
+    /// Range the remaining dotted integers must fall in; unset accepts any
     semver_range: Option<semver::VersionReq>,
-    /// Strip this suffix on the version matcher
+    /// Required at the end of the version string; stripped before comparing
     semver_suffix: Option<String>,
 }
+impl VersionMatcher {
+    /// Segments that are not plain integers are dropped before the comparison.
+    fn matches(&self, bios_version: &str) -> bool {
+        let mut semver_str = bios_version;
+        if let Some(prefix) = &self.semver_prefix {
+            let Some(rest) = semver_str.strip_prefix(prefix) else {
+                return false;
+            };
+            semver_str = rest;
+        }
+        if let Some(suffix) = &self.semver_suffix {
+            let Some(rest) = semver_str.strip_suffix(suffix) else {
+                return false;
+            };
+            semver_str = rest;
+        }
+        let semver = semver_str
+            .split(".")
+            .filter_map(|v| v.parse().ok())
+            .chain(std::iter::repeat(0))
+            .take(3)
+            .collect::<Vec<_>>();
+        let semver = semver::Version::new(semver[0], semver[1], semver[2]);
+        self.semver_range
+            .as_ref()
+            .map_or(true, |r| r.matches(&semver))
+    }
+}
 
-/// Inside a file that is firmware.json, we
-/// wanted a structure that could help decide what to do
-/// for each of the firmware versions
+/// One entry of `/usr/lib/startos/firmware.json`: an image and the machines it is flashed onto
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Firmware {
     id: String,
-    /// This is the platform(s) the firmware was built for
+    /// StartOS platforms the image applies to
     platform: BTreeSet<String>,
-    /// This usally comes from the dmidecode
+    /// `dmidecode -s system-product-name` of the machine; unset matches any
     system_product_name: Option<String>,
-    /// The version comes from dmidecode, then we decide if it matches
-    bios_version: Option<VersionMatcher>,
-    /// the hash of the firmware rom.gz
+    /// Installed `dmidecode -s bios-version` strings the image replaces; empty replaces any
+    #[serde(default)]
+    bios_version: Vec<VersionMatcher>,
+    /// SHA-256 of the `.rom.gz`
     shasum: String,
 }
 
@@ -82,31 +109,11 @@ pub async fn check_for_firmware_update() -> Result<Option<Firmware>, Error> {
             .system_product_name
             .as_ref()
             .map_or(true, |spn| spn == &system_product_name);
-        let matches_bios_version = firmware
-            .bios_version
-            .as_ref()
-            .map_or(Some(true), |bv| {
-                let mut semver_str = bios_version.as_str();
-                if let Some(prefix) = &bv.semver_prefix {
-                    semver_str = semver_str.strip_prefix(prefix)?;
-                }
-                if let Some(suffix) = &bv.semver_suffix {
-                    semver_str = semver_str.strip_suffix(suffix)?;
-                }
-                let semver = semver_str
-                    .split(".")
-                    .filter_map(|v| v.parse().ok())
-                    .chain(std::iter::repeat(0))
-                    .take(3)
-                    .collect::<Vec<_>>();
-                let semver = semver::Version::new(semver[0], semver[1], semver[2]);
-                Some(
-                    bv.semver_range
-                        .as_ref()
-                        .map_or(true, |r| r.matches(&semver)),
-                )
-            })
-            .unwrap_or(false);
+        let matches_bios_version = firmware.bios_version.is_empty()
+            || firmware
+                .bios_version
+                .iter()
+                .any(|bv| bv.matches(&bios_version));
         if firmware.platform.contains(&*PLATFORM) && matches_product_name && matches_bios_version {
             return Ok(Some(firmware));
         }
@@ -115,10 +122,7 @@ pub async fn check_for_firmware_update() -> Result<Option<Firmware>, Error> {
     Ok(None)
 }
 
-/// We wanted to make sure during every init
-/// that the firmware was the correct and updated for
-/// systems like the Pure System that a new firmware
-/// was released and the updates where pushed through the pure os.
+/// Flashes the image from `/usr/lib/startos/firmware`; takes effect on the next boot.
 #[instrument]
 pub async fn update_firmware(firmware: Firmware) -> Result<(), Error> {
     let id = &firmware.id;
@@ -150,4 +154,56 @@ pub async fn update_firmware(firmware: Firmware) -> Result<(), Error> {
         .invoke(ErrorKind::Firmware)
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn matcher(prefix: &str, range: Option<&str>) -> VersionMatcher {
+        VersionMatcher {
+            semver_prefix: Some(prefix.to_owned()),
+            semver_range: range.map(|r| r.parse().unwrap()),
+            semver_suffix: None,
+        }
+    }
+
+    #[test]
+    fn prefix_alone_matches_every_version_carrying_it() {
+        let purism = matcher("PureBoot-Release-", None);
+        assert!(purism.matches("PureBoot-Release-29"));
+        assert!(purism.matches("PureBoot-Release-30.1"));
+        assert!(purism.matches("PureBoot-Release-24-USBAutoboot-3"));
+        assert!(!purism.matches("PureBoot-start9-30.1.1"));
+        assert!(!purism.matches("4.22.01-Purism-1"));
+    }
+
+    #[test]
+    fn range_compares_the_dotted_integers_after_the_prefix() {
+        let start9 = matcher("PureBoot-start9-", Some("<30.1.1"));
+        assert!(start9.matches("PureBoot-start9-30.1.0"));
+        assert!(start9.matches("PureBoot-start9-30.1"));
+        assert!(!start9.matches("PureBoot-start9-30.1.1"));
+        assert!(!start9.matches("PureBoot-start9-31.0.1"));
+        assert!(!start9.matches("PureBoot-Release-29"));
+    }
+
+    #[test]
+    fn segments_that_are_not_integers_are_dropped() {
+        let start9 = matcher("PureBoot-start9-", Some("<30.1.1"));
+        assert!(start9.matches("PureBoot-start9-30.1.1-rc1"));
+    }
+
+    #[test]
+    fn shipped_firmware_json_deserializes() {
+        let firmwares: Vec<Firmware> = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../projects/start-os/build/lib/firmware.json"
+        )))
+        .unwrap();
+        for firmware in &firmwares {
+            assert!(firmware.platform.contains("x86_64"), "{}", firmware.id);
+            assert!(!firmware.bios_version.is_empty(), "{}", firmware.id);
+        }
+    }
 }
