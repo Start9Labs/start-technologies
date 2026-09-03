@@ -255,6 +255,31 @@ pub(crate) async fn get_wan_ipv4() -> Result<Option<Ipv4Addr>, Error> {
     }
 }
 
+/// Every IPv4 address on the `wan` interface, in ubus order. Empty when the
+/// interface is down or ubus is unavailable.
+pub(crate) fn wan_ipv4_addrs() -> Vec<Ipv4Addr> {
+    let Ok(out) = StdCommand::new("ubus")
+        .args(["call", "network.interface.wan", "status"])
+        .output()
+    else {
+        return Vec::new();
+    };
+    if !out.status.success() {
+        return Vec::new();
+    }
+    let Ok(json) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else {
+        return Vec::new();
+    };
+    json.get("ipv4-address")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|e| e.get("address")?.as_str()?.parse().ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 pub async fn get_wan_ipv6s() -> Result<Vec<Ipv6Addr>, Error> {
     let stdout = match tokio::process::Command::new("ubus")
         .args(["call", "network.interface.wan6", "status"])

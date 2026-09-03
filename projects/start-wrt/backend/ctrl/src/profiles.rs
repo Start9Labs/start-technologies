@@ -661,6 +661,7 @@ fn delete_config(
     cfgs: &mut Configs,
     query: &ProfileIdOpt,
 ) -> Result<(), Error> {
+    let wan_v4 = ctx.wan_ipv4_addrs();
     let lookup = Lookup::parse(ctx, cfgs)?;
     let id = lookup.resolve(query)?.clone();
 
@@ -829,7 +830,7 @@ fn delete_config(
     // The zone and its forwardings are gone; drop them from every
     // published-port/auto-forward hairpin projection, or fw4 rejects those
     // redirects outright over the now-unknown name.
-    crate::published_ports::sync_hairpin(&mut cfgs["firewall"])?;
+    crate::published_ports::sync_hairpin(&mut cfgs["firewall"], &wan_v4)?;
 
     Ok(())
 }
@@ -1825,7 +1826,7 @@ fn create_config(
 }
 
 fn rewrite_firewall(
-    _ctx: &impl CtrlContext,
+    ctx: &impl CtrlContext,
     cfgs: &mut Configs,
     profile: &Profile,
     all_interfaces: &BTreeSet<String>,
@@ -2116,9 +2117,9 @@ fn rewrite_firewall(
         }
     }
 
-    // The forwardings and egress rejects just changed; every hairpin
+    // The forwardings and egress rules just changed; every hairpin
     // projection is derived from them.
-    crate::published_ports::sync_hairpin(&mut cfgs["firewall"])?;
+    crate::published_ports::sync_hairpin(&mut cfgs["firewall"], &ctx.wan_ipv4_addrs())?;
 
     Ok(())
 }
@@ -3590,7 +3591,7 @@ pub(crate) async fn evaluate_and_apply_schedules(ctx: &impl CtrlContext) -> Resu
     }
 
     // A blackout REJECT also takes the profile's hairpin away.
-    crate::published_ports::sync_hairpin(&mut cfgs["firewall"])?;
+    crate::published_ports::sync_hairpin(&mut cfgs["firewall"], &ctx.wan_ipv4_addrs())?;
 
     dump_all(ctx.uci_root(), cfgs).await?;
     drop(arena);
@@ -4091,11 +4092,39 @@ config wifi-vlan
         }
     }
 
+    /// A test context that knows the router's WAN address.
+    #[derive(Clone)]
+    struct WanTestContext(PathBuf, Vec<Ipv4Addr>);
+
+    impl Context for WanTestContext {
+        fn runtime(&self) -> Option<Arc<Runtime>> {
+            None
+        }
+    }
+
+    impl CtrlContext for WanTestContext {
+        fn uci_root(&self) -> PathBuf {
+            self.0.clone()
+        }
+        fn effectful(&self) -> bool {
+            false
+        }
+        fn wan_ipv4_addrs(&self) -> Vec<Ipv4Addr> {
+            self.1.clone()
+        }
+    }
+
     async fn guest_hairpin_after(
         dir: &std::path::Path,
         profile: &Profile<ProfileIdOpt>,
     ) -> (Vec<String>, Vec<String>) {
-        let ctx = TestContext(dir.to_path_buf());
+        guest_hairpin_after_with(WanTestContext(dir.to_path_buf(), Vec::new()), profile).await
+    }
+
+    async fn guest_hairpin_after_with(
+        ctx: WanTestContext,
+        profile: &Profile<ProfileIdOpt>,
+    ) -> (Vec<String>, Vec<String>) {
         let arena = Arena::new();
         let mut cfgs = parse_all(
             ctx.uci_root(),
@@ -4163,6 +4192,36 @@ config wifi-vlan
             WanAccess::Blacklist(vec!["1.1.1.1".into()]),
         );
         let both = vec!["lan".to_string(), "vlan_guest".into()];
+        assert_eq!(
+            guest_hairpin_after(dir.path(), &profile).await,
+            (both.clone(), both.clone())
+        );
+
+        // The entries are read against the router's WAN address: a Whitelist
+        // naming it is Internet access to the port, a Blacklist naming it is
+        // not — and with the address unknown, neither entry covers anything.
+        let wan_ip: Ipv4Addr = "203.0.113.7".parse().unwrap();
+        let with_wan = || WanTestContext(dir.path().to_path_buf(), vec![wan_ip]);
+        let profile = guest_profile_with_wan(
+            LanAccess::SameProfile,
+            WanAccess::Whitelist(vec!["1.1.1.1".into(), wan_ip.to_string()]),
+        );
+        assert_eq!(
+            guest_hairpin_after_with(with_wan(), &profile).await,
+            (both.clone(), both.clone())
+        );
+        assert_eq!(
+            guest_hairpin_after(dir.path(), &profile).await,
+            (lan_only.clone(), lan_only.clone())
+        );
+        let profile = guest_profile_with_wan(
+            LanAccess::SameProfile,
+            WanAccess::Blacklist(vec!["203.0.113.0/24".into()]),
+        );
+        assert_eq!(
+            guest_hairpin_after_with(with_wan(), &profile).await,
+            (lan_only.clone(), lan_only.clone())
+        );
         assert_eq!(
             guest_hairpin_after(dir.path(), &profile).await,
             (both.clone(), both)

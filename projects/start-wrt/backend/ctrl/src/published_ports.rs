@@ -1,7 +1,8 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use imbl_value::Value;
+use ipnet::IpNet;
 use rpc_toolkit::{from_fn_async_local, HandlerExt as _, ParentHandler};
 use serde::{Deserialize, Serialize};
 use uciedit::openwrt::{
@@ -1221,7 +1222,7 @@ pub async fn set<C: CtrlContext>(
 
         // One derivation for every hairpin projection: the freshly written
         // published ports and any automatic (PCP/UPnP) forwards alike.
-        sync_hairpin(&mut cfgs["firewall"])?;
+        sync_hairpin(&mut cfgs["firewall"], &ctx.wan_ipv4_addrs())?;
 
         match dump_all(ctx.uci_root(), cfgs).await {
             Err(uciedit::Error::Conflict { .. }) if retries > 0 => {
@@ -1835,13 +1836,13 @@ async fn resolve_device_zones(
 }
 
 /// Zones whose clients hairpin into `dest_zone`: that zone itself, every zone
-/// a `config forwarding` permits into it, and every zone with Internet access
-/// — a forwarding into a masquerading zone that no unqualified REJECT toward
-/// that zone (a Whitelist catch-all, an active blackout window) cancels. A
-/// published port is a public resource: a profile that can reach the
-/// Internet reaches it, and a profile that can already reach the device on
-/// the LAN reaches it by its public address too. fw4 defaults to `dest_zone`
-/// alone.
+/// a `config forwarding` permits into it, and every zone whose Internet
+/// access reaches one of the port's `public` addresses — a forwarding into a
+/// masquerading zone, unless the zone's own rules toward it decide otherwise
+/// for those addresses ([`egress_verdict`]). A published port is a public
+/// resource: a profile that can reach it from the Internet reaches it, and a
+/// profile that can already reach the device on the LAN reaches it by its
+/// public address too. fw4 defaults to `dest_zone` alone.
 ///
 /// Only names that exist as `config zone` sections are emitted: fw4 treats an
 /// unknown name (or a `src '*'` copied from a forwarding) as an invalid
@@ -1869,6 +1870,7 @@ fn hairpin_zones(
     firewall: &uciedit::Config<'_>,
     redirect_src: &str,
     dest_zone: &str,
+    public: &[IpAddr],
 ) -> Vec<String> {
     let mut masq: HashSet<String> = HashSet::new();
     let mut eligible: HashSet<String> = HashSet::new();
@@ -1891,18 +1893,16 @@ fn hairpin_zones(
         .iter()
         .filter_map(|s| s.get::<FirewallForwarding>().ok())
         .collect();
-    let egress_cut: HashSet<(String, String)> = firewall
+    let rules: Vec<FirewallRule> = firewall
         .sections
         .iter()
         .filter_map(|s| s.get::<FirewallRule>().ok())
-        .filter(is_unqualified_reject)
-        .filter_map(|r| Some((r.src, r.dest?)))
         .collect();
     let has_internet = |zone: &str| {
         forwardings.iter().any(|f| {
             f.src == zone
                 && masq.contains(&f.dest)
-                && !egress_cut.contains(&(zone.to_string(), f.dest.clone()))
+                && egress_verdict(&rules, zone, &f.dest, public).unwrap_or(true)
         })
     };
     let has_access = |zone: &str| {
@@ -1918,30 +1918,77 @@ fn hairpin_zones(
         .collect()
 }
 
-/// A zone-to-zone REJECT that matches every flow. fw4 evaluates it ahead of
-/// the zones' forwarding, so the forwarding grants nothing while it stands.
-fn is_unqualified_reject(rule: &FirewallRule) -> bool {
-    matches!(rule.target, FirewallTarget::REJECT | FirewallTarget::DROP)
-        && rule.enabled.as_deref() != Some("0")
-        && rule.dest.is_some()
-        && rule.src_ip.is_none()
-        && rule.dest_ip.is_none()
-        && rule.src_port.is_none()
-        && rule.dest_port.is_none()
-        && rule.src_mac.is_none()
-        && rule.family.is_none()
-        && (rule.proto.is_empty() || rule.proto.iter().any(|p| p == "all"))
+/// What `zone`'s own rules toward `egress` decide for a flow to one of the
+/// `public` addresses, walked in config order as fw4 evaluates them ahead of
+/// the forwarding: `Some(true)` at the first covering ACCEPT, `Some(false)`
+/// at the first covering REJECT or DROP, `None` when nothing covers and the
+/// forwarding decides.
+fn egress_verdict(
+    rules: &[FirewallRule],
+    zone: &str,
+    egress: &str,
+    public: &[IpAddr],
+) -> Option<bool> {
+    rules
+        .iter()
+        .filter(|r| {
+            r.src == zone && r.dest.as_deref() == Some(egress) && r.enabled.as_deref() != Some("0")
+        })
+        .filter(|r| rule_covers(r, public))
+        .find_map(|r| match r.target {
+            FirewallTarget::ACCEPT => Some(true),
+            FirewallTarget::REJECT | FirewallTarget::DROP => Some(false),
+            FirewallTarget::MARK | FirewallTarget::NOTRACK => None,
+        })
+}
+
+/// Whether a rule covers a flow to one of `public`. A rule narrowed by
+/// anything but a destination address covers nothing here, and so does a
+/// destination this cannot parse (a negation, a range). Without a destination
+/// address the rule covers every flow.
+fn rule_covers(rule: &FirewallRule, public: &[IpAddr]) -> bool {
+    if rule.src_ip.is_some()
+        || rule.src_mac.is_some()
+        || rule.src_port.is_some()
+        || rule.dest_port.is_some()
+        || !(rule.proto.is_empty() || rule.proto.iter().any(|p| p == "all"))
+    {
+        return false;
+    }
+    let family_ok = |a: &IpAddr| match rule.family.as_deref() {
+        None => true,
+        Some("ipv4") => a.is_ipv4(),
+        Some("ipv6") => a.is_ipv6(),
+        Some(_) => false,
+    };
+    match rule.dest_ip.as_deref().map(str::trim) {
+        None | Some("") => rule.family.is_none() || public.iter().any(family_ok),
+        Some(dest) => {
+            let Ok(net) = dest
+                .parse::<IpNet>()
+                .or_else(|_| dest.parse::<IpAddr>().map(IpNet::from))
+            else {
+                return false;
+            };
+            public.iter().any(|a| family_ok(a) && net.contains(a))
+        }
+    }
 }
 
 /// Re-derive every hairpin projection from the current firewall config: the
 /// `reflection_zone` list on each published-port (`_pp_id`) and auto-forward
 /// (`_apf_label`) DNAT redirect, and the LAN-side copies of each IPv6
-/// published-port rule. Returns whether anything changed; the caller writes
-/// the config and reloads the firewall.
+/// published-port rule. An IPv4 redirect is public at the router's WAN
+/// addresses (`wan_v4`), an IPv6 rule at its own `dest_ip`. Returns whether
+/// anything changed; the caller writes the config and reloads the firewall.
 ///
 /// A redirect with `reflection '0'` gets an empty list: fw4 validates the
 /// names before it reads `reflection`.
-pub(crate) fn sync_hairpin(firewall: &mut uciedit::Config<'_>) -> Result<bool, Error> {
+pub(crate) fn sync_hairpin(
+    firewall: &mut uciedit::Config<'_>,
+    wan_v4: &[Ipv4Addr],
+) -> Result<bool, Error> {
+    let public: Vec<IpAddr> = wan_v4.iter().copied().map(IpAddr::V4).collect();
     let mut changed = false;
     for i in 0..firewall.sections.len() {
         let Ok(mut redirect) = firewall.sections[i].get::<FirewallRedirect>() else {
@@ -1961,7 +2008,7 @@ pub(crate) fn sync_hairpin(firewall: &mut uciedit::Config<'_>) -> Result<bool, E
         let Some(dest) = redirect.dest.clone() else {
             continue;
         };
-        let zones = hairpin_zones(firewall, &redirect.src, &dest);
+        let zones = hairpin_zones(firewall, &redirect.src, &dest, &public);
         if redirect.reflection_zone != zones {
             redirect.reflection_zone = zones;
             firewall.sections[i].set(&redirect)?;
@@ -1989,7 +2036,14 @@ fn sync_v6_hairpin_rules(firewall: &mut uciedit::Config<'_>) -> Result<bool, Err
             continue;
         };
         let stem = name.strip_suffix("_v6").unwrap_or(&name).to_string();
-        for zone in hairpin_zones(firewall, &rule.src, &dest) {
+        let public: Vec<IpAddr> = rule
+            .dest_ip
+            .as_deref()
+            .and_then(|a| a.parse::<Ipv6Addr>().ok())
+            .map(IpAddr::V6)
+            .into_iter()
+            .collect();
+        for zone in hairpin_zones(firewall, &rule.src, &dest, &public) {
             if zone == dest {
                 continue;
             }
@@ -2033,13 +2087,15 @@ fn uci_name_fragment(s: &str) -> String {
 /// Rewrites the hairpin projections and nothing else; the caller reloads the
 /// firewall. Run by the WAN-schedule crontab between its `uci commit` and
 /// its firewall reload, where the blackout REJECT it just wrote must also
-/// take the hairpin away.
+/// take the hairpin away, and by the `wan` hotplug hook, where a new WAN
+/// address changes which Whitelist and Blacklist entries cover it.
 pub async fn sync_hairpin_cmd<C: CtrlContext>(ctx: C) -> Result<Value, Error> {
+    let wan_v4 = ctx.wan_ipv4_addrs();
     let mut retries = 4;
     loop {
         let arena = Arena::new();
         let mut cfgs = parse_all(ctx.uci_root(), &arena, &["firewall"]).await?;
-        if !sync_hairpin(&mut cfgs["firewall"])? {
+        if !sync_hairpin(&mut cfgs["firewall"], &wan_v4)? {
             return Ok(Value::Null);
         }
         match dump_all(ctx.uci_root(), cfgs).await {
@@ -2114,7 +2170,7 @@ pub async fn heal_hairpin(uci_root: impl AsRef<std::path::Path>) -> Result<(), E
     });
     let arena = Arena::new();
     let mut cfgs = parse_all(uci_root.as_ref(), &arena, &["firewall"]).await?;
-    let changed = sync_hairpin(&mut cfgs["firewall"])?;
+    let changed = sync_hairpin(&mut cfgs["firewall"], &crate::system::wan_ipv4_addrs())?;
     if changed {
         dump_all(uci_root.as_ref(), cfgs).await?;
     }
@@ -3144,24 +3200,26 @@ config forwarding 'fwd_lan_wan'
         let arena = Arena::new();
         let cfg = uciedit::Config::parse_str(&arena, FORWARDINGS).unwrap();
         assert_eq!(
-            hairpin_zones(&cfg, "wan", "lan"),
+            hairpin_zones(&cfg, "wan", "lan", &[]),
             vec!["lan".to_string(), "lan_guest".into(), "lan_iot".into()],
         );
         // Nothing forwards into lan_iot; lan and lan_guest qualify by their
         // Internet access alone.
         assert_eq!(
-            hairpin_zones(&cfg, "wan", "lan_iot"),
+            hairpin_zones(&cfg, "wan", "lan_iot", &[]),
             vec!["lan".to_string(), "lan_guest".into(), "lan_iot".into()]
         );
     }
 
     #[test]
     fn hairpin_zones_internet_ground_needs_live_egress() {
-        // Five profiles, all publishing into lan: Blacklist keeps its WAN
-        // forwarding and only per-destination rejects; Whitelist keeps the
-        // forwarding behind a catch-all reject; a blackout window adds an
-        // unqualified reject; WAN None has no forwarding at all; a disabled
-        // reject cancels nothing.
+        // Eight profiles, all publishing into lan, the router's WAN address
+        // being 203.0.113.7: Blacklist keeps its WAN forwarding and only
+        // per-destination rejects; Whitelist keeps the forwarding behind a
+        // catch-all reject; a blackout window adds an unqualified reject; WAN
+        // None has no forwarding at all; a disabled reject cancels nothing; a
+        // Whitelist naming the WAN address (or a range holding it) accepts
+        // ahead of its catch-all; a Blacklist naming it rejects.
         let content = "\
 config zone 'z_lan'
 \toption name 'lan'
@@ -3196,6 +3254,24 @@ config zone 'z_none'
 
 config zone 'z_off'
 \toption name 'lan_off'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config zone 'z_wlr'
+\toption name 'lan_wlr'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config zone 'z_wlc'
+\toption name 'lan_wlc'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config zone 'z_blr'
+\toption name 'lan_blr'
 \toption input 'ACCEPT'
 \toption output 'ACCEPT'
 \toption forward 'ACCEPT'
@@ -3251,13 +3327,142 @@ config rule
 \toption dest 'wan'
 \toption target 'REJECT'
 \toption enabled '0'
+
+config forwarding
+\toption src 'lan_wlr'
+\toption dest 'wan'
+
+config rule
+\toption name 'WAN-WL-Router-203.0.113.7'
+\toption src 'lan_wlr'
+\toption dest 'wan'
+\toption dest_ip '203.0.113.7'
+\tlist proto 'all'
+\toption target 'ACCEPT'
+
+config rule
+\toption name 'WAN-WL-Router-reject'
+\toption src 'lan_wlr'
+\toption dest 'wan'
+\tlist proto 'all'
+\toption target 'REJECT'
+
+config forwarding
+\toption src 'lan_wlc'
+\toption dest 'wan'
+
+config rule
+\toption name 'WAN-WL-Range-203.0.113.0/24'
+\toption src 'lan_wlc'
+\toption dest 'wan'
+\toption dest_ip '203.0.113.0/24'
+\tlist proto 'all'
+\toption target 'ACCEPT'
+
+config rule
+\toption name 'WAN-WL-Range-reject'
+\toption src 'lan_wlc'
+\toption dest 'wan'
+\tlist proto 'all'
+\toption target 'REJECT'
+
+config forwarding
+\toption src 'lan_blr'
+\toption dest 'wan'
+
+config rule
+\toption name 'WAN-BL-Router-203.0.113.7'
+\toption src 'lan_blr'
+\toption dest 'wan'
+\toption dest_ip '203.0.113.7'
+\tlist proto 'all'
+\toption target 'REJECT'
 ";
         let arena = Arena::new();
         let cfg = uciedit::Config::parse_str(&arena, content).unwrap();
+        let wan: [IpAddr; 1] = ["203.0.113.7".parse().unwrap()];
         assert_eq!(
-            hairpin_zones(&cfg, "wan", "lan"),
-            vec!["lan".to_string(), "lan_bl".into(), "lan_off".into()],
+            hairpin_zones(&cfg, "wan", "lan", &wan),
+            vec![
+                "lan".to_string(),
+                "lan_bl".into(),
+                "lan_off".into(),
+                "lan_wlc".into(),
+                "lan_wlr".into(),
+            ],
         );
+        // With the WAN address unknown, an address entry covers nothing: a
+        // Whitelist falls to its catch-all and a Blacklist to its forwarding.
+        assert_eq!(
+            hairpin_zones(&cfg, "wan", "lan", &[]),
+            vec![
+                "lan".to_string(),
+                "lan_bl".into(),
+                "lan_blr".into(),
+                "lan_off".into()
+            ],
+        );
+        // A different WAN address: neither entry covers it.
+        let other: [IpAddr; 1] = ["198.51.100.9".parse().unwrap()];
+        assert_eq!(
+            hairpin_zones(&cfg, "wan", "lan", &other),
+            vec![
+                "lan".to_string(),
+                "lan_bl".into(),
+                "lan_blr".into(),
+                "lan_off".into()
+            ],
+        );
+    }
+
+    /// A rule narrowed by anything but a destination address decides
+    /// nothing, and neither does a destination that does not parse.
+    #[test]
+    fn rule_covers_only_address_qualified_rules() {
+        let wan: [IpAddr; 1] = ["203.0.113.7".parse().unwrap()];
+        let base = FirewallRule {
+            src: "z".into(),
+            dest: Some("wan".into()),
+            target: FirewallTarget::REJECT,
+            ..Default::default()
+        };
+        assert!(rule_covers(&base, &wan));
+        assert!(rule_covers(&base, &[]));
+        for narrowed in [
+            FirewallRule {
+                dest_port: Some("443".into()),
+                ..base.clone()
+            },
+            FirewallRule {
+                src_mac: Some("AA:BB:CC:DD:EE:FF".into()),
+                ..base.clone()
+            },
+            FirewallRule {
+                proto: vec!["tcp".into()],
+                ..base.clone()
+            },
+            FirewallRule {
+                dest_ip: Some("!203.0.113.7".into()),
+                ..base.clone()
+            },
+            FirewallRule {
+                dest_ip: Some("203.0.113.1-203.0.113.9".into()),
+                ..base.clone()
+            },
+            FirewallRule {
+                family: Some("ipv6".into()),
+                ..base.clone()
+            },
+        ] {
+            assert!(!rule_covers(&narrowed, &wan), "{narrowed:?}");
+        }
+        assert!(rule_covers(
+            &FirewallRule {
+                family: Some("ipv4".into()),
+                ..base.clone()
+            },
+            &wan
+        ));
     }
 
     #[test]
@@ -3293,16 +3498,19 @@ config forwarding
         let arena = Arena::new();
         let cfg = uciedit::Config::parse_str(&arena, &hazards).unwrap();
         assert_eq!(
-            hairpin_zones(&cfg, "wan", "lan"),
+            hairpin_zones(&cfg, "wan", "lan", &[]),
             vec!["lan".to_string(), "lan_guest".into(), "lan_iot".into()],
         );
         // A dest that is not an existing zone gets no list at all (fw4 would
         // reject the section on its `dest` before reflection matters).
-        assert_eq!(hairpin_zones(&cfg, "wan", "ghost"), Vec::<String>::new());
+        assert_eq!(
+            hairpin_zones(&cfg, "wan", "ghost", &[]),
+            Vec::<String>::new()
+        );
         // A masquerading zone spelled otherwise still counts as an egress:
         // lan_iot has no Access to lan_guest and no `wan` forwarding.
         assert_eq!(
-            hairpin_zones(&cfg, "wan", "lan_guest"),
+            hairpin_zones(&cfg, "wan", "lan_guest", &[]),
             vec!["lan".to_string(), "lan_guest".into()],
         );
         let alt = format!(
@@ -3314,7 +3522,7 @@ config forwarding
         );
         let cfg = uciedit::Config::parse_str(&arena, &alt).unwrap();
         assert_eq!(
-            hairpin_zones(&cfg, "wan", "lan_guest"),
+            hairpin_zones(&cfg, "wan", "lan_guest", &[]),
             vec!["lan".to_string(), "lan_guest".into(), "lan_iot".into()],
         );
     }
@@ -3520,7 +3728,7 @@ config redirect 'pp_off'
 "
         );
         let mut cfg = uciedit::Config::parse_str(&arena, &content).unwrap();
-        assert!(sync_hairpin(&mut cfg).unwrap());
+        assert!(sync_hairpin(&mut cfg, &[]).unwrap());
         let redirect = cfg
             .sections
             .iter()
@@ -3531,7 +3739,7 @@ config redirect 'pp_off'
         assert_eq!(redirect.reflection, Some(false));
         assert!(redirect.reflection_zone.is_empty());
         // Already clean: nothing to write.
-        assert!(!sync_hairpin(&mut cfg).unwrap());
+        assert!(!sync_hairpin(&mut cfg, &[]).unwrap());
     }
 
     const V6_RULE: &str = "\
@@ -3584,7 +3792,7 @@ config rule 'pp_x_v6_vlan_gone'
 "
         );
         let mut cfg = uciedit::Config::parse_str(&arena, &content).unwrap();
-        assert!(sync_hairpin(&mut cfg).unwrap());
+        assert!(sync_hairpin(&mut cfg, &[]).unwrap());
         assert_eq!(
             v6_copies(&cfg),
             vec![
@@ -3615,7 +3823,7 @@ config rule 'pp_x_v6_vlan_gone'
             wan,
             "a copy differs from the WAN rule only in src and the marker"
         );
-        assert!(!sync_hairpin(&mut cfg).unwrap(), "already current");
+        assert!(!sync_hairpin(&mut cfg, &[]).unwrap(), "already current");
 
         // Guest loses both Access to lan and its Internet access.
         cfg.sections.retain(|s| {
@@ -3624,10 +3832,77 @@ config rule 'pp_x_v6_vlan_gone'
                 Some("fwd_guest_lan") | Some("fwd_guest_wan")
             )
         });
-        assert!(sync_hairpin(&mut cfg).unwrap());
+        assert!(sync_hairpin(&mut cfg, &[]).unwrap());
         assert_eq!(
             v6_copies(&cfg),
             vec![("pp_x_v6_lan_iot".to_string(), "lan_iot".to_string())]
+        );
+    }
+
+    /// An IPv6 rule is public at the device's own address, so a Whitelist
+    /// naming that address earns the zone a copy and a Blacklist naming it
+    /// loses one; the router's WAN IPv4 address plays no part.
+    #[test]
+    fn v6_copies_follow_entries_on_the_device_address() {
+        let arena = Arena::new();
+        let content = format!(
+            "{FORWARDINGS}{V6_RULE}
+config zone 'z_wl'
+\toption name 'lan_wl'
+\tlist network 'wl'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config forwarding
+\toption src 'lan_wl'
+\toption dest 'wan'
+
+config rule
+\toption name 'WAN-WL-Wl-2001:db8::10'
+\toption src 'lan_wl'
+\toption dest 'wan'
+\toption dest_ip '2001:db8::10'
+\tlist proto 'all'
+\toption target 'ACCEPT'
+
+config rule
+\toption name 'WAN-WL-Wl-reject'
+\toption src 'lan_wl'
+\toption dest 'wan'
+\tlist proto 'all'
+\toption target 'REJECT'
+
+config zone 'z_bl'
+\toption name 'lan_bl'
+\tlist network 'bl'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config forwarding
+\toption src 'lan_bl'
+\toption dest 'wan'
+
+config rule
+\toption name 'WAN-BL-Bl-2001:db8::/64'
+\toption src 'lan_bl'
+\toption dest 'wan'
+\toption dest_ip '2001:db8::/64'
+\tlist proto 'all'
+\toption target 'REJECT'
+"
+        );
+        let mut cfg = uciedit::Config::parse_str(&arena, &content).unwrap();
+        let wan: [Ipv4Addr; 1] = ["203.0.113.7".parse().unwrap()];
+        assert!(sync_hairpin(&mut cfg, &wan).unwrap());
+        assert_eq!(
+            v6_copies(&cfg),
+            vec![
+                ("pp_x_v6_lan_guest".to_string(), "lan_guest".to_string()),
+                ("pp_x_v6_lan_iot".to_string(), "lan_iot".to_string()),
+                ("pp_x_v6_lan_wl".to_string(), "lan_wl".to_string()),
+            ]
         );
     }
 
@@ -3636,7 +3911,7 @@ config rule 'pp_x_v6_vlan_gone'
         let arena = Arena::new();
         let content = format!("{FORWARDINGS}{V6_RULE}\toption src_ip '2001:db8:beef::/48'\n");
         let mut cfg = uciedit::Config::parse_str(&arena, &content).unwrap();
-        assert!(!sync_hairpin(&mut cfg).unwrap());
+        assert!(!sync_hairpin(&mut cfg, &[]).unwrap());
         assert!(v6_copies(&cfg).is_empty());
     }
 
@@ -3648,7 +3923,7 @@ config rule 'pp_x_v6_vlan_gone'
         let arena = Arena::new();
         let content = format!("{FORWARDINGS}{V6_RULE}");
         let mut cfg = uciedit::Config::parse_str(&arena, &content).unwrap();
-        assert!(sync_hairpin(&mut cfg).unwrap());
+        assert!(sync_hairpin(&mut cfg, &[]).unwrap());
         std::fs::write(dir.path().join("firewall"), cfg.dump_str()).unwrap();
         std::fs::write(dir.path().join("dhcp"), "").unwrap();
 

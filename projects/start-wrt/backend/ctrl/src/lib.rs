@@ -100,6 +100,15 @@ use rpc_toolkit::{
 pub trait CtrlContext: Context + Clone {
     fn uci_root(&self) -> PathBuf;
     fn effectful(&self) -> bool;
+    /// The router's WAN IPv4 addresses: the public side of every IPv4
+    /// published port. Empty when unknown.
+    fn wan_ipv4_addrs(&self) -> Vec<std::net::Ipv4Addr> {
+        if self.effectful() {
+            crate::system::wan_ipv4_addrs()
+        } else {
+            Vec::new()
+        }
+    }
 }
 
 fn cookies_path() -> PathBuf {

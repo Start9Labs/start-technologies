@@ -1323,7 +1323,10 @@ async fn apply_forward_uci(
         cfgs["firewall"].append(&desired, Some(section))?;
         // Scope this forward's hairpin exactly like a manual published port —
         // and refresh every other projection while the file is open.
-        crate::published_ports::sync_hairpin(&mut cfgs["firewall"])?;
+        crate::published_ports::sync_hairpin(
+            &mut cfgs["firewall"],
+            &crate::system::wan_ipv4_addrs(),
+        )?;
         match dump_all(uci_root, cfgs).await {
             Err(uciedit::Error::Conflict { .. }) if retries > 0 => {
                 retries -= 1;

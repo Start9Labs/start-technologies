@@ -303,14 +303,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   profile the router answered instead of the published service, so an app or
   bookmark holding a public address worked on one network and not another. A
   published port is a public resource, so those connections are now delivered
-  to the device from every profile that could reach it from the Internet (WAN
-  Access All or Blacklist, outside a blackout window) and from every profile
-  with Access to the device's profile — and from those only. The routes follow
-  your Security Profile settings as you change them, apply to the device's
-  global IPv6 address as well, and cover ports opened through automatic port
-  forwarding (UPnP/PCP) the same way. Nothing else on the device is opened: a
-  profile without Access still cannot reach it at its LAN address or on any
-  other port.
+  to the device from every profile that could reach it from the Internet and
+  from every profile with Access to the device's profile — and from those only.
+  A profile could reach it from the Internet when its WAN Access is All, a
+  Blacklist that does not block the router's public address, or a Whitelist
+  that includes it, outside any blackout window. The routes follow your
+  Security Profile settings and your public address as they change, apply to
+  the device's global IPv6 address as well (where a Whitelist or Blacklist
+  entry counts by the device's address), and cover ports opened through
+  automatic port forwarding (UPnP/PCP) the same way. Nothing else on the device
+  is opened: a profile without Access still cannot reach it at its LAN address
+  or on any other port.
 
 ### Security
 

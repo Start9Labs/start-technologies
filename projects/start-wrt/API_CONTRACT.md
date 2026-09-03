@@ -1154,13 +1154,19 @@ the router currently has no global prefix (a flap to "none" never wipes rules).
 ```
 
 Internal endpoint, **not called from the frontend**. Re-derives every hairpin
-projection from the firewall config — the `reflection_zone` list on each
-published-port and automatic-forward redirect, and the LAN-side copies of each
-IPv6 published-port rule — and writes the config only if something changed. It
-does not reload the firewall: the WAN-schedule crontab runs it between its
-`uci commit` and its `/etc/init.d/firewall reload`, where the blackout REJECT
-the edge just wrote must also take that profile's hairpin away. Runs in the CLI
-process against `/etc/config` (no `with_call_remote`).
+projection from the firewall config and the router's current WAN IPv4
+addresses (`ubus call network.interface.wan status`) — the `reflection_zone`
+list on each published-port and automatic-forward redirect, and the LAN-side
+copies of each IPv6 published-port rule — and writes the config only if
+something changed. A profile's WAN Whitelist and Blacklist entries are read
+against those addresses (for an IPv6 rule, against the device's own address),
+so the result depends on the live WAN state. It does not reload the firewall:
+the WAN-schedule crontab runs it between its `uci commit` and its
+`/etc/init.d/firewall reload`, where the blackout REJECT the edge just wrote
+must also take that profile's hairpin away, and the `wan` hotplug hook
+(`99-startwrt-published-ports`) runs it on `ifup`/`ifupdate` followed by its
+own reload. Runs in the CLI process against `/etc/config` (no
+`with_call_remote`).
 
 ---
 

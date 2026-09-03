@@ -45,6 +45,7 @@ futures-util = "0.3"
 http = "1.0"
 imbl-value = { path = "../../../../shared-libs/crates/imbl-value" }
 include_dir = "0.7"
+ipnet = "2.8.0"
 itertools = "0.14.0"
 libc = "0.2"
 macaddr = "1.0.0"
