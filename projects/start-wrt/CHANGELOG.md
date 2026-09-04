@@ -81,12 +81,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   RPC response, so an open tab notices within seconds of its next request even
   when the update restarted the daemon too quickly to drop a connection; pages
   that make no requests while idle re-check every 30 seconds.
+- **Devices that never share a hostname are now identified by operating
+  system or hardware vendor instead of a meaningless placeholder.** Some
+  devices deliberately withhold their name from the router — Chromebooks
+  never send one, and many IoT gadgets can't — and previously showed up as an
+  opaque `device-3af2b1`. The device list now recognizes the operating system
+  from how the device requests a network address (its DHCP fingerprint), e.g.
+  `Windows device (3af2b1)`, or failing that the vendor behind its MAC
+  address, e.g. `Apple device (3af2b1)` — keeping the short suffix so
+  identical unnamed devices stay distinguishable. OS recognition works even
+  for devices using randomized Wi-Fi addresses, survives reboots, and a real
+  hostname, when one ever appears, still takes over automatically; names you
+  assign always win.
 - **6in4 tunnels can now be configured on the router.** The `6in4` protocol
   and the SIT kernel module it needs now ship in the image, so an IPv6 tunnel
   from a broker such as Hurricane Electric can be set up over SSH — useful for
   reaching IPv6 on an ISP that provides none. There is no UI for this yet.
   Previously these packages had to be built and sideloaded by hand after every
   update, since a sysupgrade does not preserve separately installed packages.
+- **eMMC boot firmware provisioning.** The flash wizard, in-app updates, and a
+  check on every boot now converge the eMMC hardware boot partitions
+  (boot0/boot1) to the release's own `bootinfo` + FSBL (u-boot SPL, built from
+  the pinned `spacemit-com/uboot-2022.10` source). Previously only vendor
+  factory tooling ever wrote boot0, so a DIY BananaPi BPI-F3 whose factory left
+  it empty (or carrying an incompatible bootloader vintage) completed the setup
+  wizard but could not boot from eMMC once the microSD card was removed. Writes
+  are idempotent (byte-compared, skipped when already current), read-back
+  verified, and ordered for power-cut safety (boot1 mirror first, the
+  single-sector bootinfo header last); boards already carrying the current
+  firmware are not touched. The boot-time check makes provisioning effective
+  from the first boot after installing this release and self-heals damaged or
+  interrupted boot firmware thereafter. The `bootinfo_emmc.bin` blob now ships
+  in the image's bootfs partition to support this.
+- **The firmware image now ships MediaTek MT7915 Wi-Fi firmware alongside the
+  MT7916 firmware.** MT7915-based mini PCIe modules (such as the AsiaRF
+  AW7915-NP1) previously failed to initialize on DIY builds: the driver was
+  present but the firmware files were not, so no Wi-Fi radio ever appeared.
+  Note that MT7915 band-selectable cards operate one band at a time — with the
+  stock configuration the 2.4 GHz network comes up — unlike the
+  dual-band-concurrent AW7916-NPD module shipped in Start9 routers.
 - **Hardware documentation.** A new Hardware page in the user guide lists the
   router's specifications and publishes the SpacemiT K1 reference schematic the
   board descends from, noting where the shipped router differs from that
