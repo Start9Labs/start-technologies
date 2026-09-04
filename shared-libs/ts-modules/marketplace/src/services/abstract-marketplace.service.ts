@@ -1,4 +1,3 @@
-import { T } from '@start9labs/start-core'
 import { Observable } from 'rxjs'
 
 import { MarketplacePkg, StoreDataWithUrl, StoreIdentity } from '../types'
@@ -23,9 +22,6 @@ export abstract class AbstractMarketplaceService {
 
   /** All registries known to this app (start9, community, then customs). */
   abstract readonly registries$: Observable<StoreIdentity[]>
-
-  /** Start9's curated registries, with their pinned name and icon. */
-  abstract readonly knownRegistries$: Observable<T.KnownRegistry[]>
 
   /** Resolve one package. version/flavor/registryUrl are optional. */
   abstract getPackage$(

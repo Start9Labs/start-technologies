@@ -44,7 +44,6 @@ src/
 2. `MainComponent` injects `MarketplaceService` and renders the shared `<marketplace>` component, passing the current registry plus two-way-bound `category` and `query` signals. It adds a "Get a Start9 server" CTA and the registry picker.
 3. `MarketplaceService` (extends `AbstractMarketplaceService` from the shared lib) owns registry selection state:
    - Default registries (Start9 + Community) come from `@start9labs/shared`'s `defaultRegistries`.
-   - Start9's verified registries come from the manifest this site serves at `/.well-known/startos/registries.json`, which carries each one's name, icon, description, and the notice shown while it is selected. `@start9labs/marketplace` displays a verified registry from the manifest alone, marks it as verified, and shows an unverified registry that claims a verified name by its address instead. `@start9labs/shared` bundles the manifest as the fallback for when the fetch fails.
    - Custom registries are persisted in `localStorage` under the `_startos/` prefix and exposed reactively via a `BehaviorSubject`.
    - It fetches registry info + packages through `ApiService` and converts raw registry responses into `MarketplacePkg` objects; fetch failures emit on `registryError$`.
    - **Localization boundary.** Registries return i18n metadata as `LocaleString` (`string | Record<lang, string>`) and only flatten it to one locale when a request carries a StartOS `device_info` — which this static, hostless site never sends. So `localize.ts` collapses every `LocaleString` field to the active locale here, as data enters the app, mirroring what the StartOS backend does for the embedded UI. Without it the raw `Record` form reaches templates and renders as `[object Object]`. This single boundary (rather than per-template `| localize`) is also where a future in-app language selector would re-localize.
@@ -56,7 +55,7 @@ Taiga UI 5 + the shared marketplace/shared libraries. The app is dark-themed (`t
 
 ## Build & deploy
 
-`@angular/build:application` builds to `projects/brochure-marketplace/dist/raw/brochure-marketplace`. Assets are pulled from `shared/assets`, `projects/brochure-marketplace/src/assets/img`, the Taiga icon set, and `shared-libs/ts-modules/shared/well-known` (copied to `.well-known`, which is how the verified-registries manifest reaches the site — the deploy rsyncs with `--delete`, so it has to come out of the build). Production builds apply the `environment.prod.ts` file replacement and output hashing. The deploy is automated on merge to `master` (`.github/workflows/deploy-brochure.yml`), which builds `@start9labs/start-core` + patch-db client first, then the brochure bundle, and ships it to the VPS hosting marketplace.start9.com.
+`@angular/build:application` builds to `projects/brochure-marketplace/dist/raw/brochure-marketplace`. Assets are pulled from `shared/assets`, `projects/brochure-marketplace/src/assets/img`, and the Taiga icon set. Production builds apply the `environment.prod.ts` file replacement and output hashing. The deploy is automated on merge to `master` (`.github/workflows/deploy-brochure.yml`), which builds `@start9labs/start-core` + patch-db client first, then the brochure bundle, and ships it to the VPS hosting marketplace.start9.com.
 
 ## Further reading
 

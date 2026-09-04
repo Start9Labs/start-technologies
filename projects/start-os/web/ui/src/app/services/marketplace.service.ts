@@ -4,7 +4,6 @@ import {
   GetPackageRes,
   Marketplace,
   MarketplacePkg,
-  resolveRegistry,
   StoreDataWithUrl,
   StoreIdentity,
 } from '@start9labs/marketplace'
@@ -12,7 +11,6 @@ import {
   defaultRegistries,
   Exver,
   i18nPipe,
-  registriesSnapshot,
   registryUrl,
   sameUrl,
 } from '@start9labs/shared'
@@ -54,26 +52,17 @@ export class MarketplaceService extends AbstractMarketplaceService {
   private readonly storage = inject(StorageService)
   private readonly i18n = inject(i18nPipe)
 
-  readonly knownRegistries$: Observable<T.KnownRegistry[]> = from(
-    this.api.getKnownRegistries(),
-  ).pipe(
-    catchError(() => of(registriesSnapshot)),
-    startWith(registriesSnapshot),
-    shareReplay(1),
-  )
-
-  readonly registries$: Observable<StoreIdentity[]> = combineLatest([
-    this.patch.watch$('ui', 'registries'),
-    this.knownRegistries$,
-  ]).pipe(
-    map(([registries, known]) => [
-      resolveRegistry(start9, { name: registries[start9] }, known),
-      resolveRegistry(community, { name: registries[community] }, known),
-      ...Object.entries(registries)
-        .filter(([u, _]) => !sameUrl(start9, u) && !sameUrl(community, u))
-        .map(([url, name]) => resolveRegistry(url, { name }, known)),
-    ]),
-  )
+  readonly registries$: Observable<StoreIdentity[]> = this.patch
+    .watch$('ui', 'registries')
+    .pipe(
+      map(registries => [
+        toStoreIdentity(start9, registries[start9]),
+        toStoreIdentity(community, registries[community]),
+        ...Object.entries(registries)
+          .filter(([u, _]) => !sameUrl(start9, u) && !sameUrl(community, u))
+          .map(([url, name]) => toStoreIdentity(url, name)),
+      ]),
+    )
 
   readonly newRegistry$ = this.patch.watch$('ui', 'registries').pipe(
     map(registries =>
@@ -343,5 +332,12 @@ export class MarketplaceService extends AbstractMarketplaceService {
     if (oldName !== newName) {
       this.api.setDbValue<string>(['registries', url], newName)
     }
+  }
+}
+
+function toStoreIdentity(url: string, name?: string | null): StoreIdentity {
+  return {
+    url,
+    name: name || url,
   }
 }

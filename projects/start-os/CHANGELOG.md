@@ -36,14 +36,6 @@ file tracks notable changes since the move to the monorepo.
   Existing StartTunnel configs remain recognizable by their StartTunnel header;
   configs without either marker are classified as outbound-only.
 
-- **Adding a registry now offers the registries Start9 has verified, alongside
-  the URL field.** A verified registry carries a mark beside its name, names
-  its operator, and shows the name, icon, description, and notice Start9
-  published for it. A registry
-  that is not on the list cannot present a verified one's name; it appears by
-  its address instead, and a banner says it is not on Start9's list. See
-  [Alternative Registries](https://docs.start9.com/start-os/alternative-registries.html).
-
 - **A registry's description appears at the top of the marketplace** while that
   registry is selected.
 

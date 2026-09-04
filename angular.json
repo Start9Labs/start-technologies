@@ -461,11 +461,6 @@
                 "glob": "**/*",
                 "input": "node_modules/@taiga-ui/icons/src",
                 "output": "assets/taiga-ui/icons"
-              },
-              {
-                "glob": "**/*",
-                "input": "shared-libs/ts-modules/shared/well-known",
-                "output": ".well-known"
               }
             ],
             "styles": [

@@ -1,7 +1,3 @@
-import { T } from '@start9labs/start-core'
-
-import manifest from '../../well-known/startos/registries.json'
-
 export type AccessType =
   | 'tor'
   | 'mdns'
@@ -34,7 +30,9 @@ export const defaultRegistries = {
   community: 'https://community-registry.start9.com/',
 } as const
 
-export const registriesManifestPath = '/.well-known/startos/registries.json'
-
-/** Used when the published list can't be fetched. */
-export const registriesSnapshot: T.KnownRegistry[] = manifest.registries
+export const knownRegistries = {
+  ...defaultRegistries,
+  start9Alpha: 'https://alpha-registry-x.start9.com/',
+  start9Beta: 'https://beta-registry.start9.com/',
+  communityBeta: 'https://community-beta-registry.start9.com/',
+} as const

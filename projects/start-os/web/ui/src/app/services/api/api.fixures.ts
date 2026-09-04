@@ -225,30 +225,6 @@ export namespace Mock {
     },
   }
 
-  export const KnownRegistries: T.KnownRegistry[] = [
-    {
-      url: 'https://registry.example.com/',
-      name: 'Example Registry',
-      icon: REGISTRY_ICON,
-      description: 'Example services for trying out StartOS.',
-      warning: 'Example Registry is a demonstration. Install at your own risk.',
-      operator: 'Example Labs',
-      contact: 'registry@example.com',
-    },
-    {
-      url: 'https://nightly.example.com/',
-      name: 'Nightly Registry',
-      icon: null,
-      description: null,
-      warning: {
-        en_US: 'Nightly Registry distributes untested builds.',
-        de_DE: 'Nightly Registry verteilt ungetestete Builds.',
-      },
-      operator: 'nightly',
-      contact: null,
-    },
-  ]
-
   export const MockManifestBitcoind: T.Manifest = {
     id: 'bitcoind',
     title: 'Bitcoin Core',

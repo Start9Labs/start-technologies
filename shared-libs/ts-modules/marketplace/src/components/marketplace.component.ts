@@ -13,7 +13,9 @@ import { toSignal } from '@angular/core/rxjs-interop'
 import { FormsModule } from '@angular/forms'
 import { WA_IS_MOBILE } from '@ng-web-apis/platform'
 import {
+  i18nKey,
   i18nPipe,
+  knownRegistries,
   LocalizePipe,
   MarkdownPipe,
   SafeLinksDirective,
@@ -41,7 +43,6 @@ import {
 } from '@taiga-ui/kit'
 import { TuiCardLarge, TuiHeader, TuiNavigation } from '@taiga-ui/layout'
 
-import { resolveRegistry } from '../identity'
 import { filterPackages } from '../pipes/filter-packages.pipe'
 import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
 import { StoreDataWithUrl } from '../types'
@@ -102,39 +103,17 @@ const ICONS: Record<string, string> = {
       </footer>
     </aside>
     <div class="content">
-      @if (description() || operator()) {
-        <div tuiNotification appearance="info">
-          @if (description(); as description) {
-            <strong>{{ 'Description' | i18n }}</strong>
-            <div
-              class="g-markdown"
-              safeLinks
-              [innerHTML]="description | localize | markdown | dompurify"
-            ></div>
-          }
-          @if (operator(); as operator) {
-            <strong>{{ 'Contact' | i18n }}</strong>
-            <ul>
-              <li>{{ 'Operated by' | i18n }} {{ operator.name }}</li>
-              @if (operator.contact; as contact) {
-                <li>
-                  <a [href]="'mailto:' + contact">{{ contact }}</a>
-                </li>
-              }
-            </ul>
-          }
-        </div>
-      }
-      @if (claimed(); as claimed) {
-        <div tuiNotification appearance="negative">
-          {{
-            'This registry presents a name reserved for one Start9 lists, so it is shown by its address instead'
-              | i18n
-          }}: "{{ claimed }}"
-        </div>
+      @if (current()?.info?.description; as description) {
+        <div
+          tuiNotification
+          appearance="info"
+          class="g-markdown"
+          safeLinks
+          [innerHTML]="description | localize | markdown | dompurify"
+        ></div>
       }
       @if (warning(); as warning) {
-        <div tuiNotification appearance="warning">{{ warning | localize }}</div>
+        <div tuiNotification appearance="warning">{{ warning | i18n }}</div>
       }
       <header tuiHeader="h4">
         <hgroup tuiTitle>
@@ -229,19 +208,6 @@ const ICONS: Record<string, string> = {
 
     [tuiNotification] {
       margin: 1rem 2rem 0;
-
-      strong {
-        display: block;
-      }
-
-      :is(.g-markdown, ul) + strong {
-        margin-block-start: 0.75rem;
-      }
-
-      ul {
-        margin: 0;
-        padding-inline-start: 1.25rem;
-      }
     }
 
     [tuiHeader] {
@@ -313,11 +279,9 @@ export class MarketplaceComponent {
   protected readonly icons = ICONS
   protected readonly asIs = () => 0
   protected readonly open = signal(!inject(WA_IS_MOBILE))
-  private readonly marketplace = inject(AbstractMarketplaceService)
-  private readonly known = toSignal(this.marketplace.knownRegistries$, {
-    requireSync: true,
-  })
-  private readonly selected = toSignal(this.marketplace.currentRegistryUrl$)
+  private readonly selected = toSignal(
+    inject(AbstractMarketplaceService).currentRegistryUrl$,
+  )
 
   protected readonly current = computed(() => {
     const registry = this.registry()
@@ -327,41 +291,12 @@ export class MarketplaceComponent {
       : undefined
   })
 
-  protected readonly identity = computed(() => {
+  protected readonly warning = computed(() => {
     const url = this.selected()
 
-    return url
-      ? resolveRegistry(url, this.current()?.info ?? null, this.known())
-      : null
+    return url ? registryWarning(url) : null
   })
 
-  protected readonly warning = computed(() => {
-    const identity = this.identity()
-
-    if (!identity) return null
-
-    return identity.listed
-      ? identity.warning
-      : this.i18n.transform(
-          'This registry is not on the list Start9 publishes. Start9 does not vouch for it or support the services it distributes.',
-        )
-  })
-
-  protected readonly description = computed(
-    () => this.identity()?.description ?? null,
-  )
-
-  protected readonly operator = computed(() => {
-    const identity = this.identity()
-
-    return identity?.operator
-      ? { name: identity.operator, contact: identity.contact }
-      : null
-  })
-
-  protected readonly claimed = computed(() =>
-    this.identity()?.impersonating ? this.current()?.info.name : null,
-  )
   // Only categories that have at least one package are shown; 'all' is the
   // always-present pseudo-category injected by each app's service.
   protected readonly categories = computed(() => {
@@ -425,4 +360,31 @@ export class MarketplaceComponent {
       sort === 'a' ? 'Alphabetical' : 'Recently updated',
     )
   }
+}
+
+function registryWarning(url: string): i18nKey | null {
+  const { start9, community, start9Beta, communityBeta, start9Alpha } =
+    knownRegistries
+
+  if (sameUrl(url, start9)) {
+    return null
+  }
+
+  if (sameUrl(url, community)) {
+    return 'Services from this registry are packaged and maintained by members of the Start9 community. Install at your own risk. If you experience an issue or have a question related to a service in this marketplace, please reach out to the package developer for assistance.'
+  }
+
+  if (sameUrl(url, communityBeta)) {
+    return 'Services from this registry are packaged and maintained by members of the Start9 community and are undergoing beta testing. Bugs are expected. Install at your own risk. If you experience an issue or have a question related to a service in this marketplace, please reach out to the package developer for assistance.'
+  }
+
+  if (sameUrl(url, start9Beta)) {
+    return 'Services from this registry are undergoing beta testing. Bugs are expected. Install at your own risk.'
+  }
+
+  if (sameUrl(url, start9Alpha)) {
+    return 'Services from this registry are undergoing alpha testing. They are expected to contain bugs and could damage your system. Install at your own risk.'
+  }
+
+  return 'This is a Custom Registry. Start9 cannot verify the integrity or functionality of services from this registry, and they could damage your system. Install at your own risk.'
 }

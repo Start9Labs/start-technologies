@@ -11,7 +11,6 @@ import {
   HttpOptions,
   HttpService,
   isRpcError,
-  registriesManifestPath,
   RpcError,
   RPCOptions,
 } from '@start9labs/shared'
@@ -66,14 +65,6 @@ export class LiveApiService extends ApiService {
       method: 'package.get',
       params,
     })
-  }
-
-  async getKnownRegistries(): Promise<T.KnownRegistry[]> {
-    const { registries } = await this.httpRequest<{
-      registries: T.KnownRegistry[]
-    }>({ method: 'GET', url: registriesManifestPath })
-
-    return registries
   }
 
   async getStaticProxy(

@@ -8,7 +8,6 @@ StartOS is built around an open registry model: no single entity controls what s
 
 - [Setup](host-registry-setup.md) — install the `startos-registry` service from the marketplace, walk through first-run setup (registry name, first admin, signing keys), and connect a local `start-cli` to the registry.
 - [Administration](host-registry-administration.md) — day-to-day tasks: managing signers, publishing and removing packages, organizing categories, registering StartOS releases. Links out to the [start-cli registry reference](/start-os/cli-reference.html#registry) for command details.
-- [Verification](host-registry-verification.md) — get your registry listed by Start9: what a listing attests to, the requirements, and how to apply.
 
 ## When you don't need to host your own
 

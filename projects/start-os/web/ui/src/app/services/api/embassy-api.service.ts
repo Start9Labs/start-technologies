@@ -172,8 +172,6 @@ export abstract class ApiService {
     params: GetRegistryPackagesReq,
   ): Promise<GetPackagesRes>
 
-  abstract getKnownRegistries(): Promise<T.KnownRegistry[]>
-
   // notification
 
   abstract getNotifications(
