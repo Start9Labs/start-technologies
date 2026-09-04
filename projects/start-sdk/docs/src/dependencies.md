@@ -50,7 +50,7 @@ Importing a dependency's types — its manifest, its interface constants, an act
 
 ```json
 "dependencies": {
-  "@start9labs/start-sdk": "2.0.9",
+  "@start9labs/start-sdk": "3.0.0",
   "synapse-startos": "github:Start9Labs/synapse-startos#next"
 },
 "overrides": {

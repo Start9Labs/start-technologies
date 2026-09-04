@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0.10 — StartOS 0.4.0.2
+## 3.0.0 — StartOS 0.4.0.2
 
 ### Changed
 
@@ -210,11 +210,10 @@
 
 ### Security
 
-- **The bundled ESLint and typescript-eslint trees carry patched
-  `brace-expansion` and `js-yaml`**, which `bundleDependencies` puts beyond the
-  reach of `overrides` and `npm audit fix`. A package scaffolded from the
-  template now reports `found 0 vulnerabilities` from `npm audit --omit=dev`.
-  Fixes [#3592](https://github.com/Start9Labs/start-technologies/issues/3592)
+- **ESLint and typescript-eslint carry patched `brace-expansion` and
+  `js-yaml`.** A package scaffolded from the template now reports
+  `found 0 vulnerabilities` from `npm audit --omit=dev`. Fixes
+  [#3592](https://github.com/Start9Labs/start-technologies/issues/3592)
 
 ## 2.0.9 — StartOS 0.4.0-beta.10 (2026-07-25)
 

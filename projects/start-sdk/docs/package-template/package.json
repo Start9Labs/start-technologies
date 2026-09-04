@@ -1,7 +1,7 @@
 {
   "name": "{{id}}-startos",
   "dependencies": {
-    "@start9labs/start-sdk": "2.0.9"
+    "@start9labs/start-sdk": "3.0.0"
   },
   "overrides": {
     "@start9labs/start-sdk": "$@start9labs/start-sdk"
