@@ -1,6 +1,6 @@
 # FAQ
 
-Common issues encountered during setup and daily use of StartOS, including network connectivity problems, diagnostic mode, clock sync failures, running out of storage, and service-specific troubleshooting.
+Common issues encountered during setup and daily use of StartOS, including a USB installer that will not boot, network connectivity problems, diagnostic mode, clock sync failures, running out of storage, and service-specific troubleshooting.
 
 ## Do I need a surge protector for my server?
 
@@ -18,6 +18,24 @@ Ethernet is strongly recommended. Servers are always-on, critical devices and sh
 ## StartOS boots into "Diagnostic Mode"
 
 If you encounter Diagnostic Mode, your best bet is stop clicking and [contact support](https://start9.com/contact).
+
+## My server boots into StartOS instead of the USB installer
+
+A Start9 server boots from a USB installer on its own, with nothing to press and no setting to change. If yours starts StartOS as usual with the installer plugged in, the USB drive is almost always the problem:
+
+1. Confirm the drive was **flashed** with the StartOS `.iso` in balenaEtcher, as described in [Flash](installing-startos.md#flash). Formatting a drive and copying the file onto it produces a drive that will not boot. The [Server Pure](firmware-pure.md) and [Server One (2023)](firmware-one-2023.md) firmware pages describe a different procedure for a different purpose; do not use them to install or update StartOS.
+
+1. Flash the drive again, and use a different USB drive if you have one. Plug it into a USB 3 port, typically blue or marked "SS".
+
+If a freshly flashed drive still does not boot, connect a monitor and keyboard and pick the drive from the boot menu:
+
+- **Server Pure** — Needs no boot menu: the firmware boots a USB drive whenever one is plugged in. If a freshly flashed drive still does not boot, [contact support](https://start9.com/contact).
+
+- **Server One (2023)** — Press `F10` repeatedly from the moment you power on, and select the USB drive from the boot menu that appears. If StartOS starts before the menu appears, use the power button instead: with the server off, hold the power button for three seconds and release it. A menu of keys appears; press `F10` there.
+
+- **Server One (2024)** — Press `Del` repeatedly from the moment you power on to enter the BIOS. Under **Boot**, open **Boot Option Priorities** and set **Boot Option #1** to the USB drive, then press `F4` to save and restart.
+
+For other hardware, see the [install guide](installing-startos.md#install) and the [Community Hub](https://community.start9.com).
 
 ## During initial setup, I am unable to connect to "start.local".
 

@@ -175,7 +175,7 @@ Anything else is a failure. **`BAD signature`** means the file is not what Start
 1. Power on your server, booting from USB.
 
    > [!TIP]
-   > Some devices do not automatically boot from USB. In these cases, you will need to access your device's BIOS settings and change the boot order to prioritize the USB drive. This is known to be required on the **Nvidia DGX Spark**, among others. You may also need to turn off Secure Boot or explicitly allow USB boot. See the [Community Hub](https://community.start9.com) for device-specific guides or to get help.
+   > Some devices do not automatically boot from USB. In these cases, you will need to access your device's BIOS settings and change the boot order to prioritize the USB drive. This is known to be required on the **Nvidia DGX Spark**, among others. You may also need to turn off Secure Boot or explicitly allow USB boot. See the [Community Hub](https://community.start9.com) for device-specific guides or to get help. A Start9 server boots from the installer on its own; if yours does not, see [My server boots into StartOS instead of the USB installer](faq.md#my-server-boots-into-startos-instead-of-the-usb-installer).
 
 1. The StartOS install wizard will now be available at `http://start.local`. You can also use a monitor, keyboard, and mouse. This is known as "Kiosk Mode".
 
