@@ -218,6 +218,7 @@ url = { version = "2.4.1", features = ["serde"] }
 uuid = { version = "1.4.1", features = ["v4"] }
 visit-rs = "0.1.1"
 x25519-dalek = { version = "3.0.0-rc.1", features = ["static_secrets"] }
+x509-parser = "0.16.0"
 xmltree = "0.10"
 zbus = "5.1.1"
 
