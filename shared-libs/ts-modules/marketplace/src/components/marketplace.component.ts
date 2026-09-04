@@ -366,12 +366,8 @@ function registryWarning(url: string): i18nKey | null {
   const { start9, community, start9Beta, communityBeta, start9Alpha } =
     knownRegistries
 
-  if (sameUrl(url, start9)) {
+  if (sameUrl(url, start9) || sameUrl(url, community)) {
     return null
-  }
-
-  if (sameUrl(url, community)) {
-    return 'Services from this registry are packaged and maintained by members of the Start9 community. Install at your own risk. If you experience an issue or have a question related to a service in this marketplace, please reach out to the package developer for assistance.'
   }
 
   if (sameUrl(url, communityBeta)) {

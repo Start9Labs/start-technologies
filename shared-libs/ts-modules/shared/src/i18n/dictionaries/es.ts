@@ -135,7 +135,6 @@ export default {
   145: 'Instalar',
   146: 'Iniciando instalación',
   148: 'Los servicios de este registro están empaquetados y mantenidos por el equipo de Start9. Si experimentas un problema o tienes preguntas relacionadas con un servicio de este registro, nuestro equipo de soporte estará encantado de ayudarte.',
-  149: 'Los servicios de este registro están empaquetados y mantenidos por miembros de la comunidad Start9. Instálalos bajo tu propio riesgo. Si experimentas un problema o tienes una pregunta sobre un servicio en este mercado, comunícate con el desarrollador del paquete.',
   150: 'Los servicios de este registro están en fase de prueba beta. Se esperan errores. Instálalos bajo tu propio riesgo.',
   151: 'Los servicios de este registro están en fase de prueba alfa. Se espera que contengan errores y podrían dañar tu sistema. Instálalos bajo tu propio riesgo.',
   152: 'Este es un registro personalizado. Start9 no puede verificar la integridad ni el funcionamiento de los servicios de este registro, y podrían dañar tu sistema. Instálalos bajo tu propio riesgo.',

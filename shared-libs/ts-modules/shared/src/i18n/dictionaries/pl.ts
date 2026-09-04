@@ -135,7 +135,6 @@ export default {
   145: 'Zainstaluj',
   146: 'Rozpoczynanie instalacji',
   148: 'Serwisy z tego katalogu są pakowane i utrzymywane przez zespół Start9. Jeśli napotkasz problem lub masz pytania dotyczące serwisu z tego katalogu, nasz zespół wsparcia z przyjemnością Ci pomoże.',
-  149: 'Serwisy z tego katalogu są tworzone i utrzymywane przez członków społeczności Start9. Instalujesz je na własne ryzyko. W przypadku problemów lub pytań skontaktuj się z twórcą pakietu.',
   150: 'Serwisy z tego katalogu są w fazie testów beta. Należy spodziewać się błędów. Instalujesz je na własne ryzyko.',
   151: 'Serwisy z tego katalogu są w fazie testów alfa. Mogą zawierać błędy i potencjalnie uszkodzić system. Instalujesz je na własne ryzyko.',
   152: 'To jest katalog niestandardowy. Start9 nie może zweryfikować integralności ani funkcjonalności serwisów z tego katalogu, a mogą one uszkodzić twój system. Instalujesz je na własne ryzyko.',

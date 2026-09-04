@@ -135,7 +135,6 @@ export default {
   145: 'Installieren',
   146: 'Installation wird gestartet',
   148: 'Dienste in diesem Register werden vom Start9-Team gepackt und gepflegt. Bei Problemen oder Fragen hilft Ihnen unser Support-Team gerne weiter.',
-  149: 'Dienste in diesem Register werden von der Start9-Community gepflegt. Die Installation erfolgt auf eigenes Risiko. Bei Problemen wenden Sie sich bitte an den Paketentwickler.',
   150: 'Dienste in diesem Register befinden sich in der Betaphase. Fehler sind zu erwarten. Die Installation erfolgt auf eigenes Risiko.',
   151: 'Dienste in diesem Register befinden sich in der Alphaphase. Sie enthalten voraussichtlich Fehler und könnten Ihr System beschädigen. Installation auf eigenes Risiko.',
   152: 'Dies ist ein benutzerdefiniertes Register. Start9 kann die Integrität oder Funktionalität der darin enthaltenen Dienste nicht garantieren. Installation auf eigenes Risiko.',

@@ -135,7 +135,6 @@ export default {
   145: 'Installer',
   146: 'Installation initiée',
   148: 'Les services de cette bibliothèque sont maintenus par l’équipe de Start9. Si vous rencontrez un problème ou avez des questions, notre équipe de support dédiée sera ravie de vous aider.',
-  149: 'Les services de cette bibliothèque sont maintenus par la communauté Start9. Installez-les à vos risques et périls. En cas de problème ou de question, veuillez contacter le développeur en charge du paquet.',
   150: 'Les services de cette bibliothèque sont en phase de test bêta. Des bugs sont à prévoir. Installez-les à vos risques et périls.',
   151: 'Les services de cette bibliothèque sont en phase de test alpha. Ils contiennent probablement des bugs et peuvent endommager votre système. Installez-les à vos risques et périls.',
   152: 'Ceci est une bibliothèque personnalisée. Start9 ne peut pas vérifier l’intégrité ou la fonctionnalité des services de cette bibliothèque, qui pourraient endommager votre système. Installez-les à vos risques et périls.',
