@@ -20,7 +20,7 @@ Because each device has its own IPv6 address, two different devices can both pub
 
 ## Manual and automatic ports
 
-The `Published Ports` page shows two tables: **Manual** ports you added by hand, and **Automatic** ports opened by connected devices via PCP/UPnP. A row's **External IP** is your VPS's public IPv4 (a v4 published port) or the device's IPv6 GUA (a v6 pinhole). You can enable, disable, or remove either; automatic ports have no editable label (they're owned by the device that created them) and may be re-created if you remove one while the device still wants it. Manual ports are persistent — they stay until you delete them. Automatic ports are lease-based: one that stops being renewed (its device went offline or no longer wants the port) expires and is removed on its own.
+The `Published Ports` page shows two tables: **Manual** ports you added by hand, and **Automatic** port uses created by connected devices. Automatic entries include PCP/UPnP port mappings and SNI hostname routes; their kind identifies which one they are. A row's **External IP** is your VPS's public IPv4 (a v4 published port) or the device's IPv6 GUA (a v6 pinhole). You can enable, disable, or remove either; automatic entries are owned by the device that created them and may be re-created if you remove one while the device still wants it. Manual ports are persistent — they stay until you delete them. Automatic port uses are lease-based: one that stops being renewed (its device went offline or no longer wants the port) expires and is removed on its own.
 
 Deleting a device or demoting it to a client clears all of its published ports (manual and automatic, IPv4 and IPv6). Turning off **auto-publish** for a device clears its automatic ports but leaves any you added by hand.
 
@@ -42,3 +42,5 @@ Deleting a device or demoting it to a client clears all of its published ports (
 ## SNI hostnames (IPv4 only)
 
 When IP Version includes IPv4 (`IPv4` or `IPv4 + IPv6`), an optional **Hostname** routes by TLS SNI so several hostnames can share one external port. SNI demultiplexing is IPv4-only — in `IPv4 + IPv6` mode it applies to the IPv4 side only, and the IPv6 side is a plain pinhole (each device already has its own address, so no demux is needed) — and it cannot be combined with a port range.
+
+Connected devices can also create SNI hostname routes **automatically**, the same way they open automatic ports. A device asks over PCP (preferred) or, when PCP can't get through, over a UPnP vendor action the tunnel advertises (`X_START9_AddHostnameMapping`). Either way the route appears in the **Automatic** table, carries a lease, and expires on its own if the device stops renewing it — and, like every automatic mapping, it can only point at the requesting device's own address.

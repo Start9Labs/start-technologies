@@ -5,7 +5,28 @@ All notable changes to StartTunnel are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.2]
+## [1.3.0]
+
+### Added
+
+- **Devices can request SNI hostname routes over UPnP, not only PCP.** The
+  tunnel's UPnP IGD now serves two Start9 vendor actions
+  (`X_START9_AddHostnameMapping` / `X_START9_DeleteHostnameMapping`, advertised
+  in its `WANIPConnection:1` SCPD) that bind a hostname on a shared external
+  port via SNI demultiplexing — the same capability the PCP `HOSTNAME` option
+  provides. A device that reaches the tunnel over UPnP but not PCP (for
+  example, UDP 5351 filtered by an intermediate device) previously kept its
+  ordinary port forwards but silently lost SNI demux; StartOS now falls back to
+  the vendor action automatically. Unlike standard UPnP mappings, these routes
+  are always lease-bearing and expire if the device stops renewing them, so a
+  vanished device can never squat a hostname against its legitimate owner.
+  A hostname grant (over either protocol) is now also refused outright when
+  the tunnel cannot bind the shared port's listener, instead of being
+  acknowledged while routing nothing.
+
+- **Generated WireGuard configs identify their gateway as accepting inbound
+  connections.** Each config includes the `# inbound: yes` gateway marker while retaining its
+  StartTunnel header for compatibility with older StartOS versions.
 
 ### Fixed
 
@@ -25,6 +46,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   duplicate key — so neither command could be run at all. They now inherit the
   subnet the way `add`, `remove` and `set-dns` already did, matching the syntax
   the documentation shows.
+
+- **An automatic port forward that asks for a time limit now expires when that
+  time runs out.** A device requesting a timed UPnP mapping had it kept as
+  though it were permanent, so a forward could outlive the app that asked for
+  it — staying open until the tunnel was next restarted. Automatic ports are
+  now lease-based as documented: one that stops being renewed is removed on its
+  own. Devices that ask for a permanent mapping, which is what StartOS does,
+  are unaffected.
+
+- **Third-party UPnP clients can now use the tunnel as a gateway.** The device
+  description didn't advertise the `WANCommonInterfaceConfig` service, and the
+  tunnel answered none of the actions a client uses to check a gateway before
+  using it (`GetStatusInfo`, `GetConnectionTypeInfo`, `GetNATRSIPStatus`) or to
+  read a mapping back (`GetSpecificPortMappingEntry`,
+  `GetGenericPortMappingEntry`). Software built on the common UPnP client
+  library — which includes many torrent clients and consumer apps — therefore
+  rejected the tunnel outright with "no valid UPnP Internet Gateway Device
+  found", or created a mapping and then reported it as failed because it could
+  not read it back. StartOS was unaffected; its client requires none of these.
+
+### Security
+
+- **The UPnP device description no longer identifies the tunnel to web
+  pages.** The description endpoint answered anyone who could reach it, and it
+  names the product ("StartTunnel") plus a stable identifier derived from the
+  tunnel's WireGuard key — so a malicious website could rebind its own domain
+  to the gateway and read it from any tunneled phone or laptop's browser: a
+  cross-site tracking beacon that re-identifies a visitor behind this tunnel
+  from any network. All UPnP endpoints now refuse requests whose `Host` is not
+  an IP address, which a real UPnP client always sends and a rebinding page
+  never can. As defense-in-depth, actions that change port forwards must also
+  be named in the `SOAPAction` header (every real client sends it; a
+  cross-origin page can never attach it), so even a browser running on a
+  device that has been granted automatic port forwarding cannot be used to
+  drive forwards blind.
 
 ## [1.2.1]
 
