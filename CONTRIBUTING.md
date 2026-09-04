@@ -2,18 +2,19 @@
 
 This guide is for contributing to the Start9 monorepo (StartOS and the other products that live here). If you are interested in packaging a service for StartOS, visit the [packaging guide](https://docs.start9.com/packaging). If you are interested in promoting, providing technical support, creating tutorials, or helping in other ways, please visit the [Start9 website](https://start9.com/contribute).
 
-This file covers what is **common to the whole monorepo** — the shared toolchain, branch policy, the cross-cutting test/format entry points, and code/commit conventions. **Per-product system dependencies, build targets, deploy steps, and release procedure live in that product's own scope** — its `AGENTS.md` (e.g. [`projects/start-sdk/AGENTS.md`](projects/start-sdk/AGENTS.md)), or its `CONTRIBUTING.md` in scopes not yet migrated (e.g. [`projects/start-os/CONTRIBUTING.md`](projects/start-os/CONTRIBUTING.md) for building the StartOS OS image). See [`AGENTS.md`](AGENTS.md) for that migration and the reasoning behind it.
+This file covers what is **common to the whole monorepo** — the shared toolchain, branch policy, the cross-cutting test/format entry points, and code/commit conventions. **Per-product system dependencies, build targets, deploy steps, and release procedure live in that product's own scope** — its `AGENTS.md` (e.g. [`projects/start-os/AGENTS.md`](projects/start-os/AGENTS.md#contributor-workflow) for building the StartOS OS image), or its `CONTRIBUTING.md` in scopes not yet migrated.
 
 ## Documentation
 
-The repo root's docs split across four files:
+The repo root's docs split across five files:
 
 - `README.md` — what this is
 - `ARCHITECTURE.md` — how it's built (the monorepo layout)
 - `CONTRIBUTING.md` — this file; how to contribute
 - `AGENTS.md` — AI-developer/agent operating rules (`CLAUDE.md` is a one-line `@AGENTS.md` import)
+- `SECURITY.md` — how to report a vulnerability, and what is in scope
 
-**These docs must be kept up to date.** When you change project structure, conventions, build process, or product context, update the relevant file(s) in the same change — do not defer. Each product and shared library keeps its own `README.md`/`ARCHITECTURE.md`/`AGENTS.md` for what is specific to it (most still carry a `CONTRIBUTING.md` too, which is being folded into that scope's `AGENTS.md` — see [`AGENTS.md`](AGENTS.md)) — see `projects/*/`, `shared-libs/crates/start-core/`, `shared-libs/ts-modules/`, and `projects/start-os/container-runtime/`.
+**These docs must be kept up to date.** When you change project structure, conventions, build process, or product context, update the relevant file(s) in the same change — do not defer. Each product and shared library keeps its own `README.md`/`ARCHITECTURE.md`/`AGENTS.md` for what is specific to it — see `projects/*/`, `shared-libs/crates/start-core/`, `shared-libs/ts-modules/`, and `projects/start-os/container-runtime/`.
 
 ### The user-facing books, and `live-docs`
 
@@ -21,12 +22,12 @@ Each product's end-user documentation is an mdBook under `projects/<product>/doc
 
 **[docs.start9.com](https://docs.start9.com) serves the `live-docs` branch.** A book goes live when its product is tagged: the tag sync copies that tag's `docs/` tree, plus the shared `projects/start-docs/` site infrastructure, onto `live-docs` and redeploys. So the site always matches released software, and docs for an unreleased version can sit in master indefinitely without leaking.
 
-To fix something that is _already published_ — a typo, a broken link, a wrong instruction on the live site — PR it against `live-docs` directly. It deploys on merge, and is then pushed to master automatically so the next tag doesn't revert it. That automatic backport is direct-to-master and needs no second review; only a conflict with master falls back to a PR, and that PR is yours to resolve.
+To fix something that is _already published_ — a typo, a broken link, a wrong instruction on the live site — PR it against `live-docs` directly. It deploys on merge, and is then pushed to master automatically so the next tag doesn't revert it. That automatic backport is direct-to-master and needs no second review; where it cannot land unattended it opens a PR instead, and that PR is yours. A text conflict comes through with its markers intact and GitHub reports the branch as mergeable, so the `Conflict Markers` check fails any pull request into master whose changed files carry a marker, and names every one in the run log. A file git cannot merge line by line — a page deleted on one side and edited on the other, or an image changed on both — comes through as one side with no marker, and the published change can be missing from the diff altogether, so compare a backport PR against `live-docs` before merging it.
 
 ## Collaboration
 
 - [Matrix](https://matrix.to/#/#dev-startos:matrix.start9labs.com)
-- Security issues: [security@start9.com](mailto:security@start9.com)
+- Security issues: [security@start9.com](mailto:security@start9.com) — see [SECURITY.md](SECURITY.md)
 
 ## Environment Setup
 
@@ -110,7 +111,7 @@ This is a monorepo: one root Cargo workspace and one Angular workspace, both roo
 
 | Product                                | Primary build target                                                                                          | Build & deploy docs                                                                  |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| StartOS (OS image, UIs, device deploy) | `make start-os`                                                                                               | [`projects/start-os/CONTRIBUTING.md`](projects/start-os/CONTRIBUTING.md)             |
+| StartOS (OS image, UIs, device deploy) | `make start-os`                                                                                               | [`projects/start-os/AGENTS.md`](projects/start-os/AGENTS.md#contributor-workflow)    |
 | start-cli                              | `make start-cli`                                                                                              | [`projects/start-cli/CONTRIBUTING.md`](projects/start-cli/CONTRIBUTING.md)           |
 | start-registry                         | `make start-registry`                                                                                         | [`projects/start-registry/CONTRIBUTING.md`](projects/start-registry/CONTRIBUTING.md) |
 | StartTunnel                            | `make start-tunnel`                                                                                           | [`projects/start-tunnel/CONTRIBUTING.md`](projects/start-tunnel/CONTRIBUTING.md)     |
@@ -139,6 +140,7 @@ Each product's `CONTRIBUTING.md` documents the `PLATFORM` values and `ENVIRONMEN
 make test                    # all tests
 make start-core-test               # Rust (shared-libs/crates/start-core)
 make start-sdk-test                # SDK
+make backup-fs-test                # backup-fs library tests except the /dev/fuse suite
 make container-runtime-test  # container runtime
 make start-wrt-test           # StartWRT Rust crates
 
@@ -191,22 +193,16 @@ the source of truth.
 
 ### Documentation & Comments
 
-**Rust:**
+The rule agents work from is [AGENTS.md § Code style](AGENTS.md#code-style), and it applies to people too. In short:
 
-- Add doc comments (`///`) to public APIs, structs, and non-obvious functions
-- Use `//` comments sparingly for complex logic that isn't self-evident
-- Comments should be shorthand, not prose. Most comments can say what they need to in a single line.
+- **Default to no comment.** Reach for the rename or the smaller function first — a name that needs a comment is the wrong name.
+- **Comment the _why_, never the _what_:** a non-obvious mechanism, a deviation from convention, a load-bearing subtlety.
+- **Write plain prose** — one idea, a complete sentence, present tense, the actor named. Not a paragraph, and not shorthand with the articles and verbs stripped out. Shorten by dropping ideas, never grammar; a comment nobody can read is worse than the paragraph it replaced.
+- **Keep it true.** Update or delete a comment when the code moves under it. History belongs in the commit message, and a task belongs in a GitHub issue rather than a `// TODO`.
 
-**TypeScript:**
+**Rust:** a `///` on a public item is documentation — write it, and hold it to the same voice. On a `#[ts(export)]` type it also generates the TypeScript binding, so editing one is never a comment-only change (see [`shared-libs/crates/start-core/AGENTS.md`](shared-libs/crates/start-core/AGENTS.md)).
 
-- Document exported functions and complex types with JSDoc
-- Keep comments focused on "why" rather than "what"
-
-**General:**
-
-- Don't add comments that just restate the code
-- Update or remove comments when code changes
-- TODOs should include context: `// TODO(username): reason`
+**TypeScript:** the same goes for JSDoc on an exported SDK surface, which package authors read in their editor. Elsewhere, a line restating the signature is noise.
 
 ## Commits / PRs
 
@@ -238,6 +234,8 @@ fix(core): resolve race condition in service startup
 docs: update CONTRIBUTING.md with style guidelines
 refactor(sdk): simplify package validation logic
 ```
+
+**Label a PR with the project(s) it modifies**, so a reviewer can see what a merge can break. Nothing applies them for you; the label set and the rule are in [AGENTS.md § Opening PRs](AGENTS.md#opening-prs).
 
 ## Licensing
 

@@ -11,6 +11,7 @@ use crate::context::CliContext;
 use crate::prelude::*;
 use crate::registry::context::RegistryContext;
 use crate::registry::package::index::Category;
+use crate::s9pk::manifest::LocaleString;
 use crate::util::DataUrl;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat};
 
@@ -29,6 +30,14 @@ pub fn info_api<C: Context>() -> ParentHandler<C, WithIoFormat<Empty>> {
                 .with_metadata("admin", Value::Bool(true))
                 .no_display()
                 .with_about("about.set-registry-name")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "set-description",
+            from_fn_async(set_description)
+                .with_metadata("admin", Value::Bool(true))
+                .no_display()
+                .with_about("about.set-registry-description")
                 .with_call_remote::<CliContext>(),
         )
         .subcommand(
@@ -51,6 +60,8 @@ pub fn info_api<C: Context>() -> ParentHandler<C, WithIoFormat<Empty>> {
 pub struct RegistryInfo {
     pub name: Option<String>,
     pub icon: Option<DataUrl<'static>>,
+    /// Markdown, shown above the registry's services.
+    pub description: Option<LocaleString>,
     pub categories: BTreeMap<InternedString, Category>,
 }
 
@@ -59,6 +70,7 @@ pub async fn get_info(ctx: RegistryContext) -> Result<RegistryInfo, Error> {
     Ok(RegistryInfo {
         name: peek.as_name().de()?,
         icon: peek.as_icon().de()?,
+        description: peek.as_description().de()?,
         categories: peek.as_package().as_categories().de()?,
     })
 }
@@ -79,6 +91,30 @@ pub async fn set_name(
 ) -> Result<(), Error> {
     ctx.db
         .mutate(|db| db.as_index_mut().as_name_mut().ser(&Some(name)))
+        .await
+        .result
+}
+
+#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[group(skip)]
+#[command(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SetDescriptionParams {
+    #[arg(help = "help.arg.registry-description")]
+    pub description: LocaleString,
+}
+
+pub async fn set_description(
+    ctx: RegistryContext,
+    SetDescriptionParams { description }: SetDescriptionParams,
+) -> Result<(), Error> {
+    ctx.db
+        .mutate(|db| {
+            db.as_index_mut()
+                .as_description_mut()
+                .ser(&Some(description))
+        })
         .await
         .result
 }

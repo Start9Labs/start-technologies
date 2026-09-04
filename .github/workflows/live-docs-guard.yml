@@ -1,0 +1,57 @@
+name: live-docs guard
+
+# live-docs carries published code as well as published books — docs-sync-on-tag.yml
+# advances its whole tree when a product is released. That sync is the only thing
+# allowed to write the code: a pull request here fixes an already-published page and
+# nothing else.
+#
+# The stakes are not confined to this branch. docs-backport.yml pushes whatever merges
+# into live-docs onto master unattended, so a PR that touched code would land a stale
+# tree on master with nobody reviewing it as a code change.
+on:
+  # `edited` covers a retarget: the branch filter sees the new base, so a PR
+  # moved onto live-docs is checked without waiting for its next push.
+  pull_request:
+    branches: ['live-docs']
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  docs-only:
+    name: Docs-only
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Reject changes outside the published books
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          changed=$(git diff --name-only "$BASE...$HEAD")
+
+          # A rule, not a mirror of docs-deploy.yml's paths: a new product's book
+          # matches the moment it exists, with nothing to keep in step.
+          rejected=$(printf '%s\n' "$changed" \
+            | grep -Ev '^projects/start-docs/|^projects/[^/]+/docs/' || true)
+
+          # The one thing under docs/ that is not a book: the template
+          # `s9pk init-package` scaffolds from. Its SDK pin is checked against the
+          # release being cut, and an edit landing here would never face that check.
+          rejected="$rejected
+          $(printf '%s\n' "$changed" \
+            | grep -E '^projects/start-sdk/docs/package-template/' || true)"
+          rejected=$(printf '%s\n' "$rejected" | sed 's/^ *//; /^$/d')
+
+          if [ -n "$rejected" ]; then
+            echo "::error::A live-docs pull request may only change published book files. Everything else on this branch is written by docs-sync-on-tag.yml when a product is released — send the files below to master instead."
+            printf '  %s\n' $rejected
+            exit 1
+          fi
+          echo "Docs-only: every changed file is a published book file."

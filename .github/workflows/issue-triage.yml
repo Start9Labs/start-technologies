@@ -28,6 +28,7 @@ jobs:
               repo: 'dr-bonez',
             }
             const FEATURE_OWNER = 'MattDHill'
+            const DEFAULT_OWNER = 'dr-bonez'
 
             const issue = context.payload.issue
             const api = { owner: context.repo.owner, repo: context.repo.repo, issue_number: issue.number }
@@ -50,11 +51,12 @@ jobs:
             if (issue.assignees.length) return
 
             const project = [...labels].find((l) => l in OWNERS)
-            const assignee = issue.type?.name === 'Feature' ? FEATURE_OWNER : project && OWNERS[project]
-            if (!assignee) {
-              core.info(`No owner for labels [${[...labels]}], type ${issue.type?.name}`)
-              return
-            }
+            const owner = issue.type?.name === 'Feature' ? FEATURE_OWNER : project && OWNERS[project]
+            const assignee = owner || DEFAULT_OWNER
 
             await github.rest.issues.addAssignees({ ...api, assignees: [assignee] })
-            core.info(`Assigned ${assignee}`)
+            core.info(
+              owner
+                ? `Assigned ${assignee}`
+                : `No owner for labels [${[...labels]}], type ${issue.type?.name} — assigned fallback ${assignee}`,
+            )

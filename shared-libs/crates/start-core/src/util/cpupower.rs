@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
 use imbl::OrdMap;
 use tokio::process::Command;
@@ -7,6 +8,7 @@ use ts_rs::TS;
 
 use crate::prelude::*;
 use crate::util::Invoke;
+use crate::util::io::maybe_read_file_to_string;
 
 pub const GOVERNOR_HEIRARCHY: &[Governor] = &[
     Governor(Cow::Borrowed("ondemand")),
@@ -131,14 +133,10 @@ pub async fn current_governor() -> Result<Option<Governor>, Error> {
     ))
 }
 
-pub async fn get_preferred_governor() -> Result<Option<&'static Governor>, Error> {
-    let governors = get_available_governors().await?;
-    for governor in GOVERNOR_HEIRARCHY {
-        if governors.contains(governor) {
-            return Ok(Some(governor));
-        }
-    }
-    Ok(None)
+pub fn preferred_governor(available: &BTreeSet<Governor>) -> Option<&'static Governor> {
+    GOVERNOR_HEIRARCHY
+        .iter()
+        .find(|governor| available.contains(*governor))
 }
 
 pub async fn set_governor(governor: &Governor) -> Result<(), Error> {
@@ -149,4 +147,127 @@ pub async fn set_governor(governor: &Governor) -> Result<(), Error> {
         .invoke(ErrorKind::CpuSettings)
         .await?;
     Ok(())
+}
+
+const CPU_ROOT: &str = "/sys/devices/system/cpu";
+
+/// Selects how aggressively an EPP-capable CPU pursues performance.
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize, TS,
+)]
+#[ts(export, type = "string")]
+pub struct Epp(Cow<'static, str>);
+
+const LIBREM_MINI_V2: &str = "librem_mini_v2";
+const LIBREM_MINI_V2_EPP: Epp = Epp(Cow::Borrowed("balance_power"));
+
+impl std::str::FromStr for Epp {
+    type Err = std::convert::Infallible;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.to_owned().into()))
+    }
+}
+impl std::fmt::Display for Epp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+impl std::ops::Deref for Epp {
+    type Target = str;
+    fn deref(&self) -> &Self::Target {
+        &*self.0
+    }
+}
+impl std::borrow::Borrow<str> for Epp {
+    fn borrow(&self) -> &str {
+        &**self
+    }
+}
+
+fn epp_path(cpu: &Path) -> PathBuf {
+    cpu.join("cpufreq/energy_performance_preference")
+}
+
+async fn epp_paths() -> Result<Vec<PathBuf>, Error> {
+    let mut dir = match tokio::fs::read_dir(CPU_ROOT).await {
+        Ok(dir) => dir,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e).with_kind(ErrorKind::Filesystem),
+    };
+    let mut paths = Vec::new();
+    while let Some(entry) = dir.next_entry().await.with_kind(ErrorKind::Filesystem)? {
+        let path = epp_path(&entry.path());
+        if tokio::fs::try_exists(&path).await.unwrap_or(false) {
+            paths.push(path);
+        }
+    }
+    paths.sort();
+    Ok(paths)
+}
+
+pub async fn get_available_epps() -> Result<BTreeSet<Epp>, Error> {
+    let path = Path::new(CPU_ROOT).join("cpu0/cpufreq/energy_performance_available_preferences");
+    Ok(maybe_read_file_to_string(path)
+        .await?
+        .into_iter()
+        .flat_map(|raw| {
+            raw.split_ascii_whitespace()
+                .map(|e| Epp(Cow::Owned(e.to_owned())))
+                .collect::<Vec<_>>()
+        })
+        .collect())
+}
+
+pub async fn current_epp() -> Result<Option<Epp>, Error> {
+    Ok(
+        maybe_read_file_to_string(epp_path(&Path::new(CPU_ROOT).join("cpu0")))
+            .await?
+            .map(|raw| Epp(Cow::Owned(raw.trim().to_owned()))),
+    )
+}
+
+pub(crate) fn preferred_epp(
+    selected: Option<Epp>,
+    system_product_name: Option<&str>,
+) -> Option<Epp> {
+    selected.or_else(|| {
+        (system_product_name == Some(LIBREM_MINI_V2)).then(|| LIBREM_MINI_V2_EPP.clone())
+    })
+}
+
+pub async fn set_epp(epp: &Epp) -> Result<(), Error> {
+    for path in epp_paths().await? {
+        tokio::fs::write(&path, &*epp.0)
+            .await
+            .with_ctx(|_| (ErrorKind::CpuSettings, path.display().to_string()))?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn librem_mini_v2_defaults_to_balance_power() {
+        assert_eq!(
+            preferred_epp(None, Some("librem_mini_v2")),
+            Some(Epp(Cow::Borrowed("balance_power")))
+        );
+    }
+
+    #[test]
+    fn selected_epp_overrides_the_librem_mini_v2_default() {
+        let selected = Epp(Cow::Borrowed("performance"));
+        assert_eq!(
+            preferred_epp(Some(selected.clone()), Some("librem_mini_v2")),
+            Some(selected)
+        );
+    }
+
+    #[test]
+    fn other_products_have_no_default_epp() {
+        assert_eq!(preferred_epp(None, Some("other")), None);
+        assert_eq!(preferred_epp(None, None), None);
+    }
 }

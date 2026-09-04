@@ -54,7 +54,7 @@ const v = new Version([1, 2, 3], [])
 const v = Version.parse('1.2.3')
 
 v.number // number[]
-v.prerelease // (string | number)[]
+v.prerelease // (string | number)[]; unbounded numeric identifiers are decimal strings
 v.compare(other) // 'greater' | 'equal' | 'less'
 v.compareForSort(other) // -1 | 0 | 1
 ```
@@ -174,8 +174,8 @@ VersionRange.any()
 VersionRange.none()
 VersionRange.anchor('=', ev)
 VersionRange.anchor('>=', ev)
-VersionRange.anchor('^', ev)                 // ^ and ~ are first-class operators
-VersionRange.anchor('~', ev)
+VersionRange.anchor('^', ev)                 // expands to >= ev && < next major
+VersionRange.anchor('~', ev)                 // expands to >= ev && < next minor
 VersionRange.flavor(null)                    // match unflavored versions
 VersionRange.flavor("bitcoin")               // match #bitcoin versions
 
@@ -213,20 +213,24 @@ range.satisfiedBy(version) // boolean (convenience)
 
 Also available on `Version` (wraps in `ExtendedVersion` with downstream=0).
 
+A release may be tested against its installed version and every version in its manifest's `satisfies` list with Rust's `VersionRange::satisfied_by_release` or TypeScript's `range.satisfiedByRelease`. Within a conjunction, one represented version must satisfy the complete conjunction. Different represented versions may satisfy different disjunction branches.
+
+`!R` is an explicit exclusion. It passes only when no represented version satisfies the complete range `R`; release evaluation does not distribute the exclusion through `R`. `!=v` is the exclusion `!(=v)`, and pairs of `!` cancel. An empty version list satisfies no range.
+
 When no operator is specified in a range string, `^` (caret) is the default.
 
 ## Operators
 
-| Syntax | Rust                       | TS     | Meaning                                     |
-| ------ | -------------------------- | ------ | ------------------------------------------- |
-| `=`    | `EQ`                       | `'='`  | Equal                                       |
-| `!=`   | `NEQ`                      | `'!='` | Not equal                                   |
-| `>`    | `GT`                       | `'>'`  | Greater than                                |
-| `>=`   | `GTE`                      | `'>='` | Greater than or equal                       |
-| `<`    | `LT`                       | `'<'`  | Less than                                   |
-| `<=`   | `LTE`                      | `'<='` | Less than or equal                          |
-| `^`    | expanded to `And(GTE, LT)` | `'^'`  | Compatible (first non-zero digit unchanged) |
-| `~`    | expanded to `And(GTE, LT)` | `'~'`  | Patch-level (minor unchanged)               |
+| Syntax | Rust                       | TS                       | Meaning                                     |
+| ------ | -------------------------- | ------------------------ | ------------------------------------------- |
+| `=`    | `EQ`                       | `'='`                    | Equal                                       |
+| `!=`   | `NEQ`                      | `'!='`                   | Not equal                                   |
+| `>`    | `GT`                       | `'>'`                    | Greater than                                |
+| `>=`   | `GTE`                      | `'>='`                   | Greater than or equal                       |
+| `<`    | `LT`                       | `'<'`                    | Less than                                   |
+| `<=`   | `LTE`                      | `'<='`                   | Less than or equal                          |
+| `^`    | expanded to `And(GTE, LT)` | expanded to `And(>=, <)` | Compatible (first non-zero digit unchanged) |
+| `~`    | expanded to `And(GTE, LT)` | expanded to `And(>=, <)` | Patch-level (minor unchanged)               |
 
 ## Flavor Rules
 
@@ -256,14 +260,12 @@ When no operator is specified in a range string, `^` (caret) is the default.
 `not`:
 
 - `not(=v) → !=v`, `not(!=v) → =v`
-- `not(and(a, b)) → or(not(a), not(b))` (De Morgan)
-- `not(or(a, b)) → and(not(a), not(b))` (De Morgan)
 - `not(not(a)) → a`
 - `not(Any) → None`, `not(None) → Any`
 
 ### TypeScript: `normalize()` (deep, canonical)
 
-`VersionRange.normalize(): VersionRange` in `shared-libs/ts-modules/start-core/lib/exver/index.ts` performs full normalization by converting the range AST into a canonical form. This is a deep operation that produces a semantically equivalent but simplified range.
+`VersionRange.normalize(): VersionRange` in `shared-libs/ts-modules/start-core/lib/exver/index.ts` performs deep normalization while preserving both single-version and release satisfaction. Subexpressions without negation or `!=` are converted into canonical form. Negation and `!=` stay explicit because release evaluation treats them as negative syntax; expanding them into ordinary positive comparisons would change the result for a release with aliases.
 
 **How it works:**
 
@@ -275,13 +277,12 @@ When no operator is specified in a range string, `^` (caret) is the default.
 
 4. **`VersionRangeTable.collapse()`** — Checks if a table is uniformly true or false across all flavors and segments. Returns `true`, `false`, or `null` (mixed).
 
-5. **`VersionRangeTable.minterms()`** — Converts truth tables back into a VersionRange AST in [sum-of-products](https://en.wikipedia.org/wiki/Canonical_normal_form#Minterms) canonical form. Each `true` segment becomes a product term (conjunction of boundary constraints), and all terms are joined with `or`. Adjacent boundary points collapse into `=` anchors.
+5. **`VersionRangeTable.minterms()`** — Converts truth tables back into a VersionRange AST in [sum-of-products](https://en.wikipedia.org/wiki/Canonical_normal_form#Minterms) canonical form. Each `true` segment becomes a product term (conjunction of boundary constraints), and all terms are joined with `or`. Adjacent boundary points collapse into `=` anchors. `normalize()` applies this conversion only where it preserves release-wide vetoes.
 
 **Example:** `normalize` can simplify:
 
 - `>=1.0.0:0 && <=1.0.0:0` → `=1.0.0:0`
 - `>=2.0.0:0 || >=1.0.0:0` → `>=1.0.0:0`
-- `!(!>=1.0.0:0)` → `>=1.0.0:0`
 
 **Also exposes:**
 
@@ -293,10 +294,10 @@ When no operator is specified in a range string, `^` (caret) is the default.
 |                             | Rust                                                                      | TypeScript                                                                              |
 | --------------------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | **`^` / `~`**               | Expanded at construction to `And(GTE, LT)`                                | First-class operator on `Anchor`                                                        |
-| **`not()`**                 | Static, eagerly simplifies (De Morgan, double negation)                   | Instance method, just wraps                                                             |
+| **`not()`**                 | Static, simplifies anchors, constants, and double negation                | Instance method, just wraps                                                             |
 | **`and()`/`or()`**          | Binary static                                                             | Both binary instance and variadic static                                                |
-| **Normalization**           | `reduce()` — shallow, one AST level                                       | `normalize()` — deep canonical form via truth tables                                    |
-| **Satisfiability**          | Not available                                                             | `satisfiable()` and `intersects(other)`                                                 |
+| **Normalization**           | `reduce()` — shallow, one AST level                                       | `normalize()` — deep; canonical except where release-wide vetoes must remain explicit   |
+| **Satisfiability**          | `satisfiable()` and `intersects(other)`                                   | `satisfiable()` and `intersects(other)`                                                 |
 | **ExtendedVersion helpers** | `with_flavor()`, `without_flavor()`, `map_upstream()`, `map_downstream()` | `incrementMajor()`, `incrementMinor()`, `greaterThan()`, `lessThan()`, `equals()`, etc. |
 | **Monoid wrappers**         | `AnyRange` (fold with `or`) and `AllRange` (fold with `and`)              | Not present — use variadic static methods                                               |
 | **`VersionString`**         | Wrapper caching parsed + string form                                      | Not present                                                                             |

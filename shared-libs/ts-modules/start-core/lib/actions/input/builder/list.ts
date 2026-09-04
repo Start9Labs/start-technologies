@@ -7,6 +7,7 @@ import {
   ValueSpecList,
   ValueSpecListOf,
 } from '../inputSpecTypes'
+import { withPatterns } from './patternCheck'
 import { z } from '../../../zExport'
 
 /**
@@ -83,7 +84,7 @@ export class List<
       generate?: null | RandomString
     },
   ) {
-    const validator = z.array(z.string())
+    const validator = z.array(withPatterns(z.string(), aSpec.patterns))
     return new List<string[]>(() => {
       const spec = {
         type: 'text' as const,
@@ -161,7 +162,10 @@ export class List<
         spec,
       }
 
-      return { spec: built, validator }
+      return {
+        spec: built,
+        validator: z.array(withPatterns(z.string(), aSpec.patterns)),
+      }
     }, validator)
   }
 

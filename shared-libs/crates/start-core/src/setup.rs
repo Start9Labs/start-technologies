@@ -28,12 +28,12 @@ use crate::context::{CliContext, RpcContext, SetupContext};
 use crate::db::model::Database;
 use crate::disk::REPAIR_DISK_PATH;
 use crate::disk::fsck::RepairStrategy;
-use crate::disk::main::DEFAULT_PASSWORD;
+use crate::disk::main::{DEFAULT_PASSWORD, ImportMode};
 use crate::disk::mount::filesystem::ReadWrite;
 use crate::disk::mount::filesystem::cifs::Cifs;
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::disk::util::{DiskInfo, StartOsRecoveryInfo, pvscan, recovery_info};
-use crate::hostname::ServerHostnameInfo;
+use crate::hostname::{ServerHostname, repair_hostname};
 use crate::init::{InitPhases, InitResult, init};
 use crate::net::ssl::root_ca_start_time;
 use crate::prelude::*;
@@ -43,7 +43,10 @@ use crate::shutdown::Shutdown;
 use crate::system::{KeyboardOptions, SetLanguageParams, save_language, sync_kiosk};
 use crate::util::Invoke;
 use crate::util::crypto::EncryptedWire;
-use crate::util::io::{Counter, create_file, dir_copy, dir_size, read_file_to_string};
+use crate::util::io::{
+    Counter, create_file, dir_copy, dir_copy_excluding, dir_size, dir_size_excluding,
+    read_file_to_string,
+};
 use crate::util::serde::{HandlerExtSerde, IoFormat, Pem};
 use crate::{DATA_DIR, Error, ErrorKind, MAIN_DATA, PACKAGE_DATA, PLATFORM, ResultExt};
 
@@ -174,12 +177,16 @@ pub async fn list_disks(_ctx: SetupContext) -> Result<Vec<DiskInfo>, Error> {
     Ok(disks)
 }
 
+fn setup_hostname(existing: ServerHostname, requested: Option<ServerHostname>) -> ServerHostname {
+    requested.unwrap_or_else(|| repair_hostname(existing.as_ref()))
+}
+
 #[instrument(skip_all)]
 async fn setup_init(
     ctx: &SetupContext,
     password: Option<String>,
     kiosk: bool,
-    hostname: Option<ServerHostnameInfo>,
+    hostname: Option<ServerHostname>,
     init_phases: InitPhases,
 ) -> Result<(AccountInfo, InitResult), Error> {
     let init_result = init(&ctx.webserver, &ctx.config.peek(|c| c.clone()), init_phases).await?;
@@ -194,9 +201,7 @@ async fn setup_init(
             if let Some(password) = &password {
                 account.set_password(password)?;
             }
-            if let Some(hostname) = hostname {
-                account.hostname = hostname;
-            }
+            account.hostname = setup_hostname(account.hostname, hostname);
             account.save(m)?;
             let info = m.as_public_mut().as_server_info_mut();
             info.as_kiosk_mut()
@@ -293,11 +298,11 @@ pub async fn attach(
         let requires_reboot = crate::disk::main::import(
             &*disk_guid,
             DATA_DIR,
-            if tokio::fs::metadata(REPAIR_DISK_PATH).await.is_ok() {
+            ImportMode::ReadWrite(if tokio::fs::metadata(REPAIR_DISK_PATH).await.is_ok() {
                 RepairStrategy::Aggressive
             } else {
                 RepairStrategy::Preen
-            },
+            }),
             if disk_guid.ends_with("_UNENC") {
                 None
             } else {
@@ -335,7 +340,7 @@ pub async fn attach(
 
         Ok((
             SetupResult {
-                hostname: account.hostname.hostname,
+                hostname: account.hostname,
                 root_ca: Pem(account.root_ca_cert),
                 needs_restart: setup_ctx.install_rootfs.peek(|a| a.is_some()),
             },
@@ -490,7 +495,7 @@ pub async fn setup_data_drive(
     let _ = crate::disk::main::import(
         &*guid,
         DATA_DIR,
-        RepairStrategy::Preen,
+        ImportMode::ReadWrite(RepairStrategy::Preen),
         encryption_password,
         None,
     )
@@ -507,7 +512,6 @@ pub struct SetupExecuteParams {
     password: Option<EncryptedWire>,
     recovery_source: Option<RecoverySource<EncryptedWire>>,
     kiosk: bool,
-    name: Option<InternedString>,
     hostname: Option<InternedString>,
 }
 
@@ -521,16 +525,14 @@ pub struct SetupExecuteParams {
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct SetupExecuteCliParams {
-    /// Disk GUID returned by `setup install-os` (or an existing data drive)
+    /// Disk GUID returned by setup install-os, or an existing data drive
     #[arg(long)]
     guid: InternedString,
     /// Enable kiosk mode
     #[arg(long)]
     kiosk: bool,
-    /// Friendly server name
-    #[arg(long)]
-    name: Option<InternedString>,
-    /// Hostname (LAN advertised) — defaults to a random adjective-noun pair
+    /// The server's .local hostname — up to 32 lowercase letters, numbers and
+    /// hyphens, not starting or ending with a hyphen; defaults to a generated one
     #[arg(long)]
     hostname: Option<InternedString>,
 }
@@ -691,7 +693,6 @@ async fn cli_execute(
             SetupExecuteCliParams {
                 guid,
                 kiosk,
-                name,
                 hostname,
             },
         ..
@@ -707,12 +708,48 @@ async fn cli_execute(
                 "guid": guid,
                 "password": password,
                 "kiosk": kiosk,
-                "name": name,
                 "hostname": hostname,
             }),
         )
         .await?;
     print_remote_result(res)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn hostname(value: &str) -> ServerHostname {
+        ServerHostname::new(InternedString::intern(value)).unwrap()
+    }
+
+    #[test]
+    fn transfer_preserves_the_existing_hostname() {
+        assert_eq!(
+            setup_hostname(hostname("preserved-host"), None).as_ref(),
+            "preserved-host"
+        );
+    }
+
+    #[test]
+    fn transfer_repairs_an_existing_hostname_over_the_limit() {
+        assert_eq!(
+            setup_hostname(hostname(&"a".repeat(50)), None).as_ref(),
+            "a".repeat(32)
+        );
+    }
+
+    #[test]
+    fn transfer_uses_an_explicit_replacement_hostname() {
+        assert_eq!(
+            setup_hostname(
+                hostname("preserved-host"),
+                Some(hostname("replacement-host"))
+            )
+            .as_ref(),
+            "replacement-host"
+        );
+    }
 }
 
 // #[command(rpc_only)]
@@ -723,10 +760,18 @@ pub async fn execute(
         password,
         recovery_source,
         kiosk,
-        name,
         hostname,
     }: SetupExecuteParams,
 ) -> Result<SetupProgress, Error> {
+    if let Some(RecoverySource::Migrate { guid: old_guid }) = &recovery_source {
+        if old_guid.as_str() == <InternedString as AsRef<str>>::as_ref(&guid) {
+            return Err(Error::new(
+                eyre!("{}", t!("setup.transfer-source-is-destination")),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+    }
+
     let password = password
         .map(|p| {
             p.decrypt(&ctx).ok_or_else(|| {
@@ -756,7 +801,7 @@ pub async fn execute(
         None => None,
     };
 
-    let hostname = ServerHostnameInfo::new_opt(name, hostname)?;
+    let hostname = ServerHostname::new_opt(hostname)?;
 
     let setup_ctx = ctx.clone();
     ctx.run_setup(move || execute_inner(setup_ctx, guid, password, recovery, kiosk, hostname))?;
@@ -848,7 +893,7 @@ pub async fn execute_inner(
     password: Option<String>,
     recovery_source: Option<RecoverySource<String>>,
     kiosk: bool,
-    hostname: Option<ServerHostnameInfo>,
+    hostname: Option<ServerHostname>,
 ) -> Result<(SetupResult, RpcContext), Error> {
     let progress = &ctx.progress;
 
@@ -858,11 +903,11 @@ pub async fn execute_inner(
         let requires_reboot = crate::disk::main::import(
             &*guid,
             DATA_DIR,
-            if tokio::fs::metadata(REPAIR_DISK_PATH).await.is_ok() {
+            ImportMode::ReadWrite(if tokio::fs::metadata(REPAIR_DISK_PATH).await.is_ok() {
                 RepairStrategy::Aggressive
             } else {
                 RepairStrategy::Preen
-            },
+            }),
             if guid.ends_with("_UNENC") {
                 None
             } else {
@@ -953,7 +998,7 @@ async fn fresh_setup(
     guid: InternedString,
     password: &str,
     kiosk: bool,
-    hostname: Option<ServerHostnameInfo>,
+    hostname: Option<ServerHostname>,
     SetupExecuteProgress {
         init_phases,
         rpc_ctx_phases,
@@ -997,7 +1042,7 @@ async fn fresh_setup(
 
     Ok((
         SetupResult {
-            hostname: account.hostname.hostname,
+            hostname: account.hostname,
             root_ca: Pem(account.root_ca_cert),
             needs_restart: ctx.install_rootfs.peek(|a| a.is_some()),
         },
@@ -1014,7 +1059,7 @@ async fn recover(
     server_id: String,
     recovery_password: String,
     kiosk: bool,
-    hostname: Option<ServerHostnameInfo>,
+    hostname: Option<ServerHostname>,
     progress: SetupExecuteProgress,
 ) -> Result<(SetupResult, RpcContext), Error> {
     let recovery_source = TmpMountGuard::mount(&recovery_source, ReadWrite).await?;
@@ -1039,7 +1084,7 @@ async fn migrate(
     old_guid: &str,
     password: Option<String>,
     kiosk: bool,
-    hostname: Option<ServerHostnameInfo>,
+    hostname: Option<ServerHostname>,
     SetupExecuteProgress {
         init_phases,
         restore_phase,
@@ -1050,71 +1095,87 @@ async fn migrate(
 
     restore_phase.start();
     restore_phase.set_units(Some(ProgressUnits::Bytes));
-    let _ = crate::disk::main::import(
-        &old_guid,
-        "/media/startos/migrate",
-        RepairStrategy::Preen,
-        if guid.ends_with("_UNENC") {
-            None
-        } else {
-            Some(DEFAULT_PASSWORD)
-        },
-        Some(&ctx.progress),
-    )
-    .await?;
 
-    let main_transfer_args = ("/media/startos/migrate/main/", formatcp!("{MAIN_DATA}/"));
-    let package_data_transfer_args = (
-        "/media/startos/migrate/package-data/",
-        formatcp!("{PACKAGE_DATA}/"),
-    );
+    let transfer_result = async {
+        let requires_reboot = crate::disk::main::import(
+            old_guid,
+            "/media/startos/migrate",
+            ImportMode::ReadOnly,
+            None,
+            Some(&ctx.progress),
+        )
+        .await?;
+        if requires_reboot.0 {
+            return Err(Error::new(
+                eyre!("{}", t!("setup.disk-errors-corrected-restart-required")),
+                ErrorKind::DiskManagement,
+            ));
+        }
 
-    let tmpdir = Path::new(package_data_transfer_args.0).join("tmp");
-    crate::util::io::delete_dir(&tmpdir).await?;
+        let main_transfer_args = ("/media/startos/migrate/main/", formatcp!("{MAIN_DATA}/"));
+        let package_data_transfer_args = (
+            "/media/startos/migrate/package-data/",
+            formatcp!("{PACKAGE_DATA}/"),
+        );
+        let package_data_tmp = Path::new(package_data_transfer_args.0).join("tmp");
+        let ordering = std::sync::atomic::Ordering::Relaxed;
+        let transfer_size = Counter::new(0, ordering);
 
-    let ordering = std::sync::atomic::Ordering::Relaxed;
+        let size = tokio::select! {
+            res = async {
+                let (main_size, package_data_size) = try_join!(
+                    dir_size(main_transfer_args.0, Some(&transfer_size)),
+                    dir_size_excluding(
+                        package_data_transfer_args.0,
+                        &package_data_tmp,
+                        Some(&transfer_size),
+                    )
+                )?;
+                Ok::<_, Error>(main_size + package_data_size)
+            } => { res? },
+            res = async {
+                loop {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    restore_phase.set_total(transfer_size.load());
+                }
+            } => res,
+        };
 
-    let main_transfer_size = Counter::new(0, ordering);
-    let package_data_transfer_size = Counter::new(0, ordering);
+        restore_phase.set_total(size);
 
-    let size = tokio::select! {
-        res = async {
-            let (main_size, package_data_size) = try_join!(
-                dir_size(main_transfer_args.0, Some(&main_transfer_size)),
-                dir_size(package_data_transfer_args.0, Some(&package_data_transfer_size))
-            )?;
-            Ok::<_, Error>(main_size + package_data_size)
-        } => { res? },
-        res = async {
-            loop {
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                restore_phase.set_total(main_transfer_size.load() + package_data_transfer_size.load());
-            }
-        } => res,
-    };
+        let transfer_progress = Counter::new(0, ordering);
 
-    restore_phase.set_total(size);
-
-    let main_transfer_progress = Counter::new(0, ordering);
-    let package_data_transfer_progress = Counter::new(0, ordering);
-
-    tokio::select! {
-        res = async {
-            try_join!(
-                dir_copy(main_transfer_args.0, main_transfer_args.1, Some(&main_transfer_progress)),
-                dir_copy(package_data_transfer_args.0, package_data_transfer_args.1, Some(&package_data_transfer_progress))
-            )?;
-            Ok::<_, Error>(())
-        } => { res? },
-        res = async {
-            loop {
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                restore_phase.set_done(main_transfer_progress.load() + package_data_transfer_progress.load());
-            }
-        } => res,
+        tokio::select! {
+            res = async {
+                try_join!(
+                    dir_copy(main_transfer_args.0, main_transfer_args.1, Some(&transfer_progress)),
+                    dir_copy_excluding(
+                        package_data_transfer_args.0,
+                        package_data_transfer_args.1,
+                        &package_data_tmp,
+                        Some(&transfer_progress),
+                    )
+                )?;
+                Ok::<_, Error>(())
+            } => { res? },
+            res = async {
+                loop {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    restore_phase.set_done(transfer_progress.load());
+                }
+            } => res,
+        }
+        Command::new("sync").invoke(ErrorKind::Filesystem).await?;
+        Ok::<_, Error>(())
     }
+    .await;
 
-    crate::disk::main::export(&old_guid, "/media/startos/migrate").await?;
+    let deactivate_result = crate::disk::main::deactivate(old_guid, "/media/startos/migrate").await;
+    if let Err(error) = transfer_result {
+        deactivate_result.log_err();
+        return Err(error);
+    }
+    deactivate_result?;
     restore_phase.complete();
 
     let (account, net_ctrl) = setup_init(&ctx, password, kiosk, hostname, init_phases).await?;
@@ -1130,7 +1191,7 @@ async fn migrate(
 
     Ok((
         SetupResult {
-            hostname: account.hostname.hostname,
+            hostname: account.hostname,
             root_ca: Pem(account.root_ca_cert),
             needs_restart: ctx.install_rootfs.peek(|a| a.is_some()),
         },

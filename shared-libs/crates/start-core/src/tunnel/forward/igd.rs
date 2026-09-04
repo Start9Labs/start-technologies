@@ -44,7 +44,7 @@ pub async fn run(ctx: TunnelContext) {
             return;
         }
     };
-    let root_desc: Arc<str> = Arc::from(render_root_desc(&uuid));
+    let root_desc: Arc<str> = Arc::from(render_root_desc("StartTunnel", &uuid));
     tokio::join!(http_server(ctx.clone(), root_desc), ssdp_server(ctx, uuid));
 }
 
@@ -144,9 +144,12 @@ async fn http_server(ctx: TunnelContext, root_desc: Arc<str>) {
     let app = Router::new()
         .route(
             ROOT_DESC_PATH,
-            get(move || serve_static(root_desc.clone(), "text/xml")),
+            get(move |headers: HeaderMap| serve_static(headers, root_desc.clone(), "text/xml")),
         )
-        .route(SCPD_PATH, get(|| serve_static(Arc::from(SCPD), "text/xml")))
+        .route(
+            SCPD_PATH,
+            get(|headers: HeaderMap| serve_static(headers, Arc::from(SCPD), "text/xml")),
+        )
         .route(CONTROL_PATH, post(control))
         .with_state(ctx.clone());
     loop {
@@ -259,6 +262,7 @@ pub(super) async fn apply_peer_forward_range(
     protocol_label: &str,
     lifetime: Option<u32>,
 ) -> Result<(), u16> {
+    let _guard = ctx.forward_write_lock.lock().await;
     // Port 80 is reserved for the tunnel's HTTP→HTTPS redirect; never
     // automatically create a forward that would take it (PCP/UPnP alike).
     let lo = source.port();
@@ -282,7 +286,7 @@ pub(super) async fn apply_peer_forward_range(
                 return Err(718); // ConflictInMappingEntry
             }
             return ctx
-                .persist_fallback_forward(source, target, lifetime, true, None)
+                .persist_fallback_forward_locked(source, target, lifetime, true, None)
                 .await
                 .map_err(|_| 718u16);
         }

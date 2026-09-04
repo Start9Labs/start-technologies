@@ -11,6 +11,10 @@ export type AddSslOptions = {
    * forwarding them upstream. Setting this implies HTTP-aware proxying.
    */
   addXForwardedHeaders: boolean
+  /**
+   * The application protocols StartOS answers a client with, from those it
+   * asked for. Unset answers with whatever it asked for.
+   */
   alpn: AlpnInfo | null
   /**
    * Certificate validation for the OS→container TLS leg when rewrapping.

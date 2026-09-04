@@ -18,10 +18,13 @@ use crate::hostname::ServerHostname;
 use crate::net::forward::AvailablePorts;
 use crate::net::host::address::{HostAddress, PublicDomainConfig, address_api};
 use crate::net::host::binding::{
-    BindInfo, BindOptions, BindingRanges, Bindings, RangeBindInfo, binding,
+    BindInfo, BindOptions, BindingRanges, Bindings, RangeBindInfo, binding, internal_span,
+    overlap_error,
 };
 use crate::net::service_interface::{HostnameInfo, HostnameMetadata};
+use crate::net::vhost::ACME_CHALLENGE_PORT;
 use crate::prelude::*;
+use crate::util::serde::const_true;
 use crate::{GatewayId, HostId, PackageId};
 
 pub mod address;
@@ -62,6 +65,9 @@ pub struct PortForward {
     /// existing single-port `PortForward`s.
     #[serde(default = "default_port_forward_count")]
     pub count: u16,
+    /// Whether this forward receives local traffic. Used to gate hairpinning check.
+    #[serde(default = "const_true")]
+    pub local: bool,
 }
 
 impl AsRef<Host> for Host {
@@ -72,6 +78,16 @@ impl AsRef<Host> for Host {
 impl Host {
     pub fn new() -> Self {
         Self::default()
+    }
+    /// Hand every external port this host holds back to the pool. Shared by
+    /// uninstall and retirement so the two cannot drift apart.
+    pub fn release(&self, available_ports: &mut AvailablePorts) {
+        for info in self.bindings.values() {
+            info.release(available_ports);
+        }
+        for range in self.binding_ranges.values() {
+            range.release(available_ports);
+        }
     }
     pub fn addresses<'a>(&'a self) -> impl Iterator<Item = HostAddress> + 'a {
         self.public_domains
@@ -110,6 +126,17 @@ fn mdns_gateways(gateways: &OrdMap<GatewayId, NetworkInterfaceInfo>) -> BTreeSet
         .collect()
 }
 
+fn secure_gateways<'a>(
+    gateways: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+    candidates: impl IntoIterator<Item = &'a GatewayId>,
+) -> BTreeSet<GatewayId> {
+    candidates
+        .into_iter()
+        .filter(|g| gateways.get(*g).map_or(false, |g| g.secure()))
+        .cloned()
+        .collect()
+}
+
 impl Model<Host> {
     pub fn update_addresses(
         &mut self,
@@ -118,6 +145,7 @@ impl Model<Host> {
         available_ports: &AvailablePorts,
     ) -> Result<(), Error> {
         let this = self.destructure_mut();
+        this.private_domains.remove(&mdns.local_domain_name())?;
 
         // ips
         for (_, bind) in this.bindings.as_entries_mut()? {
@@ -217,11 +245,7 @@ impl Model<Host> {
                 let mdns_gateways = if opt.secure.is_some() {
                     mdns_gateways.clone()
                 } else {
-                    mdns_gateways
-                        .iter()
-                        .filter(|g| gateways.get(*g).map_or(false, |g| g.secure()))
-                        .cloned()
-                        .collect()
+                    secure_gateways(gateways, mdns_gateways.iter())
                 };
                 if !mdns_gateways.is_empty() {
                     available.insert(HostnameInfo {
@@ -295,11 +319,7 @@ impl Model<Host> {
                     let gateways = if opt.secure.is_some() {
                         domain_gateways.clone()
                     } else {
-                        domain_gateways
-                            .iter()
-                            .cloned()
-                            .filter(|g| gateways.get(g).map_or(false, |g| g.secure()))
-                            .collect()
+                        secure_gateways(gateways, domain_gateways.iter())
                     };
                     available.insert(HostnameInfo {
                         ssl: opt.secure.map_or(false, |s| s.ssl),
@@ -427,6 +447,7 @@ impl Model<Host> {
         // binding/range serves internally only (`enabled_addresses`), and no
         // internal address is public, so it contributes nothing here.
         let bindings: Bindings = this.bindings.de()?;
+        let public_domains = this.public_domains.de()?;
         let mut port_forwards = BTreeSet::new();
         for bind in bindings.values() {
             for addr in bind.enabled_addresses() {
@@ -450,6 +471,16 @@ impl Model<Host> {
                 let Some(wan_ip) = ip_info.wan_ip else {
                     continue;
                 };
+                // A certificate authority validates at `ACME_CHALLENGE_PORT`,
+                // regardless of which port the address serves. `add_ssl` excludes a
+                // service that is its own ACME client.
+                let challenge = addr.ssl
+                    && bind.options.add_ssl.is_some()
+                    && port != ACME_CHALLENGE_PORT
+                    && matches!(addr.metadata, HostnameMetadata::PublicDomain { .. })
+                    && public_domains
+                        .get(&addr.hostname)
+                        .map_or(false, |domain| domain.acme.is_some());
                 for subnet in &ip_info.subnets {
                     let IpAddr::V4(addr) = subnet.addr() else {
                         continue;
@@ -459,7 +490,17 @@ impl Model<Host> {
                         dst: SocketAddrV4::new(addr, port),
                         gateway: gw_id.clone(),
                         count: 1,
+                        local: true,
                     });
+                    if challenge {
+                        port_forwards.insert(PortForward {
+                            src: SocketAddrV4::new(wan_ip, ACME_CHALLENGE_PORT),
+                            dst: SocketAddrV4::new(addr, ACME_CHALLENGE_PORT),
+                            gateway: gw_id.clone(),
+                            count: 1,
+                            local: false,
+                        });
+                    }
                 }
             }
         }
@@ -501,6 +542,7 @@ impl Model<Host> {
                         dst: SocketAddrV4::new(lan_ip, internal_start),
                         gateway: gw_id.clone(),
                         count: range.number_of_ports,
+                        local: true,
                     });
                 }
             }
@@ -563,6 +605,34 @@ pub fn host_for<'a>(
     host_info(db, package_id)?.upsert(host_id, || Ok(Host::new()))
 }
 
+/// [`host_for`] without the upsert, for paths where a missing host means there
+/// is nothing to do. Creating a host on the way to removing something from it
+/// resurrects one the service has retired.
+pub fn host_for_existing<'a>(
+    db: &'a mut DatabaseModel,
+    package_id: &PackageId,
+    host_id: &HostId,
+) -> Result<Option<&'a mut Model<Host>>, Error> {
+    if package_id.is_start_os() {
+        if *host_id != HostId::admin() {
+            return Ok(None);
+        }
+        return Ok(Some(
+            db.as_public_mut()
+                .as_server_info_mut()
+                .as_network_mut()
+                .as_host_mut(),
+        ));
+    }
+    Ok(db
+        .as_public_mut()
+        .as_package_data_mut()
+        .as_idx_mut(package_id)
+        .or_not_found(package_id)?
+        .as_hosts_mut()
+        .as_idx_mut(host_id))
+}
+
 pub fn all_hosts(db: &mut DatabaseModel) -> impl Iterator<Item = Result<&mut Model<Host>, Error>> {
     use patch_db::DestructureMut;
     let destructured = db.as_public_mut().destructure_mut();
@@ -586,6 +656,14 @@ impl Model<Host> {
         options: BindOptions,
         privileged: bool,
     ) -> Result<(), Error> {
+        let claim = internal_port..=internal_port;
+        if let Some(existing) = self
+            .as_binding_ranges()
+            .de()?
+            .enabled_overlap(&claim, None)?
+        {
+            return Err(overlap_error(&claim, &existing));
+        }
         self.as_bindings_mut().mutate(|b| {
             let info = if let Some(info) = b.remove(&internal_port) {
                 info.update(available_ports, options, privileged)?
@@ -615,6 +693,17 @@ impl Model<Host> {
                 eyre!("numberOfPorts must be at least 2; use bind for a single port"),
                 ErrorKind::InvalidRequest,
             ));
+        }
+        let claim = internal_span(internal_start_port, number_of_ports)?;
+        if let Some(existing) = self.as_bindings().de()?.enabled_overlap(&claim) {
+            return Err(overlap_error(&claim, &existing));
+        }
+        if let Some(existing) = self
+            .as_binding_ranges()
+            .de()?
+            .enabled_overlap(&claim, Some(internal_start_port))?
+        {
+            return Err(overlap_error(&claim, &existing));
         }
         self.as_binding_ranges_mut().mutate(|ranges| {
             let existing = ranges.get(&internal_start_port);
@@ -696,6 +785,10 @@ pub trait HostApiKind: 'static {
         inheritance: &Self::Inheritance,
         db: &'a mut DatabaseModel,
     ) -> Result<&'a mut Model<Host>, Error>;
+    fn host_for_existing<'a>(
+        inheritance: &Self::Inheritance,
+        db: &'a mut DatabaseModel,
+    ) -> Result<Option<&'a mut Model<Host>>, Error>;
 }
 pub struct ForPackage;
 impl HostApiKind for ForPackage {
@@ -714,6 +807,12 @@ impl HostApiKind for ForPackage {
     ) -> Result<&'a mut Model<Host>, Error> {
         host_for(db, package, host)
     }
+    fn host_for_existing<'a>(
+        (package, host): &Self::Inheritance,
+        db: &'a mut DatabaseModel,
+    ) -> Result<Option<&'a mut Model<Host>>, Error> {
+        host_for_existing(db, package, host)
+    }
 }
 pub struct ForServer;
 impl HostApiKind for ForServer {
@@ -728,6 +827,12 @@ impl HostApiKind for ForServer {
         db: &'a mut DatabaseModel,
     ) -> Result<&'a mut Model<Host>, Error> {
         host_for(db, &PackageId::start_os(), &HostId::admin())
+    }
+    fn host_for_existing<'a>(
+        _: &Self::Inheritance,
+        db: &'a mut DatabaseModel,
+    ) -> Result<Option<&'a mut Model<Host>>, Error> {
+        host_for_existing(db, &PackageId::start_os(), &HostId::admin())
     }
 }
 
@@ -794,11 +899,14 @@ mod tests {
     use imbl::OrdMap;
     use imbl_value::InternedString;
 
-    use super::mdns_gateways;
+    use super::{Host, Model, mdns_gateways, secure_gateways};
     use crate::GatewayId;
     use crate::db::model::public::{
         CapabilityVerdict, IpInfo, NetworkInterfaceInfo, NetworkInterfaceType,
     };
+    use crate::net::forward::AvailablePorts;
+    use crate::net::host::binding::BindOptions;
+    use crate::prelude::*;
 
     fn iface(
         device_type: NetworkInterfaceType,
@@ -844,6 +952,122 @@ mod tests {
         assert_eq!(
             mdns_gateways(&ifaces),
             [gw("eth0"), gw("wlan0"), gw("wg-ok")].into_iter().collect()
+        );
+    }
+
+    fn host() -> Model<Host> {
+        Model::<Host>::new(&Host::default()).unwrap()
+    }
+
+    fn plain(preferred_external_port: u16) -> BindOptions {
+        BindOptions {
+            preferred_external_port,
+            add_ssl: None,
+            secure: Some(crate::net::host::binding::Security { ssl: false }),
+        }
+    }
+
+    #[test]
+    fn a_range_may_not_cover_a_port_the_host_binds() {
+        let mut ports = AvailablePorts::new();
+        let mut host = host();
+        host.add_binding(&mut ports, 28332, plain(28332), false)
+            .unwrap();
+
+        let err = host
+            .add_binding_range(&mut ports, 28331, 40000, 4, false)
+            .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::InvalidRequest);
+        assert!(host.as_binding_ranges().de().unwrap().is_empty());
+        assert!(ports.try_alloc(40000, false, false).is_some());
+    }
+
+    #[test]
+    fn a_dormant_binding_does_not_block_the_range_that_supersedes_it() {
+        let mut ports = AvailablePorts::new();
+        let mut host = host();
+        host.add_binding(&mut ports, 28332, plain(28332), false)
+            .unwrap();
+        host.add_binding(&mut ports, 28333, plain(28333), false)
+            .unwrap();
+        host.as_bindings_mut()
+            .mutate(|b| Ok(b.values_mut().for_each(|i| i.disable())))
+            .unwrap();
+
+        host.add_binding_range(&mut ports, 28332, 40000, 2, false)
+            .unwrap();
+        assert!(host.as_binding_ranges().de().unwrap().contains_key(&28332));
+    }
+
+    #[test]
+    fn a_port_inside_an_enabled_range_may_not_be_bound_singly() {
+        let mut ports = AvailablePorts::new();
+        let mut host = host();
+        host.add_binding_range(&mut ports, 42000, 42000, 500, false)
+            .unwrap();
+
+        let err = host
+            .add_binding(&mut ports, 42499, plain(9000), false)
+            .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::InvalidRequest);
+        host.add_binding(&mut ports, 42500, plain(9000), false)
+            .unwrap();
+    }
+
+    #[test]
+    fn reaffirming_a_range_and_binding_a_disjoint_port_both_succeed() {
+        let mut ports = AvailablePorts::new();
+        let mut host = host();
+        host.add_binding(&mut ports, 3478, plain(3478), false)
+            .unwrap();
+        host.add_binding_range(&mut ports, 42000, 42000, 500, false)
+            .unwrap();
+        host.add_binding_range(&mut ports, 42000, 42000, 500, false)
+            .unwrap();
+
+        let err = host
+            .add_binding_range(&mut ports, 42499, 50000, 2, false)
+            .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::InvalidRequest);
+    }
+
+    #[test]
+    fn a_range_may_not_run_off_the_end_of_the_port_space() {
+        let mut ports = AvailablePorts::new();
+        let err = host()
+            .add_binding_range(&mut ports, 65535, 40000, 2, false)
+            .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::InvalidRequest);
+    }
+
+    #[test]
+    fn secure_gateways_follows_the_operators_override() {
+        let mut ifaces: OrdMap<GatewayId, NetworkInterfaceInfo> = [
+            (gw("lxcbr0"), iface(NetworkInterfaceType::Bridge, None)),
+            (gw("eth0"), iface(NetworkInterfaceType::Ethernet, None)),
+            (gw("wlan0"), iface(NetworkInterfaceType::Wireless, None)),
+            // Secure, but never a candidate: the result is the intersection.
+            (gw("lo"), iface(NetworkInterfaceType::Loopback, None)),
+        ]
+        .into_iter()
+        .collect();
+        let candidates = [gw("lxcbr0"), gw("eth0"), gw("wlan0"), gw("gone")];
+
+        assert_eq!(
+            secure_gateways(&ifaces, candidates.iter()),
+            [gw("lxcbr0")].into_iter().collect()
+        );
+
+        ifaces[&gw("eth0")].secure = Some(true);
+        assert_eq!(
+            secure_gateways(&ifaces, candidates.iter()),
+            [gw("lxcbr0"), gw("eth0")].into_iter().collect()
+        );
+
+        ifaces[&gw("lxcbr0")].secure = Some(false);
+        assert_eq!(
+            secure_gateways(&ifaces, candidates.iter()),
+            [gw("eth0")].into_iter().collect()
         );
     }
 }

@@ -1,4 +1,3 @@
-// Auto-generated from core/src/assets/{adjectives,nouns}.txt
 // prettier-ignore
 export const ADJECTIVES = [
   'ominous',

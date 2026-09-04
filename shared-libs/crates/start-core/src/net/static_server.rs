@@ -62,6 +62,10 @@ pub trait UiContext: Context + AsRef<RpcContinuations> + Clone + Sized {
     fn extend_router(self, router: Router) -> Router {
         router
     }
+    /// Applies layers after the UI fallback is installed.
+    fn apply_outer_layers(self, router: Router) -> Router {
+        router
+    }
 }
 
 pub static UI_CELL: OnceLock<Dir<'static>> = OnceLock::new();
@@ -87,9 +91,18 @@ impl UiContext for RpcContext {
                 get(move || {
                     let ctx = ctx.clone();
                     async move {
-                        ctx.account.peek(|account| {
-                            cert_send(&account.root_ca_cert, &account.hostname.hostname)
-                        })
+                        ctx.account
+                            .peek(|account| cert_send(&account.root_ca_cert, &account.hostname))
+                    }
+                })
+            })
+            .route("/manifest.webmanifest", {
+                let ctx = self.clone();
+                get(move || {
+                    let ctx = ctx.clone();
+                    async move {
+                        ctx.account
+                            .peek(|account| webmanifest_send(Self::ui_dir(), &account.hostname))
                     }
                 })
             })
@@ -99,11 +112,14 @@ impl UiContext for RpcContext {
                     let ctx = self.clone();
                     async move {
                         ctx.account.peek(|account| {
-                            mobileconfig_send(&account.root_ca_cert, &account.hostname.hostname)
+                            mobileconfig_send(&account.root_ca_cert, &account.hostname)
                         })
                     }
                 }),
             )
+    }
+    fn apply_outer_layers(self, router: Router) -> Router {
+        crate::net::domain_redirect::redirect_service_domains(self, router)
     }
 }
 
@@ -226,14 +242,21 @@ async fn add_security_headers(mut res: Response) -> Response {
 }
 
 pub fn ui_router<C: UiContext>(ctx: C) -> Router {
-    ctx.clone()
-        .extend_router(rpc_router(
-            ctx.clone(),
-            C::middleware(Server::new(move || ready(Ok(ctx.clone())), C::api())),
-        ))
+    let server = C::middleware(Server::new(
+        {
+            let ctx = ctx.clone();
+            move || ready(Ok(ctx.clone()))
+        },
+        C::api(),
+    ));
+    let router = ctx
+        .clone()
+        .extend_router(rpc_router(ctx.clone(), server))
         .fallback(any(|request: Request| async move {
             serve_ui::<C>(request).unwrap_or_else(server_error)
-        }))
+        }));
+    // Security headers cover responses produced by context layers.
+    ctx.apply_outer_layers(router)
         .layer(axum::middleware::map_response(add_security_headers))
 }
 
@@ -442,6 +465,30 @@ pub fn bad_request() -> Response {
         .status(StatusCode::BAD_REQUEST)
         .body(Body::empty())
         .unwrap()
+}
+
+fn webmanifest_send(
+    ui_dir: &'static Dir<'static>,
+    hostname: &ServerHostname,
+) -> Result<Response, Error> {
+    let mut manifest: serde_json::Map<String, serde_json::Value> = serde_json::from_slice(
+        ui_dir
+            .get_file("manifest.webmanifest")
+            .or_not_found("manifest.webmanifest")?
+            .contents(),
+    )
+    .with_kind(ErrorKind::Deserialization)?;
+    manifest.insert("name".into(), hostname.as_ref().into());
+    manifest.insert("short_name".into(), hostname.as_ref().into());
+    let body = serde_json::to_vec(&manifest).with_kind(ErrorKind::Serialization)?;
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, "application/manifest+json")
+        .header(CACHE_CONTROL, "no-cache")
+        .header(CONTENT_LENGTH, body.len())
+        .body(Body::from(body))
+        .with_kind(ErrorKind::Network)
 }
 
 fn cert_send(cert: &X509, hostname: &ServerHostname) -> Result<Response, Error> {

@@ -11,7 +11,7 @@ use crate::GatewayId;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::DatabaseModel;
 use crate::hostname::ServerHostname;
-use crate::net::acme::AcmeProvider;
+use crate::net::acme::{AcmeProvider, CheckChallengeParams, CheckChallengeRes, check_challenge};
 use crate::net::dns::QueryDnsRes;
 use crate::net::gateway::{
     CheckDnsParams, CheckPortParams, CheckPortRes, CheckPortV6Res, check_dns, check_port,
@@ -20,6 +20,7 @@ use crate::net::gateway::{
 use crate::net::host::binding::{DerivedAddressInfo, set_nonssl_lan_group, set_nonssl_wan_group};
 use crate::net::host::{Host, HostApiKind, all_hosts};
 use crate::net::service_interface::HostnameMetadata;
+use crate::net::vhost::ACME_CHALLENGE_PORT;
 use crate::prelude::*;
 use crate::util::serde::{HandlerExtSerde, display_serializable};
 
@@ -231,6 +232,8 @@ pub struct AddPublicDomainRes {
     pub dns: QueryDnsRes,
     pub port: CheckPortRes,
     pub port_v6: Option<CheckPortV6Res>,
+    /// The authority's own reachability requirement, where the domain has one.
+    pub challenge: Option<CheckChallengeRes>,
 }
 
 /// Reconcile a public domain on a *sibling* binding or range — one the domain
@@ -395,6 +398,7 @@ pub async fn add_public_domain<Kind: HostApiKind>(
     // Domains are matched byte-for-byte against the browser's lowercased
     // `location.hostname` — normalize at the boundary (covers UI and CLI).
     let fqdn = InternedString::intern(fqdn.to_ascii_lowercase());
+    let authority = acme.clone();
     let ext_port = ctx
         .db
         .mutate(|db| {
@@ -560,7 +564,7 @@ pub async fn add_public_domain<Kind: HostApiKind>(
     let ctx2 = ctx.clone();
     let fqdn2 = fqdn.clone();
 
-    let (dns_result, port_result, port_v6_result) = tokio::join!(
+    let (dns_result, port_result, port_v6_result, challenge_result) = tokio::join!(
         async {
             tokio::task::spawn_blocking(move || {
                 crate::net::dns::query_dns(ctx2, crate::net::dns::QueryDnsParams { fqdn: fqdn2 })
@@ -581,13 +585,29 @@ pub async fn add_public_domain<Kind: HostApiKind>(
                 port: ext_port,
                 gateway: gateway.clone(),
             },
-        )
+        ),
+        // TLS-ALPN-01 is validated at 443, regardless of which port the address serves.
+        async {
+            let Some(acme) = authority.filter(|_| ext_port != ACME_CHALLENGE_PORT) else {
+                return Ok(None);
+            };
+            check_challenge(
+                ctx.clone(),
+                CheckChallengeParams {
+                    fqdn: fqdn.clone(),
+                    gateway: gateway.clone(),
+                    acme,
+                },
+            )
+            .await
+        }
     );
 
     Ok(AddPublicDomainRes {
         dns: dns_result?,
         port: port_result?,
         port_v6: port_v6_result?,
+        challenge: challenge_result?,
     })
 }
 
@@ -607,9 +627,10 @@ pub async fn remove_public_domain<Kind: HostApiKind>(
     let fqdn = InternedString::intern(fqdn.to_ascii_lowercase());
     ctx.db
         .mutate(|db| {
-            Kind::host_for(&inheritance, db)?
-                .as_public_domains_mut()
-                .remove(&fqdn)?;
+            let Some(host) = Kind::host_for_existing(&inheritance, db)? else {
+                return Ok(());
+            };
+            host.as_public_domains_mut().remove(&fqdn)?;
             let hostname = ServerHostname::load(db.as_public().as_server_info())?;
             let gateways = db
                 .as_public()
@@ -640,9 +661,11 @@ pub async fn add_private_domain<Kind: HostApiKind>(
     AddPrivateDomainParams { fqdn, gateway }: AddPrivateDomainParams,
     inheritance: Kind::Inheritance,
 ) -> Result<bool, Error> {
-    let fqdn = InternedString::intern(fqdn.to_ascii_lowercase());
+    let fqdn = InternedString::intern(fqdn.trim_end_matches('.').to_ascii_lowercase());
     ctx.db
         .mutate(|db| {
+            let hostname = ServerHostname::load(db.as_public().as_server_info())?;
+            hostname.reject_private_domain(&fqdn)?;
             let is_new = !Kind::host_for(&inheritance, db)?
                 .as_private_domains()
                 .de()?
@@ -653,7 +676,6 @@ pub async fn add_private_domain<Kind: HostApiKind>(
                 .upsert(&fqdn, || Ok(BTreeSet::new()))?
                 .mutate(|d| Ok(d.insert(gateway.clone())))?;
             handle_duplicates(db)?;
-            let hostname = ServerHostname::load(db.as_public().as_server_info())?;
             let gateways = db
                 .as_public()
                 .as_server_info()
@@ -698,8 +720,10 @@ pub async fn remove_private_domain<Kind: HostApiKind>(
     let domain = InternedString::intern(domain.to_ascii_lowercase());
     ctx.db
         .mutate(|db| {
-            Kind::host_for(&inheritance, db)?
-                .as_private_domains_mut()
+            let Some(host) = Kind::host_for_existing(&inheritance, db)? else {
+                return Ok(());
+            };
+            host.as_private_domains_mut()
                 .mutate(|d| Ok(d.remove(&domain)))?;
             let hostname = ServerHostname::load(db.as_public().as_server_info())?;
             let gateways = db
@@ -889,6 +913,15 @@ mod test {
             domain_disabled(&a, 42000),
             "an enabled IP on a different gateway must not honor the domain"
         );
+    }
+
+    #[test]
+    fn rejects_the_servers_mdns_name_as_a_private_domain() {
+        let hostname = ServerHostname::new(InternedString::intern("myserver")).unwrap();
+
+        assert!(hostname.reject_private_domain("myserver.local").is_err());
+        assert!(hostname.reject_private_domain("myserver.local.").is_err());
+        assert!(hostname.reject_private_domain("service.local").is_ok());
     }
 
     #[test]

@@ -10,11 +10,14 @@ use igd_next::aio::Gateway;
 use igd_next::aio::tokio::{Tokio, search_gateway};
 use igd_next::{PortMappingProtocol, SearchOptions};
 
+use crate::net::port_map::pcp::hostname::validate_hostname;
+use crate::net::port_map::server::igd::{
+    ADD_HOSTNAME_ACTION, DELETE_HOSTNAME_ACTION, WANIP_SERVICE,
+};
 use crate::prelude::*;
 
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(4);
-/// IGD SOAP control calls are unbounded in igd-next; without this a gateway that
-/// accepts TCP but never answers would wedge the single-threaded port-map daemon.
+/// Bounds IGD SOAP calls that otherwise have no timeout.
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(5);
 /// `0` requests an indefinite lease; the controller re-asserts periodically.
 const LEASE_DURATION: u32 = 0;
@@ -86,6 +89,157 @@ pub async fn remove_port(
     }
 }
 
+const HOSTNAME_LEASE_SECONDS: u32 = 3600;
+
+/// Whether `gateway` advertises both Start9 hostname vendor actions.
+pub fn supports_hostname(gateway: &Gateway<Tokio>) -> bool {
+    gateway.control_schema.contains_key(ADD_HOSTNAME_ACTION)
+        && gateway.control_schema.contains_key(DELETE_HOSTNAME_ACTION)
+}
+
+/// SOAP envelope for [`ADD_HOSTNAME_ACTION`].
+pub(crate) fn add_hostname_body(
+    external_port: u16,
+    local_ip: Ipv4Addr,
+    internal_port: u16,
+    hostname: &str,
+) -> String {
+    format!(
+        r#"<?xml version="1.0"?>
+<s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+<s:Body>
+<u:{ADD_HOSTNAME_ACTION} xmlns:u="{service}">
+<NewRemoteHost></NewRemoteHost>
+<NewExternalPort>{external_port}</NewExternalPort>
+<NewProtocol>TCP</NewProtocol>
+<NewInternalPort>{internal_port}</NewInternalPort>
+<NewInternalClient>{local_ip}</NewInternalClient>
+<NewEnabled>1</NewEnabled>
+<NewPortMappingDescription>{DESCRIPTION}</NewPortMappingDescription>
+<NewLeaseDuration>{HOSTNAME_LEASE_SECONDS}</NewLeaseDuration>
+<NewHostname>{hostname}</NewHostname>
+</u:{ADD_HOSTNAME_ACTION}>
+</s:Body>
+</s:Envelope>"#,
+        service = WANIP_SERVICE,
+    )
+}
+
+/// SOAP envelope for [`DELETE_HOSTNAME_ACTION`].
+pub(crate) fn delete_hostname_body(
+    external_port: u16,
+    internal_port: u16,
+    hostname: &str,
+) -> String {
+    format!(
+        r#"<?xml version="1.0"?>
+<s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+<s:Body>
+<u:{DELETE_HOSTNAME_ACTION} xmlns:u="{service}">
+<NewRemoteHost></NewRemoteHost>
+<NewExternalPort>{external_port}</NewExternalPort>
+<NewProtocol>TCP</NewProtocol>
+<NewInternalPort>{internal_port}</NewInternalPort>
+<NewHostname>{hostname}</NewHostname>
+</u:{DELETE_HOSTNAME_ACTION}>
+</s:Body>
+</s:Envelope>"#,
+        service = WANIP_SERVICE,
+    )
+}
+
+/// Sends a vendor SOAP action to the discovered control endpoint.
+async fn vendor_control_call(
+    gateway: &Gateway<Tokio>,
+    action: &str,
+    body: String,
+) -> Result<(), Error> {
+    let url = format!("http://{}{}", gateway.addr, gateway.control_url);
+    let soap_action = format!("\"{WANIP_SERVICE}#{action}\"");
+    let call = async {
+        // LAN control traffic must bypass environment proxies.
+        let resp = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .with_kind(ErrorKind::Network)?
+            .post(&url)
+            .header("SOAPAction", soap_action)
+            .header(reqwest::header::CONTENT_TYPE, "text/xml; charset=\"utf-8\"")
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| Error::new(eyre!("UPnP {action} failed: {e}"), ErrorKind::Network))?;
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        // A 2xx without the matching response body does not prove mutation.
+        if status.is_success() && text.contains(&format!("{action}Response")) {
+            Ok(())
+        } else {
+            let code = text
+                .split("<errorCode>")
+                .nth(1)
+                .and_then(|t| t.split("</errorCode>").next())
+                .unwrap_or("unknown");
+            Err(Error::new(
+                eyre!("UPnP {action} failed: HTTP {status}, UPnP error {code}"),
+                ErrorKind::Network,
+            ))
+        }
+    };
+    match tokio::time::timeout(CONTROL_TIMEOUT, call).await {
+        Ok(r) => r,
+        Err(_) => Err(Error::new(
+            eyre!("UPnP {action} timed out"),
+            ErrorKind::Network,
+        )),
+    }
+}
+
+/// Binds a hostname to a target through the Start9 vendor action.
+/// The caller must renew the finite lease.
+pub async fn add_hostname_mapping(
+    gateway: &Gateway<Tokio>,
+    external_port: u16,
+    local_ip: Ipv4Addr,
+    internal_port: u16,
+    hostname: &str,
+) -> Result<(), Error> {
+    // Hostnames are interpolated without XML escaping.
+    if !validate_hostname(hostname) {
+        return Err(Error::new(
+            eyre!("invalid hostname for SNI mapping: {hostname:?}"),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    vendor_control_call(
+        gateway,
+        ADD_HOSTNAME_ACTION,
+        add_hostname_body(external_port, local_ip, internal_port, hostname),
+    )
+    .await
+}
+
+/// Removes a hostname mapping through the Start9 vendor action.
+pub async fn remove_hostname_mapping(
+    gateway: &Gateway<Tokio>,
+    external_port: u16,
+    internal_port: u16,
+    hostname: &str,
+) -> Result<(), Error> {
+    if !validate_hostname(hostname) {
+        return Err(Error::new(
+            eyre!("invalid hostname for SNI mapping: {hostname:?}"),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    vendor_control_call(
+        gateway,
+        DELETE_HOSTNAME_ACTION,
+        delete_hostname_body(external_port, internal_port, hostname),
+    )
+    .await
+}
+
 /// Whether `ip` is a routable public IPv4 worth reporting. A gateway behind
 /// CGNAT/double-NAT reports a private external IP, useless for clearnet, so the
 /// caller falls back to an echoip probe.
@@ -126,7 +280,38 @@ pub async fn get_external_ipv4(local_ip: Ipv4Addr) -> Result<Option<Ipv4Addr>, E
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
+
+    fn gateway_with_actions(actions: &[&str]) -> Gateway<Tokio> {
+        Gateway {
+            addr: "127.0.0.1:49001".parse().unwrap(),
+            root_url: String::new(),
+            control_url: String::new(),
+            control_schema_url: String::new(),
+            control_schema: actions
+                .iter()
+                .map(|action| ((*action).to_owned(), Vec::new()))
+                .collect::<HashMap<_, _>>(),
+            provider: Tokio,
+        }
+    }
+
+    #[test]
+    fn hostname_support_requires_add_and_delete_actions() {
+        assert!(!supports_hostname(&gateway_with_actions(&[])));
+        assert!(!supports_hostname(&gateway_with_actions(&[
+            ADD_HOSTNAME_ACTION,
+        ])));
+        assert!(!supports_hostname(&gateway_with_actions(&[
+            DELETE_HOSTNAME_ACTION,
+        ])));
+        assert!(supports_hostname(&gateway_with_actions(&[
+            ADD_HOSTNAME_ACTION,
+            DELETE_HOSTNAME_ACTION,
+        ])));
+    }
 
     #[test]
     fn private_external_ips_trigger_echoip_fallback() {

@@ -33,15 +33,17 @@ export type Manifest = {
   sdkVersion: string | null
   hardwareAcceleration: boolean
   /**
-   * Mount /dev/fuse for fuse-overlayfs storage (the rootless storage
-   * driver used by a nested OCI runtime).
+   * Grants access to `/dev/fuse`.
    */
   userspaceFilesystems: boolean
   /**
-   * Mount /dev/net/tun so the service can create kernel tunnel interfaces
-   * (VPN / WireGuard / tun-class workloads).
+   * Grants access to `/dev/net/tun`.
    */
   virtualNetworking: boolean
+  /**
+   * Grants /dev/kvm when present. The opening process must run as container root.
+   */
+  hardwareVirtualization: boolean
   plugins: Array<PluginId>
   satisfies: Array<Version>
 }

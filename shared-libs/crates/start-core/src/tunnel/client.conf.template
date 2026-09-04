@@ -1,4 +1,5 @@
 # {marker} config for {name}
+{inbound_marker}
 
 [Interface]
 Address = {addr}

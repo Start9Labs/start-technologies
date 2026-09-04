@@ -42,6 +42,8 @@ runs:
     - name: Install apt publishing tools
       shell: bash
       run: |
+        # The runner image's Microsoft apt sources 403 intermittently, and one failing source fails the whole update.
+        grep -rl 'packages\.microsoft\.com' /etc/apt/sources.list.d/ 2>/dev/null | sudo xargs -r rm -f || true
         sudo apt-get update -qq
         sudo apt-get install -y -qq s3cmd dpkg-dev apt-utils
 

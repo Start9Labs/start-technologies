@@ -196,7 +196,7 @@ fn display_all_ssh_keys(
     use prettytable::*;
 
     if let Some(format) = params.format {
-        return display_serializable(format, params);
+        return display_serializable(format, result);
     }
 
     let mut table = Table::new();

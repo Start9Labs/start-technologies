@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH start-cli-server-set-hostname 1  "set-hostname " 
+.TH start-cli-server-set-hostname 1  "set-hostname "
 .SH NAME
 start\-cli\-server\-set\-hostname \- Set the server hostname
 .SH SYNOPSIS
-\fBstart\-cli server set\-hostname\fR [\fB\-h\fR|\fB\-\-help\fR] [\fINAME\fR] [\fIHOSTNAME\fR] 
+\fBstart\-cli server set\-hostname\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIHOSTNAME\fR>
 .SH DESCRIPTION
 Set the server hostname
 .SH OPTIONS
@@ -12,8 +12,5 @@ Set the server hostname
 \fB\-h\fR, \fB\-\-help\fR
 Print help
 .TP
-[\fINAME\fR]
-
-.TP
-[\fIHOSTNAME\fR]
-
+<\fIHOSTNAME\fR>
+The server\*(Aqs .local hostname: up to 32 lowercase letters, numbers, and hyphens, not starting or ending with a hyphen

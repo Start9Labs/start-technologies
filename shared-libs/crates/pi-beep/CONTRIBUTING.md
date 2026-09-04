@@ -37,8 +37,7 @@ Run from the repo root:
 cargo test -p pi-beep
 ```
 
-There are no tests in the source today (the logic is direct sysfs I/O that only exercises on RPi
-hardware). If you add testable logic, add unit tests alongside it.
+If you add testable logic, add unit tests alongside it.
 
 ## Formatting
 

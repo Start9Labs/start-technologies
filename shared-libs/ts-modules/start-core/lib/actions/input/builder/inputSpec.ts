@@ -189,7 +189,7 @@ export class InputSpec<
     }
     return {
       spec: answer,
-      validator: z.object(validator) as any,
+      validator: z.looseObject(validator) as any,
     }
   }
 
@@ -215,7 +215,7 @@ export class InputSpec<
     const addedValues =
       build instanceof Function ? build(createInputSpecTools<Type>()) : build
     const newSpec = { ...this.spec, ...addedValues } as any
-    const newValidator = z.object(
+    const newValidator = z.looseObject(
       Object.fromEntries(
         Object.entries(newSpec).map(([k, v]) => [
           k,
@@ -271,7 +271,7 @@ export class InputSpec<
         newSpec[k] = value
       }
     }
-    const newValidator = z.object(
+    const newValidator = z.looseObject(
       Object.fromEntries(
         Object.entries(newSpec).map(([k, v]) => [k, v.validator]),
       ),
@@ -321,7 +321,7 @@ export class InputSpec<
         }
       }
     }
-    const newValidator = z.object(
+    const newValidator = z.looseObject(
       Object.fromEntries(
         Object.entries(newSpec).map(([k, v]) => [k, v.validator]),
       ),
@@ -418,7 +418,7 @@ export class InputSpec<
       }
       newSpec[k] = value
     }
-    const newValidator = z.object(
+    const newValidator = z.looseObject(
       Object.fromEntries(
         Object.entries(newSpec).map(([k, v]) => [k, v.validator]),
       ),
@@ -459,7 +459,7 @@ export class InputSpec<
       }
       newSpec[k] = value.withDisabled(message)
     }
-    const newValidator = z.object(
+    const newValidator = z.looseObject(
       Object.fromEntries(
         Object.entries(newSpec).map(([k, v]) => [k, v.validator]),
       ),
@@ -479,7 +479,7 @@ export class InputSpec<
    * ```
    */
   static of<Spec extends Record<string, Value<any, any>>>(spec: Spec) {
-    const validator = z.object(
+    const validator = z.looseObject(
       Object.fromEntries(
         Object.entries(spec).map(([k, v]) => [k, v.validator]),
       ),

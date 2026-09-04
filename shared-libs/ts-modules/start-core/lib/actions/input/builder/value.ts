@@ -12,6 +12,7 @@ import {
 } from '../inputSpecTypes'
 import { DefaultString } from '../inputSpecTypes'
 import { _, once } from '../../../util'
+import { withPatterns } from './patternCheck'
 import { z } from '../../../zExport'
 import { DeepPartial } from '../../../types'
 
@@ -31,9 +32,9 @@ function literalKeysValidator(
 }
 
 /** Zod schema for a file upload result — validates `{ path, commitment: { hash, size } }`. */
-export const fileInfoParser = z.object({
+export const fileInfoParser = z.looseObject({
   path: z.string(),
-  commitment: z.object({ hash: z.string(), size: z.number() }),
+  commitment: z.looseObject({ hash: z.string(), size: z.number() }),
 })
 /** The parsed result of a file upload, containing the file path and its content commitment (hash + size). */
 export type FileInfo = z.infer<typeof fileInfoParser>
@@ -45,7 +46,7 @@ export type AsRequired<T, Required extends boolean> = Required extends true
 
 const testForAsRequiredParser = once(
   () => (v: unknown) =>
-    z.object({ required: z.literal(true) }).safeParse(v).success,
+    z.looseObject({ required: z.literal(true) }).safeParse(v).success,
 )
 function asRequiredParser<Type, Input extends { required: boolean }>(
   parser: z.ZodType<Type>,
@@ -333,7 +334,7 @@ export class Value<
      */
     generate?: RandomString | null
   }) {
-    const validator = asRequiredParser(z.string(), a)
+    const validator = asRequiredParser(withPatterns(z.string(), a.patterns), a)
     return new Value<AsRequired<string, Required>>(
       async () => ({
         spec: {
@@ -399,7 +400,7 @@ export class Value<
             generate: a.generate ?? null,
             ...a,
           },
-          validator: asRequiredParser(z.string(), a),
+          validator: asRequiredParser(withPatterns(z.string(), a.patterns), a),
         }
       },
       z.string().nullable(),
@@ -463,7 +464,7 @@ export class Value<
      */
     immutable?: boolean
   }) {
-    const validator = asRequiredParser(z.string(), a)
+    const validator = asRequiredParser(withPatterns(z.string(), a.patterns), a)
     return new Value<AsRequired<string, Required>>(async () => {
       const built: ValueSpecTextarea = {
         description: null,
@@ -523,7 +524,7 @@ export class Value<
             immutable: false,
             ...a,
           },
-          validator: asRequiredParser(z.string(), a),
+          validator: asRequiredParser(withPatterns(z.string(), a.patterns), a),
         }
       },
       z.string().nullable(),
@@ -884,12 +885,12 @@ export class Value<
     /** Supplementary text rendered persistently beneath the field. */
     footnote?: string | null
     /**
-     * @description Determines if the field is required. If so, optionally provide a default value from the list of values.
+     * @description The option to preselect. `null` leaves the field unselected; a selection is required either way.
      * @type { (keyof Values & string) | null }
      * @example default: null
      * @example default: 'radio1'
      */
-    default: keyof Values & string
+    default: (keyof Values & string) | null
     /**
      * @description A mapping of unique radio options to their human readable display format.
      * @example
@@ -936,7 +937,7 @@ export class Value<
         description?: string | null
         warning?: string | null
         footnote?: string | null
-        default: string
+        default: string | null
         values: Values
         disabled?: false | string | string[]
       },
@@ -1222,11 +1223,12 @@ export class Value<
     warning?: string | null
     variants: Variants<VariantValues>
     /**
-     * @description Provide a default value from the list of variants.
-     * @type { string }
+     * @description The variant to preselect. `null` leaves the field unselected; a selection is required either way.
+     * @type { (keyof VariantValues & string) | null }
+     * @example default: null
      * @example default: 'variant1'
      */
-    default: keyof VariantValues & string
+    default: (keyof VariantValues & string) | null
     /**
      * @description Once set, the value can never be changed.
      * @default false
@@ -1268,7 +1270,7 @@ export class Value<
         description?: string | null
         warning?: string | null
         variants: Variants<VariantValues>
-        default: keyof VariantValues & string
+        default: (keyof VariantValues & string) | null
         disabled: string[] | false | string
       },
       OuterType
@@ -1291,7 +1293,7 @@ export class Value<
         description?: string | null
         warning?: string | null
         variants: Variants<VariantValues>
-        default: keyof VariantValues & string
+        default: (keyof VariantValues & string) | null
         disabled: string[] | false | string
       },
       OuterType
@@ -1317,7 +1319,7 @@ export class Value<
         description?: string | null
         warning?: string | null
         variants: Variants<VariantValues>
-        default: keyof VariantValues & string
+        default: (keyof VariantValues & string) | null
         disabled: string[] | false | string
       },
       OuterType

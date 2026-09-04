@@ -10,8 +10,9 @@
 `SafeLinksDirective`, pipes (`convertBytes`, `empty`, `compareExver`, `leafProgress`,
 `markdown`, `trustUrl`), `RELATIVE_URL` token, `HttpError`/`RpcError`, disk/RPC/http types,
 utils (`convertAnsi`, `formatProgress`, `getPkgId`, `pauseFor`, `@debounce`, `sameUrl`,
-`isValidHttpUrl`, `registryUrl`, hostname normalization + `randomServerName` +
-`serverNameValidator`, keyboards/languages data, `defaultRegistries`/`knownRegistries`).
+`isValidHttpUrl`, `registryUrl`, `hostnameValidator`, `hostnameValidationErrors`,
+`randomHostname`, keyboards/languages data,
+`defaultRegistries`/`knownRegistries`).
 
 `@start9labs/marketplace`: the whole storefront kit (shell, tile, preview drawer, about/
 release-notes/flavors/dependencies/links, registry picker) abstracted over

@@ -1,5 +1,7 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
+use axum::extract::ws;
 use clap::Parser;
 use itertools::Itertools;
 use patch_db::Dump;
@@ -11,10 +13,16 @@ use tracing::instrument;
 use ts_rs::TS;
 
 use crate::context::CliContext;
+use crate::db::SubscribeRes;
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::context::RegistryContext;
+use crate::rpc_continuations::{Guid, RpcContinuation};
 use crate::util::serde::{HandlerExtSerde, apply_expr};
+
+lazy_static::lazy_static! {
+    static ref INDEX: JsonPointer = "/index".parse().unwrap();
+}
 
 pub fn db_api<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
@@ -28,6 +36,12 @@ pub fn db_api<C: Context>() -> ParentHandler<C> {
             "dump",
             from_fn_async(dump)
                 .with_metadata("admin", Value::Bool(true))
+                .no_cli(),
+        )
+        .subcommand(
+            "subscribe",
+            from_fn_async(subscribe)
+                .with_metadata("authenticated", Value::Bool(false))
                 .no_cli(),
         )
         .subcommand(
@@ -94,6 +108,114 @@ pub async fn dump(ctx: RegistryContext, DumpParams { pointer }: DumpParams) -> R
         .db
         .dump(&pointer.as_ref().map_or(ROOT, |p| p.borrowed()))
         .await)
+}
+
+#[derive(Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SubscribeParams {
+    #[ts(type = "string | null")]
+    pointer: Option<JsonPointer>,
+}
+
+fn subscription_pointer(pointer: Option<JsonPointer>) -> Result<JsonPointer, Error> {
+    let pointer = pointer.unwrap_or_else(|| INDEX.clone());
+    ensure_code!(
+        pointer.starts_with(&*INDEX),
+        ErrorKind::InvalidRequest,
+        "{}",
+        rust_i18n::t!("registry.db.pointer-outside-index")
+    );
+    Ok(pointer)
+}
+
+pub async fn subscribe(
+    ctx: RegistryContext,
+    SubscribeParams { pointer }: SubscribeParams,
+) -> Result<SubscribeRes, Error> {
+    let (dump, mut sub) = ctx.db.dump_and_sub(subscription_pointer(pointer)?).await;
+    let guid = Guid::new();
+    ctx.rpc_continuations
+        .add(
+            guid.clone(),
+            RpcContinuation::ws(
+                |mut ws| async move {
+                    if let Err(e) = async {
+                        loop {
+                            tokio::select! {
+                                rev = sub.recv() => {
+                                    let Some(rev) = rev else {
+                                        return ws.normal_close("complete").await;
+                                    };
+                                    ws.send(ws::Message::Text(
+                                        serde_json::to_string(&rev)
+                                            .with_kind(ErrorKind::Serialization)?
+                                            .into(),
+                                    ))
+                                    .await
+                                    .with_kind(ErrorKind::Network)?;
+                                }
+                                msg = ws.recv() => {
+                                    if msg.transpose().with_kind(ErrorKind::Network)?.is_none() {
+                                        return Ok(())
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .await
+                    {
+                        if !crate::util::net::is_ws_reset_without_close(&e) {
+                            tracing::error!("Error in registry db websocket: {e}");
+                            tracing::debug!("{e:?}");
+                        }
+                    }
+                },
+                Duration::from_secs(30),
+            ),
+        )
+        .await;
+
+    Ok(SubscribeRes { dump, guid })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subscribe_params_allow_an_omitted_or_null_pointer() {
+        for params in [
+            serde_json::json!({}),
+            serde_json::json!({ "pointer": null }),
+        ] {
+            let params: SubscribeParams = serde_json::from_value(params).unwrap();
+            assert!(params.pointer.is_none());
+        }
+    }
+
+    #[test]
+    fn subscription_pointer_defaults_to_index() {
+        assert_eq!(subscription_pointer(None).unwrap(), INDEX.clone());
+    }
+
+    #[test]
+    fn subscription_pointer_accepts_index_descendants() {
+        for pointer in ["/index", "/index/package", "/index/os/versions"] {
+            let pointer: JsonPointer = pointer.parse().unwrap();
+            assert_eq!(
+                subscription_pointer(Some(pointer.clone())).unwrap(),
+                pointer
+            );
+        }
+    }
+
+    #[test]
+    fn subscription_pointer_rejects_paths_outside_index() {
+        for pointer in ["", "/", "/admins", "/indexing"] {
+            let err = subscription_pointer(Some(pointer.parse().unwrap())).unwrap_err();
+            assert!(matches!(err.kind, ErrorKind::InvalidRequest));
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize, Parser)]

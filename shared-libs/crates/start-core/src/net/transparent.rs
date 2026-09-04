@@ -1,23 +1,7 @@
-//! Source-preserving transparent egress for the SNI demux (RFC §4.6).
+//! Source-preserving transparent egress for the SNI demux.
 //!
-//! A demux proxy reads the TLS ClientHello on a normal listener (the host is the
-//! legitimate destination of the inbound flow), then originates the internal leg
-//! with the *client's* source address via `IP_TRANSPARENT`, so the backend sees
-//! the real peer rather than this host. Backend→client replies (addressed to the
-//! client, transiting this host as the backend's gateway) are diverted back into
-//! the proxy socket by policy routing.
-//!
-//! Datapath (`table ip`/`ip6 startos` + iproute2, mirrored per family):
-//! - egress socket: `IP_TRANSPARENT`/`IPV6_TRANSPARENT`, bound to the client's
-//!   `(ip, port)`; the client and backend legs are necessarily one family.
-//! - `mangle_prerouting` `sni-divert`: an inbound packet matching a local
-//!   `IP_TRANSPARENT` socket (i.e. a reply to such an egress) is marked with
-//!   [`DIVERT_MARK`]. Only the inbound/reply direction is touched, so the
-//!   proxy's own egress packets route to the backend normally.
-//! - `ip [-6] rule fwmark DIVERT_MARK lookup DIVERT_TABLE priority 49` + `ip [-6]
-//!   route add local 0.0.0.0/0`|`::/0` `dev lo table DIVERT_TABLE`: deliver the
-//!   marked replies locally, into the transparent socket. v4 and v6 keep
-//!   separate rule/route tables, so one number serves both.
+//! Upstream sockets bind the client address. Policy routing returns backend
+//! replies to the local transparent socket without terminating TLS.
 
 use std::net::SocketAddr;
 
@@ -32,21 +16,56 @@ use crate::net::utils::default_keepalive;
 use crate::prelude::*;
 use crate::util::Invoke;
 
-/// Firewall mark for transparent-egress reply diversion. Outside the gateway's
-/// per-interface `1000 + ifindex` mark space and its priority-50 rule.
+/// Firewall mark for transparent reply diversion.
 pub const DIVERT_MARK: u32 = 0x0054_0001;
-/// Dedicated routing table holding the local-delivery default for diverted
-/// replies. Outside the gateway's `1000 + ifindex` table space.
+/// Default policy-routing table for diverted replies.
 pub const DIVERT_TABLE: u32 = 1344;
 
-/// `mangle_prerouting` rule that marks inbound packets belonging to a local
-/// `IP_TRANSPARENT` (SNI-demux) socket — the replies to a source-preserving
-/// egress connection — so the priority-49 `ip rule` diverts them to the local
-/// table and they reach the proxy socket instead of being forwarded back out.
-/// Touches only the reply direction (the egress leg is in `output`, not here),
-/// so it cannot misroute the proxy's own outbound packets. Spliced into the
-/// gateway mangle reconcile so it survives that chain's flush; on hosts without
-/// that reconcile (e.g. the tunnel) [`ensure_divert_infra`] adds it directly.
+/// Host-specific reply-diversion policy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DivertConfig {
+    /// Routing table for the local-delivery default route.
+    pub route_table: u32,
+    /// Priority of the fwmark policy rule.
+    pub rule_priority: u32,
+    /// Whether matching preserves unrelated firewall-mark bits.
+    pub masked_fwmark: bool,
+    /// Whether this process manages the nftables marking rule.
+    pub manage_nft: bool,
+}
+
+impl Default for DivertConfig {
+    fn default() -> Self {
+        DivertConfig {
+            route_table: DIVERT_TABLE,
+            rule_priority: 49,
+            masked_fwmark: false,
+            manage_nft: true,
+        }
+    }
+}
+
+static DIVERT_CONFIG: std::sync::OnceLock<DivertConfig> = std::sync::OnceLock::new();
+
+/// Installs diversion policy before first use.
+/// Returns the rejected value when policy was already installed.
+pub fn set_divert_config(cfg: DivertConfig) -> Result<(), DivertConfig> {
+    DIVERT_CONFIG.set(cfg)
+}
+
+fn divert_config() -> &'static DivertConfig {
+    DIVERT_CONFIG.get_or_init(DivertConfig::default)
+}
+
+fn fwmark_arg(cfg: &DivertConfig) -> String {
+    if cfg.masked_fwmark {
+        format!("{DIVERT_MARK:#x}/{DIVERT_MARK:#x}")
+    } else {
+        format!("{DIVERT_MARK:#x}")
+    }
+}
+
+/// Nftables rules marking transparent-socket replies for local delivery.
 pub fn divert_mark_rule() -> String {
     [
         divert_mark_rule_family("ip"),
@@ -61,11 +80,8 @@ fn divert_mark_rule_family(family: &str) -> String {
     )
 }
 
-/// Open the internal leg of a demuxed connection from the client's own source
-/// address, so the backend sees the real peer. Requires `CAP_NET_ADMIN` (startd
-/// runs as root). The reply path is set up by [`ensure_divert_infra`]. `client`
-/// and `target` must be the same family — the source address is bound on the
-/// socket that dials the target.
+/// Opens an upstream connection bound to the client source address.
+/// Both addresses must use the same IP family.
 #[cfg(target_os = "linux")]
 pub async fn transparent_connect(
     client: SocketAddr,
@@ -74,7 +90,7 @@ pub async fn transparent_connect(
     let sock = match (client, target) {
         (SocketAddr::V4(_), SocketAddr::V4(_)) => {
             let sock = TcpSocket::new_v4()?;
-            // Must precede bind: permits binding a non-local (client) address.
+            // IP_TRANSPARENT must precede bind.
             socket2::SockRef::from(&sock).set_ip_transparent_v4(true)?;
             sock
         }
@@ -101,9 +117,7 @@ pub async fn transparent_connect(
     sock.connect(target).await
 }
 
-/// `IP_TRANSPARENT` is Linux-only and the SNI demux runs only on the Linux
-/// gateway, so this stub never executes off-Linux; it exists to keep the
-/// cross-platform build (apple-darwin) compiling.
+/// Unsupported non-Linux implementation for cross-platform builds.
 #[cfg(not(target_os = "linux"))]
 pub async fn transparent_connect(
     _client: SocketAddr,
@@ -117,10 +131,7 @@ pub async fn transparent_connect(
 
 static DIVERT_INFRA: OnceCell<()> = OnceCell::const_new();
 
-/// [`ensure_divert_infra`] serialized and run at most once per process (cached
-/// only on success, so a transient failure is retried on the next call). Cheap
-/// to call per connection from the local passthrough path. Serialization keeps
-/// concurrent callers from racing the check-then-add commands (EEXIST).
+/// Initializes diversion once, retrying after failures.
 pub async fn ensure_divert_infra_once() -> Result<(), Error> {
     DIVERT_INFRA
         .get_or_try_init(|| async { ensure_divert_infra().await.map(|_| ()) })
@@ -128,26 +139,19 @@ pub async fn ensure_divert_infra_once() -> Result<(), Error> {
         .map(|_| ())
 }
 
-/// Serializes [`ensure_divert_infra`]'s check-then-add sequences: concurrent
-/// callers (listener startup vs the periodic re-assert) would otherwise race
-/// into EEXIST.
 static DIVERT_ASSERT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-/// Install the reply-path divert (idempotent): the iproute2 half (rule + table)
-/// always, plus the nft `sni-divert` mark rule when absent — so hosts that run the
-/// SNI demux but not the gateway mangle reconcile (e.g. the tunnel) still mark and
-/// divert replies. Safe to call repeatedly; returns whether a missing piece had
-/// to be (re-)added, so periodic callers can surface external flushes.
+/// Reconciles policy-routing and optional nftables rules.
+/// Returns whether any missing rule was restored.
 pub async fn ensure_divert_infra() -> Result<bool, Error> {
     let _guard = DIVERT_ASSERT.lock().await;
+    let cfg = divert_config();
     let mut repaired = false;
-    let table = DIVERT_TABLE.to_string();
+    let table = cfg.route_table.to_string();
+    let priority = cfg.rule_priority.to_string();
+    let fwmark = fwmark_arg(cfg);
 
-    // Both families, and independently: `ip` and `ip -6` keep separate rule and
-    // route tables, so the same DIVERT_TABLE/DIVERT_MARK numbers serve each.
     for (flag, default_route, family) in [("-4", "0.0.0.0/0", "ip"), ("-6", "::/0", "ip6")] {
-        // Local-delivery default in the divert table: marked replies are delivered
-        // to the local transparent socket instead of being forwarded back out.
         Command::new("ip")
             .args([
                 flag,
@@ -163,8 +167,7 @@ pub async fn ensure_divert_infra() -> Result<bool, Error> {
             .invoke(ErrorKind::Network)
             .await?;
 
-        // Policy rule at priority 49 — above the gateway's per-interface symmetric
-        // -return rules at 50 — so diverted replies win.
+        // Divert replies before per-interface symmetric-return rules.
         let rules = Command::new("ip")
             .args([flag, "rule", "list"])
             .invoke(ErrorKind::Network)
@@ -173,24 +176,17 @@ pub async fn ensure_divert_infra() -> Result<bool, Error> {
         if !String::from_utf8_lossy(&rules).contains(&format!("lookup {table}")) {
             Command::new("ip")
                 .args([
-                    flag,
-                    "rule",
-                    "add",
-                    "fwmark",
-                    &format!("{DIVERT_MARK:#x}"),
-                    "lookup",
-                    &table,
-                    "priority",
-                    "49",
+                    flag, "rule", "add", "fwmark", &fwmark, "lookup", &table, "priority", &priority,
                 ])
                 .invoke(ErrorKind::Network)
                 .await?;
             repaired = true;
         }
 
-        // nft `sni-divert` mark rule. The gateway reconcile owns (and re-adds) it on
-        // hosts that run it; install it directly where nothing else does (the tunnel),
-        // skipping if already present so we never duplicate or fight the reconcile.
+        // Install marking only when the host firewall does not own it.
+        if !cfg.manage_nft {
+            continue;
+        }
         let chain = Command::new("nft")
             .args(["list", "chain", family, "startos", "mangle_prerouting"])
             .invoke(ErrorKind::Network)
@@ -223,8 +219,29 @@ pub async fn ensure_divert_infra() -> Result<bool, Error> {
         }
     }
 
-    // rp_filter needs no loosening: a diverted reply's source is the backend,
-    // routable via its own ingress interface, so even strict RPF (1) accepts it
-    // (verified in a netns harness under both strict and loose).
+    // Strict reverse-path filtering accepts backend-routable reply sources.
     Ok(repaired)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_matches_legacy_behavior() {
+        let cfg = DivertConfig::default();
+        assert_eq!(cfg.route_table, DIVERT_TABLE);
+        assert_eq!(cfg.rule_priority, 49);
+        assert_eq!(fwmark_arg(&cfg), format!("{DIVERT_MARK:#x}"));
+        assert!(cfg.manage_nft);
+    }
+
+    #[test]
+    fn masked_fwmark_matches_or_set_marks() {
+        let cfg = DivertConfig {
+            masked_fwmark: true,
+            ..DivertConfig::default()
+        };
+        assert_eq!(fwmark_arg(&cfg), "0x540001/0x540001");
+    }
 }

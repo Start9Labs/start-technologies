@@ -79,7 +79,6 @@
     "deep-equality-data-structures": "1.5.1",
     "dompurify": "3.4.0",
     "fast-json-patch": "^3.1.1",
-    "fuse.js": "^6.4.6",
     "jose": "^4.9.0",
     "js-yaml": "^4.1.0",
     "marked": "^4.0.0",

@@ -1,12 +1,11 @@
 use std::collections::BTreeMap;
 use std::time::SystemTime;
 
-use imbl_value::InternedString;
 use openssl::pkey::{PKey, Private};
 use openssl::x509::X509;
 
 use crate::db::model::DatabaseModel;
-use crate::hostname::{ServerHostnameInfo, generate_hostname, generate_id};
+use crate::hostname::{ServerHostname, generate_hostname, generate_id};
 use crate::net::ssl::{CertBranding, gen_nistp256, make_root_cert};
 use crate::prelude::*;
 use crate::util::serde::Pem;
@@ -23,7 +22,7 @@ fn hash_password(password: &str) -> Result<String, Error> {
 #[derive(Clone)]
 pub struct AccountInfo {
     pub server_id: String,
-    pub hostname: ServerHostnameInfo,
+    pub hostname: ServerHostname,
     pub password: String,
     pub root_ca_key: PKey<Private>,
     pub root_ca_cert: X509,
@@ -34,16 +33,12 @@ impl AccountInfo {
     pub fn new(
         password: &str,
         start_time: SystemTime,
-        hostname: Option<ServerHostnameInfo>,
+        hostname: Option<ServerHostname>,
     ) -> Result<Self, Error> {
         let server_id = generate_id();
-        let hostname = if let Some(h) = hostname {
-            h
-        } else {
-            ServerHostnameInfo::from_hostname(generate_hostname())
-        };
+        let hostname = hostname.unwrap_or_else(generate_hostname);
         let root_ca_key = gen_nistp256()?;
-        let branding = CertBranding::start_os(hostname.hostname.as_ref());
+        let branding = CertBranding::start_os(hostname.as_ref());
         let root_ca_cert = make_root_cert(&root_ca_key, &branding, start_time)?;
         let ssh_key = ssh_key::PrivateKey::from(ssh_key::private::Ed25519Keypair::random(
             &mut crate::util::crypto::os_rng(),
@@ -62,7 +57,7 @@ impl AccountInfo {
 
     pub fn load(db: &DatabaseModel) -> Result<Self, Error> {
         let server_id = db.as_public().as_server_info().as_id().de()?;
-        let hostname = ServerHostnameInfo::load(db.as_public().as_server_info())?;
+        let hostname = ServerHostname::load(db.as_public().as_server_info())?;
         let password = db.as_private().as_password().de()?;
         let key_store = db.as_private().as_key_store();
         let cert_store = key_store.as_local_certs();
@@ -106,7 +101,7 @@ impl AccountInfo {
                 .as_root_cert_mut()
                 .ser(Pem::new_ref(&self.root_ca_cert))?;
             let int_key = crate::net::ssl::gen_nistp256()?;
-            let branding = CertBranding::start_os(self.hostname.hostname.as_ref());
+            let branding = CertBranding::start_os(self.hostname.as_ref());
             let int_cert = crate::net::ssl::make_int_cert(
                 (&self.root_ca_key, &self.root_ca_cert),
                 &int_key,
@@ -122,12 +117,5 @@ impl AccountInfo {
     pub fn set_password(&mut self, password: &str) -> Result<(), Error> {
         self.password = hash_password(password)?;
         Ok(())
-    }
-
-    pub fn hostnames(&self) -> impl IntoIterator<Item = InternedString> + Send + '_ {
-        [
-            (*self.hostname.hostname).clone(),
-            self.hostname.hostname.local_domain_name(),
-        ]
     }
 }

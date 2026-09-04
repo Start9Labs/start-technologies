@@ -208,7 +208,7 @@ pub struct SniRoute {
     pub label: Option<String>,
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// Gateway-created (PCP) vs user-added. Drives the UI Manual/Automatic split.
+    /// Gateway-created vs user-added. Drives the UI Manual/Automatic split.
     #[serde(default)]
     pub auto: bool,
 }

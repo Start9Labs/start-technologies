@@ -49,6 +49,9 @@ on:
       # projects/start-wrt/docs/**) shouldn't trigger a build.
       - '!**/*.md'
   pull_request:
+    # The jobs below skip drafts, and `ready_for_review` is not a default
+    # activity type, so without it a draft marked ready is never checked.
+    types: [opened, synchronize, reopened, ready_for_review]
     branches:
       - master
       - integration/*
@@ -75,7 +78,7 @@ on:
 # publishes to alpha, so master pushes queue behind each other rather than
 # aborting a publish half-done.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  group: start-wrt-${{ github.event_name }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -150,6 +153,8 @@ jobs:
       # every product, so this install lives here instead).
       - name: Install OpenWrt build dependencies
         run: |
+          # The runner image's Microsoft apt sources 403 intermittently, and one failing source fails the whole update.
+          grep -rl 'packages\.microsoft\.com' /etc/apt/sources.list.d/ 2>/dev/null | sudo xargs -r rm -f || true
           sudo apt-get update
           sudo apt-get install -y \
             build-essential clang flex bison g++ gawk gcc-multilib \

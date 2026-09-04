@@ -23,7 +23,7 @@ pub fn os_api<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "asset",
-            asset::asset_api::<C>().with_about("about.commands-add-sign-get-assets"),
+            asset::asset_api::<C>().with_about("about.commands-add-sign-remove-get-assets"),
         )
         .subcommand(
             "version",

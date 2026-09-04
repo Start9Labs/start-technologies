@@ -35,31 +35,33 @@ The archive is cryptographically signed using Ed25519 with prehashed content (SH
 
 The package manifest contains all metadata:
 
-| Field                  | Type          | Description                                |
-| ---------------------- | ------------- | ------------------------------------------ |
-| `id`                   | string        | Package identifier (e.g., `bitcoind`)      |
-| `title`                | string        | Display name                               |
-| `version`              | string        | Extended version string                    |
-| `satisfies`            | string[]      | Version ranges this version satisfies      |
-| `releaseNotes`         | string/object | Release notes (localized)                  |
-| `canMigrateTo`         | string        | Version range for forward migration        |
-| `canMigrateFrom`       | string        | Version range for backward migration       |
-| `license`              | string        | License type                               |
-| `wrapperRepo`          | string        | StartOS wrapper repository URL             |
-| `upstreamRepo`         | string        | Upstream project URL                       |
-| `supportSite`          | string        | Support site URL                           |
-| `marketingSite`        | string        | Marketing site URL                         |
-| `donationUrl`          | string?       | Optional donation URL                      |
-| `docsUrl`              | string?       | Optional documentation URL                 |
-| `description`          | object        | Short and long descriptions (localized)    |
-| `images`               | object        | Image configurations by image ID           |
-| `volumes`              | string[]      | Volume IDs for persistent data             |
-| `dependencies`         | object        | Package dependencies                       |
-| `hardwareRequirements` | object        | Hardware requirements (arch, RAM, devices) |
-| `hardwareAcceleration` | boolean       | Whether package uses hardware acceleration |
-| `gitHash`              | string?       | Git commit hash                            |
-| `osVersion`            | string        | Minimum StartOS version                    |
-| `sdkVersion`           | string?       | SDK version used to build                  |
+| Field                    | Type          | Description                                                 |
+| ------------------------ | ------------- | ----------------------------------------------------------- |
+| `id`                     | string        | Package identifier (e.g., `bitcoind`)                       |
+| `title`                  | string        | Display name                                                |
+| `version`                | string        | Extended version string                                     |
+| `satisfies`              | string[]      | Concrete versions this version is backwards compatible with |
+| `releaseNotes`           | string/object | Release notes (localized)                                   |
+| `canMigrateTo`           | string        | Version range for forward migration                         |
+| `canMigrateFrom`         | string        | Version range for backward migration                        |
+| `license`                | string        | License type                                                |
+| `packageRepo`            | string        | StartOS package repository URL                              |
+| `upstreamRepo`           | string        | Upstream project URL                                        |
+| `marketingUrl`           | string?       | Marketing site URL                                          |
+| `donationUrl`            | string?       | Optional donation URL                                       |
+| `description`            | object        | Short and long descriptions (localized)                     |
+| `images`                 | object        | Image configurations by image ID                            |
+| `volumes`                | string[]      | Volume IDs for persistent data                              |
+| `dependencies`           | object        | Package dependencies                                        |
+| `hardwareRequirements`   | object        | Hardware requirements (arch, RAM, devices)                  |
+| `hardwareAcceleration`   | boolean       | Whether package uses hardware acceleration                  |
+| `userspaceFilesystems`   | boolean       | Whether package is granted `/dev/fuse`                      |
+| `virtualNetworking`      | boolean       | Whether package is granted `/dev/net/tun`                   |
+| `hardwareVirtualization` | boolean       | Whether package is granted `/dev/kvm`                       |
+| `plugins`                | string[]      | Plugin IDs the package registers                            |
+| `gitHash`                | string?       | Git commit hash                                             |
+| `osVersion`              | string        | Minimum StartOS version                                     |
+| `sdkVersion`             | string?       | SDK version used to build                                   |
 
 ### javascript.squashfs
 

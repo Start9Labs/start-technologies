@@ -471,7 +471,7 @@ async fn perform_backup(
     let timestamp = Utc::now();
 
     backup_guard.unencrypted_metadata.version = crate::version::Current::default().semver().into();
-    backup_guard.unencrypted_metadata.hostname = ctx.account.peek(|a| a.hostname.hostname.clone());
+    backup_guard.unencrypted_metadata.hostname = ctx.account.peek(|a| a.hostname.clone());
     backup_guard.unencrypted_metadata.timestamp = timestamp.clone();
     backup_guard.metadata.version = crate::version::Current::default().semver().into();
     backup_guard.metadata.timestamp = Some(timestamp);

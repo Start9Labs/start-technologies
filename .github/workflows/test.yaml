@@ -1,6 +1,7 @@
 name: Automated Tests
 
 on:
+  workflow_call:
   push:
     branches:
       - master
@@ -11,12 +12,15 @@ on:
     paths-ignore:
       - '**/*.md'
   pull_request:
+    # The jobs below skip drafts, and `ready_for_review` is not a default
+    # activity type, so without it a draft marked ready is never checked.
+    types: [opened, synchronize, reopened, ready_for_review]
     branches:
       - master
       - integration/*
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  group: automated-tests-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -34,6 +38,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Check pull request retarget coverage
+        run: .github/scripts/check-pr-retarget-workflows.py
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODEJS_VERSION }}
@@ -169,4 +175,17 @@ jobs:
       - name: Check man pages up to date
         run: make manpages-check
       - name: Check TS bindings up to date
+        if: '!cancelled()'
         run: make start-core-ts-bindings-check
+      # A failed gate leaves its regenerated files in the working tree.
+      - name: Upload regenerated artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: generated-artifacts
+          path: |
+            shared-libs/ts-modules/start-core/lib/osBindings
+            projects/start-cli/man
+            projects/start-registry/man
+            projects/start-tunnel/man
+            projects/start-os/man

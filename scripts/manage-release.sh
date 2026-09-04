@@ -153,20 +153,22 @@ deb_arch() {
     esac
 }
 
-os_platform_label() {
-    case "$1" in
-        x86_64-nonfree) echo "x86_64/AMD64" ;;
-        x86_64-nvidia) echo "x86_64/AMD64 + NVIDIA" ;;
-        x86_64) echo "x86_64/AMD64-slim (FOSS-only)" ;;
-        aarch64-nonfree) echo "aarch64/ARM64" ;;
-        aarch64-nvidia) echo "aarch64/ARM64 + NVIDIA" ;;
-        aarch64) echo "aarch64/ARM64-slim (FOSS-only)" ;;
-        raspberrypi) echo "Raspberry Pi (aarch64)" ;;
-        riscv64-nonfree) echo "RISCV64 (RVA23)" ;;
-        riscv64) echo "RISCV64 (RVA23)-slim (FOSS-only)" ;;
-        *) echo "$1" ;;
-    esac
-}
+# One row of the release notes' download table, in the order they are offered:
+# hardware | image | platform. A reader knows what they own, not which platform
+# tuple it is, so the hardware column leads and names the Start9 product where
+# there is one. release_notes fails on a platform with no row here, so a new
+# image variant cannot ship undescribed.
+OS_DOWNLOAD_ROWS=(
+    "**Server One**, and most other Intel and AMD desktops, laptops, and mini PCs|x86_64 (AMD64), standard|x86_64-nonfree"
+    "**Server Pure**, and other hardware that runs without proprietary firmware|x86_64 (AMD64), slim|x86_64"
+    "An Intel or AMD server with an NVIDIA GPU|x86_64 (AMD64), NVIDIA|x86_64-nvidia"
+    "ARM64 servers and single-board computers|aarch64 (ARM64), standard|aarch64-nonfree"
+    "ARM64 hardware that runs without proprietary firmware|aarch64 (ARM64), slim|aarch64"
+    "**NVIDIA DGX Spark**, and other ARM64 servers with an NVIDIA GPU|aarch64 (ARM64), NVIDIA|aarch64-nvidia"
+    "**Raspberry Pi 4** — flashed to a microSD card, not a USB drive|Raspberry Pi|raspberrypi"
+    "RISC-V servers and boards|RISC-V (RVA23), standard|riscv64-nonfree"
+    "RISC-V hardware that runs without proprietary firmware|RISC-V (RVA23), slim|riscv64"
+)
 
 # The image extensions a platform ships: squashfs everywhere, plus iso (most) or
 # a flashable img (raspberrypi).
@@ -1385,20 +1387,30 @@ release_notes() {
         os)
             echo "## Image Downloads"
             echo
-            local ext url
+            echo "| Hardware | Image | Download |"
+            echo "| --- | --- | --- |"
+            local ext url row hardware image described
             load_registry_index "$STARTOS_SOURCE_REGISTRY"
-            for platform in $OS_PLATFORMS; do
+            described=""
+            for row in "${OS_DOWNLOAD_ROWS[@]}"; do
+                IFS='|' read -r hardware image platform <<< "$row"
+                described="${described}${platform} "
                 for ext in $(os_image_exts "$platform"); do
                     # squashfs is the over-the-air update asset, not a download.
                     [ "$ext" != squashfs ] || continue
                     url=$(asset_url "$STARTOS_SOURCE_REGISTRY" "$ext" "$platform")
                     [ -n "$url" ] || continue
                     if [ "$ext" = img ]; then
-                        echo "- [$(os_platform_label "$platform")](${url}.gz \"gzip-compressed — Raspberry Pi Imager and balenaEtcher flash it without unpacking\")"
-                    else
-                        echo "- [$(os_platform_label "$platform")]($url)"
+                        url="${url}.gz \"gzip-compressed — Raspberry Pi Imager and balenaEtcher flash it without unpacking\""
                     fi
+                    echo "| ${hardware} | ${image} | [${ext^^}](${url}) |"
                 done
+            done
+            for platform in $OS_PLATFORMS; do
+                case "$described" in
+                    *"${platform} "*) ;;
+                    *) >&2 echo "No OS_DOWNLOAD_ROWS entry for ${platform} — it would be missing from the release notes" ; return 1 ;;
+                esac
             done
             echo
             local imgs

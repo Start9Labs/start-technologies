@@ -35,6 +35,7 @@ use crate::db::model::package::{
 use crate::disk::mount::filesystem::ReadOnly;
 use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
 use crate::lxc::ContainerId;
+use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
 use crate::rpc_continuations::{Guid, RpcContinuation};
 use crate::s9pk::S9pk;
@@ -42,6 +43,7 @@ use crate::service::action::update_tasks;
 use crate::service::rpc::{ExitParams, InitKind};
 use crate::service::service_map::InstallProgressHandles;
 use crate::service::uninstall::cleanup;
+use crate::status::StatusInfo;
 use crate::util::Never;
 use crate::util::actor::concurrent::ConcurrentActor;
 use crate::util::future::NonDetachingJoinHandle;
@@ -94,6 +96,35 @@ pub async fn get_data_version(id: &PackageId) -> Result<Option<String>, Error> {
     Ok(s.map(|s| s.trim().to_string()))
 }
 
+/// Notify and propagate: a failed rollback must stop the load, not pass for a clean revert.
+async fn report_failed_rollback(
+    ctx: &RpcContext,
+    id: &PackageId,
+    res: Result<(), Error>,
+) -> Result<(), Error> {
+    let Err(e) = res else {
+        return Ok(());
+    };
+    tracing::error!("Failed to restore volumes for {id}: {e}");
+    tracing::debug!("{e:?}");
+    let message = e.to_string();
+    ctx.db
+        .mutate(|db| {
+            notify(
+                db,
+                Some(id.clone()),
+                NotificationLevel::Error,
+                t!("service.mod.rollback-failed-title").to_string(),
+                t!("service.mod.rollback-failed-message", error = message).to_string(),
+                (),
+            )
+        })
+        .await
+        .result
+        .log_err();
+    Err(e)
+}
+
 struct RootCommand(pub String);
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default, TS)]
@@ -127,6 +158,37 @@ impl ServiceRef {
     pub fn weak(&self) -> Weak<Service> {
         Arc::downgrade(&self.0)
     }
+
+    /// Stops the main chain through the actor, which owns run state: marks the status
+    /// Updating and waits for the actor to report the stop. `init()` maps Updating back
+    /// to the recorded run state, so the replacement service — or the old one after a
+    /// crash — comes back the way it was.
+    pub async fn quiesce(&self) -> Result<(), Error> {
+        let id = &self.seed.id;
+        let db = &self.seed.ctx.db;
+        db.mutate(|db| {
+            db.as_public_mut()
+                .as_package_data_mut()
+                .as_idx_mut(id)
+                .or_not_found(id)?
+                .as_status_info_mut()
+                .as_desired_mut()
+                .map_mutate(|s| Ok(s.updating()))
+        })
+        .await
+        .result?;
+        let mut watch = db
+            .watch(
+                format!("/public/packageData/{id}/statusInfo")
+                    .parse()
+                    .unwrap(),
+            )
+            .await
+            .typed::<StatusInfo>();
+        watch.wait_for(|s| s.started.is_none()).await?;
+        Ok(())
+    }
+
     pub async fn uninstall(
         self,
         uninit: ExitParams,
@@ -426,15 +488,21 @@ impl Service {
                             tracing::error!("Error installing service: {e}");
                             tracing::debug!("{e:?}")
                         }) {
-                            crate::volume::remove_install_backup(id).await.log_err();
+                            crate::volume::InstallBackup::of(id)
+                                .remove()
+                                .await
+                                .log_err();
                             return Ok(Some(service));
                         }
                     }
                 }
-                cleanup(ctx, id, false).await.log_err();
-                crate::volume::restore_volumes_from_install_backup(id)
-                    .await
-                    .log_err();
+                // A failed install over pre-existing data (e.g. a 0.3.x conversion) has a
+                // rollback point to put back; don't delete the volumes out from under it.
+                let backup = crate::volume::InstallBackup::of(id);
+                backup.resolve_pending().await.log_err();
+                let keep_volumes = backup.exists().await;
+                cleanup(ctx, id, keep_volumes).await.log_err();
+                report_failed_rollback(ctx, id, backup.restore().await).await?;
                 ctx.db
                     .mutate(|v| v.as_public_mut().as_package_data_mut().remove(id))
                     .await
@@ -469,7 +537,10 @@ impl Service {
                             tracing::error!("Error installing service: {e}");
                             tracing::debug!("{e:?}")
                         }) {
-                            crate::volume::remove_install_backup(id).await.log_err();
+                            crate::volume::InstallBackup::of(id)
+                                .remove()
+                                .await
+                                .log_err();
                             return Ok(Some(service));
                         }
                     }
@@ -505,17 +576,23 @@ impl Service {
                         })
                         .await
                         .result?;
-                    // Roll the filesystem back before reloading the old service, so its
-                    // init sees old-version data instead of an impossible new->old migration.
-                    crate::volume::restore_volumes_from_install_backup(id)
-                        .await
-                        .log_err();
+                    // Roll the filesystem back before reloading the old service; a failed
+                    // rollback is fatal — the old service must not start on new-version data.
+                    report_failed_rollback(
+                        ctx,
+                        id,
+                        crate::volume::InstallBackup::of(id).restore().await,
+                    )
+                    .await?;
                     handle_installed(s9pk).await
                 }
                 .await
                 {
                     Ok(service) => {
-                        crate::volume::remove_install_backup(id).await.log_err();
+                        crate::volume::InstallBackup::of(id)
+                            .remove()
+                            .await
+                            .log_err();
                         Ok(service)
                     }
                     Err(e) => {

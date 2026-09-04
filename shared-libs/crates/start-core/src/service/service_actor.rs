@@ -116,7 +116,8 @@ async fn service_actor_loop<'a>(
             desired:
                 DesiredStatus::Stopped
                 | DesiredStatus::Restarting { .. }
-                | DesiredStatus::BackingUp { .. },
+                | DesiredStatus::BackingUp { .. }
+                | DesiredStatus::Updating { .. },
             started: Some(_),
             ..
         } => {

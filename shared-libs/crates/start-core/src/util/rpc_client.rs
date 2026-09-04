@@ -47,7 +47,7 @@ impl RpcClient {
                 let mut lines = BufReader::new(reader).lines();
                 while let Some(line) = lines.next_line().await.transpose() {
                     match line.map_err(Error::from).and_then(|l| {
-                        serde_json::from_str::<RpcResponse>(crate::dbg!(&l))
+                        serde_json::from_str::<RpcResponse>(&l)
                             .with_kind(ErrorKind::Deserialization)
                     }) {
                         Ok(l) => {
@@ -114,7 +114,7 @@ impl RpcClient {
             let (send, recv) = oneshot::channel();
             w.lock().await.insert(id.clone(), send);
             self.writer
-                .write_all((crate::dbg!(serde_json::to_string(&request))? + "\n").as_bytes())
+                .write_all((serde_json::to_string(&request)? + "\n").as_bytes())
                 .await
                 .map_err(|e| {
                     let mut err = rpc_toolkit::yajrc::INTERNAL_ERROR.clone();
@@ -154,7 +154,7 @@ impl RpcClient {
             params,
         };
         self.writer
-            .write_all((crate::dbg!(serde_json::to_string(&request))? + "\n").as_bytes())
+            .write_all((serde_json::to_string(&request)? + "\n").as_bytes())
             .await
             .map_err(|e| {
                 let mut err = rpc_toolkit::yajrc::INTERNAL_ERROR.clone();

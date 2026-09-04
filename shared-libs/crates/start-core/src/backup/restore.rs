@@ -18,7 +18,7 @@ use crate::db::model::Database;
 use crate::disk::mount::backup::BackupMountGuard;
 use crate::disk::mount::filesystem::ReadWrite;
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
-use crate::hostname::ServerHostnameInfo;
+use crate::hostname::{ServerHostname, repair_hostname};
 use crate::init::init;
 use crate::prelude::*;
 use crate::progress::ProgressUnits;
@@ -90,6 +90,13 @@ pub async fn restore_packages_rpc(
     Ok(())
 }
 
+fn restored_hostname(
+    backup_hostname: ServerHostname,
+    requested_hostname: Option<ServerHostname>,
+) -> ServerHostname {
+    requested_hostname.unwrap_or_else(|| repair_hostname(backup_hostname.as_ref()))
+}
+
 #[instrument(skip_all)]
 pub async fn recover_full_server(
     ctx: &SetupContext,
@@ -99,7 +106,7 @@ pub async fn recover_full_server(
     server_id: &str,
     recovery_password: &str,
     kiosk: bool,
-    hostname: Option<ServerHostnameInfo>,
+    hostname: Option<ServerHostname>,
     SetupExecuteProgress {
         init_phases,
         restore_phase,
@@ -127,9 +134,7 @@ pub async fn recover_full_server(
         .with_kind(ErrorKind::PasswordHashGeneration)?;
     }
 
-    if let Some(h) = hostname {
-        os_backup.account.hostname = h;
-    }
+    os_backup.account.hostname = restored_hostname(os_backup.account.hostname, hostname);
 
     sync_kiosk(kiosk).await?;
 
@@ -198,7 +203,7 @@ pub async fn recover_full_server(
 
     Ok((
         SetupResult {
-            hostname: os_backup.account.hostname.hostname,
+            hostname: os_backup.account.hostname,
             root_ca: Pem(os_backup.account.root_ca_cert),
             needs_restart: ctx.install_rootfs.peek(|a| a.is_some()),
         },
@@ -231,4 +236,41 @@ async fn restore_packages(
     }
 
     Ok(tasks)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn hostname(value: &str) -> ServerHostname {
+        ServerHostname::new(InternedString::intern(value)).unwrap()
+    }
+
+    #[test]
+    fn restore_preserves_the_backup_hostname() {
+        assert_eq!(
+            restored_hostname(hostname("preserved-host"), None).as_ref(),
+            "preserved-host"
+        );
+    }
+
+    #[test]
+    fn restore_repairs_a_backup_hostname_over_the_limit() {
+        assert_eq!(
+            restored_hostname(hostname(&"a".repeat(50)), None).as_ref(),
+            "a".repeat(32)
+        );
+    }
+
+    #[test]
+    fn restore_uses_an_explicit_replacement_hostname() {
+        assert_eq!(
+            restored_hostname(
+                hostname("preserved-host"),
+                Some(hostname("replacement-host"))
+            )
+            .as_ref(),
+            "replacement-host"
+        );
+    }
 }

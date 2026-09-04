@@ -52,6 +52,9 @@ on:
       # projects/start-tunnel/docs/**) shouldn't trigger a build.
       - '!**/*.md'
   pull_request:
+    # The jobs below skip drafts, and `ready_for_review` is not a default
+    # activity type, so without it a draft marked ready is never checked.
+    types: [opened, synchronize, reopened, ready_for_review]
     branches:
       - master
       - integration/*
@@ -80,7 +83,7 @@ on:
 # publishes to alpha, so master pushes queue behind each other rather than
 # aborting a publish half-done.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  group: start-tunnel-${{ github.event_name }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:

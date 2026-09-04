@@ -28,7 +28,7 @@ than enabling `MultiExecutable` entrypoints.
 
 ## Requirements
 
-- [Rust](https://rustup.rs) (nightly toolchain for formatting)
+- [Rust](https://rustup.rs) (stable; formatting uses a pinned nightly container)
 - [rust-analyzer](https://rust-analyzer.github.io/) recommended
 - [Docker](https://docs.docker.com/get-docker/) (for the `rust-zig-builder` cross-compile container used by the test/build scripts)
 
@@ -39,7 +39,7 @@ Run from the repo root (the single Cargo workspace):
 ```bash
 cargo check -p start-core          # type-check the library
 make start-core-test                     # run the test suite (wraps run-tests.sh)
-make start-core-format                   # nightly rustfmt on this crate
+make start-core-format                   # pinned nightly rustfmt for shared Rust crates
 ```
 
 To build a product binary, build its crate, e.g. `cargo build -p start-os --bin startbox`.
@@ -47,8 +47,7 @@ To build a product binary, build its crate, e.g. `cargo build -p start-os --bin 
 ## Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — module map, RPC pattern, patch-db data flow
-- [CONTRIBUTING.md](CONTRIBUTING.md) — build, test, format, and contribution workflow
-- [AGENTS.md](AGENTS.md) — operating rules for AI/dev work in this crate
+- [AGENTS.md](AGENTS.md) — build, test, format, and operating rules for this crate
 
 Topical deep-dives: [rpc-toolkit.md](rpc-toolkit.md), [patchdb.md](patchdb.md),
 [i18n-patterns.md](i18n-patterns.md), [core-rust-patterns.md](core-rust-patterns.md),

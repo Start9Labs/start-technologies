@@ -10,10 +10,12 @@ use ts_rs::TS;
 use crate::GatewayId;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::public::{
-    GatewayType, NetworkInfo, NetworkInterfaceInfo, NetworkInterfaceType,
+    GatewayType, IpInfo, NetworkInfo, NetworkInterfaceInfo, NetworkInterfaceType,
 };
 use crate::net::host::all_hosts;
 use crate::prelude::*;
+
+pub(crate) const INBOUND_GATEWAY_MARKER: &str = "# inbound: yes";
 
 pub fn tunnel_api<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
@@ -64,17 +66,7 @@ pub async fn add_tunnel(
         set_as_default_outbound,
     }: AddTunnelParams,
 ) -> Result<GatewayId, Error> {
-    // Caller may declare the type; fall back to auto-detection only when absent.
-    // StartTunnel configs carry a marker => inbound/outbound; anything else
-    // (e.g. a commercial VPN like Mullvad) => outbound-only.
-    let gateway_type = gateway_type.unwrap_or_else(|| {
-        let marker = crate::tunnel::wg::START_TUNNEL_MARKER.to_lowercase();
-        if config.to_lowercase().contains(&marker) {
-            GatewayType::InboundOutbound
-        } else {
-            GatewayType::OutboundOnly
-        }
-    });
+    let gateway_type = gateway_type.unwrap_or_else(|| gateway_type_from_config(&config));
 
     let ifaces = ctx.net_controller.net_iface.watcher.subscribe();
     let mut iface = GatewayId::from(InternedString::intern("wg0"));
@@ -104,20 +96,21 @@ pub async fn add_tunnel(
         ));
     }
 
-    let mut sub = ctx
+    let mut ip_info = ctx
         .db
-        .subscribe(
+        .watch(
             "/public/serverInfo/network/gateways"
                 .parse::<JsonPointer>()
                 .with_kind(ErrorKind::Database)?
                 .join_end(iface.as_str())
                 .join_end("ipInfo"),
         )
-        .await;
+        .await
+        .typed::<Option<IpInfo>>();
 
     crate::net::gateway::add_wireguard_config(iface.as_str(), &config).await?;
 
-    sub.recv().await;
+    ip_info.wait_for(|ip_info| ip_info.is_some()).await?;
 
     if set_as_default_outbound {
         ctx.db
@@ -140,18 +133,14 @@ pub async fn add_tunnel(
             .watch("/public/serverInfo/network".parse::<JsonPointer>().unwrap())
             .await
             .typed::<NetworkInfo>();
-        loop {
-            if watch
-                .peek()?
-                .as_gateways()
-                .as_idx(&iface)
-                .and_then(|g| g.as_ip_info().transpose_ref())
-                .is_some()
-            {
-                break;
-            }
-            watch.changed().await?;
-        }
+        watch
+            .wait_for(|network| {
+                network
+                    .gateways
+                    .get(&iface)
+                    .map_or(false, |g| g.ip_info.is_some())
+            })
+            .await?;
         Ok::<_, Error>(())
     })
     .await
@@ -167,6 +156,18 @@ pub async fn add_tunnel(
     }
 
     Ok(iface)
+}
+
+fn gateway_type_from_config(config: &str) -> GatewayType {
+    let has_inbound_marker = config
+        .lines()
+        .any(|line| line.trim() == INBOUND_GATEWAY_MARKER);
+    let legacy_marker = crate::tunnel::wg::START_TUNNEL_MARKER.to_ascii_lowercase();
+    if has_inbound_marker || config.to_ascii_lowercase().contains(&legacy_marker) {
+        GatewayType::InboundOutbound
+    } else {
+        GatewayType::OutboundOnly
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
@@ -260,12 +261,9 @@ pub async fn remove_tunnel(
             .watch("/public/serverInfo/network".parse::<JsonPointer>().unwrap())
             .await
             .typed::<NetworkInfo>();
-        loop {
-            if watch.peek()?.as_gateways().as_idx(&id).is_none() {
-                break;
-            }
-            watch.changed().await?;
-        }
+        watch
+            .wait_for(|network| !network.gateways.contains_key(&id))
+            .await?;
         Ok::<_, Error>(())
     })
     .await
@@ -332,4 +330,45 @@ pub async fn update_tunnel(
     // and if the handler is cancelled, the gateway is simply left on its old (or
     // new) config, never in a half-deleted state.
     crate::net::gateway::update_wireguard_config(id.as_str(), &config).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inbound_marker_selects_inbound_outbound() {
+        assert_eq!(
+            gateway_type_from_config("[Interface]\n# inbound: yes\n"),
+            GatewayType::InboundOutbound
+        );
+    }
+
+    #[test]
+    fn start_tunnel_marker_remains_inbound_outbound() {
+        assert_eq!(
+            gateway_type_from_config("# starttunnel config for server\n"),
+            GatewayType::InboundOutbound
+        );
+    }
+
+    #[test]
+    fn inbound_marker_requires_a_complete_line() {
+        assert_eq!(
+            gateway_type_from_config("# inbound: yesterday\n"),
+            GatewayType::OutboundOnly
+        );
+        assert_eq!(
+            gateway_type_from_config("# Remove # inbound: yes unless supported\n"),
+            GatewayType::OutboundOnly
+        );
+    }
+
+    #[test]
+    fn unmarked_config_is_outbound_only() {
+        assert_eq!(
+            gateway_type_from_config("[Interface]\nAddress = 192.0.2.2/32\n"),
+            GatewayType::OutboundOnly
+        );
+    }
 }

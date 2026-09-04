@@ -5,6 +5,7 @@ use futures::Stream;
 use imbl_value::Value;
 use json_patch::patch;
 use json_ptr::JsonPointer;
+use serde::de::DeserializeOwned;
 use tokio::sync::mpsc;
 
 use crate::{Dump, Error, HasModel, ModelExt, Revision};
@@ -161,6 +162,18 @@ impl<T: HasModel> TypedDbWatch<T> {
     pub fn peek_and_mark_seen(&mut self) -> Result<T::Model, Error> {
         let peek = self.as_mut().peek_and_mark_seen()?;
         Ok(<T::Model as ModelExt<T>>::from_value(peek))
+    }
+}
+impl<T: DeserializeOwned> TypedDbWatch<T> {
+    /// Waits until `f` accepts the current value, then yields it
+    pub async fn wait_for<F: FnMut(&T) -> bool>(&mut self, mut f: F) -> Result<T, Error> {
+        loop {
+            let value = imbl_value::from_value(self.as_mut().peek_and_mark_seen()?)?;
+            if f(&value) {
+                return Ok(value);
+            }
+            self.changed().await?;
+        }
     }
 }
 impl<T> Unpin for TypedDbWatch<T> {}

@@ -5,7 +5,7 @@ import { marked } from 'marked'
   name: 'markdown',
 })
 export class MarkdownPipe implements PipeTransform {
-  transform(value: string): string {
-    return value?.length ? marked(value) : ''
+  transform(value: string, options?: marked.MarkedOptions): string {
+    return value?.length ? marked(value, options) : ''
   }
 }

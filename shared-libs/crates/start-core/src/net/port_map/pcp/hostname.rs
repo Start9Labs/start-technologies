@@ -18,7 +18,12 @@ pub const RESULT_UNSUPP_HOSTNAME: u8 = 193;
 /// Valid as an SNI demux key: 1-255 octets, ASCII labels of `[A-Za-z0-9-]`
 /// (leading `*` label allowed), no leading/trailing dot, no empty labels.
 pub fn validate_hostname(name: &str) -> bool {
-    if name.is_empty() || name.len() > 255 || name.starts_with('.') || name.ends_with('.') {
+    if name.is_empty()
+        || name.len() > 255
+        || name.starts_with('.')
+        || name.ends_with('.')
+        || name.parse::<std::net::IpAddr>().is_ok()
+    {
         return false;
     }
     name.split('.').enumerate().all(|(i, label)| {
@@ -70,6 +75,8 @@ mod tests {
         assert!(!validate_hostname("ex ample.com"));
         assert!(!validate_hostname("ex*ample.com"));
         assert!(!validate_hostname("foo..bar"));
+        assert!(!validate_hostname("192.168.1.1"));
+        assert!(!validate_hostname("2001:db8::1"));
         assert!(!validate_hostname(&"a".repeat(256)));
     }
 

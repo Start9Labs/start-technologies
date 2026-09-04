@@ -519,7 +519,12 @@ pub async fn cli_install(
                 &method.join("."),
                 to_value(&InstallParams {
                     id,
-                    registry: ctx.registry_url.clone().or_not_found("--registry")?,
+                    registry: ctx
+                        .registry_url
+                        .as_ref()
+                        .or_not_found("--registry")?
+                        .get()?
+                        .clone(),
                     version,
                 })?,
             )

@@ -5,6 +5,9 @@ pub mod capability;
 pub mod hostname;
 pub mod portset;
 
+/// PCP NO_RESOURCES result code (RFC 6887 §7.4).
+pub const RESULT_NO_RESOURCES: u8 = 8;
+
 /// Walk the PCP option area (RFC 6887 §7.3): each option is code(1),
 /// reserved(1), length(2), value(length), padded to a 32-bit boundary. Yields
 /// `(code, value)` per option; one `Err(())` then stops on a length overrun.

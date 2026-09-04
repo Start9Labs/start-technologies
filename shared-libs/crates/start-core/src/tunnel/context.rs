@@ -189,18 +189,14 @@ pub struct TunnelContextSeed {
     /// Per-injector TSIG keys, read live so the injector can verify UPDATEs.
     pub dns_keys: Arc<SyncMutex<BTreeMap<IpAddr, [u8; 32]>>>,
     pub active_forwards: SyncMutex<BTreeMap<SocketAddrV4, Arc<()>>>,
+    pub forward_write_lock: tokio::sync::Mutex<()>,
     /// In-memory leases for auto (PCP-created) forwards/pinholes/SNI routes,
     /// reaped by [`crate::tunnel::forward::lease`] when a client stops renewing.
     pub leases: SyncMutex<crate::tunnel::forward::lease::Leases>,
     /// Wakes the lease reaper when a stamp may have moved the soonest expiry
     /// earlier, so it can pull its next wake-up forward.
     pub lease_wake: tokio::sync::Notify,
-    /// The wg interface's current ifindex, republished after every `wg-quick`
-    /// bounce. The PCP/IGD listeners are `SO_BINDTODEVICE`-bound, which pins the
-    /// ifindex at bind time, so a recreated interface leaves them deaf until
-    /// they rebind. Level-triggered on the value (not an edge notify) so a
-    /// listener re-subscribing after a bounce still observes the new index, and
-    /// an unchanged index skips a needless rebind.
+    /// Current WireGuard ifindex; listeners rebind after interface recreation.
     pub forward_ifindex: tokio::sync::watch::Sender<u32>,
     /// Serializes `resync_egress`; its read-DB → install → prune isn't atomic,
     /// so a concurrent reconcile could prune a rule another call just installed.
@@ -395,6 +391,7 @@ impl TunnelContext {
             dns_allowed,
             dns_keys,
             active_forwards: SyncMutex::new(active_forwards),
+            forward_write_lock: tokio::sync::Mutex::new(()),
             leases: SyncMutex::new(BTreeMap::new()),
             lease_wake: tokio::sync::Notify::new(),
             forward_ifindex: tokio::sync::watch::channel(current_ifindex()).0,
@@ -606,9 +603,7 @@ impl TunnelContext {
         Ok(())
     }
 
-    /// Re-key forwards to follow their target's WAN. A forward's external IP
-    /// equals its target's WAN, so a WAN change must re-key it old IP → new IP.
-    /// Idempotent: unchanged keys match in the per-key diffs and are left alone.
+    /// Moves forwards to each target's active WAN address.
     pub async fn resync_forward_keys(&self) -> Result<(), Error> {
         let old = self.db.peek().await.as_port_forwards().de()?.0;
 
@@ -680,65 +675,7 @@ impl TunnelContext {
             }
         }
 
-        let sni_routes = |map: &BTreeMap<SocketAddrV4, PortForward>| {
-            let mut out: BTreeMap<(SocketAddrV4, String), SocketAddrV4> = BTreeMap::new();
-            for (src, entry) in map {
-                if let PortForward::Sni { routes, .. } = entry {
-                    for (host, route) in routes {
-                        out.insert((*src, host.clone()), route.target);
-                    }
-                }
-            }
-            out
-        };
-        let old_sni = sni_routes(&old);
-        let new_sni = sni_routes(&want);
-        for ((src, host), target) in &old_sni {
-            if new_sni.get(&(*src, host.clone())) != Some(target) {
-                self.sni
-                    .unregister(*src.ip(), src.port(), std::slice::from_ref(host), *target);
-            }
-        }
-        for ((src, host), target) in &new_sni {
-            if old_sni.get(&(*src, host.clone())) != Some(target) {
-                if let Err(code) = self.sni.register(
-                    *src.ip(),
-                    src.port(),
-                    std::slice::from_ref(host),
-                    *target,
-                    None,
-                ) {
-                    tracing::warn!("failed to register SNI route {host} on {src}: code {code}");
-                }
-            }
-        }
-
-        let sni_fallbacks = |map: &BTreeMap<SocketAddrV4, PortForward>| {
-            let mut out: BTreeMap<SocketAddrV4, SocketAddrV4> = BTreeMap::new();
-            for (src, entry) in map {
-                if let PortForward::Sni {
-                    fallback: Some(f), ..
-                } = entry
-                {
-                    out.insert(*src, f.target);
-                }
-            }
-            out
-        };
-        let old_fb = sni_fallbacks(&old);
-        let new_fb = sni_fallbacks(&want);
-        for (src, target) in &old_fb {
-            if new_fb.get(src) != Some(target) {
-                self.sni.unregister_fallback(*src.ip(), src.port(), *target);
-            }
-        }
-        for (src, target) in &new_fb {
-            if old_fb.get(src) != Some(target) {
-                if let Err(code) = self.sni.register_fallback(*src.ip(), src.port(), *target) {
-                    tracing::warn!("failed to register SNI fallback on {src}: code {code}");
-                }
-            }
-        }
+        reconcile_sni_demux(&self.sni, &old, &want);
 
         let old_dnat: BTreeSet<SocketAddrV4> = old
             .iter()
@@ -788,6 +725,77 @@ impl TunnelContext {
         Ok(())
     }
 }
+fn reconcile_sni_demux(
+    sni: &Arc<crate::tunnel::forward::sni::SniDemux>,
+    old: &BTreeMap<SocketAddrV4, PortForward>,
+    want: &BTreeMap<SocketAddrV4, PortForward>,
+) {
+    let routes = |map: &BTreeMap<SocketAddrV4, PortForward>, enabled_only: bool| {
+        let mut out: BTreeMap<(SocketAddrV4, String), SocketAddrV4> = BTreeMap::new();
+        for (source, entry) in map {
+            if let PortForward::Sni { routes, .. } = entry {
+                for (hostname, route) in routes {
+                    if !enabled_only || route.enabled {
+                        out.insert((*source, hostname.clone()), route.target);
+                    }
+                }
+            }
+        }
+        out
+    };
+    let old_routes = routes(old, false);
+    let desired_routes = routes(want, true);
+    for ((source, hostname), target) in &old_routes {
+        if desired_routes.get(&(*source, hostname.clone())) != Some(target) {
+            sni.unregister(
+                *source.ip(),
+                source.port(),
+                std::slice::from_ref(hostname),
+                *target,
+            );
+        }
+    }
+    for ((source, hostname), target) in &desired_routes {
+        if let Err(code) = sni.register(
+            *source.ip(),
+            source.port(),
+            std::slice::from_ref(hostname),
+            *target,
+            None,
+        ) {
+            tracing::warn!("failed to register SNI route {hostname} on {source}: code {code}");
+        }
+    }
+
+    let fallbacks = |map: &BTreeMap<SocketAddrV4, PortForward>, enabled_only: bool| {
+        let mut out = BTreeMap::new();
+        for (source, entry) in map {
+            if let PortForward::Sni {
+                fallback: Some(fallback),
+                ..
+            } = entry
+            {
+                if !enabled_only || fallback.enabled {
+                    out.insert(*source, fallback.target);
+                }
+            }
+        }
+        out
+    };
+    let old_fallbacks = fallbacks(old, false);
+    let desired_fallbacks = fallbacks(want, true);
+    for (source, target) in &old_fallbacks {
+        if desired_fallbacks.get(source) != Some(target) {
+            sni.unregister_fallback(*source.ip(), source.port(), *target);
+        }
+    }
+    for (source, target) in &desired_fallbacks {
+        if let Err(code) = sni.register_fallback(*source.ip(), source.port(), *target) {
+            tracing::warn!("failed to register SNI fallback on {source}: code {code}");
+        }
+    }
+}
+
 impl AsRef<RpcContinuations> for TunnelContext {
     fn as_ref(&self) -> &RpcContinuations {
         &self.rpc_continuations
@@ -963,5 +971,42 @@ mod tests {
         let server = server_with_client(None);
         assert_eq!(allowed_injectors(&server).len(), 1);
         assert_eq!(injector_keys(&server).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn unchanged_sni_route_retries_after_bind_failure() {
+        let blocked = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let source = match blocked.local_addr().unwrap() {
+            SocketAddr::V4(source) => source,
+            SocketAddr::V6(_) => unreachable!(),
+        };
+        let target = "10.59.0.2:443".parse().unwrap();
+        let hostname = "retry.example.com".to_string();
+        let mut routes = BTreeMap::new();
+        routes.insert(
+            hostname.clone(),
+            crate::tunnel::db::SniRoute {
+                target,
+                label: None,
+                enabled: true,
+                auto: false,
+            },
+        );
+        let forwards = BTreeMap::from([(
+            source,
+            PortForward::Sni {
+                routes,
+                fallback: None,
+            },
+        )]);
+        let sni = crate::tunnel::forward::sni::SniDemux::new();
+
+        reconcile_sni_demux(&sni, &forwards, &forwards);
+        assert!(sni.snapshot().is_empty());
+
+        drop(blocked);
+        reconcile_sni_demux(&sni, &forwards, &forwards);
+        assert_eq!(sni.snapshot().len(), 1);
+        assert_eq!(sni.snapshot()[0].hostname, hostname);
     }
 }

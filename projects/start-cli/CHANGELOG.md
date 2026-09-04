@@ -9,9 +9,61 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
-## [1.1.1]
+## [2.0.0]
+
+### Added
+
+- **`server epp` shows or sets the CPU energy/performance preference.** The setting persists
+  across reboots and reports the values available on the server.
+
+- **`s9pk pack` packs the package's `README.md`.** It sits beside `instructions.md` in the
+  archive and is readable with `S9pk::readme()`. The point is what runs on the server: an AI
+  assistant administering a service can now read the package's technical reference from the
+  installed `.s9pk` — offline, and describing the version actually installed — instead of
+  fetching a repository's default branch, which has usually moved on. Unlike `instructions.md`
+  it is **optional**, so a package without one still builds; it is simply absent from the
+  archive and the accessor returns `None`. Nothing is packed for an s9pk built before this,
+  and v1 packages migrated forward carry no README either.
+
+- **An `s9pk` command says when `start-cli` is behind the published release.** It compares
+  itself against the `start-cli` version named by the workspace's `start-technologies`
+  checkout and prints a one-line notice. `start-cli` installs outside the workspace, so
+  nothing else would have told you: on Debian `apt upgrade` carries it forward, and
+  everywhere else re-running the installer is the only update path.
+
+### Changed
+
+- **`server governor` replaces `server experimental governor`.** Scripts that set or inspect
+  the CPU governor need to use the direct `server` subcommand.
+
+- **`server set-hostname` takes one required hostname, and `setup execute` no
+  longer takes `--name`.** A StartOS server carries a single name — its `.local`
+  hostname — where it used to carry a separate display label as well. Setting it
+  moves the address the server answers to. A provisioning script that passes
+  `--name` to `setup execute`, or a name and a hostname to `server set-hostname`,
+  needs updating. `server set-hostname` and `setup execute --hostname` also
+  reject a name longer than 32 characters, or one starting or ending with a
+  hyphen, which 1.1.0 accepted.
+
+- **`s9pk init-workspace` clones the monorepo's `live-docs` branch** rather than `master`, so a
+  workspace's packaging guide, package template, and SDK source describe the
+  `@start9labs/start-sdk` its packages install, and match the pages on docs.start9.com. An
+  existing workspace moves over with `git -C start-technologies checkout live-docs`.
 
 ### Fixed
+
+- **`s9pk init-workspace` no longer scaffolds a placeholder host** — `dev-vm.local` resolved
+  nowhere, failing every command in a fresh workspace; comment it out in an existing one.
+
+- **`registry os asset remove` can be run.** Its `iso`/`img`/`squashfs` handlers were registered
+  as RPC-only, and — unlike `add`, `sign`, and `get`, which each pair their RPC handlers with a
+  CLI counterpart — nothing was registered in their place. `remove` was left parsing as a leaf
+  that accepts no arguments: it listed under `registry os asset --help` with a blank description,
+  and naming an asset type came back `unexpected argument 'iso' found` with exit 2. The three
+  subcommands now take `<VERSION> <PLATFORM>` and reach the registry directly, mirroring
+  `registry os asset get`, so a single platform's asset can be dropped without removing the whole
+  version and re-adding every other platform. Asking to remove a platform the version has no
+  asset for now says so instead of reporting success.
 
 - **The local authcookie now reaches a registry or tunnel daemon that listens on a
   non-loopback address.** Run on the server itself, the CLI presents the daemon's local

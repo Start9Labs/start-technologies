@@ -287,7 +287,7 @@ dependencies = [
 [[package]]
 name = "async-acme"
 version = "0.6.0"
-source = "git+https://github.com/Start9Labs/async-acme.git?rev=4f71d55304e77650bbbedd33fe0acb5d26d3883f#4f71d55304e77650bbbedd33fe0acb5d26d3883f"
+source = "git+https://github.com/Start9Labs/async-acme.git?rev=45c8a56379c5f8afb6b9dd6511e0c7e1ce70ccf5#45c8a56379c5f8afb6b9dd6511e0c7e1ce70ccf5"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -4854,6 +4854,7 @@ dependencies = [
  "cfg-if",
  "cfg_aliases 0.2.1",
  "libc",
+ "memoffset 0.9.1",
 ]
 
 [[package]]
@@ -7702,7 +7703,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "start-cli"
-version = "1.1.1"
+version = "2.0.0"
 dependencies = [
  "start-core",
  "tracing",
@@ -7861,14 +7862,14 @@ dependencies = [
 
 [[package]]
 name = "start-registry"
-version = "1.0.2"
+version = "1.1.0"
 dependencies = [
  "start-core",
 ]
 
 [[package]]
 name = "start-tunnel"
-version = "1.2.2"
+version = "1.3.0"
 dependencies = [
  "include_dir",
  "start-core",
@@ -7913,7 +7914,7 @@ dependencies = [
 
 [[package]]
 name = "startwrt-core"
-version = "1.0.2"
+version = "1.1.0"
 dependencies = [
  "arc-swap",
  "async_cell",
@@ -7931,13 +7932,16 @@ dependencies = [
  "dirs",
  "ed25519-dalek 2.2.0",
  "fd-lock-rs",
+ "flate2",
  "form_urlencoded",
  "futures",
  "futures-util",
  "http",
  "imbl-value",
  "include_dir",
+ "ipnet",
  "itertools 0.14.0",
+ "libc",
  "macaddr",
  "mime_guess",
  "nix 0.29.0",
@@ -7961,6 +7965,7 @@ dependencies = [
  "serde_yaml",
  "sha-crypt",
  "sha2 0.10.9",
+ "socket2 0.6.3",
  "start-core",
  "syslog-tracing",
  "tempfile",

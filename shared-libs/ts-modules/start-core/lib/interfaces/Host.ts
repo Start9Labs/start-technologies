@@ -24,7 +24,7 @@ export const knownProtocols = {
     secure: null,
     defaultPort: 80,
     withSsl: 'https',
-    alpn: { specified: ['http/1.1'] } as AlpnInfo,
+    alpn: ['http/1.1'] as AlpnInfo,
     addXForwardedHeaders: true,
   },
   https: {
@@ -36,7 +36,7 @@ export const knownProtocols = {
     secure: null,
     defaultPort: 80,
     withSsl: 'wss',
-    alpn: { specified: ['http/1.1'] } as AlpnInfo,
+    alpn: ['http/1.1'] as AlpnInfo,
     addXForwardedHeaders: true,
   },
   wss: {
@@ -87,7 +87,7 @@ export type BindOptionsByProtocol =
   | (BindOptions & { protocol: null })
 
 const hasStringProtocol = (v: unknown): v is { protocol: string } =>
-  z.object({ protocol: z.string() }).safeParse(v).success
+  z.looseObject({ protocol: z.string() }).safeParse(v).success
 
 /**
  * Hard cap on how many ports a single {@link MultiHost.bindPortRange} call
@@ -228,6 +228,71 @@ export class MultiHost {
       externalStartPort,
       numberOfPorts,
     )
+  }
+
+  /**
+   * Permanently remove this host and everything under it.
+   *
+   * This undoes the host itself, not a `setupInterfaces` pass. That pass ends
+   * by *disabling* every binding it did not just declare, which keeps the row,
+   * its external port claim and the user's per-address choices, so an address
+   * survives a pass that omitted it. Retiring deletes:
+   *
+   * - every binding and port range on this host, and their service interfaces
+   * - the user's public and private domains for this host
+   * - the user's per-address enable/disable and WAN opt-in choices
+   * - the external port reservations, which return to the server's pool
+   *
+   * Irreversible, and it destroys configuration the user created, so name the
+   * host in your release notes when a release retires one. Binding this id
+   * again creates a new, empty host with none of that setup.
+   *
+   * Call it from a migration's `up()`, in the version that stops binding the
+   * host. Retiring an id you still bind just recreates it, minus the user's
+   * setup.
+   *
+   * @returns `true` if a host was removed, `false` if there was none — the
+   * normal result on a re-run, not an error.
+   *
+   * @example
+   * ```
+   * // 2.0 renamed this host to `ui`; drop the 1.x one.
+   * await sdk.MultiHost.of(effects, 'ui-multi').retire()
+   * ```
+   */
+  async retire(): Promise<boolean> {
+    return this.options.effects.retireHost({ id: this.options.id })
+  }
+
+  /**
+   * Permanently remove a single binding from this host — the inverse of
+   * {@link MultiHost.bindPort} — for a service that dropped one port but kept
+   * the rest. Removes whichever of the single port and the port range is bound
+   * at `internalPort`, and both if both are.
+   *
+   * Takes the binding's service interfaces with it and returns its external
+   * ports to the server's pool. Binding the port again creates a fresh binding
+   * on the surviving host. The host keeps its domains: retiring the last
+   * binding does not retire the host, so a domain can be left addressing
+   * nothing — retire the host itself if it is going away.
+   *
+   * @param internalPort - the container-side port passed to
+   * {@link MultiHost.bindPort}, or the `internalStartPort` passed to
+   * {@link MultiHost.bindPortRange}
+   * @returns `true` if something was removed, `false` if nothing was bound
+   * there — the normal result on a re-run, not an error.
+   *
+   * @example
+   * ```
+   * // upstream dropped the bundled metrics listener in 3.0
+   * await sdk.MultiHost.of(effects, 'api').retirePort(9090)
+   * ```
+   */
+  async retirePort(internalPort: number): Promise<boolean> {
+    return this.options.effects.retireBinding({
+      id: this.options.id,
+      internalPort,
+    })
   }
 
   private async bindPortForUnknown(

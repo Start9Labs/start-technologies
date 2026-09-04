@@ -25,7 +25,7 @@ use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
 use crate::progress::{FullProgressTracker, PhaseProgressTrackerHandle, ProgressTrackerWriter};
 use crate::s9pk::S9pk;
-use crate::s9pk::manifest::PackageId;
+use crate::s9pk::manifest::{Manifest, PackageId};
 use crate::s9pk::merkle_archive::source::FileSource;
 use crate::service::rpc::{ExitParams, InitKind};
 use crate::service::{LoadDisposition, Service, ServiceRef, get_data_version};
@@ -59,6 +59,47 @@ fn s9pk_installed_path(commitment: &MerkleArchiveCommitment) -> PathBuf {
         .join("installed")
         .join(Base32(commitment.root_sighash.0).to_lower_string())
         .with_extension("s9pk")
+}
+
+fn uninit_target(data_ver: &str, prev: &Manifest, next: &Manifest) -> Result<ExitParams, Error> {
+    let next_accepts_data_ver = if let Ok(data_ver_ev) = data_ver.parse::<exver::ExtendedVersion>()
+    {
+        data_ver_ev.satisfies(&next.can_migrate_from)
+    } else if let Ok(data_ver_range) = data_ver.parse::<VersionRange>() {
+        data_ver_range.intersects(&next.can_migrate_from)
+    } else {
+        false
+    };
+    if next_accepts_data_ver {
+        Ok(ExitParams::target_str(data_ver))
+    } else if next.version.satisfies(&prev.can_migrate_to) {
+        Ok(ExitParams::target_version(&next.version))
+    } else if prev.can_migrate_to.intersects(&next.can_migrate_from) {
+        Ok(ExitParams::target_range(&VersionRange::and(
+            prev.can_migrate_to.clone(),
+            next.can_migrate_from.clone(),
+        )))
+    } else {
+        Err(Error::new(
+            eyre!(
+                "{}",
+                if next.version < prev.version {
+                    t!(
+                        "service.service-map.no-downgrade-path",
+                        from = prev.version.as_str(),
+                        to = next.version.as_str()
+                    )
+                } else {
+                    t!(
+                        "service.service-map.no-migration-path",
+                        from = prev.version.as_str(),
+                        to = next.version.as_str()
+                    )
+                }
+            ),
+            ErrorKind::VersionIncompatible,
+        ))
+    }
 }
 
 /// This is the structure to contain all the services
@@ -189,6 +230,18 @@ impl ServiceMap {
         let icon = s9pk.icon_data_url().await?;
         let developer_key = s9pk.as_archive().signer();
         let mut service = self.get_mut(&id).await;
+        // Fail before the download and before the service is quiesced.
+        if recovery_source.is_none() {
+            if let Some(prev) = &*service {
+                if let Some(data_ver) = get_data_version(&id).await? {
+                    uninit_target(
+                        &data_ver,
+                        prev.seed.persistent_container.s9pk.as_manifest(),
+                        &manifest,
+                    )?;
+                }
+            }
+        }
         let size = s9pk.size();
         let op_name = if recovery_source.is_none() {
             if service.is_none() {
@@ -331,43 +384,25 @@ impl ServiceMap {
                 .handle_last(async move {
                     finalization_progress.start();
                     let s9pk = S9pk::open(&installed_path, Some(&id)).await?;
-                    let data_version = get_data_version(&id).await?;
-                    // Snapshot existing volumes before install/update modifies them
-                    crate::volume::snapshot_volumes_for_install(&id).await?;
+                    let mut data_version = get_data_version(&id).await?;
                     let prev = if let Some(service) = service.take() {
                         ensure_code!(
                             recovery_source.is_none(),
                             ErrorKind::InvalidRequest,
                             "cannot restore over existing package"
                         );
+                        // Snapshot the quiesced tree: the rollback point should be the state
+                        // the user had when they pressed update.
+                        service.quiesce().await?;
+                        crate::volume::InstallBackup::of(&id).snapshot().await?;
+                        // A `.const()` re-run can move the data version while the container comes down.
+                        data_version = get_data_version(&id).await?;
                         let uninit = if let Some(ref data_ver) = data_version {
-                            let prev_can_migrate_to = &service
-                                .seed
-                                .persistent_container
-                                .s9pk
-                                .as_manifest()
-                                .can_migrate_to;
-                            let next_version = &s9pk.as_manifest().version;
-                            let next_can_migrate_from = &s9pk.as_manifest().can_migrate_from;
-                            let next_accepts_data_ver = if let Ok(data_ver_ev) =
-                                data_ver.parse::<exver::ExtendedVersion>()
-                            {
-                                data_ver_ev.satisfies(next_can_migrate_from)
-                            } else if let Ok(data_ver_range) = data_ver.parse::<VersionRange>() {
-                                data_ver_range.intersects(next_can_migrate_from)
-                            } else {
-                                false
-                            };
-                            if next_accepts_data_ver {
-                                ExitParams::target_str(data_ver)
-                            } else if next_version.satisfies(prev_can_migrate_to) {
-                                ExitParams::target_version(&s9pk.as_manifest().version)
-                            } else {
-                                ExitParams::target_range(&VersionRange::and(
-                                    prev_can_migrate_to.clone(),
-                                    next_can_migrate_from.clone(),
-                                ))
-                            }
+                            uninit_target(
+                                data_ver,
+                                service.seed.persistent_container.s9pk.as_manifest(),
+                                s9pk.as_manifest(),
+                            )?
                         } else {
                             ExitParams::target_version(
                                 &*service.seed.persistent_container.s9pk.as_manifest().version,
@@ -376,6 +411,7 @@ impl ServiceMap {
                         let cleanup = service.uninstall(uninit, false, false).await?;
                         Some(cleanup)
                     } else {
+                        crate::volume::InstallBackup::of(&id).snapshot().await?;
                         None
                     };
                     let new_service = Service::install(
@@ -403,7 +439,10 @@ impl ServiceMap {
                         cleanup.await?;
                     }
 
-                    crate::volume::remove_install_backup(&id).await.log_err();
+                    crate::volume::InstallBackup::of(&id)
+                        .remove()
+                        .await
+                        .log_err();
 
                     drop(service);
 
@@ -502,7 +541,7 @@ pub struct ServiceRefReloadCancelGuard(
 impl Drop for ServiceRefReloadCancelGuard {
     fn drop(&mut self) {
         if let Some(info) = self.0.take() {
-            tokio::spawn(info.reload(None));
+            tokio::spawn(async move { info.reload(None).await.log_err() });
         }
     }
 }
@@ -564,35 +603,40 @@ struct ServiceRefReloadInfo {
 }
 impl ServiceRefReloadInfo {
     async fn reload(self, error: Option<Error>) -> Result<(), Error> {
+        if let Some(error) = error {
+            // Rolling back can take minutes, so the notification goes out before it starts.
+            self.notify_failure(&error).await.log_err();
+        }
         self.ctx
             .services
             .load(&self.ctx, &self.id, LoadDisposition::Undo)
-            .await?;
-        if let Some(error) = error {
-            let error_string = error.to_string();
-            let title = match self.operation {
-                "Installing" => t!("service.service-map.installing-failed"),
-                "Updating" => t!("service.service-map.updating-failed"),
-                "Restoring" => t!("service.service-map.restoring-failed"),
-                "Uninstall" => t!("service.service-map.uninstall-failed"),
-                other => t!("service.service-map.operation-failed", operation = other),
-            }
-            .to_string();
-            self.ctx
-                .db
-                .mutate(|db| {
-                    notify(
-                        db,
-                        Some(self.id.clone()),
-                        NotificationLevel::Error,
-                        title,
-                        error_string,
-                        (),
-                    )
-                })
-                .await
-                .result?;
+            .await
+    }
+
+    async fn notify_failure(&self, error: &Error) -> Result<(), Error> {
+        let id = self.id.clone();
+        let error_string = error.to_string();
+        let title = match self.operation {
+            "Installing" => t!("service.service-map.installing-failed"),
+            "Updating" => t!("service.service-map.updating-failed"),
+            "Restoring" => t!("service.service-map.restoring-failed"),
+            "Uninstall" => t!("service.service-map.uninstall-failed"),
+            other => t!("service.service-map.operation-failed", operation = other),
         }
-        Ok(())
+        .to_string();
+        self.ctx
+            .db
+            .mutate(move |db| {
+                notify(
+                    db,
+                    Some(id),
+                    NotificationLevel::Error,
+                    title,
+                    error_string,
+                    (),
+                )
+            })
+            .await
+            .result
     }
 }

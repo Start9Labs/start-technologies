@@ -38,9 +38,15 @@ export type SDKManifest = {
    */
   readonly donationUrl: string | null
   readonly description: {
-    /** Short description to display on the marketplace list page. Max length 80 chars. */
+    /**
+     * Short description, shown on the marketplace list page. The tile clamps it
+     * to two lines — about 80 characters — and hides the rest. Max 120.
+     */
     readonly short: T.LocaleString
-    /** Long description to display on the marketplace details page for this service. Max length 500 chars. */
+    /**
+     * Long description, shown on the marketplace details page. Rendered
+     * unclamped. Max 2000.
+     */
     readonly long: T.LocaleString
   }
   /**
@@ -144,6 +150,11 @@ export type SDKManifest = {
    * interfaces (VPN / WireGuard / tun-class workloads).
    */
   readonly virtualNetworking?: boolean
+
+  /**
+   * @description Grants /dev/kvm when present. The opening process must run as container root.
+   */
+  readonly hardwareVirtualization?: boolean
 
   /**
    * @description Enable OS plugins

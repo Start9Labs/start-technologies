@@ -37,6 +37,7 @@ use crate::db::model::public::{AcmeSettings, NetworkInterfaceInfo};
 use crate::db::{DbAccessByKey, DbAccessMut};
 use crate::net::acme::{
     AcmeCertStore, AcmeProvider, AcmeTlsAlpnCache, AcmeTlsHandler, GetAcmeProvider,
+    ReportOrderFailure,
 };
 use crate::net::forward::START9_BRIDGE_V6_SUBNET;
 use crate::net::gateway::{
@@ -44,9 +45,10 @@ use crate::net::gateway::{
 };
 use crate::net::port_map::{PortMapController, candidate_gateways};
 use crate::net::ssl::{CertBranding, CertStore, RootCaTlsHandler};
-use crate::net::tls::{ChainedHandler, TlsHandler, TlsHandlerAction, TlsListener, TlsMetadata};
+use crate::net::tls::{TlsHandler, TlsHandlerAction, TlsListener, TlsMetadata};
 use crate::net::utils::{bind_mio_listener, ipv6_is_link_local, is_private_ip};
 use crate::net::web_server::{Accept, AcceptStream, ExtractVisitor, TcpMetadata, extract};
+use crate::notifications::NotificationLevel;
 use crate::prelude::*;
 use crate::util::collections::EqSet;
 use crate::util::future::NonDetachingJoinHandle;
@@ -265,10 +267,10 @@ pub struct VHostController {
     /// controller has asked the port-mapper to maintain for its vhosts —
     /// everything: IPv4 SNI HOSTNAME routes (`Some(hostname)`), IPv4 bare-IP (`*`
     /// vhost) pinholes and IPv6 GUA pinholes (`None`), and the v6 80->443 redirect.
-    /// Keyed by owner so one service's reconcile only adds/removes its own entries
-    /// on a shared port.
-    port_mappings:
-        SyncMutex<BTreeMap<HostMapOwner, BTreeSet<(IpAddr, u16, Option<InternedString>)>>>,
+    /// A hostname-less key can be wanted by several owners at once.
+    port_mappings: SyncMutex<BTreeMap<HostMapOwner, BTreeSet<PortMapKey>>>,
+    /// Port-443 bind requirements from ACME domains served on another port.
+    challenge_binds: SyncMutex<BTreeMap<HostMapOwner, VHostBindRequirements>>,
 }
 impl VHostController {
     pub fn new(
@@ -291,6 +293,7 @@ impl VHostController {
             passthrough_handles: SyncMutex::new(BTreeMap::new()),
             port_map,
             port_mappings: SyncMutex::new(BTreeMap::new()),
+            challenge_binds: SyncMutex::new(BTreeMap::new()),
         };
         for pt in passthroughs {
             if let Err(e) = controller.add_passthrough(
@@ -324,6 +327,32 @@ impl VHostController {
         })
     }
 
+    /// Once per name until a certificate lands: the address refuses
+    /// connections meanwhile, and nothing else would say why.
+    fn report_acme_failure(&self) -> ReportOrderFailure {
+        let db = self.db.clone();
+        Arc::new(move |sans, error| {
+            let db = db.clone();
+            async move {
+                let domain = sans.iter().map(|s| &**s).collect::<Vec<_>>().join(", ");
+                db.mutate(|db| {
+                    crate::notifications::notify(
+                        db,
+                        None,
+                        NotificationLevel::Warning,
+                        t!("acme.order-failed-title", domain = domain).to_string(),
+                        t!("acme.order-failed-message", domain = domain, error = error).to_string(),
+                        (),
+                    )
+                })
+                .await
+                .result
+                .log_err();
+            }
+            .boxed()
+        })
+    }
+
     fn create_server(&self, port: u16) -> VHostServer<VHostBindListener> {
         let bind_reqs = Watch::new(VHostBindRequirements::default());
         let listener = VHostBindListener {
@@ -340,6 +369,7 @@ impl VHostController {
             self.crypto_provider.clone(),
             self.branding.clone(),
             self.acme_cache.clone(),
+            self.report_acme_failure(),
         )
     }
 
@@ -363,7 +393,8 @@ impl VHostController {
             addr_v6: None,
             add_x_forwarded_headers: false,
             auth: None,
-            connect_ssl: Err(AlpnInfo::Reflect),
+            connect_ssl: None,
+            alpn: None,
             passthrough: true,
             // Manual SNI demux to a LAN host: the box isn't its gateway, so
             // source-preserving egress would strand the backend's replies.
@@ -443,141 +474,63 @@ impl VHostController {
         })
     }
 
-    /// Reconcile best-effort upstream port mappings for `owner`'s public vhosts.
-    /// `desired` maps `(box IP to map from, external port)` to `(internal port,
-    /// candidate gateways, hostnames)`. A `Some(hostname)` is mapped via PCP
-    /// HOSTNAME — the gateway treats the hostname as part of the mapping's identity
-    /// and demultiplexes the shared external port by TLS SNI, so one service adding
-    /// or removing a hostname never disturbs another's on the same port. A `None`
-    /// is a bare-IP (`*` vhost) forward: no SNI, so a plain pinhole to the box's own
-    /// IP where the OS reverse proxy listens. Like the rest of the port-map layer
-    /// this is best-effort: a gateway that can't honor it leaves a manual forward.
-    /// Reconcile every upstream IPv4 port map `owner`'s vhosts need, derived from
-    /// the vhost `targets` themselves — the controller owns the whole port-map
-    /// lifecycle, so callers hand over the same `ProxyTarget` set they use to bind
-    /// the listeners and compute nothing. For each target public on IPv4
-    /// (`public_v4`), each of that gateway's box IPv4s gets a mapping keyed by the
-    /// vhost's hostname: `Some(host)` is a PCP HOSTNAME mapping (SNI demux), `None`
-    /// is a bare-IP (`*` vhost) pinhole. IPv6 GUAs carry no NAT, so they get no
-    /// mapping here. Always call this every update — an owner whose target set went
-    /// empty withdraws its prior mappings via the per-owner diff.
+    /// Call on every update; empty `targets` withdraws this owner's contribution.
+    /// Best-effort: a gateway that can't honor a mapping leaves a manual forward.
     pub fn reconcile_port_maps(
         &self,
         owner: HostMapOwner,
-        targets: &BTreeMap<(Option<InternedString>, u16), ProxyTarget>,
+        targets: &BTreeMap<VHostKey, ProxyTarget>,
     ) {
         let ip_info = self.interfaces.watcher.ip_info();
-        // `(box IP, ext port) -> (internal port, ordered PCP gateway candidates,
-        // hostnames)`. Gateways stay an ordered Vec (the port-mapper tries them in
-        // preference order and takes the first that binds); hostnames are a set —
-        // `None` is the bare-IP/GUA pinhole, `Some(h)` an SNI route, and neither
-        // repeats nor cares about order.
-        let mut desired: BTreeMap<
-            (IpAddr, u16),
-            (
-                u16,
-                Vec<(IpAddr, Option<u32>)>,
-                BTreeSet<Option<InternedString>>,
-            ),
-        > = BTreeMap::new();
-        for ((maybe_host, external), target) in targets {
-            // IPv4: forward the port to the box's LAN IPv4 — a PCP HOSTNAME mapping
-            // (SNI demux) for a domain, a plain pinhole for a bare `*` vhost.
-            for gw_id in &target.public_v4 {
-                let Some(info) = ip_info.get(gw_id) else {
-                    continue;
-                };
-                let Some(gw_ip_info) = &info.ip_info else {
-                    continue;
-                };
-                let gateways = candidate_gateways(info);
-                if gateways.is_empty() {
-                    continue;
-                }
-                for subnet in &gw_ip_info.subnets {
-                    let IpAddr::V4(local_ip) = subnet.addr() else {
-                        continue;
-                    };
-                    desired
-                        .entry((IpAddr::V4(local_ip), *external))
-                        .or_insert_with(|| (*external, gateways.clone(), BTreeSet::new()))
-                        .2
-                        .insert(maybe_host.clone());
-                }
-            }
-            // IPv6: the box's own GUA is the listener (no NAT), so open a firewall
-            // pinhole for GUA:port. No SNI demux over v6 (every host has its own
-            // GUA, nothing to share), so these are always hostname-less.
-            for gua in &target.public_v6 {
-                let Some(info) = ip_info.iter().map(|(_, i)| i).find(|info| {
-                    info.ip_info.as_ref().map_or(false, |i| {
-                        i.subnets.iter().any(|s| s.addr() == IpAddr::V6(*gua))
-                    })
-                }) else {
-                    continue;
-                };
-                let v6_gateways: Vec<(IpAddr, Option<u32>)> = candidate_gateways(info)
-                    .into_iter()
-                    .filter(|(g, _)| g.is_ipv6())
-                    .collect();
-                if v6_gateways.is_empty() {
-                    continue;
-                }
-                desired
-                    .entry((IpAddr::V6(*gua), *external))
-                    .or_insert_with(|| (*external, v6_gateways, BTreeSet::new()))
-                    .2
-                    .insert(None);
-            }
-        }
-        // v6 HTTP->HTTPS redirect: for a GUA exposing 443, ask the gateway for an
-        // 80->443 redirect pinhole, unless 80 is already a real pinhole on that GUA.
-        // (No IPv4 equivalent — the upstream gateway serves the port-80 redirect.)
-        let redirects: Vec<(Ipv6Addr, Vec<(IpAddr, Option<u32>)>)> = desired
-            .iter()
-            .filter_map(|((ip, port), (_, gateways, _))| match ip {
-                IpAddr::V6(gua) if *port == 443 => Some((*gua, gateways.clone())),
-                _ => None,
-            })
-            .filter(|(gua, _)| !desired.contains_key(&(IpAddr::V6(*gua), 80)))
-            .collect();
-        for (gua, gateways) in redirects {
-            desired
-                .entry((IpAddr::V6(gua), 80))
-                .or_insert((443, gateways, BTreeSet::from([None])));
-        }
-        self.sync_port_maps(owner, desired);
+        self.sync_port_maps(owner.clone(), desired_port_maps(targets, &ip_info));
+        self.sync_challenge_binds(owner, challenge_bind_reqs(targets));
     }
 
-    fn sync_port_maps(
-        &self,
-        owner: HostMapOwner,
-        desired: BTreeMap<
-            (IpAddr, u16),
-            (
-                u16,
-                Vec<(IpAddr, Option<u32>)>,
-                BTreeSet<Option<InternedString>>,
-            ),
-        >,
-    ) {
-        let want: BTreeSet<(IpAddr, u16, Option<InternedString>)> = desired
+    /// The union must be taken under `servers`.
+    fn sync_challenge_binds(&self, owner: HostMapOwner, reqs: VHostBindRequirements) {
+        self.servers.mutate(|writable| {
+            let union = self.challenge_binds.mutate(|owners| {
+                if reqs.is_empty() {
+                    owners.remove(&owner);
+                } else {
+                    owners.insert(owner, reqs);
+                }
+                let mut union = VHostBindRequirements::default();
+                for reqs in owners.values() {
+                    union.extend(reqs);
+                }
+                union
+            });
+            let existing = writable.remove(&ACME_CHALLENGE_PORT);
+            if existing.is_none() && union.is_empty() {
+                return;
+            }
+            let server = existing.unwrap_or_else(|| self.create_server(ACME_CHALLENGE_PORT));
+            server.set_challenge_bind_reqs(union);
+            if !server.is_empty() {
+                writable.insert(ACME_CHALLENGE_PORT, server);
+            }
+        });
+    }
+
+    fn sync_port_maps(&self, owner: HostMapOwner, desired: DesiredPortMaps) {
+        let want: BTreeSet<PortMapKey> = desired
             .iter()
-            .flat_map(|((ip, port), (_, _, hostnames))| {
-                hostnames.iter().map(move |h| (*ip, *port, h.clone()))
+            .flat_map(|((ip, port), (_, hostnames))| {
+                hostnames.keys().map(move |h| (*ip, *port, h.clone()))
             })
             .collect();
-        let had = self
-            .port_mappings
-            .peek(|owners| owners.get(&owner).cloned().unwrap_or_default());
-        for (ip, port, hostname) in had.difference(&want) {
-            match hostname {
-                Some(h) => self.port_map.remove_hostname(*ip, *port, h.to_string()),
-                None => self.port_map.remove(*ip, *port),
+        // Withdrawal must stay under the lock that decided it.
+        self.port_mappings.mutate(|owners| {
+            for (ip, port, hostname) in take_ownership(owners, owner, want) {
+                match hostname {
+                    Some(h) => self.port_map.remove_hostname(ip, port, h.to_string()),
+                    None => self.port_map.remove(ip, port),
+                }
             }
-        }
-        for ((ip, port), (internal, gateways, hostnames)) in &desired {
-            for hostname in hostnames {
+        });
+        for ((ip, port), (gateways, hostnames)) in &desired {
+            for (hostname, internal) in hostnames {
                 match hostname {
                     Some(h) => self.port_map.ensure_hostname(
                         *ip,
@@ -592,14 +545,147 @@ impl VHostController {
                 }
             }
         }
-        self.port_mappings.mutate(|owners| {
-            if want.is_empty() {
-                owners.remove(&owner);
-            } else {
-                owners.insert(owner, want);
-            }
-        });
     }
+}
+
+/// `(hostname, external port, is the public leg)`. A name reachable both ways
+/// has one entry per side; only the public one carries an authority.
+pub type VHostKey = (Option<InternedString>, u16, bool);
+
+/// Where TLS-ALPN-01 is validated, whatever port the name is served on.
+pub const ACME_CHALLENGE_PORT: u16 = 443;
+
+/// `(box IP, external port, hostname)`. `Some(hostname)` is a PCP HOSTNAME
+/// mapping; `None` is a bare-IP forward or a GUA pinhole.
+type PortMapKey = (IpAddr, u16, Option<InternedString>);
+
+/// Records this owner's mappings and returns the ones to withdraw. A key
+/// another owner still wants is not among them.
+fn take_ownership(
+    owners: &mut BTreeMap<HostMapOwner, BTreeSet<PortMapKey>>,
+    owner: HostMapOwner,
+    want: BTreeSet<PortMapKey>,
+) -> Vec<PortMapKey> {
+    let had = owners.get(&owner).cloned().unwrap_or_default();
+    if want.is_empty() {
+        owners.remove(&owner);
+    } else {
+        owners.insert(owner, want.clone());
+    }
+    had.difference(&want)
+        .filter(|key| !owners.values().any(|kept| kept.contains(key)))
+        .cloned()
+        .collect()
+}
+
+/// `(box IP, external port) -> (gateway candidates in preference order,
+/// hostname -> box-side port)`. `Some(hostname)` is a PCP HOSTNAME mapping the
+/// gateway SNI-demuxes; `None` is a bare-IP forward or a GUA pinhole.
+type DesiredPortMaps = BTreeMap<
+    (IpAddr, u16),
+    (
+        Vec<(IpAddr, Option<u32>)>,
+        BTreeMap<Option<InternedString>, u16>,
+    ),
+>;
+
+fn desired_port_maps(
+    targets: &BTreeMap<VHostKey, ProxyTarget>,
+    ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+) -> DesiredPortMaps {
+    let mut desired = DesiredPortMaps::new();
+    // GUAs serving 443, as opposed to carrying a challenge pinhole.
+    let mut https_guas = BTreeSet::new();
+    for ((maybe_host, external, _), target) in targets {
+        // IPv4: forward the port to the box's LAN IPv4 — a PCP HOSTNAME mapping
+        // (SNI demux) for a domain, a plain pinhole for a bare `*` vhost.
+        for gw_id in &target.public_v4 {
+            let Some(info) = ip_info.get(gw_id) else {
+                continue;
+            };
+            let Some(gw_ip_info) = &info.ip_info else {
+                continue;
+            };
+            let gateways = candidate_gateways(info);
+            if gateways.is_empty() {
+                continue;
+            }
+            for subnet in &gw_ip_info.subnets {
+                let IpAddr::V4(local_ip) = subnet.addr() else {
+                    continue;
+                };
+                desired
+                    .entry((IpAddr::V4(local_ip), *external))
+                    .or_insert_with(|| (gateways.clone(), BTreeMap::new()))
+                    .1
+                    .insert(maybe_host.clone(), *external);
+                // By name: the unnamed forward on 443 is the OS's own.
+                if let Some(hostname) = maybe_host
+                    && target.acme.is_some()
+                    && *external != ACME_CHALLENGE_PORT
+                {
+                    desired
+                        .entry((IpAddr::V4(local_ip), ACME_CHALLENGE_PORT))
+                        .or_insert_with(|| (gateways.clone(), BTreeMap::new()))
+                        .1
+                        .entry(Some(hostname.clone()))
+                        .or_insert(ACME_CHALLENGE_PORT);
+                }
+            }
+        }
+        // IPv6 has no NAT and no SNI demux: pinholes, keyed hostname-less.
+        for gua in &target.public_v6 {
+            let Some(info) = ip_info.iter().map(|(_, i)| i).find(|info| {
+                info.ip_info.as_ref().map_or(false, |i| {
+                    i.subnets.iter().any(|s| s.addr() == IpAddr::V6(*gua))
+                })
+            }) else {
+                continue;
+            };
+            let v6_gateways: Vec<(IpAddr, Option<u32>)> = candidate_gateways(info)
+                .into_iter()
+                .filter(|(g, _)| g.is_ipv6())
+                .collect();
+            if v6_gateways.is_empty() {
+                continue;
+            }
+            desired
+                .entry((IpAddr::V6(*gua), *external))
+                .or_insert_with(|| (v6_gateways.clone(), BTreeMap::new()))
+                .1
+                .insert(None, *external);
+            if *external == ACME_CHALLENGE_PORT {
+                https_guas.insert(*gua);
+            }
+            if maybe_host.is_some() && target.acme.is_some() && *external != ACME_CHALLENGE_PORT {
+                desired
+                    .entry((IpAddr::V6(*gua), ACME_CHALLENGE_PORT))
+                    .or_insert_with(|| (v6_gateways, BTreeMap::new()))
+                    .1
+                    .entry(None)
+                    .or_insert(ACME_CHALLENGE_PORT);
+            }
+        }
+    }
+    // v6 HTTP->HTTPS redirect: for a GUA serving 443, ask the gateway for an
+    // 80->443 redirect pinhole, unless 80 is already a real pinhole on that GUA.
+    // (No IPv4 equivalent — the upstream gateway serves the port-80 redirect.)
+    let redirects: Vec<(Ipv6Addr, Vec<(IpAddr, Option<u32>)>)> = desired
+        .iter()
+        .filter_map(|((ip, port), (gateways, _))| match ip {
+            IpAddr::V6(gua) if *port == 443 && https_guas.contains(gua) => {
+                Some((*gua, gateways.clone()))
+            }
+            _ => None,
+        })
+        .filter(|(gua, _)| !desired.contains_key(&(IpAddr::V6(*gua), 80)))
+        .collect();
+    for (gua, gateways) in redirects {
+        desired
+            .entry((IpAddr::V6(gua), 80))
+            .or_insert((gateways, BTreeMap::from([(None, 443)])));
+    }
+    desired
 }
 
 /// Union of all ProxyTargets' bind requirements for a VHostServer.
@@ -607,6 +693,32 @@ impl VHostController {
 pub struct VHostBindRequirements {
     pub public_gateways: BTreeSet<GatewayId>,
     pub private_ips: BTreeSet<IpAddr>,
+}
+impl VHostBindRequirements {
+    fn extend(&mut self, other: &Self) {
+        self.public_gateways
+            .extend(other.public_gateways.iter().cloned());
+        self.private_ips.extend(other.private_ips.iter().copied());
+    }
+
+    fn is_empty(&self) -> bool {
+        self.public_gateways.is_empty() && self.private_ips.is_empty()
+    }
+}
+
+/// Port-443 binds for the challenges of domains served on another port.
+fn challenge_bind_reqs(targets: &BTreeMap<VHostKey, ProxyTarget>) -> VHostBindRequirements {
+    let mut reqs = VHostBindRequirements::default();
+    for ((maybe_host, external, _), target) in targets {
+        if maybe_host.is_none() || target.acme.is_none() || *external == ACME_CHALLENGE_PORT {
+            continue;
+        }
+        reqs.public_gateways
+            .extend(target.public_v4.iter().cloned());
+        reqs.private_ips
+            .extend(target.public_v6.iter().map(|v6| IpAddr::V6(*v6)));
+    }
+    reqs
 }
 
 fn compute_bind_reqs<A: Accept + 'static>(mapping: &Mapping<A>) -> VHostBindRequirements {
@@ -629,6 +741,7 @@ fn compute_bind_reqs<A: Accept + 'static>(mapping: &Mapping<A>) -> VHostBindRequ
 /// still held by a torn-down listener — instead of latching the hole until the
 /// next network change.
 const BIND_RETRY_BACKOFF: Duration = Duration::from_secs(2);
+const BACKEND_DIAL_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Listener that manages its own TCP listeners with IP-level precision.
 /// Binds ALL IPs of public gateways and ONLY matching private IPs.
@@ -776,6 +889,13 @@ pub trait VHostTarget<A: Accept>: std::fmt::Debug + Eq {
     fn filter(&self, metadata: &<A as Accept>::Metadata) -> bool {
         true
     }
+    /// Whether this target answers `metadata` as one of the box's own private
+    /// addresses. Preferred over a plain [`filter`](Self::filter) match, which
+    /// on IPv4 cannot tell a local dial from a forwarded one.
+    #[allow(unused_variables)]
+    fn filter_private(&self, metadata: &<A as Accept>::Metadata) -> bool {
+        false
+    }
     fn acme(&self) -> Option<&AcmeProvider> {
         None
     }
@@ -803,6 +923,7 @@ pub trait VHostTarget<A: Accept>: std::fmt::Debug + Eq {
 
 pub trait DynVHostTargetT<A: Accept>: std::fmt::Debug + Any {
     fn filter(&self, metadata: &<A as Accept>::Metadata) -> bool;
+    fn filter_private(&self, metadata: &<A as Accept>::Metadata) -> bool;
     fn acme(&self) -> Option<&AcmeProvider>;
     fn bind_requirements(&self) -> (BTreeSet<GatewayId>, BTreeSet<IpAddr>);
     fn is_passthrough(&self) -> bool;
@@ -826,6 +947,9 @@ pub trait DynVHostTargetT<A: Accept>: std::fmt::Debug + Any {
 impl<A: Accept, T: VHostTarget<A> + 'static> DynVHostTargetT<A> for T {
     fn filter(&self, metadata: &<A as Accept>::Metadata) -> bool {
         VHostTarget::filter(self, metadata)
+    }
+    fn filter_private(&self, metadata: &<A as Accept>::Metadata) -> bool {
+        VHostTarget::filter_private(self, metadata)
     }
     fn acme(&self) -> Option<&AcmeProvider> {
         VHostTarget::acme(self)
@@ -934,7 +1058,12 @@ pub struct ProxyTarget {
     /// Optional `Authorization` header value to inject on upstream
     /// requests. Implies HTTP-aware proxying (same path as forwarded headers).
     pub auth: Option<crate::net::host::binding::ProxyAuth>,
-    pub connect_ssl: Result<Arc<ClientConfig>, AlpnInfo>, // Ok: yes, connect using ssl, pass through alpn; Err: connect tcp, use provided strategy for alpn
+    /// The config StartOS dials the container with when the container serves
+    /// its own TLS. `None` dials it in plaintext.
+    pub connect_ssl: Option<Arc<ClientConfig>>,
+    /// The protocols this binding answers a client with, from those it asked
+    /// for. `None` answers with whatever it asked for.
+    pub alpn: Option<AlpnInfo>,
     pub passthrough: bool,
     /// Open the internal leg with the client's source IP (`IP_TRANSPARENT`).
     /// Only for targets the box gateways — service containers — whose replies
@@ -954,6 +1083,7 @@ impl PartialEq for ProxyTarget {
             && self.auth == other.auth
             && self.passthrough == other.passthrough
             && self.preserve_source_ip == other.preserve_source_ip
+            && self.alpn == other.alpn
             && self.connect_ssl.as_ref().map(Arc::as_ptr)
                 == other.connect_ssl.as_ref().map(Arc::as_ptr)
     }
@@ -971,6 +1101,7 @@ impl fmt::Debug for ProxyTarget {
             .field("add_x_forwarded_headers", &self.add_x_forwarded_headers)
             .field("auth", &self.auth.as_ref().map(|_| "<redacted>"))
             .field("connect_ssl", &self.connect_ssl.as_ref().map(|_| ()))
+            .field("alpn", &self.alpn)
             .field("passthrough", &self.passthrough)
             .field("preserve_source_ip", &self.preserve_source_ip)
             .finish()
@@ -1012,8 +1143,14 @@ impl ProxyTarget {
             IpAddr::V4(_) => self.public_v4.contains(gw_id),
             IpAddr::V6(v6) => self.public_v6.contains(&v6),
         };
-        wan || (self.private.contains(&dst)
-            && (subnets.iter().any(|s| s.contains(&src)) || is_private_ip(src)))
+        wan || self.accepts_as_private(subnets, src, dst)
+    }
+
+    /// A dial of one of our own private addresses from that address's network.
+    /// On IPv4 the source is all that separates it from a forwarded one.
+    fn accepts_as_private(&self, subnets: &OrdSet<IpNet>, src: IpAddr, dst: IpAddr) -> bool {
+        self.private.contains(&dst)
+            && (subnets.iter().any(|s| s.contains(&src)) || is_private_ip(src))
     }
 
     /// Whether the box gateways `client`, which source preservation requires:
@@ -1045,6 +1182,34 @@ impl ProxyTarget {
     }
 }
 
+struct Arrival {
+    gateway: GatewayId,
+    subnets: OrdSet<IpNet>,
+    src: IpAddr,
+    dst: IpAddr,
+}
+
+fn arrival<A>(metadata: &<A as Accept>::Metadata) -> Option<Arrival>
+where
+    A: Accept + 'static,
+    <A as Accept>::Metadata: Visit<ExtractVisitor<GatewayInfo>>
+        + Visit<ExtractVisitor<TcpMetadata>>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+{
+    let gw = extract::<GatewayInfo, _>(metadata)?;
+    let tcp = extract::<TcpMetadata, _>(metadata)?;
+    let ip_info = gw.info.ip_info.as_ref()?;
+    Some(Arrival {
+        gateway: gw.id.clone(),
+        subnets: ip_info.subnets.clone(),
+        src: tcp.peer_addr.ip(),
+        dst: tcp.local_addr.ip(),
+    })
+}
+
 impl<A> VHostTarget<A> for ProxyTarget
 where
     A: Accept + 'static,
@@ -1056,19 +1221,16 @@ where
 {
     type PreprocessRes = AcceptStream;
     fn filter(&self, metadata: &<A as Accept>::Metadata) -> bool {
-        let gw = extract::<GatewayInfo, _>(metadata);
-        let tcp = extract::<TcpMetadata, _>(metadata);
-        let (Some(gw), Some(tcp)) = (gw, tcp) else {
+        let Some(at) = arrival::<A>(metadata) else {
             return false;
         };
-        let Some(ip_info) = &gw.info.ip_info else {
+        self.accepts(&at.gateway, &at.subnets, at.src, at.dst)
+    }
+    fn filter_private(&self, metadata: &<A as Accept>::Metadata) -> bool {
+        let Some(at) = arrival::<A>(metadata) else {
             return false;
         };
-
-        let src = tcp.peer_addr.ip();
-        let dst = tcp.local_addr.ip();
-
-        self.accepts(&gw.id, &ip_info.subnets, src, dst)
+        self.accepts_as_private(&at.subnets, at.src, at.dst)
     }
     fn acme(&self) -> Option<&AcmeProvider> {
         self.acme.as_ref()
@@ -1093,23 +1255,31 @@ where
     ) -> Option<(ServerConfig, Self::PreprocessRes)> {
         let peer = extract::<TcpMetadata, _>(metadata).map(|m| m.peer_addr);
         let plain_connect = || async {
-            TcpStream::connect(self.addr)
+            let deadline = tokio::time::Instant::now() + BACKEND_DIAL_TIMEOUT;
+            let stream = tokio::time::timeout_at(deadline, TcpStream::connect(self.addr))
                 .await
                 .with_ctx(|_| (ErrorKind::Network, self.addr))
-                .log_err()
+                .log_err()?
+                .with_ctx(|_| (ErrorKind::Network, self.addr))
+                .log_err()?;
+            Some((stream, deadline, self.addr))
         };
         // Source-preserving passthrough (container): open the internal leg from
         // the client's own address so the backend sees the real peer (RFC §4.6).
         // The box gateways the container, so replies transit it and the divert
         // routes them back. Manual LAN passthroughs and terminating targets
         // connect plainly — the box isn't their gateway.
-        let tcp_stream = match self.transparent_leg(peer) {
+        let (tcp_stream, deadline, backend_addr) = match self.transparent_leg(peer) {
             Some((client, target)) => {
                 crate::net::transparent::ensure_divert_infra_once()
                     .await
                     .log_err();
                 match crate::net::transparent::transparent_connect(client, target).await {
-                    Ok(stream) => stream,
+                    Ok(stream) => (
+                        stream,
+                        tokio::time::Instant::now() + BACKEND_DIAL_TIMEOUT,
+                        target,
+                    ),
                     // Degraded, not fatal: the backend sees this host rather than
                     // the client. Better than dropping a working connection.
                     Err(e) => {
@@ -1137,40 +1307,65 @@ where
             tracing::error!("Failed to set tcp keepalive: {e}");
             tracing::debug!("{e:?}");
         }
-        match &self.connect_ssl {
-            Ok(client_cfg) => {
-                let mut client_cfg = (&**client_cfg).clone();
-                client_cfg.alpn_protocols = hello
-                    .alpn()
-                    .into_iter()
-                    .flatten()
-                    .map(|x| x.to_vec())
-                    .collect();
-                let target_stream = TlsConnector::from(Arc::new(client_cfg))
-                    .connect_with(
-                        ServerName::IpAddress(self.addr.ip().into()),
-                        tcp_stream,
-                        |conn| {
-                            prev.alpn_protocols
-                                .extend(conn.alpn_protocol().into_iter().map(|p| p.to_vec()))
-                        },
-                    )
-                    .await
-                    .log_err()?;
-                return Some((prev, Box::pin(target_stream)));
-            }
-            Err(AlpnInfo::Reflect) => {
-                for alpn in hello.alpn().into_iter().flatten() {
-                    prev.alpn_protocols.push(alpn.to_vec());
-                }
-            }
-            Err(AlpnInfo::Specified(a)) => {
-                for alpn in a {
-                    prev.alpn_protocols.push(alpn.0.clone());
-                }
-            }
+        let client_alpn: Vec<Vec<u8>> = hello
+            .alpn()
+            .into_iter()
+            .flatten()
+            .map(|proto| proto.to_vec())
+            .collect();
+        let offered: Vec<Vec<u8>> = match &self.alpn {
+            Some(AlpnInfo(protos)) => protos.iter().map(|proto| proto.0.clone()).collect(),
+            None => client_alpn.clone(),
+        };
+        // The container is offered only protocols the client also named, since
+        // its choice is what the client is handed back.
+        let dialled: Vec<Vec<u8>> = offered
+            .iter()
+            .filter(|proto| client_alpn.contains(proto))
+            .cloned()
+            .collect();
+        // rustls turns a client away only when both its list and ours name
+        // something.
+        if self.connect_ssl.is_some()
+            && !offered.is_empty()
+            && !client_alpn.is_empty()
+            && dialled.is_empty()
+        {
+            prev.alpn_protocols = offered;
+            return Some((prev, Box::pin(tcp_stream)));
         }
-        Some((prev, Box::pin(tcp_stream)))
+        let (stream, negotiated): (AcceptStream, _) = match &self.connect_ssl {
+            Some(client_cfg) => {
+                // Called even for an empty list: without it the connector falls
+                // back to `client_cfg`'s own protocols.
+                let target_stream = tokio::time::timeout_at(
+                    deadline,
+                    TlsConnector::from(client_cfg.clone())
+                        .with_alpn(dialled)
+                        .connect(ServerName::IpAddress(self.addr.ip().into()), tcp_stream),
+                )
+                .await
+                .with_ctx(|_| (ErrorKind::Network, backend_addr))
+                .log_err()?
+                .with_ctx(|_| (ErrorKind::Network, backend_addr))
+                .log_err()?;
+                let negotiated = target_stream
+                    .get_ref()
+                    .1
+                    .alpn_protocol()
+                    .map(|proto| proto.to_vec());
+                (Box::pin(target_stream), negotiated)
+            }
+            None => (Box::pin(tcp_stream), None),
+        };
+        // rustls picks by this list's order.
+        prev.alpn_protocols = match &self.connect_ssl {
+            // One protocol frames both legs, so the client is offered the
+            // container's choice.
+            Some(_) => negotiated.into_iter().collect(),
+            None => offered,
+        };
+        Some((prev, stream))
     }
     fn handle_stream(
         &self,
@@ -1423,16 +1618,33 @@ impl ProxyContext {
     }
 }
 
+/// The protocols a binding answers with, carried on the wire as the list itself.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[serde(transparent)]
 #[ts(export)]
-pub enum AlpnInfo {
-    Reflect,
-    Specified(Vec<MaybeUtf8String>),
-}
-impl Default for AlpnInfo {
-    fn default() -> Self {
-        Self::Reflect
+pub struct AlpnInfo(pub Vec<MaybeUtf8String>);
+
+#[cfg(test)]
+mod alpn_wire_format {
+    use super::*;
+
+    /// A manifest writes the list itself, and no list at all is `null`.
+    #[test]
+    fn alpn_is_carried_as_the_list_itself() {
+        let pinned = Some(AlpnInfo(vec![
+            MaybeUtf8String(b"h2".to_vec()),
+            MaybeUtf8String(b"http/1.1".to_vec()),
+        ]));
+        let json = serde_json::json!(["h2", "http/1.1"]);
+        assert_eq!(serde_json::to_value(&pinned).unwrap(), json);
+        assert_eq!(
+            serde_json::from_value::<Option<AlpnInfo>>(json).unwrap(),
+            pinned,
+        );
+        assert_eq!(
+            serde_json::from_value::<Option<AlpnInfo>>(serde_json::Value::Null).unwrap(),
+            None,
+        );
     }
 }
 
@@ -1465,6 +1677,28 @@ fn cancel_dead<A: Accept + 'static>(targets: &mut InOMap<DynVHostTarget<A>, Targ
 
 type Mapping<A> = BTreeMap<Option<InternedString>, InOMap<DynVHostTarget<A>, TargetEntry>>;
 
+/// The [`Mapping`] key for a connection's SNI.
+///
+/// `None` is a connection that named no host — no SNI, or an SNI carrying an IP
+/// literal, which RFC 6066 forbids but clients send anyway — and is served by
+/// the bare-IP entry. A name is served only if it has an entry of its own: the
+/// lookup has no fallback, so a host answers to the names it was given and
+/// nothing else.
+fn host_key(server_name: Option<&str>) -> Option<InternedString> {
+    server_name
+        .filter(|name| name.parse::<IpAddr>().is_err())
+        .map(InternedString::from)
+}
+
+/// A challenge names the host it validates. One that names nothing is an
+/// ordinary connection, whatever it advertises.
+fn is_acme_challenge<'a>(
+    server_name: Option<&str>,
+    mut alpn: impl Iterator<Item = &'a [u8]>,
+) -> bool {
+    server_name.is_some() && alpn.any(|a| a == ACME_TLS_ALPN_NAME)
+}
+
 pub struct GetVHostAcmeProvider<A: Accept + 'static>(pub Watch<Mapping<A>>);
 impl<A: Accept + 'static> Clone for GetVHostAcmeProvider<A> {
     fn clone(&self) -> Self {
@@ -1484,8 +1718,11 @@ impl<A: Accept + 'static> GetAcmeProvider for GetVHostAcmeProvider<A> {
                     if x.parse::<IpAddr>().is_ok() {
                         return Some(acc);
                     }
-                    let (t, _) = m.get(&Some(x.clone()))?.iter().find(|(_, e)| e.alive())?;
-                    let acme = t.0.acme()?;
+                    let acme = m
+                        .get(&Some(x.clone()))?
+                        .iter()
+                        .filter(|(_, e)| e.alive())
+                        .find_map(|(t, _)| t.0.acme())?;
                     Some(if let Some(acc) = acc {
                         if acme == acc {
                             // all must match
@@ -1535,16 +1772,18 @@ fn passthrough_stub_config(crypto_provider: &Arc<CryptoProvider>) -> Result<Serv
 /// The handler holds the cert-resolution chain as `inner` and only invokes
 /// it when the matched target terminates TLS, or when the connection is the
 /// ACME `acme-tls/1` ALPN challenge (which has to be answered locally).
-pub struct VHostTlsHandler<I, A: Accept + 'static> {
-    inner: I,
+pub struct VHostTlsHandler<Acme, RootCa, A: Accept + 'static> {
+    acme: Acme,
+    root_ca: RootCa,
     crypto_provider: Arc<CryptoProvider>,
     mapping: Watch<Mapping<A>>,
     preprocessed: Option<Preprocessed<A>>,
 }
-impl<I: Clone, A: Accept + 'static> Clone for VHostTlsHandler<I, A> {
+impl<Acme: Clone, RootCa: Clone, A: Accept + 'static> Clone for VHostTlsHandler<Acme, RootCa, A> {
     fn clone(&self) -> Self {
         Self {
-            inner: self.inner.clone(),
+            acme: self.acme.clone(),
+            root_ca: self.root_ca.clone(),
             crypto_provider: self.crypto_provider.clone(),
             mapping: self.mapping.clone(),
             // Per-connection state — never carried across clones; each
@@ -1554,57 +1793,67 @@ impl<I: Clone, A: Accept + 'static> Clone for VHostTlsHandler<I, A> {
     }
 }
 
-impl<'a, A, I> TlsHandler<'a, A> for VHostTlsHandler<I, A>
+impl<'a, A, Acme, RootCa> TlsHandler<'a, A> for VHostTlsHandler<Acme, RootCa, A>
 where
     A: Accept + 'a,
     <A as Accept>::Metadata:
         Visit<ExtractVisitor<GatewayInfo>> + Visit<ExtractVisitor<TcpMetadata>> + Send + Sync,
-    I: TlsHandler<'a, A> + Send,
+    Acme: TlsHandler<'a, A> + Send,
+    RootCa: TlsHandler<'a, A> + Send,
 {
     async fn get_config(
         &'a mut self,
         hello: &'a ClientHello<'a>,
         metadata: &'a <A as Accept>::Metadata,
     ) -> Option<TlsHandlerAction> {
+        let sni = host_key(hello.server_name());
+
         let routed = self.mapping.peek(|m| {
-            m.get(&hello.server_name().map(InternedString::from))
-                .or_else(|| m.get(&None))
-                .into_iter()
-                .flatten()
-                .filter(|(_, e)| e.alive())
-                .find(|(t, _)| t.0.filter(metadata))
+            let alive = || m.get(&sni).into_iter().flatten().filter(|(_, e)| e.alive());
+            alive()
+                .find(|(t, _)| t.0.filter_private(metadata))
+                .or_else(|| alive().find(|(t, _)| t.0.filter(metadata)))
                 .map(|(t, e)| (t.clone(), e.ctx.clone()))
         });
 
-        let acme_alpn = hello
-            .alpn()
-            .into_iter()
-            .flatten()
-            .any(|a| a == ACME_TLS_ALPN_NAME);
+        let acme_challenge =
+            is_acme_challenge(hello.server_name(), hello.alpn().into_iter().flatten());
+
+        let Some((target, ctx)) = routed else {
+            // Validation is at :443 whatever port the name is served on, so a
+            // challenge lands here. Answered only from our orders in flight.
+            if acme_challenge {
+                return self.acme.get_config(hello, metadata).await;
+            }
+            return None;
+        };
 
         // Passthroughs should not intermediate ACME challenges — the
         // backend is the ACME client and holds the challenge cert.
-        if let Some((target, ctx)) = routed.as_ref().filter(|(t, _)| t.0.is_passthrough()) {
+        if target.0.is_passthrough() {
             let stub = passthrough_stub_config(&self.crypto_provider).log_err()?;
-            let (_, store) = target
-                .clone()
-                .into_preprocessed(ctx.clone(), stub, hello, metadata)
-                .await?;
+            let (_, store) = target.into_preprocessed(ctx, stub, hello, metadata).await?;
             self.preprocessed = Some(store);
             return Some(TlsHandlerAction::Passthrough);
         }
 
-        // ACME challenge for a terminating target (or for one with no
-        // explicit vhost mapping): answer locally from the inner chain.
-        if acme_alpn {
-            return self.inner.get_config(hello, metadata).await;
+        // ACME challenge for a terminating target: answer it ourselves.
+        if acme_challenge {
+            return self.acme.get_config(hello, metadata).await;
         }
 
-        let Some((target, ctx)) = routed else {
-            return None;
+        let action = if target.0.acme().is_some() {
+            // The authority's certificate or nothing: the root CA would answer
+            // for the name with a chain shared by every address on this server.
+            self.acme.get_config(hello, metadata).await?
+        } else {
+            // The authority's certificate where one exists, so a name served
+            // both ways presents the same one either way; the root CA else.
+            match self.acme.get_config(hello, metadata).await {
+                Some(action) => action,
+                None => self.root_ca.get_config(hello, metadata).await?,
+            }
         };
-
-        let action = self.inner.get_config(hello, metadata).await?;
         let cfg = match action {
             TlsHandlerAction::Tls(cfg) => cfg,
             other => return Some(other),
@@ -1618,10 +1867,7 @@ where
 struct VHostListener<M, A>(
     TlsListener<
         A,
-        VHostTlsHandler<
-            ChainedHandler<Arc<AcmeTlsHandler<M, GetVHostAcmeProvider<A>>>, RootCaTlsHandler<M>>,
-            A,
-        >,
+        VHostTlsHandler<Arc<AcmeTlsHandler<M, GetVHostAcmeProvider<A>>>, RootCaTlsHandler<M>, A>,
     >,
 )
 where
@@ -1718,6 +1964,8 @@ where
 struct VHostServer<A: Accept + 'static> {
     mapping: Watch<Mapping<A>>,
     bind_reqs: Watch<VHostBindRequirements>,
+    /// Bind requirements from outside this server's own mapping.
+    challenge_bind_reqs: SyncMutex<VHostBindRequirements>,
     _thread: NonDetachingJoinHandle<()>,
 }
 
@@ -1730,6 +1978,7 @@ impl<A: Accept> VHostServer<A> {
         crypto_provider: Arc<CryptoProvider>,
         branding: CertBranding,
         acme_cache: AcmeTlsAlpnCache,
+        report_acme_failure: ReportOrderFailure,
     ) -> Self
     where
         for<'a> M: HasModel<Model = Model<M>>
@@ -1751,24 +2000,24 @@ impl<A: Accept> VHostServer<A> {
         Self {
             mapping: mapping.clone(),
             bind_reqs,
+            challenge_bind_reqs: SyncMutex::new(VHostBindRequirements::default()),
             _thread: tokio::spawn(async move {
                 let mut listener = VHostListener(TlsListener::new(
                     listener,
                     VHostTlsHandler {
-                        inner: ChainedHandler(
-                            Arc::new(AcmeTlsHandler {
-                                db: db.clone(),
-                                acme_cache,
-                                crypto_provider: crypto_provider.clone(),
-                                get_provider: GetVHostAcmeProvider(mapping.clone()),
-                                in_progress: Watch::new(BTreeMap::new()),
-                            }),
-                            RootCaTlsHandler {
-                                db,
-                                crypto_provider: crypto_provider.clone(),
-                                branding,
-                            },
-                        ),
+                        acme: Arc::new(AcmeTlsHandler {
+                            db: db.clone(),
+                            acme_cache,
+                            crypto_provider: crypto_provider.clone(),
+                            get_provider: GetVHostAcmeProvider(mapping.clone()),
+                            in_progress: Watch::new(BTreeMap::new()),
+                            report_failure: Some(report_acme_failure),
+                        }),
+                        root_ca: RootCaTlsHandler {
+                            db,
+                            crypto_provider: crypto_provider.clone(),
+                            branding,
+                        },
                         crypto_provider,
                         mapping,
                         preprocessed: None,
@@ -1860,7 +2109,9 @@ impl<A: Accept> VHostServer<A> {
         });
     }
     fn update_bind_reqs(&self, mapping: &Mapping<A>) {
-        let new_reqs = compute_bind_reqs(mapping);
+        let mut new_reqs = compute_bind_reqs(mapping);
+        self.challenge_bind_reqs
+            .peek(|extra| new_reqs.extend(extra));
         self.bind_reqs.send_if_modified(|reqs| {
             if *reqs != new_reqs {
                 *reqs = new_reqs;
@@ -1870,8 +2121,13 @@ impl<A: Accept> VHostServer<A> {
             }
         });
     }
+    fn set_challenge_bind_reqs(&self, reqs: VHostBindRequirements) {
+        self.challenge_bind_reqs.replace(reqs);
+        self.mapping.peek(|mapping| self.update_bind_reqs(mapping));
+    }
+    /// A server held open by challenge requirements alone is in use.
     fn is_empty(&self) -> bool {
-        self.mapping.peek(|m| m.is_empty())
+        self.mapping.peek(|m| m.is_empty()) && self.challenge_bind_reqs.peek(|r| r.is_empty())
     }
 }
 
@@ -1914,6 +2170,298 @@ async fn copy_bidirectional_hangs_without_keepalive_when_peer_idle() {
 }
 
 #[cfg(test)]
+mod host_key_tests {
+    use super::*;
+
+    /// A dial that names no host is the bare-IP case the `None` entry serves.
+    #[test]
+    fn an_ip_literal_sni_is_the_same_as_no_sni() {
+        assert_eq!(host_key(None), None);
+        assert_eq!(host_key(Some("192.168.1.5")), None);
+        assert_eq!(host_key(Some("::1")), None);
+        assert_eq!(host_key(Some("fd00:3::1")), None);
+    }
+
+    /// Otherwise it reaches a handler with no name to check, which declines,
+    /// and the root CA answers.
+    #[test]
+    fn a_challenge_without_a_name_is_not_a_challenge() {
+        let acme = || [ACME_TLS_ALPN_NAME].into_iter();
+        assert!(is_acme_challenge(Some("example.com"), acme()));
+        assert!(!is_acme_challenge(None, acme()));
+        assert!(!is_acme_challenge(
+            Some("example.com"),
+            [b"h2".as_slice()].into_iter()
+        ));
+        assert!(!is_acme_challenge(
+            Some("example.com"),
+            std::iter::empty::<&[u8]>()
+        ));
+    }
+
+    #[test]
+    fn a_name_keys_to_itself() {
+        assert_eq!(
+            host_key(Some("server-name.local")),
+            Some(InternedString::intern("server-name.local"))
+        );
+        assert_eq!(
+            host_key(Some("example.com")),
+            Some(InternedString::intern("example.com"))
+        );
+        // Not an IP, so it keys like any other name — and nothing registers it,
+        // so the lookup misses and the connection is refused.
+        assert_eq!(
+            host_key(Some("server-name")),
+            Some(InternedString::intern("server-name"))
+        );
+    }
+}
+
+#[cfg(test)]
+mod port_map_tests {
+    use std::str::FromStr;
+
+    use super::*;
+    use crate::db::model::public::{GatewayType, IpInfo, NetworkInterfaceType};
+
+    const GATEWAY: &str = "wg0";
+    const BOX_IP: &str = "10.13.13.5";
+    const GUA: &str = "2001:db8::5";
+
+    /// On-link like StartTunnel: no next hop, so the relay comes from the subnet.
+    fn ip_info() -> OrdMap<GatewayId, NetworkInterfaceInfo> {
+        let mut info = OrdMap::new();
+        info.insert(
+            GatewayId::from(InternedString::intern(GATEWAY)),
+            NetworkInterfaceInfo {
+                name: None,
+                secure: None,
+                ip_info: Some(Arc::new(IpInfo {
+                    name: InternedString::intern(GATEWAY),
+                    scope_id: 0,
+                    device_type: Some(NetworkInterfaceType::Wireguard),
+                    subnets: ["10.13.13.5/24", "2001:db8::5/64"]
+                        .into_iter()
+                        .map(|s| s.parse::<IpNet>().unwrap())
+                        .collect(),
+                    lan_ip: Default::default(),
+                    wan_ip: None,
+                    ntp_servers: Default::default(),
+                    dns_servers: Default::default(),
+                })),
+                gateway_type: GatewayType::InboundOutbound,
+                port_map: Default::default(),
+                dns_update: Default::default(),
+            },
+        );
+        info
+    }
+
+    fn target(acme: bool, v6: bool) -> ProxyTarget {
+        ProxyTarget {
+            public_v4: [GatewayId::from(InternedString::intern(GATEWAY))]
+                .into_iter()
+                .collect(),
+            public_v6: if v6 {
+                [GUA.parse().unwrap()].into_iter().collect()
+            } else {
+                BTreeSet::new()
+            },
+            private: BTreeSet::new(),
+            acme: acme.then(|| AcmeProvider::from_str("letsencrypt").unwrap()),
+            addr: "10.0.3.2:443".parse().unwrap(),
+            addr_v6: None,
+            add_x_forwarded_headers: false,
+            auth: None,
+            connect_ssl: None,
+            alpn: None,
+            passthrough: false,
+            preserve_source_ip: false,
+        }
+    }
+
+    /// All public legs; a private one has no public gateway to map.
+    fn targets<'a>(
+        entries: impl IntoIterator<Item = (Option<&'a str>, u16, ProxyTarget)>,
+    ) -> BTreeMap<VHostKey, ProxyTarget> {
+        entries
+            .into_iter()
+            .map(|(host, port, target)| ((host.map(InternedString::intern), port, true), target))
+            .collect()
+    }
+
+    fn routes(desired: &DesiredPortMaps, ip: &str, external: u16) -> Vec<(String, u16)> {
+        let key: (IpAddr, u16) = (ip.parse().unwrap(), external);
+        desired
+            .get(&key)
+            .map(|(_, hosts)| {
+                hosts
+                    .iter()
+                    .map(|(h, port)| (h.as_ref().map_or("*".into(), |h| h.to_string()), *port))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn an_acme_domain_off_443_also_routes_the_challenge_port() {
+        let desired = desired_port_maps(
+            &targets([(Some("electrum.example.com"), 50002, target(true, false))]),
+            &ip_info(),
+        );
+
+        assert_eq!(
+            routes(&desired, BOX_IP, 50002),
+            [("electrum.example.com".to_string(), 50002)],
+        );
+        assert_eq!(
+            routes(&desired, BOX_IP, 443),
+            [("electrum.example.com".to_string(), 443)],
+        );
+    }
+
+    #[test]
+    fn every_acme_domain_takes_the_same_challenge_route() {
+        let desired = desired_port_maps(
+            &targets([
+                (Some("electrum.example.com"), 50002, target(true, false)),
+                (Some("turn.example.com"), 5349, target(true, false)),
+            ]),
+            &ip_info(),
+        );
+
+        assert_eq!(
+            routes(&desired, BOX_IP, 443),
+            [
+                ("electrum.example.com".to_string(), 443),
+                ("turn.example.com".to_string(), 443),
+            ],
+        );
+    }
+
+    #[test]
+    fn nothing_else_claims_the_challenge_port() {
+        let desired = desired_port_maps(
+            &targets([
+                (Some("plain.example.com"), 50002, target(false, false)),
+                (None, 8443, target(true, false)),
+            ]),
+            &ip_info(),
+        );
+
+        assert!(routes(&desired, BOX_IP, 443).is_empty());
+    }
+
+    #[test]
+    fn a_real_443_binding_owns_the_port_it_serves() {
+        let desired = desired_port_maps(
+            &targets([
+                (Some("example.com"), 443, target(true, false)),
+                (Some("example.com"), 50002, target(true, false)),
+            ]),
+            &ip_info(),
+        );
+
+        assert_eq!(
+            routes(&desired, BOX_IP, 443),
+            [("example.com".to_string(), 443)],
+        );
+    }
+
+    #[test]
+    fn ipv6_pinholes_are_unchanged() {
+        let desired = desired_port_maps(
+            &targets([(Some("example.com"), 443, target(true, true))]),
+            &ip_info(),
+        );
+
+        assert_eq!(routes(&desired, GUA, 443), [("*".to_string(), 443)]);
+        assert_eq!(routes(&desired, GUA, 80), [("*".to_string(), 443)]);
+    }
+
+    #[test]
+    fn an_acme_domain_off_443_pinholes_the_challenge_port_over_ipv6() {
+        let desired = desired_port_maps(
+            &targets([(Some("electrum.example.com"), 50002, target(true, true))]),
+            &ip_info(),
+        );
+
+        assert_eq!(routes(&desired, GUA, 50002), [("*".to_string(), 50002)]);
+        assert_eq!(routes(&desired, GUA, 443), [("*".to_string(), 443)]);
+        assert!(routes(&desired, GUA, 80).is_empty());
+    }
+
+    #[test]
+    fn a_served_443_still_earns_the_ipv6_redirect_beside_a_challenge_pinhole() {
+        let desired = desired_port_maps(
+            &targets([
+                (Some("example.com"), 443, target(true, true)),
+                (Some("electrum.example.com"), 50002, target(true, true)),
+            ]),
+            &ip_info(),
+        );
+
+        assert_eq!(routes(&desired, GUA, 80), [("*".to_string(), 443)]);
+    }
+
+    fn challenge_reqs(
+        entries: impl IntoIterator<Item = (Option<&'static str>, u16, ProxyTarget)>,
+    ) -> VHostBindRequirements {
+        challenge_bind_reqs(&targets(entries))
+    }
+
+    #[test]
+    fn an_acme_domain_off_443_binds_the_challenge_port_where_it_is_public() {
+        let reqs = challenge_reqs([(Some("electrum.example.com"), 50002, target(true, true))]);
+
+        assert_eq!(
+            reqs.public_gateways,
+            [GatewayId::from(InternedString::intern(GATEWAY))]
+                .into_iter()
+                .collect(),
+        );
+        assert_eq!(
+            reqs.private_ips,
+            [GUA.parse::<IpAddr>().unwrap()].into_iter().collect(),
+        );
+    }
+
+    fn owner(name: &str) -> HostMapOwner {
+        (Some(name.parse().unwrap()), "main".parse().unwrap())
+    }
+
+    fn key(port: u16) -> PortMapKey {
+        (GUA.parse().unwrap(), port, None)
+    }
+
+    #[test]
+    fn a_pinhole_another_owner_still_wants_is_not_withdrawn() {
+        let mut owners = BTreeMap::new();
+        take_ownership(&mut owners, owner("electrs"), [key(50002), key(443)].into());
+        take_ownership(&mut owners, owner("cln"), [key(3010), key(443)].into());
+
+        assert_eq!(
+            take_ownership(&mut owners, owner("electrs"), BTreeSet::new()),
+            [key(50002)],
+        );
+        assert_eq!(
+            take_ownership(&mut owners, owner("cln"), BTreeSet::new()),
+            [key(443), key(3010)],
+        );
+    }
+
+    #[test]
+    fn only_an_acme_domain_off_443_binds_the_challenge_port() {
+        assert!(
+            challenge_reqs([(Some("plain.example.com"), 50002, target(false, true))]).is_empty()
+        );
+        assert!(challenge_reqs([(Some("example.com"), 443, target(true, true))]).is_empty());
+        assert!(challenge_reqs([(None, 8443, target(true, true))]).is_empty());
+    }
+}
+
+#[cfg(test)]
 mod accept_filter_tests {
     use super::*;
 
@@ -1931,7 +2479,8 @@ mod accept_filter_tests {
             addr_v6: None,
             add_x_forwarded_headers: false,
             auth: None,
-            connect_ssl: Err(AlpnInfo::Reflect),
+            connect_ssl: None,
+            alpn: None,
             passthrough: false,
             preserve_source_ip: false,
         }
@@ -1999,6 +2548,31 @@ mod accept_filter_tests {
 
         // A different gateway is never WAN-accepted on IPv4.
         assert!(!t.accepts(&gw("other"), &no_subnets, src, v4));
+    }
+
+    /// IPv4 hands a forwarded dial and a local one the same gateway, so the
+    /// public leg claims both; the private leg's claim is the stronger one.
+    #[test]
+    fn a_lan_dial_of_a_dual_exposure_domain_belongs_to_the_private_leg() {
+        let g = gw("eth0");
+        let no_subnets = OrdSet::new();
+        let lan_dst = ip("192.168.1.2");
+        let public_leg = target(&["eth0"], &[], &[]);
+        let private_leg = target(&[], &[], &["192.168.1.2"]);
+
+        let lan_src = ip("192.168.1.50");
+        assert!(private_leg.accepts_as_private(&no_subnets, lan_src, lan_dst));
+        assert!(!public_leg.accepts_as_private(&no_subnets, lan_src, lan_dst));
+        assert!(
+            public_leg.accepts(&g, &no_subnets, lan_src, lan_dst),
+            "the public leg cannot tell a local dial from a forwarded one, \
+             which is why the private leg is preferred"
+        );
+
+        let wan_src = ip("203.0.113.9");
+        assert!(!private_leg.accepts_as_private(&no_subnets, wan_src, lan_dst));
+        assert!(!private_leg.accepts(&g, &no_subnets, wan_src, lan_dst));
+        assert!(public_leg.accepts(&g, &no_subnets, wan_src, lan_dst));
     }
 
     // LAN accept via `private` is matched by the exact local `dst` (so it is
@@ -2123,5 +2697,531 @@ mod conn_cap_tests {
             .unwrap()
             .unwrap();
         assert!(outcome == "target" || outcome == "conn", "got {outcome}");
+    }
+}
+
+/// Which protocols `preprocess` offers the container and the client.
+#[cfg(test)]
+mod upstream_alpn_tests {
+    use std::net::Ipv4Addr;
+
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio_rustls::TlsAcceptor;
+
+    use super::*;
+    use crate::net::tls::client_config_no_verify;
+    use crate::net::tls::test::{provider, self_signed_for_loopback, server_config};
+
+    fn config_advertising(alpn: &[&str]) -> ServerConfig {
+        let (key, cert) = self_signed_for_loopback();
+        let mut cfg = server_config(&key, &cert);
+        cfg.alpn_protocols = alpn.iter().map(|a| a.as_bytes().to_vec()).collect();
+        cfg
+    }
+
+    /// As [`spawn_backend_reporting`], for a caller with nothing to assert
+    /// about what the container negotiated.
+    async fn spawn_backend(alpn: &[&str]) -> SocketAddr {
+        spawn_backend_reporting(alpn).await.0
+    }
+
+    /// A TLS backend that reports the first `len` bytes it reads through its
+    /// own session.
+    async fn spawn_backend_reading(
+        len: usize,
+    ) -> (SocketAddr, tokio::sync::oneshot::Receiver<Vec<u8>>) {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let acceptor = TlsAcceptor::from(Arc::new(config_advertising(&[])));
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            if let Ok(mut tls) = acceptor.accept(tcp).await {
+                let mut read = vec![0; len];
+                if tls.read_exact(&mut read).await.is_ok() {
+                    let _ = tx.send(read);
+                }
+            }
+        });
+        (addr, rx)
+    }
+
+    /// A TLS backend advertising `alpn`, standing in for a container serving
+    /// its own TLS behind an `https` binding. Reports what it negotiated on its
+    /// first connection.
+    async fn spawn_backend_reporting(
+        alpn: &[&str],
+    ) -> (SocketAddr, tokio::sync::oneshot::Receiver<Option<Vec<u8>>>) {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let acceptor = TlsAcceptor::from(Arc::new(config_advertising(alpn)));
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let mut tx = Some(tx);
+            while let Ok((tcp, _)) = listener.accept().await {
+                let acceptor = acceptor.clone();
+                // Moved into the task, so a failed handshake drops it and the
+                // receiver closes.
+                let report = tx.take();
+                tokio::spawn(async move {
+                    if let Ok(tls) = acceptor.accept(tcp).await {
+                        if let Some(report) = report {
+                            let _ =
+                                report.send(tls.get_ref().1.alpn_protocol().map(|p| p.to_vec()));
+                        }
+                        // The backend holds its side open under the assertion.
+                        std::future::pending::<()>().await;
+                    }
+                });
+            }
+        });
+        (addr, rx)
+    }
+
+    /// Serves the client-facing config that the real [`ProxyTarget::preprocess`]
+    /// produces for an accepted `ClientHello`.
+    #[derive(Clone)]
+    struct Preprocessing {
+        target: ProxyTarget,
+        base_alpn: Vec<String>,
+        /// Written to the stream `preprocess` hands back.
+        probe: &'static [u8],
+    }
+    impl<'a> TlsHandler<'a, TcpListener> for Preprocessing {
+        async fn get_config(
+            &'a mut self,
+            hello: &'a ClientHello<'a>,
+            metadata: &'a TcpMetadata,
+        ) -> Option<TlsHandlerAction> {
+            let base_alpn: Vec<&str> = self.base_alpn.iter().map(|a| a.as_str()).collect();
+            let base = config_advertising(&base_alpn);
+            let (cfg, upstream) =
+                VHostTarget::<TcpListener>::preprocess(&self.target, base, hello, metadata).await?;
+            if self.probe.is_empty() {
+                // The client handshakes off `cfg` alone.
+                drop(upstream);
+            } else {
+                let probe = self.probe;
+                tokio::spawn(async move {
+                    let mut upstream = upstream;
+                    let _ = upstream.write_all(probe).await;
+                    let _ = upstream.flush().await;
+                    // The stream stays open until the backend has the probe.
+                    std::future::pending::<()>().await;
+                });
+            }
+            Some(TlsHandlerAction::Tls(cfg))
+        }
+    }
+
+    /// Dial the backend over TLS, as a container serving its own TLS is dialled.
+    fn rewrap() -> Option<Arc<ClientConfig>> {
+        rewrap_configured_with(&[])
+    }
+
+    /// A rewrap whose own config carries `alpn`, which the dial always
+    /// overrides.
+    fn rewrap_configured_with(alpn: &[&str]) -> Option<Arc<ClientConfig>> {
+        let mut cfg = client_config_no_verify(provider()).unwrap();
+        cfg.alpn_protocols = alpn.iter().map(|a| a.as_bytes().to_vec()).collect();
+        Some(Arc::new(cfg))
+    }
+
+    fn target(
+        backend: SocketAddr,
+        connect_ssl: Option<Arc<ClientConfig>>,
+        alpn: Option<AlpnInfo>,
+    ) -> ProxyTarget {
+        ProxyTarget {
+            public_v4: BTreeSet::new(),
+            public_v6: BTreeSet::new(),
+            private: BTreeSet::new(),
+            acme: None,
+            addr: backend,
+            addr_v6: None,
+            add_x_forwarded_headers: true,
+            auth: None,
+            connect_ssl,
+            alpn,
+            passthrough: false,
+            preserve_source_ip: false,
+        }
+    }
+
+    /// The protocol the client and the vhost listener settle on for one
+    /// connection offering `client_alpn`, in front of a rewrapped backend
+    /// advertising `backend_alpn`.
+    async fn negotiate(backend_alpn: &[&str], client_alpn: &[&str]) -> Option<String> {
+        try_negotiate(
+            rewrap(),
+            None,
+            &[],
+            spawn_backend(backend_alpn).await,
+            client_alpn,
+        )
+        .await
+        .expect("the client completes its handshake with the listener")
+    }
+
+    /// As [`negotiate`], but against a given `backend`, for any dial strategy
+    /// and any `alpn`, and with `base_alpn` already on the config handed to
+    /// `preprocess`.
+    async fn try_negotiate(
+        connect_ssl: Option<Arc<ClientConfig>>,
+        alpn: Option<AlpnInfo>,
+        base_alpn: &[&str],
+        backend: SocketAddr,
+        client_alpn: &[&str],
+    ) -> Result<Option<String>, std::io::Error> {
+        try_negotiate_probing(connect_ssl, alpn, base_alpn, backend, client_alpn, b"").await
+    }
+
+    async fn try_negotiate_probing(
+        connect_ssl: Option<Arc<ClientConfig>>,
+        alpn: Option<AlpnInfo>,
+        base_alpn: &[&str],
+        backend: SocketAddr,
+        client_alpn: &[&str],
+        probe: &'static [u8],
+    ) -> Result<Option<String>, std::io::Error> {
+        let handler = Preprocessing {
+            target: target(backend, connect_ssl, alpn),
+            base_alpn: base_alpn.iter().map(|a| a.to_string()).collect(),
+            probe,
+        };
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut vhost = TlsListener::new(listener, handler);
+
+        let accepted = tokio::spawn(async move {
+            futures::future::poll_fn(|cx| vhost.poll_accept(cx))
+                .await
+                .map(|(metadata, _stream)| metadata.tls_info.alpn)
+        });
+
+        let mut client = client_config_no_verify(provider()).unwrap();
+        client.alpn_protocols = client_alpn.iter().map(|a| a.as_bytes().to_vec()).collect();
+        let tcp = TcpStream::connect(addr).await.unwrap();
+        let handshake = tokio::time::timeout(
+            Duration::from_secs(10),
+            TlsConnector::from(Arc::new(client))
+                .connect(ServerName::IpAddress(Ipv4Addr::LOCALHOST.into()), tcp),
+        )
+        .await
+        .expect("the client handshake settles within 10s");
+
+        if let Err(e) = handshake {
+            // The listener answered with an alert, so it has no metadata to
+            // report.
+            accepted.abort();
+            return Err(e);
+        }
+
+        let alpn = tokio::time::timeout(Duration::from_secs(10), accepted)
+            .await
+            .expect("the listener finishes its handshake within 10s")
+            .expect("the listener's accept task runs to completion")
+            .expect("the listener accepts the connection");
+        Ok(alpn.map(|a| String::from_utf8(a.0).unwrap()))
+    }
+
+    #[tokio::test]
+    async fn the_client_lands_on_the_protocol_the_backend_chose() {
+        assert_eq!(
+            negotiate(&["h2", "http/1.1"], &["h2", "http/1.1"]).await,
+            Some("h2".to_owned()),
+            "the backend picks h2 out of the client's own list, so proxying \
+             the pair as HTTP/1 writes h1 framing onto an h2 connection",
+        );
+    }
+
+    #[tokio::test]
+    async fn a_backend_that_declines_alpn_leaves_the_client_without_it() {
+        assert_eq!(negotiate(&[], &["h2", "http/1.1"]).await, None);
+    }
+
+    #[tokio::test]
+    async fn a_backend_limited_to_http1_holds_the_client_there() {
+        assert_eq!(
+            negotiate(&["http/1.1"], &["h2", "http/1.1"]).await,
+            Some("http/1.1".to_owned()),
+        );
+    }
+
+    /// rustls selects by the server list's order.
+    #[tokio::test]
+    async fn a_protocol_on_the_base_config_does_not_outrank_the_backend() {
+        assert_eq!(
+            try_negotiate(
+                rewrap(),
+                None,
+                &["http/1.1"],
+                spawn_backend(&["h2", "http/1.1"]).await,
+                &["h2", "http/1.1"],
+            )
+            .await
+            .expect("the client completes its handshake with the listener"),
+            Some("h2".to_owned()),
+        );
+    }
+
+    /// A failed upstream handshake makes `preprocess` decline, and the client's
+    /// handshake fails with it.
+    #[tokio::test]
+    async fn a_backend_refusing_the_clients_alpn_declines_the_connection() {
+        try_negotiate(
+            rewrap(),
+            None,
+            &[],
+            spawn_backend(&["h2"]).await,
+            &["http/1.1"],
+        )
+        .await
+        .expect_err("the listener cannot serve a client the backend refused");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_backend_stalling_its_tls_handshake_declines_the_connection() {
+        let backend = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let backend_addr = backend.local_addr().unwrap();
+        let (accepted_tx, accepted_rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let (socket, _) = backend.accept().await.unwrap();
+            let _ = accepted_tx.send(());
+            std::future::pending::<()>().await;
+            drop(socket);
+        });
+
+        let handler = Preprocessing {
+            target: target(backend_addr, rewrap(), None),
+            base_alpn: Vec::new(),
+            probe: b"",
+        };
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let listener_addr = listener.local_addr().unwrap();
+        let mut vhost = TlsListener::new(listener, handler);
+        tokio::spawn(async move {
+            let _ = futures::future::poll_fn(|cx| vhost.poll_accept(cx)).await;
+        });
+
+        assert_eq!(BACKEND_DIAL_TIMEOUT, Duration::from_secs(15));
+        let mut client = tokio::spawn(async move {
+            let tcp = TcpStream::connect(listener_addr).await.unwrap();
+            TlsConnector::from(Arc::new(client_config_no_verify(provider()).unwrap()))
+                .connect(ServerName::IpAddress(Ipv4Addr::LOCALHOST.into()), tcp)
+                .await
+        });
+        tokio::select! {
+            _ = &mut client => panic!("the client failed before the backend accepted TCP"),
+            accepted = accepted_rx => accepted.expect("the backend accepts TCP"),
+        }
+        let handshake = tokio::time::timeout(Duration::from_secs(20), client)
+            .await
+            .expect("the client handshake settles before the guard")
+            .expect("the client task runs to completion");
+        assert!(
+            handshake.is_err(),
+            "the listener declines a backend that stalls its TLS handshake"
+        );
+    }
+
+    /// The vhost reuses a live target whose config compares equal, so `alpn`
+    /// has to be part of a target's identity.
+    #[test]
+    fn a_target_is_not_equal_to_one_that_pins_a_different_protocol() {
+        let addr: SocketAddr = "10.0.3.2:443".parse().unwrap();
+        let pinned = |proto: &[u8]| Some(AlpnInfo(vec![MaybeUtf8String(proto.to_vec())]));
+        assert_ne!(
+            target(addr, None, pinned(b"h2")),
+            target(addr, None, pinned(b"http/1.1")),
+        );
+        assert_eq!(
+            target(addr, None, pinned(b"h2")),
+            target(addr, None, pinned(b"h2")),
+        );
+    }
+
+    /// A pin narrows what the client asked for rather than replacing it.
+    #[tokio::test]
+    async fn a_client_speaking_one_of_the_pinned_protocols_is_served() {
+        let both = AlpnInfo(vec![
+            MaybeUtf8String(b"h2".to_vec()),
+            MaybeUtf8String(b"http/1.1".to_vec()),
+        ]);
+        assert_eq!(
+            try_negotiate(
+                rewrap(),
+                Some(both),
+                &[],
+                spawn_backend(&["h2", "http/1.1"]).await,
+                &["http/1.1"],
+            )
+            .await
+            .expect("a client speaking one of the pinned protocols is served"),
+            Some("http/1.1".to_owned()),
+        );
+    }
+
+    /// rustls alerts only when the list it was given is non-empty, so an empty
+    /// pin turns nobody away and the container is still reached over TLS.
+    #[tokio::test]
+    async fn an_empty_pin_still_reaches_the_container_over_tls() {
+        let (backend, negotiated) = spawn_backend_reporting(&["h2", "http/1.1"]).await;
+        assert_eq!(
+            try_negotiate(
+                rewrap(),
+                Some(AlpnInfo(Vec::new())),
+                &[],
+                backend,
+                &["h2", "http/1.1"],
+            )
+            .await
+            .expect("an empty pin turns nobody away"),
+            None,
+        );
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(10), negotiated)
+                .await
+                .expect("the container is dialled and its handshake settles within 10s")
+                .expect("the container completes its handshake"),
+            None,
+        );
+    }
+
+    /// A client that shares no protocol with the pin is refused.
+    #[tokio::test]
+    async fn a_client_sharing_no_protocol_with_the_pin_is_refused() {
+        let h2 = AlpnInfo(vec![MaybeUtf8String(b"h2".to_vec())]);
+        try_negotiate(
+            rewrap(),
+            Some(h2),
+            &[],
+            spawn_backend(&["h2", "http/1.1"]).await,
+            &["http/1.1"],
+        )
+        .await
+        .expect_err("a client that cannot meet the pin is not served");
+    }
+
+    /// The stream `preprocess` hands back is the container's TLS session, and
+    /// the client's bytes are spliced onto it.
+    #[tokio::test]
+    async fn the_client_is_spliced_onto_the_containers_tls_session() {
+        let probe = b"start9";
+        let (backend, read) = spawn_backend_reading(probe.len()).await;
+        try_negotiate_probing(rewrap(), None, &[], backend, &["h2"], probe)
+            .await
+            .expect("a rewrap completes the client handshake");
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(10), read)
+                .await
+                .expect("the container reads the probe within 10s")
+                .expect("the container reads the probe through its own session"),
+            probe,
+        );
+    }
+
+    /// The pin is the list a binding with no TLS leg offers the client, so
+    /// rustls is what turns away a client that shares none of it.
+    #[tokio::test]
+    async fn a_plaintext_binding_refuses_a_client_that_cannot_meet_the_pin() {
+        let h2 = AlpnInfo(vec![MaybeUtf8String(b"h2".to_vec())]);
+        try_negotiate(None, Some(h2), &[], spawn_backend(&[]).await, &["http/1.1"])
+            .await
+            .expect_err("a client that cannot meet the pin is not served");
+    }
+
+    /// A client that names no protocol leaves the container named none either.
+    #[tokio::test]
+    async fn a_pin_does_not_reach_a_container_when_the_client_names_nothing() {
+        let (backend, negotiated) = spawn_backend_reporting(&["h2", "http/1.1"]).await;
+        let h2 = AlpnInfo(vec![MaybeUtf8String(b"h2".to_vec())]);
+        assert_eq!(
+            try_negotiate(rewrap(), Some(h2), &[], backend, &[])
+                .await
+                .expect("a client that names no protocol is still served"),
+            None,
+        );
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(10), negotiated)
+                .await
+                .expect("the container is dialled and its handshake settles within 10s")
+                .expect("the container completes its handshake"),
+            None,
+            "the container was framed a protocol the client never named",
+        );
+    }
+
+    /// A protocol the pin leaves out is off the table even where both ends
+    /// speak it.
+    #[tokio::test]
+    async fn a_pin_keeps_the_container_off_the_protocols_it_excludes() {
+        let (backend, negotiated) = spawn_backend_reporting(&["h2", "http/1.1"]).await;
+        let http1 = AlpnInfo(vec![MaybeUtf8String(b"http/1.1".to_vec())]);
+        assert_eq!(
+            try_negotiate(rewrap(), Some(http1), &[], backend, &["h2", "http/1.1"])
+                .await
+                .expect("a pinned rewrap completes the client handshake"),
+            Some("http/1.1".to_owned()),
+        );
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(10), negotiated)
+                .await
+                .expect("the container is dialled and its handshake settles within 10s")
+                .expect("the container completes its handshake"),
+            Some(b"http/1.1".to_vec()),
+            "the container picked from the client's list instead of the pinned one",
+        );
+    }
+
+    /// An unset filter leaves the client its own list, in its own order.
+    #[tokio::test]
+    async fn an_unset_filter_gives_the_client_its_own_list() {
+        assert_eq!(
+            try_negotiate(
+                None,
+                None,
+                &["http/1.1"],
+                spawn_backend(&[]).await,
+                &["h2", "http/1.1"],
+            )
+            .await
+            .expect("an unfiltered binding completes the client handshake"),
+            Some("h2".to_owned()),
+        );
+    }
+
+    /// A client that offers no ALPN leaves the container offered none. The
+    /// connector falls back to the dialling config's own list unless it is
+    /// given one.
+    #[tokio::test]
+    async fn a_client_offering_no_alpn_does_not_fall_back_to_the_dialling_config() {
+        try_negotiate(
+            rewrap_configured_with(&["h2"]),
+            None,
+            &[],
+            spawn_backend(&["http/1.1"]).await,
+            &[],
+        )
+        .await
+        .expect("the backend is offered nothing, so it has nothing to refuse");
+    }
+
+    /// A pin is the list the client is offered.
+    #[tokio::test]
+    async fn specified_offers_the_bindings_own_list() {
+        let http1 = AlpnInfo(vec![MaybeUtf8String(b"http/1.1".to_vec())]);
+        assert_eq!(
+            try_negotiate(
+                None,
+                Some(http1),
+                &["h2"],
+                spawn_backend(&[]).await,
+                &["h2", "http/1.1"],
+            )
+            .await
+            .expect("a specified binding completes the client handshake"),
+            Some("http/1.1".to_owned()),
+        );
     }
 }

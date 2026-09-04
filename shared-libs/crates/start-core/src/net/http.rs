@@ -2,10 +2,12 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::IpAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use bytes::Bytes;
 use futures::FutureExt;
+use http::uri::{Authority, Scheme};
 use http::{HeaderMap, HeaderValue};
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
@@ -13,7 +15,8 @@ use hyper::body::{Body as HyperBody, Incoming};
 use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify, oneshot};
+use tokio_util::io::InspectReader;
 
 use crate::net::host::binding::ProxyAuth;
 use crate::prelude::*;
@@ -32,6 +35,38 @@ fn box_incoming(b: Incoming) -> ProxyBody {
 
 fn box_full(bytes: Bytes) -> ProxyBody {
     Full::new(bytes).map_err(|e: Infallible| match e {}).boxed()
+}
+
+/// Marks a response as still on its way to the client. `disable_keep_alive`
+/// only closes the connection outright while it is idle; called mid-response
+/// it stamps `Connection: close` on the head instead. Held by the relayed
+/// body, so it drops once that head and body have been written.
+struct Relaying {
+    count: Arc<AtomicUsize>,
+    done: Arc<Notify>,
+}
+
+impl Relaying {
+    fn start(count: Arc<AtomicUsize>, done: Arc<Notify>) -> Self {
+        count.fetch_add(1, Ordering::Relaxed);
+        Self { count, done }
+    }
+
+    fn hold(self, body: ProxyBody) -> ProxyBody {
+        body.map_frame(move |frame| {
+            let _ = &self;
+            frame
+        })
+        .boxed()
+    }
+}
+
+impl Drop for Relaying {
+    fn drop(&mut self) {
+        if self.count.fetch_sub(1, Ordering::Relaxed) == 1 {
+            self.done.notify_one();
+        }
+    }
 }
 
 /// Pre-compiled view of a [`ProxyAuth`] used on the proxy hot-path.
@@ -166,11 +201,33 @@ fn apply_request_policy<B>(
     Ok(())
 }
 
+pub fn request_authority<B>(req: &Request<B>) -> Option<Authority> {
+    req.uri().authority().cloned().or_else(|| {
+        req.headers()
+            .get(http::header::HOST)?
+            .to_str()
+            .ok()?
+            .parse()
+            .ok()
+    })
+}
+
+pub fn https_redirect_uri(uri: &http::Uri, authority: Authority) -> Result<http::Uri, http::Error> {
+    let path_and_query = uri
+        .path_and_query()
+        .filter(|path| path.as_str() != "*")
+        .map_or("/", |path| path.as_str());
+    http::Uri::builder()
+        .scheme(Scheme::HTTPS)
+        .authority(authority)
+        .path_and_query(path_and_query)
+        .build()
+}
+
 pub async fn handle_http_on_https(stream: impl ReadWriter + Unpin + 'static) -> Result<(), Error> {
     use axum::body::Body;
     use axum::extract::Request;
     use axum::response::Response;
-    use http::Uri;
 
     use crate::net::static_server::server_error;
 
@@ -180,20 +237,11 @@ pub async fn handle_http_on_https(stream: impl ReadWriter + Unpin + 'static) -> 
             hyper_util::service::TowerToHyperService::new(axum::Router::new().fallback(
                 axum::routing::method_routing::any(move |req: Request| async move {
                     match async move {
-                        let host = req
-                            .headers()
-                            .get(http::header::HOST)
-                            .and_then(|host| host.to_str().ok());
-                        if let Some(host) = host {
-                            let uri = Uri::from_parts({
-                                let mut parts = req.uri().to_owned().into_parts();
-                                parts.scheme = Some("https".parse()?);
-                                parts.authority = Some(host.parse()?);
-                                parts
-                            })?;
+                        if let Some(authority) = request_authority(&req) {
+                            let target = https_redirect_uri(req.uri(), authority)?;
                             Response::builder()
                                 .status(http::StatusCode::TEMPORARY_REDIRECT)
-                                .header(http::header::LOCATION, uri.to_string())
+                                .header(http::header::LOCATION, target.to_string())
                                 .body(Body::default())
                         } else {
                             Response::builder()
@@ -240,6 +288,119 @@ where
     }
 }
 
+const H2_SETTINGS_FRAME: u8 = 0x4;
+const ENABLE_CONNECT_PROTOCOL: u16 = 0x8;
+const MAX_SETTINGS_PAYLOAD: usize = 16_384;
+
+type OpeningSettingsResult = Result<bool, &'static str>;
+
+struct OpeningSettingsObserver {
+    result: Option<oneshot::Sender<OpeningSettingsResult>>,
+    header: [u8; 9],
+    header_len: usize,
+    payload_remaining: usize,
+    entry: [u8; 6],
+    entry_len: usize,
+    extended_connect: bool,
+}
+
+impl OpeningSettingsObserver {
+    fn new(result: oneshot::Sender<OpeningSettingsResult>) -> Self {
+        Self {
+            result: Some(result),
+            header: [0; 9],
+            header_len: 0,
+            payload_remaining: 0,
+            entry: [0; 6],
+            entry_len: 0,
+            extended_connect: false,
+        }
+    }
+
+    fn inspect(&mut self, mut bytes: &[u8]) {
+        if self.result.is_none() {
+            return;
+        }
+
+        if self.header_len < self.header.len() {
+            let len = bytes.len().min(self.header.len() - self.header_len);
+            self.header[self.header_len..self.header_len + len].copy_from_slice(&bytes[..len]);
+            self.header_len += len;
+            bytes = &bytes[len..];
+            if self.header_len < self.header.len() {
+                return;
+            }
+            self.payload_remaining = ((self.header[0] as usize) << 16)
+                | ((self.header[1] as usize) << 8)
+                | self.header[2] as usize;
+            if self.header[3] != H2_SETTINGS_FRAME {
+                return self.finish(Err("backend did not open with SETTINGS"));
+            }
+            if self.header[4] & 0x1 != 0 {
+                return self.finish(Err("backend opening SETTINGS was an acknowledgement"));
+            }
+            let stream_id = u32::from_be_bytes([
+                self.header[5],
+                self.header[6],
+                self.header[7],
+                self.header[8],
+            ]) & 0x7fff_ffff;
+            if stream_id != 0 {
+                return self.finish(Err("backend opening SETTINGS used a nonzero stream"));
+            }
+            if self.payload_remaining > MAX_SETTINGS_PAYLOAD {
+                return self.finish(Err("backend opening SETTINGS exceeded the maximum payload"));
+            }
+            if self.payload_remaining % self.entry.len() != 0 {
+                return self.finish(Err("backend opening SETTINGS had a partial entry"));
+            }
+            if self.payload_remaining == 0 {
+                return self.finish(Ok(false));
+            }
+        }
+
+        while !bytes.is_empty() && self.result.is_some() {
+            let len = bytes.len().min(self.entry.len() - self.entry_len);
+            self.entry[self.entry_len..self.entry_len + len].copy_from_slice(&bytes[..len]);
+            self.entry_len += len;
+            self.payload_remaining -= len;
+            bytes = &bytes[len..];
+
+            if self.entry_len == self.entry.len() {
+                let id = u16::from_be_bytes([self.entry[0], self.entry[1]]);
+                let value = u32::from_be_bytes([
+                    self.entry[2],
+                    self.entry[3],
+                    self.entry[4],
+                    self.entry[5],
+                ]);
+                if id == ENABLE_CONNECT_PROTOCOL {
+                    match value {
+                        0 => self.extended_connect = false,
+                        1 => self.extended_connect = true,
+                        _ => {
+                            return self.finish(Err(
+                                "backend opening SETTINGS had an invalid ENABLE_CONNECT_PROTOCOL",
+                            ));
+                        }
+                    }
+                }
+                self.entry_len = 0;
+            }
+
+            if self.payload_remaining == 0 {
+                self.finish(Ok(self.extended_connect));
+            }
+        }
+    }
+
+    fn finish(&mut self, result: OpeningSettingsResult) {
+        if let Some(sender) = self.result.take() {
+            let _ = sender.send(result);
+        }
+    }
+}
+
 pub async fn run_http2_proxy<F, T>(
     from: F,
     to: T,
@@ -251,6 +412,10 @@ where
     F: ReadWriter + Unpin + Send + 'static,
     T: ReadWriter + Unpin + Send + 'static,
 {
+    // Hyper fixes ENABLE_CONNECT_PROTOCOL when it creates the frontend connection.
+    let (settings_sender, mut settings_receiver) = oneshot::channel();
+    let mut settings_observer = OpeningSettingsObserver::new(settings_sender);
+    let to = InspectReader::new(to, move |bytes| settings_observer.inspect(bytes));
     let (client, to) = hyper::client::conn::http2::Builder::new(TokioExecutor::new())
         .timer(TokioTimer::new())
         .adaptive_window(true)
@@ -258,13 +423,35 @@ where
         .keep_alive_timeout(Duration::from_secs(300))
         .handshake(TokioIo::new(to))
         .await?;
-    let from = hyper::server::conn::http2::Builder::new(TokioExecutor::new())
-        .timer(TokioTimer::new())
-        .enable_connect_protocol()
-        .adaptive_window(true)
-        .keep_alive_interval(Duration::from_secs(25)) // Add this
-        .keep_alive_timeout(Duration::from_secs(300))
-        .serve_connection(
+    let mut to = Box::pin(to.fuse());
+    let settings = tokio::select! {
+        settings = &mut settings_receiver => {
+            settings.map_err(|e| Error::new(e, ErrorKind::Network))?
+        }
+        res = to.as_mut() => match settings_receiver.try_recv() {
+            Ok(settings) => settings,
+            Err(_) => {
+                res?;
+                return Err(Error::new(
+                    eyre!("backend http2 connection ended before opening SETTINGS"),
+                    ErrorKind::Network,
+                ));
+            }
+        }
+    };
+    let extended_connect =
+        settings.map_err(|message| Error::new(eyre!(message), ErrorKind::Network))?;
+    let from = {
+        let mut server = hyper::server::conn::http2::Builder::new(TokioExecutor::new());
+        server
+            .timer(TokioTimer::new())
+            .adaptive_window(true)
+            .keep_alive_interval(Duration::from_secs(25))
+            .keep_alive_timeout(Duration::from_secs(300));
+        if extended_connect {
+            server.enable_connect_protocol();
+        }
+        server.serve_connection(
             TokioIo::new(from),
             service_fn(move |mut req| {
                 let mut client = client.clone();
@@ -307,10 +494,21 @@ where
                     Ok::<_, hyper::Error>(res.map(box_incoming))
                 }
             }),
-        );
-    futures::future::try_join(from.boxed(), to.boxed()).await?;
-
-    Ok(())
+        )
+    };
+    let mut from = Box::pin(from);
+    loop {
+        tokio::select! {
+            res = from.as_mut() => return Ok(res?),
+            res = to.as_mut() => {
+                if let Err(e) = res {
+                    tracing::warn!("Error proxying http2 connection to backend: {e}");
+                    tracing::debug!("{e:?}");
+                }
+                from.as_mut().graceful_shutdown();
+            }
+        }
+    }
 }
 
 pub async fn run_http1_proxy<F, T>(
@@ -330,6 +528,11 @@ where
         .handshake(TokioIo::new(to))
         .await?;
     let client = Arc::new(Mutex::new(client));
+    // Non-zero while a relayed response is still being written to the client.
+    let relaying = Arc::new(AtomicUsize::new(0));
+    let relayed = Arc::new(Notify::new());
+    let svc_relaying = relaying.clone();
+    let svc_relayed = relayed.clone();
     // hyper disarms `header_read_timeout` while a body or upgrade is in
     // flight, so this can't kill an active stream — only idle keep-alive.
     let from = hyper::server::conn::http1::Builder::new()
@@ -340,6 +543,8 @@ where
             service_fn(move |mut req| {
                 let client = client.clone();
                 let gate = gate.clone();
+                let relaying = svc_relaying.clone();
+                let relayed = svc_relayed.clone();
                 async move {
                     if let Err(resp) =
                         apply_request_policy(&mut req, src_ip, add_forwarded, gate.as_ref())
@@ -362,6 +567,11 @@ where
                         } else {
                             None
                         };
+
+                    // Taken before `send_request`, because the upstream
+                    // connection can resolve in the same poll that delivers the
+                    // response — before this future is resumed.
+                    let relaying = Relaying::start(relaying, relayed);
 
                     let mut res = match client.lock().await.send_request(req).await {
                         Ok(r) => r,
@@ -405,13 +615,37 @@ where
                         });
                     }
 
-                    Ok::<_, hyper::Error>(res.map(box_incoming))
+                    Ok::<_, hyper::Error>(res.map(|b| relaying.hold(box_incoming(b))))
                 }
             }),
         );
-    futures::future::try_join(from.with_upgrades().boxed(), to.with_upgrades().boxed()).await?;
-
-    Ok(())
+    let mut from = Box::pin(from.with_upgrades());
+    let mut to = Box::pin(to.with_upgrades().fuse());
+    let mut deferred = false;
+    loop {
+        tokio::select! {
+            res = from.as_mut() => return Ok(res?),
+            res = to.as_mut() => {
+                res?;
+                // The backend is gone. Hand the client the EOF now, the way the
+                // splice path does, instead of leaving it a connection that
+                // looks reusable and aborts the next request it carries. But
+                // `disable_keep_alive` only closes outright when the connection
+                // is idle — mid-response it stamps `Connection: close` on the
+                // head instead, which is a header the backend never sent, and
+                // on a 101 it lands on top of `Connection: Upgrade`.
+                if relaying.load(Ordering::Relaxed) == 0 {
+                    from.as_mut().graceful_shutdown();
+                } else {
+                    deferred = true;
+                }
+            }
+            _ = relayed.notified(), if deferred => {
+                deferred = false;
+                from.as_mut().graceful_shutdown();
+            }
+        }
+    }
 }
 
 // Silence unused-import lints that may show up depending on feature flags.
@@ -423,8 +657,440 @@ fn _assert_body_bounds() {
 
 #[cfg(test)]
 mod tests {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
+
     use super::*;
     use crate::net::host::binding::BasicCredential;
+
+    async fn read_head(s: &mut DuplexStream) -> String {
+        let mut head = Vec::new();
+        let mut byte = [0u8; 1];
+        while !head.ends_with(b"\r\n\r\n") {
+            if s.read(&mut byte).await.unwrap() == 0 {
+                break;
+            }
+            head.push(byte[0]);
+        }
+        String::from_utf8_lossy(&head).to_lowercase()
+    }
+
+    /// The bytes this proxy writes upstream for one connection whose
+    /// client-facing handshake negotiated `alpn`.
+    async fn upstream_framing(alpn: Option<&str>) -> String {
+        let (mut client, client_facing) = tokio::io::duplex(4096);
+        let (backend_facing, mut backend) = tokio::io::duplex(4096);
+
+        // A target reaches `run_http_proxy` only when it adds forwarded headers
+        // or gates auth.
+        tokio::spawn(run_http_proxy(
+            client_facing,
+            backend_facing,
+            alpn.map(|a| MaybeUtf8String(a.as_bytes().to_vec())),
+            None,
+            true,
+            None,
+        ));
+        if alpn != Some("h2") {
+            // Only h2 opens with a preface.
+            client
+                .write_all(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+                .await
+                .unwrap();
+        }
+
+        let mut head = [0u8; 14];
+        tokio::time::timeout(Duration::from_secs(5), backend.read_exact(&mut head))
+            .await
+            .expect("the proxy opens the upstream leg")
+            .unwrap();
+        String::from_utf8_lossy(&head).into_owned()
+    }
+
+    /// The proxy writes h2 framing upstream only when the client-facing
+    /// handshake selected h2.
+    #[tokio::test]
+    async fn the_negotiated_alpn_frames_the_upstream_leg() {
+        assert_eq!(upstream_framing(Some("h2")).await, "PRI * HTTP/2.0");
+        assert_eq!(upstream_framing(Some("http/1.1")).await, "GET / HTTP/1.1");
+        assert_eq!(upstream_framing(None).await, "GET / HTTP/1.1");
+    }
+
+    /// A backend closing its idle keep-alive leg (Apache's `KeepAliveTimeout`
+    /// is 5s) must reach the client as an EOF, not as an abort on its next
+    /// request.
+    #[tokio::test]
+    async fn upstream_close_is_relayed_to_the_client() {
+        let (mut client, client_facing) = tokio::io::duplex(4096);
+        let (backend_facing, mut backend) = tokio::io::duplex(4096);
+
+        tokio::spawn(run_http1_proxy(
+            client_facing,
+            backend_facing,
+            None,
+            false,
+            None,
+        ));
+        tokio::spawn(async move {
+            read_head(&mut backend).await;
+            backend
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi")
+                .await
+                .unwrap();
+            drop(backend);
+        });
+
+        client
+            .write_all(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+            .await
+            .unwrap();
+        assert!(read_head(&mut client).await.starts_with("http/1.1 200 ok"));
+        client.read_exact(&mut [0u8; 2]).await.unwrap();
+
+        let eof = tokio::time::timeout(Duration::from_secs(5), client.read(&mut [0u8; 1]))
+            .await
+            .expect(
+                "client leg outlived the upstream: it is now a connection that looks reusable \
+                 and will abort the next request written to it",
+            );
+        assert_eq!(eof.unwrap(), 0);
+    }
+
+    /// A backend that answers and closes in the same breath still gets its
+    /// response relayed verbatim: `Connection: close` is a header it never
+    /// sent, and the close is carried by closing, not by editing the reply.
+    #[tokio::test]
+    async fn a_relayed_response_is_not_rewritten_when_the_backend_closes() {
+        let (mut client, client_facing) = tokio::io::duplex(4096);
+        let (backend_facing, mut backend) = tokio::io::duplex(4096);
+
+        tokio::spawn(run_http1_proxy(
+            client_facing,
+            backend_facing,
+            None,
+            false,
+            None,
+        ));
+        tokio::spawn(async move {
+            read_head(&mut backend).await;
+            backend
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi")
+                .await
+                .unwrap();
+            drop(backend);
+        });
+
+        client
+            .write_all(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+            .await
+            .unwrap();
+        let head = read_head(&mut client).await;
+        assert!(!head.contains("connection: close"), "{head:?}");
+        client.read_exact(&mut [0u8; 2]).await.unwrap();
+
+        let eof = tokio::time::timeout(Duration::from_secs(5), client.read(&mut [0u8; 1]))
+            .await
+            .expect("client leg outlived the upstream");
+        assert_eq!(eof.unwrap(), 0);
+    }
+
+    /// The proxy relays the backend's own 101 rather than answering the
+    /// upgrade itself, so the client hears nothing until the backend has
+    /// spoken.
+    #[tokio::test]
+    async fn upgrade_is_not_answered_before_the_backend_answers() {
+        let (mut client, client_facing) = tokio::io::duplex(4096);
+        let (backend_facing, mut backend) = tokio::io::duplex(4096);
+
+        tokio::spawn(run_http1_proxy(
+            client_facing,
+            backend_facing,
+            None,
+            false,
+            None,
+        ));
+        tokio::spawn(async move {
+            read_head(&mut backend).await;
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            backend
+                .write_all(
+                    b"HTTP/1.1 101 Switching Protocols\r\n\
+                      Connection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            std::future::pending::<()>().await;
+        });
+
+        client
+            .write_all(
+                b"GET /ws HTTP/1.1\r\nHost: x\r\n\
+                  Connection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+            )
+            .await
+            .unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), client.read(&mut [0u8; 1]))
+                .await
+                .is_err(),
+            "the client was answered before the backend had responded",
+        );
+        assert!(read_head(&mut client).await.starts_with("http/1.1 101"));
+    }
+
+    /// Shutting the client leg down while a 101 is in flight makes hyper
+    /// replace `Connection: Upgrade` with `Connection: close`, which
+    /// conformant WebSocket clients reject (RFC 6455 §4.1). The tunnel still
+    /// carries bytes either way, so assert on the header too.
+    #[tokio::test]
+    async fn relayed_101_keeps_its_upgrade_header() {
+        let (mut client, client_facing) = tokio::io::duplex(4096);
+        let (backend_facing, mut backend) = tokio::io::duplex(4096);
+
+        tokio::spawn(run_http1_proxy(
+            client_facing,
+            backend_facing,
+            None,
+            false,
+            None,
+        ));
+        tokio::spawn(async move {
+            assert!(read_head(&mut backend).await.contains("upgrade: websocket"));
+            backend
+                .write_all(
+                    b"HTTP/1.1 101 Switching Protocols\r\n\
+                      Connection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            let mut framed = [0u8; 4];
+            backend.read_exact(&mut framed).await.unwrap();
+            backend.write_all(&framed).await.unwrap();
+        });
+
+        client
+            .write_all(
+                b"GET /ws HTTP/1.1\r\nHost: x\r\n\
+                  Connection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+            )
+            .await
+            .unwrap();
+        let head = read_head(&mut client).await;
+        assert!(head.contains("connection: upgrade"), "{head:?}");
+        assert!(!head.contains("connection: close"), "{head:?}");
+
+        client.write_all(b"ping").await.unwrap();
+        let mut echoed = [0u8; 4];
+        tokio::time::timeout(Duration::from_secs(5), client.read_exact(&mut echoed))
+            .await
+            .expect("tunnel stalled")
+            .unwrap();
+        assert_eq!(&echoed, b"ping");
+    }
+
+    use super::{ENABLE_CONNECT_PROTOCOL, H2_SETTINGS_FRAME as SETTINGS_FRAME};
+    const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+    const GOAWAY_FRAME: u8 = 0x7;
+
+    async fn write_frame(s: &mut DuplexStream, kind: u8, payload: &[u8]) {
+        let len = payload.len() as u32;
+        let head = [
+            (len >> 16) as u8,
+            (len >> 8) as u8,
+            len as u8,
+            kind,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ];
+        s.write_all(&head).await.unwrap();
+        s.write_all(payload).await.unwrap();
+    }
+
+    async fn write_client_preface(s: &mut DuplexStream, settings: &[(u16, u32)]) {
+        s.write_all(H2_PREFACE).await.unwrap();
+        let mut payload = Vec::new();
+        for &(id, value) in settings {
+            payload.extend_from_slice(&id.to_be_bytes());
+            payload.extend_from_slice(&value.to_be_bytes());
+        }
+        write_frame(s, SETTINGS_FRAME, &payload).await;
+    }
+
+    async fn read_frame(s: &mut DuplexStream) -> std::io::Result<(u8, Vec<u8>)> {
+        let mut head = [0u8; 9];
+        s.read_exact(&mut head).await?;
+        let len = ((head[0] as usize) << 16) | ((head[1] as usize) << 8) | head[2] as usize;
+        let mut payload = vec![0u8; len];
+        s.read_exact(&mut payload).await?;
+        Ok((head[3], payload))
+    }
+
+    async fn read_client_opening(s: &mut DuplexStream) {
+        let mut preface = [0; H2_PREFACE.len()];
+        s.read_exact(&mut preface).await.unwrap();
+        assert_eq!(&preface, H2_PREFACE);
+
+        let mut header = [0; 9];
+        s.read_exact(&mut header).await.unwrap();
+        assert_eq!(header[3], SETTINGS_FRAME);
+        assert_eq!(header[4], 0);
+        assert_eq!(&header[5..9], &[0; 4]);
+        let len = ((header[0] as usize) << 16) | ((header[1] as usize) << 8) | header[2] as usize;
+        let mut payload = vec![0; len];
+        s.read_exact(&mut payload).await.unwrap();
+    }
+
+    async fn read_opening_settings(s: &mut DuplexStream) -> Vec<u8> {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let (kind, payload) = read_frame(s).await.unwrap();
+                if kind == SETTINGS_FRAME {
+                    return payload;
+                }
+            }
+        })
+        .await
+        .expect("the proxy never sent its client-facing SETTINGS")
+    }
+
+    fn extended_connect_enabled(payload: &[u8]) -> bool {
+        payload.chunks_exact(6).any(|entry| {
+            u16::from_be_bytes([entry[0], entry[1]]) == ENABLE_CONNECT_PROTOCOL
+                && u32::from_be_bytes([entry[2], entry[3], entry[4], entry[5]]) == 1
+        })
+    }
+
+    #[tokio::test]
+    async fn extended_connect_follows_the_backend_opening_settings() {
+        for (backend_settings, advertised) in [
+            (Vec::new(), false),
+            (vec![(ENABLE_CONNECT_PROTOCOL, 1u32)], true),
+        ] {
+            let (mut client, client_facing) = tokio::io::duplex(4096);
+            let (backend_facing, mut backend) = tokio::io::duplex(4096);
+
+            let proxy = tokio::spawn(run_http2_proxy(
+                client_facing,
+                backend_facing,
+                None,
+                false,
+                None,
+            ));
+            let backend = tokio::spawn(async move {
+                read_client_opening(&mut backend).await;
+                let mut payload = Vec::with_capacity(backend_settings.len() * 6);
+                for (id, value) in backend_settings {
+                    payload.extend_from_slice(&id.to_be_bytes());
+                    payload.extend_from_slice(&value.to_be_bytes());
+                }
+                write_frame(&mut backend, SETTINGS_FRAME, &payload).await;
+            });
+
+            write_client_preface(&mut client, &[]).await;
+            assert_eq!(
+                extended_connect_enabled(&read_opening_settings(&mut client).await),
+                advertised,
+            );
+            backend.await.unwrap();
+            drop(client);
+            tokio::time::timeout(Duration::from_secs(5), proxy)
+                .await
+                .expect("proxy did not close with the client")
+                .unwrap()
+                .unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn maximum_opening_settings_is_observed() {
+        let (mut client, client_facing) = tokio::io::duplex(4096);
+        let (backend_facing, mut backend) = tokio::io::duplex(32 * 1024);
+        let proxy = tokio::spawn(run_http2_proxy(
+            client_facing,
+            backend_facing,
+            None,
+            false,
+            None,
+        ));
+        let backend = tokio::spawn(async move {
+            let mut settings = vec![(0xa000u16, 0u32); 2_730];
+            settings[1_365] = (ENABLE_CONNECT_PROTOCOL, 1);
+            let mut payload = Vec::with_capacity(settings.len() * 6);
+            for (id, value) in settings {
+                payload.extend_from_slice(&id.to_be_bytes());
+                payload.extend_from_slice(&value.to_be_bytes());
+            }
+            write_frame(&mut backend, SETTINGS_FRAME, &payload).await;
+            read_client_opening(&mut backend).await;
+        });
+
+        write_client_preface(&mut client, &[]).await;
+        assert!(extended_connect_enabled(
+            &read_opening_settings(&mut client).await
+        ));
+        backend.await.unwrap();
+        drop(client);
+        tokio::time::timeout(Duration::from_secs(5), proxy)
+            .await
+            .expect("proxy did not close with the client")
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn backend_failure_before_opening_settings_returns_without_a_client_preface() {
+        let (_client, client_facing) = tokio::io::duplex(4096);
+        let (backend_facing, backend) = tokio::io::duplex(4096);
+        drop(backend);
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            run_http2_proxy(client_facing, backend_facing, None, false, None),
+        )
+        .await
+        .expect("proxy waited for the client after the backend failed");
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn established_backend_failure_sends_goaway() {
+        let (mut client, client_facing) = tokio::io::duplex(4096);
+        let (backend_facing, mut backend) = tokio::io::duplex(4096);
+
+        let proxy = tokio::spawn(run_http2_proxy(
+            client_facing,
+            backend_facing,
+            None,
+            false,
+            None,
+        ));
+        let backend = tokio::spawn(async move {
+            read_client_opening(&mut backend).await;
+            write_frame(&mut backend, SETTINGS_FRAME, &[]).await;
+            assert_eq!(read_frame(&mut backend).await.unwrap().0, SETTINGS_FRAME);
+        });
+
+        write_client_preface(&mut client, &[]).await;
+        backend.await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match read_frame(&mut client).await.unwrap() {
+                    (GOAWAY_FRAME, _) => break,
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .expect("no GOAWAY after the upstream errored");
+        drop(client);
+        tokio::time::timeout(Duration::from_secs(5), proxy)
+            .await
+            .expect("proxy did not close with the client")
+            .unwrap()
+            .unwrap();
+    }
 
     fn req_with_auth(auth: Option<&str>) -> Request<()> {
         let mut b = Request::builder().uri("/");

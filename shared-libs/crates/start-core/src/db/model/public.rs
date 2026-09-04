@@ -28,7 +28,7 @@ use crate::net::vhost::{AlpnInfo, PassthroughInfo};
 use crate::prelude::*;
 use crate::progress::FullProgress;
 use crate::system::{KeyboardOptions, SmtpValue};
-use crate::util::cpupower::Governor;
+use crate::util::cpupower::{Epp, Governor};
 use crate::util::lshw::LshwDevice;
 use crate::util::serde::MaybeUtf8String;
 use crate::version::{Current, VersionT};
@@ -57,11 +57,11 @@ impl Public {
             server_info: ServerInfo {
                 id: account.server_id.clone(),
                 version: Current::default().semver(),
-                name: account.hostname.name.clone(),
-                hostname: (*account.hostname.hostname).clone(),
+                hostname: (*account.hostname).clone(),
                 last_backup: None,
                 package_version_compat: Current::default().compat().clone(),
                 post_init_migration_todos: BTreeMap::new(),
+                latest_migration_revision: Current::default().migration_revision(),
                 network: NetworkInfo {
                     host: Host {
                         bindings: Bindings(
@@ -74,7 +74,7 @@ impl Public {
                                         add_ssl: Some(AddSslOptions {
                                             preferred_external_port: 443,
                                             add_x_forwarded_headers: false,
-                                            alpn: Some(AlpnInfo::Specified(vec![
+                                            alpn: Some(AlpnInfo(vec![
                                                 MaybeUtf8String("h2".into()),
                                                 MaybeUtf8String("http/1.1".into()),
                                             ])),
@@ -146,6 +146,7 @@ impl Public {
                 ntp_synced: false,
                 zram: true,
                 governor: None,
+                epp: None,
                 smtp: None,
                 echoip_urls: default_echoip_urls(),
                 ram: 0,
@@ -174,7 +175,6 @@ pub fn default_echoip_urls() -> Vec<Url> {
 #[ts(export)]
 pub struct ServerInfo {
     pub id: String,
-    pub name: InternedString,
     pub hostname: InternedString,
     #[ts(type = "string")]
     pub version: Version,
@@ -182,6 +182,8 @@ pub struct ServerInfo {
     pub package_version_compat: VersionRange,
     #[ts(type = "Record<string, unknown>")]
     pub post_init_migration_todos: BTreeMap<Version, Value>,
+    #[serde(default)]
+    pub latest_migration_revision: usize,
     #[ts(type = "string | null")]
     pub last_backup: Option<DateTime<Utc>>,
     pub network: NetworkInfo,
@@ -196,6 +198,8 @@ pub struct ServerInfo {
     #[serde(default)]
     pub zram: bool,
     pub governor: Option<Governor>,
+    #[serde(default)]
+    pub epp: Option<Epp>,
     pub smtp: Option<SmtpValue>,
     #[serde(default = "default_echoip_urls")]
     #[ts(type = "string[]")]
@@ -348,7 +352,7 @@ impl NetworkInterfaceInfo {
 
     // lo and lxcbr0 (the only Loopback/Bridge interfaces on StartOS) never leave the
     // host, so insecure traffic such as plain HTTP defaults to permitted over them.
-    fn is_intrinsically_secure(&self) -> bool {
+    pub fn is_intrinsically_secure(&self) -> bool {
         matches!(
             self.ip_info.as_ref().and_then(|i| i.device_type),
             Some(NetworkInterfaceType::Loopback | NetworkInterfaceType::Bridge)
@@ -478,6 +482,40 @@ pub struct ServerSpecs {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    fn iface(device_type: NetworkInterfaceType, secure: Option<bool>) -> NetworkInterfaceInfo {
+        NetworkInterfaceInfo {
+            secure,
+            ip_info: Some(std::sync::Arc::new(IpInfo {
+                device_type: Some(device_type),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn explicit_secure_overrides_the_intrinsic_default_both_ways() {
+        use NetworkInterfaceType::{Bridge, Ethernet, Loopback};
+
+        assert!(iface(Loopback, None).secure());
+        assert!(iface(Bridge, None).secure());
+        assert!(!iface(Ethernet, None).secure());
+
+        assert!(iface(Ethernet, Some(true)).secure());
+        assert!(!iface(Bridge, Some(false)).secure());
+    }
+
+    // `set_secure` refuses `Some(false)` on an intrinsically secure gateway, and
+    // this is why it cannot lean on `is_intrinsically_secure` alone to decide.
+    #[test]
+    fn a_disconnected_gateway_reports_no_device_type() {
+        let disconnected = NetworkInterfaceInfo::default();
+
+        assert!(disconnected.ip_info.is_none());
+        assert!(!disconnected.is_intrinsically_secure());
+        assert!(!iface(NetworkInterfaceType::Bridge, None).ip_info.is_none());
+    }
 
     fn gateway_type_of(type_field: serde_json::Value) -> GatewayType {
         serde_json::from_value::<NetworkInterfaceInfo>(serde_json::json!({ "type": type_field }))

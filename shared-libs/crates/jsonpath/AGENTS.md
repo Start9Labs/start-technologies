@@ -34,7 +34,7 @@ how to contribute. [README.md](README.md) is the usage/API reference.
   new FFI here.
 - `wasm/`, `benchmark/` — auxiliary build targets (separate Cargo manifests, own READMEs). `lua/`,
   `docs/`, `*.sh` build scripts are inherited from the original project and unused by the Rust crate.
-- `tests/` — one integration-test crate (11 modules: `array_filter`, `common`, `filter`,
+- `tests/` — one integration-test crate (`array_filter`, `common`, `filter`,
   `jsonpath_examples`, `lib`, `op`, `paths`, `precompile`, `readme`, `return_type`, `selector`).
 
 ## Build & test (run from the repo root)
@@ -54,8 +54,7 @@ cargo test  -p jsonpath_lib selector_delete   # a single test by name
   fully diverged; there is no upstream to track or reconcile with — treat it as first-party and edit
   freely. The largest divergence is operating on `imbl_value::Value` instead of `serde_json::Value`.
 - **Edition 2015.** `Cargo.toml` sets no `edition`, so it defaults to 2015 — old `extern crate`
-  syntax, two-element `use {a, b}` paths, etc. Pre-existing warnings (unused imports, lifetime
-  elisions, unused fields) predate the divergence and are not critical.
+  syntax, two-element `use {a, b}` paths, etc.
 - **Package name ≠ dir name.** The crate is `jsonpath_lib`; cargo `-p` flags must use that.
 - **`cdylib` + `rlib`.** The lib emits both crate types; the `cdylib` feeds the `wasm/` bindings.
   Changing public types may require rebuilding those bindings.

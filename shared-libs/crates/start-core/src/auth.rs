@@ -105,6 +105,14 @@ pub async fn write_shadow(password: &str) -> Result<(), Error> {
     }
     shadow_file.sync_all().await?;
     tokio::fs::copy("/media/startos/config/overlay/etc/shadow", "/etc/shadow").await?;
+
+    // The MOK enrollment is protected by this password, so `init`'s attempt at boot is
+    // always too early on a fresh install — setup writes the password after calling it.
+    // Staging it here is what gets the user prompted on the next boot.
+    crate::util::mok::enroll_mok(std::path::Path::new("/"))
+        .await
+        .log_err();
+
     Ok(())
 }
 

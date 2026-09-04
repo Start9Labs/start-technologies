@@ -1523,6 +1523,7 @@ pub async fn set_forward_enabled(
         hostname,
     }: SetPortForwardEnabledParams,
 ) -> Result<(), Error> {
+    let _guard = ctx.forward_write_lock.lock().await;
     let toggle = ctx
         .db
         .mutate(|db| {
@@ -1583,7 +1584,13 @@ pub async fn set_forward_enabled(
         }
         ForwardToggle::Sni { hostname, target } => {
             if enabled {
-                ctx.sni()
+                ctx.sni.prepare().await.map_err(|code| {
+                    Error::new(
+                        eyre!("SNI diversion setup failed (code {code})"),
+                        ErrorKind::Network,
+                    )
+                })?;
+                ctx.sni
                     .register(*source.ip(), source.port(), &[hostname], target, None)
                     .map_err(|code| {
                         Error::new(
@@ -1592,7 +1599,7 @@ pub async fn set_forward_enabled(
                         )
                     })?;
             } else {
-                ctx.sni()
+                ctx.sni
                     .unregister(*source.ip(), source.port(), &[hostname], target);
             }
         }

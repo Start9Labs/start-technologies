@@ -6,7 +6,7 @@ use crate::context::rpc::InitRpcContextPhases;
 use crate::context::{DiagnosticContext, InitContext, RpcContext, SetupContext};
 use crate::disk::REPAIR_DISK_PATH;
 use crate::disk::fsck::RepairStrategy;
-use crate::disk::main::DEFAULT_PASSWORD;
+use crate::disk::main::{DEFAULT_PASSWORD, ImportMode};
 use crate::firmware::{check_for_firmware_update, update_firmware};
 use crate::init::{InitPhases, STANDBY_MODE_PATH};
 use crate::net::gateway::WildcardListener;
@@ -149,11 +149,11 @@ async fn setup_or_init(
             let requires_reboot = crate::disk::main::import(
                 &*disk_guid,
                 DATA_DIR,
-                if tokio::fs::metadata(REPAIR_DISK_PATH).await.is_ok() {
+                ImportMode::ReadWrite(if tokio::fs::metadata(REPAIR_DISK_PATH).await.is_ok() {
                     RepairStrategy::Aggressive
                 } else {
                     RepairStrategy::Preen
-                },
+                }),
                 if disk_guid.ends_with("_UNENC") {
                     None
                 } else {
