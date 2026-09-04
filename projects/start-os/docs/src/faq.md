@@ -1,6 +1,6 @@
 # FAQ
 
-Common issues encountered during setup and daily use of StartOS, including a USB installer that will not boot, network connectivity problems, diagnostic mode, clock sync failures, running out of storage, and service-specific troubleshooting.
+Common issues encountered during setup and daily use of StartOS, including a USB installer that will not boot, network connectivity problems, diagnostic mode, clock sync failures, domains that do not resolve, running out of storage, and service-specific troubleshooting.
 
 ## Do I need a surge protector for my server?
 
@@ -83,6 +83,28 @@ For other hardware, see the [install guide](installing-startos.md#install) and t
 1. Try restarting your router.
 
 1. Try restarting your server. Be patient and give it plenty of time to come back online.
+
+## I am unable to reach a service at its domain name
+
+Whether the domain is [public](clearnet.md) or [private](private-domains.md), start by asking DNS directly. The answer, and which server gave it, tells you which case below you are in. On the device that cannot connect, open a terminal and run:
+
+```
+nslookup service.example.com
+```
+
+The `Server:` line is the resolver your device actually used, and the address underneath is its answer. Then ask a public resolver the same question:
+
+```
+nslookup service.example.com 1.1.1.1
+```
+
+- **The public resolver returns your gateway's address, but your own resolver returns nothing, `0.0.0.0`, or a different address.** The resolver your device is using is filtering the name; the browser typically shows a `DNS_PROBE_…` error while other sites load fine. The usual culprits are the ad, tracker or malware blocking built into privacy VPN apps (ProtonVPN's NetShield, Mullvad's DNS content blocking, NordVPN's Threat Protection), a Pi-hole or AdGuard Home on your network, a filtering DNS service such as NextDNS, or a browser's "secure DNS" setting. Turn the feature off or allow your domain in it. Your server is not involved.
+
+- **Neither resolver returns anything, and the domain is public.** The DNS record is missing or has not propagated yet. Check the record at your registrar against [Set Up DNS Records](clearnet.md#set-up-dns-records), watch propagation at [dnschecker.org](https://dnschecker.org), and re-run the test from the address's **Settings** on the service's [Interfaces](interfaces.md) tab.
+
+- **The domain is private.** A private domain has no public record, so a public resolver never answers for it. It resolves only through the DNS server of the gateway it was added to: on an Ethernet or WiFi gateway your router must hand out StartOS as its DNS server, and on a StartTunnel gateway your device must be connected to the tunnel _and_ using the tunnel's resolver, with [DNS injection](/start-tunnel/dns-records.html) enabled for the server (the default). If your device is connected and still gets no answer, check that the record appears on StartTunnel's DNS Records page, then re-import a freshly generated config for the device: configs generated before StartTunnel 1.1.0 have no `DNS =` line, so the device keeps asking its usual resolver. If the private domain is also a real domain with public records, a device that is not using the gateway's resolver gets the public answer instead, which can look like the name works while it points somewhere else entirely.
+
+- **The answer is the right address, but the page still does not load.** The right address is your gateway's public IP for a public domain, and your server's LAN IP or tunnel address for a private one. DNS is not the problem. For a private domain, confirm the device is actually on that network (the tunnel is connected, or you are on the LAN) and that you have [trusted your Root CA](trust-ca.md). For a public domain, run the port-forwarding test from the address's **Settings** on the service's [Interfaces](interfaces.md) tab.
 
 ## A public domain still loads after disabling it
 
