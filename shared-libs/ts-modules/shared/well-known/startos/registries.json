@@ -11,7 +11,9 @@
         "fr_FR": "La bibliothèque principale de StartOS, gérée par Start9.\n\nChaque service présent ici est **maintenu** par Start9 — empaqueté, testé avec la version actuelle de StartOS et tenu à jour —, **recommandé** pour sa qualité et son utilité, et **pris en charge** par le support technique de Start9.\n\nC'est la bibliothèque généraliste. Une famille de services formant une pile à part entière peut recevoir une bibliothèque dédiée, afin que toute la pile soit répertoriée ensemble.\n\nVous cherchez quelque chose qui n'est pas ici ? Parcourez le Community Registry.",
         "pl_PL": "Główny katalog dla StartOS, prowadzony przez Start9.\n\nKażdy serwis tutaj jest **utrzymywany** przez Start9 — spakowany, przetestowany z bieżącą wersją StartOS i aktualizowany na bieżąco —, **polecany** ze względu na jakość i przydatność oraz **wspierany** przez pomoc techniczną Start9.\n\nTo katalog ogólnego przeznaczenia. Rodzina serwisów tworząca własny stos może otrzymać dedykowany katalog, aby cały stos był wymieniony razem.\n\nSzukasz czegoś, czego tu nie ma? Przejrzyj Community Registry."
       },
-      "warning": null
+      "warning": null,
+      "operator": "Start9",
+      "contact": null
     },
     {
       "url": "https://community-registry.start9.com/",
@@ -30,7 +32,9 @@
         "es_ES": "Los servicios de este registro están empaquetados y mantenidos por miembros de la comunidad Start9. Instálalos bajo tu propio riesgo. Si experimentas un problema o tienes una pregunta sobre un servicio en este mercado, comunícate con el desarrollador del paquete.",
         "fr_FR": "Les services de cette bibliothèque sont maintenus par la communauté Start9. Installez-les à vos risques et périls. En cas de problème ou de question, veuillez contacter le développeur en charge du paquet.",
         "pl_PL": "Serwisy z tego katalogu są tworzone i utrzymywane przez członków społeczności Start9. Instalujesz je na własne ryzyko. W przypadku problemów lub pytań skontaktuj się z twórcą pakietu."
-      }
+      },
+      "operator": "Start9",
+      "contact": null
     },
     {
       "url": "https://beta-registry.start9.com/",
@@ -49,7 +53,9 @@
         "es_ES": "Los servicios de este registro están en fase de prueba beta. Se esperan errores. Instálalos bajo tu propio riesgo.",
         "fr_FR": "Les services de cette bibliothèque sont en phase de test bêta. Des bugs sont à prévoir. Installez-les à vos risques et périls.",
         "pl_PL": "Serwisy z tego katalogu są w fazie testów beta. Należy spodziewać się błędów. Instalujesz je na własne ryzyko."
-      }
+      },
+      "operator": "Start9",
+      "contact": null
     },
     {
       "url": "https://community-beta-registry.start9.com/",
@@ -68,7 +74,9 @@
         "es_ES": "Los servicios de este registro están empaquetados y mantenidos por miembros de la comunidad Start9 y están en fase de prueba beta. Se esperan errores. Instálalos bajo tu propio riesgo. Si experimentas un problema o tienes una pregunta sobre un servicio en este mercado, comunícate con el desarrollador del paquete.",
         "fr_FR": "Les services de cette bibliothèque sont maintenus par la communauté Start9 et sont en phase de test bêta. Des bugs sont à prévoir. Installez-les à vos risques et périls. En cas de problème ou de question, veuillez contacter le développeur en charge du paquet.",
         "pl_PL": "Serwisy z tego katalogu są tworzone i utrzymywane przez członków społeczności Start9 i są w fazie testów beta. Należy spodziewać się błędów. Instalujesz je na własne ryzyko. W przypadku problemów lub pytań skontaktuj się z twórcą pakietu."
-      }
+      },
+      "operator": "Start9",
+      "contact": null
     }
   ]
 }

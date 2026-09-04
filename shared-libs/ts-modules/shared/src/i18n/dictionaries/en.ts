@@ -824,4 +824,5 @@ export const ENGLISH: Record<string, number> = {
   'This registry is not on the list Start9 publishes. Start9 does not vouch for it or support the services it distributes.': 936,
   'Verified by Start9': 937,
   'This registry presents a name reserved for one Start9 lists, so it is shown by its address instead': 938,
+  'Operated by': 939,
 }

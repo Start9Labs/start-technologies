@@ -823,4 +823,5 @@ export default {
   936: 'Ten katalog nie znajduje się na liście publikowanej przez Start9. Start9 za niego nie ręczy ani nie zapewnia wsparcia dla dystrybuowanych przez niego serwisów.',
   937: 'Zweryfikowany przez Start9',
   938: 'Ten katalog przedstawia nazwę zarezerwowaną dla katalogu z listy Start9, dlatego jest wyświetlany pod swoim adresem',
+  939: 'Prowadzony przez',
 } satisfies i18n

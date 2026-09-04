@@ -102,14 +102,25 @@ const ICONS: Record<string, string> = {
       </footer>
     </aside>
     <div class="content">
-      @if (description(); as description) {
-        <div
-          tuiNotification
-          appearance="info"
-          class="g-markdown"
-          safeLinks
-          [innerHTML]="description | localize | markdown | dompurify"
-        ></div>
+      @if (description() || operator()) {
+        <div tuiNotification appearance="info">
+          @if (description(); as description) {
+            <div
+              class="g-markdown"
+              safeLinks
+              [innerHTML]="description | localize | markdown | dompurify"
+            ></div>
+          }
+          @if (operator(); as operator) {
+            <div class="operator">
+              {{ 'Operated by' | i18n }} {{ operator.name }}
+              @if (operator.contact; as contact) {
+                &middot;
+                <a [href]="'mailto:' + contact">{{ contact }}</a>
+              }
+            </div>
+          }
+        </div>
       }
       @if (claimed(); as claimed) {
         <div tuiNotification appearance="negative">
@@ -215,6 +226,10 @@ const ICONS: Record<string, string> = {
 
     [tuiNotification] {
       margin: 1rem 2rem 0;
+    }
+
+    .g-markdown + .operator {
+      margin-block-start: 0.5rem;
     }
 
     [tuiHeader] {
@@ -323,6 +338,14 @@ export class MarketplaceComponent {
   protected readonly description = computed(
     () => this.identity()?.description ?? null,
   )
+
+  protected readonly operator = computed(() => {
+    const identity = this.identity()
+
+    return identity?.operator
+      ? { name: identity.operator, contact: identity.contact }
+      : null
+  })
 
   protected readonly claimed = computed(() =>
     this.identity()?.impersonating ? this.current()?.info.name : null,

@@ -53,6 +53,8 @@ export namespace Mock {
       icon: REGISTRY_ICON,
       description: 'Example services for trying out StartOS.',
       warning: 'Example Registry is a demonstration. Install at your own risk.',
+      operator: 'Example Labs',
+      contact: 'registry@example.com',
     },
     {
       url: 'https://nightly.example.com/',
@@ -63,6 +65,8 @@ export namespace Mock {
         en_US: 'Nightly Registry distributes untested builds.',
         de_DE: 'Nightly Registry verteilt ungetestete Builds.',
       },
+      operator: 'nightly',
+      contact: null,
     },
   ]
 

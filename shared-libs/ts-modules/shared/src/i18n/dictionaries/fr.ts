@@ -823,4 +823,5 @@ export default {
   936: 'Cette bibliothèque ne figure pas sur la liste publiée par Start9. Start9 ne s’en porte pas garant et n’assure pas le support des services qu’elle distribue.',
   937: 'Vérifié par Start9',
   938: 'Cette bibliothèque présente un nom réservé à une bibliothèque listée par Start9 ; elle est donc affichée sous son adresse',
+  939: 'Exploité par',
 } satisfies i18n

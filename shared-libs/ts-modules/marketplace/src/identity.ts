@@ -23,6 +23,8 @@ export function resolveRegistry(
       icon: listed.icon,
       description: listed.description ?? live?.description ?? null,
       warning: listed.warning,
+      operator: listed.operator,
+      contact: listed.contact,
       listed: true,
       impersonating: false,
     }
@@ -36,6 +38,8 @@ export function resolveRegistry(
     icon: live?.icon?.startsWith('data:image/') ? live.icon : null,
     description: live?.description ?? null,
     warning: null,
+    operator: null,
+    contact: null,
     listed: false,
     impersonating,
   }

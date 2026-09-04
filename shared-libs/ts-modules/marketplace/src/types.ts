@@ -32,6 +32,8 @@ export type RegistryIdentity = StoreIdentity & {
   icon: string | null
   description: T.LocaleString | null
   warning: T.LocaleString | null
+  operator: string | null
+  contact: string | null
   /** Unlisted, and presenting a name reserved for a listed registry. */
   impersonating: boolean
 }

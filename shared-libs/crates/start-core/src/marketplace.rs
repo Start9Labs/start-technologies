@@ -21,6 +21,9 @@ pub struct KnownRegistry {
     pub icon: Option<DataUrl<'static>>,
     pub description: Option<LocaleString>,
     pub warning: Option<LocaleString>,
+    pub operator: String,
+    /// An email address.
+    pub contact: Option<String>,
 }
 
 #[derive(Deserialize)]

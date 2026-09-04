@@ -823,4 +823,5 @@ export default {
   936: 'Este registro no está en la lista que publica Start9. Start9 no responde por él ni ofrece soporte para los servicios que distribuye.',
   937: 'Verificado por Start9',
   938: 'Este registro presenta un nombre reservado para uno que Start9 lista, por lo que se muestra con su dirección',
+  939: 'Operado por',
 } satisfies i18n
