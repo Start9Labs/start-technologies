@@ -445,6 +445,41 @@ system.field-missing-from-meminfo:
   fr_FR: "%{field} manquant dans /proc/meminfo"
   pl_PL: "%{field} brakuje w /proc/meminfo"
 
+system.trust-ca.fingerprint:
+  en_US: "SHA-256 fingerprint"
+  de_DE: "SHA-256-Fingerabdruck"
+  es_ES: "Huella digital SHA-256"
+  fr_FR: "Empreinte SHA-256"
+  pl_PL: "Odcisk SHA-256"
+
+system.trust-ca.input-too-large:
+  en_US: "The CA certificate exceeds the 1 MiB limit"
+  de_DE: "Das CA-Zertifikat überschreitet die Grenze von 1 MiB"
+  es_ES: "El certificado de CA supera el límite de 1 MiB"
+  fr_FR: "Le certificat d’autorité dépasse la limite de 1 Mio"
+  pl_PL: "Certyfikat CA przekracza limit 1 MiB"
+
+system.trust-ca.invalid-certificate:
+  en_US: "The input is not a valid PEM-encoded X.509 certificate"
+  de_DE: "Die Eingabe ist kein gültiges PEM-codiertes X.509-Zertifikat"
+  es_ES: "La entrada no es un certificado X.509 válido codificado en PEM"
+  fr_FR: "L’entrée n’est pas un certificat X.509 valide encodé en PEM"
+  pl_PL: "Dane wejściowe nie są prawidłowym certyfikatem X.509 zakodowanym w formacie PEM"
+
+system.trust-ca.not-ca:
+  en_US: "The certificate is not a CA"
+  de_DE: "Das Zertifikat ist keine Zertifizierungsstelle"
+  es_ES: "El certificado no es una CA"
+  fr_FR: "Le certificat n’est pas une autorité de certification"
+  pl_PL: "Certyfikat nie jest certyfikatem CA"
+
+system.trust-ca.subject:
+  en_US: "Subject"
+  de_DE: "Subjekt"
+  es_ES: "Sujeto"
+  fr_FR: "Sujet"
+  pl_PL: "Podmiot"
+
 # error.rs - ErrorKind strings
 error.unknown:
   en_US: "Unknown Error"
@@ -3292,6 +3327,13 @@ help.arg.binding-enabled:
   es_ES: "Habilitar o deshabilitar este enlace"
   fr_FR: "Activer ou désactiver cette liaison"
   pl_PL: "Włącz lub wyłącz to powiązanie"
+
+help.arg.ca-certificate-path:
+  en_US: "Path to a PEM-encoded CA certificate, or '-' to read from stdin"
+  de_DE: "Pfad zu einem PEM-codierten CA-Zertifikat oder '-' zum Lesen von der Standardeingabe"
+  es_ES: "Ruta a un certificado de CA codificado en PEM, o '-' para leer de la entrada estándar"
+  fr_FR: "Chemin vers un certificat d’autorité encodé en PEM, ou '-' pour lire depuis l’entrée standard"
+  pl_PL: "Ścieżka do certyfikatu CA zakodowanego w formacie PEM lub '-' do odczytu ze standardowego wejścia"
 
 help.arg.cert-subject-alt-names:
   en_US: "Subject Alternative Name(s) for certificate"
@@ -6714,6 +6756,13 @@ about.tor-commands:
   es_ES: "Comandos de Tor"
   fr_FR: "Commandes Tor"
   pl_PL: "Polecenia Tora"
+
+about.trust-custom-ca-root:
+  en_US: "Trust a custom CA root for StartOS host processes"
+  de_DE: "Einer benutzerdefinierten CA-Wurzel für StartOS-Hostprozesse vertrauen"
+  es_ES: "Confiar en una raíz de CA personalizada para los procesos del host de StartOS"
+  fr_FR: "Approuver une autorité de certification racine personnalisée pour les processus hôtes de StartOS"
+  pl_PL: "Zaufaj niestandardowemu certyfikatowi głównemu CA dla procesów hosta StartOS"
 
 about.unmount-backup-target:
   en_US: "Unmount a backup target"

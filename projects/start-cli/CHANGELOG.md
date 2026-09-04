@@ -13,6 +13,9 @@ or the CLI's externally observable behavior.
 
 ### Added
 
+- **`server trust-ca` adds a PEM-encoded CA root to the StartOS host trust store.** It accepts a
+  local file or standard input and reports the certificate subject and SHA-256 fingerprint.
+
 - **`server epp` shows or sets the CPU energy/performance preference.** The setting persists
   across reboots and reports the values available on the server.
 

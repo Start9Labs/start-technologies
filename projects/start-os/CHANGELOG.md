@@ -12,6 +12,10 @@ file tracks notable changes since the move to the monorepo.
 
 ### Added
 
+- **Authenticated administrators can add custom CA roots to the host trust store with
+  `start-cli server trust-ca`.** Roots take effect without a reboot and persist across OS updates.
+  Service containers continue to use the trust store provided by their package.
+
 - **Typing a service's domain without `https://` opens its web interface over
   HTTPS.** This works on each network where the domain is assigned. Server IP
   addresses and domains assigned to the StartOS UI retain their existing
