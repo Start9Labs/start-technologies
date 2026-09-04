@@ -105,6 +105,7 @@ const ICONS: Record<string, string> = {
       @if (description() || operator()) {
         <div tuiNotification appearance="info">
           @if (description(); as description) {
+            <strong>{{ 'Description' | i18n }}</strong>
             <div
               class="g-markdown"
               safeLinks
@@ -112,13 +113,15 @@ const ICONS: Record<string, string> = {
             ></div>
           }
           @if (operator(); as operator) {
-            <div class="operator">
-              {{ 'Operated by' | i18n }} {{ operator.name }}
+            <strong>{{ 'Contact' | i18n }}</strong>
+            <ul>
+              <li>{{ 'Operated by' | i18n }} {{ operator.name }}</li>
               @if (operator.contact; as contact) {
-                &middot;
-                <a [href]="'mailto:' + contact">{{ contact }}</a>
+                <li>
+                  <a [href]="'mailto:' + contact">{{ contact }}</a>
+                </li>
               }
-            </div>
+            </ul>
           }
         </div>
       }
@@ -226,10 +229,19 @@ const ICONS: Record<string, string> = {
 
     [tuiNotification] {
       margin: 1rem 2rem 0;
-    }
 
-    .g-markdown + .operator {
-      margin-block-start: 0.5rem;
+      strong {
+        display: block;
+      }
+
+      :is(.g-markdown, ul) + strong {
+        margin-block-start: 0.75rem;
+      }
+
+      ul {
+        margin: 0;
+        padding-inline-start: 1.25rem;
+      }
     }
 
     [tuiHeader] {
