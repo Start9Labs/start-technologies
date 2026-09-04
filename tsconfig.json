@@ -7,6 +7,7 @@
     "forceConsistentCasingInFileNames": true,
     "noImplicitOverride": true,
     "esModuleInterop": true,
+    "resolveJsonModule": true,
     "noPropertyAccessFromIndexSignature": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,

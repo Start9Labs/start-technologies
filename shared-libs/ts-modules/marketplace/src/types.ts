@@ -24,8 +24,16 @@ export type GetPackagesRes = {
 export type StoreIdentity = {
   url: string
   name: string
-  /** Start9 publishes a pinned identity for this registry. */
-  known: boolean
+  /** Start9 lists this registry, and its listing is what displays. */
+  listed: boolean
+}
+
+export type RegistryIdentity = StoreIdentity & {
+  icon: string | null
+  description: T.LocaleString | null
+  warning: T.LocaleString | null
+  /** Unlisted, and presenting a name reserved for a listed registry. */
+  impersonating: boolean
 }
 
 export type Marketplace = Record<string, StoreDataWithUrl | null>

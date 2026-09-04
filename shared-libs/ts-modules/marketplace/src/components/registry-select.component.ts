@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core'
+import { Component, computed, inject } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { Router } from '@angular/router'
 import {
@@ -11,6 +11,7 @@ import {
   TuiButton,
   TuiDataList,
   TuiDropdown,
+  TuiHint,
   TuiIcon,
   TuiTitle,
 } from '@taiga-ui/core'
@@ -23,6 +24,7 @@ import {
   map,
 } from 'rxjs'
 
+import { resolveRegistry } from '../identity'
 import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
 import { ADD_REGISTRY } from './add-registry.component'
 import { StoreIconDirective } from './store-icon.directive'
@@ -42,9 +44,14 @@ import { StoreIconDirective } from './store-icon.directive'
       <span tuiAvatar appearance="action-grayscale" size="xs">
         <img [storeIcon]="data()?.current?.url || data()?.currentUrl" />
       </span>
-      <b tuiFade>
-        {{ data()?.current?.name || fetched()?.info?.name || 'Loading...' }}
-      </b>
+      <b tuiFade>{{ label() }}</b>
+      @if (data()?.current?.listed) {
+        <tui-icon
+          icon="@tui.badge-check"
+          class="g-positive"
+          [tuiHint]="'Verified by Start9' | i18n"
+        />
+      }
       @if (data(); as d) {
         <tui-data-list *tuiDropdown size="m">
           <div class="g-title">
@@ -64,6 +71,9 @@ import { StoreIconDirective } from './store-icon.directive'
               <span tuiAvatar><img [storeIcon]="registry.url" /></span>
               <span tuiTitle>
                 {{ registry.name }}
+                @if (registry.listed) {
+                  <tui-icon icon="@tui.badge-check" class="g-positive" />
+                }
                 <span tuiSubtitle>{{ registry.url }}</span>
               </span>
               @if (registry.selected) {
@@ -76,7 +86,7 @@ import { StoreIconDirective } from './store-icon.directive'
             <button tuiOption (click)="saveCurrent(url)">
               <span tuiAvatar><img [storeIcon]="url" /></span>
               <span tuiTitle>
-                {{ fetched()?.info?.name || url }}
+                {{ label() }}
                 <span tuiSubtitle>{{ 'Save this registry' | i18n }}</span>
               </span>
               <tui-icon icon="@tui.bookmark" />
@@ -95,6 +105,9 @@ import { StoreIconDirective } from './store-icon.directive'
               <span tuiAvatar><img [storeIcon]="registry.url" /></span>
               <span tuiTitle>
                 {{ registry.name }}
+                @if (registry.listed) {
+                  <tui-icon icon="@tui.badge-check" class="g-positive" />
+                }
                 <span tuiSubtitle>{{ registry.url }}</span>
               </span>
               <tui-icon icon="@tui.trash" (click.stop)="delete(registry.url)" />
@@ -139,6 +152,7 @@ import { StoreIconDirective } from './store-icon.directive'
     TuiButton,
     TuiDropdown,
     TuiDataList,
+    TuiHint,
     TuiIcon,
     TuiTitle,
     TuiAvatar,
@@ -154,9 +168,10 @@ export class MarketplaceRegistrySelectComponent {
 
   protected open = false
 
-  // The resolved current registry — used to label an arbitrary (deep-linked)
-  // registry that isn't in the saved list yet.
-  protected readonly fetched = toSignal(this.marketplace.currentRegistry$)
+  private readonly known = toSignal(this.marketplace.knownRegistries$, {
+    requireSync: true,
+  })
+  private readonly fetched = toSignal(this.marketplace.currentRegistry$)
 
   // 0 and 1 are the standard registries (start9, community); 2+ are custom.
   protected readonly data = toSignal(
@@ -182,6 +197,21 @@ export class MarketplaceRegistrySelectComponent {
       }),
     ),
   )
+
+  protected readonly label = computed(() => {
+    const data = this.data()
+
+    if (!data) return 'Loading...'
+    if (data.current) return data.current.name
+
+    const fetched = this.fetched()
+
+    return resolveRegistry(
+      data.currentUrl,
+      fetched && sameUrl(fetched.url, data.currentUrl) ? fetched.info : null,
+      this.known(),
+    ).name
+  })
 
   async connect(url: string): Promise<void> {
     this.open = false

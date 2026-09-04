@@ -36,18 +36,15 @@ file tracks notable changes since the move to the monorepo.
   Existing StartTunnel configs remain recognizable by their StartTunnel header;
   configs without either marker are classified as outbound-only.
 
-- **Adding a registry now offers a list Start9 publishes, alongside the URL
-  field.** Each listed registry appears under the name Start9 published for it,
-  and its published icon remains the fallback for the valid icon the registry
-  serves. While a listed registry is selected, the marketplace shows the notice
-  Start9 published for it. A banner atop the marketplace flags a listed registry
-  that presents a different name, icon, or description. A registry that is not
-  on the list cannot display a listed one's name. See
+- **Adding a registry now offers the registries Start9 has verified, alongside
+  the URL field.** A verified registry carries a mark beside its name and shows
+  the name, icon, description, and notice Start9 published for it. A registry
+  that is not on the list cannot present a verified one's name; it appears by
+  its address instead, and a banner says it is not on Start9's list. See
   [Alternative Registries](https://docs.start9.com/start-os/alternative-registries.html).
 
 - **A registry's description appears at the top of the marketplace** while that
-  registry is selected. For a listed registry it is the description Start9
-  published.
+  registry is selected.
 
 - **`start-cli server epp` shows and sets the CPU's
   energy/performance preference**, persisted across reboots the way the governor

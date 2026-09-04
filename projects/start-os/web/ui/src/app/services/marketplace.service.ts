@@ -4,7 +4,7 @@ import {
   GetPackageRes,
   Marketplace,
   MarketplacePkg,
-  resolveIdentity,
+  resolveRegistry,
   StoreDataWithUrl,
   StoreIdentity,
 } from '@start9labs/marketplace'
@@ -12,6 +12,7 @@ import {
   defaultRegistries,
   Exver,
   i18nPipe,
+  registriesSnapshot,
   registryUrl,
   sameUrl,
 } from '@start9labs/shared'
@@ -56,25 +57,31 @@ export class MarketplaceService extends AbstractMarketplaceService {
   readonly knownRegistries$: Observable<T.KnownRegistry[]> = from(
     this.api.getKnownRegistries(),
   ).pipe(
-    catchError(() => of<T.KnownRegistry[]>([])),
+    catchError(() => of(registriesSnapshot)),
+    startWith(registriesSnapshot),
     shareReplay(1),
   )
 
   readonly registries$: Observable<StoreIdentity[]> = combineLatest([
     this.patch.watch$('ui', 'registries'),
-    this.knownRegistries$.pipe(startWith<T.KnownRegistry[]>([])),
+    this.knownRegistries$,
   ]).pipe(
     map(([registries, known]) => [
-      resolveIdentity(start9, registries[start9] || null, known),
-      resolveIdentity(community, registries[community] || null, known),
+      resolveRegistry(start9, { name: registries[start9] }, known),
+      resolveRegistry(community, { name: registries[community] }, known),
       ...Object.entries(registries)
         .filter(([u, _]) => !sameUrl(start9, u) && !sameUrl(community, u))
-        .map(([url, name]) => resolveIdentity(url, name, known)),
+        .map(([url, name]) => resolveRegistry(url, { name }, known)),
     ]),
   )
 
-  readonly newRegistry$ = this.registries$.pipe(
-    startWith<StoreIdentity[]>([]),
+  readonly newRegistry$ = this.patch.watch$('ui', 'registries').pipe(
+    map(registries =>
+      [start9, community, ...Object.keys(registries)]
+        .filter((url, i, all) => all.findIndex(u => sameUrl(u, url)) === i)
+        .map(url => ({ url, name: registries[url] ?? null })),
+    ),
+    startWith<{ url: string; name: string | null }[]>([]),
     pairwise(),
     mergeMap(([p, c]) => c.filter(a => !p.find(b => sameUrl(a.url, b.url)))),
   )

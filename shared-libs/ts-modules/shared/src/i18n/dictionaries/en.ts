@@ -819,8 +819,9 @@ export const ENGLISH: Record<string, number> = {
   'Descending': 929,
   'Add a Registry': 930,
   'Known Registries': 932,
-  'This registry does not present the name, icon, and description Start9 published for it. Start9 has not validated that it is what it claims to be.': 933,
   'Custom Registry': 934,
   'Select a registry': 935,
-  'Start9 does not operate this registry or support the services it distributes.': 936,
+  'This registry is not on the list Start9 publishes. Start9 does not vouch for it or support the services it distributes.': 936,
+  'Verified by Start9': 937,
+  'This registry presents a name reserved for one Start9 lists, so it is shown by its address instead': 938,
 }

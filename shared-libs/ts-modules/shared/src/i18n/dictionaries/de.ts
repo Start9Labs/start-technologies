@@ -818,8 +818,9 @@ export default {
   929: 'Absteigend',
   930: 'Ein Register hinzufügen',
   932: 'Bekannte Register',
-  933: 'Dieses Register zeigt nicht den Namen, das Symbol und die Beschreibung, die Start9 dafür veröffentlicht hat. Start9 hat nicht bestätigt, dass es das ist, was es vorgibt zu sein.',
   934: 'Benutzerdefiniertes Register',
   935: 'Register auswählen',
-  936: 'Start9 betreibt dieses Register nicht und unterstützt die von ihm bereitgestellten Dienste nicht.',
+  936: 'Dieses Register steht nicht auf der von Start9 veröffentlichten Liste. Start9 bürgt nicht dafür und unterstützt die von ihm bereitgestellten Dienste nicht.',
+  937: 'Von Start9 verifiziert',
+  938: 'Dieses Register verwendet einen Namen, der einem von Start9 gelisteten Register vorbehalten ist, und wird daher unter seiner Adresse angezeigt',
 } satisfies i18n

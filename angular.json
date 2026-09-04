@@ -464,7 +464,7 @@
               },
               {
                 "glob": "**/*",
-                "input": "projects/brochure-marketplace/well-known",
+                "input": "shared-libs/ts-modules/shared/well-known",
                 "output": ".well-known"
               }
             ],

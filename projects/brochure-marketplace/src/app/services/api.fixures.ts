@@ -51,42 +51,20 @@ export namespace Mock {
       url: 'https://registry.example.com/',
       name: 'Example Registry',
       icon: REGISTRY_ICON,
-      description: null,
+      description: 'Example services for trying out StartOS.',
       warning: 'Example Registry is a demonstration. Install at your own risk.',
     },
     {
-      url: 'https://renamed.example.com/',
-      name: 'Renamed Registry',
-      icon: REGISTRY_ICON,
-      description: null,
-      warning: null,
-    },
-    {
-      url: 'https://restyled.example.com/',
-      name: 'Restyled Registry',
-      icon: REGISTRY_ICON,
+      url: 'https://nightly.example.com/',
+      name: 'Nightly Registry',
+      icon: null,
       description: null,
       warning: {
-        en_US: 'Restyled Registry distributes nightly builds.',
-        de_DE: 'Restyled Registry verteilt Nightly-Builds.',
+        en_US: 'Nightly Registry distributes untested builds.',
+        de_DE: 'Nightly Registry verteilt ungetestete Builds.',
       },
     },
   ]
-
-  /** Live identities that no longer match their pin. */
-  export const DriftedRegistries: Record<
-    string,
-    Pick<T.RegistryInfo, 'name' | 'icon'>
-  > = {
-    'https://renamed.example.com/': {
-      name: 'Renamed Registry v2',
-      icon: REGISTRY_ICON,
-    },
-    'https://restyled.example.com/': {
-      name: 'Restyled Registry',
-      icon: PROXY_ICON,
-    },
-  }
 
   export const BitcoinDep: T.DependencyMetadata = {
     title: 'Bitcoin',

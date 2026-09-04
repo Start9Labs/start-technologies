@@ -1,10 +1,9 @@
 import { computed, Directive, inject, input, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
-import { sameUrl } from '@start9labs/shared'
-import { T } from '@start9labs/start-core'
+import { registriesSnapshot, sameUrl } from '@start9labs/shared'
 import { of } from 'rxjs'
 
-import { pinnedIcon, resolveIcon } from '../identity'
+import { resolveRegistry } from '../identity'
 import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
 
 @Directive({
@@ -20,7 +19,8 @@ export class StoreIconDirective {
     optional: true,
   })
   private readonly known = toSignal(
-    this.marketplace?.knownRegistries$ || of<T.KnownRegistry[]>([]),
+    this.marketplace?.knownRegistries$ || of(registriesSnapshot),
+    { initialValue: registriesSnapshot },
   )
 
   private readonly registryIcons = toSignal(
@@ -34,17 +34,15 @@ export class StoreIconDirective {
 
   protected readonly icon = computed(() => {
     const url = this.storeIcon() || ''
-    const known = this.known()
     const live = this.registryIcons().find(entry => sameUrl(entry.url, url))
-    const fallback = pinnedIcon(url, known || [])
     const generic = 'assets/img/storefront-outline.png'
-    const candidates = [
-      known ? resolveIcon(url, live?.icon, known) : null,
-      fallback,
-      generic,
-    ]
 
-    return candidates.find(icon => icon && !this.failed().has(icon)) || generic
+    return (
+      [
+        resolveRegistry(url, { icon: live?.icon }, this.known()).icon,
+        generic,
+      ].find(icon => icon && !this.failed().has(icon)) || generic
+    )
   })
 
   protected onError(): void {

@@ -4,7 +4,7 @@ import {
   AbstractMarketplaceService,
   GetPackageRes,
   MarketplacePkg,
-  resolveIdentity,
+  resolveRegistry,
   StoreDataWithUrl,
   StoreIdentity,
 } from '@start9labs/marketplace'
@@ -13,6 +13,7 @@ import {
   Exver,
   i18nPipe,
   i18nService,
+  registriesSnapshot,
   registryUrl,
   sameUrl,
   toUrl,
@@ -75,20 +76,21 @@ export class MarketplaceService extends AbstractMarketplaceService {
   readonly knownRegistries$: Observable<T.KnownRegistry[]> = from(
     this.api.getKnownRegistries(),
   ).pipe(
-    catchError(() => of<T.KnownRegistry[]>([])),
+    catchError(() => of(registriesSnapshot)),
+    startWith(registriesSnapshot),
     shareReplay(1),
   )
 
   readonly registries$: Observable<StoreIdentity[]> = combineLatest([
     this.custom$,
-    this.knownRegistries$.pipe(startWith<T.KnownRegistry[]>([])),
+    this.knownRegistries$,
   ]).pipe(
     map(([custom, known]) => [
-      resolveIdentity(start9, null, known),
-      resolveIdentity(community, null, known),
+      resolveRegistry(start9, null, known),
+      resolveRegistry(community, null, known),
       ...Object.entries(custom)
         .filter(([u]) => !sameUrl(u, start9) && !sameUrl(u, community))
-        .map(([url, name]) => resolveIdentity(url, name, known)),
+        .map(([url, name]) => resolveRegistry(url, { name }, known)),
     ]),
     shareReplay(1),
   )

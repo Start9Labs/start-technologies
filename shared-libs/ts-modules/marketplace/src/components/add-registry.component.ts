@@ -122,7 +122,7 @@ export class MarketplaceAddRegistryComponent {
       this.selected()?.warning ??
       (this.url().trim()
         ? this.i18n.transform(
-            'Start9 does not operate this registry or support the services it distributes.',
+            'This registry is not on the list Start9 publishes. Start9 does not vouch for it or support the services it distributes.',
           )
         : null),
   )

@@ -818,8 +818,9 @@ export default {
   929: 'Malejąco',
   930: 'Dodaj katalog',
   932: 'Znane katalogi',
-  933: 'Ten katalog nie prezentuje nazwy, ikony i opisu opublikowanych dla niego przez Start9. Start9 nie zweryfikował, czy jest tym, za co się podaje.',
   934: 'Katalog niestandardowy',
   935: 'Wybierz katalog',
-  936: 'Start9 nie prowadzi tego katalogu ani nie zapewnia wsparcia dla dystrybuowanych przez niego serwisów.',
+  936: 'Ten katalog nie znajduje się na liście publikowanej przez Start9. Start9 za niego nie ręczy ani nie zapewnia wsparcia dla dystrybuowanych przez niego serwisów.',
+  937: 'Zweryfikowany przez Start9',
+  938: 'Ten katalog przedstawia nazwę zarezerwowaną dla katalogu z listy Start9, dlatego jest wyświetlany pod swoim adresem',
 } satisfies i18n

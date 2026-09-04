@@ -14,7 +14,6 @@ import { FormsModule } from '@angular/forms'
 import { WA_IS_MOBILE } from '@ng-web-apis/platform'
 import {
   i18nPipe,
-  knownRegistries as start9Registries,
   LocalizePipe,
   MarkdownPipe,
   SafeLinksDirective,
@@ -42,7 +41,7 @@ import {
 } from '@taiga-ui/kit'
 import { TuiCardLarge, TuiHeader, TuiNavigation } from '@taiga-ui/layout'
 
-import { findKnown, identityMatches } from '../identity'
+import { resolveRegistry } from '../identity'
 import { filterPackages } from '../pipes/filter-packages.pipe'
 import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
 import { StoreDataWithUrl } from '../types'
@@ -112,16 +111,16 @@ const ICONS: Record<string, string> = {
           [innerHTML]="description | localize | markdown | dompurify"
         ></div>
       }
-      @if (warning(); as warning) {
-        <div tuiNotification appearance="warning">{{ warning | localize }}</div>
-      }
-      @if (drifted()) {
+      @if (claimed(); as claimed) {
         <div tuiNotification appearance="negative">
           {{
-            'This registry does not present the name and icon Start9 published for it. Start9 has not validated that it is what it claims to be.'
+            'This registry presents a name reserved for one Start9 lists, so it is shown by its address instead'
               | i18n
-          }}
+          }}: "{{ claimed }}"
         </div>
+      }
+      @if (warning(); as warning) {
+        <div tuiNotification appearance="warning">{{ warning | localize }}</div>
       }
       <header tuiHeader="h4">
         <hgroup tuiTitle>
@@ -289,7 +288,7 @@ export class MarketplaceComponent {
   protected readonly open = signal(!inject(WA_IS_MOBILE))
   private readonly marketplace = inject(AbstractMarketplaceService)
   private readonly known = toSignal(this.marketplace.knownRegistries$, {
-    initialValue: [],
+    requireSync: true,
   })
   private readonly selected = toSignal(this.marketplace.currentRegistryUrl$)
 
@@ -301,37 +300,33 @@ export class MarketplaceComponent {
       : undefined
   })
 
-  protected readonly warning = computed(() => {
+  protected readonly identity = computed(() => {
     const url = this.selected()
 
-    if (!url) return null
+    return url
+      ? resolveRegistry(url, this.current()?.info ?? null, this.known())
+      : null
+  })
 
-    const listed = findKnown(url, this.known())
+  protected readonly warning = computed(() => {
+    const identity = this.identity()
 
-    if (listed) return listed.warning
+    if (!identity) return null
 
-    return Object.values(start9Registries).some(u => sameUrl(u, url))
-      ? null
+    return identity.listed
+      ? identity.warning
       : this.i18n.transform(
-          'Start9 does not operate this registry or support the services it distributes.',
+          'This registry is not on the list Start9 publishes. Start9 does not vouch for it or support the services it distributes.',
         )
   })
 
-  protected readonly drifted = computed(() => {
-    const registry = this.current()
-    const pin = registry && findKnown(registry.url, this.known())
+  protected readonly description = computed(
+    () => this.identity()?.description ?? null,
+  )
 
-    return !!pin && !identityMatches(pin, registry.info)
-  })
-
-  protected readonly description = computed(() => {
-    const registry = this.current()
-
-    return registry
-      ? (findKnown(registry.url, this.known())?.description ??
-          registry.info.description)
-      : null
-  })
+  protected readonly claimed = computed(() =>
+    this.identity()?.impersonating ? this.current()?.info.name : null,
+  )
   // Only categories that have at least one package are shown; 'all' is the
   // always-present pseudo-category injected by each app's service.
   protected readonly categories = computed(() => {
