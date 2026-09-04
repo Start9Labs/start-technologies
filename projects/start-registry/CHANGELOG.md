@@ -2,7 +2,31 @@
 
 All notable changes to `start-registry` (the Start Registry server) are documented here. This project is versioned **independently** (starting at `1.0.0`); its version lives in `Cargo.toml`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [1.0.2]
+## [1.1.0]
+
+- **A registry can declare a description.** `info set-description` stores markdown (a
+  `LocaleString`, so it can carry translations), `info` returns it, and the marketplace shows it
+  above the registry's services while that registry is selected.
+
+- **A client can follow the registry index over a websocket instead of re-fetching it.**
+  `db.subscribe` returns `/index` as it stands plus a continuation id; connecting to
+  `/ws/rpc/<id>` then streams its JSON patches. Callers can select `/index` or any subpath,
+  including the package or OS index, while the endpoint remains unauthenticated.
+
+- **An indexed package version now advertises which installed versions can migrate into it**, so a
+  client asking for an upgrade path is offered a version it can actually install. Entries already
+  in an index keep their permissive value until that version is published again.
+
+- **Package metadata exposes hardware virtualization support.** Packages can declare access to
+  `/dev/kvm` with `hardwareVirtualization`; manifests that omit the field remain compatible.
+
+- **`os asset remove` can be run.** Its `iso`/`img`/`squashfs` handlers were registered as
+  RPC-only with no CLI counterpart, so `remove` parsed as a leaf that accepts no arguments — it
+  listed with a blank description and rejected `os asset remove iso 0.4.0 x86_64` as an
+  unexpected argument. The three subcommands now take `<VERSION> <PLATFORM>`, mirroring
+  `os asset get`. Dropping a version's index entry for a single platform no longer requires
+  removing the whole version and re-adding every other platform. Asking to remove a platform the
+  version has no asset for now says so instead of reporting success.
 
 - **`start-registry` works on a registry host that listens on a non-loopback address.** With no
   `--registry`, the CLI derives the registry's address from `registry-listen` and authenticates

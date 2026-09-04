@@ -6,8 +6,6 @@
 
 `start-registry` lives at `projects/start-registry/` and is the product wrapper for the registry server/CLI (the `registrybox` bin + systemd unit). Its real implementation lives in `shared-libs/crates/start-core` (`src/bins/registry.rs` + `src/registry/`), and its browsing UI is `@start9labs/marketplace` (`shared-libs/ts-modules/marketplace/`). See the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md) for the overall monorepo layout.
 
-All five product binaries (`startbox`, `start-container`, `start-cli`, `registrybox`, `tunnelbox`) share the one Cargo workspace and depend on `start-core`.
-
 ## Binary: `registrybox`
 
 `src/main.rs` builds a `MultiExecutable` (from `start_core::bins`) and registers two entry points:
@@ -45,15 +43,22 @@ Defined in `shared-libs/crates/start-core/src/registry/mod.rs`:
 
 Subcommands (same module), each available over RPC and to the `start-registry` CLI via `with_call_remote`:
 
-| Command   | Module                | Purpose                                                 |
-| --------- | --------------------- | ------------------------------------------------------- |
-| `index`   | `mod::get_full_index` | full combined index (name, icon, packages, OS, signers) |
-| `info`    | `registry/info.rs`    | set/get registry info and categories                    |
-| `os`      | `registry/os/`        | OS version index + asset (image) management             |
-| `package` | `registry/package/`   | add/get/list packages, versions, assets                 |
-| `admin`   | `registry/admin.rs`   | manage admins and signers                               |
-| `db`      | `registry/db.rs`      | dump/inspect the registry database                      |
-| `metrics` | `registry/metrics.rs` | download/user metrics summaries (admin-only)            |
+| Command   | Module                | Purpose                                                                  |
+| --------- | --------------------- | ------------------------------------------------------------------------ |
+| `index`   | `mod::get_full_index` | full combined index (name, icon, packages, OS, signers)                  |
+| `info`    | `registry/info.rs`    | set/get registry info and categories                                     |
+| `os`      | `registry/os/`        | OS version index + asset (image) management                              |
+| `package` | `registry/package/`   | add/get/list packages, versions, assets                                  |
+| `admin`   | `registry/admin.rs`   | manage admins and signers                                                |
+| `db`      | `registry/db.rs`      | dump/inspect the registry database; subscribe to `/index` or any subpath |
+| `metrics` | `registry/metrics.rs` | download/user metrics summaries (admin-only)                             |
+
+### Registry index subscriptions
+
+The public `db.subscribe` RPC accepts `{ "pointer": <JSON Pointer> }`. The pointer may select
+`/index` or any descendant; omitting it or passing `null` selects `/index`. The response contains
+an initial `{ id, value }` dump and a continuation `guid`. Connecting to `/ws/rpc/<guid>` streams
+revisions whose JSON Patch paths are relative to the selected subtree.
 
 ## Data model
 
@@ -75,7 +80,7 @@ Package and OS indexes (`registry/package/index.rs`, `registry/os/index.rs`) hol
 
 ## Frontend
 
-The registry has no bundled UI of its own; the browsing/search/download UI is the shared Angular library **`@start9labs/marketplace`** at `shared-libs/ts-modules/marketplace/`. App projects (StartOS web, etc.) consume that library and point it at a registry's RPC endpoints. The library is source-consumed via tsconfig paths within the `shared-libs/ts-modules` workspace of shared TypeScript modules (which currently holds the Angular libs `shared` and `marketplace`).
+The registry has no bundled UI of its own; the browsing/search/download UI is the shared Angular library **`@start9labs/marketplace`** at `shared-libs/ts-modules/marketplace/`. App projects (StartOS web, etc.) consume that library and point it at a registry's RPC endpoints. The library is source-consumed via tsconfig paths within the `shared-libs/ts-modules` workspace of shared TypeScript modules.
 
 ## Further reading
 
