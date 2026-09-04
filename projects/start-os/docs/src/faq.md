@@ -1,6 +1,6 @@
 # FAQ
 
-Common issues encountered during setup and daily use of StartOS, including network connectivity problems, diagnostic mode, clock sync failures, and service-specific troubleshooting.
+Common issues encountered during setup and daily use of StartOS, including network connectivity problems, diagnostic mode, clock sync failures, running out of storage, and service-specific troubleshooting.
 
 ## Do I need a surge protector for my server?
 
@@ -98,6 +98,18 @@ sudo systemctl restart systemd-timesyncd
 Within a minute or so, `timedatectl timesync-status` should report a successful sync. If the warning in the UI does not clear shortly after that, restart your server once. The override file survives reboots; after a StartOS update, check that it is still present and re-create it if needed.
 
 If time sync still fails, please [contact support](https://start9.com/contact).
+
+## Can I add a second drive to give a service more storage?
+
+Not yet. StartOS keeps every service's data on a single data drive, the one chosen at the Select Drives step when [installing StartOS](installing-startos.md). There is no way to attach an additional drive to one service, and a drive plugged in after setup is only recognized as a [backup](backup-create.md) target.
+
+If a service is running low on space, you have two options today:
+
+- **Move to a larger data drive.** Install StartOS with the new drive as the data drive, then choose **Transfer** at [initial setup](initial-setup.md) and select your old data drive to move everything across. Keep the old drive connected until the transfer completes, and never boot from it as a StartOS server again.
+
+- **Keep large files on storage the service can reach over the network.** Some services can use storage outside your server on their own. Nextcloud, for example, can attach an SMB share, a WebDAV server or an S3 bucket through its built-in External Storage app, so a large library can live on a NAS or another computer. Check the service's own instructions for what it supports. Linking one service's files into another, such as File Browser into Nextcloud or Immich, does not add space, since those files are on the same data drive.
+
+Support for multiple drives is planned for StartOS 0.4.1. There is no release date yet.
 
 ## Issue with a particular service
 
