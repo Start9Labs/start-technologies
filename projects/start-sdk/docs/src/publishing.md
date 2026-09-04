@@ -6,7 +6,7 @@ Every `.s9pk` needs a registry to live in before it can be installed on a StartO
 
 The fastest and most autonomous path is to run your own registry — install the `startos-registry` service on a StartOS device, point `start-cli` at it, and publish. See [Hosting a Registry](host-registry.md) for the full walkthrough (install, first-run setup, administration).
 
-You can run a self-hosted registry in parallel with a Start9 Community submission: developers often keep an alpha/testing registry of their own while a more stable build is promoted through the community pipeline.
+You can run a self-hosted registry in parallel with a Start9 Community submission: developers often keep an alpha/testing registry of their own while a more stable build is promoted through the community pipeline. A self-hosted registry can also be [verified by Start9](host-registry-verification.md), which offers it to every StartOS user under a mark Start9 stands behind.
 
 ## Start9 Community Registry
 

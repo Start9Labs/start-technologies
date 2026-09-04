@@ -80,6 +80,7 @@
 - [Overview](host-registry.md)
 - [Setup](host-registry-setup.md)
 - [Administration](host-registry-administration.md)
+- [Verification](host-registry-verification.md)
 
 # Reference
 
