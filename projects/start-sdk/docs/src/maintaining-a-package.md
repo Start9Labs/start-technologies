@@ -81,6 +81,12 @@ gh api repos/<owner>/<repo> --jq '.parent.full_name'
 
 Do **not** use the manifest's `upstreamRepo` for this. That field points at the upstream _software_ project, which is a different repository from the packaging repo you forked — using it for a fork sync merges an unrelated history.
 
+## Bumping the SDK
+
+Packages pin `@start9labs/start-sdk` to an exact version, so a bump is `npm install @start9labs/start-sdk@<version> --save-exact`. Read the SDK's `CHANGELOG.md` for the range you crossed before relying on the new version.
+
+**Then run `npm install` again until `package-lock.json` stops changing.** The first install after an SDK bump is not a fixed point: npm records the SDK's bundled dependencies only once the new tarball is extracted, so the lockfile the first install writes is one the second rewrites. Committing after a single install leaves a half-written lock; two installs have always been enough. Then check that no nested copy of the previous SDK survives in the lock — if one does, a sibling's pin didn't move (see [Keep one copy of the SDK](#keep-one-copy-of-the-sdk)).
+
 ## Depending on another package's repo
 
 A package can depend on another package's repo through npm, to reuse its exported constants and types:
