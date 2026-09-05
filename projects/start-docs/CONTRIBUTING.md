@@ -18,6 +18,7 @@ Only the **Bitcoin Guides** book (`bitcoin-guides/`), the landing page, the them
 - StartOS → `../start-os/docs/`
 - StartTunnel → `../start-tunnel/docs/`
 - Service Packaging (book name `packaging`) → `../start-sdk/docs/`
+- StartWRT → `../start-wrt/docs/`
 
 `build.sh`'s `book_dir()` maps each book name to its source dir, so the build and the deployed URLs treat all books uniformly.
 

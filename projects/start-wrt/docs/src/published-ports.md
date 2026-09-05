@@ -75,7 +75,7 @@ Some devices can configure port forwarding for themselves using the standard UPn
 
 This is **off by default** for every device. To allow it, open the device's [detail page](devices.md#device-detail-page) and turn on **Allow automatic port forwarding**. From then on, that device — and only that device — can ask the router to forward ports, and only to itself: a device can never open a port that routes traffic to another device.
 
-Port uses created this way appear in the **Automatic** section of the Published Ports page, showing which device opened them, their kind (PCP, UPnP, or SNI), and when they expire. They are read-only:
+Port uses created this way appear in the **Automatic** section of the Published Ports page. Each row shows the **Device** (linked to its detail page), the **Port** on the device, the **Public port**, the **Hostname** for a hostname route, the **Kind** (PCP, UPnP, or SNI), and **Expires** — the minutes left before the router removes the entry unless the device renews it. They are read-only:
 
 - The device itself creates, renews, and removes its forwards.
 - A forward the device stops renewing expires and is removed automatically once the lifetime the device asked for runs out — about an hour for typical clients, and never longer than a week even for a device that asks to keep the port indefinitely.
@@ -103,7 +103,7 @@ Hostname routes and [Remote Access](settings.md#remote-access) can share port 44
 The **Endpoints** column in the table shows the public addresses where each forwarded port can be reached. IPv4 endpoints display the router's public IP (or DDNS domain) with the external port. IPv6 endpoints display the device's IPv6 address with the port directly. These are useful for configuring external services or sharing access details.
 
 > [!NOTE]
-> Port forwarding requires a public IP address. If your ISP uses [CGNAT](cgnat.md), IPv4 forwarding will not work — and because the router has no way to detect CGNAT, the rule still shows an "Active" status even though inbound IPv4 traffic never arrives. IPv6 forwarding may still work, since many CGNAT ISPs provide globally routable IPv6.
+> Port forwarding requires a public IP address. If your ISP uses [CGNAT](cgnat.md), IPv4 forwarding will not work — and because the router has no way to detect CGNAT, the rule still shows an "Active" status even though inbound IPv4 traffic never arrives. The same goes for forwards a device opens through [automatic port forwarding](#automatic-port-forwarding). IPv6 forwarding may still work, since many CGNAT ISPs provide globally routable IPv6.
 
 > [!NOTE]
 > IPv6 forwarding requires the target device to have a globally routable address. If the device only has a local-only ULA address (one that starts with `fc` or `fd`), an error explains that a global address — from your ISP's prefix delegation — is required, and the rule cannot be saved until its IP Version is set to IPv4.
