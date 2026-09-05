@@ -1,6 +1,6 @@
 # FAQ
 
-Common issues encountered during setup and daily use of StartOS, including network connectivity problems, diagnostic mode, clock sync failures, and service-specific troubleshooting.
+Common issues encountered during setup and daily use of StartOS, including a USB installer that will not boot, network connectivity problems, diagnostic mode, clock sync failures, domains that do not resolve, running out of storage, and service-specific troubleshooting.
 
 ## Do I need a surge protector for my server?
 
@@ -18,6 +18,24 @@ Ethernet is strongly recommended. Servers are always-on, critical devices and sh
 ## StartOS boots into "Diagnostic Mode"
 
 If you encounter Diagnostic Mode, your best bet is stop clicking and [contact support](https://start9.com/contact).
+
+## My server boots into StartOS instead of the USB installer
+
+A Start9 server boots from a USB installer on its own, with nothing to press and no setting to change. If yours starts StartOS as usual with the installer plugged in, the USB drive is almost always the problem:
+
+1. Confirm the drive was **flashed** with the StartOS `.iso` in balenaEtcher, as described in [Flash](installing-startos.md#flash). Formatting a drive and copying the file onto it produces a drive that will not boot. The [Server Pure](firmware-pure.md) and [Server One (2023)](firmware-one-2023.md) firmware pages describe a different procedure for a different purpose; do not use them to install or update StartOS.
+
+1. Flash the drive again, and use a different USB drive if you have one. Plug it into a USB 3 port, typically blue or marked "SS".
+
+If a freshly flashed drive still does not boot, connect a monitor and keyboard and pick the drive from the boot menu:
+
+- **Server Pure** — Needs no boot menu: the firmware boots a USB drive whenever one is plugged in. If a freshly flashed drive still does not boot, [contact support](https://start9.com/contact).
+
+- **Server One (2023)** — Press `F10` repeatedly from the moment you power on, and select the USB drive from the boot menu that appears. If StartOS starts before the menu appears, use the power button instead: with the server off, hold the power button for three seconds and release it. A menu of keys appears; press `F10` there.
+
+- **Server One (2024)** — Press `Del` repeatedly from the moment you power on to enter the BIOS. Under **Boot**, open **Boot Option Priorities** and set **Boot Option #1** to the USB drive, then press `F4` to save and restart.
+
+For other hardware, see the [install guide](installing-startos.md#install) and the [Community Hub](https://community.start9.com).
 
 ## During initial setup, I am unable to connect to "start.local".
 
@@ -66,6 +84,30 @@ If you encounter Diagnostic Mode, your best bet is stop clicking and [contact su
 
 1. Try restarting your server. Be patient and give it plenty of time to come back online.
 
+## I am unable to reach a service at its domain name
+
+Whether the domain is [public](clearnet.md) or [private](private-domains.md), start by asking DNS directly, before clearing caches or toggling settings. The answer, and which server gave it, tells you which case below you are in. On the device that cannot connect, open a terminal and run:
+
+```
+nslookup service.example.com
+```
+
+The `Server:` line is the resolver your device actually used, and the address underneath is its answer. Then ask a public resolver the same question:
+
+```
+nslookup service.example.com 1.1.1.1
+```
+
+If you would rather not use a terminal, paste the domain into [dnschecker.org](https://dnschecker.org) for the public half; it asks many public resolvers at once.
+
+- **The public resolver returns your gateway's address, but your own resolver returns nothing, `0.0.0.0`, or a different address.** The resolver your device is using is filtering the name; the browser typically shows a `DNS_PROBE_…` error while other sites load fine. The usual culprits are the ad, tracker or malware blocking built into privacy VPN apps (ProtonVPN's NetShield, Mullvad's DNS content blocking, NordVPN's Threat Protection), a Pi-hole or AdGuard Home on your network, a filtering DNS service such as NextDNS, or a browser's "secure DNS" setting. Turn the feature off or allow your domain in it. Your server is not involved.
+
+- **Neither resolver returns anything, and the domain is public.** The DNS record is missing or has not propagated yet, which can take a few hours. Check the record at your registrar against [Set Up DNS Records](clearnet.md#set-up-dns-records), and re-run the test from the address's **Settings** on the service's [Interfaces](interfaces.md) tab.
+
+- **The domain is private.** A private domain has no public record, so a public resolver never answers for it. It resolves only through the DNS server of the gateway it was added to: on an Ethernet or WiFi gateway your router must hand out StartOS as its DNS server, and on a StartTunnel gateway your device must be connected to the tunnel _and_ using the tunnel's resolver, with [DNS injection](/start-tunnel/dns-records.html) enabled for the server (the default). A phone runs only one VPN at a time, so turning on a privacy VPN such as ProtonVPN or Mullvad disconnects your StartTunnel tunnel and takes its resolver with it; private domains stop resolving until you switch back. If your device is connected and still gets no answer, check that the record appears on StartTunnel's DNS Records page, then re-import a freshly generated config for the device: configs generated before StartTunnel 1.1.0 have no `DNS =` line, so the device keeps asking its usual resolver. If the private domain is also a real domain with public records, a device that is not using the gateway's resolver gets the public answer instead, which can look like the name works while it points somewhere else entirely.
+
+- **The answer is the right address, but the page still does not load.** The right address is your gateway's public IP for a public domain, and your server's LAN IP or tunnel address for a private one. DNS is not the problem. For a private domain, confirm the device is actually on that network (the tunnel is connected, or you are on the LAN) and that you have [trusted your Root CA](trust-ca.md). For a public domain, run the port-forwarding test from the address's **Settings** on the service's [Interfaces](interfaces.md) tab.
+
 ## A public domain still loads after disabling it
 
 If you previously had a service interface (or the StartOS UI) publicly accessible on a StartTunnel gateway and then disabled it, your browser may still load the page from cache. Attempting to interact will time out because the port forwarding is still active but the interface is no longer being served.
@@ -98,6 +140,18 @@ sudo systemctl restart systemd-timesyncd
 Within a minute or so, `timedatectl timesync-status` should report a successful sync. If the warning in the UI does not clear shortly after that, restart your server once. The override file survives reboots; after a StartOS update, check that it is still present and re-create it if needed.
 
 If time sync still fails, please [contact support](https://start9.com/contact).
+
+## Can I add a second drive to give a service more storage?
+
+Not yet. StartOS keeps every service's data on a single data drive, the one chosen at the Select Drives step when [installing StartOS](installing-startos.md). There is no way to attach an additional drive to one service, and a drive plugged in after setup is only recognized as a [backup](backup-create.md) target.
+
+If a service is running low on space, you have two options today:
+
+- **Move to a larger data drive.** Install StartOS with the new drive as the data drive, then choose **Transfer** at [initial setup](initial-setup.md) and select your old data drive to move everything across. Keep the old drive connected until the transfer completes, and never boot from it as a StartOS server again.
+
+- **Keep large files on storage the service can reach over the network.** Some services can use storage outside your server on their own. Nextcloud, for example, can attach an SMB share, a WebDAV server or an S3 bucket through its built-in External Storage app, so a large library can live on a NAS or another computer. Check the service's own instructions for what it supports. Linking one service's files into another, such as File Browser into Nextcloud or Immich, does not add space, since those files are on the same data drive.
+
+Support for multiple drives is planned for StartOS 0.4.1. There is no release date yet.
 
 ## Issue with a particular service
 

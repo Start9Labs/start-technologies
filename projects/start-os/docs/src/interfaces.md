@@ -48,7 +48,7 @@ Each table has the following columns:
 You can add domains to a gateway table by clicking "Add Domain" on the gateway and choosing either:
 
 - **[Public Domain](clearnet.md)** — A clearnet domain (e.g. `mysite.com`) accessible from the Internet. Requires DNS configuration and port forwarding.
-- **[Private Domain](private-domains.md)** — A custom domain (e.g. `nextcloud.private`) that works on LAN and VPN. Requires your gateway to use StartOS for DNS. Only available on Ethernet and Wireless gateways — not WireGuard (StartTunnel) gateways.
+- **[Private Domain](private-domains.md)** — A custom domain (e.g. `nextcloud.private`) that works on LAN and VPN. Requires the gateway's DNS to serve its record: your router pointed at StartOS on an Ethernet or WiFi gateway, DNS injection on a StartTunnel gateway.
 
 ### Tor Onion Addresses
 

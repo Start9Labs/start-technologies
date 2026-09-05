@@ -2,7 +2,7 @@
 
 This page is for the Server Pure _only_. It will not work on other devices.
 
-Generally, you do not need to manually flash your device using this guide, as the firmware is now automatically updated on supported devices. Please only use this method if directed by a Start9 Support Technician. **If you were told to "_flash your device_", you are looking for the StartOS flashing guides instead.**
+Generally, you do not need to manually flash your device using this guide, as the firmware is now automatically updated on supported devices. Please only use this method if directed by a Start9 Support Technician. **If you were told to "_flash your device_", you are looking for [Installing StartOS](installing-startos.md) instead.**
 
 ## Required Equipment
 
