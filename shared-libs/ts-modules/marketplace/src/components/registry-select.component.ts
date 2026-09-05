@@ -8,6 +8,7 @@ import {
   TaskService,
 } from '@start9labs/shared'
 import {
+  TUI_BREAKPOINT,
   TuiButton,
   TuiDataList,
   TuiDropdown,
@@ -32,8 +33,8 @@ import { StoreIconDirective } from './store-icon.directive'
     <button
       tuiButton
       tuiDropdown
-      tuiDropdownSided
       iconEnd="@tui.chevron-right"
+      [tuiDropdownSided]="breakpoint() !== 'mobile'"
       size="s"
       appearance="flat-grayscale"
       [(tuiDropdownOpen)]="open"
@@ -152,6 +153,7 @@ export class MarketplaceRegistrySelectComponent {
   private readonly router = inject(Router)
 
   protected open = false
+  protected readonly breakpoint = inject(TUI_BREAKPOINT)
 
   // The resolved current registry — used to label an arbitrary (deep-linked)
   // registry that isn't in the saved list yet.
