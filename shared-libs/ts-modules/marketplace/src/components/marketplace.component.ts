@@ -103,74 +103,77 @@ const ICONS: Record<string, string> = {
       </footer>
     </aside>
     <div class="content">
-      @if (current()?.info?.description; as description) {
-        <div
-          tuiNotification
-          appearance="info"
-          class="g-markdown"
-          safeLinks
-          [innerHTML]="description | localize | markdown | dompurify"
-        ></div>
-      }
-      @if (warning(); as warning) {
-        <div tuiNotification appearance="warning">{{ warning | i18n }}</div>
-      }
-      <header tuiHeader="h4">
-        <hgroup tuiTitle>
-          <h2>
-            @if (current()) {
-              {{ name() | localize }}
-            }
-          </h2>
-        </hgroup>
-        <aside tuiAccessories>
-          <button
-            appearance="secondary-grayscale"
-            tuiButton
-            tuiButtonSelect
-            tuiChevron
-            [(ngModel)]="sortLabel"
-          >
-            {{ sortLabel }}
-            <tui-data-list *tuiDropdown>
-              @for (key of sortKeys; track key) {
-                <button tuiOption [value]="getLabel(key)">
-                  {{ getLabel(key) }}
-                </button>
-              }
-            </tui-data-list>
-          </button>
-        </aside>
-      </header>
       <tui-scrollbar>
-        <section>
-          @if (current()) {
-            @for ($implicit of packages(); track $index) {
-              <ng-container
-                *ngTemplateOutlet="template(); context: { $implicit }"
-              />
-            }
-          } @else {
-            @for (_ of '-'.repeat(6); track $index) {
-              <div tuiCardLarge="compact" [tuiSkeleton]="true">
-                <span tuiCell>
-                  <span tuiAvatar></span>
-                  <span tuiTitle>
-                    Loading
-                    <span tuiSubtitle>Loading</span>
-                  </span>
-                </span>
-                <span tuiDescription>Loading</span>
-              </div>
-            }
+        <div class="scroll">
+          @if (current()?.info?.description; as description) {
+            <div
+              tuiNotification
+              appearance="info"
+              class="g-markdown"
+              safeLinks
+              [innerHTML]="description | localize | markdown | dompurify"
+            ></div>
           }
-        </section>
+          @if (warning(); as warning) {
+            <div tuiNotification appearance="warning">{{ warning | i18n }}</div>
+          }
+          <header tuiHeader="h4">
+            <hgroup tuiTitle>
+              <h2>
+                @if (current()) {
+                  {{ name() | localize }}
+                }
+              </h2>
+            </hgroup>
+            <aside tuiAccessories>
+              <button
+                appearance="secondary-grayscale"
+                tuiButton
+                tuiButtonSelect
+                tuiChevron
+                [(ngModel)]="sortLabel"
+              >
+                {{ sortLabel }}
+                <tui-data-list *tuiDropdown>
+                  @for (key of sortKeys; track key) {
+                    <button tuiOption [value]="getLabel(key)">
+                      {{ getLabel(key) }}
+                    </button>
+                  }
+                </tui-data-list>
+              </button>
+            </aside>
+          </header>
+          <section>
+            @if (current()) {
+              @for ($implicit of packages(); track $index) {
+                <ng-container
+                  *ngTemplateOutlet="template(); context: { $implicit }"
+                />
+              }
+            } @else {
+              @for (_ of '-'.repeat(6); track $index) {
+                <div tuiCardLarge="compact" [tuiSkeleton]="true">
+                  <span tuiCell>
+                    <span tuiAvatar></span>
+                    <span tuiTitle>
+                      Loading
+                      <span tuiSubtitle>Loading</span>
+                    </span>
+                  </span>
+                  <span tuiDescription>Loading</span>
+                </div>
+              }
+            }
+          </section>
+        </div>
       </tui-scrollbar>
     </div>
   `,
   styles: `
     :host {
       --tui-theme-color: var(--tui-background-elevation-1);
+      --card-min: 20rem;
 
       display: flex;
       width: 100%;
@@ -210,24 +213,31 @@ const ICONS: Record<string, string> = {
       margin: 1rem 2rem 0;
     }
 
-    [tuiHeader] {
-      white-space: nowrap;
-      padding: 1rem 2rem 0;
+    .scroll {
+      min-inline-size: calc(var(--card-min) + 2 * 2rem);
     }
 
-    tui-scrollbar {
-      padding-block-start: 1rem;
-      mask: linear-gradient(transparent, black 1rem);
+    [tuiHeader] {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      white-space: nowrap;
+      padding: 1rem 2rem;
+      background: var(--tui-background-base);
     }
 
     section {
       padding: 0 2rem 1rem;
       display: grid;
       gap: 1rem;
-      grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
     }
 
     :host-context(tui-root._mobile) {
+      .scroll {
+        min-inline-size: calc(var(--card-min) + 2 * 1rem);
+      }
+
       :is([tuiHeader], section) {
         padding-inline: 1rem;
       }
