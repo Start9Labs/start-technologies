@@ -40,7 +40,7 @@ The options control direct WAN-side access only:
 
 ### About
 
-The General page shows an About block with the firmware **Version** and a **Build** identifier — the first 12 characters of the firmware's git hash (hover to see the full hash), with a `-modified` suffix on a build made from uncommitted source. These are useful when filing bug reports.
+The General page shows an About block with the firmware **Version** and a **Build** identifier — the first 12 characters of the firmware's git hash (hover to see the full hash). These are useful when filing bug reports.
 
 ## Password
 
