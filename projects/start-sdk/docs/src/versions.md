@@ -138,7 +138,7 @@ A historical file's export is renamed to match the version, with every `.`, `:`,
 
 That principle decides the file layout, so the deciding question is **does the version currently in `current.ts` carry a migration?** — not whether the bump you are making needs one. That only decides what you write into the new `current.ts`.
 
-**The outgoing version's migration is empty (the common case): bump `current.ts` in place.** Edit `version` and `releaseNotes` in `startos/versions/current.ts`, adding the new version's own migration if it needs one. Don't rename the file, don't touch the export name, don't touch `index.ts`, leave `other` as it is. Git history of `current.ts` preserves the prior release notes automatically, so there is no separate "keep the old notes" step.
+**The outgoing version's migration is empty (the common case): bump `current.ts` in place.** Empty means the `up` body does nothing. The template's `up: async ({ effects }) => {}` with `down: IMPOSSIBLE` is empty — `down: IMPOSSIBLE` is not a migration, it only forbids downgrades — so it earns the version no file, and the block stays as it is on the bump. Edit `version` and `releaseNotes` in `startos/versions/current.ts`, adding the new version's own migration if it needs one. Don't rename the file, don't touch the export name, don't touch `index.ts`, leave `other` as it is. Git history of `current.ts` preserves the prior release notes automatically, so there is no separate "keep the old notes" step.
 
 **The outgoing version carries a migration: spin it off, then write a fresh `current.ts`.**
 
