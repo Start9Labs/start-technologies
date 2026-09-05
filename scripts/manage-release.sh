@@ -313,7 +313,8 @@ release_files() {
 
 resolve_gh_user() {
     GH_USER=${GH_USER:-$(gh api user -q .login 2>/dev/null || true)}
-    GH_GPG_KEY=$(git config user.signingkey 2>/dev/null || true)
+    GH_GPG_KEY=$(git -C "$REPO_ROOT" config user.signingkey 2>/dev/null || true)
+    [ "$(git -C "$REPO_ROOT" config gpg.format 2>/dev/null)" != ssh ] || GH_GPG_KEY=
 }
 
 require_kind() {
@@ -1328,9 +1329,9 @@ cmd_sign() {
     mapfile -t files < <(release_files)
     mkdir -p signatures
     for file in "${files[@]}"; do
-        gpg -u $START9_GPG_KEY --detach-sign --armor -o "signatures/${file}.start9.asc" "$file"
+        gpg -u $START9_GPG_KEY --yes --detach-sign --armor -o "signatures/${file}.start9.asc" "$file"
         if [ -n "$GH_USER" ] && [ -n "$GH_GPG_KEY" ]; then
-            gpg -u "$GH_GPG_KEY" --detach-sign --armor -o "signatures/${file}.${GH_USER}.asc" "$file"
+            gpg -u "$GH_GPG_KEY" --yes --detach-sign --armor -o "signatures/${file}.${GH_USER}.asc" "$file"
         fi
     done
 
@@ -1366,7 +1367,7 @@ cmd_cosign() {
     local files file
     mapfile -t files < <(release_files)
     for file in "${files[@]}"; do
-        gpg -u "$GH_GPG_KEY" --detach-sign --armor -o "signatures/${file}.${GH_USER}.asc" "$file"
+        gpg -u "$GH_GPG_KEY" --yes --detach-sign --armor -o "signatures/${file}.${GH_USER}.asc" "$file"
     done
     gpg --export -a "$GH_GPG_KEY" > "signatures/${GH_USER}.key.asc"
 
