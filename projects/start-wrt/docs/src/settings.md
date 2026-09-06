@@ -6,7 +6,7 @@ The Settings page contains system preferences, account management, and advanced 
 
 ### Updates
 
-When a firmware update is available, a banner appears at the top of the General page showing the new version number. Expand the banner to view release notes before updating. See [Updating](updating.md) for the full update procedure.
+When a firmware update is available, a "vX.Y.Z released!" panel appears at the top of the General page. Expand it to view release notes before updating. See [Updating](updating.md) for the full update procedure.
 
 ### Preferences
 
@@ -31,13 +31,16 @@ The options control direct WAN-side access only:
 > [!WARNING]
 > Selecting "Always" exposes your router's admin interface to the public Internet. Only use this if you understand the security implications and have a strong admin password.
 
+> [!NOTE]
+> The ports Remote Access uses are protected from [Published Ports](published-ports.md): publishing 80, 443, or 22 to a device asks for confirmation first, and a device's [automatic port forwarding](published-ports.md#automatic-port-forwarding) request for them is refused. [Hostname routes](published-ports.md#hostname-routes-shared-ports) are the exception — they share port 443 with Remote Access, each connection going to the device whose hostname it names and everything else to the router.
+
 ### Security
 
 - **Download Root CA** — Download the router's Root CA certificate, saved as `startwrt-ca.crt`. See [Trusting Your Root CA](trust-ca.md) for installation instructions.
 
 ### About
 
-The General page shows an About block with the firmware **Version** and a **Build** identifier (a short git hash; hover to see the full hash). These are useful when filing bug reports.
+The General page shows an About block with the firmware **Version** and a **Build** identifier — the first 12 characters of the firmware's git hash (hover to see the full hash). These are useful when filing bug reports.
 
 ## Password
 

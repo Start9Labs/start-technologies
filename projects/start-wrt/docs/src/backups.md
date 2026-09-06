@@ -32,17 +32,19 @@ The router will apply the configuration and restart.
 
 ## What Is Included
 
-| Included                         | Not Included |
-| -------------------------------- | ------------ |
-| Security Profiles                | System logs  |
-| Wi-Fi passwords                  |              |
-| Published Ports                  |              |
-| Ethernet port assignments        |              |
-| Inbound and Outbound VPN configs |              |
-| SSH keys                         |              |
-| DDNS settings                    |              |
-| LAN/WAN settings                 |              |
-| Admin password                   |              |
-| Router name, timezone, language  |              |
-| Device names you've assigned     |              |
-| Data usage history               |              |
+| Included                              | Not Included |
+| ------------------------------------- | ------------ |
+| Security Profiles                     | System logs  |
+| Wi-Fi passwords                       |              |
+| Published Ports                       |              |
+| Ethernet port assignments             |              |
+| Inbound and Outbound VPN configs      |              |
+| SSH keys                              |              |
+| DDNS settings                         |              |
+| LAN/WAN settings                      |              |
+| Admin password                        |              |
+| Router name, timezone, language       |              |
+| Device names you've assigned          |              |
+| Reserved IPv4 addresses               |              |
+| Automatic port forwarding permissions |              |
+| Data usage history                    |              |

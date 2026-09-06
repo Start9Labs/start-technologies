@@ -124,6 +124,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   router's specifications and publishes the SpacemiT K1 reference schematic the
   board descends from, noting where the shipped router differs from that
   reference design and why.
+- **The StartWRT user guide is now published** at
+  [docs.start9.com/start-wrt](https://docs.start9.com/start-wrt/).
 
 ### Changed
 

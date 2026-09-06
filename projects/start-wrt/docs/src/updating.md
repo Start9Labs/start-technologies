@@ -19,7 +19,7 @@ Firmware integrity is enforced cryptographically (a Blake3 commitment plus ed255
 
 ## Pages Open During an Update
 
-Only the page that started the update reloads itself. If the interface was open anywhere else while the update was applied — another browser tab, another device — that page will show a "Refresh Needed" dialog once it notices the router is running newer firmware. Click **Reload** to load the new interface; nothing is reloaded out from under you automatically.
+Only the page that started the update reloads itself. If the interface was open anywhere else while the update was applied — another browser tab, another device — that page will show a "Refresh Needed" dialog once it notices the router is running newer firmware (within seconds of its next request, or about half a minute for an idle page). Click **Reload** to load the new interface; nothing is reloaded out from under you automatically.
 
 Updates also keep the router's low-level boot firmware (the eMMC boot partitions) in sync with the release — verified during the update and again on every boot — so every part of the boot chain ships and updates together. This is automatic; if it is already current, nothing is rewritten.
 
