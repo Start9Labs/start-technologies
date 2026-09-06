@@ -165,7 +165,7 @@ pub async fn install(
         .services
         .install(
             ctx.clone(),
-            || asset.deserialize_s9pk_buffered(ctx.client.clone(), download_progress),
+            || asset.deserialize_s9pk_buffered(ctx.http_client(), download_progress),
             Some(registry),
             None::<Never>,
             Some(progress_tracker),

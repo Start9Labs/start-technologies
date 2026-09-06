@@ -288,8 +288,9 @@ impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
         let sig_context = registry.host_str().map(InternedString::from);
         let is_onion = registry.host_str().map_or(false, |h| h.ends_with(".onion"));
 
-        let mut res = match crate::middleware::auth::signature::call_remote(
+        let mut res = match crate::middleware::auth::signature::call_remote_with_client(
             self,
+            self.http_client(),
             registry,
             headers,
             sig_context.as_deref(),

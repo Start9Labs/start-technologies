@@ -9,12 +9,20 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
-## [2.0.0]
+## [2.1.0]
 
 ### Added
 
 - **`server trust-ca` adds a PEM-encoded CA root to the StartOS host trust store.** It accepts a
   local file or standard input and reports the certificate subject and SHA-256 fingerprint.
+
+### Fixed
+
+- **Generated manual pages show the required value for `--format`.**
+
+## [2.0.0]
+
+### Added
 
 - **`server epp` shows or sets the CPU energy/performance preference.** The setting persists
   across reboots and reports the values available on the server.
@@ -54,8 +62,6 @@ or the CLI's externally observable behavior.
   existing workspace moves over with `git -C start-technologies checkout live-docs`.
 
 ### Fixed
-
-- **Generated manual pages show the required value for `--format`.**
 
 - **`s9pk init-workspace` no longer scaffolds a placeholder host** — `dev-vm.local` resolved
   nowhere, failing every command in a fresh workspace; comment it out in an existing one.

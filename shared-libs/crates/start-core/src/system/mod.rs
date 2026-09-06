@@ -32,7 +32,7 @@ use crate::util::serde::{WithIoFormat, display_serializable};
 use crate::util::sync::Watch;
 use crate::{MAIN_DATA, PACKAGE_DATA};
 
-pub mod trust_ca;
+pub(crate) mod trust_ca;
 
 pub fn experimental<C: Context>() -> ParentHandler<C> {
     ParentHandler::new().subcommand(
