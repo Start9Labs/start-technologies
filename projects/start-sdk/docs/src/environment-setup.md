@@ -307,6 +307,6 @@ git -C start-technologies pull --ff-only
 
 `live-docs` only ever moves forward, so this is always a fast-forward. It brings in two things: corrections to already-published pages, as soon as they go live on docs.start9.com, and — when a product is released — that product's whole tree at the release.
 
-There's no separate update command — re-running `init-workspace` on an existing workspace just fills in anything missing, and your `AGENTS.local.md` is never touched.
+There's no separate update command — re-running `init-workspace` on an existing workspace just fills in anything missing, and your `AGENTS.local.md` is never touched. If the checkout has ended up on another branch, `init-workspace` and `init-package` say so and print the command that moves it back to `live-docs`.
 
 Your environment is ready. Continue to [Quick Start](./quick-start.md) to scaffold and build your first package inside the workspace.

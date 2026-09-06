@@ -169,6 +169,13 @@ s9pk.init.cloning-guide:
   fr_FR: "Clonage du monorepo Start9 (guide d'empaquetage, sources du SDK et de l'OS)…"
   pl_PL: "Klonowanie monorepo Start9 (przewodnik pakowania, kod źródłowy SDK i OS)…"
 
+s9pk.init.guide-off-branch:
+  en_US: "%{dir} is on branch `%{branch}`, not `%{expected}`: its guide and package template may describe an `@start9labs/start-sdk` that npm cannot resolve. Switch it with `git -C %{dir} checkout %{expected}`."
+  de_DE: "%{dir} steht auf dem Branch `%{branch}`, nicht `%{expected}`: Leitfaden und Paketvorlage könnten ein `@start9labs/start-sdk` beschreiben, das npm nicht auflösen kann. Wechsle mit `git -C %{dir} checkout %{expected}`."
+  es_ES: "%{dir} está en la rama `%{branch}`, no en `%{expected}`: su guía y su plantilla de paquete pueden describir un `@start9labs/start-sdk` que npm no puede resolver. Cámbiala con `git -C %{dir} checkout %{expected}`."
+  fr_FR: "%{dir} est sur la branche `%{branch}`, pas `%{expected}` : son guide et son modèle de paquet peuvent décrire un `@start9labs/start-sdk` que npm ne peut pas résoudre. Changez-la avec `git -C %{dir} checkout %{expected}`."
+  pl_PL: "%{dir} jest na gałęzi `%{branch}`, a nie `%{expected}`: jego przewodnik i szablon pakietu mogą opisywać `@start9labs/start-sdk`, którego npm nie może rozwiązać. Przełącz go poleceniem `git -C %{dir} checkout %{expected}`."
+
 s9pk.init.installing-deps:
   en_US: "Installing dependencies (npm install)…"
   de_DE: "Abhängigkeiten werden installiert (npm install)…"
