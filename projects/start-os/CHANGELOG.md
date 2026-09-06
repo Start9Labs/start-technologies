@@ -461,6 +461,15 @@ file tracks notable changes since the move to the monorepo.
   you also reach on your local network keeps answering there with your server's
   own certificate.
 
+- **Marketplace, service and OS-update downloads no longer stall for minutes on
+  a server whose IPv6 cannot reach the Internet.** StartOS connects over
+  whichever of a host's IPv6 or IPv4 addresses answers first.
+
+- **An outbound gateway that has an IPv6 router but no IPv6 address of its own
+  carries no IPv6.** Such traffic fails at once and falls back to IPv4, instead
+  of leaving with an address that belongs to another of the server's
+  interfaces.
+
 ## [0.4.0.1]
 
 ### Changed

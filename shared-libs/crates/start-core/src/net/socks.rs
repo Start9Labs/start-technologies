@@ -5,7 +5,11 @@ use fast_socks5::client::{Config as ClientConfig, Socks5Stream};
 use fast_socks5::server::Socks5ServerProtocol;
 use fast_socks5::util::target_addr::TargetAddr;
 use fast_socks5::{ReplyError, Socks5Command};
-use tokio::net::{TcpListener, TcpStream};
+use futures::StreamExt;
+use futures::stream::FuturesUnordered;
+use itertools::Itertools;
+use tokio::net::{TcpListener, TcpStream, lookup_host};
+use tokio::time::Instant;
 
 use crate::HOST_IP;
 use crate::net::mdns::resolve_mdns;
@@ -22,6 +26,51 @@ pub const DEFAULT_SOCKS_LISTEN: SocketAddr = SocketAddr::V4(SocketAddrV4::new(
 /// reachable from the host via the embedded DNS once that service is running.
 /// Matches the default the registry server uses for its own onion requests.
 const TOR_PROXY: (&str, u16) = ("tor.startos", 9050);
+
+/// RFC 8305 connection attempt delay.
+const CONNECT_ATTEMPT_DELAY: Duration = Duration::from_millis(250);
+
+fn interleave_families(addrs: impl IntoIterator<Item = SocketAddr>) -> Vec<SocketAddr> {
+    let mut addrs = addrs.into_iter().peekable();
+    let first_is_v6 = addrs.peek().is_some_and(SocketAddr::is_ipv6);
+    let (first, second): (Vec<_>, Vec<_>) = addrs.partition(|a| a.is_ipv6() == first_is_v6);
+    first.into_iter().interleave(second).collect()
+}
+
+/// Connects to whichever address answers first; attempts start
+/// [`CONNECT_ATTEMPT_DELAY`] apart, alternating address families.
+async fn connect_any(addrs: impl IntoIterator<Item = SocketAddr>) -> Result<TcpStream, Error> {
+    let mut pending = interleave_families(addrs).into_iter();
+    let mut attempts = FuturesUnordered::new();
+    let mut last_err = None;
+    let next_attempt = tokio::time::sleep(Duration::ZERO);
+    tokio::pin!(next_attempt);
+    loop {
+        tokio::select! {
+            _ = &mut next_attempt, if pending.len() > 0 => {
+                if let Some(addr) = pending.next() {
+                    attempts.push(TcpStream::connect(addr));
+                }
+                next_attempt.as_mut().reset(Instant::now() + CONNECT_ATTEMPT_DELAY);
+            }
+            Some(res) = attempts.next() => match res {
+                Ok(stream) => return Ok(stream),
+                Err(e) => {
+                    last_err = Some(e);
+                    next_attempt.as_mut().reset(Instant::now());
+                }
+            },
+            else => break,
+        }
+    }
+    match last_err {
+        Some(e) => Err(e).with_kind(ErrorKind::Network),
+        None => Err(Error::new(
+            eyre!("no address to connect to"),
+            ErrorKind::Network,
+        )),
+    }
+}
 
 /// Open a connection to a SOCKS `CONNECT` target, special-casing the two address
 /// families the host's resolver/router can't reach on its own:
@@ -53,9 +102,14 @@ async fn connect_target(addr: TargetAddr) -> Result<TcpStream, Error> {
                 .await
                 .with_kind(ErrorKind::Network)
         }
-        TargetAddr::Domain(domain, port) => TcpStream::connect((domain, port))
+        TargetAddr::Domain(domain, port) => {
+            connect_any(
+                lookup_host((domain, port))
+                    .await
+                    .with_kind(ErrorKind::Network)?,
+            )
             .await
-            .with_kind(ErrorKind::Network),
+        }
         TargetAddr::Ip(addr) => TcpStream::connect(addr).await.with_kind(ErrorKind::Network),
     }
 }
@@ -157,9 +211,44 @@ impl SocksController {
 
 #[cfg(test)]
 mod test {
+    use std::net::Ipv6Addr;
+
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use super::*;
+
+    #[test]
+    fn interleave_families_alternates_from_the_first_family() {
+        let v6 = |n| SocketAddr::from((Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, n), 1));
+        let v4 = |n| SocketAddr::from((Ipv4Addr::new(192, 0, 2, n), 1));
+        assert_eq!(
+            interleave_families([v6(1), v6(2), v4(1)]),
+            [v6(1), v4(1), v6(2)]
+        );
+        assert_eq!(
+            interleave_families([v4(1), v6(1), v6(2)]),
+            [v4(1), v6(1), v6(2)]
+        );
+    }
+
+    #[tokio::test]
+    async fn connect_any_does_not_wait_on_a_black_hole() -> Result<(), Error> {
+        let target = echo_server().await?;
+        let started = Instant::now();
+        let mut sock =
+            connect_any([SocketAddr::from((Ipv4Addr::new(192, 0, 2, 1), 9)), target]).await?;
+        assert!(started.elapsed() < Duration::from_secs(5));
+
+        sock.write_all(b"hello")
+            .await
+            .with_kind(ErrorKind::Network)?;
+        let mut buf = [0u8; 5];
+        sock.read_exact(&mut buf)
+            .await
+            .with_kind(ErrorKind::Network)?;
+        assert_eq!(&buf, b"hello");
+        Ok(())
+    }
 
     async fn echo_server() -> Result<SocketAddr, Error> {
         let l = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))

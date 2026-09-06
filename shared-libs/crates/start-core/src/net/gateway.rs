@@ -2138,6 +2138,17 @@ async fn apply_policy_routing(
 /// reroute, but the reply that opens a connection is routed before the output
 /// hook runs, so the source rule is what lets a v6 service reached through a
 /// tunnel answer.
+/// Sending needs an address of the interface's own beyond link-local; without
+/// a gateway it must be global.
+fn carries_v6(gateway: Option<Ipv6Addr>, addrs: impl IntoIterator<Item = Ipv6Addr>) -> bool {
+    let (mut own, mut global) = (false, false);
+    for addr in addrs {
+        own |= !ipv6_is_link_local(addr);
+        global |= !ipv6_is_local(addr);
+    }
+    own && (gateway.is_some() || global)
+}
+
 async fn apply_policy_routing_v6(
     guard: &PolicyRoutingGuard,
     iface: &GatewayId,
@@ -2161,7 +2172,13 @@ async fn apply_policy_routing_v6(
             _ => None,
         })
         .collect();
-    let v6_capable = ipv6_gateway.is_some() || !global_v6.is_empty();
+    let v6_capable = carries_v6(
+        ipv6_gateway,
+        subnets.iter().filter_map(|n| match n {
+            IpNet::V6(v6n) => Some(v6n.addr()),
+            _ => None,
+        }),
+    );
 
     // Mirror main's non-default v6 routes into the per-interface table, so the
     // priority-75 catch-all does not send on-link/local v6 through the gateway.
@@ -3426,6 +3443,38 @@ mod parse_echoip_tests {
     #[test]
     fn a_malformed_echoip_answer_is_an_error() {
         assert!(parse_echoip("<html>oops</html>").is_err());
+    }
+}
+
+#[cfg(test)]
+mod carries_v6_tests {
+    use super::*;
+
+    fn v6(s: &str) -> Ipv6Addr {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn a_router_without_an_address_of_our_own_carries_nothing() {
+        assert!(!carries_v6(Some(v6("fe80::1")), [v6("fe80::2")]));
+    }
+
+    #[test]
+    fn a_router_with_a_ula_address_carries_v6() {
+        assert!(carries_v6(
+            Some(v6("fe80::1")),
+            [v6("fe80::2"), v6("fd00:0:104:1::5")]
+        ));
+    }
+
+    #[test]
+    fn a_global_address_without_a_router_carries_v6() {
+        assert!(carries_v6(None, [v6("2001:db8::5")]));
+    }
+
+    #[test]
+    fn a_ula_address_without_a_router_carries_nothing() {
+        assert!(!carries_v6(None, [v6("fd00::5")]));
     }
 }
 
