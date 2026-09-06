@@ -55,6 +55,8 @@ or the CLI's externally observable behavior.
 
 ### Fixed
 
+- **Generated manual pages show the required value for `--format`.**
+
 - **`s9pk init-workspace` no longer scaffolds a placeholder host** — `dev-vm.local` resolved
   nowhere, failing every command in a fresh workspace; comment it out in an existing one.
 

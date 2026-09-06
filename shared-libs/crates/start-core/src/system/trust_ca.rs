@@ -15,7 +15,7 @@ use x509_parser::parse_x509_certificate;
 use crate::context::{CliContext, RpcContext};
 use crate::prelude::*;
 use crate::util::Invoke;
-use crate::util::io::{open_file, write_file_atomic};
+use crate::util::io::{delete_file, maybe_open_file, open_file, write_file_atomic};
 use crate::util::serde::{WithIoFormat, display_serializable};
 
 const MAX_CERTIFICATE_SIZE: usize = crate::CAP_1_MiB;
@@ -107,9 +107,9 @@ pub async fn install(
         Path::new(PERSISTENT_CA_DIRECTORY),
     )
     .await?;
-    if let Err(error) = update_trust_store().await {
+    if let Err(error) = update_trust_store(false).await {
         let rollback_error = snapshot.restore().await.err();
-        let refresh_error = update_trust_store().await.err();
+        let refresh_error = update_trust_store(true).await.err();
         return Err(installation_error(error, rollback_error, refresh_error));
     }
 
@@ -120,7 +120,11 @@ pub fn display(params: WithIoFormat<TrustCaCliParams>, result: TrustedCa) -> Res
     if let Some(format) = params.format {
         return display_serializable(format, result);
     }
-    println!("{}: {}", t!("system.trust-ca.subject"), result.subject);
+    println!(
+        "{}: {}",
+        t!("system.trust-ca.subject"),
+        human_readable_subject(&result.subject)
+    );
     println!(
         "{}: {}",
         t!("system.trust-ca.fingerprint"),
@@ -164,13 +168,13 @@ fn parse_ca(pem: &str) -> Result<ParsedCa, Error> {
 
     let certificate = X509::from_pem(trimmed.as_bytes()).map_err(invalid_certificate)?;
     let der = certificate.to_der().map_err(invalid_certificate)?;
-    let (remainder, parsed) =
+    let (_, parsed) =
         parse_x509_certificate(&der).map_err(|error| invalid_certificate(error.to_string()))?;
     ensure_code!(
-        remainder.is_empty(),
+        parsed.validity().is_valid(),
         ErrorKind::InvalidRequest,
         "{}",
-        t!("system.trust-ca.invalid-certificate")
+        t!("system.trust-ca.not-currently-valid")
     );
     let basic_constraints = parsed
         .basic_constraints()
@@ -232,19 +236,36 @@ async fn store_ca(
     Ok(snapshot)
 }
 
-async fn update_trust_store() -> Result<(), Error> {
-    Command::new("update-ca-certificates")
-        .invoke(ErrorKind::OpenSsl)
-        .await?;
+async fn update_trust_store(fresh: bool) -> Result<(), Error> {
+    let mut command = Command::new("update-ca-certificates");
+    if fresh {
+        command.arg("--fresh");
+    }
+    command.invoke(ErrorKind::OpenSsl).await?;
     Ok(())
+}
+
+fn human_readable_subject(subject: &str) -> String {
+    subject
+        .chars()
+        .fold(String::new(), |mut output, character| {
+            if character.is_control() {
+                output.extend(character.escape_default());
+            } else {
+                output.push(character);
+            }
+            output
+        })
 }
 
 impl FileSnapshot {
     async fn capture(path: PathBuf) -> Result<Self, Error> {
-        let contents = match tokio::fs::read(&path).await {
-            Ok(contents) => Some(contents),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(error) => return Err(Error::new(error, ErrorKind::Filesystem)),
+        let contents = if let Some(mut file) = maybe_open_file(&path).await? {
+            let mut contents = Vec::new();
+            file.read_to_end(&mut contents).await?;
+            Some(contents)
+        } else {
+            None
         };
         Ok(Self { path, contents })
     }
@@ -253,21 +274,17 @@ impl FileSnapshot {
         if let Some(contents) = self.contents {
             write_file_atomic(self.path, contents).await
         } else {
-            match tokio::fs::remove_file(&self.path).await {
-                Ok(()) => Ok(()),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                Err(error) => Err(Error::new(error, ErrorKind::Filesystem)),
-            }
+            delete_file(self.path).await
         }
     }
 }
 
 impl TrustStoreSnapshot {
     async fn restore(self) -> Result<(), Error> {
-        let live = self.live.restore().await;
-        let persistent = self.persistent.restore().await;
-        live?;
-        persistent
+        let mut errors = ErrorCollection::new();
+        errors.handle(self.persistent.restore().await);
+        errors.handle(self.live.restore().await);
+        errors.into_result()
     }
 }
 
@@ -278,12 +295,16 @@ fn installation_error(
 ) -> Error {
     let mut failures = Vec::new();
     if let Some(error) = rollback_error {
-        failures.push(format!("certificate rollback failed: {error}"));
+        failures.push(t!("system.trust-ca.certificate-rollback-failed", error = error).to_string());
     }
     if let Some(error) = refresh_error {
-        failures.push(format!(
-            "trust-store refresh after rollback failed: {error}"
-        ));
+        failures.push(
+            t!(
+                "system.trust-ca.trust-store-refresh-after-rollback-failed",
+                error = error
+            )
+            .to_string(),
+        );
     }
     if failures.is_empty() {
         return error;
@@ -302,7 +323,7 @@ fn invalid_certificate(error: impl std::fmt::Display) -> Error {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
-    use std::time::SystemTime;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     use openssl::asn1::Asn1Time;
     use openssl::bn::BigNum;
@@ -319,6 +340,38 @@ mod tests {
             .unwrap()
             .to_pem()
             .unwrap()
+    }
+
+    fn root_ca_pem_with_validity(not_before: i64, not_after: i64) -> Vec<u8> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let key = gen_nistp256().unwrap();
+        let mut builder = X509Builder::new().unwrap();
+        builder.set_version(2).unwrap();
+        let serial = BigNum::from_u32(1).unwrap().to_asn1_integer().unwrap();
+        builder.set_serial_number(&serial).unwrap();
+        builder
+            .set_not_before(&Asn1Time::from_unix(now + not_before).unwrap())
+            .unwrap();
+        builder
+            .set_not_after(&Asn1Time::from_unix(now + not_after).unwrap())
+            .unwrap();
+        let mut name = X509NameBuilder::new().unwrap();
+        name.append_entry_by_text("CN", "dated CA").unwrap();
+        let name = name.build();
+        builder.set_subject_name(&name).unwrap();
+        builder.set_issuer_name(&name).unwrap();
+        builder.set_pubkey(&key).unwrap();
+        builder
+            .append_extension(BasicConstraints::new().critical().ca().build().unwrap())
+            .unwrap();
+        builder
+            .append_extension(KeyUsage::new().critical().key_cert_sign().build().unwrap())
+            .unwrap();
+        builder.sign(&key, MessageDigest::sha256()).unwrap();
+        builder.build().to_pem().unwrap()
     }
 
     fn ca_without_key_cert_sign_pem() -> Vec<u8> {
@@ -367,6 +420,25 @@ mod tests {
         assert_eq!(first.fingerprint_id.len(), 64);
         assert_eq!(first.result.fingerprint.len(), 95);
         assert_eq!(first.canonical_pem, canonical_pem);
+    }
+
+    #[test]
+    fn escapes_controls_in_human_readable_subject() {
+        assert_eq!(
+            human_readable_subject("CN=普通\n\u{1b}[31mCA\u{7f}"),
+            "CN=普通\\n\\u{1b}[31mCA\\u{7f}"
+        );
+    }
+
+    #[test]
+    fn rejects_ca_outside_validity_window() {
+        for pem in [
+            root_ca_pem_with_validity(-172_800, -86_400),
+            root_ca_pem_with_validity(86_400, 172_800),
+        ] {
+            let pem = String::from_utf8(pem).unwrap();
+            assert_eq!(parse_ca(&pem).unwrap_err().kind, ErrorKind::InvalidRequest);
+        }
     }
 
     #[test]
@@ -463,6 +535,30 @@ mod tests {
         initial_snapshot.restore().await.unwrap();
         assert_eq!(entry_count(&live).await, 1);
         assert_eq!(entry_count(&persistent).await, 1);
+        tmp.delete().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn retains_both_snapshot_restore_errors() {
+        let tmp = TmpDir::new().await.unwrap();
+        let live = tmp.join("live");
+        let persistent = tmp.join("persistent");
+        tokio::fs::create_dir_all(&live).await.unwrap();
+        tokio::fs::create_dir_all(&persistent).await.unwrap();
+        let snapshot = TrustStoreSnapshot {
+            live: FileSnapshot {
+                path: live,
+                contents: Some(Vec::new()),
+            },
+            persistent: FileSnapshot {
+                path: persistent,
+                contents: Some(Vec::new()),
+            },
+        };
+
+        let error = snapshot.restore().await.unwrap_err().to_string();
+        assert!(error.contains("live"), "{error}");
+        assert!(error.contains("persistent"), "{error}");
         tmp.delete().await.unwrap();
     }
 
