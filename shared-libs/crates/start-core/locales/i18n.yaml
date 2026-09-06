@@ -445,6 +445,13 @@ system.field-missing-from-meminfo:
   fr_FR: "%{field} manquant dans /proc/meminfo"
   pl_PL: "%{field} brakuje w /proc/meminfo"
 
+system.trust-ca.certificate-rollback-failed:
+  en_US: "Certificate rollback failed: %{error}"
+  de_DE: "Zurücksetzen des Zertifikats fehlgeschlagen: %{error}"
+  es_ES: "Error al revertir el certificado: %{error}"
+  fr_FR: "Échec de la restauration du certificat : %{error}"
+  pl_PL: "Nie udało się wycofać certyfikatu: %{error}"
+
 system.trust-ca.fingerprint:
   en_US: "SHA-256 fingerprint"
   de_DE: "SHA-256-Fingerabdruck"
@@ -473,12 +480,26 @@ system.trust-ca.not-ca:
   fr_FR: "Le certificat n’est pas une autorité de certification"
   pl_PL: "Certyfikat nie jest certyfikatem CA"
 
+system.trust-ca.not-currently-valid:
+  en_US: "Certificate is expired or not yet valid"
+  de_DE: "Zertifikat ist abgelaufen oder noch nicht gültig"
+  es_ES: "El certificado ha caducado o aún no es válido"
+  fr_FR: "Le certificat a expiré ou n’est pas encore valide"
+  pl_PL: "Certyfikat wygasł lub nie jest jeszcze ważny"
+
 system.trust-ca.subject:
   en_US: "Subject"
   de_DE: "Subjekt"
   es_ES: "Sujeto"
   fr_FR: "Sujet"
   pl_PL: "Podmiot"
+
+system.trust-ca.trust-store-refresh-after-rollback-failed:
+  en_US: "Trust-store refresh after rollback failed: %{error}"
+  de_DE: "Aktualisierung des Vertrauensspeichers nach dem Zurücksetzen fehlgeschlagen: %{error}"
+  es_ES: "Error al actualizar el almacén de confianza después de la reversión: %{error}"
+  fr_FR: "Échec de l’actualisation du magasin de confiance après la restauration : %{error}"
+  pl_PL: "Nie udało się odświeżyć magazynu zaufania po wycofaniu zmian: %{error}"
 
 # error.rs - ErrorKind strings
 error.unknown:
@@ -3502,6 +3523,13 @@ help.arg.except-tasks:
   es_ES: "IDs de tareas a excluir"
   fr_FR: "IDs de tâches à exclure"
   pl_PL: "Identyfikatory zadań do wykluczenia"
+
+help.arg.format:
+  en_US: "Output format"
+  de_DE: "Ausgabeformat"
+  es_ES: "Formato de salida"
+  fr_FR: "Format de sortie"
+  pl_PL: "Format wyjściowy"
 
 help.arg.force-clear-task:
   en_US: "Force clear the task even if running"

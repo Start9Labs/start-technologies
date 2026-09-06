@@ -438,6 +438,9 @@ impl<T: CommandFactory> CommandFactory for WithIoFormat<T> {
             cmd.arg(
                 clap::Arg::new("format")
                     .long("format")
+                    .value_name("FORMAT")
+                    .num_args(1)
+                    .help("help.arg.format")
                     .value_parser(|s: &str| s.parse::<IoFormat>().map_err(|e| eyre!("{e}"))),
             )
         } else {
@@ -450,6 +453,9 @@ impl<T: CommandFactory> CommandFactory for WithIoFormat<T> {
             cmd.arg(
                 clap::Arg::new("format")
                     .long("format")
+                    .value_name("FORMAT")
+                    .num_args(1)
+                    .help("help.arg.format")
                     .value_parser(|s: &str| s.parse::<IoFormat>().map_err(|e| eyre!("{e}"))),
             )
         } else {
@@ -613,6 +619,9 @@ where
             cmd.arg(
                 clap::Arg::new("format")
                     .long("format")
+                    .value_name("FORMAT")
+                    .num_args(1)
+                    .help("help.arg.format")
                     .value_parser(|s: &str| s.parse::<IoFormat>().map_err(|e| eyre!("{e}"))),
             )
         } else {
@@ -624,6 +633,9 @@ where
             cmd.arg(
                 clap::Arg::new("format")
                     .long("format")
+                    .value_name("FORMAT")
+                    .num_args(1)
+                    .help("help.arg.format")
                     .value_parser(|s: &str| s.parse::<IoFormat>().map_err(|e| eyre!("{e}"))),
             )
         } else {
