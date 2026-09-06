@@ -9,6 +9,14 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
+## [Unreleased]
+
+### Added
+
+- **`s9pk init-workspace` and `s9pk init-package` say when the workspace's `start-technologies`
+  checkout is on a branch other than `live-docs`.** The notice names the branch and prints the
+  `git checkout` that moves it.
+
 ## [2.0.0]
 
 ### Added

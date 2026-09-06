@@ -150,6 +150,8 @@ pub async fn init_workspace(
             .capture(false)
             .invoke(ErrorKind::Git)
             .await?;
+    } else {
+        warn_if_guide_off_branch(&root).await;
     }
 
     // Symlink (not a copy) so a guide sync keeps the workspace AGENTS.md current.
@@ -242,6 +244,7 @@ pub async fn init_package(
     }
 
     warn_if_start_cli_outdated(&root);
+    warn_if_guide_off_branch(&root).await;
 
     let template = root.join(MONOREPO_DIR).join(TEMPLATE_SUBPATH);
     if !template.exists() {
@@ -330,6 +333,32 @@ pub fn warn_if_start_cli_outdated(workspace: &Path) {
             );
         }
     });
+}
+
+async fn warn_if_guide_off_branch(workspace: &Path) {
+    let Ok(head) = Command::new("git")
+        .arg("symbolic-ref")
+        .arg("--short")
+        .arg("-q")
+        .arg("HEAD")
+        .current_dir(workspace.join(MONOREPO_DIR))
+        .invoke(ErrorKind::Git)
+        .await
+    else {
+        return;
+    };
+    let branch = String::from_utf8_lossy(&head).trim().to_owned();
+    if branch != MONOREPO_BRANCH {
+        eprintln!(
+            "{}",
+            t!(
+                "s9pk.init.guide-off-branch",
+                dir = MONOREPO_DIR,
+                branch = branch,
+                expected = MONOREPO_BRANCH
+            )
+        );
+    }
 }
 
 /// Walk up from `start` (inclusive) for the nearest workspace — a directory whose
