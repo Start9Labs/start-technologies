@@ -76,7 +76,7 @@ pub struct RpcContextSeed {
     pub callbacks: Arc<ServiceCallbacks>,
     pub wifi_manager: RwLock<Option<WpaCli>>,
     pub current_secret: Arc<Jwk>,
-    pub client: Client,
+    http: ReloadableHttpClient,
     pub start_time: Instant,
     pub crons: SyncMutex<BTreeMap<Guid, NonDetachingJoinHandle<()>>>,
 }
@@ -127,6 +127,39 @@ impl CleanupInitPhases {
 
 #[derive(Clone)]
 pub struct RpcContext(Arc<RpcContextSeed>);
+
+struct ReloadableHttpClient {
+    client: SyncRwLock<Client>,
+    socks_proxy_url: String,
+}
+impl ReloadableHttpClient {
+    fn new(socks_proxy_url: String) -> Result<Self, Error> {
+        let client = Self::build_for_proxy(&socks_proxy_url)?;
+        Ok(Self {
+            client: SyncRwLock::new(client),
+            socks_proxy_url,
+        })
+    }
+
+    fn build(&self) -> Result<Client, Error> {
+        Self::build_for_proxy(&self.socks_proxy_url)
+    }
+
+    fn build_for_proxy(socks_proxy_url: &str) -> Result<Client, Error> {
+        Client::builder()
+            .proxy(Proxy::all(socks_proxy_url)?)
+            .build()
+            .with_kind(ErrorKind::ParseUrl)
+    }
+
+    fn get(&self) -> Client {
+        self.client.peek(Clone::clone)
+    }
+
+    fn replace(&self, client: Client) {
+        self.client.replace(client);
+    }
+}
 
 /// Drop enrolled keys idle for more than 30 days. No-op until the clock is
 /// NTP-synced, so a wrong boot-time clock can't reap live sessions.
@@ -404,10 +437,7 @@ impl RpcContext {
                     )
                 })?,
             ),
-            client: Client::builder()
-                .proxy(Proxy::all(socks_proxy_url)?)
-                .build()
-                .with_kind(crate::ErrorKind::ParseUrl)?,
+            http: ReloadableHttpClient::new(socks_proxy_url)?,
             start_time: Instant::now(),
             crons,
         });
@@ -438,6 +468,18 @@ impl RpcContext {
     pub async fn wait_closed(&self) {
         let mut rx = self.0.closed.subscribe();
         let _ = rx.wait_for(|closed| *closed).await;
+    }
+
+    pub(crate) fn http_client(&self) -> Client {
+        self.http.get()
+    }
+
+    pub(crate) fn fresh_http_client(&self) -> Result<Client, Error> {
+        self.http.build()
+    }
+
+    pub(crate) fn replace_http_client(&self, client: Client) {
+        self.http.replace(client)
     }
 
     pub fn add_cron<F: Future<Output = ()> + Send + 'static>(&self, fut: F) -> Guid {
@@ -576,11 +618,6 @@ impl RpcContext {
             .await
     }
 }
-impl AsRef<Client> for RpcContext {
-    fn as_ref(&self) -> &Client {
-        &self.client
-    }
-}
 impl AsRef<Jwk> for RpcContext {
     fn as_ref(&self) -> &Jwk {
         &CURRENT_SECRET
@@ -621,5 +658,54 @@ impl Drop for RpcContext {
                 tracing::debug!("{:?}", eyre!(""))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use http::{HeaderMap, HeaderValue};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    use super::*;
+
+    fn client_with_generation(generation: &'static str) -> Client {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-client-generation", HeaderValue::from_static(generation));
+        Client::builder().default_headers(headers).build().unwrap()
+    }
+
+    #[tokio::test]
+    async fn reloadable_http_client_replaces_future_clones() {
+        let http = ReloadableHttpClient {
+            client: SyncRwLock::new(client_with_generation("old")),
+            socks_proxy_url: "socks5h://127.0.0.1:9050".to_owned(),
+        };
+        let old = http.get();
+        http.replace(client_with_generation("replacement"));
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let mut requests = Vec::new();
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = vec![0; 4096];
+                let len = stream.read(&mut request).await.unwrap();
+                requests.push(String::from_utf8(request[..len].to_vec()).unwrap());
+                stream
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                    .await
+                    .unwrap();
+            }
+            requests
+        });
+
+        old.get(&url).send().await.unwrap();
+        http.get().get(&url).send().await.unwrap();
+        let requests = server.await.unwrap();
+
+        assert!(requests[0].contains("x-client-generation: old"));
+        assert!(requests[1].contains("x-client-generation: replacement"));
+        assert!(http.build().is_ok());
     }
 }

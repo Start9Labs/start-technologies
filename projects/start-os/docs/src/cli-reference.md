@@ -104,6 +104,26 @@ Display hardware and device information.
 
 Tear down and rebuild all service containers.
 
+### `start-cli server trust-ca <CERTIFICATE>`
+
+Add a PEM-encoded CA root to the StartOS host trust store. The certificate can be read from a
+local file or from standard input by passing `-`:
+
+```sh
+start-cli --host https://server.local server trust-ca company-root.crt
+cat company-root.crt | start-cli --host https://server.local server trust-ca -
+```
+
+The command requires authentication and reports the certificate subject and SHA-256 fingerprint.
+StartOS identifies the root by that fingerprint, so installing the same certificate again keeps a
+single copy. The root becomes available to host processes immediately and persists across reboots
+and OS updates. It is added alongside the StartOS local Root CA and the distribution trust bundle.
+
+This command changes the host trust store. Services use the trust store provided by their package,
+so configure custom roots within a service separately when supported.
+
+- `--format` — Output format
+
 ### `start-cli server set-hostname <HOSTNAME>`
 
 Set the server's name, which is its `.local` address without the `.local` on the end.

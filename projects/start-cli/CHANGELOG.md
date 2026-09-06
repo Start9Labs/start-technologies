@@ -9,6 +9,17 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
+## [2.1.0]
+
+### Added
+
+- **`server trust-ca` adds a PEM-encoded CA root to the StartOS host trust store.** It accepts a
+  local file or standard input and reports the certificate subject and SHA-256 fingerprint.
+
+### Fixed
+
+- **Generated manual pages show the required value for `--format`.**
+
 ## [2.0.0]
 
 ### Added
