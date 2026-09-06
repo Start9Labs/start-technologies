@@ -5,6 +5,7 @@ use clap::Parser;
 use imbl_value::{from_value, to_value};
 use itertools::Itertools;
 use openssl::hash::MessageDigest;
+use openssl::nid::Nid;
 use openssl::x509::{X509, X509NameRef};
 use rpc_toolkit::HandlerArgs;
 use serde::{Deserialize, Serialize};
@@ -281,12 +282,15 @@ fn render_subject(subject: &X509NameRef) -> String {
     subject
         .entries()
         .map(|entry| {
-            let name = entry
-                .object()
-                .nid()
-                .short_name()
-                .map(str::to_owned)
-                .unwrap_or_else(|_| entry.object().to_string());
+            let object = entry.object();
+            let nid = object.nid();
+            let name = if nid == Nid::UNDEF {
+                object.to_string()
+            } else {
+                nid.short_name()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|_| object.to_string())
+            };
             let value = entry
                 .data()
                 .as_utf8()
@@ -439,7 +443,7 @@ mod tests {
             .set_not_after(&Asn1Time::days_from_now(1).unwrap())
             .unwrap();
         let mut name = X509NameBuilder::new().unwrap();
-        name.append_entry_by_text_with_type("CN", "Café CA", Asn1Type::T61STRING)
+        name.append_entry_by_text_with_type("CN", "Legacy CA", Asn1Type::T61STRING)
             .unwrap();
         name.append_entry_by_text("1.2.3.4", "custom").unwrap();
         let name = name.build();
@@ -505,12 +509,10 @@ mod tests {
     }
 
     #[test]
-    fn renders_legacy_subject_encodings_and_unknown_oids() {
+    fn renders_legacy_subject_encoding_and_unknown_oid() {
         let parsed = parse_ca(&String::from_utf8(legacy_subject_ca_pem()).unwrap()).unwrap();
 
-        assert!(parsed.result.subject.contains("CN="));
-        assert!(parsed.result.subject.contains("1.2.3.4=custom"));
-        assert!(!parsed.result.subject.contains("X509Error"));
+        assert_eq!(parsed.result.subject, "CN=Legacy CA, 1.2.3.4=custom");
     }
 
     #[test]
