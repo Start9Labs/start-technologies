@@ -141,6 +141,23 @@ Within a minute or so, `timedatectl timesync-status` should report a successful 
 
 If time sync still fails, please [contact support](https://start9.com/contact).
 
+## "Gateway Timeout" in the StartOS UI
+
+If the StartOS interface is already open in your browser and a message saying "Gateway Timeout" appears — when you click something, or when you try to log in — it means your browser can no longer reach your server. The wording is misleading: nothing has timed out and no gateway is involved. The page you are looking at is a copy your browser saved earlier, which is why it still loads, and why the login screen can appear even when the server is off. The moment the page needs the server, the request fails.
+
+The usual causes:
+
+- **The server is off, restarting, or still starting up** — including a restart it did on its own after an update.
+- **The server lost its network connection** — an unplugged Ethernet cable, or a router or switch that rebooted.
+- **Your device is on a different network than the server** — you switched Wi-Fi networks, or a VPN on your device is sending traffic away from your local network.
+- **The server's address changed** — your router gave it a new IP address, but your bookmark or open tab still points at the old one.
+
+To recover:
+
+1. Check that the server is powered on and has finished booting, and that its network cable and router are connected.
+2. Make sure your device is on the same network as the server. If you use a VPN, disconnect it to test.
+3. Reload the page. If a plain reload still shows the saved copy, do a hard refresh — the key combinations for each browser are listed [above](#i-am-unable-to-connect-to-my-servers-server-namelocal-url). If you were using an IP address, use `https://server-name.local` instead: it follows the server even when its IP changes.
+
 ## Can I add a second drive to give a service more storage?
 
 Not yet. StartOS keeps every service's data on a single data drive, the one chosen at the Select Drives step when [installing StartOS](installing-startos.md). There is no way to attach an additional drive to one service, and a drive plugged in after setup is only recognized as a [backup](backup-create.md) target.
