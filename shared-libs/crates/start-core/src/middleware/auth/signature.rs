@@ -587,6 +587,27 @@ pub async fn call_remote<Ctx: SigningContext + AsRef<Client>>(
     method: &str,
     params: Value,
 ) -> Result<Value, RpcError> {
+    call_remote_with_client(
+        ctx,
+        ctx.as_ref().clone(),
+        url,
+        headers,
+        sig_context,
+        method,
+        params,
+    )
+    .await
+}
+
+pub(crate) async fn call_remote_with_client<Ctx: SigningContext>(
+    ctx: &Ctx,
+    client: Client,
+    url: Url,
+    headers: HeaderMap,
+    sig_context: Option<&str>,
+    method: &str,
+    params: Value,
+) -> Result<Value, RpcError> {
     use reqwest::Method;
     use reqwest::header::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE};
     use rpc_toolkit::RpcResponse;
@@ -598,8 +619,7 @@ pub async fn call_remote<Ctx: SigningContext + AsRef<Client>>(
         params,
     };
     let body = serde_json::to_vec(&rpc_req)?;
-    let mut req = ctx
-        .as_ref()
+    let mut req = client
         .request(Method::POST, url)
         .header(CONTENT_TYPE, "application/json")
         .header(ACCEPT, "application/json")

@@ -1,10 +1,11 @@
+use std::future::Future;
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
 use imbl_value::{from_value, to_value};
 use itertools::Itertools;
 use openssl::hash::MessageDigest;
-use openssl::x509::X509;
+use openssl::x509::{X509, X509NameRef};
 use rpc_toolkit::HandlerArgs;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -13,6 +14,7 @@ use tokio::sync::Mutex;
 use x509_parser::parse_x509_certificate;
 
 use crate::context::{CliContext, RpcContext};
+use crate::net::ssl::x509_sha256_fingerprint;
 use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::io::{delete_file, maybe_open_file, open_file, write_file_atomic};
@@ -31,20 +33,20 @@ static TRUST_STORE_LOCK: Mutex<()> = Mutex::const_new(());
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
-pub struct TrustCaCliParams {
+pub(crate) struct TrustCaCliParams {
     #[arg(help = "help.arg.ca-certificate-path")]
     certificate: PathBuf,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TrustCaRpcParams {
+pub(crate) struct TrustCaRpcParams {
     pem: String,
 }
 
 #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TrustedCa {
+pub(crate) struct TrustedCa {
     subject: String,
     fingerprint: String,
 }
@@ -68,7 +70,7 @@ struct TrustStoreSnapshot {
     persistent: FileSnapshot,
 }
 
-pub async fn cli(
+pub(crate) async fn cli(
     HandlerArgs {
         context,
         parent_method,
@@ -94,29 +96,62 @@ pub async fn cli(
     )?)
 }
 
-pub async fn install(
-    _: RpcContext,
+pub(crate) async fn install(
+    context: RpcContext,
     TrustCaRpcParams { pem }: TrustCaRpcParams,
 ) -> Result<TrustedCa, Error> {
     let parsed = parse_ca(&pem)?;
-    let _guard = TRUST_STORE_LOCK.lock().await;
+    run_detached_transaction(async move {
+        let _guard = TRUST_STORE_LOCK.lock().await;
+        install_transaction(
+            &context,
+            parsed,
+            Path::new(LIVE_CA_DIRECTORY),
+            Path::new(PERSISTENT_CA_DIRECTORY),
+        )
+        .await
+    })
+    .await
+}
 
-    let snapshot = store_ca(
-        &parsed,
-        Path::new(LIVE_CA_DIRECTORY),
-        Path::new(PERSISTENT_CA_DIRECTORY),
-    )
-    .await?;
+async fn install_transaction(
+    context: &RpcContext,
+    parsed: ParsedCa,
+    live: &Path,
+    persistent: &Path,
+) -> Result<TrustedCa, Error> {
+    let snapshot = store_ca(&parsed, live, persistent).await?;
     if let Err(error) = update_trust_store(false).await {
-        let rollback_error = snapshot.restore().await.err();
-        let refresh_error = update_trust_store(true).await.err();
-        return Err(installation_error(error, rollback_error, refresh_error));
+        return Err(rollback(snapshot, error).await);
     }
-
+    let client = match context.fresh_http_client() {
+        Ok(client) => client,
+        Err(error) => return Err(rollback(snapshot, error).await),
+    };
+    context.replace_http_client(client);
     Ok(parsed.result)
 }
 
-pub fn display(params: WithIoFormat<TrustCaCliParams>, result: TrustedCa) -> Result<(), Error> {
+async fn rollback(snapshot: TrustStoreSnapshot, error: Error) -> Error {
+    let rollback_error = snapshot.restore().await.err();
+    let refresh_error = update_trust_store(true).await.err();
+    installation_error(error, rollback_error, refresh_error)
+}
+
+async fn run_detached_transaction<T, F>(transaction: F) -> Result<T, Error>
+where
+    T: Send + 'static,
+    F: Future<Output = Result<T, Error>> + Send + 'static,
+{
+    tokio::spawn(transaction)
+        .await
+        .map_err(|error| Error::new(error, ErrorKind::Unknown))?
+}
+
+pub(crate) fn display(
+    params: WithIoFormat<TrustCaCliParams>,
+    result: TrustedCa,
+) -> Result<(), Error> {
     if let Some(format) = params.format {
         return display_serializable(format, result);
     }
@@ -195,21 +230,18 @@ fn parse_ca(pem: &str) -> Result<ParsedCa, Error> {
         t!("system.trust-ca.not-ca")
     );
 
-    let fingerprint = certificate
-        .digest(MessageDigest::sha256())
-        .map_err(invalid_certificate)?;
-    let fingerprint_id = hex::encode(fingerprint.as_ref());
-    let fingerprint = fingerprint
-        .iter()
-        .map(|byte| format!("{byte:02X}"))
-        .collect::<Vec<_>>()
-        .join(":");
+    let fingerprint_id = hex::encode(
+        certificate
+            .digest(MessageDigest::sha256())
+            .map_err(invalid_certificate)?,
+    );
+    let fingerprint = x509_sha256_fingerprint(&certificate).map_err(invalid_certificate)?;
 
     Ok(ParsedCa {
         canonical_pem: certificate.to_pem().map_err(invalid_certificate)?,
         fingerprint_id,
         result: TrustedCa {
-            subject: parsed.subject().to_string(),
+            subject: render_subject(certificate.subject_name()),
             fingerprint,
         },
     })
@@ -243,6 +275,26 @@ async fn update_trust_store(fresh: bool) -> Result<(), Error> {
     }
     command.invoke(ErrorKind::OpenSsl).await?;
     Ok(())
+}
+
+fn render_subject(subject: &X509NameRef) -> String {
+    subject
+        .entries()
+        .map(|entry| {
+            let name = entry
+                .object()
+                .nid()
+                .short_name()
+                .map(str::to_owned)
+                .unwrap_or_else(|_| entry.object().to_string());
+            let value = entry
+                .data()
+                .as_utf8()
+                .map(|value| value.to_string())
+                .unwrap_or_else(|_| format!("#{}", hex::encode_upper(entry.data().as_slice())));
+            format!("{name}={value}")
+        })
+        .join(", ")
 }
 
 fn human_readable_subject(subject: &str) -> String {
@@ -323,9 +375,9 @@ fn invalid_certificate(error: impl std::fmt::Display) -> Error {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-    use openssl::asn1::Asn1Time;
+    use openssl::asn1::{Asn1Time, Asn1Type};
     use openssl::bn::BigNum;
     use openssl::x509::extension::{BasicConstraints, KeyUsage};
     use openssl::x509::{X509Builder, X509NameBuilder};
@@ -360,6 +412,36 @@ mod tests {
             .unwrap();
         let mut name = X509NameBuilder::new().unwrap();
         name.append_entry_by_text("CN", "dated CA").unwrap();
+        let name = name.build();
+        builder.set_subject_name(&name).unwrap();
+        builder.set_issuer_name(&name).unwrap();
+        builder.set_pubkey(&key).unwrap();
+        builder
+            .append_extension(BasicConstraints::new().critical().ca().build().unwrap())
+            .unwrap();
+        builder
+            .append_extension(KeyUsage::new().critical().key_cert_sign().build().unwrap())
+            .unwrap();
+        builder.sign(&key, MessageDigest::sha256()).unwrap();
+        builder.build().to_pem().unwrap()
+    }
+
+    fn legacy_subject_ca_pem() -> Vec<u8> {
+        let key = gen_nistp256().unwrap();
+        let mut builder = X509Builder::new().unwrap();
+        builder.set_version(2).unwrap();
+        let serial = BigNum::from_u32(1).unwrap().to_asn1_integer().unwrap();
+        builder.set_serial_number(&serial).unwrap();
+        builder
+            .set_not_before(&Asn1Time::days_from_now(0).unwrap())
+            .unwrap();
+        builder
+            .set_not_after(&Asn1Time::days_from_now(1).unwrap())
+            .unwrap();
+        let mut name = X509NameBuilder::new().unwrap();
+        name.append_entry_by_text_with_type("CN", "Café CA", Asn1Type::T61STRING)
+            .unwrap();
+        name.append_entry_by_text("1.2.3.4", "custom").unwrap();
         let name = name.build();
         builder.set_subject_name(&name).unwrap();
         builder.set_issuer_name(&name).unwrap();
@@ -420,6 +502,15 @@ mod tests {
         assert_eq!(first.fingerprint_id.len(), 64);
         assert_eq!(first.result.fingerprint.len(), 95);
         assert_eq!(first.canonical_pem, canonical_pem);
+    }
+
+    #[test]
+    fn renders_legacy_subject_encodings_and_unknown_oids() {
+        let parsed = parse_ca(&String::from_utf8(legacy_subject_ca_pem()).unwrap()).unwrap();
+
+        assert!(parsed.result.subject.contains("CN="));
+        assert!(parsed.result.subject.contains("1.2.3.4=custom"));
+        assert!(!parsed.result.subject.contains("X509Error"));
     }
 
     #[test]
@@ -536,6 +627,28 @@ mod tests {
         assert_eq!(entry_count(&live).await, 1);
         assert_eq!(entry_count(&persistent).await, 1);
         tmp.delete().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn detached_transaction_finishes_after_caller_is_dropped() {
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let (finished_tx, finished_rx) = tokio::sync::oneshot::channel();
+        let caller = tokio::spawn(run_detached_transaction(async move {
+            started_tx.send(()).unwrap();
+            release_rx.await.unwrap();
+            finished_tx.send(()).unwrap();
+            Ok(())
+        }));
+        started_rx.await.unwrap();
+
+        caller.abort();
+        release_tx.send(()).unwrap();
+
+        tokio::time::timeout(Duration::from_secs(1), finished_rx)
+            .await
+            .expect("transaction did not finish")
+            .unwrap();
     }
 
     #[tokio::test]

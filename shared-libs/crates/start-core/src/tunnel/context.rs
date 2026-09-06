@@ -893,8 +893,9 @@ impl CallRemote<TunnelContext, TunnelUrlParams> for RpcContext {
 
         let sig_ctx = url.host_str().map(InternedString::from_display);
 
-        crate::middleware::auth::signature::call_remote(
+        crate::middleware::auth::signature::call_remote_with_client(
             self,
+            self.http_client(),
             url,
             HeaderMap::new(),
             sig_ctx.as_deref(),

@@ -8,8 +8,6 @@ use imbl::{OrdMap, OrdSet};
 use imbl_value::InternedString;
 use ipnet::IpNet;
 use isocountry::CountryCode;
-use itertools::Itertools;
-use openssl::hash::MessageDigest;
 use patch_db::{HasModel, Value};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -24,6 +22,7 @@ use crate::net::host::Host;
 use crate::net::host::binding::{
     AddSslOptions, BindInfo, BindOptions, Bindings, DerivedAddressInfo, NetInfo,
 };
+use crate::net::ssl::x509_sha256_fingerprint;
 use crate::net::vhost::{AlpnInfo, PassthroughInfo};
 use crate::prelude::*;
 use crate::progress::FullProgress;
@@ -136,13 +135,7 @@ impl Public {
                 pubkey: ssh_key::PublicKey::from(&account.ssh_key)
                     .to_openssh()
                     .unwrap(),
-                ca_fingerprint: account
-                    .root_ca_cert
-                    .digest(MessageDigest::sha256())
-                    .unwrap()
-                    .iter()
-                    .map(|x| format!("{x:02X}"))
-                    .join(":"),
+                ca_fingerprint: x509_sha256_fingerprint(&account.root_ca_cert).unwrap(),
                 ntp_synced: false,
                 zram: true,
                 governor: None,
