@@ -320,11 +320,13 @@ urllib.request.urlopen(req)`,
 
 ## Reporting Init Progress
 
-Init progress is surfaced in the **Installing** / **Updating** phase of the install, so a long first-run setup (migrations, bootstrapping a server, downloading assets) shows a moving bar instead of an apparent stall. This mirrors backup progress reporting.
+Init progress is surfaced inside the install's **Setting up** phase — **Applying update** or **Restoring data** for the other two transitions — so a long first-run setup (migrations, bootstrapping a server, downloading assets) shows a moving bar instead of an apparent stall. This mirrors backup progress reporting.
 
 You never call the progress effect directly. The init harness builds one `FullProgressTracker` and passes it to **every** init handler as a third argument. Each handler adds its own phases (with its own names) to the shared tracker, unaware of the others. Add phases and update them — **every update auto-reports to StartOS in the background**, so there's nothing to flush by hand.
 
 `progress.addPhase(name, contribution)` returns a `PhaseHandle` with `start()`, `setTotal(n)`, `setDone(n)`, `setUnits('steps' | 'bytes')`, and `complete()`. Just update the handle; the report follows automatically.
+
+**Name a phase for the work, not for your package.** Your phases render indented under **Setting up**, on a page already headed by the service's name and icon, so `Installing <Package>` spends both its words on what the reader can already see. Name the step instead — `Creating the database`, `Copying bundled models`, `Compiling assets`.
 
 ```typescript
 export const initializeService = sdk.setupOnInit(async (effects, kind, progress) => {
@@ -381,7 +383,9 @@ export const v2_0_0 = VersionInfo.of({
 
 ### Multi-phase Handlers
 
-For a handler with several distinct steps, add one phase per step. The tracker weights them by their `contribution` and reports a combined percentage:
+For a handler with several distinct steps, add one phase per step. The tracker weights them by their `contribution` and reports a combined percentage.
+
+Set `contribution` from how long each step actually takes — install the package once, read the timings out of the service log, and use those seconds. Equal weights across a ten-second step and a two-minute one produce a bar that jumps to half and then freezes, which reads worse than no bar at all.
 
 ```typescript
 export const bootstrap = sdk.setupOnInit(async (effects, kind, progress) => {
@@ -399,6 +403,28 @@ export const bootstrap = sdk.setupOnInit(async (effects, kind, progress) => {
   seedPhase.complete()
 })
 ```
+
+### Driving Progress From a Daemon's Output
+
+The slow step is usually a program that already prints where it has got to. `exec.onStdout` / `exec.onStderr` on a daemon or oneshot turn that into a real percentage, and into the phase transitions around it:
+
+```typescript
+const app = progress.addPhase(i18n('Installing the ERPNext app'), 11)
+
+let tail = ''
+const onOutput = (chunk: Buffer | string) => {
+  process.stdout.write(chunk)
+  tail = (tail + chunk).slice(-4096) // a marker can straddle two chunks
+  const percent = /Updating DocTypes[^[]*\[[^\]]*\]\s*(\d+)%/g
+  const last = [...tail.matchAll(percent)].pop()
+  if (last) app.setDone(Number(last[1]))
+}
+```
+
+> [!WARNING]
+> Attaching **either** callback switches the process from `stdio: 'inherit'` to `'pipe'` — on all three streams. Re-emit both, or the service log goes silent and the unread stderr pipe eventually blocks the process. Attach an `onStderr` that only re-emits even when you parse nothing from it.
+
+Upstream can reword its output in any release, so keep the failure benign: a marker that stops matching should leave the phase indeterminate, never wedge init.
 
 ## Common Patterns
 

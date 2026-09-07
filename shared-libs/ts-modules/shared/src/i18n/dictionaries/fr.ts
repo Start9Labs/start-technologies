@@ -820,4 +820,7 @@ export default {
   928: 'Croissant',
   929: 'Décroissant',
   930: 'Les services de cette bibliothèque sont maintenus par la communauté Start9 et sont en phase de test bêta. Des bugs sont à prévoir. Installez-les à vos risques et périls. En cas de problème ou de question, veuillez contacter le développeur en charge du paquet.',
+  931: 'Configuration',
+  932: 'Application de la mise à jour',
+  933: 'Restauration des données',
 } satisfies i18n

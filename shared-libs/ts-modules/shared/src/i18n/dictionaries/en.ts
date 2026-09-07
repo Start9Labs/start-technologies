@@ -821,4 +821,7 @@ export const ENGLISH: Record<string, number> = {
   'Ascending': 928,
   'Descending': 929,
   'Services from this registry are packaged and maintained by members of the Start9 community and are undergoing beta testing. Bugs are expected. Install at your own risk. If you experience an issue or have a question related to a service in this marketplace, please reach out to the package developer for assistance.': 930,
+  'Setting up': 931,
+  'Applying update': 932,
+  'Restoring data': 933,
 }

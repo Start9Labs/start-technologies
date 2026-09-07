@@ -91,6 +91,10 @@ file tracks notable changes since the move to the monorepo.
 
 ### Changed
 
+- **The install phase covering a service's own setup is named for the work** —
+  _Setting up_, _Applying update_, or _Restoring data_, with the service's own
+  phases nested under it.
+
 - **Your server's name is now its `.local` address, without the `.local` on the
   end.** A server previously carried two names: a display label shown in the
   browser tab, and the `.local` address derived from it by lowercasing and

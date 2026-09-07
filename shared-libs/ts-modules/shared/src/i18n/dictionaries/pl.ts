@@ -820,4 +820,7 @@ export default {
   928: 'Rosnąco',
   929: 'Malejąco',
   930: 'Serwisy z tego katalogu są tworzone i utrzymywane przez członków społeczności Start9 i są w fazie testów beta. Należy spodziewać się błędów. Instalujesz je na własne ryzyko. W przypadku problemów lub pytań skontaktuj się z twórcą pakietu.',
+  931: 'Konfigurowanie',
+  932: 'Wprowadzanie aktualizacji',
+  933: 'Przywracanie danych',
 } satisfies i18n

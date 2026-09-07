@@ -820,4 +820,7 @@ export default {
   928: 'Ascendente',
   929: 'Descendente',
   930: 'Los servicios de este registro están empaquetados y mantenidos por miembros de la comunidad Start9 y están en fase de prueba beta. Se esperan errores. Instálalos bajo tu propio riesgo. Si experimentas un problema o tienes una pregunta sobre un servicio en este mercado, comunícate con el desarrollador del paquete.',
+  931: 'Configurando',
+  932: 'Aplicando la actualización',
+  933: 'Restaurando los datos',
 } satisfies i18n

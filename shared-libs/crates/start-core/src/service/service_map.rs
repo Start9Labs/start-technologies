@@ -245,12 +245,12 @@ impl ServiceMap {
         let size = s9pk.size();
         let op_name = if recovery_source.is_none() {
             if service.is_none() {
-                "Installing"
+                "Setting up"
             } else {
-                "Updating"
+                "Applying update"
             }
         } else {
-            "Restoring"
+            "Restoring data"
         };
         let mut finalization_progress = progress.add_phase(op_name.into(), Some(50));
         let restoring = recovery_source.is_some();
@@ -617,9 +617,9 @@ impl ServiceRefReloadInfo {
         let id = self.id.clone();
         let error_string = error.to_string();
         let title = match self.operation {
-            "Installing" => t!("service.service-map.installing-failed"),
-            "Updating" => t!("service.service-map.updating-failed"),
-            "Restoring" => t!("service.service-map.restoring-failed"),
+            "Setting up" => t!("service.service-map.installing-failed"),
+            "Applying update" => t!("service.service-map.updating-failed"),
+            "Restoring data" => t!("service.service-map.restoring-failed"),
             "Uninstall" => t!("service.service-map.uninstall-failed"),
             other => t!("service.service-map.operation-failed", operation = other),
         }
