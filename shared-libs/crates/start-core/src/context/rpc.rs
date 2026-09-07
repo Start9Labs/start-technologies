@@ -141,10 +141,6 @@ impl ReloadableHttpClient {
         })
     }
 
-    fn build(&self) -> Result<Client, Error> {
-        Self::build_for_proxy(&self.socks_proxy_url)
-    }
-
     fn build_for_proxy(socks_proxy_url: &str) -> Result<Client, Error> {
         Client::builder()
             .proxy(Proxy::all(socks_proxy_url)?)
@@ -156,8 +152,10 @@ impl ReloadableHttpClient {
         self.client.peek(Clone::clone)
     }
 
-    fn replace(&self, client: Client) {
+    fn reload(&self) -> Result<(), Error> {
+        let client = Self::build_for_proxy(&self.socks_proxy_url)?;
         self.client.replace(client);
+        Ok(())
     }
 }
 
@@ -474,12 +472,8 @@ impl RpcContext {
         self.http.get()
     }
 
-    pub(crate) fn fresh_http_client(&self) -> Result<Client, Error> {
-        self.http.build()
-    }
-
-    pub(crate) fn replace_http_client(&self, client: Client) {
-        self.http.replace(client)
+    pub(crate) fn reload_http_client(&self) -> Result<(), Error> {
+        self.http.reload()
     }
 
     pub fn add_cron<F: Future<Output = ()> + Send + 'static>(&self, fut: F) -> Guid {
@@ -681,31 +675,44 @@ mod tests {
             socks_proxy_url: "socks5h://127.0.0.1:9050".to_owned(),
         };
         let old = http.get();
-        http.replace(client_with_generation("replacement"));
+        http.reload().unwrap();
 
+        let url = assert_client_generation(old, "old").await;
+        assert!(http.get().get(url).send().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn reloadable_http_client_keeps_client_when_rebuild_fails() {
+        let http = ReloadableHttpClient {
+            client: SyncRwLock::new(client_with_generation("old")),
+            socks_proxy_url: "http://[::1".to_owned(),
+        };
+
+        assert!(http.reload().is_err());
+        assert_client_generation(http.get(), "old").await;
+    }
+
+    async fn assert_client_generation(client: Client, generation: &str) -> String {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let server = tokio::spawn(async move {
-            let mut requests = Vec::new();
-            for _ in 0..2 {
-                let (mut stream, _) = listener.accept().await.unwrap();
-                let mut request = vec![0; 4096];
-                let len = stream.read(&mut request).await.unwrap();
-                requests.push(String::from_utf8(request[..len].to_vec()).unwrap());
-                stream
-                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
-                    .await
-                    .unwrap();
-            }
-            requests
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = vec![0; 4096];
+            let len = stream.read(&mut request).await.unwrap();
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                .await
+                .unwrap();
+            String::from_utf8(request[..len].to_vec()).unwrap()
         });
 
-        old.get(&url).send().await.unwrap();
-        http.get().get(&url).send().await.unwrap();
-        let requests = server.await.unwrap();
-
-        assert!(requests[0].contains("x-client-generation: old"));
-        assert!(requests[1].contains("x-client-generation: replacement"));
-        assert!(http.build().is_ok());
+        client.get(&url).send().await.unwrap();
+        assert!(
+            server
+                .await
+                .unwrap()
+                .contains(&format!("x-client-generation: {generation}"))
+        );
+        url
     }
 }

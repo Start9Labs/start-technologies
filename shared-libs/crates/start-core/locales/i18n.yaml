@@ -459,6 +459,13 @@ system.trust-ca.fingerprint:
   fr_FR: "Empreinte SHA-256"
   pl_PL: "Odcisk SHA-256"
 
+system.trust-ca.http-client-reload-after-rollback-failed:
+  en_US: "HTTP client reload after rollback failed: %{error}"
+  de_DE: "Neuladen des HTTP-Clients nach dem Zurücksetzen fehlgeschlagen: %{error}"
+  es_ES: "Error al recargar el cliente HTTP después de la reversión: %{error}"
+  fr_FR: "Échec du rechargement du client HTTP après la restauration : %{error}"
+  pl_PL: "Nie udało się ponownie załadować klienta HTTP po wycofaniu zmian: %{error}"
+
 system.trust-ca.input-too-large:
   en_US: "The CA certificate exceeds the 1 MiB limit"
   de_DE: "Das CA-Zertifikat überschreitet die Grenze von 1 MiB"
@@ -479,13 +486,6 @@ system.trust-ca.not-ca:
   es_ES: "El certificado no es una CA"
   fr_FR: "Le certificat n’est pas une autorité de certification"
   pl_PL: "Certyfikat nie jest certyfikatem CA"
-
-system.trust-ca.not-currently-valid:
-  en_US: "Certificate is expired or not yet valid"
-  de_DE: "Zertifikat ist abgelaufen oder noch nicht gültig"
-  es_ES: "El certificado ha caducado o aún no es válido"
-  fr_FR: "Le certificat a expiré ou n’est pas encore valide"
-  pl_PL: "Certyfikat wygasł lub nie jest jeszcze ważny"
 
 system.trust-ca.subject:
   en_US: "Subject"

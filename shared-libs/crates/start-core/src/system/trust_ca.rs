@@ -13,6 +13,7 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use x509_parser::parse_x509_certificate;
+use x509_parser::x509::X509Version;
 
 use crate::context::{CliContext, RpcContext};
 use crate::net::ssl::x509_sha256_fingerprint;
@@ -101,7 +102,9 @@ pub(crate) async fn install(
     context: RpcContext,
     TrustCaRpcParams { pem }: TrustCaRpcParams,
 ) -> Result<TrustedCa, Error> {
-    let parsed = parse_ca(&pem)?;
+    let parsed = tokio::task::spawn_blocking(move || parse_ca(&pem))
+        .await
+        .map_err(|error| Error::new(error, ErrorKind::Unknown))??;
     run_detached_transaction(async move {
         let _guard = TRUST_STORE_LOCK.lock().await;
         install_transaction(
@@ -121,22 +124,49 @@ async fn install_transaction(
     live: &Path,
     persistent: &Path,
 ) -> Result<TrustedCa, Error> {
-    let snapshot = store_ca(&parsed, live, persistent).await?;
-    if let Err(error) = update_trust_store(false).await {
-        return Err(rollback(snapshot, error).await);
-    }
-    let client = match context.fresh_http_client() {
-        Ok(client) => client,
-        Err(error) => return Err(rollback(snapshot, error).await),
+    let filename = format!("{}.crt", parsed.fingerprint_id);
+    let snapshot = TrustStoreSnapshot {
+        live: FileSnapshot::capture(live.join(&filename)).await?,
+        persistent: FileSnapshot::capture(persistent.join(&filename)).await?,
     };
-    context.replace_http_client(client);
+    run_install_stages(
+        || write_file_atomic(&snapshot.live.path, &parsed.canonical_pem),
+        update_trust_store,
+        || async { context.reload_http_client() },
+        || write_file_atomic(&snapshot.persistent.path, &parsed.canonical_pem),
+        |error| rollback(context, &snapshot, error),
+    )
+    .await?;
     Ok(parsed.result)
 }
 
-async fn rollback(snapshot: TrustStoreSnapshot, error: Error) -> Error {
+async fn run_install_stages(
+    write_live: impl AsyncFnOnce() -> Result<(), Error>,
+    refresh: impl AsyncFnOnce() -> Result<(), Error>,
+    reload: impl AsyncFnOnce() -> Result<(), Error>,
+    write_persistent: impl AsyncFnOnce() -> Result<(), Error>,
+    rollback: impl AsyncFnOnce(Error) -> Error,
+) -> Result<(), Error> {
+    if let Err(error) = write_live().await {
+        return Err(rollback(error).await);
+    }
+    if let Err(error) = refresh().await {
+        return Err(rollback(error).await);
+    }
+    if let Err(error) = reload().await {
+        return Err(rollback(error).await);
+    }
+    if let Err(error) = write_persistent().await {
+        return Err(rollback(error).await);
+    }
+    Ok(())
+}
+
+async fn rollback(context: &RpcContext, snapshot: &TrustStoreSnapshot, error: Error) -> Error {
     let rollback_error = snapshot.restore().await.err();
-    let refresh_error = update_trust_store(true).await.err();
-    installation_error(error, rollback_error, refresh_error)
+    let refresh_error = update_trust_store().await.err();
+    let reload_error = context.reload_http_client().err();
+    installation_error(error, rollback_error, refresh_error, reload_error)
 }
 
 async fn run_detached_transaction<T, F>(transaction: F) -> Result<T, Error>
@@ -206,17 +236,13 @@ fn parse_ca(pem: &str) -> Result<ParsedCa, Error> {
     let der = certificate.to_der().map_err(invalid_certificate)?;
     let (_, parsed) =
         parse_x509_certificate(&der).map_err(|error| invalid_certificate(error.to_string()))?;
-    ensure_code!(
-        parsed.validity().is_valid(),
-        ErrorKind::InvalidRequest,
-        "{}",
-        t!("system.trust-ca.not-currently-valid")
-    );
     let basic_constraints = parsed
         .basic_constraints()
         .map_err(|error| invalid_certificate(error.to_string()))?;
     ensure_code!(
-        basic_constraints.is_some_and(|extension| extension.value.ca),
+        basic_constraints.map_or(parsed.version() == X509Version::V1, |extension| {
+            extension.value.ca
+        }),
         ErrorKind::InvalidRequest,
         "{}",
         t!("system.trust-ca.not-ca")
@@ -248,33 +274,10 @@ fn parse_ca(pem: &str) -> Result<ParsedCa, Error> {
     })
 }
 
-async fn store_ca(
-    parsed: &ParsedCa,
-    live: &Path,
-    persistent: &Path,
-) -> Result<TrustStoreSnapshot, Error> {
-    let filename = format!("{}.crt", parsed.fingerprint_id);
-    let snapshot = TrustStoreSnapshot {
-        live: FileSnapshot::capture(live.join(&filename)).await?,
-        persistent: FileSnapshot::capture(persistent.join(&filename)).await?,
-    };
-    write_file_atomic(&snapshot.persistent.path, &parsed.canonical_pem).await?;
-    if let Err(error) = write_file_atomic(&snapshot.live.path, &parsed.canonical_pem).await {
-        return Err(installation_error(
-            error,
-            snapshot.persistent.restore().await.err(),
-            None,
-        ));
-    }
-    Ok(snapshot)
-}
-
-async fn update_trust_store(fresh: bool) -> Result<(), Error> {
-    let mut command = Command::new("update-ca-certificates");
-    if fresh {
-        command.arg("--fresh");
-    }
-    command.invoke(ErrorKind::OpenSsl).await?;
+async fn update_trust_store() -> Result<(), Error> {
+    Command::new("update-ca-certificates")
+        .invoke(ErrorKind::OpenSsl)
+        .await?;
     Ok(())
 }
 
@@ -326,17 +329,17 @@ impl FileSnapshot {
         Ok(Self { path, contents })
     }
 
-    async fn restore(self) -> Result<(), Error> {
-        if let Some(contents) = self.contents {
-            write_file_atomic(self.path, contents).await
+    async fn restore(&self) -> Result<(), Error> {
+        if let Some(contents) = &self.contents {
+            write_file_atomic(&self.path, contents).await
         } else {
-            delete_file(self.path).await
+            delete_file(&self.path).await
         }
     }
 }
 
 impl TrustStoreSnapshot {
-    async fn restore(self) -> Result<(), Error> {
+    async fn restore(&self) -> Result<(), Error> {
         let mut errors = ErrorCollection::new();
         errors.handle(self.persistent.restore().await);
         errors.handle(self.live.restore().await);
@@ -348,6 +351,7 @@ fn installation_error(
     error: Error,
     rollback_error: Option<Error>,
     refresh_error: Option<Error>,
+    reload_error: Option<Error>,
 ) -> Error {
     let mut failures = Vec::new();
     if let Some(error) = rollback_error {
@@ -357,6 +361,15 @@ fn installation_error(
         failures.push(
             t!(
                 "system.trust-ca.trust-store-refresh-after-rollback-failed",
+                error = error
+            )
+            .to_string(),
+        );
+    }
+    if let Some(error) = reload_error {
+        failures.push(
+            t!(
+                "system.trust-ca.http-client-reload-after-rollback-failed",
                 error = error
             )
             .to_string(),
@@ -379,6 +392,7 @@ fn invalid_certificate(error: impl std::fmt::Display) -> Error {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
+    use std::sync::{Arc, Mutex as StdMutex};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     use openssl::asn1::{Asn1Time, Asn1Type};
@@ -426,6 +440,28 @@ mod tests {
         builder
             .append_extension(KeyUsage::new().critical().key_cert_sign().build().unwrap())
             .unwrap();
+        builder.sign(&key, MessageDigest::sha256()).unwrap();
+        builder.build().to_pem().unwrap()
+    }
+
+    fn extensionless_ca_pem(version: i32) -> Vec<u8> {
+        let key = gen_nistp256().unwrap();
+        let mut builder = X509Builder::new().unwrap();
+        builder.set_version(version).unwrap();
+        let serial = BigNum::from_u32(1).unwrap().to_asn1_integer().unwrap();
+        builder.set_serial_number(&serial).unwrap();
+        builder
+            .set_not_before(&Asn1Time::days_from_now(0).unwrap())
+            .unwrap();
+        builder
+            .set_not_after(&Asn1Time::days_from_now(1).unwrap())
+            .unwrap();
+        let mut name = X509NameBuilder::new().unwrap();
+        name.append_entry_by_text("CN", "extensionless CA").unwrap();
+        let name = name.build();
+        builder.set_subject_name(&name).unwrap();
+        builder.set_issuer_name(&name).unwrap();
+        builder.set_pubkey(&key).unwrap();
         builder.sign(&key, MessageDigest::sha256()).unwrap();
         builder.build().to_pem().unwrap()
     }
@@ -524,14 +560,27 @@ mod tests {
     }
 
     #[test]
-    fn rejects_ca_outside_validity_window() {
+    fn accepts_ca_outside_validity_window() {
         for pem in [
             root_ca_pem_with_validity(-172_800, -86_400),
             root_ca_pem_with_validity(86_400, 172_800),
         ] {
-            let pem = String::from_utf8(pem).unwrap();
-            assert_eq!(parse_ca(&pem).unwrap_err().kind, ErrorKind::InvalidRequest);
+            parse_ca(&String::from_utf8(pem).unwrap()).unwrap();
         }
+    }
+
+    #[test]
+    fn accepts_extensionless_v1_ca() {
+        let pem = String::from_utf8(extensionless_ca_pem(0)).unwrap();
+
+        parse_ca(&pem).unwrap();
+    }
+
+    #[test]
+    fn rejects_extensionless_v3_ca() {
+        let pem = String::from_utf8(extensionless_ca_pem(2)).unwrap();
+
+        assert_eq!(parse_ca(&pem).unwrap_err().kind, ErrorKind::InvalidRequest);
     }
 
     #[test]
@@ -589,45 +638,79 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stores_ca_idempotently_without_replacing_other_roots() {
+    async fn persistent_ca_is_published_after_live_refresh_and_reload() {
+        let stages = Arc::new(StdMutex::new(Vec::new()));
+        run_install_stages(
+            record_stage(&stages, "write-live", Ok(())),
+            record_stage(&stages, "refresh", Ok(())),
+            record_stage(&stages, "reload", Ok(())),
+            record_stage(&stages, "write-persistent", Ok(())),
+            |error| async move { error },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            *stages.lock().unwrap(),
+            ["write-live", "refresh", "reload", "write-persistent"]
+        );
+    }
+
+    #[tokio::test]
+    async fn persistent_write_failure_rolls_back_live_state() {
+        let stages = Arc::new(StdMutex::new(Vec::new()));
+        let rollback_stages = stages.clone();
+        let error = Error::new(eyre!("persistent write failed"), ErrorKind::Filesystem);
+        let result = run_install_stages(
+            record_stage(&stages, "write-live", Ok(())),
+            record_stage(&stages, "refresh", Ok(())),
+            record_stage(&stages, "reload", Ok(())),
+            record_stage(&stages, "write-persistent", Err(error)),
+            move |error| async move {
+                rollback_stages.lock().unwrap().push("rollback");
+                error
+            },
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert_eq!(
+            *stages.lock().unwrap(),
+            [
+                "write-live",
+                "refresh",
+                "reload",
+                "write-persistent",
+                "rollback"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn snapshot_rollback_restores_live_and_persistent_roots() {
         let tmp = TmpDir::new().await.unwrap();
-        let live = tmp.join("live");
-        let persistent = tmp.join("persistent");
-        write_file_atomic(live.join("startos-root-ca.crt"), b"generated")
+        let live = tmp.join("live.crt");
+        let persistent = tmp.join("persistent.crt");
+        write_file_atomic(&live, b"old-live").await.unwrap();
+        write_file_atomic(&persistent, b"old-persistent")
             .await
             .unwrap();
-        write_file_atomic(persistent.join("distribution.crt"), b"distribution")
+        let snapshot = TrustStoreSnapshot {
+            live: FileSnapshot::capture(live.clone()).await.unwrap(),
+            persistent: FileSnapshot::capture(persistent.clone()).await.unwrap(),
+        };
+        write_file_atomic(&live, b"new-live").await.unwrap();
+        write_file_atomic(&persistent, b"new-persistent")
             .await
             .unwrap();
-        let parsed = parse_ca(&String::from_utf8(root_ca_pem()).unwrap()).unwrap();
 
-        let initial_snapshot = store_ca(&parsed, &live, &persistent).await.unwrap();
-        store_ca(&parsed, &live, &persistent).await.unwrap();
+        snapshot.restore().await.unwrap();
 
+        assert_eq!(tokio::fs::read(live).await.unwrap(), b"old-live");
         assert_eq!(
-            tokio::fs::read(live.join("startos-root-ca.crt"))
-                .await
-                .unwrap(),
-            b"generated"
+            tokio::fs::read(persistent).await.unwrap(),
+            b"old-persistent"
         );
-        assert_eq!(
-            tokio::fs::read(persistent.join("distribution.crt"))
-                .await
-                .unwrap(),
-            b"distribution"
-        );
-        assert_eq!(
-            tokio::fs::read(live.join(format!("{}.crt", parsed.fingerprint_id)))
-                .await
-                .unwrap(),
-            parsed.canonical_pem
-        );
-        assert_eq!(entry_count(&live).await, 2);
-        assert_eq!(entry_count(&persistent).await, 2);
-
-        initial_snapshot.restore().await.unwrap();
-        assert_eq!(entry_count(&live).await, 1);
-        assert_eq!(entry_count(&persistent).await, 1);
         tmp.delete().await.unwrap();
     }
 
@@ -677,12 +760,15 @@ mod tests {
         tmp.delete().await.unwrap();
     }
 
-    async fn entry_count(path: &Path) -> usize {
-        let mut entries = tokio::fs::read_dir(path).await.unwrap();
-        let mut count = 0;
-        while entries.next_entry().await.unwrap().is_some() {
-            count += 1;
+    fn record_stage(
+        stages: &Arc<StdMutex<Vec<&'static str>>>,
+        stage: &'static str,
+        result: Result<(), Error>,
+    ) -> impl AsyncFnOnce() -> Result<(), Error> {
+        let stages = stages.clone();
+        async move || {
+            stages.lock().unwrap().push(stage);
+            result
         }
-        count
     }
 }

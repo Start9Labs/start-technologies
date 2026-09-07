@@ -1120,17 +1120,57 @@ pub async fn rename(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Result<(), 
         .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("mv {src:?} -> {dst:?}")))
 }
 
+#[cfg(target_os = "linux")]
+async fn sync_directory(path: &Path) -> Result<(), Error> {
+    File::open(path).await?.sync_all().await?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn sync_directory(_path: &Path) -> Result<(), Error> {
+    Ok(())
+}
+
+fn parent_directory(path: &Path) -> Option<&Path> {
+    path.parent().map(|parent| {
+        if parent.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            parent
+        }
+    })
+}
+
+async fn create_dir_all_durable(path: &Path) -> Result<(), Error> {
+    let mut missing = Vec::new();
+    let mut current = path;
+    loop {
+        match tokio::fs::metadata(current).await {
+            Ok(_) => break,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                missing.push(current.to_owned());
+                current = parent_directory(current).unwrap_or(Path::new("."));
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    for directory in missing.into_iter().rev() {
+        match tokio::fs::create_dir(&directory).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+        sync_directory(parent_directory(&directory).unwrap_or(Path::new("."))).await?;
+    }
+    Ok(())
+}
+
 #[instrument(skip_all)]
 pub async fn write_file_atomic(
     path: impl AsRef<Path>,
     contents: impl AsRef<[u8]>,
 ) -> Result<(), Error> {
     let path = path.as_ref();
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("mkdir -p {parent:?}")))?;
-    }
     let mut file = AtomicFile::new(path, None::<&Path>)
         .await
         .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("create {path:?}")))?;
@@ -1151,11 +1191,6 @@ pub async fn write_file_owned_atomic(
     gid: u32,
 ) -> Result<(), Error> {
     let path = path.as_ref();
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("mkdir -p {parent:?}")))?;
-    }
     let mut file = AtomicFile::new(path, None::<&Path>)
         .await
         .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("create {path:?}")))?;
@@ -1816,9 +1851,21 @@ impl AtomicFile {
         path: impl AsRef<Path> + Send + Sync,
         tmp_path: Option<impl AsRef<Path> + Send + Sync>,
     ) -> Result<Self, Error> {
-        let path = canonicalize(&path, true).await?;
+        let path = path.as_ref();
+        if let Some(parent) = parent_directory(path) {
+            create_dir_all_durable(parent)
+                .await
+                .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("mkdir -p {parent:?}")))?;
+        }
+        let path = canonicalize(path, false).await?;
         let tmp_path = if let Some(tmp_path) = tmp_path {
-            canonicalize(&tmp_path, true).await?
+            let tmp_path = tmp_path.as_ref();
+            if let Some(parent) = parent_directory(tmp_path) {
+                create_dir_all_durable(parent)
+                    .await
+                    .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("mkdir -p {parent:?}")))?;
+            }
+            canonicalize(tmp_path, false).await?
         } else {
             to_tmp_path(&path)?
         };
@@ -1856,6 +1903,12 @@ impl AtomicFile {
                     format!("mv {} -> {}", self.tmp_path.display(), self.path.display()),
                 )
             })?;
+        let path_parent = self.path.parent().unwrap_or(Path::new("."));
+        sync_directory(path_parent).await?;
+        let tmp_parent = self.tmp_path.parent().unwrap_or(Path::new("."));
+        if tmp_parent != path_parent {
+            sync_directory(tmp_parent).await?;
+        }
         Ok(())
     }
 }
@@ -1924,6 +1977,47 @@ mod test {
         );
 
         tokio::fs::remove_dir_all(root).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn atomic_file_accepts_relative_leaf_and_creates_parent_chain() {
+        let relative = PathBuf::from(format!(
+            ".atomic-file-test-{}-{}",
+            std::process::id(),
+            rand::random::<u64>()
+        ));
+        let mut relative_file = AtomicFile::new(&relative, None::<&Path>).await.unwrap();
+        relative_file.write_all(b"relative").await.unwrap();
+        relative_file.save().await.unwrap();
+        assert_eq!(tokio::fs::read(&relative).await.unwrap(), b"relative");
+        tokio::fs::remove_file(relative).await.unwrap();
+
+        let relative_root = PathBuf::from(format!(
+            ".atomic-directory-test-{}-{}",
+            std::process::id(),
+            rand::random::<u64>()
+        ));
+        let nested = relative_root.join("first/second/file");
+        let mut nested_file = AtomicFile::new(&nested, None::<&Path>).await.unwrap();
+        nested_file.write_all(b"nested").await.unwrap();
+        nested_file.save().await.unwrap();
+        assert_eq!(tokio::fs::read(nested).await.unwrap(), b"nested");
+        tokio::fs::remove_dir_all(relative_root).await.unwrap();
+
+        let tmp = TmpDir::new().await.unwrap();
+        let destination = tmp.join("destination/file");
+        let temporary = tmp.join("temporary/file.tmp");
+        let mut custom_tmp_file = AtomicFile::new(&destination, Some(&temporary))
+            .await
+            .unwrap();
+        custom_tmp_file.write_all(b"custom").await.unwrap();
+        custom_tmp_file.save().await.unwrap();
+        assert_eq!(tokio::fs::read(destination).await.unwrap(), b"custom");
+        assert_eq!(
+            tokio::fs::metadata(temporary).await.unwrap_err().kind(),
+            std::io::ErrorKind::NotFound
+        );
+        tmp.delete().await.unwrap();
     }
 
     #[tokio::test]
