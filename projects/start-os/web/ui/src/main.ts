@@ -1,3 +1,6 @@
+// Keep first: Zod must be configured before any schema is built.
+import './zod-config'
+
 import { enableProdMode } from '@angular/core'
 import { bootstrapApplication } from '@angular/platform-browser'
 import { AppComponent } from 'src/app/app.component'
