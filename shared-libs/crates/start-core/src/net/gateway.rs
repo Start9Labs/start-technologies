@@ -1968,6 +1968,106 @@ async fn watch_ip(
     }
 }
 
+const ROUTE_TYPES: &[&str] = &[
+    "unicast",
+    "local",
+    "broadcast",
+    "multicast",
+    "throw",
+    "unreachable",
+    "prohibit",
+    "blackhole",
+    "nat",
+    "anycast",
+];
+
+/// Flags `ip route show` prints that `ip route replace` rejects.
+const DISPLAY_FLAGS: &[&str] = &[
+    "dead",
+    "linkdown",
+    "pervasive",
+    "offload",
+    "notify",
+    "unresolved",
+    "trap",
+    "rt_offload",
+    "rt_trap",
+    "rt_offload_failed",
+];
+
+/// One route as `ip route show` prints it, as arguments `ip route replace` accepts.
+#[derive(Debug, PartialEq, Eq)]
+struct ShownRoute {
+    /// The destination: a prefix, or `default`.
+    prefix: String,
+    /// The header line, less what only `show` understands.
+    attrs: Vec<String>,
+    /// A multipath route's indented `nexthop …` continuation lines, folded together.
+    nexthops: Vec<String>,
+}
+
+fn clean_route_tokens<'a>(tokens: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut tokens = tokens.into_iter();
+    while let Some(token) = tokens.next() {
+        match token {
+            // `show` prints an unreachable/prohibit route's errno; `replace` derives it from the type.
+            "error" => {
+                tokens.next();
+            }
+            // `show` prints `expires 1786sec`; `replace` takes the bare number.
+            "expires" => {
+                if let Some(secs) = tokens.next() {
+                    out.push(token.to_owned());
+                    out.push(secs.trim_end_matches("sec").to_owned());
+                }
+            }
+            flag if DISPLAY_FLAGS.contains(&flag) => {}
+            token => out.push(token.to_owned()),
+        }
+    }
+    out
+}
+
+fn parse_route_show(output: &str) -> Vec<ShownRoute> {
+    let mut routes = Vec::<ShownRoute>::new();
+    for line in output.lines() {
+        let mut tokens = line.split_whitespace().peekable();
+        let Some(&first) = tokens.peek() else {
+            continue;
+        };
+        if first == "nexthop" {
+            if let Some(route) = routes.last_mut() {
+                route.nexthops.extend(clean_route_tokens(tokens));
+            }
+            continue;
+        }
+        let attrs = clean_route_tokens(tokens);
+        let prefix = attrs
+            .iter()
+            .find(|t| !ROUTE_TYPES.contains(&t.as_str()))
+            .cloned()
+            .unwrap_or_default();
+        routes.push(ShownRoute {
+            prefix,
+            attrs,
+            nexthops: Vec::new(),
+        });
+    }
+    routes
+}
+
+// iproute2 rejects `table` after a nexthop list, so it goes between the header and the next hops.
+fn route_replace_args(route: &ShownRoute, table: &str) -> Vec<String> {
+    route
+        .attrs
+        .iter()
+        .cloned()
+        .chain(["table".to_owned(), table.to_owned()])
+        .chain(route.nexthops.iter().cloned())
+        .collect()
+}
+
 async fn apply_policy_routing(
     guard: &PolicyRoutingGuard,
     iface: &GatewayId,
@@ -2003,25 +2103,15 @@ async fn apply_policy_routing(
         .await
         .and_then(|b| String::from_utf8(b).with_kind(ErrorKind::Utf8))
     {
-        for line in main_routes.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with("default") {
+        for route in parse_route_show(&main_routes) {
+            if route.prefix == "default" {
                 continue;
             }
-            if let Some(prefix) = line.split_whitespace().next() {
-                desired_prefixes.insert(prefix.to_owned());
-            }
+            desired_prefixes.insert(route.prefix.clone());
             let mut cmd = Command::new("ip");
-            cmd.arg("route").arg("replace");
-            for part in line.split_whitespace() {
-                // Skip status flags that appear in route output but
-                // are not valid for `ip route replace`.
-                if part == "linkdown" || part == "dead" {
-                    continue;
-                }
-                cmd.arg(part);
-            }
-            cmd.arg("table").arg(&table_str);
+            cmd.arg("route")
+                .arg("replace")
+                .args(route_replace_args(&route, &table_str));
             if let Err(e) = cmd.invoke(ErrorKind::Network).await {
                 // Transient interfaces (podman, wg-quick, etc.) may
                 // vanish between reading the main table and replaying
@@ -2064,21 +2154,14 @@ async fn apply_policy_routing(
         .await
         .and_then(|b| String::from_utf8(b).with_kind(ErrorKind::Utf8))
     {
-        for line in existing_routes.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with("default") {
-                continue;
-            }
-            let Some(prefix) = line.split_whitespace().next() else {
-                continue;
-            };
-            if desired_prefixes.contains(prefix) {
+        for route in parse_route_show(&existing_routes) {
+            if route.prefix == "default" || desired_prefixes.contains(&route.prefix) {
                 continue;
             }
             Command::new("ip")
                 .arg("route")
                 .arg("del")
-                .arg(prefix)
+                .arg(&route.prefix)
                 .arg("table")
                 .arg(&table_str)
                 .invoke(ErrorKind::Network)
@@ -2193,23 +2276,16 @@ async fn apply_policy_routing_v6(
         .await
         .and_then(|b| String::from_utf8(b).with_kind(ErrorKind::Utf8))
     {
-        for line in main_routes.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with("default") {
+        for route in parse_route_show(&main_routes) {
+            if route.prefix == "default" {
                 continue;
             }
-            if let Some(prefix) = line.split_whitespace().next() {
-                desired_prefixes.insert(prefix.to_owned());
-            }
+            desired_prefixes.insert(route.prefix.clone());
             let mut cmd = Command::new("ip");
-            cmd.arg("-6").arg("route").arg("replace");
-            for part in line.split_whitespace() {
-                if part == "linkdown" || part == "dead" {
-                    continue;
-                }
-                cmd.arg(part);
-            }
-            cmd.arg("table").arg(&table_str);
+            cmd.arg("-6")
+                .arg("route")
+                .arg("replace")
+                .args(route_replace_args(&route, &table_str));
             if let Err(e) = cmd.invoke(ErrorKind::Network).await {
                 if e.source.to_string().contains("No such file or directory") {
                     tracing::trace!("ip -6 route replace (transient device): {e}");
@@ -2255,22 +2331,15 @@ async fn apply_policy_routing_v6(
         .await
         .and_then(|b| String::from_utf8(b).with_kind(ErrorKind::Utf8))
     {
-        for line in existing_routes.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with("default") || line.starts_with("blackhole") {
-                continue;
-            }
-            let Some(prefix) = line.split_whitespace().next() else {
-                continue;
-            };
-            if desired_prefixes.contains(prefix) {
+        for route in parse_route_show(&existing_routes) {
+            if route.prefix == "default" || desired_prefixes.contains(&route.prefix) {
                 continue;
             }
             Command::new("ip")
                 .arg("-6")
                 .arg("route")
                 .arg("del")
-                .arg(prefix)
+                .arg(&route.prefix)
                 .arg("table")
                 .arg(&table_str)
                 .invoke(ErrorKind::Network)
@@ -3578,5 +3647,133 @@ mod wg_config_tests {
         assert!(!parsed.to_nm_settings("wg0", None).unwrap()["connection"].contains_key("uuid"));
         let updated = parsed.to_nm_settings("wg0", Some("uuid-x")).unwrap();
         assert_eq!(as_str(&updated["connection"]["uuid"]), "uuid-x");
+    }
+}
+
+#[cfg(test)]
+mod route_show_tests {
+    use super::*;
+
+    fn strs(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_multipath_route_folds_its_next_hops_behind_the_table() {
+        let shown = "default proto ra metric 1024 pref medium\n\
+                     \tnexthop via fe80::1 dev enp2s0 weight 1\n\
+                     \tnexthop via fe80::2 dev enp2s0 weight 1\n";
+        let routes = parse_route_show(shown);
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0].prefix, "default");
+        assert_eq!(
+            route_replace_args(&routes[0], "75"),
+            strs(&[
+                "default", "proto", "ra", "metric", "1024", "pref", "medium", "table", "75",
+                "nexthop", "via", "fe80::1", "dev", "enp2s0", "weight", "1", "nexthop", "via",
+                "fe80::2", "dev", "enp2s0", "weight", "1",
+            ])
+        );
+    }
+
+    #[test]
+    fn a_lifetime_loses_its_unit() {
+        let routes = parse_route_show(
+            "2001:db8::/64 via fe80::1 dev eth0 proto ra metric 1024 expires 1786sec hoplimit 64 pref medium",
+        );
+        assert_eq!(
+            routes[0].attrs,
+            strs(&[
+                "2001:db8::/64",
+                "via",
+                "fe80::1",
+                "dev",
+                "eth0",
+                "proto",
+                "ra",
+                "metric",
+                "1024",
+                "expires",
+                "1786",
+                "hoplimit",
+                "64",
+                "pref",
+                "medium",
+            ])
+        );
+    }
+
+    #[test]
+    fn a_typed_route_keeps_its_type_and_drops_its_errno() {
+        let routes =
+            parse_route_show("unreachable fd00::/64 dev lo metric 1024 error -113 pref medium");
+        assert_eq!(routes[0].prefix, "fd00::/64");
+        assert_eq!(
+            routes[0].attrs,
+            strs(&[
+                "unreachable",
+                "fd00::/64",
+                "dev",
+                "lo",
+                "metric",
+                "1024",
+                "pref",
+                "medium"
+            ])
+        );
+    }
+
+    #[test]
+    fn a_blackhole_default_is_a_default() {
+        let routes = parse_route_show("blackhole default dev lo metric 1024 error -22 pref medium");
+        assert_eq!(routes[0].prefix, "default");
+    }
+
+    #[test]
+    fn display_flags_are_dropped() {
+        let routes = parse_route_show(
+            "2001:db8::/64 dev eth0 proto kernel metric 256 rt_offload linkdown dead pref medium",
+        );
+        assert_eq!(
+            routes[0].attrs,
+            strs(&[
+                "2001:db8::/64",
+                "dev",
+                "eth0",
+                "proto",
+                "kernel",
+                "metric",
+                "256",
+                "pref",
+                "medium"
+            ])
+        );
+    }
+
+    #[test]
+    fn a_plain_route_passes_through() {
+        let routes = parse_route_show("fe80::/64 dev eno0 proto kernel metric 1024 pref medium\n");
+        assert_eq!(routes[0].prefix, "fe80::/64");
+        assert_eq!(
+            route_replace_args(&routes[0], "75"),
+            strs(&[
+                "fe80::/64",
+                "dev",
+                "eno0",
+                "proto",
+                "kernel",
+                "metric",
+                "1024",
+                "pref",
+                "medium",
+                "table",
+                "75"
+            ])
+        );
+    }
+
+    #[test]
+    fn a_stray_next_hop_line_is_ignored() {
+        assert!(parse_route_show("nexthop via fe80::1 dev eth0 weight 1\n").is_empty());
     }
 }

@@ -470,6 +470,11 @@ file tracks notable changes since the move to the monorepo.
   of leaving with an address that belongs to another of the server's
   interfaces.
 
+- **The gateway watcher no longer logs `ip route`'s usage text every few
+  minutes** on a network whose router advertises a route with more than one
+  next hop. Such routes, routes with a lifetime, and `unreachable` or
+  `prohibit` routes are now carried into each gateway's routing table too.
+
 ## [0.4.0.1]
 
 ### Changed
