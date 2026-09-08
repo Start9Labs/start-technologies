@@ -30,7 +30,6 @@ const TOR_PROXY: (&str, u16) = ("tor.startos", 9050);
 
 /// RFC 8305 connection attempt delay.
 const CONNECT_ATTEMPT_DELAY: Duration = Duration::from_millis(250);
-const CONNECT_ATTEMPTS_IN_FLIGHT: usize = 2;
 
 fn interleave_families(addrs: impl IntoIterator<Item = SocketAddr>) -> Vec<SocketAddr> {
     let mut addrs = addrs.into_iter().peekable();
@@ -40,8 +39,7 @@ fn interleave_families(addrs: impl IntoIterator<Item = SocketAddr>) -> Vec<Socke
 }
 
 /// Connects to the first address that answers, alternating families. Starts
-/// another attempt after [`CONNECT_ATTEMPT_DELAY`] or an earlier failure, with
-/// at most [`CONNECT_ATTEMPTS_IN_FLIGHT`] pending.
+/// another attempt after [`CONNECT_ATTEMPT_DELAY`] or an earlier failure.
 async fn connect_each<F, Fut>(
     addrs: impl IntoIterator<Item = SocketAddr>,
     mut connect: F,
@@ -57,7 +55,7 @@ where
     tokio::pin!(next_attempt);
     loop {
         tokio::select! {
-            _ = &mut next_attempt, if pending.len() > 0 && attempts.len() < CONNECT_ATTEMPTS_IN_FLIGHT => {
+            _ = &mut next_attempt, if pending.len() > 0 => {
                 if let Some(addr) = pending.next() {
                     attempts.push(connect(addr));
                 }
@@ -225,14 +223,18 @@ mod test {
     use std::net::Ipv6Addr;
 
     use futures::FutureExt;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
     use super::*;
 
     const STALLED: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 1), 9));
-    const REFUSED: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 2), 9));
+    const STALLED_TOO: SocketAddr =
+        SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 2), 9));
+    const REFUSED: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 3), 9));
 
-    async fn echo_round_trip(sock: &mut TcpStream) -> Result<(), Error> {
+    async fn echo_round_trip(
+        sock: &mut (impl AsyncRead + AsyncWrite + Unpin),
+    ) -> Result<(), Error> {
         sock.write_all(b"hello")
             .await
             .with_kind(ErrorKind::Network)?;
@@ -280,7 +282,32 @@ mod test {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn a_third_attempt_waits_for_a_failure() -> Result<(), Error> {
+    async fn stalled_attempts_do_not_hold_up_the_next() -> Result<(), Error> {
+        let target = echo_server().await?;
+        let started = Instant::now();
+        let mut starts = Vec::new();
+        let mut sock = connect_each([STALLED, STALLED_TOO, target], |addr| {
+            starts.push((addr, started.elapsed()));
+            if addr == target {
+                TcpStream::connect(addr).boxed()
+            } else {
+                futures::future::pending().boxed()
+            }
+        })
+        .await?;
+        assert_eq!(
+            starts,
+            [
+                (STALLED, Duration::ZERO),
+                (STALLED_TOO, CONNECT_ATTEMPT_DELAY),
+                (target, 2 * CONNECT_ATTEMPT_DELAY),
+            ]
+        );
+        echo_round_trip(&mut sock).await
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_failure_starts_the_next_attempt_at_once() -> Result<(), Error> {
         let target = echo_server().await?;
         let started = Instant::now();
         let mut starts = Vec::new();
@@ -290,7 +317,7 @@ mod test {
                 futures::future::pending().boxed()
             } else if addr == REFUSED {
                 async {
-                    tokio::time::sleep(Duration::from_secs(3)).await;
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                     Err(std::io::ErrorKind::ConnectionRefused.into())
                 }
                 .boxed()
@@ -304,7 +331,7 @@ mod test {
             [
                 (STALLED, Duration::ZERO),
                 (REFUSED, CONNECT_ATTEMPT_DELAY),
-                (target, Duration::from_secs(3) + CONNECT_ATTEMPT_DELAY),
+                (target, CONNECT_ATTEMPT_DELAY + Duration::from_millis(100)),
             ]
         );
         echo_round_trip(&mut sock).await
@@ -362,16 +389,7 @@ mod test {
         )
         .await
         .with_kind(ErrorKind::Network)?;
-
-        sock.write_all(b"hello")
-            .await
-            .with_kind(ErrorKind::Network)?;
-        let mut buf = [0u8; 5];
-        sock.read_exact(&mut buf)
-            .await
-            .with_kind(ErrorKind::Network)?;
-        assert_eq!(&buf, b"hello");
-        Ok(())
+        echo_round_trip(&mut sock).await
     }
 
     #[tokio::test]

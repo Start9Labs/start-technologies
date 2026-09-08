@@ -30,7 +30,7 @@ StartOS treats IPv6 outbound routing the same way as IPv4: the default gateway i
 
 If the gateway you select for outbound traffic can't carry IPv6 — for example a commercial VPN whose WireGuard config has no IPv6 address, or a LAN whose router advertises IPv6 without assigning your server an address — StartOS **drops** the server's outbound IPv6 rather than letting it fall back to your ISP connection, so your real IPv6 address never leaks around the VPN. (The drop is a blackhole in that gateway's own routing table.) A gateway that does provide IPv6 (such as a StartTunnel with a [delegated prefix](/start-tunnel/ipv6.html)) carries IPv6 normally; on a server with no native ISP IPv6, such a tunnel can also become your IPv6 default before you pin it, so select an outbound gateway explicitly if you want to control which one.
 
-When an Internet host offers both address families, StartOS tries IPv6 and IPv4 close together and uses the first connection that succeeds.
+For its own connections — marketplace, service-package and OS-update downloads — StartOS tries a host's IPv6 and IPv4 addresses a quarter of a second apart and uses the first connection that succeeds. Services make their own connections and follow their own behavior.
 
 ## Route Individual Services Through VPN
 

@@ -441,14 +441,13 @@ file tracks notable changes since the move to the monorepo.
   flavors produced no answer, so a list mixing Bitcoin Core with Bitcoin Knots
   kept whatever order it arrived in.
 
-- **Marketplace, service and OS-update downloads proceed over IPv4 at once when
-  a host's IPv6 is unreachable.** StartOS connects over whichever of a host's
-  IPv6 or IPv4 addresses answers first.
+- **Marketplace, service-package and OS-update downloads fall back to IPv4
+  within a fraction of a second when a host's IPv6 does not answer.** StartOS
+  tries a host's IPv6 and IPv4 addresses a quarter of a second apart and uses
+  the first connection that succeeds.
 
-- **Routes with more than one next hop, a lifetime, or an `unreachable` or
-  `prohibit` type are carried into each gateway's routing table.** The OS log
-  stays clear of `ip route` usage text on a network whose router advertises
-  such routes.
+- **The OS log stays free of `ip route` usage text on a network whose router
+  advertises a route with more than one next hop.**
 
 ### Security
 
@@ -472,7 +471,8 @@ file tracks notable changes since the move to the monorepo.
 
 - **Outbound IPv6 leaves only through an address of the selected gateway's
   own.** A gateway with an IPv6 router but no IPv6 address of its own carries
-  no IPv6; such traffic fails at once and falls back to IPv4.
+  no IPv6; such traffic is refused on the spot rather than sent with another
+  interface's address.
 
 ## [0.4.0.1]
 
