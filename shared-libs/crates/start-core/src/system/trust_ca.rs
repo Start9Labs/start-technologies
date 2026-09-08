@@ -1,9 +1,11 @@
+use std::cmp::Ordering;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
 use imbl_value::{from_value, to_value};
 use itertools::Itertools;
+use openssl::asn1::{Asn1Time, Asn1TimeRef};
 use openssl::hash::MessageDigest;
 use openssl::nid::Nid;
 use openssl::x509::{X509, X509NameRef};
@@ -11,7 +13,6 @@ use rpc_toolkit::HandlerArgs;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
-use tokio::sync::Mutex;
 use x509_parser::parse_x509_certificate;
 use x509_parser::x509::X509Version;
 
@@ -19,7 +20,7 @@ use crate::context::{CliContext, RpcContext};
 use crate::net::ssl::x509_sha256_fingerprint;
 use crate::prelude::*;
 use crate::util::Invoke;
-use crate::util::io::{delete_file, maybe_open_file, open_file, write_file_atomic};
+use crate::util::io::{delete_file_durable, maybe_open_file, open_file, write_file_atomic_durable};
 use crate::util::serde::{WithIoFormat, display_serializable};
 
 const MAX_CERTIFICATE_SIZE: usize = crate::CAP_1_MiB;
@@ -28,8 +29,6 @@ const PERSISTENT_CA_DIRECTORY: &str =
     "/media/startos/config/overlay/usr/local/share/ca-certificates/startos-custom";
 const PEM_BEGIN: &str = "-----BEGIN CERTIFICATE-----";
 const PEM_END: &str = "-----END CERTIFICATE-----";
-
-static TRUST_STORE_LOCK: Mutex<()> = Mutex::const_new(());
 
 #[derive(Debug, Deserialize, Serialize, Parser)]
 #[group(skip)]
@@ -105,8 +104,14 @@ pub(crate) async fn install(
     let parsed = tokio::task::spawn_blocking(move || parse_ca(&pem))
         .await
         .map_err(|error| Error::new(error, ErrorKind::Unknown))??;
+    let Some(guard) = context.admit_trust_ca_install().await else {
+        return Err(Error::new(
+            eyre!(t!("context.rpc.rpc-context-shutdown")),
+            ErrorKind::InvalidRequest,
+        ));
+    };
     run_detached_transaction(async move {
-        let _guard = TRUST_STORE_LOCK.lock().await;
+        let _guard = guard;
         install_transaction(
             &context,
             parsed,
@@ -129,11 +134,14 @@ async fn install_transaction(
         live: FileSnapshot::capture(live.join(&filename)).await?,
         persistent: FileSnapshot::capture(persistent.join(&filename)).await?,
     };
+    if snapshot.matches(&parsed.canonical_pem) {
+        return Ok(parsed.result);
+    }
     run_install_stages(
-        || write_file_atomic(&snapshot.live.path, &parsed.canonical_pem),
+        || write_file_atomic_durable(&snapshot.live.path, &parsed.canonical_pem),
         update_trust_store,
         || async { context.reload_http_client() },
-        || write_file_atomic(&snapshot.persistent.path, &parsed.canonical_pem),
+        || write_file_atomic_durable(&snapshot.persistent.path, &parsed.canonical_pem),
         |error| rollback(context, &snapshot, error),
     )
     .await?;
@@ -236,6 +244,13 @@ fn parse_ca(pem: &str) -> Result<ParsedCa, Error> {
     let der = certificate.to_der().map_err(invalid_certificate)?;
     let (_, parsed) =
         parse_x509_certificate(&der).map_err(|error| invalid_certificate(error.to_string()))?;
+    let now = Asn1Time::days_from_now(0).map_err(invalid_certificate)?;
+    ensure_code!(
+        is_currently_valid(&certificate, &now)?,
+        ErrorKind::InvalidRequest,
+        "{}",
+        t!("system.trust-ca.not-currently-valid")
+    );
     let basic_constraints = parsed
         .basic_constraints()
         .map_err(|error| invalid_certificate(error.to_string()))?;
@@ -256,6 +271,21 @@ fn parse_ca(pem: &str) -> Result<ParsedCa, Error> {
         "{}",
         t!("system.trust-ca.not-ca")
     );
+    let names_match = certificate
+        .issuer_name()
+        .try_cmp(certificate.subject_name())
+        .map_err(invalid_certificate)?
+        == Ordering::Equal;
+    let public_key = certificate.public_key().map_err(invalid_certificate)?;
+    let verifies_itself = certificate
+        .verify(&public_key)
+        .map_err(invalid_certificate)?;
+    ensure_code!(
+        names_match && verifies_itself,
+        ErrorKind::InvalidRequest,
+        "{}",
+        t!("system.trust-ca.not-self-signed-root")
+    );
 
     let fingerprint_id = hex::encode(
         certificate
@@ -272,6 +302,19 @@ fn parse_ca(pem: &str) -> Result<ParsedCa, Error> {
             fingerprint,
         },
     })
+}
+
+fn is_currently_valid(certificate: &X509, now: &Asn1TimeRef) -> Result<bool, Error> {
+    Ok(certificate
+        .not_before()
+        .compare(now)
+        .map_err(invalid_certificate)?
+        != Ordering::Greater
+        && certificate
+            .not_after()
+            .compare(now)
+            .map_err(invalid_certificate)?
+            != Ordering::Less)
 }
 
 async fn update_trust_store() -> Result<(), Error> {
@@ -297,11 +340,44 @@ fn render_subject(subject: &X509NameRef) -> String {
             let value = entry
                 .data()
                 .as_utf8()
-                .map(|value| value.to_string())
+                .map(|value| escape_subject_value(&value))
                 .unwrap_or_else(|_| format!("#{}", hex::encode_upper(entry.data().as_slice())));
             format!("{name}={value}")
         })
         .join(", ")
+}
+
+fn escape_subject_value(value: &str) -> String {
+    let last = value.chars().count().saturating_sub(1);
+    value
+        .chars()
+        .enumerate()
+        .fold(String::new(), |mut output, (index, character)| {
+            if is_bidi_formatting_control(character) {
+                output.push_str(&format!("\\u{{{:x}}}", character as u32));
+            } else if character.is_control() {
+                let mut encoded = [0; 4];
+                for byte in character.encode_utf8(&mut encoded).as_bytes() {
+                    output.push_str(&format!("\\{byte:02X}"));
+                }
+            } else if matches!(character, '\\' | ',' | '=' | '+' | '"' | '<' | '>' | ';')
+                || (index == 0 && character == '#')
+                || ((index == 0 || index == last) && character == ' ')
+            {
+                output.push('\\');
+                output.push(character);
+            } else {
+                output.push(character);
+            }
+            output
+        })
+}
+
+fn is_bidi_formatting_control(character: char) -> bool {
+    matches!(
+        character,
+        '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'
+    )
 }
 
 fn human_readable_subject(subject: &str) -> String {
@@ -331,14 +407,19 @@ impl FileSnapshot {
 
     async fn restore(&self) -> Result<(), Error> {
         if let Some(contents) = &self.contents {
-            write_file_atomic(&self.path, contents).await
+            write_file_atomic_durable(&self.path, contents).await
         } else {
-            delete_file(&self.path).await
+            delete_file_durable(&self.path).await
         }
     }
 }
 
 impl TrustStoreSnapshot {
+    fn matches(&self, contents: &[u8]) -> bool {
+        self.live.contents.as_deref() == Some(contents)
+            && self.persistent.contents.as_deref() == Some(contents)
+    }
+
     async fn restore(&self) -> Result<(), Error> {
         let mut errors = ErrorCollection::new();
         errors.handle(self.persistent.restore().await);
@@ -397,12 +478,14 @@ mod tests {
 
     use openssl::asn1::{Asn1Time, Asn1Type};
     use openssl::bn::BigNum;
+    use openssl::pkey::{PKey, Private};
     use openssl::x509::extension::{BasicConstraints, KeyUsage};
     use openssl::x509::{X509Builder, X509NameBuilder};
 
     use super::*;
     use crate::net::ssl::{CertBranding, SANInfo, gen_nistp256, make_root_cert, make_self_signed};
     use crate::util::io::TmpDir;
+    use crate::util::io::write_file_atomic;
 
     fn root_ca_pem() -> Vec<u8> {
         let key = gen_nistp256().unwrap();
@@ -412,36 +495,61 @@ mod tests {
             .unwrap()
     }
 
+    fn root_ca_with_validity_at(now: i64, not_before: i64, not_after: i64) -> X509 {
+        let key = gen_nistp256().unwrap();
+        ca_certificate(
+            &key,
+            &key,
+            "dated CA",
+            "dated CA",
+            now + not_before,
+            now + not_after,
+        )
+    }
+
     fn root_ca_pem_with_validity(not_before: i64, not_after: i64) -> Vec<u8> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-        let key = gen_nistp256().unwrap();
+        root_ca_with_validity_at(now, not_before, not_after)
+            .to_pem()
+            .unwrap()
+    }
+
+    fn ca_certificate(
+        key: &PKey<Private>,
+        signer: &PKey<Private>,
+        subject: &str,
+        issuer: &str,
+        not_before: i64,
+        not_after: i64,
+    ) -> X509 {
         let mut builder = X509Builder::new().unwrap();
         builder.set_version(2).unwrap();
         let serial = BigNum::from_u32(1).unwrap().to_asn1_integer().unwrap();
         builder.set_serial_number(&serial).unwrap();
         builder
-            .set_not_before(&Asn1Time::from_unix(now + not_before).unwrap())
+            .set_not_before(&Asn1Time::from_unix(not_before).unwrap())
             .unwrap();
         builder
-            .set_not_after(&Asn1Time::from_unix(now + not_after).unwrap())
+            .set_not_after(&Asn1Time::from_unix(not_after).unwrap())
             .unwrap();
-        let mut name = X509NameBuilder::new().unwrap();
-        name.append_entry_by_text("CN", "dated CA").unwrap();
-        let name = name.build();
-        builder.set_subject_name(&name).unwrap();
-        builder.set_issuer_name(&name).unwrap();
-        builder.set_pubkey(&key).unwrap();
+        let mut subject_name = X509NameBuilder::new().unwrap();
+        subject_name.append_entry_by_text("CN", subject).unwrap();
+        builder.set_subject_name(&subject_name.build()).unwrap();
+        let mut issuer_name = X509NameBuilder::new().unwrap();
+        issuer_name.append_entry_by_text("CN", issuer).unwrap();
+        builder.set_issuer_name(&issuer_name.build()).unwrap();
+        builder.set_pubkey(key).unwrap();
         builder
             .append_extension(BasicConstraints::new().critical().ca().build().unwrap())
             .unwrap();
         builder
             .append_extension(KeyUsage::new().critical().key_cert_sign().build().unwrap())
             .unwrap();
-        builder.sign(&key, MessageDigest::sha256()).unwrap();
-        builder.build().to_pem().unwrap()
+        builder.sign(signer, MessageDigest::sha256()).unwrap();
+        builder.build()
     }
 
     fn extensionless_ca_pem(version: i32) -> Vec<u8> {
@@ -560,12 +668,57 @@ mod tests {
     }
 
     #[test]
-    fn accepts_ca_outside_validity_window() {
+    fn subject_escaping_prevents_distinguished_name_collisions() {
+        assert_eq!(
+            escape_subject_value(" #a,b=c+d\\e\"f<g>h;i\n "),
+            "\\ #a\\,b\\=c\\+d\\\\e\\\"f\\<g\\>h\\;i\\0A\\ "
+        );
+        assert_eq!(escape_subject_value("#root"), "\\#root");
+        assert_ne!(
+            format!("CN={}", escape_subject_value("a, OU=b")),
+            "CN=a, OU=b"
+        );
+    }
+
+    #[test]
+    fn subject_escaping_neutralizes_bidi_formatting_controls() {
+        let escaped = escape_subject_value("safe\u{202e}txt\u{2066}end");
+
+        assert_eq!(escaped, "safe\\u{202e}txt\\u{2066}end");
+        assert!(!escaped.chars().any(is_bidi_formatting_control));
+        assert_ne!(
+            escaped,
+            escape_subject_value("safe\\u{202e}txt\\u{2066}end")
+        );
+    }
+
+    #[test]
+    fn accepts_each_validity_boundary() {
+        let now = 1_700_000_000;
+        let current = Asn1Time::from_unix(now).unwrap();
+
+        assert!(is_currently_valid(&root_ca_with_validity_at(now, 0, 60), &current).unwrap());
+        assert!(is_currently_valid(&root_ca_with_validity_at(now, -60, 0), &current).unwrap());
+    }
+
+    #[test]
+    fn rejects_each_invalid_validity_boundary() {
+        let now = 1_700_000_000;
+        let current = Asn1Time::from_unix(now).unwrap();
+
+        assert!(!is_currently_valid(&root_ca_with_validity_at(now, 1, 60), &current).unwrap());
+        assert!(!is_currently_valid(&root_ca_with_validity_at(now, -60, -1), &current).unwrap());
+    }
+
+    #[test]
+    fn rejects_ca_outside_validity_window() {
         for pem in [
             root_ca_pem_with_validity(-172_800, -86_400),
             root_ca_pem_with_validity(86_400, 172_800),
         ] {
-            parse_ca(&String::from_utf8(pem).unwrap()).unwrap();
+            let error = parse_ca(&String::from_utf8(pem).unwrap()).unwrap_err();
+            assert_eq!(error.kind, ErrorKind::InvalidRequest);
+            assert!(error.to_string().contains("expired or not yet valid"));
         }
     }
 
@@ -605,6 +758,55 @@ mod tests {
     }
 
     #[test]
+    fn rejects_ca_intermediate_signed_by_another_key() {
+        let issuer_key = gen_nistp256().unwrap();
+        let intermediate_key = gen_nistp256().unwrap();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let pem = ca_certificate(
+            &intermediate_key,
+            &issuer_key,
+            "intermediate CA",
+            "root CA",
+            now - 60,
+            now + 60,
+        )
+        .to_pem()
+        .unwrap();
+        let error = parse_ca(&String::from_utf8(pem).unwrap()).unwrap_err();
+
+        assert_eq!(error.kind, ErrorKind::InvalidRequest);
+        assert!(error.to_string().contains("self-signed root CA"));
+    }
+
+    #[test]
+    fn rejects_matching_names_with_signature_from_another_key() {
+        let subject_key = gen_nistp256().unwrap();
+        let signer_key = gen_nistp256().unwrap();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let pem = ca_certificate(
+            &subject_key,
+            &signer_key,
+            "forged root CA",
+            "forged root CA",
+            now - 60,
+            now + 60,
+        )
+        .to_pem()
+        .unwrap();
+
+        assert_eq!(
+            parse_ca(&String::from_utf8(pem).unwrap()).unwrap_err().kind,
+            ErrorKind::InvalidRequest
+        );
+    }
+
+    #[test]
     fn rejects_malformed_and_multiple_certificates() {
         assert_eq!(
             parse_ca("not a certificate").unwrap_err().kind,
@@ -635,6 +837,24 @@ mod tests {
                 .kind,
             ErrorKind::InvalidRequest
         );
+    }
+
+    #[test]
+    fn identical_snapshots_match_canonical_certificate() {
+        let canonical = b"canonical".to_vec();
+        let snapshot = TrustStoreSnapshot {
+            live: FileSnapshot {
+                path: PathBuf::from("live"),
+                contents: Some(canonical.clone()),
+            },
+            persistent: FileSnapshot {
+                path: PathBuf::from("persistent"),
+                contents: Some(canonical.clone()),
+            },
+        };
+
+        assert!(snapshot.matches(&canonical));
+        assert!(!snapshot.matches(b"different"));
     }
 
     #[tokio::test]

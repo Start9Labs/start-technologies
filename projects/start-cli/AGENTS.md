@@ -32,15 +32,15 @@ required when exercising `s9pk` packaging.
 Run all commands from the monorepo root, which owns the Cargo workspace and `Cargo.lock`:
 
 ```sh
-make start-cli                                           # build the start-cli bin
-cargo build -p start-cli --bin start-cli                 # dev shortcut (debug)
-cargo build -p start-cli --bin start-cli --release       # dev shortcut (release)
-cargo check -p start-cli                                 # fast type-check (linux-only locally)
-cargo test -p start-core                                 # CLI behavior tests
-cargo test -p start-core export_manpage_start_cli        # regenerate man pages
-target/debug/start-cli --help                            # smoke test
-make start-cli-format                                    # format start-cli
-make start-cli-format-check                              # check formatting (what CI runs)
+make start-cli
+cargo build -p start-cli --bin start-cli
+cargo build -p start-cli --bin start-cli --release
+cargo check -p start-cli # Omits CI's cross-target matrix.
+cargo test -p start-core
+cargo test -p start-core export_manpage_start_cli
+target/debug/start-cli --help
+make start-cli-format
+make start-cli-format-check # Matches CI's formatting check.
 cargo clippy -p start-cli
 ```
 

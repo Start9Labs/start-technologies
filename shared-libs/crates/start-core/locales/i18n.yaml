@@ -487,6 +487,20 @@ system.trust-ca.not-ca:
   fr_FR: "Le certificat n’est pas une autorité de certification"
   pl_PL: "Certyfikat nie jest certyfikatem CA"
 
+system.trust-ca.not-currently-valid:
+  en_US: "Certificate is expired or not yet valid"
+  de_DE: "Zertifikat ist abgelaufen oder noch nicht gültig"
+  es_ES: "El certificado ha caducado o aún no es válido"
+  fr_FR: "Le certificat a expiré ou n’est pas encore valide"
+  pl_PL: "Certyfikat wygasł lub nie jest jeszcze ważny"
+
+system.trust-ca.not-self-signed-root:
+  en_US: "The certificate is not a self-signed root CA"
+  de_DE: "Das Zertifikat ist keine selbstsignierte Stammzertifizierungsstelle"
+  es_ES: "El certificado no es una CA raíz autofirmada"
+  fr_FR: "Le certificat n’est pas une autorité de certification racine autosignée"
+  pl_PL: "Certyfikat nie jest samopodpisanym głównym certyfikatem CA"
+
 system.trust-ca.subject:
   en_US: "Subject"
   de_DE: "Subjekt"

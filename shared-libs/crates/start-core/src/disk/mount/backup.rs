@@ -6,7 +6,6 @@ use tokio::io::AsyncWriteExt;
 use tracing::instrument;
 
 use super::guard::{GenericMountGuard, TmpMountGuard};
-use super::util::sync_directory;
 use crate::PackageId;
 use crate::auth::check_password;
 use crate::backup::target::BackupInfo;
@@ -17,7 +16,7 @@ use crate::disk::mount::guard::SubPath;
 use crate::disk::util::BackupUnencryptedMetadata;
 use crate::prelude::*;
 use crate::util::crypto::{decrypt_slice, encrypt_slice};
-use crate::util::io::AtomicFile;
+use crate::util::io::{AtomicFile, sync_directory};
 use crate::util::serde::IoFormat;
 
 #[derive(Clone, Debug)]

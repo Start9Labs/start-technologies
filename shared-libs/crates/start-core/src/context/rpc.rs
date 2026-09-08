@@ -15,7 +15,7 @@ use reqwest::{Client, Proxy};
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{CallRemote, Context, Empty};
 use tokio::process::Command;
-use tokio::sync::{RwLock, broadcast, oneshot, watch};
+use tokio::sync::{Mutex, OwnedMutexGuard, RwLock, broadcast, oneshot, watch};
 use tokio::time::Instant;
 use tracing::instrument;
 
@@ -77,6 +77,8 @@ pub struct RpcContextSeed {
     pub wifi_manager: RwLock<Option<WpaCli>>,
     pub current_secret: Arc<Jwk>,
     http: ReloadableHttpClient,
+    trust_ca_install_lock: Arc<Mutex<()>>,
+    trust_ca_install_admission_open: AtomicBool,
     pub start_time: Instant,
     pub crons: SyncMutex<BTreeMap<Guid, NonDetachingJoinHandle<()>>>,
 }
@@ -436,6 +438,8 @@ impl RpcContext {
                 })?,
             ),
             http: ReloadableHttpClient::new(socks_proxy_url)?,
+            trust_ca_install_lock: Arc::new(Mutex::new(())),
+            trust_ca_install_admission_open: AtomicBool::new(true),
             start_time: Instant::now(),
             crons,
         });
@@ -451,6 +455,7 @@ impl RpcContext {
 
     #[instrument(skip_all)]
     pub async fn shutdown(self) -> Result<(), Error> {
+        self.close_and_drain_trust_ca_installs().await;
         self.crons.mutate(|c| std::mem::take(c));
         self.services.shutdown_all().await?;
         self.is_closed.store(true, Ordering::SeqCst);
@@ -474,6 +479,19 @@ impl RpcContext {
 
     pub(crate) fn reload_http_client(&self) -> Result<(), Error> {
         self.http.reload()
+    }
+
+    pub(crate) async fn admit_trust_ca_install(&self) -> Option<OwnedMutexGuard<()>> {
+        let guard = self.trust_ca_install_lock.clone().lock_owned().await;
+        self.trust_ca_install_admission_open
+            .load(Ordering::SeqCst)
+            .then_some(guard)
+    }
+
+    async fn close_and_drain_trust_ca_installs(&self) {
+        self.trust_ca_install_admission_open
+            .store(false, Ordering::SeqCst);
+        let _guard = self.trust_ca_install_lock.lock().await;
     }
 
     pub fn add_cron<F: Future<Output = ()> + Send + 'static>(&self, fut: F) -> Guid {
