@@ -313,6 +313,10 @@ release_files() {
 
 resolve_gh_user() {
     GH_USER=${GH_USER:-$(gh api user -q .login 2>/dev/null || true)}
+    if [ "${GH_USER,,}" = start9 ]; then
+        >&2 echo "Error: GitHub user '$GH_USER' is reserved for Start9 signatures"
+        exit 1
+    fi
     GH_GPG_KEY=$(git -C "$REPO_ROOT" config user.signingkey 2>/dev/null || true)
     case "$(git -C "$REPO_ROOT" config gpg.format 2>/dev/null)" in
         '' | openpgp) ;;
