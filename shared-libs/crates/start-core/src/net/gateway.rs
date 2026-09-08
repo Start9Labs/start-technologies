@@ -2032,6 +2032,7 @@ const VALUED_KEYWORDS: &[&str] = &[
     "nhid",
     "realm",
     "realms",
+    "ttl-propagate",
 ];
 
 /// Keywords that distinguish routes sharing a destination, in `ip route del` order.
@@ -2049,6 +2050,18 @@ struct ShownRoute {
 impl ShownRoute {
     fn identity(&self) -> (String, Vec<String>) {
         (self.prefix.clone(), self.selectors.clone())
+    }
+
+    fn failure_domain(&self) -> (String, Vec<String>) {
+        (
+            self.prefix.clone(),
+            self.selectors
+                .chunks_exact(2)
+                .filter(|selector| selector[0] != "metric")
+                .flatten()
+                .cloned()
+                .collect(),
+        )
     }
 }
 
@@ -2086,6 +2099,10 @@ fn clean_route_tokens<'a>(tokens: impl IntoIterator<Item = &'a str>) -> CleanedT
                 tokens.next();
             }
             "onlink" if nhid => {}
+            "ttl-propogate" => {
+                attrs.push("ttl-propagate".to_owned());
+                attrs.extend(tokens.next().map(str::to_owned));
+            }
             key if VALUED_KEYWORDS.contains(&key) => {
                 attrs.push(key.to_owned());
                 if let Some(value) = tokens.next() {
@@ -2188,7 +2205,7 @@ async fn apply_policy_routing(
         .and_then(|b| String::from_utf8(b).with_kind(ErrorKind::Utf8))
     {
         let mut identities = BTreeSet::new();
-        let mut replayed = true;
+        let mut failed_domains = BTreeSet::new();
         for route in parse_route_show(&main_routes) {
             if route.prefix == "default" {
                 continue;
@@ -2199,7 +2216,7 @@ async fn apply_policy_routing(
                 .arg("replace")
                 .args(route_replace_args(&route, &table_str));
             if let Err(e) = cmd.invoke(ErrorKind::Network).await {
-                replayed = false;
+                failed_domains.insert(route.failure_domain());
                 // Transient interfaces (podman, wg-quick, etc.) may
                 // vanish between reading the main table and replaying
                 // the route — demote to debug to avoid log noise.
@@ -2211,10 +2228,7 @@ async fn apply_policy_routing(
                 }
             }
         }
-        // A failed replay leaves its predecessor as the only route for that destination.
-        if replayed {
-            desired = Some(identities);
-        }
+        desired = Some((identities, failed_domains));
     }
 
     // Replace the default route via this interface's gateway.
@@ -2242,9 +2256,12 @@ async fn apply_policy_routing(
         .invoke(ErrorKind::Network)
         .await
         .and_then(|b| String::from_utf8(b).with_kind(ErrorKind::Utf8));
-    if let (Some(desired), Ok(existing_routes)) = (desired, existing_routes) {
+    if let (Some((desired, failed_domains)), Ok(existing_routes)) = (desired, existing_routes) {
         for route in parse_route_show(&existing_routes) {
-            if route.prefix == "default" || desired.contains(&route.identity()) {
+            if route.prefix == "default"
+                || desired.contains(&route.identity())
+                || failed_domains.contains(&route.failure_domain())
+            {
                 continue;
             }
             Command::new("ip")
@@ -2364,7 +2381,7 @@ async fn apply_policy_routing_v6(
         .and_then(|b| String::from_utf8(b).with_kind(ErrorKind::Utf8))
     {
         let mut identities = BTreeSet::new();
-        let mut replayed = true;
+        let mut failed_domains = BTreeSet::new();
         for route in parse_route_show(&main_routes) {
             if route.prefix == "default" {
                 continue;
@@ -2376,7 +2393,7 @@ async fn apply_policy_routing_v6(
                 .arg("replace")
                 .args(route_replace_args(&route, &table_str));
             if let Err(e) = cmd.invoke(ErrorKind::Network).await {
-                replayed = false;
+                failed_domains.insert(route.failure_domain());
                 if e.source.to_string().contains("No such file or directory") {
                     tracing::trace!("ip -6 route replace (transient device): {e}");
                 } else {
@@ -2385,9 +2402,7 @@ async fn apply_policy_routing_v6(
                 }
             }
         }
-        if replayed {
-            desired = Some(identities);
-        }
+        desired = Some((identities, failed_domains));
     }
 
     // Replace the default: a real route when the interface can carry v6, else a
@@ -2422,9 +2437,12 @@ async fn apply_policy_routing_v6(
         .invoke(ErrorKind::Network)
         .await
         .and_then(|b| String::from_utf8(b).with_kind(ErrorKind::Utf8));
-    if let (Some(desired), Ok(existing_routes)) = (desired, existing_routes) {
+    if let (Some((desired, failed_domains)), Ok(existing_routes)) = (desired, existing_routes) {
         for route in parse_route_show(&existing_routes) {
-            if route.prefix == "default" || desired.contains(&route.identity()) {
+            if route.prefix == "default"
+                || desired.contains(&route.identity())
+                || failed_domains.contains(&route.failure_domain())
+            {
                 continue;
             }
             Command::new("ip")
@@ -3907,6 +3925,28 @@ mod route_show_tests {
                 "75"
             ])
         );
+        assert_eq!(
+            v6[0].failure_domain(),
+            ("2001:db8::/64".to_owned(), Vec::new())
+        );
+        assert_eq!(
+            v6[1].failure_domain(),
+            (
+                "2001:db8::/64".to_owned(),
+                strs(&["from", "2001:db8:1::/64"])
+            )
+        );
+    }
+
+    #[test]
+    fn ttl_propagate_uses_the_spelling_accepted_on_replay() {
+        for value in ["enabled", "disabled"] {
+            let route = parse_route_show(&format!("192.0.2.0/24 dev eth0 ttl-propogate {value}"));
+            assert_eq!(
+                route[0].attrs,
+                strs(&["192.0.2.0/24", "dev", "eth0", "ttl-propagate", value])
+            );
+        }
     }
 
     #[test]
