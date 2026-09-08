@@ -318,6 +318,7 @@ resolve_gh_user() {
         '' | openpgp) ;;
         *) GH_GPG_KEY= ;;
     esac
+    [ -z "$GH_GPG_KEY" ] || gpg --list-secret-keys "$GH_GPG_KEY" >/dev/null 2>&1 || GH_GPG_KEY=
 }
 
 require_kind() {
@@ -1330,8 +1331,8 @@ cmd_sign() {
 
     local files file
     mapfile -t files < <(release_files)
-    mkdir -p signatures
-    [ -z "$GH_USER" ] || rm -f "signatures/"*".${GH_USER}.asc" "signatures/${GH_USER}.key.asc"
+    rm -rf signatures
+    mkdir signatures
     for file in "${files[@]}"; do
         gpg -u $START9_GPG_KEY --yes --detach-sign --armor -o "signatures/${file}.start9.asc" "$file"
         if [ -n "$GH_USER" ] && [ -n "$GH_GPG_KEY" ]; then
@@ -1364,8 +1365,10 @@ cmd_cosign() {
 
     echo "Downloading existing signatures..."
     gh release download -R "$REPO" "$TAG" -p "signatures.tar.gz" -D "$(pwd)" --clobber
-    mkdir -p signatures
+    rm -rf signatures
+    mkdir signatures
     tar -xzf signatures.tar.gz -C signatures
+    rm -f "signatures/"*".${GH_USER}.asc" "signatures/${GH_USER}.key.asc"
 
     echo "Adding personal signatures as $GH_USER..."
     local files file
