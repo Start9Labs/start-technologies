@@ -318,9 +318,6 @@ resolve_gh_user() {
         '' | openpgp) ;;
         *) GH_GPG_KEY= ;;
     esac
-    GH_GPG=$(git -C "$REPO_ROOT" config gpg.openpgp.program 2>/dev/null \
-        || git -C "$REPO_ROOT" config gpg.program 2>/dev/null \
-        || echo gpg)
 }
 
 require_kind() {
@@ -1334,16 +1331,17 @@ cmd_sign() {
     local files file
     mapfile -t files < <(release_files)
     mkdir -p signatures
+    [ -z "$GH_USER" ] || rm -f "signatures/"*".${GH_USER}.asc" "signatures/${GH_USER}.key.asc"
     for file in "${files[@]}"; do
         gpg -u $START9_GPG_KEY --yes --detach-sign --armor -o "signatures/${file}.start9.asc" "$file"
         if [ -n "$GH_USER" ] && [ -n "$GH_GPG_KEY" ]; then
-            "$GH_GPG" -u "$GH_GPG_KEY" --yes --detach-sign --armor -o "signatures/${file}.${GH_USER}.asc" "$file"
+            gpg -u "$GH_GPG_KEY" --yes --detach-sign --armor -o "signatures/${file}.${GH_USER}.asc" "$file"
         fi
     done
 
     gpg --export -a $START9_GPG_KEY > signatures/start9.key.asc
     if [ -n "$GH_USER" ] && [ -n "$GH_GPG_KEY" ]; then
-        "$GH_GPG" --export -a "$GH_GPG_KEY" > "signatures/${GH_USER}.key.asc"
+        gpg --export -a "$GH_GPG_KEY" > "signatures/${GH_USER}.key.asc"
     else
         >&2 echo 'Warning: could not determine GitHub user or GPG signing key, skipping personal signature'
     fi
@@ -1360,7 +1358,7 @@ cmd_cosign() {
 
     if [ -z "$GH_USER" ] || [ -z "$GH_GPG_KEY" ]; then
         >&2 echo 'Error: could not determine GitHub user or GPG signing key'
-        >&2 echo "Set GH_USER and/or configure git user.signingkey"
+        >&2 echo "Set GH_USER and/or configure an OpenPGP git user.signingkey"
         exit 1
     fi
 
@@ -1373,9 +1371,9 @@ cmd_cosign() {
     local files file
     mapfile -t files < <(release_files)
     for file in "${files[@]}"; do
-        "$GH_GPG" -u "$GH_GPG_KEY" --yes --detach-sign --armor -o "signatures/${file}.${GH_USER}.asc" "$file"
+        gpg -u "$GH_GPG_KEY" --yes --detach-sign --armor -o "signatures/${file}.${GH_USER}.asc" "$file"
     done
-    "$GH_GPG" --export -a "$GH_GPG_KEY" > "signatures/${GH_USER}.key.asc"
+    gpg --export -a "$GH_GPG_KEY" > "signatures/${GH_USER}.key.asc"
 
     tar -czf signatures.tar.gz -C signatures .
     gh release upload -R "$REPO" "$TAG" signatures.tar.gz --clobber
