@@ -124,7 +124,7 @@ Everything rests on that fingerprint being the right one, so confirm it somewher
 > [!WARNING]
 > The download in the next step contains a copy of the key, as `start9.key.asc`. Do not use that one. A key that arrives alongside the signature it is checking proves nothing.
 
-**2. Download `signatures.tar.gz`** from the release page and unpack it, into the same folder as your image. It holds one signature per image, named after the image with `.start9.asc` on the end. A second signature from the person who cut the release is in there too — the `.start9.asc` one is the one to check.
+**2. Download `signatures.tar.gz`** from the release page and unpack it, into the same folder as your image. It holds one signature per image, named after the image with `.start9.asc` on the end. A second signature from the person who cut the release may be in there too — the `.start9.asc` one is the one to check.
 
 **3. Check your image.** Replace `FILENAME` with the name of the file you downloaded, in both places:
 
