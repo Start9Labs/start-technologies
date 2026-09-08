@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::time::Duration;
 
@@ -29,6 +30,7 @@ const TOR_PROXY: (&str, u16) = ("tor.startos", 9050);
 
 /// RFC 8305 connection attempt delay.
 const CONNECT_ATTEMPT_DELAY: Duration = Duration::from_millis(250);
+const CONNECT_ATTEMPTS_IN_FLIGHT: usize = 2;
 
 fn interleave_families(addrs: impl IntoIterator<Item = SocketAddr>) -> Vec<SocketAddr> {
     let mut addrs = addrs.into_iter().peekable();
@@ -37,9 +39,17 @@ fn interleave_families(addrs: impl IntoIterator<Item = SocketAddr>) -> Vec<Socke
     first.into_iter().interleave(second).collect()
 }
 
-/// Connects to whichever address answers first; attempts start
-/// [`CONNECT_ATTEMPT_DELAY`] apart, alternating address families.
-async fn connect_any(addrs: impl IntoIterator<Item = SocketAddr>) -> Result<TcpStream, Error> {
+/// Connects to the first address that answers, alternating families. Starts
+/// another attempt after [`CONNECT_ATTEMPT_DELAY`] or an earlier failure, with
+/// at most [`CONNECT_ATTEMPTS_IN_FLIGHT`] pending.
+async fn connect_each<F, Fut>(
+    addrs: impl IntoIterator<Item = SocketAddr>,
+    mut connect: F,
+) -> Result<TcpStream, Error>
+where
+    F: FnMut(SocketAddr) -> Fut,
+    Fut: Future<Output = std::io::Result<TcpStream>>,
+{
     let mut pending = interleave_families(addrs).into_iter();
     let mut attempts = FuturesUnordered::new();
     let mut last_err = None;
@@ -47,9 +57,9 @@ async fn connect_any(addrs: impl IntoIterator<Item = SocketAddr>) -> Result<TcpS
     tokio::pin!(next_attempt);
     loop {
         tokio::select! {
-            _ = &mut next_attempt, if pending.len() > 0 => {
+            _ = &mut next_attempt, if pending.len() > 0 && attempts.len() < CONNECT_ATTEMPTS_IN_FLIGHT => {
                 if let Some(addr) = pending.next() {
-                    attempts.push(TcpStream::connect(addr));
+                    attempts.push(connect(addr));
                 }
                 next_attempt.as_mut().reset(Instant::now() + CONNECT_ATTEMPT_DELAY);
             }
@@ -103,10 +113,11 @@ async fn connect_target(addr: TargetAddr) -> Result<TcpStream, Error> {
                 .with_kind(ErrorKind::Network)
         }
         TargetAddr::Domain(domain, port) => {
-            connect_any(
+            connect_each(
                 lookup_host((domain, port))
                     .await
                     .with_kind(ErrorKind::Network)?,
+                |addr| TcpStream::connect(addr),
             )
             .await
         }
@@ -213,9 +224,25 @@ impl SocksController {
 mod test {
     use std::net::Ipv6Addr;
 
+    use futures::FutureExt;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use super::*;
+
+    const STALLED: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 1), 9));
+    const REFUSED: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 2), 9));
+
+    async fn echo_round_trip(sock: &mut TcpStream) -> Result<(), Error> {
+        sock.write_all(b"hello")
+            .await
+            .with_kind(ErrorKind::Network)?;
+        let mut buf = [0u8; 5];
+        sock.read_exact(&mut buf)
+            .await
+            .with_kind(ErrorKind::Network)?;
+        assert_eq!(&buf, b"hello");
+        Ok(())
+    }
 
     #[test]
     fn interleave_families_alternates_from_the_first_family() {
@@ -231,23 +258,56 @@ mod test {
         );
     }
 
-    #[tokio::test]
-    async fn connect_any_does_not_wait_on_a_black_hole() -> Result<(), Error> {
+    #[tokio::test(start_paused = true)]
+    async fn the_second_attempt_starts_one_delay_after_a_stalled_first() -> Result<(), Error> {
         let target = echo_server().await?;
         let started = Instant::now();
-        let mut sock =
-            connect_any([SocketAddr::from((Ipv4Addr::new(192, 0, 2, 1), 9)), target]).await?;
-        assert!(started.elapsed() < Duration::from_secs(5));
+        let mut starts = Vec::new();
+        let mut sock = connect_each([STALLED, target], |addr| {
+            starts.push((addr, started.elapsed()));
+            if addr == STALLED {
+                futures::future::pending().boxed()
+            } else {
+                TcpStream::connect(addr).boxed()
+            }
+        })
+        .await?;
+        assert_eq!(
+            starts,
+            [(STALLED, Duration::ZERO), (target, CONNECT_ATTEMPT_DELAY)]
+        );
+        echo_round_trip(&mut sock).await
+    }
 
-        sock.write_all(b"hello")
-            .await
-            .with_kind(ErrorKind::Network)?;
-        let mut buf = [0u8; 5];
-        sock.read_exact(&mut buf)
-            .await
-            .with_kind(ErrorKind::Network)?;
-        assert_eq!(&buf, b"hello");
-        Ok(())
+    #[tokio::test(start_paused = true)]
+    async fn a_third_attempt_waits_for_a_failure() -> Result<(), Error> {
+        let target = echo_server().await?;
+        let started = Instant::now();
+        let mut starts = Vec::new();
+        let mut sock = connect_each([STALLED, REFUSED, target], |addr| {
+            starts.push((addr, started.elapsed()));
+            if addr == STALLED {
+                futures::future::pending().boxed()
+            } else if addr == REFUSED {
+                async {
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                    Err(std::io::ErrorKind::ConnectionRefused.into())
+                }
+                .boxed()
+            } else {
+                TcpStream::connect(addr).boxed()
+            }
+        })
+        .await?;
+        assert_eq!(
+            starts,
+            [
+                (STALLED, Duration::ZERO),
+                (REFUSED, CONNECT_ATTEMPT_DELAY),
+                (target, Duration::from_secs(3) + CONNECT_ATTEMPT_DELAY),
+            ]
+        );
+        echo_round_trip(&mut sock).await
     }
 
     async fn echo_server() -> Result<SocketAddr, Error> {

@@ -1979,6 +1979,7 @@ const ROUTE_TYPES: &[&str] = &[
     "blackhole",
     "nat",
     "anycast",
+    "xresolve",
 ];
 
 /// Flags `ip route show` prints that `ip route replace` rejects.
@@ -1995,14 +1996,41 @@ const DISPLAY_FLAGS: &[&str] = &[
     "rt_offload_failed",
 ];
 
-/// One route as `ip route show` prints it, as arguments `ip route replace` accepts.
+/// Keywords followed by their value.
+const VALUED_KEYWORDS: &[&str] = &[
+    "via",
+    "dev",
+    "proto",
+    "scope",
+    "src",
+    "metric",
+    "tos",
+    "table",
+    "mtu",
+    "advmss",
+    "rtt",
+    "rttvar",
+    "reordering",
+    "window",
+    "cwnd",
+    "initcwnd",
+    "initrwnd",
+    "ssthresh",
+    "rto_min",
+    "hoplimit",
+    "quickack",
+    "congctl",
+    "pref",
+    "weight",
+    "nhid",
+    "realm",
+    "realms",
+];
+
 #[derive(Debug, PartialEq, Eq)]
 struct ShownRoute {
-    /// The destination: a prefix, or `default`.
     prefix: String,
-    /// The header line, less what only `show` understands.
     attrs: Vec<String>,
-    /// A multipath route's indented `nexthop …` continuation lines, folded together.
     nexthops: Vec<String>,
 }
 
@@ -2011,16 +2039,14 @@ fn clean_route_tokens<'a>(tokens: impl IntoIterator<Item = &'a str>) -> Vec<Stri
     let mut tokens = tokens.into_iter();
     while let Some(token) = tokens.next() {
         match token {
-            // `show` prints an unreachable/prohibit route's errno; `replace` derives it from the type.
-            "error" => {
+            // `error` is output-only; the route type determines errno.
+            // A copied lifetime is never renewed.
+            "error" | "expires" => {
                 tokens.next();
             }
-            // `show` prints `expires 1786sec`; `replace` takes the bare number.
-            "expires" => {
-                if let Some(secs) = tokens.next() {
-                    out.push(token.to_owned());
-                    out.push(secs.trim_end_matches("sec").to_owned());
-                }
+            key if VALUED_KEYWORDS.contains(&key) => {
+                out.push(key.to_owned());
+                out.extend(tokens.next().map(str::to_owned));
             }
             flag if DISPLAY_FLAGS.contains(&flag) => {}
             token => out.push(token.to_owned()),
@@ -2057,7 +2083,7 @@ fn parse_route_show(output: &str) -> Vec<ShownRoute> {
     routes
 }
 
-// iproute2 rejects `table` after a nexthop list, so it goes between the header and the next hops.
+// `table` must precede a multipath `nexthop` list.
 fn route_replace_args(route: &ShownRoute, table: &str) -> Vec<String> {
     route
         .attrs
@@ -2088,10 +2114,6 @@ async fn apply_policy_routing(
     // the connectivity gap that a flush+add cycle would create.  We replace
     // every desired route in-place (each replace is atomic in the kernel),
     // then delete any stale routes that are no longer in the desired set.
-
-    // Collect the set of desired non-default route prefixes (the first
-    // whitespace-delimited token of each `ip route show` line is the
-    // destination prefix, e.g. "192.168.1.0/24" or "10.0.0.0/8").
     let mut desired_prefixes = BTreeSet::<String>::new();
 
     if let Ok(main_routes) = Command::new("ip")
@@ -2203,6 +2225,17 @@ async fn apply_policy_routing(
     Ok(())
 }
 
+/// Sending needs an address of the interface's own beyond link-local; without
+/// a gateway it must be global.
+fn carries_v6(gateway: Option<Ipv6Addr>, addrs: impl IntoIterator<Item = Ipv6Addr>) -> bool {
+    let (mut own, mut global) = (false, false);
+    for addr in addrs {
+        own |= !ipv6_is_link_local(addr);
+        global |= !ipv6_is_local(addr);
+    }
+    own && (gateway.is_some() || global)
+}
+
 /// IPv6 counterpart of [`apply_policy_routing`]'s per-interface table work.
 ///
 /// The table `1000 + ifindex` mirrors `main`'s non-default v6 routes (so
@@ -2221,17 +2254,6 @@ async fn apply_policy_routing(
 /// reroute, but the reply that opens a connection is routed before the output
 /// hook runs, so the source rule is what lets a v6 service reached through a
 /// tunnel answer.
-/// Sending needs an address of the interface's own beyond link-local; without
-/// a gateway it must be global.
-fn carries_v6(gateway: Option<Ipv6Addr>, addrs: impl IntoIterator<Item = Ipv6Addr>) -> bool {
-    let (mut own, mut global) = (false, false);
-    for addr in addrs {
-        own |= !ipv6_is_link_local(addr);
-        global |= !ipv6_is_local(addr);
-    }
-    own && (gateway.is_some() || global)
-}
-
 async fn apply_policy_routing_v6(
     guard: &PolicyRoutingGuard,
     iface: &GatewayId,
@@ -3677,7 +3699,7 @@ mod route_show_tests {
     }
 
     #[test]
-    fn a_lifetime_loses_its_unit() {
+    fn a_lifetime_is_dropped() {
         let routes = parse_route_show(
             "2001:db8::/64 via fe80::1 dev eth0 proto ra metric 1024 expires 1786sec hoplimit 64 pref medium",
         );
@@ -3693,13 +3715,35 @@ mod route_show_tests {
                 "ra",
                 "metric",
                 "1024",
-                "expires",
-                "1786",
                 "hoplimit",
                 "64",
                 "pref",
                 "medium",
             ])
+        );
+    }
+
+    #[test]
+    fn an_interface_named_like_a_flag_survives() {
+        for name in ["trap", "error", "expires"] {
+            let routes = parse_route_show(&format!(
+                "2001:db8::/64 dev {name} proto ra metric 100 trap"
+            ));
+            assert_eq!(
+                routes[0].attrs,
+                strs(&["2001:db8::/64", "dev", name, "proto", "ra", "metric", "100"]),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_xresolve_route_keeps_its_destination() {
+        let routes = parse_route_show("xresolve 10.0.0.0/8 dev lo metric 1024");
+        assert_eq!(routes[0].prefix, "10.0.0.0/8");
+        assert_eq!(
+            routes[0].attrs,
+            strs(&["xresolve", "10.0.0.0/8", "dev", "lo", "metric", "1024"])
         );
     }
 
