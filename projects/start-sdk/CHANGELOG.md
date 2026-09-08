@@ -125,6 +125,12 @@
 
 ### Fixed
 
+- **`Backups.withMysqlDump` with `engine: 'mariadb'` works against MariaDB 11
+  images**, official or packaged from a distribution
+
+- `import { backup } from '@start9labs/start-sdk'` exposes `backup.Backups`
+  and `backup.mountBackupTarget`
+
 - **Scaffolded package CI builds a draft PR when it becomes ready and rebuilds
   against every new base after retargeting.** Metadata edits preserve active
   builds and their conclusions

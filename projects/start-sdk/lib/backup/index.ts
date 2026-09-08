@@ -1,2 +1,2 @@
-import './Backups'
-import './setupBackups'
+export * from './Backups'
+export * from './setupBackups'
