@@ -150,6 +150,8 @@ pub async fn init_workspace(
             .capture(false)
             .invoke(ErrorKind::Git)
             .await?;
+    } else {
+        warn_if_guide_off_branch(&root);
     }
 
     // Symlink (not a copy) so a guide sync keeps the workspace AGENTS.md current.
@@ -216,6 +218,8 @@ pub async fn init_package(
             ErrorKind::InvalidRequest,
         )
     })?;
+    warn_if_start_cli_outdated(&root);
+    warn_if_guide_off_branch(&root);
 
     // Normalize to a candidate ID, then validate it through the manifest's own
     // rules rather than re-implementing them.
@@ -240,8 +244,6 @@ pub async fn init_package(
             ErrorKind::InvalidRequest,
         ));
     }
-
-    warn_if_start_cli_outdated(&root);
 
     let template = root.join(MONOREPO_DIR).join(TEMPLATE_SUBPATH);
     if !template.exists() {
@@ -296,6 +298,10 @@ pub async fn init_package(
 pub fn warn_if_start_cli_outdated(workspace: &Path) {
     static WARNED: std::sync::Once = std::sync::Once::new();
     WARNED.call_once(|| {
+        // Off `live-docs` the manifest names a version that has not shipped.
+        if guide_branch(workspace).as_deref() != Some(MONOREPO_BRANCH) {
+            return;
+        }
         let Ok(manifest) =
             std::fs::read_to_string(workspace.join(MONOREPO_DIR).join(CLI_MANIFEST_SUBPATH))
         else {
@@ -330,6 +336,61 @@ pub fn warn_if_start_cli_outdated(workspace: &Path) {
             );
         }
     });
+}
+
+fn guide_branch(workspace: &Path) -> Option<String> {
+    let dot_git = workspace.join(MONOREPO_DIR).join(".git");
+    let git_dir = match std::fs::read_to_string(&dot_git) {
+        Ok(gitfile) => dot_git
+            .parent()?
+            .join(gitfile.strip_prefix("gitdir:")?.trim()),
+        Err(_) => dot_git,
+    };
+    let head = std::fs::read_to_string(git_dir.join("HEAD")).ok()?;
+    Some(head.trim().strip_prefix("ref: refs/heads/")?.to_owned())
+}
+
+fn init_workspace_command(workspace: &Path) -> Option<String> {
+    Some(format!(
+        "start-cli s9pk init-workspace '{}'",
+        workspace.to_str()?.replace('\'', "'\\''")
+    ))
+}
+
+fn warn_if_guide_off_branch(workspace: &Path) {
+    let Some(branch) = guide_branch(workspace).filter(|branch| branch != MONOREPO_BRANCH) else {
+        return;
+    };
+    let docs = workspace.join(MONOREPO_DIR);
+    let next = match init_workspace_command(workspace) {
+        Some(command) => t!("s9pk.init.run-init-workspace", command = command).to_string(),
+        None => t!("s9pk.init.run-init-workspace-in-root").to_string(),
+    };
+    if std::fs::symlink_metadata(&docs).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        let target = std::fs::canonicalize(&docs).unwrap_or_else(|_| docs.clone());
+        eprintln!(
+            "{}",
+            t!(
+                "s9pk.init.guide-linked-off-branch",
+                path = docs.display().to_string(),
+                target = target.display().to_string(),
+                branch = branch,
+                expected = MONOREPO_BRANCH,
+                next = next
+            )
+        );
+    } else {
+        eprintln!(
+            "{}",
+            t!(
+                "s9pk.init.guide-off-branch",
+                path = docs.display().to_string(),
+                branch = branch,
+                expected = MONOREPO_BRANCH,
+                next = next
+            )
+        );
+    }
 }
 
 /// Walk up from `start` (inclusive) for the nearest workspace — a directory whose
@@ -553,6 +614,63 @@ mod test {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn guide_branch_reads_the_checkouts_own_head() {
+        let ws = tmp();
+        assert_eq!(guide_branch(&ws), None);
+
+        let git = ws.join(MONOREPO_DIR).join(".git");
+        std::fs::create_dir_all(&git).unwrap();
+        std::fs::write(git.join("HEAD"), "ref: refs/heads/master\n").unwrap();
+        assert_eq!(guide_branch(&ws).as_deref(), Some("master"));
+
+        std::fs::write(git.join("HEAD"), "ref: refs/heads/live-docs\n").unwrap();
+        assert_eq!(guide_branch(&ws).as_deref(), Some(MONOREPO_BRANCH));
+
+        // detached
+        std::fs::write(
+            git.join("HEAD"),
+            "0123456789abcdef0123456789abcdef01234567\n",
+        )
+        .unwrap();
+        assert_eq!(guide_branch(&ws), None);
+    }
+
+    #[test]
+    fn guide_branch_follows_a_gitfile() {
+        // a linked worktree or submodule keeps HEAD where its `.git` file points
+        let ws = tmp();
+        let docs = ws.join(MONOREPO_DIR);
+        std::fs::create_dir_all(&docs).unwrap();
+        let git_dir = ws.join("elsewhere/.git/worktrees/x");
+        std::fs::create_dir_all(&git_dir).unwrap();
+        std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/feature/x\n").unwrap();
+
+        std::fs::write(
+            docs.join(".git"),
+            format!("gitdir: {}\n", git_dir.display()),
+        )
+        .unwrap();
+        assert_eq!(guide_branch(&ws).as_deref(), Some("feature/x"));
+
+        std::fs::write(docs.join(".git"), "gitdir: ../elsewhere/.git/worktrees/x\n").unwrap();
+        assert_eq!(guide_branch(&ws).as_deref(), Some("feature/x"));
+    }
+
+    #[test]
+    fn init_workspace_command_quotes_the_path() {
+        assert_eq!(
+            init_workspace_command(Path::new("/w s/it's")).as_deref(),
+            Some("start-cli s9pk init-workspace '/w s/it'\\''s'")
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let bad = Path::new(std::ffi::OsStr::from_bytes(b"/ws/\xff"));
+            assert_eq!(init_workspace_command(bad), None);
+        }
     }
 
     #[test]

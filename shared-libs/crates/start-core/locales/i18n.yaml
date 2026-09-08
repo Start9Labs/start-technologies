@@ -169,6 +169,20 @@ s9pk.init.cloning-guide:
   fr_FR: "Clonage du monorepo Start9 (guide d'empaquetage, sources du SDK et de l'OS)…"
   pl_PL: "Klonowanie monorepo Start9 (przewodnik pakowania, kod źródłowy SDK i OS)…"
 
+s9pk.init.guide-linked-off-branch:
+  en_US: "%{path} links to %{target}, which is on branch `%{branch}`, not `%{expected}`: its guide and package template may describe an `@start9labs/start-sdk` that npm cannot resolve. Rather than switching that checkout, remove the link and %{next} to give the workspace a checkout of its own."
+  de_DE: "%{path} verweist auf %{target}, das auf dem Branch `%{branch}` steht, nicht `%{expected}`: Leitfaden und Paketvorlage könnten ein `@start9labs/start-sdk` beschreiben, das npm nicht auflösen kann. Statt diesen Checkout umzuschalten, entferne den Link und %{next}, damit der Arbeitsbereich einen eigenen Checkout erhält."
+  es_ES: "%{path} enlaza a %{target}, que está en la rama `%{branch}`, no en `%{expected}`: su guía y su plantilla de paquete pueden describir un `@start9labs/start-sdk` que npm no puede resolver. En lugar de cambiar ese checkout, elimina el enlace y %{next} para que el espacio de trabajo tenga un checkout propio."
+  fr_FR: "%{path} pointe vers %{target}, qui est sur la branche `%{branch}`, pas `%{expected}` : son guide et son modèle de paquet peuvent décrire un `@start9labs/start-sdk` que npm ne peut pas résoudre. Plutôt que de changer la branche de ce dépôt, supprimez le lien et %{next} pour donner à l'espace de travail son propre clone."
+  pl_PL: "%{path} wskazuje na %{target}, który jest na gałęzi `%{branch}`, a nie `%{expected}`: jego przewodnik i szablon pakietu mogą opisywać `@start9labs/start-sdk`, którego npm nie może rozwiązać. Zamiast przełączać tamto repozytorium, usuń link i %{next}, aby obszar roboczy otrzymał własną kopię."
+
+s9pk.init.guide-off-branch:
+  en_US: "%{path} is on branch `%{branch}`, not `%{expected}`: its guide and package template may describe an `@start9labs/start-sdk` that npm cannot resolve. Move it out of the workspace, then %{next} to clone a fresh checkout on `%{expected}`."
+  de_DE: "%{path} steht auf dem Branch `%{branch}`, nicht `%{expected}`: Leitfaden und Paketvorlage könnten ein `@start9labs/start-sdk` beschreiben, das npm nicht auflösen kann. Verschiebe es aus dem Arbeitsbereich und %{next}, um einen frischen Checkout auf `%{expected}` zu klonen."
+  es_ES: "%{path} está en la rama `%{branch}`, no en `%{expected}`: su guía y su plantilla de paquete pueden describir un `@start9labs/start-sdk` que npm no puede resolver. Sácalo del espacio de trabajo y después %{next} para clonar un checkout nuevo en `%{expected}`."
+  fr_FR: "%{path} est sur la branche `%{branch}`, pas `%{expected}` : son guide et son modèle de paquet peuvent décrire un `@start9labs/start-sdk` que npm ne peut pas résoudre. Déplacez-le hors de l'espace de travail, puis %{next} pour cloner un nouveau dépôt sur `%{expected}`."
+  pl_PL: "%{path} jest na gałęzi `%{branch}`, a nie `%{expected}`: jego przewodnik i szablon pakietu mogą opisywać `@start9labs/start-sdk`, którego npm nie może rozwiązać. Przenieś go poza obszar roboczy, a następnie %{next}, aby sklonować świeżą kopię na `%{expected}`."
+
 s9pk.init.installing-deps:
   en_US: "Installing dependencies (npm install)…"
   de_DE: "Abhängigkeiten werden installiert (npm install)…"
@@ -203,6 +217,20 @@ s9pk.init.package-exists:
   es_ES: "%{path} ya existe; elige otro nombre o elimínalo."
   fr_FR: "%{path} existe déjà ; choisissez un autre nom ou supprimez-le."
   pl_PL: "%{path} już istnieje; wybierz inną nazwę lub usuń je."
+
+s9pk.init.run-init-workspace:
+  en_US: "run `%{command}`"
+  de_DE: "führe `%{command}` aus"
+  es_ES: "ejecuta `%{command}`"
+  fr_FR: "exécutez `%{command}`"
+  pl_PL: "uruchom `%{command}`"
+
+s9pk.init.run-init-workspace-in-root:
+  en_US: "run `start-cli s9pk init-workspace` from the workspace root"
+  de_DE: "führe `start-cli s9pk init-workspace` im Wurzelverzeichnis des Arbeitsbereichs aus"
+  es_ES: "ejecuta `start-cli s9pk init-workspace` desde la raíz del espacio de trabajo"
+  fr_FR: "exécutez `start-cli s9pk init-workspace` depuis la racine de l'espace de travail"
+  pl_PL: "uruchom `start-cli s9pk init-workspace` w katalogu głównym obszaru roboczego"
 
 s9pk.init.template-missing:
   en_US: "Package template not found at %{path}. Re-run `start-cli s9pk init-workspace` to restore the packaging guide."
