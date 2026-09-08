@@ -2071,6 +2071,21 @@ struct CleanedTokens {
     nhid: bool,
 }
 
+fn keep(
+    attrs: &mut Vec<String>,
+    selectors: &mut BTreeMap<usize, [String; 2]>,
+    key: &str,
+    value: Option<&str>,
+) {
+    attrs.push(key.to_owned());
+    if let Some(value) = value {
+        attrs.push(value.to_owned());
+        if let Some(i) = SELECTOR_KEYWORDS.iter().position(|s| *s == key) {
+            selectors.insert(i, [key.to_owned(), value.to_owned()]);
+        }
+    }
+}
+
 /// Attributes expanded from a nexthop id cannot be replayed with it.
 fn clean_route_tokens<'a>(tokens: impl IntoIterator<Item = &'a str>) -> CleanedTokens {
     let mut attrs = Vec::new();
@@ -2089,7 +2104,21 @@ fn clean_route_tokens<'a>(tokens: impl IntoIterator<Item = &'a str>) -> CleanedT
                 attrs.push(token.to_owned());
                 attrs.extend(tokens.next().map(str::to_owned));
             }
-            "encap" if nhid => while tokens.next_if(|t| !matches!(*t, "via" | "dev")).is_some() {},
+            "encap" if nhid => {
+                // An ip encap always prints its own `tos`; the route's follows it.
+                let mut payload_tos = tokens.next() == Some("ip");
+                while let Some(token) = tokens.next_if(|t| !matches!(*t, "via" | "dev")) {
+                    if token != "tos" {
+                        continue;
+                    }
+                    if payload_tos {
+                        payload_tos = false;
+                        tokens.next();
+                    } else {
+                        keep(&mut attrs, &mut selectors, token, tokens.next());
+                    }
+                }
+            }
             "via" if nhid => {
                 if tokens.next() == Some("inet6") {
                     tokens.next();
@@ -2104,13 +2133,7 @@ fn clean_route_tokens<'a>(tokens: impl IntoIterator<Item = &'a str>) -> CleanedT
                 attrs.extend(tokens.next().map(str::to_owned));
             }
             key if VALUED_KEYWORDS.contains(&key) => {
-                attrs.push(key.to_owned());
-                if let Some(value) = tokens.next() {
-                    attrs.push(value.to_owned());
-                    if let Some(i) = SELECTOR_KEYWORDS.iter().position(|s| *s == key) {
-                        selectors.insert(i, [key.to_owned(), value.to_owned()]);
-                    }
-                }
+                keep(&mut attrs, &mut selectors, key, tokens.next());
             }
             flag if DISPLAY_FLAGS.contains(&flag) => {}
             token => attrs.push(token.to_owned()),
@@ -3859,6 +3882,56 @@ mod route_show_tests {
             assert_eq!(
                 route.attrs,
                 shown.split_whitespace().collect::<Vec<_>>(),
+                "{shown}"
+            );
+        }
+
+        // iproute2 6.9 output: the route's `tos` follows the expansion, an ip encap carries one of its own.
+        for (shown, attrs) in [
+            (
+                "10.1.0.0/16 nhid 5 tos 0x10 via 10.0.0.1 dev dummy0",
+                vec!["10.1.0.0/16", "nhid", "5", "tos", "0x10"],
+            ),
+            (
+                "10.3.0.0/16 nhid 6  encap ip id 7 src 0.0.0.0 dst 10.0.0.9 ttl 0 tos 0 tos 0x10 via 10.0.0.1 dev dummy0",
+                vec!["10.3.0.0/16", "nhid", "6", "tos", "0x10"],
+            ),
+            (
+                "10.3.0.0/16 nhid 6  encap ip id 7 src 0.0.0.0 dst 10.0.0.9 ttl 0 tos 0 via 10.0.0.1 dev dummy0",
+                vec!["10.3.0.0/16", "nhid", "6"],
+            ),
+            (
+                "10.0.0.0/8 nhid 5 encap mpls 100/200 tos 0x10 via 10.0.0.1 dev eth0 proto ra metric 100",
+                vec![
+                    "10.0.0.0/8",
+                    "nhid",
+                    "5",
+                    "tos",
+                    "0x10",
+                    "proto",
+                    "ra",
+                    "metric",
+                    "100",
+                ],
+            ),
+        ] {
+            let route = &parse_route_show(shown)[0];
+            assert_eq!(route.attrs, strs(&attrs), "{shown}");
+            let tos: Vec<_> = attrs
+                .windows(2)
+                .find(|w| w[0] == "tos")
+                .into_iter()
+                .flatten()
+                .copied()
+                .collect();
+            assert_eq!(
+                route
+                    .selectors
+                    .iter()
+                    .take(2)
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+                tos,
                 "{shown}"
             );
         }
