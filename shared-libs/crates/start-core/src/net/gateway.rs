@@ -2006,6 +2006,7 @@ const VALUED_KEYWORDS: &[&str] = &[
     "link_dev",
     "iif",
     "oif",
+    "from",
     "proto",
     "scope",
     "src",
@@ -2033,39 +2034,36 @@ const VALUED_KEYWORDS: &[&str] = &[
     "realms",
 ];
 
-/// A nexthop id and its expanded gateway are mutually exclusive on replay.
-const NEXTHOP_KEYWORDS: &[&str] = &["via", "dev", "weight"];
+/// Keywords that distinguish routes sharing a destination, in `ip route del` order.
+const SELECTOR_KEYWORDS: &[&str] = &["tos", "from", "metric"];
 
 #[derive(Debug, PartialEq, Eq)]
 struct ShownRoute {
     prefix: String,
-    metric: Option<String>,
+    selectors: Vec<String>,
+    nhid: bool,
     attrs: Vec<String>,
     nexthops: Vec<String>,
 }
 
 impl ShownRoute {
-    fn identity(&self) -> (String, Option<String>) {
-        (self.prefix.clone(), self.metric.clone())
+    fn identity(&self) -> (String, Vec<String>) {
+        (self.prefix.clone(), self.selectors.clone())
     }
 }
 
-fn strip_nexthop_expansion(attrs: Vec<String>) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut attrs = attrs.into_iter();
-    while let Some(attr) = attrs.next() {
-        if NEXTHOP_KEYWORDS.contains(&attr.as_str()) {
-            attrs.next();
-        } else if attr != "onlink" {
-            out.push(attr);
-        }
-    }
-    out
+struct CleanedTokens {
+    attrs: Vec<String>,
+    selectors: Vec<String>,
+    nhid: bool,
 }
 
-fn clean_route_tokens<'a>(tokens: impl IntoIterator<Item = &'a str>) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut tokens = tokens.into_iter();
+/// Attributes expanded from a nexthop id cannot be replayed with it.
+fn clean_route_tokens<'a>(tokens: impl IntoIterator<Item = &'a str>) -> CleanedTokens {
+    let mut attrs = Vec::new();
+    let mut selectors = BTreeMap::new();
+    let mut nhid = false;
+    let mut tokens = tokens.into_iter().peekable();
     while let Some(token) = tokens.next() {
         match token {
             // `error` is output-only; the route type determines errno.
@@ -2073,15 +2071,39 @@ fn clean_route_tokens<'a>(tokens: impl IntoIterator<Item = &'a str>) -> Vec<Stri
             "error" | "expires" => {
                 tokens.next();
             }
+            "nhid" => {
+                nhid = true;
+                attrs.push(token.to_owned());
+                attrs.extend(tokens.next().map(str::to_owned));
+            }
+            "encap" if nhid => while tokens.next_if(|t| !matches!(*t, "via" | "dev")).is_some() {},
+            "via" if nhid => {
+                if tokens.next() == Some("inet6") {
+                    tokens.next();
+                }
+            }
+            "dev" | "weight" if nhid => {
+                tokens.next();
+            }
+            "onlink" if nhid => {}
             key if VALUED_KEYWORDS.contains(&key) => {
-                out.push(key.to_owned());
-                out.extend(tokens.next().map(str::to_owned));
+                attrs.push(key.to_owned());
+                if let Some(value) = tokens.next() {
+                    attrs.push(value.to_owned());
+                    if let Some(i) = SELECTOR_KEYWORDS.iter().position(|s| *s == key) {
+                        selectors.insert(i, [key.to_owned(), value.to_owned()]);
+                    }
+                }
             }
             flag if DISPLAY_FLAGS.contains(&flag) => {}
-            token => out.push(token.to_owned()),
+            token => attrs.push(token.to_owned()),
         }
     }
-    out
+    CleanedTokens {
+        attrs,
+        selectors: selectors.into_values().flatten().collect(),
+        nhid,
+    }
 }
 
 fn parse_route_show(output: &str) -> Vec<ShownRoute> {
@@ -2092,30 +2114,25 @@ fn parse_route_show(output: &str) -> Vec<ShownRoute> {
             continue;
         };
         if first == "nexthop" {
-            if let Some(route) = routes
-                .last_mut()
-                .filter(|r| !r.attrs.iter().any(|t| t == "nhid"))
-            {
-                route.nexthops.extend(clean_route_tokens(tokens));
+            if let Some(route) = routes.last_mut().filter(|r| !r.nhid) {
+                route.nexthops.extend(clean_route_tokens(tokens).attrs);
             }
             continue;
         }
-        let mut attrs = clean_route_tokens(tokens);
-        if attrs.iter().any(|t| t == "nhid") {
-            attrs = strip_nexthop_expansion(attrs);
-        }
+        let CleanedTokens {
+            attrs,
+            selectors,
+            nhid,
+        } = clean_route_tokens(tokens);
         let prefix = attrs
             .iter()
             .find(|t| !ROUTE_TYPES.contains(&t.as_str()))
             .cloned()
             .unwrap_or_default();
-        let metric = attrs
-            .windows(2)
-            .find(|w| w[0] == "metric")
-            .map(|w| w[1].clone());
         routes.push(ShownRoute {
             prefix,
-            metric,
+            selectors,
+            nhid,
             attrs,
             nexthops: Vec::new(),
         });
@@ -2137,12 +2154,7 @@ fn route_replace_args(route: &ShownRoute, table: &str) -> Vec<String> {
 fn route_del_args(route: &ShownRoute, table: &str) -> Vec<String> {
     [route.prefix.clone()]
         .into_iter()
-        .chain(
-            route
-                .metric
-                .iter()
-                .flat_map(|m| ["metric".to_owned(), m.clone()]),
-        )
+        .chain(route.selectors.iter().cloned())
         .chain(["table".to_owned(), table.to_owned()])
         .collect()
 }
@@ -2176,6 +2188,7 @@ async fn apply_policy_routing(
         .and_then(|b| String::from_utf8(b).with_kind(ErrorKind::Utf8))
     {
         let mut identities = BTreeSet::new();
+        let mut replayed = true;
         for route in parse_route_show(&main_routes) {
             if route.prefix == "default" {
                 continue;
@@ -2186,6 +2199,7 @@ async fn apply_policy_routing(
                 .arg("replace")
                 .args(route_replace_args(&route, &table_str));
             if let Err(e) = cmd.invoke(ErrorKind::Network).await {
+                replayed = false;
                 // Transient interfaces (podman, wg-quick, etc.) may
                 // vanish between reading the main table and replaying
                 // the route — demote to debug to avoid log noise.
@@ -2197,7 +2211,10 @@ async fn apply_policy_routing(
                 }
             }
         }
-        desired = Some(identities);
+        // A failed replay leaves its predecessor as the only route for that destination.
+        if replayed {
+            desired = Some(identities);
+        }
     }
 
     // Replace the default route via this interface's gateway.
@@ -2347,6 +2364,7 @@ async fn apply_policy_routing_v6(
         .and_then(|b| String::from_utf8(b).with_kind(ErrorKind::Utf8))
     {
         let mut identities = BTreeSet::new();
+        let mut replayed = true;
         for route in parse_route_show(&main_routes) {
             if route.prefix == "default" {
                 continue;
@@ -2358,6 +2376,7 @@ async fn apply_policy_routing_v6(
                 .arg("replace")
                 .args(route_replace_args(&route, &table_str));
             if let Err(e) = cmd.invoke(ErrorKind::Network).await {
+                replayed = false;
                 if e.source.to_string().contains("No such file or directory") {
                     tracing::trace!("ip -6 route replace (transient device): {e}");
                 } else {
@@ -2366,7 +2385,9 @@ async fn apply_policy_routing_v6(
                 }
             }
         }
-        desired = Some(identities);
+        if replayed {
+            desired = Some(identities);
+        }
     }
 
     // Replace the default: a real route when the interface can carry v6, else a
@@ -3800,12 +3821,29 @@ mod route_show_tests {
 
     #[test]
     fn a_nexthop_id_drops_its_expansion() {
-        let single =
-            parse_route_show("10.0.0.0/8 nhid 5 via 10.0.0.1 dev eth0 proto ra metric 100");
-        assert_eq!(
-            single[0].attrs,
-            strs(&["10.0.0.0/8", "nhid", "5", "proto", "ra", "metric", "100"])
-        );
+        for shown in [
+            "10.0.0.0/8 nhid 5 via 10.0.0.1 dev eth0 proto ra metric 100",
+            "10.0.0.0/8 nhid 5 via inet6 fe80::1 dev eth0 proto ra metric 100",
+            "10.0.0.0/8 nhid 5 encap mpls 100/200 via 10.0.0.1 dev eth0 onlink proto ra metric 100",
+        ] {
+            assert_eq!(
+                parse_route_show(shown)[0].attrs,
+                strs(&["10.0.0.0/8", "nhid", "5", "proto", "ra", "metric", "100"]),
+                "{shown}"
+            );
+        }
+        for shown in [
+            "10.0.0.0/8 via 10.0.0.1 dev nhid proto static metric 100",
+            "10.0.0.0/8 encap mpls 100 via 10.0.0.1 dev eth0 proto static metric 100",
+        ] {
+            let route = &parse_route_show(shown)[0];
+            assert!(!route.nhid, "{shown}");
+            assert_eq!(
+                route.attrs,
+                shown.split_whitespace().collect::<Vec<_>>(),
+                "{shown}"
+            );
+        }
 
         let group = parse_route_show(
             "default nhid 7 proto ra metric 1024 pref medium\n\
@@ -3837,6 +3875,37 @@ mod route_show_tests {
         assert_eq!(
             route_del_args(&parse_route_show("10.0.0.0/8 dev eth0")[0], "75"),
             strs(&["10.0.0.0/8", "table", "75"])
+        );
+    }
+
+    #[test]
+    fn routes_alias_on_tos_and_source_and_are_deleted_with_them() {
+        let v4 = parse_route_show(
+            "10.0.0.0/8 via 10.0.0.1 dev eth0 metric 100\n\
+             10.0.0.0/8 tos 0x10 via 10.0.0.2 dev eth0 metric 100\n",
+        );
+        assert_ne!(v4[0].identity(), v4[1].identity());
+        assert_eq!(
+            route_del_args(&v4[1], "75"),
+            strs(&["10.0.0.0/8", "tos", "0x10", "metric", "100", "table", "75"])
+        );
+
+        let v6 = parse_route_show(
+            "2001:db8::/64 via fe80::1 dev eth0 metric 1024\n\
+             2001:db8::/64 from 2001:db8:1::/64 via fe80::2 dev eth0 metric 1024\n",
+        );
+        assert_ne!(v6[0].identity(), v6[1].identity());
+        assert_eq!(
+            route_del_args(&v6[1], "75"),
+            strs(&[
+                "2001:db8::/64",
+                "from",
+                "2001:db8:1::/64",
+                "metric",
+                "1024",
+                "table",
+                "75"
+            ])
         );
     }
 

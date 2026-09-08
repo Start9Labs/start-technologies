@@ -446,7 +446,7 @@ file tracks notable changes since the move to the monorepo.
   tries a host's IPv6 and IPv4 addresses a quarter of a second apart and uses
   the first connection that succeeds.
 
-- **The OS log stays free of `ip route` usage text on a network whose router
+- **The OS log stays focused on actionable errors on a network whose router
   advertises a route with more than one next hop.**
 
 ### Security
@@ -469,10 +469,9 @@ file tracks notable changes since the move to the monorepo.
   you also reach on your local network keeps answering there with your server's
   own certificate.
 
-- **Outbound IPv6 leaves only through an address of the selected gateway's
-  own.** A gateway with an IPv6 router but no IPv6 address of its own carries
-  no IPv6; such traffic is refused on the spot rather than sent with another
-  interface's address.
+- **Outbound IPv6 uses an address assigned to the selected gateway.** Traffic
+  through a gateway that has an IPv6 router but no IPv6 address of its own
+  fails immediately.
 
 ## [0.4.0.1]
 
