@@ -1422,6 +1422,11 @@ async fn watcher(
                         });
                         gc_policy_routing(&ifaces).await;
                         reconcile_mangle_rules(&policy_ifaces).await.log_err();
+                        if !policy_ifaces.is_empty() {
+                            for v6 in [false, true] {
+                                ensure_main_suppress_rule(v6).await.log_err();
+                            }
+                        }
                         for result in futures::future::join_all(jobs).await {
                             result.log_err();
                         }
@@ -1939,7 +1944,6 @@ async fn watch_ip(
                                 None
                             };
 
-                            // Policy routing: track per-interface table for cleanup on scope exit
                             let policy_guard: Option<PolicyRoutingGuard> =
                                 policy_table_for(device_type, &iface)
                                     .map(|table_id| PolicyRoutingGuard { table_id });
@@ -1975,7 +1979,50 @@ fn rule_has(line: &str, key: &str, value: &str) -> bool {
         .any(|w| w[0] == key && w[1] == value)
 }
 
-/// Specific routes are `main`'s; a per-interface table holds only its default.
+fn main_suppress_rule(line: &str) -> bool {
+    line.split_whitespace().eq([
+        "50:",
+        "from",
+        "all",
+        "lookup",
+        "main",
+        "suppress_prefixlength",
+        "0",
+    ])
+}
+
+/// Specific routes are `main`'s; per-interface tables hold only defaults.
+async fn ensure_main_suppress_rule(v6: bool) -> Result<(), Error> {
+    // Reject-type defaults terminate before suppression; `throw` routes fall through.
+    let mut ip = Command::new("ip");
+    if v6 {
+        ip.arg("-6");
+    }
+    let rules = String::from_utf8(
+        ip.arg("rule")
+            .arg("show")
+            .invoke(ErrorKind::Network)
+            .await?,
+    )?;
+    if !rules.lines().any(main_suppress_rule) {
+        let mut ip = Command::new("ip");
+        if v6 {
+            ip.arg("-6");
+        }
+        ip.arg("rule")
+            .arg("add")
+            .arg("lookup")
+            .arg("main")
+            .arg("suppress_prefixlength")
+            .arg("0")
+            .arg("priority")
+            .arg("50")
+            .invoke(ErrorKind::Network)
+            .await?;
+    }
+    Ok(())
+}
+
 async fn ensure_table_rules(v6: bool, table_id: u32, rules_output: &str) {
     let ip = || {
         let mut c = Command::new("ip");
@@ -1985,26 +2032,6 @@ async fn ensure_table_rules(v6: bool, table_id: u32, rules_output: &str) {
         c
     };
     let table_str = table_id.to_string();
-    // A reject-type default in `main` ends the lookup before it can be suppressed.
-    // A `throw` in `main` falls through to the outbound table's default.
-    if !rules_output.lines().any(|l| {
-        let l = l.trim();
-        l.starts_with("50:")
-            && rule_has(l, "lookup", "main")
-            && l.contains("suppress_prefixlength 0")
-    }) {
-        ip().arg("rule")
-            .arg("add")
-            .arg("lookup")
-            .arg("main")
-            .arg("suppress_prefixlength")
-            .arg("0")
-            .arg("priority")
-            .arg("50")
-            .invoke(ErrorKind::Network)
-            .await
-            .log_err();
-    }
     let mut reply_rule = false;
     for line in rules_output.lines().map(str::trim) {
         if !(rule_has(line, "fwmark", &format!("0x{table_id:x}"))
@@ -3227,6 +3254,24 @@ impl Accept for WildcardListener {
             )));
         }
         Poll::Pending
+    }
+}
+
+#[cfg(test)]
+mod policy_rule_tests {
+    use super::*;
+
+    #[test]
+    fn main_suppress_rule_requires_the_unrestricted_rule() {
+        assert!(main_suppress_rule(
+            "50: from all lookup main suppress_prefixlength 0"
+        ));
+        assert!(!main_suppress_rule(
+            "50: from 192.0.2.1 lookup main suppress_prefixlength 0"
+        ));
+        assert!(!main_suppress_rule(
+            "50: from all fwmark 0x3e9 lookup main suppress_prefixlength 0"
+        ));
     }
 }
 
