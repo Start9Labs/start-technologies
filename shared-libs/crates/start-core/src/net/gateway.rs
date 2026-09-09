@@ -1180,9 +1180,6 @@ trait Ip6Config {
     fn address_data(&self) -> Result<Vec<AddressData>, Error>;
 
     #[zbus(property)]
-    fn route_data(&self) -> Result<Vec<RouteData>, Error>;
-
-    #[zbus(property)]
     fn gateway(&self) -> Result<String, Error>;
 
     // IP6Config has no `NameserverData`; its resolvers are `Nameservers` (aay),
@@ -1503,7 +1500,7 @@ async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
         .filter_map(|iface| if_nametoindex(iface.as_str()).ok().map(|idx| 1000 + idx))
         .collect();
 
-    // Collect stale per-interface table ids from the priority-50 fwmark rules in
+    // Collect stale per-interface table ids from the priority-51 fwmark rules in
     // both families (IPv4 and IPv6 install the same `1000 + ifindex` rule).
     let mut stale = BTreeSet::<u32>::new();
     for v6 in [false, true] {
@@ -1522,7 +1519,7 @@ async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
         };
         for line in rules.lines() {
             let line = line.trim();
-            if !line.starts_with("50:") {
+            if !line.starts_with("51:") {
                 continue;
             }
             let Some(pos) = line.find("lookup ") else {
@@ -1596,7 +1593,7 @@ async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
             .ok();
     }
 
-    // For each stale table, remove the priority-50 fwmark rule and flush its
+    // For each stale table, remove the priority-51 fwmark rule and flush its
     // routing table in both families, so a removed interface leaves no stale
     // reply-routing rule, v4 default, or v6 default/blackhole behind.
     for table_id in stale {
@@ -1614,7 +1611,7 @@ async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
                 .arg("lookup")
                 .arg(&table_str)
                 .arg("priority")
-                .arg("50")
+                .arg("51")
                 .invoke(ErrorKind::Network)
                 .await
                 .ok();
@@ -1793,7 +1790,7 @@ fn policy_table_for(device_type: Option<NetworkInterfaceType>, iface: &GatewayId
 ///
 /// IPv4 and IPv6 carry the same CONNMARK reply-routing layer, rebuilt together
 /// so a reply to a v6 connection that arrived on a tunnel (host-terminated or
-/// DNAT'd to a container) routes back out it via the priority-50 fwmark rule,
+/// DNAT'd to a container) routes back out it via the priority-51 fwmark rule,
 /// exactly like v4. `sni-divert` is emitted for both families.
 async fn reconcile_mangle_rules(policy_ifaces: &BTreeMap<GatewayId, u32>) -> Result<(), Error> {
     nft_ensure_base().await?;
@@ -1928,7 +1925,6 @@ async fn watch_ip(
                                     ip4_proxy.receive_nameserver_data_changed().await.stub(),
                                 )
                                 .with_stream(ip6_proxy.receive_address_data_changed().await.stub())
-                                .with_stream(ip6_proxy.receive_route_data_changed().await.stub())
                                 .with_stream(ip6_proxy.receive_gateway_changed().await.stub())
                                 .with_stream(ip6_proxy.receive_nameservers_changed().await.stub());
 
@@ -1972,231 +1968,81 @@ async fn watch_ip(
     }
 }
 
-const ROUTE_TYPES: &[&str] = &[
-    "unicast",
-    "local",
-    "broadcast",
-    "multicast",
-    "throw",
-    "unreachable",
-    "prohibit",
-    "blackhole",
-    "nat",
-    "anycast",
-    "xresolve",
-];
-
-/// Flags `ip route show` prints that `ip route replace` rejects.
-const DISPLAY_FLAGS: &[&str] = &[
-    "dead",
-    "linkdown",
-    "pervasive",
-    "offload",
-    "notify",
-    "unresolved",
-    "trap",
-    "rt_offload",
-    "rt_trap",
-    "rt_offload_failed",
-];
-
-const VALUED_KEYWORDS: &[&str] = &[
-    "via",
-    "dev",
-    "link_dev",
-    "iif",
-    "oif",
-    "from",
-    "proto",
-    "scope",
-    "src",
-    "metric",
-    "tos",
-    "table",
-    "mtu",
-    "advmss",
-    "rtt",
-    "rttvar",
-    "reordering",
-    "window",
-    "cwnd",
-    "initcwnd",
-    "initrwnd",
-    "ssthresh",
-    "rto_min",
-    "hoplimit",
-    "quickack",
-    "congctl",
-    "pref",
-    "weight",
-    "nhid",
-    "realm",
-    "realms",
-    "ttl-propagate",
-];
-
-/// Keywords that distinguish routes sharing a destination, in `ip route del` order.
-const SELECTOR_KEYWORDS: &[&str] = &["tos", "from", "metric"];
-
-#[derive(Debug, PartialEq, Eq)]
-struct ShownRoute {
-    prefix: String,
-    selectors: Vec<String>,
-    nhid: bool,
-    attrs: Vec<String>,
-    nexthops: Vec<String>,
+fn rule_has(line: &str, key: &str, value: &str) -> bool {
+    line.split_whitespace()
+        .collect::<Vec<_>>()
+        .windows(2)
+        .any(|w| w[0] == key && w[1] == value)
 }
 
-impl ShownRoute {
-    fn identity(&self) -> (String, Vec<String>) {
-        (self.prefix.clone(), self.selectors.clone())
-    }
-
-    fn failure_domain(&self) -> (String, Vec<String>) {
-        (
-            self.prefix.clone(),
-            self.selectors
-                .chunks_exact(2)
-                .filter(|selector| selector[0] != "metric")
-                .flatten()
-                .cloned()
-                .collect(),
-        )
-    }
-}
-
-struct CleanedTokens {
-    attrs: Vec<String>,
-    selectors: Vec<String>,
-    nhid: bool,
-}
-
-fn keep(
-    attrs: &mut Vec<String>,
-    selectors: &mut BTreeMap<usize, [String; 2]>,
-    key: &str,
-    value: Option<&str>,
-) {
-    attrs.push(key.to_owned());
-    if let Some(value) = value {
-        attrs.push(value.to_owned());
-        if let Some(i) = SELECTOR_KEYWORDS.iter().position(|s| *s == key) {
-            selectors.insert(i, [key.to_owned(), value.to_owned()]);
+/// Specific routes are `main`'s; a per-interface table holds only its default.
+async fn ensure_table_rules(v6: bool, table_id: u32, rules_output: &str) {
+    let ip = || {
+        let mut c = Command::new("ip");
+        if v6 {
+            c.arg("-6");
         }
+        c
+    };
+    let table_str = table_id.to_string();
+    // A reject-type default in `main` ends the lookup before it can be suppressed.
+    // A `throw` in `main` falls through to the outbound table's default.
+    if !rules_output.lines().any(|l| {
+        let l = l.trim();
+        l.starts_with("50:")
+            && rule_has(l, "lookup", "main")
+            && l.contains("suppress_prefixlength 0")
+    }) {
+        ip().arg("rule")
+            .arg("add")
+            .arg("lookup")
+            .arg("main")
+            .arg("suppress_prefixlength")
+            .arg("0")
+            .arg("priority")
+            .arg("50")
+            .invoke(ErrorKind::Network)
+            .await
+            .log_err();
     }
-}
-
-/// Attributes expanded from a nexthop id cannot be replayed with it.
-fn clean_route_tokens<'a>(tokens: impl IntoIterator<Item = &'a str>) -> CleanedTokens {
-    let mut attrs = Vec::new();
-    let mut selectors = BTreeMap::new();
-    let mut nhid = false;
-    let mut tokens = tokens.into_iter().peekable();
-    while let Some(token) = tokens.next() {
-        match token {
-            // `error` is output-only; the route type determines errno.
-            // A copied lifetime is never renewed.
-            "error" | "expires" => {
-                tokens.next();
-            }
-            "nhid" => {
-                nhid = true;
-                attrs.push(token.to_owned());
-                attrs.extend(tokens.next().map(str::to_owned));
-            }
-            "encap" if nhid => {
-                // An ip encap always prints its own `tos`; the route's follows it.
-                let mut payload_tos = tokens.next() == Some("ip");
-                while let Some(token) = tokens.next_if(|t| !matches!(*t, "via" | "dev")) {
-                    if token != "tos" {
-                        continue;
-                    }
-                    if payload_tos {
-                        payload_tos = false;
-                        tokens.next();
-                    } else {
-                        keep(&mut attrs, &mut selectors, token, tokens.next());
-                    }
-                }
-            }
-            "via" if nhid => {
-                if tokens.next() == Some("inet6") {
-                    tokens.next();
-                }
-            }
-            "dev" | "weight" if nhid => {
-                tokens.next();
-            }
-            "onlink" if nhid => {}
-            "ttl-propogate" => {
-                attrs.push("ttl-propagate".to_owned());
-                attrs.extend(tokens.next().map(str::to_owned));
-            }
-            key if VALUED_KEYWORDS.contains(&key) => {
-                keep(&mut attrs, &mut selectors, key, tokens.next());
-            }
-            flag if DISPLAY_FLAGS.contains(&flag) => {}
-            token => attrs.push(token.to_owned()),
-        }
-    }
-    CleanedTokens {
-        attrs,
-        selectors: selectors.into_values().flatten().collect(),
-        nhid,
-    }
-}
-
-fn parse_route_show(output: &str) -> Vec<ShownRoute> {
-    let mut routes = Vec::<ShownRoute>::new();
-    for line in output.lines() {
-        let mut tokens = line.split_whitespace().peekable();
-        let Some(&first) = tokens.peek() else {
-            continue;
-        };
-        if first == "nexthop" {
-            if let Some(route) = routes.last_mut().filter(|r| !r.nhid) {
-                route.nexthops.extend(clean_route_tokens(tokens).attrs);
-            }
+    let mut reply_rule = false;
+    for line in rules_output.lines().map(str::trim) {
+        if !(rule_has(line, "fwmark", &format!("0x{table_id:x}"))
+            && rule_has(line, "lookup", &table_str))
+        {
             continue;
         }
-        let CleanedTokens {
-            attrs,
-            selectors,
-            nhid,
-        } = clean_route_tokens(tokens);
-        let prefix = attrs
-            .iter()
-            .find(|t| !ROUTE_TYPES.contains(&t.as_str()))
-            .cloned()
-            .unwrap_or_default();
-        routes.push(ShownRoute {
-            prefix,
-            selectors,
-            nhid,
-            attrs,
-            nexthops: Vec::new(),
-        });
+        match line.split(':').next() {
+            Some("51") => reply_rule = true,
+            Some(priority) => {
+                ip().arg("rule")
+                    .arg("del")
+                    .arg("fwmark")
+                    .arg(&table_str)
+                    .arg("lookup")
+                    .arg(&table_str)
+                    .arg("priority")
+                    .arg(priority)
+                    .invoke(ErrorKind::Network)
+                    .await
+                    .log_err();
+            }
+            None => {}
+        }
     }
-    routes
-}
-
-// `table` must precede a multipath `nexthop` list.
-fn route_replace_args(route: &ShownRoute, table: &str) -> Vec<String> {
-    route
-        .attrs
-        .iter()
-        .cloned()
-        .chain(["table".to_owned(), table.to_owned()])
-        .chain(route.nexthops.iter().cloned())
-        .collect()
-}
-
-fn route_del_args(route: &ShownRoute, table: &str) -> Vec<String> {
-    [route.prefix.clone()]
-        .into_iter()
-        .chain(route.selectors.iter().cloned())
-        .chain(["table".to_owned(), table.to_owned()])
-        .collect()
+    if !reply_rule {
+        ip().arg("rule")
+            .arg("add")
+            .arg("fwmark")
+            .arg(&table_str)
+            .arg("lookup")
+            .arg(&table_str)
+            .arg("priority")
+            .arg("51")
+            .invoke(ErrorKind::Network)
+            .await
+            .log_err();
+    }
 }
 
 async fn apply_policy_routing(
@@ -2215,93 +2061,24 @@ async fn apply_policy_routing(
         })
         .copied();
 
-    // `replace` keeps the table live; a flush would open a connectivity gap.
-    let mut desired = None;
-
-    if let Ok(main_routes) = Command::new("ip")
-        .arg("route")
-        .arg("show")
+    let mut cmd = Command::new("ip");
+    cmd.arg("route").arg("replace").arg("default");
+    if let Some(gw) = ipv4_gateway {
+        cmd.arg("via").arg(gw.to_string());
+    }
+    cmd.arg("dev")
+        .arg(iface.as_str())
         .arg("table")
-        .arg("main")
-        .invoke(ErrorKind::Network)
-        .await
-        .and_then(|b| String::from_utf8(b).with_kind(ErrorKind::Utf8))
-    {
-        let mut identities = BTreeSet::new();
-        let mut failed_domains = BTreeSet::new();
-        for route in parse_route_show(&main_routes) {
-            if route.prefix == "default" {
-                continue;
-            }
-            identities.insert(route.identity());
-            let mut cmd = Command::new("ip");
-            cmd.arg("route")
-                .arg("replace")
-                .args(route_replace_args(&route, &table_str));
-            if let Err(e) = cmd.invoke(ErrorKind::Network).await {
-                failed_domains.insert(route.failure_domain());
-                // Transient interfaces (podman, wg-quick, etc.) may
-                // vanish between reading the main table and replaying
-                // the route — demote to debug to avoid log noise.
-                if e.source.to_string().contains("No such file or directory") {
-                    tracing::trace!("ip route replace (transient device): {e}");
-                } else {
-                    tracing::error!("{e}");
-                    tracing::debug!("{e:?}");
-                }
-            }
-        }
-        desired = Some((identities, failed_domains));
+        .arg(&table_str);
+    if ipv4_gateway.is_none() {
+        cmd.arg("scope").arg("link");
     }
-
-    // Replace the default route via this interface's gateway.
-    {
-        let mut cmd = Command::new("ip");
-        cmd.arg("route").arg("replace").arg("default");
-        if let Some(gw) = ipv4_gateway {
-            cmd.arg("via").arg(gw.to_string());
-        }
-        cmd.arg("dev")
-            .arg(iface.as_str())
-            .arg("table")
-            .arg(&table_str);
-        if ipv4_gateway.is_none() {
-            cmd.arg("scope").arg("link");
-        }
-        cmd.invoke(ErrorKind::Network).await.log_err();
-    }
-
-    let existing_routes = Command::new("ip")
-        .arg("route")
-        .arg("show")
-        .arg("table")
-        .arg(&table_str)
-        .invoke(ErrorKind::Network)
-        .await
-        .and_then(|b| String::from_utf8(b).with_kind(ErrorKind::Utf8));
-    if let (Some((desired, failed_domains)), Ok(existing_routes)) = (desired, existing_routes) {
-        for route in parse_route_show(&existing_routes) {
-            if route.prefix == "default"
-                || desired.contains(&route.identity())
-                || failed_domains.contains(&route.failure_domain())
-            {
-                continue;
-            }
-            Command::new("ip")
-                .arg("route")
-                .arg("del")
-                .args(route_del_args(&route, &table_str))
-                .invoke(ErrorKind::Network)
-                .await
-                .log_err();
-        }
-    }
+    cmd.invoke(ErrorKind::Network).await.log_err();
 
     // The mangle CONNMARK rules — the global `restore-mark` (mangle PREROUTING +
     // OUTPUT) and this interface's `mark-<iface>` — are reconciled centrally and
     // atomically by `reconcile_mangle_rules`, so they are not touched here.
 
-    // Ensure fwmark-based ip rule for this interface's table
     let rules_output = String::from_utf8(
         Command::new("ip")
             .arg("rule")
@@ -2309,23 +2086,7 @@ async fn apply_policy_routing(
             .invoke(ErrorKind::Network)
             .await?,
     )?;
-    if !rules_output
-        .lines()
-        .any(|l| l.contains("fwmark") && l.contains(&format!("lookup {table_id}")))
-    {
-        Command::new("ip")
-            .arg("rule")
-            .arg("add")
-            .arg("fwmark")
-            .arg(&table_str)
-            .arg("lookup")
-            .arg(&table_str)
-            .arg("priority")
-            .arg("50")
-            .invoke(ErrorKind::Network)
-            .await
-            .log_err();
-    }
+    ensure_table_rules(false, table_id, &rules_output).await;
 
     Ok(())
 }
@@ -2343,15 +2104,15 @@ fn carries_v6(gateway: Option<Ipv6Addr>, addrs: impl IntoIterator<Item = Ipv6Add
 
 /// IPv6 counterpart of [`apply_policy_routing`]'s per-interface table work.
 ///
-/// The table `1000 + ifindex` mirrors `main`'s non-default v6 routes (so
-/// on-link/local v6 still goes direct) plus a default: `default [via gw] dev
-/// iface` when the interface can carry v6, otherwise `blackhole default`. That
+/// The table `1000 + ifindex` holds one route: `default [via gw] dev iface`
+/// when the interface can carry v6, otherwise `blackhole default`; specific
+/// routes are `main`'s, consulted first by the priority-50 rule. That
 /// per-gateway blackhole is the leak guard — a gateway with no IPv6 selected as
 /// the default outbound (the priority-75 catch-all) then drops v6 rather than
 /// letting it fall through to some other interface's default.
 ///
 /// The table backs three rule layers: the priority-75 default-outbound catch-all
-/// ([`apply_default_outbound`]), the priority-50 CONNMARK reply-routing rule
+/// ([`apply_default_outbound`]), the priority-51 CONNMARK reply-routing rule
 /// installed at the end here (IPv4 parity; marks set by
 /// [`reconcile_mangle_rules`]), and — v6-only — a priority-60 source rule per
 /// global address on the interface. IPv6 has no NAT/SNI-demux reply layer to
@@ -2390,44 +2151,6 @@ async fn apply_policy_routing_v6(
         }),
     );
 
-    // Mirror main's non-default v6 routes into the per-interface table, so the
-    // priority-75 catch-all does not send on-link/local v6 through the gateway.
-    let mut desired = None;
-    if let Ok(main_routes) = Command::new("ip")
-        .arg("-6")
-        .arg("route")
-        .arg("show")
-        .arg("table")
-        .arg("main")
-        .invoke(ErrorKind::Network)
-        .await
-        .and_then(|b| String::from_utf8(b).with_kind(ErrorKind::Utf8))
-    {
-        let mut identities = BTreeSet::new();
-        let mut failed_domains = BTreeSet::new();
-        for route in parse_route_show(&main_routes) {
-            if route.prefix == "default" {
-                continue;
-            }
-            identities.insert(route.identity());
-            let mut cmd = Command::new("ip");
-            cmd.arg("-6")
-                .arg("route")
-                .arg("replace")
-                .args(route_replace_args(&route, &table_str));
-            if let Err(e) = cmd.invoke(ErrorKind::Network).await {
-                failed_domains.insert(route.failure_domain());
-                if e.source.to_string().contains("No such file or directory") {
-                    tracing::trace!("ip -6 route replace (transient device): {e}");
-                } else {
-                    tracing::error!("{e}");
-                    tracing::debug!("{e:?}");
-                }
-            }
-        }
-        desired = Some((identities, failed_domains));
-    }
-
     // Replace the default: a real route when the interface can carry v6, else a
     // blackhole so a non-v6 gateway selected as default outbound drops v6.
     {
@@ -2451,39 +2174,6 @@ async fn apply_policy_routing_v6(
         cmd.invoke(ErrorKind::Network).await.log_err();
     }
 
-    let existing_routes = Command::new("ip")
-        .arg("-6")
-        .arg("route")
-        .arg("show")
-        .arg("table")
-        .arg(&table_str)
-        .invoke(ErrorKind::Network)
-        .await
-        .and_then(|b| String::from_utf8(b).with_kind(ErrorKind::Utf8));
-    if let (Some((desired, failed_domains)), Ok(existing_routes)) = (desired, existing_routes) {
-        for route in parse_route_show(&existing_routes) {
-            if route.prefix == "default"
-                || desired.contains(&route.identity())
-                || failed_domains.contains(&route.failure_domain())
-            {
-                continue;
-            }
-            Command::new("ip")
-                .arg("-6")
-                .arg("route")
-                .arg("del")
-                .args(route_del_args(&route, &table_str))
-                .invoke(ErrorKind::Network)
-                .await
-                .log_err();
-        }
-    }
-
-    // Ensure the priority-50 fwmark ip rule for this interface's table — the
-    // IPv6 half of the CONNMARK reply-routing layer (marks set by
-    // `reconcile_mangle_rules`). Mirrors `apply_policy_routing`'s IPv4 rule so a
-    // reply to a connection that arrived on this interface (host-terminated or
-    // DNAT'd to a container) routes back out it rather than being lost.
     let rules_output = String::from_utf8(
         Command::new("ip")
             .arg("-6")
@@ -2492,24 +2182,7 @@ async fn apply_policy_routing_v6(
             .invoke(ErrorKind::Network)
             .await?,
     )?;
-    if !rules_output
-        .lines()
-        .any(|l| l.contains("fwmark") && l.contains(&format!("lookup {table_id}")))
-    {
-        Command::new("ip")
-            .arg("-6")
-            .arg("rule")
-            .arg("add")
-            .arg("fwmark")
-            .arg(&table_str)
-            .arg("lookup")
-            .arg(&table_str)
-            .arg("priority")
-            .arg("50")
-            .invoke(ErrorKind::Network)
-            .await
-            .log_err();
-    }
+    ensure_table_rules(true, table_id, &rules_output).await;
 
     // Ensure a priority-60 source rule per global v6 address on this interface.
     // The CONNMARK rule above cannot catch the reply that opens a connection:
@@ -2634,7 +2307,7 @@ async fn poll_ip_info(
     if let Some(guard) = policy_guard {
         apply_policy_routing(guard, iface, &lan_ip).await?;
         // v6 has no NAT/SNI-demux reply layer, but this now installs the v6
-        // CONNMARK reply-routing rule (priority 50, IPv4 parity — marks set by
+        // CONNMARK reply-routing rule (priority 51, IPv4 parity — marks set by
         // `reconcile_mangle_rules`) alongside readying the interface's v6 table
         // for the default-outbound catch-all and the per-gateway leak-guard
         // blackhole (when the interface can't carry v6).
@@ -3778,331 +3451,5 @@ mod wg_config_tests {
         assert!(!parsed.to_nm_settings("wg0", None).unwrap()["connection"].contains_key("uuid"));
         let updated = parsed.to_nm_settings("wg0", Some("uuid-x")).unwrap();
         assert_eq!(as_str(&updated["connection"]["uuid"]), "uuid-x");
-    }
-}
-
-#[cfg(test)]
-mod route_show_tests {
-    use super::*;
-
-    fn strs(v: &[&str]) -> Vec<String> {
-        v.iter().map(|s| s.to_string()).collect()
-    }
-
-    #[test]
-    fn a_multipath_route_folds_its_next_hops_behind_the_table() {
-        let shown = "default proto ra metric 1024 pref medium\n\
-                     \tnexthop via fe80::1 dev enp2s0 weight 1\n\
-                     \tnexthop via fe80::2 dev enp2s0 weight 1\n";
-        let routes = parse_route_show(shown);
-        assert_eq!(routes.len(), 1);
-        assert_eq!(routes[0].prefix, "default");
-        assert_eq!(
-            route_replace_args(&routes[0], "75"),
-            strs(&[
-                "default", "proto", "ra", "metric", "1024", "pref", "medium", "table", "75",
-                "nexthop", "via", "fe80::1", "dev", "enp2s0", "weight", "1", "nexthop", "via",
-                "fe80::2", "dev", "enp2s0", "weight", "1",
-            ])
-        );
-    }
-
-    #[test]
-    fn a_lifetime_is_dropped() {
-        let routes = parse_route_show(
-            "2001:db8::/64 via fe80::1 dev eth0 proto ra metric 1024 expires 1786sec hoplimit 64 pref medium",
-        );
-        assert_eq!(
-            routes[0].attrs,
-            strs(&[
-                "2001:db8::/64",
-                "via",
-                "fe80::1",
-                "dev",
-                "eth0",
-                "proto",
-                "ra",
-                "metric",
-                "1024",
-                "hoplimit",
-                "64",
-                "pref",
-                "medium",
-            ])
-        );
-    }
-
-    #[test]
-    fn an_interface_named_like_a_flag_survives() {
-        for name in ["trap", "error", "expires"] {
-            let routes = parse_route_show(&format!(
-                "2001:db8::/64 dev {name} proto ra metric 100 trap"
-            ));
-            assert_eq!(
-                routes[0].attrs,
-                strs(&["2001:db8::/64", "dev", name, "proto", "ra", "metric", "100"]),
-                "{name}"
-            );
-        }
-    }
-
-    #[test]
-    fn nested_interface_keywords_keep_their_values() {
-        for line in [
-            "2001:db8::/64 dev eth0 iif trap oif error metric 100",
-            "10.0.0.0/8 dev tun0 link_dev expires metric 5",
-        ] {
-            assert_eq!(
-                parse_route_show(line)[0].attrs,
-                line.split_whitespace().collect::<Vec<_>>(),
-                "{line}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_nexthop_id_drops_its_expansion() {
-        for shown in [
-            "10.0.0.0/8 nhid 5 via 10.0.0.1 dev eth0 proto ra metric 100",
-            "10.0.0.0/8 nhid 5 via inet6 fe80::1 dev eth0 proto ra metric 100",
-            "10.0.0.0/8 nhid 5 encap mpls 100/200 via 10.0.0.1 dev eth0 onlink proto ra metric 100",
-        ] {
-            assert_eq!(
-                parse_route_show(shown)[0].attrs,
-                strs(&["10.0.0.0/8", "nhid", "5", "proto", "ra", "metric", "100"]),
-                "{shown}"
-            );
-        }
-        for shown in [
-            "10.0.0.0/8 via 10.0.0.1 dev nhid proto static metric 100",
-            "10.0.0.0/8 encap mpls 100 via 10.0.0.1 dev eth0 proto static metric 100",
-        ] {
-            let route = &parse_route_show(shown)[0];
-            assert!(!route.nhid, "{shown}");
-            assert_eq!(
-                route.attrs,
-                shown.split_whitespace().collect::<Vec<_>>(),
-                "{shown}"
-            );
-        }
-
-        // iproute2 6.9 output: the route's `tos` follows the expansion, an ip encap carries one of its own.
-        for (shown, attrs) in [
-            (
-                "10.1.0.0/16 nhid 5 tos 0x10 via 10.0.0.1 dev dummy0",
-                vec!["10.1.0.0/16", "nhid", "5", "tos", "0x10"],
-            ),
-            (
-                "10.3.0.0/16 nhid 6  encap ip id 7 src 0.0.0.0 dst 10.0.0.9 ttl 0 tos 0 tos 0x10 via 10.0.0.1 dev dummy0",
-                vec!["10.3.0.0/16", "nhid", "6", "tos", "0x10"],
-            ),
-            (
-                "10.3.0.0/16 nhid 6  encap ip id 7 src 0.0.0.0 dst 10.0.0.9 ttl 0 tos 0 via 10.0.0.1 dev dummy0",
-                vec!["10.3.0.0/16", "nhid", "6"],
-            ),
-            (
-                "10.0.0.0/8 nhid 5 encap mpls 100/200 tos 0x10 via 10.0.0.1 dev eth0 proto ra metric 100",
-                vec![
-                    "10.0.0.0/8",
-                    "nhid",
-                    "5",
-                    "tos",
-                    "0x10",
-                    "proto",
-                    "ra",
-                    "metric",
-                    "100",
-                ],
-            ),
-        ] {
-            let route = &parse_route_show(shown)[0];
-            assert_eq!(route.attrs, strs(&attrs), "{shown}");
-            let tos: Vec<_> = attrs
-                .windows(2)
-                .find(|w| w[0] == "tos")
-                .into_iter()
-                .flatten()
-                .copied()
-                .collect();
-            assert_eq!(
-                route
-                    .selectors
-                    .iter()
-                    .take(2)
-                    .map(String::as_str)
-                    .collect::<Vec<_>>(),
-                tos,
-                "{shown}"
-            );
-        }
-
-        let group = parse_route_show(
-            "default nhid 7 proto ra metric 1024 pref medium\n\
-             \tnexthop via fe80::1 dev eth0 weight 1\n\
-             \tnexthop via fe80::2 dev eth0 weight 1\n",
-        );
-        assert_eq!(group.len(), 1);
-        assert!(group[0].nexthops.is_empty());
-        assert_eq!(
-            route_replace_args(&group[0], "75"),
-            strs(&[
-                "default", "nhid", "7", "proto", "ra", "metric", "1024", "pref", "medium", "table",
-                "75",
-            ])
-        );
-    }
-
-    #[test]
-    fn routes_differing_only_in_metric_are_distinct_and_deleted_by_metric() {
-        let routes = parse_route_show(
-            "2001:db8::/64 dev eth0 proto ra metric 100\n\
-             2001:db8::/64 dev eth0 proto kernel metric 1024\n",
-        );
-        assert_ne!(routes[0].identity(), routes[1].identity());
-        assert_eq!(
-            route_del_args(&routes[1], "75"),
-            strs(&["2001:db8::/64", "metric", "1024", "table", "75"])
-        );
-        assert_eq!(
-            route_del_args(&parse_route_show("10.0.0.0/8 dev eth0")[0], "75"),
-            strs(&["10.0.0.0/8", "table", "75"])
-        );
-    }
-
-    #[test]
-    fn routes_alias_on_tos_and_source_and_are_deleted_with_them() {
-        let v4 = parse_route_show(
-            "10.0.0.0/8 via 10.0.0.1 dev eth0 metric 100\n\
-             10.0.0.0/8 tos 0x10 via 10.0.0.2 dev eth0 metric 100\n",
-        );
-        assert_ne!(v4[0].identity(), v4[1].identity());
-        assert_eq!(
-            route_del_args(&v4[1], "75"),
-            strs(&["10.0.0.0/8", "tos", "0x10", "metric", "100", "table", "75"])
-        );
-
-        let v6 = parse_route_show(
-            "2001:db8::/64 via fe80::1 dev eth0 metric 1024\n\
-             2001:db8::/64 from 2001:db8:1::/64 via fe80::2 dev eth0 metric 1024\n",
-        );
-        assert_ne!(v6[0].identity(), v6[1].identity());
-        assert_eq!(
-            route_del_args(&v6[1], "75"),
-            strs(&[
-                "2001:db8::/64",
-                "from",
-                "2001:db8:1::/64",
-                "metric",
-                "1024",
-                "table",
-                "75"
-            ])
-        );
-        assert_eq!(
-            v6[0].failure_domain(),
-            ("2001:db8::/64".to_owned(), Vec::new())
-        );
-        assert_eq!(
-            v6[1].failure_domain(),
-            (
-                "2001:db8::/64".to_owned(),
-                strs(&["from", "2001:db8:1::/64"])
-            )
-        );
-    }
-
-    #[test]
-    fn ttl_propagate_uses_the_spelling_accepted_on_replay() {
-        for value in ["enabled", "disabled"] {
-            let route = parse_route_show(&format!("192.0.2.0/24 dev eth0 ttl-propogate {value}"));
-            assert_eq!(
-                route[0].attrs,
-                strs(&["192.0.2.0/24", "dev", "eth0", "ttl-propagate", value])
-            );
-        }
-    }
-
-    #[test]
-    fn an_xresolve_route_keeps_its_destination() {
-        let routes = parse_route_show("xresolve 10.0.0.0/8 dev lo metric 1024");
-        assert_eq!(routes[0].prefix, "10.0.0.0/8");
-        assert_eq!(
-            routes[0].attrs,
-            strs(&["xresolve", "10.0.0.0/8", "dev", "lo", "metric", "1024"])
-        );
-    }
-
-    #[test]
-    fn a_typed_route_keeps_its_type_and_drops_its_errno() {
-        let routes =
-            parse_route_show("unreachable fd00::/64 dev lo metric 1024 error -113 pref medium");
-        assert_eq!(routes[0].prefix, "fd00::/64");
-        assert_eq!(
-            routes[0].attrs,
-            strs(&[
-                "unreachable",
-                "fd00::/64",
-                "dev",
-                "lo",
-                "metric",
-                "1024",
-                "pref",
-                "medium"
-            ])
-        );
-    }
-
-    #[test]
-    fn a_blackhole_default_is_a_default() {
-        let routes = parse_route_show("blackhole default dev lo metric 1024 error -22 pref medium");
-        assert_eq!(routes[0].prefix, "default");
-    }
-
-    #[test]
-    fn display_flags_are_dropped() {
-        let routes = parse_route_show(
-            "2001:db8::/64 dev eth0 proto kernel metric 256 rt_offload linkdown dead pref medium",
-        );
-        assert_eq!(
-            routes[0].attrs,
-            strs(&[
-                "2001:db8::/64",
-                "dev",
-                "eth0",
-                "proto",
-                "kernel",
-                "metric",
-                "256",
-                "pref",
-                "medium"
-            ])
-        );
-    }
-
-    #[test]
-    fn a_plain_route_passes_through() {
-        let routes = parse_route_show("fe80::/64 dev eno0 proto kernel metric 1024 pref medium\n");
-        assert_eq!(routes[0].prefix, "fe80::/64");
-        assert_eq!(
-            route_replace_args(&routes[0], "75"),
-            strs(&[
-                "fe80::/64",
-                "dev",
-                "eno0",
-                "proto",
-                "kernel",
-                "metric",
-                "1024",
-                "pref",
-                "medium",
-                "table",
-                "75"
-            ])
-        );
-    }
-
-    #[test]
-    fn a_stray_next_hop_line_is_ignored() {
-        assert!(parse_route_show("nexthop via fe80::1 dev eth0 weight 1\n").is_empty());
     }
 }

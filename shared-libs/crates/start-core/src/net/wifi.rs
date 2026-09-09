@@ -1106,7 +1106,7 @@ pub async fn synchronize_network_manager<P: AsRef<Path>>(
     // outbound points its priority-75 catch-all at a `blackhole default` table
     // (see `apply_policy_routing_v6`), dropping the host's v6 egress without also
     // blackholing replies to inbound tunnel connections — those are pinned to
-    // their arrival interface by the priority-50 CONNMARK rule.
+    // their arrival interface by the priority-51 CONNMARK rule.
     Command::new("ip")
         .arg("-6")
         .arg("rule")
