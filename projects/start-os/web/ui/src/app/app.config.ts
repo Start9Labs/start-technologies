@@ -28,7 +28,6 @@ import {
   AbstractMarketplaceService,
   FilterPackagesPipe,
 } from '@start9labs/marketplace'
-import { z } from '@start9labs/start-core'
 import {
   I18N_PROVIDERS,
   I18N_STORAGE,
@@ -88,10 +87,6 @@ const {
   useMocks,
   ui: { api },
 } = require('../../../../../../config.json') as WorkspaceConfig
-
-// The UI is served under a CSP without 'unsafe-eval': make zod take its
-// interpreted path instead of probing `new Function()` against the policy.
-z.config({ jitless: true })
 
 export const APP_CONFIG: ApplicationConfig = {
   providers: [

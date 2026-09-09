@@ -1,3 +1,4 @@
-import * as z from 'zod'
+import { config } from 'zod/v4/core'
 
-z.config({ jitless: true })
+// The UI CSP forbids Zod's JIT compiler.
+config({ jitless: true })

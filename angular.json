@@ -248,7 +248,7 @@
             },
             "index": "projects/start-tunnel/web/src/index.html",
             "browser": "projects/start-tunnel/web/src/main.ts",
-            "polyfills": [],
+            "polyfills": ["./projects/start-tunnel/web/src/polyfills"],
             "optimization": {
               "scripts": true,
               "fonts": true,
