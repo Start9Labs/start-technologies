@@ -3315,11 +3315,11 @@ help.arg.config-file-path:
   pl_PL: "Ścieżka do pliku konfiguracyjnego"
 
 help.arg.container-name:
-  en_US: "Name of the container"
-  de_DE: "Name des Containers"
-  es_ES: "Nombre del contenedor"
-  fr_FR: "Nom du conteneur"
-  pl_PL: "Nazwa kontenera"
+  en_US: "Name of the subcontainer"
+  de_DE: "Name des Subcontainers"
+  es_ES: "Nombre del subcontenedor"
+  fr_FR: "Nom du sous-conteneur"
+  pl_PL: "Nazwa podkontenera"
 
 help.arg.data-directory:
   en_US: "Path to data directory"
@@ -4009,11 +4009,11 @@ help.arg.squashfs-image-path:
   pl_PL: "Ścieżka do pliku obrazu squashfs"
 
 help.arg.subcontainer-name:
-  en_US: "Name of the subcontainer"
-  de_DE: "Name des Subcontainers"
-  es_ES: "Nombre del subcontenedor"
-  fr_FR: "Nom du sous-conteneur"
-  pl_PL: "Nazwa podkontenera"
+  en_US: "Guid of the subcontainer, or a prefix; use --name to select by name"
+  de_DE: "Guid des Subcontainers oder ein Präfix davon; --name wählt nach Name aus"
+  es_ES: "Guid del subcontenedor, o un prefijo; use --name para seleccionar por nombre"
+  fr_FR: "Guid du sous-conteneur, ou un préfixe ; utilisez --name pour sélectionner par nom"
+  pl_PL: "Guid podkontenera lub jego prefiks; użyj --name, aby wybrać według nazwy"
 
 help.arg.target-disk:
   en_US: "Target disk for installation"
