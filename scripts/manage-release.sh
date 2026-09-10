@@ -1716,9 +1716,10 @@ if ! KIND=$(project_kind "$PROJECT"); then
     exit 2
 fi
 
-VERSION="${VERSION:-$(derive_version "$PROJECT")}"
-if [ -z "$VERSION" ]; then
-    >&2 echo "Could not derive version for ${PROJECT}"
+# Without the `!`, errexit takes a failing derivation at the assignment itself
+# and the script exits mute — the state this message exists to describe.
+if ! VERSION="${VERSION:-$(derive_version "$PROJECT")}" || [ -z "$VERSION" ]; then
+    >&2 echo "Could not derive ${PROJECT}'s version from its manifest; pass VERSION=<version> to override."
     exit 1
 fi
 TAG="${PROJECT}/v${VERSION}"
