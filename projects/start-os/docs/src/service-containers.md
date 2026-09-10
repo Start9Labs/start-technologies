@@ -29,10 +29,16 @@ Replace `<PACKAGE>` with the package identifier (e.g., `bitcoind`, `lnd`). You c
 start-cli package list
 ```
 
-This drops you into a shell inside the service's **subcontainer** (not the LXC container itself). If the service has only one subcontainer, you are placed directly into it. If there is more than one subcontainer, you will be prompted to choose one. To skip the prompt, specify the subcontainer ID directly:
+This drops you into a shell inside the service's **subcontainer** (not the LXC container itself). If the service has only one subcontainer, you are placed directly into it. If there is more than one subcontainer, you will be prompted to choose one. To skip the prompt, name the subcontainer with `-n` (the package's README lists them):
 
 ```bash
-start-cli package attach <PACKAGE> <SUBCONTAINER>
+start-cli package attach <PACKAGE> -n <SUBCONTAINER>
+```
+
+To run one command instead of opening a shell, put it after `--`. Commands run as the image's default user; `-u` runs them as another, which some services' command-line tools require:
+
+```bash
+start-cli package attach <PACKAGE> -n <SUBCONTAINER> -u <USER> -- <COMMAND>
 ```
 
 Type `exit` or press `Ctrl+D` to return to the host.
@@ -41,10 +47,10 @@ Type `exit` or press `Ctrl+D` to return to the host.
 
 In rare cases, you may need to access the LXC container itself rather than a subcontainer. For example, subcontainers are only accessible while the service is running, but the LXC container remains accessible even when the service is stopped — useful for inspecting or repairing state that prevents a service from starting.
 
-First, obtain the container ID:
+First, find the container ID in the stats table:
 
 ```bash
-start-cli package stats <PACKAGE>
+start-cli package stats
 ```
 
 Then attach directly to the LXC container:

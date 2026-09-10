@@ -244,19 +244,19 @@ Display logs from a service. These are also readable and downloadable on the ser
 - `-B, --before` — Show logs before cursor
 - `-b, --boot <ID>` — Filter by boot ID
 
-### `start-cli package attach <ID> [COMMAND]`
+### `start-cli package attach <ID> [-- COMMAND]`
 
 Open a shell inside a service's subcontainer (within the LXC container), or run a one-off command. If the service has only one subcontainer, you are placed directly into it; if there are multiple, you will be prompted to choose. See [Accessing Service Containers](service-containers.md) for details.
 
-- `-s, --subcontainer <NAME>` — Target a specific subcontainer
-- `-n, --name <NAME>` — Container name
-- `-u, --user <USER>` — Run as a specific user
-- `-i, --image-id <ID>` — Image identifier
+- `-n, --name <NAME>` — Select the subcontainer by name; the package's README lists them
+- `-s, --subcontainer <GUID>` — Select the subcontainer by its internal Guid, or a prefix of it (names go to `-n`)
+- `-i, --image-id <ID>` — Select the subcontainer by the image it runs
+- `-u, --user <USER>` — Run as this user instead of the image's default
 - `--force-tty` — Force TTY mode
 
-### `start-cli package stats <ID>`
+### `start-cli package stats`
 
-Display LXC container resource usage.
+Display LXC container resource usage for every installed service.
 
 - `--format` — Output format
 
