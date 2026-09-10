@@ -97,11 +97,15 @@ A pre-release version instead takes prerelease segments: `exver::Version::new([0
 4. **`as_version_t()` match** — `Self::V0_4_0_1(v) => DynVersion(Box::new(v.0)), // VERSION_BUMP`
 5. **`as_exver()` match** (inside `#[cfg(test)]`) — `Version::V0_4_0_1(Wrapper(x)) => x.semver(), // VERSION_BUMP`
 
-### 5. Release-gated docs
+### 5. Release notes
+
+**`projects/start-os/release-notes/X.Y.Z.N.md`** — this release's curated notes: a lede, an optional `## ⚠️ Before You Update`, `## Highlights`, an optional `## Important`. The GitHub release body, the registry entry the update screen shows, and the post-update notification are all composed from this one file. **The build includes it by name** (`version/release_notes.rs`), so start-core does not compile until it exists.
+
+### 6. Release-gated docs
 
 `projects/start-os/docs/src/installing-startos.md` (and `update-040.md`) pin the GitHub release link to the shipping version. `manage-release.sh pre-check start-os` fails on a stale or `releases/latest` link.
 
-### 6. SDK TypeScript version (only on breaking SDK changes)
+### 7. SDK TypeScript version (only on breaking SDK changes)
 
 **`projects/start-sdk/lib/StartSdk.ts`** — update `OSVersion` **only** when the bump includes breaking changes the SDK relies on. `OSVersion` tracks compatibility for service developers, not the OS release cadence; routine bumps skip it.
 
@@ -119,6 +123,7 @@ cargo test -p start-core --features test version::   # incl. current_matches_man
 - [ ] Create `shared-libs/crates/start-core/src/version/vX_Y_Z_N.rs`
 - [ ] Update `shared-libs/crates/start-core/src/version/mod.rs` in 5 locations
 - [ ] Add the `CHANGELOG.md` entry under a new heading
+- [ ] Write `projects/start-os/release-notes/X.Y.Z.N.md` (the build won't link without it)
 - [ ] Bump the release link in `projects/start-os/docs/src/`
 - [ ] Update `projects/start-sdk/lib/StartSdk.ts` `OSVersion` — **only** on breaking SDK changes
 - [ ] `cargo test` + `pre-check` pass
