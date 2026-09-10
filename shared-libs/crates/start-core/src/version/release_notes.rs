@@ -3,8 +3,6 @@ use crate::context::RpcContext;
 use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
 
-/// This build's release notes, the same file the GitHub release and the registry
-/// entry the update screen reads are composed from.
 const NOTES: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../../projects/start-os/release-notes/",
@@ -12,9 +10,6 @@ const NOTES: &str = include_str!(concat!(
     ".md"
 ));
 
-/// Welcome a server to the version it just landed on. The link is appended
-/// rather than placed inside `## Highlights` as the GitHub body places it: a
-/// notification renders as one document, so the bottom is the bottom.
 pub async fn welcome(ctx: &RpcContext) -> Result<(), Error> {
     let version = Current::default().semver();
     let body = format!(
@@ -26,8 +21,8 @@ pub async fn welcome(ctx: &RpcContext) -> Result<(), Error> {
                 db,
                 None,
                 NotificationLevel::Success,
-                format!("Welcome to StartOS {version}!"),
-                "Click \"View Details\" for what's new in this release.".to_string(),
+                t!("release-notes.welcome-title", version = version.to_string()).to_string(),
+                t!("release-notes.welcome-message").to_string(),
                 body,
             )?;
             Ok(())

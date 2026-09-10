@@ -28,6 +28,9 @@ CORE_SRC := $(call ls-files, shared-libs/crates/start-core) \
 	$(call ls-files, shared-libs/crates/rpc-toolkit) \
 	$(call ls-files, shared-libs/crates/yasi) \
 	$(shell git ls-files shared-libs/crates/patch-db) build/builder-alias.sh $(GIT_HASH_FILE)
+# start-core compiles this release's notes in (version/release_notes.rs), so a
+# notes-only edit has to rebuild every bin that embeds them.
+RELEASE_NOTES := $(wildcard projects/start-os/release-notes/*.md)
 PATCH_DB_CLIENT_SRC := $(shell git ls-files shared-libs/crates/patch-db/client)
 GZIP_BIN := $(shell which pigz || which gzip)
 TAR_BIN := $(shell which gtar || which tar)

@@ -75,6 +75,8 @@ on:
       # Doc-only edits under the allowlisted project trees (e.g.
       # projects/start-os/docs/**) shouldn't trigger a build.
       - '!**/*.md'
+      # Except the release notes, which the binary compiles in.
+      - 'projects/start-os/release-notes/**'
   pull_request:
     # The jobs below skip drafts, and `ready_for_review` is not a default
     # activity type, so without it a draft marked ready is never checked.
@@ -101,6 +103,8 @@ on:
       # Doc-only edits under the allowlisted project trees (e.g.
       # projects/start-os/docs/**) shouldn't trigger a build.
       - '!**/*.md'
+      # Except the release notes, which the binary compiles in.
+      - 'projects/start-os/release-notes/**'
 
 # The group is scoped by event so a master push can't cancel an in-flight
 # dispatched release build. Only pull requests cancel: a push to master
