@@ -2075,10 +2075,10 @@ lxc.mod.cleaned-up-containers:
 
 # version/release_notes.rs
 release-notes.welcome-message:
-  en_US: "Click \"View Details\" for what's new in this release."
+  en_US: "Click \"View details\" for what's new in this release."
   de_DE: "Klicken Sie auf \"Details anzeigen\", um zu sehen, was in dieser Version neu ist."
   es_ES: "Haz clic en \"Ver detalles\" para conocer las novedades de esta versión."
-  fr_FR: "Cliquez sur \"Afficher les détails\" pour découvrir les nouveautés de cette version."
+  fr_FR: "Cliquez sur \"Voir les détails\" pour découvrir les nouveautés de cette version."
   pl_PL: "Kliknij \"Zobacz szczegóły\", aby zobaczyć nowości w tej wersji."
 
 release-notes.welcome-title:

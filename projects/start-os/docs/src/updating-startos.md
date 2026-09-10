@@ -21,7 +21,7 @@
    > [!WARNING]
    > Updates can take up to an _hour_ to complete. During this time, there is no indication of progress and your StartOS UI will be unreachable. **DO NOT UNPLUG YOUR SERVER DURING THIS TIME!**
 
-1. When your server comes back, a notification welcomes you to the new version. Open it from the notifications bell, or from `System -> Notifications`, to read that release's notes again at any time.
+1. When your server comes back, a notification welcomes you to the new version. Open it from **Notifications** — the bell in the menu — to read that release's notes again at any time.
 
 ## Update by Re-flashing
 
