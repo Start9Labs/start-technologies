@@ -418,6 +418,23 @@ pub struct WithIoFormat<T> {
     #[serde(flatten)]
     pub rest: T,
 }
+
+fn with_io_format_arg(cmd: clap::Command) -> clap::Command {
+    if cmd.get_arguments().any(|arg| arg.get_id() == "format") {
+        cmd
+    } else {
+        cmd.arg(
+            clap::Arg::new("format")
+                .long("format")
+                .value_name("FORMAT")
+                .num_args(1)
+                .help("help.arg.format")
+                .value_parser(|value: &str| {
+                    value.parse::<IoFormat>().map_err(|error| eyre!("{error}"))
+                }),
+        )
+    }
+}
 impl<T: FromArgMatches> FromArgMatches for WithIoFormat<T> {
     fn from_arg_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
         Ok(Self {
@@ -433,34 +450,10 @@ impl<T: FromArgMatches> FromArgMatches for WithIoFormat<T> {
 }
 impl<T: CommandFactory> CommandFactory for WithIoFormat<T> {
     fn command() -> clap::Command {
-        let cmd = T::command();
-        if !cmd.get_arguments().any(|a| a.get_id() == "format") {
-            cmd.arg(
-                clap::Arg::new("format")
-                    .long("format")
-                    .value_name("FORMAT")
-                    .num_args(1)
-                    .help("help.arg.format")
-                    .value_parser(|s: &str| s.parse::<IoFormat>().map_err(|e| eyre!("{e}"))),
-            )
-        } else {
-            cmd
-        }
+        with_io_format_arg(T::command())
     }
     fn command_for_update() -> clap::Command {
-        let cmd = T::command_for_update();
-        if !cmd.get_arguments().any(|a| a.get_id() == "format") {
-            cmd.arg(
-                clap::Arg::new("format")
-                    .long("format")
-                    .value_name("FORMAT")
-                    .num_args(1)
-                    .help("help.arg.format")
-                    .value_parser(|s: &str| s.parse::<IoFormat>().map_err(|e| eyre!("{e}"))),
-            )
-        } else {
-            cmd
-        }
+        with_io_format_arg(T::command_for_update())
     }
 }
 
@@ -615,32 +608,10 @@ where
     T: DeserializeOwned,
 {
     fn augment_args(cmd: clap::Command) -> clap::Command {
-        if !cmd.get_arguments().any(|a| a.get_id() == "format") {
-            cmd.arg(
-                clap::Arg::new("format")
-                    .long("format")
-                    .value_name("FORMAT")
-                    .num_args(1)
-                    .help("help.arg.format")
-                    .value_parser(|s: &str| s.parse::<IoFormat>().map_err(|e| eyre!("{e}"))),
-            )
-        } else {
-            cmd
-        }
+        with_io_format_arg(cmd)
     }
     fn augment_args_for_update(cmd: clap::Command) -> clap::Command {
-        if !cmd.get_arguments().any(|a| a.get_id() == "format") {
-            cmd.arg(
-                clap::Arg::new("format")
-                    .long("format")
-                    .value_name("FORMAT")
-                    .num_args(1)
-                    .help("help.arg.format")
-                    .value_parser(|s: &str| s.parse::<IoFormat>().map_err(|e| eyre!("{e}"))),
-            )
-        } else {
-            cmd
-        }
+        with_io_format_arg(cmd)
     }
 }
 

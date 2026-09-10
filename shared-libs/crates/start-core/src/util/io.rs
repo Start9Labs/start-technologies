@@ -1195,7 +1195,7 @@ pub(crate) async fn write_file_atomic_durable(
     contents: impl AsRef<[u8]>,
 ) -> Result<(), Error> {
     let path = path.as_ref();
-    let mut file = AtomicFile::new_durable(path, None::<&Path>)
+    let mut file = AtomicFile::new_durable(path)
         .await
         .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("create {path:?}")))?;
     file.write_all(contents.as_ref())
@@ -1890,11 +1890,8 @@ impl AtomicFile {
         Self::new_inner(path.as_ref(), tmp_path.as_ref().map(AsRef::as_ref), false).await
     }
 
-    async fn new_durable(
-        path: impl AsRef<Path> + Send + Sync,
-        tmp_path: Option<impl AsRef<Path> + Send + Sync>,
-    ) -> Result<Self, Error> {
-        Self::new_inner(path.as_ref(), tmp_path.as_ref().map(AsRef::as_ref), true).await
+    async fn new_durable(path: impl AsRef<Path> + Send + Sync) -> Result<Self, Error> {
+        Self::new_inner(path.as_ref(), None, true).await
     }
 
     async fn new_inner(path: &Path, tmp_path: Option<&Path>, durable: bool) -> Result<Self, Error> {
@@ -1909,16 +1906,7 @@ impl AtomicFile {
             canonicalize(path, true).await?
         };
         let tmp_path = if let Some(tmp_path) = tmp_path {
-            if durable {
-                if let Some(parent) = parent_directory(tmp_path) {
-                    create_dir_all_durable(parent).await.with_ctx(|_| {
-                        (ErrorKind::Filesystem, lazy_format!("mkdir -p {parent:?}"))
-                    })?;
-                }
-                canonicalize(tmp_path, false).await?
-            } else {
-                canonicalize(tmp_path, true).await?
-            }
+            canonicalize(tmp_path, true).await?
         } else {
             to_tmp_path(&path)?
         };
@@ -1965,12 +1953,7 @@ impl AtomicFile {
                 )
             })?;
         if durable {
-            let path_parent = self.path.parent().unwrap_or(Path::new("."));
-            sync_directory(path_parent).await?;
-            let tmp_parent = self.tmp_path.parent().unwrap_or(Path::new("."));
-            if tmp_parent != path_parent {
-                sync_directory(tmp_parent).await?;
-            }
+            sync_directory(self.path.parent().unwrap_or(Path::new("."))).await?;
         }
         Ok(())
     }
@@ -2099,19 +2082,6 @@ mod test {
         delete_file_durable(&durable).await.unwrap();
         assert_eq!(
             tokio::fs::metadata(durable).await.unwrap_err().kind(),
-            std::io::ErrorKind::NotFound
-        );
-
-        let destination = tmp.join("durable-destination/file");
-        let temporary = tmp.join("durable-temporary/file.tmp");
-        let mut custom_tmp_file = AtomicFile::new_durable(&destination, Some(&temporary))
-            .await
-            .unwrap();
-        custom_tmp_file.write_all(b"custom").await.unwrap();
-        custom_tmp_file.save_durable().await.unwrap();
-        assert_eq!(tokio::fs::read(destination).await.unwrap(), b"custom");
-        assert_eq!(
-            tokio::fs::metadata(temporary).await.unwrap_err().kind(),
             std::io::ErrorKind::NotFound
         );
 

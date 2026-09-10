@@ -688,15 +688,43 @@ mod tests {
 
     #[tokio::test]
     async fn reloadable_http_client_replaces_future_clones() {
+        let proxy = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_url = format!("socks5h://{}", proxy.local_addr().unwrap());
+        let proxy_server = tokio::spawn(async move {
+            let (mut stream, _) = proxy.accept().await.unwrap();
+            let mut request = [0; 64];
+            stream.read(&mut request).await.unwrap();
+        });
+        let target = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let target_url = format!("http://{}", target.local_addr().unwrap());
+        let target_server = tokio::spawn(async move {
+            let (mut stream, _) = target.accept().await.unwrap();
+            let mut request = [0; 4096];
+            stream.read(&mut request).await.unwrap();
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                .await
+                .unwrap();
+        });
         let http = ReloadableHttpClient {
             client: SyncRwLock::new(client_with_generation("old")),
-            socks_proxy_url: "socks5h://127.0.0.1:9050".to_owned(),
+            socks_proxy_url: proxy_url,
         };
         let old = http.get();
         http.reload().unwrap();
 
-        let url = assert_client_generation(old, "old").await;
-        assert!(http.get().get(url).send().await.is_err());
+        assert_client_generation(old, "old").await;
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                http.get().get(target_url).send()
+            )
+            .await
+            .unwrap()
+            .is_err()
+        );
+        proxy_server.await.unwrap();
+        target_server.abort();
     }
 
     #[tokio::test]

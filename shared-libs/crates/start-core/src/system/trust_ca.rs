@@ -134,14 +134,11 @@ async fn install_transaction(
         live: FileSnapshot::capture(live.join(&filename)).await?,
         persistent: FileSnapshot::capture(persistent.join(&filename)).await?,
     };
-    if snapshot.matches(&parsed.canonical_pem) {
-        return Ok(parsed.result);
-    }
     run_install_stages(
         || write_file_atomic_durable(&snapshot.live.path, &parsed.canonical_pem),
+        || write_file_atomic_durable(&snapshot.persistent.path, &parsed.canonical_pem),
         update_trust_store,
         || async { context.reload_http_client() },
-        || write_file_atomic_durable(&snapshot.persistent.path, &parsed.canonical_pem),
         |error| rollback(context, &snapshot, error),
     )
     .await?;
@@ -150,21 +147,21 @@ async fn install_transaction(
 
 async fn run_install_stages(
     write_live: impl AsyncFnOnce() -> Result<(), Error>,
+    write_persistent: impl AsyncFnOnce() -> Result<(), Error>,
     refresh: impl AsyncFnOnce() -> Result<(), Error>,
     reload: impl AsyncFnOnce() -> Result<(), Error>,
-    write_persistent: impl AsyncFnOnce() -> Result<(), Error>,
     rollback: impl AsyncFnOnce(Error) -> Error,
 ) -> Result<(), Error> {
     if let Err(error) = write_live().await {
+        return Err(rollback(error).await);
+    }
+    if let Err(error) = write_persistent().await {
         return Err(rollback(error).await);
     }
     if let Err(error) = refresh().await {
         return Err(rollback(error).await);
     }
     if let Err(error) = reload().await {
-        return Err(rollback(error).await);
-    }
-    if let Err(error) = write_persistent().await {
         return Err(rollback(error).await);
     }
     Ok(())
@@ -415,11 +412,6 @@ impl FileSnapshot {
 }
 
 impl TrustStoreSnapshot {
-    fn matches(&self, contents: &[u8]) -> bool {
-        self.live.contents.as_deref() == Some(contents)
-            && self.persistent.contents.as_deref() == Some(contents)
-    }
-
     async fn restore(&self) -> Result<(), Error> {
         let mut errors = ErrorCollection::new();
         errors.handle(self.persistent.restore().await);
@@ -484,8 +476,7 @@ mod tests {
 
     use super::*;
     use crate::net::ssl::{CertBranding, SANInfo, gen_nistp256, make_root_cert, make_self_signed};
-    use crate::util::io::TmpDir;
-    use crate::util::io::write_file_atomic;
+    use crate::util::io::{TmpDir, write_file_atomic};
 
     fn root_ca_pem() -> Vec<u8> {
         let key = gen_nistp256().unwrap();
@@ -839,32 +830,14 @@ mod tests {
         );
     }
 
-    #[test]
-    fn identical_snapshots_match_canonical_certificate() {
-        let canonical = b"canonical".to_vec();
-        let snapshot = TrustStoreSnapshot {
-            live: FileSnapshot {
-                path: PathBuf::from("live"),
-                contents: Some(canonical.clone()),
-            },
-            persistent: FileSnapshot {
-                path: PathBuf::from("persistent"),
-                contents: Some(canonical.clone()),
-            },
-        };
-
-        assert!(snapshot.matches(&canonical));
-        assert!(!snapshot.matches(b"different"));
-    }
-
     #[tokio::test]
-    async fn persistent_ca_is_published_after_live_refresh_and_reload() {
+    async fn trust_is_reloaded_after_both_files_are_durable() {
         let stages = Arc::new(StdMutex::new(Vec::new()));
         run_install_stages(
             record_stage(&stages, "write-live", Ok(())),
+            record_stage(&stages, "write-persistent", Ok(())),
             record_stage(&stages, "refresh", Ok(())),
             record_stage(&stages, "reload", Ok(())),
-            record_stage(&stages, "write-persistent", Ok(())),
             |error| async move { error },
         )
         .await
@@ -872,20 +845,20 @@ mod tests {
 
         assert_eq!(
             *stages.lock().unwrap(),
-            ["write-live", "refresh", "reload", "write-persistent"]
+            ["write-live", "write-persistent", "refresh", "reload"]
         );
     }
 
     #[tokio::test]
-    async fn persistent_write_failure_rolls_back_live_state() {
+    async fn persistent_write_failure_rolls_back_before_publication() {
         let stages = Arc::new(StdMutex::new(Vec::new()));
         let rollback_stages = stages.clone();
         let error = Error::new(eyre!("persistent write failed"), ErrorKind::Filesystem);
         let result = run_install_stages(
             record_stage(&stages, "write-live", Ok(())),
+            record_stage(&stages, "write-persistent", Err(error)),
             record_stage(&stages, "refresh", Ok(())),
             record_stage(&stages, "reload", Ok(())),
-            record_stage(&stages, "write-persistent", Err(error)),
             move |error| async move {
                 rollback_stages.lock().unwrap().push("rollback");
                 error
@@ -896,13 +869,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             *stages.lock().unwrap(),
-            [
-                "write-live",
-                "refresh",
-                "reload",
-                "write-persistent",
-                "rollback"
-            ]
+            ["write-live", "write-persistent", "rollback"]
         );
     }
 

@@ -6,9 +6,9 @@ Outbound connections work by default. A service container can open a TCP or UDP 
 
 ## TLS trust roots are package-scoped
 
-Service containers use CA roots supplied in the package image or configured by the package. `start-cli server trust-ca` installs roots in the StartOS host trust store; those roots are not copied into service containers.
+`start-cli server trust-ca` adds CA roots to the trust store used by StartOS host processes. Service-container TLS clients use roots supplied in the package image or configured by the package.
 
-A package that connects to an endpoint using a private CA must install the root and configure its client to trust it. For example, a Node.js service can set `NODE_EXTRA_CA_CERTS` to the root certificate's path.
+To connect to an endpoint using a private CA, install the root in the package and configure the client to trust it. For example, a Node.js service can set `NODE_EXTRA_CA_CERTS` to the root certificate's path.
 
 Three things are blocked, and one of them is the reason most packages that "can't reach the internet" actually fail.
 
