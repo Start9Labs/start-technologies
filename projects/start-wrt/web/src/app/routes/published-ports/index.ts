@@ -9,6 +9,7 @@ import { provideFormService } from 'src/app/services/form.service'
 import { PublishPortDialog } from './dialog'
 import { PublishedPortsService } from './service'
 import { PublishedPortsTable } from './table'
+import { AutomaticPortUsesTable } from './automatic-table'
 import { isGua, PublishedPortDialogResult, PublishedPortDisplay } from './types'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { confirmVpnExposedPort } from 'src/app/services/vpn-exposed-port'
@@ -38,6 +39,23 @@ import { confirmVpnExposedPort } from 'src/app/services/vpn-exposed-port'
       [tuiSkeleton]="loading()"
       (edit)="edit($event)"
     ></table>
+    @if (service.automaticPortUses().length) {
+      <header tuiHeader="h6">
+        <hgroup tuiTitle>
+          <h3>{{ 'Automatic' | i18n }}</h3>
+          <p tuiSubtitle>
+            {{
+              'Opened by trusted devices themselves via UPnP or PCP. These forwards renew automatically and expire when the device stops using them.'
+                | i18n
+            }}
+          </p>
+        </hgroup>
+      </header>
+      <table
+        [style.margin-block.rem]="1"
+        [automaticPortUses]="service.automaticPortUses()"
+      ></table>
+    }
   `,
   providers: [provideFormService(PublishedPortsService)],
   imports: [
@@ -45,6 +63,7 @@ import { confirmVpnExposedPort } from 'src/app/services/vpn-exposed-port'
     TuiTitle,
     TuiButton,
     PublishedPortsTable,
+    AutomaticPortUsesTable,
     TuiSkeleton,
     i18nPipe,
   ],
@@ -74,25 +93,28 @@ export default class PublishedPorts {
   }
 
   private async loadDependencies() {
+    // Each call degrades independently: one failing WAN/LAN endpoint must not
+    // reject the whole batch and leave ipv4EndpointHost/ipv6Available unset
+    // (which suppressed every IPv4 endpoint in the table).
     const [wanIpv6, lanIpv6, ddns, wanIpv4] = await Promise.all([
-      this.api.wanIpv6Get(),
-      this.api.lanIpv6Get(),
-      this.api.wanDdnsGet(),
-      this.api.wanIpv4Get(),
+      this.api.wanIpv6Get().catch(() => null),
+      this.api.lanIpv6Get().catch(() => null),
+      this.api.wanDdnsGet().catch(() => null),
+      this.api.wanIpv4Get().catch(() => null),
     ])
 
     this.loadVpnProfiles()
     // IPv6 port forwarding requires WAN IPv6 + LAN IPv6, and crucially a real
     // global address delegated to the WAN — without a GUA prefix no LAN device
     // can be reachable, so ULA/link-local-only WANs must not offer IPv6.
-    const wanGua = wanIpv6.assigned_ipv6
+    const wanGua = wanIpv6?.assigned_ipv6
     const wanHasGua = wanGua ? isGua(wanGua) : false
-    const lanIpv6Enabled = lanIpv6.slaac || lanIpv6.dhcpv6
+    const lanIpv6Enabled = !!lanIpv6 && (lanIpv6.slaac || lanIpv6.dhcpv6)
     this.ipv6Available.set(wanHasGua && lanIpv6Enabled)
 
     // Use DDNS hostname if available, otherwise WAN IP
-    const ddnsHostname = ddns.enabled ? ddns.hostname || null : null
-    this.ipv4EndpointHost.set(ddnsHostname || wanIpv4.assigned_ip)
+    const ddnsHostname = ddns?.enabled ? ddns.hostname || null : null
+    this.ipv4EndpointHost.set(ddnsHostname || wanIpv4?.assigned_ip || null)
   }
 
   private async loadVpnProfiles() {

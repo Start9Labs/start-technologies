@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use rpc_toolkit::{from_fn_async, from_fn_async_local, HandlerExt as _, ParentHandler};
 use serde::{Deserialize, Serialize};
@@ -23,6 +23,10 @@ pub fn devices<C: CtrlContext>() -> ParentHandler<C> {
                 .with_call_remote::<CliContext>(),
         )
         .subcommand("update", from_fn_async_local(update::<C>).no_display())
+        .subcommand(
+            "set-auto-forward",
+            from_fn_async_local(crate::port_control::set_auto_forward::<C>).no_display(),
+        )
         .subcommand("forget", from_fn_async_local(forget::<C>).no_display())
         .subcommand(
             "data-usage",
@@ -54,6 +58,9 @@ pub struct Device {
     pub ipv4: Option<String>,
     pub ipv6: Option<String>,
     pub ipv4_static: bool,
+    /// Whether this device may auto-create port forwards via PCP/UPnP
+    /// (default off; set via `devices set-auto-forward`).
+    pub allow_auto_port_forward: bool,
     pub security_profile: Option<String>,
     pub speed: Option<SpeedData>,
     pub data_usage: Option<f64>,
@@ -111,35 +118,72 @@ struct TrafficSnapshot {
 
 static TRAFFIC_CACHE: Mutex<Option<HashMap<String, TrafficSnapshot>>> = Mutex::new(None);
 
-/// MACs already attempted over mDNS this daemon run. A device that answers is
-/// also persisted to the name cache; one that stays silent is recorded here so
-/// it is reverse-resolved at most once per daemon run instead of on every poll.
-/// Cleared only by daemon restart (acceptable: a device that later starts
-/// answering Bonjour is then picked up on the next restart).
-static MDNS_ATTEMPTED: Mutex<Option<std::collections::HashSet<String>>> = Mutex::new(None);
+/// Per-MAC mDNS attempt history for this daemon run. A device that answers is
+/// persisted to the name cache and never re-attempted (the `already_named`
+/// gate); one that stays silent is retried on the [`MDNS_BACKOFF`] schedule —
+/// [`MDNS_MAX_ATTEMPTS`] attempts total — then left alone until daemon
+/// restart. A single attempt is a bad sampler: it usually fires the moment
+/// the device first appears (its mDNS responder may not be up yet) or in the
+/// reassociation chaos right after a router reboot, and sleeping devices
+/// don't answer at all; the schedule's early rungs cover startup lag, the
+/// late ones cover sleepers. `Instant`, not wall time: routers boot with a
+/// wrong clock and NTP-jump minutes later, which would garble the backoff.
+static MDNS_ATTEMPTS: Mutex<Option<HashMap<String, MdnsAttempts>>> = Mutex::new(None);
+
+#[derive(Clone, Copy)]
+struct MdnsAttempts {
+    count: u8,
+    last: Instant,
+}
+
+/// Backoff before the next attempt, indexed by attempts already made (so
+/// `MDNS_BACKOFF[0]` gates attempt 2). RFC 6762 §5.2-style doubling — the
+/// mDNS spec's own retry shape for an unanswered standing query — stretched
+/// across ~31 h; unlike a standing query we cap total attempts, because many
+/// devices simply have no responder and each attempt spawns `avahi-resolve`.
+const MDNS_BACKOFF: [Duration; 5] = [
+    Duration::from_secs(60),
+    Duration::from_secs(10 * 60),
+    Duration::from_secs(60 * 60),
+    Duration::from_secs(6 * 60 * 60),
+    Duration::from_secs(24 * 60 * 60),
+];
+const MDNS_MAX_ATTEMPTS: u8 = MDNS_BACKOFF.len() as u8 + 1;
+
+/// Whether a still-unnamed device is due another mDNS attempt, given how many
+/// attempts it has had and how long ago the last one was.
+fn mdns_retry_eligible(prior: Option<(u8, Duration)>) -> bool {
+    match prior {
+        None => true,
+        Some((count, _)) if count >= MDNS_MAX_ATTEMPTS => false,
+        // count >= 1 here: an entry only exists once an attempt has been made.
+        Some((count, elapsed)) => elapsed >= MDNS_BACKOFF[usize::from(count) - 1],
+    }
+}
 
 // --- Helpers ---
 
-struct ArpEntry {
-    ip: String,
-    mac: String,
-    interface: String,
-    state: String,
+pub(crate) struct ArpEntry {
+    pub(crate) ip: String,
+    pub(crate) mac: String,
+    pub(crate) interface: String,
+    pub(crate) state: String,
 }
 
 struct DhcpLease {
     mac: String,
     ip: String,
     hostname: String,
+    /// Unix expiry from the lease file; dnsmasq writes `0` for a lease that
+    /// never expires.
+    expires: u64,
 }
 
-/// Placeholder name for a device with no UCI name, DHCP hostname, or cached
-/// hostname. Strips colons, takes the last 6 hex chars, lowercases →
-/// `device-<suffix>` (kept identical to the frontend's prior name generator).
+/// Placeholder name for a device no source could name at all — not even a
+/// vendor label. `device-<last 6 hex chars>` (kept identical to the frontend's
+/// prior name generator; suffix shared with `device_ident`'s labels).
 fn fallback_name(mac: &str) -> String {
-    let hex: String = mac.chars().filter(|c| *c != ':').collect();
-    let start = hex.len().saturating_sub(6);
-    format!("device-{}", hex[start..].to_lowercase())
+    format!("device-{}", crate::device_ident::mac_suffix(mac))
 }
 
 /// Parse a 32-char hex IPv6 address from /proc/net/if_inet6 into standard notation.
@@ -154,36 +198,37 @@ fn parse_proc_ipv6_addr(hex: &str) -> Option<String> {
     Some(std::net::Ipv6Addr::from(bytes).to_string())
 }
 
-fn parse_arp_output(output: &str) -> Vec<ArpEntry> {
+/// Parse `ip neigh show` output (`IP dev IFACE lladdr MAC STATE`) into entries,
+/// MAC uppercased, on every interface. Entries without an lladdr
+/// (FAILED/INCOMPLETE) are skipped. The single parser for the whole crate —
+/// callers apply their own interface filter.
+pub(crate) fn parse_neigh_output(output: &str) -> Vec<ArpEntry> {
     let mut entries = Vec::new();
     for line in output.lines() {
-        // Format: IP dev INTERFACE lladdr MAC STATE
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 6 && parts[2] == "lladdr" {
-            // ip neigh: IP dev IFACE lladdr MAC STATE
-            // but sometimes: IP dev IFACE lladdr MAC STATE
-            // Actual format can vary. Let's parse more carefully.
-        }
-        // Try regex-like parsing
         if let Some((ip, rest)) = line.split_once(" dev ") {
             if let Some((iface, rest)) = rest.split_once(" lladdr ") {
                 let mut rest_parts = rest.split_whitespace();
                 if let Some(mac) = rest_parts.next() {
                     let state = rest_parts.next().unwrap_or("UNKNOWN");
-                    // Only LAN interfaces
-                    if iface.starts_with("br-lan") {
-                        entries.push(ArpEntry {
-                            ip: ip.trim().to_string(),
-                            mac: mac.to_uppercase(),
-                            interface: iface.to_string(),
-                            state: state.to_string(),
-                        });
-                    }
+                    entries.push(ArpEntry {
+                        ip: ip.trim().to_string(),
+                        mac: mac.to_uppercase(),
+                        interface: iface.trim().to_string(),
+                        state: state.to_string(),
+                    });
                 }
             }
         }
     }
     entries
+}
+
+/// Neighbor-table entries on the LAN bridges this module manages devices for.
+fn parse_arp_output(output: &str) -> Vec<ArpEntry> {
+    parse_neigh_output(output)
+        .into_iter()
+        .filter(|e| e.interface.starts_with("br-lan"))
+        .collect()
 }
 
 fn parse_dhcp_leases(output: &str) -> Vec<DhcpLease> {
@@ -200,10 +245,35 @@ fn parse_dhcp_leases(output: &str) -> Vec<DhcpLease> {
                 mac: parts[1].to_uppercase(),
                 ip: parts[2].to_string(),
                 hostname: parts[3].to_string(),
+                expires: parts[0].parse().unwrap_or(0),
             });
         }
     }
     leases
+}
+
+/// MAC (uppercase) → the IPv4 dnsmasq currently has leased to it, across every
+/// lease file. Expired entries are dropped; an expiry of `0` means the lease
+/// never expires and always counts as current.
+///
+/// `None` when no lease file exists at all: the caller cannot then tell "this
+/// device holds no lease" from "the leases are unreadable", and must not act on
+/// the difference. Used by port-control to bind a forward to the address
+/// assignment behind it.
+pub(crate) async fn current_lease_ips() -> Option<HashMap<String, String>> {
+    if dhcp_lease_files().await.is_empty() {
+        return None;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    Some(
+        parse_dhcp_leases(&read_all_dhcp_leases().await)
+            .into_iter()
+            .filter(|l| l.expires == 0 || l.expires > now)
+            .map(|l| (l.mac, l.ip))
+            .collect(),
+    )
 }
 
 /// Directory and filename prefix for dnsmasq lease files.
@@ -598,7 +668,7 @@ async fn query_wg_active_peers(wg_interfaces: &[String]) -> Vec<(String, Vec<WgA
     results
 }
 
-fn reload_dnsmasq() {
+pub(crate) fn reload_dnsmasq() {
     tokio::spawn(async {
         let _ = crate::run_quiet_async(
             tokio::process::Command::new("/etc/init.d/dnsmasq").arg("reload"),
@@ -798,6 +868,129 @@ async fn ping_unreachable_macs(
     }
     let unreachable = probed.difference(&responded).cloned().collect();
     (unreachable, live_ipv4s)
+}
+
+/// GUA (`2000::/3`) or ULA (`fc00::/7`) — the two address classes [`pick_ipv6`]
+/// can return. Link-local and every other scope is filtered out downstream, so
+/// probing one would only cost a second for an address that is never displayed.
+fn is_displayable_ipv6(ip: &str) -> bool {
+    let Ok(addr) = ip.parse::<std::net::Ipv6Addr>() else {
+        return false;
+    };
+    crate::system::has_global_ipv6(std::slice::from_ref(&addr))
+        || matches!(addr.octets()[0], 0xfc | 0xfd)
+}
+
+/// IPv6 neighbor entries worth verifying: `(address, interface)` pairs whose
+/// liveness the kernel has not just confirmed.
+///
+/// The kernel keeps a `STALE` entry indefinitely while it sits below the GC
+/// threshold, so "present in the neighbor table" is not evidence the device
+/// still holds the address — it may have been dropped hours ago when a prefix
+/// went away. Anything already `REACHABLE` needs no probe (the kernel verified
+/// it within the last ~30 s), and neither does any MAC that has a `REACHABLE`
+/// entry for the same address family, since it is demonstrably answering NDP.
+///
+/// Unlike [`non_wifi_probe_candidates`] this does *not* skip WiFi clients:
+/// hostapd is authoritative for a station's presence, but says nothing about
+/// which IPv6 addresses it still owns.
+fn ipv6_probe_candidates(arp_entries: &[ArpEntry]) -> Vec<(String, String)> {
+    let reachable_macs: std::collections::HashSet<&str> = arp_entries
+        .iter()
+        .filter(|e| e.state == "REACHABLE" && e.ip.contains(':'))
+        .map(|e| e.mac.as_str())
+        .collect();
+
+    let mut seen = std::collections::HashSet::new();
+    let mut targets = Vec::new();
+    for entry in arp_entries {
+        if !entry.ip.contains(':') || !is_displayable_ipv6(&entry.ip) {
+            continue;
+        }
+        if entry.state == "REACHABLE" || reachable_macs.contains(entry.mac.as_str()) {
+            continue;
+        }
+        if !matches!(entry.state.as_str(), "STALE" | "DELAY" | "PROBE") {
+            continue;
+        }
+        if seen.insert(entry.ip.clone()) {
+            targets.push((entry.ip.clone(), entry.interface.clone()));
+        }
+    }
+    targets
+}
+
+/// Unicast-probe `targets`, then re-read the neighbor table and return every
+/// IPv6 address the kernel now reports as `REACHABLE`.
+///
+/// The verdict deliberately comes from the NUD state rather than the ping's
+/// exit code (the way [`ping_unreachable_macs`] judges IPv4). Sending to the
+/// address forces the kernel through neighbor discovery, and a device that
+/// still owns it answers the solicitation even when its firewall drops the
+/// echo request — which is the default on Windows for anything but a private
+/// network profile. Judging on echo replies would hide addresses devices
+/// genuinely hold. This is the same standard [`crate::ipv6_tracker`] applies.
+///
+/// Returns `None` when the neighbor table could not be re-read, which the
+/// caller treats as "no verification available" and fails open.
+async fn verify_ipv6_neighbors(
+    targets: Vec<(String, String)>,
+) -> Option<std::collections::HashSet<String>> {
+    use std::process::Stdio;
+
+    let mut children = Vec::new();
+    for (ip, iface) in &targets {
+        if let Ok(child) = tokio::process::Command::new("ping6")
+            .args(["-c", "1", "-W", "1", "-I", iface.as_str(), ip.as_str()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+        {
+            children.push(child);
+        }
+    }
+    for mut child in children {
+        let _ = child.wait().await;
+    }
+
+    let output = tokio::process::Command::new("ip")
+        .args(["-6", "neigh", "show"])
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(
+        parse_arp_output(&String::from_utf8_lossy(&output.stdout))
+            .into_iter()
+            .filter(|e| e.state == "REACHABLE")
+            .map(|e| e.ip)
+            .collect(),
+    )
+}
+
+/// The IPv6 addresses of a MAC that survive verification, in neighbor-table
+/// order so [`pick_ipv6`]'s GUA-over-ULA preference is unaffected.
+///
+/// An address is kept when the kernel confirmed it either in the initial
+/// snapshot or in the post-probe re-read. `verified == None` means verification
+/// was unavailable, in which case every candidate is kept — showing a possibly
+/// stale address beats blanking the field on a transient failure.
+fn live_ipv6_candidates<'a>(
+    arp_list: &[&'a ArpEntry],
+    verified: Option<&std::collections::HashSet<String>>,
+) -> Vec<&'a str> {
+    arp_list
+        .iter()
+        .filter(|e| e.ip.contains(':'))
+        .filter(|e| match verified {
+            None => true,
+            Some(live) => e.state == "REACHABLE" || live.contains(&e.ip),
+        })
+        .map(|e| e.ip.as_str())
+        .collect()
 }
 
 /// Among a MAC's IPv4 neighbor entries, pick the one most likely to be the
@@ -1027,6 +1220,10 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
     // probe) are treated as unreachable. Runs concurrently with nlbw,
     // conntrack, and lease reads so it adds zero net latency.
     let (probe_targets, ipv6_only_macs) = non_wifi_probe_candidates(&initial_arp, &wifi_clients);
+    // IPv6 addresses get their own verification pass: a STALE NDP entry can
+    // outlive the address itself by hours, so the neighbor table alone is not
+    // evidence the device still holds what we are about to display.
+    let ipv6_probe_targets = ipv6_probe_candidates(&initial_arp);
 
     // Collect WireGuard interface names for querying active peers.
     // We need to extract this before the uci_result is consumed, but uci_result
@@ -1044,16 +1241,20 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
 
     let (
         (unreachable_macs, live_ipv4s),
+        live_ipv6s,
         leases_output,
         nlbw_output,
         conntrack_output,
         wg_active_peers,
+        fp_by_mac,
     ) = tokio::join!(
         ping_unreachable_macs(probe_targets),
+        verify_ipv6_neighbors(ipv6_probe_targets),
         read_all_dhcp_leases(),
         run_cmd("nlbw", &["-c", "json", "-g", "mac"]),
         run_cmd("conntrack", &["-L", "-o", "extended"]),
         query_wg_active_peers(&wg_interfaces),
+        crate::device_ident::load_live_fingerprints(),
     );
 
     let mut unreachable_macs = unreachable_macs;
@@ -1159,11 +1360,13 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
 
     // --- Phase 4: Build device list ---
     //
-    // Load the persistent name cache once. It backfills a remembered hostname
-    // for any MAC the live sources (UCI host, DHCP lease) can't name this poll,
-    // so a recognized device never reverts to a `device-<mac>` placeholder just
-    // because dnsmasq's volatile lease state dropped its name. Observations
-    // gathered in the loop are committed back to the cache afterwards.
+    // Load the persistent identity cache once. It backfills a remembered
+    // hostname for any MAC the live sources (UCI host, DHCP lease) can't name
+    // this poll, so a recognized device never reverts to a `device-<mac>`
+    // placeholder just because dnsmasq's volatile lease state dropped its
+    // name — and a remembered DHCP fingerprint, so an OS label survives
+    // reboots (the live capture file is tmpfs). Observations gathered in the
+    // loop are committed back to the cache afterwards.
     let cache_now = chrono::Utc::now().timestamp();
     let name_cache = crate::device_names::load_all();
     let mut name_observations: Vec<crate::device_names::Observation> = Vec::new();
@@ -1172,19 +1375,24 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
     // (UCI host, DHCP lease) or the cache can name, reverse-resolve its IPv4
     // over mDNS — recovers a name for any device that suppresses DHCP option 12
     // but still answers Bonjour. A device that answers is persisted to the name
-    // cache below; one that stays silent is recorded in MDNS_ATTEMPTED. Either
-    // way a MAC is queried at most once per daemon run, so on a steady-state
-    // network there are no targets and this is a no-op. The lock is held only
+    // cache below; one that stays silent is retried on the MDNS_BACKOFF
+    // schedule (MDNS_ATTEMPTS), so on a steady-state network there are no
+    // targets and this is a no-op. Retries ride these polls — nothing fires
+    // while no client is polling the device list. The lock is held only
     // across this synchronous selection loop (no `.await` inside).
     let mut mdns_targets: Vec<(String, String)> = Vec::new();
     {
-        let mut guard = MDNS_ATTEMPTED.lock().unwrap();
-        let attempted = guard.get_or_insert_with(std::collections::HashSet::new);
+        let mut guard = MDNS_ATTEMPTS.lock().unwrap();
+        let attempts = guard.get_or_insert_with(HashMap::new);
+        let now = Instant::now();
         for mac in &all_macs {
             if unreachable_macs.contains(mac) {
                 continue;
             }
-            if attempted.contains(mac) {
+            let prior = attempts
+                .get(mac)
+                .map(|a| (a.count, now.duration_since(a.last)));
+            if !mdns_retry_eligible(prior) {
                 continue;
             }
             let already_named = hosts_by_mac
@@ -1195,7 +1403,11 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
                     .get(mac)
                     .map(|l| l.hostname != "*" && !l.hostname.is_empty())
                     .unwrap_or(false)
-                || name_cache.contains_key(mac);
+                // A fingerprint-only cache entry (e.g. a Chromebook) is not a
+                // name — such a device still deserves its mDNS attempts.
+                || name_cache
+                    .get(mac)
+                    .map_or(false, |e| e.hostname.is_some());
             if already_named {
                 continue;
             }
@@ -1207,7 +1419,8 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
                 .and_then(|l| choose_ipv4_entry(l, &live_ipv4s).map(|e| e.ip.clone()))
                 .or_else(|| lease_by_mac.get(mac).map(|l| l.ip.clone()));
             if let Some(ip) = ipv4 {
-                attempted.insert(mac.clone());
+                let count = prior.map_or(0, |(c, _)| c) + 1;
+                attempts.insert(mac.clone(), MdnsAttempts { count, last: now });
                 mdns_targets.push((mac.clone(), ip));
             }
         }
@@ -1261,12 +1474,10 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             .and_then(|h| h.ip.clone())
             .or_else(|| chosen_arp.map(|e| e.ip.clone()))
             .or_else(|| lease.map(|l| l.ip.clone()));
-        let ipv6 = pick_ipv6(
-            arp_list
-                .iter()
-                .filter(|e| e.ip.contains(':'))
-                .map(|e| e.ip.as_str()),
-        );
+        // Only addresses the device demonstrably still answers for — see
+        // live_ipv6_candidates. Unlike the IPv4 field there is no reservation or
+        // lease to fall back on, so an unverified address would be pure fiction.
+        let ipv6 = pick_ipv6(live_ipv6_candidates(&arp_list, live_ipv6s.as_ref()).into_iter());
 
         // Profile from VLAN tag, derived from the same chosen entry as the IPv4
         // address. Fall back to the first entry (e.g. an IPv6-only device with no
@@ -1284,13 +1495,19 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
 
         // Fully-resolved display name. UCI static host (user-assigned) wins,
         // then the live DHCP-lease hostname, then a live mDNS `.local` name,
-        // then the remembered hostname from the cache, then a `device-<mac>`
-        // placeholder. A fresh DHCP name always overrides a remembered one
-        // because the cache sits below it. An mDNS name is learned once for an
-        // otherwise-unnamed device and thereafter served from the cache. The
-        // reverse-resolve above queries each MAC at most once per daemon run: a
-        // cached (named) device is gated out by the cache check, and a device
-        // that stays silent is gated out by MDNS_ATTEMPTED.
+        // then the remembered hostname from the cache, then a derived label —
+        // OS from the DHCP fingerprint ("Windows device (b2c3d4)"), else
+        // vendor from the MAC's OUI ("Apple device (b2c3d4)") — then a
+        // `device-<mac>` placeholder. A fresh DHCP name always overrides a
+        // remembered one because the cache sits below it. An mDNS name is
+        // learned once for an otherwise-unnamed device and thereafter served
+        // from the cache. Labels are derived, not learned — computed each poll
+        // from the fingerprint/OUI and never cached as names, so any real name
+        // outranks them (the raw fingerprint IS cached, so the label survives
+        // reboots). The reverse-resolve above queries each MAC at most once
+        // per daemon run: a cached (named) device is gated out by the cache
+        // check, and a device that stays silent is retried on the bounded
+        // MDNS_BACKOFF schedule, then left alone (MDNS_ATTEMPTS).
         let dhcp_hostname = lease.and_then(|l| {
             if l.hostname != "*" && !l.hostname.is_empty() {
                 Some(l.hostname.clone())
@@ -1299,19 +1516,24 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             }
         });
         let mdns_hostname = mdns_by_mac.get(mac).cloned();
+        let fingerprint = fp_by_mac
+            .get(mac)
+            .or_else(|| name_cache.get(mac).and_then(|e| e.fingerprint.as_ref()));
         let name = host
             .and_then(|h| h.name.clone())
             .or_else(|| dhcp_hostname.clone())
             .or_else(|| mdns_hostname.clone())
-            .or_else(|| name_cache.get(mac).cloned())
+            .or_else(|| name_cache.get(mac).and_then(|e| e.hostname.clone()))
+            .or_else(|| crate::device_ident::device_label(mac, fingerprint))
             .unwrap_or_else(|| fallback_name(mac));
         let hostname = lease.map(|l| l.hostname.clone());
 
-        // Remember the live-learned name (DHCP, else mDNS), or keep an existing
-        // entry alive against prune.
+        // Remember the live-learned name (DHCP, else mDNS) and fingerprint, or
+        // keep an existing entry alive against prune.
         name_observations.push(crate::device_names::Observation {
             mac: mac.clone(),
             hostname: dhcp_hostname.or(mdns_hostname),
+            fingerprint: fp_by_mac.get(mac).cloned(),
         });
 
         // Connection type — only label as "Ethernet" when the bridge FDB
@@ -1350,15 +1572,19 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             ipv4,
             ipv6,
             ipv4_static: host.map(|h| h.ip.is_some()).unwrap_or(false),
+            allow_auto_port_forward: host.is_some_and(|h| h._allow_pcp.as_deref() == Some("1")),
             security_profile,
             speed,
             data_usage,
         });
     }
 
-    // Persist this poll's observations (learn/refresh names, keep visible
-    // entries alive, opportunistic prune). Best-effort — never fails the list.
+    // Persist this poll's observations (learn/refresh names and fingerprints,
+    // keep visible entries alive, opportunistic prune). Best-effort — never
+    // fails the list. Then bound the append-only fingerprint capture file,
+    // safe now that its contents are persisted.
     crate::device_names::commit(&name_observations, cache_now).await;
+    crate::device_ident::compact_fingerprint_file().await;
 
     // --- Phase 5: Add VPN-connected peers ---
     //
@@ -1451,6 +1677,8 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
                 ipv4: peer_cfg.ip.clone(),
                 ipv6: None,
                 ipv4_static: true,
+                // No MAC to authorize, so a VPN peer can never be auto-forward capable.
+                allow_auto_port_forward: false,
                 security_profile: Some(server.profile_fullname.clone()),
                 speed,
                 data_usage,
@@ -1461,31 +1689,34 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
     Ok(devices)
 }
 
-#[instrument(skip_all)]
-pub async fn update<C: CtrlContext>(
-    ctx: C,
-    DeserializeStdin(req): DeserializeStdin<DeviceUpdateReq>,
-) -> Result<(), Error> {
-    let mac_upper = req.mac.to_uppercase();
+/// Find-or-create the DHCP host section for `mac` and apply `mutate` to it,
+/// with the standard UCI conflict retries. `mutate(host, existed)` may return
+/// `false` to abort without writing (nothing to do); a created host starts
+/// from the crate's host-section defaults (`dns '1'`, `host_<mac>` section
+/// name). Returns whether a write happened. The single upsert for DHCP host
+/// entries — device updates and the auto-forward toggle both go through it so
+/// the section-name and default-field conventions can't drift apart.
+pub(crate) async fn upsert_dhcp_host<F>(
+    uci_root: &std::path::Path,
+    mac: &str,
+    mutate: F,
+) -> Result<bool, Error>
+where
+    F: Fn(&mut DhcpHost, bool) -> bool,
+{
+    let mac_upper = mac.to_uppercase();
     let mut retries = 4;
     loop {
         let arena = Arena::new();
-        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["dhcp"]).await?;
+        let mut cfgs = parse_all(uci_root, &arena, &["dhcp"]).await?;
 
         let mut found = false;
         for section in &mut cfgs["dhcp"].sections {
             if let Ok(mut host) = section.get::<DhcpHost>() {
                 if host.mac.to_uppercase() == mac_upper {
-                    host.name = Some(req.name.clone());
-                    if req.ipv4_static && !req.ipv4.is_empty() {
-                        host.ip = Some(req.ipv4.clone());
-                    } else {
-                        host.ip = None;
+                    if !mutate(&mut host, true) {
+                        return Ok(false);
                     }
-                    // `hostid` is deliberately left untouched: IPv6 addresses are
-                    // chosen by the device (SLAAC), so there is no user-facing IPv6
-                    // reservation. The suffix is backend bookkeeping, pinned by
-                    // published-ports for its prefix-rotation fallback.
                     section.set(&host)?;
                     found = true;
                     break;
@@ -1494,56 +1725,86 @@ pub async fn update<C: CtrlContext>(
         }
 
         if !found {
-            // Create new host section
-            let new_host = DhcpHost {
-                mac: req.mac.clone(),
-                name: Some(req.name.clone()),
-                ip: if req.ipv4_static && !req.ipv4.is_empty() {
-                    Some(req.ipv4.clone())
-                } else {
-                    None
-                },
-                hostid: None,
+            let mut host = DhcpHost {
+                mac: mac.to_string(),
                 dns: Some("1".to_string()),
+                ..Default::default()
             };
-            let section_name = format!("host_{}", req.mac.replace(':', "").to_lowercase());
-            cfgs["dhcp"].append(&new_host, Some(&section_name))?;
+            if !mutate(&mut host, false) {
+                return Ok(false);
+            }
+            let section_name = format!("host_{}", mac.replace(':', "").to_lowercase());
+            cfgs["dhcp"].append(&host, Some(&section_name))?;
         }
 
-        match dump_all(ctx.uci_root(), cfgs).await {
+        match dump_all(uci_root, cfgs).await {
             Err(uciedit::Error::Conflict { .. }) if retries > 0 => {
                 retries -= 1;
                 continue;
             }
-            Err(err) => {
-                let summary = if req.ipv4_static && !req.ipv4.is_empty() {
-                    format!(
-                        "Failed to update device '{}' ({}) — static IPv4: {}",
-                        req.name, mac_upper, req.ipv4
-                    )
-                } else {
-                    format!("Failed to update device '{}' ({})", req.name, mac_upper)
-                };
-                crate::activity::log("device", "updated", false, &summary, Some(&err.to_string()));
-                return Err(err.into());
-            }
-            Ok(()) => {
-                let summary = if req.ipv4_static && !req.ipv4.is_empty() {
-                    format!(
-                        "Updated device '{}' ({}) — static IPv4: {}",
-                        req.name, mac_upper, req.ipv4
-                    )
-                } else {
-                    format!("Updated device '{}' ({})", req.name, mac_upper)
-                };
-                crate::activity::log("device", "updated", true, &summary, None);
-                if ctx.effectful() {
-                    reload_dnsmasq();
-                }
-                return Ok(());
-            }
+            Err(err) => return Err(err.into()),
+            Ok(()) => return Ok(true),
         }
     }
+}
+
+#[instrument(skip_all)]
+pub async fn update<C: CtrlContext>(
+    ctx: C,
+    DeserializeStdin(req): DeserializeStdin<DeviceUpdateReq>,
+) -> Result<(), Error> {
+    let mac_upper = req.mac.to_uppercase();
+    let suffix = if req.ipv4_static && !req.ipv4.is_empty() {
+        format!(" — static IPv4: {}", req.ipv4)
+    } else {
+        String::new()
+    };
+
+    let req_ref = &req;
+    match upsert_dhcp_host(&ctx.uci_root(), &req.mac, move |host, _existed| {
+        host.name = Some(req_ref.name.clone());
+        host.ip = if req_ref.ipv4_static && !req_ref.ipv4.is_empty() {
+            Some(req_ref.ipv4.clone())
+        } else {
+            None
+        };
+        // `hostid` is deliberately left untouched: IPv6 addresses are chosen by
+        // the device (SLAAC), so there is no user-facing IPv6 reservation. The
+        // suffix is backend bookkeeping, pinned by published-ports for its
+        // prefix-rotation fallback.
+        true
+    })
+    .await
+    {
+        Err(err) => {
+            let summary = format!(
+                "Failed to update device '{}' ({}){}",
+                req.name, mac_upper, suffix
+            );
+            crate::activity::log("device", "updated", false, &summary, Some(&err.to_string()));
+            Err(err)
+        }
+        Ok(_) => {
+            let summary = format!("Updated device '{}' ({}){}", req.name, mac_upper, suffix);
+            crate::activity::log("device", "updated", true, &summary, None);
+            if ctx.effectful() {
+                reload_dnsmasq();
+            }
+            Ok(())
+        }
+    }
+}
+
+fn static_ips_for_mac(dhcp: &uciedit::Config<'_>, mac: &str) -> Vec<String> {
+    dhcp.sections
+        .iter()
+        .filter_map(|section| {
+            let host = section.get::<DhcpHost>().ok()?;
+            (host.mac.eq_ignore_ascii_case(mac))
+                .then_some(host.ip)
+                .flatten()
+        })
+        .collect()
 }
 
 #[instrument(skip_all)]
@@ -1556,8 +1817,8 @@ pub async fn forget<C: CtrlContext>(
     loop {
         let arena = Arena::new();
         let mut cfgs = parse_all(ctx.uci_root(), &arena, &["dhcp"]).await?;
+        let removed_static_ips = static_ips_for_mac(&cfgs["dhcp"], &mac_upper);
 
-        // Remove DHCP host
         cfgs["dhcp"].sections.retain(|section| {
             if let Ok(host) = section.get::<DhcpHost>() {
                 if host.mac.to_uppercase() == mac_upper {
@@ -1591,6 +1852,15 @@ pub async fn forget<C: CtrlContext>(
                     None,
                 );
                 crate::device_names::forget(&mac_upper).await;
+                crate::port_control::close_device_forwards(&mac_upper, &removed_static_ips).await;
+                // Drop the mDNS attempt history too: a forgotten device that
+                // reconnects "appears as a new entry" (per the user docs), so
+                // it starts a fresh retry schedule.
+                if let Ok(mut guard) = MDNS_ATTEMPTS.lock() {
+                    if let Some(attempts) = guard.as_mut() {
+                        attempts.remove(&mac_upper);
+                    }
+                }
                 if ctx.effectful() {
                     flush_device_from_network(&mac_upper).await;
                 }
@@ -1809,6 +2079,46 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn forget_preserves_removed_static_ip_for_route_reaping() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("dhcp"),
+            "config host\n\toption mac 'AA:BB:CC:DD:EE:FF'\n\toption ip '192.168.1.50'\n",
+        )
+        .unwrap();
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["dhcp"]).await.unwrap();
+
+        assert_eq!(
+            static_ips_for_mac(&cfgs["dhcp"], "aa:bb:cc:dd:ee:ff"),
+            vec!["192.168.1.50"]
+        );
+    }
+
+    #[test]
+    fn mdns_retry_schedule() {
+        // Never attempted: eligible immediately.
+        assert!(mdns_retry_eligible(None));
+        // Each rung: not eligible just below the backoff, eligible at it.
+        for (i, backoff) in MDNS_BACKOFF.iter().enumerate() {
+            let count = i as u8 + 1;
+            assert!(
+                !mdns_retry_eligible(Some((count, *backoff - Duration::from_secs(1)))),
+                "attempt {count} eligible too early"
+            );
+            assert!(
+                mdns_retry_eligible(Some((count, *backoff))),
+                "attempt {count} not eligible at its backoff"
+            );
+        }
+        // Capped after MDNS_MAX_ATTEMPTS, no matter how much time passes.
+        assert!(!mdns_retry_eligible(Some((
+            MDNS_MAX_ATTEMPTS,
+            Duration::from_secs(365 * 24 * 60 * 60)
+        ))));
+    }
+
     #[test]
     fn extract_ipv6_hostid_survives_zero_compression() {
         // Straightforward IID.
@@ -1871,6 +2181,99 @@ mod tests {
 
         // Empty → None.
         assert_eq!(pick_ipv6(std::iter::empty()), None);
+    }
+
+    fn arp_mac(ip: &str, mac: &str, state: &str) -> ArpEntry {
+        ArpEntry {
+            ip: ip.to_string(),
+            mac: mac.to_string(),
+            interface: "br-lan.101".to_string(),
+            state: state.to_string(),
+        }
+    }
+
+    #[test]
+    fn ipv6_probe_candidates_targets_only_unconfirmed_displayable_addresses() {
+        let entries = vec![
+            // Probed: a stale GUA and a stale ULA are exactly the addresses that
+            // can outlive the device's ownership of them.
+            arp_mac("2001:db8::5", "AA:AA:AA:00:00:01", "STALE"),
+            arp_mac("fd00::5", "AA:AA:AA:00:00:02", "STALE"),
+            // Not probed: the kernel confirmed this one within the last ~30 s.
+            arp_mac("2001:db8::6", "AA:AA:AA:00:00:03", "REACHABLE"),
+            // Not probed: same MAC as the REACHABLE entry above, so the device is
+            // demonstrably answering NDP — a second probe would tell us nothing.
+            arp_mac("2001:db8::7", "AA:AA:AA:00:00:03", "STALE"),
+            // Not probed: never displayed, so verifying it would be wasted time.
+            arp_mac("fe80::1", "AA:AA:AA:00:00:04", "STALE"),
+            arp_mac("fec0::1", "AA:AA:AA:00:00:05", "STALE"),
+            // Not probed: IPv4 has its own probe path.
+            arp_mac("192.168.10.5", "AA:AA:AA:00:00:06", "STALE"),
+            // Not probed: FAILED is not an "alive" state.
+            arp_mac("2001:db8::8", "AA:AA:AA:00:00:07", "FAILED"),
+        ];
+
+        let targets = ipv6_probe_candidates(&entries);
+        assert_eq!(
+            targets,
+            vec![
+                ("2001:db8::5".to_string(), "br-lan.101".to_string()),
+                ("fd00::5".to_string(), "br-lan.101".to_string()),
+            ],
+        );
+    }
+
+    #[test]
+    fn ipv6_probe_candidates_deduplicates_repeated_addresses() {
+        // The same address can appear on two bridges after a device roams; one
+        // probe settles it.
+        let a = arp_mac("2001:db8::5", "AA:AA:AA:00:00:01", "STALE");
+        let mut b = arp_mac("2001:db8::5", "AA:AA:AA:00:00:01", "STALE");
+        b.interface = "br-lan.102".to_string();
+        assert_eq!(ipv6_probe_candidates(&[a, b]).len(), 1);
+    }
+
+    #[test]
+    fn live_ipv6_candidates_drops_unverified_addresses() {
+        let stale_gua = arp_mac("2001:db8::5", "AA:AA:AA:00:00:01", "STALE");
+        let stale_ula = arp_mac("fd00::5", "AA:AA:AA:00:00:01", "STALE");
+        let v4 = arp_mac("192.168.10.5", "AA:AA:AA:00:00:01", "REACHABLE");
+        let list = vec![&stale_gua, &stale_ula, &v4];
+
+        // The GUA answered the probe, the ULA did not: the device dropped the
+        // ULA when its prefix went away, and the UI must stop claiming it.
+        let verified = ["2001:db8::5".to_string()].into_iter().collect();
+        assert_eq!(
+            live_ipv6_candidates(&list, Some(&verified)),
+            vec!["2001:db8::5"],
+        );
+
+        // Nothing verified → no IPv6 shown at all, rather than a fabricated one.
+        let none_verified = std::collections::HashSet::new();
+        assert!(live_ipv6_candidates(&list, Some(&none_verified)).is_empty());
+    }
+
+    #[test]
+    fn live_ipv6_candidates_keeps_initially_reachable_and_fails_open() {
+        let reachable = arp_mac("2001:db8::5", "AA:AA:AA:00:00:01", "REACHABLE");
+        let stale = arp_mac("fd00::5", "AA:AA:AA:00:00:01", "STALE");
+        let list = vec![&reachable, &stale];
+
+        // An entry the initial snapshot already confirmed is never probed, so it
+        // is absent from the verified set — it must survive on its own state.
+        let verified = std::collections::HashSet::new();
+        assert_eq!(
+            live_ipv6_candidates(&list, Some(&verified)),
+            vec!["2001:db8::5"],
+        );
+
+        // Verification unavailable (the re-read failed): keep everything, so a
+        // transient error blanks nobody's address. Order is preserved, so
+        // pick_ipv6 still prefers the GUA.
+        assert_eq!(
+            live_ipv6_candidates(&list, None),
+            vec!["2001:db8::5", "fd00::5"],
+        );
     }
 
     #[tokio::test]

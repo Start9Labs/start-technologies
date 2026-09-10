@@ -9,6 +9,7 @@ OpenWrt is a powerful open-source router OS, but it exposes raw networking primi
 - **Security Profiles** — A single abstraction that replaces manual VLAN, firewall, subnet, and routing configuration. One click creates an isolated network segment with its own DHCP, DNS, firewall rules, and VPN routing.
 - **Multi-password Wi-Fi** — One SSID with multiple passwords, each mapping to a different Security Profile. No separate SSIDs, no manual VLAN tagging.
 - **VPN chaining** — Route traffic through multiple VPN providers in sequence for multi-jurisdictional privacy.
+- **Automatic port forwarding** — Devices you permit open their own port forwards over the standard UPnP and PCP protocols, and several devices or services can share one external port through TLS hostname (SNI) routes. Off by default, granted per device.
 - **Modern web interface** — A purpose-built Angular UI that manages the full router configuration without requiring CLI knowledge. The underlying OpenWrt CLI and LuCI remain available for advanced users.
 - **OTA updates** — Firmware updates delivered through the web interface.
 
@@ -34,6 +35,10 @@ When you create a [Security Profile](security-profiles.md), the backend orchestr
 | `wireless` | New PSK entry in `wpa_psk_file` (for Wi-Fi passwords)    |
 
 This is why the web interface never exposes raw VLANs or firewall rules — the profile abstraction handles all of it consistently. StartWRT's firewall is built on fw4/nftables, so any custom firewall rules you add must be written as nftables (fw4) rules.
+
+## Automatic Port Forwarding Internals
+
+The backend runs a PCP server and a UPnP Internet Gateway Device on the LAN side. A request is honored only from a device whose **Allow automatic port forwarding** permission is on — stored as a flag on the device's entry in the `dhcp` UCI config — and only when it arrives from the network that device is on. Granted forwards are written to the `firewall` UCI config as tagged redirects, so they survive reboots and never collide with manual [Published Ports](published-ports.md) rules; their leases live in memory and the router removes a forward when its lease runs out or its device gives up the address. [Hostname routes](published-ports.md#hostname-routes-shared-ports) are not persisted: the router reads the TLS hostname of each connection on the shared port with an nftables divert and hands the connection to the owning device, and the device re-registers its routes after a restart.
 
 ## Network Isolation
 

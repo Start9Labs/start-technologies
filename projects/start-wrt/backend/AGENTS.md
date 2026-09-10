@@ -11,11 +11,10 @@ crates are members of the **root** Cargo workspace (build with `cargo build -p s
 - Run from the repo root, **always `-p`-scoped**:
   `cargo test -p startwrt-core -p uciedit -p uciedit_macros` (or `make start-wrt-test` to run the
   same set inside the `start9/cargo-zigbuild` container, mirroring `start-core-test`).
-- **Footgun:** a bare `cargo test` — including running it from `backend/` (which no longer has its
-  own workspace `Cargo.toml`) — tests the **entire** monorepo and tries to build
+- **Footgun:** a bare `cargo test` — including running it from `backend/` — tests the **entire** monorepo and tries to build
   `startos-backup-fs`→`fuser`, whose build script fails on a host lacking FUSE dev libs. start-wrt's
   own crates are fuser-free, so scope with `-p`.
-- Coverage is mostly in `startwrt-core` (~430 inline `#[tokio::test]`/`#[test]`), with the focused
+- Coverage is mostly in `startwrt-core` (inline `#[tokio::test]`/`#[test]`), with the focused
   UCI parser suite in `uciedit/src/tests.rs`.
 
 ## Operating rules

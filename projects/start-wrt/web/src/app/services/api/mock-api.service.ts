@@ -1,5 +1,6 @@
-import { Injectable } from '@angular/core'
+import { inject, Injectable } from '@angular/core'
 import { pauseFor } from '@start9labs/shared'
+import { GIT_HASH } from 'src/app/utils/workspace-config'
 import {
   ApiService,
   ExecReq,
@@ -56,6 +57,8 @@ import {
   WanDdnsSetRequest,
   PublishedPortFromApi,
   PublishedPortsSetRequest,
+  PublishedPortsSetResult,
+  AutomaticPortUseFromApi,
   OutboundVpn,
   OutboundVpnCreateRequest,
   OutboundVpnCreateResponse,
@@ -237,6 +240,8 @@ export class MockApiService extends ApiService {
 
   private mockSystemInfo: SystemInfoRes = {
     version: '1.0.0',
+    // Echo the bundle's own stamp so mock mode never trips stale-UI detection.
+    gitHash: inject(GIT_HASH),
     language: 'en_US',
     date: new Date().toISOString(),
     theme: 'system',
@@ -924,11 +929,13 @@ export class MockApiService extends ApiService {
       )
 
       // Mirror the backend's server-side name resolution chain:
-      // UCI name → DHCP hostname → device-<mac>.
+      // UCI name → DHCP hostname → derived label (fingerprint/OUI) →
+      // device-<mac>.
       const dhcpHostname = def.hostname !== '*' ? def.hostname : null
       const name =
         device.name ||
         dhcpHostname ||
+        def.identLabel ||
         `device-${mac.replace(/:/g, '').slice(-6).toLowerCase()}`
 
       return {
@@ -940,6 +947,7 @@ export class MockApiService extends ApiService {
         ipv4: device.ipv4,
         ipv6: device.ipv6,
         ipv4_static: !!host?.options.ip,
+        allow_auto_port_forward: this.autoForwardAllowed.has(mac),
         security_profile: profile?.fullname ?? null,
         speed: def.status === 'online' ? def.speed : null,
         data_usage: def.dataUsage,
@@ -974,6 +982,28 @@ export class MockApiService extends ApiService {
     return null
   }
 
+  /** MACs allowed to auto-create port forwards via PCP/UPnP. */
+  private autoForwardAllowed = new Set<string>(['00:1A:2B:3C:4D:5E'])
+
+  async devicesSetAutoForward(params: {
+    mac: string
+    allow: boolean
+  }): Promise<null> {
+    await pauseFor(250)
+    const macUpper = params.mac.toUpperCase()
+    if (params.allow) {
+      this.autoForwardAllowed.add(macUpper)
+    } else {
+      this.autoForwardAllowed.delete(macUpper)
+    }
+    this.logActivity(
+      'device',
+      'auto-forward',
+      `${params.allow ? 'Enabled' : 'Disabled'} automatic port forwarding for ${macUpper}`,
+    )
+    return null
+  }
+
   async devicesForget(params: { mac: string }): Promise<null> {
     await pauseFor(250)
     const macUpper = params.mac.toUpperCase()
@@ -986,6 +1016,7 @@ export class MockApiService extends ApiService {
     this.mockDeviceDefs = this.mockDeviceDefs.filter(
       d => d.mac.toUpperCase() !== macUpper,
     )
+    this.autoForwardAllowed.delete(macUpper)
     this.logActivity(
       'device',
       'deleted',
@@ -1244,6 +1275,7 @@ export class MockApiService extends ApiService {
       ipv6: true,
       ipv4_public_port: null,
       source: 'any',
+      override_wan_ports: false,
       status: 'active',
       status_reason: null,
       device_name: 'Home Server',
@@ -1261,6 +1293,7 @@ export class MockApiService extends ApiService {
       ipv6: false,
       ipv4_public_port: null,
       source: 'any',
+      override_wan_ports: false,
       status: 'active',
       status_reason: null,
       device_name: 'Gaming PC',
@@ -1278,6 +1311,7 @@ export class MockApiService extends ApiService {
       ipv6: true,
       ipv4_public_port: '2222',
       source: '203.0.113.0/24',
+      override_wan_ports: false,
       status: 'disabled',
       status_reason: null,
       device_name: null,
@@ -1334,8 +1368,49 @@ export class MockApiService extends ApiService {
     return { name: host?.options.name ?? null, ipv4, ipv6 }
   }
 
-  async publishedPortsSet(params: PublishedPortsSetRequest): Promise<null> {
+  async publishedPortsSet(
+    params: PublishedPortsSetRequest,
+  ): Promise<PublishedPortsSetResult> {
     await pauseFor(250)
+
+    const sniMac = '00:1A:2B:3C:4D:5E'
+    const pending = params.ports
+      .filter(
+        p =>
+          p.enabled && p.ipv4 && !p.override_wan_ports && p.protocol !== 'udp',
+      )
+      .map(p => {
+        const spec = p.ipv4_public_port || p.ports
+        const [lo, hi = lo] = spec.split('-').map(Number)
+        const router_service_ports =
+          this.mockSystemInfo.remoteAccess !== 'never'
+            ? ['80', '443', '22'].filter(
+                rp => Number(rp) >= lo && Number(rp) <= hi,
+              )
+            : []
+        const hostname_route_ports =
+          this.autoForwardAllowed.has(sniMac) && lo <= 443 && 443 <= hi
+            ? [
+                {
+                  ports: '443',
+                  hostnames: ['nextcloud.example.com'],
+                  devices: [this.lookupDeviceByMac(sniMac).name || sniMac],
+                },
+              ]
+            : []
+        return {
+          id: p.id,
+          label: p.label,
+          router_service_ports,
+          hostname_route_ports,
+        }
+      })
+      .filter(
+        c => c.router_service_ports.length || c.hostname_route_ports.length,
+      )
+    if (pending.length) {
+      return { pending_wan_port_collisions: pending }
+    }
 
     // Auto-reserve static IPv4 for enabled ports (matches real backend
     // behavior). No IPv6 counterpart: the backend tracks the device's
@@ -1374,7 +1449,49 @@ export class MockApiService extends ApiService {
       'updated',
       `Updated published ports (${params.ports.length} rule${params.ports.length !== 1 ? 's' : ''})`,
     )
-    return null
+    return { pending_wan_port_collisions: [] }
+  }
+
+  async publishedPortsAutoList(): Promise<AutomaticPortUseFromApi[]> {
+    await pauseFor(250)
+    const mac = '00:1A:2B:3C:4D:5E'
+    if (!this.autoForwardAllowed.has(mac)) return []
+    const device = this.lookupDeviceByMac(mac)
+    return [
+      {
+        id: 'apf_001a2b3c4d5e_5443',
+        kind: 'PCP',
+        device_mac: mac,
+        device_name: device.name,
+        internal_ip: device.ipv4,
+        ports: '5443',
+        public_ports: '5443',
+        expires_secs: 3542,
+        hostname: null,
+      },
+      {
+        id: 'apf_001a2b3c4d5e_80',
+        kind: 'UPnP',
+        device_mac: mac,
+        device_name: device.name,
+        internal_ip: device.ipv4,
+        ports: '5080',
+        public_ports: '80',
+        expires_secs: 3211,
+        hostname: null,
+      },
+      {
+        id: 'sni_443_nextcloud.example.com',
+        kind: 'SNI',
+        device_mac: '',
+        device_name: null,
+        internal_ip: device.ipv4,
+        ports: '443',
+        public_ports: '443',
+        expires_secs: 2954,
+        hostname: 'nextcloud.example.com',
+      },
+    ]
   }
 
   // --- Outbound VPN (WireGuard Client) smart endpoint mocks ---

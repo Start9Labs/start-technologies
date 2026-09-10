@@ -1,0 +1,7 @@
+# Deliver replies for source-preserving SNI sockets locally.
+# Preserve unrelated marks used by DNAT return routing.
+# `socket transparent` requires kmod-nft-socket or fw4 rejects the ruleset.
+chain startwrt_sni_divert {
+	type filter hook prerouting priority mangle; policy accept;
+	meta l4proto tcp socket transparent 1 meta mark set meta mark or 0x00540001
+}

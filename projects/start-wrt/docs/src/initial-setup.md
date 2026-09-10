@@ -36,11 +36,11 @@ To access the web interface securely over HTTPS, download and trust your router'
 
 The StartWRT web interface is organized into five sections:
 
-- **Internet** — WAN settings, published ports, outbound VPNs
-- **Network** — LAN settings, connected devices
-- **Security Profiles** — Create and manage access control profiles
-- **Points of Entry** — Ethernet ports, Wi-Fi passwords, inbound VPN servers
-- **System** — General settings, SSH keys, backups, logs
+- **Internet** — [WAN settings](wan.md), [published ports](published-ports.md), [outbound VPNs](outbound-vpn.md)
+- **Network** — [LAN settings](lan.md), [connected devices](devices.md)
+- **Security Profiles** — [Create and manage access control profiles](security-profiles.md)
+- **Points of Entry** — [Ethernet ports](ethernet.md), [Wi-Fi passwords](wifi.md), [inbound VPN servers](inbound-vpn.md)
+- **System** — [General settings](settings.md), [SSH keys](ssh.md), [backups](backups.md), [logs](settings.md#logs)
 
 > [!TIP]
 > Toggle **Help Mode** from the header to get a plain-language explanation of everything on the current page, including links to external resources.

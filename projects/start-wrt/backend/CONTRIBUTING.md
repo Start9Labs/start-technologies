@@ -146,7 +146,7 @@ Run from the repo root, scoped with `-p` (a bare `cargo test` tests the whole mo
 `fuser` on a bare host — see Getting Started):
 
 ```bash
-cargo test -p startwrt-core          # Handler tests — the bulk of coverage (~430 tests)
+cargo test -p startwrt-core          # Handler tests — the bulk of coverage
 cargo test -p uciedit                # UCI parser tests
 cargo test -p startwrt-core -p uciedit -p uciedit_macros   # everything
 make start-wrt-test                   # all of the above, containerized (mirrors start-core-test)

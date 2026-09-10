@@ -36,7 +36,7 @@ One SSID, multiple passwords. One router, multiple isolated networks. The profil
 
    - **Access** — Controls which other profiles this profile can communicate with on the local network:
      - **All** — Full access to devices on all profiles.
-     - **Same profile** — Only communicate with devices on this same profile.
+     - **Same profile** — Only communicate with devices on this same profile. A [published port](published-ports.md#reaching-a-published-port-from-your-own-network) on another profile stays reachable at the router's public address if this profile has Internet access to that address.
      - **Whitelist** — Select specific profiles from a list.
 
    - **Auto whitelist new profiles** — A checkbox shown in Whitelist mode. When checked, newly created profiles are automatically added to this profile's whitelist. Useful for admin profiles that should maintain access to all network segments.
@@ -47,8 +47,8 @@ One SSID, multiple passwords. One router, multiple isolated networks. The profil
    - **WAN Access** — Controls Internet access for devices on this profile:
      - **All** — Unrestricted Internet access.
      - **None** — No Internet access. Devices can only reach LAN resources permitted by the LAN access setting.
-     - **Whitelist** — Allow connections only to specific destination IPs or CIDR ranges (e.g. `1.1.1.1, 8.8.8.0/24`).
-     - **Blacklist** — Block connections to specific destination IPs or CIDR ranges, allow everything else.
+     - **Whitelist** — Allow connections only to specific destination IPs or CIDR ranges (e.g. `1.1.1.1, 8.8.8.0/24`). Include the router's public address to let the profile reach [published ports](published-ports.md#reaching-a-published-port-from-your-own-network) on other profiles.
+     - **Blacklist** — Block connections to specific destination IPs or CIDR ranges, allow everything else. Blocking the router's public address keeps the profile away from published ports on other profiles.
 
    - **Blackout Schedule** — A button that opens a schedule dialog for time-of-day Internet restrictions (see [WAN Blackout](#wan-blackout) below). It is disabled when WAN Access is None; any existing windows are retained.
 

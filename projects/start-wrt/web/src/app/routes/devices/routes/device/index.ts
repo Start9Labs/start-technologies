@@ -103,12 +103,31 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
             <input tuiInput [readOnly]="true" [value]="data()?.ipv6 ?? ''" />
           </tui-textfield>
         </div>
-        <p class="ipv6-note">
+        <div class="g-secondary">
           {{
             'Chosen by the device — IPv6 addresses cannot be reserved' | i18n
           }}
-        </p>
+        </div>
       </section>
+      <fieldset>
+        <legend>{{ 'Permissions' | i18n }}</legend>
+        <section>
+          <label tuiLabel>
+            <input
+              tuiSwitch
+              type="checkbox"
+              formControlName="allowAutoPortForward"
+            />
+            {{ 'Allow automatic port forwarding' | i18n }}
+          </label>
+          <div class="g-secondary">
+            {{
+              'Lets this device open and renew its own port forwards via UPnP/PCP (used by StartOS servers, game consoles, and similar). Off by default; active forwards appear on the Published Ports page.'
+                | i18n
+            }}
+          </div>
+        </section>
+      </fieldset>
       @if (data()) {
         <footer appFooter></footer>
       }
@@ -118,12 +137,6 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
     header[tuiHeader='h6'] {
       align-items: center;
       max-width: 50rem;
-    }
-
-    .ipv6-note {
-      margin: 0;
-      font: var(--tui-font-text-s);
-      color: var(--tui-text-secondary);
     }
   `,
   host: { class: 'g-page' },
@@ -181,6 +194,7 @@ export default class DeviceDetail {
       if (data && this.form.pristine) {
         this.form.reset({
           name: data.name,
+          allowAutoPortForward: data.allowAutoPortForward,
           ip: {
             ipv4Static: data.ipv4Static,
             ipv4: data.ipv4 ?? '',
@@ -218,11 +232,22 @@ export default class DeviceDetail {
     const ipv4Changed =
       formValue.ip.ipv4Static && formValue.ip.ipv4 !== (this.data()?.ipv4 ?? '')
 
-    const success = await this.service.update(this.mac, {
-      name: formValue.name,
-      ipv4Static: formValue.ip.ipv4Static,
-      ipv4: formValue.ip.ipv4,
-    })
+    // Only send the permission when it actually changed — it's a separate
+    // endpoint, and revoking it closes the device's existing forwards.
+    const allowAutoForward =
+      formValue.allowAutoPortForward !== this.data()?.allowAutoPortForward
+        ? formValue.allowAutoPortForward
+        : undefined
+
+    const success = await this.service.update(
+      this.mac,
+      {
+        name: formValue.name,
+        ipv4Static: formValue.ip.ipv4Static,
+        ipv4: formValue.ip.ipv4,
+      },
+      allowAutoForward,
+    )
 
     if (success) {
       this.form.markAsPristine()
@@ -249,6 +274,7 @@ export default class DeviceDetail {
     if (data) {
       this.form.reset({
         name: data.name,
+        allowAutoPortForward: data.allowAutoPortForward,
         ip: {
           ipv4Static: data.ipv4Static,
           ipv4: data.ipv4 ?? '',

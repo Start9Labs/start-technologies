@@ -57,28 +57,40 @@ StartWRT comes pre-installed on Start9 routers. If you need to reinstall or flas
 
 1. The setup wizard will guide you through the rest. If the router already has firmware installed, you can choose **Keep settings** or **Fresh Start** (full wipe). On a new device with no existing firmware, the welcome screen still appears, but **Fresh Start** is the only option offered. See [Factory Reset](factory-reset.md#reflash-microsd) for a full walkthrough of the reflash wizard.
 
-1. When the wizard completes, power off the router, remove the microSD card, and power it back on.
+1. When the wizard completes, power off the router, remove the microSD card, and power it back on. The router now boots StartWRT from its internal storage — the wizard installs everything needed for that, including the low-level boot firmware, so this works on any BananaPi BPI-F3 regardless of what (if anything) the factory installed.
 
 ## DIY and Unprogrammed Boards
+
+Flashing a bare BananaPi BPI-F3 works with the exact steps above: the setup wizard provisions the board's internal boot firmware (the eMMC boot partitions) as part of the flash, so the router boots from internal storage after the microSD card is removed even if the board arrived with no firmware at all.
+
+### Wi-Fi Card
+
+The BPI-F3 has no onboard Wi-Fi — the radio comes from a mini PCIe module, and the firmware image only carries drivers for the MediaTek MT7915/MT7916 family:
+
+- **MT7916-based modules** — the AsiaRF **AW7916-NPD**, as shipped in Start9 routers — are fully supported: 2.4 GHz and 5 GHz broadcast concurrently.
+- **MT7915-based modules** (e.g. the AsiaRF AW7915-NP1) initialize, but band-selectable cards operate **one band at a time**: with the stock configuration only the 2.4 GHz network comes up, and selecting **5 GHz** alone in Wi-Fi settings leaves no working radio.
+- Modules based on any other chipset have no driver in the image and will not work.
+
+There is one more difference on unprogrammed boards — the Wi-Fi password:
 
 Start9 routers ship with a unique Wi-Fi password programmed into the device's EEPROM and printed on a sticker on the bottom. A vendor-programmed board "just works": flash the image, boot, and connect to the `StartWRT` network with the sticker password.
 
 If you are flashing a bare BananaPi BPI-F3 that was never programmed with a Wi-Fi password, the Wi-Fi access point will **not** come up after boot. To bring it online:
 
-1.  Connect to the router over Ethernet (or serial console).
+1. Connect a computer to one of the router's LAN ports with an Ethernet cable.
 
-1.  Set a Wi-Fi password:
-    - **Random** — Generates a random 12-character password and prints it:
+1. Complete [initial setup](initial-setup.md): a captive portal opens automatically (if it does not, navigate to `router.lan`) and prompts you to create your admin password. When it finishes, you are logged in to the web interface.
 
-          startwrt-cli set-wifi-password
+1. Navigate to `Points of Entry > Wi-Fi > Passwords` and click "Add".
 
-    - **Manual** — Prompts you to enter your own password:
+1. Configure the password:
+   - **Label** — A descriptive name (e.g. "Default").
+   - **Password** — Click "Generate" to create a strong random password, or enter your own (8–63 characters).
+   - **Security Profile** — Select **Admin**. Adding the first Admin password switches the Wi-Fi radios on automatically. A first password mapped to another profile is also valid — the radios just aren't switched on for you; enable them under `Points of Entry > Wi-Fi > Settings` with the "Enable Wi-Fi" toggle.
 
-          startwrt-cli set-wifi-password --manual
+1. Click "Save". The `StartWRT` Wi-Fi network comes up — connect to it with your new password, and record the password somewhere safe.
 
-1.  Record the printed (or entered) password — this becomes your Wi-Fi password.
-
-The password lives in the router's configuration. A factory reset re-reads the EEPROM, so on an unprogrammed board you will need to run `startwrt-cli set-wifi-password` again after a reset.
+The password lives in the router's configuration, not the EEPROM. A soft [factory reset](factory-reset.md) re-reads the (empty) EEPROM, so on an unprogrammed board Wi-Fi is down again after a reset — repeat the steps above over Ethernet to bring it back.
 
 ## Next Steps
 

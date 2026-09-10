@@ -22,7 +22,7 @@ PKG_VERSION:=2022.10
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL:=https://github.com/spacemit-com/uboot-2022.10.git
 PKG_SOURCE_VERSION:=ad097c0e1d191a1d3820b2babe6ddc975c68577c
-PKG_MIRROR_HASH:=skip
+PKG_MIRROR_HASH:=2ec6e5a59409c84e2e0a95d5bdcafc482bbb5c0c6e5d1b4009286514d8a032e5
 endif
 
 include $(INCLUDE_DIR)/package.mk

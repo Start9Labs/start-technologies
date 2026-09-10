@@ -4,7 +4,7 @@ How the documentation site is built, versioned, and deployed.
 
 ## Place in the monorepo
 
-This is the `projects/start-docs/` project in the `start-os` monorepo. It owns the site build infra (`build.sh`, `serve.sh`, `versions.conf`), the shared mdBook `theme/`, the `landing/` page, and the Bitcoin Guides book — and it wires together the per-product books that live in their own product dirs (`../start-os/docs/`, `../start-tunnel/docs/`, `../start-sdk/docs/`) into one deployed site. CI (`.github/workflows/docs-deploy.yml`) consumes its output to deploy `docs.start9.com`.
+This is the `projects/start-docs/` project in the `start-os` monorepo. It owns the site build infra (`build.sh`, `serve.sh`, `versions.conf`), the shared mdBook `theme/`, the `landing/` page, and the Bitcoin Guides book — and it wires together the per-product books that live in their own product dirs (`../start-os/docs/`, `../start-tunnel/docs/`, `../start-sdk/docs/`, `../start-wrt/docs/`) into one deployed site. CI (`.github/workflows/docs-deploy.yml`) consumes its output to deploy `docs.start9.com`.
 
 ## Multi-Book Design
 
@@ -17,6 +17,7 @@ start-os/ (monorepo root)
 ├── projects/start-os/docs/        ← StartOS book (book.toml, src/, theme -> ../../start-docs/theme)
 ├── projects/start-tunnel/docs/    ← StartTunnel book
 ├── projects/start-sdk/docs/       ← Service Packaging book (book name: "packaging")
+├── projects/start-wrt/docs/       ← StartWRT book
 └── projects/start-docs/           ← THIS project: site build + landing + bitcoin-guides
     ├── build.sh          ← builds all books into docs/ output
     ├── serve.sh          ← build + local dev server
@@ -46,6 +47,7 @@ book_dir() {
     start-os) echo "$ROOT/../start-os/docs" ;;
     start-tunnel) echo "$ROOT/../start-tunnel/docs" ;;
     packaging) echo "$ROOT/../start-sdk/docs" ;;
+    start-wrt) echo "$ROOT/../start-wrt/docs" ;;
     *) echo "$ROOT/$1" ;;            # bitcoin-guides etc. live in docs/
   esac
 }

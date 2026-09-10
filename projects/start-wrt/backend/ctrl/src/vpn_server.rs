@@ -2012,6 +2012,8 @@ fn ensure_wireguard_firewall_rule(
         set_mark: None,
         _pp_id: None,
         _pp_mac: None,
+        _apf_label: None,
+        _pp_hairpin: None,
     };
 
     // Use a valid UCI section name (alphanumeric and underscores only)

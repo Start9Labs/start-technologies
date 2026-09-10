@@ -5,7 +5,146 @@ All notable changes to StartWRT are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.2]
+## [1.1.0]
+
+### Added
+
+- Automatic port forwarding (PCP + UPnP IGD). A LAN device can now open and
+  renew its own port forwards using the standard PCP and UPnP protocols —
+  StartOS servers use this to configure themselves automatically behind a
+  StartWRT router, and game consoles/torrent clients are covered too.
+  Authorization is per-device and **off by default**: enable it with the new
+  "Allow automatic port forwarding" toggle on the device's detail page. A
+  device can only ever forward ports to itself — and because PCP runs over UDP,
+  a request is honored only when it actually arrives from the network the
+  device lives on, so a device on one network can't open forwards on behalf of
+  a device on another. Requests that would take
+  over a manually published port are refused (conversely, publishing a port an
+  automatic forward holds removes the automatic forward — manual rules win).
+  Ports the router itself answers on from the internet are refused too, so an
+  automatic forward can never take over your remote access to the router, its
+  SSH, or a VPN server you've exposed.
+  Forwards are stored as tagged UCI firewall redirects (so they survive
+  reboots and never collide with manual published-port rules), renew on an
+  in-memory lease (no flash writes on renewal), and expire on the lifetime the
+  device requested when it stops renewing them — at most a week, even for a
+  device that asks to hold the port indefinitely. A forward is also removed
+  once the device no longer holds the address it points at — its DHCP lease
+  lapsed, or it returned on a different address — so a forward can never
+  quietly deliver Internet traffic to whichever device is given that address
+  next (devices with a reserved address are unaffected). Turning the toggle
+  back off — or forgetting the device — closes that device's forwards and
+  hostname routes immediately.
+  The Published Ports page gains a read-only "Automatic" section showing each
+  port use's device, kind (PCP, UPnP, or SNI), and expiry. UPnP clients see a complete gateway:
+  the router advertises the `WANCommonInterfaceConfig` service clients use to
+  recognize an Internet Gateway Device, answers the status actions they check
+  before mapping anything, and supports reading mappings back
+  (`GetSpecificPortMappingEntry`/`GetGenericPortMappingEntry`) — a device sees
+  only its own. The router identifies itself as "StartWRT" to those clients. The
+  UPnP endpoints refuse browser-shaped requests — DNS-rebinding requests and
+  blind cross-origin writes alike — so a malicious web page cannot use a LAN
+  device's browser to read the network's public IP, fingerprint the router, or
+  open that device's ports. Uses the shared `start-core` PCP/IGD server cores.
+  Devices can also register **SNI hostname routes** on a shared external port
+  (over PCP's HOSTNAME extension or the `X_START9_AddHostnameMapping` UPnP
+  vendor action): the router reads each TLS connection's requested hostname
+  and delivers it to whichever device owns it, so several devices — or several
+  services on one StartOS server with their own domains — share one port such
+  as 443. Hostname routes appear in the Automatic section with their hostname,
+  follow the same per-device permission and lease expiry as plain forwards,
+  claim their shared port whole (plain forwards on it are refused; ports the
+  router itself answers on — SSH, an inbound VPN — are refused to hostname
+  routes for the same reason), and are re-registered by the device within
+  minutes after a router restart rather than persisted. Remote access to the
+  router's own web interface is the exception, not a casualty: hostname
+  routes and remote access share port 443 — connections naming a routed
+  hostname reach its device, and everything else (such as browsing the
+  router by IP address) still reaches the router interface, accepted from
+  exactly the sources your Remote Access setting allows, so enabling one
+  feature never silently disables the other.
+  A routed hostname works from inside your own network too — a laptop on your
+  LAN can open the same public address and reach the device — with one
+  consequence worth knowing: because the device answers a local client
+  directly rather than through the router, the router puts its own address on
+  those connections, so the device cannot tell one local client from another
+  in its logs. Connections from another Security Profile, and from the
+  Internet, still carry the original address.
+- The UI now detects when the running firmware ships a newer interface than
+  the page is displaying (every RPC response and `system.info` report the
+  firmware's build stamp and the UI compares it to its own). An update
+  installed from the current tab reloads the page automatically once the
+  router is back (the "Updated to vX" confirmation follows after login); an
+  update applied any other way — CLI deploy, another device — shows a
+  "Refresh Needed" dialog with a Reload button rather than reloading out from
+  under unsaved work. Detection rides an `x-startwrt-git-hash` header on every
+  RPC response, so an open tab notices within seconds of its next request even
+  when the update restarted the daemon too quickly to drop a connection; pages
+  that make no requests while idle re-check every 30 seconds.
+- **Devices that never share a hostname are now identified by operating
+  system or hardware vendor instead of a meaningless placeholder.** Some
+  devices deliberately withhold their name from the router — Chromebooks
+  never send one, and many IoT gadgets can't — and previously showed up as an
+  opaque `device-3af2b1`. The device list now recognizes the operating system
+  from how the device requests a network address (its DHCP fingerprint), e.g.
+  `Windows device (3af2b1)`, or failing that the vendor behind its MAC
+  address, e.g. `Apple device (3af2b1)` — keeping the short suffix so
+  identical unnamed devices stay distinguishable. OS recognition works even
+  for devices using randomized Wi-Fi addresses, survives reboots, and a real
+  hostname, when one ever appears, still takes over automatically; names you
+  assign always win.
+- **6in4 tunnels can now be configured on the router.** The `6in4` protocol
+  and the SIT kernel module it needs now ship in the image, so an IPv6 tunnel
+  from a broker such as Hurricane Electric can be set up over SSH — useful for
+  reaching IPv6 on an ISP that provides none. There is no UI for this yet.
+  Previously these packages had to be built and sideloaded by hand after every
+  update, since a sysupgrade does not preserve separately installed packages.
+- **eMMC boot firmware provisioning.** The flash wizard, in-app updates, and a
+  check on every boot now converge the eMMC hardware boot partitions
+  (boot0/boot1) to the release's own `bootinfo` + FSBL (u-boot SPL, built from
+  the pinned `spacemit-com/uboot-2022.10` source). Previously only vendor
+  factory tooling ever wrote boot0, so a DIY BananaPi BPI-F3 whose factory left
+  it empty (or carrying an incompatible bootloader vintage) completed the setup
+  wizard but could not boot from eMMC once the microSD card was removed. Writes
+  are idempotent (byte-compared, skipped when already current), read-back
+  verified, and ordered for power-cut safety (boot1 mirror first, the
+  single-sector bootinfo header last); boards already carrying the current
+  firmware are not touched. The boot-time check makes provisioning effective
+  from the first boot after installing this release and self-heals damaged or
+  interrupted boot firmware thereafter. The `bootinfo_emmc.bin` blob now ships
+  in the image's bootfs partition to support this.
+- **The firmware image now ships MediaTek MT7915 Wi-Fi firmware alongside the
+  MT7916 firmware.** MT7915-based mini PCIe modules (such as the AsiaRF
+  AW7915-NP1) previously failed to initialize on DIY builds: the driver was
+  present but the firmware files were not, so no Wi-Fi radio ever appeared.
+  Note that MT7915 band-selectable cards operate one band at a time — with the
+  stock configuration the 2.4 GHz network comes up — unlike the
+  dual-band-concurrent AW7916-NPD module shipped in Start9 routers.
+- **Hardware documentation.** A new Hardware page in the user guide lists the
+  router's specifications and publishes the SpacemiT K1 reference schematic the
+  board descends from, noting where the shipped router differs from that
+  reference design and why.
+- **The StartWRT user guide is now published** at
+  [docs.start9.com/start-wrt](https://docs.start9.com/start-wrt/).
+
+### Changed
+
+- **Publishing a port the router itself answers on now asks for confirmation.**
+  Ports the router serves from the internet — remote access to its web
+  interface and SSH (80/443/22, including "When behind NAT" mode while the
+  router sits behind another router) and an inbound VPN's listen port —
+  previously could be published to a device without warning, silently cutting
+  that router service off from outside your network. Saving such a rule now
+  surfaces the conflict in a confirmation dialog; you can still publish the
+  port deliberately, and you're asked once per rule — again only if you
+  change which port that rule publishes, or its protocol. Detection follows
+  the live configuration (nothing is asked for ports no router service uses) and
+  matches transports, so e.g. a UDP-only forward on 443 doesn't warn.
+- The firmware build stamp is now identical everywhere it appears: the
+  `startwrt` binary (UI `ETag`, `system.info`, `startwrt verify`) now carries
+  the same full-hash `-modified`-suffixed stamp the Settings → General
+  **Build** field bakes in via `config.json`, instead of a separate
+  short-hash `-dirty` stamp.
 
 ### Removed
 
@@ -29,6 +168,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The WAN IPv6 "6RD" mode now works.** Selecting it wrote a valid
+  configuration, but the image shipped without the `6rd` protocol handler or
+  the SIT kernel module it depends on, so the WAN interface simply came up
+  without IPv6 — with nothing in the UI to indicate why. Both now ship.
+
 - **Disabled outbound VPNs are no longer offered as a Security Profile's
   outbound route.** The VPN picker on the profile's WAN / Internet tab listed
   every VPN, including disabled ones — and picking one silently cut that
@@ -44,6 +188,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   you chained it to — and every screen reported success. Disabled VPNs are no
   longer offered as chain targets, and the router rejects one outright.
 
+- **The bottom of the screen is no longer cut off on shorter displays.** On
+  screens shorter than a page's contextual help content, the sidebar's
+  Collapse button and the bottom of the page — including a form's Cancel/Save
+  buttons, even when scrolled all the way down — were clipped, whether or not
+  the help panel was open. The layout now always fits the screen exactly, and
+  long help content scrolls within its panel.
+
+- **A narrow window no longer cuts off the right side of the page.** Below
+  the mobile-layout width, page content is laid out at the width the collapsed
+  sidebar leaves free; with the sidebar still expanded, that layout ran under
+  the window's right edge — hiding a form's Cancel/Save buttons and other
+  right-edge content — with no way to scroll to it. The sidebar now collapses
+  automatically when the window becomes that narrow (and re-collapses after
+  navigating on a phone), and expanding it by hand at that width now shows a
+  horizontal scrollbar, so everything stays reachable either way.
+
+- **Changing a published port no longer briefly drops the firewall.** Applying
+  a port-forward change restarted the firewall, which tears the whole ruleset
+  down and rebuilds it as two separate steps — for a moment in between, the
+  router had no firewall and no NAT, and connections started in that window
+  were unfiltered. It now reloads instead, applying the new ruleset in a single
+  atomic step with no gap, and a ruleset that failed to build leaves the
+  running one untouched rather than leaving nothing in place.
+
 - **Enabling LAN IPv6 no longer silently fails when the Admin profile routes
   through an IPv4-only VPN.** Saving the LAN IPv6 settings reported success
   but immediately reverted to disabled: the save re-derived the admin LAN's
@@ -53,12 +221,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after switching the outbound back. The LAN IPv6 toggle is now the sole
   owner of that setting; with an IPv4-only VPN outbound, LAN devices still
   get local (ULA) IPv6 addresses while internet-bound IPv6 remains blocked
-  by the VPN kill switch, so nothing leaks around the tunnel.
+  by the VPN kill switch, so nothing leaks around the tunnel. That same
+  fault could also leave a router where the LAN IPv6 page read "Disabled"
+  while individual Security Profiles carried on handing out IPv6 addresses —
+  the page and the network disagreeing, with no way to bring them back into
+  line. Routers left in that state are now repaired automatically on the
+  first start after updating, which turns IPv6 off for those profiles too;
+  turn it back on from the LAN IPv6 page if you want it, and this time it
+  applies everywhere at once.
+
+- **Turning IPv6 off now tells your devices to drop their IPv6 addresses.**
+  Devices choose their own IPv6 addresses from a prefix the router advertises,
+  and the only way to take one back is to advertise it one last time as
+  expired. The router was restarting its advertisement service instead of
+  reloading it, which skips that goodbye entirely — so after disabling IPv6
+  (on the LAN, on a Security Profile, or on the WAN) devices carried on using
+  addresses that no longer worked, for up to 90 minutes, until the addresses
+  timed out on their own. The notice is now sent while the prefix is still
+  live. A device that is asleep or misses the notice still falls back to the
+  timeout.
+
+- **The Devices list no longer shows IPv6 addresses a device has given up.**
+  The router remembers a neighbouring address long after the device stops
+  using it, so a device could keep displaying an IPv6 address for hours after
+  it dropped it — most visibly after turning IPv6 off, where the address on
+  screen suggested nothing had changed. The router now confirms the device
+  still answers on an address before showing it, and leaves the field empty
+  when it does not.
 
 - **Published ports no longer reshuffle their order on every refresh.** The
   list is auto-refreshed every few seconds, and each refresh returned the
   rows in an arbitrary order, so the table visibly jumped around. Published
   ports now appear in a stable order, sorted by label.
+
+- **A device that missed its one chance to share its name over mDNS/Bonjour is
+  no longer stuck with a generic label until the router reboots.** The name
+  lookup was attempted exactly once per device, and it usually fired at the
+  worst moment — the instant the device first appeared (before its Bonjour
+  service finished starting), or during the reconnection rush right after a
+  router reboot — and sleeping phones and laptops don't answer at all. The
+  router now retries silent devices on a backoff schedule (about a minute
+  after the first miss, stretching to a day) before concluding the device has
+  no name to share; a device that answers is remembered permanently.
 
 - **IPv6 published-port rules now follow the target device when it changes
   its address.** Devices assign their own IPv6 addresses and change them
@@ -72,6 +276,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   privacy address that expired within days. The **Endpoints** column shows
   that same stable address, so the endpoint you copy always matches the rule.
 
+- Browsers could keep serving a stale, cached copy of the web UI after a
+  firmware update — the router previously sent no cache headers, leaving cache
+  behavior to per-browser heuristics (Firefox/Safari could silently run an old
+  UI against the new backend). The embedded UI is now served with explicit
+  headers: stable-named files (`index.html`, `assets/`) revalidate on every
+  load against a per-build `ETag` (a cheap `304 Not Modified` when unchanged),
+  while Angular's content-hashed bundles are cached as `immutable`. Requests
+  for assets from an older build now get a `404` instead of a mis-typed
+  `index.html` fallback.
+- The "Updated to vX" confirmation shown after a firmware update is now
+  translated instead of always appearing in English.
+
 - **Documentation corrected against the code in a full docs-vs-code audit.** The
   user guide no longer misstates product behavior: backups _do_ preserve assigned
   device names and data-usage history; a Fresh Start reflash sets a new admin
@@ -82,6 +298,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   corrected `API_CONTRACT.md` wire types and documented the previously missing
   endpoints, and fixed stale paths, commands, and structure descriptions across
   the developer docs.
+
 - **Cloudflare Dynamic DNS now saves a working configuration.** The saved
   config was missing fields the update client requires (the Bearer-token
   marker and the zone), so Cloudflare updates could never succeed. The form
@@ -93,6 +310,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   permissions. Proxied (orange-cloud) records are supported: the client
   reads the registered IP through the Cloudflare API rather than DNS, which
   would only ever see the proxy's address.
+
 - **Dynamic DNS now actually updates your provider.** The image was missing
   the `ddns-scripts` update client (and its Cloudflare and No-IP extensions),
   so DDNS settings were saved but no DNS record was ever updated. The FreeDNS
@@ -103,6 +321,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   WAN interface, so an update fires the moment the connection comes back up
   (e.g. after a modem reboot or PPPoE reconnect) instead of waiting for the
   next scheduled check.
+
+- **Published Ports endpoints no longer disappear when a WAN setting can't be
+  read.** A network interface hand-configured with a protocol StartWRT doesn't
+  manage (e.g. a `6in4` tunnel on `wan6`) made the WAN/LAN IPv6 settings
+  endpoints error, and the Published Ports page treated that one failure as
+  fatal — every port's IPv4 endpoint showed `—` even though the forwards were
+  active. Unmanaged protocols now read back gracefully (reported as IPv6
+  disabled) and are preserved untouched on disk, and the page now loads each
+  WAN setting independently, so one failure can no longer blank out the
+  endpoint list.
+
+- **A published port is now reachable from your other Security Profiles at the
+  router's public address.** Reaching a published port by the router's public
+  address — or a domain name pointing at it — rather than the device's LAN
+  address only worked from the target device's own profile. From any other
+  profile the router answered instead of the published service, so an app or
+  bookmark holding a public address worked on one network and not another. A
+  published port is a public resource, so those connections are now delivered
+  to the device from every profile that could reach it from the Internet and
+  from every profile with Access to the device's profile — and from those only.
+  A profile could reach it from the Internet when its WAN Access is All, a
+  Blacklist that does not block the router's public address, or a Whitelist
+  that includes it, outside any blackout window. The routes follow your
+  Security Profile settings and your public address as they change, apply to
+  the device's global IPv6 address as well (where a Whitelist or Blacklist
+  entry counts by the device's address), and cover ports opened through
+  automatic port forwarding (UPnP/PCP) the same way. Nothing else on the device
+  is opened: a profile without Access still cannot reach it at its LAN address
+  or on any other port.
+
+### Security
+
+- **A published port restricted by Source is no longer reachable from your own
+  network at the router's public address.** The restriction applied to
+  connections arriving from the Internet, but a device on your own network
+  could reach the port through the router's public address regardless of it.
+  Restricted rules are no longer served that way; reach them from inside your
+  network at the device's own LAN address.
 
 ## [1.0.1]
 

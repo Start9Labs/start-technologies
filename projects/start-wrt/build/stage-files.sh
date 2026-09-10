@@ -140,6 +140,8 @@ cp "$PROJECT_DIR"/backend/hotplug/99-startwrt-proxy-arp "${FILES_DIR}/etc/hotplu
 chmod +x "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-proxy-arp"
 cp "$PROJECT_DIR"/backend/hotplug/99-startwrt-published-ports "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-published-ports"
 chmod +x "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-published-ports"
+cp "$PROJECT_DIR"/backend/hotplug/99-startwrt-port-control "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-port-control"
+chmod +x "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-port-control"
 
 # Custom nftables rules auto-included by fw4 (/etc/nftables.d/*.nft).
 # 10-startwrt-dnat-mark.nft marks DNAT-state reply traffic so port-forward
@@ -160,9 +162,13 @@ cat > "${FILES_DIR}/lib/upgrade/keep.d/startwrt" << 'KEEPEOF'
 /etc/ssl/private/startwrt-server.key
 /etc/nlbwmon/data/
 /etc/startwrt/pending-update
-# Persistent device-name cache. Written atomically (temp + rename), so a live
-# `sysupgrade --create-backup` always captures one complete JSON document.
+# Persistent device-identity cache (hostnames + DHCP fingerprints). Written
+# atomically (temp + rename), so a live `sysupgrade --create-backup` always
+# captures one complete JSON document.
 /etc/startwrt/device_names.json
+# dnsmasq dhcp-script hook (fingerprint capture). The daemon rewrites it every
+# boot regardless; keeping it just spares one dnsmasq reload after sysupgrade.
+/etc/startwrt/dhcp-fingerprint.sh
 # Per-device IPv6 address history (same atomic-write pattern) — the stability
 # evidence the ipv6_tracker's election needs across reboots.
 /etc/startwrt/ipv6_neighbors.json

@@ -128,4 +128,14 @@ tui-dialog :not([tuiForm]) > [tuiNotification]:not(:last-child) {
     border: 1px solid var(--tui-border-normal);
     padding: 0.25rem 0.75rem;
   }
+
+  a {
+    color: var(--tui-text-action);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in lch, currentColor, transparent);
+
+    &:hover {
+      text-decoration-color: currentColor;
+    }
+  }
 }

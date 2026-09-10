@@ -29,12 +29,12 @@ If EEPROM tag 0x2F is missing or invalid (DIY install on a board the vendor neve
 
 The BPI-F3's persistent storage layers:
 
-| Storage                                         | Contents                                                   | Purpose                                                                                        |
-| ----------------------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| **SPI NOR** (4MB)                               | U-Boot                                                     | Bootloader — selects eMMC or microSD boot                                                      |
-| **I²C EEPROM** (24c02, 256 bytes, bus 2 / 0x50) | ONIE TLV blob (MAC, serial, **WiFi PMK at tag 0x2F**, CRC) | Vendor-programmed identity + WiFi password — survives reflash, factory reset, and overlay wipe |
-| **eMMC — firmware partitions**                  | Kernel, SquashFS root, overlay                             | Main OS — factory reset wipes overlay only                                                     |
-| **microSD** (removable)                         | Bootable reflash image                                     | Recovery / reflash (Part 3)                                                                    |
+| Storage                                           | Contents                                                    | Purpose                                                                                                                                                                                                                            |
+| ------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **eMMC — hardware boot partitions** (boot0/boot1) | `bootinfo` header + FSBL (u-boot SPL), FSBL mirror in boot1 | eMMC boot entry point — the K1 BootROM tries microSD first, then boots eMMC from boot0. Written by StartWRT's boot0 provisioning (flash wizard, sysupgrade, and a self-healing check on every boot), not by the raw user-area copy |
+| **I²C EEPROM** (24c02, 256 bytes, bus 2 / 0x50)   | ONIE TLV blob (MAC, serial, **WiFi PMK at tag 0x2F**, CRC)  | Vendor-programmed identity + WiFi password — survives reflash, factory reset, and overlay wipe                                                                                                                                     |
+| **eMMC — firmware partitions**                    | Kernel, SquashFS root, overlay                              | Main OS — factory reset wipes overlay only                                                                                                                                                                                         |
+| **microSD** (removable)                           | Bootable reflash image                                      | Recovery / reflash (Part 3)                                                                                                                                                                                                        |
 
 The EEPROM is read at runtime via the `at24` driver bound to the device tree (`/sys/bus/i2c/devices/2-0050/eeprom`). StartWRT only **reads** from the EEPROM — programming is a manufacturing responsibility. See `backend/ctrl/src/eeprom.rs` for the parser and resolution logic.
 
@@ -169,10 +169,11 @@ Physical access (microSD) = sufficient authorization.
  4. Confirm admin password
  5. Backup config files (sysupgrade conffiles list, excluding /etc/shadow)
  6. Flash new firmware (replace squashfs base, wipe overlay)
- 7. Restore config files
- 8. Write admin hash → /etc/shadow on new overlay
- 9. Mark overlay FS_STATE_READY so first boot doesn't wipe it
-10. "Update complete. Remove microSD and reboot."
+ 7. Provision eMMC boot partitions (boot0/boot1: bootinfo + FSBL, skipped when already current)
+ 8. Restore config files
+ 9. Write admin hash → /etc/shadow on new overlay
+10. Mark overlay FS_STATE_READY so first boot doesn't wipe it
+11. "Update complete. Remove microSD and reboot."
 ```
 
 On first boot from eMMC: daemon reads EEPROM → writes WiFi password to UCI → AP comes up. Admin login works immediately. Config files (firewall rules, WiFi profiles, SSH keys, etc.) are preserved via `sysupgrade` conffiles. User-installed package binaries are wiped — users must reinstall packages, though their config files are retained.
@@ -188,9 +189,10 @@ On first boot from eMMC: daemon reads EEPROM → writes WiFi password to UCI →
  4. Confirm admin password
  5. Wipe onboard disk config overlay entirely
  6. Flash fresh firmware
- 7. Write admin hash → /etc/shadow on new overlay
- 8. Mark overlay FS_STATE_READY
- 9. "Setup complete. Remove microSD and reboot."
+ 7. Provision eMMC boot partitions (boot0/boot1: bootinfo + FSBL, skipped when already current)
+ 8. Write admin hash → /etc/shadow on new overlay
+ 9. Mark overlay FS_STATE_READY
+10. "Setup complete. Remove microSD and reboot."
 ```
 
 On first boot from eMMC: daemon reads EEPROM → writes WiFi password to UCI → AP comes up. Admin login works immediately. All settings start fresh.

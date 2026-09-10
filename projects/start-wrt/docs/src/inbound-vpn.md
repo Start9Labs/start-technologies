@@ -24,6 +24,9 @@ An inbound VPN server listens for WireGuard connections from the Internet. When 
 > [!NOTE]
 > Each Security Profile can have at most one inbound VPN. Once every profile has one, the "Add" button is disabled.
 
+> [!NOTE]
+> The router keeps the VPN's port for itself: publishing it to a device in [Published Ports](published-ports.md) asks for confirmation first, and a device's [automatic port forwarding](published-ports.md#automatic-port-forwarding) request for it is refused.
+
 ## Managing a VPN Server
 
 Each VPN server row has an actions menu:

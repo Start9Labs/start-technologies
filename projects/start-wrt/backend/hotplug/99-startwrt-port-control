@@ -1,0 +1,5 @@
+#!/bin/sh
+# Re-key SNI listeners after WAN address changes.
+[ "$ACTION" = "ifup" -o "$ACTION" = "ifupdate" ] && [ "$INTERFACE" = "wan" ] && {
+    /usr/bin/startwrt-cli published-ports wan-changed 2>/dev/null &
+}

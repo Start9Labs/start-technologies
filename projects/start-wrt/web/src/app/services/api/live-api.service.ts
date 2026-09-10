@@ -53,6 +53,8 @@ import {
   WanDdnsSetRequest,
   PublishedPortFromApi,
   PublishedPortsSetRequest,
+  PublishedPortsSetResult,
+  AutomaticPortUseFromApi,
   OutboundVpn,
   OutboundVpnCreateRequest,
   OutboundVpnCreateResponse,
@@ -261,6 +263,13 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'devices.update', params })
   }
 
+  async devicesSetAutoForward(params: {
+    mac: string
+    allow: boolean
+  }): Promise<null> {
+    return this.rpc.request({ method: 'devices.set-auto-forward', params })
+  }
+
   async devicesForget(params: { mac: string }): Promise<null> {
     return this.rpc.request({ method: 'devices.forget', params })
   }
@@ -331,8 +340,17 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'published-ports.list', params: {} })
   }
 
-  async publishedPortsSet(params: PublishedPortsSetRequest): Promise<null> {
+  async publishedPortsSet(
+    params: PublishedPortsSetRequest,
+  ): Promise<PublishedPortsSetResult> {
     return this.rpc.request({ method: 'published-ports.set', params })
+  }
+
+  async publishedPortsAutoList(): Promise<AutomaticPortUseFromApi[]> {
+    return this.rpc.request({
+      method: 'published-ports.auto-list',
+      params: {},
+    })
   }
 
   async vpnClientList(): Promise<OutboundVpn[]> {
