@@ -522,7 +522,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          sparse-checkout: package.json
+          sparse-checkout: |
+            scripts
+            projects/start-os/release-notes
 
       - name: Determine version
         id: version
@@ -649,11 +651,16 @@ jobs:
           start-cli --registry="${{ env.REGISTRY }}" registry os version remove "$VERSION" \
             || echo "::notice::v${VERSION} was not indexed in ${{ env.REGISTRY }} yet."
 
+      # The notes are what the update screen shows before a server updates;
+      # manage-release.sh composes them from this version's release-notes file
+      # and appends the changelog link, pinned to the commit that built this.
       - name: Register OS version
         run: |
           VERSION="${{ steps.version.outputs.version }}"
+          NOTES=$(CHANGELOG_REF="${{ github.sha }}" ./scripts/manage-release.sh notes start-os) \
+            || { echo "::warning::No release notes for v${VERSION}; registering without them."; NOTES=""; }
           start-cli --registry="${{ env.REGISTRY }}" registry os version add \
-            "$VERSION" "v${VERSION}" '' ">=0.3.5 <=${VERSION}"
+            "$VERSION" "v${VERSION}" "$NOTES" ">=0.3.5 <=${VERSION}"
 
       - name: Index assets in registry
         run: |

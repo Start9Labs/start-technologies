@@ -4,9 +4,9 @@ All notable changes to the StartOS OS product are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and StartOS
 uses an [extended version](https://docs.start9.com) of semantic versioning.
 
-Full per-release notes are published on the
-[GitHub releases page](https://github.com/Start9Labs/start-technologies/releases). This
-file tracks notable changes since the move to the monorepo.
+This file tracks notable changes since the move to the monorepo, and is what each
+[GitHub release](https://github.com/Start9Labs/start-technologies/releases) links to
+for the detail behind its highlights.
 
 ## [0.4.0.2]
 
