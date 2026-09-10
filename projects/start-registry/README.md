@@ -50,6 +50,12 @@ Configuration is read from CLI flags and a config file (`-c <path>`; default sea
 
 Server state lives in `<datadir>/registry.db` (PatchDB) plus a SQLite metrics database and hosted asset files.
 
+> [!NOTE]
+> **Non-StartOS deployments only:** A separately managed reverse proxy must forward `/rpc/`,
+> `/ws/rpc/`, and `/rest/rpc/`. The WebSocket route also needs HTTP/1.1 upgrade forwarding and a
+> long-lived idle timeout. StartOS-hosted registries expose all three routes through their exported
+> `protocol: 'http'` interface automatically.
+
 ## Where things are
 
 - `Cargo.toml` — crate `start-registry`, bin `registrybox`, depends on `start-core` (package name `start-core`, lib `start_core`).
