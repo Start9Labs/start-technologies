@@ -51,6 +51,8 @@ on:
       # Doc-only edits under the allowlisted project trees (e.g.
       # projects/start-tunnel/docs/**) shouldn't trigger a build.
       - '!**/*.md'
+      # A release tags alpha's commit, which must contain its notes.
+      - 'projects/start-tunnel/release-notes/**'
   pull_request:
     # The jobs below skip drafts, and `ready_for_review` is not a default
     # activity type, so without it a draft marked ready is never checked.
