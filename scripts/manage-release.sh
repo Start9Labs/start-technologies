@@ -214,6 +214,15 @@ OS_DOWNLOAD_ROWS=(
     "RISC-V hardware that runs without proprietary firmware|RISC-V (RVA23), slim|riscv64"
 )
 
+# One row of the StartWRT download table: hardware | image | asset slot |
+# tooltip. The K1 is the only platform it builds for, so the rows differ by slot
+# rather than by hardware — img is the fresh-install sdcard image, squashfs the
+# sysupgrade payload. Mirrors OS_DOWNLOAD_ROWS.
+WRT_DOWNLOAD_ROWS=(
+    "**Start9 router**, and other BananaPi BPI-F3 boards (SpaceMiT K1, RISC-V)|microSD card — fresh install or reflash|img|gzip-compressed — balenaEtcher flashes it without unpacking"
+    "A router already running StartWRT|Sysupgrade — the payload an in-app update fetches for itself|squashfs|"
+)
+
 # The image extensions a platform ships: squashfs everywhere, plus iso (most) or
 # a flashable img (raspberrypi).
 os_image_exts() {
@@ -1484,16 +1493,16 @@ generated_sections() {
         wrt)
             echo "## Image Downloads"
             echo
-            local sdcard sysupgrade imgs
+            echo "| Hardware | Image | Download |"
+            echo "| --- | --- | --- |"
+            local row hardware image slot tip url imgs
             load_registry_index "$STARTWRT_SOURCE_REGISTRY"
-            sdcard=$(asset_url "$STARTWRT_SOURCE_REGISTRY" img "$STARTWRT_PLATFORM")
-            sysupgrade=$(asset_url "$STARTWRT_SOURCE_REGISTRY" squashfs "$STARTWRT_PLATFORM")
-            if [ -n "$sdcard" ]; then
-                echo "- [SD card image (fresh install)]($sdcard \"Write to microSD/eMMC to flash a new device\")"
-            fi
-            if [ -n "$sysupgrade" ]; then
-                echo "- [Sysupgrade image (OTA update)]($sysupgrade \"In-place upgrade via OpenWrt sysupgrade\")"
-            fi
+            for row in "${WRT_DOWNLOAD_ROWS[@]}"; do
+                IFS='|' read -r hardware image slot tip <<< "$row"
+                url=$(asset_url "$STARTWRT_SOURCE_REGISTRY" "$slot" "$STARTWRT_PLATFORM")
+                [ -n "$url" ] || continue
+                echo "| ${hardware} | ${image} | [IMG](${url}${tip:+ \"${tip}\"}) |"
+            done
             echo
             mapfile -t imgs < <(release_files)
             checksum_block "StartWRT" "${imgs[@]}"
