@@ -171,6 +171,7 @@ project_display_name() {
     case "$1" in
         start-os) echo "StartOS" ;;
         start-wrt) echo "StartWRT" ;;
+        start-tunnel) echo "StartTunnel" ;;
         start-sdk) echo "Start SDK" ;;
         *) echo "$1" ;;
     esac
