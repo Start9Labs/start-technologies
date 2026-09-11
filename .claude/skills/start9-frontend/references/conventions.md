@@ -6,9 +6,10 @@
 - Dictionaries: `en.ts` maps English → numeric id; `de/es/fr/pl.ts` map id → translation. Adding
   a string = add to `en.ts` with the next id + real translations in **all** other dictionaries.
   `npm run check:i18n` (and per-app `check:i18n:wrt`/`:tunnel`) scans for misses.
-- `shared` hosts the dictionaries for ui/setup-wizard/brochure; start-wrt/start-tunnel keep
-  local copies of the same machinery (consolidation into shared is planned — don't grow them
-  further apart). Ops-container apps are English-only: hardcode strings there.
+- `shared` hosts the dictionaries for ui/setup-wizard/brochure; start-wrt, start-tunnel, and
+  support-server's portal keep local copies of the same machinery (consolidation into shared
+  is planned — don't grow them further apart). ops-server and start9-store are English-only:
+  hardcode strings there.
 - Shared-lib services translate centrally: `DialogService`/`TaskService` accept `i18nKey`-typed
   labels, so callers pass English keys and never pre-translate.
 

@@ -46,6 +46,8 @@ on:
       # Doc-only edits shouldn't trigger a build. (start-cli has no docs/ subtree
       # today, but this guards a README or future docs added under the allowlist.)
       - '!**/*.md'
+      # A release tags alpha's commit, which must contain its notes.
+      - 'projects/start-cli/release-notes/**'
   pull_request:
     # The jobs below skip drafts, and `ready_for_review` is not a default
     # activity type, so without it a draft marked ready is never checked.

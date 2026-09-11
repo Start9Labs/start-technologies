@@ -5,6 +5,17 @@ All notable changes to StartWRT are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1]
+
+### Fixed
+
+- **Flashing to internal storage no longer depends on the microSD card's
+  partition table being untouched since the image was written.** A card whose
+  table a partition tool had rewritten to span the whole card, or whose last
+  partition had been grown to fill it, made the flash fail with
+  `rootfs_data partition not found on eMMC` and left the router unable to boot
+  from internal storage until reflashed.
+
 ## [1.1.0]
 
 ### Added
