@@ -4,6 +4,12 @@
 
 Outbound connections work by default. A service container can open a TCP or UDP connection to any external host — an upstream API, a package registry, a block explorer, an SMTP relay — with no manifest flag and no SDK call.
 
+## TLS trust roots are package-scoped
+
+`start-cli server trust-ca` adds CA roots to the trust store used by StartOS host processes. Service-container TLS clients use roots supplied in the package image or configured by the package.
+
+To connect to an endpoint using a private CA, install the root in the package and configure the client to trust it. For example, a Node.js service can set `NODE_EXTRA_CA_CERTS` to the root certificate's path.
+
 Three things are blocked, and one of them is the reason most packages that "can't reach the internet" actually fail.
 
 ## DNS must go through the container's own resolver

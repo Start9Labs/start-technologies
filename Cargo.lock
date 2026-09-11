@@ -287,7 +287,7 @@ dependencies = [
 [[package]]
 name = "async-acme"
 version = "0.6.0"
-source = "git+https://github.com/Start9Labs/async-acme.git?rev=45c8a56379c5f8afb6b9dd6511e0c7e1ce70ccf5#45c8a56379c5f8afb6b9dd6511e0c7e1ce70ccf5"
+source = "git+https://github.com/Start9Labs/async-acme.git?rev=34f487819bf3760392d36819acce8547b9c01a07#34f487819bf3760392d36819acce8547b9c01a07"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -395,6 +395,18 @@ dependencies = [
  "event-listener 5.4.1",
  "event-listener-strategy",
  "pin-project-lite",
+]
+
+[[package]]
+name = "async-native-tls"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9343dc5acf07e79ff82d0c37899f079db3534d99f189a1837c8e549c99405bec"
+dependencies = [
+ "native-tls",
+ "thiserror 1.0.69",
+ "tokio",
+ "url",
 ]
 
 [[package]]
@@ -2791,17 +2803,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "futures-rustls"
-version = "0.26.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8f2f12607f92c69b12ed746fabf9ca4f5c482cba46679c1a75b874ed7c26adb"
-dependencies = [
- "futures-io",
- "rustls",
- "rustls-pki-types",
-]
-
-[[package]]
 name = "futures-sink"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2881,8 +2882,8 @@ version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a453aa4984a2c67877ae6b13d433b46ce79bf6b6fa23c2da29b93b9f00ac744"
 dependencies = [
+ "async-native-tls",
  "futures",
- "futures-rustls",
  "hyper",
  "log",
  "serde",
@@ -2890,8 +2891,6 @@ dependencies = [
  "serde_qs",
  "serde_urlencoded",
  "tokio",
- "tokio-rustls",
- "webpki-roots 0.26.11",
 ]
 
 [[package]]
@@ -3502,7 +3501,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -6047,7 +6046,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -6084,7 +6083,7 @@ dependencies = [
  "cfg_aliases 0.2.1",
  "libc",
  "once_cell",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -7703,7 +7702,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "start-cli"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "start-core",
  "tracing",
@@ -7848,6 +7847,7 @@ dependencies = [
  "uuid",
  "visit-rs",
  "x25519-dalek 3.0.0-rc.1",
+ "x509-parser",
  "xmltree",
  "zbus",
 ]
@@ -9525,7 +9525,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

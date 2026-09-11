@@ -1120,17 +1120,63 @@ pub async fn rename(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Result<(), 
         .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("mv {src:?} -> {dst:?}")))
 }
 
+/// Routes FUSE mounts through `FUSE_FSYNCDIR`.
+#[cfg(target_os = "linux")]
+pub(crate) async fn sync_directory(path: &Path) -> Result<(), Error> {
+    open_file(path).await?.sync_all().await.with_ctx(|_| {
+        (
+            ErrorKind::Filesystem,
+            lazy_format!("fsync directory {path:?}"),
+        )
+    })?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) async fn sync_directory(_path: &Path) -> Result<(), Error> {
+    Ok(())
+}
+
+fn parent_directory(path: &Path) -> Option<&Path> {
+    path.parent().map(|parent| {
+        if parent.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            parent
+        }
+    })
+}
+
+async fn create_dir_all_durable(path: &Path) -> Result<(), Error> {
+    let mut missing = Vec::new();
+    let mut current = path;
+    loop {
+        match tokio::fs::metadata(current).await {
+            Ok(_) => break,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                missing.push(current.to_owned());
+                current = parent_directory(current).unwrap_or(Path::new("."));
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    for directory in missing.into_iter().rev() {
+        match tokio::fs::create_dir(&directory).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+        sync_directory(parent_directory(&directory).unwrap_or(Path::new("."))).await?;
+    }
+    Ok(())
+}
+
 #[instrument(skip_all)]
 pub async fn write_file_atomic(
     path: impl AsRef<Path>,
     contents: impl AsRef<[u8]>,
 ) -> Result<(), Error> {
     let path = path.as_ref();
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("mkdir -p {parent:?}")))?;
-    }
     let mut file = AtomicFile::new(path, None::<&Path>)
         .await
         .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("create {path:?}")))?;
@@ -1144,6 +1190,36 @@ pub async fn write_file_atomic(
 }
 
 #[instrument(skip_all)]
+pub(crate) async fn write_file_atomic_durable(
+    path: impl AsRef<Path>,
+    contents: impl AsRef<[u8]>,
+) -> Result<(), Error> {
+    let path = path.as_ref();
+    let mut file = AtomicFile::new_durable(path)
+        .await
+        .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("create {path:?}")))?;
+    file.write_all(contents.as_ref())
+        .await
+        .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("write {path:?}")))?;
+    file.save_durable()
+        .await
+        .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("save {path:?}")))?;
+    Ok(())
+}
+
+#[instrument(skip_all)]
+pub(crate) async fn delete_file_durable(path: impl AsRef<Path>) -> Result<(), Error> {
+    let path = path.as_ref();
+    match tokio::fs::remove_file(path).await {
+        Ok(()) => sync_directory(parent_directory(path).unwrap_or(Path::new("."))).await,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => {
+            Err(error).with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("delete {path:?}")))
+        }
+    }
+}
+
+#[instrument(skip_all)]
 pub async fn write_file_owned_atomic(
     path: impl AsRef<Path>,
     contents: impl AsRef<[u8]>,
@@ -1151,11 +1227,6 @@ pub async fn write_file_owned_atomic(
     gid: u32,
 ) -> Result<(), Error> {
     let path = path.as_ref();
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("mkdir -p {parent:?}")))?;
-    }
     let mut file = AtomicFile::new(path, None::<&Path>)
         .await
         .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("create {path:?}")))?;
@@ -1816,9 +1887,26 @@ impl AtomicFile {
         path: impl AsRef<Path> + Send + Sync,
         tmp_path: Option<impl AsRef<Path> + Send + Sync>,
     ) -> Result<Self, Error> {
-        let path = canonicalize(&path, true).await?;
+        Self::new_inner(path.as_ref(), tmp_path.as_ref().map(AsRef::as_ref), false).await
+    }
+
+    async fn new_durable(path: impl AsRef<Path> + Send + Sync) -> Result<Self, Error> {
+        Self::new_inner(path.as_ref(), None, true).await
+    }
+
+    async fn new_inner(path: &Path, tmp_path: Option<&Path>, durable: bool) -> Result<Self, Error> {
+        let path = if durable {
+            if let Some(parent) = parent_directory(path) {
+                create_dir_all_durable(parent)
+                    .await
+                    .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("mkdir -p {parent:?}")))?;
+            }
+            canonicalize(path, false).await?
+        } else {
+            canonicalize(path, true).await?
+        };
         let tmp_path = if let Some(tmp_path) = tmp_path {
-            canonicalize(&tmp_path, true).await?
+            canonicalize(tmp_path, true).await?
         } else {
             to_tmp_path(&path)?
         };
@@ -1840,7 +1928,15 @@ impl AtomicFile {
         Ok(())
     }
 
-    pub async fn save(mut self) -> Result<(), Error> {
+    pub async fn save(self) -> Result<(), Error> {
+        self.save_inner(false).await
+    }
+
+    async fn save_durable(self) -> Result<(), Error> {
+        self.save_inner(true).await
+    }
+
+    async fn save_inner(mut self, durable: bool) -> Result<(), Error> {
         use tokio::io::AsyncWriteExt;
         if let Some(file) = self.file.as_mut() {
             file.flush().await?;
@@ -1856,6 +1952,9 @@ impl AtomicFile {
                     format!("mv {} -> {}", self.tmp_path.display(), self.path.display()),
                 )
             })?;
+        if durable {
+            sync_directory(self.path.parent().unwrap_or(Path::new("."))).await?;
+        }
         Ok(())
     }
 }
@@ -1924,6 +2023,69 @@ mod test {
         );
 
         tokio::fs::remove_dir_all(root).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn ordinary_atomic_file_accepts_relative_leaf_and_creates_parent_chain() {
+        let relative = PathBuf::from(format!(
+            ".atomic-file-test-{}-{}",
+            std::process::id(),
+            rand::random::<u64>()
+        ));
+        let mut relative_file = AtomicFile::new(&relative, None::<&Path>).await.unwrap();
+        relative_file.write_all(b"relative").await.unwrap();
+        relative_file.save().await.unwrap();
+        assert_eq!(tokio::fs::read(&relative).await.unwrap(), b"relative");
+        tokio::fs::remove_file(relative).await.unwrap();
+
+        let relative_root = PathBuf::from(format!(
+            ".atomic-directory-test-{}-{}",
+            std::process::id(),
+            rand::random::<u64>()
+        ));
+        let nested = relative_root.join("first/second/file");
+        let mut nested_file = AtomicFile::new(&nested, None::<&Path>).await.unwrap();
+        nested_file.write_all(b"nested").await.unwrap();
+        nested_file.save().await.unwrap();
+        assert_eq!(tokio::fs::read(nested).await.unwrap(), b"nested");
+        tokio::fs::remove_dir_all(relative_root).await.unwrap();
+
+        let tmp = TmpDir::new().await.unwrap();
+        let destination = tmp.join("destination/file");
+        let temporary = tmp.join("temporary/file.tmp");
+        let mut custom_tmp_file = AtomicFile::new(&destination, Some(&temporary))
+            .await
+            .unwrap();
+        custom_tmp_file.write_all(b"custom").await.unwrap();
+        custom_tmp_file.save().await.unwrap();
+        assert_eq!(tokio::fs::read(destination).await.unwrap(), b"custom");
+        assert_eq!(
+            tokio::fs::metadata(temporary).await.unwrap_err().kind(),
+            std::io::ErrorKind::NotFound
+        );
+        tmp.delete().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn atomic_write_helpers_create_parent_chains() {
+        let tmp = TmpDir::new().await.unwrap();
+        let ordinary = tmp.join("ordinary/parent/file");
+        write_file_atomic(&ordinary, b"ordinary").await.unwrap();
+        assert_eq!(tokio::fs::read(ordinary).await.unwrap(), b"ordinary");
+
+        let durable = tmp.join("durable/parent/file");
+        write_file_atomic_durable(&durable, b"durable")
+            .await
+            .unwrap();
+        assert_eq!(tokio::fs::read(&durable).await.unwrap(), b"durable");
+        delete_file_durable(&durable).await.unwrap();
+        delete_file_durable(&durable).await.unwrap();
+        assert_eq!(
+            tokio::fs::metadata(durable).await.unwrap_err().kind(),
+            std::io::ErrorKind::NotFound
+        );
+
+        tmp.delete().await.unwrap();
     }
 
     #[tokio::test]
