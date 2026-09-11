@@ -6,8 +6,9 @@ FIRMWARE_ROMS := projects/start-os/build/firmware/$(PLATFORM) $(shell jq --raw-o
 BUILD_SRC := $(call ls-files, projects/start-os/build/lib) build/lib/scripts/forward-port build/lib/scripts/forward-port6 projects/start-os/build/lib/depends projects/start-os/build/lib/conflicts $(FIRMWARE_ROMS) projects/start-os/build/lib/migration-images/.done
 IMAGE_RECIPE_SRC := $(call ls-files, projects/start-os/build/image-recipe/)
 STARTD_SRC := projects/start-os/startd.service projects/start-os/services.slice projects/start-os/startos-shutdown.service projects/start-os/startos-restart.service $(BUILD_SRC)
+STARTOS_RELEASE_NOTES := projects/start-os/release-notes/$(shell cat $(VERSION_FILE)).md
 COMPILED_TARGETS := target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox target/$(RUST_ARCH)-unknown-linux-musl/release/start-container projects/start-os/container-runtime/rootfs.$(ARCH).squashfs
-STARTOS_TARGETS := $(STARTD_SRC) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_FILE) $(COMPILED_TARGETS) target/$(RUST_ARCH)-unknown-linux-musl/release/startos-backup-fs $(PLATFORM_FILE) \
+STARTOS_TARGETS := $(STARTD_SRC) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_FILE) $(STARTOS_RELEASE_NOTES) $(COMPILED_TARGETS) target/$(RUST_ARCH)-unknown-linux-musl/release/startos-backup-fs $(PLATFORM_FILE) \
 	$(shell if [ "$(PLATFORM)" = "raspberrypi" ]; then \
 		echo target/aarch64-unknown-linux-musl/release/pi-beep; \
 	fi) \
@@ -98,6 +99,7 @@ start-os-install: $(STARTOS_TARGETS)
 	$(call cp,build/env/ENVIRONMENT.txt,$(DESTDIR)/usr/lib/startos/ENVIRONMENT.txt)
 	$(call cp,build/env/GIT_HASH.txt,$(DESTDIR)/usr/lib/startos/GIT_HASH.txt)
 	$(call cp,build/env/VERSION.txt,$(DESTDIR)/usr/lib/startos/VERSION.txt)
+	$(call cp,$(STARTOS_RELEASE_NOTES),$(DESTDIR)/usr/lib/startos/release-notes.md)
 
 start-os-update-overlay: $(STARTOS_TARGETS)
 	@echo "\033[33m!!! THIS WILL ONLY REFLASH YOUR DEVICE IN MEMORY !!!\033[0m"
@@ -195,11 +197,11 @@ projects/start-os/build/lib/depends projects/start-os/build/lib/conflicts: $(ENV
 $(FIRMWARE_ROMS): projects/start-os/build/lib/firmware.json ./projects/start-os/build/download-firmware.sh $(PLATFORM_FILE)
 	./projects/start-os/build/download-firmware.sh $(PLATFORM)
 
-target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox: $(CORE_SRC) $(RELEASE_NOTES) $(COMPRESSED_WEB_UIS) projects/start-os/web/patchdb-ui-seed.json $(ENVIRONMENT_FILE) projects/start-os/build/build-startbox.sh
+target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox: $(CORE_SRC) $(COMPRESSED_WEB_UIS) projects/start-os/web/patchdb-ui-seed.json $(ENVIRONMENT_FILE) projects/start-os/build/build-startbox.sh
 	ARCH=$(ARCH) PROFILE=$(PROFILE) ./projects/start-os/build/build-startbox.sh
 	touch target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox
 
-target/$(RUST_ARCH)-unknown-linux-musl/release/start-container: $(CORE_SRC) $(RELEASE_NOTES) $(ENVIRONMENT_FILE) projects/start-os/build/build-start-container.sh
+target/$(RUST_ARCH)-unknown-linux-musl/release/start-container: $(CORE_SRC) $(ENVIRONMENT_FILE) projects/start-os/build/build-start-container.sh
 	ARCH=$(ARCH) ./projects/start-os/build/build-start-container.sh
 	touch target/$(RUST_ARCH)-unknown-linux-musl/release/start-container
 

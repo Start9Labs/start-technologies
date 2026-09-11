@@ -3,17 +3,18 @@ use crate::context::RpcContext;
 use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
 
-const NOTES: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../../projects/start-os/release-notes/",
-    env!("STARTOS_VERSION"),
-    ".md"
-));
+const RELEASE_NOTES_PATH: &str = "/usr/lib/startos/release-notes.md";
 
 pub async fn welcome(ctx: &RpcContext) -> Result<(), Error> {
+    let Some(notes) = crate::util::io::read_file_to_string(RELEASE_NOTES_PATH)
+        .await
+        .log_err()
+    else {
+        return Ok(());
+    };
     let version = Current::default().semver();
     let body = format!(
-        "{NOTES}\n\n**[Full changelog for v{version}](https://github.com/Start9Labs/start-technologies/blob/start-os/v{version}/projects/start-os/CHANGELOG.md)** — every change in this release."
+        "{notes}\n\n**[Full changelog for v{version}](https://github.com/Start9Labs/start-technologies/blob/start-os/v{version}/projects/start-os/CHANGELOG.md)** — every change in this release."
     );
     ctx.db
         .mutate(|db| {
