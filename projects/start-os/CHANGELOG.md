@@ -84,6 +84,10 @@ for the detail behind its highlights.
   any browser pointed at this server. Narrow windows and phones always show the
   grid.
 
+- **A notification welcomes you to a new version after your server restarts.**
+  It names the version you landed on and carries that release's notes, so what
+  you read before updating is there afterwards too.
+
 - **An action can return a multi-line value** — a diagnostic report, a
   generated config file, an exported key block. It appears as a read-only
   monospace box that keeps its line breaks, and, where the service asks for it,

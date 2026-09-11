@@ -2073,6 +2073,21 @@ lxc.mod.cleaned-up-containers:
   fr_FR: "Conteneurs LXC orphelins nettoyés avec succès"
   pl_PL: "Pomyślnie wyczyszczono wiszące kontenery LXC"
 
+# version/release_notes.rs
+release-notes.welcome-message:
+  en_US: "Click \"View details\" for what's new in this release."
+  de_DE: "Klicken Sie auf \"Details anzeigen\", um zu sehen, was in dieser Version neu ist."
+  es_ES: "Haz clic en \"Ver detalles\" para conocer las novedades de esta versión."
+  fr_FR: "Cliquez sur \"Voir les détails\" pour découvrir les nouveautés de cette version."
+  pl_PL: "Kliknij \"Zobacz szczegóły\", aby zobaczyć nowości w tej wersji."
+
+release-notes.welcome-title:
+  en_US: "Welcome to StartOS %{version}!"
+  de_DE: "Willkommen bei StartOS %{version}!"
+  es_ES: "¡Bienvenido a StartOS %{version}!"
+  fr_FR: "Bienvenue dans StartOS %{version} !"
+  pl_PL: "Witamy w StartOS %{version}!"
+
 # version/v0_3_6_alpha_0.rs
 migration.migrating-package:
   en_US: "Migrating package %{package}..."
