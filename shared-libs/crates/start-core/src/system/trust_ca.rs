@@ -314,7 +314,7 @@ fn is_currently_valid(certificate: &X509, now: &Asn1TimeRef) -> Result<bool, Err
             != Ordering::Less)
 }
 
-async fn update_trust_store() -> Result<(), Error> {
+pub(crate) async fn update_trust_store() -> Result<(), Error> {
     Command::new("update-ca-certificates")
         .invoke(ErrorKind::OpenSsl)
         .await?;
