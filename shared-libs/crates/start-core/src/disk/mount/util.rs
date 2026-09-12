@@ -48,8 +48,7 @@ pub async fn bind<P0: AsRef<Path>, P1: AsRef<Path>>(
     Ok(())
 }
 
-/// Flushes the containing filesystem via `syncfs(2)`.
-/// Use `sync_directory` for daemons implementing durability through `FUSE_FSYNCDIR`.
+/// Commits dirty data through `syncfs(2)`.
 #[instrument(skip_all)]
 pub async fn sync_filesystem<P: AsRef<Path>>(path: P) -> Result<(), Error> {
     tokio::process::Command::new("sync")

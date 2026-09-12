@@ -1120,7 +1120,7 @@ pub async fn rename(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Result<(), 
         .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("mv {src:?} -> {dst:?}")))
 }
 
-/// Routes FUSE mounts through `FUSE_FSYNCDIR`.
+/// Invokes `FUSE_FSYNCDIR` for FUSE-backed directories.
 #[cfg(target_os = "linux")]
 pub(crate) async fn sync_directory(path: &Path) -> Result<(), Error> {
     open_file(path).await?.sync_all().await.with_ctx(|_| {
@@ -1157,14 +1157,28 @@ async fn create_dir_all_durable(path: &Path) -> Result<(), Error> {
                 missing.push(current.to_owned());
                 current = parent_directory(current).unwrap_or(Path::new("."));
             }
-            Err(error) => return Err(error.into()),
+            Err(error) => {
+                return Err(error).with_ctx(|_| {
+                    (
+                        ErrorKind::Filesystem,
+                        lazy_format!("read metadata for {current:?}"),
+                    )
+                });
+            }
         }
     }
     for directory in missing.into_iter().rev() {
         match tokio::fs::create_dir(&directory).await {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(error.into()),
+            Err(error) => {
+                return Err(error).with_ctx(|_| {
+                    (
+                        ErrorKind::Filesystem,
+                        lazy_format!("create directory {directory:?}"),
+                    )
+                });
+            }
         }
         sync_directory(parent_directory(&directory).unwrap_or(Path::new("."))).await?;
     }

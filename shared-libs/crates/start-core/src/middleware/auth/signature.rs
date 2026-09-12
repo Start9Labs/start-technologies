@@ -24,7 +24,6 @@ use crate::rpc_continuations::OpenAuthedContinuations;
 use crate::sign::commitment::Commitment;
 use crate::sign::commitment::request::RequestCommitment;
 use crate::sign::{AnySignature, AnySigningKey, AnyVerifyingKey};
-use crate::util::iter::TransposeResultIterExt;
 use crate::util::serde::Base64;
 use crate::util::sync::SyncMutex;
 
