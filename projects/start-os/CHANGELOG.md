@@ -128,10 +128,6 @@ for the detail behind its highlights.
 
 ### Fixed
 
-- **Private service ports accept connections from routed private networks.** A
-  service on one subnet is available to devices on another private subnet when
-  the router permits traffic between them, matching private web interfaces.
-
 - **The port-forwarding test reports a port as open to the Internet only where
   it is reachable from the Internet.** Where StartOS's port-forward request was
   granted by a router that sits behind another router, the test could pass a
