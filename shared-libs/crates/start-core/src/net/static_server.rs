@@ -772,6 +772,25 @@ enum ByteRange {
     Unsatisfiable { size: u64 },
 }
 
+fn parse_decimal_saturating(decimal: &str) -> Option<u64> {
+    if decimal.is_empty() {
+        return None;
+    }
+    decimal.bytes().try_fold(0u64, |value, digit| {
+        digit.is_ascii_digit().then(|| {
+            value
+                .saturating_mul(10)
+                .saturating_add(u64::from(digit - b'0'))
+        })
+    })
+}
+
+fn decimal_less_than(left: &str, right: &str) -> bool {
+    let left = left.trim_start_matches('0');
+    let right = right.trim_start_matches('0');
+    left.len() < right.len() || (left.len() == right.len() && left < right)
+}
+
 fn parse_range(header: &HeaderValue, len: u64) -> ByteRange {
     let Some(range) = header
         .to_str()
@@ -781,27 +800,24 @@ fn parse_range(header: &HeaderValue, len: u64) -> ByteRange {
             range
                 .get(..6)
                 .filter(|unit| unit.eq_ignore_ascii_case("bytes="))
-                .map(|_| &range[6..])
+                .map(|_| range[6..].trim())
         })
         .filter(|range| !range.contains(','))
     else {
         return ByteRange::Full;
     };
-    let Some((start, end)) = range
-        .split_once('-')
-        .map(|(start, end)| (start.trim(), end.trim()))
-    else {
+    let Some((start, end)) = range.split_once('-') else {
         return ByteRange::Full;
     };
     if start.is_empty() {
-        if end.is_empty() || !end.bytes().all(|byte| byte.is_ascii_digit()) {
-            return ByteRange::Full;
-        }
-        let Ok(suffix_len) = end.parse::<u64>() else {
+        let Some(suffix_len) = parse_decimal_saturating(end) else {
             return ByteRange::Full;
         };
-        if suffix_len == 0 || len == 0 {
+        if suffix_len == 0 {
             return ByteRange::Unsatisfiable { size: len };
+        }
+        if len == 0 {
+            return ByteRange::Full;
         }
         return ByteRange::Satisfiable {
             start: len.saturating_sub(suffix_len),
@@ -809,35 +825,28 @@ fn parse_range(header: &HeaderValue, len: u64) -> ByteRange {
             size: len,
         };
     }
-    if !start.bytes().all(|byte| byte.is_ascii_digit()) {
-        return ByteRange::Full;
-    }
-    let Ok(start) = start.parse::<u64>() else {
+    let Some(start_value) = parse_decimal_saturating(start) else {
         return ByteRange::Full;
     };
     let parsed_end = if end.is_empty() {
         None
     } else {
-        if !end.bytes().all(|byte| byte.is_ascii_digit()) {
-            return ByteRange::Full;
-        }
-        let Ok(end) = end.parse::<u64>() else {
+        let Some(end_value) = parse_decimal_saturating(end) else {
             return ByteRange::Full;
         };
-        Some(end)
+        if end_value < start_value || (end_value == start_value && decimal_less_than(end, start)) {
+            return ByteRange::Full;
+        }
+        Some(end_value)
     };
-    if start >= len {
+    if start_value >= len {
         return ByteRange::Unsatisfiable { size: len };
     }
     let end = min(parsed_end.unwrap_or(len - 1), len - 1);
-    if end < start {
-        ByteRange::Unsatisfiable { size: len }
-    } else {
-        ByteRange::Satisfiable {
-            start,
-            end,
-            size: len,
-        }
+    ByteRange::Satisfiable {
+        start: start_value,
+        end,
+        size: len,
     }
 }
 
@@ -1577,25 +1586,56 @@ mod tests {
                 size,
             },
         );
-        assert_eq!(
-            parse_range(&HeaderValue::from_static("bytes=10-"), size),
-            ByteRange::Satisfiable {
-                start: 10,
-                end: 19,
-                size,
-            },
-        );
+        for range in ["bytes=10-", "bytes= 10-"] {
+            assert_eq!(
+                parse_range(&HeaderValue::from_static(range), size),
+                ByteRange::Satisfiable {
+                    start: 10,
+                    end: 19,
+                    size,
+                },
+            );
+        }
         assert_eq!(
             parse_range(&HeaderValue::from_static("bytes=20-"), size),
             ByteRange::Unsatisfiable { size },
         );
         assert_eq!(
-            parse_range(&HeaderValue::from_static("bytes=10-5"), size),
-            ByteRange::Unsatisfiable { size },
-        );
-        assert_eq!(
             parse_range(&HeaderValue::from_static("bytes=0-"), 0),
             ByteRange::Unsatisfiable { size: 0 },
+        );
+        assert_eq!(
+            parse_range(&HeaderValue::from_static("bytes=-1"), 0),
+            ByteRange::Full,
+        );
+        assert_eq!(
+            parse_range(
+                &HeaderValue::from_static("bytes=-18446744073709551616"),
+                size,
+            ),
+            ByteRange::Satisfiable {
+                start: 0,
+                end: 19,
+                size,
+            },
+        );
+        assert_eq!(
+            parse_range(
+                &HeaderValue::from_static("bytes=5-18446744073709551616"),
+                size,
+            ),
+            ByteRange::Satisfiable {
+                start: 5,
+                end: 19,
+                size,
+            },
+        );
+        assert_eq!(
+            parse_range(
+                &HeaderValue::from_static("bytes=18446744073709551616-"),
+                size,
+            ),
+            ByteRange::Unsatisfiable { size },
         );
         for malformed in [
             "bytes=-",
@@ -1606,6 +1646,11 @@ mod tests {
             "bytes=1-+2",
             "bytes=--5",
             "bytes=1--2",
+            "bytes=10-5",
+            "bytes=10 -15",
+            "bytes=10- 15",
+            "bytes= 10 - 15",
+            "bytes=18446744073709551617-18446744073709551616",
         ] {
             assert_eq!(
                 parse_range(&HeaderValue::from_str(malformed).unwrap(), 0),
