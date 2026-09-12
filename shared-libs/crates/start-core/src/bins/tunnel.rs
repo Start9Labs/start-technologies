@@ -37,11 +37,70 @@ impl<V: MetadataVisitor> Visit<V> for WebserverListener {
     }
 }
 
-async fn await_aborted_task(name: &str, task: NonDetachingJoinHandle<()>) {
-    if let Err(error) = task.await {
+const FORWARDING_TASK_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
+
+fn log_task_result(name: &str, result: Result<(), tokio::task::JoinError>) {
+    if let Err(error) = result {
         if !error.is_cancelled() {
             tracing::error!("{name} task failed: {error}");
         }
+    }
+}
+
+async fn await_task(name: &str, task: NonDetachingJoinHandle<()>) {
+    log_task_result(name, task.await);
+}
+
+async fn stop_forwarding_tasks(tasks: [NonDetachingJoinHandle<()>; 3]) {
+    let [mut pcp, mut igd, mut lease] = tasks;
+    let mut pcp_done = false;
+    let mut igd_done = false;
+    let mut lease_done = false;
+    let timeout = tokio::time::sleep(FORWARDING_TASK_SHUTDOWN_TIMEOUT);
+    tokio::pin!(timeout);
+
+    while !(pcp_done && igd_done && lease_done) {
+        tokio::select! {
+            biased;
+            _ = &mut timeout => break,
+            result = &mut pcp, if !pcp_done => {
+                log_task_result("PCP", result);
+                pcp_done = true;
+            }
+            result = &mut igd, if !igd_done => {
+                log_task_result("IGD", result);
+                igd_done = true;
+            }
+            result = &mut lease, if !lease_done => {
+                log_task_result("lease", result);
+                lease_done = true;
+            }
+        }
+    }
+
+    if pcp_done && igd_done && lease_done {
+        return;
+    }
+    tracing::warn!(
+        "forwarding servers did not stop within {FORWARDING_TASK_SHUTDOWN_TIMEOUT:?}; aborting"
+    );
+    if !pcp_done {
+        pcp.abort();
+    }
+    if !igd_done {
+        igd.abort();
+    }
+    if !lease_done {
+        lease.abort();
+    }
+    if !pcp_done {
+        log_task_result("PCP", pcp.await);
+    }
+    if !igd_done {
+        log_task_result("IGD", igd.await);
+    }
+    if !lease_done {
+        log_task_result("lease", lease.await);
     }
 }
 
@@ -54,6 +113,7 @@ async fn inner_main(config: &TunnelConfig) -> Result<Option<bool>, Error> {
         let http_acceptor =
             Acceptor::bind_map_dyn([(WebserverListener::Http, listen)]).await?;
         let ctx = TunnelContext::init(config).await?;
+        let mut shutdown_recv = ctx.shutdown.subscribe();
         let forwarding_threads = ctx.spawn_forwarding_servers();
         let server = WebServer::new(http_acceptor, tunnel_router(ctx.clone()));
         let acceptor_setter = server.acceptor_setter();
@@ -140,8 +200,6 @@ async fn inner_main(config: &TunnelConfig) -> Result<Option<bool>, Error> {
         })
         .into();
 
-        let mut shutdown_recv = ctx.shutdown.subscribe();
-
         let sig_handler_ctx = ctx.clone();
         let sig_handler: NonDetachingJoinHandle<()> = tokio::spawn(async move {
             use tokio::signal::unix::SignalKind;
@@ -171,34 +229,35 @@ async fn inner_main(config: &TunnelConfig) -> Result<Option<bool>, Error> {
         })
         .into();
 
-        let shutdown = shutdown_recv
-            .recv()
-            .await
-            .with_kind(crate::ErrorKind::Unknown)?;
+        let shutdown = loop {
+            match shutdown_recv.recv().await {
+                Ok(shutdown) => break shutdown,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(error) => return Err(error).with_kind(crate::ErrorKind::Unknown),
+            }
+        };
 
         sig_handler.abort();
         https_thread.abort();
         redirect_thread.abort();
 
-        await_aborted_task("signal", sig_handler).await;
-        await_aborted_task("HTTPS", https_thread).await;
-        await_aborted_task("redirect", redirect_thread).await;
+        await_task("signal", sig_handler).await;
+        await_task("HTTPS", https_thread).await;
+        await_task("redirect", redirect_thread).await;
 
         Ok::<_, Error>((server, ctx, shutdown, forwarding_threads))
     }
     .await?;
     server.shutdown().await;
 
-    if let Err(error) = ctx.shutdown_forwarding().await {
+    if let Err(error) = crate::net::forward::timeout_forwarding_drain(async {
+        stop_forwarding_tasks(forwarding_threads).await;
+        ctx.drain_forwarding().await
+    })
+    .await
+    {
         tracing::error!("forwarding cleanup failed: {error}");
         tracing::debug!("{error:?}");
-    }
-
-    for thread in &forwarding_threads {
-        thread.abort();
-    }
-    for (name, thread) in ["PCP", "IGD", "lease"].into_iter().zip(forwarding_threads) {
-        await_aborted_task(name, thread).await;
     }
 
     Ok(shutdown)

@@ -5,9 +5,10 @@
 //! `table ip6 startos`, mirroring the v4 forward path — the destination is
 //! always the client's own GUA, so a client can only ever expose itself.
 
+use std::collections::BTreeSet;
 use std::net::{Ipv6Addr, SocketAddrV6};
 
-use crate::net::forward::nft_rule_v6;
+use crate::net::forward::{nft_comments_with_prefix_v6, nft_ensure_base, nft_rule_v6};
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::db::Pinhole;
@@ -65,10 +66,23 @@ pub async fn apply_pinhole(
 /// comment tag, so it needs no rule text and covers both the pinhole and remap
 /// shapes).
 pub async fn remove_pinhole_rules(gua: Ipv6Addr, external_port: u16) -> Result<(), Error> {
-    let comment = tag(gua, external_port);
-    nft_rule_v6("prerouting", &comment, true, false, "").await?;
-    nft_rule_v6("forward", &comment, true, false, "").await?;
-    Ok(())
+    remove_pinhole_tag(&tag(gua, external_port)).await
+}
+
+async fn remove_pinhole_tag(comment: &str) -> Result<(), Error> {
+    match tokio::join!(
+        nft_rule_v6("prerouting", comment, true, false, ""),
+        nft_rule_v6("forward", comment, true, false, ""),
+    ) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+        (Err(prerouting_error), Err(forward_error)) => Err(Error::new(
+            eyre!(
+                "pinhole rule cleanup failed: prerouting: {prerouting_error:#}; forward: {forward_error:#}"
+            ),
+            ErrorKind::Network,
+        )),
+    }
 }
 
 /// Whether `gua` is the `/128` this tunnel delegates to some client — the
@@ -214,6 +228,43 @@ pub async fn remove_pinhole(ctx: &TunnelContext, gua: Ipv6Addr, external_port: u
         .result;
     if removed.is_ok() {
         remove_pinhole_rules(gua, external_port).await.log_err();
+    }
+}
+
+pub(crate) async fn drain_pinholes() -> Result<(), Error> {
+    let mut attempt = 1_u64;
+    loop {
+        if let Err(error) = nft_ensure_base().await {
+            tracing::warn!("pinhole drain failed on attempt {attempt}: {error:#}");
+            attempt = attempt.saturating_add(1);
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            continue;
+        }
+        let (prerouting, forward) = tokio::join!(
+            nft_comments_with_prefix_v6("prerouting", "pinhole:"),
+            nft_comments_with_prefix_v6("forward", "pinhole:"),
+        );
+        let mut comments = BTreeSet::new();
+        let mut first_error = None;
+        for result in [prerouting, forward] {
+            match result {
+                Ok(found) => comments.extend(found),
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                }
+            }
+        }
+        for comment in comments {
+            if let Err(error) = remove_pinhole_tag(&comment).await {
+                first_error.get_or_insert(error);
+            }
+        }
+        let Some(error) = first_error else {
+            return Ok(());
+        };
+        tracing::warn!("pinhole drain failed on attempt {attempt}: {error:#}");
+        attempt = attempt.saturating_add(1);
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 }
 

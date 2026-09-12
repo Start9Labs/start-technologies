@@ -455,7 +455,7 @@ async fn nft_rules_with_comment(
     family: &str,
     chain: &str,
     comment: &str,
-) -> Result<Vec<(u32, String)>, Error> {
+) -> Result<Vec<(u64, String)>, Error> {
     let needle = format!("comment \"{comment}\"");
     Ok(nft_list_chain(family, chain)
         .await?
@@ -465,7 +465,7 @@ async fn nft_rules_with_comment(
                 .rsplit_once("# handle ")?
                 .1
                 .trim()
-                .parse::<u32>()
+                .parse::<u64>()
                 .ok()?;
             let body = line.split_once(&needle)?.0.trim().to_owned();
             Some((handle, body))
@@ -473,13 +473,12 @@ async fn nft_rules_with_comment(
         .collect())
 }
 
-/// Comment tags in `chain` of `table ip startos` beginning with `prefix`. Used
-/// to prune orphaned per-device/per-subnet rules whose owner no longer exists.
-pub(crate) async fn nft_comments_with_prefix(
+async fn nft_comments_with_prefix_family(
+    family: &str,
     chain: &str,
     prefix: &str,
 ) -> Result<Vec<String>, Error> {
-    Ok(nft_list_chain("ip", chain)
+    Ok(nft_list_chain(family, chain)
         .await?
         .lines()
         .filter_map(|line| {
@@ -488,6 +487,20 @@ pub(crate) async fn nft_comments_with_prefix(
             tag.starts_with(prefix).then(|| tag.to_owned())
         })
         .collect())
+}
+
+pub(crate) async fn nft_comments_with_prefix(
+    chain: &str,
+    prefix: &str,
+) -> Result<Vec<String>, Error> {
+    nft_comments_with_prefix_family("ip", chain, prefix).await
+}
+
+pub(crate) async fn nft_comments_with_prefix_v6(
+    chain: &str,
+    prefix: &str,
+) -> Result<Vec<String>, Error> {
+    nft_comments_with_prefix_family("ip6", chain, prefix).await
 }
 
 /// Converges the tagged rule, retrying stale handles.
@@ -1241,34 +1254,44 @@ impl InterfaceForwardState {
 impl InterfaceForwardState {
     async fn drain(&mut self) -> Result<(), Error> {
         self.state.clear();
-        let mut first_error = self.port_forward.drain().await.err();
         for mapping in self.ipv6.values_mut() {
             mapping.rc = Weak::new();
         }
-        let sources = self.ipv6.keys().copied().collect::<Vec<_>>();
-        for source in sources {
-            let Some(spec) = self
-                .ipv6
-                .get(&source)
-                .and_then(|mapping| mapping.applied.clone())
-            else {
-                continue;
-            };
-            match unforward6(
-                source,
-                spec.target,
-                spec.target_prefix,
-                spec.src_filter.as_ref(),
-            )
-            .await
-            {
-                Ok(()) => self.ipv6.get_mut(&source).unwrap().applied = None,
-                Err(error) => {
-                    first_error.get_or_insert(error);
+
+        let port_forward = &self.port_forward;
+        let ipv6 = &mut self.ipv6;
+        let (ipv4_result, ipv6_result) = tokio::join!(port_forward.drain(), async {
+            let sources = ipv6.keys().copied().collect::<Vec<_>>();
+            let mut first_error = None;
+            for source in sources {
+                let Some(spec) = ipv6
+                    .get(&source)
+                    .and_then(|mapping| mapping.applied.clone())
+                else {
+                    continue;
+                };
+                match unforward6(
+                    source,
+                    spec.target,
+                    spec.target_prefix,
+                    spec.src_filter.as_ref(),
+                )
+                .await
+                {
+                    Ok(()) => ipv6.get_mut(&source).unwrap().applied = None,
+                    Err(error) => {
+                        first_error.get_or_insert(error);
+                    }
                 }
             }
+            ipv6.retain(|_, mapping| mapping.applied.is_some());
+            first_error.map_or(Ok(()), Err)
+        });
+
+        let mut first_error = ipv4_result.err();
+        if let Err(error) = ipv6_result {
+            first_error.get_or_insert(error);
         }
-        self.ipv6.retain(|_, mapping| mapping.applied.is_some());
         first_error.map_or(Ok(()), Err)
     }
 }

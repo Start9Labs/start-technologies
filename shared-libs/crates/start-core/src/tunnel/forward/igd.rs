@@ -21,6 +21,9 @@ use axum::routing::{get, post};
 use nix::net::if_::if_nametoindex;
 use socket2::{Domain, InterfaceIndexOrAddress, Protocol, SockAddr, Socket, Type};
 use tokio::net::{TcpListener, UdpSocket};
+use tokio::sync::broadcast::Receiver;
+use tokio::sync::broadcast::error::TryRecvError;
+use tokio::sync::oneshot;
 
 use crate::db::model::public::NetworkInterfaceType;
 use crate::net::port_map::server::igd::{
@@ -34,9 +37,17 @@ use crate::tunnel::db::PortForward;
 use crate::tunnel::forward::lease::{self, LeaseKey};
 use crate::tunnel::wg::WIREGUARD_INTERFACE_NAME;
 
+const REBIND_GRACE_TIMEOUT: Duration = Duration::from_secs(15);
+
 /// Run the IGD server (SSDP responder + HTTP control server) for the life of
 /// the tunnel. Both halves self-restart on error.
-pub async fn run(ctx: TunnelContext) {
+pub async fn run(ctx: TunnelContext, mut startup_shutdown: Receiver<Option<bool>>) {
+    let http_shutdown = ctx.shutdown.subscribe();
+    let ssdp_shutdown = ctx.shutdown.subscribe();
+    if shutdown_pending(&mut startup_shutdown) {
+        return;
+    }
+
     let uuid = match device_uuid(&ctx).await {
         Ok(uuid) => uuid,
         Err(e) => {
@@ -45,7 +56,17 @@ pub async fn run(ctx: TunnelContext) {
         }
     };
     let root_desc: Arc<str> = Arc::from(render_root_desc("StartTunnel", &uuid));
-    tokio::join!(http_server(ctx.clone(), root_desc), ssdp_server(ctx, uuid));
+    tokio::join!(
+        http_server(ctx.clone(), root_desc, http_shutdown),
+        ssdp_server(ctx, uuid, ssdp_shutdown),
+    );
+}
+
+fn shutdown_pending(shutdown: &mut Receiver<Option<bool>>) -> bool {
+    match shutdown.try_recv() {
+        Ok(_) | Err(TryRecvError::Closed | TryRecvError::Lagged(_)) => true,
+        Err(TryRecvError::Empty) => false,
+    }
 }
 
 async fn device_uuid(ctx: &TunnelContext) -> Result<String, Error> {
@@ -53,11 +74,17 @@ async fn device_uuid(ctx: &TunnelContext) -> Result<String, Error> {
     Ok(format_uuid(key.0.as_bytes()))
 }
 
-async fn ssdp_server(ctx: TunnelContext, uuid: String) {
+async fn ssdp_server(ctx: TunnelContext, uuid: String, mut shutdown: Receiver<Option<bool>>) {
     loop {
-        if let Err(e) = ssdp_loop(&ctx, &uuid).await {
-            tracing::warn!("UPnP IGD SSDP responder failed, retrying: {e}");
-            tokio::time::sleep(Duration::from_secs(5)).await;
+        match ssdp_loop(&ctx, &uuid, &mut shutdown).await {
+            Ok(true) => return,
+            Ok(false) => continue,
+            Err(e) => tracing::warn!("UPnP IGD SSDP responder failed: {e}"),
+        }
+        tokio::select! {
+            biased;
+            _ = shutdown.recv() => return,
+            _ = tokio::time::sleep(Duration::from_secs(5)) => {}
         }
     }
 }
@@ -86,7 +113,11 @@ fn ssdp_socket() -> Result<UdpSocket, Error> {
     UdpSocket::from_std(socket.into()).with_kind(ErrorKind::Network)
 }
 
-async fn ssdp_loop(ctx: &TunnelContext, uuid: &str) -> Result<(), Error> {
+async fn ssdp_loop(
+    ctx: &TunnelContext,
+    uuid: &str,
+    shutdown: &mut Receiver<Option<bool>>,
+) -> Result<bool, Error> {
     // Subscribe before binding so a bounce during setup still triggers a rebind.
     let mut ifindex = ctx.forward_ifindex.subscribe();
     ifindex.borrow_and_update();
@@ -95,11 +126,13 @@ async fn ssdp_loop(ctx: &TunnelContext, uuid: &str) -> Result<(), Error> {
     let mut buf = [0u8; 2048];
     loop {
         let (n, from) = tokio::select! {
-            res = socket.recv_from(&mut buf) => res.with_kind(ErrorKind::Network)?,
+            biased;
+            _ = shutdown.recv() => return Ok(true),
             _ = ifindex.changed() => {
                 tracing::info!("{WIREGUARD_INTERFACE_NAME} ifindex changed; rebinding SSDP responder");
-                return Ok(());
+                return Ok(false);
             }
+            res = socket.recv_from(&mut buf) => res.with_kind(ErrorKind::Network)?,
         };
         let Ok(text) = std::str::from_utf8(&buf[..n]) else {
             continue;
@@ -140,7 +173,11 @@ pub(super) async fn subnet_gateway_for(ctx: &TunnelContext, peer: Ipv4Addr) -> O
     })
 }
 
-async fn http_server(ctx: TunnelContext, root_desc: Arc<str>) {
+async fn http_server(
+    ctx: TunnelContext,
+    root_desc: Arc<str>,
+    mut shutdown: Receiver<Option<bool>>,
+) {
     let app = Router::new()
         .route(
             ROOT_DESC_PATH,
@@ -161,25 +198,71 @@ async fn http_server(ctx: TunnelContext, root_desc: Arc<str>) {
                 tracing::info!(
                     "UPnP IGD control server listening on {WIREGUARD_INTERFACE_NAME}:{IGD_HTTP_PORT}"
                 );
-                tokio::select! {
-                    res = axum::serve(
-                        listener,
-                        app.clone()
-                            .into_make_service_with_connect_info::<SocketAddr>(),
-                    ) => {
-                        if let Err(e) = res {
-                            tracing::warn!("UPnP IGD control server exited, retrying: {e}");
+                let (graceful_send, graceful_recv) = oneshot::channel();
+                let server = axum::serve(
+                    listener,
+                    app.clone()
+                        .into_make_service_with_connect_info::<SocketAddr>(),
+                )
+                .with_graceful_shutdown(async move {
+                    graceful_recv.await.ok();
+                })
+                .into_future();
+                tokio::pin!(server);
+                enum ServerEnd {
+                    Shutdown,
+                    Rebind,
+                    Exited(Result<(), std::io::Error>),
+                }
+                let end = tokio::select! {
+                    biased;
+                    _ = shutdown.recv() => ServerEnd::Shutdown,
+                    _ = ifindex.changed() => ServerEnd::Rebind,
+                    result = server.as_mut() => ServerEnd::Exited(result),
+                };
+                match end {
+                    ServerEnd::Shutdown => {
+                        graceful_send.send(()).ok();
+                        if let Err(e) = server.as_mut().await {
+                            tracing::warn!("UPnP IGD control server exited during shutdown: {e}");
                         }
+                        return;
                     }
-                    _ = ifindex.changed() => {
-                        tracing::info!("{WIREGUARD_INTERFACE_NAME} ifindex changed; rebinding IGD control server");
+                    ServerEnd::Rebind => {
+                        graceful_send.send(()).ok();
+                        match tokio::time::timeout(REBIND_GRACE_TIMEOUT, server.as_mut()).await {
+                            Ok(Ok(())) => {}
+                            Ok(Err(e)) => {
+                                tracing::warn!("UPnP IGD control server exited during rebind: {e}");
+                            }
+                            Err(_) => {
+                                tracing::warn!(
+                                    "UPnP IGD control server exceeded {REBIND_GRACE_TIMEOUT:?} during rebind"
+                                );
+                            }
+                        }
+                        if shutdown_pending(&mut shutdown) {
+                            return;
+                        }
+                        tracing::info!(
+                            "{WIREGUARD_INTERFACE_NAME} ifindex changed; rebinding IGD control server"
+                        );
                         continue;
+                    }
+                    ServerEnd::Exited(result) => {
+                        if let Err(e) = result {
+                            tracing::warn!("UPnP IGD control server exited: {e}");
+                        }
                     }
                 }
             }
-            Err(e) => tracing::warn!("UPnP IGD control server bind failed, retrying: {e}"),
+            Err(e) => tracing::warn!("UPnP IGD control server bind failed: {e}"),
         }
-        tokio::time::sleep(Duration::from_secs(5)).await;
+        tokio::select! {
+            biased;
+            _ = shutdown.recv() => return,
+            _ = tokio::time::sleep(Duration::from_secs(5)) => {}
+        }
     }
 }
 
@@ -246,6 +329,9 @@ async fn control(
 ) -> Response {
     let IpAddr::V4(peer) = from.ip() else {
         return StatusCode::BAD_REQUEST.into_response();
+    };
+    let Some(_admission) = ctx.forwarding_admission().await else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
     handle_control(&ctx, peer, &headers, &body).await
 }

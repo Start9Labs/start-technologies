@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use clap::Parser;
@@ -194,6 +195,8 @@ pub struct TunnelContextSeed {
     pub dns_keys: Arc<SyncMutex<BTreeMap<IpAddr, [u8; 32]>>>,
     pub active_forwards: SyncMutex<BTreeMap<SocketAddrV4, Arc<()>>>,
     pub forward_write_lock: tokio::sync::Mutex<()>,
+    forwarding_closed: AtomicBool,
+    forwarding_active: tokio::sync::RwLock<()>,
     /// In-memory leases for auto (PCP-created) forwards/pinholes/SNI routes,
     /// reaped by [`crate::tunnel::forward::lease`] when a client stops renewing.
     pub leases: SyncMutex<crate::tunnel::forward::lease::Leases>,
@@ -335,6 +338,8 @@ impl TunnelContext {
             dns_keys,
             active_forwards: SyncMutex::new(BTreeMap::new()),
             forward_write_lock: tokio::sync::Mutex::new(()),
+            forwarding_closed: AtomicBool::new(false),
+            forwarding_active: tokio::sync::RwLock::new(()),
             leases: SyncMutex::new(BTreeMap::new()),
             lease_wake: tokio::sync::Notify::new(),
             forward_ifindex: tokio::sync::watch::channel(current_ifindex()).0,
@@ -427,16 +432,55 @@ impl TunnelContext {
     }
 
     pub(crate) fn spawn_forwarding_servers(&self) -> [NonDetachingJoinHandle<()>; 3] {
+        let pcp_shutdown = self.shutdown.subscribe();
+        let igd_shutdown = self.shutdown.subscribe();
+        let lease_shutdown = self.shutdown.subscribe();
         [
-            tokio::spawn(crate::tunnel::forward::pcp::run(self.clone())).into(),
-            tokio::spawn(crate::tunnel::forward::igd::run(self.clone())).into(),
-            tokio::spawn(crate::tunnel::forward::lease::run(self.clone())).into(),
+            tokio::spawn(crate::tunnel::forward::pcp::run(self.clone(), pcp_shutdown)).into(),
+            tokio::spawn(crate::tunnel::forward::igd::run(self.clone(), igd_shutdown)).into(),
+            tokio::spawn(crate::tunnel::forward::lease::run(
+                self.clone(),
+                lease_shutdown,
+            ))
+            .into(),
         ]
     }
 
+    pub(crate) async fn forwarding_admission(
+        &self,
+    ) -> Option<tokio::sync::RwLockReadGuard<'_, ()>> {
+        if self.forwarding_closed.load(Ordering::Acquire) {
+            return None;
+        }
+        let admission = self.forwarding_active.read().await;
+        if self.forwarding_closed.load(Ordering::Acquire) {
+            None
+        } else {
+            Some(admission)
+        }
+    }
+
+    pub(crate) async fn drain_forwarding(&self) -> Result<(), Error> {
+        self.forwarding_closed.store(true, Ordering::Release);
+        let pinholes = async {
+            let _admission = self.forwarding_active.write().await;
+            self.active_forwards.mutate(BTreeMap::clear);
+            crate::tunnel::forward::pinhole::drain_pinholes().await
+        };
+        match tokio::join!(self.forward.drain(), pinholes) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+            (Err(forward_error), Err(pinhole_error)) => Err(Error::new(
+                eyre!(
+                    "forwarding drains failed: IPv4 forwarding: {forward_error:#}; IPv6 pinholes: {pinhole_error:#}"
+                ),
+                ErrorKind::Network,
+            )),
+        }
+    }
+
     pub(crate) async fn shutdown_forwarding(&self) -> Result<(), Error> {
-        self.active_forwards.mutate(BTreeMap::clear);
-        timeout_forwarding_drain(self.forward.drain()).await
+        timeout_forwarding_drain(self.drain_forwarding()).await
     }
 
     pub async fn gc_forwards(
