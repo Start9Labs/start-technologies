@@ -19,13 +19,12 @@ use crate::hostname::ServerHostname;
 use crate::net::dns::DnsController;
 use crate::net::dns_update::{DnsUpdateController, spawn_server_mdns_injection};
 use crate::net::forward::{
-    ForwardRequirements, InterfacePortForwardController, START9_BRIDGE_IFACE, nft_rule,
-    nft_rule_v6, target_prefix_for,
+    ForwardRequirements, InterfacePortForwardController, START9_BRIDGE_IFACE, nft_rule, nft_rule_v6,
 };
 use crate::net::gateway::NetworkInterfaceController;
 use crate::net::host::binding::{AddSslOptions, BindId, BindOptions, UpstreamCertValidation};
 use crate::net::host::{Host, Hosts, host_for, host_for_existing};
-use crate::net::port_map::{PortMapController, candidate_gateways};
+use crate::net::port_map::PortMapController;
 use crate::net::service_interface::{
     AddressInfo, HostnameInfo, HostnameMetadata, ServiceInterface, ServiceInterfaceType,
 };
@@ -161,6 +160,10 @@ impl NetController {
             _socks: socks,
             callbacks: Arc::new(ServiceCallbacks::default()),
         })
+    }
+
+    pub(crate) async fn shutdown_forwarding(&self) -> Result<(), Error> {
+        self.forward.shutdown().await
     }
 
     /// Client config for the OS→container TLS leg when rewrapping SSL. Falls
@@ -323,14 +326,20 @@ fn retired_hosts<'a>(held: impl Iterator<Item = &'a HostId>, current: &Hosts) ->
 }
 
 type GuaForwardKey = (Ipv6Addr, u16);
-type GuaForwardSpec = (Ipv6Addr, u16, Option<IpNet>, Vec<(IpAddr, Option<u32>)>);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GuaForwardSpec {
+    target: Ipv6Addr,
+    internal_port: u16,
+    src_filter: Option<IpNet>,
+}
+
 type GuaForwardMap = BTreeMap<GuaForwardKey, GuaForwardSpec>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Ipv4ForwardSpec {
     target: SocketAddrV4,
     count: u16,
-    target_prefix: u8,
     requirements: ForwardRequirements,
 }
 
@@ -371,6 +380,7 @@ impl NetServiceData {
         // together with the DNAT (see the reconcile below).
         let mut gua_forwards = GuaForwardMap::new();
         let binds = self.binds.entry(id.clone()).or_default();
+        let mut reconciliation_error = None;
 
         let net_ifaces = ctrl.net_iface.watcher.ip_info();
         let host_addresses: Vec<_> = host.addresses().collect();
@@ -655,31 +665,13 @@ impl NetServiceData {
                         // container — no vhost owns a non-TLS port. The forward
                         // controller opens its upstream pinhole together with the
                         // DNAT (see the reconcile below).
-                        let gateways = if src_filter.is_none() {
-                            net_ifaces
-                                .iter()
-                                .map(|(_, info)| info)
-                                .find(|info| {
-                                    info.ip_info.as_ref().map_or(false, |ip_info| {
-                                        ip_info
-                                            .subnets
-                                            .iter()
-                                            .any(|subnet| subnet.addr() == IpAddr::V6(*gua.ip()))
-                                    })
-                                })
-                                .map(|info| {
-                                    candidate_gateways(info)
-                                        .into_iter()
-                                        .filter(|(gateway, _)| gateway.is_ipv6())
-                                        .collect()
-                                })
-                                .unwrap_or_default()
-                        } else {
-                            Vec::new()
-                        };
                         gua_forwards.insert(
                             (*gua.ip(), gua.port()),
-                            (container_v6, *port, src_filter, gateways),
+                            GuaForwardSpec {
+                                target: container_v6,
+                                internal_port: *port,
+                                src_filter,
+                            },
                         );
                     }
                 }
@@ -776,18 +768,19 @@ impl NetServiceData {
                     continue;
                 }
                 let (gua, external) = key;
-                let (target, internal, src_filter, gateways) = spec.clone();
-                let lease = ctrl
+                let result = ctrl
                     .forward
                     .forward6(
                         SocketAddrV6::new(gua, external, 0, 0),
-                        SocketAddrV6::new(target, internal, 0, 0),
+                        SocketAddrV6::new(spec.target, spec.internal_port, 0, 0),
                         64,
-                        src_filter,
-                        gateways,
+                        spec.src_filter,
                     )
                     .await?;
-                binds.gua_forwards.insert(key, (spec, lease));
+                binds.gua_forwards.insert(key, (spec, result.lease));
+                if let Err(error) = result.reconciliation {
+                    reconciliation_error.get_or_insert(error);
+                }
             }
         }
 
@@ -804,28 +797,21 @@ impl NetServiceData {
                 let spec = Ipv4ForwardSpec {
                     target: internal,
                     count,
-                    target_prefix: target_prefix_for(&net_ifaces, *internal.ip(), 32),
                     requirements: reqs,
                 };
                 prev = prev.filter(|(old, _)| old == &spec);
-                binds.forwards.insert(
-                    external,
-                    if let Some(prev) = prev {
-                        prev
-                    } else {
-                        let lease = ctrl
-                            .forward
-                            .add_range(
-                                external,
-                                spec.count,
-                                spec.requirements.clone(),
-                                spec.target,
-                                spec.target_prefix,
-                            )
-                            .await?;
-                        (spec, lease)
-                    },
-                );
+                if let Some(prev) = prev {
+                    binds.forwards.insert(external, prev);
+                } else {
+                    let result = ctrl
+                        .forward
+                        .add_range(external, spec.count, spec.requirements.clone(), spec.target)
+                        .await?;
+                    binds.forwards.insert(external, (spec, result.lease));
+                    if let Err(error) = result.reconciliation {
+                        reconciliation_error.get_or_insert(error);
+                    }
+                }
             }
         }
         ctrl.forward.gc().await.log_err();
@@ -888,7 +874,7 @@ impl NetServiceData {
         ctrl.dns.gc_private_domains(&rm)?;
         ctrl.dns_update.gc(rm);
 
-        Ok(())
+        reconciliation_error.map_or(Ok(()), Err)
     }
 
     async fn retire(&mut self, ctrl: &NetController, id: HostId) -> Result<(), Error> {
@@ -995,7 +981,7 @@ impl NetService {
                         } => (true, true),
                     };
 
-                    // Handle host updates
+                    // Interface changes can alter host-derived forwarding state.
                     if hosts_changed {
                         if let Err(e) = async {
                             // A host absent from a hosts map we failed to read is
@@ -1011,16 +997,21 @@ impl NetService {
                             };
                             let mut data = thread_data.lock().await;
                             let ctrl = data.net_controller()?;
+                            let mut first_error = None;
                             // Retire first: a port handed from a removed host to
                             // a surviving one in the same pass has to come down
                             // before it is rebuilt.
                             for host_id in retired_hosts(data.binds.keys(), &hosts) {
-                                data.retire(&*ctrl, host_id).await?;
+                                if let Err(error) = data.retire(&ctrl, host_id).await {
+                                    first_error.get_or_insert(error);
+                                }
                             }
                             for (host_id, host) in hosts.0 {
-                                data.update(&*ctrl, host_id, host).await?;
+                                if let Err(error) = data.update(&ctrl, host_id, host).await {
+                                    first_error.get_or_insert(error);
+                                }
                             }
-                            Ok::<_, Error>(())
+                            first_error.map_or(Ok(()), Err)
                         }
                         .await
                         {
@@ -1574,27 +1565,6 @@ mod tests {
     }
 
     #[test]
-    fn host_forward_identity_includes_target_prefix() {
-        let requirements = ForwardRequirements {
-            public_gateways: BTreeSet::new(),
-            private_ips: BTreeSet::new(),
-            secure: true,
-        };
-        let first = Ipv4ForwardSpec {
-            target: SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 2), 8080),
-            count: 1,
-            target_prefix: 24,
-            requirements,
-        };
-        let changed = Ipv4ForwardSpec {
-            target_prefix: 32,
-            ..first.clone()
-        };
-
-        assert_ne!(first, changed);
-    }
-
-    #[test]
     fn only_hosts_the_database_dropped_are_retired() {
         let held = [host_id("ui"), host_id("api"), host_id("peer")];
 
@@ -1625,7 +1595,6 @@ mod tests {
         );
     }
 
-    /// Every `HostBinds` field requires retirement reconciliation in `update`.
     #[test]
     fn host_binds_holds_only_what_update_reconciles() {
         let HostBinds {
