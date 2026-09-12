@@ -40,8 +40,17 @@ if [ "$count" -eq 1 ]; then
     dport_match="$dport"
 else
     pairs=""; sep=""
+    if [ "$sport" != "$dport" ]; then
+        map=""
+    fi
     for ((i = 0; i < count; i++)); do
-        pairs+="${sep}$((sport + i)) . $((dport + i))"; sep=", "
+        external_port=$((sport + i))
+        internal_port=$((dport + i))
+        pairs+="${sep}${external_port} . ${internal_port}"
+        if [ "$sport" != "$dport" ]; then
+            map+="${sep}${external_port} : $dip . ${internal_port}"
+        fi
+        sep=", "
     done
     port_pair_match="ct original proto-dst . th dport { $pairs } ip daddr $dip"
     dport_match="${dport}-${dport_end}"
@@ -49,10 +58,6 @@ else
         # Equal bases preserve each destination port.
         dnat="th dport ${sport}-${sport_end} dnat to $dip"
     else
-        map=""; sep=""
-        for ((i = 0; i < count; i++)); do
-            map+="${sep}$((sport + i)) : $dip . $((dport + i))"; sep=", "
-        done
         dnat="dnat to th dport map { $map }"
     fi
 fi

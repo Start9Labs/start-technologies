@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::future::Future;
 use std::marker::PhantomData;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::process::Stdio;
@@ -84,6 +85,26 @@ impl<T: ?Sized> AsRef<T> for Never {
     }
 }
 
+struct ProcessGroupGuard(Option<nix::unistd::Pid>);
+
+impl ProcessGroupGuard {
+    fn new(child: &tokio::process::Child) -> Self {
+        Self(child.id().map(|pid| nix::unistd::Pid::from_raw(pid as i32)))
+    }
+
+    fn disarm(&mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for ProcessGroupGuard {
+    fn drop(&mut self) {
+        if let Some(process_group) = self.0 {
+            let _ = nix::sys::signal::killpg(process_group, nix::sys::signal::Signal::SIGKILL);
+        }
+    }
+}
+
 pub trait Invoke<'a> {
     type Extended<'ext>
     where
@@ -94,6 +115,7 @@ pub trait Invoke<'a> {
         next: &'ext mut tokio::process::Command,
     ) -> Self::Extended<'ext>;
     fn timeout<'ext: 'a>(&'ext mut self, timeout: Option<Duration>) -> Self::Extended<'ext>;
+    fn kill_process_group_on_drop<'ext: 'a>(&'ext mut self) -> Self::Extended<'ext>;
     fn input<'ext: 'a, Input: tokio::io::AsyncRead + Unpin + Send>(
         &'ext mut self,
         input: Option<&'ext mut Input>,
@@ -111,6 +133,7 @@ pub struct ExtendedCommand<'a> {
     input: Option<&'a mut (dyn AsyncRead + Unpin + Send)>,
     pipe: VecDeque<&'a mut tokio::process::Command>,
     capture: bool,
+    kill_process_group_on_drop: bool,
 }
 impl<'a> From<&'a mut tokio::process::Command> for ExtendedCommand<'a> {
     fn from(value: &'a mut tokio::process::Command) -> Self {
@@ -120,6 +143,7 @@ impl<'a> From<&'a mut tokio::process::Command> for ExtendedCommand<'a> {
             input: None,
             pipe: VecDeque::new(),
             capture: true,
+            kill_process_group_on_drop: false,
         }
     }
 }
@@ -152,6 +176,11 @@ impl<'a> Invoke<'a> for tokio::process::Command {
     fn timeout<'ext: 'a>(&'ext mut self, timeout: Option<Duration>) -> Self::Extended<'ext> {
         let mut cmd = ExtendedCommand::from(self);
         cmd.timeout = timeout;
+        cmd
+    }
+    fn kill_process_group_on_drop<'ext: 'a>(&'ext mut self) -> Self::Extended<'ext> {
+        let mut cmd = ExtendedCommand::from(self);
+        cmd.kill_process_group_on_drop = true;
         cmd
     }
     fn input<'ext: 'a, Input: AsyncRead + Unpin + Send>(
@@ -193,6 +222,10 @@ impl<'a> Invoke<'a> for ExtendedCommand<'a> {
         self.timeout = timeout;
         self
     }
+    fn kill_process_group_on_drop<'ext: 'a>(&'ext mut self) -> Self::Extended<'ext> {
+        self.kill_process_group_on_drop = true;
+        self
+    }
     fn input<'ext: 'a, Input: tokio::io::AsyncRead + Unpin + Send>(
         &'ext mut self,
         input: Option<&'ext mut Input>,
@@ -211,6 +244,12 @@ impl<'a> Invoke<'a> for ExtendedCommand<'a> {
     #[instrument(skip_all)]
     async fn invoke(&mut self, error_kind: crate::ErrorKind) -> Result<Vec<u8>, Error> {
         self.cmd.kill_on_drop(true);
+        if self.kill_process_group_on_drop {
+            self.cmd.as_std_mut().process_group(0);
+            for cmd in &mut self.pipe {
+                cmd.as_std_mut().process_group(0);
+            }
+        }
         if self.input.is_some() {
             self.cmd.stdin(Stdio::piped());
         }
@@ -226,6 +265,9 @@ impl<'a> Invoke<'a> for ExtendedCommand<'a> {
                 self.cmd.stderr(Stdio::piped());
             }
             let mut child = self.cmd.spawn().with_ctx(|_| (error_kind, &cmd_str))?;
+            let mut process_group = self
+                .kill_process_group_on_drop
+                .then(|| ProcessGroupGuard::new(&child));
             if let (Some(mut stdin), Some(input)) = (child.stdin.take(), self.input.take()) {
                 use tokio::io::AsyncWriteExt;
                 tokio::io::copy(input, &mut stdin).await?;
@@ -243,6 +285,9 @@ impl<'a> Invoke<'a> for ExtendedCommand<'a> {
                     .with_kind(ErrorKind::Timeout)?
                     .with_ctx(|_| (error_kind, &cmd_str))?,
             };
+            if let Some(guard) = &mut process_group {
+                guard.disarm();
+            }
             crate::ensure_code!(
                 res.status.success(),
                 error_kind,
@@ -281,6 +326,9 @@ impl<'a> Invoke<'a> for ExtendedCommand<'a> {
                     cmd.stdin(Stdio::piped());
                 }
                 let mut child = cmd.spawn().with_ctx(|_| (error_kind, &cmd_str))?;
+                let mut process_group = self
+                    .kill_process_group_on_drop
+                    .then(|| ProcessGroupGuard::new(&child));
                 let input = std::mem::replace(
                     &mut prev,
                     child
@@ -303,6 +351,9 @@ impl<'a> Invoke<'a> for ExtendedCommand<'a> {
                                 .await
                                 .with_kind(ErrorKind::Timeout)??,
                         };
+                        if let Some(guard) = &mut process_group {
+                            guard.disarm();
+                        }
                         crate::ensure_code!(
                             res.status.success(),
                             error_kind,
@@ -733,5 +784,34 @@ impl Serialize for PathOrUrl {
         S: ::serde::Serializer,
     {
         serialize_display(self, serializer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn timeout_kills_command_descendants() {
+        let sentinel = std::env::temp_dir().join(format!(
+            "start-core-invoke-process-group-{}",
+            crate::util::new_guid()
+        ));
+        let script = format!(
+            "(sleep 0.2; printf written > '{}') & wait",
+            sentinel.display()
+        );
+        let mut command = tokio::process::Command::new("sh");
+        command.arg("-c").arg(script);
+
+        let result = command
+            .kill_process_group_on_drop()
+            .timeout(Some(Duration::from_millis(50)))
+            .invoke(ErrorKind::Unknown)
+            .await;
+
+        assert!(result.is_err());
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(!sentinel.exists());
     }
 }

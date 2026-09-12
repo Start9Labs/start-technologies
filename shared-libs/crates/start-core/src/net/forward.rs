@@ -29,6 +29,7 @@ use crate::util::sync::Watch;
 pub const START9_BRIDGE_IFACE: &str = "lxcbr0";
 const EPHEMERAL_PORT_START: u16 = 49152;
 const PORT_FORWARD_GC_INTERVAL: Duration = Duration::from_secs(30);
+const FORWARD_SCRIPT_TIMEOUT: Duration = Duration::from_secs(30);
 // Reserved by/for host daemons (mDNS 5353, LLMNR 5355, postgres 5432, X11
 // forwarding 6010). 9050/9051 are claimable on purpose: they were the 0.3.x
 // host tor daemon's reservation (gone in 0.4.x), and the tor service now binds
@@ -471,13 +472,7 @@ pub(crate) async fn nft_comments_with_prefix(
         .collect())
 }
 
-/// Idempotently install (or, with `undo`, remove) the rule tagged `comment` in
-/// `chain` of `table ip startos`, via one atomic nft transaction that drops
-/// every prior copy of this comment and adds the desired rule. No-op when the
-/// chain already holds exactly that rule. `prepend` inserts at the chain top
-/// (needed for the mark-restore rule, which must precede the set-mark rules).
-///
-/// Retries when concurrent reconciliation invalidates a listed handle.
+/// Converges the tagged rule, retrying stale handles.
 pub async fn nft_rule(
     chain: &str,
     comment: &str,
@@ -822,7 +817,6 @@ struct InterfaceForwardRequest {
 
 pub(super) struct ForwardLease {
     pub(super) lease: Arc<()>,
-    pub(super) reconciliation: Result<(), Error>,
 }
 
 #[derive(Clone)]
@@ -995,9 +989,6 @@ impl InterfaceForwardEntry {
             reqs,
             rc,
         }: InterfaceForwardRequest,
-        ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
-        port_forward: &PortForwardController,
-        pmap: &PortMapController,
     ) -> Result<ForwardLease, Error> {
         if external != self.external {
             return Err(Error::new(
@@ -1006,22 +997,15 @@ impl InterfaceForwardEntry {
             ));
         }
         if count != self.count {
-            // A resize, or a single-port forward and a range swapped at this
-            // reused start port. The nft chain name encodes the count, so rebuild
-            // from scratch; `state` entries are never evicted, so otherwise a
-            // count change here would be a hard error until restart.
+            // The nft chain name encodes the count.
             self.count = count;
             self.targets.clear();
             self.forwards.clear();
         }
 
         let rc = self.cache_target(reqs, target, target_prefix_fallback, rc);
-        let reconciliation = self.update(ip_info, port_forward, pmap).await;
 
-        Ok(ForwardLease {
-            lease: rc,
-            reconciliation,
-        })
+        Ok(ForwardLease { lease: rc })
     }
 
     async fn gc(
@@ -1058,22 +1042,16 @@ impl InterfaceForwardState {
     async fn handle_request(
         &mut self,
         request: InterfaceForwardRequest,
-        ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
     ) -> Result<ForwardLease, Error> {
         let count = request.count;
         self.state
             .entry(request.external)
             .or_insert_with(|| InterfaceForwardEntry::new(request.external, count))
-            .update_request(request, ip_info, &self.port_forward, &self.pmap)
+            .update_request(request)
             .await
     }
 
-    async fn add_forward6(
-        &mut self,
-        source: SocketAddrV6,
-        spec: Ipv6ForwardSpec,
-        ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
-    ) -> ForwardLease {
+    async fn add_forward6(&mut self, source: SocketAddrV6, spec: Ipv6ForwardSpec) -> ForwardLease {
         let rc = self
             .ipv6
             .get(&source)
@@ -1093,11 +1071,7 @@ impl InterfaceForwardState {
                 });
             }
         }
-        let reconciliation = self.reconcile_forward6(source, ip_info).await;
-        ForwardLease {
-            lease: rc,
-            reconciliation,
-        }
+        ForwardLease { lease: rc }
     }
 
     async fn reconcile_forward6(
@@ -1176,10 +1150,24 @@ impl InterfaceForwardState {
         ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
     ) -> Result<(), Error> {
         let mut first_error = None;
+        let mut empty = Vec::new();
         for mut entry in self.state.iter_mut() {
-            if let Err(error) = entry.gc(ip_info, &self.port_forward, &self.pmap).await {
-                first_error.get_or_insert(error);
+            match entry.gc(ip_info, &self.port_forward, &self.pmap).await {
+                Ok(())
+                    if entry.targets.is_empty()
+                        && entry.forwards.is_empty()
+                        && entry.mapped.is_empty() =>
+                {
+                    empty.push(entry.external);
+                }
+                Ok(()) => {}
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                }
             }
+        }
+        for external in empty {
+            self.state.remove(&external);
         }
         if let Err(error) = self.reconcile_forwards6(ip_info).await {
             first_error.get_or_insert(error);
@@ -1369,7 +1357,7 @@ impl InterfacePortForwardController {
                                 let result = tokio::select! {
                                     biased;
                                     _ = actor_cancel.cancelled() => break 'active,
-                                    result = state.handle_request(req, &interfaces) => result,
+                                    result = state.handle_request(req) => result,
                                 };
                                 re.send(result).ok()
                             }
@@ -1377,7 +1365,7 @@ impl InterfacePortForwardController {
                                 let result = tokio::select! {
                                     biased;
                                     _ = actor_cancel.cancelled() => break 'active,
-                                    result = state.add_forward6(source, spec, &interfaces) => result,
+                                    result = state.add_forward6(source, spec) => result,
                                 };
                                 respond.send(result).ok()
                             }
@@ -1528,7 +1516,10 @@ async fn forward(
     if let Some(subnet) = src_filter {
         cmd.env("src_subnet", subnet.to_string());
     }
-    cmd.invoke(ErrorKind::Network).await?;
+    cmd.kill_process_group_on_drop()
+        .timeout(Some(FORWARD_SCRIPT_TIMEOUT))
+        .invoke(ErrorKind::Network)
+        .await?;
     Ok(())
 }
 
@@ -1550,7 +1541,10 @@ async fn unforward(
     if let Some(subnet) = src_filter {
         cmd.env("src_subnet", subnet.to_string());
     }
-    cmd.invoke(ErrorKind::Network).await?;
+    cmd.kill_process_group_on_drop()
+        .timeout(Some(FORWARD_SCRIPT_TIMEOUT))
+        .invoke(ErrorKind::Network)
+        .await?;
     Ok(())
 }
 
@@ -1577,7 +1571,10 @@ pub(crate) async fn forward6(
     if let Some(subnet) = src_filter {
         cmd.env("src_subnet", subnet.to_string());
     }
-    cmd.invoke(ErrorKind::Network).await?;
+    cmd.kill_process_group_on_drop()
+        .timeout(Some(FORWARD_SCRIPT_TIMEOUT))
+        .invoke(ErrorKind::Network)
+        .await?;
     Ok(())
 }
 
@@ -1599,7 +1596,10 @@ pub(crate) async fn unforward6(
     if let Some(subnet) = src_filter {
         cmd.env("src_subnet", subnet.to_string());
     }
-    cmd.invoke(ErrorKind::Network).await?;
+    cmd.kill_process_group_on_drop()
+        .timeout(Some(FORWARD_SCRIPT_TIMEOUT))
+        .invoke(ErrorKind::Network)
+        .await?;
     Ok(())
 }
 
@@ -1705,19 +1705,6 @@ mod tests {
             ipv6_candidate_gateways(&interfaces("2001:db8::ff"), source)
         );
         assert_eq!(mapping.next_operation(), None);
-    }
-
-    #[test]
-    fn reconciliation_error_keeps_lease_alive() {
-        let lease = Arc::new(());
-        let result = ForwardLease {
-            lease: lease.clone(),
-            reconciliation: Err(Error::new(eyre!("failed"), ErrorKind::Network)),
-        };
-        drop(lease);
-
-        assert!(result.reconciliation.is_err());
-        assert_eq!(Arc::strong_count(&result.lease), 1);
     }
 
     #[tokio::test]
@@ -1981,36 +1968,47 @@ mod tests {
                 ..Default::default()
             },
         )]));
+        let port_forward =
+            PortForwardController::spawn(|| std::future::pending::<Result<(), Error>>());
+        let port_forward_req = port_forward.req.clone();
         let controller = InterfacePortForwardController::with_port_forward(
             interfaces.clone(),
             PortMapController::new(interfaces),
-            PortForwardController::spawn(|| std::future::pending::<Result<(), Error>>()),
+            port_forward,
         );
-        let request = controller.add_range(
-            8080,
-            1,
-            ForwardRequirements {
-                public_gateways: BTreeSet::from([gateway]),
-                private_ips: BTreeSet::new(),
-                secure: true,
-            },
-            SocketAddrV4::new(Ipv4Addr::new(10, 0, 3, 2), 8080),
-        );
-        tokio::pin!(request);
+        let _lease = controller
+            .add_range(
+                8080,
+                1,
+                ForwardRequirements {
+                    public_gateways: BTreeSet::from([gateway]),
+                    private_ips: BTreeSet::new(),
+                    secure: true,
+                },
+                SocketAddrV4::new(Ipv4Addr::new(10, 0, 3, 2), 8080),
+            )
+            .await
+            .unwrap();
+        let gc = controller.gc();
+        tokio::pin!(gc);
 
-        assert!(
-            tokio::time::timeout(Duration::from_millis(50), &mut request)
-                .await
-                .is_err()
-        );
+        assert!(futures::poll!(&mut gc).is_pending());
+        let (barrier_send, barrier_receive) = oneshot::channel();
+        port_forward_req
+            .send(PortForwardCommand::Drain {
+                respond: barrier_send,
+            })
+            .unwrap();
+        barrier_receive.await.unwrap().unwrap();
+
         tokio::time::timeout(Duration::from_secs(1), controller.drain())
             .await
             .expect("drain timed out")
             .unwrap();
         assert!(
-            tokio::time::timeout(Duration::from_secs(1), &mut request)
+            tokio::time::timeout(Duration::from_secs(1), &mut gc)
                 .await
-                .expect("forward request stayed blocked")
+                .expect("gc stayed blocked")
                 .is_err()
         );
     }

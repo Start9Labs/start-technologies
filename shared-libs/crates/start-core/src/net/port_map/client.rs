@@ -5,10 +5,8 @@
 //! [`crate::tunnel::forward::pcp`]). PCP/NAT-PMP via `crab_nat`, UPnP via
 //! [`crate::net::port_map::upnp`].
 //!
-//! Reconciliation is best-effort: failures are logged. Gateways without these
-//! protocols require a manual forward. Fire-and-forget requests keep gateway
-//! latency off the forwarding path. An awaited drain surfaces teardown failures
-//! during shutdown.
+//! A drain atomically stops admission, waits for every shard's teardown, and
+//! permanently closes the controller.
 //!
 //! Work is sharded per local IP (one task per gateway interface), so a gateway
 //! that answers slowly or not at all never head-of-line-blocks mapping attempts
@@ -32,6 +30,8 @@ use chrono::{DateTime, Utc};
 use crab_nat::{
     InternetProtocol, MappingFailure, PortMapping, PortMappingOptions, TimeoutConfig, pcp,
 };
+use futures::FutureExt;
+use futures::future::{BoxFuture, Shared};
 use igd_next::PortMappingProtocol;
 use igd_next::aio::Gateway;
 use igd_next::aio::tokio::Tokio;
@@ -198,7 +198,6 @@ enum Command {
     },
     Remove {
         key: MappingKey,
-        respond: Option<oneshot::Sender<Result<(), Error>>>,
     },
     /// Gateway-assigned external IP for an active TCP mapping on
     /// `external_port`, to confirm TCP reachability without a remote echo.
@@ -212,28 +211,37 @@ enum Command {
     },
 }
 
+type DrainFuture = Shared<BoxFuture<'static, Result<(), Arc<Error>>>>;
+
+enum ControllerState {
+    Accepting(BTreeMap<IpAddr, mpsc::UnboundedSender<Command>>),
+    Draining(DrainFuture),
+}
+
 /// Fire-and-forget port-map requests, sharded per local IP so one interface's
 /// gateway can never delay another interface's mapping work.
 #[derive(Clone)]
 pub struct PortMapController {
     interfaces: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
-    shards: Arc<SyncMutex<BTreeMap<IpAddr, mpsc::UnboundedSender<Command>>>>,
+    state: Arc<SyncMutex<ControllerState>>,
 }
 
 impl PortMapController {
     pub fn new(interfaces: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>) -> Self {
         Self {
             interfaces,
-            shards: Arc::new(SyncMutex::new(BTreeMap::new())),
+            state: Arc::new(SyncMutex::new(ControllerState::Accepting(BTreeMap::new()))),
         }
     }
 
-    fn shard(&self, local_ip: IpAddr) -> mpsc::UnboundedSender<Command> {
-        self.shards.mutate(|shards| {
-            shards
+    fn send(&self, local_ip: IpAddr, command: Command) -> bool {
+        self.state.mutate(|state| match state {
+            ControllerState::Accepting(shards) => shards
                 .entry(local_ip)
                 .or_insert_with(|| spawn_shard(self.interfaces.clone()))
-                .clone()
+                .send(command)
+                .is_ok(),
+            ControllerState::Draining(_) => false,
         })
     }
 
@@ -311,71 +319,92 @@ impl PortMapController {
         count: u16,
         protocol: TransportProtocol,
     ) {
-        self.shard(local_ip)
-            .send(Command::Ensure {
+        self.send(
+            local_ip,
+            Command::Ensure {
                 key: (local_ip, external_port, hostname, protocol),
                 spec: Spec {
                     internal_port,
                     gateways,
                     count,
                 },
-            })
-            .ok();
+            },
+        );
     }
 
     pub fn remove(&self, local_ip: IpAddr, external_port: u16) {
         for protocol in [TransportProtocol::Tcp, TransportProtocol::Udp] {
-            self.shard(local_ip)
-                .send(Command::Remove {
+            self.send(
+                local_ip,
+                Command::Remove {
                     key: (local_ip, external_port, None, protocol),
-                    respond: None,
-                })
-                .ok();
+                },
+            );
         }
     }
 
     /// Remove the SNI HOSTNAME mapping for `hostname` on
     /// `(local_ip, external_port)`, leaving any other hostnames on that port.
     pub fn remove_hostname(&self, local_ip: IpAddr, external_port: u16, hostname: String) {
-        self.shard(local_ip)
-            .send(Command::Remove {
+        self.send(
+            local_ip,
+            Command::Remove {
                 key: (
                     local_ip,
                     external_port,
                     Some(hostname),
                     TransportProtocol::Tcp,
                 ),
-                respond: None,
-            })
-            .ok();
+            },
+        );
     }
 
     pub(crate) async fn drain(&self) -> Result<(), Error> {
-        let shards = self
-            .shards
-            .peek(|shards| shards.values().cloned().collect::<Vec<_>>());
-        let mut responses = Vec::with_capacity(shards.len());
-        let mut first_error = None;
-        for shard in shards {
-            let (respond, receive) = oneshot::channel();
-            if shard.send(Command::Drain { respond }).is_err() {
-                first_error.get_or_insert_with(controller_exited);
-            } else {
-                responses.push(receive);
-            }
-        }
-        for receive in responses {
-            match receive.await {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => {
-                    first_error.get_or_insert(error);
+        let completion = self.state.mutate(|state| match state {
+            ControllerState::Accepting(shards) => {
+                let mut responses = Vec::with_capacity(shards.len());
+                let mut first_error = None;
+                for shard in shards.values() {
+                    let (respond, receive) = oneshot::channel();
+                    if shard.send(Command::Drain { respond }).is_err() {
+                        first_error.get_or_insert_with(controller_exited);
+                    } else {
+                        responses.push(receive);
+                    }
                 }
-                Err(_) => {
-                    first_error.get_or_insert_with(controller_exited);
-                }
+                let completion = tokio::spawn(async move {
+                    for receive in responses {
+                        match receive.await {
+                            Ok(Ok(())) => {}
+                            Ok(Err(error)) => {
+                                first_error.get_or_insert(error);
+                            }
+                            Err(_) => {
+                                first_error.get_or_insert_with(controller_exited);
+                            }
+                        }
+                    }
+                    first_error.map_or(Ok(()), Err)
+                })
+                .map(|result| {
+                    result
+                        .map_err(|error| {
+                            Error::new(
+                                eyre!("port-map drain task panicked: {error}"),
+                                ErrorKind::Unknown,
+                            )
+                        })
+                        .and_then(|result| result)
+                        .map_err(Arc::new)
+                })
+                .boxed()
+                .shared();
+                *state = ControllerState::Draining(completion.clone());
+                completion
             }
-        }
-        first_error.map_or(Ok(()), Err)
+            ControllerState::Draining(completion) => completion.clone(),
+        });
+        completion.await.map_err(|error| error.clone_output())
     }
 
     /// Gateway-assigned external IP if a TCP mapping is active for
@@ -386,12 +415,14 @@ impl PortMapController {
     /// say whether anything reaches it.
     pub async fn mapped_external_ip(&self, local_ip: IpAddr, external_port: u16) -> Option<IpAddr> {
         let (resp, rx) = oneshot::channel();
-        self.shard(local_ip)
-            .send(Command::ExternalIp {
+        self.send(
+            local_ip,
+            Command::ExternalIp {
                 external_port,
                 resp,
-            })
-            .ok()?;
+            },
+        )
+        .then_some(())?;
         rx.await.ok().flatten()
     }
 }
@@ -448,13 +479,8 @@ fn spawn_shard(
             tokio::select! {
                 cmd = recv.recv() => match cmd {
                     Some(Command::Ensure { key, spec }) => state.ensure(&interfaces, key, spec).await,
-                    Some(Command::Remove { key, respond }) => {
-                        let result = state.remove(key).await;
-                        if let Some(respond) = respond {
-                            respond.send(result).ok();
-                        } else {
-                            result.log_err();
-                        }
+                    Some(Command::Remove { key }) => {
+                        state.remove(key).await.log_err();
                     }
                     Some(Command::ExternalIp { external_port, resp }) => {
                         let _ = resp.send(external_ip_of(
@@ -466,6 +492,7 @@ fn spawn_shard(
                     }
                     Some(Command::Drain { respond }) => {
                         respond.send(state.drain().await).ok();
+                        break;
                     }
                     None => break,
                 },
@@ -1710,7 +1737,81 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn drain_clears_desired_state_without_disabling_reuse() {
+    async fn controller_rejects_new_shards_after_drain() {
+        let controller = PortMapController::new(interfaces());
+        controller.drain().await.unwrap();
+
+        let ip: IpAddr = "fd00:59::2".parse().unwrap();
+        controller.ensure(ip, 443, 443, Vec::new());
+
+        assert!(
+            controller
+                .state
+                .peek(|state| matches!(state, ControllerState::Draining(_)))
+        );
+        assert_eq!(controller.mapped_external_ip(ip, 443).await, None);
+        controller.drain().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn concurrent_drains_share_completion_after_cancellation() {
+        let controller = PortMapController::new(interfaces());
+        let ip: IpAddr = "fd00:59::2".parse().unwrap();
+        let (shard, mut commands) = mpsc::unbounded_channel();
+        controller.state.mutate(|state| match state {
+            ControllerState::Accepting(shards) => {
+                shards.insert(ip, shard);
+            }
+            ControllerState::Draining(_) => panic!("controller already draining"),
+        });
+        let (drain_started, drain_received) = oneshot::channel();
+        let (release_drain, drain_released) = oneshot::channel();
+        tokio::spawn(async move {
+            let Some(Command::Drain { respond }) = commands.recv().await else {
+                panic!("shard did not receive drain command");
+            };
+            drain_started.send(()).unwrap();
+            drain_released.await.unwrap();
+            respond
+                .send(Err(Error::new(
+                    eyre!("held teardown failed"),
+                    ErrorKind::Network,
+                )))
+                .ok();
+        });
+
+        let first_controller = controller.clone();
+        let first = tokio::spawn(async move { first_controller.drain().await });
+        drain_received.await.unwrap();
+
+        let second = controller.drain();
+        tokio::pin!(second);
+        assert!(
+            futures::poll!(&mut second).is_pending(),
+            "second drain completed before shard teardown"
+        );
+        first.abort();
+        assert!(first.await.unwrap_err().is_cancelled());
+        assert!(
+            futures::poll!(&mut second).is_pending(),
+            "cancelling the initiating caller cancelled teardown"
+        );
+
+        release_drain.send(()).unwrap();
+        let completed = second.await.unwrap_err();
+        let completed_message = completed.to_string();
+        assert_eq!(completed.kind, ErrorKind::Network);
+        assert!(completed_message.contains("held teardown failed"));
+
+        for _ in 0..2 {
+            let repeated = controller.drain().await.unwrap_err();
+            assert_eq!(repeated.kind, completed.kind);
+            assert_eq!(repeated.to_string(), completed_message);
+        }
+    }
+
+    #[tokio::test]
+    async fn state_can_be_reused_after_drain() {
         let ip: IpAddr = "fd00:59::2".parse().unwrap();
         let key: MappingKey = (ip, 443, None, TransportProtocol::Tcp);
         let mut state = State::default();
