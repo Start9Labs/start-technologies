@@ -1,0 +1,54 @@
+#!/bin/bash
+
+set -euo pipefail
+
+if [ "$#" -gt 1 ]; then
+    >&2 echo "Usage: $0 [fstab]"
+    exit 1
+fi
+
+BLKID=${BLKID:-blkid}
+fstab=${1:-/etc/fstab}
+tmp=$(mktemp "$(dirname -- "$fstab")/.$(basename -- "$fstab").XXXXXX")
+trap 'rm -f -- "$tmp"' EXIT
+
+ends_with_newline=0
+if [ -s "$fstab" ] && [ "$(tail -c 1 -- "$fstab" | od -An -t x1 | tr -d '[:space:]')" = 0a ]; then
+    ends_with_newline=1
+fi
+
+while IFS= read -r line || [ -n "$line" ]; do
+    if [[ $line =~ ^([[:blank:]]*)(/dev/[^[:blank:]]+)([[:blank:]]+)([^[:blank:]]+)(.*)$ ]]; then
+        leading=${BASH_REMATCH[1]}
+        source=${BASH_REMATCH[2]}
+        separator=${BASH_REMATCH[3]}
+        target=${BASH_REMATCH[4]}
+        remainder=${BASH_REMATCH[5]}
+        case "$target" in
+            /|/boot|/boot/*)
+                if ! partuuid=$("$BLKID" -p -s PART_ENTRY_UUID -o value "$source") ||
+                    [ -z "$partuuid" ] || [[ $partuuid =~ [[:space:]] ]]; then
+                    >&2 echo "Unable to resolve PARTUUID for $source"
+                    exit 1
+                fi
+                printf '%sPARTUUID=%s%s%s%s\n' \
+                    "$leading" "$partuuid" "$separator" "$target" "$remainder"
+                continue
+                ;;
+        esac
+    fi
+    printf '%s\n' "$line"
+done < "$fstab" > "$tmp"
+
+if [ -s "$fstab" ] && [ "$ends_with_newline" -eq 0 ]; then
+    truncate -s -1 "$tmp"
+fi
+
+if cmp -s -- "$fstab" "$tmp"; then
+    exit 0
+fi
+
+chown --reference="$fstab" "$tmp"
+chmod --reference="$fstab" "$tmp"
+mv -f -- "$tmp" "$fstab"
+trap - EXIT

@@ -64,6 +64,10 @@ The container runtime communicates with the StartOS host via JSON-RPC over a Uni
 
 Each service has one or more named volumes for persistent data. Volumes survive container restarts, updates, and restores. They are id-mapped to the container's user namespace for security. Packages declare which volumes to include in backups.
 
+### OS Partitions
+
+StartOS identifies its boot and system partitions by stable partition IDs. It continues mounting the same partitions when another disk is added, removed, or reordered.
+
 ## Networking
 
 StartOS provides multiple ways to access services, all managed through the UI.

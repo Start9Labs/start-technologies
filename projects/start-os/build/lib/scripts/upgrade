@@ -2,8 +2,6 @@
 
 set -e
 
-SOURCE_DIR="$(dirname $(realpath "${BASH_SOURCE[0]}"))"
-
 if [ "$UID" -ne 0 ]; then
     >&2 echo 'Must be run as root'
     exit 1
@@ -16,17 +14,18 @@ fi
 
 echo 'Upgrading...'
 
-hash=$(b3sum $1 | head -c 32)
-# Gated on CHECKSUM, not on a second positional argument: every caller passes
-# only the image path, so the old `[ -n "$2" ]` guard meant the comparison never
-# ran and a corrupt-but-mountable image installed silently. $2 is still accepted
-# so callers written for the old form keep working.
+hash=$(b3sum "$1" | head -c 32)
 if [ -n "${CHECKSUM:-}" ] && [ "$hash" != "$CHECKSUM" ]; then
     >&2 echo "Checksum mismatch: expected $CHECKSUM, got $hash"
     exit 2
 fi
 
-unsquashfs -f -d / $1 boot
+unsquashfs -n -f -d / "$1" /usr/lib/startos/scripts/normalize-fstab
+if [ -f /media/startos/config/overlay/etc/fstab ]; then
+    /usr/lib/startos/scripts/normalize-fstab /media/startos/config/overlay/etc/fstab
+fi
+
+unsquashfs -f -d / "$1" boot
 
 umount -l /media/startos/next 2> /dev/null || true
 umount /media/startos/upper 2> /dev/null || true
@@ -35,7 +34,7 @@ umount /media/startos/lower 2> /dev/null || true
 mkdir -p /media/startos/upper
 mount -t tmpfs tmpfs /media/startos/upper
 mkdir -p /media/startos/lower /media/startos/upper/data /media/startos/upper/work /media/startos/next
-mount $1 /media/startos/lower
+mount "$1" /media/startos/lower
 mount -t overlay \
       -olowerdir=/media/startos/lower,upperdir=/media/startos/upper/data,workdir=/media/startos/upper/work \
 	    overlay /media/startos/next
@@ -54,7 +53,7 @@ mount -t proc proc /media/startos/next/proc
 mount --rbind /boot /media/startos/next/boot
 mount --bind /media/startos/root /media/startos/next/media/startos/root
 
-if mountpoint /sys/firmware/efi/efivars 2>&1 > /dev/null; then
+if mountpoint /sys/firmware/efi/efivars > /dev/null 2>&1; then
     mount -t efivarfs efivarfs /media/startos/next/sys/firmware/efi/efivars
 fi
 
@@ -82,8 +81,8 @@ umount -l /media/startos/next
 umount /media/startos/upper
 umount /media/startos/lower
 
-mv $1 /media/startos/images/${hash}.rootfs
-ln -rsf /media/startos/images/${hash}.rootfs /media/startos/config/current.rootfs
+mv "$1" "/media/startos/images/${hash}.rootfs"
+ln -rsf "/media/startos/images/${hash}.rootfs" /media/startos/config/current.rootfs
 
 sync
 

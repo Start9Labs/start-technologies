@@ -68,9 +68,8 @@ impl OsPartitionInfo {
                 continue;
             };
 
-            // `/` is an overlayfs the initramfs sets up, so its fstab source
-            // (`overlay`) names no block device — root comes from the live OS
-            // mount below. Only /boot* entries are real block-device mounts.
+            // `/` is an overlayfs the initramfs sets up, so root comes from the
+            // live OS mount below. Only /boot* entries are mounted from fstab.
             if target != "/boot" && !target.starts_with("/boot/") {
                 continue;
             }

@@ -7,8 +7,8 @@
 # box's existing `next`/`current` make the rsync a small delta, and the apply-time
 # `chroot next update-grub2` runs in a complete userland. On top we layer the
 # 0.4.0 upgrade: the 0.4.0 base image as a nested squashfs (what the 0.4.0
-# initramfs boots), the 0.4.0 kernel/initramfs, a migration sentinel, and our
-# deterministic bootloader updater. The old Haskell registry loop-mounts the
+# initramfs boots), the 0.4.0 kernel/initramfs, a migration sentinel, and the
+# apply-time migration scripts. The old Haskell registry loop-mounts the
 # result and rsync-serves its tree unchanged.
 set -eo pipefail
 
@@ -76,10 +76,11 @@ printf '%s\n%s\n' \
     "$(cd "$WORK/payload/boot" && ls -1 initrd.img-* | head -n1)" \
     > "$WORK/payload/usr/lib/startos/migration-boot"
 
-# 4. Sentinel the 0.4.0 initramfs keys on, plus our bootloader updater (0.3.5.1
-#    execs /usr/sbin/update-grub2 in the payload chroot at apply time).
+# 4. Add the sentinel and apply-time migration scripts. StartOS 0.3.5.1
+#    executes /usr/sbin/update-grub2 in the payload chroot.
 touch "$WORK/payload/.startos-migration"
 install -m0755 "$SOURCE_DIR/lib/scripts/migration-update-grub" "$WORK/payload/usr/sbin/update-grub2"
+install -m0755 "$SOURCE_DIR/lib/scripts/normalize-fstab" "$WORK/payload/usr/lib/startos/scripts/normalize-fstab"
 
 # 5. Re-squash into the OTA payload the registry loop-mounts and serves.
 rm -f "$OUT"

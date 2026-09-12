@@ -52,7 +52,7 @@ MIGRATION_FROM_TAG := v0.3.5.1
 
 start-os-migration-squashfs: results/$(BASENAME).migration.squashfs
 
-results/$(BASENAME).migration.squashfs: results/$(BASENAME).squashfs projects/start-os/build/assemble-migration-payload.sh projects/start-os/build/lib/scripts/migration-update-grub
+results/$(BASENAME).migration.squashfs: results/$(BASENAME).squashfs projects/start-os/build/assemble-migration-payload.sh projects/start-os/build/lib/scripts/migration-update-grub projects/start-os/build/lib/scripts/normalize-fstab
 	@if [ "$(PLATFORM)" = raspberrypi ]; then >&2 echo "migration payload: raspberrypi has no in-place migration — reflash required (#3443)"; exit 1; fi
 	mkdir -p results/migration-base
 	gh release download $(MIGRATION_FROM_TAG) --repo Start9Labs/start-technologies \

@@ -61,6 +61,32 @@ pub fn partition_for(disk: impl AsRef<Path>, idx: u32) -> PathBuf {
     }
 }
 
+async fn fstab_source(partition: &Path) -> Result<String, Error> {
+    let output = Command::new("blkid")
+        .args(["-p", "-s", "PART_ENTRY_UUID", "-o", "value"])
+        .arg(partition)
+        .invoke(ErrorKind::BlockDevice)
+        .await?;
+    let partuuid = String::from_utf8(output)?;
+    let partuuid = partuuid.trim();
+    if partuuid.is_empty() || partuuid.chars().any(char::is_whitespace) {
+        return Err(Error::new(
+            eyre!("Invalid PARTUUID for {}", partition.display()),
+            ErrorKind::BlockDevice,
+        ));
+    }
+    Ok(format!("PARTUUID={partuuid}"))
+}
+
+fn render_fstab(boot: &str, efi: Option<&str>, root: &str) -> String {
+    format!(
+        include_str!("fstab.template"),
+        boot = boot,
+        efi = efi.unwrap_or("# N/A"),
+        root = root,
+    )
+}
+
 async fn partition(
     disk_path: &Path,
     capacity: u64,
@@ -518,18 +544,15 @@ pub async fn install_os_to(
         None
     };
 
+    let boot_source = fstab_source(&part_info.boot).await?;
+    let efi_source = match part_info.extra_boot.get("efi") {
+        Some(efi) => Some(fstab_source(efi).await?),
+        None => None,
+    };
+    let root_source = fstab_source(&part_info.root).await?;
     tokio::fs::write(
         overlay.path().join("etc/fstab"),
-        format!(
-            include_str!("fstab.template"),
-            boot = part_info.boot.display(),
-            efi = part_info
-                .extra_boot
-                .get("efi")
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|| "# N/A".to_owned()),
-            root = part_info.root.display(),
-        ),
+        render_fstab(&boot_source, efi_source.as_deref(), &root_source),
     )
     .await?;
 
@@ -884,6 +907,39 @@ mod tests {
                 partition("/dev/sda4", Some("EMBASSY_AAAA")),
             ],
         )
+    }
+
+    #[test]
+    fn fstab_uses_stable_partition_ids() {
+        assert_eq!(
+            render_fstab(
+                "PARTUUID=boot-id",
+                Some("PARTUUID=efi-id"),
+                "PARTUUID=root-id",
+            ),
+            "PARTUUID=boot-id  /boot       vfat    umask=0077  0   2\n\
+             PARTUUID=efi-id   /boot/efi   vfat    umask=0077  0   1\n\
+             PARTUUID=root-id  /           btrfs   defaults    0   1",
+        );
+    }
+
+    #[test]
+    fn fstab_without_efi_comments_out_mount() {
+        assert!(render_fstab("PARTUUID=boot", None, "PARTUUID=root").contains("# N/A"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fstab_normalizer_rewrites_device_sources_atomically() {
+        let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../projects/start-os/build/tests/normalize-fstab-test.sh");
+        let output = std::process::Command::new(&script).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
     }
 
     #[test]
