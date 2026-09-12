@@ -32,6 +32,7 @@ fi
 
 TAG="F$(echo "$sip:$sport+$count -> $dip/$dprefix:$dport ${src_subnet:-any}" | sha256sum | head -c 15)"
 PROTO='meta l4proto { tcp, udp }'
+PRIVATE_IPV4_SUBNETS='{ 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, 169.254.0.0/16 }'
 
 # DNAT clause (the part following $PROTO) and the internal-port matcher used by
 # the forward-accept and masquerade rules.
@@ -74,10 +75,10 @@ delete_tagged() {
 {
     delete_tagged
     if [ "${UNDO:-0}" != 1 ]; then
-        # DNAT inbound. With src_subnet, restrict to that subnet (private
-        # forward) plus the container bridge; otherwise forward from anywhere.
+        # Private forwards accept on-link and private sources.
         if [ -n "${src_subnet:-}" ]; then
             echo "add rule ip startos prerouting ip saddr $src_subnet ip daddr $sip $PROTO $dnat comment \"$TAG\""
+            echo "add rule ip startos prerouting ip saddr $PRIVATE_IPV4_SUBNETS ip daddr $sip $PROTO $dnat comment \"$TAG\""
             if [ -n "${bridge_subnet:-}" ]; then
                 echo "add rule ip startos prerouting ip saddr $bridge_subnet ip daddr $sip $PROTO $dnat comment \"$TAG\""
             fi
