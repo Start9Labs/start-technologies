@@ -84,6 +84,7 @@ render() {
         -u NFT_LIST_STDERR \
         -u NFT_LISTING \
         -u NFT_LISTING_HANDLES \
+        FORWARD_PORT_NFT=./build/lib/scripts/forward-port-nft \
         sip="$sip" \
         dip="$dip" \
         dprefix="$dprefix" \
