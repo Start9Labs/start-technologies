@@ -40,33 +40,20 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
           {{ 'Refresh' | i18n }}
         </button>
       } @else {
-        {{
-          'Your user interface is cached and out of date. Hard refresh the page to get the latest UI.'
-            | i18n
-        }}
-        <ul>
-          <li>
-            <b>On Mac (Chrome/Firefox)</b>
-            : cmd + shift + R
-          </li>
-          <li>
-            <b>On Mac (Safari)</b>
-            : option + cmd + R, or hold option and choose View > Reload Page
-            from Origin
-          </li>
-          <li>
-            <b>On Linux/Windows</b>
-            : ctrl + shift + R
-          </li>
-        </ul>
+        <p>
+          {{
+            'StartOS has been updated, but this page is still running the previous interface. Reload the page to get the latest version.'
+              | i18n
+          }}
+        </p>
         <button
           tuiButton
           appearance="secondary"
           style="float: right"
           [tuiAppearanceFocus]="false"
-          (click)="dismiss$.next()"
+          (click)="reload()"
         >
-          {{ 'Ok' | i18n }}
+          {{ 'Reload' | i18n }}
         </button>
       }
     </ng-template>
@@ -99,15 +86,29 @@ export class RefreshAlertComponent {
     },
   )
 
-  async pwaReload() {
+  protected async reload(): Promise<void> {
+    try {
+      if (
+        this.updates.isEnabled &&
+        this.win.navigator.serviceWorker.controller !== null
+      ) {
+        await this.updates.checkForUpdate()
+        await this.updates.activateUpdate()
+      }
+    } catch (e) {
+      console.error('Error activating update from service worker: ', e)
+    } finally {
+      this.win.location.reload()
+    }
+  }
+
+  protected async pwaReload(): Promise<void> {
     try {
       this.loader.open('Reloading PWA').subscribe()
-      // attempt to update to the latest client version available
       await this.updates.activateUpdate()
     } catch (e) {
       console.error('Error activating update from service worker: ', e)
     } finally {
-      // always reload, as this resolves most out of sync cases
       this.win.location.reload()
     }
   }
