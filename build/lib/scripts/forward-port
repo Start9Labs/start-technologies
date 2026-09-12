@@ -34,27 +34,32 @@ TAG="F$(echo "$sip:$sport+$count -> $dip/$dprefix:$dport ${src_subnet:-any}" | s
 PROTO='meta l4proto { tcp, udp }'
 PRIVATE_IPV4_SUBNETS='{ 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, 169.254.0.0/16 }'
 
-# DNAT clause (the part following $PROTO) and the internal-port matcher used by
-# the forward-accept and masquerade rules.
 if [ "$count" -eq 1 ]; then
     dnat="th dport $sport dnat to $dip:$dport"
+    port_pair_match="ct original proto-dst $sport ip daddr $dip th dport $dport"
     dport_match="$dport"
-elif [ "$sport" = "$dport" ]; then
-    # Equal bases: preserve the destination port across the range (one rule).
-    dnat="th dport ${sport}-${sport_end} dnat to $dip"
-    dport_match="${dport}-${dport_end}"
 else
-    # Offset range: map each external port to its internal counterpart.
-    map=""; sep=""
+    pairs=""; sep=""
     for ((i = 0; i < count; i++)); do
-        map+="${sep}$((sport + i)) : $dip . $((dport + i))"; sep=", "
+        pairs+="${sep}$((sport + i)) . $((dport + i))"; sep=", "
     done
-    dnat="dnat to th dport map { $map }"
+    port_pair_match="ct original proto-dst . th dport { $pairs } ip daddr $dip"
     dport_match="${dport}-${dport_end}"
+    if [ "$sport" = "$dport" ]; then
+        # Equal bases: preserve the destination port across the range (one rule).
+        dnat="th dport ${sport}-${sport_end} dnat to $dip"
+    else
+        # Offset range: map each external port to its internal counterpart.
+        map=""; sep=""
+        for ((i = 0; i < count; i++)); do
+            map+="${sep}$((sport + i)) : $dip . $((dport + i))"; sep=", "
+        done
+        dnat="dnat to th dport map { $map }"
+    fi
 fi
 
 # Base table/chains are owned by PortForwardController init; ensure defensively.
-nft -f - <<'EOF'
+nft -f - <<'EOF' || exit $?
 add table ip startos
 add chain ip startos prerouting { type nat hook prerouting priority dstnat; policy accept; }
 add chain ip startos output { type nat hook output priority -100; policy accept; }
@@ -77,8 +82,8 @@ delete_tagged() {
     done
 }
 
-deletions=$(delete_tagged) || exit $?
-{
+render_transaction() {
+    local deletions="$1"
     if [ -n "$deletions" ]; then
         printf '%s\n' "$deletions"
     fi
@@ -89,15 +94,28 @@ deletions=$(delete_tagged) || exit $?
         else
             echo "add rule ip startos prerouting ip daddr $sip $PROTO $dnat comment \"$TAG\""
         fi
-        # DNAT for locally-originated (hairpin from the host itself).
         echo "add rule ip startos output ip daddr $sip $PROTO $dnat comment \"$TAG\""
-        # Allow new forwarded connections to the target.
-        echo "add rule ip startos forward ip daddr $dip $PROTO th dport $dport_match ct state new accept comment \"$TAG\""
-        # Masquerade hairpin replies so they reverse through this host.
+        echo "add rule ip startos forward ct status dnat ct original ip daddr $sip $PROTO $port_pair_match ct state new accept comment \"$TAG\""
         echo "add rule ip startos postrouting fib saddr type local ct original ip daddr $sip ip daddr $dip $PROTO th dport $dport_match masquerade comment \"$TAG\""
         echo "add rule ip startos postrouting ip saddr $dip/$dprefix ip daddr $dip $PROTO th dport $dport_match masquerade comment \"$TAG\""
     fi
-} | nft -f - || exit $?
+}
+
+error_file=$(mktemp)
+trap 'rm -f "$error_file"' EXIT
+for ((attempt = 1; attempt <= 3; attempt++)); do
+    deletions=$(delete_tagged) || exit $?
+    : > "$error_file"
+    if render_transaction "$deletions" | nft -f - 2> "$error_file"; then
+        break
+    else
+        status=$?
+    fi
+    if [ "$attempt" -eq 3 ] || ! grep -qiE 'No such file or directory|ENOENT' "$error_file"; then
+        cat "$error_file" >&2
+        exit "$status"
+    fi
+done
 
 if [ "${UNDO:-0}" = 1 ]; then
     # conntrack returns 1 when no flows match; ignore. -D takes no port range,

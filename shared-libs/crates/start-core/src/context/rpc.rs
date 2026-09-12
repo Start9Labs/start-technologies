@@ -424,11 +424,12 @@ impl RpcContext {
     #[instrument(skip_all)]
     pub async fn shutdown(self) -> Result<(), Error> {
         self.crons.mutate(|c| std::mem::take(c));
-        self.services.shutdown_all().await?;
-        self.is_closed.store(true, Ordering::SeqCst);
-        self.closed.send_replace(true);
+        let result = self.services.shutdown_all().await;
+        self.net_controller.shutdown_forwarding().await.log_err();
+        self.0.is_closed.store(true, Ordering::SeqCst);
+        self.0.closed.send_replace(true);
         tracing::info!("{}", t!("context.rpc.rpc-context-shutdown"));
-        Ok(())
+        result
     }
 
     /// Resolves once graceful teardown (`shutdown`) has completed. Used by the
