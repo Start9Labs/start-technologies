@@ -15,10 +15,7 @@ case "$SOURCE_DIR" in
 esac
 [ -n "$INSTALL_ROOT" ] || INSTALL_ROOT=/
 STARTOS_MEDIA="${INSTALL_ROOT%/}/media/startos"
-NORMALIZE_FSTAB="${INSTALL_ROOT%/}/usr/lib/startos/scripts/normalize-fstab"
-if [ ! -x "$NORMALIZE_FSTAB" ]; then
-    NORMALIZE_FSTAB="$SOURCE_DIR/normalize-fstab"
-fi
+NORMALIZE_FSTAB="$SOURCE_DIR/normalize-fstab"
 
 if [ "$(id -u)" -ne 0 ]; then
     >&2 echo 'Must be run as root'
@@ -49,6 +46,18 @@ while [[ $# -gt 0 ]]; do
 done
 
 set -- "${POSITIONAL_ARGS[@]}" # restore positional parameters
+
+if [ -z "$ONLY_CREATE" ]; then
+    if [ ! -x "$NORMALIZE_FSTAB" ]; then
+        >&2 echo "Missing fstab normalizer: $NORMALIZE_FSTAB"
+        exit 1
+    fi
+    NORMALIZE_FSTAB_SNAPSHOT=$(mktemp /tmp/startos-normalize-fstab.XXXXXX) || exit 1
+    trap 'rm -f -- "$NORMALIZE_FSTAB_SNAPSHOT"' EXIT
+    if ! cp -- "$NORMALIZE_FSTAB" "$NORMALIZE_FSTAB_SNAPSHOT"; then
+        exit 1
+    fi
+fi
 
 if [ -z "$NO_SYNC" ]; then
     echo 'Syncing...'
@@ -94,7 +103,7 @@ else
 fi
 
 if [ "$CHROOT_RES" -eq 0 ] && [ -f "$STARTOS_MEDIA/config/overlay/etc/fstab" ]; then
-    "$NORMALIZE_FSTAB" "$STARTOS_MEDIA/config/overlay/etc/fstab"
+    /bin/bash "$NORMALIZE_FSTAB_SNAPSHOT" "$STARTOS_MEDIA/config/overlay/etc/fstab"
     CHROOT_RES=$?
 fi
 

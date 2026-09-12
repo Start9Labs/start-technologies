@@ -35,33 +35,42 @@ partition_on_disk() {
     printf '%s\n' "$found"
 }
 
-legacy_device() {
-    local target=$1 boot parent boot_number number
-    boot=$(mounted_device /boot) || return 1
-    parent=$(lsblk -nro PKNAME "$boot") || return 1
-    boot_number=$(lsblk -nro PARTN "$boot") || return 1
-    [ -n "$parent" ] && [[ $boot_number =~ ^[0-9]+$ ]] || return 1
-    case "$target" in
-        /boot) printf '%s\n' "$boot"; return ;;
-        /) number=$((boot_number + 1)) ;;
-        /boot/efi)
-            [ "$boot_number" -eq 2 ] || return 1
-            number=1
-            ;;
+installed_root() {
+    if [ "$legacy" -eq 1 ]; then
+        mounted_device /
+    else
+        mounted_device /media/startos/root
+    fi
+}
+
+installed_device() {
+    local target=$1 root parent root_number number device mounted
+    root=$(installed_root) || return 1
+    parent=$(lsblk -nro PKNAME "$root") || return 1
+    root_number=$(lsblk -nro PARTN "$root") || return 1
+    [ -n "$parent" ] && [[ $root_number =~ ^[0-9]+$ ]] || return 1
+    case "$root_number:$target" in
+        3:/) number=3 ;;
+        3:/boot) number=2 ;;
+        3:/boot/efi) number=1 ;;
+        2:/) number=2 ;;
+        2:/boot) number=1 ;;
+        *) return 1 ;;
     esac
-    partition_on_disk "/dev/$parent" "$number"
+    device=$(partition_on_disk "/dev/$parent" "$number") || return 1
+    if [ "$target" != / ] &&
+        ! { [ "$legacy" -eq 1 ] && [ "$target" = /boot/efi ]; }; then
+        mounted=$(mounted_device "$target") || return 1
+        mounted=$(readlink -f -- "$mounted") || return 1
+        device=$(readlink -f -- "$device") || return 1
+        [ "$mounted" = "$device" ] || return 1
+    fi
+    printf '%s\n' "$device"
 }
 
 identity_device() {
     local target=$1 device label expected_label
-    if [ "$legacy" -eq 1 ]; then
-        device=$(legacy_device "$target") || return 1
-    else
-        case "$target" in
-            /) device=$(mounted_device /media/startos/root) || return 1 ;;
-            /boot|/boot/efi) device=$(mounted_device "$target") || return 1 ;;
-        esac
-    fi
+    device=$(installed_device "$target") || return 1
     case "$target" in
         /) expected_label=rootfs ;;
         /boot) expected_label=boot ;;
@@ -98,7 +107,7 @@ if [ -s "$snapshot" ]; then
     [ "$last_byte" != 0a ] || ends_with_newline=1
 fi
 
-cat -- "$snapshot" | while IFS= read -r line || [ -n "$line" ]; do
+while IFS= read -r line || [ -n "$line" ]; do
     if [[ $line =~ ^([[:blank:]]*)(/dev/[^[:blank:]]+)([[:blank:]]+)([^[:blank:]]+)(.*)$ ]]; then
         leading=${BASH_REMATCH[1]}
         separator=${BASH_REMATCH[3]}
@@ -116,7 +125,7 @@ cat -- "$snapshot" | while IFS= read -r line || [ -n "$line" ]; do
         esac
     fi
     printf '%s\n' "$line"
-done > "$tmp"
+done < "$snapshot" > "$tmp"
 
 if [ -s "$snapshot" ] && [ "$ends_with_newline" -eq 0 ]; then
     truncate -s -1 "$tmp"

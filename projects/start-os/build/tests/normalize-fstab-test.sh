@@ -21,10 +21,14 @@ cat > "$MOCK_BIN/findmnt" <<'EOF'
 set -euo pipefail
 [ "$#" -eq 5 ] && [ "$1" = -n ] && [ "$2" = -o ] && [ "$3" = SOURCE ] && [ "$4" = --target ] || exit 64
 case "${MOUNT_LAYOUT}:$5" in
-    current:/media/startos/root) echo /dev/nvme0n1p3 ;;
-    current:/boot) echo /dev/nvme0n1p2 ;;
-    current:/boot/efi) echo /dev/nvme0n1p1 ;;
-    legacy:/boot) echo /dev/vda2 ;;
+    current:/media/startos/root|current-foreign-*:/media/startos/root) echo /dev/nvme0n1p3 ;;
+    current:/boot|current-foreign-efi:/boot) echo /dev/nvme0n1p2 ;;
+    current:/boot/efi|current-foreign-boot:/boot/efi) echo /dev/nvme0n1p1 ;;
+    current-foreign-boot:/boot) echo /dev/sdb2 ;;
+    current-foreign-efi:/boot/efi) echo /dev/sdb1 ;;
+    legacy:/) echo /dev/vda3 ;;
+    legacy:/boot|legacy:/boot/efi) echo /dev/vda2 ;;
+    legacy-mbr:/) echo /dev/vda2 ;;
     legacy-mbr:/boot) echo /dev/vda1 ;;
     wrong:/media/startos/root) echo /dev/sda3 ;;
     *) exit 1 ;;
@@ -35,11 +39,21 @@ cat > "$MOCK_BIN/lsblk" <<'EOF'
 #!/bin/bash
 set -euo pipefail
 case "$*" in
-    '-nro PKNAME /dev/vda1'|'-nro PKNAME /dev/vda2') echo vda ;;
-    '-nro PARTN /dev/vda1') echo 1 ;;
+    '-nro PKNAME /dev/nvme0n1p3') echo nvme0n1 ;;
+    '-nro PARTN /dev/nvme0n1p3') echo 3 ;;
+    '-nrpo PATH,PARTN /dev/nvme0n1')
+        printf '%s\n' '/dev/nvme0n1 ' '/dev/nvme0n1p1 1' '/dev/nvme0n1p2 2' '/dev/nvme0n1p3 3'
+        ;;
+    '-nro PKNAME /dev/vda2'|'-nro PKNAME /dev/vda3') echo vda ;;
     '-nro PARTN /dev/vda2') echo 2 ;;
+    '-nro PARTN /dev/vda3') echo 3 ;;
     '-nrpo PATH,PARTN /dev/vda')
         printf '%s\n' '/dev/vda ' '/dev/vda1 1' '/dev/vda2 2' '/dev/vda3 3'
+        ;;
+    '-nro PKNAME /dev/sda3') echo sda ;;
+    '-nro PARTN /dev/sda3') echo 3 ;;
+    '-nrpo PATH,PARTN /dev/sda')
+        printf '%s\n' '/dev/sda ' '/dev/sda1 1' '/dev/sda2 2' '/dev/sda3 3'
         ;;
     *) exit 64 ;;
 esac
@@ -63,8 +77,16 @@ case "$3:$6" in
     PART_ENTRY_UUID:/dev/vda1) [ "$MOUNT_LAYOUT" = legacy-mbr ] && echo mbr-boot || echo legacy-efi ;;
     PART_ENTRY_UUID:/dev/vda2) [ "$MOUNT_LAYOUT" = legacy-mbr ] && echo mbr-root || echo legacy-boot ;;
     PART_ENTRY_UUID:/dev/vda3) echo legacy-root ;;
-    LABEL:/dev/sda*) echo wrong-disk ;;
+    LABEL:/dev/sda1) echo efi ;;
+    LABEL:/dev/sda2) echo boot ;;
+    LABEL:/dev/sda3) [ "$MOUNT_LAYOUT" = wrong ] && echo wrong-disk || echo rootfs ;;
     PART_ENTRY_UUID:/dev/sda*) echo stale-partuuid ;;
+    LABEL:/dev/sdb1) echo efi ;;
+    LABEL:/dev/sdb2) echo boot ;;
+    LABEL:/dev/sdb3) echo rootfs ;;
+    PART_ENTRY_UUID:/dev/sdb1) echo foreign-efi ;;
+    PART_ENTRY_UUID:/dev/sdb2) echo foreign-boot ;;
+    PART_ENTRY_UUID:/dev/sdb3) echo foreign-root ;;
     *) exit 2 ;;
 esac
 EOF
@@ -172,6 +194,14 @@ grep -Fx 'PART_ENTRY_UUID|/dev/nvme0n1p1' "$BLKID_LOG" >/dev/null
 
 echo 'PASS live mounts override valid stale device paths'
 
+bios_fstab="$TEST_DIR/fstab-bios"
+printf '/dev/sda3 / ext4 defaults 0 1\n/dev/sda2 /boot vfat defaults 0 2\n' > "$bios_fstab"
+printf 'PARTUUID=current-root / ext4 defaults 0 1\nPARTUUID=current-boot /boot vfat defaults 0 2\n' > "$bios_fstab.expected"
+MOUNT_LAYOUT=current run_normalizer "$bios_fstab"
+assert_files_equal "$bios_fstab.expected" "$bios_fstab"
+
+echo 'PASS BIOS GPT layout does not require an EFI mount'
+
 inode_before=$(stat -c '%i' "$fstab")
 MOUNT_LAYOUT=current run_normalizer "$fstab"
 [ "$(stat -c '%i' "$fstab")" = "$inode_before" ]
@@ -235,6 +265,22 @@ assert_files_equal "$wrong.expected" "$wrong"
 grep -F 'Unable to establish installed partition for /' "$TEST_DIR/wrong.err" >/dev/null
 
 echo 'PASS mounted partition must match the StartOS layout label'
+
+for target in boot efi; do
+    foreign_boot="$TEST_DIR/fstab-foreign-$target"
+    printf '/dev/sda3 / ext4 defaults 0 1\n/dev/sda2 /boot vfat defaults 0 2\n/dev/sda1 /boot/efi vfat defaults 0 1\n' > "$foreign_boot"
+    /bin/cp "$foreign_boot" "$foreign_boot.expected"
+    if MOUNT_LAYOUT="current-foreign-$target" run_normalizer "$foreign_boot" \
+        >"$TEST_DIR/foreign-$target.out" 2>"$TEST_DIR/foreign-$target.err"; then
+        >&2 echo "Expected another StartOS disk mounted at $target to fail"
+        exit 1
+    fi
+    assert_files_equal "$foreign_boot.expected" "$foreign_boot"
+done
+grep -F 'Unable to establish installed partition for /boot' "$TEST_DIR/foreign-boot.err" >/dev/null
+grep -F 'Unable to establish installed partition for /boot/efi' "$TEST_DIR/foreign-efi.err" >/dev/null
+
+echo 'PASS boot and EFI mounts from another correctly-labelled StartOS disk are rejected'
 
 read_failure="$TEST_DIR/fstab-read-failure"
 printf '/dev/sda3 / ext4 defaults 0 1\nsecond line that must survive\n' > "$read_failure"
@@ -387,6 +433,8 @@ mkdir -p "$staged_scripts"
 /bin/cp "$CHROOT_SCRIPT" "$staged_scripts/chroot-and-upgrade"
 /bin/cp "$SCRIPT" "$staged_scripts/normalize-fstab"
 chmod +x "$staged_scripts"/*
+printf '#!/bin/bash\nexit 99\n' > "$ota_scripts/normalize-fstab"
+chmod +x "$ota_scripts/normalize-fstab"
 printf '/dev/sda3 / ext4 defaults 0 1\n' > "$ota_root/media/startos/config/overlay/etc/fstab"
 : > "$COMMAND_LOG"
 env PATH="$INTEGRATION_BIN:/usr/bin:/bin" SHELL=/bin/bash MOUNT_LAYOUT=current \
@@ -400,7 +448,7 @@ image_operation=$(grep -nF "mksquashfs $ota_root/media/startos/next" "$COMMAND_L
 [ "$remove_operation" -lt "$normalize_operation" ]
 [ "$normalize_operation" -lt "$image_operation" ]
 
-echo 'PASS staged OTA wrapper targets outer media and survives target helper removal'
+echo 'PASS staged OTA wrapper snapshots its sibling and survives target helper removal'
 
 old_image="$TEST_DIR/old.iso"
 new_squashfs="$TEST_DIR/new.squashfs"

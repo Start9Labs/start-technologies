@@ -68,7 +68,6 @@ impl OsPartitionInfo {
                 continue;
             };
 
-            // The installed OS root comes from its live bind mount.
             if target != "/boot" && !target.starts_with("/boot/") {
                 continue;
             }
@@ -166,51 +165,34 @@ enum FstabSourceError {
     Ambiguous(Error),
 }
 
-fn parse_blkid_devices(output: &str) -> Vec<PathBuf> {
-    output
+fn unique_blkid_device(output: &str) -> Result<Option<PathBuf>, Vec<PathBuf>> {
+    let devices = output
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .map(PathBuf::from)
-        .collect()
-}
+        .collect::<Vec<_>>();
 
-fn select_fstab_device(
-    candidates: Vec<(PathBuf, Option<PathBuf>)>,
-    mounted: Option<&Path>,
-) -> Result<Option<PathBuf>, Vec<PathBuf>> {
-    if candidates.len() < 2 {
-        return Ok(candidates.into_iter().next().map(|(device, _)| device));
-    }
-    if candidates.iter().any(|(_, identity)| identity.is_none()) {
-        return Err(candidates.into_iter().map(|(device, _)| device).collect());
-    }
-
-    let matching = mounted
-        .map(|mounted| {
-            candidates
-                .iter()
-                .filter(|(_, identity)| identity.as_deref() == Some(mounted))
-                .map(|(device, _)| device.clone())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    if matching.len() == 1 {
-        Ok(matching.into_iter().next())
-    } else {
-        Err(candidates.into_iter().map(|(device, _)| device).collect())
+    match devices.len() {
+        0 => Ok(None),
+        1 => Ok(devices.into_iter().next()),
+        _ => Err(devices),
     }
 }
 
 async fn resolve_fstab_source(source: &str, target: &str) -> Result<PathBuf, FstabSourceError> {
+    match get_mount_source(target).await {
+        Ok(Some(device)) => return Ok(device),
+        Ok(None) => {}
+        Err(error) => return Err(FstabSourceError::Ignored(error)),
+    }
+
     if source.starts_with('/') {
         return Ok(tokio::fs::canonicalize(source)
             .await
             .unwrap_or_else(|_| PathBuf::from(source)));
     }
-    // Only TAG=value specs (PARTUUID=, UUID=, LABEL=) are resolvable via blkid;
-    // pseudo sources (overlay, tmpfs, none, ...) are not block devices.
+    // blkid resolves TAG=value block-device specifications.
     if !source.contains('=') {
         return Err(FstabSourceError::Ignored(Error::new(
             eyre!("not a block device spec"),
@@ -226,24 +208,7 @@ async fn resolve_fstab_source(source: &str, target: &str) -> Result<PathBuf, Fst
         .map_err(Error::from)
         .map_err(FstabSourceError::Ignored)?;
 
-    let devices = parse_blkid_devices(&output);
-    let duplicate = devices.len() > 1;
-    let mounted = if duplicate {
-        get_mount_source(target).await.ok().flatten()
-    } else {
-        None
-    };
-    let mut candidates = Vec::with_capacity(devices.len());
-    for device in devices {
-        let identity = if duplicate {
-            tokio::fs::canonicalize(&device).await.ok()
-        } else {
-            None
-        };
-        candidates.push((device, identity));
-    }
-
-    match select_fstab_device(candidates, mounted.as_deref()) {
+    match unique_blkid_device(&output) {
         Ok(Some(device)) => Ok(device),
         Ok(None) => Err(FstabSourceError::Ignored(Error::new(
             eyre!("no matching block device"),
@@ -354,112 +319,28 @@ pub async fn repair() -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
 
-    use super::{parse_blkid_devices, select_fstab_device};
+    use super::unique_blkid_device;
 
-    fn candidate(device: &str, identity: &str) -> (PathBuf, Option<PathBuf>) {
-        (PathBuf::from(device), Some(PathBuf::from(identity)))
+    #[test]
+    fn unique_blkid_device_ignores_empty_lines() {
+        assert_eq!(unique_blkid_device("\n\n"), Ok(None));
     }
 
     #[test]
-    fn parse_blkid_devices_ignores_empty_lines() {
+    fn unique_blkid_device_accepts_one_nonempty_device() {
         assert_eq!(
-            parse_blkid_devices("\n/dev/sda1\n\n/dev/sdb1\n"),
-            vec![PathBuf::from("/dev/sda1"), PathBuf::from("/dev/sdb1")]
-        );
-    }
-
-    #[test]
-    fn select_fstab_device_returns_none_without_candidates() {
-        assert_eq!(select_fstab_device(Vec::new(), None), Ok(None));
-    }
-
-    #[test]
-    fn select_fstab_device_accepts_unique_candidate() {
-        assert_eq!(
-            select_fstab_device(vec![candidate("/dev/sda1", "/dev/sda1")], None),
+            unique_blkid_device("\n /dev/sda1 \n"),
             Ok(Some(PathBuf::from("/dev/sda1")))
         );
     }
 
     #[test]
-    fn select_fstab_device_uses_matching_mount() {
+    fn unique_blkid_device_rejects_multiple_devices() {
         assert_eq!(
-            select_fstab_device(
-                vec![
-                    candidate("/dev/sda1", "/dev/sda1"),
-                    candidate("/dev/sdb1", "/dev/sdb1"),
-                ],
-                Some(Path::new("/dev/sdb1")),
-            ),
-            Ok(Some(PathBuf::from("/dev/sdb1")))
-        );
-    }
-
-    #[test]
-    fn select_fstab_device_rejects_unavailable_or_mismatched_mount() {
-        let candidates = vec![
-            candidate("/dev/sda1", "/dev/sda1"),
-            candidate("/dev/sdb1", "/dev/sdb1"),
-        ];
-        let devices = vec![PathBuf::from("/dev/sda1"), PathBuf::from("/dev/sdb1")];
-
-        assert_eq!(
-            select_fstab_device(candidates.clone(), None),
-            Err(devices.clone())
-        );
-        assert_eq!(
-            select_fstab_device(candidates, Some(Path::new("/dev/sdc1"))),
-            Err(devices)
-        );
-    }
-
-    #[test]
-    fn select_fstab_device_compares_canonical_identities() {
-        assert_eq!(
-            select_fstab_device(
-                vec![
-                    candidate("/dev/disk/by-partuuid/active", "/dev/sda1"),
-                    candidate("/dev/disk/by-partuuid/clone", "/dev/sdb1"),
-                ],
-                Some(Path::new("/dev/sda1")),
-            ),
-            Ok(Some(PathBuf::from("/dev/disk/by-partuuid/active")))
-        );
-    }
-
-    #[test]
-    fn select_fstab_device_rejects_failed_identity() {
-        let candidates = vec![
-            (PathBuf::from("/dev/sda1"), None),
-            candidate("/dev/sdb1", "/dev/sdb1"),
-        ];
-        let devices = vec![PathBuf::from("/dev/sda1"), PathBuf::from("/dev/sdb1")];
-
-        for mounted in [Path::new("/dev/sda1"), Path::new("/dev/sdb1")] {
-            assert_eq!(
-                select_fstab_device(candidates.clone(), Some(mounted)),
-                Err(devices.clone())
-            );
-        }
-    }
-
-    #[test]
-    fn select_fstab_device_rejects_duplicate_canonical_identities() {
-        let devices = vec![
-            PathBuf::from("/dev/disk/by-partuuid/active"),
-            PathBuf::from("/dev/disk/by-partuuid/clone"),
-        ];
-        assert_eq!(
-            select_fstab_device(
-                vec![
-                    candidate("/dev/disk/by-partuuid/active", "/dev/sda1"),
-                    candidate("/dev/disk/by-partuuid/clone", "/dev/sda1"),
-                ],
-                Some(Path::new("/dev/sda1")),
-            ),
-            Err(devices)
+            unique_blkid_device("/dev/sda1\n\n/dev/sdb1\n"),
+            Err(vec![PathBuf::from("/dev/sda1"), PathBuf::from("/dev/sdb1")])
         );
     }
 }

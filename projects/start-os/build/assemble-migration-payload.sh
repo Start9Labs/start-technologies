@@ -1,5 +1,5 @@
 #!/bin/bash
-# The legacy updater rsyncs this complete payload root before invoking its hook.
+# The legacy updater rsyncs the entire payload before invoking update-grub2.
 set -eo pipefail
 
 SOURCE_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
