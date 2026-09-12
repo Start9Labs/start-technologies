@@ -8,7 +8,7 @@ import { TuiResponsiveDialog } from '@taiga-ui/addon-mobile'
 import { TuiButton } from '@taiga-ui/core'
 import { TuiNotificationMiddleService } from '@taiga-ui/kit'
 import { PatchDB } from 'patch-db-client'
-import { distinctUntilChanged, map, merge, Subject, Subscription } from 'rxjs'
+import { distinctUntilChanged, map, merge, Subject } from 'rxjs'
 import { ConfigService } from 'src/app/services/config.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 
@@ -79,16 +79,11 @@ export class RefreshAlertComponent {
   )
 
   protected async reload(): Promise<void> {
-    let loader: Subscription | undefined
-    let shouldReload = true
-
-    try {
-      loader = this.isPwa
-        ? this.loader.open(this.i18n.transform('Reloading PWA')).subscribe()
-        : undefined
-    } catch (e: unknown) {
-      console.error(e)
-    }
+    const loader = this.isPwa
+      ? this.loader
+          .open(this.i18n.transform('Reloading PWA'))
+          .subscribe({ error: e => console.error(e) })
+      : undefined
 
     try {
       if (
@@ -99,27 +94,23 @@ export class RefreshAlertComponent {
         await this.updates.activateUpdate()
       }
     } catch (e: unknown) {
-      shouldReload = false
-
-      try {
-        if (e instanceof HttpError || typeof e === 'string') {
-          this.error.handleError(e)
-        } else if (e instanceof Error) {
-          this.error.handleError(e.message)
-        } else {
-          console.error(e)
-        }
-      } catch (reportingError: unknown) {
-        console.error(e, reportingError)
+      if (e instanceof HttpError || typeof e === 'string') {
+        this.error.handleError(e)
+      } else if (e instanceof Error) {
+        this.error.handleError(e.message)
+      } else {
+        console.error(e)
       }
+
+      return
     } finally {
       try {
         loader?.unsubscribe()
       } catch (e: unknown) {
         console.error(e)
       }
-
-      if (shouldReload) this.win.location.reload()
     }
+
+    this.win.location.reload()
   }
 }
