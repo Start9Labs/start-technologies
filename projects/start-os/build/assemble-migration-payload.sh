@@ -71,7 +71,6 @@ touch "$WORK/payload/.startos-migration"
 install -m0755 "$SOURCE_DIR/lib/scripts/migration-update-grub" "$WORK/payload/usr/sbin/update-grub2"
 install -m0755 "$SOURCE_DIR/lib/scripts/normalize-fstab" "$WORK/payload/usr/lib/startos/scripts/normalize-fstab"
 
-# 5. Re-squash into the OTA payload the registry loop-mounts and serves.
 rm -f "$OUT"
 mksquashfs "$WORK/payload" "$OUT" -noappend -comp gzip -b 4096
 # hand the container-created output back to the invoking user (OWNER_* passed in)

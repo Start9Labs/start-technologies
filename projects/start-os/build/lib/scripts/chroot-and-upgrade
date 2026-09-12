@@ -1,8 +1,26 @@
 #!/bin/bash
 
 SOURCE_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
+case "$SOURCE_DIR" in
+    */media/startos/next/usr/lib/startos/scripts)
+        INSTALL_ROOT=${SOURCE_DIR%/media/startos/next/usr/lib/startos/scripts}
+        ;;
+    */usr/lib/startos/scripts)
+        INSTALL_ROOT=${SOURCE_DIR%/usr/lib/startos/scripts}
+        ;;
+    *)
+        >&2 echo "Unsupported script location: $SOURCE_DIR"
+        exit 1
+        ;;
+esac
+[ -n "$INSTALL_ROOT" ] || INSTALL_ROOT=/
+STARTOS_MEDIA="${INSTALL_ROOT%/}/media/startos"
+NORMALIZE_FSTAB="${INSTALL_ROOT%/}/usr/lib/startos/scripts/normalize-fstab"
+if [ ! -x "$NORMALIZE_FSTAB" ]; then
+    NORMALIZE_FSTAB="$SOURCE_DIR/normalize-fstab"
+fi
 
-if [ "$UID" -ne 0 ]; then
+if [ "$(id -u)" -ne 0 ]; then
     >&2 echo 'Must be run as root'
     exit 1
 fi
@@ -34,89 +52,89 @@ set -- "${POSITIONAL_ARGS[@]}" # restore positional parameters
 
 if [ -z "$NO_SYNC" ]; then
     echo 'Syncing...'
-    umount -l /media/startos/next 2> /dev/null
-    umount /media/startos/upper 2> /dev/null
-    rm -rf /media/startos/upper /media/startos/next
-    mkdir /media/startos/upper
-    mount -t tmpfs tmpfs /media/startos/upper
-    mkdir -p /media/startos/upper/data /media/startos/upper/work /media/startos/next
+    umount -l "$STARTOS_MEDIA/next" 2> /dev/null
+    umount "$STARTOS_MEDIA/upper" 2> /dev/null
+    rm -rf "$STARTOS_MEDIA/upper" "$STARTOS_MEDIA/next"
+    mkdir "$STARTOS_MEDIA/upper"
+    mount -t tmpfs tmpfs "$STARTOS_MEDIA/upper"
+    mkdir -p "$STARTOS_MEDIA/upper/data" "$STARTOS_MEDIA/upper/work" "$STARTOS_MEDIA/next"
     mount -t overlay \
-		  -olowerdir=/media/startos/current,upperdir=/media/startos/upper/data,workdir=/media/startos/upper/work \
-		  overlay /media/startos/next
+        -o"lowerdir=$STARTOS_MEDIA/current,upperdir=$STARTOS_MEDIA/upper/data,workdir=$STARTOS_MEDIA/upper/work" \
+        overlay "$STARTOS_MEDIA/next"
 fi
 
 if [ -n "$ONLY_CREATE" ]; then
     exit 0
 fi
 
-mkdir -p /media/startos/next/run
-mkdir -p /media/startos/next/dev
-mkdir -p /media/startos/next/sys
-mkdir -p /media/startos/next/proc
-mkdir -p /media/startos/next/boot
-mkdir -p /media/startos/next/media/startos/root
-mount -t tmpfs tmpfs /media/startos/next/run
-mount -t tmpfs tmpfs /media/startos/next/tmp
-mount --bind /dev /media/startos/next/dev
-mount -t sysfs sysfs /media/startos/next/sys
-mount -t proc proc /media/startos/next/proc
-mount --bind /boot /media/startos/next/boot
-mount --bind /media/startos/root /media/startos/next/media/startos/root
+mkdir -p "$STARTOS_MEDIA/next/run"
+mkdir -p "$STARTOS_MEDIA/next/dev"
+mkdir -p "$STARTOS_MEDIA/next/sys"
+mkdir -p "$STARTOS_MEDIA/next/proc"
+mkdir -p "$STARTOS_MEDIA/next/boot"
+mkdir -p "$STARTOS_MEDIA/next/media/startos/root"
+mount -t tmpfs tmpfs "$STARTOS_MEDIA/next/run"
+mount -t tmpfs tmpfs "$STARTOS_MEDIA/next/tmp"
+mount --bind /dev "$STARTOS_MEDIA/next/dev"
+mount -t sysfs sysfs "$STARTOS_MEDIA/next/sys"
+mount -t proc proc "$STARTOS_MEDIA/next/proc"
+mount --bind /boot "$STARTOS_MEDIA/next/boot"
+mount --bind "$STARTOS_MEDIA/root" "$STARTOS_MEDIA/next/media/startos/root"
 
 if mountpoint /sys/firmware/efi/efivars > /dev/null 2>&1; then
-  mount -t efivarfs efivarfs /media/startos/next/sys/firmware/efi/efivars
+  mount -t efivarfs efivarfs "$STARTOS_MEDIA/next/sys/firmware/efi/efivars"
 fi
 
 if [ -z "$*" ]; then
-    chroot /media/startos/next
+    chroot "$STARTOS_MEDIA/next"
     CHROOT_RES=$?
 else
-    chroot /media/startos/next "$SHELL" -c "$*"
+    chroot "$STARTOS_MEDIA/next" "$SHELL" -c "$*"
     CHROOT_RES=$?
 fi
 
-if [ "$CHROOT_RES" -eq 0 ] && [ -f /media/startos/config/overlay/etc/fstab ]; then
-    /media/startos/next/usr/lib/startos/scripts/normalize-fstab /media/startos/config/overlay/etc/fstab
+if [ "$CHROOT_RES" -eq 0 ] && [ -f "$STARTOS_MEDIA/config/overlay/etc/fstab" ]; then
+    "$NORMALIZE_FSTAB" "$STARTOS_MEDIA/config/overlay/etc/fstab"
     CHROOT_RES=$?
 fi
 
-if mountpoint /media/startos/next/sys/firmware/efi/efivars > /dev/null 2>&1; then
-  umount /media/startos/next/sys/firmware/efi/efivars 
+if mountpoint "$STARTOS_MEDIA/next/sys/firmware/efi/efivars" > /dev/null 2>&1; then
+  umount "$STARTOS_MEDIA/next/sys/firmware/efi/efivars"
 fi
 
-umount -l /media/startos/next/run
-umount -l /media/startos/next/tmp
-umount -l /media/startos/next/dev
-umount -l /media/startos/next/sys
-umount -l /media/startos/next/proc
-umount -l /media/startos/next/boot
-umount -l /media/startos/next/media/startos/root
+umount -l "$STARTOS_MEDIA/next/run"
+umount -l "$STARTOS_MEDIA/next/tmp"
+umount -l "$STARTOS_MEDIA/next/dev"
+umount -l "$STARTOS_MEDIA/next/sys"
+umount -l "$STARTOS_MEDIA/next/proc"
+umount -l "$STARTOS_MEDIA/next/boot"
+umount -l "$STARTOS_MEDIA/next/media/startos/root"
 
 if [ "$CHROOT_RES" -eq 0 ]; then
 
-    if [ -h /media/startos/config/current.rootfs ] && [ -e /media/startos/config/current.rootfs ]; then
-        "$SOURCE_DIR/prune-images" "$(du -s --bytes /media/startos/next | awk '{print $1}')"
+    if [ -h "$STARTOS_MEDIA/config/current.rootfs" ] && [ -e "$STARTOS_MEDIA/config/current.rootfs" ]; then
+        "$SOURCE_DIR/prune-images" "$(du -s --bytes "$STARTOS_MEDIA/next" | awk '{print $1}')"
     fi
 
     echo 'Upgrading...'
 
-    rm -f /media/startos/images/next.squashfs
-    if ! time mksquashfs /media/startos/next /media/startos/images/next.squashfs -b 4096 -comp gzip; then
-        umount -l /media/startos/next
-        umount -l /media/startos/upper
-        rm -rf /media/startos/upper /media/startos/next
+    rm -f "$STARTOS_MEDIA/images/next.squashfs"
+    if ! time mksquashfs "$STARTOS_MEDIA/next" "$STARTOS_MEDIA/images/next.squashfs" -b 4096 -comp gzip; then
+        umount -l "$STARTOS_MEDIA/next"
+        umount -l "$STARTOS_MEDIA/upper"
+        rm -rf "$STARTOS_MEDIA/upper" "$STARTOS_MEDIA/next"
         exit 1
     fi
-    hash=$(b3sum /media/startos/images/next.squashfs | head -c 32)
-    mv /media/startos/images/next.squashfs "/media/startos/images/${hash}.rootfs"
-    ln -rsf "/media/startos/images/${hash}.rootfs" /media/startos/config/current.rootfs
+    hash=$(b3sum "$STARTOS_MEDIA/images/next.squashfs" | head -c 32)
+    mv "$STARTOS_MEDIA/images/next.squashfs" "$STARTOS_MEDIA/images/${hash}.rootfs"
+    ln -rsf "$STARTOS_MEDIA/images/${hash}.rootfs" "$STARTOS_MEDIA/config/current.rootfs"
 
     sync
 
     reboot
 fi
 
-umount -l /media/startos/next
-umount -l /media/startos/upper
-rm -rf /media/startos/upper /media/startos/next
+umount -l "$STARTOS_MEDIA/next"
+umount -l "$STARTOS_MEDIA/upper"
+rm -rf "$STARTOS_MEDIA/upper" "$STARTOS_MEDIA/next"
 exit "$CHROOT_RES"

@@ -5,14 +5,18 @@ set -euo pipefail
 ROOT=$(realpath "$(dirname -- "${BASH_SOURCE[0]}")/..")
 SCRIPT="$ROOT/lib/scripts/normalize-fstab"
 CHROOT_SCRIPT="$ROOT/lib/scripts/chroot-and-upgrade"
-MIGRATION_SCRIPT="$ROOT/lib/scripts/migration-update-grub"
+ASSEMBLE_SCRIPT="$ROOT/assemble-migration-payload.sh"
 TEST_DIR=$(mktemp -d)
 trap 'rm -rf -- "$TEST_DIR"' EXIT
 
+MOCK_BIN="$TEST_DIR/bin"
+mkdir "$MOCK_BIN"
 COMMAND_LOG="$TEST_DIR/commands.log"
 BLKID_LOG="$TEST_DIR/blkid.log"
+: > "$COMMAND_LOG"
+: > "$BLKID_LOG"
 
-cat > "$TEST_DIR/findmnt" <<'EOF'
+cat > "$MOCK_BIN/findmnt" <<'EOF'
 #!/bin/bash
 set -euo pipefail
 [ "$#" -eq 5 ] && [ "$1" = -n ] && [ "$2" = -o ] && [ "$3" = SOURCE ] && [ "$4" = --target ] || exit 64
@@ -27,7 +31,7 @@ case "${MOUNT_LAYOUT}:$5" in
 esac
 EOF
 
-cat > "$TEST_DIR/lsblk" <<'EOF'
+cat > "$MOCK_BIN/lsblk" <<'EOF'
 #!/bin/bash
 set -euo pipefail
 case "$*" in
@@ -41,7 +45,7 @@ case "$*" in
 esac
 EOF
 
-cat > "$TEST_DIR/blkid" <<'EOF'
+cat > "$MOCK_BIN/blkid" <<'EOF'
 #!/bin/bash
 set -euo pipefail
 [ "$#" -eq 6 ] && [ "$1" = -p ] && [ "$2" = -s ] && [ "$4" = -o ] && [ "$5" = value ] || exit 64
@@ -65,31 +69,58 @@ case "$3:$6" in
 esac
 EOF
 
-cat > "$TEST_DIR/sync" <<'EOF'
+cat > "$MOCK_BIN/sync" <<'EOF'
 #!/bin/bash
 set -euo pipefail
-[ "$1" = -f ] && [ "$#" -eq 2 ] || exit 64
-if [[ $2 = */.fstab-durable.* ]]; then
-    [ "$(stat -c '%a' "$2")" = 604 ]
-    grep -Fx 'PARTUUID=current-root / ext4 defaults 0 1' "$2" >/dev/null
+[ "$#" -le 1 ] || exit 64
+if [ "$#" -eq 1 ]; then
+    if [[ $1 = */.fstab-durable.* ]]; then
+        [ "$(stat -c '%a' "$1")" = 604 ]
+        grep -Fx 'PARTUUID=current-root / ext4 defaults 0 1' "$1" >/dev/null
+    fi
+    printf 'sync %s\n' "$1" >> "$COMMAND_LOG"
+else
+    printf 'sync\n' >> "$COMMAND_LOG"
 fi
-printf 'sync %s\n' "$2" >> "$COMMAND_LOG"
 EOF
 
-cat > "$TEST_DIR/mv" <<'EOF'
+cat > "$MOCK_BIN/mv" <<'EOF'
 #!/bin/bash
 set -euo pipefail
 printf 'mv %s\n' "${@: -1}" >> "$COMMAND_LOG"
 exec /bin/mv "$@"
 EOF
-chmod +x "$TEST_DIR/findmnt" "$TEST_DIR/lsblk" "$TEST_DIR/blkid" "$TEST_DIR/sync" "$TEST_DIR/mv"
+
+cat > "$MOCK_BIN/cp" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+if [ "${FAIL_SOURCE_COPY:-0}" -eq 1 ]; then
+    args=("$@")
+    source=${args[$((${#args[@]} - 2))]}
+    destination=${args[$((${#args[@]} - 1))]}
+    /bin/dd if="$source" of="$destination" bs=1 count=8 status=none
+    exit 74
+fi
+exec /bin/cp "$@"
+EOF
+
+cat > "$MOCK_BIN/cmp" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+if [ -n "${CMP_FAIL_AT:-}" ]; then
+    count=$(cat "$CMP_COUNT")
+    count=$((count + 1))
+    printf '%s\n' "$count" > "$CMP_COUNT"
+    [ "$count" -ne "$CMP_FAIL_AT" ] || exit 2
+fi
+exec /usr/bin/cmp "$@"
+EOF
+chmod +x "$MOCK_BIN"/*
 
 run_normalizer() {
     env \
-        BLKID="$TEST_DIR/blkid" BLKID_LOG="$BLKID_LOG" \
-        FINDMNT="$TEST_DIR/findmnt" LSBLK="$TEST_DIR/lsblk" \
-        SYNC="$TEST_DIR/sync" MV="$TEST_DIR/mv" COMMAND_LOG="$COMMAND_LOG" \
-        MOUNT_LAYOUT="$MOUNT_LAYOUT" \
+        PATH="$MOCK_BIN:$PATH" BLKID_LOG="$BLKID_LOG" \
+        COMMAND_LOG="$COMMAND_LOG" MOUNT_LAYOUT="$MOUNT_LAYOUT" \
         "$SCRIPT" "$@"
 }
 
@@ -123,11 +154,14 @@ PARTUUID=current-boot /boot vfat defaults 0 2
 /dev/mapper/data /srv/data btrfs subvol=@data,compress=zstd 0 2
 EOF
 chmod 0640 "$fstab"
+touch -d '@946684800' "$fstab"
 owner_before=$(stat -c '%u:%g' "$fstab")
+mtime_before=$(stat -c '%Y' "$fstab")
 MOUNT_LAYOUT=current run_normalizer "$fstab"
 assert_files_equal "$expected" "$fstab"
 [ "$(stat -c '%a' "$fstab")" = 640 ]
 [ "$(stat -c '%u:%g' "$fstab")" = "$owner_before" ]
+[ "$(stat -c '%Y' "$fstab")" = "$mtime_before" ]
 if grep -F '/dev/sda' "$BLKID_LOG" >/dev/null; then
     >&2 echo 'Read stale device identity'
     exit 1
@@ -143,6 +177,18 @@ MOUNT_LAYOUT=current run_normalizer "$fstab"
 [ "$(stat -c '%i' "$fstab")" = "$inode_before" ]
 
 echo 'PASS idempotence'
+
+symlink_dir="$TEST_DIR/fstab-symlink"
+mkdir "$symlink_dir"
+printf '/dev/sda3 / ext4 defaults 0 1\n' > "$symlink_dir/target"
+ln -s target "$symlink_dir/fstab"
+MOUNT_LAYOUT=current run_normalizer "$symlink_dir/fstab"
+[ -L "$symlink_dir/fstab" ]
+[ "$(readlink "$symlink_dir/fstab")" = target ]
+printf 'PARTUUID=current-root / ext4 defaults 0 1\n' > "$symlink_dir/expected"
+assert_files_equal "$symlink_dir/expected" "$symlink_dir/target"
+
+echo 'PASS symlink destination remains linked and its target is normalized'
 
 legacy="$TEST_DIR/fstab-legacy"
 legacy_expected="$TEST_DIR/expected-legacy"
@@ -168,7 +214,7 @@ echo 'PASS legacy MBR boot mount selects the following root partition'
 
 unresolved="$TEST_DIR/fstab-unresolved"
 printf '/dev/sda3 / ext4 defaults 0 1\n' > "$unresolved"
-cp "$unresolved" "$unresolved.expected"
+/bin/cp "$unresolved" "$unresolved.expected"
 if MOUNT_LAYOUT=missing run_normalizer "$unresolved" >"$TEST_DIR/unresolved.out" 2>"$TEST_DIR/unresolved.err"; then
     >&2 echo 'Expected missing installed identity to fail'
     exit 1
@@ -180,7 +226,7 @@ echo 'PASS unresolved identity fails without replacing fstab'
 
 wrong="$TEST_DIR/fstab-wrong"
 printf '/dev/sda3 / ext4 defaults 0 1\n' > "$wrong"
-cp "$wrong" "$wrong.expected"
+/bin/cp "$wrong" "$wrong.expected"
 if MOUNT_LAYOUT=wrong run_normalizer "$wrong" >"$TEST_DIR/wrong.out" 2>"$TEST_DIR/wrong.err"; then
     >&2 echo 'Expected non-StartOS mounted partition to fail'
     exit 1
@@ -189,6 +235,44 @@ assert_files_equal "$wrong.expected" "$wrong"
 grep -F 'Unable to establish installed partition for /' "$TEST_DIR/wrong.err" >/dev/null
 
 echo 'PASS mounted partition must match the StartOS layout label'
+
+read_failure="$TEST_DIR/fstab-read-failure"
+printf '/dev/sda3 / ext4 defaults 0 1\nsecond line that must survive\n' > "$read_failure"
+/bin/cp "$read_failure" "$read_failure.expected"
+: > "$COMMAND_LOG"
+if env PATH="$MOCK_BIN:$PATH" BLKID_LOG="$BLKID_LOG" COMMAND_LOG="$COMMAND_LOG" \
+    MOUNT_LAYOUT=current FAIL_SOURCE_COPY=1 "$SCRIPT" "$read_failure"; then
+    >&2 echo 'Expected partial source copy to fail'
+    exit 1
+fi
+assert_files_equal "$read_failure.expected" "$read_failure"
+if grep -F "mv $read_failure" "$COMMAND_LOG" >/dev/null; then
+    >&2 echo 'Partial source copy reached rename'
+    exit 1
+fi
+
+echo 'PASS failed complete source read cannot replace fstab'
+
+for cmp_fail_at in 1 2; do
+    compare_failure="$TEST_DIR/fstab-compare-failure-$cmp_fail_at"
+    printf '/dev/sda3 / ext4 defaults 0 1\n' > "$compare_failure"
+    /bin/cp "$compare_failure" "$compare_failure.expected"
+    : > "$COMMAND_LOG"
+    printf '0\n' > "$TEST_DIR/cmp-count"
+    if env PATH="$MOCK_BIN:$PATH" BLKID_LOG="$BLKID_LOG" COMMAND_LOG="$COMMAND_LOG" \
+        MOUNT_LAYOUT=current CMP_FAIL_AT="$cmp_fail_at" CMP_COUNT="$TEST_DIR/cmp-count" \
+        "$SCRIPT" "$compare_failure"; then
+        >&2 echo "Expected comparison $cmp_fail_at to fail"
+        exit 1
+    fi
+    assert_files_equal "$compare_failure.expected" "$compare_failure"
+    if grep -F "mv $compare_failure" "$COMMAND_LOG" >/dev/null; then
+        >&2 echo "Comparison $cmp_fail_at failure reached rename"
+        exit 1
+    fi
+done
+
+echo 'PASS failed source comparisons cannot replace fstab'
 
 : > "$COMMAND_LOG"
 durable="$TEST_DIR/fstab-durable"
@@ -201,12 +285,140 @@ mapfile -t operations < "$COMMAND_LOG"
 [ "${operations[1]}" = "mv $durable" ]
 [ "${operations[2]}" = "sync $TEST_DIR" ]
 
-echo 'PASS completed temp file and parent filesystem are flushed around rename'
+echo 'PASS completed temp file and parent directory are flushed around rename'
 
-normalize_line=$(grep -nF '/media/startos/next/usr/lib/startos/scripts/normalize-fstab /media/startos/config/overlay/etc/fstab' "$CHROOT_SCRIPT" | cut -d: -f1)
-mksquashfs_line=$(grep -nF 'mksquashfs /media/startos/next' "$CHROOT_SCRIPT" | cut -d: -f1)
-[ "$(grep -cF '/media/startos/next/usr/lib/startos/scripts/normalize-fstab' "$CHROOT_SCRIPT")" -eq 1 ]
-[ "$normalize_line" -lt "$mksquashfs_line" ]
-grep -F '/usr/lib/startos/scripts/normalize-fstab --legacy /etc/fstab' "$MIGRATION_SCRIPT" >/dev/null
+INTEGRATION_BIN="$TEST_DIR/integration-bin"
+mkdir "$INTEGRATION_BIN"
+for command in blkid cmp cp findmnt lsblk mv sync; do
+    ln -s "$MOCK_BIN/$command" "$INTEGRATION_BIN/$command"
+done
+cat > "$INTEGRATION_BIN/id" <<'EOF'
+#!/bin/bash
+[ "$1" = -u ] && echo 0
+EOF
+cat > "$INTEGRATION_BIN/mountpoint" <<'EOF'
+#!/bin/bash
+exit 1
+EOF
+cat > "$INTEGRATION_BIN/mount" <<'EOF'
+#!/bin/bash
+printf 'mount %s\n' "$*" >> "$COMMAND_LOG"
+EOF
+cat > "$INTEGRATION_BIN/umount" <<'EOF'
+#!/bin/bash
+printf 'umount %s\n' "$*" >> "$COMMAND_LOG"
+EOF
+cat > "$INTEGRATION_BIN/chroot" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+printf 'chroot %s\n' "$*" >> "$COMMAND_LOG"
+if [ "${REMOVE_TARGET_HELPER:-0}" -eq 1 ]; then
+    rm -f "$1/usr/lib/startos/scripts/normalize-fstab"
+    printf 'remove-target-helper %s\n' "$1/usr/lib/startos/scripts/normalize-fstab" >> "$COMMAND_LOG"
+fi
+EOF
+cat > "$INTEGRATION_BIN/mksquashfs" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+printf 'mksquashfs %s\n' "$*" >> "$COMMAND_LOG"
+mkdir -p "$(dirname "$2")"
+: > "$2"
+if [ -n "${PAYLOAD_CAPTURE:-}" ]; then
+    rm -rf "$PAYLOAD_CAPTURE"
+    /bin/cp -a "$1" "$PAYLOAD_CAPTURE"
+fi
+EOF
+cat > "$INTEGRATION_BIN/b3sum" <<'EOF'
+#!/bin/bash
+printf '0123456789abcdef0123456789abcdef  %s\n' "$1"
+EOF
+cat > "$INTEGRATION_BIN/reboot" <<'EOF'
+#!/bin/bash
+printf 'reboot\n' >> "$COMMAND_LOG"
+EOF
+cat > "$INTEGRATION_BIN/xorriso" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+: > "${@: -1}"
+EOF
+cat > "$INTEGRATION_BIN/unsquashfs" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+for ((i = 1; i <= $#; i++)); do
+    if [ "${!i}" = -d ]; then
+        j=$((i + 1))
+        destination=${!j}
+        break
+    fi
+done
+mkdir -p "$destination/etc" "$destination/boot" "$destination/usr/lib/startos/scripts" "$destination/usr/sbin"
+if [ "${@: -1}" = boot ]; then
+    : > "$destination/boot/vmlinuz-test"
+    : > "$destination/boot/initrd.img-test"
+else
+    printf '/dev/sdb3 / ext4 defaults 0 1\n/dev/sdb2 /boot vfat defaults 0 2\n/dev/sdb1 /boot/efi vfat defaults 0 1\n' > "$destination/etc/fstab"
+fi
+EOF
+chmod +x "$INTEGRATION_BIN"/*
 
-echo 'PASS shared chroot activation and legacy migration invoke normalization'
+ota_root="$TEST_DIR/ota-root"
+ota_scripts="$ota_root/usr/lib/startos/scripts"
+mkdir -p "$ota_scripts" "$ota_root/media/startos/config/overlay/etc" "$ota_root/media/startos/images" "$ota_root/media/startos/root"
+/bin/cp "$CHROOT_SCRIPT" "$ota_scripts/chroot-and-upgrade"
+/bin/cp "$SCRIPT" "$ota_scripts/normalize-fstab"
+chmod +x "$ota_scripts"/*
+printf '/dev/sda3 / ext4 defaults 0 1\n' > "$ota_root/media/startos/config/overlay/etc/fstab"
+: > "$COMMAND_LOG"
+env PATH="$INTEGRATION_BIN:/usr/bin:/bin" SHELL=/bin/bash MOUNT_LAYOUT=current \
+    BLKID_LOG="$BLKID_LOG" COMMAND_LOG="$COMMAND_LOG" \
+    "$ota_scripts/chroot-and-upgrade" true
+printf 'PARTUUID=current-root / ext4 defaults 0 1\n' > "$TEST_DIR/ota.expected"
+assert_files_equal "$TEST_DIR/ota.expected" "$ota_root/media/startos/config/overlay/etc/fstab"
+normalize_operation=$(grep -nF "mv $ota_root/media/startos/config/overlay/etc/fstab" "$COMMAND_LOG" | cut -d: -f1)
+image_operation=$(grep -nF "mksquashfs $ota_root/media/startos/next" "$COMMAND_LOG" | cut -d: -f1)
+[ "$normalize_operation" -lt "$image_operation" ]
+[ ! -e "$ota_root/media/startos/next/usr/lib/startos/scripts/normalize-fstab" ]
+
+echo 'PASS installed OTA wrapper uses its stable helper before image creation'
+
+rm -f "$ota_root/media/startos/config/current.rootfs"
+staged_scripts="$ota_root/media/startos/next/usr/lib/startos/scripts"
+mkdir -p "$staged_scripts"
+/bin/cp "$CHROOT_SCRIPT" "$staged_scripts/chroot-and-upgrade"
+/bin/cp "$SCRIPT" "$staged_scripts/normalize-fstab"
+chmod +x "$staged_scripts"/*
+printf '/dev/sda3 / ext4 defaults 0 1\n' > "$ota_root/media/startos/config/overlay/etc/fstab"
+: > "$COMMAND_LOG"
+env PATH="$INTEGRATION_BIN:/usr/bin:/bin" SHELL=/bin/bash MOUNT_LAYOUT=current \
+    BLKID_LOG="$BLKID_LOG" COMMAND_LOG="$COMMAND_LOG" REMOVE_TARGET_HELPER=1 \
+    "$staged_scripts/chroot-and-upgrade" --no-sync true
+assert_files_equal "$TEST_DIR/ota.expected" "$ota_root/media/startos/config/overlay/etc/fstab"
+grep -Fx "chroot $ota_root/media/startos/next /bin/bash -c true" "$COMMAND_LOG" >/dev/null
+remove_operation=$(grep -nFx "remove-target-helper $staged_scripts/normalize-fstab" "$COMMAND_LOG" | cut -d: -f1)
+normalize_operation=$(grep -nF "mv $ota_root/media/startos/config/overlay/etc/fstab" "$COMMAND_LOG" | cut -d: -f1)
+image_operation=$(grep -nF "mksquashfs $ota_root/media/startos/next" "$COMMAND_LOG" | cut -d: -f1)
+[ "$remove_operation" -lt "$normalize_operation" ]
+[ "$normalize_operation" -lt "$image_operation" ]
+
+echo 'PASS staged OTA wrapper targets outer media and survives target helper removal'
+
+old_image="$TEST_DIR/old.iso"
+new_squashfs="$TEST_DIR/new.squashfs"
+payload="$TEST_DIR/payload.squashfs"
+payload_capture="$TEST_DIR/payload-root"
+: > "$old_image"
+: > "$new_squashfs"
+env PATH="$INTEGRATION_BIN:/usr/bin:/bin" COMMAND_LOG="$COMMAND_LOG" PAYLOAD_CAPTURE="$payload_capture" \
+    "$ASSEMBLE_SCRIPT" --arch x86_64 --new-squashfs "$new_squashfs" \
+    --old-image "$old_image" --out "$payload"
+[ -x "$payload_capture/usr/sbin/update-grub2" ]
+[ -x "$payload_capture/usr/lib/startos/scripts/normalize-fstab" ]
+mkdir -p "$payload_capture/proc"
+printf 'quiet root=UUID=legacy-root ro\n' > "$payload_capture/proc/cmdline"
+env PATH="$INTEGRATION_BIN:/usr/bin:/bin" MOUNT_LAYOUT=legacy BLKID_LOG="$BLKID_LOG" \
+    COMMAND_LOG="$COMMAND_LOG" "$payload_capture/usr/sbin/update-grub2"
+printf 'PARTUUID=legacy-root / ext4 defaults 0 1\nPARTUUID=legacy-boot /boot vfat defaults 0 2\nPARTUUID=legacy-efi /boot/efi vfat defaults 0 1\n' > "$TEST_DIR/migration.expected"
+assert_files_equal "$TEST_DIR/migration.expected" "$payload_capture/etc/fstab"
+grep -F 'linux /vmlinuz-test root=UUID=legacy-root boot=startos' "$payload_capture/boot/grub/grub.cfg" >/dev/null
+
+echo 'PASS migration payload stages and reaches legacy normalization'

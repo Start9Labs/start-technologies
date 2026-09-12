@@ -9,10 +9,12 @@
 # this box already booted with. The 0.4.0 initramfs takes over from there.
 set -e
 
-BOOT=/boot
-MIGRATION_BOOT=/usr/lib/startos/migration-boot
+ROOT="$(realpath "$(dirname "${BASH_SOURCE[0]}")/../..")"
+ROOT=${ROOT%/}
+BOOT="$ROOT/boot"
+MIGRATION_BOOT="$ROOT/usr/lib/startos/migration-boot"
 
-/usr/lib/startos/scripts/normalize-fstab --legacy /etc/fstab
+"$ROOT/usr/lib/startos/scripts/normalize-fstab" --legacy "$ROOT/etc/fstab"
 
 if [ -r "$MIGRATION_BOOT" ]; then
     kernel="$(sed -n 1p "$MIGRATION_BOOT")"
@@ -26,7 +28,7 @@ if [ -z "$kernel" ] || [ -z "$initrd" ]; then
     exit 1
 fi
 
-root="$(grep -oE 'root=[^ ]+' /proc/cmdline | head -n1)"
+root="$(grep -oE 'root=[^ ]+' "$ROOT/proc/cmdline" | head -n1)"
 if [ -z "$root" ]; then
     >&2 echo "migration-update-grub: could not read root= from /proc/cmdline"
     exit 1

@@ -61,27 +61,48 @@ pub fn partition_for(disk: impl AsRef<Path>, idx: u32) -> PathBuf {
     }
 }
 
-async fn fstab_source(partition: &Path) -> Result<String, Error> {
-    let output = Command::new("blkid")
-        .args(["-p", "-s", "PART_ENTRY_UUID", "-o", "value"])
-        .arg(partition)
-        .invoke(ErrorKind::BlockDevice)
-        .await?;
-    let partuuid = String::from_utf8(output)?;
-    let partuuid = partuuid.trim();
+fn parse_partuuid(output: &[u8]) -> Result<&str, color_eyre::eyre::Error> {
+    let output = std::str::from_utf8(output)?;
+    let partuuid = output
+        .strip_suffix("\r\n")
+        .or_else(|| output.strip_suffix('\n'))
+        .unwrap_or(output);
     if partuuid.is_empty() || partuuid.chars().any(char::is_whitespace) {
-        return Err(Error::new(
-            eyre!(
-                "{}",
-                t!(
-                    "os-install.invalid-partuuid",
-                    partition = partition.display()
-                )
-            ),
-            ErrorKind::BlockDevice,
-        ));
+        return Err(eyre!("invalid PARTUUID output"));
     }
+    Ok(partuuid)
+}
+
+fn invalid_partuuid(partition: &Path, cause: color_eyre::eyre::Error) -> Error {
+    let message = t!(
+        "os-install.invalid-partuuid",
+        partition = partition.display()
+    )
+    .to_string();
+    let mut error = Error::new(eyre!(message.clone()), ErrorKind::BlockDevice);
+    error.debug = Some(cause.wrap_err(message));
+    error
+}
+
+fn fstab_source_from_blkid(
+    partition: &Path,
+    output: Result<Vec<u8>, Error>,
+) -> Result<String, Error> {
+    let output =
+        output.map_err(|error| invalid_partuuid(partition, error.debug.unwrap_or(error.source)))?;
+    let partuuid = parse_partuuid(&output).map_err(|error| invalid_partuuid(partition, error))?;
     Ok(format!("PARTUUID={partuuid}"))
+}
+
+async fn fstab_source(partition: &Path) -> Result<String, Error> {
+    fstab_source_from_blkid(
+        partition,
+        Command::new("blkid")
+            .args(["-p", "-s", "PART_ENTRY_UUID", "-o", "value"])
+            .arg(partition)
+            .invoke(ErrorKind::BlockDevice)
+            .await,
+    )
 }
 
 fn render_fstab(boot: &str, efi: Option<&str>, root: &str) -> String {
@@ -913,6 +934,53 @@ mod tests {
                 partition("/dev/sda4", Some("EMBASSY_AAAA")),
             ],
         )
+    }
+
+    #[test]
+    fn partuuid_parser_accepts_one_value() {
+        assert_eq!(
+            parse_partuuid(b"01234567-89ab-cdef").unwrap(),
+            "01234567-89ab-cdef"
+        );
+        assert_eq!(parse_partuuid(b"01234567-01\n").unwrap(), "01234567-01");
+        assert_eq!(parse_partuuid(b"01234567-01\r\n").unwrap(), "01234567-01");
+    }
+
+    #[test]
+    fn partuuid_parser_rejects_invalid_output() {
+        for output in [
+            &b""[..],
+            &b"\n"[..],
+            &b"  \n"[..],
+            &b"01234567-01  \n"[..],
+            &b"01234567-01 extra\n"[..],
+            &b"01234567-01\n89abcdef-02\n"[..],
+            &[0xff][..],
+        ] {
+            assert!(parse_partuuid(output).is_err());
+        }
+    }
+
+    #[test]
+    fn fstab_source_localizes_blkid_failure() {
+        let error = fstab_source_from_blkid(
+            Path::new("/dev/test-partition"),
+            Err(Error::new(
+                std::io::Error::other("blkid failed"),
+                ErrorKind::DiskManagement,
+            )),
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind, ErrorKind::BlockDevice);
+        assert_eq!(
+            error.display_src().to_string(),
+            t!(
+                "os-install.invalid-partuuid",
+                partition = "/dev/test-partition"
+            )
+        );
+        assert!(format!("{:?}", error.debug.as_ref().unwrap()).contains("blkid failed"));
     }
 
     #[test]
