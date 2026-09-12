@@ -128,10 +128,8 @@ for the detail behind its highlights.
 
 ### Fixed
 
-- **A browser page left open during an update can load the latest interface with
-  one click.** Stable UI files revalidate against the server on reload, while
-  content-hashed bundles retain long-lived caching. The **Refresh Needed**
-  dialog now offers **Reload** in browser tabs.
+- **Browser tabs now offer Reload in the Refresh Needed dialog.** A page opened
+  on this release can switch to a newer interface without a hard refresh.
 
 - **The port-forwarding test reports a port as open to the Internet only where
   it is reachable from the Internet.** Where StartOS's port-forward request was
