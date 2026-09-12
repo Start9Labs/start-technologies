@@ -16,6 +16,7 @@ start-tunnel-install: target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/tunnelbo
 
 	$(call mkdir,$(DESTDIR)/usr/lib/startos/scripts)
 	$(call cp,build/lib/scripts/forward-port,$(DESTDIR)/usr/lib/startos/scripts/forward-port)
+	$(call cp,build/lib/scripts/forward-port-nft,$(DESTDIR)/usr/lib/startos/scripts/forward-port-nft)
 
 	$(call mkdir,$(DESTDIR)/etc/apt/sources.list.d)
 	$(call cp,apt/start9.list,$(DESTDIR)/etc/apt/sources.list.d/start9.list)
@@ -27,7 +28,7 @@ target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/tunnelbox: $(CORE_SRC) $(ENVIR
 
 start-tunnel-deb: results/$(TUNNEL_BASENAME).deb
 
-results/$(TUNNEL_BASENAME).deb: debian/build.sh $(call ls-files,projects/start-tunnel/debian) $(TUNNEL_TARGETS) build/lib/scripts/forward-port
+results/$(TUNNEL_BASENAME).deb: debian/build.sh $(call ls-files,projects/start-tunnel/debian) $(TUNNEL_TARGETS) build/lib/scripts/forward-port build/lib/scripts/forward-port-nft
 	PROJECT=start-tunnel PLATFORM=$(ARCH) REQUIRES=debian DEPENDS=wireguard-tools,iptables,nftables,conntrack ./build/os-compat/run-compat.sh ./debian/build.sh
 
 .PHONY: start-tunnel-clean
