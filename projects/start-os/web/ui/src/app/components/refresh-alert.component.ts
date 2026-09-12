@@ -2,7 +2,7 @@ import { Component, inject } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { SwUpdate } from '@angular/service-worker'
 import { WA_WINDOW } from '@ng-web-apis/common'
-import { i18nPipe } from '@start9labs/shared'
+import { ErrorService, i18nPipe } from '@start9labs/shared'
 import { Version } from '@start9labs/start-core'
 import { TuiResponsiveDialog } from '@taiga-ui/addon-mobile'
 import { TuiButton } from '@taiga-ui/core'
@@ -30,15 +30,6 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
               | i18n
           }}
         </p>
-        <button
-          tuiButton
-          appearance="secondary"
-          style="float: right"
-          [tuiAppearanceFocus]="false"
-          (click)="pwaReload()"
-        >
-          {{ 'Refresh' | i18n }}
-        </button>
       } @else {
         <p>
           {{
@@ -46,16 +37,16 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
               | i18n
           }}
         </p>
-        <button
-          tuiButton
-          appearance="secondary"
-          style="float: right"
-          [tuiAppearanceFocus]="false"
-          (click)="reload()"
-        >
-          {{ 'Reload' | i18n }}
-        </button>
       }
+      <button
+        tuiButton
+        appearance="secondary"
+        style="float: right"
+        [tuiAppearanceFocus]="false"
+        (click)="reload()"
+      >
+        {{ (isPwa ? 'Refresh' : 'Reload') | i18n }}
+      </button>
     </ng-template>
   `,
   imports: [TuiResponsiveDialog, TuiButton, i18nPipe],
@@ -64,6 +55,7 @@ export class RefreshAlertComponent {
   private readonly win = inject(WA_WINDOW)
   private readonly updates = inject(SwUpdate)
   private readonly loader = inject(TuiNotificationMiddleService)
+  private readonly error = inject(ErrorService)
   private readonly version = Version.parse(inject(ConfigService).version)
 
   readonly i18n = inject(i18nPipe)
@@ -87,6 +79,10 @@ export class RefreshAlertComponent {
   )
 
   protected async reload(): Promise<void> {
+    const loader = this.isPwa
+      ? this.loader.open(this.i18n.transform('Reloading PWA')).subscribe()
+      : undefined
+
     try {
       if (
         this.updates.isEnabled &&
@@ -95,21 +91,13 @@ export class RefreshAlertComponent {
         await this.updates.checkForUpdate()
         await this.updates.activateUpdate()
       }
-    } catch (e) {
-      console.error('Error activating update from service worker: ', e)
+    } catch (e: any) {
+      this.error.handleError(e)
+      return
     } finally {
-      this.win.location.reload()
+      loader?.unsubscribe()
     }
-  }
 
-  protected async pwaReload(): Promise<void> {
-    try {
-      this.loader.open('Reloading PWA').subscribe()
-      await this.updates.activateUpdate()
-    } catch (e) {
-      console.error('Error activating update from service worker: ', e)
-    } finally {
-      this.win.location.reload()
-    }
+    this.win.location.reload()
   }
 }
