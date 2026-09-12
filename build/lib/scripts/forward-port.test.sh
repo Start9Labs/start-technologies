@@ -14,6 +14,8 @@ nft() {
         if [ "$NFT_CALLS" -eq 2 ] && [ "${NFT_TRANSACTION_STATUS:-0}" -ne 0 ]; then
             return "$NFT_TRANSACTION_STATUS"
         fi
+    elif [ "${1:-}" = "-a" ] && [ "${NFT_LIST_STATUS:-0}" -ne 0 ]; then
+        return "$NFT_LIST_STATUS"
     fi
 }
 export capture
@@ -27,6 +29,7 @@ render_rules() {
         -u src_subnet \
         -u count \
         -u NFT_TRANSACTION_STATUS \
+        -u NFT_LIST_STATUS \
         sip=192.0.2.10 \
         dip=10.0.3.2 \
         dprefix=24 \
@@ -35,6 +38,26 @@ render_rules() {
         NFT_CALLS=0 \
         "$@" \
         ./build/lib/scripts/forward-port || status=$?
+    cat "$capture"
+    return "$status"
+}
+
+render_rules6() {
+    : > "$capture"
+    local status=0
+    env \
+        -u UNDO \
+        -u src_subnet \
+        -u NFT_TRANSACTION_STATUS \
+        -u NFT_LIST_STATUS \
+        sip=2001:db8::10 \
+        dip=fd00:3::2 \
+        dprefix=64 \
+        sport=4444 \
+        dport=5555 \
+        NFT_CALLS=0 \
+        "$@" \
+        ./build/lib/scripts/forward-port6 || status=$?
     cat "$capture"
     return "$status"
 }
@@ -62,3 +85,15 @@ test "$(grep -c '^add rule ip startos prerouting ip ' <<< "$public")" -eq 1
 status=0
 render_rules NFT_TRANSACTION_STATUS=23 > /dev/null 2>&1 || status=$?
 test "$status" -eq 23
+
+status=0
+render_rules NFT_LIST_STATUS=24 > /dev/null 2>&1 || status=$?
+test "$status" -eq 24
+
+status=0
+render_rules6 NFT_TRANSACTION_STATUS=23 > /dev/null 2>&1 || status=$?
+test "$status" -eq 23
+
+status=0
+render_rules6 NFT_LIST_STATUS=24 > /dev/null 2>&1 || status=$?
+test "$status" -eq 24

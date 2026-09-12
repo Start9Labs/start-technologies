@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 
+use crate::GatewayId;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::public::NetworkInterfaceInfo;
 use crate::net::port_map::{PortMapController, candidate_gateways};
@@ -22,7 +23,6 @@ use crate::util::Invoke;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::serde::{HandlerExtSerde, display_serializable};
 use crate::util::sync::Watch;
-use crate::GatewayId;
 
 pub const START9_BRIDGE_IFACE: &str = "lxcbr0";
 const EPHEMERAL_PORT_START: u16 = 49152;
@@ -212,16 +212,7 @@ impl PortForwardState {
                     return Ok(rc);
                 }
             } else {
-                if let Some(mapping) = self.mappings.remove(&source) {
-                    unforward(
-                        mapping.source,
-                        mapping.target,
-                        mapping.count,
-                        mapping.target_prefix,
-                        mapping.src_filter.as_ref(),
-                    )
-                    .await?;
-                }
+                self.remove_forward(source).await?;
             }
         }
 
@@ -251,17 +242,24 @@ impl PortForwardState {
             .collect();
 
         for source in to_remove {
-            if let Some(mapping) = self.mappings.remove(&source) {
-                unforward(
-                    mapping.source,
-                    mapping.target,
-                    mapping.count,
-                    mapping.target_prefix,
-                    mapping.src_filter.as_ref(),
-                )
-                .await?;
-            }
+            self.remove_forward(source).await?;
         }
+        Ok(())
+    }
+
+    async fn remove_forward(&mut self, source: SocketAddrV4) -> Result<(), Error> {
+        let Some(mapping) = self.mappings.get(&source) else {
+            return Ok(());
+        };
+        unforward(
+            mapping.source,
+            mapping.target,
+            mapping.count,
+            mapping.target_prefix,
+            mapping.src_filter.as_ref(),
+        )
+        .await?;
+        self.mappings.remove(&source);
         Ok(())
     }
 
@@ -337,9 +335,7 @@ pub async fn nft_ensure_base() -> Result<(), Error> {
     Ok(())
 }
 
-/// `nft -a list chain <family> startos <chain>` output, empty on error.
-/// `family` is `ip` (IPv4) or `ip6`.
-async fn nft_list_chain(family: &str, chain: &str) -> String {
+async fn nft_list_chain(family: &str, chain: &str) -> Result<String, Error> {
     let out = Command::new("nft")
         .arg("-a")
         .arg("list")
@@ -348,17 +344,20 @@ async fn nft_list_chain(family: &str, chain: &str) -> String {
         .arg("startos")
         .arg(chain)
         .invoke(ErrorKind::Network)
-        .await
-        .unwrap_or_default();
-    String::from_utf8_lossy(&out).into_owned()
+        .await?;
+    Ok(String::from_utf8_lossy(&out).into_owned())
 }
 
 /// Rules in `chain` tagged with `comment`, as `(handle, body)` where `body` is
 /// the rule text preceding the `comment "..."` token.
-async fn nft_rules_with_comment(family: &str, chain: &str, comment: &str) -> Vec<(u32, String)> {
+async fn nft_rules_with_comment(
+    family: &str,
+    chain: &str,
+    comment: &str,
+) -> Result<Vec<(u32, String)>, Error> {
     let needle = format!("comment \"{comment}\"");
-    nft_list_chain(family, chain)
-        .await
+    Ok(nft_list_chain(family, chain)
+        .await?
         .lines()
         .filter_map(|line| {
             let handle = line
@@ -370,21 +369,24 @@ async fn nft_rules_with_comment(family: &str, chain: &str, comment: &str) -> Vec
             let body = line.split_once(&needle)?.0.trim().to_owned();
             Some((handle, body))
         })
-        .collect()
+        .collect())
 }
 
 /// Comment tags in `chain` of `table ip startos` beginning with `prefix`. Used
 /// to prune orphaned per-device/per-subnet rules whose owner no longer exists.
-pub(crate) async fn nft_comments_with_prefix(chain: &str, prefix: &str) -> Vec<String> {
-    nft_list_chain("ip", chain)
-        .await
+pub(crate) async fn nft_comments_with_prefix(
+    chain: &str,
+    prefix: &str,
+) -> Result<Vec<String>, Error> {
+    Ok(nft_list_chain("ip", chain)
+        .await?
         .lines()
         .filter_map(|line| {
             let after = line.split_once("comment \"")?.1;
             let tag = after.split_once('"')?.0;
             tag.starts_with(prefix).then(|| tag.to_owned())
         })
-        .collect()
+        .collect())
 }
 
 /// Idempotently install (or, with `undo`, remove) the rule tagged `comment` in
@@ -393,10 +395,7 @@ pub(crate) async fn nft_comments_with_prefix(chain: &str, prefix: &str) -> Vec<S
 /// chain already holds exactly that rule. `prepend` inserts at the chain top
 /// (needed for the mark-restore rule, which must precede the set-mark rules).
 ///
-/// Lock-free: the only failure is a stale handle — a concurrent reconcile of
-/// the *same* comment replaced the rule between our list and delete. Benign (nft
-/// commits atomically), so we warn, re-read, and retry to convergence. Only
-/// arises for callers without a single-writer guarantee (e.g. tunnel masq).
+/// Retries stale handles caused by concurrent reconciliation.
 pub async fn nft_rule(
     chain: &str,
     comment: &str,
@@ -432,7 +431,7 @@ async fn nft_rule_family(
     const MAX_ATTEMPTS: usize = 5;
     let mut last_err = None;
     for attempt in 1..=MAX_ATTEMPTS {
-        let existing = nft_rules_with_comment(family, chain, comment).await;
+        let existing = nft_rules_with_comment(family, chain, comment).await?;
 
         // Already converged: nothing to undo, or exactly the desired rule present.
         if undo {

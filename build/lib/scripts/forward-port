@@ -63,17 +63,25 @@ add chain ip startos forward { type filter hook forward priority filter; policy 
 EOF
 
 delete_tagged() {
-    local chain
+    local chain listing status
     for chain in prerouting output postrouting forward; do
-        nft -a list chain ip startos "$chain" 2>/dev/null | awk -v chain="$chain" -v tag="comment \"$TAG\"" '
+        listing=$(nft -a list chain ip startos "$chain")
+        status=$?
+        if [ "$status" -ne 0 ]; then
+            return "$status"
+        fi
+        printf '%s\n' "$listing" | awk -v chain="$chain" -v tag="comment \"$TAG\"" '
             index($0, tag) {
                 for (i = 1; i <= NF; i++) if ($i == "handle") print "delete rule ip startos " chain " handle " $(i+1)
             }'
     done
 }
 
+deletions=$(delete_tagged) || exit $?
 {
-    delete_tagged
+    if [ -n "$deletions" ]; then
+        printf '%s\n' "$deletions"
+    fi
     if [ "${UNDO:-0}" != 1 ]; then
         if [ -n "${src_subnet:-}" ]; then
             echo "add rule ip startos prerouting ip saddr $src_subnet ip daddr $sip $PROTO $dnat comment \"$TAG\""
