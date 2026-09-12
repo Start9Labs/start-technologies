@@ -26,6 +26,7 @@ use crate::util::sync::Watch;
 
 pub const START9_BRIDGE_IFACE: &str = "lxcbr0";
 const EPHEMERAL_PORT_START: u16 = 49152;
+const PORT_FORWARD_GC_INTERVAL: Duration = Duration::from_secs(30);
 // Reserved by/for host daemons (mDNS 5353, LLMNR 5355, postgres 5432, X11
 // forwarding 6010). 9050/9051 are claimable on purpose: they were the 0.3.x
 // host tor daemon's reservation (gone in 0.4.x), and the tor service now binds
@@ -185,6 +186,65 @@ struct ForwardMapping {
     rc: Weak<()>,
 }
 
+impl ForwardMapping {
+    fn matches(
+        &self,
+        target: SocketAddrV4,
+        count: u16,
+        target_prefix: u8,
+        src_filter: Option<&IpNet>,
+    ) -> bool {
+        self.target == target
+            && self.count == count
+            && self.target_prefix == target_prefix
+            && self.src_filter.as_ref() == src_filter
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Ipv6ForwardSpec {
+    target: SocketAddrV6,
+    target_prefix: u8,
+    src_filter: Option<IpNet>,
+    gateways: Vec<(IpAddr, Option<u32>)>,
+}
+
+struct Ipv6ForwardMapping {
+    desired: Ipv6ForwardSpec,
+    applied: Option<Ipv6ForwardSpec>,
+    rc: Weak<()>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Ipv6ForwardOperation {
+    Add(Ipv6ForwardSpec),
+    Remove(Ipv6ForwardSpec),
+}
+
+impl Ipv6ForwardMapping {
+    fn live_desired(&self) -> Option<Ipv6ForwardSpec> {
+        (self.rc.strong_count() > 0).then(|| self.desired.clone())
+    }
+
+    fn next_operation(&self) -> Option<Ipv6ForwardOperation> {
+        let desired = self.live_desired();
+        match (&self.applied, desired) {
+            (Some(applied), desired) if desired.as_ref() != Some(applied) => {
+                Some(Ipv6ForwardOperation::Remove(applied.clone()))
+            }
+            (None, Some(desired)) => Some(Ipv6ForwardOperation::Add(desired)),
+            _ => None,
+        }
+    }
+
+    fn operation_succeeded(&mut self, operation: Ipv6ForwardOperation) {
+        match operation {
+            Ipv6ForwardOperation::Add(spec) => self.applied = Some(spec),
+            Ipv6ForwardOperation::Remove(_) => self.applied = None,
+        }
+    }
+}
+
 #[derive(Default)]
 struct PortForwardState {
     mappings: BTreeMap<SocketAddrV4, ForwardMapping>, // source -> target
@@ -200,10 +260,7 @@ impl PortForwardState {
         src_filter: Option<IpNet>,
     ) -> Result<Arc<()>, Error> {
         if let Some(existing) = self.mappings.get_mut(&source) {
-            if existing.target == target
-                && existing.count == count
-                && existing.src_filter == src_filter
-            {
+            if existing.matches(target, count, target_prefix, src_filter.as_ref()) {
                 if let Some(existing_rc) = existing.rc.upgrade() {
                     return Ok(existing_rc);
                 } else {
@@ -241,10 +298,15 @@ impl PortForwardState {
             .map(|(source, _)| *source)
             .collect();
 
+        let mut first_error = None;
         for source in to_remove {
-            self.remove_forward(source).await?;
+            if let Err(error) = self.remove_forward(source).await {
+                tracing::error!("failed to remove IPv4 forward {source}: {error}");
+                tracing::debug!("{error:?}");
+                first_error.get_or_insert(error);
+            }
         }
-        Ok(())
+        first_error.map_or(Ok(()), Err)
     }
 
     async fn remove_forward(&mut self, source: SocketAddrV4) -> Result<(), Error> {
@@ -395,7 +457,7 @@ pub(crate) async fn nft_comments_with_prefix(
 /// chain already holds exactly that rule. `prepend` inserts at the chain top
 /// (needed for the mark-restore rule, which must precede the set-mark rules).
 ///
-/// Retries stale handles caused by concurrent reconciliation.
+/// Retries when concurrent reconciliation invalidates a listed handle.
 pub async fn nft_rule(
     chain: &str,
     comment: &str,
@@ -535,27 +597,42 @@ impl PortForwardController {
                 tokio::time::sleep(Duration::from_secs(5)).await;
             }
             let mut state = PortForwardState::default();
-            while let Some(cmd) = req_recv.recv().await {
-                match cmd {
-                    PortForwardCommand::AddForward {
-                        source,
-                        target,
-                        count,
-                        target_prefix,
-                        src_filter,
-                        respond,
-                    } => {
-                        let result = state
-                            .add_forward(source, target, count, target_prefix, src_filter)
-                            .await;
-                        respond.send(result).ok();
+            let mut gc_interval = tokio::time::interval_at(
+                tokio::time::Instant::now() + PORT_FORWARD_GC_INTERVAL,
+                PORT_FORWARD_GC_INTERVAL,
+            );
+            gc_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tokio::select! {
+                    cmd = req_recv.recv() => {
+                        let Some(cmd) = cmd else {
+                            break;
+                        };
+                        match cmd {
+                            PortForwardCommand::AddForward {
+                                source,
+                                target,
+                                count,
+                                target_prefix,
+                                src_filter,
+                                respond,
+                            } => {
+                                let result = state
+                                    .add_forward(source, target, count, target_prefix, src_filter)
+                                    .await;
+                                respond.send(result).ok();
+                            }
+                            PortForwardCommand::Gc { respond } => {
+                                let result = state.gc().await;
+                                respond.send(result).ok();
+                            }
+                            PortForwardCommand::Dump { respond } => {
+                                respond.send(state.dump()).ok();
+                            }
+                        }
                     }
-                    PortForwardCommand::Gc { respond } => {
-                        let result = state.gc().await;
-                        respond.send(result).ok();
-                    }
-                    PortForwardCommand::Dump { respond } => {
-                        respond.send(state.dump()).ok();
+                    _ = gc_interval.tick() => {
+                        let _ = state.gc().await;
                     }
                 }
             }
@@ -623,6 +700,25 @@ impl PortForwardController {
     }
 }
 
+pub(super) fn target_prefix_for(
+    ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+    target: Ipv4Addr,
+    fallback: u8,
+) -> u8 {
+    ip_info
+        .iter()
+        .find_map(|(_, info)| {
+            info.ip_info.as_ref().and_then(|ip_info| {
+                ip_info
+                    .subnets
+                    .iter()
+                    .find(|subnet| subnet.contains(&IpAddr::V4(target)))
+            })
+        })
+        .map(IpNet::prefix_len)
+        .unwrap_or(fallback)
+}
+
 struct InterfaceForwardRequest {
     external: u16,
     target: SocketAddrV4,
@@ -685,8 +781,8 @@ impl InterfaceForwardEntry {
         let mut want = BTreeMap::<(Ipv4Addr, u16), (u16, u16, Vec<(IpAddr, Option<u32>)>)>::new();
 
         for (gw_id, info) in ip_info.iter() {
-            if let Some(ip_info) = &info.ip_info {
-                for subnet in ip_info.subnets.iter() {
+            if let Some(interface_ip_info) = &info.ip_info {
+                for subnet in interface_ip_info.subnets.iter() {
                     if let IpAddr::V4(ip) = subnet.addr() {
                         let addr = SocketAddrV4::new(ip, self.external);
                         if keep.contains(&addr) {
@@ -727,12 +823,14 @@ impl InterfaceForwardEntry {
                                     (self.count, internal, gws)
                                 });
                             }
+                            let live_target_prefix =
+                                target_prefix_for(ip_info, *target.ip(), *target_prefix);
                             let fwd_rc = port_forward
                                 .add_forward_range(
                                     addr,
                                     *target,
                                     self.count,
-                                    *target_prefix,
+                                    live_target_prefix,
                                     src_filter,
                                 )
                                 .await?;
@@ -768,6 +866,30 @@ impl InterfaceForwardEntry {
         Ok(())
     }
 
+    fn cache_target(
+        &mut self,
+        reqs: ForwardRequirements,
+        target: SocketAddrV4,
+        target_prefix: u8,
+        mut rc: Arc<()>,
+    ) -> Arc<()> {
+        let entry = self
+            .targets
+            .entry(reqs)
+            .or_insert_with(|| (target, target_prefix, Arc::downgrade(&rc)));
+        if entry.0 != target || entry.1 != target_prefix {
+            entry.0 = target;
+            entry.1 = target_prefix;
+            entry.2 = Arc::downgrade(&rc);
+        }
+        if let Some(existing) = entry.2.upgrade() {
+            rc = existing;
+        } else {
+            entry.2 = Arc::downgrade(&rc);
+        }
+        rc
+    }
+
     async fn update_request(
         &mut self,
         InterfaceForwardRequest {
@@ -776,7 +898,7 @@ impl InterfaceForwardEntry {
             count,
             target_prefix,
             reqs,
-            mut rc,
+            rc,
         }: InterfaceForwardRequest,
         ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
         port_forward: &PortForwardController,
@@ -798,20 +920,7 @@ impl InterfaceForwardEntry {
             self.forwards.clear();
         }
 
-        let entry = self
-            .targets
-            .entry(reqs)
-            .or_insert_with(|| (target, target_prefix, Arc::downgrade(&rc)));
-        if entry.0 != target {
-            entry.0 = target;
-            entry.1 = target_prefix;
-            entry.2 = Arc::downgrade(&rc);
-        }
-        if let Some(existing) = entry.2.upgrade() {
-            rc = existing;
-        } else {
-            entry.2 = Arc::downgrade(&rc);
-        }
+        let rc = self.cache_target(reqs, target, target_prefix, rc);
 
         self.update(ip_info, port_forward, pmap).await?;
 
@@ -834,6 +943,7 @@ struct InterfaceForwardState {
     port_forward: PortForwardController,
     pmap: PortMapController,
     state: IdOrdMap<InterfaceForwardEntry>,
+    ipv6: BTreeMap<SocketAddrV6, Ipv6ForwardMapping>,
 }
 
 impl InterfaceForwardState {
@@ -842,6 +952,7 @@ impl InterfaceForwardState {
             port_forward,
             pmap,
             state: IdOrdMap::new(),
+            ipv6: BTreeMap::new(),
         }
     }
 }
@@ -860,15 +971,106 @@ impl InterfaceForwardState {
             .await
     }
 
+    async fn add_forward6(&mut self, source: SocketAddrV6, spec: Ipv6ForwardSpec) -> Arc<()> {
+        let rc = self
+            .ipv6
+            .get(&source)
+            .filter(|mapping| mapping.desired == spec)
+            .and_then(|mapping| mapping.rc.upgrade())
+            .unwrap_or_else(|| Arc::new(()));
+        let mapping = self
+            .ipv6
+            .entry(source)
+            .or_insert_with(|| Ipv6ForwardMapping {
+                desired: spec.clone(),
+                applied: None,
+                rc: Arc::downgrade(&rc),
+            });
+        mapping.desired = spec;
+        mapping.rc = Arc::downgrade(&rc);
+        if let Err(error) = self.reconcile_forward6(source).await {
+            tracing::error!("failed to reconcile IPv6 forward {source}: {error}");
+            tracing::debug!("{error:?}");
+        }
+        rc
+    }
+
+    async fn reconcile_forward6(&mut self, source: SocketAddrV6) -> Result<(), Error> {
+        let Some(mapping) = self.ipv6.get_mut(&source) else {
+            return Ok(());
+        };
+        while let Some(operation) = mapping.next_operation() {
+            match &operation {
+                Ipv6ForwardOperation::Add(spec) => {
+                    forward6(
+                        source,
+                        spec.target,
+                        spec.target_prefix,
+                        spec.src_filter.as_ref(),
+                    )
+                    .await?;
+                    if spec.src_filter.is_none() {
+                        self.pmap.ensure(
+                            IpAddr::V6(*source.ip()),
+                            source.port(),
+                            source.port(),
+                            spec.gateways.clone(),
+                        );
+                    }
+                }
+                Ipv6ForwardOperation::Remove(spec) => {
+                    unforward6(
+                        source,
+                        spec.target,
+                        spec.target_prefix,
+                        spec.src_filter.as_ref(),
+                    )
+                    .await?;
+                    if spec.src_filter.is_none() {
+                        self.pmap.remove(IpAddr::V6(*source.ip()), source.port());
+                    }
+                }
+            }
+            mapping.operation_succeeded(operation);
+        }
+        Ok(())
+    }
+
+    async fn reconcile_forwards6(&mut self) {
+        let sources: Vec<_> = self.ipv6.keys().copied().collect();
+        for source in sources {
+            if let Err(error) = self.reconcile_forward6(source).await {
+                tracing::error!("failed to reconcile IPv6 forward {source}: {error}");
+                tracing::debug!("{error:?}");
+            }
+        }
+        self.ipv6
+            .retain(|_, mapping| mapping.rc.strong_count() > 0 || mapping.applied.is_some());
+    }
+
+    async fn reconcile(
+        &mut self,
+        ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+    ) -> Result<(), Error> {
+        let mut first_error = None;
+        for mut entry in self.state.iter_mut() {
+            if let Err(error) = entry.gc(ip_info, &self.port_forward, &self.pmap).await {
+                first_error.get_or_insert(error);
+            }
+        }
+        self.reconcile_forwards6().await;
+        first_error.map_or(Ok(()), Err)
+    }
+
     async fn sync(
         &mut self,
         ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
     ) -> Result<(), Error> {
-        for mut entry in self.state.iter_mut() {
-            entry.gc(ip_info, &self.port_forward, &self.pmap).await?;
+        let mut first_error = self.reconcile(ip_info).await.err();
+        if let Err(error) = self.port_forward.gc().await {
+            first_error.get_or_insert(error);
         }
-
-        self.port_forward.gc().await
+        first_error.map_or(Ok(()), Err)
     }
 }
 
@@ -921,16 +1123,17 @@ enum InterfaceForwardCommand {
         InterfaceForwardRequest,
         oneshot::Sender<Result<Arc<()>, Error>>,
     ),
+    Forward6 {
+        source: SocketAddrV6,
+        spec: Ipv6ForwardSpec,
+        respond: oneshot::Sender<Arc<()>>,
+    },
     Sync(oneshot::Sender<Result<(), Error>>),
     DumpTable(oneshot::Sender<ForwardTable>),
 }
 
 pub struct InterfacePortForwardController {
     req: mpsc::UnboundedSender<InterfaceForwardCommand>,
-    /// A clone of the shared `PortMapController`, so this controller owns the
-    /// upstream pinhole of a v6 GUA DNAT ([`Self::forward6`]) the same way the v4
-    /// path does inside [`InterfaceForwardEntry::update`].
-    pmap: PortMapController,
     _thread: NonDetachingJoinHandle<()>,
 }
 
@@ -940,12 +1143,16 @@ impl InterfacePortForwardController {
         pmap: PortMapController,
     ) -> Self {
         let port_forward = PortForwardController::new();
-        let v6_pmap = pmap.clone();
 
         let (req_send, mut req_recv) = mpsc::unbounded_channel::<InterfaceForwardCommand>();
         let thread = NonDetachingJoinHandle::from(tokio::spawn(async move {
             let mut state = InterfaceForwardState::new(port_forward, pmap);
             let mut interfaces = ip_info.read_and_mark_seen();
+            let mut reconcile_interval = tokio::time::interval_at(
+                tokio::time::Instant::now() + PORT_FORWARD_GC_INTERVAL,
+                PORT_FORWARD_GC_INTERVAL,
+            );
+            reconcile_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 tokio::select! {
                     msg = req_recv.recv() => {
@@ -953,6 +1160,9 @@ impl InterfacePortForwardController {
                             match cmd {
                                 InterfaceForwardCommand::Forward(req, re) => {
                                     re.send(state.handle_request(req, &interfaces).await).ok()
+                                }
+                                InterfaceForwardCommand::Forward6 { source, spec, respond } => {
+                                    respond.send(state.add_forward6(source, spec).await).ok()
                                 }
                                 InterfaceForwardCommand::Sync(re) => {
                                     re.send(state.sync(&interfaces).await).ok()
@@ -969,22 +1179,19 @@ impl InterfacePortForwardController {
                         interfaces = ip_info.read();
                         state.sync(&interfaces).await.log_err();
                     }
+                    _ = reconcile_interval.tick() => {
+                        state.reconcile(&interfaces).await.log_err();
+                    }
                 }
             }
         }));
 
         Self {
             req: req_send,
-            pmap: v6_pmap,
             _thread: thread,
         }
     }
 
-    /// DNAT a host GUA to a container ULA (v6 counterpart of a v4 forward) and, for
-    /// a WAN forward (`src_filter == None`), open its upstream firewall pinhole —
-    /// so the DNAT and its pinhole are owned together, as in the v4 path.
-    /// `gateways` are the PCP candidates for the pinhole (ignored for a LAN-only
-    /// forward). Best-effort pinhole: it is a fire-and-forget port-map request.
     pub async fn forward6(
         &self,
         source: SocketAddrV6,
@@ -992,33 +1199,21 @@ impl InterfacePortForwardController {
         target_prefix: u8,
         src_filter: Option<IpNet>,
         gateways: Vec<(IpAddr, Option<u32>)>,
-    ) -> Result<(), Error> {
-        forward6(source, target, target_prefix, src_filter.as_ref()).await?;
-        if src_filter.is_none() && !gateways.is_empty() {
-            self.pmap.ensure(
-                IpAddr::V6(*source.ip()),
-                source.port(),
-                source.port(),
-                gateways,
-            );
-        }
-        Ok(())
-    }
-
-    /// Tear down a [`Self::forward6`] — the nft DNAT and, for a WAN forward, its
-    /// upstream pinhole.
-    pub async fn unforward6(
-        &self,
-        source: SocketAddrV6,
-        target: SocketAddrV6,
-        target_prefix: u8,
-        src_filter: Option<IpNet>,
-    ) -> Result<(), Error> {
-        unforward6(source, target, target_prefix, src_filter.as_ref()).await?;
-        if src_filter.is_none() {
-            self.pmap.remove(IpAddr::V6(*source.ip()), source.port());
-        }
-        Ok(())
+    ) -> Result<Arc<()>, Error> {
+        let (respond, receive) = oneshot::channel();
+        self.req
+            .send(InterfaceForwardCommand::Forward6 {
+                source,
+                spec: Ipv6ForwardSpec {
+                    target,
+                    target_prefix,
+                    src_filter,
+                    gateways,
+                },
+                respond,
+            })
+            .map_err(err_has_exited)?;
+        receive.await.map_err(err_has_exited)
     }
 
     pub async fn add(
@@ -1175,6 +1370,146 @@ pub(crate) async fn unforward6(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ipv6_spec(gateways: Vec<(IpAddr, Option<u32>)>) -> Ipv6ForwardSpec {
+        Ipv6ForwardSpec {
+            target: SocketAddrV6::new("fd00:3::2".parse().unwrap(), 8080, 0, 0),
+            target_prefix: 64,
+            src_filter: None,
+            gateways,
+        }
+    }
+
+    #[test]
+    fn ipv6_mapping_identity_includes_gateways() {
+        let first = ipv6_spec(vec![("2001:db8::1".parse().unwrap(), None)]);
+        let changed = ipv6_spec(vec![("2001:db8::2".parse().unwrap(), None)]);
+
+        assert_ne!(first, changed);
+    }
+
+    #[test]
+    fn ipv6_add_and_replacement_advance_only_after_success() {
+        let lease = Arc::new(());
+        let original = ipv6_spec(Vec::new());
+        let replacement = Ipv6ForwardSpec {
+            target: SocketAddrV6::new("fd00:3::3".parse().unwrap(), 8080, 0, 0),
+            ..original.clone()
+        };
+        let mut mapping = Ipv6ForwardMapping {
+            desired: original.clone(),
+            applied: None,
+            rc: Arc::downgrade(&lease),
+        };
+
+        let add = Ipv6ForwardOperation::Add(original.clone());
+        assert_eq!(mapping.next_operation(), Some(add.clone()));
+        assert_eq!(mapping.next_operation(), Some(add.clone()));
+        mapping.operation_succeeded(add);
+        assert_eq!(mapping.next_operation(), None);
+
+        mapping.desired = replacement.clone();
+        let remove = Ipv6ForwardOperation::Remove(original);
+        assert_eq!(mapping.next_operation(), Some(remove.clone()));
+        assert_eq!(mapping.next_operation(), Some(remove.clone()));
+        mapping.operation_succeeded(remove);
+
+        let add_replacement = Ipv6ForwardOperation::Add(replacement);
+        assert_eq!(mapping.next_operation(), Some(add_replacement.clone()));
+        mapping.operation_succeeded(add_replacement);
+        assert_eq!(mapping.next_operation(), None);
+    }
+
+    #[test]
+    fn dropped_ipv6_lease_keeps_teardown_pending_until_success() {
+        let lease = Arc::new(());
+        let spec = ipv6_spec(Vec::new());
+        let mut mapping = Ipv6ForwardMapping {
+            desired: spec.clone(),
+            applied: Some(spec.clone()),
+            rc: Arc::downgrade(&lease),
+        };
+        assert_eq!(mapping.next_operation(), None);
+
+        drop(lease);
+
+        let remove = Ipv6ForwardOperation::Remove(spec);
+        assert_eq!(mapping.next_operation(), Some(remove.clone()));
+        assert_eq!(mapping.next_operation(), Some(remove.clone()));
+        mapping.operation_succeeded(remove);
+        assert_eq!(mapping.next_operation(), None);
+    }
+
+    #[test]
+    fn mapping_identity_includes_target_prefix() {
+        let source = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 80);
+        let target = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 2), 8080);
+        let mapping = ForwardMapping {
+            source,
+            target,
+            count: 1,
+            target_prefix: 24,
+            src_filter: None,
+            rc: Weak::new(),
+        };
+
+        assert!(mapping.matches(target, 1, 24, None));
+        assert!(!mapping.matches(target, 1, 32, None));
+    }
+
+    #[test]
+    fn live_target_prefix_tracks_interface_changes() {
+        use imbl::OrdSet;
+        use imbl_value::InternedString;
+
+        use crate::db::model::public::IpInfo;
+
+        let gateway = GatewayId::from(InternedString::intern("eth0"));
+        let interfaces = |subnet: &str| {
+            let subnets: OrdSet<IpNet> = [subnet.parse::<IpNet>().unwrap()].into_iter().collect();
+            [(
+                gateway.clone(),
+                NetworkInterfaceInfo {
+                    ip_info: Some(Arc::new(IpInfo {
+                        subnets,
+                        ..Default::default()
+                    })),
+                    ..Default::default()
+                },
+            )]
+            .into_iter()
+            .collect()
+        };
+        let target = Ipv4Addr::new(10, 0, 0, 2);
+
+        assert_eq!(
+            target_prefix_for(&interfaces("10.0.0.0/24"), target, 32),
+            24
+        );
+        assert_eq!(
+            target_prefix_for(&interfaces("10.0.0.0/16"), target, 32),
+            16
+        );
+        assert_eq!(target_prefix_for(&OrdMap::new(), target, 32), 32);
+    }
+
+    #[test]
+    fn cached_target_identity_includes_target_prefix() {
+        let requirements = ForwardRequirements {
+            public_gateways: BTreeSet::new(),
+            private_ips: BTreeSet::new(),
+            secure: true,
+        };
+        let target = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 2), 8080);
+        let mut entry = InterfaceForwardEntry::new(80, 1);
+        let first = entry.cache_target(requirements.clone(), target, 24, Arc::new(()));
+        let replacement = Arc::new(());
+        let updated = entry.cache_target(requirements.clone(), target, 32, replacement.clone());
+
+        assert!(!Arc::ptr_eq(&first, &updated));
+        assert!(Arc::ptr_eq(&replacement, &updated));
+        assert_eq!(entry.targets[&requirements].1, 32);
+    }
 
     #[test]
     fn try_alloc_range_basic() {

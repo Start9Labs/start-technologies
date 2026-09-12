@@ -19,7 +19,8 @@ use crate::hostname::ServerHostname;
 use crate::net::dns::DnsController;
 use crate::net::dns_update::{DnsUpdateController, spawn_server_mdns_injection};
 use crate::net::forward::{
-    ForwardRequirements, InterfacePortForwardController, START9_BRIDGE_IFACE, nft_rule, nft_rule_v6,
+    ForwardRequirements, InterfacePortForwardController, START9_BRIDGE_IFACE, nft_rule,
+    nft_rule_v6, target_prefix_for,
 };
 use crate::net::gateway::NetworkInterfaceController;
 use crate::net::host::binding::{AddSslOptions, BindId, BindOptions, UpstreamCertValidation};
@@ -321,19 +322,24 @@ fn retired_hosts<'a>(held: impl Iterator<Item = &'a HostId>, current: &Hosts) ->
         .collect()
 }
 
+type GuaForwardKey = (Ipv6Addr, u16);
+type GuaForwardSpec = (Ipv6Addr, u16, Option<IpNet>, Vec<(IpAddr, Option<u32>)>);
+type GuaForwardMap = BTreeMap<GuaForwardKey, GuaForwardSpec>;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Ipv4ForwardSpec {
+    target: SocketAddrV4,
+    count: u16,
+    target_prefix: u8,
+    requirements: ForwardRequirements,
+}
+
 #[derive(Default, Debug)]
 struct HostBinds {
-    /// `(internal-target, count, requirements, rc)` keyed by external start
-    /// port. `count == 1` is the single-port case; `count > 1` represents a
-    /// contiguous range forward.
-    forwards: BTreeMap<u16, (SocketAddrV4, u16, ForwardRequirements, Arc<()>)>,
+    forwards: BTreeMap<u16, (Ipv4ForwardSpec, Arc<()>)>,
     vhosts: BTreeMap<VHostKey, (ProxyTarget, Arc<()>)>,
     private_dns: BTreeMap<InternedString, Arc<()>>,
-    /// Directly-forwarded v6: `(host GUA, external port) -> (container v6,
-    /// internal port, LAN source filter)`. A GUA on a port no listener of ours
-    /// answers is DNAT'd to the container (see `forward6`); tracked so a stale
-    /// forward is torn down when the GUA's exposure or target changes.
-    gua_forwards: BTreeMap<(Ipv6Addr, u16), (Ipv6Addr, u16, Option<IpNet>)>,
+    gua_forwards: BTreeMap<GuaForwardKey, (GuaForwardSpec, Arc<()>)>,
 }
 
 pub struct NetServiceData {
@@ -363,8 +369,7 @@ impl NetServiceData {
         // Non-SSL v6 DNAT forwards to the container — net_controller's concern (no
         // vhost owns them), but the forward controller opens their upstream pinhole
         // together with the DNAT (see the reconcile below).
-        let mut gua_forwards: BTreeMap<(Ipv6Addr, u16), (Ipv6Addr, u16, Option<IpNet>)> =
-            BTreeMap::new();
+        let mut gua_forwards = GuaForwardMap::new();
         let binds = self.binds.entry(id.clone()).or_default();
 
         let net_ifaces = ctrl.net_iface.watcher.ip_info();
@@ -650,8 +655,32 @@ impl NetServiceData {
                         // container — no vhost owns a non-TLS port. The forward
                         // controller opens its upstream pinhole together with the
                         // DNAT (see the reconcile below).
-                        gua_forwards
-                            .insert((*gua.ip(), gua.port()), (container_v6, *port, src_filter));
+                        let gateways = if src_filter.is_none() {
+                            net_ifaces
+                                .iter()
+                                .map(|(_, info)| info)
+                                .find(|info| {
+                                    info.ip_info.as_ref().map_or(false, |ip_info| {
+                                        ip_info
+                                            .subnets
+                                            .iter()
+                                            .any(|subnet| subnet.addr() == IpAddr::V6(*gua.ip()))
+                                    })
+                                })
+                                .map(|info| {
+                                    candidate_gateways(info)
+                                        .into_iter()
+                                        .filter(|(gateway, _)| gateway.is_ipv6())
+                                        .collect()
+                                })
+                                .unwrap_or_default()
+                        } else {
+                            Vec::new()
+                        };
+                        gua_forwards.insert(
+                            (*gua.ip(), gua.port()),
+                            (container_v6, *port, src_filter, gateways),
+                        );
                     }
                 }
             }
@@ -733,70 +762,34 @@ impl NetServiceData {
         // DNAT). So net_controller itself requests no port maps. The IPv4 gateway
         // serves its own port-80 HTTP->HTTPS redirect.
 
-        // Reconcile non-SSL v6 forwards: tear down any that changed or went away,
-        // then install new/changed ones. The forward controller owns each forward's
-        // DNAT *and* its upstream pinhole (WAN forwards only), just like the v4 path.
-        // Best-effort — a nft failure on one forward is logged, not fatal.
-        for (key, spec) in &binds.gua_forwards {
-            if gua_forwards.get(key) != Some(spec) {
-                let &(gua, ext) = key;
-                let &(tgt, int, ref src) = spec;
-                if let Err(e) = ctrl
-                    .forward
-                    .unforward6(
-                        SocketAddrV6::new(gua, ext, 0, 0),
-                        SocketAddrV6::new(tgt, int, 0, 0),
-                        64,
-                        src.clone(),
-                    )
-                    .await
-                {
-                    tracing::error!("failed to remove v6 forward [{gua}]:{ext}: {e}");
-                    tracing::debug!("{e:?}");
+        let all = binds
+            .gua_forwards
+            .keys()
+            .chain(gua_forwards.keys())
+            .copied()
+            .collect::<BTreeSet<_>>();
+        for key in all {
+            let previous = binds.gua_forwards.remove(&key);
+            if let Some(spec) = gua_forwards.remove(&key) {
+                if let Some((previous_spec, lease)) = previous.filter(|(old, _)| old == &spec) {
+                    binds.gua_forwards.insert(key, (previous_spec, lease));
+                    continue;
                 }
-            }
-        }
-        for (key, spec) in &gua_forwards {
-            if binds.gua_forwards.get(key) != Some(spec) {
-                let &(gua, ext) = key;
-                let &(tgt, int, ref src) = spec;
-                // PCP candidates for the pinhole (only used for a WAN forward).
-                let gateways: Vec<(IpAddr, Option<u32>)> = if src.is_none() {
-                    net_ifaces
-                        .iter()
-                        .map(|(_, i)| i)
-                        .find(|info| {
-                            info.ip_info.as_ref().map_or(false, |i| {
-                                i.subnets.iter().any(|s| s.addr() == IpAddr::V6(gua))
-                            })
-                        })
-                        .map(|info| {
-                            candidate_gateways(info)
-                                .into_iter()
-                                .filter(|(g, _)| g.is_ipv6())
-                                .collect()
-                        })
-                        .unwrap_or_default()
-                } else {
-                    Vec::new()
-                };
-                if let Err(e) = ctrl
+                let (gua, external) = key;
+                let (target, internal, src_filter, gateways) = spec.clone();
+                let lease = ctrl
                     .forward
                     .forward6(
-                        SocketAddrV6::new(gua, ext, 0, 0),
-                        SocketAddrV6::new(tgt, int, 0, 0),
+                        SocketAddrV6::new(gua, external, 0, 0),
+                        SocketAddrV6::new(target, internal, 0, 0),
                         64,
-                        src.clone(),
+                        src_filter,
                         gateways,
                     )
-                    .await
-                {
-                    tracing::error!("failed to add v6 forward [{gua}]:{ext} -> [{tgt}]:{int}: {e}");
-                    tracing::debug!("{e:?}");
-                }
+                    .await?;
+                binds.gua_forwards.insert(key, (spec, lease));
             }
         }
-        binds.gua_forwards = gua_forwards;
 
         // ── Phase 3: Reconcile ──
         let all = binds
@@ -808,36 +801,29 @@ impl NetServiceData {
         for external in all {
             let mut prev = binds.forwards.remove(&external);
             if let Some((internal, count, reqs)) = forwards.remove(&external) {
-                prev = prev.filter(|(i, c, r, _)| i == &internal && *c == count && *r == reqs);
+                let spec = Ipv4ForwardSpec {
+                    target: internal,
+                    count,
+                    target_prefix: target_prefix_for(&net_ifaces, *internal.ip(), 32),
+                    requirements: reqs,
+                };
+                prev = prev.filter(|(old, _)| old == &spec);
                 binds.forwards.insert(
                     external,
                     if let Some(prev) = prev {
                         prev
                     } else {
-                        (
-                            internal,
-                            count,
-                            reqs.clone(),
-                            ctrl.forward
-                                .add_range(
-                                    external,
-                                    count,
-                                    reqs,
-                                    internal,
-                                    net_ifaces
-                                        .iter()
-                                        .find_map(|(_, i)| {
-                                            i.ip_info.as_ref().and_then(|i| {
-                                                i.subnets.iter().find(|i| {
-                                                    i.contains(&IpAddr::from(*internal.ip()))
-                                                })
-                                            })
-                                        })
-                                        .map(|s| s.prefix_len())
-                                        .unwrap_or(32),
-                                )
-                                .await?,
-                        )
+                        let lease = ctrl
+                            .forward
+                            .add_range(
+                                external,
+                                spec.count,
+                                spec.requirements.clone(),
+                                spec.target,
+                                spec.target_prefix,
+                            )
+                            .await?;
+                        (spec, lease)
                     },
                 );
             }
@@ -905,10 +891,7 @@ impl NetServiceData {
         Ok(())
     }
 
-    /// Tear down everything the datapath holds for a host that is no longer in
-    /// the database. Reconciling against an empty host is what reaps it: the v6
-    /// forwards, the vhost port maps and the RFC 2136 records carry no
-    /// refcount, so dropping `HostBinds` on its own leaves them up.
+    /// Reconciles IPv6 forwards and records before dropping host bookkeeping.
     async fn retire(&mut self, ctrl: &NetController, id: HostId) -> Result<(), Error> {
         if !self.binds.contains_key(&id) {
             return Ok(());
@@ -1589,6 +1572,27 @@ mod tests {
                 .map(|id| (host_id(id), Host::new()))
                 .collect(),
         )
+    }
+
+    #[test]
+    fn host_forward_identity_includes_target_prefix() {
+        let requirements = ForwardRequirements {
+            public_gateways: BTreeSet::new(),
+            private_ips: BTreeSet::new(),
+            secure: true,
+        };
+        let first = Ipv4ForwardSpec {
+            target: SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 2), 8080),
+            count: 1,
+            target_prefix: 24,
+            requirements,
+        };
+        let changed = Ipv4ForwardSpec {
+            target_prefix: 32,
+            ..first.clone()
+        };
+
+        assert_ne!(first, changed);
     }
 
     #[test]
