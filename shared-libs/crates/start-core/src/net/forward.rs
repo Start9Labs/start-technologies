@@ -7,7 +7,7 @@ use std::time::Duration;
 use futures::channel::oneshot;
 use iddqd::{IdOrdItem, IdOrdMap};
 use imbl::OrdMap;
-use ipnet::{IpNet, Ipv4Net};
+use ipnet::IpNet;
 use rand::RngExt;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,7 @@ use crate::util::Invoke;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::serde::{HandlerExtSerde, display_serializable};
 use crate::util::sync::Watch;
-use crate::{GatewayId, HOST_IP};
+use crate::GatewayId;
 
 pub const START9_BRIDGE_IFACE: &str = "lxcbr0";
 const EPHEMERAL_PORT_START: u16 = 49152;
@@ -1094,14 +1094,7 @@ async fn forward(
         .env("dprefix", target_prefix.to_string())
         .env("sport", source.port().to_string())
         .env("dport", target.port().to_string())
-        .env("count", count.to_string())
-        .env(
-            "bridge_subnet",
-            Ipv4Net::new(HOST_IP.into(), 24)
-                .with_kind(ErrorKind::ParseNetAddress)?
-                .trunc()
-                .to_string(),
-        );
+        .env("count", count.to_string());
     if let Some(subnet) = src_filter {
         cmd.env("src_subnet", subnet.to_string());
     }

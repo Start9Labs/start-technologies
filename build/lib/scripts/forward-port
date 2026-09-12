@@ -78,9 +78,6 @@ delete_tagged() {
         if [ -n "${src_subnet:-}" ]; then
             echo "add rule ip startos prerouting ip saddr $src_subnet ip daddr $sip $PROTO $dnat comment \"$TAG\""
             echo "add rule ip startos prerouting ip saddr $PRIVATE_IPV4_SUBNETS ip daddr $sip $PROTO $dnat comment \"$TAG\""
-            if [ -n "${bridge_subnet:-}" ]; then
-                echo "add rule ip startos prerouting ip saddr $bridge_subnet ip daddr $sip $PROTO $dnat comment \"$TAG\""
-            fi
         else
             echo "add rule ip startos prerouting ip daddr $sip $PROTO $dnat comment \"$TAG\""
         fi
@@ -92,7 +89,7 @@ delete_tagged() {
         echo "add rule ip startos postrouting fib saddr type local ct original ip daddr $sip ip daddr $dip $PROTO th dport $dport_match masquerade comment \"$TAG\""
         echo "add rule ip startos postrouting ip saddr $dip/$dprefix ip daddr $dip $PROTO th dport $dport_match masquerade comment \"$TAG\""
     fi
-} | nft -f -
+} | nft -f - || exit $?
 
 if [ "${UNDO:-0}" = 1 ]; then
     # conntrack returns 1 when no flows match; ignore. -D takes no port range,
