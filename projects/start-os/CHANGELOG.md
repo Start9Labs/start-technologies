@@ -68,10 +68,11 @@ for the detail behind its highlights.
   `net gateway list` shows the current setting. This is one switch for the whole
   server: every installed service's non-SSL addresses — the server's LAN IP
   addresses, its `.local` name and its private domains — are offered on that
-  gateway's directly connected network and routed private networks at once and
-  enabled immediately. Mark a gateway secure only when you control every device
-  on those networks: anything on them can read and alter traffic to a plaintext
-  address, including the passwords typed into it. See
+  gateway at once and enabled immediately. Over IPv4, those addresses accept
+  connections from the directly connected subnet and any routed private network
+  that can reach the server. Mark a gateway secure only when you control every
+  device on those networks: anything on them can read and alter traffic to a
+  plaintext address, including the passwords typed into it. See
   [Gateways](https://docs.start9.com/start-os/gateways.html).
 
 - **An action result that hands you a link can be opened in a new tab.** Where a
