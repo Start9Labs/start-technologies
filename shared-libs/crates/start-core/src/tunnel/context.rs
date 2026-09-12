@@ -31,7 +31,8 @@ use crate::middleware::auth::signature::{NonceCache, url_host_str};
 use crate::middleware::cors::Cors;
 use crate::net::dns_update::rfc2136::{DnsInjector, InjectedRecord};
 use crate::net::forward::{
-    FORWARD_DRAIN_TIMEOUT, PortForwardController, nft_comments_with_prefix, nft_rule, nft_rule_v6,
+    PortForwardController, nft_comments_with_prefix, nft_rule, nft_rule_v6,
+    timeout_forwarding_drain,
 };
 use crate::net::static_server::{EMPTY_DIR, UiContext};
 use crate::prelude::*;
@@ -411,8 +412,6 @@ impl TunnelContext {
 
             ctx.resync_egress().await?;
             ctx.resync_v6().await?;
-            // Grant every restored auto entry a fresh lease so a client that never
-            // reconnects is reaped rather than lingering forever.
             crate::tunnel::forward::lease::seed_from_db(&ctx).await?;
             crate::tunnel::forward::pinhole::seed_pinholes(&ctx).await?;
             Ok::<_, Error>(())
@@ -437,17 +436,7 @@ impl TunnelContext {
 
     pub(crate) async fn shutdown_forwarding(&self) -> Result<(), Error> {
         self.active_forwards.mutate(BTreeMap::clear);
-        tokio::time::timeout(FORWARD_DRAIN_TIMEOUT, self.forward.drain())
-            .await
-            .map_err(|_| {
-                Error::new(
-                    eyre!(
-                        "forwarding teardown exceeded aggregate deadline of {:?}",
-                        FORWARD_DRAIN_TIMEOUT
-                    ),
-                    ErrorKind::Timeout,
-                )
-            })?
+        timeout_forwarding_drain(self.forward.drain()).await
     }
 
     pub async fn gc_forwards(

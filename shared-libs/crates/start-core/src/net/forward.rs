@@ -31,7 +31,8 @@ pub const START9_BRIDGE_IFACE: &str = "lxcbr0";
 const EPHEMERAL_PORT_START: u16 = 49152;
 const PORT_FORWARD_GC_INTERVAL: Duration = Duration::from_secs(30);
 const FORWARD_SCRIPT_TIMEOUT: Duration = Duration::from_secs(30);
-pub(crate) const FORWARD_DRAIN_TIMEOUT: Duration = Duration::from_secs(90);
+const FORWARD_DRAIN_RETRY_INTERVAL: Duration = Duration::from_secs(1);
+const FORWARD_DRAIN_TIMEOUT: Duration = Duration::from_secs(90);
 // Reserved by/for host daemons (mDNS 5353, LLMNR 5355, postgres 5432, X11
 // forwarding 6010). 9050/9051 are claimable on purpose: they were the 0.3.x
 // host tor daemon's reservation (gone in 0.4.x), and the tor service now binds
@@ -713,7 +714,23 @@ impl PortForwardController {
                         respond.send(state.dump()).ok();
                     }
                     PortForwardCommand::Drain { respond } => {
-                        respond.send(state.drain().await).ok();
+                        let mut attempt = 1usize;
+                        loop {
+                            match state.drain().await {
+                                Ok(()) => {
+                                    respond.send(Ok(())).ok();
+                                    break;
+                                }
+                                Err(error) => {
+                                    tracing::error!(
+                                        "port forwarding drain failed on attempt {attempt}; retrying in {FORWARD_DRAIN_RETRY_INTERVAL:?}: {error:#}"
+                                    );
+                                    tracing::debug!("{error:?}");
+                                    attempt = attempt.saturating_add(1);
+                                    tokio::time::sleep(FORWARD_DRAIN_RETRY_INTERVAL).await;
+                                }
+                            }
+                        }
                         break;
                     }
                 }
@@ -1633,12 +1650,29 @@ pub(crate) async fn unforward6(
     Ok(())
 }
 
+pub(crate) async fn timeout_forwarding_drain<F>(drain: F) -> Result<(), Error>
+where
+    F: Future<Output = Result<(), Error>>,
+{
+    tokio::time::timeout(FORWARD_DRAIN_TIMEOUT, drain)
+        .await
+        .map_err(|_| {
+            Error::new(
+                eyre!(
+                    "forwarding teardown exceeded aggregate deadline of {:?}",
+                    FORWARD_DRAIN_TIMEOUT
+                ),
+                ErrorKind::Timeout,
+            )
+        })?
+}
+
 pub(crate) async fn drain_forwarding<F, P>(forward: F, port_map: P) -> Result<(), Error>
 where
     F: Future<Output = Result<(), Error>>,
     P: Future<Output = Result<(), Error>>,
 {
-    tokio::time::timeout(FORWARD_DRAIN_TIMEOUT, async {
+    timeout_forwarding_drain(async {
         match tokio::join!(forward, port_map) {
             (Ok(()), Ok(())) => Ok(()),
             (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
@@ -1651,15 +1685,6 @@ where
         }
     })
     .await
-    .map_err(|_| {
-        Error::new(
-            eyre!(
-                "forwarding teardown exceeded aggregate deadline of {:?}",
-                FORWARD_DRAIN_TIMEOUT
-            ),
-            ErrorKind::Timeout,
-        )
-    })?
 }
 
 #[cfg(test)]

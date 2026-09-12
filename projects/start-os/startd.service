@@ -7,6 +7,7 @@ Environment=RUST_LOG=warn,start_core=debug
 ExecStart=/usr/bin/startd
 Restart=always
 RestartSec=3
+TimeoutStopSec=120
 ManagedOOMPreference=avoid
 CPUAccounting=true
 CPUWeight=1000

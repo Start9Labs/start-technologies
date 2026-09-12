@@ -47,7 +47,7 @@ async fn await_aborted_task(name: &str, task: NonDetachingJoinHandle<()>) {
 
 #[instrument(skip_all)]
 async fn inner_main(config: &TunnelConfig) -> Result<Option<bool>, Error> {
-    let (server, ctx, shutdown) = async {
+    let (server, ctx, shutdown, forwarding_threads) = async {
         let listen = config
             .tunnel_listen
             .unwrap_or(crate::tunnel::TUNNEL_DEFAULT_LISTEN);
@@ -176,24 +176,15 @@ async fn inner_main(config: &TunnelConfig) -> Result<Option<bool>, Error> {
             .await
             .with_kind(crate::ErrorKind::Unknown)?;
 
-        for thread in &forwarding_threads {
-            thread.abort();
-        }
         sig_handler.abort();
         https_thread.abort();
         redirect_thread.abort();
 
-        for (name, thread) in ["PCP", "IGD", "lease"]
-            .into_iter()
-            .zip(forwarding_threads)
-        {
-            await_aborted_task(name, thread).await;
-        }
         await_aborted_task("signal", sig_handler).await;
         await_aborted_task("HTTPS", https_thread).await;
         await_aborted_task("redirect", redirect_thread).await;
 
-        Ok::<_, Error>((server, ctx, shutdown))
+        Ok::<_, Error>((server, ctx, shutdown, forwarding_threads))
     }
     .await?;
     server.shutdown().await;
@@ -201,6 +192,13 @@ async fn inner_main(config: &TunnelConfig) -> Result<Option<bool>, Error> {
     if let Err(error) = ctx.shutdown_forwarding().await {
         tracing::error!("forwarding cleanup failed: {error}");
         tracing::debug!("{error:?}");
+    }
+
+    for thread in &forwarding_threads {
+        thread.abort();
+    }
+    for (name, thread) in ["PCP", "IGD", "lease"].into_iter().zip(forwarding_threads) {
+        await_aborted_task(name, thread).await;
     }
 
     Ok(shutdown)
