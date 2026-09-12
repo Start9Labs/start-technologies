@@ -724,6 +724,20 @@ impl RepresentationQualities {
         }
         selected.map_or(RepresentationChoice::NotAcceptable, |(_, _, choice)| choice)
     }
+
+    fn select_for_range(
+        self,
+        range: &mut ByteRange,
+        gzip_available: bool,
+        brotli_available: bool,
+    ) -> RepresentationChoice {
+        if *range != ByteRange::Full && self.identity > 0.0 {
+            RepresentationChoice::Identity
+        } else {
+            *range = ByteRange::Full;
+            self.select(gzip_available, brotli_available)
+        }
+    }
 }
 
 fn if_none_match(req: &RequestParts, current: &str) -> bool {
@@ -780,6 +794,9 @@ fn parse_range(header: &HeaderValue, len: u64) -> ByteRange {
         return ByteRange::Full;
     };
     if start.is_empty() {
+        if end.is_empty() || !end.bytes().all(|byte| byte.is_ascii_digit()) {
+            return ByteRange::Full;
+        }
         let Ok(suffix_len) = end.parse::<u64>() else {
             return ByteRange::Full;
         };
@@ -792,12 +809,18 @@ fn parse_range(header: &HeaderValue, len: u64) -> ByteRange {
             size: len,
         };
     }
+    if !start.bytes().all(|byte| byte.is_ascii_digit()) {
+        return ByteRange::Full;
+    }
     let Ok(start) = start.parse::<u64>() else {
         return ByteRange::Full;
     };
     let parsed_end = if end.is_empty() {
         None
     } else {
+        if !end.bytes().all(|byte| byte.is_ascii_digit()) {
+            return ByteRange::Full;
+        }
         let Ok(end) = end.parse::<u64>() else {
             return ByteRange::Full;
         };
@@ -914,12 +937,7 @@ impl FileData {
         let brotli = ui_dir
             .get_file(format!("{}.br", path.display()))
             .map(|file| file.contents());
-        let choice = if range != ByteRange::Full && qualities.identity > 0.0 {
-            RepresentationChoice::Identity
-        } else {
-            range = ByteRange::Full;
-            qualities.select(gzip.is_some(), brotli.is_some())
-        };
+        let choice = qualities.select_for_range(&mut range, gzip.is_some(), brotli.is_some());
         let (encoding, representation) = match choice {
             RepresentationChoice::Identity => (None, file.contents()),
             RepresentationChoice::Gzip => (Some("gzip"), gzip.unwrap()),
@@ -993,7 +1011,7 @@ impl FileData {
             .await
             .with_ctx(|_| (ErrorKind::Filesystem, path.display().to_string()))?;
         let qualities = RepresentationQualities::from_request(req);
-        // Installed archives are immutable; inode and ctime identify the opened snapshot.
+        // Installed archive bytes are immutable after atomic publication.
         let identity_e_tag = e_tag(
             path,
             format!(
@@ -1007,43 +1025,46 @@ impl FileData {
             ),
         );
         let mut range = requested_range(req, metadata.len(), Some(&identity_e_tag));
-        let choice = if range != ByteRange::Full && qualities.identity > 0.0 {
-            RepresentationChoice::Identity
-        } else {
-            range = ByteRange::Full;
-            qualities.select(true, false)
-        };
+        let choice = qualities.select_for_range(&mut range, true, false);
         if choice == RepresentationChoice::NotAcceptable {
             return Ok(Some(Self::not_acceptable()));
         }
-        let e_tag = Some(match choice {
+        let e_tag = match choice {
             RepresentationChoice::Identity => identity_e_tag,
             RepresentationChoice::Gzip => {
                 format!("W/{}", e_tag(path, format!("{identity_e_tag}:gzip")))
             }
             RepresentationChoice::NotAcceptable | RepresentationChoice::Brotli => unreachable!(),
-        });
+        };
+        let send_payload = req.method != Method::HEAD && !if_none_match(req, &e_tag);
 
         let (encoding, len, data) = match range {
-            ByteRange::Full => Self::encode(choice, file, metadata.len()),
+            ByteRange::Full if send_payload => Self::encode(choice, file, metadata.len()),
+            ByteRange::Full => match choice {
+                RepresentationChoice::Gzip => (Some("gzip"), None, Body::empty()),
+                RepresentationChoice::Identity => (None, Some(metadata.len()), Body::empty()),
+                RepresentationChoice::NotAcceptable | RepresentationChoice::Brotli => {
+                    unreachable!()
+                }
+            },
             ByteRange::Satisfiable { start, end, .. } => {
                 let len = end + 1 - start;
-                file.seek(std::io::SeekFrom::Start(start)).await?;
-                Self::encode(choice, file.take(len), len)
+                if send_payload {
+                    file.seek(std::io::SeekFrom::Start(start)).await?;
+                    Self::encode(choice, file.take(len), len)
+                } else {
+                    (None, Some(len), Body::empty())
+                }
             }
             ByteRange::Unsatisfiable { .. } => (None, Some(0), Body::empty()),
         };
 
         Ok(Some(Self {
-            data: if req.method == Method::HEAD {
-                Body::empty()
-            } else {
-                data
-            },
+            data,
             len,
             range,
             encoding,
-            e_tag,
+            e_tag: Some(e_tag),
             cache_control: Some(PRIVATE_REVALIDATE_CACHE_CONTROL),
             mime: MimeGuess::from_path(path)
                 .first()
@@ -1072,12 +1093,7 @@ impl FileData {
 
         let qualities = RepresentationQualities::from_request(req);
         let mut range = requested_range(req, len, None);
-        let choice = if range != ByteRange::Full && qualities.identity > 0.0 {
-            RepresentationChoice::Identity
-        } else {
-            range = ByteRange::Full;
-            qualities.select(true, false)
-        };
+        let choice = qualities.select_for_range(&mut range, true, false);
         if choice == RepresentationChoice::NotAcceptable {
             return Ok(Some(Self::not_acceptable()));
         }
@@ -1421,6 +1437,33 @@ mod tests {
 
         let revalidated = path_response(Method::GET, &path, &[(IF_NONE_MATCH, &e_tag)]).await;
         assert_eq!(revalidated.status(), StatusCode::NOT_MODIFIED);
+        let gzip_revalidated = path_response(
+            Method::GET,
+            &path,
+            &[(ACCEPT_ENCODING, "gzip"), (IF_NONE_MATCH, &gzip_e_tag)],
+        )
+        .await;
+        assert_eq!(gzip_revalidated.status(), StatusCode::NOT_MODIFIED);
+        assert_eq!(header(&gzip_revalidated, ETAG), gzip_e_tag);
+        assert!(!gzip_revalidated.headers().contains_key(CONTENT_ENCODING));
+        assert!(
+            to_bytes(gzip_revalidated.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+
+        let gzip_head = path_response(Method::HEAD, &path, &[(ACCEPT_ENCODING, "gzip")]).await;
+        assert_eq!(gzip_head.status(), StatusCode::OK);
+        assert_eq!(header(&gzip_head, ETAG), gzip_e_tag);
+        assert_eq!(header(&gzip_head, CONTENT_ENCODING), "gzip");
+        assert!(!gzip_head.headers().contains_key(CONTENT_LENGTH));
+        assert!(
+            to_bytes(gzip_head.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .is_empty()
+        );
 
         drop(full);
         drop(gzip);
@@ -1535,6 +1578,14 @@ mod tests {
             },
         );
         assert_eq!(
+            parse_range(&HeaderValue::from_static("bytes=10-"), size),
+            ByteRange::Satisfiable {
+                start: 10,
+                end: 19,
+                size,
+            },
+        );
+        assert_eq!(
             parse_range(&HeaderValue::from_static("bytes=20-"), size),
             ByteRange::Unsatisfiable { size },
         );
@@ -1546,7 +1597,16 @@ mod tests {
             parse_range(&HeaderValue::from_static("bytes=0-"), 0),
             ByteRange::Unsatisfiable { size: 0 },
         );
-        for malformed in ["bytes=-", "bytes=garbage-", "bytes=0-garbage"] {
+        for malformed in [
+            "bytes=-",
+            "bytes=garbage-",
+            "bytes=0-garbage",
+            "bytes=+1-+2",
+            "bytes=+1-2",
+            "bytes=1-+2",
+            "bytes=--5",
+            "bytes=1--2",
+        ] {
             assert_eq!(
                 parse_range(&HeaderValue::from_str(malformed).unwrap(), 0),
                 ByteRange::Full,
