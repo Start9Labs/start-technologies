@@ -1213,6 +1213,14 @@ disk.mount.binding:
   fr_FR: "Liaison de %{src} à %{dst}"
   pl_PL: "Wiązanie %{src} do %{dst}"
 
+# os_install/mod.rs
+os-install.invalid-partuuid:
+  en_US: "Unable to resolve a valid partition UUID for %{partition}"
+  de_DE: "Für %{partition} konnte keine gültige Partitions-UUID ermittelt werden"
+  es_ES: "No se pudo resolver un UUID de partición válido para %{partition}"
+  fr_FR: "Impossible de résoudre un UUID de partition valide pour %{partition}"
+  pl_PL: "Nie udało się ustalić prawidłowego UUID partycji dla %{partition}"
+
 # os_install/gpt.rs
 os-install.no-free-space-for-os-root:
   en_US: "No free space left on device for OS root partition"

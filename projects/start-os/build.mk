@@ -28,6 +28,9 @@ backup-fs-test: $(call ls-files, projects/start-os/backup-fs/src) projects/start
 container-runtime-test: projects/start-os/container-runtime/node_modules/.package-lock.json $(call ls-files, projects/start-os/container-runtime/src) projects/start-os/container-runtime/package.json projects/start-os/container-runtime/tsconfig.json
 	cd projects/start-os/container-runtime && npm test
 
+start-os-build-test: projects/start-os/build/tests/normalize-fstab-test.sh projects/start-os/build/lib/scripts/normalize-fstab
+	./projects/start-os/build/tests/normalize-fstab-test.sh
+
 projects/start-os/build/lib/migration-images/.done: projects/start-os/build/save-migration-images.sh
 	ARCH=$(ARCH) ./projects/start-os/build/save-migration-images.sh projects/start-os/build/lib/migration-images
 	touch $@
@@ -52,7 +55,7 @@ MIGRATION_FROM_TAG := v0.3.5.1
 
 start-os-migration-squashfs: results/$(BASENAME).migration.squashfs
 
-results/$(BASENAME).migration.squashfs: results/$(BASENAME).squashfs projects/start-os/build/assemble-migration-payload.sh projects/start-os/build/lib/scripts/migration-update-grub
+results/$(BASENAME).migration.squashfs: results/$(BASENAME).squashfs projects/start-os/build/assemble-migration-payload.sh projects/start-os/build/lib/scripts/migration-update-grub projects/start-os/build/lib/scripts/normalize-fstab
 	@if [ "$(PLATFORM)" = raspberrypi ]; then >&2 echo "migration payload: raspberrypi has no in-place migration — reflash required (#3443)"; exit 1; fi
 	mkdir -p results/migration-base
 	gh release download $(MIGRATION_FROM_TAG) --repo Start9Labs/start-technologies \

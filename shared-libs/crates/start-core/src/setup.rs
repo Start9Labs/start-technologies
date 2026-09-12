@@ -158,20 +158,34 @@ pub fn disk<C: Context>() -> ParentHandler<C> {
 
 const LIVE_MEDIUM_PATH: &str = "/run/live/medium";
 
-pub async fn list_disks(_ctx: SetupContext) -> Result<Vec<DiskInfo>, Error> {
-    let mut disks = crate::disk::util::list(
-        &crate::disk::OsPartitionInfo::from_fstab()
-            .await
-            .unwrap_or_default(),
-        None,
-    )
-    .await?;
+fn parent_disk_path(source: &Path, parent: &str) -> PathBuf {
+    let parent = parent.trim();
+    if parent.is_empty() {
+        source.to_owned()
+    } else {
+        Path::new("/dev").join(parent)
+    }
+}
 
-    // Filter out the disk containing the live medium (installer USB)
-    if let Ok(Some(live_medium_source)) =
-        crate::disk::util::get_mount_source(LIVE_MEDIUM_PATH).await
-    {
-        disks.retain(|disk| disk.logicalname != live_medium_source);
+async fn source_disk(source: &Path) -> Result<PathBuf, Error> {
+    let output = Command::new("lsblk")
+        .args(["-dnro", "PKNAME"])
+        .arg(source)
+        .invoke(ErrorKind::DiskManagement)
+        .await?;
+    let disk = parent_disk_path(source, &String::from_utf8(output)?);
+    tokio::fs::canonicalize(&disk)
+        .await
+        .with_ctx(|_| (ErrorKind::Filesystem, disk.display().to_string()))
+}
+
+pub async fn list_disks(_ctx: SetupContext) -> Result<Vec<DiskInfo>, Error> {
+    let os_partitions = crate::disk::OsPartitionInfo::from_fstab().await?;
+    let mut disks = crate::disk::util::list(&os_partitions, None).await?;
+
+    if let Some(live_medium_source) = crate::disk::util::get_mount_source(LIVE_MEDIUM_PATH).await? {
+        let live_medium_disk = source_disk(&live_medium_source).await?;
+        disks.retain(|disk| disk.logicalname != live_medium_disk);
     }
 
     Ok(disks)
@@ -721,6 +735,18 @@ mod test {
 
     fn hostname(value: &str) -> ServerHostname {
         ServerHostname::new(InternedString::intern(value)).unwrap()
+    }
+
+    #[test]
+    fn live_medium_partition_uses_its_parent_disk() {
+        assert_eq!(
+            parent_disk_path(Path::new("/dev/sdb1"), "sdb\n"),
+            Path::new("/dev/sdb")
+        );
+        assert_eq!(
+            parent_disk_path(Path::new("/dev/sr0"), ""),
+            Path::new("/dev/sr0")
+        );
     }
 
     #[test]

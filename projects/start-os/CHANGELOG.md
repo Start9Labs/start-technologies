@@ -128,6 +128,10 @@ for the detail behind its highlights.
 
 ### Fixed
 
+- **StartOS keeps mounting its OS partitions when Linux enumerates disks in a
+  different order.** Fresh installs and updated servers identify the boot and
+  system partitions by their stable partition IDs.
+
 - **The port-forwarding test reports a port as open to the Internet only where
   it is reachable from the Internet.** Where StartOS's port-forward request was
   granted by a router that sits behind another router, the test could pass a

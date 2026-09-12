@@ -44,9 +44,7 @@ impl OsPartitionInfo {
             || self.extra_boot.values().any(|v| v == p)
     }
 
-    /// Build partition info by resolving the OS root device, parsing /etc/fstab
-    /// for the boot partition(s), and discovering the BIOS boot partition
-    /// (which is never mounted).
+    /// Resolves OS partitions from live mounts and `/etc/fstab`.
     pub async fn from_fstab() -> Result<Self, Error> {
         let fstab = tokio::fs::read_to_string("/etc/fstab")
             .await
@@ -68,19 +66,17 @@ impl OsPartitionInfo {
                 continue;
             };
 
-            // `/` is an overlayfs the initramfs sets up, so its fstab source
-            // (`overlay`) names no block device — root comes from the live OS
-            // mount below. Only /boot* entries are real block-device mounts.
             if target != "/boot" && !target.starts_with("/boot/") {
                 continue;
             }
 
-            let dev = match resolve_fstab_source(source).await {
+            let dev = match resolve_fstab_source(source, target).await {
                 Ok(d) => d,
-                Err(e) => {
+                Err(FstabSourceError::Ignored(e)) => {
                     tracing::warn!("Failed to resolve fstab source {source}: {e}");
                     continue;
                 }
+                Err(FstabSourceError::Fatal(e)) => return Err(e),
             };
 
             match target {
@@ -94,7 +90,7 @@ impl OsPartitionInfo {
             }
         }
 
-        let root = os_root_device().await.unwrap_or_default();
+        let root = os_root_device().await?.unwrap_or_default();
 
         let boot = boot.unwrap_or_default();
         let bios = if !boot.as_os_str().is_empty() {
@@ -113,26 +109,14 @@ impl OsPartitionInfo {
     }
 }
 
-/// The initramfs bind-mounts the installed OS root partition here on every
-/// StartOS boot. It exists only on a running installed system — not in the live
-/// installer — so it names the OS root exactly when there is one.
 const OS_ROOT_MOUNT: &str = "/media/startos/root";
 
-/// Resolve the installed OS root block device from its live mount.
-///
-/// It can't come from the fstab `/` entry (`/` is an overlayfs the initramfs
-/// stacks over the real partition) nor from "whatever the system booted from":
-/// during os_install we're booted off the installer USB, which is not the OS
-/// root this struct describes. The initramfs bind-mounts the real OS partition
-/// at `/media/startos/root`, so that mount is the source of truth — and its
-/// absence in the installer correctly yields no OS root.
-async fn os_root_device() -> Option<PathBuf> {
-    get_mount_source(OS_ROOT_MOUNT).await.ok().flatten()
+async fn os_root_device() -> Result<Option<PathBuf>, Error> {
+    get_mount_source(OS_ROOT_MOUNT).await
 }
 
 const BIOS_BOOT_TYPE_GUID: &str = "21686148-6449-6E6F-744E-656564454649";
 
-/// Find the BIOS boot partition on the same disk as `known_part`.
 async fn find_bios_boot_partition(known_part: &Path) -> Result<Option<PathBuf>, Error> {
     let output = Command::new("lsblk")
         .args(["-n", "-l", "-o", "NAME,PKNAME,PARTTYPE"])
@@ -173,27 +157,67 @@ async fn find_bios_boot_partition(known_part: &Path) -> Result<Option<PathBuf>, 
     Ok(None)
 }
 
-/// Resolve an fstab device spec (e.g. /dev/sda1, PARTUUID=..., UUID=...) to a
-/// canonical device path.
-async fn resolve_fstab_source(source: &str) -> Result<PathBuf, Error> {
+enum FstabSourceError {
+    Ignored(Error),
+    Fatal(Error),
+}
+
+fn unique_blkid_device(output: &str) -> Result<Option<PathBuf>, Vec<PathBuf>> {
+    let devices = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+
+    match devices.len() {
+        0 => Ok(None),
+        1 => Ok(devices.into_iter().next()),
+        _ => Err(devices),
+    }
+}
+
+async fn resolve_fstab_source(source: &str, target: &str) -> Result<PathBuf, FstabSourceError> {
+    match get_mount_source(target).await {
+        Ok(Some(device)) => return Ok(device),
+        Ok(None) => {}
+        Err(error) => return Err(FstabSourceError::Fatal(error)),
+    }
+
     if source.starts_with('/') {
         return Ok(tokio::fs::canonicalize(source)
             .await
             .unwrap_or_else(|_| PathBuf::from(source)));
     }
-    // Only TAG=value specs (PARTUUID=, UUID=, LABEL=) are resolvable via blkid;
-    // pseudo sources (overlay, tmpfs, none, ...) are not block devices.
     if !source.contains('=') {
-        return Err(Error::new(
+        return Err(FstabSourceError::Ignored(Error::new(
             eyre!("not a block device spec"),
             ErrorKind::DiskManagement,
-        ));
+        )));
     }
     let output = Command::new("blkid")
         .args(["-o", "device", "-t", source])
         .invoke(ErrorKind::DiskManagement)
-        .await?;
-    Ok(PathBuf::from(String::from_utf8(output)?.trim()))
+        .await
+        .map_err(FstabSourceError::Ignored)?;
+    let output = String::from_utf8(output)
+        .map_err(Error::from)
+        .map_err(FstabSourceError::Ignored)?;
+
+    match unique_blkid_device(&output) {
+        Ok(Some(device)) => Ok(device),
+        Ok(None) => Err(FstabSourceError::Ignored(Error::new(
+            eyre!("no matching block device"),
+            ErrorKind::DiskManagement,
+        ))),
+        Err(devices) => Err(FstabSourceError::Fatal(Error::new(
+            eyre!(
+                "fstab source {source} matches multiple devices: {}",
+                devices.iter().map(|path| path.display()).format(", ")
+            ),
+            ErrorKind::DiskManagement,
+        ))),
+    }
 }
 
 pub fn disk<C: Context>() -> ParentHandler<C> {
@@ -287,4 +311,32 @@ pub async fn list(ctx: RpcContext, _: Empty) -> Result<Vec<DiskInfo>, Error> {
 pub async fn repair() -> Result<(), Error> {
     tokio::fs::write(REPAIR_DISK_PATH, b"").await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::unique_blkid_device;
+
+    #[test]
+    fn unique_blkid_device_ignores_empty_lines() {
+        assert_eq!(unique_blkid_device("\n\n"), Ok(None));
+    }
+
+    #[test]
+    fn unique_blkid_device_accepts_one_nonempty_device() {
+        assert_eq!(
+            unique_blkid_device("\n /dev/sda1 \n"),
+            Ok(Some(PathBuf::from("/dev/sda1")))
+        );
+    }
+
+    #[test]
+    fn unique_blkid_device_rejects_multiple_devices() {
+        assert_eq!(
+            unique_blkid_device("/dev/sda1\n\n/dev/sdb1\n"),
+            Err(vec![PathBuf::from("/dev/sda1"), PathBuf::from("/dev/sdb1")])
+        );
+    }
 }

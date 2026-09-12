@@ -36,7 +36,7 @@ monorepo-wide rules and [ARCHITECTURE.md](ARCHITECTURE.md) for how this product 
 - Type-check web apps: `npm run check:ui && npm run check:setup`.
 - Type-check the runtime: `cd projects/start-os/container-runtime && npm run check`.
 - Build the UI: `make start-os-ui` (or `make start-os-uis` for ui + setup-wizard).
-- Tests: `make test` (Rust + SDK + container-runtime), `make start-core-test`, or `make backup-fs-test` for all backup-fs library tests except the mount-based `/dev/fuse` suite.
+- Tests: `make test` (all), `make start-core-test`, `make start-os-build-test` for OS image scripts, or `make backup-fs-test` for all backup-fs library tests except the mount-based `/dev/fuse` suite.
 - Format: `make start-os-format` / `make start-os-format-check` (Rust only);
   TS/web/container-runtime formatting runs through `make web-format` (root
   prettier config).
@@ -211,9 +211,10 @@ Then follow the screenshot walkthrough in [`assets/create-vm/`](assets/create-vm
 ### Testing
 
 ```sh
-make test                      # Rust + SDK + container-runtime
-make start-core-test                 # backend only
-make backup-fs-test                  # backup-fs library tests except the /dev/fuse suite
+make test                      # all tests
+make start-core-test           # backend only
+make start-os-build-test       # OS image scripts
+make backup-fs-test            # backup-fs library tests except the /dev/fuse suite
 ```
 
 The container-runtime has its own test suite — see [container-runtime/CONTRIBUTING.md](container-runtime/CONTRIBUTING.md). Note CI builds a multi-platform matrix (apple-darwin + aarch64/x86_64/riscv64 musl); local `cargo check` is linux-only, so consider platform-specific impact.
