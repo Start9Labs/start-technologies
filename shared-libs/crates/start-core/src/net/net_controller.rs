@@ -163,7 +163,11 @@ impl NetController {
     }
 
     pub(crate) async fn shutdown_forwarding(&self) -> Result<(), Error> {
-        self.forward.shutdown().await
+        let mut first_error = self.forward.drain().await.err();
+        if let Err(error) = self.port_map.drain().await {
+            first_error.get_or_insert(error);
+        }
+        first_error.map_or(Ok(()), Err)
     }
 
     /// Client config for the OS→container TLS leg when rewrapping SSL. Falls

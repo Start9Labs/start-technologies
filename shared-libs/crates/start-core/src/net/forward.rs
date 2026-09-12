@@ -1,5 +1,6 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write;
+use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, SocketAddrV4, SocketAddrV6};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -13,6 +14,7 @@ use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 use crate::GatewayId;
 use crate::context::{CliContext, RpcContext};
@@ -375,6 +377,19 @@ enum PortForwardCommand {
     Dump {
         respond: oneshot::Sender<BTreeMap<SocketAddrV4, ForwardMapping>>,
     },
+    Drain {
+        respond: oneshot::Sender<Result<(), Error>>,
+    },
+}
+
+impl PortForwardCommand {
+    fn response_is_closed(&self) -> bool {
+        match self {
+            Self::AddForward { respond, .. } => respond.is_canceled(),
+            Self::Gc { respond } | Self::Drain { respond } => respond.is_canceled(),
+            Self::Dump { respond } => respond.is_canceled(),
+        }
+    }
 }
 
 pub struct PortForwardController {
@@ -553,54 +568,92 @@ async fn nft_rule_family(
     Err(last_err.expect("loop only exits here via the stale-handle path, which sets last_err"))
 }
 
+async fn initialize_port_forwarding() -> Result<(), Error> {
+    nft_ensure_base().await?;
+    nft_rule(
+        "forward",
+        "base-established",
+        false,
+        false,
+        "ct state established,related accept",
+    )
+    .await?;
+    nft_rule_v6(
+        "forward",
+        "base-established",
+        false,
+        false,
+        "ct state established,related accept",
+    )
+    .await?;
+    Command::new("sysctl")
+        .arg("-w")
+        .arg("net.ipv4.ip_forward=1")
+        .invoke(ErrorKind::Network)
+        .await?;
+    Command::new("sysctl")
+        .arg("-w")
+        .arg("net.ipv6.conf.all.forwarding=1")
+        .invoke(ErrorKind::Network)
+        .await?;
+    Ok(())
+}
+
 impl PortForwardController {
     pub fn new() -> Self {
+        Self::spawn(initialize_port_forwarding)
+    }
+
+    fn spawn<F, Fut>(mut initialize: F) -> Self
+    where
+        F: FnMut() -> Fut + Send + 'static,
+        Fut: Future<Output = Result<(), Error>> + Send + 'static,
+    {
         let (req_send, mut req_recv) = mpsc::unbounded_channel::<PortForwardCommand>();
         let thread = NonDetachingJoinHandle::from(tokio::spawn(async move {
-            while let Err(e) = async {
-                nft_ensure_base().await?;
-                nft_rule(
-                    "forward",
-                    "base-established",
-                    false,
-                    false,
-                    "ct state established,related accept",
-                )
-                .await?;
-                // Same for the v6 forward chain (drop policy) so reply packets of
-                // a non-SSL GUA forward aren't dropped.
-                nft_rule_v6(
-                    "forward",
-                    "base-established",
-                    false,
-                    false,
-                    "ct state established,related accept",
-                )
-                .await?;
-                Command::new("sysctl")
-                    .arg("-w")
-                    .arg("net.ipv4.ip_forward=1")
-                    .invoke(ErrorKind::Network)
-                    .await?;
-                Command::new("sysctl")
-                    .arg("-w")
-                    .arg("net.ipv6.conf.all.forwarding=1")
-                    .invoke(ErrorKind::Network)
-                    .await?;
-                Ok::<_, Error>(())
-            }
-            .await
-            {
+            let mut pending = VecDeque::new();
+            'initialize: loop {
+                let initialization = initialize();
+                tokio::pin!(initialization);
+                let error = loop {
+                    tokio::select! {
+                        result = &mut initialization => match result {
+                            Ok(()) => break 'initialize,
+                            Err(error) => break error,
+                        },
+                        cmd = req_recv.recv() => match cmd {
+                            Some(PortForwardCommand::Drain { respond }) => {
+                                respond.send(Ok(())).ok();
+                            }
+                            Some(cmd) => pending.push_back(cmd),
+                            None => return,
+                        },
+                    }
+                };
                 tracing::error!(
                     "{}",
                     t!(
                         "net.forward.error-initializing-controller",
-                        error = format!("{e:#}")
+                        error = format!("{error:#}")
                     )
                 );
-                tracing::debug!("{e:?}");
-                tokio::time::sleep(Duration::from_secs(5)).await;
+                tracing::debug!("{error:?}");
+                let retry = tokio::time::sleep(Duration::from_secs(5));
+                tokio::pin!(retry);
+                loop {
+                    tokio::select! {
+                        _ = &mut retry => break,
+                        cmd = req_recv.recv() => match cmd {
+                            Some(PortForwardCommand::Drain { respond }) => {
+                                respond.send(Ok(())).ok();
+                            }
+                            Some(cmd) => pending.push_back(cmd),
+                            None => return,
+                        },
+                    }
+                }
             }
+
             let mut state = PortForwardState::default();
             let mut gc_interval = tokio::time::interval_at(
                 tokio::time::Instant::now() + PORT_FORWARD_GC_INTERVAL,
@@ -608,36 +661,42 @@ impl PortForwardController {
             );
             gc_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
-                tokio::select! {
-                    cmd = req_recv.recv() => {
-                        let Some(cmd) = cmd else {
-                            break;
-                        };
-                        match cmd {
-                            PortForwardCommand::AddForward {
-                                source,
-                                target,
-                                count,
-                                target_prefix,
-                                src_filter,
-                                respond,
-                            } => {
-                                let result = state
-                                    .add_forward(source, target, count, target_prefix, src_filter)
-                                    .await;
-                                respond.send(result).ok();
-                            }
-                            PortForwardCommand::Gc { respond } => {
-                                let result = state.gc().await;
-                                respond.send(result).ok();
-                            }
-                            PortForwardCommand::Dump { respond } => {
-                                respond.send(state.dump()).ok();
-                            }
+                let cmd = if let Some(cmd) = pending.pop_front() {
+                    Some(cmd)
+                } else {
+                    tokio::select! {
+                        cmd = req_recv.recv() => cmd,
+                        _ = gc_interval.tick() => {
+                            state.gc().await.log_err();
+                            continue;
                         }
                     }
-                    _ = gc_interval.tick() => {
-                        state.gc().await.log_err();
+                };
+                let Some(cmd) = cmd else {
+                    break;
+                };
+                if cmd.response_is_closed() {
+                    continue;
+                }
+                match cmd {
+                    PortForwardCommand::AddForward {
+                        source,
+                        target,
+                        count,
+                        target_prefix,
+                        src_filter,
+                        respond,
+                    } => {
+                        let result = state
+                            .add_forward(source, target, count, target_prefix, src_filter)
+                            .await;
+                        respond.send(result).ok();
+                    }
+                    PortForwardCommand::Gc { respond } | PortForwardCommand::Drain { respond } => {
+                        respond.send(state.gc().await).ok();
+                    }
+                    PortForwardCommand::Dump { respond } => {
+                        respond.send(state.dump()).ok();
                     }
                 }
             }
@@ -690,6 +749,15 @@ impl PortForwardController {
         let (send, recv) = oneshot::channel();
         self.req
             .send(PortForwardCommand::Gc { respond: send })
+            .map_err(err_has_exited)?;
+
+        recv.await.map_err(err_has_exited)?
+    }
+
+    async fn drain(&self) -> Result<(), Error> {
+        let (send, recv) = oneshot::channel();
+        self.req
+            .send(PortForwardCommand::Drain { respond: send })
             .map_err(err_has_exited)?;
 
         recv.await.map_err(err_has_exited)?
@@ -1132,26 +1200,22 @@ impl InterfaceForwardState {
 }
 
 impl InterfaceForwardState {
-    async fn shutdown(&mut self) -> Result<(), Error> {
-        let mapped = self
-            .state
-            .iter()
-            .flat_map(|entry| entry.mapped.iter().copied())
-            .collect::<BTreeSet<_>>();
+    async fn drain(&mut self) -> Result<(), Error> {
         self.state.clear();
-        let mut first_error = self.port_forward.gc().await.err();
-        for (ip, port) in mapped {
-            self.pmap
-                .remove_and_wait(IpAddr::V4(ip), port)
-                .await
-                .log_err();
+        let mut first_error = self.port_forward.drain().await.err();
+        for mapping in self.ipv6.values_mut() {
+            mapping.rc = Weak::new();
         }
-        let applied = std::mem::take(&mut self.ipv6)
-            .into_iter()
-            .filter_map(|(source, mapping)| mapping.applied.map(|spec| (source, spec)))
-            .collect::<Vec<_>>();
-        for (source, spec) in applied {
-            if let Err(error) = unforward6(
+        let sources = self.ipv6.keys().copied().collect::<Vec<_>>();
+        for source in sources {
+            let Some(spec) = self
+                .ipv6
+                .get(&source)
+                .and_then(|mapping| mapping.applied.clone())
+            else {
+                continue;
+            };
+            match unforward6(
                 source,
                 spec.target,
                 spec.target_prefix,
@@ -1159,15 +1223,13 @@ impl InterfaceForwardState {
             )
             .await
             {
-                first_error.get_or_insert(error);
-            }
-            if spec.src_filter.is_none() {
-                self.pmap
-                    .remove_and_wait(IpAddr::V6(*source.ip()), source.port())
-                    .await
-                    .log_err();
+                Ok(()) => self.ipv6.get_mut(&source).unwrap().applied = None,
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                }
             }
         }
+        self.ipv6.retain(|_, mapping| mapping.applied.is_some());
         first_error.map_or(Ok(()), Err)
     }
 }
@@ -1261,21 +1323,30 @@ enum InterfaceForwardCommand {
     },
     Sync(oneshot::Sender<Result<(), Error>>),
     DumpTable(oneshot::Sender<Result<ForwardTable, Error>>),
-    Shutdown(oneshot::Sender<Result<(), Error>>),
+    Drain(oneshot::Sender<Result<(), Error>>),
 }
 
 pub struct InterfacePortForwardController {
     req: mpsc::UnboundedSender<InterfaceForwardCommand>,
+    cancel: CancellationToken,
     _thread: NonDetachingJoinHandle<()>,
 }
 
 impl InterfacePortForwardController {
     pub fn new(
-        mut ip_info: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
+        ip_info: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
         pmap: PortMapController,
     ) -> Self {
-        let port_forward = PortForwardController::new();
+        Self::with_port_forward(ip_info, pmap, PortForwardController::new())
+    }
 
+    fn with_port_forward(
+        mut ip_info: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
+        pmap: PortMapController,
+        port_forward: PortForwardController,
+    ) -> Self {
+        let cancel = CancellationToken::new();
+        let actor_cancel = cancel.clone();
         let (req_send, mut req_recv) = mpsc::unbounded_channel::<InterfaceForwardCommand>();
         let thread = NonDetachingJoinHandle::from(tokio::spawn(async move {
             let mut state = InterfaceForwardState::new(port_forward, pmap);
@@ -1285,48 +1356,82 @@ impl InterfacePortForwardController {
                 PORT_FORWARD_GC_INTERVAL,
             );
             reconcile_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            loop {
+            'active: loop {
                 tokio::select! {
+                    biased;
+                    _ = actor_cancel.cancelled() => break,
                     msg = req_recv.recv() => {
-                        if let Some(cmd) = msg {
-                            match cmd {
-                                InterfaceForwardCommand::Forward(req, re) => {
-                                    re.send(state.handle_request(req, &interfaces).await).ok()
-                                }
-                                InterfaceForwardCommand::Forward6 { source, spec, respond } => {
-                                    respond.send(state.add_forward6(source, spec, &interfaces).await).ok()
-                                }
-                                InterfaceForwardCommand::Sync(re) => {
-                                    re.send(state.sync(&interfaces).await).ok()
-                                }
-                                InterfaceForwardCommand::DumpTable(re) => {
-                                    let result = state.port_forward.dump().await.map(|applied| {
+                        let Some(cmd) = msg else {
+                            return;
+                        };
+                        match cmd {
+                            InterfaceForwardCommand::Forward(req, re) => {
+                                let result = tokio::select! {
+                                    biased;
+                                    _ = actor_cancel.cancelled() => break 'active,
+                                    result = state.handle_request(req, &interfaces) => result,
+                                };
+                                re.send(result).ok()
+                            }
+                            InterfaceForwardCommand::Forward6 { source, spec, respond } => {
+                                let result = tokio::select! {
+                                    biased;
+                                    _ = actor_cancel.cancelled() => break 'active,
+                                    result = state.add_forward6(source, spec, &interfaces) => result,
+                                };
+                                respond.send(result).ok()
+                            }
+                            InterfaceForwardCommand::Sync(re) => {
+                                let result = tokio::select! {
+                                    biased;
+                                    _ = actor_cancel.cancelled() => break 'active,
+                                    result = state.sync(&interfaces) => result,
+                                };
+                                re.send(result).ok()
+                            }
+                            InterfaceForwardCommand::DumpTable(re) => {
+                                let result = tokio::select! {
+                                    biased;
+                                    _ = actor_cancel.cancelled() => break 'active,
+                                    result = state.port_forward.dump() => result.map(|applied| {
                                         ForwardTable::from_state(&state, &applied)
-                                    });
-                                    re.send(result).ok()
-                                }
-                                InterfaceForwardCommand::Shutdown(re) => {
-                                    re.send(state.shutdown().await).ok();
-                                    break;
-                                }
-                            };
-                        } else {
-                            break;
-                        }
+                                    }),
+                                };
+                                re.send(result).ok()
+                            }
+                            InterfaceForwardCommand::Drain(respond) => {
+                                respond.send(state.drain().await).ok();
+                                break 'active;
+                            }
+                        };
                     }
                     _ = ip_info.changed() => {
                         interfaces = ip_info.read();
-                        state.sync(&interfaces).await.log_err();
+                        tokio::select! {
+                            biased;
+                            _ = actor_cancel.cancelled() => break,
+                            result = state.sync(&interfaces) => result.log_err(),
+                        };
                     }
                     _ = reconcile_interval.tick() => {
-                        state.reconcile(&interfaces).await.log_err();
+                        tokio::select! {
+                            biased;
+                            _ = actor_cancel.cancelled() => break,
+                            result = state.reconcile(&interfaces) => result.log_err(),
+                        };
                     }
+                }
+            }
+            while let Some(cmd) = req_recv.recv().await {
+                if let InterfaceForwardCommand::Drain(respond) = cmd {
+                    respond.send(state.drain().await).ok();
                 }
             }
         }));
 
         Self {
             req: req_send,
+            cancel,
             _thread: thread,
         }
     }
@@ -1353,7 +1458,6 @@ impl InterfacePortForwardController {
         receive.await.map_err(err_has_exited)
     }
 
-    /// Adds contiguous forwards mapped by port offset.
     pub(super) async fn add_range(
         &self,
         external: u16,
@@ -1397,10 +1501,11 @@ impl InterfacePortForwardController {
         res.await.map_err(err_has_exited)?
     }
 
-    pub async fn shutdown(&self) -> Result<(), Error> {
+    pub async fn drain(&self) -> Result<(), Error> {
+        self.cancel.cancel();
         let (req, res) = oneshot::channel();
         self.req
-            .send(InterfaceForwardCommand::Shutdown(req))
+            .send(InterfaceForwardCommand::Drain(req))
             .map_err(err_has_exited)?;
         res.await.map_err(err_has_exited)?
     }
@@ -1809,5 +1914,104 @@ mod tests {
         // A host daemon's port is nobody's to take, root or not.
         assert!(ports.try_alloc(5432, false, true).is_none());
         assert!(ports.try_alloc_range(1020, 10, true).is_ok());
+    }
+
+    #[test]
+    fn failed_ipv6_retirement_keeps_applied_state() {
+        let spec = ipv6_spec();
+        let mut mapping = Ipv6ForwardMapping {
+            desired: spec.clone(),
+            applied: Some(spec.clone()),
+            rc: Weak::new(),
+        };
+        let operation = Ipv6ForwardOperation::Remove(spec.clone());
+
+        mapping.operation_failed(&operation);
+
+        assert_eq!(mapping.applied, Some(spec));
+        assert_eq!(mapping.next_operation(), Some(operation));
+    }
+
+    #[tokio::test]
+    async fn a_preinitialization_request_resumes_after_initialization() {
+        let initialize = Arc::new(tokio::sync::Notify::new());
+        let controller = PortForwardController::spawn({
+            let initialize = initialize.clone();
+            move || {
+                let initialize = initialize.clone();
+                async move {
+                    initialize.notified().await;
+                    Ok(())
+                }
+            }
+        });
+        let request = controller.dump();
+        tokio::pin!(request);
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut request)
+                .await
+                .is_err()
+        );
+        initialize.notify_one();
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), &mut request)
+                .await
+                .expect("dump stayed blocked after initialization")
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn drain_interrupts_a_forward_waiting_for_initialization() {
+        use imbl::OrdSet;
+        use imbl_value::InternedString;
+
+        use crate::db::model::public::IpInfo;
+
+        let gateway = GatewayId::from(InternedString::intern("eth0"));
+        let interfaces = Watch::new(OrdMap::from_iter([(
+            gateway.clone(),
+            NetworkInterfaceInfo {
+                ip_info: Some(Arc::new(IpInfo {
+                    subnets: OrdSet::from_iter(["192.168.1.2/24".parse::<IpNet>().unwrap()]),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+        )]));
+        let controller = InterfacePortForwardController::with_port_forward(
+            interfaces.clone(),
+            PortMapController::new(interfaces),
+            PortForwardController::spawn(|| std::future::pending::<Result<(), Error>>()),
+        );
+        let request = controller.add_range(
+            8080,
+            1,
+            ForwardRequirements {
+                public_gateways: BTreeSet::from([gateway]),
+                private_ips: BTreeSet::new(),
+                secure: true,
+            },
+            SocketAddrV4::new(Ipv4Addr::new(10, 0, 3, 2), 8080),
+        );
+        tokio::pin!(request);
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut request)
+                .await
+                .is_err()
+        );
+        tokio::time::timeout(Duration::from_secs(1), controller.drain())
+            .await
+            .expect("drain timed out")
+            .unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), &mut request)
+                .await
+                .expect("forward request stayed blocked")
+                .is_err()
+        );
     }
 }

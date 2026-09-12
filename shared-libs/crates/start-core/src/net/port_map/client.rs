@@ -5,10 +5,10 @@
 //! [`crate::tunnel::forward::pcp`]). PCP/NAT-PMP via `crab_nat`, UPnP via
 //! [`crate::net::port_map::upnp`].
 //!
-//! All best-effort: failures are logged, never surfaced to the nftables forward
-//! reconcile, so a gateway with none of these just falls back to a manual
-//! forward. `ensure`/`remove` are fire-and-forget sends so a slow or absent
-//! gateway never blocks the forward path.
+//! Reconciliation is best-effort: failures are logged. Gateways without these
+//! protocols require a manual forward. Fire-and-forget requests keep gateway
+//! latency off the forwarding path. An awaited drain surfaces teardown failures
+//! during shutdown.
 //!
 //! Work is sharded per local IP (one task per gateway interface), so a gateway
 //! that answers slowly or not at all never head-of-line-blocks mapping attempts
@@ -187,6 +187,7 @@ enum Active {
         external_ip: Option<Ipv4Addr>,
         /// Needed by owner-scoped hostname deletion.
         internal_port: u16,
+        gateway: Gateway<Tokio>,
     },
 }
 
@@ -205,6 +206,9 @@ enum Command {
     ExternalIp {
         external_port: u16,
         resp: oneshot::Sender<Option<IpAddr>>,
+    },
+    Drain {
+        respond: oneshot::Sender<Result<(), Error>>,
     },
 }
 
@@ -330,23 +334,31 @@ impl PortMapController {
         }
     }
 
-    pub(crate) async fn remove_and_wait(
-        &self,
-        local_ip: IpAddr,
-        external_port: u16,
-    ) -> Result<(), Error> {
-        let mut responses = Vec::new();
+    /// Remove the SNI HOSTNAME mapping for `hostname` on
+    /// `(local_ip, external_port)`, leaving any other hostnames on that port.
+    pub fn remove_hostname(&self, local_ip: IpAddr, external_port: u16, hostname: String) {
+        self.shard(local_ip)
+            .send(Command::Remove {
+                key: (
+                    local_ip,
+                    external_port,
+                    Some(hostname),
+                    TransportProtocol::Tcp,
+                ),
+                respond: None,
+            })
+            .ok();
+    }
+
+    pub(crate) async fn drain(&self) -> Result<(), Error> {
+        let shards = self
+            .shards
+            .peek(|shards| shards.values().cloned().collect::<Vec<_>>());
+        let mut responses = Vec::with_capacity(shards.len());
         let mut first_error = None;
-        for protocol in [TransportProtocol::Tcp, TransportProtocol::Udp] {
+        for shard in shards {
             let (respond, receive) = oneshot::channel();
-            if self
-                .shard(local_ip)
-                .send(Command::Remove {
-                    key: (local_ip, external_port, None, protocol),
-                    respond: Some(respond),
-                })
-                .is_err()
-            {
+            if shard.send(Command::Drain { respond }).is_err() {
                 first_error.get_or_insert_with(controller_exited);
             } else {
                 responses.push(receive);
@@ -364,22 +376,6 @@ impl PortMapController {
             }
         }
         first_error.map_or(Ok(()), Err)
-    }
-
-    /// Remove the SNI HOSTNAME mapping for `hostname` on
-    /// `(local_ip, external_port)`, leaving any other hostnames on that port.
-    pub fn remove_hostname(&self, local_ip: IpAddr, external_port: u16, hostname: String) {
-        self.shard(local_ip)
-            .send(Command::Remove {
-                key: (
-                    local_ip,
-                    external_port,
-                    Some(hostname),
-                    TransportProtocol::Tcp,
-                ),
-                respond: None,
-            })
-            .ok();
     }
 
     /// Gateway-assigned external IP if a TCP mapping is active for
@@ -403,6 +399,7 @@ impl PortMapController {
 /// Gateway-reported external address of the active TCP mapping on
 /// `external_port`, kept only where the public Internet can reach it.
 fn external_ip_of(
+    desired: &BTreeMap<MappingKey, Spec>,
     active: &BTreeMap<MappingKey, Active>,
     stale: &BTreeSet<MappingKey>,
     external_port: u16,
@@ -410,7 +407,10 @@ fn external_ip_of(
     active
         .iter()
         .find(|(key, _)| {
-            key.1 == external_port && key.3 == TransportProtocol::Tcp && !stale.contains(*key)
+            key.1 == external_port
+                && key.3 == TransportProtocol::Tcp
+                && desired.contains_key(*key)
+                && !stale.contains(*key)
         })
         .and_then(|(_, a)| {
             routable_external_ip(match a {
@@ -458,10 +458,14 @@ fn spawn_shard(
                     }
                     Some(Command::ExternalIp { external_port, resp }) => {
                         let _ = resp.send(external_ip_of(
+                            &state.desired,
                             &state.active,
                             &state.stale,
                             external_port,
                         ));
+                    }
+                    Some(Command::Drain { respond }) => {
+                        respond.send(state.drain().await).ok();
                     }
                     None => break,
                 },
@@ -601,8 +605,7 @@ struct State {
     desired: BTreeMap<MappingKey, Spec>,
     active: BTreeMap<MappingKey, Active>,
     upnp_cache: BTreeMap<Ipv4Addr, (Gateway<Tokio>, Instant)>,
-    /// Consecutive mapping failures per key and when the latest attempt ran —
-    /// drives the exponential backoff between retries.
+    /// Stores each mapping's failure count and latest attempt for retry backoff.
     failures: BTreeMap<MappingKey, (u32, Instant)>,
     stale: BTreeSet<MappingKey>,
 }
@@ -637,6 +640,20 @@ impl State {
         self.failures.remove(&key);
         self.stale.remove(&key);
         self.teardown(key).await
+    }
+
+    async fn drain(&mut self) -> Result<(), Error> {
+        self.desired.clear();
+        self.failures.clear();
+        self.stale.clear();
+        let keys = self.active.keys().cloned().collect::<Vec<_>>();
+        let mut first_error = None;
+        for key in keys {
+            if let Err(error) = self.teardown(key).await {
+                first_error.get_or_insert(error);
+            }
+        }
+        first_error.map_or(Ok(()), Err)
     }
 
     fn backoff_elapsed(&self, key: &MappingKey) -> bool {
@@ -715,28 +732,14 @@ impl State {
             Some(Active::Upnp {
                 external_ip,
                 internal_port,
+                gateway,
             }) => {
-                let IpAddr::V4(local_ip) = key.0 else {
-                    return Ok(());
-                };
-                let Some(gateway) = self.gateway_for(local_ip).await else {
-                    self.active.insert(
-                        key,
-                        Active::Upnp {
-                            external_ip,
-                            internal_port,
-                        },
-                    );
-                    return Err(Error::new(
-                        eyre!("UPnP gateway for {local_ip} is unavailable"),
-                        ErrorKind::Network,
-                    ));
-                };
                 let result = match &key.2 {
                     Some(hostname) => {
-                        upnp::remove_hostname_mapping(gateway, key.1, internal_port, hostname).await
+                        upnp::remove_hostname_mapping(&gateway, key.1, internal_port, hostname)
+                            .await
                     }
-                    None => upnp::remove_port(gateway, key.3.upnp(), key.1).await,
+                    None => upnp::remove_port(&gateway, key.3.upnp(), key.1).await,
                 };
                 if result.is_err() {
                     self.active.insert(
@@ -744,6 +747,7 @@ impl State {
                         Active::Upnp {
                             external_ip,
                             internal_port,
+                            gateway,
                         },
                     );
                 }
@@ -905,18 +909,22 @@ impl State {
                     return attempted;
                 }
                 attempted = true;
-                let (added, invalidate_upnp_cache) = match self.gateway_for(local_v4).await {
-                    Some(gw) => {
+                let (gateway, invalidate_upnp_cache) = match self
+                    .gateway_for(local_v4)
+                    .await
+                    .cloned()
+                {
+                    Some(gateway) => {
                         report_local(interfaces, local_ip, true);
-                        if !upnp::supports_hostname(gw) {
+                        if !upnp::supports_hostname(&gateway) {
                             crate::dev_log!(
                                 debug,
                                 "UPnP HOSTNAME skip on {local_ip}: IGD doesn't advertise the vendor action"
                             );
-                            (false, false)
+                            (None, false)
                         } else {
                             match upnp::add_hostname_mapping(
-                                gw,
+                                &gateway,
                                 external_port,
                                 local_v4,
                                 spec.internal_port,
@@ -929,33 +937,31 @@ impl State {
                                         "UPnP HOSTNAME mapped {external_port}->{local_v4}:{} {hostname}",
                                         spec.internal_port
                                     );
-                                    (true, false)
+                                    (Some(gateway), false)
                                 }
                                 Err(e) => {
                                     crate::dev_log!(
                                         debug,
                                         "UPnP HOSTNAME map {local_v4}:{external_port} {hostname} failed: {e}"
                                     );
-                                    (false, true)
+                                    (None, true)
                                 }
                             }
                         }
                     }
                     None => {
                         report_local(interfaces, local_ip, false);
-                        (false, true)
+                        (None, true)
                     }
                 };
-                if added {
-                    let external_ip = match self.gateway_for(local_v4).await {
-                        Some(gw) => upnp::external_ipv4(gw).await.ok().flatten(),
-                        None => None,
-                    };
+                if let Some(gateway) = gateway {
+                    let external_ip = upnp::external_ipv4(&gateway).await.ok().flatten();
                     self.active.insert(
                         key.clone(),
                         Active::Upnp {
                             external_ip,
                             internal_port: spec.internal_port,
+                            gateway,
                         },
                     );
                 } else if invalidate_upnp_cache {
@@ -1105,12 +1111,12 @@ impl State {
                 return attempted;
             }
             attempted = true;
-            let added = match self.gateway_for(local_v4).await {
-                Some(gw) => {
+            let gateway = match self.gateway_for(local_v4).await.cloned() {
+                Some(gateway) => {
                     // Discovery alone proves the IGD, whatever the SOAP call says.
                     report_local(interfaces, local_ip, true);
                     match upnp::add_port(
-                        gw,
+                        &gateway,
                         protocol.upnp(),
                         external_port,
                         local_v4,
@@ -1123,31 +1129,30 @@ impl State {
                                 "UPnP {protocol:?} mapped {external_port}->{local_v4}:{}",
                                 spec.internal_port
                             );
-                            true
+                            Some(gateway)
                         }
                         Err(e) => {
                             crate::dev_log!(
                                 debug,
                                 "UPnP {protocol:?} map {local_v4}:{external_port} failed: {e}"
                             );
-                            false
+                            None
                         }
                     }
                 }
                 None => {
                     report_local(interfaces, local_ip, false);
-                    false
+                    None
                 }
             };
-            if added {
-                // Best-effort external IP (local IGD query) so a reachability check
-                // can short-circuit; `get_external_ipv4` discards private/CGNAT.
-                let external_ip = upnp::get_external_ipv4(local_v4).await.ok().flatten();
+            if let Some(gateway) = gateway {
+                let external_ip = upnp::external_ipv4(&gateway).await.ok().flatten();
                 self.active.insert(
                     key.clone(),
                     Active::Upnp {
                         external_ip,
                         internal_port: spec.internal_port,
+                        gateway,
                     },
                 );
             } else {
@@ -1219,6 +1224,17 @@ mod tests {
         Watch::new(OrdMap::new())
     }
 
+    fn test_gateway() -> Gateway<Tokio> {
+        Gateway {
+            addr: "127.0.0.1:49001".parse().unwrap(),
+            root_url: String::new(),
+            control_url: String::new(),
+            control_schema_url: String::new(),
+            control_schema: Default::default(),
+            provider: Tokio,
+        }
+    }
+
     // The filter both protocols' reported addresses funnel through. PCP grants
     // cannot be built here (`crab_nat::PortMapping` has private fields), so the
     // Pcp arm reaches this only by construction: `external_ip_of` has the one
@@ -1267,6 +1283,7 @@ mod tests {
             Active::Upnp {
                 external_ip: Some(public),
                 internal_port: 443,
+                gateway: test_gateway(),
             },
         );
         active.insert(
@@ -1274,20 +1291,36 @@ mod tests {
             Active::Upnp {
                 external_ip: Some(public),
                 internal_port: 8080,
+                gateway: test_gateway(),
             },
         );
 
         assert_eq!(
-            external_ip_of(&active, &BTreeSet::new(), 443),
+            external_ip_of(
+                &active.keys().cloned().map(|key| (key, spec())).collect(),
+                &active,
+                &BTreeSet::new(),
+                443
+            ),
             Some(IpAddr::V4(public))
         );
         assert_eq!(
-            external_ip_of(&active, &BTreeSet::new(), 8080),
+            external_ip_of(
+                &active.keys().cloned().map(|key| (key, spec())).collect(),
+                &active,
+                &BTreeSet::new(),
+                8080
+            ),
             None,
             "UDP is not TCP"
         );
         assert_eq!(
-            external_ip_of(&active, &BTreeSet::new(), 444),
+            external_ip_of(
+                &active.keys().cloned().map(|key| (key, spec())).collect(),
+                &active,
+                &BTreeSet::new(),
+                444
+            ),
             None,
             "no mapping on that port"
         );
@@ -1302,10 +1335,38 @@ mod tests {
             Active::Upnp {
                 external_ip: Some(Ipv4Addr::new(1, 2, 3, 4)),
                 internal_port: 443,
+                gateway: test_gateway(),
             },
         )]);
 
-        assert_eq!(external_ip_of(&active, &BTreeSet::from([key]), 443), None);
+        assert_eq!(
+            external_ip_of(
+                &active.keys().cloned().map(|key| (key, spec())).collect(),
+                &active,
+                &BTreeSet::from([key]),
+                443
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn an_active_undesired_mapping_answers_nothing() {
+        let ip: IpAddr = Ipv4Addr::new(10, 59, 0, 2).into();
+        let key: MappingKey = (ip, 443, None, TransportProtocol::Tcp);
+        let active = BTreeMap::from([(
+            key,
+            Active::Upnp {
+                external_ip: Some(Ipv4Addr::new(1, 2, 3, 4)),
+                internal_port: 443,
+                gateway: test_gateway(),
+            },
+        )]);
+
+        assert_eq!(
+            external_ip_of(&BTreeMap::new(), &active, &BTreeSet::new(), 443),
+            None
+        );
     }
 
     #[test]
@@ -1317,9 +1378,18 @@ mod tests {
             Active::Upnp {
                 external_ip: Some(Ipv4Addr::new(192, 168, 8, 1)),
                 internal_port: 443,
+                gateway: test_gateway(),
             },
         );
-        assert_eq!(external_ip_of(&active, &BTreeSet::new(), 443), None);
+        assert_eq!(
+            external_ip_of(
+                &active.keys().cloned().map(|key| (key, spec())).collect(),
+                &active,
+                &BTreeSet::new(),
+                443
+            ),
+            None
+        );
     }
 
     // Distinct hostnames on the same external port are independent mappings;
@@ -1637,5 +1707,19 @@ mod tests {
             gws.is_empty(),
             "OutboundOnly must yield no candidates, got {gws:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn drain_clears_desired_state_without_disabling_reuse() {
+        let ip: IpAddr = "fd00:59::2".parse().unwrap();
+        let key: MappingKey = (ip, 443, None, TransportProtocol::Tcp);
+        let mut state = State::default();
+        state.ensure(&interfaces(), key.clone(), spec()).await;
+
+        state.drain().await.unwrap();
+        assert!(state.desired.is_empty());
+
+        state.ensure(&interfaces(), key.clone(), spec()).await;
+        assert!(state.desired.contains_key(&key));
     }
 }
