@@ -75,7 +75,6 @@ delete_tagged() {
 {
     delete_tagged
     if [ "${UNDO:-0}" != 1 ]; then
-        # Private forwards accept on-link and private sources.
         if [ -n "${src_subnet:-}" ]; then
             echo "add rule ip startos prerouting ip saddr $src_subnet ip daddr $sip $PROTO $dnat comment \"$TAG\""
             echo "add rule ip startos prerouting ip saddr $PRIVATE_IPV4_SUBNETS ip daddr $sip $PROTO $dnat comment \"$TAG\""
