@@ -80,11 +80,17 @@ export class RefreshAlertComponent {
 
   protected async reload(): Promise<void> {
     let loader: Subscription | undefined
+    let shouldReload = true
 
     try {
       loader = this.isPwa
         ? this.loader.open(this.i18n.transform('Reloading PWA')).subscribe()
         : undefined
+    } catch (e: unknown) {
+      console.error(e)
+    }
+
+    try {
       if (
         this.updates.isEnabled &&
         this.win.navigator.serviceWorker.controller !== null
@@ -93,6 +99,8 @@ export class RefreshAlertComponent {
         await this.updates.activateUpdate()
       }
     } catch (e: unknown) {
+      shouldReload = false
+
       try {
         if (e instanceof HttpError || typeof e === 'string') {
           this.error.handleError(e)
@@ -107,9 +115,11 @@ export class RefreshAlertComponent {
     } finally {
       try {
         loader?.unsubscribe()
-      } finally {
-        this.win.location.reload()
+      } catch (e: unknown) {
+        console.error(e)
       }
+
+      if (shouldReload) this.win.location.reload()
     }
   }
 }
