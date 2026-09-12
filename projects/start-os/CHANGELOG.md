@@ -128,6 +128,9 @@ for the detail behind its highlights.
 
 ### Fixed
 
+- **Browser tabs now offer Reload in the Refresh Needed dialog.** A page opened
+  on this release can switch to a newer interface without a hard refresh.
+
 - **The port-forwarding test reports a port as open to the Internet only where
   it is reachable from the Internet.** Where StartOS's port-forward request was
   granted by a router that sits behind another router, the test could pass a

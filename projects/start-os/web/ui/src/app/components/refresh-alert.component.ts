@@ -2,13 +2,13 @@ import { Component, inject } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { SwUpdate } from '@angular/service-worker'
 import { WA_WINDOW } from '@ng-web-apis/common'
-import { i18nPipe } from '@start9labs/shared'
+import { ErrorService, HttpError, i18nPipe } from '@start9labs/shared'
 import { Version } from '@start9labs/start-core'
 import { TuiResponsiveDialog } from '@taiga-ui/addon-mobile'
 import { TuiButton } from '@taiga-ui/core'
 import { TuiNotificationMiddleService } from '@taiga-ui/kit'
 import { PatchDB } from 'patch-db-client'
-import { distinctUntilChanged, map, merge, Subject } from 'rxjs'
+import { distinctUntilChanged, map, merge, Subject, Subscription } from 'rxjs'
 import { ConfigService } from 'src/app/services/config.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 
@@ -30,45 +30,23 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
               | i18n
           }}
         </p>
-        <button
-          tuiButton
-          appearance="secondary"
-          style="float: right"
-          [tuiAppearanceFocus]="false"
-          (click)="pwaReload()"
-        >
-          {{ 'Refresh' | i18n }}
-        </button>
       } @else {
-        {{
-          'Your user interface is cached and out of date. Hard refresh the page to get the latest UI.'
-            | i18n
-        }}
-        <ul>
-          <li>
-            <b>On Mac (Chrome/Firefox)</b>
-            : cmd + shift + R
-          </li>
-          <li>
-            <b>On Mac (Safari)</b>
-            : option + cmd + R, or hold option and choose View > Reload Page
-            from Origin
-          </li>
-          <li>
-            <b>On Linux/Windows</b>
-            : ctrl + shift + R
-          </li>
-        </ul>
-        <button
-          tuiButton
-          appearance="secondary"
-          style="float: right"
-          [tuiAppearanceFocus]="false"
-          (click)="dismiss$.next()"
-        >
-          {{ 'Ok' | i18n }}
-        </button>
+        <p>
+          {{
+            'StartOS has been updated, but this page is still running the previous interface. Reload the page to get the latest version.'
+              | i18n
+          }}
+        </p>
       }
+      <button
+        tuiButton
+        appearance="secondary"
+        style="float: right"
+        [tuiAppearanceFocus]="false"
+        (click)="reload()"
+      >
+        {{ (isPwa ? 'Refresh' : 'Reload') | i18n }}
+      </button>
     </ng-template>
   `,
   imports: [TuiResponsiveDialog, TuiButton, i18nPipe],
@@ -77,6 +55,7 @@ export class RefreshAlertComponent {
   private readonly win = inject(WA_WINDOW)
   private readonly updates = inject(SwUpdate)
   private readonly loader = inject(TuiNotificationMiddleService)
+  private readonly error = inject(ErrorService)
   private readonly version = Version.parse(inject(ConfigService).version)
 
   readonly i18n = inject(i18nPipe)
@@ -99,16 +78,38 @@ export class RefreshAlertComponent {
     },
   )
 
-  async pwaReload() {
+  protected async reload(): Promise<void> {
+    let loader: Subscription | undefined
+
     try {
-      this.loader.open('Reloading PWA').subscribe()
-      // attempt to update to the latest client version available
-      await this.updates.activateUpdate()
-    } catch (e) {
-      console.error('Error activating update from service worker: ', e)
+      loader = this.isPwa
+        ? this.loader.open(this.i18n.transform('Reloading PWA')).subscribe()
+        : undefined
+      if (
+        this.updates.isEnabled &&
+        this.win.navigator.serviceWorker.controller !== null
+      ) {
+        await this.updates.checkForUpdate()
+        await this.updates.activateUpdate()
+      }
+    } catch (e: unknown) {
+      try {
+        if (e instanceof HttpError || typeof e === 'string') {
+          this.error.handleError(e)
+        } else if (e instanceof Error) {
+          this.error.handleError(e.message)
+        } else {
+          console.error(e)
+        }
+      } catch (reportingError: unknown) {
+        console.error(e, reportingError)
+      }
     } finally {
-      // always reload, as this resolves most out of sync cases
-      this.win.location.reload()
+      try {
+        loader?.unsubscribe()
+      } finally {
+        this.win.location.reload()
+      }
     }
   }
 }
