@@ -384,7 +384,6 @@ impl NetServiceData {
         // together with the DNAT (see the reconcile below).
         let mut gua_forwards = GuaForwardMap::new();
         let binds = self.binds.entry(id.clone()).or_default();
-        let mut reconciliation_error = None;
 
         let net_ifaces = ctrl.net_iface.watcher.ip_info();
         let host_addresses: Vec<_> = host.addresses().collect();
@@ -782,9 +781,6 @@ impl NetServiceData {
                     )
                     .await?;
                 binds.gua_forwards.insert(key, (spec, result.lease));
-                if let Err(error) = result.reconciliation {
-                    reconciliation_error.get_or_insert(error);
-                }
             }
         }
 
@@ -812,13 +808,10 @@ impl NetServiceData {
                         .add_range(external, spec.count, spec.requirements.clone(), spec.target)
                         .await?;
                     binds.forwards.insert(external, (spec, result.lease));
-                    if let Err(error) = result.reconciliation {
-                        reconciliation_error.get_or_insert(error);
-                    }
                 }
             }
         }
-        ctrl.forward.gc().await.log_err();
+        let reconciliation_error = ctrl.forward.gc().await.err();
 
         // The vhost controller owns every upstream IPv4 port map for its ports —
         // PCP HOSTNAME for a public domain, a plain pinhole for a bare public IPv4
