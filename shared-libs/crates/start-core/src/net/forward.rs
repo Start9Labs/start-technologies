@@ -707,15 +707,11 @@ pub(super) fn target_prefix_for(
 ) -> u8 {
     ip_info
         .iter()
-        .find_map(|(_, info)| {
-            info.ip_info.as_ref().and_then(|ip_info| {
-                ip_info
-                    .subnets
-                    .iter()
-                    .find(|subnet| subnet.contains(&IpAddr::V4(target)))
-            })
-        })
+        .filter_map(|(_, info)| info.ip_info.as_ref())
+        .flat_map(|ip_info| ip_info.subnets.iter())
+        .filter(|subnet| subnet.contains(&IpAddr::V4(target)))
         .map(IpNet::prefix_len)
+        .max()
         .unwrap_or(fallback)
 }
 
@@ -922,7 +918,7 @@ impl InterfaceForwardEntry {
 
         let rc = self.cache_target(reqs, target, target_prefix, rc);
 
-        self.update(ip_info, port_forward, pmap).await?;
+        self.update(ip_info, port_forward, pmap).await.log_err();
 
         Ok(rc)
     }
@@ -1071,6 +1067,35 @@ impl InterfaceForwardState {
             first_error.get_or_insert(error);
         }
         first_error.map_or(Ok(()), Err)
+    }
+}
+
+impl Drop for InterfaceForwardState {
+    fn drop(&mut self) {
+        let applied = std::mem::take(&mut self.ipv6)
+            .into_iter()
+            .filter_map(|(source, mapping)| mapping.applied.map(|spec| (source, spec)))
+            .collect::<Vec<_>>();
+        if !applied.is_empty() {
+            let pmap = self.pmap.clone();
+            tokio::spawn(async move {
+                for (source, spec) in applied {
+                    if unforward6(
+                        source,
+                        spec.target,
+                        spec.target_prefix,
+                        spec.src_filter.as_ref(),
+                    )
+                    .await
+                    .log_err()
+                    .is_some()
+                        && spec.src_filter.is_none()
+                    {
+                        pmap.remove(IpAddr::V6(*source.ip()), source.port());
+                    }
+                }
+            });
+        }
     }
 }
 
@@ -1464,31 +1489,42 @@ mod tests {
 
         use crate::db::model::public::IpInfo;
 
-        let gateway = GatewayId::from(InternedString::intern("eth0"));
-        let interfaces = |subnet: &str| {
-            let subnets: OrdSet<IpNet> = [subnet.parse::<IpNet>().unwrap()].into_iter().collect();
-            [(
-                gateway.clone(),
-                NetworkInterfaceInfo {
-                    ip_info: Some(Arc::new(IpInfo {
-                        subnets,
-                        ..Default::default()
-                    })),
-                    ..Default::default()
-                },
-            )]
-            .into_iter()
-            .collect()
+        let interfaces = |entries: &[(&str, &str)]| {
+            entries
+                .iter()
+                .map(|(gateway, subnet)| {
+                    let subnets: OrdSet<IpNet> =
+                        [subnet.parse::<IpNet>().unwrap()].into_iter().collect();
+                    (
+                        GatewayId::from(InternedString::intern(*gateway)),
+                        NetworkInterfaceInfo {
+                            ip_info: Some(Arc::new(IpInfo {
+                                subnets,
+                                ..Default::default()
+                            })),
+                            ..Default::default()
+                        },
+                    )
+                })
+                .collect()
         };
         let target = Ipv4Addr::new(10, 0, 0, 2);
 
         assert_eq!(
-            target_prefix_for(&interfaces("10.0.0.0/24"), target, 32),
+            target_prefix_for(&interfaces(&[("eth0", "10.0.0.0/24")]), target, 32),
             24
         );
         assert_eq!(
-            target_prefix_for(&interfaces("10.0.0.0/16"), target, 32),
+            target_prefix_for(&interfaces(&[("eth0", "10.0.0.0/16")]), target, 32),
             16
+        );
+        assert_eq!(
+            target_prefix_for(
+                &interfaces(&[("eth0", "10.0.0.0/16"), ("eth1", "10.0.0.0/24")]),
+                target,
+                32,
+            ),
+            24
         );
         assert_eq!(target_prefix_for(&OrdMap::new(), target, 32), 32);
     }

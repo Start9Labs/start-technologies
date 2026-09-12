@@ -828,7 +828,7 @@ impl NetServiceData {
                 );
             }
         }
-        ctrl.forward.gc().await?;
+        ctrl.forward.gc().await.log_err();
 
         // The vhost controller owns every upstream IPv4 port map for its ports —
         // PCP HOSTNAME for a public domain, a plain pinhole for a bare public IPv4
@@ -891,7 +891,6 @@ impl NetServiceData {
         Ok(())
     }
 
-    /// Reconciles IPv6 forwards and records before dropping host bookkeeping.
     async fn retire(&mut self, ctrl: &NetController, id: HostId) -> Result<(), Error> {
         if !self.binds.contains_key(&id) {
             return Ok(());
@@ -993,7 +992,7 @@ impl NetService {
                             } else {
                                 std::future::pending::<()>().await;
                             }
-                        } => (false, true),
+                        } => (true, true),
                     };
 
                     // Handle host updates
@@ -1626,12 +1625,7 @@ mod tests {
         );
     }
 
-    /// Retiring a host works by reconciling it against an empty [`Host`], which
-    /// is a teardown only for as long as every resource `HostBinds` holds is
-    /// driven by the desired set `update` computes from that host. Adding a
-    /// field here fails to compile until it is destructured, which is the
-    /// prompt to go wire it into `update`'s teardown — several of these carry
-    /// no refcount, so nothing else would reap them.
+    /// Every `HostBinds` field requires retirement reconciliation in `update`.
     #[test]
     fn host_binds_holds_only_what_update_reconciles() {
         let HostBinds {
