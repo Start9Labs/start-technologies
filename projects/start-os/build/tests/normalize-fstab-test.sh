@@ -50,6 +50,7 @@ proc /proc proc defaults 0 0
 tmpfs /run tmpfs nosuid,nodev 0 0
   /dev/sda1   /   ext4   defaults,noatime   0 1 # root
 	/dev/nvme0n1p2	/boot/efi	vfat	umask=0077	0	1
+/dev/mapper/boot-assets /boot/assets ext4 defaults 0 2
 /dev/mapper/data /srv/data btrfs subvol=@data,compress=zstd 0 2
 EOF
 cat > "$expected" <<'EOF'
@@ -61,6 +62,7 @@ proc /proc proc defaults 0 0
 tmpfs /run tmpfs nosuid,nodev 0 0
   PARTUUID=7f3a2b1c-01   /   ext4   defaults,noatime   0 1 # root
 	PARTUUID=f81d4fae-7dec-11d0-a765-00a0c91e6bf6	/boot/efi	vfat	umask=0077	0	1
+/dev/mapper/boot-assets /boot/assets ext4 defaults 0 2
 /dev/mapper/data /srv/data btrfs subvol=@data,compress=zstd 0 2
 EOF
 chmod 0640 "$fstab"

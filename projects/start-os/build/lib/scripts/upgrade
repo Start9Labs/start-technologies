@@ -20,7 +20,7 @@ if [ -n "${CHECKSUM:-}" ] && [ "$hash" != "$CHECKSUM" ]; then
     exit 2
 fi
 
-unsquashfs -n -f -d / "$1" /usr/lib/startos/scripts/normalize-fstab
+unsquashfs -n -f -match -d / "$1" /usr/lib/startos/scripts/normalize-fstab
 if [ -f /media/startos/config/overlay/etc/fstab ]; then
     /usr/lib/startos/scripts/normalize-fstab /media/startos/config/overlay/etc/fstab
 fi

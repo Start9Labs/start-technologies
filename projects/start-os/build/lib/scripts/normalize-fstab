@@ -25,7 +25,7 @@ while IFS= read -r line || [ -n "$line" ]; do
         target=${BASH_REMATCH[4]}
         remainder=${BASH_REMATCH[5]}
         case "$target" in
-            /|/boot|/boot/*)
+            /|/boot|/boot/efi)
                 if ! partuuid=$("$BLKID" -p -s PART_ENTRY_UUID -o value "$source") ||
                     [ -z "$partuuid" ] || [[ $partuuid =~ [[:space:]] ]]; then
                     >&2 echo "Unable to resolve PARTUUID for $source"

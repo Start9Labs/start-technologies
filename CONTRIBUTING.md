@@ -140,6 +140,7 @@ Each product's `CONTRIBUTING.md` documents the `PLATFORM` values and `ENVIRONMEN
 make test                    # all tests
 make start-core-test               # Rust (shared-libs/crates/start-core)
 make start-sdk-test                # SDK
+make start-os-build-test           # StartOS image scripts
 make backup-fs-test                # backup-fs library tests except the /dev/fuse suite
 make container-runtime-test  # container runtime
 make start-wrt-test           # StartWRT Rust crates

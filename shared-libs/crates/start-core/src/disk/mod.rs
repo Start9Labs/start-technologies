@@ -68,8 +68,7 @@ impl OsPartitionInfo {
                 continue;
             };
 
-            // `/` is an overlayfs the initramfs sets up, so root comes from the
-            // live OS mount below. Only /boot* entries are mounted from fstab.
+            // The initramfs overlays `/`; fstab supplies the boot partitions.
             if target != "/boot" && !target.starts_with("/boot/") {
                 continue;
             }
@@ -112,19 +111,9 @@ impl OsPartitionInfo {
     }
 }
 
-/// The initramfs bind-mounts the installed OS root partition here on every
-/// StartOS boot. It exists only on a running installed system — not in the live
-/// installer — so it names the OS root exactly when there is one.
 const OS_ROOT_MOUNT: &str = "/media/startos/root";
 
-/// Resolve the installed OS root block device from its live mount.
-///
-/// It can't come from the fstab `/` entry (`/` is an overlayfs the initramfs
-/// stacks over the real partition) nor from "whatever the system booted from":
-/// during os_install we're booted off the installer USB, which is not the OS
-/// root this struct describes. The initramfs bind-mounts the real OS partition
-/// at `/media/startos/root`, so that mount is the source of truth — and its
-/// absence in the installer correctly yields no OS root.
+// The initramfs bind mount excludes the live installer device.
 async fn os_root_device() -> Option<PathBuf> {
     get_mount_source(OS_ROOT_MOUNT).await.ok().flatten()
 }

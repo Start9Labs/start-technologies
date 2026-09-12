@@ -71,7 +71,13 @@ async fn fstab_source(partition: &Path) -> Result<String, Error> {
     let partuuid = partuuid.trim();
     if partuuid.is_empty() || partuuid.chars().any(char::is_whitespace) {
         return Err(Error::new(
-            eyre!("Invalid PARTUUID for {}", partition.display()),
+            eyre!(
+                "{}",
+                t!(
+                    "os-install.invalid-partuuid",
+                    partition = partition.display()
+                )
+            ),
             ErrorKind::BlockDevice,
         ));
     }
@@ -926,20 +932,6 @@ mod tests {
     #[test]
     fn fstab_without_efi_comments_out_mount() {
         assert!(render_fstab("PARTUUID=boot", None, "PARTUUID=root").contains("# N/A"));
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn fstab_normalizer_rewrites_device_sources_atomically() {
-        let script = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../projects/start-os/build/tests/normalize-fstab-test.sh");
-        let output = std::process::Command::new(&script).output().unwrap();
-        assert!(
-            output.status.success(),
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr),
-        );
     }
 
     #[test]

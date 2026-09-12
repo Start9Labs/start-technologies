@@ -76,8 +76,7 @@ printf '%s\n%s\n' \
     "$(cd "$WORK/payload/boot" && ls -1 initrd.img-* | head -n1)" \
     > "$WORK/payload/usr/lib/startos/migration-boot"
 
-# 4. Add the sentinel and apply-time migration scripts. StartOS 0.3.5.1
-#    executes /usr/sbin/update-grub2 in the payload chroot.
+# 4. update-grub2 is the 0.3.5.1 updater's apply-time migration hook.
 touch "$WORK/payload/.startos-migration"
 install -m0755 "$SOURCE_DIR/lib/scripts/migration-update-grub" "$WORK/payload/usr/sbin/update-grub2"
 install -m0755 "$SOURCE_DIR/lib/scripts/normalize-fstab" "$WORK/payload/usr/lib/startos/scripts/normalize-fstab"
