@@ -1,0 +1,67 @@
+#!/bin/bash
+
+if [ "$#" -ne 2 ]; then
+    >&2 echo 'usage: forward-port-nft <ip|ip6> <tag>'
+    exit 64
+fi
+
+family=$1
+TAG=$2
+case "$family" in
+    ip | ip6) ;;
+    *)
+        >&2 echo "invalid nft family: $family"
+        exit 64
+        ;;
+esac
+
+additions=$(cat)
+
+nft -f - <<EOF_BASE || exit $?
+add table $family startos
+add chain $family startos prerouting { type nat hook prerouting priority dstnat; policy accept; }
+add chain $family startos output { type nat hook output priority -100; policy accept; }
+add chain $family startos postrouting { type nat hook postrouting priority srcnat; policy accept; }
+add chain $family startos forward { type filter hook forward priority filter; policy drop; }
+EOF_BASE
+
+delete_tagged() {
+    local chain listing status
+    for chain in prerouting output postrouting forward; do
+        listing=$(nft -a list chain "$family" startos "$chain")
+        status=$?
+        if [ "$status" -ne 0 ]; then
+            return "$status"
+        fi
+        printf '%s\n' "$listing" | awk -v family="$family" -v chain="$chain" -v tag="comment \"$TAG\"" '
+            index($0, tag) {
+                for (i = 1; i <= NF; i++) if ($i == "handle") print "delete rule " family " startos " chain " handle " $(i+1)
+            }'
+    done
+}
+
+render_transaction() {
+    local deletions=$1
+    if [ -n "$deletions" ]; then
+        printf '%s\n' "$deletions"
+    fi
+    if [ "${UNDO:-0}" != 1 ] && [ -n "$additions" ]; then
+        printf '%s\n' "$additions"
+    fi
+}
+
+error_file=$(mktemp)
+trap 'rm -f "$error_file"' EXIT
+for ((attempt = 1; attempt <= 3; attempt++)); do
+    deletions=$(delete_tagged) || exit $?
+    : > "$error_file"
+    if render_transaction "$deletions" | nft -f - 2> "$error_file"; then
+        exit 0
+    else
+        status=$?
+    fi
+    if [ "$attempt" -eq 3 ] || ! grep -qiE 'No such file or directory|ENOENT' "$error_file"; then
+        cat "$error_file" >&2
+        exit "$status"
+    fi
+done

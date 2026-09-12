@@ -5,10 +5,8 @@
 //! [`crate::tunnel::forward::pcp`]). PCP/NAT-PMP via `crab_nat`, UPnP via
 //! [`crate::net::port_map::upnp`].
 //!
-//! All best-effort: failures are logged, never surfaced to the nftables forward
-//! reconcile, so a gateway with none of these just falls back to a manual
-//! forward. `ensure`/`remove` are fire-and-forget sends so a slow or absent
-//! gateway never blocks the forward path.
+//! A drain atomically stops admission, waits for every shard's teardown, and
+//! permanently closes the controller.
 //!
 //! Work is sharded per local IP (one task per gateway interface), so a gateway
 //! that answers slowly or not at all never head-of-line-blocks mapping attempts
@@ -22,7 +20,7 @@
 //! - Per-key exponential backoff: a mapping that keeps failing is retried at
 //!   15s doubling to a 16-minute cap, reset on success or a spec change.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr};
 use std::num::NonZeroU16;
 use std::sync::Arc;
@@ -32,6 +30,8 @@ use chrono::{DateTime, Utc};
 use crab_nat::{
     InternetProtocol, MappingFailure, PortMapping, PortMappingOptions, TimeoutConfig, pcp,
 };
+use futures::FutureExt;
+use futures::future::{BoxFuture, Shared};
 use igd_next::PortMappingProtocol;
 use igd_next::aio::Gateway;
 use igd_next::aio::tokio::Tokio;
@@ -187,6 +187,7 @@ enum Active {
         external_ip: Option<Ipv4Addr>,
         /// Needed by owner-scoped hostname deletion.
         internal_port: u16,
+        gateway: Gateway<Tokio>,
     },
 }
 
@@ -205,6 +206,16 @@ enum Command {
         external_port: u16,
         resp: oneshot::Sender<Option<IpAddr>>,
     },
+    Drain {
+        respond: oneshot::Sender<Result<(), Error>>,
+    },
+}
+
+type DrainFuture = Shared<BoxFuture<'static, Result<(), Arc<Error>>>>;
+
+enum ControllerState {
+    Accepting(BTreeMap<IpAddr, mpsc::UnboundedSender<Command>>),
+    Draining(DrainFuture),
 }
 
 /// Fire-and-forget port-map requests, sharded per local IP so one interface's
@@ -212,23 +223,25 @@ enum Command {
 #[derive(Clone)]
 pub struct PortMapController {
     interfaces: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
-    shards: Arc<SyncMutex<BTreeMap<IpAddr, mpsc::UnboundedSender<Command>>>>,
+    state: Arc<SyncMutex<ControllerState>>,
 }
 
 impl PortMapController {
     pub fn new(interfaces: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>) -> Self {
         Self {
             interfaces,
-            shards: Arc::new(SyncMutex::new(BTreeMap::new())),
+            state: Arc::new(SyncMutex::new(ControllerState::Accepting(BTreeMap::new()))),
         }
     }
 
-    fn shard(&self, local_ip: IpAddr) -> mpsc::UnboundedSender<Command> {
-        self.shards.mutate(|shards| {
-            shards
+    fn send(&self, local_ip: IpAddr, command: Command) -> bool {
+        self.state.mutate(|state| match state {
+            ControllerState::Accepting(shards) => shards
                 .entry(local_ip)
                 .or_insert_with(|| spawn_shard(self.interfaces.clone()))
-                .clone()
+                .send(command)
+                .is_ok(),
+            ControllerState::Draining(_) => false,
         })
     }
 
@@ -306,41 +319,92 @@ impl PortMapController {
         count: u16,
         protocol: TransportProtocol,
     ) {
-        self.shard(local_ip)
-            .send(Command::Ensure {
+        self.send(
+            local_ip,
+            Command::Ensure {
                 key: (local_ip, external_port, hostname, protocol),
                 spec: Spec {
                     internal_port,
                     gateways,
                     count,
                 },
-            })
-            .ok();
+            },
+        );
     }
 
     pub fn remove(&self, local_ip: IpAddr, external_port: u16) {
         for protocol in [TransportProtocol::Tcp, TransportProtocol::Udp] {
-            self.shard(local_ip)
-                .send(Command::Remove {
+            self.send(
+                local_ip,
+                Command::Remove {
                     key: (local_ip, external_port, None, protocol),
-                })
-                .ok();
+                },
+            );
         }
     }
 
     /// Remove the SNI HOSTNAME mapping for `hostname` on
     /// `(local_ip, external_port)`, leaving any other hostnames on that port.
     pub fn remove_hostname(&self, local_ip: IpAddr, external_port: u16, hostname: String) {
-        self.shard(local_ip)
-            .send(Command::Remove {
+        self.send(
+            local_ip,
+            Command::Remove {
                 key: (
                     local_ip,
                     external_port,
                     Some(hostname),
                     TransportProtocol::Tcp,
                 ),
-            })
-            .ok();
+            },
+        );
+    }
+
+    pub(crate) async fn drain(&self) -> Result<(), Error> {
+        let completion = self.state.mutate(|state| match state {
+            ControllerState::Accepting(shards) => {
+                let mut responses = Vec::with_capacity(shards.len());
+                let mut first_error = None;
+                for shard in shards.values() {
+                    let (respond, receive) = oneshot::channel();
+                    if shard.send(Command::Drain { respond }).is_err() {
+                        first_error.get_or_insert_with(controller_exited);
+                    } else {
+                        responses.push(receive);
+                    }
+                }
+                let completion = tokio::spawn(async move {
+                    for receive in responses {
+                        match receive.await {
+                            Ok(Ok(())) => {}
+                            Ok(Err(error)) => {
+                                first_error.get_or_insert(error);
+                            }
+                            Err(_) => {
+                                first_error.get_or_insert_with(controller_exited);
+                            }
+                        }
+                    }
+                    first_error.map_or(Ok(()), Err)
+                })
+                .map(|result| {
+                    result
+                        .map_err(|error| {
+                            Error::new(
+                                eyre!("port-map drain task panicked: {error}"),
+                                ErrorKind::Unknown,
+                            )
+                        })
+                        .and_then(|result| result)
+                        .map_err(Arc::new)
+                })
+                .boxed()
+                .shared();
+                *state = ControllerState::Draining(completion.clone());
+                completion
+            }
+            ControllerState::Draining(completion) => completion.clone(),
+        });
+        completion.await.map_err(|error| error.clone_output())
     }
 
     /// Gateway-assigned external IP if a TCP mapping is active for
@@ -351,22 +415,34 @@ impl PortMapController {
     /// say whether anything reaches it.
     pub async fn mapped_external_ip(&self, local_ip: IpAddr, external_port: u16) -> Option<IpAddr> {
         let (resp, rx) = oneshot::channel();
-        self.shard(local_ip)
-            .send(Command::ExternalIp {
+        self.send(
+            local_ip,
+            Command::ExternalIp {
                 external_port,
                 resp,
-            })
-            .ok()?;
+            },
+        )
+        .then_some(())?;
         rx.await.ok().flatten()
     }
 }
 
 /// Gateway-reported external address of the active TCP mapping on
 /// `external_port`, kept only where the public Internet can reach it.
-fn external_ip_of(active: &BTreeMap<MappingKey, Active>, external_port: u16) -> Option<IpAddr> {
+fn external_ip_of(
+    desired: &BTreeMap<MappingKey, Spec>,
+    active: &BTreeMap<MappingKey, Active>,
+    stale: &BTreeSet<MappingKey>,
+    external_port: u16,
+) -> Option<IpAddr> {
     active
         .iter()
-        .find(|(k, _)| k.1 == external_port && k.3 == TransportProtocol::Tcp)
+        .find(|(key, _)| {
+            key.1 == external_port
+                && key.3 == TransportProtocol::Tcp
+                && desired.contains_key(*key)
+                && !stale.contains(*key)
+        })
         .and_then(|(_, a)| {
             routable_external_ip(match a {
                 Active::Pcp(m) => m.external_ip(),
@@ -385,6 +461,10 @@ fn routable_external_ip(reported: Option<IpAddr>) -> Option<IpAddr> {
     })
 }
 
+fn controller_exited() -> Error {
+    Error::new(eyre!("port-map controller exited"), ErrorKind::Network)
+}
+
 fn spawn_shard(
     interfaces: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
 ) -> mpsc::UnboundedSender<Command> {
@@ -399,9 +479,20 @@ fn spawn_shard(
             tokio::select! {
                 cmd = recv.recv() => match cmd {
                     Some(Command::Ensure { key, spec }) => state.ensure(&interfaces, key, spec).await,
-                    Some(Command::Remove { key }) => state.remove(key).await,
+                    Some(Command::Remove { key }) => {
+                        state.remove(key).await.log_err();
+                    }
                     Some(Command::ExternalIp { external_port, resp }) => {
-                        let _ = resp.send(external_ip_of(&state.active, external_port));
+                        let _ = resp.send(external_ip_of(
+                            &state.desired,
+                            &state.active,
+                            &state.stale,
+                            external_port,
+                        ));
+                    }
+                    Some(Command::Drain { respond }) => {
+                        respond.send(state.drain().await).ok();
+                        break;
                     }
                     None => break,
                 },
@@ -541,9 +632,9 @@ struct State {
     desired: BTreeMap<MappingKey, Spec>,
     active: BTreeMap<MappingKey, Active>,
     upnp_cache: BTreeMap<Ipv4Addr, (Gateway<Tokio>, Instant)>,
-    /// Consecutive apply failures per key and when the latest attempt ran —
-    /// drives the exponential backoff between retries.
+    /// Stores each mapping's failure count and latest attempt for retry backoff.
     failures: BTreeMap<MappingKey, (u32, Instant)>,
+    stale: BTreeSet<MappingKey>,
 }
 
 impl State {
@@ -563,16 +654,33 @@ impl State {
         if changed {
             self.failures.remove(&key);
         }
-        if changed || (!self.active.contains_key(&key) && self.backoff_elapsed(&key)) {
-            self.teardown(key.clone()).await;
+        let replace = changed || self.stale.contains(&key);
+        if replace && (changed || self.backoff_elapsed(&key)) {
+            self.replace_mapping(interfaces, key).await;
+        } else if !self.active.contains_key(&key) && self.backoff_elapsed(&key) {
             self.apply(interfaces, key).await;
         }
     }
 
-    async fn remove(&mut self, key: MappingKey) {
+    async fn remove(&mut self, key: MappingKey) -> Result<(), Error> {
         self.desired.remove(&key);
         self.failures.remove(&key);
-        self.teardown(key).await;
+        self.stale.remove(&key);
+        self.teardown(key).await
+    }
+
+    async fn drain(&mut self) -> Result<(), Error> {
+        self.desired.clear();
+        self.failures.clear();
+        self.stale.clear();
+        let keys = self.active.keys().cloned().collect::<Vec<_>>();
+        let mut first_error = None;
+        for key in keys {
+            if let Err(error) = self.teardown(key).await {
+                first_error.get_or_insert(error);
+            }
+        }
+        first_error.map_or(Ok(()), Err)
     }
 
     fn backoff_elapsed(&self, key: &MappingKey) -> bool {
@@ -584,6 +692,12 @@ impl State {
     async fn refresh(&mut self, interfaces: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>) {
         for key in self.desired.keys().cloned().collect::<Vec<_>>() {
             let retry_ready = self.backoff_elapsed(&key);
+            if self.stale.contains(&key) {
+                if retry_ready {
+                    self.replace_mapping(interfaces, key).await;
+                }
+                continue;
+            }
             match self.active.get_mut(&key) {
                 // Renew against the lifetime granted by the gateway.
                 Some(Active::Pcp(m))
@@ -594,8 +708,7 @@ impl State {
                             debug,
                             "PCP/NAT-PMP renew for {key:?} failed, re-mapping: {e}"
                         );
-                        self.teardown(key.clone()).await;
-                        self.apply(interfaces, key).await;
+                        self.replace_mapping(interfaces, key).await;
                     }
                 }
                 Some(Active::Pcp(_)) => {}
@@ -607,8 +720,7 @@ impl State {
                 }
                 Some(Active::Upnp { .. }) if key.2.is_some() => {}
                 Some(Active::Upnp { .. }) => {
-                    self.teardown(key.clone()).await;
-                    self.apply(interfaces, key).await;
+                    self.replace_mapping(interfaces, key).await;
                 }
                 None => {
                     if self.backoff_elapsed(&key) {
@@ -617,44 +729,84 @@ impl State {
                 }
             }
         }
+        let retiring = self
+            .active
+            .keys()
+            .filter(|key| !self.desired.contains_key(*key))
+            .cloned()
+            .collect::<Vec<_>>();
+        for key in retiring {
+            self.teardown(key).await.log_err();
+        }
         self.upnp_cache
             .retain(|_, (_, at)| at.elapsed() < GATEWAY_CACHE_TTL);
         self.failures.retain(|k, _| self.desired.contains_key(k));
+        self.stale.retain(|key| self.desired.contains_key(key));
     }
 
-    async fn teardown(&mut self, key: MappingKey) {
+    async fn teardown(&mut self, key: MappingKey) -> Result<(), Error> {
         match self.active.remove(&key) {
-            Some(Active::Pcp(m)) => {
-                if let Err((e, _)) = m.try_drop().await {
-                    crate::dev_log!(debug, "PCP/NAT-PMP unmap for {key:?} failed: {e}");
+            Some(Active::Pcp(mapping)) => match mapping.try_drop().await {
+                Ok(()) => Ok(()),
+                Err((error, mapping)) => {
+                    self.active.insert(key.clone(), Active::Pcp(mapping));
+                    Err(Error::new(
+                        eyre!("PCP/NAT-PMP unmap for {key:?} failed: {error}"),
+                        ErrorKind::Network,
+                    ))
                 }
-            }
-            Some(Active::Upnp { internal_port, .. }) => {
-                let (local_ip, external_port, hostname, protocol) = key;
-                if let IpAddr::V4(local_v4) = local_ip {
-                    if let Some(gw) = self.gateway_for(local_v4).await {
-                        match &hostname {
-                            Some(host) => {
-                                upnp::remove_hostname_mapping(
-                                    gw,
-                                    external_port,
-                                    internal_port,
-                                    host,
-                                )
-                                .await
-                                .log_err();
-                            }
-                            None => {
-                                upnp::remove_port(gw, protocol.upnp(), external_port)
-                                    .await
-                                    .log_err();
-                            }
-                        }
+            },
+            Some(Active::Upnp {
+                external_ip,
+                internal_port,
+                gateway,
+            }) => {
+                let result = match &key.2 {
+                    Some(hostname) => {
+                        upnp::remove_hostname_mapping(&gateway, key.1, internal_port, hostname)
+                            .await
                     }
+                    None => upnp::remove_port(&gateway, key.3.upnp(), key.1).await,
+                };
+                if result.is_err() {
+                    self.active.insert(
+                        key,
+                        Active::Upnp {
+                            external_ip,
+                            internal_port,
+                            gateway,
+                        },
+                    );
                 }
+                result
             }
-            None => {}
+            None => Ok(()),
         }
+    }
+
+    async fn replace_mapping(
+        &mut self,
+        interfaces: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
+        key: MappingKey,
+    ) {
+        let result = self.teardown(key.clone()).await;
+        if result.is_ok() {
+            self.stale.remove(&key);
+            self.apply(interfaces, key).await;
+        } else {
+            self.stale.insert(key.clone());
+            self.record_failure(key);
+        }
+        result.log_err();
+    }
+
+    fn record_failure(&mut self, key: MappingKey) {
+        let (failures, _) = self
+            .failures
+            .get(&key)
+            .copied()
+            .unwrap_or((0, Instant::now()));
+        self.failures.insert(key, (failures + 1, Instant::now()));
     }
 
     /// Updates retry backoff after a mapping attempt.
@@ -667,12 +819,7 @@ impl State {
         if self.active.contains_key(&key) {
             self.failures.remove(&key);
         } else if attempted {
-            let (n, _) = self
-                .failures
-                .get(&key)
-                .copied()
-                .unwrap_or((0, Instant::now()));
-            self.failures.insert(key, (n + 1, Instant::now()));
+            self.record_failure(key);
         }
     }
 
@@ -789,18 +936,22 @@ impl State {
                     return attempted;
                 }
                 attempted = true;
-                let (added, invalidate_upnp_cache) = match self.gateway_for(local_v4).await {
-                    Some(gw) => {
+                let (gateway, invalidate_upnp_cache) = match self
+                    .gateway_for(local_v4)
+                    .await
+                    .cloned()
+                {
+                    Some(gateway) => {
                         report_local(interfaces, local_ip, true);
-                        if !upnp::supports_hostname(gw) {
+                        if !upnp::supports_hostname(&gateway) {
                             crate::dev_log!(
                                 debug,
                                 "UPnP HOSTNAME skip on {local_ip}: IGD doesn't advertise the vendor action"
                             );
-                            (false, false)
+                            (None, false)
                         } else {
                             match upnp::add_hostname_mapping(
-                                gw,
+                                &gateway,
                                 external_port,
                                 local_v4,
                                 spec.internal_port,
@@ -813,33 +964,31 @@ impl State {
                                         "UPnP HOSTNAME mapped {external_port}->{local_v4}:{} {hostname}",
                                         spec.internal_port
                                     );
-                                    (true, false)
+                                    (Some(gateway), false)
                                 }
                                 Err(e) => {
                                     crate::dev_log!(
                                         debug,
                                         "UPnP HOSTNAME map {local_v4}:{external_port} {hostname} failed: {e}"
                                     );
-                                    (false, true)
+                                    (None, true)
                                 }
                             }
                         }
                     }
                     None => {
                         report_local(interfaces, local_ip, false);
-                        (false, true)
+                        (None, true)
                     }
                 };
-                if added {
-                    let external_ip = match self.gateway_for(local_v4).await {
-                        Some(gw) => upnp::external_ipv4(gw).await.ok().flatten(),
-                        None => None,
-                    };
+                if let Some(gateway) = gateway {
+                    let external_ip = upnp::external_ipv4(&gateway).await.ok().flatten();
                     self.active.insert(
                         key.clone(),
                         Active::Upnp {
                             external_ip,
                             internal_port: spec.internal_port,
+                            gateway,
                         },
                     );
                 } else if invalidate_upnp_cache {
@@ -989,12 +1138,12 @@ impl State {
                 return attempted;
             }
             attempted = true;
-            let added = match self.gateway_for(local_v4).await {
-                Some(gw) => {
+            let gateway = match self.gateway_for(local_v4).await.cloned() {
+                Some(gateway) => {
                     // Discovery alone proves the IGD, whatever the SOAP call says.
                     report_local(interfaces, local_ip, true);
                     match upnp::add_port(
-                        gw,
+                        &gateway,
                         protocol.upnp(),
                         external_port,
                         local_v4,
@@ -1007,31 +1156,30 @@ impl State {
                                 "UPnP {protocol:?} mapped {external_port}->{local_v4}:{}",
                                 spec.internal_port
                             );
-                            true
+                            Some(gateway)
                         }
                         Err(e) => {
                             crate::dev_log!(
                                 debug,
                                 "UPnP {protocol:?} map {local_v4}:{external_port} failed: {e}"
                             );
-                            false
+                            None
                         }
                     }
                 }
                 None => {
                     report_local(interfaces, local_ip, false);
-                    false
+                    None
                 }
             };
-            if added {
-                // Best-effort external IP (local IGD query) so a reachability check
-                // can short-circuit; `get_external_ipv4` discards private/CGNAT.
-                let external_ip = upnp::get_external_ipv4(local_v4).await.ok().flatten();
+            if let Some(gateway) = gateway {
+                let external_ip = upnp::external_ipv4(&gateway).await.ok().flatten();
                 self.active.insert(
                     key.clone(),
                     Active::Upnp {
                         external_ip,
                         internal_port: spec.internal_port,
+                        gateway,
                     },
                 );
             } else {
@@ -1103,6 +1251,17 @@ mod tests {
         Watch::new(OrdMap::new())
     }
 
+    fn test_gateway() -> Gateway<Tokio> {
+        Gateway {
+            addr: "127.0.0.1:49001".parse().unwrap(),
+            root_url: String::new(),
+            control_url: String::new(),
+            control_schema_url: String::new(),
+            control_schema: Default::default(),
+            provider: Tokio,
+        }
+    }
+
     // The filter both protocols' reported addresses funnel through. PCP grants
     // cannot be built here (`crab_nat::PortMapping` has private fields), so the
     // Pcp arm reaches this only by construction: `external_ip_of` has the one
@@ -1151,6 +1310,7 @@ mod tests {
             Active::Upnp {
                 external_ip: Some(public),
                 internal_port: 443,
+                gateway: test_gateway(),
             },
         );
         active.insert(
@@ -1158,15 +1318,81 @@ mod tests {
             Active::Upnp {
                 external_ip: Some(public),
                 internal_port: 8080,
+                gateway: test_gateway(),
             },
         );
 
-        assert_eq!(external_ip_of(&active, 443), Some(IpAddr::V4(public)));
-        assert_eq!(external_ip_of(&active, 8080), None, "UDP is not TCP");
         assert_eq!(
-            external_ip_of(&active, 444),
+            external_ip_of(
+                &active.keys().cloned().map(|key| (key, spec())).collect(),
+                &active,
+                &BTreeSet::new(),
+                443
+            ),
+            Some(IpAddr::V4(public))
+        );
+        assert_eq!(
+            external_ip_of(
+                &active.keys().cloned().map(|key| (key, spec())).collect(),
+                &active,
+                &BTreeSet::new(),
+                8080
+            ),
+            None,
+            "UDP is not TCP"
+        );
+        assert_eq!(
+            external_ip_of(
+                &active.keys().cloned().map(|key| (key, spec())).collect(),
+                &active,
+                &BTreeSet::new(),
+                444
+            ),
             None,
             "no mapping on that port"
+        );
+    }
+
+    #[test]
+    fn a_stale_mapping_answers_nothing() {
+        let ip: IpAddr = Ipv4Addr::new(10, 59, 0, 2).into();
+        let key: MappingKey = (ip, 443, None, TransportProtocol::Tcp);
+        let active = BTreeMap::from([(
+            key.clone(),
+            Active::Upnp {
+                external_ip: Some(Ipv4Addr::new(1, 2, 3, 4)),
+                internal_port: 443,
+                gateway: test_gateway(),
+            },
+        )]);
+
+        assert_eq!(
+            external_ip_of(
+                &active.keys().cloned().map(|key| (key, spec())).collect(),
+                &active,
+                &BTreeSet::from([key]),
+                443
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn an_active_undesired_mapping_answers_nothing() {
+        let ip: IpAddr = Ipv4Addr::new(10, 59, 0, 2).into();
+        let key: MappingKey = (ip, 443, None, TransportProtocol::Tcp);
+        let active = BTreeMap::from([(
+            key,
+            Active::Upnp {
+                external_ip: Some(Ipv4Addr::new(1, 2, 3, 4)),
+                internal_port: 443,
+                gateway: test_gateway(),
+            },
+        )]);
+
+        assert_eq!(
+            external_ip_of(&BTreeMap::new(), &active, &BTreeSet::new(), 443),
+            None
         );
     }
 
@@ -1179,9 +1405,18 @@ mod tests {
             Active::Upnp {
                 external_ip: Some(Ipv4Addr::new(192, 168, 8, 1)),
                 internal_port: 443,
+                gateway: test_gateway(),
             },
         );
-        assert_eq!(external_ip_of(&active, 443), None);
+        assert_eq!(
+            external_ip_of(
+                &active.keys().cloned().map(|key| (key, spec())).collect(),
+                &active,
+                &BTreeSet::new(),
+                443
+            ),
+            None
+        );
     }
 
     // Distinct hostnames on the same external port are independent mappings;
@@ -1219,7 +1454,7 @@ mod tests {
             "plain mapping is a distinct identity"
         );
 
-        state.remove(a.clone()).await;
+        state.remove(a.clone()).await.unwrap();
         assert!(!state.desired.contains_key(&a));
         assert!(state.desired.contains_key(&b), "removing a dropped b");
         assert!(state.desired.contains_key(&plain));
@@ -1240,7 +1475,7 @@ mod tests {
         assert!(state.desired.contains_key(&udp));
         assert_eq!(state.desired.len(), 2);
 
-        state.remove(tcp.clone()).await;
+        state.remove(tcp.clone()).await.unwrap();
         assert!(!state.desired.contains_key(&tcp));
         assert!(state.desired.contains_key(&udp), "removing TCP dropped UDP");
     }
@@ -1499,5 +1734,93 @@ mod tests {
             gws.is_empty(),
             "OutboundOnly must yield no candidates, got {gws:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn controller_rejects_new_shards_after_drain() {
+        let controller = PortMapController::new(interfaces());
+        controller.drain().await.unwrap();
+
+        let ip: IpAddr = "fd00:59::2".parse().unwrap();
+        controller.ensure(ip, 443, 443, Vec::new());
+
+        assert!(
+            controller
+                .state
+                .peek(|state| matches!(state, ControllerState::Draining(_)))
+        );
+        assert_eq!(controller.mapped_external_ip(ip, 443).await, None);
+        controller.drain().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn concurrent_drains_share_completion_after_cancellation() {
+        let controller = PortMapController::new(interfaces());
+        let ip: IpAddr = "fd00:59::2".parse().unwrap();
+        let (shard, mut commands) = mpsc::unbounded_channel();
+        controller.state.mutate(|state| match state {
+            ControllerState::Accepting(shards) => {
+                shards.insert(ip, shard);
+            }
+            ControllerState::Draining(_) => panic!("controller already draining"),
+        });
+        let (drain_started, drain_received) = oneshot::channel();
+        let (release_drain, drain_released) = oneshot::channel();
+        tokio::spawn(async move {
+            let Some(Command::Drain { respond }) = commands.recv().await else {
+                panic!("shard did not receive drain command");
+            };
+            drain_started.send(()).unwrap();
+            drain_released.await.unwrap();
+            respond
+                .send(Err(Error::new(
+                    eyre!("held teardown failed"),
+                    ErrorKind::Network,
+                )))
+                .ok();
+        });
+
+        let first_controller = controller.clone();
+        let first = tokio::spawn(async move { first_controller.drain().await });
+        drain_received.await.unwrap();
+
+        let second = controller.drain();
+        tokio::pin!(second);
+        assert!(
+            futures::poll!(&mut second).is_pending(),
+            "second drain completed before shard teardown"
+        );
+        first.abort();
+        assert!(first.await.unwrap_err().is_cancelled());
+        assert!(
+            futures::poll!(&mut second).is_pending(),
+            "cancelling the initiating caller cancelled teardown"
+        );
+
+        release_drain.send(()).unwrap();
+        let completed = second.await.unwrap_err();
+        let completed_message = completed.to_string();
+        assert_eq!(completed.kind, ErrorKind::Network);
+        assert!(completed_message.contains("held teardown failed"));
+
+        for _ in 0..2 {
+            let repeated = controller.drain().await.unwrap_err();
+            assert_eq!(repeated.kind, completed.kind);
+            assert_eq!(repeated.to_string(), completed_message);
+        }
+    }
+
+    #[tokio::test]
+    async fn state_can_be_reused_after_drain() {
+        let ip: IpAddr = "fd00:59::2".parse().unwrap();
+        let key: MappingKey = (ip, 443, None, TransportProtocol::Tcp);
+        let mut state = State::default();
+        state.ensure(&interfaces(), key.clone(), spec()).await;
+
+        state.drain().await.unwrap();
+        assert!(state.desired.is_empty());
+
+        state.ensure(&interfaces(), key.clone(), spec()).await;
+        assert!(state.desired.contains_key(&key));
     }
 }

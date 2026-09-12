@@ -3,7 +3,7 @@
 
 IMAGE_TYPE=$(shell if [ "$(PLATFORM)" = raspberrypi ]; then echo img; else echo iso; fi)
 FIRMWARE_ROMS := projects/start-os/build/firmware/$(PLATFORM) $(shell jq --raw-output '.[] | select(.platform[] | contains("$(PLATFORM)")) | "./projects/start-os/build/firmware/$(PLATFORM)/" + .id + ".rom.gz"' projects/start-os/build/lib/firmware.json)
-BUILD_SRC := $(call ls-files, projects/start-os/build/lib) build/lib/scripts/forward-port build/lib/scripts/forward-port6 projects/start-os/build/lib/depends projects/start-os/build/lib/conflicts $(FIRMWARE_ROMS) projects/start-os/build/lib/migration-images/.done
+BUILD_SRC := $(call ls-files, projects/start-os/build/lib) build/lib/scripts/forward-port build/lib/scripts/forward-port6 build/lib/scripts/forward-port-nft projects/start-os/build/lib/depends projects/start-os/build/lib/conflicts $(FIRMWARE_ROMS) projects/start-os/build/lib/migration-images/.done
 IMAGE_RECIPE_SRC := $(call ls-files, projects/start-os/build/image-recipe/)
 STARTD_SRC := projects/start-os/startd.service projects/start-os/services.slice projects/start-os/startos-shutdown.service projects/start-os/startos-restart.service $(BUILD_SRC)
 COMPILED_TARGETS := target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox target/$(RUST_ARCH)-unknown-linux-musl/release/start-container projects/start-os/container-runtime/rootfs.$(ARCH).squashfs
@@ -91,6 +91,7 @@ start-os-install: $(STARTOS_TARGETS)
 	$(call cp,projects/start-os/build/firmware/$(PLATFORM),$(DESTDIR)/usr/lib/startos/firmware)
 	$(call cp,build/lib/scripts/forward-port,$(DESTDIR)/usr/lib/startos/scripts/forward-port)
 	$(call cp,build/lib/scripts/forward-port6,$(DESTDIR)/usr/lib/startos/scripts/forward-port6)
+	$(call cp,build/lib/scripts/forward-port-nft,$(DESTDIR)/usr/lib/startos/scripts/forward-port-nft)
 	$(call mkdir,$(DESTDIR)/usr/lib/startos/container-runtime)
 	$(call cp,projects/start-os/container-runtime/rootfs.$(ARCH).squashfs,$(DESTDIR)/usr/lib/startos/container-runtime/rootfs.squashfs)
 

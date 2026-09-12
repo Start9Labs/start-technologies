@@ -32,67 +32,50 @@ fi
 
 TAG="F$(echo "$sip:$sport+$count -> $dip/$dprefix:$dport ${src_subnet:-any}" | sha256sum | head -c 15)"
 PROTO='meta l4proto { tcp, udp }'
+PRIVATE_IPV4_SUBNETS='{ 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, 169.254.0.0/16 }'
 
-# DNAT clause (the part following $PROTO) and the internal-port matcher used by
-# the forward-accept and masquerade rules.
 if [ "$count" -eq 1 ]; then
     dnat="th dport $sport dnat to $dip:$dport"
+    port_pair_match="ct original proto-dst $sport ip daddr $dip th dport $dport"
     dport_match="$dport"
-elif [ "$sport" = "$dport" ]; then
-    # Equal bases: preserve the destination port across the range (one rule).
-    dnat="th dport ${sport}-${sport_end} dnat to $dip"
-    dport_match="${dport}-${dport_end}"
 else
-    # Offset range: map each external port to its internal counterpart.
-    map=""; sep=""
+    pairs=""; sep=""
+    if [ "$sport" != "$dport" ]; then
+        map=""
+    fi
     for ((i = 0; i < count; i++)); do
-        map+="${sep}$((sport + i)) : $dip . $((dport + i))"; sep=", "
+        external_port=$((sport + i))
+        internal_port=$((dport + i))
+        pairs+="${sep}${external_port} . ${internal_port}"
+        if [ "$sport" != "$dport" ]; then
+            map+="${sep}${external_port} : $dip . ${internal_port}"
+        fi
+        sep=", "
     done
-    dnat="dnat to th dport map { $map }"
+    port_pair_match="ct original proto-dst . th dport { $pairs } ip daddr $dip"
     dport_match="${dport}-${dport_end}"
+    if [ "$sport" = "$dport" ]; then
+        # Equal bases preserve each destination port.
+        dnat="th dport ${sport}-${sport_end} dnat to $dip"
+    else
+        dnat="dnat to th dport map { $map }"
+    fi
 fi
 
-# Base table/chains are owned by PortForwardController init; ensure defensively.
-nft -f - <<'EOF'
-add table ip startos
-add chain ip startos prerouting { type nat hook prerouting priority dstnat; policy accept; }
-add chain ip startos output { type nat hook output priority -100; policy accept; }
-add chain ip startos postrouting { type nat hook postrouting priority srcnat; policy accept; }
-add chain ip startos forward { type filter hook forward priority filter; policy drop; }
-EOF
-
-delete_tagged() {
-    local chain
-    for chain in prerouting output postrouting forward; do
-        nft -a list chain ip startos "$chain" 2>/dev/null | awk -v chain="$chain" -v tag="comment \"$TAG\"" '
-            index($0, tag) {
-                for (i = 1; i <= NF; i++) if ($i == "handle") print "delete rule ip startos " chain " handle " $(i+1)
-            }'
-    done
+render_rules() {
+    if [ -n "${src_subnet:-}" ]; then
+        echo "add rule ip startos prerouting ip saddr $src_subnet ip daddr $sip $PROTO $dnat comment \"$TAG\""
+        echo "add rule ip startos prerouting ip saddr $PRIVATE_IPV4_SUBNETS ip daddr $sip $PROTO $dnat comment \"$TAG\""
+    else
+        echo "add rule ip startos prerouting ip daddr $sip $PROTO $dnat comment \"$TAG\""
+    fi
+    echo "add rule ip startos output ip daddr $sip $PROTO $dnat comment \"$TAG\""
+    echo "add rule ip startos forward ct status dnat ct original ip daddr $sip $PROTO $port_pair_match ct state new accept comment \"$TAG\""
+    echo "add rule ip startos postrouting fib saddr type local ct original ip daddr $sip ip daddr $dip $PROTO th dport $dport_match masquerade comment \"$TAG\""
+    echo "add rule ip startos postrouting ip saddr $dip/$dprefix ip daddr $dip $PROTO th dport $dport_match masquerade comment \"$TAG\""
 }
 
-{
-    delete_tagged
-    if [ "${UNDO:-0}" != 1 ]; then
-        # DNAT inbound. With src_subnet, restrict to that subnet (private
-        # forward) plus the container bridge; otherwise forward from anywhere.
-        if [ -n "${src_subnet:-}" ]; then
-            echo "add rule ip startos prerouting ip saddr $src_subnet ip daddr $sip $PROTO $dnat comment \"$TAG\""
-            if [ -n "${bridge_subnet:-}" ]; then
-                echo "add rule ip startos prerouting ip saddr $bridge_subnet ip daddr $sip $PROTO $dnat comment \"$TAG\""
-            fi
-        else
-            echo "add rule ip startos prerouting ip daddr $sip $PROTO $dnat comment \"$TAG\""
-        fi
-        # DNAT for locally-originated (hairpin from the host itself).
-        echo "add rule ip startos output ip daddr $sip $PROTO $dnat comment \"$TAG\""
-        # Allow new forwarded connections to the target.
-        echo "add rule ip startos forward ip daddr $dip $PROTO th dport $dport_match ct state new accept comment \"$TAG\""
-        # Masquerade hairpin replies so they reverse through this host.
-        echo "add rule ip startos postrouting fib saddr type local ct original ip daddr $sip ip daddr $dip $PROTO th dport $dport_match masquerade comment \"$TAG\""
-        echo "add rule ip startos postrouting ip saddr $dip/$dprefix ip daddr $dip $PROTO th dport $dport_match masquerade comment \"$TAG\""
-    fi
-} | nft -f -
+render_rules | "${FORWARD_PORT_NFT:-/usr/lib/startos/scripts/forward-port-nft}" ip "$TAG" || exit $?
 
 if [ "${UNDO:-0}" = 1 ]; then
     # conntrack returns 1 when no flows match; ignore. -D takes no port range,
