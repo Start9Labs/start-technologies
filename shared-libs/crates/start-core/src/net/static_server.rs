@@ -1118,29 +1118,29 @@ impl FileData {
         }
 
         let range = requested_range(req, len, None);
-        let (encoding, len, data) = match range {
-            ByteRange::Full => Self::encode(
-                RepresentationChoice::Identity,
-                contents.reader().await?.take(len),
-                len,
-            ),
-            ByteRange::Satisfiable { start, end, .. } => {
-                let len = end + 1 - start;
-                Self::encode(
+        let (encoding, len, data) = if req.method == Method::HEAD {
+            (None, Some(len), Body::empty())
+        } else {
+            match range {
+                ByteRange::Full => Self::encode(
                     RepresentationChoice::Identity,
-                    contents.slice(start, len).await?,
+                    contents.reader().await?.take(len),
                     len,
-                )
+                ),
+                ByteRange::Satisfiable { start, end, .. } => {
+                    let len = end + 1 - start;
+                    Self::encode(
+                        RepresentationChoice::Identity,
+                        contents.slice(start, len).await?,
+                        len,
+                    )
+                }
+                ByteRange::Unsatisfiable { .. } => (None, Some(0), Body::empty()),
             }
-            ByteRange::Unsatisfiable { .. } => (None, Some(0), Body::empty()),
         };
 
         Ok(Self {
-            data: if req.method == Method::HEAD {
-                Body::empty()
-            } else {
-                data
-            },
+            data,
             len,
             range,
             encoding,
@@ -1272,6 +1272,26 @@ mod tests {
         Duration::from_secs(1),
         Duration::from_secs(1),
     );
+
+    struct UnreadableSource;
+
+    impl FileSource for UnreadableSource {
+        type Reader = std::io::Cursor<&'static [u8]>;
+        type SliceReader = Self::Reader;
+
+        async fn size(&self) -> Result<u64, Error> {
+            panic!("HEAD read the source size")
+        }
+
+        async fn reader(&self) -> Result<Self::Reader, Error> {
+            panic!("HEAD opened the source reader")
+        }
+
+        async fn slice(&self, _: u64, _: u64) -> Result<Self::SliceReader, Error> {
+            panic!("HEAD sliced the source")
+        }
+    }
+
     static TEST_UI_DIR: Dir<'static> = Dir::new(
         "",
         &[
@@ -1477,6 +1497,37 @@ mod tests {
         .unwrap();
         assert_eq!(rejected.status(), StatusCode::NOT_ACCEPTABLE);
         assert!(!rejected.headers().contains_key("Repr-Digest"));
+    }
+
+    #[tokio::test]
+    async fn s9pk_head_does_not_read_contents() {
+        let contents = FileContents::new(UnreadableSource);
+
+        for range in [None, Some("bytes=0-4")] {
+            let headers = range.map_or_else(Vec::new, |range| vec![(RANGE, range)]);
+            let request_parts = request(Method::HEAD, "/asset.bin", &headers).into_parts().0;
+            let response = FileData::from_s9pk_contents(
+                &request_parts,
+                Path::new("asset.bin"),
+                &contents,
+                None,
+                21,
+            )
+            .await
+            .unwrap()
+            .into_response(&request_parts)
+            .unwrap();
+
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(header(&response, CONTENT_LENGTH), "21");
+            assert!(!response.headers().contains_key(CONTENT_RANGE));
+            assert!(
+                to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+        }
     }
 
     #[test]
