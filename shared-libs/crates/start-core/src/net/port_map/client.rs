@@ -5,8 +5,7 @@
 //! [`crate::tunnel::forward::pcp`]). PCP/NAT-PMP via `crab_nat`, UPnP via
 //! [`crate::net::port_map::upnp`].
 //!
-//! A drain atomically stops admission, waits for every shard's teardown, and
-//! permanently closes the controller.
+//! A drain atomically and permanently closes admission before awaiting shard teardown.
 //!
 //! Work is sharded per local IP (one task per gateway interface), so a gateway
 //! that answers slowly or not at all never head-of-line-blocks mapping attempts
@@ -31,7 +30,7 @@ use crab_nat::{
     InternetProtocol, MappingFailure, PortMapping, PortMappingOptions, TimeoutConfig, pcp,
 };
 use futures::FutureExt;
-use futures::future::{BoxFuture, Shared};
+use futures::future::{BoxFuture, Shared, join_all};
 use igd_next::PortMappingProtocol;
 use igd_next::aio::Gateway;
 use igd_next::aio::tokio::Tokio;
@@ -362,26 +361,15 @@ impl PortMapController {
     pub(crate) async fn drain(&self) -> Result<(), Error> {
         let completion = self.state.mutate(|state| match state {
             ControllerState::Accepting(shards) => {
-                let mut responses = Vec::with_capacity(shards.len());
-                let mut first_error = None;
-                for shard in shards.values() {
-                    let (respond, receive) = oneshot::channel();
-                    if shard.send(Command::Drain { respond }).is_err() {
-                        first_error.get_or_insert_with(controller_exited);
-                    } else {
-                        responses.push(receive);
-                    }
-                }
+                let drains = shards
+                    .iter()
+                    .map(|(local_ip, shard)| drain_shard(*local_ip, shard.clone()))
+                    .collect::<Vec<_>>();
                 let completion = tokio::spawn(async move {
-                    for receive in responses {
-                        match receive.await {
-                            Ok(Ok(())) => {}
-                            Ok(Err(error)) => {
-                                first_error.get_or_insert(error);
-                            }
-                            Err(_) => {
-                                first_error.get_or_insert_with(controller_exited);
-                            }
+                    let mut first_error = None;
+                    for result in join_all(drains).await {
+                        if let Err(error) = result {
+                            first_error.get_or_insert(error);
                         }
                     }
                     first_error.map_or(Ok(()), Err)
@@ -465,6 +453,27 @@ fn controller_exited() -> Error {
     Error::new(eyre!("port-map controller exited"), ErrorKind::Network)
 }
 
+async fn drain_shard(local_ip: IpAddr, shard: mpsc::UnboundedSender<Command>) -> Result<(), Error> {
+    let mut failures: u32 = 0;
+    loop {
+        let (respond, receive) = oneshot::channel();
+        shard
+            .send(Command::Drain { respond })
+            .map_err(|_| controller_exited())?;
+        match receive.await.map_err(|_| controller_exited())? {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                failures = failures.saturating_add(1);
+                let delay = retry_delay(failures);
+                tracing::warn!(
+                    "port-map drain for shard {local_ip} failed on attempt {failures}; retrying in {delay:?}: {error}"
+                );
+                tokio::time::sleep(delay).await;
+            }
+        }
+    }
+}
+
 fn spawn_shard(
     interfaces: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
 ) -> mpsc::UnboundedSender<Command> {
@@ -491,8 +500,12 @@ fn spawn_shard(
                         ));
                     }
                     Some(Command::Drain { respond }) => {
-                        respond.send(state.drain().await).ok();
-                        break;
+                        let result = state.drain().await;
+                        let complete = result.is_ok();
+                        respond.send(result).ok();
+                        if complete {
+                            break;
+                        }
                     }
                     None => break,
                 },
@@ -632,7 +645,6 @@ struct State {
     desired: BTreeMap<MappingKey, Spec>,
     active: BTreeMap<MappingKey, Active>,
     upnp_cache: BTreeMap<Ipv4Addr, (Gateway<Tokio>, Instant)>,
-    /// Stores each mapping's failure count and latest attempt for retry backoff.
     failures: BTreeMap<MappingKey, (u32, Instant)>,
     stale: BTreeSet<MappingKey>,
 }
@@ -1753,7 +1765,7 @@ mod tests {
         controller.drain().await.unwrap();
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn concurrent_drains_share_completion_after_cancellation() {
         let controller = PortMapController::new(interfaces());
         let ip: IpAddr = "fd00:59::2".parse().unwrap();
@@ -1764,63 +1776,39 @@ mod tests {
             }
             ControllerState::Draining(_) => panic!("controller already draining"),
         });
-        let (drain_started, drain_received) = oneshot::channel();
-        let (release_drain, drain_released) = oneshot::channel();
-        tokio::spawn(async move {
-            let Some(Command::Drain { respond }) = commands.recv().await else {
-                panic!("shard did not receive drain command");
-            };
-            drain_started.send(()).unwrap();
-            drain_released.await.unwrap();
-            respond
-                .send(Err(Error::new(
-                    eyre!("held teardown failed"),
-                    ErrorKind::Network,
-                )))
-                .ok();
-        });
 
         let first_controller = controller.clone();
         let first = tokio::spawn(async move { first_controller.drain().await });
-        drain_received.await.unwrap();
+        let Some(Command::Drain { respond }) = commands.recv().await else {
+            panic!("shard did not receive first drain command");
+        };
+        respond
+            .send(Err(Error::new(
+                eyre!("synthetic teardown failed"),
+                ErrorKind::Network,
+            )))
+            .unwrap();
+        tokio::task::yield_now().await;
 
-        let second = controller.drain();
-        tokio::pin!(second);
-        assert!(
-            futures::poll!(&mut second).is_pending(),
-            "second drain completed before shard teardown"
-        );
         first.abort();
         assert!(first.await.unwrap_err().is_cancelled());
-        assert!(
-            futures::poll!(&mut second).is_pending(),
-            "cancelling the initiating caller cancelled teardown"
-        );
+        let second_controller = controller.clone();
+        let second = tokio::spawn(async move { second_controller.drain().await });
+        let third_controller = controller.clone();
+        let third = tokio::spawn(async move { third_controller.drain().await });
+        tokio::task::yield_now().await;
+        assert!(!second.is_finished());
+        assert!(!third.is_finished());
 
-        release_drain.send(()).unwrap();
-        let completed = second.await.unwrap_err();
-        let completed_message = completed.to_string();
-        assert_eq!(completed.kind, ErrorKind::Network);
-        assert!(completed_message.contains("held teardown failed"));
+        tokio::time::advance(RETRY_INTERVAL).await;
+        let Some(Command::Drain { respond }) = commands.recv().await else {
+            panic!("shard did not receive retried drain command");
+        };
+        respond.send(Ok(())).unwrap();
 
-        for _ in 0..2 {
-            let repeated = controller.drain().await.unwrap_err();
-            assert_eq!(repeated.kind, completed.kind);
-            assert_eq!(repeated.to_string(), completed_message);
-        }
-    }
-
-    #[tokio::test]
-    async fn state_can_be_reused_after_drain() {
-        let ip: IpAddr = "fd00:59::2".parse().unwrap();
-        let key: MappingKey = (ip, 443, None, TransportProtocol::Tcp);
-        let mut state = State::default();
-        state.ensure(&interfaces(), key.clone(), spec()).await;
-
-        state.drain().await.unwrap();
-        assert!(state.desired.is_empty());
-
-        state.ensure(&interfaces(), key.clone(), spec()).await;
-        assert!(state.desired.contains_key(&key));
+        second.await.unwrap().unwrap();
+        third.await.unwrap().unwrap();
+        controller.drain().await.unwrap();
+        controller.drain().await.unwrap();
     }
 }

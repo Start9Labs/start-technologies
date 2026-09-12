@@ -30,7 +30,9 @@ use crate::middleware::auth::local::{LocalAuthContext, dial_addr, local_auth_hea
 use crate::middleware::auth::signature::{NonceCache, url_host_str};
 use crate::middleware::cors::Cors;
 use crate::net::dns_update::rfc2136::{DnsInjector, InjectedRecord};
-use crate::net::forward::{PortForwardController, nft_comments_with_prefix, nft_rule, nft_rule_v6};
+use crate::net::forward::{
+    FORWARD_DRAIN_TIMEOUT, PortForwardController, nft_comments_with_prefix, nft_rule, nft_rule_v6,
+};
 use crate::net::static_server::{EMPTY_DIR, UiContext};
 use crate::prelude::*;
 use crate::rpc_continuations::{OpenAuthedContinuations, RpcContinuations};
@@ -42,6 +44,7 @@ use crate::tunnel::migrations::run_migrations;
 use crate::tunnel::wg::{WIREGUARD_INTERFACE_NAME, WgServer, current_ifindex};
 use crate::util::Invoke;
 use crate::util::collections::OrdMapIterMut;
+use crate::util::future::NonDetachingJoinHandle;
 use crate::util::sync::{SyncMutex, Watch};
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, Parser)]
@@ -315,67 +318,6 @@ impl TunnelContext {
         dns_proxy.sync(&wg, dns_injector.clone()).await?;
 
         let sni = crate::tunnel::forward::sni::SniDemux::new();
-        let mut active_forwards = BTreeMap::new();
-        for (from, entry) in peek.as_port_forwards().de()?.0 {
-            match entry {
-                PortForward::Dnat {
-                    target,
-                    enabled,
-                    count,
-                    ..
-                } => {
-                    if !enabled {
-                        continue;
-                    }
-                    let to = target;
-                    let prefix = net_iface
-                        .peek(|i| {
-                            i.iter()
-                                .find_map(|(_, i)| {
-                                    i.ip_info.as_ref().and_then(|i| {
-                                        i.subnets
-                                            .iter()
-                                            .find(|s| s.contains(&IpAddr::from(*to.ip())))
-                                    })
-                                })
-                                .cloned()
-                        })
-                        .map(|s| s.prefix_len())
-                        .unwrap_or(32);
-                    active_forwards.insert(
-                        from,
-                        forward
-                            .add_forward_range(from, to, count, prefix, None)
-                            .await?,
-                    );
-                }
-                PortForward::Sni { routes, fallback } => {
-                    for (hostname, route) in routes {
-                        if !route.enabled {
-                            continue;
-                        }
-                        if let Err(code) = sni.register(
-                            *from.ip(),
-                            from.port(),
-                            &[hostname.clone()],
-                            route.target,
-                            None,
-                        ) {
-                            tracing::warn!(
-                                "failed to restore SNI route {hostname} on {from}: code {code}"
-                            );
-                        }
-                    }
-                    if let Some(f) = fallback.filter(|f| f.enabled) {
-                        if let Err(code) = sni.register_fallback(*from.ip(), from.port(), f.target)
-                        {
-                            tracing::warn!("failed to restore SNI fallback on {from}: code {code}");
-                        }
-                    }
-                }
-            }
-        }
-
         let ctx = Self(Arc::new(TunnelContextSeed {
             listen,
             db,
@@ -390,7 +332,7 @@ impl TunnelContext {
             dns_injector,
             dns_allowed,
             dns_keys,
-            active_forwards: SyncMutex::new(active_forwards),
+            active_forwards: SyncMutex::new(BTreeMap::new()),
             forward_write_lock: tokio::sync::Mutex::new(()),
             leases: SyncMutex::new(BTreeMap::new()),
             lease_wake: tokio::sync::Notify::new(),
@@ -401,21 +343,111 @@ impl TunnelContext {
             shutdown,
         }));
 
-        ctx.resync_egress().await?;
-        ctx.resync_v6().await?;
-        crate::tunnel::forward::pinhole::seed_pinholes(&ctx).await?;
-        // Grant every restored auto entry a fresh lease so a client that never
-        // reconnects is reaped rather than lingering forever.
-        crate::tunnel::forward::lease::seed_from_db(&ctx).await?;
+        let initialized = async {
+            for (from, entry) in peek.as_port_forwards().de()?.0 {
+                match entry {
+                    PortForward::Dnat {
+                        target,
+                        enabled,
+                        count,
+                        ..
+                    } => {
+                        if !enabled {
+                            continue;
+                        }
+                        let to = target;
+                        let prefix = ctx
+                            .net_iface
+                            .peek(|i| {
+                                i.iter()
+                                    .find_map(|(_, i)| {
+                                        i.ip_info.as_ref().and_then(|i| {
+                                            i.subnets
+                                                .iter()
+                                                .find(|s| s.contains(&IpAddr::from(*to.ip())))
+                                        })
+                                    })
+                                    .cloned()
+                            })
+                            .map(|s| s.prefix_len())
+                            .unwrap_or(32);
+                        let active = ctx
+                            .forward
+                            .add_forward_range(from, to, count, prefix, None)
+                            .await?;
+                        ctx.active_forwards.mutate(|forwards| {
+                            forwards.insert(from, active);
+                        });
+                    }
+                    PortForward::Sni { routes, fallback } => {
+                        for (hostname, route) in routes {
+                            if !route.enabled {
+                                continue;
+                            }
+                            if let Err(code) = ctx.sni.register(
+                                *from.ip(),
+                                from.port(),
+                                &[hostname.clone()],
+                                route.target,
+                                None,
+                            ) {
+                                tracing::warn!(
+                                    "failed to restore SNI route {hostname} on {from}: code {code}"
+                                );
+                            }
+                        }
+                        if let Some(f) = fallback.filter(|f| f.enabled) {
+                            if let Err(code) =
+                                ctx.sni.register_fallback(*from.ip(), from.port(), f.target)
+                            {
+                                tracing::warn!(
+                                    "failed to restore SNI fallback on {from}: code {code}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
 
-        // PCP (preferred) + UPnP IGD (fallback) let connected clients open their
-        // public ports automatically; the reaper expires auto mappings whose
-        // client stops renewing.
-        tokio::spawn(crate::tunnel::forward::pcp::run(ctx.clone()));
-        tokio::spawn(crate::tunnel::forward::igd::run(ctx.clone()));
-        tokio::spawn(crate::tunnel::forward::lease::run(ctx.clone()));
+            ctx.resync_egress().await?;
+            ctx.resync_v6().await?;
+            // Grant every restored auto entry a fresh lease so a client that never
+            // reconnects is reaped rather than lingering forever.
+            crate::tunnel::forward::lease::seed_from_db(&ctx).await?;
+            crate::tunnel::forward::pinhole::seed_pinholes(&ctx).await?;
+            Ok::<_, Error>(())
+        }
+        .await;
+
+        if let Err(error) = initialized {
+            ctx.shutdown_forwarding().await.log_err();
+            return Err(error);
+        }
 
         Ok(ctx)
+    }
+
+    pub(crate) fn spawn_forwarding_servers(&self) -> [NonDetachingJoinHandle<()>; 3] {
+        [
+            tokio::spawn(crate::tunnel::forward::pcp::run(self.clone())).into(),
+            tokio::spawn(crate::tunnel::forward::igd::run(self.clone())).into(),
+            tokio::spawn(crate::tunnel::forward::lease::run(self.clone())).into(),
+        ]
+    }
+
+    pub(crate) async fn shutdown_forwarding(&self) -> Result<(), Error> {
+        self.active_forwards.mutate(BTreeMap::clear);
+        tokio::time::timeout(FORWARD_DRAIN_TIMEOUT, self.forward.drain())
+            .await
+            .map_err(|_| {
+                Error::new(
+                    eyre!(
+                        "forwarding teardown exceeded aggregate deadline of {:?}",
+                        FORWARD_DRAIN_TIMEOUT
+                    ),
+                    ErrorKind::Timeout,
+                )
+            })?
     }
 
     pub async fn gc_forwards(

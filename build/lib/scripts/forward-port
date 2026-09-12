@@ -55,7 +55,6 @@ else
     port_pair_match="ct original proto-dst . th dport { $pairs } ip daddr $dip"
     dport_match="${dport}-${dport_end}"
     if [ "$sport" = "$dport" ]; then
-        # Equal bases preserve each destination port.
         dnat="th dport ${sport}-${sport_end} dnat to $dip"
     else
         dnat="dnat to th dport map { $map }"

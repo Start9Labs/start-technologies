@@ -19,7 +19,8 @@ use crate::hostname::ServerHostname;
 use crate::net::dns::DnsController;
 use crate::net::dns_update::{DnsUpdateController, spawn_server_mdns_injection};
 use crate::net::forward::{
-    ForwardRequirements, InterfacePortForwardController, START9_BRIDGE_IFACE, nft_rule, nft_rule_v6,
+    ForwardRequirements, InterfacePortForwardController, START9_BRIDGE_IFACE, drain_forwarding,
+    nft_rule, nft_rule_v6,
 };
 use crate::net::gateway::NetworkInterfaceController;
 use crate::net::host::binding::{AddSslOptions, BindId, BindOptions, UpstreamCertValidation};
@@ -163,11 +164,7 @@ impl NetController {
     }
 
     pub(crate) async fn shutdown_forwarding(&self) -> Result<(), Error> {
-        let mut first_error = self.forward.drain().await.err();
-        if let Err(error) = self.port_map.drain().await {
-            first_error.get_or_insert(error);
-        }
-        first_error.map_or(Ok(()), Err)
+        drain_forwarding(self.forward.drain(), self.port_map.drain()).await
     }
 
     /// Client config for the OS→container TLS leg when rewrapping SSL. Falls
@@ -780,7 +777,7 @@ impl NetServiceData {
                         spec.src_filter,
                     )
                     .await?;
-                binds.gua_forwards.insert(key, (spec, result.lease));
+                binds.gua_forwards.insert(key, (spec, result));
             }
         }
 
@@ -807,7 +804,7 @@ impl NetServiceData {
                         .forward
                         .add_range(external, spec.count, spec.requirements.clone(), spec.target)
                         .await?;
-                    binds.forwards.insert(external, (spec, result.lease));
+                    binds.forwards.insert(external, (spec, result));
                 }
             }
         }

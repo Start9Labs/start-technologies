@@ -37,17 +37,25 @@ impl<V: MetadataVisitor> Visit<V> for WebserverListener {
     }
 }
 
+async fn await_aborted_task(name: &str, task: NonDetachingJoinHandle<()>) {
+    if let Err(error) = task.await {
+        if !error.is_cancelled() {
+            tracing::error!("{name} task failed: {error}");
+        }
+    }
+}
+
 #[instrument(skip_all)]
 async fn inner_main(config: &TunnelConfig) -> Result<Option<bool>, Error> {
-    let mut shutdown = None;
-
-    let server = async {
+    let (server, ctx, shutdown) = async {
+        let listen = config
+            .tunnel_listen
+            .unwrap_or(crate::tunnel::TUNNEL_DEFAULT_LISTEN);
+        let http_acceptor =
+            Acceptor::bind_map_dyn([(WebserverListener::Http, listen)]).await?;
         let ctx = TunnelContext::init(config).await?;
-        let listen = ctx.listen;
-        let server = WebServer::new(
-            Acceptor::bind_map_dyn([(WebserverListener::Http, listen)]).await?,
-            tunnel_router(ctx.clone()),
-        );
+        let forwarding_threads = ctx.spawn_forwarding_servers();
+        let server = WebServer::new(http_acceptor, tunnel_router(ctx.clone()));
         let acceptor_setter = server.acceptor_setter();
         let https_db = ctx.db.clone();
         let https_thread: NonDetachingJoinHandle<()> = tokio::spawn(async move {
@@ -134,7 +142,7 @@ async fn inner_main(config: &TunnelConfig) -> Result<Option<bool>, Error> {
 
         let mut shutdown_recv = ctx.shutdown.subscribe();
 
-        let sig_handler_ctx = ctx;
+        let sig_handler_ctx = ctx.clone();
         let sig_handler: NonDetachingJoinHandle<()> = tokio::spawn(async move {
             use tokio::signal::unix::SignalKind;
             futures::future::select_all(
@@ -163,19 +171,37 @@ async fn inner_main(config: &TunnelConfig) -> Result<Option<bool>, Error> {
         })
         .into();
 
-        shutdown = shutdown_recv
+        let shutdown = shutdown_recv
             .recv()
             .await
             .with_kind(crate::ErrorKind::Unknown)?;
 
-        sig_handler.wait_for_abort().await.with_kind(ErrorKind::Unknown)?;
-        https_thread.wait_for_abort().await.with_kind(ErrorKind::Unknown)?;
-        redirect_thread.wait_for_abort().await.with_kind(ErrorKind::Unknown)?;
+        for thread in &forwarding_threads {
+            thread.abort();
+        }
+        sig_handler.abort();
+        https_thread.abort();
+        redirect_thread.abort();
 
-        Ok::<_, Error>(server)
+        for (name, thread) in ["PCP", "IGD", "lease"]
+            .into_iter()
+            .zip(forwarding_threads)
+        {
+            await_aborted_task(name, thread).await;
+        }
+        await_aborted_task("signal", sig_handler).await;
+        await_aborted_task("HTTPS", https_thread).await;
+        await_aborted_task("redirect", redirect_thread).await;
+
+        Ok::<_, Error>((server, ctx, shutdown))
     }
     .await?;
     server.shutdown().await;
+
+    if let Err(error) = ctx.shutdown_forwarding().await {
+        tracing::error!("forwarding cleanup failed: {error}");
+        tracing::debug!("{error:?}");
+    }
 
     Ok(shutdown)
 }

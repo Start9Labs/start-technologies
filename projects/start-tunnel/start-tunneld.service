@@ -9,6 +9,7 @@ Environment=RUST_LOG=warn,start_core=debug
 ExecStart=/usr/bin/start-tunneld
 Restart=always
 RestartSec=3
+TimeoutStopSec=120
 ManagedOOMPreference=avoid
 LimitNOFILE=65536
 

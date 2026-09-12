@@ -132,6 +132,9 @@ for the detail behind its highlights.
 
 ### Fixed
 
+- **Service and published ports stay synchronized more reliably with configured
+  exposure after transient forwarding failures and during graceful shutdown.**
+
 - **The port-forwarding test reports a port as open to the Internet only where
   it is reachable from the Internet.** Where StartOS's port-forward request was
   granted by a router that sits behind another router, the test could pass a

@@ -424,18 +424,18 @@ impl RpcContext {
     #[instrument(skip_all)]
     pub async fn shutdown(self) -> Result<(), Error> {
         self.crons.mutate(|c| std::mem::take(c));
-        let result = self.services.shutdown_all().await;
-        self.net_controller.shutdown_forwarding().await.log_err();
+        let (result, forwarding_result) = tokio::join!(
+            self.services.shutdown_all(),
+            self.net_controller.shutdown_forwarding(),
+        );
+        forwarding_result.log_err();
         self.0.is_closed.store(true, Ordering::SeqCst);
         self.0.closed.send_replace(true);
         tracing::info!("{}", t!("context.rpc.rpc-context-shutdown"));
         result
     }
 
-    /// Resolves once graceful teardown (`shutdown`) has completed. Used by the
-    /// `wait` path of the server shutdown/restart RPC so a caller can block
-    /// until containers are stopped (it won't outlive the webserver teardown
-    /// that immediately follows).
+    /// Resolves once [`Self::shutdown`] marks the context closed.
     pub async fn wait_closed(&self) {
         let mut rx = self.0.closed.subscribe();
         let _ = rx.wait_for(|closed| *closed).await;

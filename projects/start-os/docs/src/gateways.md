@@ -38,6 +38,8 @@ Every gateway routes outbound traffic from your server to the Internet. Some gat
 
 To re-import a gateway's WireGuard config — for example, a StartTunnel config re-issued with new settings — open the gateway's `⋮` menu, choose "Update config", and paste or upload the new file. The config is replaced **in place**: the gateway keeps its identity, so its port forwards and private/public domains are preserved. (Re-adding via "Add" would instead create a separate gateway.)
 
+Temporary forwarding failures are retried while StartOS runs, and graceful shutdown includes a bounded cleanup pass for active local and router forwards.
+
 ## Secure Gateways
 
 Some service interfaces are served without SSL — plain HTTP, or another protocol carrying no encryption of its own. StartOS offers those addresses only on a network it treats as secure. Loopback and the container bridge are secure, because they never leave your server. Every other gateway — your router, WiFi, a WireGuard tunnel — is not, so a service interface bound without SSL is neither listed nor reachable through it.

@@ -219,17 +219,25 @@ pub async fn remove_pinhole(ctx: &TunnelContext, gua: Ipv6Addr, external_port: u
 
 /// Reinstall every enabled pinhole's nft rules from the db (startup / resync).
 pub async fn seed_pinholes(ctx: &TunnelContext) -> Result<(), Error> {
+    let mut attempted = Vec::new();
     for (key, ph) in ctx.db.peek().await.as_pinholes6().de()?.0 {
         if !ph.enabled {
             continue;
         }
-        apply_pinhole(
+        attempted.push((*key.ip(), key.port()));
+        if let Err(error) = apply_pinhole(
             *key.ip(),
             key.port(),
             ph.internal_port(key.port()),
             ph.count,
         )
-        .await?;
+        .await
+        {
+            for (gua, external_port) in attempted {
+                remove_pinhole_rules(gua, external_port).await.log_err();
+            }
+            return Err(error);
+        }
     }
     Ok(())
 }
