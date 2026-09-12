@@ -1,8 +1,8 @@
 use std::cmp::min;
 use std::future::Future;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
-use std::time::UNIX_EPOCH;
 
 use async_compression::tokio::bufread::GzipEncoder;
 use axum::Router;
@@ -43,7 +43,7 @@ use crate::s9pk::merkle_archive::source::FileSource;
 use crate::s9pk::merkle_archive::source::http::HttpSource;
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
-use crate::util::io::open_file;
+use crate::util::io::{maybe_open_file, open_file};
 use crate::util::serde::BASE64;
 use crate::{PackageId, main_api};
 
@@ -51,9 +51,9 @@ const NOT_FOUND: &[u8] = b"Not Found";
 const METHOD_NOT_ALLOWED: &[u8] = b"Method Not Allowed";
 const NOT_AUTHORIZED: &[u8] = b"Not Authorized";
 const INTERNAL_SERVER_ERROR: &[u8] = b"Internal Server Error";
-const IMMUTABLE_FILE_CACHE_CONTROL: &str = "public, max-age=21000000, immutable";
 const IMMUTABLE_UI_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 const REVALIDATE_CACHE_CONTROL: &str = "no-cache";
+const PRIVATE_REVALIDATE_CACHE_CONTROL: &str = "private, no-cache";
 
 pub const EMPTY_DIR: Dir<'_> = Dir::new("", &[]);
 
@@ -242,7 +242,7 @@ fn serve_ui_from_dir(req: Request, ui_dir: &'static Dir<'static>) -> Result<Resp
             });
 
             if let Some(file) = file {
-                FileData::from_embedded(&request_parts, file, ui_dir)?.into_response(&request_parts)
+                FileData::from_embedded(&request_parts, file, ui_dir).into_response(&request_parts)
             } else {
                 Ok(not_found())
             }
@@ -299,7 +299,7 @@ pub fn ui_router<C: UiContext>(ctx: C) -> Router {
 pub fn refresher() -> Router {
     Router::new().fallback(get(|request: Request| async move {
         let (request_parts, _) = request.into_parts();
-        let file = if encoding_quality(&request_parts, "identity") <= 0.0 {
+        let file = if RepresentationQualities::from_request(&request_parts).identity <= 0.0 {
             FileData::not_acceptable()
         } else {
             let res = include_bytes!("./refresher.html");
@@ -309,7 +309,6 @@ pub fn refresher() -> Router {
                 e_tag: None,
                 cache_control: None,
                 encoding: None,
-                vary_accept_encoding: true,
                 len: Some(res.len() as u64),
                 mime: Some("text/html".into()),
                 digest: None,
@@ -333,7 +332,7 @@ fn s9pk_router(ctx: RpcContext) -> Router {
                             .unwrap_or(&s9pk)
                             .parse::<PackageId>()?;
                         let (parts, _) = request.into_parts();
-                        match FileData::from_path(
+                        match FileData::from_installed_s9pk(
                             &parts,
                             &ctx.db
                                 .peek()
@@ -643,54 +642,87 @@ fn format_uuid_from_hex(hex32: &str) -> String {
     )
 }
 
-fn encoding_quality(req: &RequestParts, encoding: &str) -> f32 {
-    let mut exact = None::<f32>;
-    let mut wildcard = None::<f32>;
-    for value in req
-        .headers
-        .get_all(ACCEPT_ENCODING)
-        .iter()
-        .filter_map(|header| header.to_str().ok())
-        .flat_map(|header| header.split(','))
-    {
-        let mut parts = value.split(';');
-        let name = parts.next().unwrap_or_default().trim();
-        let mut quality = 1.0;
-        for parameter in parts {
-            let Some((key, value)) = parameter.trim().split_once('=') else {
-                continue;
-            };
-            if key.trim().eq_ignore_ascii_case("q") {
-                quality = value
-                    .trim()
-                    .parse::<f32>()
-                    .ok()
-                    .filter(|quality| (0.0..=1.0).contains(quality))
-                    .unwrap_or(0.0);
-            }
-        }
-        if name.eq_ignore_ascii_case(encoding) {
-            exact = Some(exact.map_or(quality, |current| current.max(quality)));
-        } else if name == "*" {
-            wildcard = Some(wildcard.map_or(quality, |current| current.max(quality)));
-        }
-    }
-    if encoding.eq_ignore_ascii_case("identity") {
-        exact.unwrap_or_else(|| if wildcard == Some(0.0) { 0.0 } else { 1.0 })
-    } else {
-        exact.or(wildcard).unwrap_or(0.0)
-    }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RepresentationChoice {
+    NotAcceptable,
+    Identity,
+    Gzip,
+    Brotli,
 }
 
-fn negotiate_gzip(req: &RequestParts) -> Option<Option<&'static str>> {
-    let identity = encoding_quality(req, "identity");
-    let gzip = encoding_quality(req, "gzip");
-    if identity <= 0.0 && gzip <= 0.0 {
-        None
-    } else if gzip > 0.0 && gzip >= identity {
-        Some(Some("gzip"))
-    } else {
-        Some(None)
+#[derive(Clone, Copy, Debug)]
+struct RepresentationQualities {
+    identity: f32,
+    gzip: f32,
+    brotli: f32,
+}
+
+impl RepresentationQualities {
+    fn from_request(req: &RequestParts) -> Self {
+        let mut identity = None::<f32>;
+        let mut gzip = None::<f32>;
+        let mut brotli = None::<f32>;
+        let mut wildcard = None::<f32>;
+        for value in req
+            .headers
+            .get_all(ACCEPT_ENCODING)
+            .iter()
+            .filter_map(|header| header.to_str().ok())
+            .flat_map(|header| header.split(','))
+        {
+            let mut parts = value.split(';');
+            let name = parts.next().unwrap_or_default().trim();
+            let mut quality = 1.0;
+            for parameter in parts {
+                let Some((key, value)) = parameter.trim().split_once('=') else {
+                    continue;
+                };
+                if key.trim().eq_ignore_ascii_case("q") {
+                    quality = value
+                        .trim()
+                        .parse::<f32>()
+                        .ok()
+                        .filter(|quality| (0.0..=1.0).contains(quality))
+                        .unwrap_or(0.0);
+                }
+            }
+            let target = if name.eq_ignore_ascii_case("identity") {
+                &mut identity
+            } else if name.eq_ignore_ascii_case("gzip") {
+                &mut gzip
+            } else if name.eq_ignore_ascii_case("br") {
+                &mut brotli
+            } else if name == "*" {
+                &mut wildcard
+            } else {
+                continue;
+            };
+            *target = Some(target.map_or(quality, |current| current.max(quality)));
+        }
+        Self {
+            identity: identity.unwrap_or_else(|| if wildcard == Some(0.0) { 0.0 } else { 1.0 }),
+            gzip: gzip.or(wildcard).unwrap_or(0.0),
+            brotli: brotli.or(wildcard).unwrap_or(0.0),
+        }
+    }
+
+    fn select(self, gzip: bool, brotli: bool) -> RepresentationChoice {
+        let mut selected =
+            (self.identity > 0.0).then_some((self.identity, 0, RepresentationChoice::Identity));
+        for (available, quality, priority, choice) in [
+            (gzip, self.gzip, 1, RepresentationChoice::Gzip),
+            (brotli, self.brotli, 2, RepresentationChoice::Brotli),
+        ] {
+            if available
+                && quality > 0.0
+                && selected.is_none_or(|(current, current_priority, _)| {
+                    quality > current || (quality == current && priority > current_priority)
+                })
+            {
+                selected = Some((quality, priority, choice));
+            }
+        }
+        selected.map_or(RepresentationChoice::NotAcceptable, |(_, _, choice)| choice)
     }
 }
 
@@ -731,7 +763,12 @@ fn parse_range(header: &HeaderValue, len: u64) -> ByteRange {
         .to_str()
         .ok()
         .map(str::trim)
-        .and_then(|range| range.strip_prefix("bytes="))
+        .and_then(|range| {
+            range
+                .get(..6)
+                .filter(|unit| unit.eq_ignore_ascii_case("bytes="))
+                .map(|_| &range[6..])
+        })
         .filter(|range| !range.contains(','))
     else {
         return ByteRange::Full;
@@ -785,10 +822,14 @@ fn requested_range(req: &RequestParts, len: u64, current_e_tag: Option<&str>) ->
     if req.method != Method::GET || !if_range_matches(req, current_e_tag) {
         return ByteRange::Full;
     }
-    req.headers
-        .get(RANGE)
-        .map(|range| parse_range(range, len))
-        .unwrap_or(ByteRange::Full)
+    let mut ranges = req.headers.get_all(RANGE).iter();
+    let Some(range) = ranges.next() else {
+        return ByteRange::Full;
+    };
+    if ranges.next().is_some() {
+        return ByteRange::Full;
+    }
+    parse_range(range, len)
 }
 
 struct FileData {
@@ -796,7 +837,6 @@ struct FileData {
     len: Option<u64>,
     range: ByteRange,
     encoding: Option<&'static str>,
-    vary_accept_encoding: bool,
     e_tag: Option<String>,
     cache_control: Option<&'static str>,
     mime: Option<InternedString>,
@@ -810,7 +850,6 @@ impl FileData {
             len: None,
             range: ByteRange::Full,
             encoding: None,
-            vary_accept_encoding: true,
             e_tag: None,
             cache_control: None,
             mime: None,
@@ -826,7 +865,7 @@ impl FileData {
         cache_control: &'static str,
         data: Vec<u8>,
     ) -> Self {
-        if encoding_quality(req, "identity") <= 0.0 {
+        if RepresentationQualities::from_request(req).identity <= 0.0 {
             return Self::not_acceptable();
         }
         let e_tag = Some(e_tag(path, &data));
@@ -852,7 +891,6 @@ impl FileData {
             len,
             range,
             encoding: None,
-            vary_accept_encoding: true,
             e_tag,
             cache_control: Some(cache_control),
             mime: Some(mime.into()),
@@ -865,39 +903,28 @@ impl FileData {
         req: &RequestParts,
         file: &'static include_dir::File<'static>,
         ui_dir: &'static Dir<'static>,
-    ) -> Result<Self, Error> {
+    ) -> Self {
         let path = file.path();
         let identity_e_tag = embedded_e_tag(path, file.contents());
+        let qualities = RepresentationQualities::from_request(req);
         let mut range = requested_range(req, file.contents().len() as u64, Some(&identity_e_tag));
-        let identity_quality = encoding_quality(req, "identity");
-        let (encoding, representation) = if range != ByteRange::Full && identity_quality > 0.0 {
-            (None, file.contents())
+        let gzip = ui_dir
+            .get_file(format!("{}.gz", path.display()))
+            .map(|file| file.contents());
+        let brotli = ui_dir
+            .get_file(format!("{}.br", path.display()))
+            .map(|file| file.contents());
+        let choice = if range != ByteRange::Full && qualities.identity > 0.0 {
+            RepresentationChoice::Identity
         } else {
             range = ByteRange::Full;
-            let mut selected: Option<(f32, u8, Option<&'static str>, &'static [u8])> =
-                (identity_quality > 0.0).then_some((identity_quality, 0, None, file.contents()));
-            for (encoding, suffix, priority) in [("gzip", ".gz", 1), ("br", ".br", 2)] {
-                let quality = encoding_quality(req, encoding);
-                let Some(representation) = (quality > 0.0)
-                    .then(|| ui_dir.get_file(format!("{}{suffix}", path.display())))
-                    .flatten()
-                    .map(|file| file.contents())
-                else {
-                    continue;
-                };
-                if selected
-                    .as_ref()
-                    .is_none_or(|(current, current_priority, ..)| {
-                        quality > *current || (quality == *current && priority > *current_priority)
-                    })
-                {
-                    selected = Some((quality, priority, Some(encoding), representation));
-                }
-            }
-            let Some((_, _, encoding, representation)) = selected else {
-                return Ok(Self::not_acceptable());
-            };
-            (encoding, representation)
+            qualities.select(gzip.is_some(), brotli.is_some())
+        };
+        let (encoding, representation) = match choice {
+            RepresentationChoice::Identity => (None, file.contents()),
+            RepresentationChoice::Gzip => (Some("gzip"), gzip.unwrap()),
+            RepresentationChoice::Brotli => (Some("br"), brotli.unwrap()),
+            RepresentationChoice::NotAcceptable => return Self::not_acceptable(),
         };
         let e_tag = Some(if encoding.is_none() {
             identity_e_tag
@@ -916,7 +943,7 @@ impl FileData {
             ByteRange::Unsatisfiable { .. } => (Body::empty(), Some(0)),
         };
 
-        Ok(Self {
+        Self {
             len,
             encoding,
             range,
@@ -931,79 +958,80 @@ impl FileData {
             } else {
                 REVALIDATE_CACHE_CONTROL
             }),
-            vary_accept_encoding: true,
             mime: MimeGuess::from_path(path)
                 .first()
                 .map(|m| m.essence_str().into()),
             digest: None,
             status: StatusCode::OK,
-        })
+        }
     }
 
     fn encode<R: AsyncRead + Send + 'static>(
-        encoding: &mut Option<&str>,
+        choice: RepresentationChoice,
         data: R,
         len: u64,
-    ) -> (Option<u64>, Body) {
-        if *encoding == Some("gzip") {
-            (
+    ) -> (Option<&'static str>, Option<u64>, Body) {
+        match choice {
+            RepresentationChoice::Gzip => (
+                Some("gzip"),
                 None,
                 Body::from_stream(ReaderStream::new(GzipEncoder::new(BufReader::new(data)))),
-            )
-        } else {
-            *encoding = None;
-            (Some(len), Body::from_stream(ReaderStream::new(data)))
+            ),
+            RepresentationChoice::Identity => {
+                (None, Some(len), Body::from_stream(ReaderStream::new(data)))
+            }
+            RepresentationChoice::NotAcceptable | RepresentationChoice::Brotli => unreachable!(),
         }
     }
 
-    async fn from_path(req: &RequestParts, path: &Path) -> Result<Option<Self>, Error> {
-        if tokio::fs::metadata(path).await.is_err() {
+    async fn from_installed_s9pk(req: &RequestParts, path: &Path) -> Result<Option<Self>, Error> {
+        let Some(mut file) = maybe_open_file(path).await? else {
             return Ok(None);
-        }
-
-        let mut file = open_file(path).await?;
-
+        };
         let metadata = file
             .metadata()
             .await
             .with_ctx(|_| (ErrorKind::Filesystem, path.display().to_string()))?;
-
-        let modified = metadata
-            .modified()?
-            .duration_since(UNIX_EPOCH)
-            .map(|duration| duration.as_nanos().to_string())
-            .unwrap_or_else(|error| format!("-{}", error.duration().as_nanos()));
-        let identity_e_tag = format!(
-            "W/{}",
-            e_tag(path, format!("{modified}:{}:identity", metadata.len()))
+        let qualities = RepresentationQualities::from_request(req);
+        // Installed archives are immutable; inode and ctime identify the opened snapshot.
+        let identity_e_tag = e_tag(
+            path,
+            format!(
+                "{}:{}:{}:{}:{}:{}",
+                *INSTANCE_NONCE,
+                metadata.dev(),
+                metadata.ino(),
+                metadata.len(),
+                metadata.ctime(),
+                metadata.ctime_nsec(),
+            ),
         );
         let mut range = requested_range(req, metadata.len(), Some(&identity_e_tag));
-        let mut encoding = if range != ByteRange::Full && encoding_quality(req, "identity") > 0.0 {
-            None
+        let choice = if range != ByteRange::Full && qualities.identity > 0.0 {
+            RepresentationChoice::Identity
         } else {
             range = ByteRange::Full;
-            let Some(encoding) = negotiate_gzip(req) else {
-                return Ok(Some(Self::not_acceptable()));
-            };
-            encoding
+            qualities.select(true, false)
         };
-        let e_tag = Some(if encoding.is_none() {
-            identity_e_tag
-        } else {
-            format!(
-                "W/{}",
-                e_tag(path, format!("{modified}:{}:gzip", metadata.len()))
-            )
+        if choice == RepresentationChoice::NotAcceptable {
+            return Ok(Some(Self::not_acceptable()));
+        }
+        let e_tag = Some(match choice {
+            RepresentationChoice::Identity => identity_e_tag,
+            RepresentationChoice::Gzip => {
+                format!("W/{}", e_tag(path, format!("{identity_e_tag}:gzip")))
+            }
+            RepresentationChoice::NotAcceptable | RepresentationChoice::Brotli => unreachable!(),
         });
 
-        let (len, data) = match range {
-            ByteRange::Full => Self::encode(&mut encoding, file, metadata.len()),
+        let (encoding, len, data) = match range {
+            ByteRange::Full => Self::encode(choice, file, metadata.len()),
             ByteRange::Satisfiable { start, end, .. } => {
                 let len = end + 1 - start;
                 file.seek(std::io::SeekFrom::Start(start)).await?;
-                Self::encode(&mut encoding, file.take(len), len)
+                Self::encode(choice, file.take(len), len)
             }
-            ByteRange::Unsatisfiable { .. } => (Some(0), Body::empty()),
+            ByteRange::Unsatisfiable { .. } => (None, Some(0), Body::empty()),
         };
 
         Ok(Some(Self {
@@ -1015,9 +1043,8 @@ impl FileData {
             len,
             range,
             encoding,
-            vary_accept_encoding: true,
             e_tag,
-            cache_control: Some(IMMUTABLE_FILE_CACHE_CONTROL),
+            cache_control: Some(PRIVATE_REVALIDATE_CACHE_CONTROL),
             mime: MimeGuess::from_path(path)
                 .first()
                 .map(|m| m.essence_str().into()),
@@ -1043,24 +1070,25 @@ impl FileData {
             (None, contents.size().await?)
         };
 
+        let qualities = RepresentationQualities::from_request(req);
         let mut range = requested_range(req, len, None);
-        let mut encoding = if range != ByteRange::Full && encoding_quality(req, "identity") > 0.0 {
-            None
+        let choice = if range != ByteRange::Full && qualities.identity > 0.0 {
+            RepresentationChoice::Identity
         } else {
             range = ByteRange::Full;
-            let Some(encoding) = negotiate_gzip(req) else {
-                return Ok(Some(Self::not_acceptable()));
-            };
-            encoding
+            qualities.select(true, false)
         };
+        if choice == RepresentationChoice::NotAcceptable {
+            return Ok(Some(Self::not_acceptable()));
+        }
 
-        let (len, data) = match range {
-            ByteRange::Full => Self::encode(&mut encoding, contents.reader().await?.take(len), len),
+        let (encoding, len, data) = match range {
+            ByteRange::Full => Self::encode(choice, contents.reader().await?.take(len), len),
             ByteRange::Satisfiable { start, end, .. } => {
                 let len = end + 1 - start;
-                Self::encode(&mut encoding, contents.slice(start, len).await?, len)
+                Self::encode(choice, contents.slice(start, len).await?, len)
             }
-            ByteRange::Unsatisfiable { .. } => (Some(0), Body::empty()),
+            ByteRange::Unsatisfiable { .. } => (None, Some(0), Body::empty()),
         };
 
         Ok(Some(Self {
@@ -1072,7 +1100,6 @@ impl FileData {
             len,
             range,
             encoding,
-            vary_accept_encoding: true,
             e_tag: None,
             cache_control: None,
             mime: MimeGuess::from_path(path)
@@ -1098,9 +1125,7 @@ impl FileData {
         if let Some(cache_control) = self.cache_control {
             builder = builder.header(CACHE_CONTROL, cache_control);
         }
-        if self.vary_accept_encoding {
-            builder = builder.header(VARY, "Accept-Encoding");
-        }
+        builder = builder.header(VARY, "Accept-Encoding");
         if self.status != StatusCode::OK {
             return builder
                 .status(self.status)
@@ -1109,7 +1134,9 @@ impl FileData {
         }
 
         builder = builder.header(ACCEPT_RANGES, "bytes");
-        if let Some((algorithm, digest)) = self.digest {
+        if self.encoding.is_none()
+            && let Some((algorithm, digest)) = self.digest
+        {
             builder = builder.header(
                 "Repr-Digest",
                 format!("{algorithm}=:{}:", Base64Display::new(&digest, &BASE64)),
@@ -1190,6 +1217,7 @@ mod tests {
     use std::time::Duration;
 
     use axum::body::to_bytes;
+    use http::header::HeaderName;
     use include_dir::{DirEntry, File, Metadata};
 
     use super::*;
@@ -1227,16 +1255,30 @@ mod tests {
         ],
     );
 
-    fn request(uri: &str, if_none_match: Option<&str>) -> Request {
-        let mut request = Request::builder().uri(uri);
-        if let Some(e_tag) = if_none_match {
-            request = request.header(IF_NONE_MATCH, e_tag);
+    fn request(method: Method, uri: &str, headers: &[(HeaderName, &str)]) -> Request {
+        let mut request = Request::builder().method(method).uri(uri);
+        for (name, value) in headers {
+            request = request.header(name, *value);
         }
         request.body(Body::empty()).unwrap()
     }
 
-    fn ui_response(uri: &str, if_none_match: Option<&str>) -> Response {
-        serve_ui_from_dir(request(uri, if_none_match), &TEST_UI_DIR).unwrap()
+    fn ui_response(uri: &str, headers: &[(HeaderName, &str)]) -> Response {
+        serve_ui_from_dir(request(Method::GET, uri, headers), &TEST_UI_DIR).unwrap()
+    }
+
+    async fn path_response(
+        method: Method,
+        path: &Path,
+        headers: &[(HeaderName, &str)],
+    ) -> Response {
+        let request_parts = request(method, "/", headers).into_parts().0;
+        FileData::from_installed_s9pk(&request_parts, path)
+            .await
+            .unwrap()
+            .unwrap()
+            .into_response(&request_parts)
+            .unwrap()
     }
 
     fn header(response: &Response, name: http::header::HeaderName) -> &str {
@@ -1255,11 +1297,7 @@ mod tests {
             ("identity;q=0", StatusCode::NOT_ACCEPTABLE),
             ("*;q=0", StatusCode::NOT_ACCEPTABLE),
         ] {
-            let request = Request::builder()
-                .uri("/")
-                .header(ACCEPT_ENCODING, accept_encoding)
-                .body(Body::empty())
-                .unwrap();
+            let request = request(Method::GET, "/", &[(ACCEPT_ENCODING, accept_encoding)]);
             let response = refresher().call(request).await.unwrap();
             assert_eq!(response.status(), expected, "{accept_encoding}");
             assert_eq!(header(&response, VARY), "Accept-Encoding");
@@ -1290,7 +1328,7 @@ mod tests {
     #[test]
     fn stable_ui_files_revalidate_and_hashed_bundles_are_immutable() {
         for path in ["/", "/ngsw-worker.js", "/assets/logo.svg"] {
-            let response = ui_response(path, None);
+            let response = ui_response(path, &[]);
             assert_eq!(response.status(), StatusCode::OK, "{path}");
             assert_eq!(
                 header(&response, CACHE_CONTROL),
@@ -1301,7 +1339,7 @@ mod tests {
         }
 
         for path in ["/main-ABCDEFGH.js", "/styles-ABCD_ef-.css"] {
-            let response = ui_response(path, None);
+            let response = ui_response(path, &[]);
             assert_eq!(response.status(), StatusCode::OK, "{path}");
             assert_eq!(
                 header(&response, CACHE_CONTROL),
@@ -1311,14 +1349,14 @@ mod tests {
             assert!(response.headers().contains_key(ETAG), "{path}");
         }
 
-        let response = ui_response("/", None);
+        let response = ui_response("/", &[]);
         let e_tag = header(&response, ETAG).to_owned();
         for validator in [
             format!("W/{e_tag}"),
             format!("\"old\", {e_tag}"),
             "*".into(),
         ] {
-            let response = ui_response("/", Some(&validator));
+            let response = ui_response("/", &[(IF_NONE_MATCH, &validator)]);
             assert_eq!(response.status(), StatusCode::NOT_MODIFIED, "{validator}");
             assert_eq!(header(&response, CACHE_CONTROL), REVALIDATE_CACHE_CONTROL);
         }
@@ -1331,87 +1369,147 @@ mod tests {
             e_tag(Path::new("index.html"), b"second"),
         );
 
-        let identity = ui_response("/main-ABCDEFGH.js", None);
+        let identity = ui_response("/main-ABCDEFGH.js", &[]);
         let identity_e_tag = header(&identity, ETAG).to_owned();
         assert_eq!(header(&identity, VARY), "Accept-Encoding");
 
-        let gzip = serve_ui_from_dir(
-            Request::builder()
-                .uri("/main-ABCDEFGH.js")
-                .header(ACCEPT_ENCODING, "gzip")
-                .body(Body::empty())
-                .unwrap(),
-            &TEST_UI_DIR,
-        )
-        .unwrap();
+        let gzip = ui_response("/main-ABCDEFGH.js", &[(ACCEPT_ENCODING, "gzip")]);
         assert_eq!(header(&gzip, CONTENT_ENCODING), "gzip");
         assert_ne!(header(&gzip, ETAG), identity_e_tag);
 
-        let rejected = serve_ui_from_dir(
-            Request::builder()
-                .uri("/main-ABCDEFGH.js")
-                .header(ACCEPT_ENCODING, "gzip;q=0")
-                .body(Body::empty())
-                .unwrap(),
-            &TEST_UI_DIR,
-        )
-        .unwrap();
+        let rejected = ui_response("/main-ABCDEFGH.js", &[(ACCEPT_ENCODING, "gzip;q=0")]);
         assert!(!rejected.headers().contains_key(CONTENT_ENCODING));
         assert_eq!(header(&rejected, ETAG), identity_e_tag);
     }
 
+    #[tokio::test]
+    async fn installed_s9pks_revalidate_and_resume_with_strong_etags() {
+        let path = std::env::temp_dir().join(format!(
+            "start-core-static-server-{}.s9pk",
+            rand::random::<u64>()
+        ));
+        let mut contents = vec![0; 256];
+        contents[..10].copy_from_slice(b"0123456789");
+        tokio::fs::write(&path, &contents).await.unwrap();
+
+        let full = path_response(Method::GET, &path, &[]).await;
+        assert_eq!(
+            header(&full, CACHE_CONTROL),
+            PRIVATE_REVALIDATE_CACHE_CONTROL,
+        );
+        let e_tag = header(&full, ETAG).to_owned();
+        assert!(!e_tag.starts_with("W/"));
+
+        let gzip = path_response(Method::GET, &path, &[(ACCEPT_ENCODING, "gzip")]).await;
+        let gzip_e_tag = header(&gzip, ETAG).to_owned();
+        assert_eq!(header(&gzip, CONTENT_ENCODING), "gzip");
+        assert!(gzip_e_tag.starts_with("W/"));
+        assert_ne!(gzip_e_tag, e_tag);
+
+        let ranged = path_response(
+            Method::GET,
+            &path,
+            &[(RANGE, "bytes=2-5"), (IF_RANGE, &e_tag)],
+        )
+        .await;
+        assert_eq!(ranged.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(header(&ranged, CONTENT_RANGE), "bytes 2-5/256");
+        assert_eq!(
+            to_bytes(ranged.into_body(), usize::MAX).await.unwrap(),
+            "2345",
+        );
+
+        let revalidated = path_response(Method::GET, &path, &[(IF_NONE_MATCH, &e_tag)]).await;
+        assert_eq!(revalidated.status(), StatusCode::NOT_MODIFIED);
+
+        drop(full);
+        drop(gzip);
+        drop(revalidated);
+        contents[200] = 1;
+        tokio::fs::write(&path, &contents).await.unwrap();
+        let changed = path_response(Method::GET, &path, &[]).await;
+        assert_ne!(header(&changed, ETAG), e_tag);
+
+        tokio::fs::remove_file(path).await.unwrap();
+    }
+
+    #[test]
+    fn representation_digest_is_omitted_for_gzip() {
+        fn response(encoding: Option<&'static str>) -> Response {
+            let request_parts = request(Method::GET, "/", &[]).into_parts().0;
+            FileData {
+                data: Body::empty(),
+                len: Some(3),
+                range: ByteRange::Full,
+                encoding,
+                e_tag: None,
+                cache_control: None,
+                mime: None,
+                digest: Some(("blake3", vec![1, 2, 3])),
+                status: StatusCode::OK,
+            }
+            .into_response(&request_parts)
+            .unwrap()
+        }
+
+        assert!(response(None).headers().contains_key("Repr-Digest"));
+        assert!(!response(Some("gzip")).headers().contains_key("Repr-Digest"));
+    }
+
+    #[test]
+    fn encoding_negotiation_combines_field_lines_and_prefers_brotli_on_ties() {
+        let request_parts = request(
+            Method::GET,
+            "/",
+            &[
+                (ACCEPT_ENCODING, "gzip;q=0"),
+                (ACCEPT_ENCODING, "gzip;q=1, identity;q=0"),
+            ],
+        )
+        .into_parts()
+        .0;
+        assert_eq!(
+            RepresentationQualities::from_request(&request_parts).select(true, false),
+            RepresentationChoice::Gzip,
+        );
+
+        let request_parts = request(Method::GET, "/", &[(ACCEPT_ENCODING, "identity, gzip, br")])
+            .into_parts()
+            .0;
+        assert_eq!(
+            RepresentationQualities::from_request(&request_parts).select(true, true),
+            RepresentationChoice::Brotli,
+        );
+    }
+
     #[test]
     fn encoding_negotiation_honors_identity_rejection() {
-        let response = serve_ui_from_dir(
-            Request::builder()
-                .uri("/main-ABCDEFGH.js")
-                .header(ACCEPT_ENCODING, "gzip;q=1, identity;q=0")
-                .body(Body::empty())
-                .unwrap(),
-            &TEST_UI_DIR,
-        )
-        .unwrap();
+        let response = ui_response(
+            "/main-ABCDEFGH.js",
+            &[(ACCEPT_ENCODING, "gzip;q=1, identity;q=0")],
+        );
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(header(&response, CONTENT_ENCODING), "gzip");
 
-        let lower_quality = serve_ui_from_dir(
-            Request::builder()
-                .uri("/main-ABCDEFGH.js")
-                .header(ACCEPT_ENCODING, "gzip;q=0.5")
-                .body(Body::empty())
-                .unwrap(),
-            &TEST_UI_DIR,
-        )
-        .unwrap();
+        let lower_quality = ui_response("/main-ABCDEFGH.js", &[(ACCEPT_ENCODING, "gzip;q=0.5")]);
         assert!(!lower_quality.headers().contains_key(CONTENT_ENCODING));
 
         for (path, accept_encoding) in [
             ("/index.html", "identity;q=0"),
             ("/main-ABCDEFGH.js", "*;q=0"),
         ] {
-            let response = serve_ui_from_dir(
-                Request::builder()
-                    .uri(path)
-                    .header(ACCEPT_ENCODING, accept_encoding)
-                    .body(Body::empty())
-                    .unwrap(),
-                &TEST_UI_DIR,
-            )
-            .unwrap();
+            let response = ui_response(path, &[(ACCEPT_ENCODING, accept_encoding)]);
             assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE, "{path}");
             assert_eq!(header(&response, VARY), "Accept-Encoding", "{path}");
         }
 
-        let ranged = serve_ui_from_dir(
-            Request::builder()
-                .uri("/main-ABCDEFGH.js")
-                .header(RANGE, "bytes=0-4")
-                .header(ACCEPT_ENCODING, "gzip;q=1, identity;q=0")
-                .body(Body::empty())
-                .unwrap(),
-            &TEST_UI_DIR,
-        )
-        .unwrap();
+        let ranged = ui_response(
+            "/main-ABCDEFGH.js",
+            &[
+                (RANGE, "bytes=0-4"),
+                (ACCEPT_ENCODING, "gzip;q=1, identity;q=0"),
+            ],
+        );
         assert_eq!(ranged.status(), StatusCode::OK);
         assert_eq!(header(&ranged, CONTENT_ENCODING), "gzip");
         assert!(!ranged.headers().contains_key(CONTENT_RANGE));
@@ -1463,19 +1561,10 @@ mod tests {
 
     #[tokio::test]
     async fn range_responses_use_identity_bytes_and_valid_status_headers() {
-        let full = ui_response("/", None);
+        let full = ui_response("/", &[]);
         let e_tag = header(&full, ETAG).to_owned();
 
-        let suffix = serve_ui_from_dir(
-            Request::builder()
-                .uri("/")
-                .header(RANGE, "bytes=-5")
-                .header(ACCEPT_ENCODING, "gzip")
-                .body(Body::empty())
-                .unwrap(),
-            &TEST_UI_DIR,
-        )
-        .unwrap();
+        let suffix = ui_response("/", &[(RANGE, "bytes=-5"), (ACCEPT_ENCODING, "gzip")]);
         assert_eq!(suffix.status(), StatusCode::PARTIAL_CONTENT);
         assert_eq!(header(&suffix, CONTENT_RANGE), "bytes 15-19/20");
         assert!(!suffix.headers().contains_key(CONTENT_ENCODING));
@@ -1484,61 +1573,34 @@ mod tests {
             "html>",
         );
 
-        let unsatisfiable = serve_ui_from_dir(
-            Request::builder()
-                .uri("/")
-                .header(RANGE, "bytes=20-")
-                .body(Body::empty())
-                .unwrap(),
-            &TEST_UI_DIR,
-        )
-        .unwrap();
+        let case_variant = ui_response("/", &[(RANGE, "Bytes=0-4")]);
+        assert_eq!(case_variant.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(header(&case_variant, CONTENT_RANGE), "bytes 0-4/20");
+
+        let unsatisfiable = ui_response("/", &[(RANGE, "bytes=20-")]);
         assert_eq!(unsatisfiable.status(), StatusCode::RANGE_NOT_SATISFIABLE,);
         assert_eq!(header(&unsatisfiable, CONTENT_RANGE), "bytes */20");
 
-        let not_modified = serve_ui_from_dir(
-            Request::builder()
-                .uri("/")
-                .header(RANGE, "bytes=0-4")
-                .header(IF_NONE_MATCH, e_tag)
-                .body(Body::empty())
-                .unwrap(),
-            &TEST_UI_DIR,
-        )
-        .unwrap();
+        let repeated = ui_response("/", &[(RANGE, "bytes=20-"), (RANGE, "bytes=0-4")]);
+        assert_eq!(repeated.status(), StatusCode::OK);
+        assert!(!repeated.headers().contains_key(CONTENT_RANGE));
+
+        let not_modified = ui_response("/", &[(RANGE, "bytes=0-4"), (IF_NONE_MATCH, &e_tag)]);
         assert_eq!(not_modified.status(), StatusCode::NOT_MODIFIED);
         assert!(!not_modified.headers().contains_key(CONTENT_RANGE));
     }
 
     #[tokio::test]
     async fn ranges_require_get_and_a_current_if_range_validator() {
-        let full = ui_response("/", None);
+        let full = ui_response("/", &[]);
         let e_tag = header(&full, ETAG).to_owned();
 
-        let matched = serve_ui_from_dir(
-            Request::builder()
-                .uri("/")
-                .header(RANGE, "bytes=0-4")
-                .header(IF_RANGE, &e_tag)
-                .body(Body::empty())
-                .unwrap(),
-            &TEST_UI_DIR,
-        )
-        .unwrap();
+        let matched = ui_response("/", &[(RANGE, "bytes=0-4"), (IF_RANGE, &e_tag)]);
         assert_eq!(matched.status(), StatusCode::PARTIAL_CONTENT);
         assert_eq!(header(&matched, CONTENT_RANGE), "bytes 0-4/20");
 
         for validator in ["\"stale\"".to_owned(), format!("W/{e_tag}")] {
-            let response = serve_ui_from_dir(
-                Request::builder()
-                    .uri("/")
-                    .header(RANGE, "bytes=0-4")
-                    .header(IF_RANGE, validator)
-                    .body(Body::empty())
-                    .unwrap(),
-                &TEST_UI_DIR,
-            )
-            .unwrap();
+            let response = ui_response("/", &[(RANGE, "bytes=0-4"), (IF_RANGE, &validator)]);
             assert_eq!(response.status(), StatusCode::OK);
             assert!(!response.headers().contains_key(CONTENT_RANGE));
             assert_eq!(
@@ -1548,12 +1610,7 @@ mod tests {
         }
 
         let head = serve_ui_from_dir(
-            Request::builder()
-                .method(Method::HEAD)
-                .uri("/")
-                .header(RANGE, "bytes=0-4")
-                .body(Body::empty())
-                .unwrap(),
+            request(Method::HEAD, "/", &[(RANGE, "bytes=0-4")]),
             &TEST_UI_DIR,
         )
         .unwrap();
@@ -1568,27 +1625,14 @@ mod tests {
         );
 
         let post = serve_ui_from_dir(
-            Request::builder()
-                .method(Method::POST)
-                .uri("/")
-                .header(RANGE, "bytes=0-4")
-                .body(Body::empty())
-                .unwrap(),
+            request(Method::POST, "/", &[(RANGE, "bytes=0-4")]),
             &TEST_UI_DIR,
         )
         .unwrap();
         assert_eq!(post.status(), StatusCode::METHOD_NOT_ALLOWED);
 
         for malformed in ["bytes=-", "bytes=garbage-", "bytes=0-garbage"] {
-            let response = serve_ui_from_dir(
-                Request::builder()
-                    .uri("/empty.txt")
-                    .header(RANGE, malformed)
-                    .body(Body::empty())
-                    .unwrap(),
-                &TEST_UI_DIR,
-            )
-            .unwrap();
+            let response = ui_response("/empty.txt", &[(RANGE, malformed)]);
             assert_eq!(response.status(), StatusCode::OK, "{malformed}");
             assert!(!response.headers().contains_key(CONTENT_RANGE));
         }
@@ -1596,7 +1640,7 @@ mod tests {
 
     #[tokio::test]
     async fn spa_fallback_uses_index_for_routes_and_not_for_asset_paths() {
-        let index = ui_response("/", None);
+        let index = ui_response("/", &[]);
         let index_e_tag = header(&index, ETAG).to_owned();
         let index_body = to_bytes(index.into_body(), usize::MAX).await.unwrap();
 
@@ -1606,7 +1650,7 @@ mod tests {
             "/route.name/child",
             "/settings/general?tab=a.b",
         ] {
-            let response = ui_response(path, None);
+            let response = ui_response(path, &[]);
             assert_eq!(response.status(), StatusCode::OK, "{path}");
             assert_eq!(header(&response, CONTENT_TYPE), "text/html", "{path}");
             assert_eq!(header(&response, ETAG), index_e_tag, "{path}");
@@ -1630,13 +1674,13 @@ mod tests {
             "/route.",
         ] {
             assert_eq!(
-                ui_response(path, None).status(),
+                ui_response(path, &[]).status(),
                 StatusCode::NOT_FOUND,
                 "{path}"
             );
         }
         assert_eq!(
-            ui_response("/main-ABCDEFGH.js?v=1.2", None).status(),
+            ui_response("/main-ABCDEFGH.js?v=1.2", &[]).status(),
             StatusCode::OK,
         );
     }
@@ -1644,7 +1688,10 @@ mod tests {
     #[tokio::test]
     async fn generated_webmanifest_revalidates_its_body() {
         fn response(hostname: &str, if_none_match: Option<&str>) -> Response {
-            let request_parts = request("/manifest.webmanifest", if_none_match)
+            let headers = if_none_match
+                .map(|e_tag| vec![(IF_NONE_MATCH, e_tag)])
+                .unwrap_or_default();
+            let request_parts = request(Method::GET, "/manifest.webmanifest", &headers)
                 .into_parts()
                 .0;
             let hostname =
@@ -1677,13 +1724,13 @@ mod tests {
         let beta = response("beta", None);
         assert_ne!(header(&beta, ETAG), alpha_e_tag);
 
-        let request_parts = Request::builder()
-            .uri("/manifest.webmanifest")
-            .header(ACCEPT_ENCODING, "identity;q=0")
-            .body(Body::empty())
-            .unwrap()
-            .into_parts()
-            .0;
+        let request_parts = request(
+            Method::GET,
+            "/manifest.webmanifest",
+            &[(ACCEPT_ENCODING, "identity;q=0")],
+        )
+        .into_parts()
+        .0;
         let rejected = webmanifest_send(
             &request_parts,
             &TEST_UI_DIR,

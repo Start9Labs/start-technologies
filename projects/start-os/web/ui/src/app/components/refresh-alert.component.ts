@@ -2,13 +2,13 @@ import { Component, inject } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { SwUpdate } from '@angular/service-worker'
 import { WA_WINDOW } from '@ng-web-apis/common'
-import { ErrorService, i18nPipe } from '@start9labs/shared'
+import { ErrorService, HttpError, i18nPipe } from '@start9labs/shared'
 import { Version } from '@start9labs/start-core'
 import { TuiResponsiveDialog } from '@taiga-ui/addon-mobile'
 import { TuiButton } from '@taiga-ui/core'
 import { TuiNotificationMiddleService } from '@taiga-ui/kit'
 import { PatchDB } from 'patch-db-client'
-import { distinctUntilChanged, map, merge, Subject } from 'rxjs'
+import { distinctUntilChanged, map, merge, Subject, Subscription } from 'rxjs'
 import { ConfigService } from 'src/app/services/config.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 
@@ -79,11 +79,12 @@ export class RefreshAlertComponent {
   )
 
   protected async reload(): Promise<void> {
-    const loader = this.isPwa
-      ? this.loader.open(this.i18n.transform('Reloading PWA')).subscribe()
-      : undefined
+    let loader: Subscription | undefined
 
     try {
+      loader = this.isPwa
+        ? this.loader.open(this.i18n.transform('Reloading PWA')).subscribe()
+        : undefined
       if (
         this.updates.isEnabled &&
         this.win.navigator.serviceWorker.controller !== null
@@ -91,13 +92,24 @@ export class RefreshAlertComponent {
         await this.updates.checkForUpdate()
         await this.updates.activateUpdate()
       }
-    } catch (e: any) {
-      this.error.handleError(e)
-      return
+    } catch (e: unknown) {
+      try {
+        if (e instanceof HttpError || typeof e === 'string') {
+          this.error.handleError(e)
+        } else if (e instanceof Error) {
+          this.error.handleError(e.message)
+        } else {
+          console.error(e)
+        }
+      } catch (reportingError: unknown) {
+        console.error(e, reportingError)
+      }
     } finally {
-      loader?.unsubscribe()
+      try {
+        loader?.unsubscribe()
+      } finally {
+        this.win.location.reload()
+      }
     }
-
-    this.win.location.reload()
   }
 }
