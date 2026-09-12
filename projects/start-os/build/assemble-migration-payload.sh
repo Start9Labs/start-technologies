@@ -25,9 +25,6 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$ARCH" ] && [ -f "$NEW_SQUASHFS" ] && [ -f "$OLD_IMAGE" ] && [ -n "$OUT" ] || usage
 
-# Must run as root so unsquashfs/mksquashfs can restore the rootfs's ownership and
-# device nodes (as non-root, unsquashfs can't and exits non-zero). Callers wrap
-# this in a container rather than using host sudo (see build.mk / CI).
 if [ "$(id -u)" -ne 0 ]; then
     >&2 echo "assemble-migration-payload: must run as root — wrap it in a container (the make target and CI do)"
     exit 1
@@ -36,7 +33,6 @@ fi
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-# 1. Extract the 0.3.5.1 base rootfs (the payload's base) from its release image.
 case "$OLD_IMAGE" in
     *.iso)
         xorriso -osirrox on -indev "$OLD_IMAGE" -extract /live/filesystem.squashfs "$WORK/old.squashfs"
@@ -49,15 +45,12 @@ esac
 unsquashfs -d "$WORK/payload" "$WORK/old.squashfs"
 rm -f "$WORK/old.squashfs"
 
-# 2. Nest the 0.4.0 base image as images/<b3sum>.rootfs — the rootfs the 0.4.0
-#    initramfs installs and boots (naming matches the fresh-install layout).
+# The initramfs installs images/<16-character b3sum>.rootfs.
 B3SUM="$(b3sum "$NEW_SQUASHFS" | head -c 16)"
 mkdir -p "$WORK/payload/images"
 cp "$NEW_SQUASHFS" "$WORK/payload/images/$B3SUM.rootfs"
 
-# 3. Stage the 0.4.0 kernel/initramfs; 0.3.5.1's sync_boot rsyncs boot/ -> /boot.
-#    Record the exact names so update-grub2 boots the 0.4.0 kernel, not whichever
-#    version happens to sort highest once /boot holds both.
+# The migration must name the staged kernel exactly.
 rm -rf "$WORK/payload/boot"
 unsquashfs -n -f -d "$WORK/payload" "$NEW_SQUASHFS" boot
 mkdir -p "$WORK/payload/usr/lib/startos"
@@ -73,7 +66,6 @@ install -m0755 "$SOURCE_DIR/lib/scripts/normalize-fstab" "$WORK/payload/usr/lib/
 
 rm -f "$OUT"
 mksquashfs "$WORK/payload" "$OUT" -noappend -comp gzip -b 4096
-# hand the container-created output back to the invoking user (OWNER_* passed in)
 if [ -n "${OWNER_UID:-}" ]; then chown "$OWNER_UID:${OWNER_GID:-$OWNER_UID}" "$OUT"; fi
 
 echo "migration payload for $ARCH -> $OUT (base image $B3SUM.rootfs)"

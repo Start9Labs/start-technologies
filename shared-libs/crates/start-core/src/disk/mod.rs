@@ -44,9 +44,7 @@ impl OsPartitionInfo {
             || self.extra_boot.values().any(|v| v == p)
     }
 
-    /// Build partition info by resolving the OS root device, parsing /etc/fstab
-    /// for the boot partition(s), and discovering the BIOS boot partition
-    /// (which is never mounted).
+    /// Resolves OS partitions from live mounts and `/etc/fstab`.
     pub async fn from_fstab() -> Result<Self, Error> {
         let fstab = tokio::fs::read_to_string("/etc/fstab")
             .await
@@ -78,7 +76,7 @@ impl OsPartitionInfo {
                     tracing::warn!("Failed to resolve fstab source {source}: {e}");
                     continue;
                 }
-                Err(FstabSourceError::Ambiguous(e)) => return Err(e),
+                Err(FstabSourceError::Fatal(e)) => return Err(e),
             };
 
             match target {
@@ -92,7 +90,7 @@ impl OsPartitionInfo {
             }
         }
 
-        let root = os_root_device().await.unwrap_or_default();
+        let root = os_root_device().await?.unwrap_or_default();
 
         let boot = boot.unwrap_or_default();
         let bios = if !boot.as_os_str().is_empty() {
@@ -113,13 +111,12 @@ impl OsPartitionInfo {
 
 const OS_ROOT_MOUNT: &str = "/media/startos/root";
 
-async fn os_root_device() -> Option<PathBuf> {
-    get_mount_source(OS_ROOT_MOUNT).await.ok().flatten()
+async fn os_root_device() -> Result<Option<PathBuf>, Error> {
+    get_mount_source(OS_ROOT_MOUNT).await
 }
 
 const BIOS_BOOT_TYPE_GUID: &str = "21686148-6449-6E6F-744E-656564454649";
 
-/// Find the BIOS boot partition on the same disk as `known_part`.
 async fn find_bios_boot_partition(known_part: &Path) -> Result<Option<PathBuf>, Error> {
     let output = Command::new("lsblk")
         .args(["-n", "-l", "-o", "NAME,PKNAME,PARTTYPE"])
@@ -162,7 +159,7 @@ async fn find_bios_boot_partition(known_part: &Path) -> Result<Option<PathBuf>, 
 
 enum FstabSourceError {
     Ignored(Error),
-    Ambiguous(Error),
+    Fatal(Error),
 }
 
 fn unique_blkid_device(output: &str) -> Result<Option<PathBuf>, Vec<PathBuf>> {
@@ -184,7 +181,7 @@ async fn resolve_fstab_source(source: &str, target: &str) -> Result<PathBuf, Fst
     match get_mount_source(target).await {
         Ok(Some(device)) => return Ok(device),
         Ok(None) => {}
-        Err(error) => return Err(FstabSourceError::Ignored(error)),
+        Err(error) => return Err(FstabSourceError::Fatal(error)),
     }
 
     if source.starts_with('/') {
@@ -192,7 +189,6 @@ async fn resolve_fstab_source(source: &str, target: &str) -> Result<PathBuf, Fst
             .await
             .unwrap_or_else(|_| PathBuf::from(source)));
     }
-    // blkid resolves TAG=value block-device specifications.
     if !source.contains('=') {
         return Err(FstabSourceError::Ignored(Error::new(
             eyre!("not a block device spec"),
@@ -214,7 +210,7 @@ async fn resolve_fstab_source(source: &str, target: &str) -> Result<PathBuf, Fst
             eyre!("no matching block device"),
             ErrorKind::DiskManagement,
         ))),
-        Err(devices) => Err(FstabSourceError::Ambiguous(Error::new(
+        Err(devices) => Err(FstabSourceError::Fatal(Error::new(
             eyre!(
                 "fstab source {source} matches multiple devices: {}",
                 devices.iter().map(|path| path.display()).format(", ")
