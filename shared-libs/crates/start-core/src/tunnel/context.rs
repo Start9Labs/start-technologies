@@ -595,7 +595,7 @@ impl TunnelContext {
             }
         }
         // Prune device-override rules whose device was removed or cleared its `wan_ip`.
-        for comment in nft_comments_with_prefix("postrouting", "tunnel-snat-dev-").await {
+        for comment in nft_comments_with_prefix("postrouting", "tunnel-snat-dev-").await? {
             if !want_dev.contains(&comment) {
                 nft_rule("postrouting", &comment, true, false, "").await?;
             }
