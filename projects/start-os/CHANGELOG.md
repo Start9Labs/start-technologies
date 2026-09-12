@@ -323,6 +323,11 @@ for the detail behind its highlights.
   now serves its `.local` address, the domains you have assigned to it, and
   direct connections to its IP address.
 
+- **Disabled addresses are no longer restored by another address on the same
+  gateway.** Switching off a private IP now closes access through it for both
+  SSL and directly forwarded interfaces, even while another IP or `.local`
+  address on that gateway remains enabled.
+
 - **Image upgrades verify their checksum again.** `upgrade` compared the image's
   blake3 hash only when it was given a second positional argument, which no
   caller passed — so the comparison never ran and a corrupt but still mountable

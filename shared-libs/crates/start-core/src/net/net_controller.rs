@@ -312,6 +312,48 @@ fn ssl_vhost_public_v4<'a>(
         .collect()
 }
 
+fn ssl_vhost_private_ips<'a>(
+    enabled_addresses: impl IntoIterator<Item = &'a HostnameInfo>,
+) -> BTreeSet<IpAddr> {
+    enabled_addresses
+        .into_iter()
+        .filter(|a| !a.public && a.ssl && a.metadata.is_ip())
+        .filter_map(|a| a.hostname.parse().ok())
+        .collect()
+}
+
+fn direct_forward_private_ips<'a>(
+    enabled_addresses: impl IntoIterator<Item = &'a HostnameInfo>,
+    port: u16,
+) -> BTreeSet<IpAddr> {
+    enabled_addresses
+        .into_iter()
+        .filter(|a| {
+            !a.public && a.port == Some(port) && matches!(a.metadata, HostnameMetadata::Ipv4 { .. })
+        })
+        .filter_map(|a| a.hostname.parse::<Ipv4Addr>().ok().map(IpAddr::V4))
+        .collect()
+}
+
+fn mdns_vhost_private_ips<'a>(
+    mdns: &HostnameInfo,
+    enabled_addresses: impl IntoIterator<Item = &'a HostnameInfo>,
+) -> BTreeSet<IpAddr> {
+    enabled_addresses
+        .into_iter()
+        .filter(|a| {
+            !a.public
+                && a.ssl == mdns.ssl
+                && a.port == mdns.port
+                && a.metadata.is_ip()
+                && a.metadata
+                    .gateways()
+                    .any(|gateway| mdns.metadata.gateways().any(|g| g == gateway))
+        })
+        .filter_map(|a| a.hostname.parse().ok())
+        .collect()
+}
+
 /// Hosts the datapath still holds that the database no longer has. Collected
 /// before the update loop so a port handed from a retired host to a surviving
 /// one in the same pass comes down before it is rebuilt.
@@ -334,6 +376,43 @@ struct HostBinds {
     /// answers is DNAT'd to the container (see `forward6`); tracked so a stale
     /// forward is torn down when the GUA's exposure or target changes.
     gua_forwards: BTreeMap<(Ipv6Addr, u16), (Ipv6Addr, u16, Option<IpNet>)>,
+}
+
+fn reconcile_vhosts(
+    current: &mut BTreeMap<VHostKey, (ProxyTarget, Arc<()>)>,
+    desired: &mut BTreeMap<VHostKey, ProxyTarget>,
+    mut add: impl FnMut(&VHostKey, ProxyTarget) -> Result<Arc<()>, Error>,
+    mut replace: impl FnMut(&VHostKey, &(ProxyTarget, Arc<()>), ProxyTarget) -> Result<Arc<()>, Error>,
+    mut remove: impl FnMut(&VHostKey, (ProxyTarget, Arc<()>)),
+) -> Result<(), Error> {
+    let all = current
+        .keys()
+        .chain(desired.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    for key in all {
+        match (current.get(&key), desired.get(&key)) {
+            (Some((previous, _)), Some(target)) if previous == target => {
+                desired.remove(&key);
+            }
+            (Some(previous), Some(target)) => {
+                let handle = replace(&key, previous, target.clone())?;
+                let target = desired.remove(&key).unwrap();
+                current.insert(key, (target, handle));
+            }
+            (None, Some(target)) => {
+                let handle = add(&key, target.clone())?;
+                let target = desired.remove(&key).unwrap();
+                current.insert(key, (target, handle));
+            }
+            (Some(_), None) => {
+                let previous = current.remove(&key).unwrap();
+                remove(&key, previous);
+            }
+            (None, None) => unreachable!(),
+        }
+    }
+    Ok(())
 }
 
 pub struct NetServiceData {
@@ -421,15 +500,8 @@ impl NetServiceData {
             // ours — terminating (add_ssl), or an SNI-agnostic passthrough when
             // the container serves its own TLS.
             if let Some(assigned_ssl_port) = bind.net.assigned_ssl_port {
-                // Collect private IPs from enabled LAN-only addresses' gateways
-                // (a GUA set to LAN+WAN is WAN, so it lands in the public set).
-                let server_private_ips: BTreeSet<IpAddr> = enabled_addresses
-                    .iter()
-                    .filter(|a| !a.public)
-                    .flat_map(|a| a.metadata.gateways())
-                    .filter_map(|gw| net_ifaces.get(gw).and_then(|info| info.ip_info.as_ref()))
-                    .flat_map(|ip_info| ip_info.subnets.iter().map(|s| s.addr()))
-                    .collect();
+                // A GUA set to LAN+WAN is WAN, so it lands in the public set below.
+                let server_private_ips = ssl_vhost_private_ips(enabled_addresses.iter().copied());
 
                 // Public gateways, split by family: a bare public IPv4 (WAN IP)
                 // and a LAN+WAN GUA are independently toggleable, and the vhost
@@ -505,6 +577,19 @@ impl NetServiceData {
                     let Some(domain_ssl_port) = addr_info.port else {
                         continue;
                     };
+                    let mdns_private =
+                        if matches!(addr_info.metadata, HostnameMetadata::Mdns { .. }) {
+                            let private = mdns_vhost_private_ips(
+                                addr_info,
+                                enabled_addresses.iter().copied(),
+                            );
+                            if private.is_empty() {
+                                continue;
+                            }
+                            Some(private)
+                        } else {
+                            None
+                        };
                     let key = (Some(domain.clone()), domain_ssl_port, addr_info.public);
                     let target = vhosts.entry(key).or_insert_with(|| ProxyTarget {
                         public_v4: BTreeSet::new(),
@@ -544,6 +629,8 @@ impl NetServiceData {
                         target
                             .public_v6
                             .extend(crate::net::utils::gua_ips(&net_ifaces, &gws));
+                    } else if let Some(private) = mdns_private {
+                        target.private.extend(private);
                     } else {
                         for gw in addr_info.metadata.gateways() {
                             if let Some(info) = net_ifaces.get(gw) {
@@ -558,8 +645,7 @@ impl NetServiceData {
                 }
             }
 
-            // Direct forward — the plaintext port, the only external port with
-            // no listener of ours in front (every TLS port is a vhost above).
+            // The assigned port is forwarded directly; assigned SSL ports use vhosts.
             if let Some(external) = bind.net.assigned_port {
                 // Only addresses at this port drive its forward (a vhost's port has its own).
                 let fwd_public: BTreeSet<GatewayId> = enabled_addresses
@@ -581,13 +667,8 @@ impl NetServiceData {
                         a.metadata.gateways().collect::<Vec<_>>(),
                     );
                 }
-                let fwd_private: BTreeSet<IpAddr> = enabled_addresses
-                    .iter()
-                    .filter(|a| !a.public && a.port == Some(external))
-                    .flat_map(|a| a.metadata.gateways())
-                    .filter_map(|gw| net_ifaces.get(gw).and_then(|i| i.ip_info.as_ref()))
-                    .flat_map(|ip| ip.subnets.iter().map(|s| s.addr()))
-                    .collect();
+                let fwd_private =
+                    direct_forward_private_ips(enabled_addresses.iter().copied(), external);
                 // StartOS answers these addresses itself, and a loopback DNAT is martian-dropped on ingress.
                 if !self.ip.is_loopback() {
                     forwards.insert(
@@ -615,8 +696,7 @@ impl NetServiceData {
                         let Some(gua) = a.gua().filter(|g| g.port() == external) else {
                             continue;
                         };
-                        // Secure only when the underlying protocol is itself secure —
-                        // this is the plaintext port, so we never terminate TLS here.
+                        // `secure` describes the backend protocol; StartOS does not terminate TLS here.
                         // The WAN is never secure, so an insecure exposure that
                         // requested public serves the LAN instead.
                         let secure_exposure = bind.options.secure.is_some();
@@ -702,13 +782,10 @@ impl NetServiceData {
                 .flat_map(|a| a.metadata.gateways())
                 .cloned()
                 .collect();
-            let private_ips: BTreeSet<IpAddr> = enabled_addresses
-                .iter()
-                .filter(|a| !a.public)
-                .flat_map(|a| a.metadata.gateways())
-                .filter_map(|gw| net_ifaces.get(gw).and_then(|i| i.ip_info.as_ref()))
-                .flat_map(|ip| ip.subnets.iter().map(|s| s.addr()))
-                .collect();
+            let private_ips = direct_forward_private_ips(
+                enabled_addresses.iter().copied(),
+                range.external_start_port,
+            );
             if public_gateways.is_empty() && private_ips.is_empty() {
                 continue;
             }
@@ -853,34 +930,22 @@ impl NetServiceData {
         ctrl.vhost
             .reconcile_port_maps((self.id.clone(), id.clone()), &vhosts);
 
-        let all = binds
-            .vhosts
-            .keys()
-            .chain(vhosts.keys())
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        for key in all {
-            let mut prev = binds.vhosts.remove(&key);
-            if let Some(target) = vhosts.remove(&key) {
-                prev = prev.filter(|(t, _)| t == &target);
-                binds.vhosts.insert(
-                    key.clone(),
-                    if let Some(prev) = prev {
-                        prev
-                    } else {
-                        (
-                            target.clone(),
-                            ctrl.vhost.add(key.0, key.1, DynVHostTarget::new(target))?,
-                        )
-                    },
-                );
-            } else {
-                if let Some((_, rc)) = prev {
-                    drop(rc);
-                    ctrl.vhost.gc(key.0, key.1);
-                }
-            }
-        }
+        reconcile_vhosts(
+            &mut binds.vhosts,
+            &mut vhosts,
+            |key, target| {
+                ctrl.vhost
+                    .add(key.0.clone(), key.1, DynVHostTarget::new(target))
+            },
+            |key, previous, target| {
+                ctrl.vhost
+                    .replace(key.0.clone(), key.1, (&previous.0, &previous.1), target)
+            },
+            |key, (_, handle)| {
+                drop(handle);
+                ctrl.vhost.gc(key.0.clone(), key.1);
+            },
+        )?;
 
         let mut rm = BTreeSet::new();
         binds.private_dns.retain(|fqdn, _| {
@@ -1500,6 +1565,7 @@ mod tests {
 
     use super::*;
     use crate::net::host::binding::Security;
+    use crate::net::vhost::{VHostBindListener, VHostTarget};
 
     fn bind_options(
         add_ssl: bool,
@@ -1579,6 +1645,188 @@ mod tests {
         );
     }
 
+    fn gw(name: &str) -> GatewayId {
+        GatewayId::from(InternedString::intern(name))
+    }
+
+    fn lan_ip(ip: &str, ssl: bool, port: u16, gateway: &str) -> HostnameInfo {
+        let metadata = if ip.parse::<IpAddr>().unwrap().is_ipv4() {
+            HostnameMetadata::Ipv4 {
+                gateway: gw(gateway),
+            }
+        } else {
+            HostnameMetadata::Ipv6 {
+                gateway: gw(gateway),
+                scope_id: 0,
+            }
+        };
+        HostnameInfo {
+            ssl,
+            public: false,
+            hostname: InternedString::intern(ip),
+            port: Some(port),
+            metadata,
+        }
+    }
+
+    fn mdns(
+        ssl: bool,
+        port: u16,
+        gateways: impl IntoIterator<Item = &'static str>,
+    ) -> HostnameInfo {
+        HostnameInfo {
+            ssl,
+            public: false,
+            hostname: InternedString::intern("start-9.local"),
+            port: Some(port),
+            metadata: HostnameMetadata::Mdns {
+                gateways: gateways.into_iter().map(gw).collect(),
+            },
+        }
+    }
+
+    fn private_domain(port: u16, gateways: impl IntoIterator<Item = &'static str>) -> HostnameInfo {
+        HostnameInfo {
+            ssl: false,
+            public: false,
+            hostname: InternedString::intern("service.home"),
+            port: Some(port),
+            metadata: HostnameMetadata::PrivateDomain {
+                gateways: gateways.into_iter().map(gw).collect(),
+            },
+        }
+    }
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn a_name_contributes_no_address_to_the_ssl_vhost() {
+        let addrs = [
+            lan_ip("fe80::1", true, 443, "eth0"),
+            mdns(true, 443, ["eth0"]),
+            lan_ip("10.0.3.1", true, 443, "lxcbr0"),
+        ];
+
+        assert_eq!(
+            ssl_vhost_private_ips(addrs.iter()),
+            BTreeSet::from([ip("fe80::1"), ip("10.0.3.1")]),
+            "only the addresses still enabled are served"
+        );
+    }
+
+    #[test]
+    fn direct_forward_uses_enabled_private_ipv4_rows() {
+        let enabled = lan_ip("192.168.1.5", false, 80, "eth0");
+        let same_gateway_name = private_domain(80, ["eth0"]);
+        let same_gateway_mdns = mdns(false, 80, ["eth0"]);
+
+        assert_eq!(
+            direct_forward_private_ips([&enabled, &same_gateway_name, &same_gateway_mdns], 80),
+            BTreeSet::from([ip("192.168.1.5")]),
+            "names do not restore another IP on their gateway"
+        );
+    }
+
+    #[test]
+    fn direct_forward_private_ips_match_port_and_private_ipv4() {
+        let selected = lan_ip("192.168.1.5", false, 5000, "eth0");
+        let other_port = lan_ip("192.168.1.6", false, 5001, "eth0");
+        let ipv6 = lan_ip("fd00::5", false, 5000, "eth0");
+        let public = bare_v4(false, 5000, &gw("eth0"));
+
+        assert_eq!(
+            direct_forward_private_ips([&selected, &other_port, &ipv6, &public], 5000),
+            BTreeSet::from([ip("192.168.1.5")]),
+        );
+    }
+
+    #[test]
+    fn plaintext_ip_does_not_keep_https_mdns_served() {
+        let name = mdns(true, 443, ["eth0"]);
+        let http = lan_ip("192.168.1.5", false, 80, "eth0");
+        let https = lan_ip("192.168.1.5", true, 443, "eth0");
+
+        assert_eq!(
+            mdns_vhost_private_ips(&name, [&http, &https]),
+            BTreeSet::from([ip("192.168.1.5")]),
+        );
+        assert!(mdns_vhost_private_ips(&name, [&http]).is_empty());
+    }
+
+    #[test]
+    fn another_gateway_does_not_keep_mdns_served() {
+        let name = mdns(true, 443, ["eth0"]);
+        let eth0 = lan_ip("192.168.1.5", true, 443, "eth0");
+        let wg0 = lan_ip("10.13.13.5", true, 443, "wg0");
+
+        assert_eq!(
+            mdns_vhost_private_ips(&name, [&eth0, &wg0]),
+            BTreeSet::from([ip("192.168.1.5")]),
+        );
+        assert!(mdns_vhost_private_ips(&name, [&wg0]).is_empty());
+    }
+
+    #[test]
+    fn a_bare_ip_serves_itself_and_not_its_gateways_other_addresses() {
+        let addrs = [
+            lan_ip("192.168.1.5", true, 443, "eth0"),
+            lan_ip("10.13.13.5", true, 443, "eth0"),
+        ];
+
+        assert_eq!(
+            ssl_vhost_private_ips(addrs.iter()),
+            BTreeSet::from([ip("192.168.1.5"), ip("10.13.13.5")]),
+            "each enabled address is served"
+        );
+
+        assert_eq!(
+            ssl_vhost_private_ips(addrs[1..].iter()),
+            BTreeSet::from([ip("10.13.13.5")]),
+            "switching one off leaves the other served"
+        );
+    }
+
+    #[test]
+    fn a_plain_port_bare_ip_is_not_served_by_the_ssl_vhost() {
+        let addrs = [lan_ip("192.168.1.5", false, 80, "eth0")];
+
+        assert!(
+            ssl_vhost_private_ips(addrs.iter()).is_empty(),
+            "a plain-port bare IP is not an address the SSL vhost answers on"
+        );
+    }
+
+    #[test]
+    fn a_public_address_is_not_a_private_one() {
+        let addrs = [bare_v4(true, 443, &gw("eth0"))];
+
+        assert!(
+            ssl_vhost_private_ips(addrs.iter()).is_empty(),
+            "the WAN IPv4 belongs to the public set"
+        );
+    }
+
+    #[test]
+    fn the_container_bridges_own_addresses_are_internal() {
+        assert!(lan_ip("10.0.3.1", true, 443, "lxcbr0").is_internal());
+        assert!(lan_ip("fd00:3::1", true, 443, "lxcbr0").is_internal());
+        assert!(lan_ip("127.0.0.1", true, 443, "lo").is_internal());
+        assert!(lan_ip("::1", true, 443, "lo").is_internal());
+
+        assert!(!lan_ip("192.168.1.5", true, 443, "eth0").is_internal());
+        assert!(
+            !lan_ip("fd00:3::5", true, 443, "eth0").is_internal(),
+            "a router handing out the bridge's own prefix does not make its \
+             addresses internal, which would put them beyond the operator's reach"
+        );
+        assert!(
+            !lan_ip("fe80::1", true, 443, "lxcbr0").is_internal(),
+            "a link-local address is the kernel's, not one the bridge is given"
+        );
+    }
+
     fn host_id(s: &str) -> HostId {
         HostId::from(Id::try_from(s.to_owned()).unwrap())
     }
@@ -1589,6 +1837,130 @@ mod tests {
                 .map(|id| (host_id(id), Host::new()))
                 .collect(),
         )
+    }
+
+    fn proxy_target(private: &[&str]) -> ProxyTarget {
+        ProxyTarget {
+            public_v4: BTreeSet::new(),
+            public_v6: BTreeSet::new(),
+            private: private.iter().map(|ip| ip.parse().unwrap()).collect(),
+            acme: None,
+            addr: "10.0.3.2:80".parse().unwrap(),
+            addr_v6: None,
+            add_x_forwarded_headers: false,
+            auth: None,
+            connect_ssl: None,
+            alpn: Some(AlpnInfo(vec![MaybeUtf8String(b"h2".to_vec())])),
+            passthrough: false,
+            preserve_source_ip: false,
+        }
+    }
+
+    #[test]
+    fn vhost_reconciliation_preserves_only_compatible_live_contexts() {
+        let key = (None, 443, false);
+        let original = proxy_target(&["192.168.1.2"]);
+        let original_handle = Arc::new(());
+        let mut current =
+            BTreeMap::from([(key.clone(), (original.clone(), original_handle.clone()))]);
+        let mut desired = BTreeMap::from([(key.clone(), proxy_target(&["10.13.13.2"]))]);
+        let mut replaced_previous = false;
+
+        reconcile_vhosts(
+            &mut current,
+            &mut desired,
+            |_, _| panic!("an existing route must be replaced"),
+            |_, previous, target| {
+                assert!(Arc::ptr_eq(&previous.1, &original_handle));
+                replaced_previous = true;
+                assert!(VHostTarget::<VHostBindListener>::same_lifecycle(
+                    &original, &target
+                ));
+                Ok(original_handle.clone())
+            },
+            |_, _| panic!("the route remains present"),
+        )
+        .unwrap();
+        assert!(replaced_previous);
+        assert!(Arc::ptr_eq(&current[&key].1, &original_handle));
+        assert_eq!(
+            current[&key].0.private,
+            BTreeSet::from([ip("10.13.13.2")]),
+            "the retained context must be paired with the new routing set"
+        );
+
+        for mutate in [
+            |target: &mut ProxyTarget| {
+                target.alpn = Some(AlpnInfo(vec![MaybeUtf8String(b"http/1.1".to_vec())]));
+            },
+            |target: &mut ProxyTarget| target.addr = "10.0.3.3:80".parse().unwrap(),
+            |target: &mut ProxyTarget| {
+                target.auth = Some(crate::net::host::binding::ProxyAuth::Bearer {
+                    tokens: vec!["token".to_owned()],
+                    realm: None,
+                });
+            },
+        ] {
+            let previous_handle = current[&key].1.clone();
+            let mut changed = current[&key].0.clone();
+            mutate(&mut changed);
+            let mut desired = BTreeMap::from([(key.clone(), changed)]);
+            reconcile_vhosts(
+                &mut current,
+                &mut desired,
+                |_, _| unreachable!(),
+                |_, previous, target| {
+                    assert!(Arc::ptr_eq(&previous.1, &previous_handle));
+                    assert!(!VHostTarget::<VHostBindListener>::same_lifecycle(
+                        &previous.0,
+                        &target
+                    ));
+                    Ok(Arc::new(()))
+                },
+                |_, _| unreachable!(),
+            )
+            .unwrap();
+            assert!(!Arc::ptr_eq(&current[&key].1, &previous_handle));
+        }
+    }
+
+    #[test]
+    fn vhost_reconciliation_keeps_the_failed_key_unchanged() {
+        let key = (None, 443, false);
+        let original = proxy_target(&["192.168.1.2"]);
+        let original_handle = Arc::new(());
+        let replacement = proxy_target(&["10.13.13.2"]);
+        let mut current =
+            BTreeMap::from([(key.clone(), (original.clone(), original_handle.clone()))]);
+        let mut desired = BTreeMap::from([(key.clone(), replacement.clone())]);
+
+        assert!(
+            reconcile_vhosts(
+                &mut current,
+                &mut desired,
+                |_, _| unreachable!(),
+                |_, _, _| Err(Error::new(eyre!("replace failed"), ErrorKind::Network)),
+                |_, _| unreachable!(),
+            )
+            .is_err()
+        );
+        assert_eq!(current[&key].0, original);
+        assert!(Arc::ptr_eq(&current[&key].1, &original_handle));
+        assert_eq!(desired[&key], replacement);
+
+        let mut current = BTreeMap::new();
+        assert!(
+            reconcile_vhosts(
+                &mut current,
+                &mut desired,
+                |_, _| Err(Error::new(eyre!("add failed"), ErrorKind::Network)),
+                |_, _, _| unreachable!(),
+                |_, _| unreachable!(),
+            )
+            .is_err()
+        );
+        assert!(current.is_empty());
+        assert_eq!(desired[&key], replacement);
     }
 
     #[test]
