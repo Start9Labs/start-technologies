@@ -17,7 +17,7 @@ use digest::Digest;
 use futures::future::ready;
 use http::header::{
     ACCEPT_ENCODING, ACCEPT_RANGES, CACHE_CONTROL, CONNECTION, CONTENT_ENCODING, CONTENT_LENGTH,
-    CONTENT_RANGE, CONTENT_TYPE, ETAG, RANGE,
+    CONTENT_RANGE, CONTENT_TYPE, ETAG, IF_NONE_MATCH, RANGE,
 };
 use http::request::Parts as RequestParts;
 use http::{HeaderValue, Method, StatusCode};
@@ -52,6 +52,9 @@ const NOT_FOUND: &[u8] = b"Not Found";
 const METHOD_NOT_ALLOWED: &[u8] = b"Method Not Allowed";
 const NOT_AUTHORIZED: &[u8] = b"Not Authorized";
 const INTERNAL_SERVER_ERROR: &[u8] = b"Internal Server Error";
+const IMMUTABLE_FILE_CACHE_CONTROL: &str = "public, max-age=21000000, immutable";
+const IMMUTABLE_UI_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
+const REVALIDATE_CACHE_CONTROL: &str = "no-cache";
 
 pub const EMPTY_DIR: Dir<'_> = Dir::new("", &[]);
 
@@ -98,11 +101,13 @@ impl UiContext for RpcContext {
             })
             .route("/manifest.webmanifest", {
                 let ctx = self.clone();
-                get(move || {
+                get(move |request: Request| {
                     let ctx = ctx.clone();
                     async move {
-                        ctx.account
-                            .peek(|account| webmanifest_send(Self::ui_dir(), &account.hostname))
+                        let (request_parts, _body) = request.into_parts();
+                        ctx.account.peek(|account| {
+                            webmanifest_send(&request_parts, Self::ui_dir(), &account.hostname)
+                        })
                     }
                 })
             })
@@ -194,7 +199,34 @@ pub fn rpc_router<C: Context + Clone + AsRef<RpcContinuations>>(
         )
 }
 
-fn serve_ui<C: UiContext>(req: Request) -> Result<Response, Error> {
+fn is_content_hashed(path: &Path) -> bool {
+    if path.components().count() != 1 {
+        return false;
+    }
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    let Some(stem) = file_name
+        .strip_suffix(".js")
+        .or_else(|| file_name.strip_suffix(".css"))
+    else {
+        return false;
+    };
+    let bytes = stem.as_bytes();
+    bytes.len() > 9
+        && bytes[bytes.len() - 9] == b'-'
+        && bytes[bytes.len() - 8..]
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-' || *byte == b'_')
+}
+
+fn is_route_like(path: &str) -> bool {
+    path.rsplit('/')
+        .next()
+        .is_some_and(|name| !name.contains('.'))
+}
+
+fn serve_ui_from_dir(req: Request, ui_dir: &'static Dir<'static>) -> Result<Response, Error> {
     let (request_parts, _body) = req.into_parts();
     match &request_parts.method {
         &Method::GET | &Method::HEAD => {
@@ -204,19 +236,24 @@ fn serve_ui<C: UiContext>(req: Request) -> Result<Response, Error> {
                 .strip_prefix('/')
                 .unwrap_or(request_parts.uri.path());
 
-            let file = C::ui_dir()
-                .get_file(uri_path)
-                .or_else(|| C::ui_dir().get_file("index.html"));
+            let file = ui_dir.get_file(uri_path).or_else(|| {
+                is_route_like(uri_path)
+                    .then(|| ui_dir.get_file("index.html"))
+                    .flatten()
+            });
 
             if let Some(file) = file {
-                FileData::from_embedded(&request_parts, file, C::ui_dir())?
-                    .into_response(&request_parts)
+                FileData::from_embedded(&request_parts, file, ui_dir)?.into_response(&request_parts)
             } else {
                 Ok(not_found())
             }
         }
         _ => Ok(method_not_allowed()),
     }
+}
+
+fn serve_ui<C: UiContext>(req: Request) -> Result<Response, Error> {
+    serve_ui_from_dir(req, C::ui_dir())
 }
 
 /// Hardening headers on every UI-origin response. The CSP is the backstop
@@ -267,6 +304,7 @@ pub fn refresher() -> Router {
             data: Body::from(&res[..]),
             content_range: None,
             e_tag: None,
+            cache_control: None,
             encoding: None,
             len: Some(res.len() as u64),
             mime: Some("text/html".into()),
@@ -468,6 +506,7 @@ pub fn bad_request() -> Response {
 }
 
 fn webmanifest_send(
+    request_parts: &RequestParts,
     ui_dir: &'static Dir<'static>,
     hostname: &ServerHostname,
 ) -> Result<Response, Error> {
@@ -482,13 +521,28 @@ fn webmanifest_send(
     manifest.insert("short_name".into(), hostname.as_ref().into());
     let body = serde_json::to_vec(&manifest).with_kind(ErrorKind::Serialization)?;
 
-    Response::builder()
-        .status(StatusCode::OK)
+    let e_tag = e_tag(Path::new("manifest.webmanifest"), &body);
+    let builder = Response::builder()
         .header(CONTENT_TYPE, "application/manifest+json")
-        .header(CACHE_CONTROL, "no-cache")
-        .header(CONTENT_LENGTH, body.len())
-        .body(Body::from(body))
-        .with_kind(ErrorKind::Network)
+        .header(CACHE_CONTROL, REVALIDATE_CACHE_CONTROL)
+        .header(ETAG, &e_tag);
+    if request_parts
+        .headers
+        .get(IF_NONE_MATCH)
+        .and_then(|header| header.to_str().ok())
+        == Some(e_tag.as_str())
+    {
+        builder.status(StatusCode::NOT_MODIFIED).body(Body::empty())
+    } else {
+        builder
+            .header(CONTENT_LENGTH, body.len())
+            .body(if request_parts.method == Method::HEAD {
+                Body::empty()
+            } else {
+                Body::from(body)
+            })
+    }
+    .with_kind(ErrorKind::Network)
 }
 
 fn cert_send(cert: &X509, hostname: &ServerHostname) -> Result<Response, Error> {
@@ -636,6 +690,7 @@ struct FileData {
     content_range: Option<(u64, u64, u64)>,
     encoding: Option<&'static str>,
     e_tag: Option<String>,
+    cache_control: Option<&'static str>,
     mime: Option<InternedString>,
     digest: Option<(&'static str, Vec<u8>)>,
 }
@@ -723,6 +778,11 @@ impl FileData {
                     .as_bytes(),
                 )
             }),
+            cache_control: Some(if is_content_hashed(path) {
+                IMMUTABLE_UI_CACHE_CONTROL
+            } else {
+                REVALIDATE_CACHE_CONTROL
+            }),
             mime: MimeGuess::from_path(path)
                 .first()
                 .map(|m| m.essence_str().into()),
@@ -806,6 +866,7 @@ impl FileData {
             content_range,
             encoding,
             e_tag,
+            cache_control: Some(IMMUTABLE_FILE_CACHE_CONTROL),
             mime: MimeGuess::from_path(path)
                 .first()
                 .map(|m| m.essence_str().into()),
@@ -864,6 +925,7 @@ impl FileData {
             content_range,
             encoding,
             e_tag: None,
+            cache_control: None,
             mime: MimeGuess::from_path(path)
                 .first()
                 .map(|m| m.essence_str().into()),
@@ -877,9 +939,10 @@ impl FileData {
             builder = builder.header(CONTENT_TYPE, &*mime);
         }
         if let Some(e_tag) = &self.e_tag {
-            builder = builder
-                .header(ETAG, &**e_tag)
-                .header(CACHE_CONTROL, "public, max-age=21000000, immutable");
+            builder = builder.header(ETAG, &**e_tag);
+        }
+        if let Some(cache_control) = self.cache_control {
+            builder = builder.header(CACHE_CONTROL, cache_control);
         }
 
         builder = builder.header(ACCEPT_RANGES, "bytes");
@@ -908,11 +971,7 @@ impl FileData {
         }
 
         if self.e_tag.is_some()
-            && req
-                .headers
-                .get("if-none-match")
-                .and_then(|h| h.to_str().ok())
-                == self.e_tag.as_deref()
+            && req.headers.get(IF_NONE_MATCH).and_then(|h| h.to_str().ok()) == self.e_tag.as_deref()
         {
             builder.status(StatusCode::NOT_MODIFIED).body(Body::empty())
         } else {
@@ -942,4 +1001,204 @@ fn e_tag(path: &Path, modified: impl AsRef<[u8]>) -> String {
         "\"{}\"",
         base32::encode(base32::Alphabet::Rfc4648 { padding: false }, res.as_slice()).to_lowercase()
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use axum::body::to_bytes;
+    use include_dir::{DirEntry, File, Metadata};
+
+    use super::*;
+
+    const METADATA: Metadata = Metadata::new(
+        Duration::from_secs(1),
+        Duration::from_secs(1),
+        Duration::from_secs(1),
+    );
+    static TEST_UI_DIR: Dir<'static> = Dir::new(
+        "",
+        &[
+            DirEntry::File(
+                File::new("index.html", b"<html>StartOS</html>").with_metadata(METADATA),
+            ),
+            DirEntry::File(
+                File::new("main-ABCDEFGH.js", b"console.log('StartOS')").with_metadata(METADATA),
+            ),
+            DirEntry::File(File::new("styles-ABCD_ef-.css", b"body {}").with_metadata(METADATA)),
+            DirEntry::File(
+                File::new("ngsw-worker.js", b"self.addEventListener()").with_metadata(METADATA),
+            ),
+            DirEntry::File(File::new("assets/logo.svg", b"<svg></svg>").with_metadata(METADATA)),
+            DirEntry::File(
+                File::new(
+                    "manifest.webmanifest",
+                    br#"{"name":"StartOS","short_name":"StartOS"}"#,
+                )
+                .with_metadata(METADATA),
+            ),
+        ],
+    );
+
+    fn request(uri: &str, if_none_match: Option<&str>) -> Request {
+        let mut request = Request::builder().uri(uri);
+        if let Some(e_tag) = if_none_match {
+            request = request.header(IF_NONE_MATCH, e_tag);
+        }
+        request.body(Body::empty()).unwrap()
+    }
+
+    fn ui_response(uri: &str, if_none_match: Option<&str>) -> Response {
+        serve_ui_from_dir(request(uri, if_none_match), &TEST_UI_DIR).unwrap()
+    }
+
+    fn header(response: &Response, name: http::header::HeaderName) -> Option<&str> {
+        response.headers().get(name).unwrap().to_str().ok()
+    }
+
+    #[test]
+    fn content_hashed_paths_are_top_level_bundles() {
+        for path in [
+            "main-ABCDEFGH.js",
+            "polyfills-Ab_0-cDe.js",
+            "chunk-C-f2EvjP.js",
+            "styles-XYUDF62Z.css",
+        ] {
+            assert!(is_content_hashed(Path::new(path)), "{path}");
+        }
+        for path in [
+            "index.html",
+            "main.js",
+            "chunk-C-f2EvjP.js.map",
+            "favicon-96x96.png",
+            "assets/font-ABCDEFGH.css",
+        ] {
+            assert!(!is_content_hashed(Path::new(path)), "{path}");
+        }
+    }
+
+    #[test]
+    fn stable_ui_files_revalidate_and_hashed_bundles_are_immutable() {
+        for path in ["/", "/ngsw-worker.js", "/assets/logo.svg"] {
+            let response = ui_response(path, None);
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+            assert_eq!(
+                header(&response, CACHE_CONTROL),
+                Some(REVALIDATE_CACHE_CONTROL),
+                "{path}",
+            );
+            assert!(response.headers().contains_key(ETAG), "{path}");
+        }
+
+        for path in ["/main-ABCDEFGH.js", "/styles-ABCD_ef-.css"] {
+            let response = ui_response(path, None);
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+            assert_eq!(
+                header(&response, CACHE_CONTROL),
+                Some(IMMUTABLE_UI_CACHE_CONTROL),
+                "{path}",
+            );
+            assert!(response.headers().contains_key(ETAG), "{path}");
+        }
+
+        let response = ui_response("/", None);
+        let e_tag = header(&response, ETAG).unwrap().to_owned();
+        let response = ui_response("/", Some(&e_tag));
+        assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
+        assert_eq!(
+            header(&response, CACHE_CONTROL),
+            Some(REVALIDATE_CACHE_CONTROL),
+        );
+    }
+
+    #[tokio::test]
+    async fn spa_fallback_uses_index_for_routes_and_not_for_asset_paths() {
+        let index = ui_response("/", None);
+        let index_e_tag = header(&index, ETAG).unwrap().to_owned();
+        let index_body = to_bytes(index.into_body(), usize::MAX).await.unwrap();
+
+        for path in [
+            "/settings/general",
+            "/settings/general/",
+            "/route.name/child",
+            "/settings/general?tab=a.b",
+        ] {
+            let response = ui_response(path, None);
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+            assert_eq!(header(&response, CONTENT_TYPE), Some("text/html"), "{path}");
+            assert_eq!(
+                header(&response, ETAG),
+                Some(index_e_tag.as_str()),
+                "{path}"
+            );
+            assert_eq!(
+                header(&response, CACHE_CONTROL),
+                Some(REVALIDATE_CACHE_CONTROL),
+                "{path}",
+            );
+            assert_eq!(
+                to_bytes(response.into_body(), usize::MAX).await.unwrap(),
+                index_body,
+                "{path}",
+            );
+        }
+
+        for path in [
+            "/missing.js",
+            "/missing.js?route=general",
+            "/assets/missing/icon.svg",
+            "/.hidden",
+            "/route.",
+        ] {
+            assert_eq!(
+                ui_response(path, None).status(),
+                StatusCode::NOT_FOUND,
+                "{path}"
+            );
+        }
+        assert_eq!(
+            ui_response("/main-ABCDEFGH.js?v=1.2", None).status(),
+            StatusCode::OK,
+        );
+    }
+
+    #[tokio::test]
+    async fn generated_webmanifest_revalidates_its_body() {
+        fn response(hostname: &str, if_none_match: Option<&str>) -> Response {
+            let request_parts = request("/manifest.webmanifest", if_none_match)
+                .into_parts()
+                .0;
+            let hostname =
+                ServerHostname::new_from_input(InternedString::intern(hostname)).unwrap();
+            webmanifest_send(&request_parts, &TEST_UI_DIR, &hostname).unwrap()
+        }
+
+        let alpha = response("alpha", None);
+        assert_eq!(alpha.status(), StatusCode::OK);
+        assert_eq!(
+            header(&alpha, CONTENT_TYPE),
+            Some("application/manifest+json"),
+        );
+        assert_eq!(
+            header(&alpha, CACHE_CONTROL),
+            Some(REVALIDATE_CACHE_CONTROL),
+        );
+        let alpha_e_tag = header(&alpha, ETAG).unwrap().to_owned();
+        let alpha_body: serde_json::Value =
+            serde_json::from_slice(&to_bytes(alpha.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(alpha_body["name"], "alpha");
+        assert_eq!(alpha_body["short_name"], "alpha");
+
+        let revalidated = response("alpha", Some(&alpha_e_tag));
+        assert_eq!(revalidated.status(), StatusCode::NOT_MODIFIED);
+        assert_eq!(
+            header(&revalidated, CACHE_CONTROL),
+            Some(REVALIDATE_CACHE_CONTROL),
+        );
+
+        let beta = response("beta", None);
+        assert_ne!(header(&beta, ETAG), Some(alpha_e_tag.as_str()));
+    }
 }

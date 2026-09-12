@@ -535,7 +535,7 @@ export default {
   579: 'musi być prawidłowym kluczem publicznym SSH',
   580: 'Wymagane odświeżenie',
   581: 'Twój interfejs użytkownika jest w pamięci podręcznej i jest nieaktualny. Spróbuj ponownie załadować PWA za pomocą przycisku poniżej. Jeśli nadal widzisz ten komunikat, odinstaluj i ponownie zainstaluj PWA.',
-  582: 'Twój interfejs użytkownika jest w pamięci podręcznej i jest nieaktualny. Wykonaj twarde odświeżenie strony, aby uzyskać najnowszy interfejs.',
+  582: 'StartOS został zaktualizowany, ale ta strona nadal korzysta z poprzedniego interfejsu. Załaduj stronę ponownie, aby uzyskać najnowszą wersję.',
   606: 'Host',
   607: 'Wartość',
   610: 'Dynamiczny DNS',
@@ -820,4 +820,5 @@ export default {
   928: 'Rosnąco',
   929: 'Malejąco',
   930: 'Serwisy z tego katalogu są tworzone i utrzymywane przez członków społeczności Start9 i są w fazie testów beta. Należy spodziewać się błędów. Instalujesz je na własne ryzyko. W przypadku problemów lub pytań skontaktuj się z twórcą pakietu.',
+  931: 'Załaduj ponownie',
 } satisfies i18n

@@ -535,7 +535,7 @@ export default {
   579: 'debe ser una clave pública SSH válida',
   580: 'Actualización necesaria',
   581: 'Tu interfaz de usuario está en caché y desactualizada. Intenta recargar la PWA usando el botón de abajo. Si sigues viendo este mensaje, desinstala y vuelve a instalar la PWA.',
-  582: 'Tu interfaz de usuario está en caché y desactualizada. Haz un hard refresh de la página para obtener la última interfaz.',
+  582: 'StartOS se ha actualizado, pero esta página sigue ejecutando la interfaz anterior. Recarga la página para obtener la última versión.',
   606: 'Host',
   607: 'Valor',
   610: 'DNS dinámico',
@@ -820,4 +820,5 @@ export default {
   928: 'Ascendente',
   929: 'Descendente',
   930: 'Los servicios de este registro están empaquetados y mantenidos por miembros de la comunidad Start9 y están en fase de prueba beta. Se esperan errores. Instálalos bajo tu propio riesgo. Si experimentas un problema o tienes una pregunta sobre un servicio en este mercado, comunícate con el desarrollador del paquete.',
+  931: 'Recargar',
 } satisfies i18n

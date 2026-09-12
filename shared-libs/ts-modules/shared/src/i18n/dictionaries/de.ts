@@ -535,7 +535,7 @@ export default {
   579: 'muss ein gültiger SSH-Öffentlicher Schlüssel sein',
   580: 'Aktualisierung erforderlich',
   581: 'Ihre Benutzeroberfläche ist zwischengespeichert und veraltet. Versuchen Sie, die PWA mit der Schaltfläche unten neu zu laden. Wenn Sie diese Nachricht weiterhin sehen, deinstallieren und installieren Sie die PWA erneut.',
-  582: 'Ihre Benutzeroberfläche ist zwischengespeichert und veraltet. Führen Sie einen Hard-Refresh der Seite durch, um die neueste Benutzeroberfläche zu erhalten.',
+  582: 'StartOS wurde aktualisiert, aber auf dieser Seite wird noch die vorherige Benutzeroberfläche ausgeführt. Laden Sie die Seite neu, um die neueste Version zu erhalten.',
   606: 'Host',
   607: 'Wert',
   610: 'Dynamisches DNS',
@@ -820,4 +820,5 @@ export default {
   928: 'Aufsteigend',
   929: 'Absteigend',
   930: 'Dienste in diesem Register werden von der Start9-Community gepflegt und befinden sich in der Betaphase. Fehler sind zu erwarten. Die Installation erfolgt auf eigenes Risiko. Bei Problemen wenden Sie sich bitte an den Paketentwickler.',
+  931: 'Neu laden',
 } satisfies i18n

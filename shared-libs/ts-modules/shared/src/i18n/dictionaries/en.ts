@@ -534,7 +534,7 @@ export const ENGLISH: Record<string, number> = {
   'must be a valid SSH public key': 579,
   'Refresh Needed': 580,
   'Your user interface is cached and out of date. Attempt to reload the PWA using the button below. If you continue to see this message, uninstall and reinstall the PWA.': 581,
-  'Your user interface is cached and out of date. Hard refresh the page to get the latest UI.': 582,
+  'StartOS has been updated, but this page is still running the previous interface. Reload the page to get the latest version.': 582,
   'Host': 606, // as in, a network host
   'Value': 607, // as in, the value in a column of a table
   'Dynamic DNS': 610,
@@ -821,4 +821,5 @@ export const ENGLISH: Record<string, number> = {
   'Ascending': 928,
   'Descending': 929,
   'Services from this registry are packaged and maintained by members of the Start9 community and are undergoing beta testing. Bugs are expected. Install at your own risk. If you experience an issue or have a question related to a service in this marketplace, please reach out to the package developer for assistance.': 930,
+  'Reload': 931,
 }
