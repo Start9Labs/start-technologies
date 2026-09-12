@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SOURCE_DIR="$(dirname $(realpath "${BASH_SOURCE[0]}"))"
+SOURCE_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 
 if [ "$UID" -ne 0 ]; then
     >&2 echo 'Must be run as root'
@@ -19,7 +19,7 @@ while [[ $# -gt 0 ]]; do
           ONLY_CREATE=1
           shift
           ;;
-      -*|--*)
+      -*)
           echo "Unknown option $1"
           exit 1
           ;;
@@ -63,7 +63,7 @@ mount -t proc proc /media/startos/next/proc
 mount --bind /boot /media/startos/next/boot
 mount --bind /media/startos/root /media/startos/next/media/startos/root
 
-if mountpoint /sys/firmware/efi/efivars 2>&1 > /dev/null; then
+if mountpoint /sys/firmware/efi/efivars > /dev/null 2>&1; then
   mount -t efivarfs efivarfs /media/startos/next/sys/firmware/efi/efivars
 fi
 
@@ -75,7 +75,12 @@ else
     CHROOT_RES=$?
 fi
 
-if mountpoint /media/startos/next/sys/firmware/efi/efivars 2>&1 > /dev/null; then
+if [ "$CHROOT_RES" -eq 0 ] && [ -f /media/startos/config/overlay/etc/fstab ]; then
+    /media/startos/next/usr/lib/startos/scripts/normalize-fstab /media/startos/config/overlay/etc/fstab
+    CHROOT_RES=$?
+fi
+
+if mountpoint /media/startos/next/sys/firmware/efi/efivars > /dev/null 2>&1; then
   umount /media/startos/next/sys/firmware/efi/efivars 
 fi
 
@@ -90,7 +95,7 @@ umount -l /media/startos/next/media/startos/root
 if [ "$CHROOT_RES" -eq 0 ]; then
 
     if [ -h /media/startos/config/current.rootfs ] && [ -e /media/startos/config/current.rootfs ]; then
-        ${SOURCE_DIR}/prune-images $(du -s --bytes /media/startos/next | awk '{print $1}')
+        "$SOURCE_DIR/prune-images" "$(du -s --bytes /media/startos/next | awk '{print $1}')"
     fi
 
     echo 'Upgrading...'
@@ -103,8 +108,8 @@ if [ "$CHROOT_RES" -eq 0 ]; then
         exit 1
     fi
     hash=$(b3sum /media/startos/images/next.squashfs | head -c 32)
-    mv /media/startos/images/next.squashfs /media/startos/images/${hash}.rootfs
-    ln -rsf /media/startos/images/${hash}.rootfs /media/startos/config/current.rootfs
+    mv /media/startos/images/next.squashfs "/media/startos/images/${hash}.rootfs"
+    ln -rsf "/media/startos/images/${hash}.rootfs" /media/startos/config/current.rootfs
 
     sync
 
@@ -114,3 +119,4 @@ fi
 umount -l /media/startos/next
 umount -l /media/startos/upper
 rm -rf /media/startos/upper /media/startos/next
+exit "$CHROOT_RES"

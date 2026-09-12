@@ -40,7 +40,7 @@ A service moves through several lifecycle stages, each of which can trigger pack
 2. **Actions** — Actions are operations defined by the package that appear as buttons in the UI. They can display information (e.g., show admin credentials), accept user input (e.g., configure SMTP), or modify the service's state. Actions can run whether the service is started, stopped, or both.
 3. **Tasks** — Tasks are notifications that prompt the user to run a specific action. Packages create tasks during initialization or at runtime to guide the user through required setup steps. Tasks have a severity level: _critical_ tasks block the service from starting until completed, while lower-severity tasks are informational.
 4. **Start** — The package's `setupMain` function runs, which defines daemons (long-running processes), oneshots (startup tasks like migrations), and health checks. Daemons run inside subcontainers created from the package's images.
-5. **Update** — When a new version is installed, the package's version migration code runs, transforming stored data as needed. The `setupOnInit` function runs again with `kind: 'install'`.
+5. **Update** — When a new version is installed, the package's version migration code runs, transforming stored data as needed. The `setupOnInit` function runs again with `kind: 'update'`.
 6. **Backup** — StartOS creates an encrypted backup of the service's designated volumes. Services can exclude data that is recoverable by other means (e.g., Bitcoin excludes the blockchain).
 7. **Restore** — A backup is decrypted and restored. The `setupOnInit` function runs with `kind: 'restore'`, allowing the package to re-register triggers or re-prompt the user.
 8. **Uninstall** — The container and its volumes are removed.
@@ -64,7 +64,7 @@ The container runtime communicates with the StartOS host via JSON-RPC over a Uni
 
 Each service has one or more named volumes for persistent data. Volumes survive container restarts, updates, and restores. They are id-mapped to the container's user namespace for security. Packages declare which volumes to include in backups.
 
-### OS Partitions
+## OS Partitions
 
 StartOS identifies its boot and system partitions by stable partition IDs. It continues mounting the same partitions when another disk is added, removed, or reordered.
 

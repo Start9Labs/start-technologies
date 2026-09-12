@@ -12,7 +12,7 @@ set -e
 BOOT=/boot
 MIGRATION_BOOT=/usr/lib/startos/migration-boot
 
-/usr/lib/startos/scripts/normalize-fstab /etc/fstab
+/usr/lib/startos/scripts/normalize-fstab --legacy /etc/fstab
 
 if [ -r "$MIGRATION_BOOT" ]; then
     kernel="$(sed -n 1p "$MIGRATION_BOOT")"

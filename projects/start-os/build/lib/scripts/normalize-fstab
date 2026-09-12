@@ -2,14 +2,111 @@
 
 set -euo pipefail
 
+BLKID=${BLKID:-blkid}
+FINDMNT=${FINDMNT:-findmnt}
+LSBLK=${LSBLK:-lsblk}
+SYNC=${SYNC:-sync}
+MV=${MV:-mv}
+
+legacy=0
+if [ "${1:-}" = --legacy ]; then
+    legacy=1
+    shift
+fi
 if [ "$#" -gt 1 ]; then
-    >&2 echo "Usage: $0 [fstab]"
+    >&2 echo "Usage: $0 [--legacy] [fstab]"
     exit 1
 fi
 
-BLKID=${BLKID:-blkid}
 fstab=${1:-/etc/fstab}
-tmp=$(mktemp "$(dirname -- "$fstab")/.$(basename -- "$fstab").XXXXXX")
+dir=$(dirname -- "$fstab")
+
+mounted_device() {
+    local target=$1 source
+    source=$("$FINDMNT" -n -o SOURCE --target "$target") || return 1
+    source=${source%%\[*}
+    [[ $source = /dev/* ]] || return 1
+    printf '%s\n' "$source"
+}
+
+partition_on_disk() {
+    local disk=$1 number=$2 path part found=
+    while read -r path part; do
+        if [ "$part" = "$number" ]; then
+            [ -z "$found" ] || return 1
+            found=$path
+        fi
+    done < <("$LSBLK" -nrpo PATH,PARTN "$disk")
+    [ -n "$found" ] || return 1
+    printf '%s\n' "$found"
+}
+
+legacy_device() {
+    local target=$1 boot parent boot_number number
+    boot=$(mounted_device /boot) || return 1
+    parent=$("$LSBLK" -nro PKNAME "$boot") || return 1
+    boot_number=$("$LSBLK" -nro PARTN "$boot") || return 1
+    [ -n "$parent" ] && [[ $boot_number =~ ^[0-9]+$ ]] || return 1
+    case "$target" in
+        /boot) printf '%s\n' "$boot"; return ;;
+        /) number=$((boot_number + 1)) ;;
+        /boot/efi)
+            [ "$boot_number" -eq 2 ] || return 1
+            number=1
+            ;;
+    esac
+    partition_on_disk "/dev/$parent" "$number"
+}
+
+identity_device() {
+    local target=$1 device label expected_label
+    if [ "$legacy" -eq 1 ]; then
+        device=$(legacy_device "$target") || return 1
+    else
+        case "$target" in
+            /) device=$(mounted_device /media/startos/root) || return 1 ;;
+            /boot|/boot/efi) device=$(mounted_device "$target") || return 1 ;;
+        esac
+    fi
+    case "$target" in
+        /) expected_label=rootfs ;;
+        /boot) expected_label=boot ;;
+        /boot/efi) expected_label=efi ;;
+    esac
+    label=$("$BLKID" -p -s LABEL -o value "$device") || return 1
+    [ "$label" = "$expected_label" ] || return 1
+    printf '%s\n' "$device"
+}
+
+partuuid_for_target() {
+    local target=$1 device partuuid
+    device=$(identity_device "$target") || {
+        >&2 echo "Unable to establish installed partition for $target"
+        return 1
+    }
+    if ! partuuid=$("$BLKID" -p -s PART_ENTRY_UUID -o value "$device") ||
+        [ -z "$partuuid" ] || [[ $partuuid =~ [[:space:]] ]]; then
+        >&2 echo "Unable to resolve PARTUUID for installed partition $target"
+        return 1
+    fi
+    printf '%s\n' "$partuuid"
+}
+
+declare -A partuuids=()
+while IFS= read -r line || [ -n "$line" ]; do
+    if [[ $line =~ ^[[:blank:]]*/dev/[^[:blank:]]+[[:blank:]]+([^[:blank:]]+) ]]; then
+        target=${BASH_REMATCH[1]}
+        case "$target" in
+            /|/boot|/boot/efi)
+                if [ -z "${partuuids[$target]:-}" ]; then
+                    partuuids[$target]=$(partuuid_for_target "$target") || exit 1
+                fi
+                ;;
+        esac
+    fi
+done < "$fstab"
+
+tmp=$(mktemp "$dir/.$(basename -- "$fstab").XXXXXX")
 trap 'rm -f -- "$tmp"' EXIT
 
 ends_with_newline=0
@@ -20,19 +117,13 @@ fi
 while IFS= read -r line || [ -n "$line" ]; do
     if [[ $line =~ ^([[:blank:]]*)(/dev/[^[:blank:]]+)([[:blank:]]+)([^[:blank:]]+)(.*)$ ]]; then
         leading=${BASH_REMATCH[1]}
-        source=${BASH_REMATCH[2]}
         separator=${BASH_REMATCH[3]}
         target=${BASH_REMATCH[4]}
         remainder=${BASH_REMATCH[5]}
         case "$target" in
             /|/boot|/boot/efi)
-                if ! partuuid=$("$BLKID" -p -s PART_ENTRY_UUID -o value "$source") ||
-                    [ -z "$partuuid" ] || [[ $partuuid =~ [[:space:]] ]]; then
-                    >&2 echo "Unable to resolve PARTUUID for $source"
-                    exit 1
-                fi
                 printf '%sPARTUUID=%s%s%s%s\n' \
-                    "$leading" "$partuuid" "$separator" "$target" "$remainder"
+                    "$leading" "${partuuids[$target]}" "$separator" "$target" "$remainder"
                 continue
                 ;;
         esac
@@ -50,5 +141,7 @@ fi
 
 chown --reference="$fstab" "$tmp"
 chmod --reference="$fstab" "$tmp"
-mv -f -- "$tmp" "$fstab"
+"$SYNC" -f "$tmp"
+"$MV" -f -- "$tmp" "$fstab"
+"$SYNC" -f "$dir"
 trap - EXIT

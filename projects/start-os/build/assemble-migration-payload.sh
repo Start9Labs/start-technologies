@@ -1,15 +1,5 @@
 #!/bin/bash
-# Assemble the 0.3.5.1 -> 0.4.0 migration OTA payload.
-#
-# StartOS 0.3.5.1's (unchangeable) updater rsyncs the *contents* of the published
-# OTA squashfs into the box's `next` subvolume, then reboots. We base the payload
-# on the real 0.3.5.1 rootfs (extracted from its published release image) so the
-# box's existing `next`/`current` make the rsync a small delta, and the apply-time
-# `chroot next update-grub2` runs in a complete userland. On top we layer the
-# 0.4.0 upgrade: the 0.4.0 base image as a nested squashfs (what the 0.4.0
-# initramfs boots), the 0.4.0 kernel/initramfs, a migration sentinel, and the
-# apply-time migration scripts. The old Haskell registry loop-mounts the
-# result and rsync-serves its tree unchanged.
+# The legacy updater rsyncs this complete payload root before invoking its hook.
 set -eo pipefail
 
 SOURCE_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
@@ -76,7 +66,7 @@ printf '%s\n%s\n' \
     "$(cd "$WORK/payload/boot" && ls -1 initrd.img-* | head -n1)" \
     > "$WORK/payload/usr/lib/startos/migration-boot"
 
-# 4. update-grub2 is the 0.3.5.1 updater's apply-time migration hook.
+# The legacy updater invokes /usr/sbin/update-grub2 inside the payload chroot.
 touch "$WORK/payload/.startos-migration"
 install -m0755 "$SOURCE_DIR/lib/scripts/migration-update-grub" "$WORK/payload/usr/sbin/update-grub2"
 install -m0755 "$SOURCE_DIR/lib/scripts/normalize-fstab" "$WORK/payload/usr/lib/startos/scripts/normalize-fstab"

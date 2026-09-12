@@ -68,17 +68,18 @@ impl OsPartitionInfo {
                 continue;
             };
 
-            // The initramfs overlays `/`; fstab supplies the boot partitions.
+            // The installed OS root comes from its live bind mount.
             if target != "/boot" && !target.starts_with("/boot/") {
                 continue;
             }
 
             let dev = match resolve_fstab_source(source).await {
                 Ok(d) => d,
-                Err(e) => {
+                Err(FstabSourceError::Ignored(e)) => {
                     tracing::warn!("Failed to resolve fstab source {source}: {e}");
                     continue;
                 }
+                Err(FstabSourceError::Ambiguous(e)) => return Err(e),
             };
 
             match target {
@@ -113,7 +114,7 @@ impl OsPartitionInfo {
 
 const OS_ROOT_MOUNT: &str = "/media/startos/root";
 
-// The initramfs bind mount excludes the live installer device.
+// The live installer has no installed-root mount.
 async fn os_root_device() -> Option<PathBuf> {
     get_mount_source(OS_ROOT_MOUNT).await.ok().flatten()
 }
@@ -161,9 +162,29 @@ async fn find_bios_boot_partition(known_part: &Path) -> Result<Option<PathBuf>, 
     Ok(None)
 }
 
+enum FstabSourceError {
+    Ignored(Error),
+    Ambiguous(Error),
+}
+
+fn parse_blkid_devices(output: &str) -> Result<Option<PathBuf>, Vec<PathBuf>> {
+    let devices = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+
+    match devices.len() {
+        0 => Ok(None),
+        1 => Ok(devices.into_iter().next()),
+        _ => Err(devices),
+    }
+}
+
 /// Resolve an fstab device spec (e.g. /dev/sda1, PARTUUID=..., UUID=...) to a
 /// canonical device path.
-async fn resolve_fstab_source(source: &str) -> Result<PathBuf, Error> {
+async fn resolve_fstab_source(source: &str) -> Result<PathBuf, FstabSourceError> {
     if source.starts_with('/') {
         return Ok(tokio::fs::canonicalize(source)
             .await
@@ -172,16 +193,34 @@ async fn resolve_fstab_source(source: &str) -> Result<PathBuf, Error> {
     // Only TAG=value specs (PARTUUID=, UUID=, LABEL=) are resolvable via blkid;
     // pseudo sources (overlay, tmpfs, none, ...) are not block devices.
     if !source.contains('=') {
-        return Err(Error::new(
+        return Err(FstabSourceError::Ignored(Error::new(
             eyre!("not a block device spec"),
             ErrorKind::DiskManagement,
-        ));
+        )));
     }
     let output = Command::new("blkid")
         .args(["-o", "device", "-t", source])
         .invoke(ErrorKind::DiskManagement)
-        .await?;
-    Ok(PathBuf::from(String::from_utf8(output)?.trim()))
+        .await
+        .map_err(FstabSourceError::Ignored)?;
+    let output = String::from_utf8(output)
+        .map_err(Error::from)
+        .map_err(FstabSourceError::Ignored)?;
+
+    match parse_blkid_devices(&output) {
+        Ok(Some(device)) => Ok(device),
+        Ok(None) => Err(FstabSourceError::Ignored(Error::new(
+            eyre!("no matching block device"),
+            ErrorKind::DiskManagement,
+        ))),
+        Err(devices) => Err(FstabSourceError::Ambiguous(Error::new(
+            eyre!(
+                "fstab source {source} matches multiple devices: {}",
+                devices.iter().map(|path| path.display()).format(", ")
+            ),
+            ErrorKind::DiskManagement,
+        ))),
+    }
 }
 
 pub fn disk<C: Context>() -> ParentHandler<C> {
@@ -275,4 +314,32 @@ pub async fn list(ctx: RpcContext, _: Empty) -> Result<Vec<DiskInfo>, Error> {
 pub async fn repair() -> Result<(), Error> {
     tokio::fs::write(REPAIR_DISK_PATH, b"").await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::parse_blkid_devices;
+
+    #[test]
+    fn parse_blkid_devices_with_no_matches() {
+        assert_eq!(parse_blkid_devices(""), Ok(None));
+    }
+
+    #[test]
+    fn parse_blkid_devices_with_one_match() {
+        assert_eq!(
+            parse_blkid_devices("/dev/sda1\n"),
+            Ok(Some(PathBuf::from("/dev/sda1")))
+        );
+    }
+
+    #[test]
+    fn parse_blkid_devices_with_multiple_matches() {
+        assert_eq!(
+            parse_blkid_devices("/dev/sda1\n/dev/sdb1\n"),
+            Err(vec![PathBuf::from("/dev/sda1"), PathBuf::from("/dev/sdb1")])
+        );
+    }
 }
