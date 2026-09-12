@@ -1,27 +1,26 @@
 #!/bin/bash
 
+set -euo pipefail
+
 SOURCE_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
-case "$SOURCE_DIR" in
-    */media/startos/next/usr/lib/startos/scripts)
-        INSTALL_ROOT=${SOURCE_DIR%/media/startos/next/usr/lib/startos/scripts}
-        ;;
-    */usr/lib/startos/scripts)
-        INSTALL_ROOT=${SOURCE_DIR%/usr/lib/startos/scripts}
-        ;;
+STARTOS_MEDIA=${STARTOS_MEDIA:-/media/startos}
+case "$STARTOS_MEDIA" in
+    /*) ;;
     *)
-        >&2 echo "Unsupported script location: $SOURCE_DIR"
+        >&2 echo "STARTOS_MEDIA must be an absolute path: $STARTOS_MEDIA"
         exit 1
         ;;
 esac
-[ -n "$INSTALL_ROOT" ] || INSTALL_ROOT=/
-STARTOS_MEDIA="${INSTALL_ROOT%/}/media/startos"
 NORMALIZE_FSTAB="$SOURCE_DIR/normalize-fstab"
+CHROOT_SHELL=${SHELL:-/bin/bash}
 
 if [ "$(id -u)" -ne 0 ]; then
     >&2 echo 'Must be run as root'
     exit 1
 fi
 
+NO_SYNC=
+ONLY_CREATE=
 POSITIONAL_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -47,103 +46,181 @@ done
 
 set -- "${POSITIONAL_ARGS[@]}"
 
+if [ -n "$ONLY_CREATE" ] && [ -n "$NO_SYNC" ]; then
+    >&2 echo '--create and --no-sync cannot be combined'
+    exit 1
+fi
+
+NORMALIZE_FSTAB_SNAPSHOT=
+CREATED_MOUNTS=()
+OUTER_UPPER_MOUNTED=0
+OUTER_NEXT_MOUNTED=0
+KEEP_OUTER_MOUNTS=0
+cleanup_inner_mounts() {
+    local index result=0
+    local -a failed_mounts=()
+    for ((index = ${#CREATED_MOUNTS[@]} - 1; index >= 0; index--)); do
+        if ! umount -l "${CREATED_MOUNTS[index]}" 2>/dev/null; then
+            failed_mounts=("${CREATED_MOUNTS[index]}" "${failed_mounts[@]}")
+            result=1
+        fi
+    done
+    CREATED_MOUNTS=("${failed_mounts[@]}")
+    return "$result"
+}
+cleanup_outer_mounts() {
+    local result=0
+    if [ "$OUTER_NEXT_MOUNTED" -eq 1 ]; then
+        if umount -l "$STARTOS_MEDIA/next" 2>/dev/null; then
+            OUTER_NEXT_MOUNTED=0
+        else
+            result=1
+        fi
+    fi
+    if [ "$OUTER_UPPER_MOUNTED" -eq 1 ]; then
+        if umount -l "$STARTOS_MEDIA/upper" 2>/dev/null; then
+            OUTER_UPPER_MOUNTED=0
+        else
+            result=1
+        fi
+    fi
+    if [ "$OUTER_NEXT_MOUNTED" -eq 0 ] && [ "$OUTER_UPPER_MOUNTED" -eq 0 ]; then
+        rm -rf "$STARTOS_MEDIA/upper" "$STARTOS_MEDIA/next" || result=1
+    fi
+    return "$result"
+}
+cleanup() {
+    local status=$?
+    trap - EXIT HUP INT TERM
+    set +e
+    cleanup_inner_mounts || status=1
+    if [ -n "$NORMALIZE_FSTAB_SNAPSHOT" ]; then
+        rm -f -- "$NORMALIZE_FSTAB_SNAPSHOT" || status=1
+    fi
+    if [ "$KEEP_OUTER_MOUNTS" -eq 0 ]; then
+        cleanup_outer_mounts || status=1
+    fi
+    exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+mount_inner() {
+    mount "$@"
+    CREATED_MOUNTS+=("${@: -1}")
+}
+
 if [ -z "$ONLY_CREATE" ]; then
     if [ ! -x "$NORMALIZE_FSTAB" ]; then
         >&2 echo "Missing fstab normalizer: $NORMALIZE_FSTAB"
         exit 1
     fi
-    NORMALIZE_FSTAB_SNAPSHOT=$(mktemp /tmp/startos-normalize-fstab.XXXXXX) || exit 1
-    trap 'rm -f -- "$NORMALIZE_FSTAB_SNAPSHOT"' EXIT
-    if ! cp -- "$NORMALIZE_FSTAB" "$NORMALIZE_FSTAB_SNAPSHOT"; then
-        exit 1
-    fi
+    NORMALIZE_FSTAB_SNAPSHOT=$(mktemp /tmp/startos-normalize-fstab.XXXXXX)
+    cp -- "$NORMALIZE_FSTAB" "$NORMALIZE_FSTAB_SNAPSHOT"
 fi
 
 if [ -z "$NO_SYNC" ]; then
     echo 'Syncing...'
-    umount -l "$STARTOS_MEDIA/next" 2> /dev/null
-    umount "$STARTOS_MEDIA/upper" 2> /dev/null
-    rm -rf "$STARTOS_MEDIA/upper" "$STARTOS_MEDIA/next"
+    if mountpoint "$STARTOS_MEDIA/next" >/dev/null 2>&1; then
+        OUTER_NEXT_MOUNTED=1
+    fi
+    if mountpoint "$STARTOS_MEDIA/upper" >/dev/null 2>&1; then
+        OUTER_UPPER_MOUNTED=1
+    fi
+    if ! cleanup_outer_mounts; then
+        exit 1
+    fi
     mkdir "$STARTOS_MEDIA/upper"
     mount -t tmpfs tmpfs "$STARTOS_MEDIA/upper"
+    OUTER_UPPER_MOUNTED=1
     mkdir -p "$STARTOS_MEDIA/upper/data" "$STARTOS_MEDIA/upper/work" "$STARTOS_MEDIA/next"
     mount -t overlay \
         -o"lowerdir=$STARTOS_MEDIA/current,upperdir=$STARTOS_MEDIA/upper/data,workdir=$STARTOS_MEDIA/upper/work" \
         overlay "$STARTOS_MEDIA/next"
+    OUTER_NEXT_MOUNTED=1
+else
+    missing_outer_mount=0
+    if mountpoint "$STARTOS_MEDIA/upper" >/dev/null 2>&1; then
+        OUTER_UPPER_MOUNTED=1
+    else
+        missing_outer_mount=1
+    fi
+    if mountpoint "$STARTOS_MEDIA/next" >/dev/null 2>&1; then
+        OUTER_NEXT_MOUNTED=1
+    else
+        missing_outer_mount=1
+    fi
+    if [ "$missing_outer_mount" -eq 1 ]; then
+        >&2 echo 'Missing staging mounts for --no-sync'
+        exit 1
+    fi
 fi
 
 if [ -n "$ONLY_CREATE" ]; then
+    KEEP_OUTER_MOUNTS=1
     exit 0
 fi
 
-mkdir -p "$STARTOS_MEDIA/next/run"
-mkdir -p "$STARTOS_MEDIA/next/dev"
-mkdir -p "$STARTOS_MEDIA/next/sys"
-mkdir -p "$STARTOS_MEDIA/next/proc"
-mkdir -p "$STARTOS_MEDIA/next/boot"
-mkdir -p "$STARTOS_MEDIA/next/media/startos/root"
-mount -t tmpfs tmpfs "$STARTOS_MEDIA/next/run"
-mount -t tmpfs tmpfs "$STARTOS_MEDIA/next/tmp"
-mount --bind /dev "$STARTOS_MEDIA/next/dev"
-mount -t sysfs sysfs "$STARTOS_MEDIA/next/sys"
-mount -t proc proc "$STARTOS_MEDIA/next/proc"
-mount --bind /boot "$STARTOS_MEDIA/next/boot"
-mount --bind "$STARTOS_MEDIA/root" "$STARTOS_MEDIA/next/media/startos/root"
+mkdir -p \
+    "$STARTOS_MEDIA/next/run" \
+    "$STARTOS_MEDIA/next/tmp" \
+    "$STARTOS_MEDIA/next/dev" \
+    "$STARTOS_MEDIA/next/sys" \
+    "$STARTOS_MEDIA/next/proc" \
+    "$STARTOS_MEDIA/next/boot" \
+    "$STARTOS_MEDIA/next/media/startos/root"
+mount_inner -t tmpfs tmpfs "$STARTOS_MEDIA/next/run"
+mount_inner -t tmpfs tmpfs "$STARTOS_MEDIA/next/tmp"
+mount_inner --bind /dev "$STARTOS_MEDIA/next/dev"
+mount_inner -t sysfs sysfs "$STARTOS_MEDIA/next/sys"
+mount_inner -t proc proc "$STARTOS_MEDIA/next/proc"
+mount_inner --bind /boot "$STARTOS_MEDIA/next/boot"
+mount_inner --bind "$STARTOS_MEDIA/root" "$STARTOS_MEDIA/next/media/startos/root"
 
-if mountpoint /sys/firmware/efi/efivars > /dev/null 2>&1; then
-  mount -t efivarfs efivarfs "$STARTOS_MEDIA/next/sys/firmware/efi/efivars"
+if mountpoint /sys/firmware/efi/efivars >/dev/null 2>&1; then
+    mkdir -p "$STARTOS_MEDIA/next/sys/firmware/efi/efivars"
+    mount_inner -t efivarfs efivarfs "$STARTOS_MEDIA/next/sys/firmware/efi/efivars"
 fi
 
 if [ -z "$*" ]; then
-    chroot "$STARTOS_MEDIA/next"
-    CHROOT_RES=$?
+    if chroot "$STARTOS_MEDIA/next"; then
+        :
+    else
+        exit $?
+    fi
 else
-    chroot "$STARTOS_MEDIA/next" "$SHELL" -c "$*"
-    CHROOT_RES=$?
+    if chroot "$STARTOS_MEDIA/next" "$CHROOT_SHELL" -c "$*"; then
+        :
+    else
+        exit $?
+    fi
 fi
 
-if [ "$CHROOT_RES" -eq 0 ] && [ -f "$STARTOS_MEDIA/config/overlay/etc/fstab" ]; then
+if ! cleanup_inner_mounts; then
+    exit 1
+fi
+
+if [ -f "$STARTOS_MEDIA/config/overlay/etc/fstab" ]; then
     /bin/bash "$NORMALIZE_FSTAB_SNAPSHOT" "$STARTOS_MEDIA/config/overlay/etc/fstab"
-    CHROOT_RES=$?
 fi
 
-if mountpoint "$STARTOS_MEDIA/next/sys/firmware/efi/efivars" > /dev/null 2>&1; then
-  umount "$STARTOS_MEDIA/next/sys/firmware/efi/efivars"
+if [ -h "$STARTOS_MEDIA/config/current.rootfs" ] && [ -e "$STARTOS_MEDIA/config/current.rootfs" ]; then
+    "$SOURCE_DIR/prune-images" "$(du -s --bytes "$STARTOS_MEDIA/next" | awk '{print $1}')"
 fi
 
-umount -l "$STARTOS_MEDIA/next/run"
-umount -l "$STARTOS_MEDIA/next/tmp"
-umount -l "$STARTOS_MEDIA/next/dev"
-umount -l "$STARTOS_MEDIA/next/sys"
-umount -l "$STARTOS_MEDIA/next/proc"
-umount -l "$STARTOS_MEDIA/next/boot"
-umount -l "$STARTOS_MEDIA/next/media/startos/root"
+echo 'Upgrading...'
 
-if [ "$CHROOT_RES" -eq 0 ]; then
-
-    if [ -h "$STARTOS_MEDIA/config/current.rootfs" ] && [ -e "$STARTOS_MEDIA/config/current.rootfs" ]; then
-        "$SOURCE_DIR/prune-images" "$(du -s --bytes "$STARTOS_MEDIA/next" | awk '{print $1}')"
-    fi
-
-    echo 'Upgrading...'
-
-    rm -f "$STARTOS_MEDIA/images/next.squashfs"
-    if ! time mksquashfs "$STARTOS_MEDIA/next" "$STARTOS_MEDIA/images/next.squashfs" -b 4096 -comp gzip; then
-        umount -l "$STARTOS_MEDIA/next"
-        umount -l "$STARTOS_MEDIA/upper"
-        rm -rf "$STARTOS_MEDIA/upper" "$STARTOS_MEDIA/next"
-        exit 1
-    fi
-    hash=$(b3sum "$STARTOS_MEDIA/images/next.squashfs" | head -c 32)
-    mv "$STARTOS_MEDIA/images/next.squashfs" "$STARTOS_MEDIA/images/${hash}.rootfs"
-    ln -rsf "$STARTOS_MEDIA/images/${hash}.rootfs" "$STARTOS_MEDIA/config/current.rootfs"
-
-    sync
-
-    reboot
+rm -f "$STARTOS_MEDIA/images/next.squashfs"
+time mksquashfs "$STARTOS_MEDIA/next" "$STARTOS_MEDIA/images/next.squashfs" -b 4096 -comp gzip
+if ! cleanup_outer_mounts; then
+    exit 1
 fi
+hash=$(b3sum "$STARTOS_MEDIA/images/next.squashfs" | head -c 32)
+mv "$STARTOS_MEDIA/images/next.squashfs" "$STARTOS_MEDIA/images/${hash}.rootfs"
+ln -rsf "$STARTOS_MEDIA/images/${hash}.rootfs" "$STARTOS_MEDIA/config/current.rootfs"
 
-umount -l "$STARTOS_MEDIA/next"
-umount -l "$STARTOS_MEDIA/upper"
-rm -rf "$STARTOS_MEDIA/upper" "$STARTOS_MEDIA/next"
-exit "$CHROOT_RES"
+sync
+
+reboot

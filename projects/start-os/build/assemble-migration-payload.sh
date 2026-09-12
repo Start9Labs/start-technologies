@@ -50,7 +50,7 @@ B3SUM="$(b3sum "$NEW_SQUASHFS" | head -c 16)"
 mkdir -p "$WORK/payload/images"
 cp "$NEW_SQUASHFS" "$WORK/payload/images/$B3SUM.rootfs"
 
-# The migration must name the staged kernel exactly.
+# The bootloader must select the staged kernel and initramfs.
 rm -rf "$WORK/payload/boot"
 unsquashfs -n -f -d "$WORK/payload" "$NEW_SQUASHFS" boot
 mkdir -p "$WORK/payload/usr/lib/startos"

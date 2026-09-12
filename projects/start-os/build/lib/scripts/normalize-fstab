@@ -82,7 +82,8 @@ identity_device() {
 }
 
 partuuid_for_target() {
-    local target=$1 device partuuid
+    local target=$1 device partuuid matches canonical_device canonical_match
+    local -a matching_devices
     device=$(identity_device "$target") || {
         >&2 echo "Unable to establish installed partition for $target"
         return 1
@@ -90,6 +91,22 @@ partuuid_for_target() {
     if ! partuuid=$(blkid -p -s PART_ENTRY_UUID -o value "$device") ||
         [ -z "$partuuid" ] || [[ $partuuid =~ [[:space:]] ]]; then
         >&2 echo "Unable to resolve PARTUUID for installed partition $target"
+        return 1
+    fi
+    if ! matches=$(blkid -t "PARTUUID=$partuuid" -o device); then
+        >&2 echo "Unable to uniquely resolve PARTUUID for installed partition $target"
+        return 1
+    fi
+    mapfile -t matching_devices <<< "$matches"
+    if [ "${#matching_devices[@]}" -ne 1 ] || [ -z "${matching_devices[0]}" ] ||
+        [[ ${matching_devices[0]} =~ [[:space:]] ]]; then
+        >&2 echo "Unable to uniquely resolve PARTUUID for installed partition $target"
+        return 1
+    fi
+    canonical_device=$(readlink -f -- "$device") || return 1
+    canonical_match=$(readlink -f -- "${matching_devices[0]}") || return 1
+    if [ "$canonical_match" != "$canonical_device" ]; then
+        >&2 echo "PARTUUID for installed partition $target resolves to another device"
         return 1
     fi
     printf '%s\n' "$partuuid"

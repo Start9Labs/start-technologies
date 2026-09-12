@@ -62,33 +62,53 @@ EOF
 cat > "$MOCK_BIN/blkid" <<'EOF'
 #!/bin/bash
 set -euo pipefail
-[ "$#" -eq 6 ] && [ "$1" = -p ] && [ "$2" = -s ] && [ "$4" = -o ] && [ "$5" = value ] || exit 64
-printf '%s|%s\n' "$3" "$6" >> "$BLKID_LOG"
-case "$3:$6" in
-    LABEL:/dev/nvme0n1p1) echo efi ;;
-    LABEL:/dev/nvme0n1p2) echo boot ;;
-    LABEL:/dev/nvme0n1p3) echo rootfs ;;
-    PART_ENTRY_UUID:/dev/nvme0n1p1) echo current-efi ;;
-    PART_ENTRY_UUID:/dev/nvme0n1p2) echo current-boot ;;
-    PART_ENTRY_UUID:/dev/nvme0n1p3) echo current-root ;;
-    LABEL:/dev/vda1) [ "$MOUNT_LAYOUT" = legacy-mbr ] && echo boot || echo efi ;;
-    LABEL:/dev/vda2) [ "$MOUNT_LAYOUT" = legacy-mbr ] && echo rootfs || echo boot ;;
-    LABEL:/dev/vda3) echo rootfs ;;
-    PART_ENTRY_UUID:/dev/vda1) [ "$MOUNT_LAYOUT" = legacy-mbr ] && echo mbr-boot || echo legacy-efi ;;
-    PART_ENTRY_UUID:/dev/vda2) [ "$MOUNT_LAYOUT" = legacy-mbr ] && echo mbr-root || echo legacy-boot ;;
-    PART_ENTRY_UUID:/dev/vda3) echo legacy-root ;;
-    LABEL:/dev/sda1) echo efi ;;
-    LABEL:/dev/sda2) echo boot ;;
-    LABEL:/dev/sda3) [ "$MOUNT_LAYOUT" = wrong ] && echo wrong-disk || echo rootfs ;;
-    PART_ENTRY_UUID:/dev/sda*) echo stale-partuuid ;;
-    LABEL:/dev/sdb1) echo efi ;;
-    LABEL:/dev/sdb2) echo boot ;;
-    LABEL:/dev/sdb3) echo rootfs ;;
-    PART_ENTRY_UUID:/dev/sdb1) echo foreign-efi ;;
-    PART_ENTRY_UUID:/dev/sdb2) echo foreign-boot ;;
-    PART_ENTRY_UUID:/dev/sdb3) echo foreign-root ;;
-    *) exit 2 ;;
-esac
+if [ "$#" -eq 6 ] && [ "$1" = -p ] && [ "$2" = -s ] && [ "$4" = -o ] && [ "$5" = value ]; then
+    printf '%s|%s\n' "$3" "$6" >> "$BLKID_LOG"
+    case "$3:$6" in
+        LABEL:/dev/nvme0n1p1) echo efi ;;
+        LABEL:/dev/nvme0n1p2) echo boot ;;
+        LABEL:/dev/nvme0n1p3) echo rootfs ;;
+        PART_ENTRY_UUID:/dev/nvme0n1p1) echo current-efi ;;
+        PART_ENTRY_UUID:/dev/nvme0n1p2) echo current-boot ;;
+        PART_ENTRY_UUID:/dev/nvme0n1p3) echo current-root ;;
+        LABEL:/dev/vda1) [ "$MOUNT_LAYOUT" = legacy-mbr ] && echo boot || echo efi ;;
+        LABEL:/dev/vda2) [ "$MOUNT_LAYOUT" = legacy-mbr ] && echo rootfs || echo boot ;;
+        LABEL:/dev/vda3) echo rootfs ;;
+        PART_ENTRY_UUID:/dev/vda1) [ "$MOUNT_LAYOUT" = legacy-mbr ] && echo mbr-boot || echo legacy-efi ;;
+        PART_ENTRY_UUID:/dev/vda2) [ "$MOUNT_LAYOUT" = legacy-mbr ] && echo mbr-root || echo legacy-boot ;;
+        PART_ENTRY_UUID:/dev/vda3) echo legacy-root ;;
+        LABEL:/dev/sda1) echo efi ;;
+        LABEL:/dev/sda2) echo boot ;;
+        LABEL:/dev/sda3) [ "$MOUNT_LAYOUT" = wrong ] && echo wrong-disk || echo rootfs ;;
+        PART_ENTRY_UUID:/dev/sda*) echo stale-partuuid ;;
+        LABEL:/dev/sdb1) echo efi ;;
+        LABEL:/dev/sdb2) echo boot ;;
+        LABEL:/dev/sdb3) echo rootfs ;;
+        PART_ENTRY_UUID:/dev/sdb1) echo foreign-efi ;;
+        PART_ENTRY_UUID:/dev/sdb2) echo foreign-boot ;;
+        PART_ENTRY_UUID:/dev/sdb3) echo foreign-root ;;
+        *) exit 2 ;;
+    esac
+elif [ "$#" -eq 4 ] && [ "$1" = -t ] && [ "$3" = -o ] && [ "$4" = device ]; then
+    partuuid=${2#PARTUUID=}
+    printf 'LOOKUP|%s\n' "$partuuid" >> "$BLKID_LOG"
+    case "${GLOBAL_PARTUUID_LAYOUT:-match}:$partuuid" in
+        match:current-efi) echo /dev/nvme0n1p1 ;;
+        match:current-boot) echo /dev/nvme0n1p2 ;;
+        match:current-root) echo /dev/nvme0n1p3 ;;
+        match:legacy-efi) echo /dev/vda1 ;;
+        match:legacy-boot) echo /dev/vda2 ;;
+        match:legacy-root) echo /dev/vda3 ;;
+        match:mbr-boot) echo /dev/vda1 ;;
+        match:mbr-root) echo /dev/vda2 ;;
+        duplicate:current-root) printf '%s\n' /dev/nvme0n1p3 /dev/sda3 ;;
+        mismatch:current-root) echo /dev/sda3 ;;
+        none:current-root) exit 2 ;;
+        *) exit 2 ;;
+    esac
+else
+    exit 64
+fi
 EOF
 
 cat > "$MOCK_BIN/sync" <<'EOF'
@@ -143,7 +163,7 @@ run_normalizer() {
     env \
         PATH="$MOCK_BIN:$PATH" BLKID_LOG="$BLKID_LOG" \
         COMMAND_LOG="$COMMAND_LOG" MOUNT_LAYOUT="$MOUNT_LAYOUT" \
-        "$SCRIPT" "$@"
+        GLOBAL_PARTUUID_LAYOUT="${GLOBAL_PARTUUID_LAYOUT:-match}" "$SCRIPT" "$@"
 }
 
 assert_files_equal() {
@@ -266,6 +286,23 @@ grep -F 'Unable to establish installed partition for /' "$TEST_DIR/wrong.err" >/
 
 echo 'PASS mounted partition must match the StartOS layout label'
 
+for global_layout in duplicate mismatch none; do
+    global_failure="$TEST_DIR/fstab-global-$global_layout"
+    printf '/dev/sda3 / ext4 defaults 0 1\n' > "$global_failure"
+    /bin/cp "$global_failure" "$global_failure.expected"
+    if GLOBAL_PARTUUID_LAYOUT="$global_layout" MOUNT_LAYOUT=current run_normalizer "$global_failure" \
+        >"$TEST_DIR/global-$global_layout.out" 2>"$TEST_DIR/global-$global_layout.err"; then
+        >&2 echo "Expected $global_layout global PARTUUID lookup to fail"
+        exit 1
+    fi
+    assert_files_equal "$global_failure.expected" "$global_failure"
+done
+grep -F 'Unable to uniquely resolve PARTUUID for installed partition /' "$TEST_DIR/global-duplicate.err" >/dev/null
+grep -F 'resolves to another device' "$TEST_DIR/global-mismatch.err" >/dev/null
+grep -F 'Unable to uniquely resolve PARTUUID for installed partition /' "$TEST_DIR/global-none.err" >/dev/null
+
+echo 'PASS PARTUUID must resolve globally and uniquely to the installed partition'
+
 for target in boot efi; do
     foreign_boot="$TEST_DIR/fstab-foreign-$target"
     printf '/dev/sda3 / ext4 defaults 0 1\n/dev/sda2 /boot vfat defaults 0 2\n/dev/sda1 /boot/efi vfat defaults 0 1\n' > "$foreign_boot"
@@ -344,15 +381,34 @@ cat > "$INTEGRATION_BIN/id" <<'EOF'
 EOF
 cat > "$INTEGRATION_BIN/mountpoint" <<'EOF'
 #!/bin/bash
-exit 1
+case "${@: -1}" in
+    */media/startos/next|*/media/startos/upper)
+        [ "${OUTER_MOUNTS_READY:-0}" -eq 1 ]
+        ;;
+    *) exit 1 ;;
+esac
 EOF
 cat > "$INTEGRATION_BIN/mount" <<'EOF'
 #!/bin/bash
+set -euo pipefail
 printf 'mount %s\n' "$*" >> "$COMMAND_LOG"
+if [ -n "${FAIL_MOUNT_AT:-}" ]; then
+    count=$(cat "$MOUNT_COUNT")
+    count=$((count + 1))
+    printf '%s\n' "$count" > "$MOUNT_COUNT"
+    [ "$count" -ne "$FAIL_MOUNT_AT" ] || exit 32
+fi
 EOF
 cat > "$INTEGRATION_BIN/umount" <<'EOF'
 #!/bin/bash
+set -euo pipefail
 printf 'umount %s\n' "$*" >> "$COMMAND_LOG"
+if [ -n "${FAIL_UMOUNT_AT:-}" ]; then
+    count=$(cat "$UMOUNT_COUNT")
+    count=$((count + 1))
+    printf '%s\n' "$count" > "$UMOUNT_COUNT"
+    [ "$count" -ne "$FAIL_UMOUNT_AT" ] || exit 32
+fi
 EOF
 cat > "$INTEGRATION_BIN/chroot" <<'EOF'
 #!/bin/bash
@@ -362,6 +418,10 @@ if [ "${REMOVE_TARGET_HELPER:-0}" -eq 1 ]; then
     rm -f "$1/usr/lib/startos/scripts/normalize-fstab"
     printf 'remove-target-helper %s\n' "$1/usr/lib/startos/scripts/normalize-fstab" >> "$COMMAND_LOG"
 fi
+if [ -n "${CHROOT_SIGNAL:-}" ]; then
+    kill "-$CHROOT_SIGNAL" "$PPID"
+fi
+exit "${CHROOT_EXIT:-0}"
 EOF
 cat > "$INTEGRATION_BIN/mksquashfs" <<'EOF'
 #!/bin/bash
@@ -414,9 +474,155 @@ mkdir -p "$ota_scripts" "$ota_root/media/startos/config/overlay/etc" "$ota_root/
 /bin/cp "$SCRIPT" "$ota_scripts/normalize-fstab"
 chmod +x "$ota_scripts"/*
 printf '/dev/sda3 / ext4 defaults 0 1\n' > "$ota_root/media/startos/config/overlay/etc/fstab"
+
 : > "$COMMAND_LOG"
+if env PATH="$INTEGRATION_BIN:/usr/bin:/bin" COMMAND_LOG="$COMMAND_LOG" STARTOS_MEDIA=relative/path \
+    "$ota_scripts/chroot-and-upgrade" true >"$TEST_DIR/relative-media.out" 2>"$TEST_DIR/relative-media.err"; then
+    >&2 echo 'Expected relative STARTOS_MEDIA override to fail'
+    exit 1
+fi
+grep -F 'STARTOS_MEDIA must be an absolute path' "$TEST_DIR/relative-media.err" >/dev/null
+[ ! -s "$COMMAND_LOG" ]
+
+echo 'PASS STARTOS_MEDIA accepts only an explicit absolute test override'
+
+: > "$COMMAND_LOG"
+if env PATH="$INTEGRATION_BIN:/usr/bin:/bin" COMMAND_LOG="$COMMAND_LOG" \
+    STARTOS_MEDIA="$ota_root/media/startos" "$ota_scripts/chroot-and-upgrade" --create --no-sync; then
+    >&2 echo 'Expected --create --no-sync to fail'
+    exit 1
+fi
+[ ! -s "$COMMAND_LOG" ]
+
+echo 'PASS --create rejects --no-sync rather than accepting absent staging mounts'
+
+: > "$COMMAND_LOG"
+if env PATH="$INTEGRATION_BIN:/usr/bin:/bin" COMMAND_LOG="$COMMAND_LOG" \
+    STARTOS_MEDIA="$ota_root/media/startos" "$ota_scripts/chroot-and-upgrade" --no-sync true; then
+    >&2 echo 'Expected --no-sync without staging mounts to fail'
+    exit 1
+fi
+if grep -E '^mount |^chroot ' "$COMMAND_LOG" >/dev/null; then
+    >&2 echo 'Missing staging mounts reached chroot setup'
+    exit 1
+fi
+
+echo 'PASS --no-sync requires both staging mounts'
+
+: > "$COMMAND_LOG"
+env PATH="$INTEGRATION_BIN:/usr/bin:/bin" COMMAND_LOG="$COMMAND_LOG" \
+    STARTOS_MEDIA="$ota_root/media/startos" "$ota_scripts/chroot-and-upgrade" --create
+if grep '^umount ' "$COMMAND_LOG" >/dev/null; then
+    >&2 echo '--create cleaned the staging mounts it must preserve'
+    exit 1
+fi
+[ -d "$ota_root/media/startos/next" ]
+[ -d "$ota_root/media/startos/upper" ]
+
+echo 'PASS --create preserves the staging mounts for the next invocation'
+
+: > "$COMMAND_LOG"
+printf '0\n' > "$TEST_DIR/mount-count"
+if env PATH="$INTEGRATION_BIN:/usr/bin:/bin" SHELL=/bin/bash MOUNT_LAYOUT=current \
+    BLKID_LOG="$BLKID_LOG" COMMAND_LOG="$COMMAND_LOG" STARTOS_MEDIA="$ota_root/media/startos" \
+    FAIL_MOUNT_AT=5 MOUNT_COUNT="$TEST_DIR/mount-count" "$ota_scripts/chroot-and-upgrade" true; then
+    >&2 echo 'Expected required mount failure'
+    exit 1
+fi
+if grep -F 'chroot ' "$COMMAND_LOG" >/dev/null; then
+    >&2 echo 'Required mount failure reached chroot'
+    exit 1
+fi
+mapfile -t failed_mount_cleanup < <(grep '^umount ' "$COMMAND_LOG" | tail -n 4)
+[ "${failed_mount_cleanup[0]}" = "umount -l $ota_root/media/startos/next/tmp" ]
+[ "${failed_mount_cleanup[1]}" = "umount -l $ota_root/media/startos/next/run" ]
+[ "${failed_mount_cleanup[2]}" = "umount -l $ota_root/media/startos/next" ]
+[ "${failed_mount_cleanup[3]}" = "umount -l $ota_root/media/startos/upper" ]
+
+echo 'PASS required mount failure stops before chroot and cleans successful mounts'
+
+mkdir -p "$ota_root/media/startos/next" "$ota_root/media/startos/upper"
+: > "$COMMAND_LOG"
+chroot_status=0
 env PATH="$INTEGRATION_BIN:/usr/bin:/bin" SHELL=/bin/bash MOUNT_LAYOUT=current \
-    BLKID_LOG="$BLKID_LOG" COMMAND_LOG="$COMMAND_LOG" \
+    BLKID_LOG="$BLKID_LOG" COMMAND_LOG="$COMMAND_LOG" STARTOS_MEDIA="$ota_root/media/startos" \
+    OUTER_MOUNTS_READY=1 CHROOT_EXIT=42 "$ota_scripts/chroot-and-upgrade" --no-sync true || chroot_status=$?
+[ "$chroot_status" -eq 42 ]
+if grep -F 'mksquashfs ' "$COMMAND_LOG" >/dev/null; then
+    >&2 echo 'Failed chroot reached image creation'
+    exit 1
+fi
+mapfile -t chroot_failure_cleanup < <(grep '^umount ' "$COMMAND_LOG")
+expected_cleanup=(
+    "umount -l $ota_root/media/startos/next/media/startos/root"
+    "umount -l $ota_root/media/startos/next/boot"
+    "umount -l $ota_root/media/startos/next/proc"
+    "umount -l $ota_root/media/startos/next/sys"
+    "umount -l $ota_root/media/startos/next/dev"
+    "umount -l $ota_root/media/startos/next/tmp"
+    "umount -l $ota_root/media/startos/next/run"
+    "umount -l $ota_root/media/startos/next"
+    "umount -l $ota_root/media/startos/upper"
+)
+[ "${chroot_failure_cleanup[*]}" = "${expected_cleanup[*]}" ]
+
+echo 'PASS failed chroot cleans invocation mounts in reverse order'
+
+mkdir -p "$ota_root/media/startos/next" "$ota_root/media/startos/upper"
+: > "$COMMAND_LOG"
+printf '0\n' > "$TEST_DIR/umount-count"
+unmount_status=0
+env PATH="$INTEGRATION_BIN:/usr/bin:/bin" SHELL=/bin/bash MOUNT_LAYOUT=current \
+    BLKID_LOG="$BLKID_LOG" COMMAND_LOG="$COMMAND_LOG" STARTOS_MEDIA="$ota_root/media/startos" \
+    OUTER_MOUNTS_READY=1 FAIL_UMOUNT_AT=1 UMOUNT_COUNT="$TEST_DIR/umount-count" \
+    "$ota_scripts/chroot-and-upgrade" --no-sync true || unmount_status=$?
+[ "$unmount_status" -eq 1 ]
+if grep -F 'mksquashfs ' "$COMMAND_LOG" >/dev/null; then
+    >&2 echo 'Failed inner unmount reached image creation'
+    exit 1
+fi
+[ "$(grep -Fc "umount -l $ota_root/media/startos/next/media/startos/root" "$COMMAND_LOG")" -eq 2 ]
+
+echo 'PASS failed inner unmount stops image creation and is retried during cleanup'
+
+mkdir -p "$ota_root/media/startos/next" "$ota_root/media/startos/upper"
+: > "$COMMAND_LOG"
+signal_status=0
+env PATH="$INTEGRATION_BIN:/usr/bin:/bin" SHELL=/bin/bash MOUNT_LAYOUT=current \
+    BLKID_LOG="$BLKID_LOG" COMMAND_LOG="$COMMAND_LOG" STARTOS_MEDIA="$ota_root/media/startos" \
+    OUTER_MOUNTS_READY=1 CHROOT_SIGNAL=TERM "$ota_scripts/chroot-and-upgrade" --no-sync true \
+    || signal_status=$?
+[ "$signal_status" -eq 143 ]
+if grep -F 'mksquashfs ' "$COMMAND_LOG" >/dev/null; then
+    >&2 echo 'Terminated chroot reached image creation'
+    exit 1
+fi
+grep -Fx "umount -l $ota_root/media/startos/next/media/startos/root" "$COMMAND_LOG" >/dev/null
+grep -Fx "umount -l $ota_root/media/startos/next" "$COMMAND_LOG" >/dev/null
+
+echo 'PASS catchable termination cleans inner and outer mounts'
+
+mkdir -p "$ota_root/media/startos/next" "$ota_root/media/startos/upper"
+: > "$COMMAND_LOG"
+printf '0\n' > "$TEST_DIR/umount-count"
+outer_unmount_status=0
+env PATH="$INTEGRATION_BIN:/usr/bin:/bin" SHELL=/bin/bash MOUNT_LAYOUT=current \
+    BLKID_LOG="$BLKID_LOG" COMMAND_LOG="$COMMAND_LOG" STARTOS_MEDIA="$ota_root/media/startos" \
+    OUTER_MOUNTS_READY=1 FAIL_UMOUNT_AT=8 UMOUNT_COUNT="$TEST_DIR/umount-count" \
+    "$ota_scripts/chroot-and-upgrade" --no-sync true || outer_unmount_status=$?
+[ "$outer_unmount_status" -eq 1 ]
+grep -F "mksquashfs $ota_root/media/startos/next" "$COMMAND_LOG" >/dev/null
+if grep -E 'reboot|mv .*/images/.*\.rootfs' "$COMMAND_LOG" >/dev/null; then
+    >&2 echo 'Failed outer unmount activated the staged image'
+    exit 1
+fi
+
+echo 'PASS failed outer unmount prevents image activation'
+
+printf '/dev/sda3 / ext4 defaults 0 1\n' > "$ota_root/media/startos/config/overlay/etc/fstab"
+: > "$COMMAND_LOG"
+env -u SHELL PATH="$INTEGRATION_BIN:/usr/bin:/bin" MOUNT_LAYOUT=current \
+    BLKID_LOG="$BLKID_LOG" COMMAND_LOG="$COMMAND_LOG" STARTOS_MEDIA="$ota_root/media/startos" \
     "$ota_scripts/chroot-and-upgrade" true
 printf 'PARTUUID=current-root / ext4 defaults 0 1\n' > "$TEST_DIR/ota.expected"
 assert_files_equal "$TEST_DIR/ota.expected" "$ota_root/media/startos/config/overlay/etc/fstab"
@@ -439,6 +645,7 @@ printf '/dev/sda3 / ext4 defaults 0 1\n' > "$ota_root/media/startos/config/overl
 : > "$COMMAND_LOG"
 env PATH="$INTEGRATION_BIN:/usr/bin:/bin" SHELL=/bin/bash MOUNT_LAYOUT=current \
     BLKID_LOG="$BLKID_LOG" COMMAND_LOG="$COMMAND_LOG" REMOVE_TARGET_HELPER=1 \
+    STARTOS_MEDIA="$ota_root/media/startos" OUTER_MOUNTS_READY=1 \
     "$staged_scripts/chroot-and-upgrade" --no-sync true
 assert_files_equal "$TEST_DIR/ota.expected" "$ota_root/media/startos/config/overlay/etc/fstab"
 grep -Fx "chroot $ota_root/media/startos/next /bin/bash -c true" "$COMMAND_LOG" >/dev/null
