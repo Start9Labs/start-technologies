@@ -115,7 +115,7 @@ jobs:
               "aarch64": ["aarch64"],
               "riscv64": ["riscv64"],
               "ALL": ["x86_64", "aarch64", "riscv64"]
-            }')[github.event.inputs.platform || 'ALL']
+            }')[github.event.inputs.arch || 'ALL']
           }}
     runs-on: ${{ fromJson('["ubuntu-latest", "ubuntu-24.04-32-cores"]')[github.event.inputs.runner == 'fast'] }}
     steps:
