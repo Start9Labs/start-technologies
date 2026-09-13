@@ -14,7 +14,7 @@ to the clearnet without revealing your home IP address.
   third party sees your traffic.
 - **Private access** like Tailscale, but fully self-hosted with no coordination
   server.
-- **Layer 3/4 port forwarding** via kernel `iptables`/`nftables` DNAT — TLS
+- **Layer 3/4 port forwarding** via kernel `nftables` DNAT — TLS
   terminates at your service, never at the tunnel.
 - **MIT licensed**, no account, no telemetry, no terms of service.
 
@@ -23,8 +23,8 @@ For a feature tour and comparison to Cloudflare Tunnel / Tailscale, see the
 
 ## Place in the monorepo
 
-StartTunnel is one product in the `start-os` monorepo. This directory is a thin
-wrapper; the actual server logic lives in the shared Rust library.
+StartTunnel is one product in the `start-technologies` monorepo. This directory
+is a thin wrapper; the actual server logic lives in the shared Rust library.
 
 ```
 projects/start-tunnel/
@@ -98,13 +98,12 @@ embeds the compiled UI from `web/dist/static/start-tunnel/` into.
 - `wireguard-tools`, `iptables`, `nftables`, `conntrack` (pulled in by the .deb)
 - A public IP (required only for clearnet port forwarding)
 
-## Documentation & Contributing
+## Documentation & Development
 
 - User & reference docs: [`docs/`](docs/) (browse at
   [start9.com/start-tunnel](https://start9.com/start-tunnel/))
 - Architecture: [ARCHITECTURE.md](ARCHITECTURE.md)
-- Building, testing, formatting: [CONTRIBUTING.md](CONTRIBUTING.md)
-- Agent/dev quick reference: [AGENTS.md](AGENTS.md)
+- Building, testing, formatting, and agent guidance: [AGENTS.md](AGENTS.md)
 
 ## License
 

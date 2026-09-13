@@ -304,15 +304,16 @@ Passing a client TSval through to the backend can violate PAWS monotonicity
   `bpf.rs` (load/attach/pin management), called from `handle_conn` in
   `sni.rs` behind the feature gate.
 - **Everything `#[cfg(target_os = "linux")]`** with no-op stubs otherwise —
-  CI builds `*-apple-darwin` (see `projects/start-tunnel/AGENTS.md`); follow
-  the `transparent.rs` pattern.
+  StartTunnel CI builds all three Linux targets, while start-cli CI compiles
+  shared `start-core` changes for `*-apple-darwin` (see
+  `projects/start-tunnel/AGENTS.md`); follow the `transparent.rs` pattern.
 - BPF toolchain: recommend **aya** (pure-Rust userspace loader; no libc/libbpf
   C dependency, which matters for the musl riscv64/aarch64 cross-builds) with
   the BPF program in C compiled by clang in `build.rs`, or aya-ebpf if the
   team accepts the bpf-linker/nightly build dependency. BPF bytecode is
   target-independent, so one embedded object serves all host architectures.
   Decision point for the implementer + maintainer; whichever is chosen must
-  be added to the CI build image and `projects/start-tunnel/CONTRIBUTING.md`.
+  be added to the CI build image and `projects/start-tunnel/AGENTS.md`.
 - Config: a tunnel db setting (`/settings/kernel-handoff`, default **off**
   for the first release; flip after soak on tunnel-chad), surfaced in CLI
   only (`start-tunnel settings ...`) — i18n for any user-facing strings, all
