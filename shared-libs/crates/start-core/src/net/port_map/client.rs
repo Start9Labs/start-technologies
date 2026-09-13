@@ -546,6 +546,7 @@ async fn run_shard(
                     break;
                 }
             },
+            _ = wait_for_retry(removal_retry), if !draining => state.retry_removals().await,
             cmd = recv.recv(), if !draining => match cmd {
                 Some(Command::Ensure { key, spec }) => state.ensure(&interfaces, key, spec).await,
                 Some(Command::Remove { key }) => {
@@ -564,7 +565,6 @@ async fn run_shard(
                     break;
                 }
             },
-            _ = wait_for_retry(removal_retry), if !draining => state.retry_removals().await,
             _ = refresh.tick(), if !draining => state.refresh(&interfaces).await,
         }
     }

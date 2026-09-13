@@ -482,7 +482,7 @@ async fn inner_main() -> Result<(), Error> {
         _ = sigterm.recv() => tracing::info!("received SIGTERM, shutting down"),
         _ = sigint.recv() => tracing::info!("received SIGINT, shutting down"),
     }
-    server.shutdown().await;
+    server.shutdown().await?;
 
     Ok(())
 }

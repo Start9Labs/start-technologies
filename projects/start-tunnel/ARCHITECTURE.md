@@ -63,9 +63,9 @@ All paths below are under `shared-libs/crates/start-core/src/tunnel/`.
 
 1. Reserve the configured HTTP listener before mutating forwarding state.
 2. Build `TunnelContext` from `TunnelConfig`. Initialization restores persisted
-   IPv4, SNI, IPv6, and pinhole state, then seeds volatile leases before the
-   HTTP server is exposed. A partial initialization failure drains forwarding
-   before returning.
+   IPv4, SNI, and IPv6 state, seeds volatile leases, then restores pinholes
+   before the HTTP server is exposed. A partial initialization failure drains
+   forwarding before returning.
 3. Subscribe to shutdown, start the PCP, IGD, and lease servers, then expose
    `tunnel_router` (UI + API) through `WebServer`.
 4. Spawn the reactive HTTPS listener, HTTP redirect reconciler, and signal
