@@ -85,5 +85,5 @@ to write the committed man pages into this project's `man/` dir
 ## Further reading
 
 - [`README.md`](./README.md) — what `start-cli` is and how to use it.
-- [`CONTRIBUTING.md`](./CONTRIBUTING.md) — how to contribute to this crate.
-- [`AGENTS.md`](./AGENTS.md) — agent/dev rules; `CLAUDE.md` is a one-line `@AGENTS.md` import.
+- [`AGENTS.md`](./AGENTS.md#build-test-and-format) — how to build, test, format, and contribute to this
+  crate; `CLAUDE.md` is a one-line `@AGENTS.md` import.

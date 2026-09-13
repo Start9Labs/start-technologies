@@ -75,6 +75,7 @@ async fn run_update(
     guard: Arc<()>,
 ) -> Result<UpdateSystemRes, Error> {
     let target_range = target.unwrap_or(VersionRange::Any);
+    ctx.refresh_custom_ca_trust_store().await?;
     let client = Client::new();
 
     let current_version = Current::default().semver();

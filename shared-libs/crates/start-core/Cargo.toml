@@ -32,9 +32,8 @@ unstable = ["backtrace-on-stack-overflow"]
 
 [dependencies]
 aes = "0.9.1"
-async-acme = { version = "0.6.0", git = "https://github.com/Start9Labs/async-acme.git", rev = "45c8a56379c5f8afb6b9dd6511e0c7e1ce70ccf5", features = [
-  "use_rustls",
-  "use_tokio",
+async-acme = { version = "0.6.0", git = "https://github.com/Start9Labs/async-acme.git", rev = "34f487819bf3760392d36819acce8547b9c01a07", default-features = false, features = [
+  "hyper_native_tls",
 ] }
 async-compression = { version = "0.4.32", features = [
   "brotli",
@@ -218,6 +217,7 @@ url = { version = "2.4.1", features = ["serde"] }
 uuid = { version = "1.4.1", features = ["v4"] }
 visit-rs = "0.1.1"
 x25519-dalek = { version = "3.0.0-rc.1", features = ["static_secrets"] }
+x509-parser = "0.16.0"
 xmltree = "0.10"
 zbus = "5.1.1"
 

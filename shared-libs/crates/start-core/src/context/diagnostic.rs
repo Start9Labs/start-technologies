@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use rpc_toolkit::Context;
 use rpc_toolkit::yajrc::RpcError;
+use tokio::sync::OnceCell;
 use tokio::sync::broadcast::Sender;
 use tracing::instrument;
 
@@ -19,6 +20,7 @@ pub struct DiagnosticContextSeed {
     pub rpc_continuations: RpcContinuations,
     /// Single-flight token for `diagnostic.update`; strong count > 1 means an update is running.
     pub update_in_progress: SyncMutex<Arc<()>>,
+    custom_ca_trust_store_refreshed: OnceCell<()>,
 }
 
 #[derive(Clone)]
@@ -44,9 +46,20 @@ impl DiagnosticContext {
             error: Arc::new(error.into()),
             rpc_continuations: RpcContinuations::new(),
             update_in_progress: SyncMutex::new(Arc::new(())),
+            custom_ca_trust_store_refreshed: OnceCell::new(),
         })))
     }
+
+    pub(crate) async fn refresh_custom_ca_trust_store(&self) -> Result<(), Error> {
+        self.custom_ca_trust_store_refreshed
+            .get_or_try_init(|| async {
+                crate::system::trust_ca::update_trust_store_if_custom_roots_present().await
+            })
+            .await
+            .map(|_| ())
+    }
 }
+
 impl AsRef<RpcContinuations> for DiagnosticContext {
     fn as_ref(&self) -> &RpcContinuations {
         &self.rpc_continuations

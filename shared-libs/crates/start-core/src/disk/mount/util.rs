@@ -48,30 +48,11 @@ pub async fn bind<P0: AsRef<Path>, P1: AsRef<Path>>(
     Ok(())
 }
 
-/// Flush the filesystem containing `path` via `syncfs(2)` (`sync -f`).
-///
-/// Use this before lazy-unmounting a layered fs whose front layer flushes
-/// dirty data to its backing on `syncfs` (e.g. overlayfs). FUSE filesystems
-/// that don't implement `FUSE_SYNCFS` won't see this signal — use
-/// [`sync_directory`] for those.
+/// Commits dirty data through `syncfs(2)`.
 #[instrument(skip_all)]
 pub async fn sync_filesystem<P: AsRef<Path>>(path: P) -> Result<(), Error> {
     tokio::process::Command::new("sync")
         .arg("-f")
-        .arg(path.as_ref())
-        .invoke(crate::ErrorKind::Filesystem)
-        .await?;
-    Ok(())
-}
-
-/// Flush the directory at `path` via `fsync(2)` (`sync` with no flag).
-///
-/// For FUSE-based filesystems (e.g. backup-fs) this routes to
-/// `FUSE_FSYNCDIR`, which the daemon implements to drain its dirty cache —
-/// `syncfs` is not enough because FUSE doesn't propagate it.
-#[instrument(skip_all)]
-pub async fn sync_directory<P: AsRef<Path>>(path: P) -> Result<(), Error> {
-    tokio::process::Command::new("sync")
         .arg(path.as_ref())
         .invoke(crate::ErrorKind::Filesystem)
         .await?;

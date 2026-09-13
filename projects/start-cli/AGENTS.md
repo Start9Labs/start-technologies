@@ -1,10 +1,13 @@
 # AGENTS.md — start-cli
 
-Agent/dev notes for the `start-cli` crate. `CLAUDE.md` is a one-line `@AGENTS.md` import. See
-[`ARCHITECTURE.md`](./ARCHITECTURE.md) and [`CONTRIBUTING.md`](./CONTRIBUTING.md) for this crate, and the root
+Contribution guide and agent/dev notes for the `start-cli` crate. `CLAUDE.md` is a one-line
+`@AGENTS.md` import. See [`README.md`](./README.md) for usage,
+[`ARCHITECTURE.md`](./ARCHITECTURE.md) for internals, and the root
 [`AGENTS.md`](../../AGENTS.md) and [`CONTRIBUTING.md`](../../CONTRIBUTING.md) for repo-wide rules.
 
-**Read up the tree first.** These docs are hierarchical: before working here, read the `AGENTS.md` in each enclosing directory up to the repo root (and their `ARCHITECTURE.md` / `CONTRIBUTING.md` where relevant). This file covers only what is specific to this scope and does not repeat rules already stated higher up.
+**Read up the tree first.** Before working here, read the root `AGENTS.md`, `ARCHITECTURE.md`, and
+`CONTRIBUTING.md`. This file covers only what is specific to this scope and does not repeat rules
+already stated higher up.
 
 ## What this is
 
@@ -21,26 +24,36 @@ entrypoint (`src/main.rs`) and feature/bin wiring (`Cargo.toml`).
 - `build/build-cli.sh` — release musl/darwin build via the `rust-zig-builder` container (what
   `make start-cli` runs; `--install` copies the binary to `~/.cargo/bin`).
 
-## Build & test (run from the repo root)
+## Build, test, and format
 
-From the **monorepo root** (one Cargo workspace, one `Cargo.lock`):
+A Rust toolchain matching the workspace's Rust 2024 edition is required. Docker or Podman is also
+required when exercising `s9pk` packaging.
+
+Run all commands from the monorepo root, which owns the Cargo workspace and `Cargo.lock`:
 
 ```sh
-make start-cli                                             # build the start-cli bin
-cargo build -p start-cli --bin start-cli             # dev shortcut (debug)
-cargo build -p start-cli --bin start-cli --release   # dev shortcut (release)
-cargo check -p start-cli                              # fast type-check (linux-only locally)
-target/debug/start-cli --help                        # smoke test
+make start-cli
+cargo build -p start-cli --bin start-cli
+cargo build -p start-cli --bin start-cli --release
+cargo check -p start-cli # Omits CI's cross-target matrix.
+cargo test -p start-core
+cargo test -p start-core export_manpage_start_cli
+target/debug/start-cli --help
+make start-cli-format
+make start-cli-format-check # Matches CI's formatting check.
+cargo clippy -p start-cli
 ```
 
-There are no tests in this crate itself. CLI behavior is tested in `start-core`; the man-page
-generator is `cargo test -p start-core export_manpage_start_cli`.
+There are no tests in this crate itself. CLI behavior and the man-page generator live in
+`start-core`.
 
 ## Gotchas
 
-- **Don't add command logic here.** New/changed subcommands go in `start-core` —
-  `main_api()` in `shared-libs/crates/start-core/src/lib.rs` plus the relevant `src/<area>/` module.
-  This crate changes only for entrypoint, feature, or bin-wiring edits.
+- **Don't add command logic here.** New or changed subcommands go in `start-core` — `main_api()` in
+  `shared-libs/crates/start-core/src/lib.rs` plus the relevant `src/<area>/` module. Argument and
+  configuration changes go in `start-core::context::config` (`ClientConfig`), and CLI entrypoint
+  behavior goes in `shared-libs/crates/start-core/src/bins/start_cli.rs`. This crate changes only for
+  entrypoint, feature, or bin-wiring edits.
 - **`start-core` is depended on by package name** in `Cargo.toml`
   (`start-core = { path = "../../shared-libs/crates/start-core" }`). `src/main.rs`
   imports it as `start_core::...` (the crate's lib name).
@@ -50,8 +63,10 @@ generator is `cargo test -p start-core export_manpage_start_cli`.
   falsey → `PREFER_DOCKER` is set (Docker). Truthy (`1/true/y/yes`) → Podman.
 - **In a StartOS image `start-cli` is a symlink to `startbox`** (see OS `Makefile`), the same
   `MultiExecutable` multiplexer. The standalone bin here enables only the `start-cli` sub-bin.
+- **CLI surface changes require product documentation updates.** Update the relevant packaging pages
+  under `projects/start-sdk/docs` and StartOS pages under `projects/start-os/docs` in the same change.
 
 ## Verifying a command
 
-Build the bin, then run it against a StartOS test VM. Remote commands need `-H https://<ip>` and an `auth login`; local
-commands (`s9pk`, `init-key`, `pubkey`, `util`) need no server.
+Build the bin, then run it against a StartOS test VM. Remote commands need `-H https://<ip>` and an
+`auth login`; local commands (`s9pk`, `init-key`, `pubkey`, `util`) need no server.

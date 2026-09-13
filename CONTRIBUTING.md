@@ -112,7 +112,7 @@ This is a monorepo: one root Cargo workspace and one Angular workspace, both roo
 | Product                                | Primary build target                                                                                          | Build & deploy docs                                                                  |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | StartOS (OS image, UIs, device deploy) | `make start-os`                                                                                               | [`projects/start-os/AGENTS.md`](projects/start-os/AGENTS.md#contributor-workflow)    |
-| start-cli                              | `make start-cli`                                                                                              | [`projects/start-cli/CONTRIBUTING.md`](projects/start-cli/CONTRIBUTING.md)           |
+| start-cli                              | `make start-cli`                                                                                              | [`projects/start-cli/AGENTS.md`](projects/start-cli/AGENTS.md#build-test-and-format) |
 | start-registry                         | `make start-registry`                                                                                         | [`projects/start-registry/CONTRIBUTING.md`](projects/start-registry/CONTRIBUTING.md) |
 | StartTunnel                            | `make start-tunnel`                                                                                           | [`projects/start-tunnel/CONTRIBUTING.md`](projects/start-tunnel/CONTRIBUTING.md)     |
 | StartWRT                               | `make start-wrt` (`make start-wrt-image` for the full OpenWrt image — hours, fetches the pinned OpenWrt tree) | [`projects/start-wrt/CONTRIBUTING.md`](projects/start-wrt/CONTRIBUTING.md)           |
@@ -132,7 +132,7 @@ Builds are parameterized by environment variables shared across all products:
 | `PROFILE`            | Build profile: `release` (default) or `dev`.                                                       |
 | `GIT_BRANCH_AS_HASH` | Set to `1` to use the git branch name as the version hash (avoids rebuilds).                       |
 
-Each product's `CONTRIBUTING.md` documents the `PLATFORM` values and `ENVIRONMENT` flags it actually supports.
+See each product's build guide linked above for its supported build configuration.
 
 ## Testing
 
@@ -148,7 +148,7 @@ make start-wrt-test           # StartWRT Rust crates
 cd shared-libs/crates/start-core && cargo test <test_name> --features=test
 ```
 
-Each product's `CONTRIBUTING.md` covers its own scoped tests.
+See each product's build guide linked above for its scoped tests.
 
 ## Formatting
 
