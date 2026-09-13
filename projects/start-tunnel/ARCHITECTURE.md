@@ -47,7 +47,7 @@ All paths below are under `shared-libs/crates/start-core/src/tunnel/`.
   from the `*.conf.template` files, and applies interface state.
 - **`dns.rs`** — DNS helpers for the tunnel network.
 - **`forward/`** — the port-forwarding engine:
-  - `mod.rs` — forward-entry orchestration (iptables/nftables DNAT rules).
+  - `mod.rs` — forward-entry orchestration (nftables DNAT rules).
   - `sni.rs` — SNI-based routing for forwarded TLS traffic.
   - `igd.rs` — IGD/UPnP upstream port mapping.
   - `pcp.rs` — PCP (Port Control Protocol) upstream port mapping.
@@ -61,15 +61,22 @@ All paths below are under `shared-libs/crates/start-core/src/tunnel/`.
 
 `start-tunneld` runs `inner_main` on a multi-threaded Tokio runtime:
 
-1. Build `TunnelContext` from `TunnelConfig`.
-2. Start a `WebServer` bound to the HTTP listen address, serving
-   `tunnel_router` (UI + API).
-3. Spawn a task subscribed to the `/webserver` db path. When HTTPS is enabled it
-   binds a `TlsListener` with `TunnelCertHandler`; when disabled it tears the
-   listener back down. This is fully reactive to db patches — no restart needed.
-4. Spawn a signal handler (SIGINT/SIGQUIT/SIGTERM) that triggers graceful
-   shutdown.
-5. On shutdown, the return value can request a `reboot` or `poweroff`.
+1. Reserve the configured HTTP listener before mutating forwarding state.
+2. Build `TunnelContext` from `TunnelConfig`. Initialization restores persisted
+   IPv4, SNI, IPv6, and pinhole state, then seeds volatile leases before the
+   HTTP server is exposed. A partial initialization failure drains forwarding
+   before returning.
+3. Subscribe to shutdown, start the PCP, IGD, and lease servers, then expose
+   `tunnel_router` (UI + API) through `WebServer`.
+4. Spawn the reactive HTTPS listener, HTTP redirect reconciler, and signal
+   handler (SIGINT/SIGQUIT/SIGTERM). HTTPS follows the `/webserver` db path
+   without requiring a restart.
+5. On shutdown, abort and join the signal, HTTPS, and redirect tasks, then stop
+   the web server.
+6. Stop the forwarding producers, close forwarding admission, and withdraw
+   IPv4 forwards and IPv6 pinholes. A single aggregate deadline bounds this
+   cleanup before the shutdown value is returned.
+7. The return value can request a `reboot` or `poweroff`.
 
 The `start-tunnel` CLI builds an `rpc-toolkit` `CliApp` against the same
 `tunnel_api()`, so the CLI and UI share one API definition.
@@ -78,8 +85,8 @@ The `start-tunnel` CLI builds an `rpc-toolkit` `CliApp` against the same
 
 1. User adds a forward (UI or `start-tunnel`) → JSON-RPC method in `api.rs`.
 2. The forward entry is written to PatchDB (`db.rs`).
-3. The `forward/` engine reconciles kernel state: installs `iptables`/`nftables`
-   DNAT rules so the VPS's public IP:port maps to the device's WireGuard IP:port.
+3. The `forward/` engine reconciles kernel state: it installs nftables DNAT
+   rules so the VPS's public IP:port maps to the device's WireGuard IP:port.
 4. Optionally requests an upstream mapping from the network gateway via
    IGD (`igd.rs`) or PCP (`pcp.rs`).
 5. Inbound packets are NAT-forwarded at Layer 3/4 — payloads are never
@@ -117,5 +124,4 @@ chains it) → `projects/start-tunnel/web/dist/raw/start-tunnel/` → compressed
 ## Further reading
 
 - [`README.md`](README.md) — what StartTunnel is and how to use it.
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — building, testing, and changing it.
-- [`AGENTS.md`](AGENTS.md) — rules for AI agents working in this scope.
+- [`AGENTS.md`](AGENTS.md#contributor-workflow) — building, testing, and changing it.

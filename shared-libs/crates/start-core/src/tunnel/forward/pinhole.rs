@@ -5,10 +5,9 @@
 //! `table ip6 startos`, mirroring the v4 forward path — the destination is
 //! always the client's own GUA, so a client can only ever expose itself.
 
-use std::collections::BTreeSet;
 use std::net::{Ipv6Addr, SocketAddrV6};
 
-use crate::net::forward::{nft_comments_with_prefix_v6, nft_ensure_base, nft_rule_v6};
+use crate::net::forward::{nft_delete_rules_with_comment_prefix_v6, nft_rule_v6};
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::db::Pinhole;
@@ -234,37 +233,15 @@ pub async fn remove_pinhole(ctx: &TunnelContext, gua: Ipv6Addr, external_port: u
 pub(crate) async fn drain_pinholes() -> Result<(), Error> {
     let mut attempt = 1_u64;
     loop {
-        if let Err(error) = nft_ensure_base().await {
-            tracing::warn!("pinhole drain failed on attempt {attempt}: {error:#}");
-            attempt = attempt.saturating_add(1);
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            continue;
-        }
-        let (prerouting, forward) = tokio::join!(
-            nft_comments_with_prefix_v6("prerouting", "pinhole:"),
-            nft_comments_with_prefix_v6("forward", "pinhole:"),
-        );
-        let mut comments = BTreeSet::new();
-        let mut first_error = None;
-        for result in [prerouting, forward] {
-            match result {
-                Ok(found) => comments.extend(found),
-                Err(error) => {
-                    first_error.get_or_insert(error);
-                }
+        match nft_delete_rules_with_comment_prefix_v6(&["prerouting", "forward"], "pinhole:").await
+        {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                tracing::warn!("pinhole drain failed on attempt {attempt}: {error:#}");
+                attempt = attempt.saturating_add(1);
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }
         }
-        for comment in comments {
-            if let Err(error) = remove_pinhole_tag(&comment).await {
-                first_error.get_or_insert(error);
-            }
-        }
-        let Some(error) = first_error else {
-            return Ok(());
-        };
-        tracing::warn!("pinhole drain failed on attempt {attempt}: {error:#}");
-        attempt = attempt.saturating_add(1);
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 }
 

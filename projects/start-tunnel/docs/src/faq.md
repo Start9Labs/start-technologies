@@ -4,7 +4,7 @@ Answers to common questions about StartTunnel's security model, compatibility, V
 
 ## Can anyone else see my traffic?
 
-No. Published ports operate at Layer 3/4 (iptables DNAT), meaning the VPS rewrites IP headers and forwards packets without inspecting payloads. If your service uses HTTPS, TLS terminates at the service itself — the VPS never sees plaintext. For VPN traffic between devices, WireGuard provides end-to-end encryption. Since you own the VPS, there is no third party in the data path.
+No. Published ports operate at Layer 3/4 (nftables DNAT), meaning the VPS rewrites IP headers and forwards packets without inspecting payloads. If your service uses HTTPS, TLS terminates at the service itself — the VPS never sees plaintext. For VPN traffic between devices, WireGuard provides end-to-end encryption. Since you own the VPS, there is no third party in the data path.
 
 ## Do I need a WireGuard client on my devices?
 

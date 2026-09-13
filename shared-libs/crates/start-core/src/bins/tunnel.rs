@@ -106,16 +106,16 @@ async fn stop_forwarding_tasks(tasks: [NonDetachingJoinHandle<()>; 3]) {
 
 #[instrument(skip_all)]
 async fn inner_main(config: &TunnelConfig) -> Result<Option<bool>, Error> {
-    let (server, ctx, shutdown, forwarding_threads) = async {
-        let listen = config
-            .tunnel_listen
-            .unwrap_or(crate::tunnel::TUNNEL_DEFAULT_LISTEN);
-        let http_acceptor =
-            Acceptor::bind_map_dyn([(WebserverListener::Http, listen)]).await?;
-        let ctx = TunnelContext::init(config).await?;
-        let mut shutdown_recv = ctx.shutdown.subscribe();
-        let forwarding_threads = ctx.spawn_forwarding_servers();
-        let server = WebServer::new(http_acceptor, tunnel_router(ctx.clone()));
+    let listen = config
+        .tunnel_listen
+        .unwrap_or(crate::tunnel::TUNNEL_DEFAULT_LISTEN);
+    let http_acceptor = Acceptor::bind_map_dyn([(WebserverListener::Http, listen)]).await?;
+    let ctx = TunnelContext::init(config).await?;
+    let mut shutdown_recv = ctx.shutdown.subscribe();
+    let forwarding_threads = ctx.spawn_forwarding_servers();
+    let server = WebServer::new(http_acceptor, tunnel_router(ctx.clone()));
+
+    let shutdown = async {
         let acceptor_setter = server.acceptor_setter();
         let https_db = ctx.db.clone();
         let https_thread: NonDetachingJoinHandle<()> = tokio::spawn(async move {
@@ -231,9 +231,9 @@ async fn inner_main(config: &TunnelConfig) -> Result<Option<bool>, Error> {
 
         let shutdown = loop {
             match shutdown_recv.recv().await {
-                Ok(shutdown) => break shutdown,
+                Ok(shutdown) => break Ok(shutdown),
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(error) => return Err(error).with_kind(crate::ErrorKind::Unknown),
+                Err(error) => break Err(error).with_kind(crate::ErrorKind::Unknown),
             }
         };
 
@@ -245,10 +245,10 @@ async fn inner_main(config: &TunnelConfig) -> Result<Option<bool>, Error> {
         await_task("HTTPS", https_thread).await;
         await_task("redirect", redirect_thread).await;
 
-        Ok::<_, Error>((server, ctx, shutdown, forwarding_threads))
+        shutdown
     }
-    .await?;
-    server.shutdown().await;
+    .await;
+    let server_result = server.shutdown().await;
 
     if let Err(error) = crate::net::forward::timeout_forwarding_drain(async {
         stop_forwarding_tasks(forwarding_threads).await;
@@ -260,7 +260,8 @@ async fn inner_main(config: &TunnelConfig) -> Result<Option<bool>, Error> {
         tracing::debug!("{error:?}");
     }
 
-    Ok(shutdown)
+    server_result?;
+    shutdown
 }
 
 pub fn main(args: impl IntoIterator<Item = OsString>) {

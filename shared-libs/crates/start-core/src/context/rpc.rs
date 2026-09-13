@@ -128,6 +128,16 @@ impl CleanupInitPhases {
 #[derive(Clone)]
 pub struct RpcContext(Arc<RpcContextSeed>);
 
+async fn cleanup_forwarding_on_error<T>(
+    controller: &NetController,
+    result: Result<T, Error>,
+) -> Result<T, Error> {
+    if result.is_err() {
+        controller.shutdown_forwarding().await.log_err();
+    }
+    result
+}
+
 /// Drop enrolled keys idle for more than 30 days. No-op until the clock is
 /// NTP-synced, so a wrong boot-time clock can't reap live sessions.
 fn reap_idle_sessions(
@@ -201,9 +211,11 @@ impl RpcContext {
                 .await?,
             );
             webserver.send_modify(|wl| wl.set_ip_info(net_ctrl.net_iface.watcher.subscribe()));
-            let os_net_service = net_ctrl.os_bindings().await?;
+            let bindings = net_ctrl.os_bindings().await;
+            let os_net_service = cleanup_forwarding_on_error(&net_ctrl, bindings).await?;
             (net_ctrl, os_net_service)
         };
+        let cleanup_controller = net_controller.clone();
         init_net_ctrl.complete();
         tracing::info!("{}", t!("context.rpc.initialized-net-controller"));
 
@@ -331,14 +343,14 @@ impl RpcContext {
 
         let crons = SyncMutex::new(BTreeMap::new());
 
-        if !db
+        let ntp_synced = db
             .peek()
             .await
             .as_public()
             .as_server_info()
             .as_ntp_synced()
-            .de()?
-        {
+            .de();
+        if !cleanup_forwarding_on_error(&cleanup_controller, ntp_synced).await? {
             let db = db.clone();
             crons.mutate(|c| {
                 c.insert(
@@ -368,10 +380,39 @@ impl RpcContext {
             });
         }
 
+        let os_partitions =
+            cleanup_forwarding_on_error(&cleanup_controller, OsPartitionInfo::from_fstab().await)
+                .await?;
+        let current_secret = cleanup_forwarding_on_error(
+            &cleanup_controller,
+            Jwk::generate_ec_key(josekit::jwk::alg::ec::EcCurve::P256).map_err(|error| {
+                tracing::debug!("{error:?}");
+                tracing::error!("{}", t!("context.rpc.couldnt-generate-ec-key"));
+                Error::new(
+                    eyre!("{}", t!("context.rpc.couldnt-generate-ec-key")),
+                    ErrorKind::Unknown,
+                )
+            }),
+        )
+        .await?;
+        let proxy = cleanup_forwarding_on_error(
+            &cleanup_controller,
+            Proxy::all(socks_proxy_url).map_err(Error::from),
+        )
+        .await?;
+        let client = cleanup_forwarding_on_error(
+            &cleanup_controller,
+            Client::builder()
+                .proxy(proxy)
+                .build()
+                .with_kind(ErrorKind::ParseUrl),
+        )
+        .await?;
+
         let seed = Arc::new(RpcContextSeed {
             is_closed: AtomicBool::new(false),
             closed: watch::Sender::new(false),
-            os_partitions: OsPartitionInfo::from_fstab().await?,
+            os_partitions,
             disk_guid,
             ephemeral_auth_keys: SyncMutex::new(AuthKeys::new()),
             auth_sig_nonce_cache: SyncMutex::new(Default::default()),
@@ -394,29 +435,25 @@ impl RpcContext {
             lxc_manager: Arc::new(LxcManager::new()),
             open_authed_continuations: OpenAuthedContinuations::new(),
             wifi_manager: RwLock::new(None),
-            current_secret: Arc::new(
-                Jwk::generate_ec_key(josekit::jwk::alg::ec::EcCurve::P256).map_err(|e| {
-                    tracing::debug!("{:?}", e);
-                    tracing::error!("{}", t!("context.rpc.couldnt-generate-ec-key"));
-                    Error::new(
-                        color_eyre::eyre::eyre!("{}", t!("context.rpc.couldnt-generate-ec-key")),
-                        crate::ErrorKind::Unknown,
-                    )
-                })?,
-            ),
-            client: Client::builder()
-                .proxy(Proxy::all(socks_proxy_url)?)
-                .build()
-                .with_kind(crate::ErrorKind::ParseUrl)?,
+            current_secret: Arc::new(current_secret),
+            client,
             start_time: Instant::now(),
             crons,
         });
 
         let res = Self(seed.clone());
-        res.cleanup_and_initialize(cleanup_init).await?;
+        cleanup_forwarding_on_error(
+            &cleanup_controller,
+            res.cleanup_and_initialize(cleanup_init).await,
+        )
+        .await?;
         tracing::info!("{}", t!("context.rpc.cleaned-up-transient-states"));
 
-        crate::version::post_init(&res, run_migrations).await?;
+        cleanup_forwarding_on_error(
+            &cleanup_controller,
+            crate::version::post_init(&res, run_migrations).await,
+        )
+        .await?;
         tracing::info!("{}", t!("context.rpc.completed-migrations"));
         Ok(res)
     }

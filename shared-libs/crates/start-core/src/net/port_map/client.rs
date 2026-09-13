@@ -205,15 +205,22 @@ enum Command {
         external_port: u16,
         resp: oneshot::Sender<Option<IpAddr>>,
     },
-    Drain {
-        respond: oneshot::Sender<Result<(), Error>>,
-    },
+}
+
+struct DrainRequest {
+    respond: oneshot::Sender<Result<(), Error>>,
+}
+
+#[derive(Clone)]
+struct Shard {
+    commands: mpsc::UnboundedSender<Command>,
+    drain: mpsc::UnboundedSender<DrainRequest>,
 }
 
 type DrainFuture = Shared<BoxFuture<'static, Result<(), Arc<Error>>>>;
 
 enum ControllerState {
-    Accepting(BTreeMap<IpAddr, mpsc::UnboundedSender<Command>>),
+    Accepting(BTreeMap<IpAddr, Shard>),
     Draining(DrainFuture),
 }
 
@@ -238,6 +245,7 @@ impl PortMapController {
             ControllerState::Accepting(shards) => shards
                 .entry(local_ip)
                 .or_insert_with(|| spawn_shard(self.interfaces.clone()))
+                .commands
                 .send(command)
                 .is_ok(),
             ControllerState::Draining(_) => false,
@@ -453,12 +461,13 @@ fn controller_exited() -> Error {
     Error::new(eyre!("port-map controller exited"), ErrorKind::Network)
 }
 
-async fn drain_shard(local_ip: IpAddr, shard: mpsc::UnboundedSender<Command>) -> Result<(), Error> {
+async fn drain_shard(local_ip: IpAddr, shard: Shard) -> Result<(), Error> {
     let mut failures: u32 = 0;
     loop {
         let (respond, receive) = oneshot::channel();
         shard
-            .send(Command::Drain { respond })
+            .drain
+            .send(DrainRequest { respond })
             .map_err(|_| controller_exited())?;
         match receive.await.map_err(|_| controller_exited())? {
             Ok(()) => return Ok(()),
@@ -474,46 +483,91 @@ async fn drain_shard(local_ip: IpAddr, shard: mpsc::UnboundedSender<Command>) ->
     }
 }
 
-fn spawn_shard(
-    interfaces: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
-) -> mpsc::UnboundedSender<Command> {
-    let (req, mut recv) = mpsc::unbounded_channel::<Command>();
-    // Detached: `tokio::spawn` won't abort on drop; the loop exits when all
-    // senders are gone.
-    tokio::spawn(async move {
-        let mut state = State::default();
-        let mut refresh = interval(REFRESH_INTERVAL);
-        refresh.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        loop {
-            tokio::select! {
-                cmd = recv.recv() => match cmd {
-                    Some(Command::Ensure { key, spec }) => state.ensure(&interfaces, key, spec).await,
-                    Some(Command::Remove { key }) => {
-                        state.remove(key).await.log_err();
-                    }
-                    Some(Command::ExternalIp { external_port, resp }) => {
-                        let _ = resp.send(external_ip_of(
-                            &state.desired,
-                            &state.active,
-                            &state.stale,
-                            external_port,
-                        ));
-                    }
-                    Some(Command::Drain { respond }) => {
-                        let result = state.drain().await;
-                        let complete = result.is_ok();
-                        respond.send(result).ok();
-                        if complete {
-                            break;
-                        }
-                    }
-                    None => break,
-                },
-                _ = refresh.tick() => state.refresh(&interfaces).await,
+fn spawn_shard(interfaces: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>) -> Shard {
+    let (commands, recv) = mpsc::unbounded_channel();
+    let (drain, drain_recv) = mpsc::unbounded_channel();
+    // Detached: dropping the join handle does not abort the task.
+    tokio::spawn(run_shard(interfaces, State::default(), recv, drain_recv));
+    Shard { commands, drain }
+}
+
+async fn wait_for_retry(deadline: Option<Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => std::future::pending().await,
+    }
+}
+
+async fn drain_after_channel_close(state: &mut State) {
+    let mut failures: u32 = 0;
+    loop {
+        match state.drain().await {
+            Ok(()) => return,
+            Err(error) => {
+                failures = failures.saturating_add(1);
+                let delay = retry_delay(failures);
+                tracing::warn!(
+                    "port-map cleanup after controller exit failed on attempt {failures}; retrying in {delay:?}: {error}"
+                );
+                tokio::time::sleep(delay).await;
             }
         }
-    });
-    req
+    }
+}
+
+async fn run_shard(
+    interfaces: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
+    mut state: State,
+    mut recv: mpsc::UnboundedReceiver<Command>,
+    mut drain_recv: mpsc::UnboundedReceiver<DrainRequest>,
+) {
+    let mut refresh = interval(REFRESH_INTERVAL);
+    refresh.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    refresh.tick().await;
+    let mut draining = false;
+    loop {
+        let removal_retry = state.removal_retry_deadline();
+        tokio::select! {
+            biased;
+            request = drain_recv.recv() => match request {
+                Some(DrainRequest { respond }) => {
+                    draining = true;
+                    recv.close();
+                    while recv.try_recv().is_ok() {}
+                    let result = state.drain().await;
+                    let complete = result.is_ok();
+                    respond.send(result).ok();
+                    if complete {
+                        break;
+                    }
+                }
+                None => {
+                    drain_after_channel_close(&mut state).await;
+                    break;
+                }
+            },
+            cmd = recv.recv(), if !draining => match cmd {
+                Some(Command::Ensure { key, spec }) => state.ensure(&interfaces, key, spec).await,
+                Some(Command::Remove { key }) => {
+                    state.remove(key).await.log_err();
+                }
+                Some(Command::ExternalIp { external_port, resp }) => {
+                    let _ = resp.send(external_ip_of(
+                        &state.desired,
+                        &state.active,
+                        &state.stale,
+                        external_port,
+                    ));
+                }
+                None => {
+                    drain_after_channel_close(&mut state).await;
+                    break;
+                }
+            },
+            _ = wait_for_retry(removal_retry), if !draining => state.retry_removals().await,
+            _ = refresh.tick(), if !draining => state.refresh(&interfaces).await,
+        }
+    }
 }
 
 /// Capability verdicts for the interface whose candidate list contains `gw`.
@@ -676,9 +730,44 @@ impl State {
 
     async fn remove(&mut self, key: MappingKey) -> Result<(), Error> {
         self.desired.remove(&key);
-        self.failures.remove(&key);
         self.stale.remove(&key);
-        self.teardown(key).await
+        let result = self.teardown(key.clone()).await;
+        self.finish_removal_attempt(key, &result);
+        result
+    }
+
+    fn finish_removal_attempt(&mut self, key: MappingKey, result: &Result<(), Error>) {
+        if result.is_ok() {
+            self.failures.remove(&key);
+        } else {
+            self.record_failure(key);
+        }
+    }
+
+    fn removal_retry_deadline(&self) -> Option<Instant> {
+        self.active
+            .keys()
+            .filter(|key| !self.desired.contains_key(*key))
+            .filter_map(|key| {
+                self.failures
+                    .get(key)
+                    .map(|(failures, at)| *at + retry_delay(*failures))
+            })
+            .min()
+    }
+
+    async fn retry_removals(&mut self) {
+        let keys = self
+            .active
+            .keys()
+            .filter(|key| !self.desired.contains_key(*key) && self.backoff_elapsed(key))
+            .cloned()
+            .collect::<Vec<_>>();
+        for key in keys {
+            let result = self.teardown(key.clone()).await;
+            self.finish_removal_attempt(key, &result);
+            result.log_err();
+        }
     }
 
     async fn drain(&mut self) -> Result<(), Error> {
@@ -741,18 +830,11 @@ impl State {
                 }
             }
         }
-        let retiring = self
-            .active
-            .keys()
-            .filter(|key| !self.desired.contains_key(*key))
-            .cloned()
-            .collect::<Vec<_>>();
-        for key in retiring {
-            self.teardown(key).await.log_err();
-        }
+        self.retry_removals().await;
         self.upnp_cache
             .retain(|_, (_, at)| at.elapsed() < GATEWAY_CACHE_TTL);
-        self.failures.retain(|k, _| self.desired.contains_key(k));
+        self.failures
+            .retain(|k, _| self.desired.contains_key(k) || self.active.contains_key(k));
         self.stale.retain(|key| self.desired.contains_key(key));
     }
 
@@ -818,7 +900,8 @@ impl State {
             .get(&key)
             .copied()
             .unwrap_or((0, Instant::now()));
-        self.failures.insert(key, (failures + 1, Instant::now()));
+        self.failures
+            .insert(key, (failures.saturating_add(1), Instant::now()));
     }
 
     /// Updates retry backoff after a mapping attempt.
@@ -1765,22 +1848,87 @@ mod tests {
         controller.drain().await.unwrap();
     }
 
+    #[tokio::test]
+    async fn drain_bypasses_queued_commands() {
+        let (commands, recv) = mpsc::unbounded_channel();
+        let (drain, drain_recv) = mpsc::unbounded_channel();
+        let (external_ip, external_ip_rx) = oneshot::channel();
+        commands
+            .send(Command::ExternalIp {
+                external_port: 443,
+                resp: external_ip,
+            })
+            .unwrap();
+        let (respond, response) = oneshot::channel();
+        drain.send(DrainRequest { respond }).unwrap();
+
+        tokio::spawn(run_shard(interfaces(), State::default(), recv, drain_recv));
+
+        response.await.unwrap().unwrap();
+        assert!(
+            external_ip_rx.await.is_err(),
+            "the queued ordinary command ran before drain"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn failed_explicit_removal_uses_bounded_retry_state() {
+        let ip: IpAddr = Ipv4Addr::LOCALHOST.into();
+        let key: MappingKey = (ip, 443, None, TransportProtocol::Tcp);
+        let mut state = State::default();
+        state.desired.insert(key.clone(), spec());
+        state.active.insert(
+            key.clone(),
+            Active::Upnp {
+                external_ip: None,
+                internal_port: 443,
+                gateway: test_gateway(),
+            },
+        );
+
+        state.remove(key.clone()).await.unwrap_err();
+        let first_retry = state.removal_retry_deadline().unwrap();
+        assert!(!state.desired.contains_key(&key));
+        assert!(state.active.contains_key(&key));
+        assert_eq!(state.failures.get(&key).map(|(n, _)| *n), Some(1));
+        assert_eq!(first_retry.duration_since(Instant::now()), RETRY_INTERVAL);
+        assert!(!state.backoff_elapsed(&key));
+
+        tokio::time::advance(RETRY_INTERVAL).await;
+        assert!(state.backoff_elapsed(&key));
+        state.retry_removals().await;
+        let second_retry = state.removal_retry_deadline().unwrap();
+        assert!(state.active.contains_key(&key));
+        assert_eq!(state.failures.get(&key).map(|(n, _)| *n), Some(2));
+        assert_eq!(
+            second_retry.duration_since(Instant::now()),
+            RETRY_INTERVAL * 2
+        );
+        assert!(second_retry.duration_since(first_retry) < REFRESH_INTERVAL);
+
+        state.active.remove(&key);
+        state.finish_removal_attempt(key.clone(), &Ok(()));
+        assert!(!state.failures.contains_key(&key));
+        assert_eq!(state.removal_retry_deadline(), None);
+    }
+
     #[tokio::test(start_paused = true)]
     async fn concurrent_drains_share_completion_after_cancellation() {
         let controller = PortMapController::new(interfaces());
         let ip: IpAddr = "fd00:59::2".parse().unwrap();
-        let (shard, mut commands) = mpsc::unbounded_channel();
+        let (commands, mut command_rx) = mpsc::unbounded_channel();
+        let (drain, mut drain_requests) = mpsc::unbounded_channel();
         controller.state.mutate(|state| match state {
             ControllerState::Accepting(shards) => {
-                shards.insert(ip, shard);
+                shards.insert(ip, Shard { commands, drain });
             }
             ControllerState::Draining(_) => panic!("controller already draining"),
         });
 
         let first_controller = controller.clone();
         let first = tokio::spawn(async move { first_controller.drain().await });
-        let Some(Command::Drain { respond }) = commands.recv().await else {
-            panic!("shard did not receive first drain command");
+        let Some(DrainRequest { respond }) = drain_requests.recv().await else {
+            panic!("shard did not receive first drain request");
         };
         respond
             .send(Err(Error::new(
@@ -1789,6 +1937,8 @@ mod tests {
             )))
             .unwrap();
         tokio::task::yield_now().await;
+        controller.ensure(ip, 443, 443, Vec::new());
+        assert!(command_rx.try_recv().is_err());
 
         first.abort();
         assert!(first.await.unwrap_err().is_cancelled());
@@ -1801,8 +1951,8 @@ mod tests {
         assert!(!third.is_finished());
 
         tokio::time::advance(RETRY_INTERVAL).await;
-        let Some(Command::Drain { respond }) = commands.recv().await else {
-            panic!("shard did not receive retried drain command");
+        let Some(DrainRequest { respond }) = drain_requests.recv().await else {
+            panic!("shard did not receive retried drain request");
         };
         respond.send(Ok(())).unwrap();
 

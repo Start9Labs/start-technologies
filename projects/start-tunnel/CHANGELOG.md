@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Published IPv4 forwarding stays synchronized more reliably across
-  configuration changes and graceful shutdown.**
+- **Published-port forwarding stays synchronized more reliably across IPv4 and
+  IPv6 configuration changes and graceful shutdown.**
 
 ## [1.3.0]
 

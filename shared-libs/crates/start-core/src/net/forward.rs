@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write;
 use std::future::Future;
+use std::io::Cursor;
 use std::net::{IpAddr, Ipv4Addr, SocketAddrV4, SocketAddrV6};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -496,11 +497,101 @@ pub(crate) async fn nft_comments_with_prefix(
     nft_comments_with_prefix_family("ip", chain, prefix).await
 }
 
-pub(crate) async fn nft_comments_with_prefix_v6(
-    chain: &str,
+const NFT_RULE_MAX_ATTEMPTS: usize = 5;
+
+fn nft_error_is_stale(error: &Error) -> bool {
+    error
+        .source
+        .to_string()
+        .contains("No such file or directory")
+}
+
+async fn nft_execute_transaction(script: &str) -> Result<(), Error> {
+    let mut input = Cursor::new(script.as_bytes());
+    Command::new("nft")
+        .arg("-f")
+        .arg("-")
+        .input(Some(&mut input))
+        .invoke(ErrorKind::Network)
+        .await?;
+    Ok(())
+}
+
+fn nft_delete_rules_matching_script<F>(family: &str, chains: &[(&str, &str)], matches: &F) -> String
+where
+    F: Fn(&str) -> bool,
+{
+    let mut script = String::new();
+    for (chain, listing) in chains {
+        for line in listing.lines() {
+            let Some((rule, handle)) = line.rsplit_once("# handle ") else {
+                continue;
+            };
+            let Ok(handle) = handle.trim().parse::<u64>() else {
+                continue;
+            };
+            let Some((_, comment)) = rule.split_once("comment \"") else {
+                continue;
+            };
+            let Some((comment, _)) = comment.split_once('"') else {
+                continue;
+            };
+            if matches(comment) {
+                writeln!(
+                    script,
+                    "delete rule {family} startos {chain} handle {handle}"
+                )
+                .unwrap();
+            }
+        }
+    }
+    script
+}
+
+async fn nft_delete_rules_matching<F>(
+    family: &str,
+    chains: &[&str],
+    matches: F,
+) -> Result<(), Error>
+where
+    F: Fn(&str) -> bool,
+{
+    nft_ensure_base().await?;
+
+    let mut last_err = None;
+    for attempt in 1..=NFT_RULE_MAX_ATTEMPTS {
+        let listings = futures::future::try_join_all(chains.iter().map(|chain| async move {
+            Ok::<_, Error>((*chain, nft_list_chain(family, chain).await?))
+        }))
+        .await?;
+        let listings = listings
+            .iter()
+            .map(|(chain, listing)| (*chain, listing.as_str()))
+            .collect::<Vec<_>>();
+        let script = nft_delete_rules_matching_script(family, &listings, &matches);
+        if script.is_empty() {
+            return Ok(());
+        }
+
+        match nft_execute_transaction(&script).await {
+            Ok(()) => return Ok(()),
+            Err(error) if nft_error_is_stale(&error) => {
+                tracing::warn!(
+                    "nft batch delete: stale handle on attempt {attempt}/{NFT_RULE_MAX_ATTEMPTS}"
+                );
+                last_err = Some(error);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(last_err.expect("loop only exits here via the stale-handle path, which sets last_err"))
+}
+
+pub(crate) async fn nft_delete_rules_with_comment_prefix_v6(
+    chains: &[&str],
     prefix: &str,
-) -> Result<Vec<String>, Error> {
-    nft_comments_with_prefix_family("ip6", chain, prefix).await
+) -> Result<(), Error> {
+    nft_delete_rules_matching("ip6", chains, |comment| comment.starts_with(prefix)).await
 }
 
 /// Converges the tagged rule, retrying stale handles.
@@ -536,9 +627,8 @@ async fn nft_rule_family(
 ) -> Result<(), Error> {
     nft_ensure_base().await?;
 
-    const MAX_ATTEMPTS: usize = 5;
     let mut last_err = None;
-    for attempt in 1..=MAX_ATTEMPTS {
+    for attempt in 1..=NFT_RULE_MAX_ATTEMPTS {
         let existing = nft_rules_with_comment(family, chain, comment).await?;
 
         // Already converged: nothing to undo, or exactly the desired rule present.
@@ -574,24 +664,38 @@ async fn nft_rule_family(
             return Ok(());
         }
 
-        match Command::new("nft")
-            .arg(&script)
-            .invoke(ErrorKind::Network)
-            .await
-        {
-            Ok(_) => return Ok(()),
+        match nft_execute_transaction(&script).await {
+            Ok(()) => return Ok(()),
             // Stale handle: a concurrent reconcile won the race; re-read and
             // retry. Any other error is real and surfaces immediately.
-            Err(e) if e.source.to_string().contains("No such file or directory") => {
+            Err(error) if nft_error_is_stale(&error) => {
                 tracing::warn!(
-                    "nft_rule {chain}/{comment}: stale handle on attempt {attempt}/{MAX_ATTEMPTS}"
+                    "nft_rule {chain}/{comment}: stale handle on attempt {attempt}/{NFT_RULE_MAX_ATTEMPTS}"
                 );
-                last_err = Some(e);
+                last_err = Some(error);
             }
-            Err(e) => return Err(e),
+            Err(error) => return Err(error),
         }
     }
     Err(last_err.expect("loop only exits here via the stale-handle path, which sets last_err"))
+}
+
+const DYNAMIC_FORWARD_CHAINS: [&str; 4] = ["prerouting", "output", "postrouting", "forward"];
+
+fn is_dynamic_forward_comment(family: &str, comment: &str) -> bool {
+    let hash = match family {
+        "ip" => comment.strip_prefix('F'),
+        "ip6" => comment.strip_prefix("F6"),
+        _ => None,
+    };
+    hash.is_some_and(|hash| hash.len() == 15 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
+}
+
+async fn remove_stale_dynamic_forwarding_rules_family(family: &str) -> Result<(), Error> {
+    nft_delete_rules_matching(family, &DYNAMIC_FORWARD_CHAINS, |comment| {
+        is_dynamic_forward_comment(family, comment)
+    })
+    .await
 }
 
 async fn initialize_port_forwarding() -> Result<(), Error> {
@@ -622,6 +726,8 @@ async fn initialize_port_forwarding() -> Result<(), Error> {
         .arg("net.ipv6.conf.all.forwarding=1")
         .invoke(ErrorKind::Network)
         .await?;
+    remove_stale_dynamic_forwarding_rules_family("ip").await?;
+    remove_stale_dynamic_forwarding_rules_family("ip6").await?;
     Ok(())
 }
 
@@ -638,6 +744,7 @@ impl PortForwardController {
         let (req_send, mut req_recv) = mpsc::unbounded_channel::<PortForwardCommand>();
         let thread = NonDetachingJoinHandle::from(tokio::spawn(async move {
             let mut pending = VecDeque::new();
+            let mut drain = None;
             'initialize: loop {
                 let initialization = initialize();
                 tokio::pin!(initialization);
@@ -649,10 +756,10 @@ impl PortForwardController {
                         },
                         cmd = req_recv.recv() => match cmd {
                             Some(PortForwardCommand::Drain { respond }) => {
-                                respond.send(Ok(())).ok();
-                                return;
+                                drain = Some(respond);
                             }
-                            Some(cmd) => pending.push_back(cmd),
+                            Some(cmd) if drain.is_none() => pending.push_back(cmd),
+                            Some(_) => {},
                             None => return,
                         },
                     }
@@ -672,10 +779,10 @@ impl PortForwardController {
                         _ = &mut retry => break,
                         cmd = req_recv.recv() => match cmd {
                             Some(PortForwardCommand::Drain { respond }) => {
-                                respond.send(Ok(())).ok();
-                                return;
+                                drain = Some(respond);
                             }
-                            Some(cmd) => pending.push_back(cmd),
+                            Some(cmd) if drain.is_none() => pending.push_back(cmd),
+                            Some(_) => {},
                             None => return,
                         },
                     }
@@ -683,6 +790,10 @@ impl PortForwardController {
             }
 
             let mut state = PortForwardState::default();
+            if let Some(respond) = drain {
+                respond.send(state.drain().await).ok();
+                return;
+            }
             let mut gc_interval = tokio::time::interval_at(
                 tokio::time::Instant::now() + PORT_FORWARD_GC_INTERVAL,
                 PORT_FORWARD_GC_INTERVAL,
@@ -863,7 +974,7 @@ fn ipv6_candidate_gateways(
         .collect()
 }
 
-fn target_prefix_for(
+pub(super) fn target_prefix_for(
     ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
     target: Ipv4Addr,
     fallback: u8,
@@ -897,9 +1008,7 @@ struct InterfaceForwardEntry {
     count: u16,
     targets: BTreeMap<ForwardRequirements, (SocketAddrV4, u8, Weak<()>)>,
     forwards: BTreeMap<SocketAddrV4, Arc<()>>,
-    // (local IP, external port) pairs we've asked the upstream gateway (via
-    // PCP/NAT-PMP/UPnP) to forward here. Tracked so the mapping is withdrawn
-    // when the forward is dropped; a range contributes one entry per port.
+    // Upstream mappings keyed by local IP and external start, retained for withdrawal.
     mapped: BTreeSet<(Ipv4Addr, u16)>,
 }
 
@@ -1278,7 +1387,12 @@ impl InterfaceForwardState {
                 )
                 .await
                 {
-                    Ok(()) => ipv6.get_mut(&source).unwrap().applied = None,
+                    Ok(()) => {
+                        if spec.src_filter.is_none() {
+                            self.pmap.remove(IpAddr::V6(*source.ip()), source.port());
+                        }
+                        ipv6.get_mut(&source).unwrap().applied = None;
+                    }
                     Err(error) => {
                         first_error.get_or_insert(error);
                     }
@@ -1293,6 +1407,23 @@ impl InterfaceForwardState {
             first_error.get_or_insert(error);
         }
         first_error.map_or(Ok(()), Err)
+    }
+
+    async fn drain_until_complete(&mut self) -> Result<(), Error> {
+        let mut attempt = 1usize;
+        loop {
+            match self.drain().await {
+                Ok(()) => return Ok(()),
+                Err(error) => {
+                    tracing::error!(
+                        "interface forwarding drain failed on attempt {attempt}; retrying in {FORWARD_DRAIN_RETRY_INTERVAL:?}: {error:#}"
+                    );
+                    tracing::debug!("{error:?}");
+                    attempt = attempt.saturating_add(1);
+                    tokio::time::sleep(FORWARD_DRAIN_RETRY_INTERVAL).await;
+                }
+            }
+        }
     }
 }
 
@@ -1458,7 +1589,7 @@ impl InterfacePortForwardController {
                                 re.send(result).ok()
                             }
                             InterfaceForwardCommand::Drain(respond) => {
-                                respond.send(state.drain().await).ok();
+                                respond.send(state.drain_until_complete().await).ok();
                                 break 'active;
                             }
                         };
@@ -1482,7 +1613,7 @@ impl InterfacePortForwardController {
             }
             while let Some(cmd) = req_recv.recv().await {
                 if let InterfaceForwardCommand::Drain(respond) = cmd {
-                    respond.send(state.drain().await).ok();
+                    respond.send(state.drain_until_complete().await).ok();
                 }
             }
         }));
@@ -1522,6 +1653,7 @@ impl InterfacePortForwardController {
         count: u16,
         reqs: ForwardRequirements,
         target: SocketAddrV4,
+        target_prefix: u8,
     ) -> Result<Arc<()>, Error> {
         let rc = Arc::new(());
         let (send, recv) = oneshot::channel();
@@ -1531,7 +1663,7 @@ impl InterfacePortForwardController {
                     external,
                     target,
                     count,
-                    target_prefix_fallback: 32,
+                    target_prefix_fallback: target_prefix,
                     reqs,
                     rc,
                 },
@@ -1723,6 +1855,100 @@ mod tests {
     }
 
     #[test]
+    fn dynamic_forward_comment_detection_preserves_other_owners() {
+        assert!(is_dynamic_forward_comment("ip", "F0123456789abcde"));
+        assert!(is_dynamic_forward_comment("ip6", "F60123456789abcde"));
+        assert!(!is_dynamic_forward_comment("ip", "base-established"));
+        assert!(!is_dynamic_forward_comment("ip", "F60123456789abcde"));
+        assert!(!is_dynamic_forward_comment("ip6", "F0123456789abcde"));
+        assert!(!is_dynamic_forward_comment("ip", "ForwardedBySomeoneElse"));
+    }
+
+    #[test]
+    fn batch_delete_selects_only_dynamic_forward_rules() {
+        let listing = r#"
+            ip daddr 192.0.2.1 comment "F0123456789abcde" # handle 10
+            ip daddr 192.0.2.2 comment "Fshort" # handle 11
+            ip daddr 192.0.2.3 comment "ForwardedBySomeoneElse" # handle 12
+            ip daddr 192.0.2.4 comment "F60123456789abcde" # handle 13
+        "#;
+
+        assert_eq!(
+            nft_delete_rules_matching_script("ip", &[("prerouting", listing)], &|comment| {
+                is_dynamic_forward_comment("ip", comment)
+            }),
+            "delete rule ip startos prerouting handle 10\n"
+        );
+    }
+
+    #[test]
+    fn batch_delete_selects_pinhole_rules_across_chains() {
+        let prerouting = r#"
+            ip6 daddr fd00::2 comment "pinhole:[fd00::2]:80" # handle 10
+            ip6 daddr fd00::3 comment "base-established" # handle 11
+            ip6 daddr fd00::4 comment "other:pinhole:[fd00::4]:80" # handle 12
+        "#;
+        let forward = r#"
+            ip6 daddr fd00::2 comment "pinhole:[fd00::2]:80" # handle 20
+            ip6 daddr fd00::2 comment "pinhole:[fd00::2]:80" # handle 21
+        "#;
+
+        assert_eq!(
+            nft_delete_rules_matching_script(
+                "ip6",
+                &[("prerouting", prerouting), ("forward", forward)],
+                &|comment| comment.starts_with("pinhole:"),
+            ),
+            "delete rule ip6 startos prerouting handle 10\n\
+             delete rule ip6 startos forward handle 20\n\
+             delete rule ip6 startos forward handle 21\n"
+        );
+    }
+
+    #[test]
+    fn batch_delete_is_empty_when_converged() {
+        assert!(
+            nft_delete_rules_matching_script(
+                "ip6",
+                &[("prerouting", ""), ("forward", "")],
+                &|comment| comment.starts_with("pinhole:"),
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn batch_delete_many_rules_remains_one_script() {
+        let listing = (0..10_000)
+            .map(|handle| {
+                format!(
+                    "ip6 daddr fd00::{handle:x} comment \"pinhole:[fd00::{handle:x}]:80\" # handle {handle}\n"
+                )
+            })
+            .collect::<String>();
+        let script =
+            nft_delete_rules_matching_script("ip6", &[("forward", &listing)], &|comment| {
+                comment.starts_with("pinhole:")
+            });
+
+        assert_eq!(script.lines().count(), 10_000);
+        assert!(script.starts_with("delete rule ip6 startos forward handle 0\n"));
+        assert!(script.ends_with("delete rule ip6 startos forward handle 9999\n"));
+    }
+
+    #[test]
+    fn stale_nft_error_detection_is_specific() {
+        assert!(nft_error_is_stale(&Error::new(
+            eyre!("Could not process rule: No such file or directory"),
+            ErrorKind::Network,
+        )));
+        assert!(!nft_error_is_stale(&Error::new(
+            eyre!("Operation not permitted"),
+            ErrorKind::Network,
+        )));
+    }
+
+    #[test]
     fn ipv6_add_and_replacement_advance_only_after_success() {
         let lease = Arc::new(());
         let original = ipv6_spec();
@@ -1894,6 +2120,31 @@ mod tests {
     }
 
     #[test]
+    fn request_seeds_caller_current_target_prefix() {
+        let requirements = ForwardRequirements {
+            public_gateways: BTreeSet::new(),
+            private_ips: BTreeSet::new(),
+            secure: true,
+        };
+        let target = SocketAddrV4::new(Ipv4Addr::new(10, 0, 3, 2), 8080);
+
+        let mut entry = InterfaceForwardEntry::new(8080, 1);
+        let lease = entry
+            .update_request(InterfaceForwardRequest {
+                external: 8080,
+                target,
+                count: 1,
+                target_prefix_fallback: 24,
+                reqs: requirements.clone(),
+                rc: Arc::new(()),
+            })
+            .unwrap();
+
+        assert_eq!(entry.targets[&requirements].1, 24);
+        drop(lease);
+    }
+
+    #[test]
     fn live_target_prefix_tracks_interface_changes() {
         use imbl::OrdSet;
         use imbl_value::InternedString;
@@ -2023,7 +2274,9 @@ mod tests {
         mapping.operation_failed(&operation);
 
         assert_eq!(mapping.applied, Some(spec));
-        assert_eq!(mapping.next_operation(), Some(operation));
+        assert_eq!(mapping.next_operation(), Some(operation.clone()));
+        mapping.operation_succeeded(operation);
+        assert_eq!(mapping.applied, None);
     }
 
     #[tokio::test]
@@ -2058,19 +2311,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn drain_during_initialization_is_terminal_and_shared() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
+    async fn drain_during_initialization_waits_for_stale_rule_cleanup() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
         let initialization_started = Arc::new(AtomicUsize::new(0));
+        let cleanup_complete = Arc::new(AtomicBool::new(false));
         let initialize = Arc::new(tokio::sync::Notify::new());
         let controller = PortForwardController::spawn({
             let initialization_started = initialization_started.clone();
+            let cleanup_complete = cleanup_complete.clone();
             let initialize = initialize.clone();
             move || {
                 initialization_started.fetch_add(1, Ordering::SeqCst);
+                let cleanup_complete = cleanup_complete.clone();
                 let initialize = initialize.clone();
                 async move {
                     initialize.notified().await;
+                    cleanup_complete.store(true, Ordering::SeqCst);
                     Ok(())
                 }
             }
@@ -2080,20 +2337,18 @@ mod tests {
             tokio::task::yield_now().await;
         }
 
-        {
-            let first = controller.drain();
-            tokio::pin!(first);
-            assert!(futures::poll!(&mut first).is_pending());
-        }
+        let first = controller.drain();
+        tokio::pin!(first);
+        assert!(futures::poll!(&mut first).is_pending());
+        assert!(!cleanup_complete.load(Ordering::SeqCst));
 
-        let (second, concurrent) = tokio::join!(controller.drain(), controller.drain());
-        second.unwrap();
+        initialize.notify_waiters();
+        let (first_result, concurrent) = tokio::join!(first, controller.drain());
+        first_result.unwrap();
         concurrent.unwrap();
         controller.drain().await.unwrap();
         assert!(controller.dump().await.is_err());
-
-        initialize.notify_waiters();
-        tokio::task::yield_now().await;
+        assert!(cleanup_complete.load(Ordering::SeqCst));
         assert_eq!(initialization_started.load(Ordering::SeqCst), 1);
     }
 
@@ -2161,8 +2416,17 @@ mod tests {
                 ..Default::default()
             },
         )]));
-        let port_forward =
-            PortForwardController::spawn(|| std::future::pending::<Result<(), Error>>());
+        let initialize = Arc::new(tokio::sync::Notify::new());
+        let port_forward = PortForwardController::spawn({
+            let initialize = initialize.clone();
+            move || {
+                let initialize = initialize.clone();
+                async move {
+                    initialize.notified().await;
+                    Ok(())
+                }
+            }
+        });
         let controller = InterfacePortForwardController::with_port_forward(
             interfaces.clone(),
             PortMapController::new(interfaces),
@@ -2178,6 +2442,7 @@ mod tests {
                     secure: true,
                 },
                 SocketAddrV4::new(Ipv4Addr::new(10, 0, 3, 2), 8080),
+                24,
             )
             .await
             .unwrap();
@@ -2186,7 +2451,11 @@ mod tests {
 
         assert!(futures::poll!(&mut gc).is_pending());
 
-        tokio::time::timeout(Duration::from_secs(1), controller.drain())
+        let drain = controller.drain();
+        tokio::pin!(drain);
+        assert!(futures::poll!(&mut drain).is_pending());
+        initialize.notify_one();
+        tokio::time::timeout(Duration::from_secs(1), &mut drain)
             .await
             .expect("drain timed out")
             .unwrap();

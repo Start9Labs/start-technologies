@@ -161,7 +161,7 @@ pub fn main(args: impl IntoIterator<Item = OsString>) {
             let mut server = WebServer::new(Acceptor::new(WildcardListener::new(80)?), refresher());
             match inner_main(&mut server, &config).await {
                 Ok(a) => {
-                    server.shutdown().await;
+                    server.shutdown().await?;
                     Ok(a)
                 }
                 Err(e) => {
@@ -192,7 +192,7 @@ pub fn main(args: impl IntoIterator<Item = OsString>) {
                         let shutdown =
                             shutdown.recv().await.with_kind(crate::ErrorKind::Unknown)?;
 
-                        server.shutdown().await;
+                        server.shutdown().await?;
 
                         Ok::<_, Error>(Some(shutdown))
                     }

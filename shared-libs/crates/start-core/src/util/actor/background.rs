@@ -30,11 +30,6 @@ pub struct BackgroundJobRunner {
     recv: mpsc::UnboundedReceiver<BoxFuture<'static, ()>>,
     jobs: FuturesUnordered<BoxFuture<'static, ()>>,
 }
-impl BackgroundJobRunner {
-    pub fn is_empty(&self) -> bool {
-        self.recv.is_empty() && self.jobs.is_empty()
-    }
-}
 impl Future for BackgroundJobRunner {
     type Output = ();
     fn poll(

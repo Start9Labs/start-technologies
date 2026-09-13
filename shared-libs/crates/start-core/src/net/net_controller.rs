@@ -20,7 +20,7 @@ use crate::net::dns::DnsController;
 use crate::net::dns_update::{DnsUpdateController, spawn_server_mdns_injection};
 use crate::net::forward::{
     ForwardRequirements, InterfacePortForwardController, START9_BRIDGE_IFACE, drain_forwarding,
-    nft_rule, nft_rule_v6,
+    nft_rule, nft_rule_v6, target_prefix_for,
 };
 use crate::net::gateway::NetworkInterfaceController;
 use crate::net::host::binding::{AddSslOptions, BindId, BindOptions, UpstreamCertValidation};
@@ -800,9 +800,16 @@ impl NetServiceData {
                 if let Some(prev) = prev {
                     binds.forwards.insert(external, prev);
                 } else {
+                    let target_prefix = target_prefix_for(&net_ifaces, *spec.target.ip(), 32);
                     let result = ctrl
                         .forward
-                        .add_range(external, spec.count, spec.requirements.clone(), spec.target)
+                        .add_range(
+                            external,
+                            spec.count,
+                            spec.requirements.clone(),
+                            spec.target,
+                            target_prefix,
+                        )
                         .await?;
                     binds.forwards.insert(external, (spec, result));
                 }
