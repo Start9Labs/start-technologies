@@ -738,7 +738,7 @@ mod tests {
         assert_client_generation(http.get(), "old").await;
     }
 
-    async fn assert_client_generation(client: Client, generation: &str) -> String {
+    async fn assert_client_generation(client: Client, generation: &str) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let server = tokio::spawn(async move {
@@ -759,6 +759,5 @@ mod tests {
                 .unwrap()
                 .contains(&format!("x-client-generation: {generation}"))
         );
-        url
     }
 }

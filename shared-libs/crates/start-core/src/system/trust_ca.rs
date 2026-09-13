@@ -321,6 +321,45 @@ pub(crate) async fn update_trust_store() -> Result<(), Error> {
     Ok(())
 }
 
+pub(crate) async fn update_trust_store_if_custom_roots_present() -> Result<(), Error> {
+    update_trust_store_if_custom_roots_present_at(
+        Path::new(PERSISTENT_CA_DIRECTORY),
+        update_trust_store,
+    )
+    .await
+}
+
+async fn update_trust_store_if_custom_roots_present_at(
+    persistent: &Path,
+    refresh: impl AsyncFnOnce() -> Result<(), Error>,
+) -> Result<(), Error> {
+    let mut entries = match tokio::fs::read_dir(persistent).await {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error)
+                .with_ctx(|_| (ErrorKind::Filesystem, format!("readdir {persistent:?}")));
+        }
+    };
+    while let Some(entry) = entries
+        .next_entry()
+        .await
+        .with_ctx(|_| (ErrorKind::Filesystem, format!("readdir {persistent:?}")))?
+    {
+        let path = entry.path();
+        if path.extension().is_some_and(|extension| extension == "crt")
+            && entry
+                .file_type()
+                .await
+                .with_ctx(|_| (ErrorKind::Filesystem, format!("stat {path:?}")))?
+                .is_file()
+        {
+            return refresh().await;
+        }
+    }
+    Ok(())
+}
+
 fn render_subject(subject: &X509NameRef) -> String {
     subject
         .entries()
@@ -465,6 +504,7 @@ fn invalid_certificate(error: impl std::fmt::Display) -> Error {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
+    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
     use std::sync::{Arc, Mutex as StdMutex};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -828,6 +868,43 @@ mod tests {
                 .kind,
             ErrorKind::InvalidRequest
         );
+    }
+
+    #[tokio::test]
+    async fn refreshes_trust_store_only_when_custom_root_exists() {
+        let tmp = TmpDir::new().await.unwrap();
+        let refreshes = AtomicUsize::new(0);
+
+        update_trust_store_if_custom_roots_present_at(&tmp, || async {
+            refreshes.fetch_add(1, AtomicOrdering::SeqCst);
+            Ok(())
+        })
+        .await
+        .unwrap();
+        tokio::fs::create_dir(tmp.join("directory.crt"))
+            .await
+            .unwrap();
+        write_file_atomic(&tmp.join("ignored.pem"), b"certificate")
+            .await
+            .unwrap();
+        update_trust_store_if_custom_roots_present_at(&tmp, || async {
+            refreshes.fetch_add(1, AtomicOrdering::SeqCst);
+            Ok(())
+        })
+        .await
+        .unwrap();
+        write_file_atomic(&tmp.join("custom.crt"), b"certificate")
+            .await
+            .unwrap();
+        update_trust_store_if_custom_roots_present_at(&tmp, || async {
+            refreshes.fetch_add(1, AtomicOrdering::SeqCst);
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(refreshes.load(AtomicOrdering::SeqCst), 1);
+        tmp.delete().await.unwrap();
     }
 
     #[tokio::test]

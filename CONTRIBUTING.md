@@ -132,7 +132,7 @@ Builds are parameterized by environment variables shared across all products:
 | `PROFILE`            | Build profile: `release` (default) or `dev`.                                                       |
 | `GIT_BRANCH_AS_HASH` | Set to `1` to use the git branch name as the version hash (avoids rebuilds).                       |
 
-Each product's `CONTRIBUTING.md` documents the `PLATFORM` values and `ENVIRONMENT` flags it actually supports.
+See each product's build guide linked above for its supported build configuration.
 
 ## Testing
 
@@ -148,7 +148,7 @@ make start-wrt-test           # StartWRT Rust crates
 cd shared-libs/crates/start-core && cargo test <test_name> --features=test
 ```
 
-Each product's `CONTRIBUTING.md` covers its own scoped tests.
+See each product's build guide linked above for its scoped tests.
 
 ## Formatting
 
