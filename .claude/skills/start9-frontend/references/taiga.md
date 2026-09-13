@@ -74,7 +74,11 @@ nothing may import it. When in doubt: the official MCP
   `@tui-desktop` in `@taiga-ui/styles/utils` (boundaries ≈ 767.4 / 1023.4 / 1279.4 px).
 - `[tuiSkeleton]="loadingOrLineCount"` on any element; `tuiFade` / `tui-line-clamp` for
   truncation; `<tui-scrollbar>` for themed scrollbars (`provideTaiga({ scrollbars: 'native' })`
-  opts out — the fleet's embedded UIs do).
+  opts out — the fleet's embedded UIs do). `tui-scrollbar`'s inner `.t-content` is
+  `min-inline-size: fit-content`, so one `white-space: nowrap` descendant widens the whole
+  scroll area and pushes a row's trailing content out of view — pair `tuiFade` truncation
+  inside a scrollbar with `:host ::ng-deep tui-scrollbar > .t-content { min-inline-size: 0 }`
+  (`.t-content` alone ties on specificity and loses).
 
 ### Overlay facts
 

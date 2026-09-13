@@ -52,7 +52,7 @@ A component that **is** a control (button, link, badge, row, card, shell chrome)
 @Component({
   selector: 'a[marketplacePackageLink]',
   hostDirectives: [TuiButton],
-  host: { target: '_blank', rel: 'noreferrer' },
+  host: { tuiButton: '', target: '_blank', rel: 'noreferrer' },
   providers: [tuiButtonOptionsProvider({ size: 's', appearance: 'flat-grayscale' })],
   ...
 })
@@ -60,6 +60,11 @@ A component that **is** a control (button, link, badge, row, card, shell chrome)
 // NO — a <my-thing> wrapper around a styled child with a
 // :host { display: grid } stretch hack — these get unwrapped in review.
 ```
+
+**Stamp the host directive's own attribute** (`host: { tuiButton: '' }`) — Taiga's CSS is keyed
+on `[tuiButton]`, `[tuiChip]`, `[tuiBadge]`, and a host directive does not add its selector to
+the element. Skip it and the directive runs with none of its styling, silently: no chrome, no
+`iconStart`. `TuiCell` and `TuiCardLarge` stamp theirs; `TuiButton`, `TuiChip`, `TuiBadge` don't.
 
 Real fleet examples: `header[appHeader]`, `footer[appFooter]`, `button[marketplaceTile]`
 (+`TuiCardLarge`), `button[server]` (+`TuiCell`), `table[appTable]`
