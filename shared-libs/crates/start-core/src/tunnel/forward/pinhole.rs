@@ -230,11 +230,14 @@ pub async fn remove_pinhole(ctx: &TunnelContext, gua: Ipv6Addr, external_port: u
     }
 }
 
+pub(crate) async fn cleanup_pinholes() -> Result<(), Error> {
+    nft_delete_rules_with_comment_prefix_v6(&["prerouting", "forward"], "pinhole:").await
+}
+
 pub(crate) async fn drain_pinholes() -> Result<(), Error> {
     let mut attempt = 1_u64;
     loop {
-        match nft_delete_rules_with_comment_prefix_v6(&["prerouting", "forward"], "pinhole:").await
-        {
+        match cleanup_pinholes().await {
             Ok(()) => return Ok(()),
             Err(error) => {
                 tracing::warn!("pinhole drain failed on attempt {attempt}: {error:#}");

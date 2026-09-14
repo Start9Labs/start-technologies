@@ -385,6 +385,7 @@ pub async fn set_auto_port_forward(
         enabled,
     }: SetAutoPortForwardParams,
 ) -> Result<(), Error> {
+    let _admission = ctx.forwarding_admission().await?;
     ctx.db
         .mutate(|db| {
             db.as_wg_mut()
@@ -426,6 +427,7 @@ pub async fn set_device_kind(
     ctx: TunnelContext,
     SetDeviceKindParams { subnet, ip, kind }: SetDeviceKindParams,
 ) -> Result<(), Error> {
+    let _admission = ctx.forwarding_admission().await?;
     let autoconfig = matches!(kind, WgClientKind::Server);
     ctx.db
         .mutate(|db| {
@@ -634,6 +636,7 @@ pub async fn remove_subnet(
     _: Empty,
     SubnetParams { subnet }: SubnetParams,
 ) -> Result<(), Error> {
+    let _admission = ctx.forwarding_admission().await?;
     let (server, gc) = ctx
         .db
         .mutate(|db| {
@@ -789,6 +792,7 @@ pub async fn set_subnet_wan(
     SetSubnetWanParams { wan_ip }: SetSubnetWanParams,
     SubnetParams { subnet }: SubnetParams,
 ) -> Result<(), Error> {
+    let _admission = ctx.forwarding_admission().await?;
     ctx.db
         .mutate(|db| {
             db.as_wg_mut()
@@ -944,6 +948,7 @@ pub async fn set_device_wan(
     ctx: TunnelContext,
     SetDeviceWanParams { subnet, ip, wan_ip }: SetDeviceWanParams,
 ) -> Result<(), Error> {
+    let _admission = ctx.forwarding_admission().await?;
     ctx.db
         .mutate(|db| {
             db.as_wg_mut()
@@ -1088,6 +1093,7 @@ pub async fn remove_device(
     ctx: TunnelContext,
     RemoveDeviceParams { subnet, ip }: RemoveDeviceParams,
 ) -> Result<(), Error> {
+    let _admission = ctx.forwarding_admission().await?;
     // Tear down the device's exposure (v4 forwards, SNI routes, v6 pinholes, and
     // their leases) before it's gone. `gc_forwards` below reclaims v4/SNI for any
     // departed client, but not v6 pinholes, so clear them here.
@@ -1236,6 +1242,7 @@ pub async fn add_forward(
         count,
     }: AddPortForwardParams,
 ) -> Result<(), Error> {
+    let _admission = ctx.forwarding_admission().await?;
     let count = count.unwrap_or(1);
     if count == 0 {
         return Err(Error::new(
@@ -1390,6 +1397,7 @@ pub async fn remove_forward(
     ctx: TunnelContext,
     RemovePortForwardParams { source, hostname }: RemovePortForwardParams,
 ) -> Result<(), Error> {
+    let _admission = ctx.forwarding_admission().await?;
     let entry = ctx
         .db
         .peek()
@@ -1523,6 +1531,7 @@ pub async fn set_forward_enabled(
         hostname,
     }: SetPortForwardEnabledParams,
 ) -> Result<(), Error> {
+    let _admission = ctx.forwarding_admission().await?;
     let _guard = ctx.forward_write_lock.lock().await;
     let toggle = ctx
         .db
@@ -1643,6 +1652,7 @@ pub async fn add_pinhole(
         count,
     }: AddPinholeParams,
 ) -> Result<(), Error> {
+    let _admission = ctx.forwarding_admission().await?;
     let count = count.unwrap_or(1);
     if count == 0 {
         return Err(Error::new(
@@ -1685,6 +1695,7 @@ pub async fn remove_pinhole(
     ctx: TunnelContext,
     RemovePinholeParams { gua, external_port }: RemovePinholeParams,
 ) -> Result<(), Error> {
+    let _admission = ctx.forwarding_admission().await?;
     pinhole::remove_pinhole(&ctx, gua, external_port).await;
     Ok(())
 }
@@ -1729,6 +1740,7 @@ pub async fn set_pinhole_enabled(
         enabled,
     }: SetPinholeEnabledParams,
 ) -> Result<(), Error> {
+    let _admission = ctx.forwarding_admission().await?;
     pinhole::set_pinhole_enabled(&ctx, gua, external_port, enabled).await
 }
 

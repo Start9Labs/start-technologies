@@ -22,7 +22,6 @@ use nix::net::if_::if_nametoindex;
 use socket2::{Domain, InterfaceIndexOrAddress, Protocol, SockAddr, Socket, Type};
 use tokio::net::{TcpListener, UdpSocket};
 use tokio::sync::broadcast::Receiver;
-use tokio::sync::broadcast::error::TryRecvError;
 use tokio::sync::oneshot;
 
 use crate::db::model::public::NetworkInterfaceType;
@@ -35,6 +34,7 @@ use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::db::PortForward;
 use crate::tunnel::forward::lease::{self, LeaseKey};
+use crate::tunnel::forward::shutdown_pending;
 use crate::tunnel::wg::WIREGUARD_INTERFACE_NAME;
 
 const REBIND_GRACE_TIMEOUT: Duration = Duration::from_secs(15);
@@ -60,13 +60,6 @@ pub async fn run(ctx: TunnelContext, mut startup_shutdown: Receiver<Option<bool>
         http_server(ctx.clone(), root_desc, http_shutdown),
         ssdp_server(ctx, uuid, ssdp_shutdown),
     );
-}
-
-fn shutdown_pending(shutdown: &mut Receiver<Option<bool>>) -> bool {
-    match shutdown.try_recv() {
-        Ok(_) | Err(TryRecvError::Closed | TryRecvError::Lagged(_)) => true,
-        Err(TryRecvError::Empty) => false,
-    }
 }
 
 async fn device_uuid(ctx: &TunnelContext) -> Result<String, Error> {
@@ -330,7 +323,7 @@ async fn control(
     let IpAddr::V4(peer) = from.ip() else {
         return StatusCode::BAD_REQUEST.into_response();
     };
-    let Some(_admission) = ctx.forwarding_admission().await else {
+    let Ok(_admission) = ctx.forwarding_admission().await else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
     handle_control(&ctx, peer, &headers, &body).await

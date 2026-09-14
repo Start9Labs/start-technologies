@@ -225,6 +225,7 @@ pub struct TunnelContext(Arc<TunnelContextSeed>);
 impl TunnelContext {
     #[instrument(skip_all)]
     pub async fn init(config: &TunnelConfig) -> Result<Self, Error> {
+        crate::tunnel::forward::pinhole::cleanup_pinholes().await?;
         Self::init_auth_cookie().await?;
         let (shutdown, _) = tokio::sync::broadcast::channel(1);
         let datadir = config
@@ -431,39 +432,57 @@ impl TunnelContext {
         Ok(ctx)
     }
 
-    pub(crate) fn spawn_forwarding_servers(&self) -> [NonDetachingJoinHandle<()>; 3] {
+    pub(crate) fn spawn_forwarding_servers(
+        &self,
+    ) -> [(&'static str, NonDetachingJoinHandle<()>); 3] {
         let pcp_shutdown = self.shutdown.subscribe();
         let igd_shutdown = self.shutdown.subscribe();
         let lease_shutdown = self.shutdown.subscribe();
         [
-            tokio::spawn(crate::tunnel::forward::pcp::run(self.clone(), pcp_shutdown)).into(),
-            tokio::spawn(crate::tunnel::forward::igd::run(self.clone(), igd_shutdown)).into(),
-            tokio::spawn(crate::tunnel::forward::lease::run(
-                self.clone(),
-                lease_shutdown,
-            ))
-            .into(),
+            (
+                "PCP",
+                tokio::spawn(crate::tunnel::forward::pcp::run(self.clone(), pcp_shutdown)).into(),
+            ),
+            (
+                "IGD",
+                tokio::spawn(crate::tunnel::forward::igd::run(self.clone(), igd_shutdown)).into(),
+            ),
+            (
+                "lease",
+                tokio::spawn(crate::tunnel::forward::lease::run(
+                    self.clone(),
+                    lease_shutdown,
+                ))
+                .into(),
+            ),
         ]
     }
 
     pub(crate) async fn forwarding_admission(
         &self,
-    ) -> Option<tokio::sync::RwLockReadGuard<'_, ()>> {
+    ) -> Result<tokio::sync::RwLockReadGuard<'_, ()>, Error> {
         if self.forwarding_closed.load(Ordering::Acquire) {
-            return None;
+            return Err(Error::new(
+                eyre!("{}", t!("error.cancelled")),
+                ErrorKind::Cancelled,
+            ));
         }
         let admission = self.forwarding_active.read().await;
         if self.forwarding_closed.load(Ordering::Acquire) {
-            None
+            Err(Error::new(
+                eyre!("{}", t!("error.cancelled")),
+                ErrorKind::Cancelled,
+            ))
         } else {
-            Some(admission)
+            Ok(admission)
         }
     }
 
     pub(crate) async fn drain_forwarding(&self) -> Result<(), Error> {
         self.forwarding_closed.store(true, Ordering::Release);
+        let _admission = self.forwarding_active.write().await;
         let pinholes = async {
-            let _admission = self.forwarding_active.write().await;
+            self.sni.shutdown().await;
             self.active_forwards.mutate(BTreeMap::clear);
             crate::tunnel::forward::pinhole::drain_pinholes().await
         };

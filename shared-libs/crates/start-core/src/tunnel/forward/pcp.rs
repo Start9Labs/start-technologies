@@ -13,7 +13,6 @@ use std::time::{Duration, Instant};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tokio::net::UdpSocket;
 use tokio::sync::broadcast::Receiver;
-use tokio::sync::broadcast::error::TryRecvError;
 
 use crate::net::port_map::server::{GatewayBackend, MappingEntry, PCP_PORT, handle, handle6};
 use crate::prelude::*;
@@ -23,16 +22,13 @@ use crate::tunnel::forward::igd::{
     apply_peer_forward_range, bind_to_wireguard, external_ipv4, is_known_client,
 };
 use crate::tunnel::forward::lease::{self, LeaseKey};
+use crate::tunnel::forward::shutdown_pending;
 use crate::tunnel::forward::sni::SniDemux;
 use crate::tunnel::wg::WIREGUARD_INTERFACE_NAME;
 
 enum ServeEnd {
     Rebind,
     Shutdown,
-}
-
-fn shutdown_pending(shutdown: &mut Receiver<Option<bool>>) -> bool {
-    !matches!(shutdown.try_recv(), Err(TryRecvError::Empty))
 }
 
 /// Runs IPv4 and IPv6 PCP listeners, rebinding after WireGuard recreation.

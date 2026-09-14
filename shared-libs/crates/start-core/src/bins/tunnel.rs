@@ -6,7 +6,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
-use futures::FutureExt;
+use futures::stream::FuturesUnordered;
+use futures::{FutureExt, StreamExt};
 use patch_db::json_ptr::ROOT;
 use rpc_toolkit::CliApp;
 use rust_i18n::t;
@@ -51,56 +52,44 @@ async fn await_task(name: &str, task: NonDetachingJoinHandle<()>) {
     log_task_result(name, task.await);
 }
 
-async fn stop_forwarding_tasks(tasks: [NonDetachingJoinHandle<()>; 3]) {
-    let [mut pcp, mut igd, mut lease] = tasks;
-    let mut pcp_done = false;
-    let mut igd_done = false;
-    let mut lease_done = false;
-    let timeout = tokio::time::sleep(FORWARDING_TASK_SHUTDOWN_TIMEOUT);
-    tokio::pin!(timeout);
-
-    while !(pcp_done && igd_done && lease_done) {
-        tokio::select! {
-            biased;
-            _ = &mut timeout => break,
-            result = &mut pcp, if !pcp_done => {
-                log_task_result("PCP", result);
-                pcp_done = true;
-            }
-            result = &mut igd, if !igd_done => {
-                log_task_result("IGD", result);
-                igd_done = true;
-            }
-            result = &mut lease, if !lease_done => {
-                log_task_result("lease", result);
-                lease_done = true;
-            }
+async fn stop_forwarding_tasks(
+    tasks: impl IntoIterator<Item = (&'static str, NonDetachingJoinHandle<()>)>,
+) {
+    let mut tasks = tasks
+        .into_iter()
+        .map(|(name, task)| (name, Some(task)))
+        .collect::<Vec<_>>();
+    let timed_out = tokio::time::timeout(FORWARDING_TASK_SHUTDOWN_TIMEOUT, async {
+        let mut pending = tasks
+            .iter_mut()
+            .map(|(name, task)| {
+                let name = *name;
+                async move {
+                    let result = task.as_mut().expect("pending forwarding task").await;
+                    task.take();
+                    (name, result)
+                }
+            })
+            .collect::<FuturesUnordered<_>>();
+        while let Some((name, result)) = pending.next().await {
+            log_task_result(name, result);
         }
-    }
+    })
+    .await
+    .is_err();
 
-    if pcp_done && igd_done && lease_done {
+    if !timed_out {
         return;
     }
     tracing::warn!(
         "forwarding servers did not stop within {FORWARDING_TASK_SHUTDOWN_TIMEOUT:?}; aborting"
     );
-    if !pcp_done {
-        pcp.abort();
-    }
-    if !igd_done {
-        igd.abort();
-    }
-    if !lease_done {
-        lease.abort();
-    }
-    if !pcp_done {
-        log_task_result("PCP", pcp.await);
-    }
-    if !igd_done {
-        log_task_result("IGD", igd.await);
-    }
-    if !lease_done {
-        log_task_result("lease", lease.await);
+    for (name, task) in tasks
+        .into_iter()
+        .filter_map(|(name, task)| task.map(|task| (name, task)))
+    {
+        task.abort();
+        log_task_result(name, task.await);
     }
 }
 
@@ -250,18 +239,27 @@ async fn inner_main(config: &TunnelConfig) -> Result<Option<bool>, Error> {
     .await;
     let server_result = server.shutdown().await;
 
-    if let Err(error) = crate::net::forward::timeout_forwarding_drain(async {
+    let forwarding_result = crate::net::forward::timeout_forwarding_drain(async {
         stop_forwarding_tasks(forwarding_threads).await;
         ctx.drain_forwarding().await
     })
-    .await
-    {
-        tracing::error!("forwarding cleanup failed: {error}");
-        tracing::debug!("{error:?}");
-    }
+    .await;
 
-    server_result?;
-    shutdown
+    if let Err(error) = server_result {
+        forwarding_result.log_err();
+        return Err(error);
+    }
+    match shutdown {
+        Ok(None) => forwarding_result.map(|()| None),
+        Ok(Some(action)) => {
+            forwarding_result.log_err();
+            Ok(Some(action))
+        }
+        Err(error) => {
+            forwarding_result.log_err();
+            Err(error)
+        }
+    }
 }
 
 pub fn main(args: impl IntoIterator<Item = OsString>) {

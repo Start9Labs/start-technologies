@@ -457,6 +457,24 @@ impl SniDemux {
         }
     }
 
+    pub async fn shutdown(&self) {
+        self.ports.mutate(BTreeMap::clear);
+        let listeners = self.listeners.mutate(std::mem::take);
+        for ((_, port), listener) in &listeners {
+            listener.abort();
+            if let Some(on_change) = &self.on_change {
+                on_change(*port, false);
+            }
+        }
+        for (_, listener) in listeners {
+            if let Err(error) = listener.await {
+                if !error.is_cancelled() {
+                    tracing::error!("SNI listener task failed: {error}");
+                }
+            }
+        }
+    }
+
     fn prune(&self) {
         let now = Instant::now();
         let empty: Vec<PortKey> = self.ports.mutate(|ports| {
@@ -843,6 +861,36 @@ mod tests {
             .unwrap();
         assert_eq!(demux.snapshot().len(), 1);
         assert_eq!(events.peek(|e| e.clone()), vec![(port, true)]);
+    }
+
+    #[tokio::test]
+    async fn shutdown_stops_listeners_and_clears_routes() {
+        let events = Arc::new(SyncMutex::new(Vec::<(u16, bool)>::new()));
+        let recorded = events.clone();
+        let demux = SniDemux::with_on_change(
+            move |port, active| recorded.mutate(|events| events.push((port, active))),
+            None,
+        );
+        let probe = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+        demux
+            .register(
+                Ipv4Addr::LOCALHOST,
+                port,
+                &["shutdown.example.com".to_string()],
+                "10.0.0.1:443".parse().unwrap(),
+                None,
+            )
+            .unwrap();
+
+        demux.shutdown().await;
+
+        demux
+            .listeners
+            .peek(|listeners| assert!(listeners.is_empty()));
+        demux.ports.peek(|ports| assert!(ports.is_empty()));
+        assert_eq!(events.peek(Clone::clone), vec![(port, true), (port, false)]);
     }
 
     #[tokio::test]

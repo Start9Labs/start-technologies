@@ -17,6 +17,13 @@ use crate::tunnel::context::TunnelContext;
 use crate::tunnel::db::PortForward;
 use crate::tunnel::wg6::host_v6;
 
+fn shutdown_pending(shutdown: &mut tokio::sync::broadcast::Receiver<Option<bool>>) -> bool {
+    !matches!(
+        shutdown.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+    )
+}
+
 /// Tear down a device's inbound exposure — v4 DNAT forwards, SNI routes, and v6
 /// pinholes — when it loses the right to it: a device deleted, demoted to a
 /// client, or (with `auto_only`) having automatic forwarding switched off.
