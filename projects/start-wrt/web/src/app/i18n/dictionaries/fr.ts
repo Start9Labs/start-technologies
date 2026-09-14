@@ -544,4 +544,6 @@ export default {
   552: 'Publier quand même ?',
   553: 'Port utilisé par des routes par nom d’hôte',
   554: 'Type',
+  555: 'Pays',
+  556: 'Sélectionnez le pays dans lequel ce routeur fonctionne pour débloquer les canaux Wi-Fi et la puissance d’émission autorisés sur place. En attendant, il utilise un sous-ensemble prudent valable dans le monde entier.',
 } satisfies i18n

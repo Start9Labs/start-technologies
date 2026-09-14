@@ -544,4 +544,6 @@ export default {
   552: '¿Publicar de todos modos?',
   553: 'Puerto usado por rutas de nombre de host',
   554: 'Tipo',
+  555: 'País',
+  556: 'Seleccione el país en el que funciona este router para habilitar los canales Wi-Fi y la potencia de transmisión permitidos allí. Hasta entonces se usa un subconjunto conservador válido en todo el mundo.',
 } satisfies i18n

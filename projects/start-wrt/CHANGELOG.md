@@ -5,6 +5,17 @@ All notable changes to StartWRT are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0]
+
+### Added
+
+- **Wi-Fi regulatory country.** `Points of Entry > Wi-Fi > Settings` gains a
+  Country selector. The selected country sets the channels each band may use
+  and the maximum transmit power; the channel dropdowns list only what that
+  country permits. With no country selected the router runs on a conservative
+  worldwide subset (2.4 GHz channels 1–11, 5 GHz channels 36–48, 20 dBm), so
+  select yours after setup.
+
 ## [1.1.1]
 
 ### Fixed

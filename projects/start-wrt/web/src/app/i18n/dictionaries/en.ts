@@ -549,4 +549,6 @@ export const ENGLISH: Record<string, number> = {
   'Publish anyway?': 552,
   'Port Used for Hostname Routes': 553,
   'Kind': 554,
+  'Country': 555,
+  'Select the country this router operates in to unlock the Wi-Fi channels and transmit power permitted there. Until then it uses a conservative worldwide subset.': 556,
 }

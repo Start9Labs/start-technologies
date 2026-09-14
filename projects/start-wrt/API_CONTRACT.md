@@ -1423,6 +1423,9 @@ struct WifiPassword {
 struct WifiConfig {
     ssid: String,
     broadcast_separately: bool,
+    /// ISO 3166-1 alpha-2 regulatory country, written to every radio. `null`
+    /// (the factory state) leaves the radios on the world domain.
+    country: Option<String>,
     radios: HashMap<String, WifiRadio>,
     passwords: Vec<WifiPassword>,
 }
@@ -1512,6 +1515,25 @@ web UI.
 ```rust
 // Request: {}
 // Response: String — a random 16-character alphanumeric password
+```
+
+### `wifi.regulatory`
+
+```rust
+// Request: {}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WifiRegulatory {
+    /// ISO 3166-1 alpha-2 codes the firmware's regulatory database defines —
+    /// the values `wifi.set` accepts for `country`.
+    countries: Vec<String>,
+    /// Channels an access point may use under the country currently in force,
+    /// keyed by band ("2g", "5g"). Re-read after a `wifi.set` that changes
+    /// `country`; a channel outside this list leaves that radio down.
+    channels: HashMap<String, Vec<u32>>,
+}
+// Response: WifiRegulatory
 ```
 
 ---
@@ -1946,6 +1968,7 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `wifi.blackout-get`            | WiFi            |                             |
 | `wifi.blackout-set`            | WiFi            |                             |
 | `wifi.generate-password`       | WiFi            |                             |
+| `wifi.regulatory`              | WiFi            |                             |
 | `profiles.list`                | Profiles        |                             |
 | `profiles.get`                 | Profiles        |                             |
 | `profiles.create`              | Profiles        |                             |

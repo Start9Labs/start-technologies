@@ -471,6 +471,10 @@ Le mot de passe que les appareils utiliseront pour se connecter. Doit comporter 
 Contrôle ce à quoi l’appareil connecté peut accéder sur le réseau. Attribuez un profil de sécurité pour limiter ou accorder l’accès à des ressources spécifiques.`,
   '/wifi/settings': `## Wi-Fi – Paramètres
 
+### Pays
+
+Le pays dont le routeur suit la réglementation Wi-Fi. Il détermine les canaux que chaque bande peut utiliser et la puissance d’émission autorisée. Tant qu’aucun pays n’est sélectionné, le routeur fonctionne avec un sous-ensemble prudent valable dans le monde entier : canaux 1–11 en 2,4 GHz et canaux 36–48 en 5 GHz à puissance réduite. Changer de pays réinitialise la sélection des canaux sur Auto. Choisissez le pays où le routeur se trouve physiquement.
+
 ### Activer le Wi-Fi
 
 Allumez ou éteignez la radio sans fil. Lorsqu’elle est désactivée, aucun appareil ne peut se connecter en Wi-Fi.

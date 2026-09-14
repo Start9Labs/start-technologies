@@ -471,6 +471,10 @@ La contraseña que usarán los dispositivos para conectarse. Debe tener al menos
 Controla a qué puede acceder el dispositivo conectado en la red. Asigna un perfil de seguridad para limitar o conceder acceso a recursos específicos.`,
   '/wifi/settings': `## Wi-Fi – Ajustes
 
+### País
+
+El país cuya normativa Wi-Fi sigue el router. Determina qué canales puede usar cada banda y cuánta potencia de transmisión está permitida. Hasta que se seleccione un país, el router funciona con un subconjunto conservador válido en todo el mundo: canales 1–11 en 2,4 GHz y canales 36–48 en 5 GHz con potencia reducida. Cambiar el país restablece la selección de canales a Auto. Elija el país en el que el router está físicamente ubicado.
+
 ### Habilitar Wi-Fi
 
 Enciende o apaga la radio inalámbrica. Cuando está deshabilitada, ningún dispositivo puede conectarse por Wi-Fi.
