@@ -215,11 +215,10 @@ impl GatewayBackend for TunnelContext {
             Some(PortForward::Sni {
                 fallback: Some(fallback),
                 ..
-            }) if *fallback.target.ip() == peer => {
-                self.remove_sni_fallback_locked(source, fallback.target)
-                    .await;
-                true
-            }
+            }) if *fallback.target.ip() == peer => self
+                .remove_sni_fallback_locked(source, fallback.target)
+                .await
+                .is_ok(),
             _ => false,
         }
     }
@@ -252,28 +251,23 @@ impl GatewayBackend for TunnelContext {
             count,
             None,
             true,
+            lifetime,
         )
         .await
         .map_err(|e| {
             tracing::warn!("PCP v6 pinhole {gua}:{external_port} failed: {e}");
             0u16
-        })?;
-        if let Some(lt) = lifetime {
-            lease::stamp(
-                self,
-                LeaseKey::Pinhole(SocketAddrV6::new(gua, external_port, 0, 0)),
-                lt,
-            );
-        }
-        Ok(())
+        })
     }
 
-    async fn remove_pinhole(&self, gua: Ipv6Addr, external_port: u16) {
-        crate::tunnel::forward::pinhole::remove_pinhole(self, gua, external_port).await;
-        lease::forget(
-            self,
-            &LeaseKey::Pinhole(SocketAddrV6::new(gua, external_port, 0, 0)),
-        );
+    async fn remove_pinhole(&self, gua: Ipv6Addr, external_port: u16) -> Result<(), u16> {
+        crate::tunnel::forward::pinhole::remove_pinhole(self, gua, external_port)
+            .await
+            .map_err(|error| {
+                tracing::warn!("PCP pinhole removal failed: {error:#}");
+                0u16
+            })?;
+        Ok(())
     }
 
     async fn list_forwards(&self, peer: Ipv4Addr) -> Vec<MappingEntry> {
@@ -307,18 +301,32 @@ impl GatewayBackend for TunnelContext {
         target: SocketAddrV4,
         hostnames: &[String],
     ) {
+        self.remove_sni_forward_result(source, target, hostnames)
+            .await
+            .log_err();
+    }
+}
+
+impl TunnelContext {
+    pub(super) async fn remove_sni_forward_result(
+        &self,
+        source: SocketAddrV4,
+        target: SocketAddrV4,
+        hostnames: &[String],
+    ) -> Result<(), Error> {
         let _guard = self.forward_write_lock.lock().await;
+        self.remove_sni_forward_locked(source, target, hostnames)
+            .await
+    }
+
+    pub(crate) async fn remove_sni_forward_locked(
+        &self,
+        source: SocketAddrV4,
+        target: SocketAddrV4,
+        hostnames: &[String],
+    ) -> Result<(), Error> {
         self.sni
             .unregister(*source.ip(), source.port(), hostnames, target);
-        for h in hostnames {
-            lease::forget(
-                self,
-                &LeaseKey::Sni {
-                    source,
-                    hostname: h.clone(),
-                },
-            );
-        }
         let hostnames = hostnames.to_vec();
         self.db
             .mutate(|db| {
@@ -336,8 +344,11 @@ impl GatewayBackend for TunnelContext {
                 })
             })
             .await
-            .result
-            .log_err();
+            .result?;
+        for hostname in hostnames {
+            lease::forget(self, &LeaseKey::Sni { source, hostname });
+        }
+        Ok(())
     }
 }
 
@@ -576,7 +587,9 @@ impl TunnelContext {
             .register_fallback(*source.ip(), source.port(), target)
             .is_err()
         {
-            self.remove_sni_fallback_locked(source, target).await;
+            self.remove_sni_fallback_locked(source, target)
+                .await
+                .log_err();
             return Err(crate::net::port_map::pcp::hostname::RESULT_HOSTNAME_TAKEN);
         }
         if let Some(lt) = lifetime {
@@ -587,19 +600,22 @@ impl TunnelContext {
 
     /// Remove the hostname-less fallback on `source`, only if held by `target`.
     /// Drops the shared port entirely if no SNI routes remain either.
-    pub async fn remove_sni_fallback(&self, source: SocketAddrV4, target: SocketAddrV4) {
-        let _guard = self.forward_write_lock.lock().await;
-        self.remove_sni_fallback_locked(source, target).await;
-    }
-
-    pub(super) async fn remove_sni_fallback_locked(
+    pub async fn remove_sni_fallback(
         &self,
         source: SocketAddrV4,
         target: SocketAddrV4,
-    ) {
+    ) -> Result<(), Error> {
+        let _guard = self.forward_write_lock.lock().await;
+        self.remove_sni_fallback_locked(source, target).await
+    }
+
+    pub(crate) async fn remove_sni_fallback_locked(
+        &self,
+        source: SocketAddrV4,
+        target: SocketAddrV4,
+    ) -> Result<(), Error> {
         self.sni
             .unregister_fallback(*source.ip(), source.port(), target);
-        lease::forget(self, &LeaseKey::SniFallback(source));
         self.db
             .mutate(|db| {
                 db.as_port_forwards_mut().mutate(|pf| {
@@ -618,8 +634,9 @@ impl TunnelContext {
                 })
             })
             .await
-            .result
-            .log_err();
+            .result?;
+        lease::forget(self, &LeaseKey::SniFallback(source));
+        Ok(())
     }
 }
 
@@ -727,7 +744,9 @@ async fn remove_peer_forward(ctx: &TunnelContext, peer: Ipv4Addr, internal_port:
         return;
     };
     if is_sni {
-        ctx.remove_sni_fallback_locked(source, target).await;
+        ctx.remove_sni_fallback_locked(source, target)
+            .await
+            .log_err();
         return;
     }
     ctx.db

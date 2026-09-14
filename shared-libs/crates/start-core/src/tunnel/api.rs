@@ -1311,10 +1311,7 @@ pub async fn add_forward(
         ));
     }
 
-    // DB is the source of truth: atomically reject an overlapping or duplicate
-    // forward and reserve the slot in one mutate before touching the dataplane
-    // (mirrors add_sni_forward). A detached peek-then-insert let two concurrent
-    // adds both pass the overlap check.
+    let _guard = ctx.forward_write_lock.lock().await;
     ctx.db
         .mutate(|db| {
             db.as_port_forwards_mut().mutate(|pf| {
@@ -1398,6 +1395,7 @@ pub async fn remove_forward(
     RemovePortForwardParams { source, hostname }: RemovePortForwardParams,
 ) -> Result<(), Error> {
     let _admission = ctx.forwarding_admission().await?;
+    let _guard = ctx.forward_write_lock.lock().await;
     let entry = ctx
         .db
         .peek()
@@ -1417,25 +1415,24 @@ pub async fn remove_forward(
                 None => routes.iter().map(|(h, r)| (h.clone(), r.target)).collect(),
             };
             for (h, route_target) in to_remove {
-                ctx.remove_sni_forward(source, route_target, &[h]).await;
+                ctx.remove_sni_forward_locked(source, route_target, &[h])
+                    .await?;
             }
             // Removing the whole forward (no hostname) also drops its fallback.
             if hostname.is_none() {
                 if let Some(f) = fallback {
-                    ctx.remove_sni_fallback(source, f.target).await;
+                    ctx.remove_sni_fallback_locked(source, f.target).await?;
                 }
             }
             Ok(())
         }
         Some(PortForward::Dnat { .. }) => {
+            drop(ctx.active_forwards.mutate(|m| m.remove(&source)));
+            ctx.forward.gc().await?;
             ctx.db
                 .mutate(|db| db.as_port_forwards_mut().remove(&source))
                 .await
                 .result?;
-            if let Some(rc) = ctx.active_forwards.mutate(|m| m.remove(&source)) {
-                drop(rc);
-                ctx.forward.gc().await?;
-            }
             Ok(())
         }
         None => Ok(()),
@@ -1516,7 +1513,7 @@ pub struct SetPortForwardEnabledParams {
 
 /// Carries what the db.mutate selected so the dataplane action runs after it.
 enum ForwardToggle {
-    Dnat(SocketAddrV4),
+    Dnat(SocketAddrV4, u16),
     Sni {
         hostname: String,
         target: SocketAddrV4,
@@ -1545,10 +1542,13 @@ pub async fn set_forward_enabled(
                 })?;
                 match entry {
                     PortForward::Dnat {
-                        enabled: e, target, ..
+                        enabled: e,
+                        target,
+                        count,
+                        ..
                     } => {
                         *e = enabled;
-                        Ok(ForwardToggle::Dnat(*target))
+                        Ok(ForwardToggle::Dnat(*target, *count))
                     }
                     PortForward::Sni { routes, .. } => {
                         let hostname = hostname.clone().ok_or_else(|| {
@@ -1576,12 +1576,12 @@ pub async fn set_forward_enabled(
         .result?;
 
     match toggle {
-        ForwardToggle::Dnat(target) => {
+        ForwardToggle::Dnat(target, count) => {
             if enabled {
                 let prefix = crate::tunnel::forward::igd::prefix_for(&ctx, target.ip()).await;
                 let rc = ctx
                     .forward
-                    .add_forward(source, target, prefix, None)
+                    .add_forward_range(source, target, count, prefix, None)
                     .await?;
                 ctx.active_forwards.mutate(|m| {
                     m.insert(source, rc);
@@ -1679,7 +1679,17 @@ pub async fn add_pinhole(
             ErrorKind::InvalidRequest,
         ));
     }
-    pinhole::add_pinhole(&ctx, gua, external_port, internal, count, label, false).await
+    pinhole::add_pinhole(
+        &ctx,
+        gua,
+        external_port,
+        internal,
+        count,
+        label,
+        false,
+        None,
+    )
+    .await
 }
 
 #[derive(Deserialize, Serialize, Parser, TS)]
@@ -1696,7 +1706,7 @@ pub async fn remove_pinhole(
     RemovePinholeParams { gua, external_port }: RemovePinholeParams,
 ) -> Result<(), Error> {
     let _admission = ctx.forwarding_admission().await?;
-    pinhole::remove_pinhole(&ctx, gua, external_port).await;
+    pinhole::remove_pinhole(&ctx, gua, external_port).await?;
     Ok(())
 }
 
@@ -1818,6 +1828,10 @@ pub async fn list_http_redirects(ctx: TunnelContext) -> Result<Vec<HttpRedirectS
         })
         .collect())
 }
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "api_forwarding_vm_tests.rs"]
+mod forwarding_vm_tests;
 
 #[cfg(test)]
 mod tests {

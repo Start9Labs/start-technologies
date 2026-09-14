@@ -351,7 +351,6 @@ impl RpcContext {
                     c.insert(
                         Guid::new(),
                         tokio::spawn(async move {
-                            // Transient query failures preserve the sync warning.
                             while !check_time_is_synchronized()
                                 .await
                                 .log_err()
@@ -441,11 +440,16 @@ impl RpcContext {
             self.services.shutdown_all(),
             self.net_controller.shutdown_forwarding(),
         );
-        forwarding_result.log_err();
         self.0.is_closed.store(true, Ordering::SeqCst);
         self.0.closed.send_replace(true);
         tracing::info!("{}", t!("context.rpc.rpc-context-shutdown"));
-        result
+        match result {
+            Ok(()) => forwarding_result,
+            Err(error) => {
+                forwarding_result.log_err();
+                Err(error)
+            }
+        }
     }
 
     /// Resolves once [`Self::shutdown`] marks the context closed.

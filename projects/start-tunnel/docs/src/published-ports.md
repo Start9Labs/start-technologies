@@ -39,6 +39,20 @@ Deleting a device or demoting it to a client clears all of its published ports (
 > [!NOTE]
 > There is no option to also publish port `80 → 443` — HTTP→HTTPS on port 80 is handled by the [HTTP redirect](./http-redirects.md) that runs by default on every public IPv4.
 
+## Disable or remove a published port
+
+Disabling and re-enabling a port range preserves its full count and the offset
+between external and internal ports. Repeating the same toggle applies the same
+configuration.
+
+If removing an IPv6 pinhole reports an error, its entry and lease remain available
+for retry. Check the daemon logs, correct the reported firewall problem, and retry
+the removal. Treat the port as potentially reachable until removal succeeds.
+
+Graceful shutdown stops forwarding requests and waits for the cleanup workers to
+finish. Cleanup has a deadline; an incomplete withdrawal is reported in the daemon
+logs. Confirm the firewall state on the tunnel server if cleanup reports a failure.
+
 ## SNI hostnames (IPv4 only)
 
 When IP Version includes IPv4 (`IPv4` or `IPv4 + IPv6`), an optional **Hostname** routes by TLS SNI so several hostnames can share one external port. SNI demultiplexing is IPv4-only — in `IPv4 + IPv6` mode it applies to the IPv4 side only, and the IPv6 side is a plain pinhole (each device already has its own address, so no demux is needed) — and it cannot be combined with a port range.

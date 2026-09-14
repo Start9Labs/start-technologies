@@ -17,7 +17,6 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::broadcast::Receiver;
 
-use crate::net::port_map::server::GatewayBackend;
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::db::PortForward;
@@ -150,114 +149,156 @@ async fn reap_expired(ctx: &TunnelContext) -> Option<Instant> {
         {
             continue;
         }
-        match &key {
+        let result = match &key {
             LeaseKey::Dnat(source) => reap_dnat(ctx, *source).await,
             LeaseKey::Sni { source, hostname } => reap_sni(ctx, *source, hostname).await,
             LeaseKey::SniFallback(source) => reap_sni_fallback(ctx, *source).await,
             LeaseKey::Pinhole(k) => reap_pinhole(ctx, *k).await,
-        }
-        // Drop the lease unless a renewal extended it while we reaped.
-        ctx.leases.mutate(|l| {
-            if l.get(&key).is_some_and(|exp| *exp <= now) {
-                l.remove(&key);
-            }
-        });
+        };
+        let success = result.is_ok();
+        result.log_err();
+        ctx.leases
+            .mutate(|leases| finish_reap(leases, &key, now, success));
     }
     ctx.leases.peek(|l| l.values().min().copied())
 }
 
-async fn reap_dnat(ctx: &TunnelContext, source: SocketAddrV4) {
+fn finish_reap(leases: &mut Leases, key: &LeaseKey, observed: Instant, success: bool) {
+    if let Some(expiry) = leases.get_mut(key).filter(|expiry| **expiry <= observed) {
+        if success {
+            leases.remove(key);
+        } else {
+            *expiry = Instant::now() + Duration::from_secs(5);
+        }
+    }
+}
+
+async fn reap_dnat(ctx: &TunnelContext, source: SocketAddrV4) -> Result<(), Error> {
+    let _guard = ctx.forward_write_lock.lock().await;
+    if ctx.leases.peek(|leases| {
+        leases
+            .get(&LeaseKey::Dnat(source))
+            .is_none_or(|expiry| *expiry > Instant::now())
+    }) {
+        return Ok(());
+    }
     // Never touch a manual forward or an SNI-occupied port; only auto DNAT.
     let auto = ctx
         .db
         .peek()
         .await
         .as_port_forwards()
-        .de()
-        .ok()
-        .and_then(|pf| pf.0.get(&source).cloned())
+        .de()?
+        .0
+        .get(&source)
         .is_some_and(|e| matches!(e, PortForward::Dnat { auto: true, .. }));
     if !auto {
-        return;
+        return Ok(());
     }
-    if ctx
-        .db
+    drop(ctx.active_forwards.mutate(|m| m.remove(&source)));
+    ctx.forward.gc().await?;
+    ctx.db
         .mutate(|db| db.as_port_forwards_mut().remove(&source).map(|_| ()))
         .await
-        .result
-        .is_ok()
-    {
-        if let Some(rc) = ctx.active_forwards.mutate(|m| m.remove(&source)) {
-            drop(rc);
-            ctx.forward.gc().await.log_err();
-        }
-        tracing::info!("PCP lease lapsed: removed auto forward {source}");
-    }
+        .result?;
+    tracing::info!("PCP lease lapsed: removed auto forward {source}");
+    Ok(())
 }
 
-async fn reap_sni(ctx: &TunnelContext, source: SocketAddrV4, hostname: &str) {
+async fn reap_sni(ctx: &TunnelContext, source: SocketAddrV4, hostname: &str) -> Result<(), Error> {
     let target = ctx
         .db
         .peek()
         .await
         .as_port_forwards()
-        .de()
-        .ok()
-        .and_then(|pf| match pf.0.get(&source) {
-            Some(PortForward::Sni { routes, .. }) => {
+        .de()?
+        .0
+        .get(&source)
+        .and_then(|entry| match entry {
+            PortForward::Sni { routes, .. } => {
                 routes.get(hostname).filter(|r| r.auto).map(|r| r.target)
             }
             _ => None,
         });
     let Some(target) = target else {
-        return;
+        return Ok(());
     };
-    ctx.remove_sni_forward(source, target, &[hostname.to_string()])
-        .await;
+    ctx.remove_sni_forward_result(source, target, &[hostname.to_string()])
+        .await?;
     tracing::info!("PCP lease lapsed: removed auto SNI route {hostname} on {source}");
+    Ok(())
 }
 
-async fn reap_sni_fallback(ctx: &TunnelContext, source: SocketAddrV4) {
+async fn reap_sni_fallback(ctx: &TunnelContext, source: SocketAddrV4) -> Result<(), Error> {
     let target = ctx
         .db
         .peek()
         .await
         .as_port_forwards()
-        .de()
-        .ok()
-        .and_then(|pf| match pf.0.get(&source) {
-            Some(PortForward::Sni { fallback, .. }) => {
+        .de()?
+        .0
+        .get(&source)
+        .and_then(|entry| match entry {
+            PortForward::Sni { fallback, .. } => {
                 fallback.as_ref().filter(|f| f.auto).map(|f| f.target)
             }
             _ => None,
         });
     let Some(target) = target else {
-        return;
+        return Ok(());
     };
-    ctx.remove_sni_fallback(source, target).await;
+    ctx.remove_sni_fallback(source, target).await?;
     tracing::info!("PCP lease lapsed: removed auto SNI fallback on {source}");
+    Ok(())
 }
 
-async fn reap_pinhole(ctx: &TunnelContext, key: SocketAddrV6) {
+async fn reap_pinhole(ctx: &TunnelContext, key: SocketAddrV6) -> Result<(), Error> {
+    let _guard = ctx.forward_write_lock.lock().await;
+    if ctx.leases.peek(|leases| {
+        leases
+            .get(&LeaseKey::Pinhole(key))
+            .is_none_or(|expiry| *expiry > Instant::now())
+    }) {
+        return Ok(());
+    }
     let auto = ctx
         .db
         .peek()
         .await
         .as_pinholes6()
-        .de()
-        .ok()
-        .and_then(|ph| ph.0.get(&key).cloned())
+        .de()?
+        .0
+        .get(&key)
         .is_some_and(|p| p.auto);
     if !auto {
-        return;
+        return Ok(());
     }
-    crate::tunnel::forward::pinhole::remove_pinhole(ctx, *key.ip(), key.port()).await;
+    crate::tunnel::forward::pinhole::remove_pinhole_locked(ctx, *key.ip(), key.port()).await?;
     tracing::info!("PCP lease lapsed: removed auto pinhole {key}");
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_reap_retains_lease_and_paces_retry() {
+        let now = Instant::now();
+        let key = LeaseKey::Pinhole("[2001:db8::1]:443".parse().unwrap());
+        let mut leases = Leases::from([(key.clone(), now)]);
+        finish_reap(&mut leases, &key, now, false);
+        assert!(expired_keys(&leases, now + Duration::from_secs(4)).is_empty());
+        assert_eq!(
+            expired_keys(&leases, now + Duration::from_secs(6)),
+            vec![key.clone()]
+        );
+        finish_reap(&mut leases, &key, now + Duration::from_secs(6), true);
+        assert!(leases.is_empty());
+        leases.insert(key.clone(), now + Duration::from_secs(60));
+        finish_reap(&mut leases, &key, now, true);
+        assert_eq!(leases[&key], now + Duration::from_secs(60));
+    }
 
     #[test]
     fn only_lapsed_leases_are_selected() {

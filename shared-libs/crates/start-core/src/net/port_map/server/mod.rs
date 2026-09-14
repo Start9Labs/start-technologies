@@ -128,8 +128,8 @@ pub trait GatewayBackend: Send + Sync {
         &self,
         _gua: Ipv6Addr,
         _external_port: u16,
-    ) -> impl Future<Output = ()> + Send {
-        async {}
+    ) -> impl Future<Output = Result<(), u16>> + Send {
+        async { Ok(()) }
     }
 
     /// The mappings this gateway currently holds on behalf of `peer`, for the
@@ -682,9 +682,13 @@ pub async fn handle6<B: GatewayBackend + ?Sized>(
 
     // Lifetime 0 deletes the pinhole (RFC 6887 §15).
     if lifetime == 0 {
-        backend.remove_pinhole(peer, external_port).await;
+        let result = backend.remove_pinhole(peer, external_port).await;
         return Some(map_response6(
-            SUCCESS,
+            if result.is_ok() {
+                SUCCESS
+            } else {
+                NO_RESOURCES
+            },
             req,
             internal_port,
             external_port,
@@ -947,6 +951,7 @@ mod tests {
     struct V6Stub {
         sni: Arc<SniDemux>,
         known: bool,
+        fail_remove: bool,
         pinholes: std::sync::Mutex<Vec<(Ipv6Addr, u16, u16, u16)>>,
         removed: std::sync::Mutex<Vec<(Ipv6Addr, u16)>>,
     }
@@ -955,6 +960,7 @@ mod tests {
             Self {
                 sni: SniDemux::new(),
                 known,
+                fail_remove: false,
                 pinholes: std::sync::Mutex::new(Vec::new()),
                 removed: std::sync::Mutex::new(Vec::new()),
             }
@@ -1009,13 +1015,24 @@ mod tests {
             &self,
             gua: Ipv6Addr,
             external_port: u16,
-        ) -> impl Future<Output = ()> + Send {
+        ) -> impl Future<Output = Result<(), u16>> + Send {
             self.removed.lock().unwrap().push((gua, external_port));
-            async {}
+            let fail = self.fail_remove;
+            async move { if fail { Err(0) } else { Ok(()) } }
         }
         fn sni(&self) -> Option<&Arc<SniDemux>> {
             Some(&self.sni)
         }
+    }
+
+    #[tokio::test]
+    async fn handle6_reports_failed_pinhole_deletion() {
+        let mut stub = V6Stub::new(true);
+        stub.fail_remove = true;
+        let req = map_request([9; 12], 0, 443, 8443);
+        let response = handle6(&stub, TEST_GUA, &req, 1).await.unwrap();
+        assert_eq!(response[3], NO_RESOURCES);
+        assert_eq!(*stub.removed.lock().unwrap(), vec![(TEST_GUA, 8443)]);
     }
 
     const TEST_GUA: Ipv6Addr = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0x50);

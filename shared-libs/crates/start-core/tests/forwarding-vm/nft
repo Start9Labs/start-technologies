@@ -1,0 +1,28 @@
+#!/usr/bin/python3
+import fcntl
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+root = Path(os.environ['STARTOS_FORWARDING_VM_TEST'])
+args = sys.argv[1:]
+script = sys.stdin.read() if args == ['-f', '-'] else None
+with (root / 'transactions.jsonl').open('a') as log:
+    fcntl.flock(log, fcntl.LOCK_EX)
+    log.write(json.dumps({'args': args, 'stdin': script}) + '\n')
+if script and 'delete rule ' in script and (root / 'fail-delete').exists():
+    print('injected nft delete failure: Operation not permitted', file=sys.stderr)
+    sys.exit(1)
+barrier = root / 'barrier'
+if script and 'add rule ' in script and barrier.exists() and barrier.read_text() in script:
+    (root / 'entered').touch()
+    deadline = time.monotonic() + 15
+    while not (root / 'release').exists():
+        if time.monotonic() >= deadline:
+            print('nft test barrier timed out', file=sys.stderr)
+            sys.exit(1)
+        time.sleep(0.01)
+sys.exit(subprocess.run(['/usr/sbin/nft', *args], input=script, text=True).returncode)

@@ -54,42 +54,33 @@ async fn await_task(name: &str, task: NonDetachingJoinHandle<()>) {
 
 async fn stop_forwarding_tasks(
     tasks: impl IntoIterator<Item = (&'static str, NonDetachingJoinHandle<()>)>,
+    deadline: tokio::time::Instant,
 ) {
-    let mut tasks = tasks
+    let mut aborts = Vec::new();
+    let mut pending = tasks
         .into_iter()
-        .map(|(name, task)| (name, Some(task)))
-        .collect::<Vec<_>>();
-    let timed_out = tokio::time::timeout(FORWARDING_TASK_SHUTDOWN_TIMEOUT, async {
-        let mut pending = tasks
-            .iter_mut()
-            .map(|(name, task)| {
-                let name = *name;
-                async move {
-                    let result = task.as_mut().expect("pending forwarding task").await;
-                    task.take();
-                    (name, result)
-                }
-            })
-            .collect::<FuturesUnordered<_>>();
+        .map(|(name, task)| {
+            aborts.push(task.abort_handle());
+            async move { (name, task.await) }
+        })
+        .collect::<FuturesUnordered<_>>();
+    let stop_deadline =
+        deadline.min(tokio::time::Instant::now() + FORWARDING_TASK_SHUTDOWN_TIMEOUT);
+    if tokio::time::timeout_at(stop_deadline, async {
         while let Some((name, result)) = pending.next().await {
             log_task_result(name, result);
         }
     })
     .await
-    .is_err();
-
-    if !timed_out {
-        return;
-    }
-    tracing::warn!(
-        "forwarding servers did not stop within {FORWARDING_TASK_SHUTDOWN_TIMEOUT:?}; aborting"
-    );
-    for (name, task) in tasks
-        .into_iter()
-        .filter_map(|(name, task)| task.map(|task| (name, task)))
+    .is_err()
     {
-        task.abort();
-        log_task_result(name, task.await);
+        tracing::warn!("forwarding servers did not stop before deadline; aborting");
+        for abort in aborts {
+            abort.abort();
+        }
+    }
+    while let Some((name, result)) = pending.next().await {
+        log_task_result(name, result);
     }
 }
 
@@ -239,11 +230,10 @@ async fn inner_main(config: &TunnelConfig) -> Result<Option<bool>, Error> {
     .await;
     let server_result = server.shutdown().await;
 
-    let forwarding_result = crate::net::forward::timeout_forwarding_drain(async {
-        stop_forwarding_tasks(forwarding_threads).await;
-        ctx.drain_forwarding().await
-    })
-    .await;
+    let deadline =
+        tokio::time::Instant::now() + crate::tunnel::context::FORWARDING_SHUTDOWN_TIMEOUT;
+    stop_forwarding_tasks(forwarding_threads, deadline).await;
+    let forwarding_result = ctx.drain_forwarding_until(deadline).await;
 
     if let Err(error) = server_result {
         forwarding_result.log_err();
@@ -320,6 +310,55 @@ pub fn cli(args: impl IntoIterator<Item = OsString>) {
         }
 
         std::process::exit(e.code);
+    }
+}
+
+#[cfg(test)]
+mod shutdown_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn expired_stop_joins_every_producer() {
+        let mut tasks = Vec::new();
+        let mut dropped = Vec::new();
+        for name in ["pcp", "igd", "lease"] {
+            let (started, ready) = tokio::sync::oneshot::channel();
+            let (on_drop, ended) = tokio::sync::oneshot::channel();
+            tasks.push((
+                name,
+                tokio::spawn(async move {
+                    let _guard = crate::util::GeneralGuard::new(move || {
+                        let _ = on_drop.send(());
+                    });
+                    started.send(()).unwrap();
+                    futures::future::pending::<()>().await;
+                })
+                .into(),
+            ));
+            ready.await.unwrap();
+            dropped.push(ended);
+        }
+        stop_forwarding_tasks(tasks, tokio::time::Instant::now()).await;
+        for mut ended in dropped {
+            assert_eq!(ended.try_recv(), Ok(()));
+        }
+    }
+
+    #[tokio::test]
+    async fn producer_failure_does_not_skip_other_joins() {
+        let failed: NonDetachingJoinHandle<()> =
+            tokio::spawn(async { panic!("producer failure") }).into();
+        let (done, mut completed) = tokio::sync::oneshot::channel();
+        let healthy = tokio::spawn(async move {
+            done.send(()).unwrap();
+        })
+        .into();
+        stop_forwarding_tasks(
+            [("failed", failed), ("healthy", healthy)],
+            tokio::time::Instant::now() + Duration::from_secs(1),
+        )
+        .await;
+        assert_eq!(completed.try_recv(), Ok(()));
     }
 }
 

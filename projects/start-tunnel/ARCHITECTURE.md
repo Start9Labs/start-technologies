@@ -49,8 +49,8 @@ All paths below are under `shared-libs/crates/start-core/src/tunnel/`.
 - **`forward/`** — the port-forwarding engine:
   - `mod.rs` — forward-entry orchestration (nftables DNAT rules).
   - `sni.rs` — SNI-based routing for forwarded TLS traffic.
-  - `igd.rs` — IGD/UPnP upstream port mapping.
-  - `pcp.rs` — PCP (Port Control Protocol) upstream port mapping.
+  - `igd.rs` — IGD/UPnP port-mapping server for connected devices.
+  - `pcp.rs` — PCP (Port Control Protocol) server for connected devices.
 - **`update.rs`** — self-update support for the daemon.
 - **`migrations/`** — ordered db schema migrations (`m_00_*` …), registered in
   `migrations/mod.rs`.
@@ -73,9 +73,12 @@ All paths below are under `shared-libs/crates/start-core/src/tunnel/`.
    without requiring a restart.
 5. On shutdown, abort and join the signal, HTTPS, and redirect tasks, then stop
    the web server.
-6. Stop the forwarding producers, close forwarding admission, and withdraw
-   IPv4 forwards and IPv6 pinholes. A single aggregate deadline bounds this
-   cleanup before the shutdown value is returned.
+6. Stop the forwarding producers, close forwarding admission, and wait for
+   admitted mutations before withdrawing IPv4 forwards and IPv6 pinholes. One
+   terminal completion owner retains and joins the cleanup actors under the
+   original aggregate deadline, shared by concurrent or cancelled waiters.
+   Expiry aborts and joins remaining workers and reports incomplete cleanup
+   before the shutdown value is returned.
 7. The return value can request a `reboot` or `poweroff`.
 
 The `start-tunnel` CLI builds an `rpc-toolkit` `CliApp` against the same
@@ -87,10 +90,18 @@ The `start-tunnel` CLI builds an `rpc-toolkit` `CliApp` against the same
 2. The forward entry is written to PatchDB (`db.rs`).
 3. The `forward/` engine reconciles kernel state: it installs nftables DNAT
    rules so the VPS's public IP:port maps to the device's WireGuard IP:port.
-4. Optionally requests an upstream mapping from the network gateway via
-   IGD (`igd.rs`) or PCP (`pcp.rs`).
+4. Device-requested mappings arrive through IGD (`igd.rs`) or PCP (`pcp.rs`)
+   and carry leases tracked by `forward/lease.rs`.
 5. Inbound packets are NAT-forwarded at Layer 3/4 — payloads are never
    inspected, so TLS terminates at the destination service, not the tunnel.
+
+Forwarding owners retain exact applied nft footprints across failed withdrawals.
+Replacement waits for retirement of the previous mapping. The IPv4 API serializes
+mutation through its state commit; failed IPv6 removal retains the database entry
+and lease for a same-key retry.
+
+The ignored API regression test and its disposable-VM runner are documented in
+[`tests/forwarding-vm/README.md`](../../shared-libs/crates/start-core/tests/forwarding-vm/README.md).
 
 ## Frontend
 

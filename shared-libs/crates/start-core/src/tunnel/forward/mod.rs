@@ -46,7 +46,7 @@ pub async fn clear_for_peer(
         ctx.remove_sni_forward(source, target, &[host]).await;
     }
     for (source, target) in sni_fallbacks {
-        ctx.remove_sni_fallback(source, target).await;
+        ctx.remove_sni_fallback(source, target).await?;
     }
 
     // v6 pinholes are keyed by the device's own GUA, derivable from each subnet's
@@ -77,7 +77,7 @@ pub async fn clear_for_peer(
             .map(|(key, _)| *key)
             .collect();
         for key in keys {
-            ctx.remove_pinhole(*key.ip(), key.port()).await;
+            pinhole::remove_pinhole(ctx, *key.ip(), key.port()).await?;
         }
     }
     Ok(())

@@ -19,8 +19,8 @@ use crate::hostname::ServerHostname;
 use crate::net::dns::DnsController;
 use crate::net::dns_update::{DnsUpdateController, spawn_server_mdns_injection};
 use crate::net::forward::{
-    ForwardRequirements, InterfacePortForwardController, START9_BRIDGE_IFACE, drain_forwarding,
-    nft_rule, nft_rule_v6, target_prefix_for,
+    FORWARD_DRAIN_TIMEOUT, ForwardRequirements, InterfacePortForwardController,
+    START9_BRIDGE_IFACE, drain_forwarding, nft_rule, nft_rule_v6, target_prefix_for,
 };
 use crate::net::gateway::NetworkInterfaceController;
 use crate::net::host::binding::{AddSslOptions, BindId, BindOptions, UpstreamCertValidation};
@@ -164,7 +164,12 @@ impl NetController {
     }
 
     pub(crate) async fn shutdown_forwarding(&self) -> Result<(), Error> {
-        drain_forwarding(self.forward.drain(), self.port_map.drain()).await
+        let deadline = tokio::time::Instant::now() + FORWARD_DRAIN_TIMEOUT;
+        drain_forwarding(
+            self.forward.drain_until(deadline),
+            self.port_map.drain_until(deadline),
+        )
+        .await
     }
 
     /// Client config for the OS→container TLS leg when rewrapping SSL. Falls
@@ -337,19 +342,12 @@ struct GuaForwardSpec {
 
 type GuaForwardMap = BTreeMap<GuaForwardKey, GuaForwardSpec>;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct Ipv4ForwardSpec {
-    target: SocketAddrV4,
-    count: u16,
-    requirements: ForwardRequirements,
-}
-
 #[derive(Default, Debug)]
 struct HostBinds {
-    forwards: BTreeMap<u16, (Ipv4ForwardSpec, Arc<()>)>,
-    vhosts: BTreeMap<VHostKey, (ProxyTarget, Arc<()>)>,
+    forwards: BTreeMap<u16, Arc<()>>,
+    vhosts: BTreeMap<VHostKey, Arc<()>>,
     private_dns: BTreeMap<InternedString, Arc<()>>,
-    gua_forwards: BTreeMap<GuaForwardKey, (GuaForwardSpec, Arc<()>)>,
+    gua_forwards: BTreeMap<GuaForwardKey, Arc<()>>,
 }
 
 pub struct NetServiceData {
@@ -761,12 +759,7 @@ impl NetServiceData {
             .copied()
             .collect::<BTreeSet<_>>();
         for key in all {
-            let previous = binds.gua_forwards.remove(&key);
             if let Some(spec) = gua_forwards.remove(&key) {
-                if let Some((previous_spec, lease)) = previous.filter(|(old, _)| old == &spec) {
-                    binds.gua_forwards.insert(key, (previous_spec, lease));
-                    continue;
-                }
                 let (gua, external) = key;
                 let result = ctrl
                     .forward
@@ -777,7 +770,9 @@ impl NetServiceData {
                         spec.src_filter,
                     )
                     .await?;
-                binds.gua_forwards.insert(key, (spec, result));
+                binds.gua_forwards.insert(key, result);
+            } else {
+                binds.gua_forwards.remove(&key);
             }
         }
 
@@ -789,30 +784,15 @@ impl NetServiceData {
             .copied()
             .collect::<BTreeSet<_>>();
         for external in all {
-            let mut prev = binds.forwards.remove(&external);
             if let Some((internal, count, reqs)) = forwards.remove(&external) {
-                let spec = Ipv4ForwardSpec {
-                    target: internal,
-                    count,
-                    requirements: reqs,
-                };
-                prev = prev.filter(|(old, _)| old == &spec);
-                if let Some(prev) = prev {
-                    binds.forwards.insert(external, prev);
-                } else {
-                    let target_prefix = target_prefix_for(&net_ifaces, *spec.target.ip(), 32);
-                    let result = ctrl
-                        .forward
-                        .add_range(
-                            external,
-                            spec.count,
-                            spec.requirements.clone(),
-                            spec.target,
-                            target_prefix,
-                        )
-                        .await?;
-                    binds.forwards.insert(external, (spec, result));
-                }
+                let target_prefix = target_prefix_for(&net_ifaces, *internal.ip(), 32);
+                let result = ctrl
+                    .forward
+                    .add_range(external, count, reqs, internal, target_prefix)
+                    .await?;
+                binds.forwards.insert(external, result);
+            } else {
+                binds.forwards.remove(&external);
             }
         }
         let reconciliation_error = ctrl.forward.gc().await.err();
@@ -833,25 +813,14 @@ impl NetServiceData {
             .cloned()
             .collect::<BTreeSet<_>>();
         for key in all {
-            let mut prev = binds.vhosts.remove(&key);
             if let Some(target) = vhosts.remove(&key) {
-                prev = prev.filter(|(t, _)| t == &target);
-                binds.vhosts.insert(
-                    key.clone(),
-                    if let Some(prev) = prev {
-                        prev
-                    } else {
-                        (
-                            target.clone(),
-                            ctrl.vhost.add(key.0, key.1, DynVHostTarget::new(target))?,
-                        )
-                    },
-                );
-            } else {
-                if let Some((_, rc)) = prev {
-                    drop(rc);
-                    ctrl.vhost.gc(key.0, key.1);
-                }
+                let lease = ctrl
+                    .vhost
+                    .add(key.0.clone(), key.1, DynVHostTarget::new(target))?;
+                binds.vhosts.insert(key.clone(), lease);
+                ctrl.vhost.gc(key.0, key.1);
+            } else if binds.vhosts.remove(&key).is_some() {
+                ctrl.vhost.gc(key.0, key.1);
             }
         }
 

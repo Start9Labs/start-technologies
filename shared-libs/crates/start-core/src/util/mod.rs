@@ -85,26 +85,6 @@ impl<T: ?Sized> AsRef<T> for Never {
     }
 }
 
-struct ProcessGroupGuard(Option<nix::unistd::Pid>);
-
-impl ProcessGroupGuard {
-    fn new(child: &tokio::process::Child) -> Self {
-        Self(child.id().map(|pid| nix::unistd::Pid::from_raw(pid as i32)))
-    }
-
-    fn disarm(&mut self) {
-        self.0 = None;
-    }
-}
-
-impl Drop for ProcessGroupGuard {
-    fn drop(&mut self) {
-        if let Some(process_group) = self.0 {
-            let _ = nix::sys::signal::killpg(process_group, nix::sys::signal::Signal::SIGKILL);
-        }
-    }
-}
-
 pub trait Invoke<'a> {
     type Extended<'ext>
     where
@@ -115,6 +95,7 @@ pub trait Invoke<'a> {
         next: &'ext mut tokio::process::Command,
     ) -> Self::Extended<'ext>;
     fn timeout<'ext: 'a>(&'ext mut self, timeout: Option<Duration>) -> Self::Extended<'ext>;
+    /// Runs each command in its own process group, killed on cancellation or timeout.
     fn kill_process_group_on_drop<'ext: 'a>(&'ext mut self) -> Self::Extended<'ext>;
     fn input<'ext: 'a, Input: tokio::io::AsyncRead + Unpin + Send>(
         &'ext mut self,
@@ -265,9 +246,17 @@ impl<'a> Invoke<'a> for ExtendedCommand<'a> {
                 self.cmd.stderr(Stdio::piped());
             }
             let mut child = self.cmd.spawn().with_ctx(|_| (error_kind, &cmd_str))?;
-            let mut process_group = self
-                .kill_process_group_on_drop
-                .then(|| ProcessGroupGuard::new(&child));
+            let process_group = self.kill_process_group_on_drop.then(|| {
+                let pid = child.id();
+                GeneralGuard::new(move || {
+                    if let Some(pid) = pid {
+                        let _ = nix::sys::signal::killpg(
+                            nix::unistd::Pid::from_raw(pid as i32),
+                            nix::sys::signal::Signal::SIGKILL,
+                        );
+                    }
+                })
+            });
             if let (Some(mut stdin), Some(input)) = (child.stdin.take(), self.input.take()) {
                 use tokio::io::AsyncWriteExt;
                 tokio::io::copy(input, &mut stdin).await?;
@@ -285,8 +274,8 @@ impl<'a> Invoke<'a> for ExtendedCommand<'a> {
                     .with_kind(ErrorKind::Timeout)?
                     .with_ctx(|_| (error_kind, &cmd_str))?,
             };
-            if let Some(guard) = &mut process_group {
-                guard.disarm();
+            if let Some(guard) = process_group {
+                guard.drop_without_action();
             }
             crate::ensure_code!(
                 res.status.success(),
@@ -326,9 +315,17 @@ impl<'a> Invoke<'a> for ExtendedCommand<'a> {
                     cmd.stdin(Stdio::piped());
                 }
                 let mut child = cmd.spawn().with_ctx(|_| (error_kind, &cmd_str))?;
-                let mut process_group = self
-                    .kill_process_group_on_drop
-                    .then(|| ProcessGroupGuard::new(&child));
+                let process_group = self.kill_process_group_on_drop.then(|| {
+                    let pid = child.id();
+                    GeneralGuard::new(move || {
+                        if let Some(pid) = pid {
+                            let _ = nix::sys::signal::killpg(
+                                nix::unistd::Pid::from_raw(pid as i32),
+                                nix::sys::signal::Signal::SIGKILL,
+                            );
+                        }
+                    })
+                });
                 let input = std::mem::replace(
                     &mut prev,
                     child
@@ -351,8 +348,8 @@ impl<'a> Invoke<'a> for ExtendedCommand<'a> {
                                 .await
                                 .with_kind(ErrorKind::Timeout)??,
                         };
-                        if let Some(guard) = &mut process_group {
-                            guard.disarm();
+                        if let Some(guard) = process_group {
+                            guard.drop_without_action();
                         }
                         crate::ensure_code!(
                             res.status.success(),
@@ -790,6 +787,67 @@ impl Serialize for PathOrUrl {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn assert_descendants_cancelled(pipeline: bool, timeout: bool) {
+        let dir = std::env::temp_dir().join(format!("start-core-invoke-{}", new_guid()));
+        std::fs::create_dir(&dir).unwrap();
+        let task_dir = dir.clone();
+        let task: future::NonDetachingJoinHandle<_> = tokio::spawn(async move {
+            let mut first = tokio::process::Command::new("sh");
+            let mut second = tokio::process::Command::new("sh");
+            for (index, command) in IntoIterator::into_iter([&mut first, &mut second]).enumerate() {
+                command.args([
+                    "-c",
+                    "(sleep 0.5; printf written > \"$2\") & printf ready > \"$1\"; wait",
+                    "sh",
+                ]);
+                command.arg(task_dir.join(format!("ready-{index}")));
+                command.arg(task_dir.join(format!("sentinel-{index}")));
+            }
+            let mut command = first.kill_process_group_on_drop();
+            let command = if pipeline {
+                command.pipe(&mut second)
+            } else {
+                &mut command
+            };
+            command
+                .timeout(timeout.then_some(Duration::from_millis(250)))
+                .invoke(ErrorKind::Unknown)
+                .await
+        })
+        .into();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !(dir.join("ready-0").exists() && (!pipeline || dir.join("ready-1").exists())) {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        if timeout {
+            assert_eq!(task.await.unwrap().unwrap_err().kind, ErrorKind::Timeout);
+        } else {
+            assert!(task.wait_for_abort().await.unwrap_err().is_cancelled());
+        }
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        assert!(!dir.join("sentinel-0").exists());
+        assert!(!dir.join("sentinel-1").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancellation_kills_command_descendants() {
+        assert_descendants_cancelled(false, false).await;
+    }
+
+    #[tokio::test]
+    async fn cancellation_kills_pipeline_descendants() {
+        assert_descendants_cancelled(true, false).await;
+    }
+
+    #[tokio::test]
+    async fn timeout_kills_pipeline_descendants() {
+        assert_descendants_cancelled(true, true).await;
+    }
 
     #[tokio::test]
     async fn timeout_kills_command_descendants() {

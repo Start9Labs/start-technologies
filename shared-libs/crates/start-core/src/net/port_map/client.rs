@@ -49,6 +49,7 @@ use crate::net::port_map::{probe, upnp};
 use crate::net::utils::ipv6_is_link_local;
 use crate::prelude::*;
 use crate::util::collections::OrdMapIterMut;
+use crate::util::future::NonDetachingJoinHandle;
 use crate::util::sync::{SyncMutex, Watch};
 
 /// Refresh cadence for active mappings and backoff-eligible retries.
@@ -58,6 +59,7 @@ const RETRY_INTERVAL: Duration = Duration::from_secs(15);
 const BACKOFF_MAX: Duration = Duration::from_secs(960);
 const GATEWAY_CACHE_TTL: Duration = Duration::from_secs(600);
 const PCP_LIFETIME_SECONDS: u32 = 3600;
+const DRAIN_TIMEOUT: Duration = Duration::from_secs(90);
 /// Short probe timeout before falling back to UPnP.
 const PCP_TIMEOUTS: TimeoutConfig = TimeoutConfig {
     initial_timeout: Duration::from_millis(250),
@@ -208,13 +210,13 @@ enum Command {
 }
 
 struct DrainRequest {
-    respond: oneshot::Sender<Result<(), Error>>,
+    deadline: Instant,
 }
 
-#[derive(Clone)]
 struct Shard {
     commands: mpsc::UnboundedSender<Command>,
     drain: mpsc::UnboundedSender<DrainRequest>,
+    task: NonDetachingJoinHandle<Result<(), Error>>,
 }
 
 type DrainFuture = Shared<BoxFuture<'static, Result<(), Arc<Error>>>>;
@@ -230,6 +232,7 @@ enum ControllerState {
 pub struct PortMapController {
     interfaces: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
     state: Arc<SyncMutex<ControllerState>>,
+    footprints: Arc<SyncMutex<BTreeMap<MappingKey, Footprint>>>,
 }
 
 impl PortMapController {
@@ -237,6 +240,7 @@ impl PortMapController {
         Self {
             interfaces,
             state: Arc::new(SyncMutex::new(ControllerState::Accepting(BTreeMap::new()))),
+            footprints: Default::default(),
         }
     }
 
@@ -244,7 +248,7 @@ impl PortMapController {
         self.state.mutate(|state| match state {
             ControllerState::Accepting(shards) => shards
                 .entry(local_ip)
-                .or_insert_with(|| spawn_shard(self.interfaces.clone()))
+                .or_insert_with(|| spawn_shard(self.interfaces.clone(), self.footprints.clone()))
                 .commands
                 .send(command)
                 .is_ok(),
@@ -367,11 +371,15 @@ impl PortMapController {
     }
 
     pub(crate) async fn drain(&self) -> Result<(), Error> {
+        self.drain_until(Instant::now() + DRAIN_TIMEOUT).await
+    }
+
+    pub(crate) async fn drain_until(&self, deadline: Instant) -> Result<(), Error> {
         let completion = self.state.mutate(|state| match state {
             ControllerState::Accepting(shards) => {
-                let drains = shards
-                    .iter()
-                    .map(|(local_ip, shard)| drain_shard(*local_ip, shard.clone()))
+                let drains = std::mem::take(shards)
+                    .into_iter()
+                    .map(|(local_ip, shard)| drain_shard(local_ip, shard, deadline))
                     .collect::<Vec<_>>();
                 let completion = tokio::spawn(async move {
                     let mut first_error = None;
@@ -461,34 +469,52 @@ fn controller_exited() -> Error {
     Error::new(eyre!("port-map controller exited"), ErrorKind::Network)
 }
 
-async fn drain_shard(local_ip: IpAddr, shard: Shard) -> Result<(), Error> {
-    let mut failures: u32 = 0;
-    loop {
-        let (respond, receive) = oneshot::channel();
-        shard
-            .drain
-            .send(DrainRequest { respond })
-            .map_err(|_| controller_exited())?;
-        match receive.await.map_err(|_| controller_exited())? {
-            Ok(()) => return Ok(()),
-            Err(error) => {
-                failures = failures.saturating_add(1);
-                let delay = retry_delay(failures);
-                tracing::warn!(
-                    "port-map drain for shard {local_ip} failed on attempt {failures}; retrying in {delay:?}: {error}"
-                );
-                tokio::time::sleep(delay).await;
+async fn drain_shard(local_ip: IpAddr, mut shard: Shard, deadline: Instant) -> Result<(), Error> {
+    if Instant::now() >= deadline {
+        shard.task.abort();
+        let _ = (&mut shard.task).await;
+        return Err(Error::new(
+            eyre!("port-map cleanup deadline expired"),
+            ErrorKind::Network,
+        ));
+    }
+    let requested = shard.drain.send(DrainRequest { deadline }).is_ok();
+    match tokio::time::timeout_at(deadline, &mut shard.task).await {
+        Ok(result) => {
+            result.map_err(|_| controller_exited())??;
+            if requested {
+                Ok(())
+            } else {
+                Err(controller_exited())
             }
+        }
+        Err(_) => {
+            shard.task.abort();
+            let _ = (&mut shard.task).await;
+            Err(Error::new(
+                eyre!("port-map cleanup for {local_ip} incomplete at shutdown deadline"),
+                ErrorKind::Network,
+            ))
         }
     }
 }
 
-fn spawn_shard(interfaces: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>) -> Shard {
+fn spawn_shard(
+    interfaces: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
+    footprints: Arc<SyncMutex<BTreeMap<MappingKey, Footprint>>>,
+) -> Shard {
     let (commands, recv) = mpsc::unbounded_channel();
     let (drain, drain_recv) = mpsc::unbounded_channel();
-    // Dropping a Tokio `JoinHandle` does not abort its task.
-    tokio::spawn(run_shard(interfaces, State::default(), recv, drain_recv));
-    Shard { commands, drain }
+    let state = State {
+        footprints,
+        ..Default::default()
+    };
+    let task = tokio::spawn(run_shard(interfaces, state, recv, drain_recv)).into();
+    Shard {
+        commands,
+        drain,
+        task,
+    }
 }
 
 async fn wait_for_retry(deadline: Option<Instant>) {
@@ -498,18 +524,24 @@ async fn wait_for_retry(deadline: Option<Instant>) {
     }
 }
 
-async fn drain_after_channel_close(state: &mut State) {
+async fn drain_to_completion(state: &mut State, deadline: Instant) -> Result<(), Error> {
     let mut failures: u32 = 0;
     loop {
-        match state.drain().await {
-            Ok(()) => return,
+        if Instant::now() >= deadline {
+            return Err(Error::new(
+                eyre!("port-map cleanup deadline expired"),
+                ErrorKind::Network,
+            ));
+        }
+        match state.drain_until(deadline).await {
+            Ok(()) => return Ok(()),
             Err(error) => {
                 failures = failures.saturating_add(1);
                 let delay = retry_delay(failures);
                 tracing::warn!(
-                    "port-map cleanup after controller exit failed on attempt {failures}; retrying in {delay:?}: {error}"
+                    "port-map cleanup failed on attempt {failures}; retrying in {delay:?}: {error}"
                 );
-                tokio::time::sleep(delay).await;
+                tokio::time::sleep_until((Instant::now() + delay).min(deadline)).await;
             }
         }
     }
@@ -520,52 +552,32 @@ async fn run_shard(
     mut state: State,
     mut recv: mpsc::UnboundedReceiver<Command>,
     mut drain_recv: mpsc::UnboundedReceiver<DrainRequest>,
-) {
+) -> Result<(), Error> {
     let mut refresh = interval(REFRESH_INTERVAL);
     refresh.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     refresh.tick().await;
-    let mut draining = false;
     loop {
         let removal_retry = state.removal_retry_deadline();
         tokio::select! {
             biased;
-            request = drain_recv.recv() => match request {
-                Some(DrainRequest { respond }) => {
-                    draining = true;
-                    recv.close();
-                    while recv.try_recv().is_ok() {}
-                    let result = state.drain().await;
-                    let complete = result.is_ok();
-                    respond.send(result).ok();
-                    if complete {
-                        break;
-                    }
-                }
-                None => {
-                    drain_after_channel_close(&mut state).await;
-                    break;
-                }
+            request = drain_recv.recv() => {
+                recv.close();
+                while recv.try_recv().is_ok() {}
+                let deadline = request.map_or_else(|| Instant::now() + DRAIN_TIMEOUT, |r| r.deadline);
+                return drain_to_completion(&mut state, deadline).await;
             },
-            _ = wait_for_retry(removal_retry), if !draining => state.retry_removals().await,
-            cmd = recv.recv(), if !draining => match cmd {
+            _ = wait_for_retry(removal_retry) => state.retry_removals().await,
+            cmd = recv.recv() => match cmd {
                 Some(Command::Ensure { key, spec }) => state.ensure(&interfaces, key, spec).await,
-                Some(Command::Remove { key }) => {
-                    state.remove(key).await.log_err();
-                }
+                Some(Command::Remove { key }) => { state.remove(key).await.log_err(); }
                 Some(Command::ExternalIp { external_port, resp }) => {
                     let _ = resp.send(external_ip_of(
-                        &state.desired,
-                        &state.active,
-                        &state.stale,
-                        external_port,
+                        &state.desired, &state.active, &state.stale, external_port,
                     ));
                 }
-                None => {
-                    drain_after_channel_close(&mut state).await;
-                    break;
-                }
+                None => return drain_to_completion(&mut state, Instant::now() + DRAIN_TIMEOUT).await,
             },
-            _ = refresh.tick(), if !draining => state.refresh(&interfaces).await,
+            _ = refresh.tick() => state.refresh(&interfaces).await,
         }
     }
 }
@@ -694,6 +706,74 @@ fn report_pcp_failure(
     });
 }
 
+#[derive(Clone)]
+struct Footprint {
+    gateway: (IpAddr, Option<u32>),
+    address: Option<IpAddr>,
+    protocol: TransportProtocol,
+    hostname: Option<String>,
+    start: u16,
+    count: u16,
+}
+
+impl Footprint {
+    fn gateway(ip: IpAddr, scope: Option<u32>) -> (IpAddr, Option<u32>) {
+        (
+            ip,
+            match ip {
+                IpAddr::V6(ip) if ipv6_is_link_local(ip) => scope,
+                _ => None,
+            },
+        )
+    }
+
+    fn requested(key: &MappingKey, spec: &Spec, gateway: (IpAddr, Option<u32>)) -> Self {
+        Self {
+            gateway: Self::gateway(gateway.0, gateway.1),
+            address: key.0.is_ipv6().then_some(key.0),
+            protocol: key.3,
+            hostname: key.2.as_ref().map(|name| name.to_ascii_lowercase()),
+            start: key.1,
+            count: spec.count.max(1),
+        }
+    }
+
+    fn conflicts(&self, other: &Self) -> bool {
+        self.gateway == other.gateway
+            && self.address == other.address
+            && self.protocol == other.protocol
+            && (self.hostname.is_none()
+                || other.hostname.is_none()
+                || self.hostname == other.hostname)
+            && u32::from(self.start) < u32::from(other.start) + u32::from(other.count)
+            && u32::from(other.start) < u32::from(self.start) + u32::from(self.count)
+    }
+
+    fn granted(key: &MappingKey, mapping: &PortMapping) -> Self {
+        Self {
+            gateway: Self::gateway(mapping.gateway(), mapping.gateway_scope_id()),
+            address: key
+                .0
+                .is_ipv6()
+                .then_some(mapping.external_ip().unwrap_or(key.0)),
+            protocol: key.3,
+            hostname: mapping
+                .response_options()
+                .iter()
+                .find(|o| o.code == OPTION_HOSTNAME)
+                .and_then(|o| String::from_utf8(o.data.clone()).ok())
+                .map(|name| name.to_ascii_lowercase()),
+            start: mapping.external_port().get(),
+            count: mapping
+                .response_options()
+                .iter()
+                .find(|o| o.code == OPTION_PORT_SET)
+                .and_then(|o| PortSet::from_payload(&o.data))
+                .map_or(1, |ps| ps.size.max(1)),
+        }
+    }
+}
+
 #[derive(Default)]
 struct State {
     desired: BTreeMap<MappingKey, Spec>,
@@ -701,9 +781,48 @@ struct State {
     upnp_cache: BTreeMap<Ipv4Addr, (Gateway<Tokio>, Instant)>,
     failures: BTreeMap<MappingKey, (u32, Instant)>,
     stale: BTreeSet<MappingKey>,
+    footprints: Arc<SyncMutex<BTreeMap<MappingKey, Footprint>>>,
 }
 
 impl State {
+    fn reserve(&self, key: &MappingKey, footprint: Footprint) -> bool {
+        self.footprints.mutate(|owned| {
+            if owned
+                .iter()
+                .any(|(owner, old)| owner != key && old.conflicts(&footprint))
+            {
+                return false;
+            }
+            owned.insert(key.clone(), footprint);
+            true
+        })
+    }
+
+    fn release(&self, key: &MappingKey) {
+        self.footprints.mutate(|owned| {
+            owned.remove(key);
+        });
+    }
+
+    fn retain_pcp(&mut self, key: &MappingKey, mapping: PortMapping) {
+        self.footprints.mutate(|owned| {
+            owned.insert(key.clone(), Footprint::granted(key, &mapping));
+        });
+        self.active.insert(key.clone(), Active::Pcp(mapping));
+    }
+
+    async fn reject_pcp(&mut self, key: &MappingKey, mapping: PortMapping) -> bool {
+        self.retain_pcp(key, mapping);
+        self.stale.insert(key.clone());
+        if let Err(error) = self.teardown(key.clone()).await {
+            Err::<(), _>(error).log_err();
+            true
+        } else {
+            self.stale.remove(key);
+            false
+        }
+    }
+
     async fn ensure(
         &mut self,
         interfaces: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
@@ -770,13 +889,24 @@ impl State {
         }
     }
 
+    #[cfg(test)]
     async fn drain(&mut self) -> Result<(), Error> {
+        self.drain_until(Instant::now() + DRAIN_TIMEOUT).await
+    }
+
+    async fn drain_until(&mut self, deadline: Instant) -> Result<(), Error> {
         self.desired.clear();
         self.failures.clear();
         self.stale.clear();
         let keys = self.active.keys().cloned().collect::<Vec<_>>();
         let mut first_error = None;
         for key in keys {
+            if Instant::now() >= deadline {
+                return Err(Error::new(
+                    eyre!("port-map cleanup deadline expired"),
+                    ErrorKind::Network,
+                ));
+            }
             if let Err(error) = self.teardown(key).await {
                 first_error.get_or_insert(error);
             }
@@ -804,24 +934,54 @@ impl State {
                 Some(Active::Pcp(m))
                     if renew_due(std::time::Instant::now(), m.expiration(), m.lifetime()) =>
                 {
-                    if let Err(e) = m.renew().await {
-                        crate::dev_log!(
-                            debug,
-                            "PCP/NAT-PMP renew for {key:?} failed, re-mapping: {e}"
-                        );
-                        self.replace_mapping(interfaces, key).await;
+                    match m.renew().await {
+                        Ok(()) => {
+                            let granted = Footprint::granted(&key, m);
+                            let spec = &self.desired[&key];
+                            let accepted = granted.start == key.1
+                                && granted.count >= spec.count
+                                && granted.hostname
+                                    == key.2.as_ref().map(|name| name.to_ascii_lowercase());
+                            self.footprints.mutate(|owned| {
+                                owned.insert(key.clone(), granted);
+                            });
+                            if !accepted {
+                                self.stale.insert(key.clone());
+                                self.replace_mapping(interfaces, key).await;
+                            }
+                        }
+                        Err(e) => {
+                            crate::dev_log!(debug, "PCP/NAT-PMP renew for {key:?} failed: {e}");
+                            self.replace_mapping(interfaces, key).await;
+                        }
                     }
                 }
                 Some(Active::Pcp(_)) => {}
-                // Re-register hostname routes without deleting the live mapping first.
-                Some(Active::Upnp { .. }) if key.2.is_some() && retry_ready => {
-                    let previous = self.active.remove(&key).expect("active mapping");
-                    self.apply(interfaces, key.clone()).await;
-                    if let std::collections::btree_map::Entry::Vacant(entry) =
-                        self.active.entry(key.clone())
+                Some(Active::Upnp {
+                    gateway,
+                    internal_port,
+                    ..
+                }) if key.2.is_some() && retry_ready => {
+                    let IpAddr::V4(local_ip) = key.0 else {
+                        continue;
+                    };
+                    match upnp::add_hostname_mapping(
+                        gateway,
+                        key.1,
+                        local_ip,
+                        *internal_port,
+                        key.2.as_deref().unwrap(),
+                    )
+                    .await
                     {
-                        entry.insert(previous);
-                        self.stale.insert(key);
+                        Ok(()) => {
+                            self.failures.remove(&key);
+                        }
+                        Err(error) => {
+                            self.stale.insert(key.clone());
+                            self.record_failure(key);
+                            Err::<(), _>(error).log_err();
+                        }
                     }
                 }
                 Some(Active::Upnp { .. }) if key.2.is_some() => {}
@@ -844,43 +1004,30 @@ impl State {
     }
 
     async fn teardown(&mut self, key: MappingKey) -> Result<(), Error> {
-        match self.active.remove(&key) {
-            Some(Active::Pcp(mapping)) => match mapping.try_drop().await {
-                Ok(()) => Ok(()),
-                Err((error, mapping)) => {
-                    self.active.insert(key.clone(), Active::Pcp(mapping));
-                    Err(Error::new(
-                        eyre!("PCP/NAT-PMP unmap for {key:?} failed: {error}"),
-                        ErrorKind::Network,
-                    ))
-                }
-            },
+        let result = match self.active.get(&key) {
+            Some(Active::Pcp(mapping)) => mapping.clone().try_drop().await.map_err(|(error, _)| {
+                Error::new(
+                    eyre!("PCP/NAT-PMP unmap for {key:?} failed: {error}"),
+                    ErrorKind::Network,
+                )
+            }),
             Some(Active::Upnp {
-                external_ip,
                 internal_port,
                 gateway,
-            }) => {
-                let result = match &key.2 {
-                    Some(hostname) => {
-                        upnp::remove_hostname_mapping(&gateway, key.1, internal_port, hostname)
-                            .await
-                    }
-                    None => upnp::remove_port(&gateway, key.3.upnp(), key.1).await,
-                };
-                if result.is_err() {
-                    self.active.insert(
-                        key,
-                        Active::Upnp {
-                            external_ip,
-                            internal_port,
-                            gateway,
-                        },
-                    );
+                ..
+            }) => match &key.2 {
+                Some(hostname) => {
+                    upnp::remove_hostname_mapping(gateway, key.1, *internal_port, hostname).await
                 }
-                result
-            }
+                None => upnp::remove_port(gateway, key.3.upnp(), key.1).await,
+            },
             None => Ok(()),
+        };
+        if result.is_ok() {
+            self.active.remove(&key);
+            self.release(&key);
         }
+        result
     }
 
     async fn replace_mapping(
@@ -916,14 +1063,14 @@ impl State {
         key: MappingKey,
     ) {
         let attempted = self.try_apply(interfaces, &key).await;
-        if self.active.contains_key(&key) {
+        if self.active.contains_key(&key) && !self.stale.contains(&key) {
             self.failures.remove(&key);
         } else if attempted {
             self.record_failure(key);
         }
     }
 
-    /// Returns `true` if any network I/O was attempted.
+    /// Whether a failed request needs retry backoff.
     async fn try_apply(
         &mut self,
         interfaces: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
@@ -978,6 +1125,9 @@ impl State {
                         }
                     }
                 }
+                if !self.reserve(key, Footprint::requested(key, &spec, (*gw, *scope_id))) {
+                    return true;
+                }
                 attempted = true;
                 match pcp::port_mapping(
                     pcp::BaseMapRequest::new(*gw, local_ip, protocol.internet(), intl),
@@ -996,15 +1146,16 @@ impl State {
                     // The echoed option confirms the gateway applied HOSTNAME.
                     Ok(m)
                         if m.external_port() == ext
-                            && m.response_options()
-                                .iter()
-                                .any(|o| o.code == OPTION_HOSTNAME) =>
+                            && m.response_options().iter().any(|o| {
+                                o.code == OPTION_HOSTNAME
+                                    && o.data.eq_ignore_ascii_case(hostname.as_bytes())
+                            }) =>
                     {
                         tracing::debug!(
                             "PCP HOSTNAME mapped {external_port}->{local_ip}:{} {hostname} via {gw}",
                             spec.internal_port,
                         );
-                        self.active.insert(key.clone(), Active::Pcp(m));
+                        self.retain_pcp(key, m);
                         return true;
                     }
                     Ok(m) => {
@@ -1012,9 +1163,12 @@ impl State {
                             set_verdict(&mut caps.pcp, true, now)
                                 | set_verdict(&mut caps.pcp_hostname, false, now)
                         });
-                        let _ = m.try_drop().await;
+                        if self.reject_pcp(key, m).await {
+                            return true;
+                        }
                     }
                     Err(e) => {
+                        self.release(key);
                         report_pcp_failure(interfaces, *gw, &e);
                         crate::dev_log!(
                             debug,
@@ -1050,6 +1204,12 @@ impl State {
                             );
                             (None, false)
                         } else {
+                            if !self.reserve(
+                                key,
+                                Footprint::requested(key, &spec, (gateway.addr.ip(), None)),
+                            ) {
+                                return true;
+                            }
                             match upnp::add_hostname_mapping(
                                 &gateway,
                                 external_port,
@@ -1071,6 +1231,7 @@ impl State {
                                         debug,
                                         "UPnP HOSTNAME map {local_v4}:{external_port} {hostname} failed: {e}"
                                     );
+                                    self.release(key);
                                     (None, true)
                                 }
                             }
@@ -1082,7 +1243,7 @@ impl State {
                     }
                 };
                 if let Some(gateway) = gateway {
-                    let external_ip = upnp::external_ipv4(&gateway).await.ok().flatten();
+                    let external_ip = None;
                     self.active.insert(
                         key.clone(),
                         Active::Upnp {
@@ -1091,6 +1252,14 @@ impl State {
                             gateway,
                         },
                     );
+                    if let Some(Active::Upnp {
+                        gateway,
+                        external_ip,
+                        ..
+                    }) = self.active.get_mut(key)
+                    {
+                        *external_ip = upnp::external_ipv4(gateway).await.ok().flatten();
+                    }
                 } else if invalidate_upnp_cache {
                     self.upnp_cache.remove(&local_v4);
                 }
@@ -1121,6 +1290,9 @@ impl State {
                     crate::dev_log!(debug, "PCP PORT_SET skip {gw}: known not to support PCP");
                     continue;
                 }
+                if !self.reserve(key, Footprint::requested(key, &spec, (*gw, *scope_id))) {
+                    return true;
+                }
                 attempted = true;
                 match pcp::port_mapping(
                     pcp::BaseMapRequest::new(*gw, local_ip, protocol.internet(), intl),
@@ -1148,19 +1320,24 @@ impl State {
                                 "PCP PORT_SET {protocol:?} mapped {external_port}+{range_size}->{local_ip}:{} via {gw}",
                                 spec.internal_port
                             );
-                            self.active.insert(key.clone(), Active::Pcp(m));
+                            self.retain_pcp(key, m);
                             return true;
                         }
                         crate::dev_log!(
                             debug,
                             "gateway {gw} granted {granted}/{range_size} PORT_SET ports for {local_ip}:{external_port}; skipping range"
                         );
-                        let _ = m.try_drop().await;
+                        if self.reject_pcp(key, m).await {
+                            return true;
+                        }
                     }
                     Ok(m) => {
-                        let _ = m.try_drop().await;
+                        if self.reject_pcp(key, m).await {
+                            return true;
+                        }
                     }
                     Err(e) => {
+                        self.release(key);
                         report_pcp_failure(interfaces, *gw, &e);
                         crate::dev_log!(
                             debug,
@@ -1183,6 +1360,9 @@ impl State {
                     "PCP/NAT-PMP skip {gw}: known not to support port mapping"
                 );
                 continue;
+            }
+            if !self.reserve(key, Footprint::requested(key, &spec, (*gw, *scope_id))) {
+                return true;
             }
             attempted = true;
             match PortMapping::new(
@@ -1210,14 +1390,17 @@ impl State {
                         set_verdict(&mut caps.pcp, !nat_pmp, now)
                             | set_verdict(&mut caps.nat_pmp, nat_pmp, now)
                     });
-                    self.active.insert(key.clone(), Active::Pcp(m));
+                    self.retain_pcp(key, m);
                     return true;
                 }
                 // A different external port is useless for a fixed public port.
                 Ok(m) => {
-                    let _ = m.try_drop().await;
+                    if self.reject_pcp(key, m).await {
+                        return true;
+                    }
                 }
                 Err(e) => {
+                    self.release(key);
                     report_crab_nat_failure(interfaces, *gw, &e);
                     crate::dev_log!(
                         debug,
@@ -1242,6 +1425,12 @@ impl State {
                 Some(gateway) => {
                     // Discovery alone proves the IGD, whatever the SOAP call says.
                     report_local(interfaces, local_ip, true);
+                    if !self.reserve(
+                        key,
+                        Footprint::requested(key, &spec, (gateway.addr.ip(), None)),
+                    ) {
+                        return true;
+                    }
                     match upnp::add_port(
                         &gateway,
                         protocol.upnp(),
@@ -1263,6 +1452,7 @@ impl State {
                                 debug,
                                 "UPnP {protocol:?} map {local_v4}:{external_port} failed: {e}"
                             );
+                            self.release(key);
                             None
                         }
                     }
@@ -1273,7 +1463,7 @@ impl State {
                 }
             };
             if let Some(gateway) = gateway {
-                let external_ip = upnp::external_ipv4(&gateway).await.ok().flatten();
+                let external_ip = None;
                 self.active.insert(
                     key.clone(),
                     Active::Upnp {
@@ -1282,6 +1472,14 @@ impl State {
                         gateway,
                     },
                 );
+                if let Some(Active::Upnp {
+                    gateway,
+                    external_ip,
+                    ..
+                }) = self.active.get_mut(key)
+                {
+                    *external_ip = upnp::external_ipv4(gateway).await.ok().flatten();
+                }
             } else {
                 // Re-discover next time in case the gateway went away.
                 self.upnp_cache.remove(&local_v4);
@@ -1337,6 +1535,640 @@ fn renew_due(now: std::time::Instant, expiration: std::time::Instant, lifetime: 
 mod tests {
     use super::*;
 
+    struct RouterFixture {
+        ip: IpAddr,
+        requests: Arc<SyncMutex<Vec<Vec<u8>>>>,
+        reject_delete: Arc<std::sync::atomic::AtomicBool>,
+        silence_delete: Arc<std::sync::atomic::AtomicBool>,
+        barriers: mpsc::UnboundedSender<oneshot::Sender<usize>>,
+        task: NonDetachingJoinHandle<()>,
+    }
+
+    impl RouterFixture {
+        async fn new(nat_pmp: bool, shift: u16, count: Option<u16>, hostname: bool) -> Self {
+            use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+            static NEXT: AtomicU32 = AtomicU32::new(1);
+            let n = NEXT.fetch_add(1, Ordering::Relaxed);
+            let ip: IpAddr = Ipv4Addr::from(0x7f4d0000 + n).into();
+            let socket = tokio::net::UdpSocket::bind((ip, 5351)).await.unwrap();
+            let requests = Arc::new(SyncMutex::new(Vec::new()));
+            let reject_delete = Arc::new(AtomicBool::new(true));
+            let silence_delete = Arc::new(AtomicBool::new(false));
+            let (barriers, mut barrier_recv) = mpsc::unbounded_channel::<oneshot::Sender<usize>>();
+            let captured = requests.clone();
+            let reject = reject_delete.clone();
+            let silence = silence_delete.clone();
+            let task = tokio::spawn(async move {
+                let mut bytes = [0; 1500];
+                loop {
+                    let (n, peer) = tokio::select! {
+                        biased;
+                        packet = socket.recv_from(&mut bytes) => packet.unwrap(),
+                        Some(barrier) = barrier_recv.recv() => {
+                            let _ = barrier.send(captured.peek(|requests| requests.len()));
+                            continue;
+                        }
+                    };
+                    let request = &bytes[..n];
+                    captured.mutate(|requests| requests.push(request.to_vec()));
+                    if nat_pmp && request[0] == 2 {
+                        socket.send_to(&[0, 0x81, 0, 1], peer).await.unwrap();
+                        continue;
+                    }
+                    if request[1] == 0 {
+                        let mut response = if request[0] == 2 {
+                            let mut response = vec![0; 24];
+                            response[0] = 2;
+                            crate::net::port_map::pcp::capability::encode_start9_capability_option(
+                                &mut response,
+                            );
+                            response
+                        } else {
+                            let mut response = vec![0; 12];
+                            response[3] = if nat_pmp { 0 } else { 1 };
+                            response[8..12].copy_from_slice(&[1, 2, 3, 4]);
+                            response
+                        };
+                        response[1] = 0x80;
+                        socket.send_to(&response, peer).await.unwrap();
+                        continue;
+                    }
+                    let deleting = if nat_pmp {
+                        &request[8..12]
+                    } else {
+                        &request[4..8]
+                    } == [0; 4];
+                    if deleting && silence.load(Ordering::SeqCst) {
+                        continue;
+                    }
+                    let denied = deleting && reject.load(Ordering::SeqCst);
+                    let response = if nat_pmp {
+                        let mut response = vec![0; 16];
+                        response[1] = request[1] | 0x80;
+                        response[3] = if denied { 2 } else { 0 };
+                        response[8..10].copy_from_slice(&request[4..6]);
+                        let port = u16::from_be_bytes(request[6..8].try_into().unwrap());
+                        response[10..12].copy_from_slice(
+                            &if deleting {
+                                0
+                            } else {
+                                port.saturating_add(shift)
+                            }
+                            .to_be_bytes(),
+                        );
+                        response[12..16].copy_from_slice(&request[8..12]);
+                        response
+                    } else {
+                        let mut response = vec![0; 60];
+                        response[0] = 2;
+                        response[1] = request[1] | 0x80;
+                        response[3] = if denied { 2 } else { 0 };
+                        response[4..8].copy_from_slice(&request[4..8]);
+                        response[24..60].copy_from_slice(&request[24..60]);
+                        let port = u16::from_be_bytes(request[42..44].try_into().unwrap());
+                        response[42..44].copy_from_slice(
+                            &if deleting {
+                                0
+                            } else {
+                                port.saturating_add(shift)
+                            }
+                            .to_be_bytes(),
+                        );
+                        response[44..60]
+                            .copy_from_slice(&Ipv4Addr::new(1, 2, 3, 4).to_ipv6_mapped().octets());
+                        for option in crate::net::port_map::pcp::pcp_options(&request[60..]) {
+                            let (code, data) = option.unwrap();
+                            if code == OPTION_HOSTNAME && !hostname {
+                                continue;
+                            }
+                            let data = if code == OPTION_PORT_SET {
+                                count
+                                    .map(|size| {
+                                        PortSet {
+                                            size,
+                                            first_internal_port: u16::from_be_bytes(
+                                                request[40..42].try_into().unwrap(),
+                                            ),
+                                            parity: false,
+                                        }
+                                        .to_payload()
+                                    })
+                                    .unwrap_or_else(|| data.to_vec())
+                            } else {
+                                data.to_vec()
+                            };
+                            crate::net::port_map::pcp::encode_pcp_option(
+                                &mut response,
+                                code,
+                                &data,
+                            );
+                        }
+                        response
+                    };
+                    socket.send_to(&response, peer).await.unwrap();
+                }
+            })
+            .into();
+            Self {
+                ip,
+                requests,
+                reject_delete,
+                silence_delete,
+                barriers,
+                task,
+            }
+        }
+
+        fn interfaces(&self) -> Watch<OrdMap<GatewayId, NetworkInterfaceInfo>> {
+            Watch::new(OrdMap::from_iter([(
+                GatewayId::from(imbl_value::InternedString::intern("fixture")),
+                NetworkInterfaceInfo {
+                    port_map: GatewayPortMapCapabilities {
+                        pcp: CapabilityVerdict::supported(true),
+                        pcp_hostname: CapabilityVerdict::supported(true),
+                        upnp: CapabilityVerdict::supported(false),
+                        ..Default::default()
+                    },
+                    ..iface(
+                        &["127.0.0.2/8"],
+                        &[&self.ip.to_string()],
+                        GatewayType::InboundOutbound,
+                    )
+                },
+            )]))
+        }
+
+        fn spec(&self, count: u16) -> Spec {
+            Spec {
+                internal_port: 8443,
+                gateways: vec![(self.ip, None)],
+                count,
+            }
+        }
+
+        async fn received_through_barrier(&self) -> usize {
+            let (send, recv) = oneshot::channel();
+            self.barriers.send(send).unwrap();
+            recv.await.unwrap()
+        }
+
+        async fn finish(mut self) {
+            self.task.abort();
+            let _ = (&mut self.task).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn rejected_grants_retain_exact_cleanup_and_block_fallback() {
+        use std::sync::atomic::Ordering;
+        for (nat_pmp, shift, count, hostname) in [
+            (false, 7, 1, false),
+            (true, 7, 1, false),
+            (false, 0, 1, true),
+            (false, 0, 8, false),
+        ] {
+            let router = RouterFixture::new(nat_pmp, shift, Some(2), false).await;
+            let fallback = RouterFixture::new(false, 0, None, true).await;
+            let key = (
+                "127.0.0.2".parse().unwrap(),
+                443,
+                hostname.then(|| "a.example.com".to_owned()),
+                TransportProtocol::Tcp,
+            );
+            let mut requested = router.spec(count);
+            requested.gateways.push((fallback.ip, None));
+            let mut state = State::default();
+            state
+                .ensure(&router.interfaces(), key.clone(), requested)
+                .await;
+            assert!(state.active.contains_key(&key));
+            assert!(state.stale.contains(&key));
+            assert_eq!(
+                external_ip_of(&state.desired, &state.active, &state.stale, 443),
+                None
+            );
+            assert!(fallback.requests.peek(|requests| requests.is_empty()));
+            let footprint = state.footprints.peek(|owned| owned[&key].clone());
+            assert_eq!(footprint.start, 443 + shift);
+            assert_eq!(footprint.count, if count > 1 { 2 } else { 1 });
+            assert!(footprint.hostname.is_none());
+            let mut overlapping = State {
+                footprints: state.footprints.clone(),
+                ..Default::default()
+            };
+            let overlap_key = (
+                "127.0.0.3".parse().unwrap(),
+                footprint.start,
+                None,
+                TransportProtocol::Tcp,
+            );
+            let calls = router.requests.peek(|requests| requests.len());
+            overlapping
+                .ensure(&router.interfaces(), overlap_key.clone(), router.spec(1))
+                .await;
+            assert!(!overlapping.active.contains_key(&overlap_key));
+            assert_eq!(router.requests.peek(|requests| requests.len()), calls);
+            let first = router.requests.peek(|requests| {
+                requests
+                    .iter()
+                    .find(|r| r[1] != 0 && r[0] == if nat_pmp { 0 } else { 2 })
+                    .unwrap()
+                    .clone()
+            });
+            state.remove(key.clone()).await.unwrap_err();
+            assert!(state.active.contains_key(&key));
+            router.reject_delete.store(false, Ordering::SeqCst);
+            state.drain().await.unwrap();
+            assert!(state.active.is_empty());
+            assert!(state.footprints.peek(|owned| owned.is_empty()));
+            router.requests.peek(|requests| {
+                for delete in requests
+                    .iter()
+                    .filter(|r| r[1] != 0 && r[0] == if nat_pmp { 0 } else { 2 })
+                    .skip(1)
+                {
+                    if nat_pmp {
+                        assert_eq!(&delete[4..6], &first[4..6]);
+                        assert_eq!(&delete[8..12], &[0; 4]);
+                    } else {
+                        assert_eq!(&delete[24..42], &first[24..42]);
+                        assert_eq!(&delete[60..], &first[60..]);
+                        assert_eq!(&delete[4..8], &[0; 4]);
+                    }
+                }
+            });
+            router.finish().await;
+            fallback.finish().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn retained_footprints_fence_overlapping_keys_and_shards() {
+        use std::sync::atomic::Ordering;
+        let router = RouterFixture::new(false, 0, None, true).await;
+        let key = (
+            "127.0.0.2".parse().unwrap(),
+            4000,
+            None,
+            TransportProtocol::Tcp,
+        );
+        let mut old = State::default();
+        old.ensure(&router.interfaces(), key.clone(), router.spec(10))
+            .await;
+        assert!(old.active.contains_key(&key));
+        let mut changed = router.spec(1);
+        changed.internal_port = 9999;
+        old.ensure(&router.interfaces(), key.clone(), changed).await;
+        assert!(old.stale.contains(&key));
+        assert_eq!(old.footprints.peek(|owned| owned[&key].count), 10);
+        let mut next = State {
+            footprints: old.footprints.clone(),
+            ..Default::default()
+        };
+        let sibling = (
+            "127.0.0.3".parse().unwrap(),
+            4005,
+            None,
+            TransportProtocol::Tcp,
+        );
+        let calls = router.requests.peek(|requests| requests.len());
+        next.ensure(&router.interfaces(), sibling.clone(), router.spec(1))
+            .await;
+        assert!(!next.active.contains_key(&sibling));
+        assert_eq!(router.requests.peek(|requests| requests.len()), calls);
+        let same_shard = (key.0, 4008, None, TransportProtocol::Tcp);
+        old.ensure(&router.interfaces(), same_shard.clone(), router.spec(1))
+            .await;
+        assert!(!old.active.contains_key(&same_shard));
+        let udp = (sibling.0, sibling.1, None, TransportProtocol::Udp);
+        next.ensure(&router.interfaces(), udp.clone(), router.spec(1))
+            .await;
+        assert!(next.active.contains_key(&udp));
+        router.reject_delete.store(false, Ordering::SeqCst);
+        old.remove(key).await.unwrap();
+        next.failures.remove(&sibling);
+        next.ensure(&router.interfaces(), sibling.clone(), router.spec(1))
+            .await;
+        assert!(next.active.contains_key(&sibling));
+        old.drain().await.unwrap();
+        next.drain().await.unwrap();
+        router.finish().await;
+    }
+
+    #[tokio::test]
+    async fn cancelling_teardown_preserves_pcp_identity() {
+        use std::sync::atomic::Ordering;
+        let router = RouterFixture::new(false, 0, None, true).await;
+        let key = (
+            "127.0.0.2".parse().unwrap(),
+            443,
+            None,
+            TransportProtocol::Tcp,
+        );
+        let mut state = State::default();
+        state
+            .ensure(&router.interfaces(), key.clone(), router.spec(1))
+            .await;
+        router.silence_delete.store(true, Ordering::SeqCst);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), state.teardown(key.clone()))
+                .await
+                .is_err()
+        );
+        assert!(state.active.contains_key(&key));
+        assert!(state.footprints.peek(|owned| owned.contains_key(&key)));
+        router.silence_delete.store(false, Ordering::SeqCst);
+        router.reject_delete.store(false, Ordering::SeqCst);
+        state.teardown(key).await.unwrap();
+        router.finish().await;
+    }
+
+    #[tokio::test]
+    async fn retained_hostname_does_not_block_distinct_sni() {
+        use std::sync::atomic::Ordering;
+        let router = RouterFixture::new(false, 0, None, true).await;
+        let key = (
+            "127.0.0.2".parse().unwrap(),
+            443,
+            Some("a.example.com".into()),
+            TransportProtocol::Tcp,
+        );
+        let mut first = State::default();
+        first
+            .ensure(&router.interfaces(), key.clone(), router.spec(1))
+            .await;
+        first.remove(key.clone()).await.unwrap_err();
+        let mut second = State {
+            footprints: first.footprints.clone(),
+            ..Default::default()
+        };
+        let other = (
+            "127.0.0.3".parse().unwrap(),
+            443,
+            Some("b.example.com".into()),
+            TransportProtocol::Tcp,
+        );
+        second
+            .ensure(&router.interfaces(), other.clone(), router.spec(1))
+            .await;
+        assert!(second.active.contains_key(&other));
+        let same = (other.0, 443, key.2.clone(), TransportProtocol::Tcp);
+        second
+            .ensure(&router.interfaces(), same.clone(), router.spec(1))
+            .await;
+        assert!(!second.active.contains_key(&same));
+        router.reject_delete.store(false, Ordering::SeqCst);
+        first.drain().await.unwrap();
+        second.drain().await.unwrap();
+        router.finish().await;
+    }
+
+    async fn soap_fixture() -> (
+        Gateway<Tokio>,
+        Arc<SyncMutex<Vec<String>>>,
+        Arc<std::sync::atomic::AtomicBool>,
+        NonDetachingJoinHandle<()>,
+    ) {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        use crate::net::port_map::server::igd::{ADD_HOSTNAME_ACTION, DELETE_HOSTNAME_ACTION};
+        let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        let gateway = Gateway {
+            addr: listener.local_addr().unwrap(),
+            control_url: "/control".into(),
+            control_schema: [ADD_HOSTNAME_ACTION, DELETE_HOSTNAME_ACTION]
+                .into_iter()
+                .map(|action| (action.to_owned(), Vec::new()))
+                .collect(),
+            ..test_gateway()
+        };
+        let requests = Arc::new(SyncMutex::new(Vec::new()));
+        let fail = Arc::new(AtomicBool::new(false));
+        let captured = requests.clone();
+        let failing = fail.clone();
+        let task = tokio::spawn(async move {
+            loop {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                let mut bytes = [0; 4096];
+                loop {
+                    let n = stream.read(&mut bytes).await.unwrap();
+                    if n == 0 { break; }
+                    request.extend_from_slice(&bytes[..n]);
+                    if let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let header = String::from_utf8_lossy(&request[..end]);
+                        let length = header.lines().find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("content-length").then(|| value.trim().parse::<usize>().unwrap())
+                        }).unwrap_or(0);
+                        if request.len() >= end + 4 + length { break; }
+                    }
+                }
+                let request = String::from_utf8(request).unwrap();
+                let action = if request.contains(DELETE_HOSTNAME_ACTION) { DELETE_HOSTNAME_ACTION } else { ADD_HOSTNAME_ACTION };
+                captured.mutate(|requests| requests.push(request));
+                let (status, body) = if failing.load(Ordering::SeqCst) {
+                    (500, "<errorCode>501</errorCode>".to_owned())
+                } else {
+                    (200, format!("<{action}Response/>"))
+                };
+                let response = format!("HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                let _ = stream.write_all(response.as_bytes()).await;
+            }
+        }).into();
+        (gateway, requests, fail, task)
+    }
+
+    #[tokio::test]
+    async fn hostname_refresh_keeps_gateway_and_owner_until_withdrawn() {
+        use std::sync::atomic::Ordering;
+
+        use crate::net::port_map::server::igd::{ADD_HOSTNAME_ACTION, DELETE_HOSTNAME_ACTION};
+        let (old_gateway, old_calls, old_fail, mut old_task) = soap_fixture().await;
+        let (new_gateway, new_calls, _, mut new_task) = soap_fixture().await;
+        let local = Ipv4Addr::new(127, 0, 0, 2);
+        let key = (
+            local.into(),
+            443,
+            Some("a.example.com".into()),
+            TransportProtocol::Tcp,
+        );
+        let mut state = State::default();
+        state.desired.insert(
+            key.clone(),
+            Spec {
+                internal_port: 9443,
+                ..spec()
+            },
+        );
+        state.active.insert(
+            key.clone(),
+            Active::Upnp {
+                external_ip: None,
+                internal_port: 8443,
+                gateway: old_gateway,
+            },
+        );
+        state
+            .upnp_cache
+            .insert(local, (new_gateway, Instant::now()));
+        let ifaces = Watch::new(OrdMap::new());
+        state.refresh(&ifaces).await;
+        old_calls.peek(|calls| {
+            assert_eq!(calls.len(), 1);
+            assert!(calls[0].contains(ADD_HOSTNAME_ACTION));
+            assert!(calls[0].contains("<NewInternalPort>8443</NewInternalPort>"));
+        });
+        assert!(new_calls.peek(|calls| calls.is_empty()));
+        old_fail.store(true, Ordering::SeqCst);
+        state.refresh(&ifaces).await;
+        assert!(state.stale.contains(&key));
+        state.failures.remove(&key);
+        state.refresh(&ifaces).await;
+        assert!(new_calls.peek(|calls| calls.is_empty()));
+        old_calls.peek(|calls| assert!(calls.last().unwrap().contains(DELETE_HOSTNAME_ACTION)));
+        old_fail.store(false, Ordering::SeqCst);
+        state.failures.remove(&key);
+        state.refresh(&ifaces).await;
+        assert!(!state.stale.contains(&key));
+        new_calls.peek(|calls| {
+            assert_eq!(calls.len(), 2);
+            assert!(calls[1].contains("GetExternalIPAddress"));
+            assert!(calls[0].contains(ADD_HOSTNAME_ACTION));
+            assert!(calls[0].contains("<NewInternalPort>9443</NewInternalPort>"));
+        });
+        state.drain().await.unwrap();
+        old_task.abort();
+        new_task.abort();
+        let _ = (&mut old_task).await;
+        let _ = (&mut new_task).await;
+    }
+
+    #[tokio::test]
+    async fn drain_deadline_joins_shard_and_stops_router_calls() {
+        use std::sync::atomic::Ordering;
+        let router = RouterFixture::new(false, 0, None, true).await;
+        let key = (
+            "127.0.0.2".parse().unwrap(),
+            443,
+            None,
+            TransportProtocol::Tcp,
+        );
+        let mut state = State::default();
+        state
+            .ensure(&router.interfaces(), key.clone(), router.spec(1))
+            .await;
+        router.silence_delete.store(true, Ordering::SeqCst);
+        let controller = PortMapController::new(router.interfaces());
+        let (commands, recv) = mpsc::unbounded_channel();
+        let (drain, drain_recv) = mpsc::unbounded_channel();
+        let task: NonDetachingJoinHandle<_> =
+            tokio::spawn(run_shard(router.interfaces(), state, recv, drain_recv)).into();
+        let abort = task.abort_handle();
+        controller.state.mutate(|state| {
+            let ControllerState::Accepting(shards) = state else {
+                unreachable!()
+            };
+            shards.insert(
+                key.0,
+                Shard {
+                    commands,
+                    drain,
+                    task,
+                },
+            );
+        });
+        let first_controller = controller.clone();
+        let deadline = Instant::now() + Duration::from_millis(60);
+        let first = tokio::spawn(async move { first_controller.drain_until(deadline).await });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        first.abort();
+        assert!(first.await.unwrap_err().is_cancelled());
+        controller
+            .drain_until(deadline + Duration::from_secs(60))
+            .await
+            .unwrap_err();
+        assert!(abort.is_finished());
+        // Flush datagrams queued before the shard joined before counting new sends.
+        let calls = router.received_through_barrier().await;
+        tokio::time::sleep(Duration::from_millis(350)).await;
+        assert_eq!(router.received_through_barrier().await, calls);
+        controller.drain().await.unwrap_err();
+        router.finish().await;
+    }
+
+    #[tokio::test]
+    async fn slow_gateway_does_not_block_another_interface() {
+        use std::sync::atomic::Ordering;
+        let slow = RouterFixture::new(false, 0, None, true).await;
+        let fast = RouterFixture::new(false, 0, None, true).await;
+        let controller = PortMapController::new(slow.interfaces());
+        let local: IpAddr = "127.0.0.2".parse().unwrap();
+        controller.ensure(local, 443, 8443, vec![(slow.ip, None)]);
+        assert_eq!(
+            controller.mapped_external_ip(local, 443).await,
+            Some("1.2.3.4".parse().unwrap())
+        );
+        slow.silence_delete.store(true, Ordering::SeqCst);
+        controller.remove(local, 443);
+        let other: IpAddr = "127.0.0.3".parse().unwrap();
+        controller.ensure(other, 443, 8443, vec![(fast.ip, None)]);
+        assert_eq!(
+            tokio::time::timeout(
+                Duration::from_millis(150),
+                controller.mapped_external_ip(other, 443)
+            )
+            .await
+            .unwrap(),
+            Some("1.2.3.4".parse().unwrap())
+        );
+        slow.silence_delete.store(false, Ordering::SeqCst);
+        slow.reject_delete.store(false, Ordering::SeqCst);
+        fast.reject_delete.store(false, Ordering::SeqCst);
+        controller
+            .drain_until(Instant::now() + Duration::from_secs(3))
+            .await
+            .unwrap();
+        slow.finish().await;
+        fast.finish().await;
+    }
+
+    #[tokio::test]
+    async fn expired_drain_never_starts_withdrawal() {
+        let router = RouterFixture::new(false, 0, None, true).await;
+        let key = (
+            "127.0.0.2".parse().unwrap(),
+            443,
+            None,
+            TransportProtocol::Tcp,
+        );
+        let mut state = State::default();
+        state
+            .ensure(&router.interfaces(), key, router.spec(1))
+            .await;
+        let calls = router.requests.peek(|calls| calls.len());
+        let (commands, recv) = mpsc::unbounded_channel();
+        let (drain, drain_recv) = mpsc::unbounded_channel();
+        let task = tokio::spawn(run_shard(router.interfaces(), state, recv, drain_recv)).into();
+        drain_shard(
+            router.ip,
+            Shard {
+                commands,
+                drain,
+                task,
+            },
+            Instant::now(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(router.requests.peek(|calls| calls.len()), calls);
+        router.finish().await;
+    }
+
     fn spec() -> Spec {
         Spec {
             internal_port: 443,
@@ -1369,10 +2201,6 @@ mod tests {
         }
     }
 
-    // The filter both protocols' reported addresses funnel through. PCP grants
-    // cannot be built here (`crab_nat::PortMapping` has private fields), so the
-    // Pcp arm reaches this only by construction: `external_ip_of` has the one
-    // call site, and it wraps the match over both arms.
     #[test]
     fn a_gateway_behind_another_nat_reports_no_usable_address() {
         for ip in ["192.168.1.1", "10.0.0.1", "172.16.0.1"] {
@@ -1551,8 +2379,6 @@ mod tests {
         );
     }
 
-    // Distinct hostnames on the same external port are independent mappings;
-    // removing one (or adding a plain mapping) never clobbers the others.
     #[tokio::test]
     async fn distinct_hostnames_share_a_port_without_clobbering() {
         let ip: IpAddr = Ipv4Addr::new(10, 59, 0, 2).into();
@@ -1896,12 +2722,16 @@ mod tests {
                 resp: external_ip,
             })
             .unwrap();
-        let (respond, response) = oneshot::channel();
-        drain.send(DrainRequest { respond }).unwrap();
+        drain
+            .send(DrainRequest {
+                deadline: Instant::now() + DRAIN_TIMEOUT,
+            })
+            .unwrap();
 
-        tokio::spawn(run_shard(interfaces(), State::default(), recv, drain_recv));
-
-        response.await.unwrap().unwrap();
+        tokio::spawn(run_shard(interfaces(), State::default(), recv, drain_recv))
+            .await
+            .unwrap()
+            .unwrap();
         assert!(
             external_ip_rx.await.is_err(),
             "the queued ordinary command ran before drain"
@@ -1955,24 +2785,32 @@ mod tests {
         let ip: IpAddr = "fd00:59::2".parse().unwrap();
         let (commands, mut command_rx) = mpsc::unbounded_channel();
         let (drain, mut drain_requests) = mpsc::unbounded_channel();
+        let (started, start_rx) = oneshot::channel();
+        let (finish, finish_rx) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            drain_requests.recv().await.unwrap();
+            started.send(()).unwrap();
+            finish_rx.await.unwrap();
+            Ok(())
+        })
+        .into();
         controller.state.mutate(|state| match state {
             ControllerState::Accepting(shards) => {
-                shards.insert(ip, Shard { commands, drain });
+                shards.insert(
+                    ip,
+                    Shard {
+                        commands,
+                        drain,
+                        task,
+                    },
+                );
             }
             ControllerState::Draining(_) => panic!("controller already draining"),
         });
 
         let first_controller = controller.clone();
         let first = tokio::spawn(async move { first_controller.drain().await });
-        let Some(DrainRequest { respond }) = drain_requests.recv().await else {
-            panic!("shard did not receive first drain request");
-        };
-        respond
-            .send(Err(Error::new(
-                eyre!("synthetic teardown failed"),
-                ErrorKind::Network,
-            )))
-            .unwrap();
+        start_rx.await.unwrap();
         tokio::task::yield_now().await;
         controller.ensure(ip, 443, 443, Vec::new());
         assert!(command_rx.try_recv().is_err());
@@ -1987,11 +2825,7 @@ mod tests {
         assert!(!second.is_finished());
         assert!(!third.is_finished());
 
-        tokio::time::advance(RETRY_INTERVAL).await;
-        let Some(DrainRequest { respond }) = drain_requests.recv().await else {
-            panic!("shard did not receive retried drain request");
-        };
-        respond.send(Ok(())).unwrap();
+        finish.send(()).unwrap();
 
         second.await.unwrap().unwrap();
         third.await.unwrap().unwrap();

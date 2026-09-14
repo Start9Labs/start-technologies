@@ -132,8 +132,10 @@ for the detail behind its highlights.
 
 ### Fixed
 
-- **Service and published ports stay synchronized more reliably with configured
-  exposure after transient forwarding failures and during graceful shutdown.**
+- **Service ports retry failed forwarding changes while retaining the state
+  needed for cleanup.** Graceful shutdown waits for forwarding cleanup workers
+  to finish and reports incomplete withdrawal. An unreachable router may keep
+  a mapping for the remainder of its granted lifetime.
 
 - **The port-forwarding test reports a port as open to the Internet only where
   it is reachable from the Internet.** Where StartOS's port-forward request was
