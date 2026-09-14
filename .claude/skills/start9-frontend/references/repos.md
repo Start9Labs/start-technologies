@@ -30,6 +30,6 @@
   inline `canMatch` guards on `SessionService.user()` and its `role`. Both themes: the account's
   appearance setting drives `TUI_DARK_MODE` (`provideTaiga()` with no `mode` seeds from the OS,
   StartOS tokens for dark). Local i18n machinery with `en.ts` only. No commit hook:
-  `npm run check` runs the compiler, `check-i18n`, the mock's type-check, and
-  `prettier --check`. Its `web/AGENTS.md` carries the
-  portal-specific rules.
+  `npm run check` runs the compiler, `check-i18n`, the logic tests in `scripts/*.test.ts`
+  (`tsx --test`), the mock's type-check, and `prettier --check`. Its `web/AGENTS.md` carries
+  the portal-specific rules.

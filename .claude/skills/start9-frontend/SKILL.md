@@ -75,9 +75,12 @@ it with every Angular/Taiga bump (other repos' docs deliberately carry no versio
    style bindings, `hostDirectives` for composition. `@HostBinding`/`@HostListener` are dead.
 8. **English strings are i18n keys** (monorepo apps): every user-facing string goes through
    `| i18n` and exists in all five dictionaries; `tsc` enforces via the `i18nKey` type.
-9. **Verification is `tsc` + Prettier, not tests.** No unit-test runner is wired up anywhere.
-   `npm run check` (strict + `strictTemplates`), the i18n check, a prod build, and manual
-   verification are the bar. Don't claim "tests pass"; don't add a test framework unasked.
+9. **Verification is `npm run check` + a manual pass; a test only where logic earns it.**
+   `check` (strict + `strictTemplates`), the i18n check, a prod build and clicking through the
+   app are the bar. A test is for state machinery a manual pass can't drive deterministically
+   — request sequencing, a store's transitions, merge order — written with `node:test` against
+   the plain class and wired into `check`; never for a template, a style or what a component
+   renders. No test framework; don't claim "tests pass" in a repo that has none.
 10. **The docs ship with the change — this skill first.** This skill is the fleet-wide
     frontend source of truth: the ops repos reach it through committed symlinks, and stack
     versions live only in its fleet table. When frontend conventions, versions, or idioms
@@ -112,8 +115,8 @@ it with every Angular/Taiga bump (other repos' docs deliberately carry no versio
   shared `g-*` utilities; deep relative or `src/`-absolute imports.
 - **No semicolons.** Prettier: `singleQuote`, `semi: false`, `arrowParens: "avoid"`,
   `trailingComma: "all"`, `htmlWhitespaceSensitivity: "ignore"`, `tabWidth: 2`.
-- **No ESLint, no unit tests.** Prettier runs via husky/lint-staged — never
-  `git commit --no-verify`; fix the formatting.
+- **No ESLint, no test framework.** Logic tests are `node:test` (doctrine 9). Prettier runs
+  via husky/lint-staged — never `git commit --no-verify`; fix the formatting.
 - **Suffixless files and classes** in new code: `routes/devices/index.ts` exporting
   `export default class Devices`, plus `dialog.ts`, `table.ts`, `service.ts` —
   not `devices-page.component.ts` / `DevicesPageComponent`.
