@@ -6,7 +6,7 @@ STARTWRT_RUST_ARCH := riscv64gc
 STARTWRT_ARCH := riscv64
 
 STARTWRT_BIN := target/$(STARTWRT_RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startwrt
-STARTWRT_WEB_DIST := $(STARTWRT_DIR)/web/dist/startwrt/browser/index.html
+STARTWRT_WEB_DIST := $(STARTWRT_DIR)/web/dist/startwrt/browser/immutable-assets.txt
 STARTWRT_WEB_CONFIG := $(STARTWRT_DIR)/web/config.json
 STARTWRT_GIT_HASH_FILE := $(STARTWRT_DIR)/build/env/GIT_HASH.txt
 
@@ -71,7 +71,7 @@ $(STARTWRT_BIN): $(STARTWRT_RUST_SRC) $(STARTWRT_SHARED_RUST_SRC) Cargo.toml Car
 # and .angular/.updated carry the shared libs + the @start9labs/start-core / patch-db
 # client file: deps (defined in shared-libs/ts-modules/build.mk). $(STARTWRT_WEB_CONFIG)
 # is start-wrt's own runtime config.json (separate from the root workspace config.json).
-$(STARTWRT_WEB_DIST): $(STARTWRT_WEB_SRC) $(WEB_SHARED_SRC) .angular/.updated $(STARTWRT_WEB_CONFIG)
+$(STARTWRT_WEB_DIST): $(STARTWRT_WEB_SRC) $(WEB_SHARED_SRC) $(IMMUTABLE_ASSETS_GENERATOR) .angular/.updated $(STARTWRT_WEB_CONFIG)
 	npm --prefix . run build:wrt
 	touch $(STARTWRT_WEB_DIST)
 

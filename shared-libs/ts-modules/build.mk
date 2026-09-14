@@ -2,8 +2,9 @@ WEB_SHARED_SRC := $(call ls-files, shared-libs/ts-modules/shared) $(call ls-file
 WEB_UI_SRC := $(call ls-files, projects/start-os/web/ui)
 WEB_SETUP_WIZARD_SRC := $(call ls-files, projects/start-os/web/setup-wizard)
 WEB_START_TUNNEL_SRC := $(call ls-files, projects/start-tunnel/web)
-WEB_UIS := projects/start-os/web/dist/raw/ui/index.html projects/start-os/web/dist/raw/setup-wizard/index.html
-COMPRESSED_WEB_UIS := projects/start-os/web/dist/static/ui/index.html projects/start-os/web/dist/static/setup-wizard/index.html
+IMMUTABLE_ASSETS_GENERATOR := shared-libs/ts-modules/scripts/generate-immutable-assets.mjs
+WEB_UIS := projects/start-os/web/dist/raw/ui/immutable-assets.txt projects/start-os/web/dist/raw/setup-wizard/immutable-assets.txt
+COMPRESSED_WEB_UIS := projects/start-os/web/dist/static/ui/immutable-assets.txt projects/start-os/web/dist/static/setup-wizard/immutable-assets.txt
 
 # start-core (the shared TS lib formerly start-sdk/base): web consumes its built
 # dist via the root file: dep; the SDK and container-runtime consume it too.
@@ -28,22 +29,22 @@ node_modules/.package-lock.json: package-lock.json
 	npm --prefix . run check:i18n
 	touch .i18n-checked
 
-projects/start-os/web/dist/raw/ui/index.html: $(WEB_UI_SRC) $(WEB_SHARED_SRC) .angular/.updated .i18n-checked
+projects/start-os/web/dist/raw/ui/immutable-assets.txt: $(WEB_UI_SRC) $(WEB_SHARED_SRC) $(IMMUTABLE_ASSETS_GENERATOR) .angular/.updated .i18n-checked
 	npm --prefix . run build:ui
-	touch projects/start-os/web/dist/raw/ui/index.html
+	touch projects/start-os/web/dist/raw/ui/immutable-assets.txt
 
-projects/start-os/web/dist/raw/setup-wizard/index.html: $(WEB_SETUP_WIZARD_SRC) $(WEB_SHARED_SRC) .angular/.updated .i18n-checked
+projects/start-os/web/dist/raw/setup-wizard/immutable-assets.txt: $(WEB_SETUP_WIZARD_SRC) $(WEB_SHARED_SRC) $(IMMUTABLE_ASSETS_GENERATOR) .angular/.updated .i18n-checked
 	npm --prefix . run build:setup
-	touch projects/start-os/web/dist/raw/setup-wizard/index.html
+	touch projects/start-os/web/dist/raw/setup-wizard/immutable-assets.txt
 
-projects/start-tunnel/web/dist/raw/start-tunnel/index.html: $(WEB_START_TUNNEL_SRC) $(WEB_SHARED_SRC) .angular/.updated .i18n-checked
+projects/start-tunnel/web/dist/raw/start-tunnel/immutable-assets.txt: $(WEB_START_TUNNEL_SRC) $(WEB_SHARED_SRC) $(IMMUTABLE_ASSETS_GENERATOR) .angular/.updated .i18n-checked
 	npm --prefix . run build:tunnel
-	touch projects/start-tunnel/web/dist/raw/start-tunnel/index.html
+	touch projects/start-tunnel/web/dist/raw/start-tunnel/immutable-assets.txt
 
-projects/start-os/web/dist/static/%/index.html: projects/start-os/web/dist/raw/%/index.html
+projects/start-os/web/dist/static/%/immutable-assets.txt: projects/start-os/web/dist/raw/%/immutable-assets.txt
 	./shared-libs/ts-modules/compress-uis.sh $* projects/start-os/web
 
-projects/start-tunnel/web/dist/static/%/index.html: projects/start-tunnel/web/dist/raw/%/index.html
+projects/start-tunnel/web/dist/static/%/immutable-assets.txt: projects/start-tunnel/web/dist/raw/%/immutable-assets.txt
 	./shared-libs/ts-modules/compress-uis.sh $* projects/start-tunnel/web
 
 config.json: $(GIT_HASH_FILE) $(ENVIRONMENT_FILE) shared-libs/ts-modules/config-sample.json shared-libs/ts-modules/update-config.sh
@@ -52,7 +53,7 @@ config.json: $(GIT_HASH_FILE) $(ENVIRONMENT_FILE) shared-libs/ts-modules/config-
 # convenience steps to build the StartOS web UIs (OS-product targets; not referenced elsewhere)
 start-os-uis: $(WEB_UIS)
 
-start-os-ui: projects/start-os/web/dist/raw/ui/index.html
+start-os-ui: projects/start-os/web/dist/raw/ui/immutable-assets.txt
 
 .PHONY: web-clean
 # Owns the Angular workspace, the patch-db TS client it consumes, and brochure (built via this workspace).

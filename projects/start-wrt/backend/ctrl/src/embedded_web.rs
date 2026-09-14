@@ -1,7 +1,7 @@
 use axum::body::Body;
 use axum::http::{header, Request, Response, StatusCode};
 use include_dir::{include_dir, Dir};
-use startos::net::static_server::{is_ui_content_hashed, is_ui_route};
+use startos::net::static_server::{is_ui_asset_immutable, is_ui_route};
 
 static WEB_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/../../web/dist/startwrt/browser");
 
@@ -24,7 +24,7 @@ pub async fn serve_embedded(req: Request<Body>) -> Response<Body> {
             .unwrap();
     };
 
-    let cache_control = if is_ui_content_hashed(file.path()) {
+    let cache_control = if is_ui_asset_immutable(&WEB_DIR, file.path()) {
         "public, max-age=31536000, immutable"
     } else {
         "no-cache"
@@ -58,8 +58,6 @@ pub async fn serve_embedded(req: Request<Body>) -> Response<Body> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
     use super::*;
 
     fn get(path: &str, if_none_match: Option<&str>) -> Response<Body> {
@@ -115,16 +113,16 @@ mod tests {
     }
 
     #[test]
-    fn hashed_bundles_are_immutable() {
+    fn declared_assets_are_immutable() {
         if !dist_embedded() {
             return;
         }
-        let main = WEB_DIR
+        let path = WEB_DIR
             .files()
-            .map(|f| f.path().to_string_lossy().into_owned())
-            .find(|p| is_ui_content_hashed(Path::new(p)))
-            .expect("built dist contains hashed bundles");
-        let res = get(&format!("/{main}"), None);
+            .find(|file| is_ui_asset_immutable(&WEB_DIR, file.path()))
+            .expect("the UI build declares an immutable asset")
+            .path();
+        let res = get(&format!("/{}", path.display()), None);
         assert_eq!(res.status(), StatusCode::OK);
         assert_eq!(
             header_str(&res, header::CACHE_CONTROL),

@@ -54,6 +54,7 @@ const INTERNAL_SERVER_ERROR: &[u8] = b"Internal Server Error";
 const IMMUTABLE_UI_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 const REVALIDATE_CACHE_CONTROL: &str = "no-cache";
 const PRIVATE_REVALIDATE_CACHE_CONTROL: &str = "private, no-cache";
+const IMMUTABLE_ASSETS_MANIFEST: &str = "immutable-assets.txt";
 
 pub const EMPTY_DIR: Dir<'_> = Dir::new("", &[]);
 
@@ -198,26 +199,15 @@ pub fn rpc_router<C: Context + Clone + AsRef<RpcContinuations>>(
         )
 }
 
-/// Matches top-level Angular bundles whose filenames carry content hashes.
-pub fn is_ui_content_hashed(path: &Path) -> bool {
-    if path.components().count() != 1 {
-        return false;
-    }
-    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+/// Whether the UI build declares this path immutable.
+pub fn is_ui_asset_immutable(ui_dir: &Dir<'_>, path: &Path) -> bool {
+    let Some(path) = path.to_str() else {
         return false;
     };
-    let Some(stem) = file_name
-        .strip_suffix(".js")
-        .or_else(|| file_name.strip_suffix(".css"))
-    else {
-        return false;
-    };
-    let bytes = stem.as_bytes();
-    bytes.len() > 9
-        && bytes[bytes.len() - 9] == b'-'
-        && bytes[bytes.len() - 8..]
-            .iter()
-            .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-' || *byte == b'_')
+    ui_dir
+        .get_file(IMMUTABLE_ASSETS_MANIFEST)
+        .and_then(|file| std::str::from_utf8(file.contents()).ok())
+        .is_some_and(|assets| assets.lines().any(|asset| asset == path))
 }
 
 /// Matches paths whose final segment has no extension.
@@ -978,7 +968,7 @@ impl FileData {
                 data
             },
             e_tag,
-            cache_control: Some(if is_ui_content_hashed(path) {
+            cache_control: Some(if is_ui_asset_immutable(ui_dir, path) {
                 IMMUTABLE_UI_CACHE_CONTROL
             } else {
                 REVALIDATE_CACHE_CONTROL
@@ -1293,6 +1283,13 @@ mod tests {
                 File::new("index.html", b"<html>StartOS</html>").with_metadata(METADATA),
             ),
             DirEntry::File(
+                File::new(
+                    IMMUTABLE_ASSETS_MANIFEST,
+                    b"empty.txt\nmain-ABCDEFGH.js\nmedia/font-ABCDEFGH.woff2\n",
+                )
+                .with_metadata(METADATA),
+            ),
+            DirEntry::File(
                 File::new("main-ABCDEFGH.js", b"console.log('StartOS')").with_metadata(METADATA),
             ),
             DirEntry::File(
@@ -1304,6 +1301,7 @@ mod tests {
                 File::new("ngsw-worker.js", b"self.addEventListener()").with_metadata(METADATA),
             ),
             DirEntry::File(File::new("assets/logo.svg", b"<svg></svg>").with_metadata(METADATA)),
+            DirEntry::File(File::new("media/font-ABCDEFGH.woff2", b"font").with_metadata(METADATA)),
             DirEntry::File(
                 File::new(
                     "manifest.webmanifest",
@@ -1551,29 +1549,54 @@ mod tests {
     }
 
     #[test]
-    fn content_hashed_paths_are_top_level_bundles() {
-        for path in [
-            "main-ABCDEFGH.js",
-            "polyfills-Ab_0-cDe.js",
-            "chunk-C-f2EvjP.js",
-            "styles-XYUDF62Z.css",
-        ] {
-            assert!(is_ui_content_hashed(Path::new(path)), "{path}");
-        }
-        for path in [
-            "index.html",
-            "main.js",
-            "chunk-C-f2EvjP.js.map",
-            "favicon-96x96.png",
-            "assets/font-ABCDEFGH.css",
-        ] {
-            assert!(!is_ui_content_hashed(Path::new(path)), "{path}");
-        }
+    fn immutable_assets_are_declared_by_exact_path() {
+        assert!(is_ui_asset_immutable(&TEST_UI_DIR, Path::new("empty.txt")));
+        assert!(is_ui_asset_immutable(
+            &TEST_UI_DIR,
+            Path::new("media/font-ABCDEFGH.woff2")
+        ));
+        assert!(!is_ui_asset_immutable(
+            &TEST_UI_DIR,
+            Path::new("styles-ABCD_ef-.css")
+        ));
+        assert!(!is_ui_asset_immutable(
+            &TEST_UI_DIR,
+            Path::new("main-ABCDEFGH.js.gz")
+        ));
+        assert!(!is_ui_asset_immutable(&EMPTY_DIR, Path::new("empty.txt")));
+
+        static EMPTY_SIDECAR: Dir<'static> = Dir::new(
+            "",
+            &[DirEntry::File(File::new(IMMUTABLE_ASSETS_MANIFEST, b"\n"))],
+        );
+        assert!(!is_ui_asset_immutable(
+            &EMPTY_SIDECAR,
+            Path::new("empty.txt")
+        ));
+
+        static NON_UTF8_SIDECAR: Dir<'static> = Dir::new(
+            "",
+            &[DirEntry::File(File::new(
+                IMMUTABLE_ASSETS_MANIFEST,
+                b"\xff",
+            ))],
+        );
+        assert!(!is_ui_asset_immutable(
+            &NON_UTF8_SIDECAR,
+            Path::new("empty.txt")
+        ));
     }
 
     #[test]
-    fn stable_ui_files_revalidate_and_hashed_bundles_are_immutable() {
-        for path in ["/", "/ngsw-worker.js", "/assets/logo.svg"] {
+    fn ui_cache_policy_uses_immutable_asset_declarations() {
+        for path in [
+            "/",
+            "/ngsw-worker.js",
+            "/assets/logo.svg",
+            "/styles-ABCD_ef-.css",
+            "/immutable-assets.txt",
+            "/main-ABCDEFGH.js.gz",
+        ] {
             let response = ui_response(path, &[]);
             assert_eq!(response.status(), StatusCode::OK, "{path}");
             assert_eq!(
@@ -1584,7 +1607,11 @@ mod tests {
             assert!(response.headers().contains_key(ETAG), "{path}");
         }
 
-        for path in ["/main-ABCDEFGH.js", "/styles-ABCD_ef-.css"] {
+        for path in [
+            "/empty.txt",
+            "/main-ABCDEFGH.js",
+            "/media/font-ABCDEFGH.woff2",
+        ] {
             let response = ui_response(path, &[]);
             assert_eq!(response.status(), StatusCode::OK, "{path}");
             assert_eq!(
@@ -1594,6 +1621,10 @@ mod tests {
             );
             assert!(response.headers().contains_key(ETAG), "{path}");
         }
+
+        let gzip = ui_response("/main-ABCDEFGH.js", &[(ACCEPT_ENCODING, "gzip")]);
+        assert_eq!(header(&gzip, CONTENT_ENCODING), "gzip");
+        assert_eq!(header(&gzip, CACHE_CONTROL), IMMUTABLE_UI_CACHE_CONTROL);
 
         let response = ui_response("/", &[]);
         let e_tag = header(&response, ETAG).to_owned();
