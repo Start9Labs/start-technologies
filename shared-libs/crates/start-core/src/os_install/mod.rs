@@ -63,36 +63,35 @@ pub fn partition_for(disk: impl AsRef<Path>, idx: u32) -> PathBuf {
     }
 }
 
-fn parse_partuuid(output: &[u8]) -> Result<&str, color_eyre::eyre::Error> {
-    let output = std::str::from_utf8(output)?;
+fn parse_partuuid(output: &[u8]) -> Option<&str> {
+    let output = std::str::from_utf8(output).ok()?;
     let partuuid = output
         .strip_suffix("\r\n")
         .or_else(|| output.strip_suffix('\n'))
         .unwrap_or(output);
-    if partuuid.is_empty() || partuuid.chars().any(char::is_whitespace) {
-        return Err(eyre!("invalid PARTUUID output"));
-    }
-    Ok(partuuid)
+    (!partuuid.is_empty() && !partuuid.chars().any(char::is_whitespace)).then_some(partuuid)
 }
 
-fn invalid_partuuid(partition: &Path, cause: color_eyre::eyre::Error) -> Error {
-    let message = t!(
-        "os-install.invalid-partuuid",
-        partition = partition.display()
+fn invalid_partuuid(partition: &Path) -> Error {
+    Error::new(
+        eyre!(t!(
+            "os-install.invalid-partuuid",
+            partition = partition.display()
+        )),
+        ErrorKind::BlockDevice,
     )
-    .to_string();
-    let mut error = Error::new(eyre!(message.clone()), ErrorKind::BlockDevice);
-    error.debug = Some(cause.wrap_err(message));
-    error
 }
 
 fn fstab_source_from_blkid(
     partition: &Path,
     output: Result<Vec<u8>, Error>,
 ) -> Result<String, Error> {
-    let output =
-        output.map_err(|error| invalid_partuuid(partition, error.debug.unwrap_or(error.source)))?;
-    let partuuid = parse_partuuid(&output).map_err(|error| invalid_partuuid(partition, error))?;
+    let output = output.map_err(|cause| {
+        let mut error = invalid_partuuid(partition);
+        error.debug = Some(cause.debug.unwrap_or(cause.source));
+        error
+    })?;
+    let partuuid = parse_partuuid(&output).ok_or_else(|| invalid_partuuid(partition))?;
     Ok(format!("PARTUUID={partuuid}"))
 }
 
@@ -1069,7 +1068,7 @@ mod tests {
             &b"01234567-01\n89abcdef-02\n"[..],
             &[0xff][..],
         ] {
-            assert!(parse_partuuid(output).is_err());
+            assert!(parse_partuuid(output).is_none());
         }
     }
 
