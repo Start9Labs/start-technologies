@@ -199,7 +199,7 @@ pub fn rpc_router<C: Context + Clone + AsRef<RpcContinuations>>(
         )
 }
 
-/// Whether the UI build declares this path immutable.
+/// Matches an exact path listed in `immutable-assets.txt`.
 pub fn is_ui_asset_immutable(ui_dir: &Dir<'_>, path: &Path) -> bool {
     let Some(path) = path.to_str() else {
         return false;

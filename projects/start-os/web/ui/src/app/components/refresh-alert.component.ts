@@ -2,11 +2,10 @@ import { Component, inject } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { SwUpdate } from '@angular/service-worker'
 import { WA_WINDOW } from '@ng-web-apis/common'
-import { ErrorService, HttpError, i18nPipe } from '@start9labs/shared'
+import { i18nPipe, TaskService } from '@start9labs/shared'
 import { Version } from '@start9labs/start-core'
 import { TuiResponsiveDialog } from '@taiga-ui/addon-mobile'
 import { TuiButton } from '@taiga-ui/core'
-import { TuiNotificationMiddleService } from '@taiga-ui/kit'
 import { PatchDB } from 'patch-db-client'
 import { distinctUntilChanged, map, merge, Subject } from 'rxjs'
 import { ConfigService } from 'src/app/services/config.service'
@@ -54,8 +53,7 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
 export class RefreshAlertComponent {
   private readonly win = inject(WA_WINDOW)
   private readonly updates = inject(SwUpdate)
-  private readonly loader = inject(TuiNotificationMiddleService)
-  private readonly error = inject(ErrorService)
+  private readonly tasks = inject(TaskService)
   private readonly version = Version.parse(inject(ConfigService).version)
 
   readonly i18n = inject(i18nPipe)
@@ -79,38 +77,21 @@ export class RefreshAlertComponent {
   )
 
   protected async reload(): Promise<void> {
-    const loader = this.isPwa
-      ? this.loader
-          .open(this.i18n.transform('Reloading PWA'))
-          .subscribe({ error: e => console.error(e) })
-      : undefined
-
     try {
       if (
         this.updates.isEnabled &&
         this.win.navigator.serviceWorker.controller !== null
       ) {
-        await this.updates.checkForUpdate()
-        await this.updates.activateUpdate()
+        await this.tasks.run(
+          async () => {
+            await this.updates.checkForUpdate()
+            await this.updates.activateUpdate()
+          },
+          this.isPwa ? 'Reloading PWA' : 'Reload',
+        )
       }
-    } catch (e: unknown) {
-      if (e instanceof HttpError || typeof e === 'string') {
-        this.error.handleError(e)
-      } else if (e instanceof Error) {
-        this.error.handleError(e.message)
-      } else {
-        console.error(e)
-      }
-
-      return
     } finally {
-      try {
-        loader?.unsubscribe()
-      } catch (e: unknown) {
-        console.error(e)
-      }
+      this.win.location.reload()
     }
-
-    this.win.location.reload()
   }
 }
