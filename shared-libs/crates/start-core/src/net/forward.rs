@@ -699,7 +699,6 @@ async fn remove_stale_dynamic_forwarding_rules_family(family: &str) -> Result<()
 }
 
 async fn initialize_port_forwarding() -> Result<(), Error> {
-    nft_ensure_base().await?;
     nft_rule(
         "forward",
         "base-established",
@@ -1008,7 +1007,6 @@ struct InterfaceForwardEntry {
     count: u16,
     targets: BTreeMap<ForwardRequirements, (SocketAddrV4, u8, Weak<()>)>,
     forwards: BTreeMap<SocketAddrV4, Arc<()>>,
-    // Upstream mappings keyed by local IP and external start, retained for withdrawal.
     mapped: BTreeSet<(Ipv4Addr, u16)>,
 }
 
@@ -1039,13 +1037,6 @@ impl InterfaceForwardEntry {
         pmap: &PortMapController,
     ) -> Result<(), Error> {
         let mut keep = BTreeSet::<SocketAddrV4>::new();
-        // (local IP, external start) -> (port count, internal start, candidate
-        // upstream gateways) to open upstream. The internal port is the target's,
-        // so the gateway maps external->internal faithfully (e.g. an 80->443
-        // redirect); it equals the external for ordinary port-preserving forwards.
-        // Only public (WAN-facing) forwards need this; private subnets are already
-        // reachable. A `count > 1` range is one PCP PORT_SET request (RFC 7753),
-        // skipped on gateways without it (UPnP/NAT-PMP can't map ranges).
         let mut want = BTreeMap::<(Ipv4Addr, u16), (u16, u16, Vec<(IpAddr, Option<u32>)>)>::new();
 
         for (gw_id, info) in ip_info.iter() {

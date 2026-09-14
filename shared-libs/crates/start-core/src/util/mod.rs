@@ -797,12 +797,12 @@ mod tests {
             "start-core-invoke-process-group-{}",
             crate::util::new_guid()
         ));
-        let script = format!(
-            "(sleep 0.2; printf written > '{}') & wait",
-            sentinel.display()
-        );
         let mut command = tokio::process::Command::new("sh");
-        command.arg("-c").arg(script);
+        command
+            .arg("-c")
+            .arg("(sleep 0.2; printf written > \"$1\") & wait")
+            .arg("sh")
+            .arg(&sentinel);
 
         let result = command
             .kill_process_group_on_drop()
@@ -810,7 +810,7 @@ mod tests {
             .invoke(ErrorKind::Unknown)
             .await;
 
-        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind, ErrorKind::Timeout);
         tokio::time::sleep(Duration::from_millis(300)).await;
         assert!(!sentinel.exists());
     }

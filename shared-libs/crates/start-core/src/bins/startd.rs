@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use clap::Parser;
 use color_eyre::eyre::eyre;
-use futures::{FutureExt, TryFutureExt};
+use futures::FutureExt;
 use rust_i18n::t;
 use tokio::signal::unix::signal;
 use tracing::instrument;
@@ -18,8 +18,24 @@ use crate::net::web_server::{Acceptor, WebServer};
 use crate::prelude::*;
 use crate::shutdown::Shutdown;
 use crate::system::launch_metrics_task;
+use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::append_file;
 use crate::util::logger::LOGGER;
+
+fn startd_task_result(
+    result: Result<(), tokio::task::JoinError>,
+    cancellation_is_success: bool,
+    panic_message: String,
+) -> Result<(), Error> {
+    match result {
+        Ok(()) => Ok(()),
+        Err(error) if cancellation_is_success && error.is_cancelled() => Ok(()),
+        Err(error) => Err(Error::new(
+            eyre!("{error}").wrap_err(panic_message),
+            ErrorKind::Unknown,
+        )),
+    }
+}
 
 #[instrument(skip_all)]
 async fn inner_main(
@@ -37,7 +53,10 @@ async fn inner_main(
             Err(s) => return Ok(Some(s)),
             Ok(ctx) => ctx,
         };
-        tokio::fs::write("/run/startos/initialized", "").await?;
+        if let Err(error) = tokio::fs::write("/run/startos/initialized", "").await {
+            ctx.shutdown().await.log_err();
+            return Err(error.into());
+        }
 
         server.serve_ui_for(ctx.clone());
         LOGGER.set_logfile(None);
@@ -69,70 +88,153 @@ async fn inner_main(
         ctx
     };
 
-    let (rpc_ctx, shutdown) = async {
+    let shutdown = async {
         crate::hostname::sync_hostname(&rpc_ctx.account.peek(|a| a.hostname.clone())).await?;
 
         let mut shutdown_recv = rpc_ctx.shutdown.subscribe();
 
         let sig_handler_ctx = rpc_ctx.clone();
-        let sig_handler = tokio::spawn(async move {
-            use tokio::signal::unix::SignalKind;
-            futures::future::select_all(
-                [
-                    SignalKind::interrupt(),
-                    SignalKind::quit(),
-                    SignalKind::terminate(),
-                ]
-                .iter()
-                .map(|s| {
-                    async move {
-                        signal(*s)
-                            .unwrap_or_else(|_| panic!("register {:?} handler", s))
-                            .recv()
-                            .await
-                    }
-                    .boxed()
-                }),
-            )
-            .await;
-            sig_handler_ctx
-                .shutdown
-                .send(None)
-                .map_err(|_| ())
-                .expect("send shutdown signal");
-        });
+        let mut sig_handler: Option<NonDetachingJoinHandle<()>> = Some(
+            tokio::spawn(async move {
+                use tokio::signal::unix::SignalKind;
+                futures::future::select_all(
+                    [
+                        SignalKind::interrupt(),
+                        SignalKind::quit(),
+                        SignalKind::terminate(),
+                    ]
+                    .iter()
+                    .map(|s| {
+                        async move {
+                            signal(*s)
+                                .unwrap_or_else(|_| panic!("register {:?} handler", s))
+                                .recv()
+                                .await
+                        }
+                        .boxed()
+                    }),
+                )
+                .await;
+                sig_handler_ctx
+                    .shutdown
+                    .send(None)
+                    .map_err(|_| ())
+                    .expect("send shutdown signal");
+            })
+            .into(),
+        );
 
         let metrics_ctx = rpc_ctx.clone();
-        let metrics_task = tokio::spawn(async move {
-            launch_metrics_task(&metrics_ctx.metrics_cache, || {
-                metrics_ctx.shutdown.subscribe()
+        let mut metrics_task: Option<NonDetachingJoinHandle<()>> = Some(
+            tokio::spawn(async move {
+                launch_metrics_task(&metrics_ctx.metrics_cache, || {
+                    metrics_ctx.shutdown.subscribe()
+                })
+                .await
             })
-            .await
-        });
+            .into(),
+        );
 
-        metrics_task
-            .map_err(|e| {
-                Error::new(
-                    eyre!("{}", e).wrap_err(t!("bins.startd.metrics-daemon-panicked").to_string()),
-                    ErrorKind::Unknown,
-                )
-            })
-            .map_ok(|_| tracing::debug!("{}", t!("bins.startd.metrics-daemon-shutdown")))
-            .await?;
+        enum Event {
+            Shutdown(
+                Result<Option<crate::shutdown::Shutdown>, tokio::sync::broadcast::error::RecvError>,
+            ),
+            Metrics(Result<(), tokio::task::JoinError>),
+            Signal(Result<(), tokio::task::JoinError>),
+        }
 
-        let shutdown = shutdown_recv
-            .recv()
-            .await
-            .with_kind(crate::ErrorKind::Unknown)?;
+        let event = tokio::select! {
+            shutdown = shutdown_recv.recv() => Event::Shutdown(shutdown),
+            result = metrics_task.as_mut().expect("metrics task") => {
+                metrics_task.take();
+                Event::Metrics(result)
+            }
+            result = sig_handler.as_mut().expect("signal task") => {
+                sig_handler.take();
+                Event::Signal(result)
+            }
+        };
+        let result = match event {
+            Event::Shutdown(shutdown) => shutdown.with_kind(crate::ErrorKind::Unknown),
+            Event::Metrics(metrics) => match startd_task_result(
+                metrics,
+                false,
+                t!("bins.startd.metrics-daemon-panicked").to_string(),
+            ) {
+                Ok(()) => {
+                    tracing::debug!("{}", t!("bins.startd.metrics-daemon-shutdown"));
+                    shutdown_recv
+                        .recv()
+                        .await
+                        .with_kind(crate::ErrorKind::Unknown)
+                }
+                Err(error) => Err(error),
+            },
+            Event::Signal(signal) => match startd_task_result(
+                signal,
+                false,
+                t!("bins.startd.signal-handler-panicked").to_string(),
+            ) {
+                Ok(()) => shutdown_recv
+                    .recv()
+                    .await
+                    .with_kind(crate::ErrorKind::Unknown),
+                Err(error) => Err(error),
+            },
+        };
 
-        sig_handler.abort();
-
-        Ok::<_, Error>((rpc_ctx, shutdown))
+        let (metrics_result, signal_result) = tokio::join!(
+            async {
+                match metrics_task {
+                    Some(task) => startd_task_result(
+                        task.wait_for_abort().await,
+                        true,
+                        t!("bins.startd.metrics-daemon-panicked").to_string(),
+                    ),
+                    None => Ok(()),
+                }
+            },
+            async {
+                match sig_handler {
+                    Some(task) => startd_task_result(
+                        task.wait_for_abort().await,
+                        true,
+                        t!("bins.startd.signal-handler-panicked").to_string(),
+                    ),
+                    None => Ok(()),
+                }
+            }
+        );
+        let tasks_result = match metrics_result {
+            Ok(()) => signal_result,
+            Err(error) => {
+                signal_result.log_err();
+                Err(error)
+            }
+        };
+        match result {
+            Ok(shutdown) => {
+                tasks_result?;
+                Ok(shutdown)
+            }
+            Err(error) => {
+                tasks_result.log_err();
+                Err(error)
+            }
+        }
     }
-    .await?;
-    rpc_ctx.shutdown().await?;
-
-    Ok(shutdown)
+    .await;
+    let cleanup = rpc_ctx.shutdown().await;
+    match shutdown {
+        Ok(shutdown) => {
+            cleanup?;
+            Ok(shutdown)
+        }
+        Err(error) => {
+            cleanup.log_err();
+            Err(error)
+        }
+    }
 }
 
 pub fn main(args: impl IntoIterator<Item = OsString>) {

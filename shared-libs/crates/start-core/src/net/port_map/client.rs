@@ -486,7 +486,7 @@ async fn drain_shard(local_ip: IpAddr, shard: Shard) -> Result<(), Error> {
 fn spawn_shard(interfaces: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>) -> Shard {
     let (commands, recv) = mpsc::unbounded_channel();
     let (drain, drain_recv) = mpsc::unbounded_channel();
-    // Detached: dropping the join handle does not abort the task.
+    // Dropping a Tokio `JoinHandle` does not abort its task.
     tokio::spawn(run_shard(interfaces, State::default(), recv, drain_recv));
     Shard { commands, drain }
 }
@@ -817,7 +817,12 @@ impl State {
                 Some(Active::Upnp { .. }) if key.2.is_some() && retry_ready => {
                     let previous = self.active.remove(&key).expect("active mapping");
                     self.apply(interfaces, key.clone()).await;
-                    self.active.entry(key).or_insert(previous);
+                    if let std::collections::btree_map::Entry::Vacant(entry) =
+                        self.active.entry(key.clone())
+                    {
+                        entry.insert(previous);
+                        self.stale.insert(key);
+                    }
                 }
                 Some(Active::Upnp { .. }) if key.2.is_some() => {}
                 Some(Active::Upnp { .. }) => {
@@ -1333,8 +1338,6 @@ mod tests {
     use super::*;
 
     fn spec() -> Spec {
-        // No gateways: try_apply() does no network I/O, so these tests exercise
-        // the keying/identity logic only.
         Spec {
             internal_port: 443,
             gateways: Vec::new(),
@@ -1343,7 +1346,16 @@ mod tests {
     }
 
     fn interfaces() -> Watch<OrdMap<GatewayId, NetworkInterfaceInfo>> {
-        Watch::new(OrdMap::new())
+        Watch::new(OrdMap::from_iter([(
+            GatewayId::from(imbl_value::InternedString::intern("eno0")),
+            NetworkInterfaceInfo {
+                port_map: GatewayPortMapCapabilities {
+                    upnp: CapabilityVerdict::supported(false),
+                    ..Default::default()
+                },
+                ..iface(&["10.59.0.2/24"], &[], GatewayType::InboundOutbound)
+            },
+        )]))
     }
 
     fn test_gateway() -> Gateway<Tokio> {
@@ -1468,6 +1480,31 @@ mod tests {
                 &BTreeSet::from([key]),
                 443
             ),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn a_hostname_refresh_without_replacement_restores_a_stale_mapping() {
+        let ip: IpAddr = Ipv4Addr::new(10, 59, 0, 2).into();
+        let key: MappingKey = (ip, 443, Some("example.com".into()), TransportProtocol::Tcp);
+        let mut state = State::default();
+        state.desired.insert(key.clone(), spec());
+        state.active.insert(
+            key.clone(),
+            Active::Upnp {
+                external_ip: Some(Ipv4Addr::new(1, 2, 3, 4)),
+                internal_port: 443,
+                gateway: test_gateway(),
+            },
+        );
+
+        state.refresh(&interfaces()).await;
+
+        assert!(state.active.contains_key(&key));
+        assert!(state.stale.contains(&key));
+        assert_eq!(
+            external_ip_of(&state.desired, &state.active, &state.stale, 443),
             None
         );
     }

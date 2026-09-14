@@ -188,7 +188,11 @@ impl RpcContext {
             TypedPatchDb::<Database>::load(config.db().await?).await?
         };
         let peek = db.peek().await;
-        let account = AccountInfo::load(&peek)?;
+        let account = if let Some(InitResult { net_ctrl, .. }) = &init_result {
+            cleanup_forwarding_on_error(net_ctrl, AccountInfo::load(&peek)).await?
+        } else {
+            AccountInfo::load(&peek)?
+        };
         load_db.complete();
         tracing::info!("{}", t!("context.rpc.opened-patchdb"));
 
@@ -216,246 +220,218 @@ impl RpcContext {
             (net_ctrl, os_net_service)
         };
         let cleanup_controller = net_controller.clone();
-        init_net_ctrl.complete();
-        tracing::info!("{}", t!("context.rpc.initialized-net-controller"));
+        let result = async {
+            init_net_ctrl.complete();
+            tracing::info!("{}", t!("context.rpc.initialized-net-controller"));
 
-        if PLATFORM.ends_with("-nvidia") {
-            if let Err(e) = Command::new("nvidia-smi")
-                .invoke(ErrorKind::ParseSysInfo)
-                .await
-            {
-                tracing::warn!("{}", t!("context.rpc.nvidia-smi-error", error = e));
-                tracing::info!("{}", t!("context.rpc.nvidia-warning-can-be-ignored"));
-            } else {
-                async {
-                    let version: InternedString = String::from_utf8(
-                        Command::new("modinfo")
-                            .arg("-F")
-                            .arg("version")
-                            .arg("nvidia")
-                            .invoke(ErrorKind::ParseSysInfo)
-                            .await?,
-                    )?
-                    .trim()
-                    .into();
+            if PLATFORM.ends_with("-nvidia") {
+                if let Err(e) = Command::new("nvidia-smi")
+                    .invoke(ErrorKind::ParseSysInfo)
+                    .await
+                {
+                    tracing::warn!("{}", t!("context.rpc.nvidia-smi-error", error = e));
+                    tracing::info!("{}", t!("context.rpc.nvidia-warning-can-be-ignored"));
+                } else {
+                    async {
+                        let version: InternedString = String::from_utf8(
+                            Command::new("modinfo")
+                                .arg("-F")
+                                .arg("version")
+                                .arg("nvidia")
+                                .invoke(ErrorKind::ParseSysInfo)
+                                .await?,
+                        )?
+                        .trim()
+                        .into();
 
-                    let nvidia_dir =
-                        Path::new("/media/startos/data/package-data/nvidia").join(&*version);
+                        let nvidia_dir =
+                            Path::new("/media/startos/data/package-data/nvidia").join(&*version);
 
-                    // Generate single squashfs with both debian and generic overlays
-                    let sqfs = nvidia_dir.join("container-overlay.squashfs");
-                    if tokio::fs::metadata(&sqfs).await.is_err() {
-                        let tmp = TmpDir::new().await?;
+                        let sqfs = nvidia_dir.join("container-overlay.squashfs");
+                        if tokio::fs::metadata(&sqfs).await.is_err() {
+                            let tmp = TmpDir::new().await?;
 
-                        // Generate debian overlay (libs in /usr/lib/aarch64-linux-gnu/)
-                        let debian_dir = tmp.join("debian");
-                        tokio::fs::create_dir_all(&debian_dir).await?;
-                        // Create /etc/debian_version to trigger debian path detection
-                        tokio::fs::create_dir_all(debian_dir.join("etc")).await?;
-                        tokio::fs::write(debian_dir.join("etc/debian_version"), "").await?;
-                        let procfs = MountGuard::mount(
-                            &Bind::new("/proc"),
-                            debian_dir.join("proc"),
-                            ReadOnly,
-                        )
-                        .await?;
-                        Command::new("nvidia-container-cli")
-                            .arg("configure")
-                            .arg("--no-devbind")
-                            .arg("--no-cgroups")
-                            .arg("--utility")
-                            .arg("--compute")
-                            .arg("--graphics")
-                            .arg("--video")
-                            .arg(&debian_dir)
-                            .invoke(ErrorKind::Unknown)
+                            let debian_dir = tmp.join("debian");
+                            tokio::fs::create_dir_all(&debian_dir).await?;
+                            tokio::fs::create_dir_all(debian_dir.join("etc")).await?;
+                            tokio::fs::write(debian_dir.join("etc/debian_version"), "").await?;
+                            let procfs = MountGuard::mount(
+                                &Bind::new("/proc"),
+                                debian_dir.join("proc"),
+                                ReadOnly,
+                            )
                             .await?;
-                        procfs.unmount(true).await?;
-                        // Run ldconfig to create proper symlinks for all NVIDIA libraries
-                        Command::new("ldconfig")
-                            .arg("-r")
-                            .arg(&debian_dir)
-                            .invoke(ErrorKind::Unknown)
-                            .await?;
-                        // Remove /etc/debian_version - it was only needed for nvidia-container-cli detection
-                        tokio::fs::remove_file(debian_dir.join("etc/debian_version")).await?;
+                            Command::new("nvidia-container-cli")
+                                .arg("configure")
+                                .arg("--no-devbind")
+                                .arg("--no-cgroups")
+                                .arg("--utility")
+                                .arg("--compute")
+                                .arg("--graphics")
+                                .arg("--video")
+                                .arg(&debian_dir)
+                                .invoke(ErrorKind::Unknown)
+                                .await?;
+                            procfs.unmount(true).await?;
+                            Command::new("ldconfig")
+                                .arg("-r")
+                                .arg(&debian_dir)
+                                .invoke(ErrorKind::Unknown)
+                                .await?;
+                            tokio::fs::remove_file(debian_dir.join("etc/debian_version")).await?;
 
-                        // Generate generic overlay (libs in /usr/lib64/)
-                        let generic_dir = tmp.join("generic");
-                        tokio::fs::create_dir_all(&generic_dir).await?;
-                        // No /etc/debian_version - will use generic /usr/lib64 paths
-                        let procfs = MountGuard::mount(
-                            &Bind::new("/proc"),
-                            generic_dir.join("proc"),
-                            ReadOnly,
-                        )
-                        .await?;
-                        Command::new("nvidia-container-cli")
-                            .arg("configure")
-                            .arg("--no-devbind")
-                            .arg("--no-cgroups")
-                            .arg("--utility")
-                            .arg("--compute")
-                            .arg("--graphics")
-                            .arg("--video")
-                            .arg(&generic_dir)
-                            .invoke(ErrorKind::Unknown)
+                            let generic_dir = tmp.join("generic");
+                            tokio::fs::create_dir_all(&generic_dir).await?;
+                            let procfs = MountGuard::mount(
+                                &Bind::new("/proc"),
+                                generic_dir.join("proc"),
+                                ReadOnly,
+                            )
                             .await?;
-                        procfs.unmount(true).await?;
-                        // Run ldconfig to create proper symlinks for all NVIDIA libraries
-                        Command::new("ldconfig")
-                            .arg("-r")
-                            .arg(&generic_dir)
-                            .invoke(ErrorKind::Unknown)
-                            .await?;
+                            Command::new("nvidia-container-cli")
+                                .arg("configure")
+                                .arg("--no-devbind")
+                                .arg("--no-cgroups")
+                                .arg("--utility")
+                                .arg("--compute")
+                                .arg("--graphics")
+                                .arg("--video")
+                                .arg(&generic_dir)
+                                .invoke(ErrorKind::Unknown)
+                                .await?;
+                            procfs.unmount(true).await?;
+                            Command::new("ldconfig")
+                                .arg("-r")
+                                .arg(&generic_dir)
+                                .invoke(ErrorKind::Unknown)
+                                .await?;
 
-                        // Create squashfs with UID/GID mapping (avoids chown on readonly mounts)
-                        if let Some(p) = sqfs.parent() {
-                            tokio::fs::create_dir_all(p)
-                                .await
-                                .with_ctx(|_| (ErrorKind::Filesystem, format!("mkdir -p {p:?}")))?;
+                            if let Some(p) = sqfs.parent() {
+                                tokio::fs::create_dir_all(p).await.with_ctx(|_| {
+                                    (ErrorKind::Filesystem, format!("mkdir -p {p:?}"))
+                                })?;
+                            }
+                            Command::new("mksquashfs")
+                                .arg(&*tmp)
+                                .arg(&sqfs)
+                                .arg("-force-uid")
+                                .arg("100000")
+                                .arg("-force-gid")
+                                .arg("100000")
+                                .invoke(ErrorKind::Filesystem)
+                                .await?;
                         }
-                        Command::new("mksquashfs")
-                            .arg(&*tmp)
-                            .arg(&sqfs)
-                            .arg("-force-uid")
-                            .arg("100000")
-                            .arg("-force-gid")
-                            .arg("100000")
-                            .invoke(ErrorKind::Filesystem)
+                        BlockDev::new(&sqfs)
+                            .mount(NVIDIA_OVERLAY_PATH, ReadOnly)
                             .await?;
-                        // tmp.unmount_and_delete().await?;
+
+                        Ok::<_, Error>(())
                     }
-                    BlockDev::new(&sqfs)
-                        .mount(NVIDIA_OVERLAY_PATH, ReadOnly)
-                        .await?;
-
-                    Ok::<_, Error>(())
+                    .await
+                    .log_err();
                 }
-                .await
-                .log_err();
             }
-        }
 
-        let services = ServiceMap::default();
-        let metrics_cache = Watch::<Option<crate::system::Metrics>>::new(None);
-        let socks_proxy_url = format!("socks5h://{socks_proxy}");
+            let services = ServiceMap::default();
+            let metrics_cache = Watch::<Option<crate::system::Metrics>>::new(None);
+            let socks_proxy_url = format!("socks5h://{socks_proxy}");
 
-        let crons = SyncMutex::new(BTreeMap::new());
+            let crons = SyncMutex::new(BTreeMap::new());
 
-        let ntp_synced = db
-            .peek()
-            .await
-            .as_public()
-            .as_server_info()
-            .as_ntp_synced()
-            .de();
-        if !cleanup_forwarding_on_error(&cleanup_controller, ntp_synced).await? {
-            let db = db.clone();
-            crons.mutate(|c| {
-                c.insert(
-                    Guid::new(),
-                    tokio::spawn(async move {
-                        // a failed query must not kill this task — the sync
-                        // warning would stick for the rest of the boot
-                        while !check_time_is_synchronized()
+            let ntp_synced = db
+                .peek()
+                .await
+                .as_public()
+                .as_server_info()
+                .as_ntp_synced()
+                .de()?;
+            if !ntp_synced {
+                let db = db.clone();
+                crons.mutate(|c| {
+                    c.insert(
+                        Guid::new(),
+                        tokio::spawn(async move {
+                            // Transient query failures preserve the sync warning.
+                            while !check_time_is_synchronized()
+                                .await
+                                .log_err()
+                                .unwrap_or(false)
+                            {
+                                tokio::time::sleep(Duration::from_secs(30)).await;
+                            }
+                            db.mutate(|v| {
+                                v.as_public_mut()
+                                    .as_server_info_mut()
+                                    .as_ntp_synced_mut()
+                                    .ser(&true)
+                            })
                             .await
-                            .log_err()
-                            .unwrap_or(false)
-                        {
-                            tokio::time::sleep(Duration::from_secs(30)).await;
-                        }
-                        db.mutate(|v| {
-                            v.as_public_mut()
-                                .as_server_info_mut()
-                                .as_ntp_synced_mut()
-                                .ser(&true)
+                            .result
+                            .log_err();
                         })
-                        .await
-                        .result
-                        .log_err();
-                    })
-                    .into(),
-                )
-            });
-        }
+                        .into(),
+                    )
+                });
+            }
 
-        let os_partitions =
-            cleanup_forwarding_on_error(&cleanup_controller, OsPartitionInfo::from_fstab().await)
-                .await?;
-        let current_secret = cleanup_forwarding_on_error(
-            &cleanup_controller,
-            Jwk::generate_ec_key(josekit::jwk::alg::ec::EcCurve::P256).map_err(|error| {
-                tracing::debug!("{error:?}");
-                tracing::error!("{}", t!("context.rpc.couldnt-generate-ec-key"));
-                Error::new(
-                    eyre!("{}", t!("context.rpc.couldnt-generate-ec-key")),
-                    ErrorKind::Unknown,
-                )
-            }),
-        )
-        .await?;
-        let proxy = cleanup_forwarding_on_error(
-            &cleanup_controller,
-            Proxy::all(socks_proxy_url).map_err(Error::from),
-        )
-        .await?;
-        let client = cleanup_forwarding_on_error(
-            &cleanup_controller,
-            Client::builder()
+            let os_partitions = OsPartitionInfo::from_fstab().await?;
+            let current_secret = Jwk::generate_ec_key(josekit::jwk::alg::ec::EcCurve::P256)
+                .map_err(|error| {
+                    tracing::debug!("{error:?}");
+                    tracing::error!("{}", t!("context.rpc.couldnt-generate-ec-key"));
+                    Error::new(
+                        eyre!("{}", t!("context.rpc.couldnt-generate-ec-key")),
+                        ErrorKind::Unknown,
+                    )
+                })?;
+            let proxy = Proxy::all(socks_proxy_url).map_err(Error::from)?;
+            let client = Client::builder()
                 .proxy(proxy)
                 .build()
-                .with_kind(ErrorKind::ParseUrl),
-        )
-        .await?;
+                .with_kind(ErrorKind::ParseUrl)?;
 
-        let seed = Arc::new(RpcContextSeed {
-            is_closed: AtomicBool::new(false),
-            closed: watch::Sender::new(false),
-            os_partitions,
-            disk_guid,
-            ephemeral_auth_keys: SyncMutex::new(AuthKeys::new()),
-            auth_sig_nonce_cache: SyncMutex::new(Default::default()),
-            sync_db: watch::Sender::new(db.sequence().await),
-            db,
-            account: SyncRwLock::new(account),
-            callbacks: net_controller.callbacks.clone(),
-            net_controller,
-            os_net_service,
-            s9pk_arch: if config.multi_arch_s9pks.unwrap_or(false) {
-                None
-            } else {
-                Some(crate::ARCH)
-            },
-            services,
-            cancellable_installs: SyncMutex::new(BTreeMap::new()),
-            metrics_cache,
-            rpc_continuations: RpcContinuations::new(),
-            shutdown,
-            lxc_manager: Arc::new(LxcManager::new()),
-            open_authed_continuations: OpenAuthedContinuations::new(),
-            wifi_manager: RwLock::new(None),
-            current_secret: Arc::new(current_secret),
-            client,
-            start_time: Instant::now(),
-            crons,
-        });
+            let seed = Arc::new(RpcContextSeed {
+                is_closed: AtomicBool::new(false),
+                closed: watch::Sender::new(false),
+                os_partitions,
+                disk_guid,
+                ephemeral_auth_keys: SyncMutex::new(AuthKeys::new()),
+                auth_sig_nonce_cache: SyncMutex::new(Default::default()),
+                sync_db: watch::Sender::new(db.sequence().await),
+                db,
+                account: SyncRwLock::new(account),
+                callbacks: net_controller.callbacks.clone(),
+                net_controller,
+                os_net_service,
+                s9pk_arch: if config.multi_arch_s9pks.unwrap_or(false) {
+                    None
+                } else {
+                    Some(crate::ARCH)
+                },
+                services,
+                cancellable_installs: SyncMutex::new(BTreeMap::new()),
+                metrics_cache,
+                rpc_continuations: RpcContinuations::new(),
+                shutdown,
+                lxc_manager: Arc::new(LxcManager::new()),
+                open_authed_continuations: OpenAuthedContinuations::new(),
+                wifi_manager: RwLock::new(None),
+                current_secret: Arc::new(current_secret),
+                client,
+                start_time: Instant::now(),
+                crons,
+            });
 
-        let res = Self(seed.clone());
-        cleanup_forwarding_on_error(
-            &cleanup_controller,
-            res.cleanup_and_initialize(cleanup_init).await,
-        )
-        .await?;
-        tracing::info!("{}", t!("context.rpc.cleaned-up-transient-states"));
+            let res = Self(seed.clone());
+            res.cleanup_and_initialize(cleanup_init).await?;
+            tracing::info!("{}", t!("context.rpc.cleaned-up-transient-states"));
 
-        cleanup_forwarding_on_error(
-            &cleanup_controller,
-            crate::version::post_init(&res, run_migrations).await,
-        )
-        .await?;
-        tracing::info!("{}", t!("context.rpc.completed-migrations"));
-        Ok(res)
+            crate::version::post_init(&res, run_migrations).await?;
+            tracing::info!("{}", t!("context.rpc.completed-migrations"));
+            Ok::<_, Error>(res)
+        }
+        .await;
+        cleanup_forwarding_on_error(&cleanup_controller, result).await
     }
 
     #[instrument(skip_all)]
