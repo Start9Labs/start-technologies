@@ -40,6 +40,11 @@
   compile error. To reach a single file, mount the directory holding it.
   `mountVolume` and `mountAssets` still take `type`
 
+- **Breaking — MySQL and MariaDB use separate dump builders.** MySQL callers
+  keep `Backups.withMysqlDump`; `engine: 'mysql'` remains accepted but is
+  optional. MariaDB callers use `Backups.withMariadbDump`, remove
+  `engine: 'mariadb'`, and rename `mysqldOptions` to `mariadbdOptions`
+
 - **`addSsl.alpn` is written as the list of protocols itself: `['h2']`, or
   `null` for no filter.** It used to be `{ specified: ['h2'] }` or the string
   `'reflect'`, and setting either changed how StartOS dialled the container —
@@ -125,8 +130,8 @@
 
 ### Fixed
 
-- **`Backups.withMysqlDump` with `engine: 'mariadb'` works against MariaDB 11
-  images**, official or packaged from a distribution
+- **`Backups.withMariadbDump` works against MariaDB 11 images**, official or
+  packaged from a distribution
 
 - `import { backup } from '@start9labs/start-sdk'` exposes `backup.Backups`
   and `backup.mountBackupTarget`
@@ -174,7 +179,8 @@
   environment…" on every run
 
 - **A database dump backup or restore is no longer killed after exactly thirty
-  seconds.** Every step of `Backups.withPgDump` / `withMysqlDump` whose duration
+  seconds.** Every step of `Backups.withPgDump`, `withMysqlDump` and
+  `withMariadbDump` whose duration
   follows the size of the data now opts out of `SubContainer.exec`'s 30 s cap,
   and `PgDumpConfig.readyTimeout` supplies `pg_ctl`'s `-t` so that raising it
   reaches the step that actually blocks. Fixes

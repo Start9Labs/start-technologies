@@ -896,11 +896,10 @@ export class StartSdk<Manifest extends T.SDKManifest> {
          * additional volumes in the backup.
          */
         withPgDump: Backups.withPgDump<Manifest>,
-        /**
-         * Back up a MySQL/MariaDB database as a logical dump and rebuild it
-         * from that dump on restore.
-         */
+        /** Back up and restore a MySQL database through a logical dump. */
         withMysqlDump: Backups.withMysqlDump<Manifest>,
+        /** Back up and restore a MariaDB database through a logical dump. */
+        withMariadbDump: Backups.withMariadbDump<Manifest>,
       },
       InputSpec: {
         /**

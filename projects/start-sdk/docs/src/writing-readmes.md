@@ -222,7 +222,7 @@ For each check: what it probes, its grace period, and — most importantly — *
 
 What survives a backup, and what a restored instance has to rebuild.
 
-Lead with the **strategy**, because it decides what the guarantee actually is: volumes copied wholesale (`ofVolumes`), a database dumped and replayed rather than copied (`withPgDump` / `withMysqlDump`), or a mix. A volume that is dumped is not a volume that is backed up — its files are never captured, and restore reconstructs it by starting the engine and replaying the dump. Saying only that it is "included" tells a reader the opposite of what happens.
+Lead with the **strategy**, because it decides what the guarantee actually is: volumes copied wholesale (`ofVolumes`), a database dumped and replayed rather than copied (`withPgDump` / `withMysqlDump` / `withMariadbDump`), or a mix. A volume that is dumped is not a volume that is backed up — its files are never captured, and restore reconstructs it by starting the engine and replaying the dump. Saying only that it is "included" tells a reader the opposite of what happens.
 
 Then: what is deliberately excluded and why (a cache or an index that rebuilds is a feature, not a gap), and what a restored instance still has to do before it is usable — a resync from a dependency, a credential to re-enter, a dependency that must be present first.
 

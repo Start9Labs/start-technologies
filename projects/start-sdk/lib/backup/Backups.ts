@@ -54,28 +54,50 @@ export type PgDumpConfig<M extends T.SDKManifest> = {
   readyTimeout?: number
 }
 
-/** Configuration for MySQL/MariaDB dump-based backup */
+/** Options for rebuilding a MySQL data volume from a logical dump. */
 export type MysqlDumpConfig<M extends T.SDKManifest> = {
-  /** Image ID of the MySQL/MariaDB container (e.g. 'mysql', 'mariadb') */
+  /** Manifest image containing the MySQL server and client tools. */
   imageId: keyof M['images'] & T.ImageId
-  /** Volume ID containing the MySQL data directory */
+  /** Volume rebuilt from the logical dump during restore. */
   dbVolume: M['volumes'][number]
-  /** Path to MySQL data directory within the container (typically '/var/lib/mysql') */
+  /** Mount point for the database volume inside the image. */
   datadir: string
-  /** MySQL database name to dump */
+  /** Database included in the logical dump. */
   database: string
-  /** MySQL user for dump operations */
+  /** Account used to create the dump and recreated on restore. */
   user: string
-  /** Password for `user`, and for root in a restored data directory. Can be a string or a function that returns one, resolved when each hook runs — on restore, after the volumes are back. */
+  /** Dump-account password, resolved after volumes return on restore. Non-null values also configure root. */
   password: LazyPassword
-  /** Database engine: 'mysql' initializes with --initialize-insecure, 'mariadb' with mariadb-install-db */
-  engine: 'mysql' | 'mariadb'
-  /** Readiness check run while backing up, with `MYSQL_PWD` set to `password` when that is not null (default: `mysqladmin ping` / `mariadb-admin ping` as `user`) */
+  /** Backup readiness probe; defaults to `mysqladmin ping` as the dump account. */
   readyCommand?: string[]
-  /** Additional options passed to the server on startup (e.g. '--innodb-buffer-pool-size=256M'). Appended after `--bind-address=127.0.0.1`. */
+  /** Appended after `--bind-address=127.0.0.1`. */
   mysqldOptions?: string[]
-  /** Milliseconds for the server to become ready before failing (default 30000). Raise for large data directories that need longer to initialize or run crash recovery. */
+  /** Readiness timeout in milliseconds; defaults to 30,000. */
   readyTimeout?: number
+  engine?: 'mysql'
+}
+
+/** Options for rebuilding a MariaDB data volume from a logical dump. */
+export type MariadbDumpConfig<M extends T.SDKManifest> = {
+  /** Manifest image containing the MariaDB server and client tools. */
+  imageId: keyof M['images'] & T.ImageId
+  /** Volume rebuilt from the logical dump during restore. */
+  dbVolume: M['volumes'][number]
+  /** Mount point for the database volume inside the image. */
+  datadir: string
+  /** Database included in the logical dump. */
+  database: string
+  /** Account used to create the dump and recreated on restore. */
+  user: string
+  /** Dump-account password, resolved after volumes return on restore. Non-null values also configure root. */
+  password: LazyPassword
+  /** Backup readiness probe; defaults to `mariadb-admin ping` as the dump account. */
+  readyCommand?: string[]
+  /** Appended after `--bind-address=127.0.0.1`. */
+  mariadbdOptions?: string[]
+  /** Readiness timeout in milliseconds; defaults to 30,000. */
+  readyTimeout?: number
+  mysqldOptions?: never
 }
 
 const sqlString = (s: string) =>
@@ -423,24 +445,13 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
   }
 
   /**
-   * Configure MySQL/MariaDB dump-based backup for a volume.
+   * Backs up a MySQL database as a logical dump and rebuilds it on restore.
    *
-   * Backup takes a logical dump instead of rsyncing the raw data directory.
-   * Restore initializes a fresh data directory with the engine's own tool,
-   * creates `database`, `user` and root's password from `password`, and replays
-   * the dump. Both engines run the server binary directly, so an image with the
-   * engine installed the way its distribution packages it works.
-   *
-   * The dump is staged in the subcontainer's `/tmp` on its way to and from the
-   * backup target; a mariadb restore holds it there compressed and decompressed.
-   *
-   * @returns A configured Backups instance with pre/post hooks. Chain `.addVolume()` or
-   * `.addSync()` to include additional volumes/paths in the backup.
+   * Chain `.addVolume()` or `.addSync()` for additional backup content.
    */
   static withMysqlDump<M extends T.SDKManifest = never>(
     config: MysqlDumpConfig<M>,
   ): Backups<M> {
-    if (config.engine === 'mariadb') return Backups.withMariadbDump(config)
     const {
       imageId,
       dbVolume,
@@ -633,8 +644,13 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
       })
   }
 
-  private static withMariadbDump<M extends T.SDKManifest>(
-    config: MysqlDumpConfig<M>,
+  /**
+   * Backs up a MariaDB database as a compressed logical dump and rebuilds it on restore.
+   *
+   * Chain `.addVolume()` or `.addSync()` for additional backup content.
+   */
+  static withMariadbDump<M extends T.SDKManifest = never>(
+    config: MariadbDumpConfig<M>,
   ): Backups<M> {
     const {
       imageId,
@@ -644,7 +660,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
       user,
       password,
       readyCommand,
-      mysqldOptions = [],
+      mariadbdOptions = [],
       readyTimeout = 30_000,
     } = config
     const dumpFile = `${BACKUP_CONTAINER_MOUNT}/${database}.sql.gz`
@@ -679,7 +695,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
             '--user=mysql',
             `--datadir=${datadir}`,
             '--bind-address=127.0.0.1',
-            ...mysqldOptions,
+            ...mariadbdOptions,
           ],
           { user: 'root', timeout: null },
         )
