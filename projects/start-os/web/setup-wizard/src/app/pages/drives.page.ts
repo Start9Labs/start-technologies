@@ -239,7 +239,7 @@ export default class DrivesPage {
     (osDrive: DiskInfo | null): ValidatorFn =>
     ({ value }: AbstractControl) => {
       if (!value) return null
-      const sameAsOs = osDrive && value.logicalname === osDrive.logicalname
+      const sameAsOs = osDrive && value.stablePath === osDrive.stablePath
       const min = sameAsOs ? this.MIN_BOTH : this.MIN_DATA
       if (value.capacity < min) {
         return sameAsOs
@@ -287,6 +287,7 @@ export default class DrivesPage {
     if (this.stateService.osDrive) {
       this.form.controls.osDrive.setValue({
         logicalname: this.stateService.osDrive,
+        stablePath: this.stateService.osDrive,
         vendor: null,
         model: this.stateService.osDrive,
         partitions: [],
@@ -362,7 +363,7 @@ export default class DrivesPage {
       return
     }
 
-    const sameDevice = osDrive.logicalname === dataDrive.logicalname
+    const sameDevice = osDrive.stablePath === dataDrive.stablePath
     const dataHasStartOS = !!toGuid(dataDrive)
 
     // Scenario 1: Same drive, has StartOS data, preserving → no warning
@@ -390,12 +391,12 @@ export default class DrivesPage {
   private preserveBlockedReason(dataDrive: DiskInfo): i18nKey | null {
     const osDrive = this.stateService.osDrive
       ? null
-      : this.form.controls.osDrive.value?.logicalname
+      : this.form.controls.osDrive.value?.stablePath
     const wholeDiskPool = this.isStartOsPoolGuid(dataDrive.guid)
     const partitionPool = dataDrive.partitions.some(p =>
       this.isStartOsPoolGuid(p.guid),
     )
-    const sameDrive = osDrive === dataDrive.logicalname
+    const sameDrive = osDrive === dataDrive.stablePath
 
     if (wholeDiskPool) {
       return sameDrive
@@ -489,9 +490,9 @@ export default class DrivesPage {
       const result = await this.api.installOs({
         // Pre-installed: null OS drive tells the backend to skip the install
         // and only provision the data drive.
-        osDrive: this.stateService.osDrive ? null : osDrive.logicalname,
+        osDrive: this.stateService.osDrive ? null : osDrive.stablePath,
         dataDrive: {
-          logicalname: dataDrive.logicalname,
+          stablePath: dataDrive.stablePath,
           wipe,
         },
       })

@@ -1349,6 +1349,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
     powjefhjbnwhdva: {
       type: 'disk',
       logicalname: 'sdba1',
+      stablePath: '/dev/disk/by-path/pci-0000:00:17.0-ata-2-part1',
       label: 'Another Drive',
       capacity: 2000000000000,
       used: 100000000000,

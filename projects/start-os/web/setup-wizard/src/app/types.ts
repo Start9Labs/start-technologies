@@ -5,7 +5,7 @@ import { DiskInfo, PartitionInfo, StartOSDiskInfo } from '@start9labs/shared'
 export interface InstallOsParams {
   osDrive: string | null // null = already booted from the OS drive; provision data only
   dataDrive: {
-    logicalname: string // e.g. /dev/sda, /dev/sdb3
+    stablePath: string
     wipe: boolean
   }
 }

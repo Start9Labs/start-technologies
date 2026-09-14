@@ -8,17 +8,17 @@ use crate::disk::util::pvscan;
 use crate::prelude::*;
 use crate::util::Invoke;
 
-/// `/dev/<part>` paths for every partition currently exposed on `disk_path`.
+/// Partition paths for kernel nodes and `/dev/disk/by-path` aliases.
 pub async fn list_partitions(disk_path: &Path) -> Result<Vec<PathBuf>, Error> {
-    let disk_name = disk_path
-        .file_name()
-        .and_then(|s| s.to_str())
-        .ok_or_else(|| {
-            Error::new(
-                eyre!("invalid disk path: {}", disk_path.display()),
-                ErrorKind::BlockDevice,
-            )
-        })?;
+    let canonical = tokio::fs::canonicalize(disk_path)
+        .await
+        .with_ctx(|_| (ErrorKind::BlockDevice, disk_path.display().to_string()))?;
+    let disk_name = canonical.file_name().ok_or_else(|| {
+        Error::new(
+            eyre!("invalid disk path: {}", disk_path.display()),
+            ErrorKind::BlockDevice,
+        )
+    })?;
     let sys_block = Path::new("/sys/block").join(disk_name);
     let mut out = Vec::new();
     let mut entries = match tokio::fs::read_dir(&sys_block).await {
@@ -31,12 +31,13 @@ pub async fn list_partitions(disk_path: &Path) -> Result<Vec<PathBuf>, Error> {
             ErrorKind::Filesystem,
         )
     })? {
-        if tokio::fs::metadata(entry.path().join("partition"))
-            .await
-            .is_ok()
-        {
-            out.push(Path::new("/dev").join(entry.file_name()));
-        }
+        let Ok(number) = tokio::fs::read_to_string(entry.path().join("partition")).await else {
+            continue;
+        };
+        let Ok(number) = number.trim().parse() else {
+            continue;
+        };
+        out.push(super::partition_for(disk_path, number));
     }
     Ok(out)
 }
@@ -51,6 +52,7 @@ async fn canonical(path: &Path) -> PathBuf {
 
 /// Direct holders of `dev` (`/sys/class/block/<dev>/holders/*`) as `/dev/<name>`.
 async fn holders_of(dev: &Path) -> Vec<PathBuf> {
+    let dev = canonical(dev).await;
     let Some(name) = dev.file_name() else {
         return Vec::new();
     };
