@@ -1,48 +1,18 @@
 use axum::body::Body;
 use axum::http::{header, Request, Response, StatusCode};
 use include_dir::{include_dir, Dir};
+use startos::net::static_server::{is_ui_content_hashed, is_ui_route};
 
 static WEB_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/../../web/dist/startwrt/browser");
 
-// One ETag for the whole bundle: include_dir embeds no per-file metadata, and
-// the dist only ever changes as a unit — with the firmware build.
 const ETAG: &str = concat!("\"", env!("STARTWRT_GIT_HASH"), "\"");
-
-/// Angular emits content-hashed top-level bundle files (`main-NUVV5TLQ.js`,
-/// `chunk-C-f2EvjP.js`, `styles-XYUDF62Z.css`): a `-` plus 8 chars of
-/// `[A-Za-z0-9_-]` before the extension. Their names change with their
-/// content, so browsers may cache them forever. Everything else (index.html,
-/// assets/) keeps a stable name across builds and must be revalidated.
-fn is_content_hashed(path: &str) -> bool {
-    if path.contains('/') {
-        return false;
-    }
-    let Some(stem) = path
-        .strip_suffix(".js")
-        .or_else(|| path.strip_suffix(".css"))
-    else {
-        return false;
-    };
-    let bytes = stem.as_bytes();
-    bytes.len() > 9
-        && bytes[bytes.len() - 9] == b'-'
-        && bytes[bytes.len() - 8..]
-            .iter()
-            .all(|b| b.is_ascii_alphanumeric() || *b == b'-' || *b == b'_')
-}
 
 pub async fn serve_embedded(req: Request<Body>) -> Response<Body> {
     let path = req.uri().path().trim_start_matches('/');
     let path = if path.is_empty() { "index.html" } else { path };
 
     let file = WEB_DIR.get_file(path).or_else(|| {
-        // SPA fallback: unknown extensionless paths are Angular routes and get
-        // index.html. Asset-like paths (anything with an extension, e.g. a
-        // hashed chunk from a previous firmware requested by a stale browser)
-        // must 404 instead — a 200 HTML body there breaks module loading and
-        // can get cached as the chunk.
-        let last_segment = path.rsplit('/').next().unwrap_or(path);
-        (!last_segment.contains('.'))
+        is_ui_route(path)
             .then(|| WEB_DIR.get_file("index.html"))
             .flatten()
     });
@@ -54,11 +24,7 @@ pub async fn serve_embedded(req: Request<Body>) -> Response<Body> {
             .unwrap();
     };
 
-    // Content-hashed bundles are immutable; everything else is cached but
-    // revalidated on every load (a cheap 304 below), so a firmware update is
-    // picked up immediately. Browsers were previously left to heuristics here,
-    // which let them serve a stale pre-update UI indefinitely.
-    let cache_control = if is_content_hashed(&file.path().to_string_lossy()) {
+    let cache_control = if is_ui_content_hashed(file.path()) {
         "public, max-age=31536000, immutable"
     } else {
         "no-cache"
@@ -92,21 +58,9 @@ pub async fn serve_embedded(req: Request<Body>) -> Response<Body> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
-
-    #[test]
-    fn content_hashed_detection() {
-        assert!(is_content_hashed("main-NUVV5TLQ.js"));
-        assert!(is_content_hashed("chunk-C-f2EvjP.js"));
-        assert!(is_content_hashed("chunk-Bu_0_vFc.js"));
-        assert!(is_content_hashed("styles-XYUDF62Z.css"));
-
-        assert!(!is_content_hashed("index.html"));
-        assert!(!is_content_hashed("favicon-96x96.png"));
-        assert!(!is_content_hashed("assets/fonts/font-AbCdEf12.css"));
-        assert!(!is_content_hashed("main.js"));
-        assert!(!is_content_hashed("chunk-C-f2EvjP.js.map"));
-    }
 
     fn get(path: &str, if_none_match: Option<&str>) -> Response<Body> {
         let mut req = Request::builder().uri(path);
@@ -168,7 +122,7 @@ mod tests {
         let main = WEB_DIR
             .files()
             .map(|f| f.path().to_string_lossy().into_owned())
-            .find(|p| is_content_hashed(p))
+            .find(|p| is_ui_content_hashed(Path::new(p)))
             .expect("built dist contains hashed bundles");
         let res = get(&format!("/{main}"), None);
         assert_eq!(res.status(), StatusCode::OK);

@@ -8,9 +8,8 @@ use async_compression::tokio::bufread::GzipEncoder;
 use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::extract::{self as x, Request};
-use axum::handler::Handler;
 use axum::response::Response;
-use axum::routing::{MethodRouter, any, get};
+use axum::routing::{any, get};
 use base64::Engine;
 use base64::display::Base64Display;
 use digest::Digest;
@@ -199,7 +198,8 @@ pub fn rpc_router<C: Context + Clone + AsRef<RpcContinuations>>(
         )
 }
 
-fn is_content_hashed(path: &Path) -> bool {
+/// Matches top-level Angular bundles whose filenames carry content hashes.
+pub fn is_ui_content_hashed(path: &Path) -> bool {
     if path.components().count() != 1 {
         return false;
     }
@@ -220,7 +220,8 @@ fn is_content_hashed(path: &Path) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-' || *byte == b'_')
 }
 
-fn is_route_like(path: &str) -> bool {
+/// Matches paths whose final segment has no extension.
+pub fn is_ui_route(path: &str) -> bool {
     path.rsplit('/')
         .next()
         .is_some_and(|name| !name.contains('.'))
@@ -237,7 +238,7 @@ fn serve_ui_from_dir(req: Request, ui_dir: &'static Dir<'static>) -> Result<Resp
                 .unwrap_or(request_parts.uri.path());
 
             let file = ui_dir.get_file(uri_path).or_else(|| {
-                is_route_like(uri_path)
+                is_ui_route(uri_path)
                     .then(|| ui_dir.get_file("index.html"))
                     .flatten()
             });
@@ -312,20 +313,11 @@ pub fn refresher() -> Router {
     }))
 }
 
-fn s9pk_get<H, T, S>(handler: H) -> MethodRouter<S>
-where
-    H: Handler<T, S>,
-    T: 'static,
-    S: Clone + Send + Sync + 'static,
-{
-    get(handler)
-}
-
 fn s9pk_router(ctx: RpcContext) -> Router {
     Router::new()
         .route("/installed/{s9pk}", {
             let ctx = ctx.clone();
-            s9pk_get(
+            get(
                 |x::Path(s9pk): x::Path<String>, request: Request| async move {
                     if_authorized(&ctx, request, |request| async {
                         let id = s9pk
@@ -358,7 +350,7 @@ fn s9pk_router(ctx: RpcContext) -> Router {
         })
         .route("/installed/{s9pk}/{*path}", {
             let ctx = ctx.clone();
-            s9pk_get(
+            get(
                 |x::Path((s9pk, path)): x::Path<(String, PathBuf)>,
                  x::RawQuery(query): x::RawQuery,
                  request: Request| async move {
@@ -403,7 +395,7 @@ fn s9pk_router(ctx: RpcContext) -> Router {
         })
         .route(
             "/proxy/{url}/{*path}",
-            s9pk_get(
+            get(
                 |x::Path((url, path)): x::Path<(Url, PathBuf)>,
                  x::RawQuery(query): x::RawQuery,
                  request: Request| async move {
@@ -755,14 +747,19 @@ fn if_none_match(req: &RequestParts, current: &str) -> bool {
 }
 
 fn if_range_matches(req: &RequestParts, current: Option<&str>) -> bool {
-    req.headers.get(IF_RANGE).is_none_or(|candidate| {
-        current.is_some_and(|current| {
-            !current.starts_with("W/")
-                && candidate
-                    .to_str()
-                    .ok()
-                    .is_some_and(|candidate| candidate.trim() == current)
-        })
+    let mut candidates = req.headers.get_all(IF_RANGE).iter();
+    let Some(candidate) = candidates.next() else {
+        return true;
+    };
+    if candidates.next().is_some() {
+        return false;
+    }
+    current.is_some_and(|current| {
+        !current.starts_with("W/")
+            && candidate
+                .to_str()
+                .ok()
+                .is_some_and(|candidate| candidate.trim() == current)
     })
 }
 
@@ -981,7 +978,7 @@ impl FileData {
                 data
             },
             e_tag,
-            cache_control: Some(if is_content_hashed(path) {
+            cache_control: Some(if is_ui_content_hashed(path) {
                 IMMUTABLE_UI_CACHE_CONTROL
             } else {
                 REVALIDATE_CACHE_CONTROL
@@ -1008,6 +1005,17 @@ impl FileData {
             RepresentationChoice::Identity => {
                 (None, Some(len), Body::from_stream(ReaderStream::new(data)))
             }
+            RepresentationChoice::NotAcceptable | RepresentationChoice::Brotli => unreachable!(),
+        }
+    }
+
+    fn empty_representation(
+        choice: RepresentationChoice,
+        len: u64,
+    ) -> (Option<&'static str>, Option<u64>, Body) {
+        match choice {
+            RepresentationChoice::Gzip => (Some("gzip"), None, Body::empty()),
+            RepresentationChoice::Identity => (None, Some(len), Body::empty()),
             RepresentationChoice::NotAcceptable | RepresentationChoice::Brotli => unreachable!(),
         }
     }
@@ -1050,13 +1058,7 @@ impl FileData {
 
         let (encoding, len, data) = match range {
             ByteRange::Full if send_payload => Self::encode(choice, file, metadata.len()),
-            ByteRange::Full => match choice {
-                RepresentationChoice::Gzip => (Some("gzip"), None, Body::empty()),
-                RepresentationChoice::Identity => (None, Some(metadata.len()), Body::empty()),
-                RepresentationChoice::NotAcceptable | RepresentationChoice::Brotli => {
-                    unreachable!()
-                }
-            },
+            ByteRange::Full => Self::empty_representation(choice, metadata.len()),
             ByteRange::Satisfiable { start, end, .. } => {
                 let len = end + 1 - start;
                 if send_payload {
@@ -1113,27 +1115,21 @@ impl FileData {
         digest: Option<(&'static str, Vec<u8>)>,
         len: u64,
     ) -> Result<Self, Error> {
-        if RepresentationQualities::from_request(req).identity <= 0.0 {
+        let qualities = RepresentationQualities::from_request(req);
+        let mut range = requested_range(req, len, None);
+        let choice = qualities.select_for_range(&mut range, true, false);
+        if choice == RepresentationChoice::NotAcceptable {
             return Ok(Self::not_acceptable());
         }
 
-        let range = requested_range(req, len, None);
         let (encoding, len, data) = if req.method == Method::HEAD {
-            (None, Some(len), Body::empty())
+            Self::empty_representation(choice, len)
         } else {
             match range {
-                ByteRange::Full => Self::encode(
-                    RepresentationChoice::Identity,
-                    contents.reader().await?.take(len),
-                    len,
-                ),
+                ByteRange::Full => Self::encode(choice, contents.reader().await?.take(len), len),
                 ByteRange::Satisfiable { start, end, .. } => {
                     let len = end + 1 - start;
-                    Self::encode(
-                        RepresentationChoice::Identity,
-                        contents.slice(start, len).await?,
-                        len,
-                    )
+                    Self::encode(choice, contents.slice(start, len).await?, len)
                 }
                 ByteRange::Unsatisfiable { .. } => (None, Some(0), Body::empty()),
             }
@@ -1178,11 +1174,9 @@ impl FileData {
         }
 
         builder = builder.header(ACCEPT_RANGES, "bytes");
-        if self.encoding.is_none()
-            && let Some((algorithm, digest)) = self.digest
-        {
+        if let Some((algorithm, digest)) = self.digest {
             builder = builder.header(
-                "Repr-Digest",
+                "File-Digest",
                 format!("{algorithm}=:{}:", Base64Display::new(&digest, &BASE64)),
             );
         }
@@ -1409,7 +1403,7 @@ mod tests {
         use tower_service::Service;
 
         fn router() -> Router {
-            Router::new().route("/installed/{s9pk}", s9pk_get(|| async { "served" }))
+            Router::new().route("/installed/{s9pk}", get(|| async { "served" }))
         }
 
         let get_response = router()
@@ -1444,73 +1438,94 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn s9pk_gzip_requests_keep_identity_bytes_and_signed_digest() {
+    async fn s9pk_file_digest_is_invariant_across_full_range_and_gzip_gets() {
+        use async_compression::tokio::bufread::GzipDecoder;
+
         let bytes: Arc<[u8]> = Arc::from(&b"signed package bytes"[..]);
         let digest = blake3::hash(&bytes).as_bytes().to_vec();
-        let contents = FileContents::new(bytes.clone());
-        let request_parts = request(Method::GET, "/asset.bin", &[(ACCEPT_ENCODING, "gzip")])
-            .into_parts()
-            .0;
-        let response = FileData::from_s9pk_contents(
-            &request_parts,
-            Path::new("asset.bin"),
-            &contents,
-            Some(("blake3", digest.clone())),
-            bytes.len() as u64,
-        )
-        .await
-        .unwrap()
-        .into_response(&request_parts)
-        .unwrap();
+        let expected_digest = format!("blake3=:{}:", Base64Display::new(&digest, &BASE64));
+        async fn response(
+            bytes: &Arc<[u8]>,
+            digest: &[u8],
+            headers: &[(HeaderName, &str)],
+        ) -> Response {
+            let contents = FileContents::new(bytes.clone());
+            let request_parts = request(Method::GET, "/asset.bin", headers).into_parts().0;
+            FileData::from_s9pk_contents(
+                &request_parts,
+                Path::new("asset.bin"),
+                &contents,
+                Some(("blake3", digest.to_vec())),
+                bytes.len() as u64,
+            )
+            .await
+            .unwrap()
+            .into_response(&request_parts)
+            .unwrap()
+        }
 
-        assert_eq!(response.status(), StatusCode::OK);
-        assert!(!response.headers().contains_key(CONTENT_ENCODING));
+        let full = response(&bytes, &digest, &[]).await;
+        assert_eq!(full.status(), StatusCode::OK);
         assert_eq!(
-            header(
-                &response,
-                http::header::HeaderName::from_static("repr-digest")
-            ),
-            format!("blake3=:{}:", Base64Display::new(&digest, &BASE64),),
+            header(&full, HeaderName::from_static("file-digest")),
+            expected_digest
         );
+        assert!(!full.headers().contains_key("Repr-Digest"));
         assert_eq!(
-            to_bytes(response.into_body(), usize::MAX).await.unwrap(),
+            to_bytes(full.into_body(), usize::MAX).await.unwrap(),
             bytes.as_ref(),
         );
 
-        let rejected_parts = request(
-            Method::GET,
-            "/asset.bin",
-            &[(ACCEPT_ENCODING, "gzip, identity;q=0")],
-        )
-        .into_parts()
-        .0;
-        let rejected = FileData::from_s9pk_contents(
-            &rejected_parts,
-            Path::new("asset.bin"),
-            &contents,
-            Some(("blake3", digest)),
-            bytes.len() as u64,
-        )
-        .await
-        .unwrap()
-        .into_response(&rejected_parts)
-        .unwrap();
+        let range = response(&bytes, &digest, &[(RANGE, "bytes=2-7")]).await;
+        assert_eq!(range.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(header(&range, CONTENT_RANGE), "bytes 2-7/20");
+        assert_eq!(
+            header(&range, HeaderName::from_static("file-digest")),
+            expected_digest
+        );
+        assert!(!range.headers().contains_key(CONTENT_ENCODING));
+        assert_eq!(
+            to_bytes(range.into_body(), usize::MAX).await.unwrap(),
+            &bytes[2..=7],
+        );
+
+        let gzip = response(&bytes, &digest, &[(ACCEPT_ENCODING, "gzip, identity;q=0")]).await;
+        assert_eq!(gzip.status(), StatusCode::OK);
+        assert_eq!(header(&gzip, CONTENT_ENCODING), "gzip");
+        assert_eq!(
+            header(&gzip, HeaderName::from_static("file-digest")),
+            expected_digest
+        );
+        let compressed = to_bytes(gzip.into_body(), usize::MAX).await.unwrap();
+        let mut decoded = Vec::new();
+        GzipDecoder::new(BufReader::new(std::io::Cursor::new(compressed)))
+            .read_to_end(&mut decoded)
+            .await
+            .unwrap();
+        assert_eq!(decoded, bytes.as_ref());
+
+        let rejected = response(&bytes, &digest, &[(ACCEPT_ENCODING, "br, identity;q=0")]).await;
         assert_eq!(rejected.status(), StatusCode::NOT_ACCEPTABLE);
-        assert!(!rejected.headers().contains_key("Repr-Digest"));
+        assert!(!rejected.headers().contains_key("File-Digest"));
     }
 
     #[tokio::test]
-    async fn s9pk_head_does_not_read_contents() {
-        let contents = FileContents::new(UnreadableSource);
+    async fn s9pk_head_negotiates_encoding_and_does_not_read_contents() {
+        let digest = vec![1, 2, 3];
+        let expected_digest = format!("blake3=:{}:", Base64Display::new(&digest, &BASE64));
 
-        for range in [None, Some("bytes=0-4")] {
-            let headers = range.map_or_else(Vec::new, |range| vec![(RANGE, range)]);
+        for (headers, expected_encoding, expected_length) in [
+            (vec![], "", "21"),
+            (vec![(RANGE, "bytes=0-4")], "", "21"),
+            (vec![(ACCEPT_ENCODING, "gzip, identity;q=0")], "gzip", ""),
+        ] {
+            let contents = FileContents::new(UnreadableSource);
             let request_parts = request(Method::HEAD, "/asset.bin", &headers).into_parts().0;
             let response = FileData::from_s9pk_contents(
                 &request_parts,
                 Path::new("asset.bin"),
                 &contents,
-                None,
+                Some(("blake3", digest.clone())),
                 21,
             )
             .await
@@ -1519,7 +1534,12 @@ mod tests {
             .unwrap();
 
             assert_eq!(response.status(), StatusCode::OK);
-            assert_eq!(header(&response, CONTENT_LENGTH), "21");
+            assert_eq!(header(&response, CONTENT_ENCODING), expected_encoding);
+            assert_eq!(header(&response, CONTENT_LENGTH), expected_length);
+            assert_eq!(
+                header(&response, HeaderName::from_static("file-digest")),
+                expected_digest,
+            );
             assert!(!response.headers().contains_key(CONTENT_RANGE));
             assert!(
                 to_bytes(response.into_body(), usize::MAX)
@@ -1538,7 +1558,7 @@ mod tests {
             "chunk-C-f2EvjP.js",
             "styles-XYUDF62Z.css",
         ] {
-            assert!(is_content_hashed(Path::new(path)), "{path}");
+            assert!(is_ui_content_hashed(Path::new(path)), "{path}");
         }
         for path in [
             "index.html",
@@ -1547,7 +1567,7 @@ mod tests {
             "favicon-96x96.png",
             "assets/font-ABCDEFGH.css",
         ] {
-            assert!(!is_content_hashed(Path::new(path)), "{path}");
+            assert!(!is_ui_content_hashed(Path::new(path)), "{path}");
         }
     }
 
@@ -1610,10 +1630,8 @@ mod tests {
 
     #[tokio::test]
     async fn installed_s9pks_revalidate_and_resume_with_strong_etags() {
-        let path = std::env::temp_dir().join(format!(
-            "start-core-static-server-{}.s9pk",
-            rand::random::<u64>()
-        ));
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("package.s9pk");
         let mut contents = vec![0; 256];
         contents[..10].copy_from_slice(b"0123456789");
         tokio::fs::write(&path, &contents).await.unwrap();
@@ -1682,31 +1700,6 @@ mod tests {
         tokio::fs::write(&path, &contents).await.unwrap();
         let changed = path_response(Method::GET, &path, &[]).await;
         assert_ne!(header(&changed, ETAG), e_tag);
-
-        tokio::fs::remove_file(path).await.unwrap();
-    }
-
-    #[test]
-    fn representation_digest_is_omitted_for_gzip() {
-        fn response(encoding: Option<&'static str>) -> Response {
-            let request_parts = request(Method::GET, "/", &[]).into_parts().0;
-            FileData {
-                data: Body::empty(),
-                len: Some(3),
-                range: ByteRange::Full,
-                encoding,
-                e_tag: None,
-                cache_control: None,
-                mime: None,
-                digest: Some(("blake3", vec![1, 2, 3])),
-                status: StatusCode::OK,
-            }
-            .into_response(&request_parts)
-            .unwrap()
-        }
-
-        assert!(response(None).headers().contains_key("Repr-Digest"));
-        assert!(!response(Some("gzip")).headers().contains_key("Repr-Digest"));
     }
 
     #[test]
@@ -1914,6 +1907,19 @@ mod tests {
                 "<html>StartOS</html>",
             );
         }
+
+        let duplicate_if_range = ui_response(
+            "/",
+            &[(RANGE, "bytes=0-4"), (IF_RANGE, &e_tag), (IF_RANGE, &e_tag)],
+        );
+        assert_eq!(duplicate_if_range.status(), StatusCode::OK);
+        assert!(!duplicate_if_range.headers().contains_key(CONTENT_RANGE));
+        assert_eq!(
+            to_bytes(duplicate_if_range.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+            "<html>StartOS</html>",
+        );
 
         let head = serve_ui_from_dir(
             request(Method::HEAD, "/", &[(RANGE, "bytes=0-4")]),

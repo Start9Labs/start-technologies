@@ -7827,6 +7827,7 @@ dependencies = [
  "sscanf",
  "ssh-key",
  "tar",
+ "tempfile",
  "termion",
  "textwrap",
  "thiserror 2.0.18",
