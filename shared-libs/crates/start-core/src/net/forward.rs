@@ -1217,6 +1217,7 @@ impl PortForwardController {
         recv.await.map_err(err_has_exited)?
     }
 
+    #[cfg(test)]
     pub(crate) async fn drain(&self) -> Result<(), Error> {
         self.drain_until(tokio::time::Instant::now() + FORWARD_DRAIN_TIMEOUT)
             .await

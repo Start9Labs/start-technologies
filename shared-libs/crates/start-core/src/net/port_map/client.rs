@@ -370,6 +370,7 @@ impl PortMapController {
         );
     }
 
+    #[cfg(test)]
     pub(crate) async fn drain(&self) -> Result<(), Error> {
         self.drain_until(Instant::now() + DRAIN_TIMEOUT).await
     }
