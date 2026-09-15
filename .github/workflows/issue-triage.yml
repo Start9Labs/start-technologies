@@ -28,7 +28,7 @@ jobs:
               repo: 'dr-bonez',
             }
             const FEATURE_OWNER = 'MattDHill'
-            const DEFAULT_OWNER = 'dr-bonez'
+            const TRIAGE_OWNER = 'MattDHill'
             const TYPES = ['Bug', 'Feature', 'Task']
             const GATE = 'needs-triage'
             const MARKER = '<!-- issue-triage: needs-triage -->'
@@ -85,8 +85,8 @@ jobs:
                 })
               }
               if (!assignees.length) {
-                await github.rest.issues.addAssignees({ ...api, assignees: [DEFAULT_OWNER] })
-                core.info(`Missing ${missing}; assigned fallback ${DEFAULT_OWNER}`)
+                await github.rest.issues.addAssignees({ ...api, assignees: [TRIAGE_OWNER] })
+                core.info(`Missing ${missing}; assigned ${TRIAGE_OWNER} for triage`)
               }
               return
             }
@@ -94,8 +94,8 @@ jobs:
             const owner = type === 'Feature' ? FEATURE_OWNER : OWNERS[project]
             if (labels.has(GATE)) {
               await github.rest.issues.removeLabel({ ...api, name: GATE })
-              if (assignees.length === 1 && assignees[0] === DEFAULT_OWNER && owner !== DEFAULT_OWNER) {
-                await github.rest.issues.removeAssignees({ ...api, assignees: [DEFAULT_OWNER] })
+              if (assignees.length === 1 && assignees[0] === TRIAGE_OWNER && owner !== TRIAGE_OWNER) {
+                await github.rest.issues.removeAssignees({ ...api, assignees: [TRIAGE_OWNER] })
                 assignees.length = 0
               }
             }
