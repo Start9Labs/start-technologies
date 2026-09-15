@@ -1241,6 +1241,21 @@ disk.mount.binding:
   fr_FR: "Liaison de %{src} à %{dst}"
   pl_PL: "Wiązanie %{src} do %{dst}"
 
+# os_install/mod.rs
+os-install.invalid-partuuid:
+  en_US: "Unable to resolve a valid partition UUID for %{partition}"
+  de_DE: "Für %{partition} konnte keine gültige Partitions-UUID ermittelt werden"
+  es_ES: "No se pudo resolver un UUID de partición válido para %{partition}"
+  fr_FR: "Impossible de résoudre un UUID de partition valide pour %{partition}"
+  pl_PL: "Nie udało się ustalić prawidłowego UUID partycji dla %{partition}"
+
+os-install.unknown-disk:
+  en_US: "The selected disk %{disk} is no longer available"
+  de_DE: "Der ausgewählte Datenträger %{disk} ist nicht mehr verfügbar"
+  es_ES: "El disco seleccionado %{disk} ya no está disponible"
+  fr_FR: "Le disque sélectionné %{disk} n’est plus disponible"
+  pl_PL: "Wybrany dysk %{disk} nie jest już dostępny"
+
 # os_install/gpt.rs
 os-install.no-free-space-for-os-root:
   en_US: "No free space left on device for OS root partition"
@@ -3372,11 +3387,11 @@ help.arg.data-directory:
   pl_PL: "Ścieżka do katalogu danych"
 
 help.arg.data-drive-path:
-  en_US: "Path to the data drive"
-  de_DE: "Pfad zum Datenlaufwerk"
-  es_ES: "Ruta a la unidad de datos"
-  fr_FR: "Chemin vers le disque de données"
-  pl_PL: "Ścieżka do dysku danych"
+  en_US: "Stable path to the data drive; may match the OS drive"
+  de_DE: "Stabiler Pfad zum Datenlaufwerk; kann dem Betriebssystemlaufwerk entsprechen"
+  es_ES: "Ruta estable a la unidad de datos; puede coincidir con la unidad del sistema operativo"
+  fr_FR: "Chemin stable vers le disque de données ; peut être identique au disque du système d’exploitation"
+  pl_PL: "Stabilna ścieżka do dysku danych; może być taka sama jak ścieżka dysku systemowego"
 
 help.arg.db-pointer:
   en_US: "JSON pointer to object in database to dump"
@@ -4487,11 +4502,11 @@ help.arg.onion-secret-key:
   pl_PL: "Tajny klucz onion Tor"
 
 help.arg.os-drive-path:
-  en_US: "Path to OS drive"
-  de_DE: "Pfad zum Betriebssystemlaufwerk"
-  es_ES: "Ruta a la unidad del sistema operativo"
-  fr_FR: "Chemin vers le disque du système d'exploitation"
-  pl_PL: "Ścieżka do dysku systemu operacyjnego"
+  en_US: "Stable path to the OS drive"
+  de_DE: "Stabiler Pfad zum Betriebssystemlaufwerk"
+  es_ES: "Ruta estable a la unidad del sistema operativo"
+  fr_FR: "Chemin stable vers le disque du système d’exploitation"
+  pl_PL: "Stabilna ścieżka do dysku systemu operacyjnego"
 
 help.arg.package-display-name:
   en_US: "Human-readable package name (e.g. \"Hello World\")"

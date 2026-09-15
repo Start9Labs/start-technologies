@@ -19,6 +19,8 @@ or the CLI's externally observable behavior.
 
 ### Fixed
 
+- **`setup install-os` accepts the stable disk paths reported by `setup disk list`.** The selected drive remains the installation target when Linux reorders disk names.
+
 - **The notice that `start-cli` is behind the published release is given only when the workspace's
   `start-technologies` checkout is on `live-docs`.**
 
