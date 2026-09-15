@@ -381,7 +381,7 @@ function registryWarning(url: string): i18nKey | null {
   }
 
   if (sameUrl(url, communityBeta)) {
-    return 'Services from this registry are packaged and maintained by members of the Start9 community and are undergoing beta testing. Bugs are expected. Install at your own risk. If you experience an issue or have a question related to a service in this marketplace, please reach out to the package developer for assistance.'
+    return 'Services from this registry are maintained by the Start9 community and are undergoing beta testing. Bugs are expected. Install at your own risk.'
   }
 
   if (sameUrl(url, start9Beta)) {
@@ -389,8 +389,8 @@ function registryWarning(url: string): i18nKey | null {
   }
 
   if (sameUrl(url, start9Alpha)) {
-    return 'Services from this registry are undergoing alpha testing. They are expected to contain bugs and could damage your system. Install at your own risk.'
+    return 'Services from this registry are undergoing alpha testing. Bugs are expected and could damage your system. Install at your own risk.'
   }
 
-  return 'This is a Custom Registry. Start9 cannot verify the integrity or functionality of services from this registry, and they could damage your system. Install at your own risk.'
+  return 'This is a Custom Registry. Start9 cannot verify its services, and they could damage your system. Install at your own risk.'
 }

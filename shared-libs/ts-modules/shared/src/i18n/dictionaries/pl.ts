@@ -136,8 +136,8 @@ export default {
   146: 'Rozpoczynanie instalacji',
   148: 'Serwisy z tego katalogu są pakowane i utrzymywane przez zespół Start9. Jeśli napotkasz problem lub masz pytania dotyczące serwisu z tego katalogu, nasz zespół wsparcia z przyjemnością Ci pomoże.',
   150: 'Serwisy z tego katalogu są w fazie testów beta. Należy spodziewać się błędów. Instalujesz je na własne ryzyko.',
-  151: 'Serwisy z tego katalogu są w fazie testów alfa. Mogą zawierać błędy i potencjalnie uszkodzić system. Instalujesz je na własne ryzyko.',
-  152: 'To jest katalog niestandardowy. Start9 nie może zweryfikować integralności ani funkcjonalności serwisów z tego katalogu, a mogą one uszkodzić twój system. Instalujesz je na własne ryzyko.',
+  151: 'Serwisy z tego katalogu są w fazie testów alfa. Należy spodziewać się błędów, które mogą uszkodzić system. Instalujesz je na własne ryzyko.',
+  152: 'To jest katalog niestandardowy. Start9 nie może zweryfikować jego serwisów, a mogą one uszkodzić twój system. Instalujesz je na własne ryzyko.',
   153: 'Katalogi domyślne',
   154: 'Katalogi niestandardowe',
   851: 'Zapisane katalogi',
@@ -819,5 +819,5 @@ export default {
   927: 'Widok siatki',
   928: 'Rosnąco',
   929: 'Malejąco',
-  930: 'Serwisy z tego katalogu są tworzone i utrzymywane przez członków społeczności Start9 i są w fazie testów beta. Należy spodziewać się błędów. Instalujesz je na własne ryzyko. W przypadku problemów lub pytań skontaktuj się z twórcą pakietu.',
+  930: 'Serwisy z tego katalogu są utrzymywane przez społeczność Start9 i są w fazie testów beta. Należy spodziewać się błędów. Instalujesz je na własne ryzyko.',
 } satisfies i18n
