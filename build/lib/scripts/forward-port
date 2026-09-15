@@ -30,7 +30,7 @@ if [ "$sport_end" -gt 65535 ] || [ "$dport_end" -gt 65535 ]; then
     exit 1
 fi
 
-TAG="F$(echo "$sip:$sport+$count -> $dip/$dprefix:$dport ${src_subnet:-any}" | sha256sum | head -c 15)"
+TAG="F4-$(echo "$sip:$sport+$count -> $dip/$dprefix:$dport ${src_subnet:-any}" | sha256sum | head -c 16)"
 PROTO='meta l4proto { tcp, udp }'
 
 # DNAT clause (the part following $PROTO) and the internal-port matcher used by

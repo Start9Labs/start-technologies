@@ -387,6 +387,53 @@ pub(crate) async fn nft_comments_with_prefix(chain: &str, prefix: &str) -> Vec<S
         .collect()
 }
 
+/// The comment tag `forward-port` (`F4-` + digest) or `forward-port6` (`F6-` +
+/// digest) stamps on its rules.
+fn is_forward_script_tag(tag: &str) -> bool {
+    tag.strip_prefix("F4-")
+        .or_else(|| tag.strip_prefix("F6-"))
+        .is_some_and(|hex| hex.len() == 16 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+/// Deletes every rule a previous run's forward scripts left in the kernel.
+async fn remove_stale_forward_rules() -> Result<(), Error> {
+    let mut script = String::new();
+    for family in ["ip", "ip6"] {
+        for chain in ["prerouting", "output", "postrouting", "forward"] {
+            for line in nft_list_chain(family, chain).await.lines() {
+                let Some(tag) = line
+                    .split_once("comment \"")
+                    .and_then(|(_, after)| after.split_once('"'))
+                    .map(|(tag, _)| tag)
+                else {
+                    continue;
+                };
+                let Some(handle) = line
+                    .rsplit_once("# handle ")
+                    .and_then(|(_, handle)| handle.trim().parse::<u32>().ok())
+                else {
+                    continue;
+                };
+                if is_forward_script_tag(tag) {
+                    writeln!(
+                        script,
+                        "delete rule {family} startos {chain} handle {handle}"
+                    )
+                    .unwrap();
+                }
+            }
+        }
+    }
+    if script.is_empty() {
+        return Ok(());
+    }
+    Command::new("nft")
+        .arg(&script)
+        .invoke(ErrorKind::Network)
+        .await?;
+    Ok(())
+}
+
 /// Idempotently install (or, with `undo`, remove) the rule tagged `comment` in
 /// `chain` of `table ip startos`, via one atomic nft transaction that drops
 /// every prior copy of this comment and adds the desired rule. No-op when the
@@ -493,6 +540,7 @@ impl PortForwardController {
         let thread = NonDetachingJoinHandle::from(tokio::spawn(async move {
             while let Err(e) = async {
                 nft_ensure_base().await?;
+                remove_stale_forward_rules().await?;
                 nft_rule(
                     "forward",
                     "base-established",
@@ -1238,6 +1286,19 @@ mod tests {
         // Other ports in the requested range were NOT allocated as a side effect.
         assert!(ports.try_alloc(40000, false, false).is_some());
         assert!(ports.try_alloc(40099, false, false).is_some());
+    }
+
+    #[test]
+    fn forward_script_tags_are_a_family_prefix_and_sixteen_hex_digits() {
+        assert!(is_forward_script_tag("F4-ac286185d01ca612"));
+        assert!(is_forward_script_tag("F6-ac286185d01ca612"));
+        assert!(!is_forward_script_tag("Fac286185d01ca612"));
+        assert!(!is_forward_script_tag("F4-ac286185d01ca61"));
+        assert!(!is_forward_script_tag("F4-ac286185d01ca612a"));
+        assert!(!is_forward_script_tag("F4-ac286185d01cg612"));
+        assert!(!is_forward_script_tag("base-established"));
+        assert!(!is_forward_script_tag("pinhole:2001:db8::1:443"));
+        assert!(!is_forward_script_tag("sni-divert"));
     }
 
     #[test]

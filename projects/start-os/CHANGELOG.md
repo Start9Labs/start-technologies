@@ -140,6 +140,11 @@ for the detail behind its highlights.
   StartOS now measures the port from the Internet in that case and reports
   what it finds.
 
+- **Port forwards left behind by an earlier run of the server are cleared at
+  startup.** After a crash, or a restart during which the server's address
+  changed, a stale forward could keep sending a port to an old address until
+  the next reboot.
+
 - **Client connections through StartOS's TLS-terminating reverse proxy now fail
   within 15 seconds if StartOS cannot connect to the service or complete a
   required TLS handshake with it.**
