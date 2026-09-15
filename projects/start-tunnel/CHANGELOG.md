@@ -9,8 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Published-port forwarding stays synchronized more reliably across IPv4 and
-  IPv6 configuration changes and graceful shutdown.**
+- **Published-port ranges keep every port when disabled and re-enabled.**
+  Repeated changes preserve the configured range and port translations. Failed
+  IPv4-forward and IPv6-pinhole deletion reports an error and preserves the
+  entry and lease for retry. Concurrent forwarding changes complete in order, and graceful shutdown
+  waits for cleanup workers to finish, reporting incomplete withdrawal.
 
 ## [1.3.0]
 

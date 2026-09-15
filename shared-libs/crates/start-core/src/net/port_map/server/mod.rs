@@ -79,19 +79,22 @@ pub trait GatewayBackend: Send + Sync {
     ) -> impl Future<Output = Result<(), u16>> + Send;
 
     /// Remove the peer's forward to `(peer, internal_port)`, if any (PCP
-    /// identifies a mapping by its target).
-    fn remove_forward(&self, peer: Ipv4Addr, internal_port: u16)
-    -> impl Future<Output = ()> + Send;
+    /// identifies a mapping by its target). Errors carry an IGD fault code.
+    fn remove_forward(
+        &self,
+        peer: Ipv4Addr,
+        internal_port: u16,
+    ) -> impl Future<Output = Result<(), u16>> + Send;
 
     /// Remove the forward at external address `source` if owned by `peer` (UPnP
     /// IGD identifies a mapping by its external port). Returns whether a
     /// peer-owned forward was removed; `false` means "no such mapping", reported
-    /// without revealing other peers' mappings.
+    /// without revealing other peers' mappings. Errors carry an IGD fault code.
     fn remove_forward_by_source(
         &self,
         source: SocketAddrV4,
         peer: Ipv4Addr,
-    ) -> impl Future<Output = bool> + Send;
+    ) -> impl Future<Output = Result<bool, u16>> + Send;
 
     /// The external (WAN) IPv4 the gateway routes `peer`'s egress out of, or
     /// `None` if unknown.
@@ -128,8 +131,8 @@ pub trait GatewayBackend: Send + Sync {
         &self,
         _gua: Ipv6Addr,
         _external_port: u16,
-    ) -> impl Future<Output = ()> + Send {
-        async {}
+    ) -> impl Future<Output = Result<(), u16>> + Send {
+        async { Ok(()) }
     }
 
     /// The mappings this gateway currently holds on behalf of `peer`, for the
@@ -173,17 +176,27 @@ pub trait GatewayBackend: Send + Sync {
     }
 
     /// Remove the SNI routes for `hostnames` on `source` owned by `target`.
+    /// Errors carry a PCP result code.
     fn remove_sni_forward(
         &self,
         source: SocketAddrV4,
         target: SocketAddrV4,
         hostnames: &[String],
-    ) -> impl Future<Output = ()> + Send {
+    ) -> impl Future<Output = Result<(), u8>> + Send {
         async move {
             if let Some(sni) = self.sni() {
                 sni.unregister(*source.ip(), source.port(), hostnames, target);
             }
+            Ok(())
         }
+    }
+}
+
+fn deletion_result(result: Result<(), u16>) -> u8 {
+    match result {
+        Ok(()) | Err(714) => SUCCESS,
+        Err(606) => NOT_AUTHORIZED,
+        Err(_) => NO_RESOURCES,
     }
 }
 
@@ -449,7 +462,7 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
         // Force the route target to the requesting peer's own address.
         let target = SocketAddrV4::new(peer, internal_port);
         if lifetime == 0 {
-            backend
+            let result = backend
                 .remove_sni_forward(
                     SocketAddrV4::new(external_ip, external_port),
                     target,
@@ -457,7 +470,7 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
                 )
                 .await;
             return Some(map_response_with_hostnames(
-                SUCCESS,
+                result.err().unwrap_or(SUCCESS),
                 req,
                 internal_port,
                 external_port,
@@ -531,9 +544,9 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
             let source = SocketAddrV4::new(external_ip, external_port);
             let target = SocketAddrV4::new(peer, internal_port);
             if lifetime == 0 {
-                backend.remove_forward(peer, internal_port).await;
+                let result = backend.remove_forward(peer, internal_port).await;
                 return Some(map_response_with_port_set(
-                    SUCCESS,
+                    deletion_result(result),
                     req,
                     internal_port,
                     external_port,
@@ -573,9 +586,9 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
 
     // Lifetime 0 deletes the mapping (RFC 6887 §15).
     if lifetime == 0 {
-        backend.remove_forward(peer, internal_port).await;
+        let result = backend.remove_forward(peer, internal_port).await;
         return Some(map_response(
-            SUCCESS,
+            deletion_result(result),
             req,
             internal_port,
             external_port,
@@ -682,9 +695,13 @@ pub async fn handle6<B: GatewayBackend + ?Sized>(
 
     // Lifetime 0 deletes the pinhole (RFC 6887 §15).
     if lifetime == 0 {
-        backend.remove_pinhole(peer, external_port).await;
+        let result = backend.remove_pinhole(peer, external_port).await;
         return Some(map_response6(
-            SUCCESS,
+            if result.is_ok() {
+                SUCCESS
+            } else {
+                NO_RESOURCES
+            },
             req,
             internal_port,
             external_port,
@@ -819,15 +836,19 @@ mod tests {
         ) -> impl Future<Output = Result<(), u16>> + Send {
             async { Ok(()) }
         }
-        fn remove_forward(&self, _: Ipv4Addr, _: u16) -> impl Future<Output = ()> + Send {
-            async {}
+        fn remove_forward(
+            &self,
+            _: Ipv4Addr,
+            _: u16,
+        ) -> impl Future<Output = Result<(), u16>> + Send {
+            async { Ok(()) }
         }
         fn remove_forward_by_source(
             &self,
             _: SocketAddrV4,
             _: Ipv4Addr,
-        ) -> impl Future<Output = bool> + Send {
-            async { false }
+        ) -> impl Future<Output = Result<bool, u16>> + Send {
+            async { Ok(false) }
         }
         fn external_ipv4(&self, _: Ipv4Addr) -> impl Future<Output = Option<Ipv4Addr>> + Send {
             async { Some(Ipv4Addr::new(203, 0, 113, 1)) }
@@ -870,6 +891,8 @@ mod tests {
     struct RecordingStub {
         sni: Arc<SniDemux>,
         forward_lifetime: std::sync::Mutex<Option<Option<u32>>>,
+        removal: Result<(), u16>,
+        sni_removal: Result<(), u8>,
     }
     impl GatewayBackend for RecordingStub {
         fn add_forward(
@@ -883,15 +906,23 @@ mod tests {
             *self.forward_lifetime.lock().unwrap() = Some(lifetime);
             async { Ok(()) }
         }
-        fn remove_forward(&self, _: Ipv4Addr, _: u16) -> impl Future<Output = ()> + Send {
-            async {}
+        async fn remove_forward(&self, _: Ipv4Addr, _: u16) -> Result<(), u16> {
+            self.removal
+        }
+        async fn remove_sni_forward(
+            &self,
+            _: SocketAddrV4,
+            _: SocketAddrV4,
+            _: &[String],
+        ) -> Result<(), u8> {
+            self.sni_removal
         }
         fn remove_forward_by_source(
             &self,
             _: SocketAddrV4,
             _: Ipv4Addr,
-        ) -> impl Future<Output = bool> + Send {
-            async { false }
+        ) -> impl Future<Output = Result<bool, u16>> + Send {
+            async { Ok(false) }
         }
         fn external_ipv4(&self, _: Ipv4Addr) -> impl Future<Output = Option<Ipv4Addr>> + Send {
             async { Some(Ipv4Addr::new(203, 0, 113, 1)) }
@@ -912,6 +943,8 @@ mod tests {
         let stub = RecordingStub {
             sni: SniDemux::new(),
             forward_lifetime: std::sync::Mutex::new(None),
+            removal: Ok(()),
+            sni_removal: Ok(()),
         };
         let req = map_request([1u8; 12], 7200, 8443, 443); // 7200 > MAX 3600
         let resp = handle(&stub, Ipv4Addr::new(10, 59, 0, 2), &req, 5)
@@ -935,6 +968,8 @@ mod tests {
         let stub = RecordingStub {
             sni: SniDemux::new(),
             forward_lifetime: std::sync::Mutex::new(None),
+            removal: Ok(()),
+            sni_removal: Ok(()),
         };
         let req = map_request([2u8; 12], 0, 8443, 443);
         let resp = handle(&stub, Ipv4Addr::new(10, 59, 0, 2), &req, 5)
@@ -944,9 +979,62 @@ mod tests {
         assert_eq!(*stub.forward_lifetime.lock().unwrap(), None);
     }
 
+    #[tokio::test]
+    async fn deletion_results_cover_plain_range_and_hostname_maps() {
+        for (removal, expected) in [
+            (Ok(()), SUCCESS),
+            (Err(714), SUCCESS),
+            (Err(606), NOT_AUTHORIZED),
+            (Err(501), NO_RESOURCES),
+        ] {
+            let mut stub = RecordingStub {
+                sni: SniDemux::new(),
+                forward_lifetime: std::sync::Mutex::new(None),
+                removal,
+                sni_removal: if expected == SUCCESS {
+                    Ok(())
+                } else {
+                    Err(expected)
+                },
+            };
+            for extension in 0..3 {
+                let mut req = map_request([2; 12], 0, 8443, 443);
+                if extension == 1 {
+                    encode_port_set_option(
+                        &mut req,
+                        &PortSet {
+                            size: 3,
+                            first_internal_port: 8443,
+                            parity: false,
+                        },
+                    );
+                }
+                if extension == 2 {
+                    encode_hostname_option(&mut req, "delete.example.com");
+                }
+                let response = handle(&stub, Ipv4Addr::new(10, 59, 0, 2), &req, 5)
+                    .await
+                    .unwrap();
+                assert_eq!(response[3], expected, "extension {extension}");
+                assert_eq!(&response[4..8], &[0; 4]);
+            }
+            stub.removal = Ok(());
+            stub.sni_removal = Ok(());
+            let req = map_request([2; 12], 0, 8443, 443);
+            assert_eq!(
+                handle(&stub, Ipv4Addr::new(10, 59, 0, 2), &req, 5)
+                    .await
+                    .unwrap()[3],
+                SUCCESS
+            );
+            assert_eq!(*stub.forward_lifetime.lock().unwrap(), None);
+        }
+    }
+
     struct V6Stub {
         sni: Arc<SniDemux>,
         known: bool,
+        fail_remove: bool,
         pinholes: std::sync::Mutex<Vec<(Ipv6Addr, u16, u16, u16)>>,
         removed: std::sync::Mutex<Vec<(Ipv6Addr, u16)>>,
     }
@@ -955,6 +1043,7 @@ mod tests {
             Self {
                 sni: SniDemux::new(),
                 known,
+                fail_remove: false,
                 pinholes: std::sync::Mutex::new(Vec::new()),
                 removed: std::sync::Mutex::new(Vec::new()),
             }
@@ -971,15 +1060,19 @@ mod tests {
         ) -> impl Future<Output = Result<(), u16>> + Send {
             async { Ok(()) }
         }
-        fn remove_forward(&self, _: Ipv4Addr, _: u16) -> impl Future<Output = ()> + Send {
-            async {}
+        fn remove_forward(
+            &self,
+            _: Ipv4Addr,
+            _: u16,
+        ) -> impl Future<Output = Result<(), u16>> + Send {
+            async { Ok(()) }
         }
         fn remove_forward_by_source(
             &self,
             _: SocketAddrV4,
             _: Ipv4Addr,
-        ) -> impl Future<Output = bool> + Send {
-            async { false }
+        ) -> impl Future<Output = Result<bool, u16>> + Send {
+            async { Ok(false) }
         }
         fn external_ipv4(&self, _: Ipv4Addr) -> impl Future<Output = Option<Ipv4Addr>> + Send {
             async { None }
@@ -1009,13 +1102,24 @@ mod tests {
             &self,
             gua: Ipv6Addr,
             external_port: u16,
-        ) -> impl Future<Output = ()> + Send {
+        ) -> impl Future<Output = Result<(), u16>> + Send {
             self.removed.lock().unwrap().push((gua, external_port));
-            async {}
+            let fail = self.fail_remove;
+            async move { if fail { Err(0) } else { Ok(()) } }
         }
         fn sni(&self) -> Option<&Arc<SniDemux>> {
             Some(&self.sni)
         }
+    }
+
+    #[tokio::test]
+    async fn handle6_reports_failed_pinhole_deletion() {
+        let mut stub = V6Stub::new(true);
+        stub.fail_remove = true;
+        let req = map_request([9; 12], 0, 443, 8443);
+        let response = handle6(&stub, TEST_GUA, &req, 1).await.unwrap();
+        assert_eq!(response[3], NO_RESOURCES);
+        assert_eq!(*stub.removed.lock().unwrap(), vec![(TEST_GUA, 8443)]);
     }
 
     const TEST_GUA: Ipv6Addr = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0x50);
@@ -1080,15 +1184,19 @@ mod tests {
         ) -> impl Future<Output = Result<(), u16>> + Send {
             async { Ok(()) }
         }
-        fn remove_forward(&self, _: Ipv4Addr, _: u16) -> impl Future<Output = ()> + Send {
-            async {}
+        fn remove_forward(
+            &self,
+            _: Ipv4Addr,
+            _: u16,
+        ) -> impl Future<Output = Result<(), u16>> + Send {
+            async { Ok(()) }
         }
         fn remove_forward_by_source(
             &self,
             _: SocketAddrV4,
             _: Ipv4Addr,
-        ) -> impl Future<Output = bool> + Send {
-            async { false }
+        ) -> impl Future<Output = Result<bool, u16>> + Send {
+            async { Ok(false) }
         }
         fn external_ipv4(&self, _: Ipv4Addr) -> impl Future<Output = Option<Ipv4Addr>> + Send {
             async { Some(Ipv4Addr::new(203, 0, 113, 1)) }

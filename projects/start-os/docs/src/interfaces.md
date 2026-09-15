@@ -32,7 +32,7 @@ Each table has the following columns:
 
 | Column                    | Description                                                                                                                                                                                                                                                                                                                                           |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Toggle**                | Enable or disable the address. This directly affects iptables and firewall rules — disabling an address blocks traffic to it. Public IPv4 addresses are off by default. All other addresses are on by default.                                                                                                                                        |
+| **Toggle**                | Enable or disable the address. This updates the address's firewall rules and gateway mappings. Public IPv4 addresses are off by default. All other addresses are on by default.                                                                                                                                                                       |
 | **Access**                | **Public** or **Private**. Public addresses are reachable from the Internet. Private addresses are only reachable on the LAN or via VPN. **For an IPv6 global-unicast (GUA) address this column is an editable Local / Public dropdown** — see the note below.                                                                                        |
 | **Type**                  | The address type: `IPv4`, `IPv6`, `Domain`, or `mDNS` (mDNS is only available on router gateways).                                                                                                                                                                                                                                                    |
 | **Certificate Authority** | Who signs the SSL certificate for this address: **Root CA** (your server's own CA), **Let's Encrypt** (publicly trusted), or **None** (non-SSL, e.g. plain HTTP).                                                                                                                                                                                     |
@@ -58,6 +58,18 @@ Each table has the following columns:
 > - **Public** — also reachable from the Internet. StartOS attempts to open the matching pinhole on your gateway automatically (via PCP); if your gateway doesn't support it you may need to allow inbound traffic to that address and port manually.
 >
 > This only applies to IPv6 GUAs. IPv6 ULAs (private) are always local, and IPv4 keeps its separate LAN and WAN address rows.
+
+### Forwarding changes and cleanup
+
+StartOS retries failed forwarding changes and retains the information needed to
+withdraw the previous rules and gateway mappings. Check the daemon logs when a
+change fails, and treat a port as potentially reachable until its withdrawal
+succeeds.
+
+Graceful shutdown waits for forwarding cleanup workers to finish. Cleanup has a
+deadline, and incomplete withdrawal is reported in the logs. An unreachable router
+may retain a mapping for the remainder of its granted lifetime; check the router
+directly if you need to confirm that the port is closed.
 
 ### Adding Domains
 

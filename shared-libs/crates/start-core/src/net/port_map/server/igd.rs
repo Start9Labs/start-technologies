@@ -540,10 +540,10 @@ async fn delete_mapping<B: GatewayBackend + ?Sized>(
     let source = SocketAddrV4::new(source_ip, external_port);
 
     // Owner-scoped so a peer can't delete (or probe for) another's mapping.
-    if backend.remove_forward_by_source(source, peer).await {
-        ok("DeletePortMapping", "")
-    } else {
-        fault(714, "NoSuchEntryInArray")
+    match backend.remove_forward_by_source(source, peer).await {
+        Ok(true) => ok("DeletePortMapping", ""),
+        Ok(false) | Err(714) => fault(714, "NoSuchEntryInArray"),
+        Err(code) => fault(code, upnp_error_text(code)),
     }
 }
 
@@ -651,10 +651,14 @@ async fn delete_hostname_mapping<B: GatewayBackend + ?Sized>(
     };
     let source = SocketAddrV4::new(source_ip, external_port);
     let target = SocketAddrV4::new(peer, internal_port);
-    backend
+    match backend
         .remove_sni_forward(source, target, std::slice::from_ref(&hostname))
-        .await;
-    ok(DELETE_HOSTNAME_ACTION, "")
+        .await
+    {
+        Ok(()) => ok(DELETE_HOSTNAME_ACTION, ""),
+        Err(2) => fault(606, "Action not authorized"),
+        Err(_) => fault(501, "Action Failed"),
+    }
 }
 
 #[cfg(test)]
@@ -898,15 +902,15 @@ mod tests {
             &self,
             _: Ipv4Addr,
             _: u16,
-        ) -> impl std::future::Future<Output = ()> + Send {
-            async {}
+        ) -> impl std::future::Future<Output = Result<(), u16>> + Send {
+            async { Ok(()) }
         }
         fn remove_forward_by_source(
             &self,
             _: SocketAddrV4,
             _: Ipv4Addr,
-        ) -> impl std::future::Future<Output = bool> + Send {
-            async { false }
+        ) -> impl std::future::Future<Output = Result<bool, u16>> + Send {
+            async { Ok(false) }
         }
         fn external_ipv4(
             &self,
@@ -939,15 +943,15 @@ mod tests {
             &self,
             _: Ipv4Addr,
             _: u16,
-        ) -> impl std::future::Future<Output = ()> + Send {
-            async {}
+        ) -> impl std::future::Future<Output = Result<(), u16>> + Send {
+            async { Ok(()) }
         }
         fn remove_forward_by_source(
             &self,
             _: SocketAddrV4,
             _: Ipv4Addr,
-        ) -> impl std::future::Future<Output = bool> + Send {
-            async { false }
+        ) -> impl std::future::Future<Output = Result<bool, u16>> + Send {
+            async { Ok(false) }
         }
         fn external_ipv4(
             &self,
@@ -1125,6 +1129,8 @@ mod tests {
         known: bool,
         calls: Mutex<Vec<(SocketAddrV4, SocketAddrV4, Vec<String>, Option<u32>)>>,
         remove_calls: Mutex<Vec<(SocketAddrV4, SocketAddrV4, Vec<String>)>>,
+        removal: Result<bool, u16>,
+        sni_removal: Result<(), u8>,
     }
     impl HostnameStub {
         fn new(known: bool) -> Self {
@@ -1133,6 +1139,8 @@ mod tests {
                 known,
                 calls: Mutex::new(Vec::new()),
                 remove_calls: Mutex::new(Vec::new()),
+                removal: Ok(false),
+                sni_removal: Ok(()),
             }
         }
     }
@@ -1147,15 +1155,19 @@ mod tests {
         ) -> impl Future<Output = Result<(), u16>> + Send {
             async { Ok(()) }
         }
-        fn remove_forward(&self, _: Ipv4Addr, _: u16) -> impl Future<Output = ()> + Send {
-            async {}
+        fn remove_forward(
+            &self,
+            _: Ipv4Addr,
+            _: u16,
+        ) -> impl Future<Output = Result<(), u16>> + Send {
+            async { Ok(()) }
         }
-        fn remove_forward_by_source(
+        async fn remove_forward_by_source(
             &self,
             _: SocketAddrV4,
             _: Ipv4Addr,
-        ) -> impl Future<Output = bool> + Send {
-            async { false }
+        ) -> Result<bool, u16> {
+            self.removal
         }
         fn external_ipv4(&self, _: Ipv4Addr) -> impl Future<Output = Option<Ipv4Addr>> + Send {
             async { Some(EXT_IP) }
@@ -1188,14 +1200,17 @@ mod tests {
             source: SocketAddrV4,
             target: SocketAddrV4,
             hostnames: &[String],
-        ) -> impl Future<Output = ()> + Send {
+        ) -> impl Future<Output = Result<(), u8>> + Send {
             self.remove_calls
                 .lock()
                 .unwrap()
                 .push((source, target, hostnames.to_vec()));
-            self.sni
-                .unregister(*source.ip(), source.port(), hostnames, target);
-            async {}
+            let result = self.sni_removal;
+            if result.is_ok() {
+                self.sni
+                    .unregister(*source.ip(), source.port(), hostnames, target);
+            }
+            async move { result }
         }
     }
 
@@ -1256,6 +1271,48 @@ mod tests {
 
     async fn control(stub: &HostnameStub, peer: Ipv4Addr, body: &str) -> Response {
         handle_control(stub, peer, &client_headers(body), body).await
+    }
+
+    #[tokio::test]
+    async fn deletion_faults_distinguish_absent_unauthorized_and_failed() {
+        let mut stub = HostnameStub::new(true);
+        let body = r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:DeletePortMapping xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:1"><NewExternalPort>44300</NewExternalPort><NewProtocol>TCP</NewProtocol></u:DeletePortMapping></s:Body></s:Envelope>"#;
+        for (result, code) in [
+            (Ok(false), 714),
+            (Err(714), 714),
+            (Err(606), 606),
+            (Err(501), 501),
+        ] {
+            stub.removal = result;
+            let response = control(&stub, PEER, body).await;
+            assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+            assert!(
+                body_text(response)
+                    .await
+                    .contains(&format!("<errorCode>{code}</errorCode>"))
+            );
+        }
+        stub.removal = Ok(true);
+        assert_eq!(control(&stub, PEER, body).await.status(), StatusCode::OK);
+        for (result, code) in [
+            (Err(2), 606),
+            (Err(crate::net::port_map::pcp::RESULT_NO_RESOURCES), 501),
+        ] {
+            stub.sni_removal = result;
+            let response = control(&stub, PEER, &delete_hostname_body("delete.example.com")).await;
+            assert!(
+                body_text(response)
+                    .await
+                    .contains(&format!("<errorCode>{code}</errorCode>"))
+            );
+        }
+        stub.sni_removal = Ok(());
+        assert_eq!(
+            control(&stub, PEER, &delete_hostname_body("delete.example.com"))
+                .await
+                .status(),
+            StatusCode::OK
+        );
     }
 
     #[test]
@@ -1571,15 +1628,19 @@ mod tests {
             ) -> impl Future<Output = Result<(), u16>> + Send {
                 async { Ok(()) }
             }
-            fn remove_forward(&self, _: Ipv4Addr, _: u16) -> impl Future<Output = ()> + Send {
-                async {}
+            fn remove_forward(
+                &self,
+                _: Ipv4Addr,
+                _: u16,
+            ) -> impl Future<Output = Result<(), u16>> + Send {
+                async { Ok(()) }
             }
             fn remove_forward_by_source(
                 &self,
                 _: SocketAddrV4,
                 _: Ipv4Addr,
-            ) -> impl Future<Output = bool> + Send {
-                async { false }
+            ) -> impl Future<Output = Result<bool, u16>> + Send {
+                async { Ok(false) }
             }
             fn external_ipv4(&self, _: Ipv4Addr) -> impl Future<Output = Option<Ipv4Addr>> + Send {
                 async { Some(EXT_IP) }

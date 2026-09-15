@@ -84,6 +84,20 @@ erasure-coded FUSE filesystem used for StartOS backups. It builds to the
   `start-cli server shutdown`.
 - `startos-restart.service` — restart handling.
 
+## Forwarding ownership and shutdown
+
+The shared `net/forward.rs` controllers retain desired configuration separately
+from the exact applied nft footprint. The `net/port_map/client.rs` controller
+retains router grants and their cleanup identities across failed withdrawals.
+Replacement waits for retirement of the previous mapping.
+
+Shutdown stops producers and closes controller admission, then waits for admitted
+mutations before withdrawing forwarding state. Each controller has one terminal
+completion owner that retains and joins its actors; concurrent or cancelled
+waiters share that completion and its original absolute deadline. At the deadline,
+remaining workers are aborted and joined before incomplete cleanup is reported.
+An unreachable router may retain a grant until its lifetime expires.
+
 ## OS image packaging
 
 Image build inputs are partly shared at the repo root: `debian/` (shared

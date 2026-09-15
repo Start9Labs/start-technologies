@@ -360,7 +360,6 @@ pub async fn init(
         let mut ntp_synced = false;
         let mut not_made_progress = 0u32;
         for _ in 0..1800 {
-            // Transient query failures keep the server in setup mode.
             if check_time_is_synchronized()
                 .await
                 .log_err()

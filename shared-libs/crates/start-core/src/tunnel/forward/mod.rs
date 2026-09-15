@@ -11,7 +11,6 @@ pub mod sni;
 use std::collections::BTreeSet;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 
-use crate::net::port_map::server::GatewayBackend;
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::db::PortForward;
@@ -40,13 +39,14 @@ pub async fn clear_for_peer(
     let (dnat_sources, sni_routes, sni_fallbacks) =
         select_peer_forwards(&forwards.0, peer, auto_only);
     for source in dnat_sources {
-        ctx.remove_forward_by_source(source, peer).await;
+        ctx.remove_forward_by_source_result(source, peer).await?;
     }
     for (source, target, host) in sni_routes {
-        ctx.remove_sni_forward(source, target, &[host]).await;
+        ctx.remove_sni_forward_result(source, target, &[host])
+            .await?;
     }
     for (source, target) in sni_fallbacks {
-        ctx.remove_sni_fallback(source, target).await;
+        ctx.remove_sni_fallback(source, target).await?;
     }
 
     // v6 pinholes are keyed by the device's own GUA, derivable from each subnet's
@@ -77,7 +77,7 @@ pub async fn clear_for_peer(
             .map(|(key, _)| *key)
             .collect();
         for key in keys {
-            ctx.remove_pinhole(*key.ip(), key.port()).await;
+            pinhole::remove_pinhole(ctx, *key.ip(), key.port()).await?;
         }
     }
     Ok(())

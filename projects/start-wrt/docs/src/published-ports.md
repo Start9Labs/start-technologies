@@ -77,7 +77,7 @@ This is **off by default** for every device. To allow it, open the device's [det
 
 Port uses created this way appear in the **Automatic** section of the Published Ports page. Each row shows the **Device** (linked to its detail page), the **Port** on the device, the **Public port**, the **Hostname** for a hostname route, the **Kind** (PCP, UPnP, or SNI), and **Expires** — the minutes left before the router removes the entry unless the device renews it. They are read-only:
 
-- The device itself creates, renews, and removes its forwards.
+- The device itself creates, renews, and removes its forwards. If removing a forward fails, the device receives an error and can retry the same request. The forward may remain active while the error persists.
 - A forward the device stops renewing expires and is removed automatically once the lifetime the device asked for runs out — about an hour for typical clients, and never longer than a week even for a device that asks to keep the port indefinitely.
 - A forward is also removed once the device no longer holds the address it points at — if the device leaves the network long enough for its DHCP lease to lapse, or comes back on a different address. This keeps a forward from quietly delivering Internet traffic to whichever device is given that address next. Devices with a reserved address are unaffected.
 - To stop a device from creating forwards, turn its toggle back off on the device page — or forget the device entirely. Either way its existing forwards and hostname routes are closed immediately, and it can no longer open new ones.

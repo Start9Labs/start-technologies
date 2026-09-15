@@ -1,7 +1,6 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 use std::future::Future;
-use std::io::Cursor;
 use std::net::{IpAddr, Ipv4Addr, SocketAddrV4, SocketAddrV6};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -33,7 +32,7 @@ const EPHEMERAL_PORT_START: u16 = 49152;
 const PORT_FORWARD_GC_INTERVAL: Duration = Duration::from_secs(30);
 const FORWARD_SCRIPT_TIMEOUT: Duration = Duration::from_secs(30);
 const FORWARD_DRAIN_RETRY_INTERVAL: Duration = Duration::from_secs(1);
-const FORWARD_DRAIN_TIMEOUT: Duration = Duration::from_secs(90);
+pub(crate) const FORWARD_DRAIN_TIMEOUT: Duration = Duration::from_secs(90);
 // Reserved by/for host daemons (mDNS 5353, LLMNR 5355, postgres 5432, X11
 // forwarding 6010). 9050/9051 are claimable on purpose: they were the 0.3.x
 // host tor daemon's reservation (gone in 0.4.x), and the tor service now binds
@@ -191,6 +190,8 @@ struct ForwardMapping {
     count: u16,
     target_prefix: u8,
     src_filter: Option<IpNet>,
+    // Unconfirmed identities must be removed before another add.
+    confirmed: bool,
     rc: Weak<()>,
 }
 
@@ -219,6 +220,8 @@ struct Ipv6ForwardSpec {
 struct Ipv6ForwardMapping {
     desired: Ipv6ForwardSpec,
     applied: Option<Ipv6ForwardSpec>,
+    // Unconfirmed identities must be removed before another add.
+    confirmed: bool,
     rc: Weak<()>,
 }
 
@@ -232,7 +235,7 @@ impl Ipv6ForwardMapping {
     fn next_operation(&self) -> Option<Ipv6ForwardOperation> {
         let live = self.rc.strong_count() > 0;
         match &self.applied {
-            Some(applied) if !live || &self.desired != applied => {
+            Some(applied) if !self.confirmed || !live || &self.desired != applied => {
                 Some(Ipv6ForwardOperation::Remove(applied.clone()))
             }
             None if live => Some(Ipv6ForwardOperation::Add(self.desired.clone())),
@@ -241,20 +244,19 @@ impl Ipv6ForwardMapping {
     }
 
     fn operation_started(&mut self, operation: &Ipv6ForwardOperation) {
+        self.confirmed = false;
         if let Ipv6ForwardOperation::Add(spec) = operation {
             self.applied = Some(spec.clone());
         }
     }
 
-    fn operation_failed(&mut self, operation: &Ipv6ForwardOperation) {
-        if matches!(operation, Ipv6ForwardOperation::Add(_)) {
-            self.applied = None;
-        }
-    }
-
     fn operation_succeeded(&mut self, operation: Ipv6ForwardOperation) {
-        if matches!(operation, Ipv6ForwardOperation::Remove(_)) {
-            self.applied = None;
+        match operation {
+            Ipv6ForwardOperation::Add(_) => self.confirmed = true,
+            Ipv6ForwardOperation::Remove(_) => {
+                self.applied = None;
+                self.confirmed = false;
+            }
         }
     }
 }
@@ -273,8 +275,47 @@ impl PortForwardState {
         target_prefix: u8,
         src_filter: Option<IpNet>,
     ) -> Result<Arc<()>, Error> {
+        let end = source
+            .port()
+            .checked_add(count.checked_sub(1).ok_or_else(|| {
+                Error::new(eyre!("empty forwarding range"), ErrorKind::InvalidRequest)
+            })?)
+            .ok_or_else(|| {
+                Error::new(
+                    eyre!("forwarding range overflow"),
+                    ErrorKind::InvalidRequest,
+                )
+            })?;
+        target.port().checked_add(count - 1).ok_or_else(|| {
+            Error::new(
+                eyre!("target forwarding range overflow"),
+                ErrorKind::InvalidRequest,
+            )
+        })?;
+        let conflicts = self
+            .mappings
+            .iter()
+            .filter(|(key, mapping)| {
+                **key != source
+                    && key.ip() == source.ip()
+                    && u32::from(key.port()) <= u32::from(end)
+                    && u32::from(source.port()) < u32::from(key.port()) + u32::from(mapping.count)
+            })
+            .map(|(key, mapping)| (*key, mapping.rc.strong_count() > 0))
+            .collect::<Vec<_>>();
+        if conflicts.iter().any(|(_, live)| *live) {
+            return Err(Error::new(
+                eyre!("overlapping live forwarding range"),
+                ErrorKind::Network,
+            ));
+        }
+        for (key, _) in conflicts {
+            self.remove_forward(key).await?;
+        }
         if let Some(existing) = self.mappings.get_mut(&source) {
-            if existing.matches(target, count, target_prefix, src_filter.as_ref()) {
+            if existing.confirmed
+                && existing.matches(target, count, target_prefix, src_filter.as_ref())
+            {
                 if let Some(existing_rc) = existing.rc.upgrade() {
                     return Ok(existing_rc);
                 } else {
@@ -287,8 +328,6 @@ impl PortForwardState {
             }
         }
 
-        let rc = Arc::new(());
-        forward(source, target, count, target_prefix, src_filter.as_ref()).await?;
         self.mappings.insert(
             source,
             ForwardMapping {
@@ -297,9 +336,15 @@ impl PortForwardState {
                 count,
                 target_prefix,
                 src_filter,
-                rc: Arc::downgrade(&rc),
+                confirmed: false,
+                rc: Weak::new(),
             },
         );
+        forward(source, target, count, target_prefix, src_filter.as_ref()).await?;
+        let rc = Arc::new(());
+        let mapping = self.mappings.get_mut(&source).unwrap();
+        mapping.confirmed = true;
+        mapping.rc = Arc::downgrade(&rc);
 
         Ok(rc)
     }
@@ -333,9 +378,10 @@ impl PortForwardState {
     }
 
     async fn remove_forward(&mut self, source: SocketAddrV4) -> Result<(), Error> {
-        let Some(mapping) = self.mappings.get(&source) else {
+        let Some(mapping) = self.mappings.get_mut(&source) else {
             return Ok(());
         };
+        mapping.confirmed = false;
         unforward(
             mapping.source,
             mapping.target,
@@ -351,30 +397,9 @@ impl PortForwardState {
     fn dump(&self) -> BTreeMap<SocketAddrV4, ForwardMapping> {
         self.mappings
             .iter()
-            .filter(|(_, mapping)| mapping.rc.strong_count() > 0)
+            .filter(|(_, mapping)| mapping.confirmed && mapping.rc.strong_count() > 0)
             .map(|(source, mapping)| (*source, mapping.clone()))
             .collect()
-    }
-}
-
-impl Drop for PortForwardState {
-    fn drop(&mut self) {
-        if !self.mappings.is_empty() {
-            let mappings = std::mem::take(&mut self.mappings);
-            tokio::spawn(async move {
-                for (_, mapping) in mappings {
-                    unforward(
-                        mapping.source,
-                        mapping.target,
-                        mapping.count,
-                        mapping.target_prefix,
-                        mapping.src_filter.as_ref(),
-                    )
-                    .await
-                    .log_err();
-                }
-            });
-        }
     }
 }
 
@@ -411,10 +436,33 @@ impl PortForwardCommand {
 
 type PortForwardDrainFuture = Shared<BoxFuture<'static, Result<(), Arc<Error>>>>;
 
+async fn join_forward_actor(
+    mut thread: NonDetachingJoinHandle<()>,
+    response: oneshot::Receiver<Result<(), Error>>,
+    deadline: tokio::time::Instant,
+) -> Result<(), Error> {
+    match tokio::time::timeout_at(deadline, async {
+        let response = response.await.map_err(err_has_exited);
+        (&mut thread).await.map_err(err_has_exited)?;
+        response?
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => {
+            thread.wait_for_abort().await.ok();
+            Err(Error::new(
+                eyre!("forwarding teardown deadline expired; cleanup incomplete"),
+                ErrorKind::Timeout,
+            ))
+        }
+    }
+}
+
 pub struct PortForwardController {
     req: mpsc::UnboundedSender<PortForwardCommand>,
-    drain_completion: SyncMutex<Option<PortForwardDrainFuture>>,
-    _thread: NonDetachingJoinHandle<()>,
+    drain_completion: Arc<SyncMutex<Option<PortForwardDrainFuture>>>,
+    thread: SyncMutex<Option<NonDetachingJoinHandle<()>>>,
 }
 
 /// Native nftables table owning all of StartOS's packet-filter / NAT rules.
@@ -426,27 +474,31 @@ pub const NFT_TABLE: &str = "startos";
 /// table`/`add chain` are no-ops if present). The forward chain defaults to
 /// `drop` (replacing `iptables -P FORWARD DROP`); callers add ACCEPT rules.
 pub async fn nft_ensure_base() -> Result<(), Error> {
-    Command::new("nft")
-        .arg(include_str!("startos-base.nft"))
-        .invoke(ErrorKind::Network)
-        .await?;
-    Command::new("nft")
-        .arg(include_str!("startos-base-v6.nft"))
-        .invoke(ErrorKind::Network)
-        .await?;
+    nft_ensure_base_until("nft", nft_deadline()).await
+}
+
+async fn nft_ensure_base_until(program: &str, deadline: tokio::time::Instant) -> Result<(), Error> {
+    for base in [
+        include_str!("startos-base.nft"),
+        include_str!("startos-base-v6.nft"),
+    ] {
+        nft_invoke_until(Command::new(program).arg(base), &[], deadline).await?;
+    }
     Ok(())
 }
 
-async fn nft_list_chain(family: &str, chain: &str) -> Result<String, Error> {
-    let out = Command::new("nft")
-        .arg("-a")
-        .arg("list")
-        .arg("chain")
-        .arg(family)
-        .arg("startos")
-        .arg(chain)
-        .invoke(ErrorKind::Network)
-        .await?;
+async fn nft_list_chain_until(
+    program: &str,
+    family: &str,
+    chain: &str,
+    deadline: tokio::time::Instant,
+) -> Result<String, Error> {
+    let out = nft_invoke_until(
+        Command::new(program).args(["-a", "list", "chain", family, "startos", chain]),
+        &[],
+        deadline,
+    )
+    .await?;
     Ok(String::from_utf8_lossy(&out).into_owned())
 }
 
@@ -456,9 +508,10 @@ async fn nft_rules_with_comment(
     family: &str,
     chain: &str,
     comment: &str,
+    deadline: tokio::time::Instant,
 ) -> Result<Vec<(u64, String)>, Error> {
     let needle = format!("comment \"{comment}\"");
-    Ok(nft_list_chain(family, chain)
+    Ok(nft_list_chain_until("nft", family, chain, deadline)
         .await?
         .lines()
         .filter_map(|line| {
@@ -479,7 +532,7 @@ async fn nft_comments_with_prefix_family(
     chain: &str,
     prefix: &str,
 ) -> Result<Vec<String>, Error> {
-    Ok(nft_list_chain(family, chain)
+    Ok(nft_list_chain_until("nft", family, chain, nft_deadline())
         .await?
         .lines()
         .filter_map(|line| {
@@ -499,6 +552,88 @@ pub(crate) async fn nft_comments_with_prefix(
 
 const NFT_RULE_MAX_ATTEMPTS: usize = 5;
 
+fn nft_deadline() -> tokio::time::Instant {
+    tokio::time::Instant::now() + FORWARD_SCRIPT_TIMEOUT
+}
+
+/// Cancellation kills the inherited process group; deadline expiry also reaps the immediate child.
+pub(crate) async fn nft_invoke_until(
+    command: &mut Command,
+    input: &[u8],
+    deadline: tokio::time::Instant,
+) -> Result<Vec<u8>, Error> {
+    use std::os::unix::process::CommandExt;
+    use std::process::Stdio;
+
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    if tokio::time::Instant::now() >= deadline {
+        return Err(Error::new(
+            eyre!("nft deadline expired"),
+            ErrorKind::Timeout,
+        ));
+    }
+    command.as_std_mut().process_group(0);
+    command
+        .kill_on_drop(true)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().with_kind(ErrorKind::Network)?;
+    let pid = child.id().expect("spawned nft child has a pid");
+    let group = crate::util::GeneralGuard::new(move || {
+        let _ = nix::sys::signal::killpg(
+            nix::unistd::Pid::from_raw(pid as i32),
+            nix::sys::signal::Signal::SIGKILL,
+        );
+    });
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = child.stdout.take().unwrap();
+    let mut stderr = child.stderr.take().unwrap();
+    let mut output = Vec::new();
+    let mut errors = Vec::new();
+    let result = tokio::time::timeout_at(deadline, async {
+        let (input, stdout, stderr, status) = tokio::join!(
+            async {
+                stdin.write_all(input).await?;
+                stdin.shutdown().await?;
+                drop(stdin);
+                Ok::<_, std::io::Error>(())
+            },
+            stdout.read_to_end(&mut output),
+            stderr.read_to_end(&mut errors),
+            child.wait(),
+        );
+        Ok::<_, std::io::Error>((status?, input, stdout, stderr))
+    })
+    .await;
+    let (status, input_result, stdout_result, stderr_result) = match result {
+        Ok(Ok(result)) => {
+            group.drop_without_action();
+            result
+        }
+        result => {
+            drop(group);
+            child.wait().await.with_kind(ErrorKind::Network)?;
+            return Err(match result {
+                Err(error) => Error::new(error, ErrorKind::Timeout),
+                Ok(Err(error)) => Error::new(error, ErrorKind::Network),
+                Ok(Ok(_)) => unreachable!(),
+            });
+        }
+    };
+    crate::ensure_code!(
+        status.success(),
+        ErrorKind::Network,
+        "{}",
+        String::from_utf8_lossy(&errors).trim()
+    );
+    input_result.with_kind(ErrorKind::Network)?;
+    stdout_result.with_kind(ErrorKind::Network)?;
+    stderr_result.with_kind(ErrorKind::Network)?;
+    Ok(output)
+}
+
 fn nft_error_is_stale(error: &Error) -> bool {
     error
         .source
@@ -506,14 +641,17 @@ fn nft_error_is_stale(error: &Error) -> bool {
         .contains("No such file or directory")
 }
 
-async fn nft_execute_transaction(script: &str) -> Result<(), Error> {
-    let mut input = Cursor::new(script.as_bytes());
-    Command::new("nft")
-        .arg("-f")
-        .arg("-")
-        .input(Some(&mut input))
-        .invoke(ErrorKind::Network)
-        .await?;
+async fn nft_execute_transaction_until(
+    program: &str,
+    script: &str,
+    deadline: tokio::time::Instant,
+) -> Result<(), Error> {
+    nft_invoke_until(
+        Command::new(program).args(["-f", "-"]),
+        script.as_bytes(),
+        deadline,
+    )
+    .await?;
     Ok(())
 }
 
@@ -548,7 +686,7 @@ where
     script
 }
 
-async fn nft_delete_rules_matching<F>(
+pub(crate) async fn nft_delete_rules_matching<F>(
     family: &str,
     chains: &[&str],
     matches: F,
@@ -556,14 +694,44 @@ async fn nft_delete_rules_matching<F>(
 where
     F: Fn(&str) -> bool,
 {
-    nft_ensure_base().await?;
+    nft_delete_rules_matching_until(family, chains, matches, nft_deadline()).await
+}
+
+pub(crate) async fn nft_delete_rules_matching_until<F>(
+    family: &str,
+    chains: &[&str],
+    matches: F,
+    deadline: tokio::time::Instant,
+) -> Result<(), Error>
+where
+    F: Fn(&str) -> bool,
+{
+    nft_delete_rules_matching_with_program_until("nft", family, chains, matches, deadline).await
+}
+
+async fn nft_delete_rules_matching_with_program_until<F>(
+    program: &str,
+    family: &str,
+    chains: &[&str],
+    matches: F,
+    deadline: tokio::time::Instant,
+) -> Result<(), Error>
+where
+    F: Fn(&str) -> bool,
+{
+    nft_ensure_base_until(program, deadline).await?;
 
     let mut last_err = None;
     for attempt in 1..=NFT_RULE_MAX_ATTEMPTS {
-        let listings = futures::future::try_join_all(chains.iter().map(|chain| async move {
-            Ok::<_, Error>((*chain, nft_list_chain(family, chain).await?))
+        let listings = futures::future::join_all(chains.iter().map(|chain| async move {
+            Ok::<_, Error>((
+                *chain,
+                nft_list_chain_until(program, family, chain, deadline).await?,
+            ))
         }))
-        .await?;
+        .await
+        .into_iter()
+        .collect::<Result<Vec<_>, Error>>()?;
         let listings = listings
             .iter()
             .map(|(chain, listing)| (*chain, listing.as_str()))
@@ -573,7 +741,7 @@ where
             return Ok(());
         }
 
-        match nft_execute_transaction(&script).await {
+        match nft_execute_transaction_until(program, &script, deadline).await {
             Ok(()) => return Ok(()),
             Err(error) if nft_error_is_stale(&error) => {
                 tracing::warn!(
@@ -595,6 +763,7 @@ pub(crate) async fn nft_delete_rules_with_comment_prefix_v6(
 }
 
 /// Converges the tagged rule, retrying stale handles.
+/// `undo` deletes all matching tags; `prepend` inserts additions at the chain head.
 pub async fn nft_rule(
     chain: &str,
     comment: &str,
@@ -625,11 +794,12 @@ async fn nft_rule_family(
     prepend: bool,
     rule: &str,
 ) -> Result<(), Error> {
-    nft_ensure_base().await?;
+    let deadline = nft_deadline();
+    nft_ensure_base_until("nft", deadline).await?;
 
     let mut last_err = None;
     for attempt in 1..=NFT_RULE_MAX_ATTEMPTS {
-        let existing = nft_rules_with_comment(family, chain, comment).await?;
+        let existing = nft_rules_with_comment(family, chain, comment, deadline).await?;
 
         // Already converged: nothing to undo, or exactly the desired rule present.
         if undo {
@@ -664,7 +834,7 @@ async fn nft_rule_family(
             return Ok(());
         }
 
-        match nft_execute_transaction(&script).await {
+        match nft_execute_transaction_until("nft", &script, deadline).await {
             Ok(()) => return Ok(()),
             // Stale handle: a concurrent reconcile won the race; re-read and
             // retry. Any other error is real and surfaces immediately.
@@ -678,6 +848,188 @@ async fn nft_rule_family(
         }
     }
     Err(last_err.expect("loop only exits here via the stale-handle path, which sets last_err"))
+}
+
+#[cfg(test)]
+mod nft_process_tests {
+    use super::*;
+
+    fn scratch() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("start-core-nft-{}", crate::util::new_guid()));
+        std::fs::create_dir(&dir).unwrap();
+        dir
+    }
+
+    async fn assert_group_stopped(block_stdin: bool, cancel: bool) {
+        let dir = scratch();
+        let task_dir = dir.clone();
+        let task: NonDetachingJoinHandle<_> = tokio::spawn(async move {
+            let mut command = Command::new("sh");
+            command
+                .args([
+                    "-c",
+                    "echo $$ > \"$1/pid\"; (sleep 0.7; echo survived > \"$1/sentinel\") & wait",
+                    "sh",
+                ])
+                .arg(task_dir);
+            let input = if block_stdin {
+                vec![0; 4 * 1024 * 1024]
+            } else {
+                Vec::new()
+            };
+            nft_invoke_until(
+                &mut command,
+                &input,
+                tokio::time::Instant::now() + Duration::from_millis(300),
+            )
+            .await
+        })
+        .into();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !dir.join("pid").exists() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        if cancel {
+            assert!(task.wait_for_abort().await.unwrap_err().is_cancelled());
+        } else {
+            assert_eq!(task.await.unwrap().unwrap_err().kind, ErrorKind::Timeout);
+            let pid = std::fs::read_to_string(dir.join("pid"))
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap();
+            assert_eq!(
+                nix::sys::wait::waitpid(
+                    nix::unistd::Pid::from_raw(pid),
+                    Some(nix::sys::wait::WaitPidFlag::WNOHANG),
+                ),
+                Err(nix::errno::Errno::ECHILD),
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        assert!(!dir.join("sentinel").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn nft_timeout_covers_blocked_stdin_and_reaps_child() {
+        assert_group_stopped(true, false).await;
+    }
+
+    #[tokio::test]
+    async fn nft_timeout_kills_inherited_group_and_reaps_child() {
+        assert_group_stopped(false, false).await;
+    }
+
+    #[tokio::test]
+    async fn nft_cancellation_kills_inherited_group() {
+        assert_group_stopped(true, true).await;
+    }
+
+    #[tokio::test]
+    async fn nft_captures_output_and_errors() {
+        let output = nft_invoke_until(
+            Command::new("sh").args(["-c", "cat"]),
+            b"transaction",
+            nft_deadline(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(output, b"transaction");
+        let error = nft_invoke_until(
+            Command::new("sh").args(["-c", "echo 'No such file or directory' >&2; exit 1"]),
+            &[],
+            nft_deadline(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Network);
+        assert!(nft_error_is_stale(&error));
+        let error = nft_invoke_until(
+            Command::new("sh").args(["-c", "echo 'No such file or directory' >&2; exit 1"]),
+            &vec![0; 4 * 1024 * 1024],
+            nft_deadline(),
+        )
+        .await
+        .unwrap_err();
+        assert!(nft_error_is_stale(&error));
+    }
+
+    fn fake_nft(dir: &std::path::Path, script: &str) -> String {
+        use std::os::unix::fs::PermissionsExt;
+        let file = dir.join("nft");
+        std::fs::write(
+            &file,
+            format!("#!/bin/sh\ncd -- \"$(dirname -- \"$0\")\"\n{script}\n"),
+        )
+        .unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o700)).unwrap();
+        file.to_str().unwrap().to_owned()
+    }
+
+    #[tokio::test]
+    async fn nft_batch_retries_share_base_listing_and_transaction_deadline() {
+        let dir = scratch();
+        let program = fake_nft(
+            &dir,
+            r#"
+case "$1" in
+    -a) echo list >> calls; sleep 0.1; echo 'accept comment "pinhole:test" # handle 1';;
+    -f) cat > transaction; echo transaction >> calls; sleep 0.1; echo 'No such file or directory' >&2; exit 1;;
+    *) echo base >> calls; sleep 0.1;;
+esac
+"#,
+        );
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(650);
+        let error = nft_delete_rules_matching_with_program_until(
+            &program,
+            "ip6",
+            &["prerouting", "forward"],
+            |comment| comment.starts_with("pinhole:"),
+            deadline,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Timeout);
+        assert!(tokio::time::Instant::now() < deadline + Duration::from_secs(1));
+        let calls = std::fs::read_to_string(dir.join("calls")).unwrap();
+        assert_eq!(calls.lines().filter(|line| *line == "base").count(), 2);
+        assert!(calls.lines().filter(|line| *line == "list").count() >= 4);
+        assert!(calls.contains("transaction"));
+        let transaction = std::fs::read_to_string(dir.join("transaction")).unwrap();
+        assert!(transaction.contains("delete rule ip6 startos prerouting handle 1"));
+        assert!(transaction.contains("delete rule ip6 startos forward handle 1"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn nft_batch_preserves_listing_error_without_transacting() {
+        let dir = scratch();
+        let program = fake_nft(
+            &dir,
+            r#"
+case "$1" in
+    -a) echo 'listing denied' >&2; exit 1;;
+    -f) touch transaction;;
+esac
+"#,
+        );
+        let error = nft_delete_rules_matching_with_program_until(
+            &program,
+            "ip6",
+            &["prerouting", "forward"],
+            |_| true,
+            nft_deadline(),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.source.to_string().contains("listing denied"));
+        assert!(!dir.join("transaction").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
 
 const DYNAMIC_FORWARD_CHAINS: [&str; 4] = ["prerouting", "output", "postrouting", "forward"];
@@ -741,79 +1093,39 @@ impl PortForwardController {
         Fut: Future<Output = Result<(), Error>> + Send + 'static,
     {
         let (req_send, mut req_recv) = mpsc::unbounded_channel::<PortForwardCommand>();
+        let drain_completion = Arc::new(SyncMutex::new(None::<PortForwardDrainFuture>));
+        let actor_drain = drain_completion.clone();
         let thread = NonDetachingJoinHandle::from(tokio::spawn(async move {
-            let mut pending = VecDeque::new();
-            let mut drain = None;
-            'initialize: loop {
-                let initialization = initialize();
-                tokio::pin!(initialization);
-                let error = loop {
-                    tokio::select! {
-                        result = &mut initialization => match result {
-                            Ok(()) => break 'initialize,
-                            Err(error) => break error,
-                        },
-                        cmd = req_recv.recv() => match cmd {
-                            Some(PortForwardCommand::Drain { respond }) => {
-                                drain = Some(respond);
-                            }
-                            Some(cmd) if drain.is_none() => pending.push_back(cmd),
-                            Some(_) => {},
-                            None => return,
-                        },
-                    }
-                };
-                tracing::error!(
-                    "{}",
-                    t!(
-                        "net.forward.error-initializing-controller",
-                        error = format!("{error:#}")
-                    )
-                );
-                tracing::debug!("{error:?}");
-                let retry = tokio::time::sleep(Duration::from_secs(5));
-                tokio::pin!(retry);
-                loop {
-                    tokio::select! {
-                        _ = &mut retry => break,
-                        cmd = req_recv.recv() => match cmd {
-                            Some(PortForwardCommand::Drain { respond }) => {
-                                drain = Some(respond);
-                            }
-                            Some(cmd) if drain.is_none() => pending.push_back(cmd),
-                            Some(_) => {},
-                            None => return,
-                        },
+            loop {
+                match initialize().await {
+                    Ok(()) => break,
+                    Err(error) => {
+                        tracing::error!("forwarding initialization failed: {error:#}");
+                        tokio::time::sleep(Duration::from_secs(5)).await;
                     }
                 }
             }
-
+            let reject_pending = actor_drain.mutate(|completion| completion.is_some());
             let mut state = PortForwardState::default();
-            if let Some(respond) = drain {
-                respond.send(state.drain().await).ok();
-                return;
-            }
             let mut gc_interval = tokio::time::interval_at(
                 tokio::time::Instant::now() + PORT_FORWARD_GC_INTERVAL,
                 PORT_FORWARD_GC_INTERVAL,
             );
             gc_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
-                let cmd = if let Some(cmd) = pending.pop_front() {
-                    Some(cmd)
-                } else {
-                    tokio::select! {
-                        cmd = req_recv.recv() => cmd,
-                        _ = gc_interval.tick() => {
-                            state.gc().await.log_err();
-                            continue;
-                        }
+                let cmd = tokio::select! {
+                    cmd = req_recv.recv() => cmd,
+                    _ = gc_interval.tick() => {
+                        state.gc().await.log_err();
+                        continue;
                     }
                 };
                 let Some(cmd) = cmd else {
                     break;
                 };
-                if cmd.response_is_closed() {
+                if (reject_pending && !matches!(&cmd, PortForwardCommand::Drain { .. }))
+                    || cmd.response_is_closed()
+                {
                     continue;
                 }
                 match cmd {
@@ -862,8 +1174,8 @@ impl PortForwardController {
 
         Self {
             req: req_send,
-            drain_completion: SyncMutex::new(None),
-            _thread: thread,
+            drain_completion,
+            thread: SyncMutex::new(Some(thread)),
         }
     }
 
@@ -876,20 +1188,7 @@ impl PortForwardController {
         })
     }
 
-    pub async fn add_forward(
-        &self,
-        source: SocketAddrV4,
-        target: SocketAddrV4,
-        target_prefix: u8,
-        src_filter: Option<IpNet>,
-    ) -> Result<Arc<()>, Error> {
-        self.add_forward_range(source, target, 1, target_prefix, src_filter)
-            .await
-    }
-
-    /// Like [`add_forward`] but covers `count` contiguous ports per protocol
-    /// (TCP + UDP) from `source.port()` / `target.port()`, mapped by offset
-    /// (the two bases may differ).
+    /// Forwards contiguous TCP and UDP ports, mapping the two bases by offset.
     pub async fn add_forward_range(
         &self,
         source: SocketAddrV4,
@@ -918,29 +1217,32 @@ impl PortForwardController {
         recv.await.map_err(err_has_exited)?
     }
 
+    #[cfg(test)]
     pub(crate) async fn drain(&self) -> Result<(), Error> {
+        self.drain_until(tokio::time::Instant::now() + FORWARD_DRAIN_TIMEOUT)
+            .await
+    }
+
+    pub(crate) async fn drain_until(&self, deadline: tokio::time::Instant) -> Result<(), Error> {
         let completion = self.drain_completion.mutate(|completion| {
-            if let Some(completion) = completion {
-                return completion.clone();
-            }
-
-            let (send, recv) = oneshot::channel();
-            let sent = self
-                .req
-                .send(PortForwardCommand::Drain { respond: send })
-                .is_ok();
-            let drain = async move {
-                if !sent {
-                    return Err(Arc::new(err_has_exited(())));
-                }
-                recv.await.map_err(err_has_exited)?.map_err(Arc::new)
-            }
-            .boxed()
-            .shared();
-            *completion = Some(drain.clone());
-            drain
+            completion
+                .get_or_insert_with(|| {
+                    let (send, recv) = oneshot::channel();
+                    self.req
+                        .send(PortForwardCommand::Drain { respond: send })
+                        .ok();
+                    let thread = self.thread.mutate(Option::take).unwrap();
+                    let owner = tokio::spawn(async move {
+                        join_forward_actor(thread, recv, deadline)
+                            .await
+                            .map_err(Arc::new)
+                    });
+                    async move { owner.await.map_err(|e| Arc::new(err_has_exited(e)))? }
+                        .boxed()
+                        .shared()
+                })
+                .clone()
         });
-
         completion.await.map_err(|error| error.clone_output())
     }
 
@@ -1189,16 +1491,16 @@ impl InterfaceForwardEntry {
 }
 
 struct InterfaceForwardState {
-    port_forward: PortForwardController,
+    port_forward: Arc<PortForwardController>,
     pmap: PortMapController,
     state: IdOrdMap<InterfaceForwardEntry>,
     ipv6: BTreeMap<SocketAddrV6, Ipv6ForwardMapping>,
 }
 
 impl InterfaceForwardState {
-    fn new(port_forward: PortForwardController, pmap: PortMapController) -> Self {
+    fn new(port_forward: impl Into<Arc<PortForwardController>>, pmap: PortMapController) -> Self {
         Self {
-            port_forward,
+            port_forward: port_forward.into(),
             pmap,
             state: IdOrdMap::new(),
             ipv6: BTreeMap::new(),
@@ -1231,6 +1533,7 @@ impl InterfaceForwardState {
                 entry.insert(Ipv6ForwardMapping {
                     desired: spec,
                     applied: None,
+                    confirmed: false,
                     rc: Arc::downgrade(&rc),
                 });
             }
@@ -1269,7 +1572,6 @@ impl InterfaceForwardState {
                 }
             };
             if let Err(error) = result {
-                mapping.operation_failed(&operation);
                 return Err(error);
             }
             if matches!(&operation, Ipv6ForwardOperation::Remove(spec) if spec.src_filter.is_none())
@@ -1278,10 +1580,11 @@ impl InterfaceForwardState {
             }
             mapping.operation_succeeded(operation);
         }
-        if mapping
-            .applied
-            .as_ref()
-            .is_some_and(|spec| spec.src_filter.is_none())
+        if mapping.confirmed
+            && mapping
+                .applied
+                .as_ref()
+                .is_some_and(|spec| spec.src_filter.is_none())
         {
             self.pmap.ensure(
                 IpAddr::V6(*source.ip()),
@@ -1358,46 +1661,7 @@ impl InterfaceForwardState {
             mapping.rc = Weak::new();
         }
 
-        let port_forward = &self.port_forward;
-        let ipv6 = &mut self.ipv6;
-        let (ipv4_result, ipv6_result) = tokio::join!(port_forward.drain(), async {
-            let sources = ipv6.keys().copied().collect::<Vec<_>>();
-            let mut first_error = None;
-            for source in sources {
-                let Some(spec) = ipv6
-                    .get(&source)
-                    .and_then(|mapping| mapping.applied.clone())
-                else {
-                    continue;
-                };
-                match unforward6(
-                    source,
-                    spec.target,
-                    spec.target_prefix,
-                    spec.src_filter.as_ref(),
-                )
-                .await
-                {
-                    Ok(()) => {
-                        if spec.src_filter.is_none() {
-                            self.pmap.remove(IpAddr::V6(*source.ip()), source.port());
-                        }
-                        ipv6.get_mut(&source).unwrap().applied = None;
-                    }
-                    Err(error) => {
-                        first_error.get_or_insert(error);
-                    }
-                }
-            }
-            ipv6.retain(|_, mapping| mapping.applied.is_some());
-            first_error.map_or(Ok(()), Err)
-        });
-
-        let mut first_error = ipv4_result.err();
-        if let Err(error) = ipv6_result {
-            first_error.get_or_insert(error);
-        }
-        first_error.map_or(Ok(()), Err)
+        self.reconcile_forwards6(&OrdMap::new()).await
     }
 
     async fn drain_until_complete(&mut self) -> Result<(), Error> {
@@ -1414,35 +1678,6 @@ impl InterfaceForwardState {
                     tokio::time::sleep(FORWARD_DRAIN_RETRY_INTERVAL).await;
                 }
             }
-        }
-    }
-}
-
-impl Drop for InterfaceForwardState {
-    fn drop(&mut self) {
-        let applied = std::mem::take(&mut self.ipv6)
-            .into_iter()
-            .filter_map(|(source, mapping)| mapping.applied.map(|spec| (source, spec)))
-            .collect::<Vec<_>>();
-        if !applied.is_empty() {
-            let pmap = self.pmap.clone();
-            tokio::spawn(async move {
-                for (source, spec) in applied {
-                    if unforward6(
-                        source,
-                        spec.target,
-                        spec.target_prefix,
-                        spec.src_filter.as_ref(),
-                    )
-                    .await
-                    .log_err()
-                    .is_some()
-                        && spec.src_filter.is_none()
-                    {
-                        pmap.remove(IpAddr::V6(*source.ip()), source.port());
-                    }
-                }
-            });
         }
     }
 }
@@ -1513,7 +1748,9 @@ enum InterfaceForwardCommand {
 pub struct InterfacePortForwardController {
     req: mpsc::UnboundedSender<InterfaceForwardCommand>,
     cancel: CancellationToken,
-    _thread: NonDetachingJoinHandle<()>,
+    thread: SyncMutex<Option<NonDetachingJoinHandle<()>>>,
+    port_forward: Arc<PortForwardController>,
+    drain_completion: SyncMutex<Option<PortForwardDrainFuture>>,
 }
 
 impl InterfacePortForwardController {
@@ -1531,9 +1768,11 @@ impl InterfacePortForwardController {
     ) -> Self {
         let cancel = CancellationToken::new();
         let actor_cancel = cancel.clone();
+        let port_forward = Arc::new(port_forward);
+        let nested = port_forward.clone();
         let (req_send, mut req_recv) = mpsc::unbounded_channel::<InterfaceForwardCommand>();
         let thread = NonDetachingJoinHandle::from(tokio::spawn(async move {
-            let mut state = InterfaceForwardState::new(port_forward, pmap);
+            let mut state = InterfaceForwardState::new(nested, pmap);
             let mut interfaces = ip_info.read_and_mark_seen();
             let mut reconcile_interval = tokio::time::interval_at(
                 tokio::time::Instant::now() + PORT_FORWARD_GC_INTERVAL,
@@ -1565,7 +1804,11 @@ impl InterfacePortForwardController {
                                 let result = tokio::select! {
                                     biased;
                                     _ = actor_cancel.cancelled() => break 'active,
-                                    result = state.sync(&interfaces) => result,
+                                    result = state.port_forward.dump() => result.map(|_| ()),
+                                };
+                                let result = match result {
+                                    Ok(()) => state.sync(&interfaces).await,
+                                    Err(error) => Err(error),
                                 };
                                 re.send(result).ok()
                             }
@@ -1581,7 +1824,7 @@ impl InterfacePortForwardController {
                             }
                             InterfaceForwardCommand::Drain(respond) => {
                                 respond.send(state.drain_until_complete().await).ok();
-                                break 'active;
+                                return;
                             }
                         };
                     }
@@ -1590,21 +1833,28 @@ impl InterfacePortForwardController {
                         tokio::select! {
                             biased;
                             _ = actor_cancel.cancelled() => break,
-                            result = state.sync(&interfaces) => result.log_err(),
+                            result = state.port_forward.dump() => {
+                                if result.log_err().is_none() { continue; }
+                            },
                         };
+                        state.sync(&interfaces).await.log_err();
                     }
                     _ = reconcile_interval.tick() => {
                         tokio::select! {
                             biased;
                             _ = actor_cancel.cancelled() => break,
-                            result = state.reconcile(&interfaces) => result.log_err(),
+                            result = state.port_forward.dump() => {
+                                if result.log_err().is_none() { continue; }
+                            },
                         };
+                        state.reconcile(&interfaces).await.log_err();
                     }
                 }
             }
             while let Some(cmd) = req_recv.recv().await {
                 if let InterfaceForwardCommand::Drain(respond) = cmd {
                     respond.send(state.drain_until_complete().await).ok();
+                    return;
                 }
             }
         }));
@@ -1612,8 +1862,19 @@ impl InterfacePortForwardController {
         Self {
             req: req_send,
             cancel,
-            _thread: thread,
+            thread: SyncMutex::new(Some(thread)),
+            port_forward,
+            drain_completion: SyncMutex::new(None),
         }
+    }
+
+    fn send(&self, command: InterfaceForwardCommand) -> Result<(), Error> {
+        self.drain_completion.mutate(|completion| {
+            if completion.is_some() {
+                return Err(err_has_exited(()));
+            }
+            self.req.send(command).map_err(err_has_exited)
+        })
     }
 
     pub(super) async fn forward6(
@@ -1624,17 +1885,15 @@ impl InterfacePortForwardController {
         src_filter: Option<IpNet>,
     ) -> Result<Arc<()>, Error> {
         let (respond, receive) = oneshot::channel();
-        self.req
-            .send(InterfaceForwardCommand::Forward6 {
-                source,
-                spec: Ipv6ForwardSpec {
-                    target,
-                    target_prefix,
-                    src_filter,
-                },
-                respond,
-            })
-            .map_err(err_has_exited)?;
+        self.send(InterfaceForwardCommand::Forward6 {
+            source,
+            spec: Ipv6ForwardSpec {
+                target,
+                target_prefix,
+                src_filter,
+            },
+            respond,
+        })?;
         receive.await.map_err(err_has_exited)
     }
 
@@ -1648,47 +1907,68 @@ impl InterfacePortForwardController {
     ) -> Result<Arc<()>, Error> {
         let rc = Arc::new(());
         let (send, recv) = oneshot::channel();
-        self.req
-            .send(InterfaceForwardCommand::Forward(
-                InterfaceForwardRequest {
-                    external,
-                    target,
-                    count,
-                    target_prefix_fallback: target_prefix,
-                    reqs,
-                    rc,
-                },
-                send,
-            ))
-            .map_err(err_has_exited)?;
+        self.send(InterfaceForwardCommand::Forward(
+            InterfaceForwardRequest {
+                external,
+                target,
+                count,
+                target_prefix_fallback: target_prefix,
+                reqs,
+                rc,
+            },
+            send,
+        ))?;
 
         recv.await.map_err(err_has_exited)?
     }
 
     pub async fn gc(&self) -> Result<(), Error> {
         let (send, recv) = oneshot::channel();
-        self.req
-            .send(InterfaceForwardCommand::Sync(send))
-            .map_err(err_has_exited)?;
+        self.send(InterfaceForwardCommand::Sync(send))?;
 
         recv.await.map_err(err_has_exited)?
     }
 
     pub async fn dump_table(&self) -> Result<ForwardTable, Error> {
         let (req, res) = oneshot::channel();
-        self.req
-            .send(InterfaceForwardCommand::DumpTable(req))
-            .map_err(err_has_exited)?;
+        self.send(InterfaceForwardCommand::DumpTable(req))?;
         res.await.map_err(err_has_exited)?
     }
 
     pub async fn drain(&self) -> Result<(), Error> {
-        self.cancel.cancel();
-        let (req, res) = oneshot::channel();
-        self.req
-            .send(InterfaceForwardCommand::Drain(req))
-            .map_err(err_has_exited)?;
-        res.await.map_err(err_has_exited)?
+        self.drain_until(tokio::time::Instant::now() + FORWARD_DRAIN_TIMEOUT)
+            .await
+    }
+
+    pub(crate) async fn drain_until(&self, deadline: tokio::time::Instant) -> Result<(), Error> {
+        let completion = self.drain_completion.mutate(|completion| {
+            completion
+                .get_or_insert_with(|| {
+                    self.cancel.cancel();
+                    let (send, recv) = oneshot::channel();
+                    self.req.send(InterfaceForwardCommand::Drain(send)).ok();
+                    let thread = self.thread.mutate(Option::take).unwrap();
+                    let nested = self.port_forward.clone();
+                    let owner = tokio::spawn(async move {
+                        let (outer, inner) = tokio::join!(
+                            join_forward_actor(thread, recv, deadline),
+                            nested.drain_until(deadline)
+                        );
+                        combine_drain_results(
+                            outer,
+                            inner,
+                            "interface forwarding",
+                            "IPv4 forwarding",
+                        )
+                        .map_err(Arc::new)
+                    });
+                    async move { owner.await.map_err(|e| Arc::new(err_has_exited(e)))? }
+                        .boxed()
+                        .shared()
+                })
+                .clone()
+        });
+        completion.await.map_err(|error| error.clone_output())
     }
 }
 
@@ -1699,21 +1979,7 @@ async fn forward(
     target_prefix: u8,
     src_filter: Option<&IpNet>,
 ) -> Result<(), Error> {
-    let mut cmd = Command::new("/usr/lib/startos/scripts/forward-port");
-    cmd.env("sip", source.ip().to_string())
-        .env("dip", target.ip().to_string())
-        .env("dprefix", target_prefix.to_string())
-        .env("sport", source.port().to_string())
-        .env("dport", target.port().to_string())
-        .env("count", count.to_string());
-    if let Some(subnet) = src_filter {
-        cmd.env("src_subnet", subnet.to_string());
-    }
-    cmd.kill_process_group_on_drop()
-        .timeout(Some(FORWARD_SCRIPT_TIMEOUT))
-        .invoke(ErrorKind::Network)
-        .await?;
-    Ok(())
+    invoke_forward(source, target, count, target_prefix, src_filter, false).await
 }
 
 async fn unforward(
@@ -1723,22 +1989,7 @@ async fn unforward(
     target_prefix: u8,
     src_filter: Option<&IpNet>,
 ) -> Result<(), Error> {
-    let mut cmd = Command::new("/usr/lib/startos/scripts/forward-port");
-    cmd.env("UNDO", "1")
-        .env("sip", source.ip().to_string())
-        .env("dip", target.ip().to_string())
-        .env("dprefix", target_prefix.to_string())
-        .env("sport", source.port().to_string())
-        .env("dport", target.port().to_string())
-        .env("count", count.to_string());
-    if let Some(subnet) = src_filter {
-        cmd.env("src_subnet", subnet.to_string());
-    }
-    cmd.kill_process_group_on_drop()
-        .timeout(Some(FORWARD_SCRIPT_TIMEOUT))
-        .invoke(ErrorKind::Network)
-        .await?;
-    Ok(())
+    invoke_forward(source, target, count, target_prefix, src_filter, true).await
 }
 
 /// The lxcbr0 IPv6 bridge subnet (a ULA), assigned by lxc-net (see
@@ -1754,21 +2005,7 @@ pub(crate) async fn forward6(
     target_prefix: u8,
     src_filter: Option<&IpNet>,
 ) -> Result<(), Error> {
-    let mut cmd = Command::new("/usr/lib/startos/scripts/forward-port6");
-    cmd.env("sip", source.ip().to_string())
-        .env("dip", target.ip().to_string())
-        .env("dprefix", target_prefix.to_string())
-        .env("sport", source.port().to_string())
-        .env("dport", target.port().to_string())
-        .env("bridge_subnet", START9_BRIDGE_V6_SUBNET);
-    if let Some(subnet) = src_filter {
-        cmd.env("src_subnet", subnet.to_string());
-    }
-    cmd.kill_process_group_on_drop()
-        .timeout(Some(FORWARD_SCRIPT_TIMEOUT))
-        .invoke(ErrorKind::Network)
-        .await?;
-    Ok(())
+    invoke_forward6(source, target, target_prefix, src_filter, false).await
 }
 
 /// Tear down a forward created by [`forward6`]. Passes the same identifying env
@@ -1779,38 +2016,103 @@ pub(crate) async fn unforward6(
     target_prefix: u8,
     src_filter: Option<&IpNet>,
 ) -> Result<(), Error> {
-    let mut cmd = Command::new("/usr/lib/startos/scripts/forward-port6");
-    cmd.env("UNDO", "1")
-        .env("sip", source.ip().to_string())
+    invoke_forward6(source, target, target_prefix, src_filter, true).await
+}
+
+#[cfg(test)]
+tokio::task_local! {
+    static FORWARD_TEST_CALLS: std::cell::RefCell<(Vec<(bool, SocketAddrV4, u16)>, bool)>;
+    static FORWARD_TEST_PROGRAM: (std::path::PathBuf, Duration);
+}
+
+#[cfg(test)]
+fn configure_forward_test_program(command: &mut Command) -> Duration {
+    FORWARD_TEST_PROGRAM
+        .try_with(|(program, timeout)| {
+            *command = Command::new(program);
+            *timeout
+        })
+        .unwrap_or(FORWARD_SCRIPT_TIMEOUT)
+}
+
+async fn invoke_forward(
+    source: SocketAddrV4,
+    target: SocketAddrV4,
+    count: u16,
+    target_prefix: u8,
+    src_filter: Option<&IpNet>,
+    undo: bool,
+) -> Result<(), Error> {
+    #[cfg(test)]
+    if let Ok(result) = FORWARD_TEST_CALLS.try_with(|calls| {
+        let mut calls = calls.borrow_mut();
+        calls.0.push((undo, source, count));
+        if undo && calls.1 {
+            Err(Error::new(
+                eyre!("injected removal failure"),
+                ErrorKind::Network,
+            ))
+        } else {
+            Ok(())
+        }
+    }) {
+        return result;
+    }
+    let mut cmd = Command::new("/usr/lib/startos/scripts/forward-port");
+    #[cfg(test)]
+    let timeout = configure_forward_test_program(&mut cmd);
+    #[cfg(not(test))]
+    let timeout = FORWARD_SCRIPT_TIMEOUT;
+    cmd.env("sip", source.ip().to_string())
         .env("dip", target.ip().to_string())
         .env("dprefix", target_prefix.to_string())
         .env("sport", source.port().to_string())
-        .env("dport", target.port().to_string());
+        .env("dport", target.port().to_string())
+        .env("count", count.to_string());
+    if undo {
+        cmd.env("UNDO", "1");
+    }
     if let Some(subnet) = src_filter {
         cmd.env("src_subnet", subnet.to_string());
     }
     cmd.kill_process_group_on_drop()
-        .timeout(Some(FORWARD_SCRIPT_TIMEOUT))
+        .timeout(Some(timeout))
         .invoke(ErrorKind::Network)
         .await?;
     Ok(())
 }
 
-pub(crate) async fn timeout_forwarding_drain<F>(drain: F) -> Result<(), Error>
-where
-    F: Future<Output = Result<(), Error>>,
-{
-    tokio::time::timeout(FORWARD_DRAIN_TIMEOUT, drain)
-        .await
-        .map_err(|_| {
-            Error::new(
-                eyre!(
-                    "forwarding teardown exceeded aggregate deadline of {:?}",
-                    FORWARD_DRAIN_TIMEOUT
-                ),
-                ErrorKind::Timeout,
-            )
-        })?
+async fn invoke_forward6(
+    source: SocketAddrV6,
+    target: SocketAddrV6,
+    target_prefix: u8,
+    src_filter: Option<&IpNet>,
+    undo: bool,
+) -> Result<(), Error> {
+    let mut cmd = Command::new("/usr/lib/startos/scripts/forward-port6");
+    #[cfg(test)]
+    let timeout = configure_forward_test_program(&mut cmd);
+    #[cfg(not(test))]
+    let timeout = FORWARD_SCRIPT_TIMEOUT;
+    cmd.env("sip", source.ip().to_string())
+        .env("dip", target.ip().to_string())
+        .env("dprefix", target_prefix.to_string())
+        .env("sport", source.port().to_string())
+        .env("dport", target.port().to_string());
+    if !undo {
+        cmd.env("bridge_subnet", START9_BRIDGE_V6_SUBNET);
+    }
+    if undo {
+        cmd.env("UNDO", "1");
+    }
+    if let Some(subnet) = src_filter {
+        cmd.env("src_subnet", subnet.to_string());
+    }
+    cmd.kill_process_group_on_drop()
+        .timeout(Some(timeout))
+        .invoke(ErrorKind::Network)
+        .await?;
+    Ok(())
 }
 
 pub(crate) async fn drain_forwarding<F, P>(forward: F, port_map: P) -> Result<(), Error>
@@ -1818,24 +2120,477 @@ where
     F: Future<Output = Result<(), Error>>,
     P: Future<Output = Result<(), Error>>,
 {
-    timeout_forwarding_drain(async {
-        match tokio::join!(forward, port_map) {
-            (Ok(()), Ok(())) => Ok(()),
-            (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
-            (Err(forward_error), Err(port_map_error)) => Err(Error::new(
-                eyre!(
-                    "forwarding drains failed: interface forwarding: {forward_error:#}; port mapping: {port_map_error:#}"
-                ),
-                ErrorKind::Network,
-            )),
-        }
-    })
-    .await
+    let (forward, port_map) = tokio::join!(forward, port_map);
+    combine_drain_results(forward, port_map, "interface forwarding", "port mapping")
+}
+
+fn combine_drain_results(
+    first: Result<(), Error>,
+    second: Result<(), Error>,
+    first_context: &str,
+    second_context: &str,
+) -> Result<(), Error> {
+    match (first, second) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+        (Err(forward_error), Err(port_map_error)) => Err(Error::new(
+            eyre!(
+                "forwarding drains failed: {first_context}: {forward_error:#}; {second_context}: {port_map_error:#}"
+            ),
+            ErrorKind::Network,
+        )),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct ForwardScriptFixture {
+        dir: std::path::PathBuf,
+    }
+
+    impl ForwardScriptFixture {
+        fn new(mode: &str) -> Self {
+            use std::os::unix::fs::PermissionsExt;
+
+            let dir =
+                std::env::temp_dir().join(format!("forward-outcome-{}", crate::util::new_guid()));
+            std::fs::create_dir(&dir).unwrap();
+            let program = dir.join("forward");
+            std::fs::write(
+                &program,
+                r#"#!/bin/sh
+cd "${0%/*}" || exit 1
+identity="$sip:$sport+$count -> $dip/$dprefix:$dport $src_subnet"
+if [ "$UNDO" = 1 ]; then
+    echo remove >> calls
+    [ ! -f block-remove ] || exit 1
+    if [ -f rule ]; then
+        [ "$(cat rule)" = "$identity" ] || exit 2
+        rm rule
+    fi
+else
+    echo add >> calls
+    [ ! -f rule ] || exit 3
+    printf '%s' "$identity" > rule
+    case "$(cat mode)" in
+        fail) exit 1 ;;
+        hang) sleep 60 ;;
+    esac
+fi
+"#,
+            )
+            .unwrap();
+            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let fixture = Self { dir };
+            fixture.mode(mode);
+            fixture.block_removal(true);
+            fixture
+        }
+
+        fn mode(&self, mode: &str) {
+            std::fs::write(self.dir.join("mode"), mode).unwrap();
+        }
+
+        fn block_removal(&self, block: bool) {
+            if block {
+                std::fs::write(self.dir.join("block-remove"), "").unwrap();
+            } else {
+                std::fs::remove_file(self.dir.join("block-remove")).unwrap();
+            }
+        }
+
+        fn calls(&self) -> String {
+            std::fs::read_to_string(self.dir.join("calls")).unwrap()
+        }
+
+        fn program(&self) -> (std::path::PathBuf, Duration) {
+            (self.dir.join("forward"), Duration::from_secs(3))
+        }
+    }
+
+    impl Drop for ForwardScriptFixture {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.dir).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn uncertain_ipv4_add_blocks_reuse_and_overlap_until_removed() {
+        for mode in ["fail", "hang"] {
+            let fixture = ForwardScriptFixture::new(mode);
+            FORWARD_TEST_PROGRAM
+                .scope(fixture.program(), async {
+                    let mut state = PortForwardState::default();
+                    let source = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 40000);
+                    let target = SocketAddrV4::new(Ipv4Addr::new(10, 0, 3, 2), 50000);
+                    let error = state
+                        .add_forward(source, target, 10, 24, None)
+                        .await
+                        .unwrap_err();
+                    let mapping = &state.mappings[&source];
+                    assert!(!mapping.confirmed);
+                    assert_eq!(mapping.rc.strong_count(), 0);
+                    assert!(state.dump().is_empty());
+                    assert!(fixture.dir.join("rule").exists(), "mode={mode}: {error:?}");
+                    fixture.mode("success");
+                    assert!(
+                        state
+                            .add_forward(source, target, 10, 24, None)
+                            .await
+                            .is_err()
+                    );
+                    let overlap = SocketAddrV4::new(*source.ip(), 40009);
+                    assert!(
+                        state
+                            .add_forward(overlap, target, 2, 24, None)
+                            .await
+                            .is_err()
+                    );
+                    assert!(state.gc().await.is_err());
+                    assert_eq!(fixture.calls(), "add\nremove\nremove\nremove\n");
+                    assert_eq!(state.mappings.len(), 1);
+                    fixture.block_removal(false);
+                    let lease = state
+                        .add_forward(overlap, target, 2, 24, None)
+                        .await
+                        .unwrap();
+                    let shared = state
+                        .add_forward(overlap, target, 2, 24, None)
+                        .await
+                        .unwrap();
+                    assert!(Arc::ptr_eq(&lease, &shared));
+                    assert!(state.mappings[&overlap].confirmed);
+                    assert_eq!(
+                        fixture.calls(),
+                        "add\nremove\nremove\nremove\nremove\nadd\n"
+                    );
+                    state.drain().await.unwrap();
+                    assert!(state.mappings.is_empty());
+                    assert!(!fixture.dir.join("rule").exists());
+
+                    fixture.mode(mode);
+                    assert!(
+                        state
+                            .add_forward(source, target, 10, 24, None)
+                            .await
+                            .is_err()
+                    );
+                    assert!(fixture.dir.join("rule").exists());
+                    state.drain().await.unwrap();
+                    assert!(state.mappings.is_empty());
+                    assert!(!fixture.dir.join("rule").exists());
+                })
+                .await;
+        }
+    }
+
+    #[tokio::test]
+    async fn invalid_ipv4_ranges_reserve_no_cleanup_identity() {
+        FORWARD_TEST_CALLS
+            .scope(std::cell::RefCell::new((Vec::new(), false)), async {
+                let mut state = PortForwardState::default();
+                let source = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 65535);
+                let target = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 40000);
+                for (source, target, count) in [
+                    (source, target, 0),
+                    (source, target, 2),
+                    (target, source, 2),
+                ] {
+                    assert!(
+                        state
+                            .add_forward(source, target, count, 24, None)
+                            .await
+                            .is_err()
+                    );
+                }
+                assert!(state.mappings.is_empty());
+                state.drain().await.unwrap();
+                FORWARD_TEST_CALLS.with(|calls| assert!(calls.borrow().0.is_empty()));
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn uncertain_ipv6_add_retains_identity_across_drop_replacement_and_drain() {
+        for mode in ["fail", "hang"] {
+            let fixture = ForwardScriptFixture::new(mode);
+            FORWARD_TEST_PROGRAM
+                .scope(fixture.program(), async {
+                    let mut state = InterfaceForwardState::new(
+                        PortForwardController::spawn(|| async { Ok(()) }),
+                        PortMapController::new(Watch::new(OrdMap::new())),
+                    );
+                    let source = SocketAddrV6::new("2001:db8::2".parse().unwrap(), 40000, 0, 0);
+                    let spec = Ipv6ForwardSpec {
+                        src_filter: Some("2001:db8::/64".parse().unwrap()),
+                        ..ipv6_spec()
+                    };
+                    let lease = state.add_forward6(source, spec.clone());
+                    assert!(
+                        state
+                            .reconcile_forward6(source, &OrdMap::new())
+                            .await
+                            .is_err()
+                    );
+                    assert!(!state.ipv6[&source].confirmed);
+                    assert_eq!(state.ipv6[&source].applied, Some(spec.clone()));
+                    assert!(fixture.dir.join("rule").exists());
+                    fixture.mode("success");
+                    assert!(
+                        state
+                            .reconcile_forward6(source, &OrdMap::new())
+                            .await
+                            .is_err()
+                    );
+                    drop(lease);
+                    assert!(state.reconcile_forwards6(&OrdMap::new()).await.is_err());
+                    let replacement = Ipv6ForwardSpec {
+                        target_prefix: 80,
+                        ..spec.clone()
+                    };
+                    let lease = state.add_forward6(source, replacement.clone());
+                    assert!(
+                        state
+                            .reconcile_forward6(source, &OrdMap::new())
+                            .await
+                            .is_err()
+                    );
+                    assert_eq!(state.ipv6[&source].desired, replacement.clone());
+                    assert_eq!(state.ipv6[&source].applied, Some(spec.clone()));
+                    assert_eq!(fixture.calls(), "add\nremove\nremove\nremove\n");
+                    fixture.block_removal(false);
+                    state
+                        .reconcile_forward6(source, &OrdMap::new())
+                        .await
+                        .unwrap();
+                    assert!(state.ipv6[&source].confirmed);
+                    assert_eq!(state.ipv6[&source].applied, Some(replacement));
+                    assert_eq!(
+                        fixture.calls(),
+                        "add\nremove\nremove\nremove\nremove\nadd\n"
+                    );
+                    state.drain().await.unwrap();
+                    assert!(state.ipv6.is_empty());
+                    assert!(!fixture.dir.join("rule").exists());
+                    drop(lease);
+
+                    fixture.mode(mode);
+                    let _lease = state.add_forward6(source, spec);
+                    assert!(
+                        state
+                            .reconcile_forward6(source, &OrdMap::new())
+                            .await
+                            .is_err()
+                    );
+                    state.drain().await.unwrap();
+                    assert!(state.ipv6.is_empty());
+                    assert!(!fixture.dir.join("rule").exists());
+                    state.port_forward.drain().await.unwrap();
+                    state.pmap.drain().await.unwrap();
+                })
+                .await;
+        }
+    }
+
+    #[test]
+    fn interface_drain_preserves_both_contextual_errors() {
+        let error = combine_drain_results(
+            Err(Error::new(eyre!("outer failed"), ErrorKind::Network)),
+            Err(Error::new(eyre!("inner failed"), ErrorKind::Network)),
+            "interface forwarding",
+            "IPv4 forwarding",
+        )
+        .unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains(&format!(
+            "interface forwarding: {}: outer failed",
+            ErrorKind::Network
+        )));
+        assert!(message.contains(&format!(
+            "IPv4 forwarding: {}: inner failed",
+            ErrorKind::Network
+        )));
+        assert!(!message.contains("port mapping"));
+    }
+
+    #[tokio::test]
+    async fn overlapping_ranges_retire_dead_rules_before_installing() {
+        FORWARD_TEST_CALLS
+            .scope(std::cell::RefCell::new((Vec::new(), false)), async {
+                let mut state = PortForwardState::default();
+                let source = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 40000);
+                let target = SocketAddrV4::new(Ipv4Addr::new(10, 0, 3, 2), 40000);
+                let lease = state
+                    .add_forward(source, target, 10, 24, None)
+                    .await
+                    .unwrap();
+                let shared = state
+                    .add_forward(source, target, 10, 24, None)
+                    .await
+                    .unwrap();
+                assert!(Arc::ptr_eq(&lease, &shared));
+                let overlap = SocketAddrV4::new(*source.ip(), 40009);
+                assert!(
+                    state
+                        .add_forward(overlap, target, 2, 24, None)
+                        .await
+                        .is_err()
+                );
+                drop((lease, shared));
+                FORWARD_TEST_CALLS.with(|calls| calls.borrow_mut().1 = true);
+                assert!(
+                    state
+                        .add_forward(overlap, target, 2, 24, None)
+                        .await
+                        .is_err()
+                );
+                assert!(state.mappings.contains_key(&source));
+                assert!(!state.mappings.contains_key(&overlap));
+                FORWARD_TEST_CALLS.with(|calls| calls.borrow_mut().1 = false);
+                let _lease = state
+                    .add_forward(overlap, target, 2, 24, None)
+                    .await
+                    .unwrap();
+                assert!(!state.mappings.contains_key(&source));
+                FORWARD_TEST_CALLS.with(|calls| {
+                    assert_eq!(
+                        calls.borrow().0,
+                        vec![
+                            (false, source, 10),
+                            (true, source, 10),
+                            (true, source, 10),
+                            (false, overlap, 2),
+                        ]
+                    )
+                });
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn forwarding_range_boundaries_and_same_key_replacement() {
+        FORWARD_TEST_CALLS
+            .scope(std::cell::RefCell::new((Vec::new(), false)), async {
+                let mut state = PortForwardState::default();
+                let source = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 40000);
+                let target = SocketAddrV4::new(Ipv4Addr::new(10, 0, 3, 2), 40000);
+                let _original = state
+                    .add_forward(source, target, 10, 24, None)
+                    .await
+                    .unwrap();
+                let adjacent = SocketAddrV4::new(*source.ip(), 40010);
+                let _adjacent = state
+                    .add_forward(adjacent, target, 1, 24, None)
+                    .await
+                    .unwrap();
+                let other_ip = SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 1), 40000);
+                let _other = state
+                    .add_forward(other_ip, target, 10, 24, None)
+                    .await
+                    .unwrap();
+                assert!(
+                    state
+                        .add_forward(source, target, 11, 24, None)
+                        .await
+                        .is_err()
+                );
+                FORWARD_TEST_CALLS.with(|calls| calls.borrow_mut().1 = true);
+                assert!(
+                    state
+                        .add_forward(source, target, 5, 24, None)
+                        .await
+                        .is_err()
+                );
+                assert_eq!(state.mappings[&source].count, 10);
+                FORWARD_TEST_CALLS.with(|calls| calls.borrow_mut().1 = false);
+                let _replacement = state
+                    .add_forward(source, target, 5, 24, None)
+                    .await
+                    .unwrap();
+                assert_eq!(state.mappings[&source].count, 5);
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn drain_rejects_queued_preinitialization_requests() {
+        let initialize = Arc::new(tokio::sync::Notify::new());
+        let controller = PortForwardController::spawn({
+            let initialize = initialize.clone();
+            move || {
+                let initialize = initialize.clone();
+                async move {
+                    initialize.notified().await;
+                    Ok(())
+                }
+            }
+        });
+        let request = controller.dump();
+        tokio::pin!(request);
+        assert!(futures::poll!(&mut request).is_pending());
+        let drain = controller.drain();
+        tokio::pin!(drain);
+        assert!(futures::poll!(&mut drain).is_pending());
+        initialize.notify_one();
+        drain.await.unwrap();
+        assert!(request.await.is_err());
+        assert!(controller.req.is_closed());
+    }
+
+    #[tokio::test]
+    async fn cancelled_drain_waiter_still_joins_initialization_on_deadline() {
+        let controller =
+            PortForwardController::spawn(|| std::future::pending::<Result<(), Error>>());
+        let mut first = Box::pin(
+            controller.drain_until(tokio::time::Instant::now() + Duration::from_millis(30)),
+        );
+        assert!(futures::poll!(&mut first).is_pending());
+        drop(first);
+        let error = tokio::time::timeout(Duration::from_secs(1), controller.drain())
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Timeout);
+        assert!(controller.req.is_closed());
+        assert!(controller.thread.mutate(|thread| thread.is_none()));
+    }
+
+    #[tokio::test]
+    async fn interface_deadline_joins_nested_initialization() {
+        let interfaces = Watch::new(OrdMap::new());
+        let controller = InterfacePortForwardController::with_port_forward(
+            interfaces.clone(),
+            PortMapController::new(interfaces),
+            PortForwardController::spawn(|| std::future::pending::<Result<(), Error>>()),
+        );
+        let _lease = controller
+            .forward6(
+                SocketAddrV6::new("2001:db8::1".parse().unwrap(), 80, 0, 0),
+                ipv6_spec().target,
+                64,
+                None,
+            )
+            .await
+            .unwrap();
+        let gc = controller.gc();
+        tokio::pin!(gc);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut gc)
+                .await
+                .is_err()
+        );
+        assert!(
+            controller
+                .drain_until(tokio::time::Instant::now() + Duration::from_millis(30))
+                .await
+                .is_err()
+        );
+        assert!(controller.req.is_closed());
+        assert!(controller.port_forward.req.is_closed());
+        assert!(gc.await.is_err());
+    }
 
     fn ipv6_spec() -> Ipv6ForwardSpec {
         Ipv6ForwardSpec {
@@ -1950,6 +2705,7 @@ mod tests {
         let mut mapping = Ipv6ForwardMapping {
             desired: original.clone(),
             applied: None,
+            confirmed: false,
             rc: Arc::downgrade(&lease),
         };
 
@@ -1972,20 +2728,24 @@ mod tests {
     }
 
     #[test]
-    fn failed_ipv6_add_clears_provisional_applied_state() {
+    fn failed_ipv6_add_retains_unconfirmed_identity_until_removed() {
         let lease = Arc::new(());
         let spec = ipv6_spec();
         let mut mapping = Ipv6ForwardMapping {
             desired: spec.clone(),
             applied: None,
+            confirmed: false,
             rc: Arc::downgrade(&lease),
         };
         let operation = Ipv6ForwardOperation::Add(spec.clone());
 
         mapping.operation_started(&operation);
         assert_eq!(mapping.applied, Some(spec.clone()));
-        mapping.operation_failed(&operation);
-
+        assert!(!mapping.confirmed);
+        let remove = Ipv6ForwardOperation::Remove(spec.clone());
+        assert_eq!(mapping.next_operation(), Some(remove.clone()));
+        mapping.operation_started(&remove);
+        mapping.operation_succeeded(remove);
         assert_eq!(mapping.applied, None);
         assert_eq!(
             mapping.next_operation(),
@@ -2020,6 +2780,7 @@ mod tests {
         let mapping = Ipv6ForwardMapping {
             desired: spec.clone(),
             applied: Some(spec),
+            confirmed: true,
             rc: Arc::downgrade(&lease),
         };
 
@@ -2065,6 +2826,7 @@ mod tests {
                 count: 1,
                 target_prefix: 24,
                 src_filter: None,
+                confirmed: true,
                 rc: Arc::downgrade(&lease),
             },
         )]);
@@ -2081,6 +2843,7 @@ mod tests {
         let mut mapping = Ipv6ForwardMapping {
             desired: spec.clone(),
             applied: Some(spec.clone()),
+            confirmed: true,
             rc: Arc::downgrade(&lease),
         };
         assert_eq!(mapping.next_operation(), None);
@@ -2103,6 +2866,7 @@ mod tests {
             count: 1,
             target_prefix: 24,
             src_filter: None,
+            confirmed: true,
             rc: Weak::new(),
         };
 
@@ -2258,12 +3022,14 @@ mod tests {
         let mut mapping = Ipv6ForwardMapping {
             desired: spec.clone(),
             applied: Some(spec.clone()),
+            confirmed: true,
             rc: Weak::new(),
         };
         let operation = Ipv6ForwardOperation::Remove(spec.clone());
 
-        mapping.operation_failed(&operation);
+        mapping.operation_started(&operation);
 
+        assert!(!mapping.confirmed);
         assert_eq!(mapping.applied, Some(spec));
         assert_eq!(mapping.next_operation(), Some(operation.clone()));
         mapping.operation_succeeded(operation);
@@ -2373,20 +3139,20 @@ mod tests {
         assert!(error.to_string().contains("port map failed"));
     }
 
-    #[tokio::test(start_paused = true)]
-    async fn aggregate_drain_enforces_shared_deadline() {
+    #[tokio::test]
+    async fn aggregate_drain_waits_for_workers_after_a_timeout_error() {
+        let (release, joined) = oneshot::channel();
         let drain = drain_forwarding(
-            std::future::pending::<Result<(), Error>>(),
-            std::future::pending::<Result<(), Error>>(),
+            async { Err(Error::new(eyre!("deadline expired"), ErrorKind::Timeout)) },
+            async {
+                joined.await.unwrap();
+                Ok(())
+            },
         );
         tokio::pin!(drain);
         assert!(futures::poll!(&mut drain).is_pending());
-
-        tokio::time::advance(FORWARD_DRAIN_TIMEOUT).await;
-
-        let error = drain.await.unwrap_err();
-        assert_eq!(error.kind, ErrorKind::Timeout);
-        assert!(error.to_string().contains("aggregate deadline"));
+        release.send(()).unwrap();
+        assert_eq!(drain.await.unwrap_err().kind, ErrorKind::Timeout);
     }
 
     #[tokio::test]

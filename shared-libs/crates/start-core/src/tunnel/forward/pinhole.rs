@@ -7,7 +7,10 @@
 
 use std::net::{Ipv6Addr, SocketAddrV6};
 
-use crate::net::forward::{nft_delete_rules_with_comment_prefix_v6, nft_rule_v6};
+use crate::net::forward::{
+    nft_delete_rules_matching, nft_delete_rules_matching_until,
+    nft_delete_rules_with_comment_prefix_v6, nft_rule_v6,
+};
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::db::Pinhole;
@@ -69,19 +72,7 @@ pub async fn remove_pinhole_rules(gua: Ipv6Addr, external_port: u16) -> Result<(
 }
 
 async fn remove_pinhole_tag(comment: &str) -> Result<(), Error> {
-    match tokio::join!(
-        nft_rule_v6("prerouting", comment, true, false, ""),
-        nft_rule_v6("forward", comment, true, false, ""),
-    ) {
-        (Ok(()), Ok(())) => Ok(()),
-        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
-        (Err(prerouting_error), Err(forward_error)) => Err(Error::new(
-            eyre!(
-                "pinhole rule cleanup failed: prerouting: {prerouting_error:#}; forward: {forward_error:#}"
-            ),
-            ErrorKind::Network,
-        )),
-    }
+    nft_delete_rules_matching("ip6", &["prerouting", "forward"], |tag| tag == comment).await
 }
 
 /// Whether `gua` is the `/128` this tunnel delegates to some client — the
@@ -122,8 +113,10 @@ pub async fn add_pinhole(
     count: u16,
     label: Option<String>,
     auto: bool,
+    lifetime: Option<u32>,
 ) -> Result<(), Error> {
     let key = SocketAddrV6::new(gua, external_port, 0, 0);
+    let _guard = ctx.forward_write_lock.lock().await;
     let internal = (internal_port != external_port).then_some(internal_port);
     ctx.db
         .mutate(|db| {
@@ -157,7 +150,13 @@ pub async fn add_pinhole(
         })
         .await
         .result?;
-    apply_pinhole(gua, external_port, internal_port, count).await
+    if let Some(lifetime) = lifetime {
+        super::lease::stamp(ctx, super::lease::LeaseKey::Pinhole(key), lifetime);
+    }
+    if ctx.db.peek().await.as_pinholes6().de()?.0[&key].enabled {
+        apply_pinhole(gua, external_port, internal_port, count).await?;
+    }
+    Ok(())
 }
 
 /// Enable or disable a pinhole, installing or tearing down its nft rules to match.
@@ -167,6 +166,7 @@ pub async fn set_pinhole_enabled(
     external_port: u16,
     enabled: bool,
 ) -> Result<(), Error> {
+    let _guard = ctx.forward_write_lock.lock().await;
     let key = SocketAddrV6::new(gua, external_port, 0, 0);
     ctx.db
         .mutate(|db| {
@@ -218,57 +218,123 @@ pub async fn set_pinhole_label(
 
 /// Remove the pinhole at `[gua]:external_port` from the db and tear down its
 /// nft rules.
-pub async fn remove_pinhole(ctx: &TunnelContext, gua: Ipv6Addr, external_port: u16) {
+pub async fn remove_pinhole(
+    ctx: &TunnelContext,
+    gua: Ipv6Addr,
+    external_port: u16,
+) -> Result<(), Error> {
+    let _guard = ctx.forward_write_lock.lock().await;
+    remove_pinhole_locked(ctx, gua, external_port).await
+}
+
+pub(super) async fn remove_pinhole_locked(
+    ctx: &TunnelContext,
+    gua: Ipv6Addr,
+    external_port: u16,
+) -> Result<(), Error> {
     let key = SocketAddrV6::new(gua, external_port, 0, 0);
-    let removed = ctx
-        .db
+    remove_pinhole_rules(gua, external_port).await?;
+    ctx.db
         .mutate(|db| db.as_pinholes6_mut().remove(&key).map(|_| ()))
         .await
-        .result;
-    if removed.is_ok() {
-        remove_pinhole_rules(gua, external_port).await.log_err();
-    }
+        .result?;
+    super::lease::forget(ctx, &super::lease::LeaseKey::Pinhole(key));
+    Ok(())
 }
 
 pub(crate) async fn cleanup_pinholes() -> Result<(), Error> {
     nft_delete_rules_with_comment_prefix_v6(&["prerouting", "forward"], "pinhole:").await
 }
 
-pub(crate) async fn drain_pinholes() -> Result<(), Error> {
+pub(crate) async fn drain_pinholes_until(deadline: tokio::time::Instant) -> Result<(), Error> {
+    drain_pinholes_with_until(deadline, |deadline| {
+        nft_delete_rules_matching_until(
+            "ip6",
+            &["prerouting", "forward"],
+            |comment| comment.starts_with("pinhole:"),
+            deadline,
+        )
+    })
+    .await
+}
+
+async fn drain_pinholes_with_until<F, Fut>(
+    deadline: tokio::time::Instant,
+    mut cleanup: F,
+) -> Result<(), Error>
+where
+    F: FnMut(tokio::time::Instant) -> Fut,
+    Fut: std::future::Future<Output = Result<(), Error>>,
+{
     let mut attempt = 1_u64;
     loop {
-        match cleanup_pinholes().await {
+        if tokio::time::Instant::now() >= deadline {
+            return Err(Error::new(
+                eyre!("pinhole teardown deadline expired; cleanup incomplete"),
+                ErrorKind::Timeout,
+            ));
+        }
+        match cleanup(deadline).await {
             Ok(()) => return Ok(()),
             Err(error) => {
                 tracing::warn!("pinhole drain failed on attempt {attempt}: {error:#}");
                 attempt = attempt.saturating_add(1);
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                tokio::time::sleep_until(
+                    deadline.min(tokio::time::Instant::now() + std::time::Duration::from_secs(1)),
+                )
+                .await;
             }
         }
     }
 }
 
+#[cfg(test)]
+mod drain_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn pinhole_retry_and_hung_command_share_absolute_deadline() {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(1400);
+        let mut attempts = 0;
+        let error = drain_pinholes_with_until(deadline, |passed_deadline| {
+            assert_eq!(passed_deadline, deadline);
+            attempts += 1;
+            let script = if attempts == 1 {
+                "exit 1"
+            } else {
+                "exec sleep 30"
+            };
+            async move {
+                crate::net::forward::nft_invoke_until(
+                    tokio::process::Command::new("sh").args(["-c", script]),
+                    &[],
+                    passed_deadline,
+                )
+                .await
+                .map(|_| ())
+            }
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Timeout);
+        assert_eq!(attempts, 2);
+        assert!(tokio::time::Instant::now() < deadline + std::time::Duration::from_secs(1));
+    }
+}
+
 /// Reinstall every enabled pinhole's nft rules from the db (startup / resync).
 pub async fn seed_pinholes(ctx: &TunnelContext) -> Result<(), Error> {
-    let mut attempted = Vec::new();
     for (key, ph) in ctx.db.peek().await.as_pinholes6().de()?.0 {
         if !ph.enabled {
             continue;
         }
-        attempted.push((*key.ip(), key.port()));
-        if let Err(error) = apply_pinhole(
+        apply_pinhole(
             *key.ip(),
             key.port(),
             ph.internal_port(key.port()),
             ph.count,
         )
-        .await
-        {
-            for (gua, external_port) in attempted {
-                remove_pinhole_rules(gua, external_port).await.log_err();
-            }
-            return Err(error);
-        }
+        .await?;
     }
     Ok(())
 }

@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use clap::Parser;
+use futures::future::{BoxFuture, FutureExt, Shared};
 use http::HeaderMap;
 use http::header::AUTHORIZATION;
 use imbl::OrdMap;
@@ -31,10 +32,7 @@ use crate::middleware::auth::local::{LocalAuthContext, dial_addr, local_auth_hea
 use crate::middleware::auth::signature::{NonceCache, url_host_str};
 use crate::middleware::cors::Cors;
 use crate::net::dns_update::rfc2136::{DnsInjector, InjectedRecord};
-use crate::net::forward::{
-    PortForwardController, nft_comments_with_prefix, nft_rule, nft_rule_v6,
-    timeout_forwarding_drain,
-};
+use crate::net::forward::{PortForwardController, nft_comments_with_prefix, nft_rule, nft_rule_v6};
 use crate::net::static_server::{EMPTY_DIR, UiContext};
 use crate::prelude::*;
 use crate::rpc_continuations::{OpenAuthedContinuations, RpcContinuations};
@@ -48,6 +46,9 @@ use crate::util::Invoke;
 use crate::util::collections::OrdMapIterMut;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::sync::{SyncMutex, Watch};
+
+pub(crate) const FORWARDING_SHUTDOWN_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(90);
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, Parser)]
 #[group(skip)]
@@ -197,6 +198,7 @@ pub struct TunnelContextSeed {
     pub forward_write_lock: tokio::sync::Mutex<()>,
     forwarding_closed: AtomicBool,
     forwarding_active: tokio::sync::RwLock<()>,
+    forwarding_completion: OnceLock<Shared<BoxFuture<'static, Result<(), Arc<Error>>>>>,
     /// In-memory leases for auto (PCP-created) forwards/pinholes/SNI routes,
     /// reaped by [`crate::tunnel::forward::lease`] when a client stops renewing.
     pub leases: SyncMutex<crate::tunnel::forward::lease::Leases>,
@@ -341,6 +343,7 @@ impl TunnelContext {
             forward_write_lock: tokio::sync::Mutex::new(()),
             forwarding_closed: AtomicBool::new(false),
             forwarding_active: tokio::sync::RwLock::new(()),
+            forwarding_completion: OnceLock::new(),
             leases: SyncMutex::new(BTreeMap::new()),
             lease_wake: tokio::sync::Notify::new(),
             forward_ifindex: tokio::sync::watch::channel(current_ifindex()).0,
@@ -478,15 +481,38 @@ impl TunnelContext {
         }
     }
 
-    pub(crate) async fn drain_forwarding(&self) -> Result<(), Error> {
-        self.forwarding_closed.store(true, Ordering::Release);
+    pub(crate) async fn drain_forwarding_until(
+        &self,
+        deadline: tokio::time::Instant,
+    ) -> Result<(), Error> {
+        let completion =
+            self.forwarding_completion
+                .get_or_init(|| {
+                    self.forwarding_closed.store(true, Ordering::Release);
+                    let ctx = self.clone();
+                    let owner = tokio::spawn(async move {
+                        ctx.finish_forwarding(deadline).await.map_err(Arc::new)
+                    });
+                    async move {
+                        owner
+                            .await
+                            .map_err(|error| Arc::new(Error::new(error, ErrorKind::Unknown)))?
+                    }
+                    .boxed()
+                    .shared()
+                })
+                .clone();
+        completion.await.map_err(|error| error.clone_output())
+    }
+
+    async fn finish_forwarding(&self, deadline: tokio::time::Instant) -> Result<(), Error> {
         let _admission = self.forwarding_active.write().await;
         let pinholes = async {
             self.sni.shutdown().await;
             self.active_forwards.mutate(BTreeMap::clear);
-            crate::tunnel::forward::pinhole::drain_pinholes().await
+            crate::tunnel::forward::pinhole::drain_pinholes_until(deadline).await
         };
-        match tokio::join!(self.forward.drain(), pinholes) {
+        match tokio::join!(self.forward.drain_until(deadline), pinholes) {
             (Ok(()), Ok(())) => Ok(()),
             (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
             (Err(forward_error), Err(pinhole_error)) => Err(Error::new(
@@ -499,7 +525,8 @@ impl TunnelContext {
     }
 
     pub(crate) async fn shutdown_forwarding(&self) -> Result<(), Error> {
-        timeout_forwarding_drain(self.drain_forwarding()).await
+        self.drain_forwarding_until(tokio::time::Instant::now() + FORWARDING_SHUTDOWN_TIMEOUT)
+            .await
     }
 
     pub async fn gc_forwards(
