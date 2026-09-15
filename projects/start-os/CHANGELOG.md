@@ -144,6 +144,11 @@ for the detail behind its highlights.
   within 15 seconds if StartOS cannot connect to the service or complete a
   required TLS handshake with it.**
 
+- **A port mapping StartOS opens on a UPnP router closes on its own within an
+  hour of the server going away.** It was requested as a permanent mapping, so
+  it stayed on the router after the server was powered off or moved to another
+  network. A router that grants only permanent mappings still gets one.
+
 - **Transfers preserve the source filesystem format.** StartOS mounts source
   filesystems read-only while copying persistent data, repairing ext4 only when
   needed to mount it. This leaves the source drive available as a fallback.
