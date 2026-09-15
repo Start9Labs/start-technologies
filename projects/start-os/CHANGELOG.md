@@ -148,6 +148,10 @@ for the detail behind its highlights.
   filesystems read-only while copying persistent data, repairing ext4 only when
   needed to mount it. This leaves the source drive available as a fallback.
 
+- **Transfers preserve file permissions.** Files copied from the previous drive
+  lost their modes, which left a WireGuard gateway such as StartTunnel
+  disconnected after a transfer until its profile was made private again by hand.
+
 - **An app that remembers your server's certificate sees the same certificate
   across every route to that name.** Wallets and other apps that pin the first
   certificate they are shown — Sparrow and the Electrum clients most visibly —
