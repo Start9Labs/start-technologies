@@ -69,10 +69,11 @@ for the detail behind its highlights.
   server: every installed service's non-SSL addresses — the server's LAN IP
   addresses, its `.local` name and its private domains — are offered on that
   network at once and enabled immediately. An address unlocked this way reaches
-  only devices on that gateway's own network segment; it is never opened to the
-  public internet. Mark a gateway secure only when you control every device on
-  the network it reaches: anything on it can read and alter traffic to a
-  plaintext address, including the passwords typed into it. See
+  devices on that gateway's own network and, over IPv4, on any private network
+  routed to it; it is never opened to the public internet. Mark a gateway
+  secure only when you control every device on those networks: anything on
+  them can read and alter traffic to a plaintext address, including the
+  passwords typed into it. See
   [Gateways](https://docs.start9.com/start-os/gateways.html).
 
 - **An action result that hands you a link can be opened in a new tab.** Where a
@@ -131,6 +132,14 @@ for the detail behind its highlights.
   driver still provides display output without GPU compute.
 
 ### Fixed
+
+- **A service's plain (non-SSL) port accepts connections from other private
+  networks routed to the server.** From a second VLAN, a wired/wireless split
+  or a routed IoT network, a service's web interface opened but a plain port
+  such as a mining pool's stratum port refused the connection, so the service
+  looked down from that network. A private IPv4 address now admits every
+  private (RFC 1918) source on its plain ports, as it already did on its web
+  interfaces.
 
 - **The port-forwarding test reports a port as open to the Internet only where
   it is reachable from the Internet.** Where StartOS's port-forward request was
