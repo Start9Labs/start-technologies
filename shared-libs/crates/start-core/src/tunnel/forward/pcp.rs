@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tokio::net::UdpSocket;
+use tokio::sync::broadcast::Receiver;
 
 use crate::net::port_map::server::{GatewayBackend, MappingEntry, PCP_PORT, handle, handle6};
 use crate::prelude::*;
@@ -21,25 +22,52 @@ use crate::tunnel::forward::igd::{
     apply_peer_forward_range, bind_to_wireguard, external_ipv4, is_known_client,
 };
 use crate::tunnel::forward::lease::{self, LeaseKey};
+use crate::tunnel::forward::shutdown_pending;
 use crate::tunnel::forward::sni::SniDemux;
 use crate::tunnel::wg::WIREGUARD_INTERFACE_NAME;
 
+enum ServeEnd {
+    Rebind,
+    Shutdown,
+}
+
 /// Runs IPv4 and IPv6 PCP listeners, rebinding after WireGuard recreation.
-pub async fn run(ctx: TunnelContext) {
+pub async fn run(ctx: TunnelContext, mut startup_shutdown: Receiver<Option<bool>>) {
     let started = Instant::now();
+    let mut v4_shutdown = ctx.shutdown.subscribe();
+    let mut v6_shutdown = ctx.shutdown.subscribe();
+    if shutdown_pending(&mut startup_shutdown) {
+        return;
+    }
     let v4 = async {
         loop {
-            if let Err(e) = serve(&ctx, started).await {
-                tracing::warn!("PCP v4 server failed, retrying: {e}");
-                tokio::time::sleep(Duration::from_secs(5)).await;
+            match serve(&ctx, started, &mut v4_shutdown).await {
+                Ok(ServeEnd::Rebind) => {}
+                Ok(ServeEnd::Shutdown) => break,
+                Err(e) => {
+                    tracing::warn!("PCP v4 server failed: {e}");
+                    tokio::select! {
+                        biased;
+                        _ = v4_shutdown.recv() => break,
+                        _ = tokio::time::sleep(Duration::from_secs(5)) => {}
+                    }
+                }
             }
         }
     };
     let v6 = async {
         loop {
-            if let Err(e) = serve6(&ctx, started).await {
-                tracing::warn!("PCP v6 server failed, retrying: {e}");
-                tokio::time::sleep(Duration::from_secs(5)).await;
+            match serve6(&ctx, started, &mut v6_shutdown).await {
+                Ok(ServeEnd::Rebind) => {}
+                Ok(ServeEnd::Shutdown) => break,
+                Err(e) => {
+                    tracing::warn!("PCP v6 server failed: {e}");
+                    tokio::select! {
+                        biased;
+                        _ = v6_shutdown.recv() => break,
+                        _ = tokio::time::sleep(Duration::from_secs(5)) => {}
+                    }
+                }
             }
         }
     };
@@ -84,8 +112,11 @@ fn socket6() -> Result<UdpSocket, Error> {
     UdpSocket::from_std(socket.into()).with_kind(ErrorKind::Network)
 }
 
-async fn serve(ctx: &TunnelContext, started: Instant) -> Result<(), Error> {
-    // Subscribe before binding to close the setup race.
+async fn serve(
+    ctx: &TunnelContext,
+    started: Instant,
+    shutdown: &mut Receiver<Option<bool>>,
+) -> Result<ServeEnd, Error> {
     let mut ifindex = ctx.forward_ifindex.subscribe();
     ifindex.borrow_and_update();
     let socket = socket()?;
@@ -93,11 +124,13 @@ async fn serve(ctx: &TunnelContext, started: Instant) -> Result<(), Error> {
     let mut buf = [0u8; 1100];
     loop {
         let (n, from) = tokio::select! {
-            res = socket.recv_from(&mut buf) => res.with_kind(ErrorKind::Network)?,
+            biased;
+            _ = shutdown.recv() => return Ok(ServeEnd::Shutdown),
             _ = ifindex.changed() => {
                 tracing::info!("{WIREGUARD_INTERFACE_NAME} ifindex changed; rebinding PCP server");
-                return Ok(());
+                return Ok(ServeEnd::Rebind);
             }
+            res = socket.recv_from(&mut buf) => res.with_kind(ErrorKind::Network)?,
         };
         let IpAddr::V4(peer) = from.ip() else {
             continue;
@@ -109,7 +142,11 @@ async fn serve(ctx: &TunnelContext, started: Instant) -> Result<(), Error> {
     }
 }
 
-async fn serve6(ctx: &TunnelContext, started: Instant) -> Result<(), Error> {
+async fn serve6(
+    ctx: &TunnelContext,
+    started: Instant,
+    shutdown: &mut Receiver<Option<bool>>,
+) -> Result<ServeEnd, Error> {
     let mut ifindex = ctx.forward_ifindex.subscribe();
     ifindex.borrow_and_update();
     let socket = socket6()?;
@@ -117,11 +154,13 @@ async fn serve6(ctx: &TunnelContext, started: Instant) -> Result<(), Error> {
     let mut buf = [0u8; 1100];
     loop {
         let (n, from) = tokio::select! {
-            res = socket.recv_from(&mut buf) => res.with_kind(ErrorKind::Network)?,
+            biased;
+            _ = shutdown.recv() => return Ok(ServeEnd::Shutdown),
             _ = ifindex.changed() => {
                 tracing::info!("{WIREGUARD_INTERFACE_NAME} ifindex changed; rebinding PCP v6 server");
-                return Ok(());
+                return Ok(ServeEnd::Rebind);
             }
+            res = socket.recv_from(&mut buf) => res.with_kind(ErrorKind::Network)?,
         };
         let IpAddr::V6(peer) = from.ip() else {
             continue;

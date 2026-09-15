@@ -11,7 +11,7 @@ PROFILE=${PROFILE:-release}
 if [ "${PROFILE}" = "release" ]; then
 	BUILD_FLAGS="--release"
 else
-  if [ "$PROFILE" != "debug"]; then
+  if [ "$PROFILE" != "debug" ]; then
     >&2 echo "Unknown profile $PROFILE: falling back to debug..."
     PROFILE=debug
   fi
@@ -40,5 +40,6 @@ fi
 
 echo "FEATURES=\"$FEATURES\""
 echo "RUSTFLAGS=\"$RUSTFLAGS\""
+./build/lib/scripts/forward-port.test.sh
 rust-zig-builder cargo test --manifest-path=./Cargo.toml $BUILD_FLAGS --features=test,$FEATURES -p start-core --locked --lib -- --skip export_
 rust-zig-builder sh -c "chown -R $UID:$UID target && chown -R $UID:$UID /usr/local/cargo"

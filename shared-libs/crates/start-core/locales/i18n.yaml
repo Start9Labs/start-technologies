@@ -126,6 +126,13 @@ bins.startd.metrics-daemon-shutdown:
   fr_FR: "Démon de métriques arrêté"
   pl_PL: "Demon metryk zamknięty"
 
+bins.startd.signal-handler-panicked:
+  en_US: "Signal handler panicked!"
+  de_DE: "Signal-Handler ist abgestürzt!"
+  es_ES: "¡El controlador de señales entró en pánico!"
+  fr_FR: "Le gestionnaire de signaux a paniqué !"
+  pl_PL: "Program obsługi sygnałów uległ panice!"
+
 bins.startd.failed-to-initialize-runtime:
   en_US: "failed to initialize runtime"
   de_DE: "Laufzeit konnte nicht initialisiert werden"

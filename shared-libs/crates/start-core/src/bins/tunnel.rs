@@ -6,7 +6,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
-use futures::FutureExt;
+use futures::stream::FuturesUnordered;
+use futures::{FutureExt, StreamExt};
 use patch_db::json_ptr::ROOT;
 use rpc_toolkit::CliApp;
 use rust_i18n::t;
@@ -37,17 +38,73 @@ impl<V: MetadataVisitor> Visit<V> for WebserverListener {
     }
 }
 
+const FORWARDING_TASK_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
+
+fn log_task_result(name: &str, result: Result<(), tokio::task::JoinError>) {
+    if let Err(error) = result {
+        if !error.is_cancelled() {
+            tracing::error!("{name} task failed: {error}");
+        }
+    }
+}
+
+async fn await_task(name: &str, task: NonDetachingJoinHandle<()>) {
+    log_task_result(name, task.await);
+}
+
+async fn stop_forwarding_tasks(
+    tasks: impl IntoIterator<Item = (&'static str, NonDetachingJoinHandle<()>)>,
+) {
+    let mut tasks = tasks
+        .into_iter()
+        .map(|(name, task)| (name, Some(task)))
+        .collect::<Vec<_>>();
+    let timed_out = tokio::time::timeout(FORWARDING_TASK_SHUTDOWN_TIMEOUT, async {
+        let mut pending = tasks
+            .iter_mut()
+            .map(|(name, task)| {
+                let name = *name;
+                async move {
+                    let result = task.as_mut().expect("pending forwarding task").await;
+                    task.take();
+                    (name, result)
+                }
+            })
+            .collect::<FuturesUnordered<_>>();
+        while let Some((name, result)) = pending.next().await {
+            log_task_result(name, result);
+        }
+    })
+    .await
+    .is_err();
+
+    if !timed_out {
+        return;
+    }
+    tracing::warn!(
+        "forwarding servers did not stop within {FORWARDING_TASK_SHUTDOWN_TIMEOUT:?}; aborting"
+    );
+    for (name, task) in tasks
+        .into_iter()
+        .filter_map(|(name, task)| task.map(|task| (name, task)))
+    {
+        task.abort();
+        log_task_result(name, task.await);
+    }
+}
+
 #[instrument(skip_all)]
 async fn inner_main(config: &TunnelConfig) -> Result<Option<bool>, Error> {
-    let mut shutdown = None;
+    let listen = config
+        .tunnel_listen
+        .unwrap_or(crate::tunnel::TUNNEL_DEFAULT_LISTEN);
+    let http_acceptor = Acceptor::bind_map_dyn([(WebserverListener::Http, listen)]).await?;
+    let ctx = TunnelContext::init(config).await?;
+    let mut shutdown_recv = ctx.shutdown.subscribe();
+    let forwarding_threads = ctx.spawn_forwarding_servers();
+    let server = WebServer::new(http_acceptor, tunnel_router(ctx.clone()));
 
-    let server = async {
-        let ctx = TunnelContext::init(config).await?;
-        let listen = ctx.listen;
-        let server = WebServer::new(
-            Acceptor::bind_map_dyn([(WebserverListener::Http, listen)]).await?,
-            tunnel_router(ctx.clone()),
-        );
+    let shutdown = async {
         let acceptor_setter = server.acceptor_setter();
         let https_db = ctx.db.clone();
         let https_thread: NonDetachingJoinHandle<()> = tokio::spawn(async move {
@@ -132,9 +189,7 @@ async fn inner_main(config: &TunnelConfig) -> Result<Option<bool>, Error> {
         })
         .into();
 
-        let mut shutdown_recv = ctx.shutdown.subscribe();
-
-        let sig_handler_ctx = ctx;
+        let sig_handler_ctx = ctx.clone();
         let sig_handler: NonDetachingJoinHandle<()> = tokio::spawn(async move {
             use tokio::signal::unix::SignalKind;
             futures::future::select_all(
@@ -163,21 +218,48 @@ async fn inner_main(config: &TunnelConfig) -> Result<Option<bool>, Error> {
         })
         .into();
 
-        shutdown = shutdown_recv
-            .recv()
-            .await
-            .with_kind(crate::ErrorKind::Unknown)?;
+        let shutdown = loop {
+            match shutdown_recv.recv().await {
+                Ok(shutdown) => break Ok(shutdown),
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(error) => break Err(error).with_kind(crate::ErrorKind::Unknown),
+            }
+        };
 
-        sig_handler.wait_for_abort().await.with_kind(ErrorKind::Unknown)?;
-        https_thread.wait_for_abort().await.with_kind(ErrorKind::Unknown)?;
-        redirect_thread.wait_for_abort().await.with_kind(ErrorKind::Unknown)?;
+        sig_handler.abort();
+        https_thread.abort();
+        redirect_thread.abort();
 
-        Ok::<_, Error>(server)
+        await_task("signal", sig_handler).await;
+        await_task("HTTPS", https_thread).await;
+        await_task("redirect", redirect_thread).await;
+
+        shutdown
     }
-    .await?;
-    server.shutdown().await;
+    .await;
+    let server_result = server.shutdown().await;
 
-    Ok(shutdown)
+    let forwarding_result = crate::net::forward::timeout_forwarding_drain(async {
+        stop_forwarding_tasks(forwarding_threads).await;
+        ctx.drain_forwarding().await
+    })
+    .await;
+
+    if let Err(error) = server_result {
+        forwarding_result.log_err();
+        return Err(error);
+    }
+    match shutdown {
+        Ok(None) => forwarding_result.map(|()| None),
+        Ok(Some(action)) => {
+            forwarding_result.log_err();
+            Ok(Some(action))
+        }
+        Err(error) => {
+            forwarding_result.log_err();
+            Err(error)
+        }
+    }
 }
 
 pub fn main(args: impl IntoIterator<Item = OsString>) {

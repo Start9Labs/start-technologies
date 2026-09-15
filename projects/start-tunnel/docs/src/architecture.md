@@ -22,7 +22,7 @@ StartTunnel occupies a unique position between Cloudflare Tunnel and Tailscale. 
 
 ### Architecture
 
-**StartTunnel** is a virtual private router that runs on a VPS you control. Like a home router, it creates private networks, assigns IPs, and forwards ports — but using WireGuard tunnels instead of physical cables. Publishing a port uses kernel-level iptables NAT (Layer 3/4) to route public traffic to devices on the VPN. There is no central service, no coordination server, and no third party in the data path.
+**StartTunnel** is a virtual private router that runs on a VPS you control. Like a home router, it creates private networks, assigns IPs, and forwards ports — but using WireGuard tunnels instead of physical cables. Publishing a port uses kernel-level nftables NAT (Layer 3/4) to route public traffic to devices on the VPN. There is no central service, no coordination server, and no third party in the data path.
 
 **Cloudflare Tunnel** runs a daemon (`cloudflared`) on your machine that makes outbound connections to Cloudflare's global edge network. Public traffic hits Cloudflare's CDN first, where Cloudflare terminates TLS, inspects the request at Layer 7, and proxies it to your origin through the tunnel.
 
@@ -32,7 +32,7 @@ StartTunnel occupies a unique position between Cloudflare Tunnel and Tailscale. 
 
 This is the most important difference. It comes down to: **who can see your traffic?**
 
-**StartTunnel**: Nobody but you. Published ports operate at Layer 3/4 (iptables DNAT), meaning the VPS rewrites IP headers and forwards packets without inspecting payloads. If a service uses HTTPS, TLS terminates at the service itself — the VPS never sees plaintext. For VPN traffic between devices, WireGuard provides end-to-end encryption. Since you own the VPS, there is no third party with access to your traffic or metadata.
+**StartTunnel**: Nobody but you. Published ports operate at Layer 3/4 (nftables DNAT), meaning the VPS rewrites IP headers and forwards packets without inspecting payloads. If a service uses HTTPS, TLS terminates at the service itself — the VPS never sees plaintext. For VPN traffic between devices, WireGuard provides end-to-end encryption. Since you own the VPS, there is no third party with access to your traffic or metadata.
 
 **Cloudflare Tunnel**: Cloudflare terminates TLS at their edge and re-encrypts to your origin. This means Cloudflare can — and does — see plaintext traffic. They offer "TLS inspection" as a feature and can scan request bodies, filter content, and inject responses. Using Cloudflare Tunnel requires trusting a publicly traded company not to misuse its position as a man-in-the-middle on all your traffic.
 
@@ -103,6 +103,6 @@ StartTunnel is built on [WireGuard](https://www.wireguard.com/), a modern VPN pr
 
 ## Source Code
 
-The StartTunnel source code and release binaries live in the [StartOS monorepo](https://github.com/Start9Labs/start-technologies). The installer script is hosted at [start9.com/start-tunnel/install.sh](https://start9.com/start-tunnel/install.sh).
+The StartTunnel source code and release binaries live in the [`start-technologies` monorepo](https://github.com/Start9Labs/start-technologies). The installer script is hosted at [start9.com/start-tunnel/install.sh](https://start9.com/start-tunnel/install.sh).
 
 To report bugs or request features, [open an issue](https://github.com/Start9Labs/start-technologies/issues).

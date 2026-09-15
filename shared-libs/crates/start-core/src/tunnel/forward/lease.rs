@@ -15,10 +15,13 @@ use std::collections::BTreeMap;
 use std::net::{SocketAddrV4, SocketAddrV6};
 use std::time::{Duration, Instant};
 
+use tokio::sync::broadcast::Receiver;
+
 use crate::net::port_map::server::GatewayBackend;
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::db::PortForward;
+use crate::tunnel::forward::shutdown_pending;
 
 /// Lease granted to an auto entry restored from the DB on startup; the client's
 /// re-MAP refreshes it well within this. Matches the server's max granted lease.
@@ -99,17 +102,27 @@ pub async fn seed_from_db(ctx: &TunnelContext) -> Result<(), Error> {
 /// The reaper: tear down any auto mapping whose lease has lapsed, then sleep
 /// exactly until the soonest remaining lease is due (or until a newly stamped,
 /// sooner lease wakes it). Runs for the life of the tunnel.
-pub async fn run(ctx: TunnelContext) {
+pub async fn run(ctx: TunnelContext, mut shutdown: Receiver<Option<bool>>) {
     loop {
+        if shutdown_pending(&mut shutdown) {
+            break;
+        }
         match reap_expired(&ctx).await {
             Some(next) => {
                 tokio::select! {
+                    biased;
+                    _ = shutdown.recv() => break,
                     _ = tokio::time::sleep_until(tokio::time::Instant::from_std(next)) => {}
                     _ = ctx.lease_wake.notified() => {}
                 }
             }
-            // No leases outstanding — wait for the next stamp to wake us.
-            None => ctx.lease_wake.notified().await,
+            None => {
+                tokio::select! {
+                    biased;
+                    _ = shutdown.recv() => break,
+                    _ = ctx.lease_wake.notified() => {}
+                }
+            }
         }
     }
 }

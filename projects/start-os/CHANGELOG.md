@@ -68,10 +68,10 @@ for the detail behind its highlights.
   `net gateway list` shows the current setting. This is one switch for the whole
   server: every installed service's non-SSL addresses — the server's LAN IP
   addresses, its `.local` name and its private domains — are offered on that
-  network at once and enabled immediately. An address unlocked this way reaches
-  only devices on that gateway's own network segment; it is never opened to the
-  public internet. Mark a gateway secure only when you control every device on
-  the network it reaches: anything on it can read and alter traffic to a
+  gateway at once and enabled immediately. Over IPv4, those addresses accept
+  connections from the directly connected subnet and any routed private network
+  that can reach the server. Mark a gateway secure only when you control every
+  device on those networks: anything on them can read and alter traffic to a
   plaintext address, including the passwords typed into it. See
   [Gateways](https://docs.start9.com/start-os/gateways.html).
 
@@ -131,6 +131,9 @@ for the detail behind its highlights.
   driver still provides display output without GPU compute.
 
 ### Fixed
+
+- **Service and published ports stay synchronized more reliably with configured
+  exposure after transient forwarding failures and during graceful shutdown.**
 
 - **The port-forwarding test reports a port as open to the Internet only where
   it is reachable from the Internet.** Where StartOS's port-forward request was

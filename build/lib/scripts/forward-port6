@@ -24,47 +24,22 @@ PROTO='meta l4proto { tcp, udp }'
 # Bracketed for IPv6 dnat target.
 dnat="th dport $sport dnat to [$dip]:$dport"
 
-# Base table/chains are owned by nft_ensure_base; ensure defensively.
-nft -f - <<'EOF'
-add table ip6 startos
-add chain ip6 startos prerouting { type nat hook prerouting priority dstnat; policy accept; }
-add chain ip6 startos output { type nat hook output priority -100; policy accept; }
-add chain ip6 startos postrouting { type nat hook postrouting priority srcnat; policy accept; }
-add chain ip6 startos forward { type filter hook forward priority filter; policy drop; }
-EOF
-
-delete_tagged() {
-    local chain
-    for chain in prerouting output postrouting forward; do
-        nft -a list chain ip6 startos "$chain" 2>/dev/null | awk -v chain="$chain" -v tag="comment \"$TAG\"" '
-            index($0, tag) {
-                for (i = 1; i <= NF; i++) if ($i == "handle") print "delete rule ip6 startos " chain " handle " $(i+1)
-            }'
-    done
+render_rules() {
+    if [ -n "${src_subnet:-}" ]; then
+        echo "add rule ip6 startos prerouting ip6 saddr $src_subnet ip6 daddr $sip $PROTO $dnat comment \"$TAG\""
+        if [ -n "${bridge_subnet:-}" ]; then
+            echo "add rule ip6 startos prerouting ip6 saddr $bridge_subnet ip6 daddr $sip $PROTO $dnat comment \"$TAG\""
+        fi
+    else
+        echo "add rule ip6 startos prerouting ip6 daddr $sip $PROTO $dnat comment \"$TAG\""
+    fi
+    echo "add rule ip6 startos output ip6 daddr $sip $PROTO $dnat comment \"$TAG\""
+    echo "add rule ip6 startos forward ct status dnat ct original ip6 daddr $sip $PROTO ct original proto-dst $sport ip6 daddr $dip th dport $dport ct state new accept comment \"$TAG\""
+    echo "add rule ip6 startos postrouting fib saddr type local ct original ip6 daddr $sip ip6 daddr $dip $PROTO th dport $dport masquerade comment \"$TAG\""
+    echo "add rule ip6 startos postrouting ip6 saddr $dip/$dprefix ip6 daddr $dip $PROTO th dport $dport masquerade comment \"$TAG\""
 }
 
-{
-    delete_tagged
-    if [ "${UNDO:-0}" != 1 ]; then
-        # DNAT inbound. With src_subnet, restrict to that subnet (LAN-only GUA)
-        # plus the container bridge; otherwise (LAN+WAN) forward from anywhere.
-        if [ -n "${src_subnet:-}" ]; then
-            echo "add rule ip6 startos prerouting ip6 saddr $src_subnet ip6 daddr $sip $PROTO $dnat comment \"$TAG\""
-            if [ -n "${bridge_subnet:-}" ]; then
-                echo "add rule ip6 startos prerouting ip6 saddr $bridge_subnet ip6 daddr $sip $PROTO $dnat comment \"$TAG\""
-            fi
-        else
-            echo "add rule ip6 startos prerouting ip6 daddr $sip $PROTO $dnat comment \"$TAG\""
-        fi
-        # DNAT for locally-originated (hairpin from the host itself).
-        echo "add rule ip6 startos output ip6 daddr $sip $PROTO $dnat comment \"$TAG\""
-        # Allow new forwarded connections to the container.
-        echo "add rule ip6 startos forward ip6 daddr $dip $PROTO th dport $dport ct state new accept comment \"$TAG\""
-        # Masquerade hairpin replies so they reverse through this host.
-        echo "add rule ip6 startos postrouting fib saddr type local ct original ip6 daddr $sip ip6 daddr $dip $PROTO th dport $dport masquerade comment \"$TAG\""
-        echo "add rule ip6 startos postrouting ip6 saddr $dip/$dprefix ip6 daddr $dip $PROTO th dport $dport masquerade comment \"$TAG\""
-    fi
-} | nft -f -
+render_rules | "${FORWARD_PORT_NFT:-/usr/lib/startos/scripts/forward-port-nft}" ip6 "$TAG" || exit $?
 
 if [ "${UNDO:-0}" = 1 ]; then
     # conntrack returns 1 when no flows match; ignore.

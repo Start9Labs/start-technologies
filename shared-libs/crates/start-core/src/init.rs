@@ -224,237 +224,239 @@ pub async fn init(
         )
         .await?,
     );
-    webserver.send_modify(|wl| wl.set_ip_info(net_ctrl.net_iface.watcher.subscribe()));
-    let os_net_service = net_ctrl.os_bindings().await?;
-    start_net.complete();
+    let cleanup_controller = net_ctrl.clone();
+    let result = async {
+        webserver.send_modify(|wl| wl.set_ip_info(net_ctrl.net_iface.watcher.subscribe()));
+        let os_net_service = net_ctrl.os_bindings().await?;
+        start_net.complete();
 
-    mount_logs.start();
-    let log_dir = Path::new(MAIN_DATA).join("logs");
-    if tokio::fs::metadata(&log_dir).await.is_err() {
-        tokio::fs::create_dir_all(&log_dir).await?;
-    }
-    let current_machine_id = tokio::fs::read_to_string("/etc/machine-id").await?;
-    let mut machine_ids = tokio::fs::read_dir(&log_dir).await?;
-    while let Some(machine_id) = machine_ids.next_entry().await? {
-        if machine_id.file_name().to_string_lossy().trim() != current_machine_id.trim() {
-            tokio::fs::remove_dir_all(machine_id.path()).await?;
+        mount_logs.start();
+        let log_dir = Path::new(MAIN_DATA).join("logs");
+        if tokio::fs::metadata(&log_dir).await.is_err() {
+            tokio::fs::create_dir_all(&log_dir).await?;
         }
-    }
-    crate::disk::mount::util::bind(&log_dir, "/var/log/journal", false).await?;
-    match Command::new("chattr")
-        .arg("-R")
-        .arg("+C")
-        .arg("/var/log/journal")
-        .env("LANG", "C.UTF-8")
-        .invoke(ErrorKind::Filesystem)
-        .await
-    {
-        Ok(_) => Ok(()),
-        Err(e) if e.source.to_string().contains("Operation not supported") => Ok(()),
-        Err(e) => Err(e),
-    }?;
-    Command::new("systemctl")
-        .arg("restart")
-        .arg("systemd-journald")
-        .invoke(crate::ErrorKind::Journald)
-        .await?;
-    Command::new("killall")
-        .arg("journalctl")
-        .invoke(crate::ErrorKind::Journald)
-        .await
-        .ok();
-    mount_logs.complete();
-    tokio::io::copy(
-        &mut open_file("/run/startos/init.log").await?,
-        &mut tokio::io::stderr(),
-    )
-    .await?;
-
-    load_ca_cert.start();
-    // write to ca cert store
-    tokio::fs::write(
-        "/usr/local/share/ca-certificates/startos-root-ca.crt",
-        account.root_ca_cert.to_pem()?,
-    )
-    .await?;
-    Command::new("update-ca-certificates")
-        .invoke(crate::ErrorKind::OpenSsl)
-        .await?;
-    load_ca_cert.complete();
-
-    load_wifi.start();
-    crate::net::wifi::synchronize_network_manager(
-        MAIN_DATA,
-        &peek
-            .as_public()
-            .as_server_info()
-            .as_network()
-            .as_wifi()
-            .de()
-            .unwrap_or_default(),
-    )
-    .await?;
-    load_wifi.complete();
-
-    init_tmp.start();
-    let tmp_dir = Path::new(PACKAGE_DATA).join("tmp");
-    crate::util::io::delete_dir(&tmp_dir).await?;
-    if tokio::fs::metadata(&tmp_dir).await.is_err() {
-        tokio::fs::create_dir_all(&tmp_dir).await?;
-    }
-    let tmp_var = Path::new(PACKAGE_DATA).join("tmp/var");
-    crate::util::io::delete_dir(&tmp_var).await?;
-    crate::disk::mount::util::bind(&tmp_var, "/var/tmp", false).await?;
-    let downloading = Path::new(PACKAGE_DATA).join("archive/downloading");
-    crate::util::io::delete_dir(&downloading).await?;
-    let tmp_docker = Path::new(PACKAGE_DATA).join("tmp").join(*CONTAINER_TOOL);
-    crate::disk::mount::util::bind(&tmp_docker, *CONTAINER_DATADIR, false).await?;
-    init_tmp.complete();
-
-    let server_info = db.peek().await.into_public().into_server_info();
-    set_governor.start();
-    let selected_governor = server_info.as_governor().de()?;
-    let available_governors = cpupower::get_available_governors()
-        .await
-        .log_err()
-        .unwrap_or_default();
-    let governor = match &selected_governor {
-        Some(governor) if available_governors.contains(governor) => Some(governor),
-        Some(governor) => {
-            tracing::warn!(
-                "{}",
-                t!("init.cpu-governor-not-available", governor = governor)
-            );
-            None
+        let current_machine_id = tokio::fs::read_to_string("/etc/machine-id").await?;
+        let mut machine_ids = tokio::fs::read_dir(&log_dir).await?;
+        while let Some(machine_id) = machine_ids.next_entry().await? {
+            if machine_id.file_name().to_string_lossy().trim() != current_machine_id.trim() {
+                tokio::fs::remove_dir_all(machine_id.path()).await?;
+            }
         }
-        None => cpupower::preferred_governor(&available_governors),
-    };
-    if let Some(governor) = governor {
-        tracing::info!("{}", t!("init.setting-cpu-governor", governor = governor));
-        cpupower::set_governor(governor).await.log_err();
-    }
+        crate::disk::mount::util::bind(&log_dir, "/var/log/journal", false).await?;
+        match Command::new("chattr")
+            .arg("-R")
+            .arg("+C")
+            .arg("/var/log/journal")
+            .env("LANG", "C.UTF-8")
+            .invoke(ErrorKind::Filesystem)
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(e) if e.source.to_string().contains("Operation not supported") => Ok(()),
+            Err(e) => Err(e),
+        }?;
+        Command::new("systemctl")
+            .arg("restart")
+            .arg("systemd-journald")
+            .invoke(crate::ErrorKind::Journald)
+            .await?;
+        Command::new("killall")
+            .arg("journalctl")
+            .invoke(crate::ErrorKind::Journald)
+            .await
+            .ok();
+        mount_logs.complete();
+        tokio::io::copy(
+            &mut open_file("/run/startos/init.log").await?,
+            &mut tokio::io::stderr(),
+        )
+        .await?;
 
-    let selected_epp = server_info.as_epp().de()?;
-    let system_product_name = if selected_epp.is_none() {
-        crate::firmware::system_product_name().await.log_err()
-    } else {
-        None
-    };
-    let epp = cpupower::preferred_epp(selected_epp, system_product_name.as_deref());
-    if let Some(epp) = &epp {
-        let available_epps = cpupower::get_available_epps()
+        load_ca_cert.start();
+        tokio::fs::write(
+            "/usr/local/share/ca-certificates/startos-root-ca.crt",
+            account.root_ca_cert.to_pem()?,
+        )
+        .await?;
+        Command::new("update-ca-certificates")
+            .invoke(crate::ErrorKind::OpenSsl)
+            .await?;
+        load_ca_cert.complete();
+
+        load_wifi.start();
+        crate::net::wifi::synchronize_network_manager(
+            MAIN_DATA,
+            &peek
+                .as_public()
+                .as_server_info()
+                .as_network()
+                .as_wifi()
+                .de()
+                .unwrap_or_default(),
+        )
+        .await?;
+        load_wifi.complete();
+
+        init_tmp.start();
+        let tmp_dir = Path::new(PACKAGE_DATA).join("tmp");
+        crate::util::io::delete_dir(&tmp_dir).await?;
+        if tokio::fs::metadata(&tmp_dir).await.is_err() {
+            tokio::fs::create_dir_all(&tmp_dir).await?;
+        }
+        let tmp_var = Path::new(PACKAGE_DATA).join("tmp/var");
+        crate::util::io::delete_dir(&tmp_var).await?;
+        crate::disk::mount::util::bind(&tmp_var, "/var/tmp", false).await?;
+        let downloading = Path::new(PACKAGE_DATA).join("archive/downloading");
+        crate::util::io::delete_dir(&downloading).await?;
+        let tmp_docker = Path::new(PACKAGE_DATA).join("tmp").join(*CONTAINER_TOOL);
+        crate::disk::mount::util::bind(&tmp_docker, *CONTAINER_DATADIR, false).await?;
+        init_tmp.complete();
+
+        let server_info = db.peek().await.into_public().into_server_info();
+        set_governor.start();
+        let selected_governor = server_info.as_governor().de()?;
+        let available_governors = cpupower::get_available_governors()
             .await
             .log_err()
             .unwrap_or_default();
-        if available_epps.contains(epp) {
-            tracing::info!("{}", t!("init.setting-cpu-epp", epp = epp));
-            cpupower::set_epp(epp).await.log_err();
+        let governor = match &selected_governor {
+            Some(governor) if available_governors.contains(governor) => Some(governor),
+            Some(governor) => {
+                tracing::warn!(
+                    "{}",
+                    t!("init.cpu-governor-not-available", governor = governor)
+                );
+                None
+            }
+            None => cpupower::preferred_governor(&available_governors),
+        };
+        if let Some(governor) = governor {
+            tracing::info!("{}", t!("init.setting-cpu-governor", governor = governor));
+            cpupower::set_governor(governor).await.log_err();
+        }
+
+        let selected_epp = server_info.as_epp().de()?;
+        let system_product_name = if selected_epp.is_none() {
+            crate::firmware::system_product_name().await.log_err()
         } else {
-            tracing::warn!("{}", t!("init.cpu-epp-not-available", epp = epp));
+            None
+        };
+        let epp = cpupower::preferred_epp(selected_epp, system_product_name.as_deref());
+        if let Some(epp) = &epp {
+            let available_epps = cpupower::get_available_epps()
+                .await
+                .log_err()
+                .unwrap_or_default();
+            if available_epps.contains(epp) {
+                tracing::info!("{}", t!("init.setting-cpu-epp", epp = epp));
+                cpupower::set_epp(epp).await.log_err();
+            } else {
+                tracing::warn!("{}", t!("init.cpu-epp-not-available", epp = epp));
+            }
         }
-    }
-    set_governor.complete();
+        set_governor.complete();
 
-    sync_clock.start();
-    let mut ntp_synced = false;
-    let mut not_made_progress = 0u32;
-    for _ in 0..1800 {
-        // a failed query is "don't know yet", not a boot failure — an Err escaping
-        // this loop drops the server into Diagnostic Mode
-        if check_time_is_synchronized()
-            .await
-            .log_err()
-            .unwrap_or(false)
-        {
-            ntp_synced = true;
-            break;
+        sync_clock.start();
+        let mut ntp_synced = false;
+        let mut not_made_progress = 0u32;
+        for _ in 0..1800 {
+            // Transient query failures keep the server in setup mode.
+            if check_time_is_synchronized()
+                .await
+                .log_err()
+                .unwrap_or(false)
+            {
+                ntp_synced = true;
+                break;
+            }
+            let t = SystemTime::now();
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            if t.elapsed()
+                .map(|t| t > Duration::from_secs_f64(1.1))
+                .unwrap_or(true)
+            {
+                not_made_progress = 0;
+            } else {
+                not_made_progress += 1;
+            }
+            if not_made_progress > 30 {
+                break;
+            }
         }
-        let t = SystemTime::now();
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        if t.elapsed()
-            .map(|t| t > Duration::from_secs_f64(1.1))
-            .unwrap_or(true)
-        {
-            not_made_progress = 0;
-        } else {
-            not_made_progress += 1;
+        if !ntp_synced {
+            tracing::warn!("{}", t!("init.clock-sync-timeout"));
         }
-        if not_made_progress > 30 {
-            break;
+        sync_clock.complete();
+
+        enable_zram.start();
+        if server_info.as_zram().de()? {
+            crate::system::enable_zram().await?;
+            tracing::info!("{}", t!("init.enabled-zram"));
         }
+        enable_zram.complete();
+
+        // Reserves host-management memory outside `services.slice`.
+        if let Err(e) = crate::system::limit_container_memory().await {
+            tracing::warn!("could not cap service-container memory: {e}");
+            tracing::debug!("{e:?}");
+        }
+
+        update_server_info.start();
+        sync_kiosk(server_info.as_kiosk().de()?.unwrap_or(false)).await?;
+        let ram = get_mem_info().await?.total.0 as u64 * 1024 * 1024;
+        let devices = lshw().await?;
+        let status_info = ServerStatus {
+            update_progress: None,
+            backup_progress: None,
+            shutting_down: false,
+            restarting: false,
+            restart: None,
+        };
+        db.mutate(|v| {
+            let server_info = v.as_public_mut().as_server_info_mut();
+            server_info.as_ntp_synced_mut().ser(&ntp_synced)?;
+            server_info.as_ram_mut().ser(&ram)?;
+            server_info.as_devices_mut().ser(&devices)?;
+            server_info.as_status_info_mut().ser(&status_info)?;
+            Ok(())
+        })
+        .await
+        .result?;
+        update_server_info.complete();
+
+        launch_service_network.start();
+        Command::new("systemctl")
+            .arg("start")
+            .arg("lxc-net.service")
+            .invoke(ErrorKind::Lxc)
+            .await?;
+        launch_service_network.complete();
+
+        validate_db.start();
+        db.mutate(|d| {
+            let model = d.de()?;
+            d.ser(&model)
+        })
+        .await
+        .result?;
+        validate_db.complete();
+
+        if let Some(progress) = postinit {
+            run_script("/media/startos/config/postinit.sh", progress).await;
+        }
+
+        tracing::info!("{}", t!("init.system-initialized"));
+
+        Ok(InitResult {
+            net_ctrl,
+            os_net_service,
+        })
     }
-    if !ntp_synced {
-        tracing::warn!("{}", t!("init.clock-sync-timeout"));
+    .await;
+    if result.is_err() {
+        cleanup_controller.shutdown_forwarding().await.log_err();
     }
-    sync_clock.complete();
-
-    enable_zram.start();
-    if server_info.as_zram().de()? {
-        crate::system::enable_zram().await?;
-        tracing::info!("{}", t!("init.enabled-zram"));
-    }
-    enable_zram.complete();
-
-    // Cap the aggregate memory of the service-container slice (services.slice)
-    // so the host management plane (startd, sshd) always keeps its reservation
-    // and a burst of concurrent installs can't swap-thrash the box into a wedge;
-    // systemd-oomd reclaims/kills within the slice under sustained pressure.
-    // Best-effort: a failure here must never block boot.
-    if let Err(e) = crate::system::limit_container_memory().await {
-        tracing::warn!("could not cap service-container memory: {e}");
-        tracing::debug!("{e:?}");
-    }
-
-    update_server_info.start();
-    sync_kiosk(server_info.as_kiosk().de()?.unwrap_or(false)).await?;
-    let ram = get_mem_info().await?.total.0 as u64 * 1024 * 1024;
-    let devices = lshw().await?;
-    let status_info = ServerStatus {
-        update_progress: None,
-        backup_progress: None,
-        shutting_down: false,
-        restarting: false,
-        restart: None,
-    };
-    db.mutate(|v| {
-        let server_info = v.as_public_mut().as_server_info_mut();
-        server_info.as_ntp_synced_mut().ser(&ntp_synced)?;
-        server_info.as_ram_mut().ser(&ram)?;
-        server_info.as_devices_mut().ser(&devices)?;
-        server_info.as_status_info_mut().ser(&status_info)?;
-        Ok(())
-    })
-    .await
-    .result?;
-    update_server_info.complete();
-
-    launch_service_network.start();
-    Command::new("systemctl")
-        .arg("start")
-        .arg("lxc-net.service")
-        .invoke(ErrorKind::Lxc)
-        .await?;
-    launch_service_network.complete();
-
-    validate_db.start();
-    db.mutate(|d| {
-        let model = d.de()?;
-        d.ser(&model)
-    })
-    .await
-    .result?;
-    validate_db.complete();
-
-    if let Some(progress) = postinit {
-        run_script("/media/startos/config/postinit.sh", progress).await;
-    }
-
-    tracing::info!("{}", t!("init.system-initialized"));
-
-    Ok(InitResult {
-        net_ctrl,
-        os_net_service,
-    })
+    result
 }
 
 pub fn init_api<C: Context>() -> ParentHandler<C> {

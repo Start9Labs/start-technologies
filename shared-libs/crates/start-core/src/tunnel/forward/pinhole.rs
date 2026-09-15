@@ -7,7 +7,7 @@
 
 use std::net::{Ipv6Addr, SocketAddrV6};
 
-use crate::net::forward::nft_rule_v6;
+use crate::net::forward::{nft_delete_rules_with_comment_prefix_v6, nft_rule_v6};
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::db::Pinhole;
@@ -65,10 +65,23 @@ pub async fn apply_pinhole(
 /// comment tag, so it needs no rule text and covers both the pinhole and remap
 /// shapes).
 pub async fn remove_pinhole_rules(gua: Ipv6Addr, external_port: u16) -> Result<(), Error> {
-    let comment = tag(gua, external_port);
-    nft_rule_v6("prerouting", &comment, true, false, "").await?;
-    nft_rule_v6("forward", &comment, true, false, "").await?;
-    Ok(())
+    remove_pinhole_tag(&tag(gua, external_port)).await
+}
+
+async fn remove_pinhole_tag(comment: &str) -> Result<(), Error> {
+    match tokio::join!(
+        nft_rule_v6("prerouting", comment, true, false, ""),
+        nft_rule_v6("forward", comment, true, false, ""),
+    ) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+        (Err(prerouting_error), Err(forward_error)) => Err(Error::new(
+            eyre!(
+                "pinhole rule cleanup failed: prerouting: {prerouting_error:#}; forward: {forward_error:#}"
+            ),
+            ErrorKind::Network,
+        )),
+    }
 }
 
 /// Whether `gua` is the `/128` this tunnel delegates to some client — the
@@ -217,19 +230,45 @@ pub async fn remove_pinhole(ctx: &TunnelContext, gua: Ipv6Addr, external_port: u
     }
 }
 
+pub(crate) async fn cleanup_pinholes() -> Result<(), Error> {
+    nft_delete_rules_with_comment_prefix_v6(&["prerouting", "forward"], "pinhole:").await
+}
+
+pub(crate) async fn drain_pinholes() -> Result<(), Error> {
+    let mut attempt = 1_u64;
+    loop {
+        match cleanup_pinholes().await {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                tracing::warn!("pinhole drain failed on attempt {attempt}: {error:#}");
+                attempt = attempt.saturating_add(1);
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+        }
+    }
+}
+
 /// Reinstall every enabled pinhole's nft rules from the db (startup / resync).
 pub async fn seed_pinholes(ctx: &TunnelContext) -> Result<(), Error> {
+    let mut attempted = Vec::new();
     for (key, ph) in ctx.db.peek().await.as_pinholes6().de()?.0 {
         if !ph.enabled {
             continue;
         }
-        apply_pinhole(
+        attempted.push((*key.ip(), key.port()));
+        if let Err(error) = apply_pinhole(
             *key.ip(),
             key.port(),
             ph.internal_port(key.port()),
             ph.count,
         )
-        .await?;
+        .await
+        {
+            for (gua, external_port) in attempted {
+                remove_pinhole_rules(gua, external_port).await.log_err();
+            }
+            return Err(error);
+        }
     }
     Ok(())
 }

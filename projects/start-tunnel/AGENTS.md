@@ -1,12 +1,10 @@
 # AGENTS.md — start-tunnel
 
 Practical instructions for working on the StartTunnel product inside the
-`start-os` monorepo. Read the root `AGENTS.md` for monorepo-wide conventions
-first; this file is scoped to `projects/start-tunnel/`. `CLAUDE.md` is a one-line
-`@AGENTS.md` import. See [ARCHITECTURE.md](ARCHITECTURE.md) and
-[CONTRIBUTING.md](CONTRIBUTING.md).
-
-**Read up the tree first.** These docs are hierarchical: before working here, read the `AGENTS.md` in each enclosing directory up to the repo root (and their `ARCHITECTURE.md` / `CONTRIBUTING.md` where relevant). This file covers only what is specific to this scope and does not repeat rules already stated higher up.
+`start-technologies` monorepo. Read the root `AGENTS.md` for monorepo-wide
+conventions first; this file is scoped to `projects/start-tunnel/`. `CLAUDE.md`
+is a one-line `@AGENTS.md` import. See [ARCHITECTURE.md](ARCHITECTURE.md) for
+system details.
 
 ## What this is
 
@@ -43,7 +41,9 @@ Where to make changes:
 Almost all backend work happens in `start-core`, not here. The one tunnel-local
 Rust file is `src/main.rs`.
 
-## Build & test (run from the repo root)
+## Contributor workflow
+
+Run all commands from the repo root.
 
 ```bash
 make start-tunnel                                   # build tunnelbox (UI + daemon)
@@ -56,14 +56,20 @@ make start-core-test                                 # backend tests (tunnel log
 
 Notes:
 
-- `cargo check`/`cargo build` here only cover the linux target. The CI matrix
-  also builds `*-apple-darwin` and `riscv64`/`aarch64` musl — platform-specific
-  code (`libc`, resolv-conf, etc.) can pass locally and break darwin. cfg-gate
-  platform-only paths; don't reimplement them cross-platform.
+- `cargo check`/`cargo build` here only cover the Linux target. StartTunnel CI
+  builds x86_64, aarch64, and riscv64 Linux packages. Changes under shared
+  `start-core` also compile for `*-apple-darwin` through the start-cli CI matrix.
+  Platform-specific code (`libc`, resolv-conf, etc.) can pass locally and break
+  Darwin; cfg-gate platform-only paths rather than reimplementing them.
 - `make start-tunnel` needs the static UI at `web/dist/static/start-tunnel/index.html`;
-  the Makefile target chains the UI build → `compress-uis.sh` automatically.
+  the Makefile target chains the UI build → `compress-uis.sh` automatically and
+  writes `target/<arch>-unknown-linux-musl/<profile>/tunnelbox`.
 - TS bindings for the tunnel API regenerate via `make start-core-ts-bindings` into
   `shared-libs/crates/start-core/bindings/tunnel/`.
+- This wrapper has no independent tests; tunnel behavior is exercised by the
+  `start-core` test suite.
+- For runtime verification, build the `.deb` and install it on a Debian 13 VPS
+  or a local VM.
 
 ## Gotchas
 
@@ -74,17 +80,20 @@ Notes:
   `tunnel/mod.rs`). HTTPS is added/removed reactively from the `/webserver` db
   path — no restart on toggle.
 - **State is PatchDB.** Changes are JSON patches; the daemon subscribes to db
-  paths and reconciles kernel state (WireGuard, iptables). Schema changes need a
-  numbered migration in `tunnel/migrations/` and registration in `mod.rs`.
-- **Runtime deps.** The daemon shells out to `wireguard-tools`, `iptables`,
-  `nftables`, and `conntrack`; the `.deb` declares them. Adding a new external
-  tool means updating the `DEPENDS=` list in the Makefile `start-tunnel-deb` target.
+  paths and reconciles WireGuard and nftables state. Schema changes need a
+  numbered migration in `tunnel/migrations/` and registration in
+  `tunnel/migrations/mod.rs`.
+- **Runtime deps.** The `.deb` installs `wireguard-tools`, `iptables`, `nftables`,
+  and `conntrack`. Adding a new external tool means updating the `DEPENDS=` list
+  in the Makefile `start-tunnel-deb` target.
 - **Port forwarding is Layer 3/4.** It rewrites IP headers (DNAT) and does not
   decrypt payloads — keep it that way; TLS terminates at the user's service.
 - **CLI and UI share `tunnel_api()`.** Add a method once in `api.rs`; both
   surfaces get it.
-- **Version bump:** `Cargo.toml` `version` carries a `# VERSION_BUMP` marker —
-  bump it there.
+- **Versioning.** `Cargo.toml` `version` carries a `# VERSION_BUMP` marker and
+  mirrors the prospective version at the top of `CHANGELOG.md`. Origin tags use
+  `start-tunnel/v<version>`; follow the root rules to decide whether to add to
+  the current heading or cut a new one.
 - **Manpages** for `start-tunnel` are generated (and committed) into this
   project's `man/` dir by `cargo test -p start-core export_manpage_start_tunnel`
   (the generator lives in `start-core`'s `bins/tunnel.rs`).

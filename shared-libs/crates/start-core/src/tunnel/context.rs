@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use clap::Parser;
@@ -30,7 +31,10 @@ use crate::middleware::auth::local::{LocalAuthContext, dial_addr, local_auth_hea
 use crate::middleware::auth::signature::{NonceCache, url_host_str};
 use crate::middleware::cors::Cors;
 use crate::net::dns_update::rfc2136::{DnsInjector, InjectedRecord};
-use crate::net::forward::{PortForwardController, nft_comments_with_prefix, nft_rule, nft_rule_v6};
+use crate::net::forward::{
+    PortForwardController, nft_comments_with_prefix, nft_rule, nft_rule_v6,
+    timeout_forwarding_drain,
+};
 use crate::net::static_server::{EMPTY_DIR, UiContext};
 use crate::prelude::*;
 use crate::rpc_continuations::{OpenAuthedContinuations, RpcContinuations};
@@ -42,6 +46,7 @@ use crate::tunnel::migrations::run_migrations;
 use crate::tunnel::wg::{WIREGUARD_INTERFACE_NAME, WgServer, current_ifindex};
 use crate::util::Invoke;
 use crate::util::collections::OrdMapIterMut;
+use crate::util::future::NonDetachingJoinHandle;
 use crate::util::sync::{SyncMutex, Watch};
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, Parser)]
@@ -190,6 +195,8 @@ pub struct TunnelContextSeed {
     pub dns_keys: Arc<SyncMutex<BTreeMap<IpAddr, [u8; 32]>>>,
     pub active_forwards: SyncMutex<BTreeMap<SocketAddrV4, Arc<()>>>,
     pub forward_write_lock: tokio::sync::Mutex<()>,
+    forwarding_closed: AtomicBool,
+    forwarding_active: tokio::sync::RwLock<()>,
     /// In-memory leases for auto (PCP-created) forwards/pinholes/SNI routes,
     /// reaped by [`crate::tunnel::forward::lease`] when a client stops renewing.
     pub leases: SyncMutex<crate::tunnel::forward::lease::Leases>,
@@ -218,6 +225,7 @@ pub struct TunnelContext(Arc<TunnelContextSeed>);
 impl TunnelContext {
     #[instrument(skip_all)]
     pub async fn init(config: &TunnelConfig) -> Result<Self, Error> {
+        crate::tunnel::forward::pinhole::cleanup_pinholes().await?;
         Self::init_auth_cookie().await?;
         let (shutdown, _) = tokio::sync::broadcast::channel(1);
         let datadir = config
@@ -315,67 +323,6 @@ impl TunnelContext {
         dns_proxy.sync(&wg, dns_injector.clone()).await?;
 
         let sni = crate::tunnel::forward::sni::SniDemux::new();
-        let mut active_forwards = BTreeMap::new();
-        for (from, entry) in peek.as_port_forwards().de()?.0 {
-            match entry {
-                PortForward::Dnat {
-                    target,
-                    enabled,
-                    count,
-                    ..
-                } => {
-                    if !enabled {
-                        continue;
-                    }
-                    let to = target;
-                    let prefix = net_iface
-                        .peek(|i| {
-                            i.iter()
-                                .find_map(|(_, i)| {
-                                    i.ip_info.as_ref().and_then(|i| {
-                                        i.subnets
-                                            .iter()
-                                            .find(|s| s.contains(&IpAddr::from(*to.ip())))
-                                    })
-                                })
-                                .cloned()
-                        })
-                        .map(|s| s.prefix_len())
-                        .unwrap_or(32);
-                    active_forwards.insert(
-                        from,
-                        forward
-                            .add_forward_range(from, to, count, prefix, None)
-                            .await?,
-                    );
-                }
-                PortForward::Sni { routes, fallback } => {
-                    for (hostname, route) in routes {
-                        if !route.enabled {
-                            continue;
-                        }
-                        if let Err(code) = sni.register(
-                            *from.ip(),
-                            from.port(),
-                            &[hostname.clone()],
-                            route.target,
-                            None,
-                        ) {
-                            tracing::warn!(
-                                "failed to restore SNI route {hostname} on {from}: code {code}"
-                            );
-                        }
-                    }
-                    if let Some(f) = fallback.filter(|f| f.enabled) {
-                        if let Err(code) = sni.register_fallback(*from.ip(), from.port(), f.target)
-                        {
-                            tracing::warn!("failed to restore SNI fallback on {from}: code {code}");
-                        }
-                    }
-                }
-            }
-        }
-
         let ctx = Self(Arc::new(TunnelContextSeed {
             listen,
             db,
@@ -390,8 +337,10 @@ impl TunnelContext {
             dns_injector,
             dns_allowed,
             dns_keys,
-            active_forwards: SyncMutex::new(active_forwards),
+            active_forwards: SyncMutex::new(BTreeMap::new()),
             forward_write_lock: tokio::sync::Mutex::new(()),
+            forwarding_closed: AtomicBool::new(false),
+            forwarding_active: tokio::sync::RwLock::new(()),
             leases: SyncMutex::new(BTreeMap::new()),
             lease_wake: tokio::sync::Notify::new(),
             forward_ifindex: tokio::sync::watch::channel(current_ifindex()).0,
@@ -401,21 +350,156 @@ impl TunnelContext {
             shutdown,
         }));
 
-        ctx.resync_egress().await?;
-        ctx.resync_v6().await?;
-        crate::tunnel::forward::pinhole::seed_pinholes(&ctx).await?;
-        // Grant every restored auto entry a fresh lease so a client that never
-        // reconnects is reaped rather than lingering forever.
-        crate::tunnel::forward::lease::seed_from_db(&ctx).await?;
+        let initialized = async {
+            for (from, entry) in peek.as_port_forwards().de()?.0 {
+                match entry {
+                    PortForward::Dnat {
+                        target,
+                        enabled,
+                        count,
+                        ..
+                    } => {
+                        if !enabled {
+                            continue;
+                        }
+                        let to = target;
+                        let prefix = ctx
+                            .net_iface
+                            .peek(|i| {
+                                i.iter()
+                                    .find_map(|(_, i)| {
+                                        i.ip_info.as_ref().and_then(|i| {
+                                            i.subnets
+                                                .iter()
+                                                .find(|s| s.contains(&IpAddr::from(*to.ip())))
+                                        })
+                                    })
+                                    .cloned()
+                            })
+                            .map(|s| s.prefix_len())
+                            .unwrap_or(32);
+                        let active = ctx
+                            .forward
+                            .add_forward_range(from, to, count, prefix, None)
+                            .await?;
+                        ctx.active_forwards.mutate(|forwards| {
+                            forwards.insert(from, active);
+                        });
+                    }
+                    PortForward::Sni { routes, fallback } => {
+                        for (hostname, route) in routes {
+                            if !route.enabled {
+                                continue;
+                            }
+                            if let Err(code) = ctx.sni.register(
+                                *from.ip(),
+                                from.port(),
+                                &[hostname.clone()],
+                                route.target,
+                                None,
+                            ) {
+                                tracing::warn!(
+                                    "failed to restore SNI route {hostname} on {from}: code {code}"
+                                );
+                            }
+                        }
+                        if let Some(f) = fallback.filter(|f| f.enabled) {
+                            if let Err(code) =
+                                ctx.sni.register_fallback(*from.ip(), from.port(), f.target)
+                            {
+                                tracing::warn!(
+                                    "failed to restore SNI fallback on {from}: code {code}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
 
-        // PCP (preferred) + UPnP IGD (fallback) let connected clients open their
-        // public ports automatically; the reaper expires auto mappings whose
-        // client stops renewing.
-        tokio::spawn(crate::tunnel::forward::pcp::run(ctx.clone()));
-        tokio::spawn(crate::tunnel::forward::igd::run(ctx.clone()));
-        tokio::spawn(crate::tunnel::forward::lease::run(ctx.clone()));
+            ctx.resync_egress().await?;
+            ctx.resync_v6().await?;
+            crate::tunnel::forward::lease::seed_from_db(&ctx).await?;
+            crate::tunnel::forward::pinhole::seed_pinholes(&ctx).await?;
+            Ok::<_, Error>(())
+        }
+        .await;
+
+        if let Err(error) = initialized {
+            ctx.shutdown_forwarding().await.log_err();
+            return Err(error);
+        }
 
         Ok(ctx)
+    }
+
+    pub(crate) fn spawn_forwarding_servers(
+        &self,
+    ) -> [(&'static str, NonDetachingJoinHandle<()>); 3] {
+        let pcp_shutdown = self.shutdown.subscribe();
+        let igd_shutdown = self.shutdown.subscribe();
+        let lease_shutdown = self.shutdown.subscribe();
+        [
+            (
+                "PCP",
+                tokio::spawn(crate::tunnel::forward::pcp::run(self.clone(), pcp_shutdown)).into(),
+            ),
+            (
+                "IGD",
+                tokio::spawn(crate::tunnel::forward::igd::run(self.clone(), igd_shutdown)).into(),
+            ),
+            (
+                "lease",
+                tokio::spawn(crate::tunnel::forward::lease::run(
+                    self.clone(),
+                    lease_shutdown,
+                ))
+                .into(),
+            ),
+        ]
+    }
+
+    pub(crate) async fn forwarding_admission(
+        &self,
+    ) -> Result<tokio::sync::RwLockReadGuard<'_, ()>, Error> {
+        if self.forwarding_closed.load(Ordering::Acquire) {
+            return Err(Error::new(
+                eyre!("{}", t!("error.cancelled")),
+                ErrorKind::Cancelled,
+            ));
+        }
+        let admission = self.forwarding_active.read().await;
+        if self.forwarding_closed.load(Ordering::Acquire) {
+            Err(Error::new(
+                eyre!("{}", t!("error.cancelled")),
+                ErrorKind::Cancelled,
+            ))
+        } else {
+            Ok(admission)
+        }
+    }
+
+    pub(crate) async fn drain_forwarding(&self) -> Result<(), Error> {
+        self.forwarding_closed.store(true, Ordering::Release);
+        let _admission = self.forwarding_active.write().await;
+        let pinholes = async {
+            self.sni.shutdown().await;
+            self.active_forwards.mutate(BTreeMap::clear);
+            crate::tunnel::forward::pinhole::drain_pinholes().await
+        };
+        match tokio::join!(self.forward.drain(), pinholes) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+            (Err(forward_error), Err(pinhole_error)) => Err(Error::new(
+                eyre!(
+                    "forwarding drains failed: IPv4 forwarding: {forward_error:#}; IPv6 pinholes: {pinhole_error:#}"
+                ),
+                ErrorKind::Network,
+            )),
+        }
+    }
+
+    pub(crate) async fn shutdown_forwarding(&self) -> Result<(), Error> {
+        timeout_forwarding_drain(self.drain_forwarding()).await
     }
 
     pub async fn gc_forwards(
@@ -595,7 +679,7 @@ impl TunnelContext {
             }
         }
         // Prune device-override rules whose device was removed or cleared its `wan_ip`.
-        for comment in nft_comments_with_prefix("postrouting", "tunnel-snat-dev-").await {
+        for comment in nft_comments_with_prefix("postrouting", "tunnel-snat-dev-").await? {
             if !want_dev.contains(&comment) {
                 nft_rule("postrouting", &comment, true, false, "").await?;
             }

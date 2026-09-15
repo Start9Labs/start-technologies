@@ -518,11 +518,12 @@ where
             drop(queue);
             drop(queue_cell.replace(None));
 
-            if !runner.is_empty() {
-                tokio::time::timeout(Duration::from_millis(100), runner)
-                    .await
-                    .log_err();
-            }
+            tokio::time::timeout(
+                Duration::from_millis(100),
+                runner.run_while(graceful.shutdown()),
+            )
+            .await
+            .log_err();
         }));
         Self {
             shutdown,
@@ -532,9 +533,14 @@ where
         }
     }
 
-    pub async fn shutdown(self) {
+    pub async fn shutdown(self) -> Result<(), Error> {
         self.shutdown.send(()).unwrap_or_default();
-        self.thread.await.unwrap()
+        self.thread.await.map_err(|error| {
+            Error::new(
+                eyre!("web server task failed during shutdown: {error}"),
+                ErrorKind::Unknown,
+            )
+        })
     }
 
     pub fn serve_router(&mut self, router: Router) {

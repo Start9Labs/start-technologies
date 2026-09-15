@@ -64,7 +64,7 @@ async fn inner_main(config: &RegistryConfig) -> Result<(), Error> {
         Ok::<_, Error>(server)
     }
     .await?;
-    server.shutdown().await;
+    server.shutdown().await?;
 
     Ok(())
 }
