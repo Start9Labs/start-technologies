@@ -453,6 +453,9 @@ for the detail behind its highlights.
 - **The OS log stays focused on actionable errors on a network whose router
   advertises a route with more than one next hop.**
 
+- **A service that mounts a dependency's files read-write fails to start when
+  that dependency is not installed**, naming the missing volume.
+
 ### Security
 
 - **Service mount paths are validated and confined to their intended
