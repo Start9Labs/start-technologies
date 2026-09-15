@@ -471,6 +471,10 @@ Hasło, którego urządzenia będą używać do łączenia się. Musi mieć co n
 Kontroluje, do czego podłączone urządzenie może mieć dostęp w sieci. Przypisz profil bezpieczeństwa, aby ograniczyć lub przyznać dostęp do określonych zasobów.`,
   '/wifi/settings': `## Wi-Fi – Ustawienia
 
+### Kraj
+
+Kraj, którego przepisy dotyczące Wi-Fi obowiązują router. Decyduje o tym, jakich kanałów może używać każde pasmo i jaka moc nadawania jest dozwolona. Do czasu wybrania kraju router działa w ostrożnym podzbiorze obowiązującym na całym świecie: kanały 1–11 w paśmie 2,4 GHz i kanały 36–48 w paśmie 5 GHz z obniżoną mocą. Zmiana kraju przywraca wybór kanałów na Auto. Wybierz kraj, w którym router fizycznie się znajduje.
+
 ### Włącz Wi-Fi
 
 Włącz lub wyłącz radio bezprzewodowe. Po wyłączeniu żadne urządzenie nie może połączyć się przez Wi-Fi.

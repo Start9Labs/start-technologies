@@ -544,4 +544,6 @@ export default {
   552: 'Trotzdem veröffentlichen?',
   553: 'Port für Hostnamen-Routen verwendet',
   554: 'Art',
+  555: 'Land',
+  556: 'Wählen Sie das Land, in dem dieser Router betrieben wird, um die dort zulässigen WLAN-Kanäle und Sendeleistungen freizuschalten. Bis dahin wird eine konservative weltweite Teilmenge verwendet.',
 } satisfies i18n

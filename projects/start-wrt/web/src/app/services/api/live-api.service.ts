@@ -65,6 +65,7 @@ import {
   EthernetSetConfig,
   EthernetSetResult,
   WifiSetResult,
+  WifiRegulatory,
   SshKeyFromApi,
   SshKeysAddRequest,
   SshKeysDeleteRequest,
@@ -177,6 +178,10 @@ export class LiveApiService extends ApiService {
 
   async wifiGeneratePassword(): Promise<string> {
     return this.rpc.request({ method: 'wifi.generate-password', params: {} })
+  }
+
+  async wifiRegulatory(): Promise<WifiRegulatory> {
+    return this.rpc.request({ method: 'wifi.regulatory', params: {} })
   }
 
   async wifiBlackoutGet(): Promise<ScheduleWindow[]> {

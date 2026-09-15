@@ -318,6 +318,7 @@ pub struct WifiDevice {
     pub band: String,
     #[uci(inpt)]
     pub channel: WifiChannel,
+    pub country: Option<String>,
 }
 
 #[derive(Clone, Debug, TypedSection)]

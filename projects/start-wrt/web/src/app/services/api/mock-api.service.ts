@@ -69,6 +69,7 @@ import {
   EthernetSetConfig,
   EthernetSetResult,
   WifiSetResult,
+  WifiRegulatory,
   SshKeyFromApi,
   SshKeysAddRequest,
   SshKeysDeleteRequest,
@@ -490,6 +491,7 @@ export class MockApiService extends ApiService {
   private mockWifi: WifiConfig = {
     ssid: 'StartOS',
     broadcastSeparately: false,
+    country: null,
     radios: {
       default_radio0: {
         band: '2g',
@@ -551,6 +553,25 @@ export class MockApiService extends ApiService {
       days: [false, true, true, true, true, true, false],
     },
   ]
+
+  async wifiRegulatory(): Promise<WifiRegulatory> {
+    await pauseFor(100)
+    const world = this.mockWifi.country === null
+    return {
+      countries: ['CA', 'CR', 'DE', 'FR', 'GB', 'MX', 'US'],
+      channels: {
+        '2g': world
+          ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+          : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+        '5g': world
+          ? [36, 40, 44, 48]
+          : [
+              36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124,
+              128, 132, 136, 140, 144, 149, 153, 157, 161, 165,
+            ],
+      },
+    }
+  }
 
   async wifiGeneratePassword(): Promise<string> {
     await pauseFor(100)
