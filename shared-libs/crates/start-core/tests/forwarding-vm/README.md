@@ -65,14 +65,22 @@ The test exercises the real API handlers and checks:
 
 - A three-port IPv4 range retains every translated offset through repeated
   disable/enable calls.
+- Repeated IPv4 disable failures report errors and preserve exact nft rules;
+  retrying withdraws them.
+- PCP and IGD deletion failures retain the database entry, lease expiry, and
+  exact IPv4 rules for retry; another device's deletion leaves them intact.
+- A first automatic IPv6 pinhole apply failure retains expiring intent.
 - An injected IPv6 deletion failure retains the database entry, lease expiry,
   and exact nft rules; retrying the same removal clears all three.
+- Queued SNI lease reapers preserve renewed leases and manually owned hostname
+  routes and fallbacks.
 - A concurrent IPv4 removal waits for an admitted addition's nft transaction,
   then leaves the database, active-owner map, and nft rules clear.
 - Final forwarding shutdown completes and fixture rules are absent.
 
-`nft` logs each invocation and delegates to `/usr/sbin/nft`. While `fail-delete`
-exists, transactions containing `delete rule` fail before reaching nft. A
+`nft` logs each invocation and delegates to `/usr/sbin/nft`. While `fail-add` or
+`fail-delete` exists, transactions containing `add rule` or `delete rule`,
+respectively, fail before reaching nft. A
 `barrier` containing a matching fragment pauses an `add rule` transaction until
 `release` exists, with a 15-second timeout and an `entered` marker. These are
 injected failures and scheduling barriers, not simulated successful nft changes.

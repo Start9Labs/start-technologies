@@ -7,6 +7,7 @@ use futures::FutureExt;
 use tokio::process::Command;
 
 use super::*;
+use crate::net::port_map::server::GatewayBackend;
 use crate::tunnel::context::TunnelConfig;
 use crate::tunnel::forward::lease::{self, LeaseKey};
 use crate::util::Invoke;
@@ -20,6 +21,128 @@ async fn rules(family: &str) -> String {
             .unwrap(),
     )
     .unwrap()
+}
+
+async fn exercise_sni_reaper(ctx: &TunnelContext) {
+    let source: SocketAddrV4 = "198.51.100.2:47000".parse().unwrap();
+    let target: SocketAddrV4 = "192.0.2.2:48000".parse().unwrap();
+    let hostnames = vec!["reaper.example.com".to_string()];
+    GatewayBackend::add_sni_forward(ctx, source, target, &hostnames, Some(3600))
+        .await
+        .unwrap();
+    ctx.persist_fallback_forward(source, target, Some(3600), true, None)
+        .await
+        .unwrap();
+    for fallback in [false, true] {
+        let key = if fallback {
+            LeaseKey::SniFallback(source)
+        } else {
+            LeaseKey::Sni {
+                source,
+                hostname: hostnames[0].clone(),
+            }
+        };
+        let guard = ctx.forward_write_lock.lock().await;
+        ctx.leases.mutate(|leases| {
+            leases.insert(
+                key.clone(),
+                std::time::Instant::now() - Duration::from_secs(1),
+            );
+        });
+        let renew = async {
+            if fallback {
+                ctx.persist_fallback_forward(source, target, Some(3600), true, None)
+                    .await
+            } else {
+                GatewayBackend::add_sni_forward(ctx, source, target, &hostnames, Some(3600)).await
+            }
+        };
+        let reap = async {
+            if fallback {
+                lease::reap_sni_fallback(ctx, source).await
+            } else {
+                lease::reap_sni(ctx, source, &hostnames[0]).await
+            }
+        };
+        tokio::pin!(renew, reap);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut renew)
+                .await
+                .is_err()
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut reap)
+                .await
+                .is_err()
+        );
+        drop(guard);
+        let (renewed, reaped) = tokio::join!(renew, reap);
+        renewed.unwrap();
+        reaped.unwrap();
+        assert!(
+            ctx.leases
+                .peek(|leases| leases[&key] > std::time::Instant::now())
+        );
+        let forward = ctx.db.peek().await.as_port_forwards().de().unwrap().0[&source].clone();
+        assert!(
+            matches!(forward, PortForward::Sni { routes, fallback } if routes.contains_key(&hostnames[0]) && fallback.is_some())
+        );
+
+        let guard = ctx.forward_write_lock.lock().await;
+        ctx.leases.mutate(|leases| {
+            leases.insert(
+                key.clone(),
+                std::time::Instant::now() - Duration::from_secs(1),
+            );
+        });
+        let reap = async {
+            if fallback {
+                lease::reap_sni_fallback(ctx, source).await
+            } else {
+                lease::reap_sni(ctx, source, &hostnames[0]).await
+            }
+        };
+        tokio::pin!(reap);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut reap)
+                .await
+                .is_err()
+        );
+        ctx.db
+            .mutate(|db| {
+                db.as_port_forwards_mut().mutate(|forwards| {
+                    let PortForward::Sni {
+                        routes,
+                        fallback: route_fallback,
+                    } = forwards.0.get_mut(&source).unwrap()
+                    else {
+                        unreachable!()
+                    };
+                    if fallback {
+                        route_fallback.as_mut().unwrap().auto = false;
+                    } else {
+                        routes.get_mut(&hostnames[0]).unwrap().auto = false;
+                    }
+                    Ok(())
+                })
+            })
+            .await
+            .result
+            .unwrap();
+        drop(guard);
+        reap.await.unwrap();
+        let forward = ctx.db.peek().await.as_port_forwards().de().unwrap().0[&source].clone();
+        assert!(
+            matches!(forward, PortForward::Sni { routes, fallback } if routes.contains_key(&hostnames[0]) && fallback.is_some())
+        );
+    }
+    GatewayBackend::remove_sni_forward(ctx, source, target, &hostnames)
+        .await
+        .unwrap();
+    ctx.remove_sni_fallback(source, target).await.unwrap();
+    eprintln!(
+        "PASS: queued SNI reapers preserve renewed leases and manually-owned routes/fallbacks"
+    );
 }
 
 async fn exercise(ctx: &TunnelContext, controls: &Path) {
@@ -90,6 +213,34 @@ async fn exercise(ctx: &TunnelContext, controls: &Path) {
             assert!(!installed.contains("198.51.100.2"), "{installed}");
         }
     }
+    let before = rules("ip").await;
+    std::fs::write(controls.join("fail-delete"), "").unwrap();
+    for _ in 0..2 {
+        assert!(
+            set_forward_enabled(
+                ctx.clone(),
+                SetPortForwardEnabledParams {
+                    source,
+                    enabled: false,
+                    hostname: None
+                },
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(rules("ip").await, before);
+    }
+    std::fs::remove_file(controls.join("fail-delete")).unwrap();
+    set_forward_enabled(
+        ctx.clone(),
+        SetPortForwardEnabledParams {
+            source,
+            enabled: false,
+            hostname: None,
+        },
+    )
+    .await
+    .unwrap();
     remove_forward(
         ctx.clone(),
         RemovePortForwardParams {
@@ -100,7 +251,93 @@ async fn exercise(ctx: &TunnelContext, controls: &Path) {
     .await
     .unwrap();
     assert!(!rules("ip").await.contains("198.51.100.2"));
+    eprintln!("PASS: two failed disables report failure; retry withdraws exact DNAT rules");
+
+    GatewayBackend::add_forward(ctx, source, target, 3, *target.ip(), Some(3600))
+        .await
+        .unwrap();
+    assert!(
+        !GatewayBackend::remove_forward_by_source(ctx, source, "192.0.2.3".parse().unwrap())
+            .await
+            .unwrap()
+    );
+    let lease_key = LeaseKey::Dnat(source);
+    let expiry = ctx.leases.peek(|leases| leases[&lease_key]);
+    let before = rules("ip").await;
+    let entry = ctx.db.peek().await.as_port_forwards().de().unwrap().0[&source].clone();
+    std::fs::write(controls.join("fail-delete"), "").unwrap();
+    assert!(
+        GatewayBackend::remove_forward(ctx, *target.ip(), target.port())
+            .await
+            .is_err()
+    );
+    assert!(
+        GatewayBackend::remove_forward_by_source(ctx, source, *target.ip())
+            .await
+            .is_err()
+    );
+    assert_eq!(rules("ip").await, before);
+    assert_eq!(
+        serde_json::to_value(
+            ctx.db.peek().await.as_port_forwards().de().unwrap().0[&source].clone()
+        )
+        .unwrap(),
+        serde_json::to_value(entry).unwrap()
+    );
+    assert_eq!(
+        ctx.leases.peek(|leases| leases.get(&lease_key).copied()),
+        Some(expiry)
+    );
+    std::fs::remove_file(controls.join("fail-delete")).unwrap();
+    assert!(
+        GatewayBackend::remove_forward_by_source(ctx, source, *target.ip())
+            .await
+            .unwrap()
+    );
+    GatewayBackend::remove_forward(ctx, *target.ip(), target.port())
+        .await
+        .unwrap();
+    assert!(
+        !GatewayBackend::remove_forward_by_source(ctx, source, *target.ip())
+            .await
+            .unwrap()
+    );
+    assert!(!ctx.leases.peek(|leases| leases.contains_key(&lease_key)));
+    assert!(
+        !ctx.db
+            .peek()
+            .await
+            .as_port_forwards()
+            .de()
+            .unwrap()
+            .0
+            .contains_key(&source)
+    );
+    assert!(!rules("ip").await.contains("198.51.100.2"));
+    eprintln!("PASS: PCP and IGD deletion failures retain exact DB, lease and rules for retry");
     eprintln!("PASS: actual set-enabled handler preserves all three DNAT offsets");
+
+    let failed_key = SocketAddrV6::new(gua, 45000, 0, 0);
+    let failed_lease = LeaseKey::Pinhole(failed_key);
+    std::fs::write(controls.join("fail-add"), "").unwrap();
+    assert!(
+        GatewayBackend::add_pinhole(ctx, gua, 45000, 46000, 1, Some(3600))
+            .await
+            .is_err()
+    );
+    std::fs::remove_file(controls.join("fail-add")).unwrap();
+    assert!(ctx.db.peek().await.as_pinholes6().de().unwrap().0[&failed_key].auto);
+    assert!(ctx.leases.peek(|leases| leases.contains_key(&failed_lease)));
+    assert!(
+        !rules("ip6")
+            .await
+            .contains(&format!("pinhole:{failed_key}"))
+    );
+    GatewayBackend::remove_pinhole(ctx, gua, 45000)
+        .await
+        .unwrap();
+    assert!(!ctx.leases.peek(|leases| leases.contains_key(&failed_lease)));
+    eprintln!("PASS: first auto pinhole apply failure retains expiring intent");
 
     add_pinhole(
         ctx.clone(),
@@ -171,6 +408,8 @@ async fn exercise(ctx: &TunnelContext, controls: &Path) {
     eprintln!(
         "PASS: failed pinhole removal retains DB, exact rules and lease; same-key retry removes all"
     );
+
+    exercise_sni_reaper(ctx).await;
 
     std::fs::write(controls.join("barrier"), "198.51.100.2").unwrap();
     let add = add_forward(
@@ -259,6 +498,7 @@ async fn forwarding_handlers_vm() {
         .catch_unwind()
         .await;
     let _ = std::fs::remove_file(controls.join("fail-delete"));
+    let _ = std::fs::remove_file(controls.join("fail-add"));
     std::fs::write(controls.join("release"), "").unwrap();
     let drained = ctx.shutdown_forwarding().await;
     assert!(drained.is_ok(), "forwarding shutdown failed: {drained:?}");

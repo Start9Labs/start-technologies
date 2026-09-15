@@ -150,11 +150,11 @@ pub async fn add_pinhole(
         })
         .await
         .result?;
-    if ctx.db.peek().await.as_pinholes6().de()?.0[&key].enabled {
-        apply_pinhole(gua, external_port, internal_port, count).await?;
-    }
     if let Some(lifetime) = lifetime {
         super::lease::stamp(ctx, super::lease::LeaseKey::Pinhole(key), lifetime);
+    }
+    if ctx.db.peek().await.as_pinholes6().de()?.0[&key].enabled {
+        apply_pinhole(gua, external_port, internal_port, count).await?;
     }
     Ok(())
 }

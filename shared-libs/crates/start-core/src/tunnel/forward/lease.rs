@@ -141,8 +141,6 @@ async fn reap_expired(ctx: &TunnelContext) -> Option<Instant> {
     let now = Instant::now();
     let expired = ctx.leases.peek(|l| expired_keys(l, now));
     for key in expired {
-        // Re-check under the lock: a renewal between the snapshot and here
-        // re-stamps a later expiry, in which case the client still wants it.
         if ctx
             .leases
             .peek(|l| l.get(&key).is_none_or(|exp| *exp > now))
@@ -205,7 +203,23 @@ async fn reap_dnat(ctx: &TunnelContext, source: SocketAddrV4) -> Result<(), Erro
     Ok(())
 }
 
-async fn reap_sni(ctx: &TunnelContext, source: SocketAddrV4, hostname: &str) -> Result<(), Error> {
+pub(crate) async fn reap_sni(
+    ctx: &TunnelContext,
+    source: SocketAddrV4,
+    hostname: &str,
+) -> Result<(), Error> {
+    let _guard = ctx.forward_write_lock.lock().await;
+    let key = LeaseKey::Sni {
+        source,
+        hostname: hostname.to_string(),
+    };
+    if ctx.leases.peek(|leases| {
+        leases
+            .get(&key)
+            .is_none_or(|expiry| *expiry > Instant::now())
+    }) {
+        return Ok(());
+    }
     let target = ctx
         .db
         .peek()
@@ -223,13 +237,24 @@ async fn reap_sni(ctx: &TunnelContext, source: SocketAddrV4, hostname: &str) -> 
     let Some(target) = target else {
         return Ok(());
     };
-    ctx.remove_sni_forward_result(source, target, &[hostname.to_string()])
+    ctx.remove_sni_forward_locked(source, target, &[hostname.to_string()])
         .await?;
     tracing::info!("PCP lease lapsed: removed auto SNI route {hostname} on {source}");
     Ok(())
 }
 
-async fn reap_sni_fallback(ctx: &TunnelContext, source: SocketAddrV4) -> Result<(), Error> {
+pub(crate) async fn reap_sni_fallback(
+    ctx: &TunnelContext,
+    source: SocketAddrV4,
+) -> Result<(), Error> {
+    let _guard = ctx.forward_write_lock.lock().await;
+    if ctx.leases.peek(|leases| {
+        leases
+            .get(&LeaseKey::SniFallback(source))
+            .is_none_or(|expiry| *expiry > Instant::now())
+    }) {
+        return Ok(());
+    }
     let target = ctx
         .db
         .peek()
@@ -247,7 +272,7 @@ async fn reap_sni_fallback(ctx: &TunnelContext, source: SocketAddrV4) -> Result<
     let Some(target) = target else {
         return Ok(());
     };
-    ctx.remove_sni_fallback(source, target).await?;
+    ctx.remove_sni_fallback_locked(source, target).await?;
     tracing::info!("PCP lease lapsed: removed auto SNI fallback on {source}");
     Ok(())
 }

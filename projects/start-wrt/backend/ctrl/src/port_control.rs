@@ -494,9 +494,9 @@ impl PortControl {
 
     /// Remove the client's forwards to `internal_port` (PCP identifies a
     /// mapping by its target; several external ports may forward to it).
-    async fn remove_forward_for(&self, peer: Ipv4Addr, internal_port: u16) {
+    async fn remove_forward_for(&self, peer: Ipv4Addr, internal_port: u16) -> Result<(), u16> {
         let Some(client) = self.authorized_client(peer).await else {
-            return;
+            return Err(606);
         };
         self.remove_client_forwards(&client.mac, move |r| {
             r.dest_port
@@ -504,14 +504,15 @@ impl PortControl {
                 .and_then(parse_port_range)
                 .is_some_and(|range| range.0 == internal_port)
         })
-        .await;
+        .await?;
+        Ok(())
     }
 
     /// Remove the client's forward at external port `source` (UPnP identifies
     /// a mapping by its external port). Returns whether one was removed.
-    async fn remove_by_source(&self, source: SocketAddrV4, peer: Ipv4Addr) -> bool {
+    async fn remove_by_source(&self, source: SocketAddrV4, peer: Ipv4Addr) -> Result<bool, u16> {
         let Some(client) = self.authorized_client(peer).await else {
-            return false;
+            return Err(606);
         };
         let external_port = source.port();
         self.remove_client_forwards(&client.mac, move |r| {
@@ -521,7 +522,7 @@ impl PortControl {
                 .is_some_and(|range| range.0 == external_port)
         })
         .await
-            > 0
+        .map(|removed| removed > 0)
     }
 
     /// Remove the auto-forward sections owned by `mac` whose redirect matches
@@ -530,7 +531,7 @@ impl PortControl {
         &self,
         mac: &str,
         matches: impl Fn(&FirewallRedirect) -> bool + Send + 'static,
-    ) -> usize {
+    ) -> Result<usize, u16> {
         let _serial = self.write_serial.lock().await;
         let uci_root = self.uci_root.clone();
         let mac = mac.to_string();
@@ -563,16 +564,16 @@ impl PortControl {
             Ok(names)
         })
         .await
-        .unwrap_or_else(|e| {
+        .map_err(|e| {
             tracing::warn!("port-control: removing forward failed: {e}");
-            Vec::new()
-        });
+            501u16
+        })?;
         if !removed.is_empty() {
             tracing::info!("port-control: removed forward(s) {removed:?}");
             self.forget_leases(&removed);
             self.reload_firewall();
         }
-        removed.len()
+        Ok(removed.len())
     }
 
     /// One sweep: grant a grace lease to any auto section the daemon isn't
@@ -778,7 +779,7 @@ impl PortControl {
         source: SocketAddrV4,
         target: SocketAddrV4,
         hostnames: &[String],
-    ) {
+    ) -> Result<(), u8> {
         let _serial = self.write_serial.lock().await;
         let routes: Vec<_> = self
             .sni
@@ -798,10 +799,12 @@ impl PortControl {
                 target,
             );
         }
-        if let Err(e) = self.sync_sni_rules().await {
+        self.sync_sni_rules().await.map_err(|e| {
             tracing::warn!("port-control: reconciling SNI admission failed: {e}");
-        }
+            startos::net::port_map::pcp::RESULT_NO_RESOURCES
+        })?;
         self.sync_sni_fallback(*source.ip()).await;
+        Ok(())
     }
 
     async fn remove_sni_routes_for_ips(&self, ips: &[String]) {
@@ -1026,11 +1029,15 @@ impl GatewayBackend for Via {
             .await
     }
 
-    async fn remove_forward(&self, peer: Ipv4Addr, internal_port: u16) {
+    async fn remove_forward(&self, peer: Ipv4Addr, internal_port: u16) -> Result<(), u16> {
         self.pc.remove_forward_for(peer, internal_port).await
     }
 
-    async fn remove_forward_by_source(&self, source: SocketAddrV4, peer: Ipv4Addr) -> bool {
+    async fn remove_forward_by_source(
+        &self,
+        source: SocketAddrV4,
+        peer: Ipv4Addr,
+    ) -> Result<bool, u16> {
         self.pc.remove_by_source(source, peer).await
     }
 
@@ -1075,7 +1082,7 @@ impl GatewayBackend for Via {
         source: SocketAddrV4,
         target: SocketAddrV4,
         hostnames: &[String],
-    ) {
+    ) -> Result<(), u8> {
         self.pc.remove_sni_route(source, target, hostnames).await
     }
 }
@@ -2126,7 +2133,9 @@ pub(crate) async fn close_device_forwards(mac: &str, known_ips: &[String]) {
         return;
     };
     pc.invalidate_clients();
-    pc.remove_client_forwards(mac, |_| true).await;
+    if let Err(code) = pc.remove_client_forwards(mac, |_| true).await {
+        tracing::warn!("port-control: client forward removal failed (code {code})");
+    }
     pc.remove_sni_routes_for_ips(known_ips).await;
     pc.reap_unauthorized_sni_routes().await;
 }
@@ -2694,9 +2703,30 @@ config redirect 'dns_override_lan'
 
         let pc = PortControl::new(dir.path().to_path_buf());
         pc.bump_lease("apf_aabbccddeeff_8443".to_string(), MAX_LEASE);
+        std::fs::rename(
+            dir.path().join("firewall"),
+            dir.path().join("firewall.saved"),
+        )
+        .unwrap();
+        std::fs::create_dir(dir.path().join("firewall")).unwrap();
+        for _ in 0..2 {
+            assert_eq!(
+                pc.remove_client_forwards("AA:BB:CC:DD:EE:FF", |_| true)
+                    .await,
+                Err(501)
+            );
+            assert!(pc.lease_remaining("apf_aabbccddeeff_8443").is_some());
+        }
+        std::fs::remove_dir(dir.path().join("firewall")).unwrap();
+        std::fs::rename(
+            dir.path().join("firewall.saved"),
+            dir.path().join("firewall"),
+        )
+        .unwrap();
         let removed = pc
             .remove_client_forwards("AA:BB:CC:DD:EE:FF", |_| true)
-            .await;
+            .await
+            .unwrap();
 
         assert_eq!(removed, 1);
         let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
@@ -3027,7 +3057,9 @@ config host
             kind: KIND_PCP,
             arrival: Arrival::Unchecked,
         };
-        via.remove_sni_forward(source, target, &hostnames).await;
+        via.remove_sni_forward(source, target, &hostnames)
+            .await
+            .unwrap();
 
         let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
         assert!(!written.contains("apf_sni_8443"));

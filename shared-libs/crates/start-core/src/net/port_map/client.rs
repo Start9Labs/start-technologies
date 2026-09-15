@@ -712,6 +712,7 @@ struct Footprint {
     address: Option<IpAddr>,
     protocol: TransportProtocol,
     hostname: Option<String>,
+    fallback: bool,
     start: u16,
     count: u16,
 }
@@ -733,24 +734,37 @@ impl Footprint {
             address: key.0.is_ipv6().then_some(key.0),
             protocol: key.3,
             hostname: key.2.as_ref().map(|name| name.to_ascii_lowercase()),
+            fallback: key.2.is_none()
+                && key.0.is_ipv4()
+                && key.3 == TransportProtocol::Tcp
+                && spec.count.max(1) == 1,
             start: key.1,
             count: spec.count.max(1),
         }
     }
 
-    fn conflicts(&self, other: &Self) -> bool {
+    fn conflicts(&self, other: &Self, same_client: bool) -> bool {
         self.gateway == other.gateway
             && self.address == other.address
             && self.protocol == other.protocol
-            && (self.hostname.is_none()
-                || other.hostname.is_none()
-                || self.hostname == other.hostname)
+            && match (&self.hostname, &other.hostname) {
+                (Some(a), Some(b)) => a == b,
+                (None, Some(_)) => !(same_client && self.fallback && other.count == 1),
+                (Some(_), None) => !(same_client && other.fallback && self.count == 1),
+                (None, None) => true,
+            }
             && u32::from(self.start) < u32::from(other.start) + u32::from(other.count)
             && u32::from(other.start) < u32::from(self.start) + u32::from(self.count)
     }
 
+    fn matches_request(&self, key: &MappingKey, spec: &Spec) -> bool {
+        self.start == key.1
+            && self.count >= spec.count.max(1)
+            && self.hostname == key.2.as_ref().map(|name| name.to_ascii_lowercase())
+    }
+
     fn granted(key: &MappingKey, mapping: &PortMapping) -> Self {
-        Self {
+        let mut footprint = Self {
             gateway: Self::gateway(mapping.gateway(), mapping.gateway_scope_id()),
             address: key
                 .0
@@ -763,6 +777,7 @@ impl Footprint {
                 .find(|o| o.code == OPTION_HOSTNAME)
                 .and_then(|o| String::from_utf8(o.data.clone()).ok())
                 .map(|name| name.to_ascii_lowercase()),
+            fallback: false,
             start: mapping.external_port().get(),
             count: mapping
                 .response_options()
@@ -770,7 +785,13 @@ impl Footprint {
                 .find(|o| o.code == OPTION_PORT_SET)
                 .and_then(|o| PortSet::from_payload(&o.data))
                 .map_or(1, |ps| ps.size.max(1)),
-        }
+        };
+        footprint.fallback = key.2.is_none()
+            && key.0.is_ipv4()
+            && key.3 == TransportProtocol::Tcp
+            && footprint.hostname.is_none()
+            && footprint.count == 1;
+        footprint
     }
 }
 
@@ -789,7 +810,7 @@ impl State {
         self.footprints.mutate(|owned| {
             if owned
                 .iter()
-                .any(|(owner, old)| owner != key && old.conflicts(&footprint))
+                .any(|(owner, old)| owner != key && old.conflicts(&footprint, owner.0 == key.0))
             {
                 return false;
             }
@@ -804,15 +825,35 @@ impl State {
         });
     }
 
-    fn retain_pcp(&mut self, key: &MappingKey, mapping: PortMapping) {
+    fn record_grant(&self, key: &MappingKey, mut footprint: Footprint, accepted: bool) -> bool {
+        footprint.fallback &= accepted;
         self.footprints.mutate(|owned| {
-            owned.insert(key.clone(), Footprint::granted(key, &mapping));
-        });
+            let accepted = accepted
+                && !owned.iter().any(|(owner, old)| {
+                    owner != key && old.conflicts(&footprint, owner.0 == key.0)
+                });
+            footprint.fallback &= accepted;
+            owned.insert(key.clone(), footprint);
+            accepted
+        })
+    }
+
+    async fn accept_pcp(&mut self, key: &MappingKey, mapping: PortMapping) {
+        let footprint = Footprint::granted(key, &mapping);
+        let accepted = footprint.matches_request(key, &self.desired[key]);
+        let accepted = self.record_grant(key, footprint, accepted);
         self.active.insert(key.clone(), Active::Pcp(mapping));
+        if !accepted {
+            self.stale.insert(key.clone());
+            if self.teardown(key.clone()).await.log_err().is_some() {
+                self.stale.remove(key);
+            }
+        }
     }
 
     async fn reject_pcp(&mut self, key: &MappingKey, mapping: PortMapping) -> bool {
-        self.retain_pcp(key, mapping);
+        self.record_grant(key, Footprint::granted(key, &mapping), false);
+        self.active.insert(key.clone(), Active::Pcp(mapping));
         self.stale.insert(key.clone());
         if let Err(error) = self.teardown(key.clone()).await {
             Err::<(), _>(error).log_err();
@@ -938,13 +979,8 @@ impl State {
                         Ok(()) => {
                             let granted = Footprint::granted(&key, m);
                             let spec = &self.desired[&key];
-                            let accepted = granted.start == key.1
-                                && granted.count >= spec.count
-                                && granted.hostname
-                                    == key.2.as_ref().map(|name| name.to_ascii_lowercase());
-                            self.footprints.mutate(|owned| {
-                                owned.insert(key.clone(), granted);
-                            });
+                            let accepted = granted.matches_request(&key, spec);
+                            let accepted = self.record_grant(&key, granted, accepted);
                             if !accepted {
                                 self.stale.insert(key.clone());
                                 self.replace_mapping(interfaces, key).await;
@@ -1125,10 +1161,10 @@ impl State {
                         }
                     }
                 }
-                if !self.reserve(key, Footprint::requested(key, &spec, (*gw, *scope_id))) {
-                    return true;
-                }
                 attempted = true;
+                if !self.reserve(key, Footprint::requested(key, &spec, (*gw, *scope_id))) {
+                    continue;
+                }
                 match pcp::port_mapping(
                     pcp::BaseMapRequest::new(*gw, local_ip, protocol.internet(), intl),
                     None,
@@ -1155,7 +1191,7 @@ impl State {
                             "PCP HOSTNAME mapped {external_port}->{local_ip}:{} {hostname} via {gw}",
                             spec.internal_port,
                         );
-                        self.retain_pcp(key, m);
+                        self.accept_pcp(key, m).await;
                         return true;
                     }
                     Ok(m) => {
@@ -1290,10 +1326,10 @@ impl State {
                     crate::dev_log!(debug, "PCP PORT_SET skip {gw}: known not to support PCP");
                     continue;
                 }
-                if !self.reserve(key, Footprint::requested(key, &spec, (*gw, *scope_id))) {
-                    return true;
-                }
                 attempted = true;
+                if !self.reserve(key, Footprint::requested(key, &spec, (*gw, *scope_id))) {
+                    continue;
+                }
                 match pcp::port_mapping(
                     pcp::BaseMapRequest::new(*gw, local_ip, protocol.internet(), intl),
                     None,
@@ -1320,7 +1356,7 @@ impl State {
                                 "PCP PORT_SET {protocol:?} mapped {external_port}+{range_size}->{local_ip}:{} via {gw}",
                                 spec.internal_port
                             );
-                            self.retain_pcp(key, m);
+                            self.accept_pcp(key, m).await;
                             return true;
                         }
                         crate::dev_log!(
@@ -1361,10 +1397,10 @@ impl State {
                 );
                 continue;
             }
-            if !self.reserve(key, Footprint::requested(key, &spec, (*gw, *scope_id))) {
-                return true;
-            }
             attempted = true;
+            if !self.reserve(key, Footprint::requested(key, &spec, (*gw, *scope_id))) {
+                continue;
+            }
             match PortMapping::new(
                 *gw,
                 local_ip,
@@ -1390,7 +1426,7 @@ impl State {
                         set_verdict(&mut caps.pcp, !nat_pmp, now)
                             | set_verdict(&mut caps.nat_pmp, nat_pmp, now)
                     });
-                    self.retain_pcp(key, m);
+                    self.accept_pcp(key, m).await;
                     return true;
                 }
                 // A different external port is useless for a fixed public port.
@@ -1540,6 +1576,8 @@ mod tests {
         requests: Arc<SyncMutex<Vec<Vec<u8>>>>,
         reject_delete: Arc<std::sync::atomic::AtomicBool>,
         silence_delete: Arc<std::sync::atomic::AtomicBool>,
+        granted_count: Arc<SyncMutex<Option<u16>>>,
+        lifetime: Arc<std::sync::atomic::AtomicU32>,
         barriers: mpsc::UnboundedSender<oneshot::Sender<usize>>,
         task: NonDetachingJoinHandle<()>,
     }
@@ -1554,6 +1592,10 @@ mod tests {
             let requests = Arc::new(SyncMutex::new(Vec::new()));
             let reject_delete = Arc::new(AtomicBool::new(true));
             let silence_delete = Arc::new(AtomicBool::new(false));
+            let granted_count = Arc::new(SyncMutex::new(count));
+            let lifetime = Arc::new(AtomicU32::new(PCP_LIFETIME_SECONDS));
+            let count = granted_count.clone();
+            let grant_lifetime = lifetime.clone();
             let (barriers, mut barrier_recv) = mpsc::unbounded_channel::<oneshot::Sender<usize>>();
             let captured = requests.clone();
             let reject = reject_delete.clone();
@@ -1623,7 +1665,14 @@ mod tests {
                         response[0] = 2;
                         response[1] = request[1] | 0x80;
                         response[3] = if denied { 2 } else { 0 };
-                        response[4..8].copy_from_slice(&request[4..8]);
+                        response[4..8].copy_from_slice(
+                            &if deleting {
+                                0
+                            } else {
+                                grant_lifetime.load(Ordering::SeqCst)
+                            }
+                            .to_be_bytes(),
+                        );
                         response[24..60].copy_from_slice(&request[24..60]);
                         let port = u16::from_be_bytes(request[42..44].try_into().unwrap());
                         response[42..44].copy_from_slice(
@@ -1643,6 +1692,7 @@ mod tests {
                             }
                             let data = if code == OPTION_PORT_SET {
                                 count
+                                    .peek(|count| *count)
                                     .map(|size| {
                                         PortSet {
                                             size,
@@ -1674,6 +1724,8 @@ mod tests {
                 requests,
                 reject_delete,
                 silence_delete,
+                granted_count,
+                lifetime,
                 barriers,
                 task,
             }
@@ -1712,10 +1764,292 @@ mod tests {
             recv.await.unwrap()
         }
 
+        async fn mapping_requests_through_barrier(&self) -> usize {
+            self.received_through_barrier().await;
+            self.requests
+                .peek(|requests| requests.iter().filter(|request| request[1] != 0).count())
+        }
+
         async fn finish(mut self) {
             self.task.abort();
             let _ = (&mut self.task).await;
         }
+    }
+
+    #[tokio::test]
+    async fn confirmed_fallback_and_hostname_share_single_port_in_both_orders() {
+        use std::sync::atomic::Ordering;
+        for hostname_first in [false, true] {
+            let router = RouterFixture::new(false, 0, None, true).await;
+            let plain = (
+                "127.0.0.2".parse().unwrap(),
+                443,
+                None,
+                TransportProtocol::Tcp,
+            );
+            let named = (plain.0, 443, Some("a.example.com".into()), plain.3);
+            let mut state = State::default();
+            let keys = if hostname_first {
+                [&named, &plain]
+            } else {
+                [&plain, &named]
+            };
+            for key in keys {
+                state
+                    .ensure(&router.interfaces(), key.clone(), router.spec(1))
+                    .await;
+                assert!(state.active.contains_key(key));
+                assert!(!state.stale.contains(key));
+            }
+            assert_eq!(state.active.len(), 2);
+            assert!(state.footprints.peek(|owned| owned[&plain].fallback));
+            let mut sibling = State {
+                footprints: state.footprints.clone(),
+                ..Default::default()
+            };
+            let other_client = (
+                "127.0.0.3".parse().unwrap(),
+                443,
+                Some("b.example.com".into()),
+                plain.3,
+            );
+            sibling
+                .ensure(&router.interfaces(), other_client.clone(), router.spec(1))
+                .await;
+            assert!(!sibling.active.contains_key(&other_client));
+            router.reject_delete.store(false, Ordering::SeqCst);
+            state.remove(plain).await.unwrap();
+            assert_eq!(
+                external_ip_of(&state.desired, &state.active, &state.stale, 443),
+                Some("1.2.3.4".parse().unwrap())
+            );
+            state.drain().await.unwrap();
+            router.finish().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn rejected_hostname_catchall_fences_same_client_names() {
+        use std::sync::atomic::Ordering;
+        let router = RouterFixture::new(false, 0, None, false).await;
+        let key = (
+            "127.0.0.2".parse().unwrap(),
+            443,
+            Some("a.example.com".into()),
+            TransportProtocol::Tcp,
+        );
+        let other = (key.0, key.1, Some("b.example.com".into()), key.3);
+        let mut state = State::default();
+        state
+            .ensure(&router.interfaces(), key.clone(), router.spec(1))
+            .await;
+        assert!(state.stale.contains(&key));
+        assert!(!state.footprints.peek(|owned| owned[&key].fallback));
+        let calls = router.mapping_requests_through_barrier().await;
+        state
+            .ensure(&router.interfaces(), other.clone(), router.spec(1))
+            .await;
+        assert!(!state.active.contains_key(&other));
+        assert_eq!(router.mapping_requests_through_barrier().await, calls);
+        router.reject_delete.store(false, Ordering::SeqCst);
+        state.drain().await.unwrap();
+        router.finish().await;
+    }
+
+    #[tokio::test]
+    async fn occupied_candidate_does_not_suppress_independent_gateway() {
+        use std::sync::atomic::Ordering;
+        for (count, hostname) in [(1, None), (4, None), (1, Some("a.example.com".to_owned()))] {
+            let occupied = RouterFixture::new(false, 0, None, true).await;
+            let free = RouterFixture::new(false, 0, None, true).await;
+            let key = (
+                "127.0.0.2".parse().unwrap(),
+                4000,
+                hostname.clone(),
+                TransportProtocol::Tcp,
+            );
+            let other = ("127.0.0.3".parse().unwrap(), key.1, hostname, key.3);
+            let mut owner = State::default();
+            owner
+                .ensure(&occupied.interfaces(), key, occupied.spec(count))
+                .await;
+            let mut next = State {
+                footprints: owner.footprints.clone(),
+                ..Default::default()
+            };
+            let mut requested = occupied.spec(count);
+            requested.gateways.push((free.ip, None));
+            let calls = occupied.mapping_requests_through_barrier().await;
+            next.ensure(&occupied.interfaces(), other.clone(), requested)
+                .await;
+            assert!(next.active.contains_key(&other));
+            assert_eq!(
+                next.footprints.peek(|owned| owned[&other].gateway.0),
+                free.ip
+            );
+            assert_eq!(occupied.mapping_requests_through_barrier().await, calls);
+            occupied.reject_delete.store(false, Ordering::SeqCst);
+            free.reject_delete.store(false, Ordering::SeqCst);
+            owner.drain().await.unwrap();
+            next.drain().await.unwrap();
+            occupied.finish().await;
+            free.finish().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn oversized_initial_and_renewed_grants_are_cleanup_only_on_conflict() {
+        use std::sync::atomic::Ordering;
+        for renew in [false, true] {
+            let router = RouterFixture::new(false, 0, Some(if renew { 2 } else { 8 }), true).await;
+            let fallback = RouterFixture::new(false, 0, None, true).await;
+            let owner_key = (
+                "127.0.0.3".parse().unwrap(),
+                4005,
+                None,
+                TransportProtocol::Tcp,
+            );
+            let key = (
+                "127.0.0.2".parse().unwrap(),
+                4000,
+                None,
+                TransportProtocol::Tcp,
+            );
+            let mut owner = State::default();
+            owner
+                .ensure(&router.interfaces(), owner_key.clone(), router.spec(1))
+                .await;
+            let mut next = State {
+                footprints: owner.footprints.clone(),
+                ..Default::default()
+            };
+            let mut requested = router.spec(2);
+            requested.gateways.push((fallback.ip, None));
+            if renew {
+                router.lifetime.store(1, Ordering::SeqCst);
+            }
+            next.ensure(&router.interfaces(), key.clone(), requested.clone())
+                .await;
+            if renew {
+                assert!(!next.stale.contains(&key));
+                router.granted_count.mutate(|count| *count = Some(8));
+                tokio::time::sleep(Duration::from_millis(1100)).await;
+                next.refresh(&router.interfaces()).await;
+            }
+            assert!(next.stale.contains(&key));
+            assert!(next.active.contains_key(&key));
+            assert_eq!(next.footprints.peek(|owned| owned[&key].count), 8);
+            assert_eq!(
+                external_ip_of(&next.desired, &next.active, &next.stale, 4000),
+                None
+            );
+            assert_eq!(
+                external_ip_of(&owner.desired, &owner.active, &owner.stale, 4005),
+                Some("1.2.3.4".parse().unwrap())
+            );
+            requested.gateways = vec![(fallback.ip, None)];
+            next.ensure(&router.interfaces(), key.clone(), requested)
+                .await;
+            assert!(fallback.requests.peek(|requests| requests.is_empty()));
+            router.reject_delete.store(false, Ordering::SeqCst);
+            next.remove(key.clone()).await.unwrap();
+            assert!(!next.footprints.peek(|owned| owned.contains_key(&key)));
+            assert!(
+                owner
+                    .footprints
+                    .peek(|owned| owned.contains_key(&owner_key))
+            );
+            router.requests.peek(|requests| {
+                let first = requests
+                    .iter()
+                    .find(|r| {
+                        r[1] == 1 && u16::from_be_bytes(r[42..44].try_into().unwrap()) == 4000
+                    })
+                    .unwrap();
+                let maps = requests
+                    .iter()
+                    .filter(|r| r[1] == 1 && r[24..36] == first[24..36])
+                    .collect::<Vec<_>>();
+                assert!(maps.iter().any(|r| r[4..8] == [0; 4]));
+                for request in maps {
+                    assert_eq!(&request[24..42], &first[24..42]);
+                    assert_eq!(&request[60..], &first[60..]);
+                }
+            });
+            owner.drain().await.unwrap();
+            router.finish().await;
+            fallback.finish().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn terminal_drain_retries_failed_delete_under_original_deadline() {
+        use std::sync::atomic::Ordering;
+        let router = RouterFixture::new(false, 0, None, true).await;
+        let key = (
+            "127.0.0.2".parse().unwrap(),
+            443,
+            None,
+            TransportProtocol::Tcp,
+        );
+        let mut state = State::default();
+        state
+            .ensure(&router.interfaces(), key.clone(), router.spec(1))
+            .await;
+        let footprints = state.footprints.clone();
+        let controller = PortMapController::new(router.interfaces());
+        let (commands, recv) = mpsc::unbounded_channel();
+        let (drain, drain_recv) = mpsc::unbounded_channel();
+        let task: NonDetachingJoinHandle<_> =
+            tokio::spawn(run_shard(router.interfaces(), state, recv, drain_recv)).into();
+        let abort = task.abort_handle();
+        controller.state.mutate(|state| {
+            let ControllerState::Accepting(shards) = state else {
+                unreachable!()
+            };
+            shards.insert(
+                key.0,
+                Shard {
+                    commands,
+                    drain,
+                    task,
+                },
+            );
+        });
+        let deadline = Instant::now() + RETRY_INTERVAL + Duration::from_secs(5);
+        let first_controller = controller.clone();
+        let first = tokio::spawn(async move { first_controller.drain_until(deadline).await });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !router
+                .requests
+                .peek(|requests| requests.iter().any(|r| r[1] == 1 && r[4..8] == [0; 4]))
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        router.received_through_barrier().await;
+        assert!(footprints.peek(|owned| owned.contains_key(&key)));
+        first.abort();
+        assert!(first.await.unwrap_err().is_cancelled());
+        router.reject_delete.store(false, Ordering::SeqCst);
+        controller
+            .drain_until(deadline + Duration::from_secs(60))
+            .await
+            .unwrap();
+        assert!(Instant::now() < deadline);
+        assert!(abort.is_finished());
+        assert!(footprints.peek(|owned| owned.is_empty()));
+        assert_eq!(
+            router.requests.peek(|requests| requests
+                .iter()
+                .filter(|r| r[1] == 1 && r[4..8] == [0; 4])
+                .count()),
+            2
+        );
+        controller.drain().await.unwrap();
+        router.finish().await;
     }
 
     #[tokio::test]

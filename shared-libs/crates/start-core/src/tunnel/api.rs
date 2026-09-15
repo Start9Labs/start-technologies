@@ -1586,8 +1586,8 @@ pub async fn set_forward_enabled(
                 ctx.active_forwards.mutate(|m| {
                     m.insert(source, rc);
                 });
-            } else if let Some(rc) = ctx.active_forwards.mutate(|m| m.remove(&source)) {
-                drop(rc);
+            } else {
+                drop(ctx.active_forwards.mutate(|m| m.remove(&source)));
                 ctx.forward.gc().await?;
             }
         }

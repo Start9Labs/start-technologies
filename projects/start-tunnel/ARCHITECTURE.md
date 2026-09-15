@@ -97,8 +97,8 @@ The `start-tunnel` CLI builds an `rpc-toolkit` `CliApp` against the same
 
 Forwarding owners retain exact applied nft footprints across failed withdrawals.
 Replacement waits for retirement of the previous mapping. The IPv4 API serializes
-mutation through its state commit; failed IPv6 removal retains the database entry
-and lease for a same-key retry.
+mutation through its state commit; failed IPv4 DNAT or IPv6 pinhole removal
+retains the database entry and lease for a same-key retry.
 
 The ignored API regression test and its disposable-VM runner are documented in
 [`tests/forwarding-vm/README.md`](../../shared-libs/crates/start-core/tests/forwarding-vm/README.md).

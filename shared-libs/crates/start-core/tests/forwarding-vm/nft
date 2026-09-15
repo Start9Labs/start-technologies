@@ -13,6 +13,9 @@ script = sys.stdin.read() if args == ['-f', '-'] else None
 with (root / 'transactions.jsonl').open('a') as log:
     fcntl.flock(log, fcntl.LOCK_EX)
     log.write(json.dumps({'args': args, 'stdin': script}) + '\n')
+if script and 'add rule ' in script and (root / 'fail-add').exists():
+    print('injected nft add failure: Operation not permitted', file=sys.stderr)
+    sys.exit(1)
 if script and 'delete rule ' in script and (root / 'fail-delete').exists():
     print('injected nft delete failure: Operation not permitted', file=sys.stderr)
     sys.exit(1)

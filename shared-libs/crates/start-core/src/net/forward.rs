@@ -190,6 +190,8 @@ struct ForwardMapping {
     count: u16,
     target_prefix: u8,
     src_filter: Option<IpNet>,
+    // Unconfirmed identities must be removed before another add.
+    confirmed: bool,
     rc: Weak<()>,
 }
 
@@ -218,6 +220,8 @@ struct Ipv6ForwardSpec {
 struct Ipv6ForwardMapping {
     desired: Ipv6ForwardSpec,
     applied: Option<Ipv6ForwardSpec>,
+    // Unconfirmed identities must be removed before another add.
+    confirmed: bool,
     rc: Weak<()>,
 }
 
@@ -231,7 +235,7 @@ impl Ipv6ForwardMapping {
     fn next_operation(&self) -> Option<Ipv6ForwardOperation> {
         let live = self.rc.strong_count() > 0;
         match &self.applied {
-            Some(applied) if !live || &self.desired != applied => {
+            Some(applied) if !self.confirmed || !live || &self.desired != applied => {
                 Some(Ipv6ForwardOperation::Remove(applied.clone()))
             }
             None if live => Some(Ipv6ForwardOperation::Add(self.desired.clone())),
@@ -240,20 +244,19 @@ impl Ipv6ForwardMapping {
     }
 
     fn operation_started(&mut self, operation: &Ipv6ForwardOperation) {
+        self.confirmed = false;
         if let Ipv6ForwardOperation::Add(spec) = operation {
             self.applied = Some(spec.clone());
         }
     }
 
-    fn operation_failed(&mut self, operation: &Ipv6ForwardOperation) {
-        if matches!(operation, Ipv6ForwardOperation::Add(_)) {
-            self.applied = None;
-        }
-    }
-
     fn operation_succeeded(&mut self, operation: Ipv6ForwardOperation) {
-        if matches!(operation, Ipv6ForwardOperation::Remove(_)) {
-            self.applied = None;
+        match operation {
+            Ipv6ForwardOperation::Add(_) => self.confirmed = true,
+            Ipv6ForwardOperation::Remove(_) => {
+                self.applied = None;
+                self.confirmed = false;
+            }
         }
     }
 }
@@ -310,7 +313,9 @@ impl PortForwardState {
             self.remove_forward(key).await?;
         }
         if let Some(existing) = self.mappings.get_mut(&source) {
-            if existing.matches(target, count, target_prefix, src_filter.as_ref()) {
+            if existing.confirmed
+                && existing.matches(target, count, target_prefix, src_filter.as_ref())
+            {
                 if let Some(existing_rc) = existing.rc.upgrade() {
                     return Ok(existing_rc);
                 } else {
@@ -323,8 +328,6 @@ impl PortForwardState {
             }
         }
 
-        let rc = Arc::new(());
-        forward(source, target, count, target_prefix, src_filter.as_ref()).await?;
         self.mappings.insert(
             source,
             ForwardMapping {
@@ -333,9 +336,15 @@ impl PortForwardState {
                 count,
                 target_prefix,
                 src_filter,
-                rc: Arc::downgrade(&rc),
+                confirmed: false,
+                rc: Weak::new(),
             },
         );
+        forward(source, target, count, target_prefix, src_filter.as_ref()).await?;
+        let rc = Arc::new(());
+        let mapping = self.mappings.get_mut(&source).unwrap();
+        mapping.confirmed = true;
+        mapping.rc = Arc::downgrade(&rc);
 
         Ok(rc)
     }
@@ -369,9 +378,10 @@ impl PortForwardState {
     }
 
     async fn remove_forward(&mut self, source: SocketAddrV4) -> Result<(), Error> {
-        let Some(mapping) = self.mappings.get(&source) else {
+        let Some(mapping) = self.mappings.get_mut(&source) else {
             return Ok(());
         };
+        mapping.confirmed = false;
         unforward(
             mapping.source,
             mapping.target,
@@ -387,7 +397,7 @@ impl PortForwardState {
     fn dump(&self) -> BTreeMap<SocketAddrV4, ForwardMapping> {
         self.mappings
             .iter()
-            .filter(|(_, mapping)| mapping.rc.strong_count() > 0)
+            .filter(|(_, mapping)| mapping.confirmed && mapping.rc.strong_count() > 0)
             .map(|(source, mapping)| (*source, mapping.clone()))
             .collect()
     }
@@ -1522,6 +1532,7 @@ impl InterfaceForwardState {
                 entry.insert(Ipv6ForwardMapping {
                     desired: spec,
                     applied: None,
+                    confirmed: false,
                     rc: Arc::downgrade(&rc),
                 });
             }
@@ -1560,7 +1571,6 @@ impl InterfaceForwardState {
                 }
             };
             if let Err(error) = result {
-                mapping.operation_failed(&operation);
                 return Err(error);
             }
             if matches!(&operation, Ipv6ForwardOperation::Remove(spec) if spec.src_filter.is_none())
@@ -1569,10 +1579,11 @@ impl InterfaceForwardState {
             }
             mapping.operation_succeeded(operation);
         }
-        if mapping
-            .applied
-            .as_ref()
-            .is_some_and(|spec| spec.src_filter.is_none())
+        if mapping.confirmed
+            && mapping
+                .applied
+                .as_ref()
+                .is_some_and(|spec| spec.src_filter.is_none())
         {
             self.pmap.ensure(
                 IpAddr::V6(*source.ip()),
@@ -1942,7 +1953,13 @@ impl InterfacePortForwardController {
                             join_forward_actor(thread, recv, deadline),
                             nested.drain_until(deadline)
                         );
-                        outer.and(inner).map_err(Arc::new)
+                        combine_drain_results(
+                            outer,
+                            inner,
+                            "interface forwarding",
+                            "IPv4 forwarding",
+                        )
+                        .map_err(Arc::new)
                     });
                     async move { owner.await.map_err(|e| Arc::new(err_has_exited(e)))? }
                         .boxed()
@@ -2004,6 +2021,17 @@ pub(crate) async fn unforward6(
 #[cfg(test)]
 tokio::task_local! {
     static FORWARD_TEST_CALLS: std::cell::RefCell<(Vec<(bool, SocketAddrV4, u16)>, bool)>;
+    static FORWARD_TEST_PROGRAM: (std::path::PathBuf, Duration);
+}
+
+#[cfg(test)]
+fn configure_forward_test_program(command: &mut Command) -> Duration {
+    FORWARD_TEST_PROGRAM
+        .try_with(|(program, timeout)| {
+            *command = Command::new(program);
+            *timeout
+        })
+        .unwrap_or(FORWARD_SCRIPT_TIMEOUT)
 }
 
 async fn invoke_forward(
@@ -2030,6 +2058,10 @@ async fn invoke_forward(
         return result;
     }
     let mut cmd = Command::new("/usr/lib/startos/scripts/forward-port");
+    #[cfg(test)]
+    let timeout = configure_forward_test_program(&mut cmd);
+    #[cfg(not(test))]
+    let timeout = FORWARD_SCRIPT_TIMEOUT;
     cmd.env("sip", source.ip().to_string())
         .env("dip", target.ip().to_string())
         .env("dprefix", target_prefix.to_string())
@@ -2043,7 +2075,7 @@ async fn invoke_forward(
         cmd.env("src_subnet", subnet.to_string());
     }
     cmd.kill_process_group_on_drop()
-        .timeout(Some(FORWARD_SCRIPT_TIMEOUT))
+        .timeout(Some(timeout))
         .invoke(ErrorKind::Network)
         .await?;
     Ok(())
@@ -2057,6 +2089,10 @@ async fn invoke_forward6(
     undo: bool,
 ) -> Result<(), Error> {
     let mut cmd = Command::new("/usr/lib/startos/scripts/forward-port6");
+    #[cfg(test)]
+    let timeout = configure_forward_test_program(&mut cmd);
+    #[cfg(not(test))]
+    let timeout = FORWARD_SCRIPT_TIMEOUT;
     cmd.env("sip", source.ip().to_string())
         .env("dip", target.ip().to_string())
         .env("dprefix", target_prefix.to_string())
@@ -2072,7 +2108,7 @@ async fn invoke_forward6(
         cmd.env("src_subnet", subnet.to_string());
     }
     cmd.kill_process_group_on_drop()
-        .timeout(Some(FORWARD_SCRIPT_TIMEOUT))
+        .timeout(Some(timeout))
         .invoke(ErrorKind::Network)
         .await?;
     Ok(())
@@ -2083,12 +2119,22 @@ where
     F: Future<Output = Result<(), Error>>,
     P: Future<Output = Result<(), Error>>,
 {
-    match tokio::join!(forward, port_map) {
+    let (forward, port_map) = tokio::join!(forward, port_map);
+    combine_drain_results(forward, port_map, "interface forwarding", "port mapping")
+}
+
+fn combine_drain_results(
+    first: Result<(), Error>,
+    second: Result<(), Error>,
+    first_context: &str,
+    second_context: &str,
+) -> Result<(), Error> {
+    match (first, second) {
         (Ok(()), Ok(())) => Ok(()),
         (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
         (Err(forward_error), Err(port_map_error)) => Err(Error::new(
             eyre!(
-                "forwarding drains failed: interface forwarding: {forward_error:#}; port mapping: {port_map_error:#}"
+                "forwarding drains failed: {first_context}: {forward_error:#}; {second_context}: {port_map_error:#}"
             ),
             ErrorKind::Network,
         )),
@@ -2098,6 +2144,275 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct ForwardScriptFixture {
+        dir: std::path::PathBuf,
+    }
+
+    impl ForwardScriptFixture {
+        fn new(mode: &str) -> Self {
+            use std::os::unix::fs::PermissionsExt;
+
+            let dir =
+                std::env::temp_dir().join(format!("forward-outcome-{}", crate::util::new_guid()));
+            std::fs::create_dir(&dir).unwrap();
+            let program = dir.join("forward");
+            std::fs::write(
+                &program,
+                r#"#!/bin/sh
+cd "${0%/*}" || exit 1
+identity="$sip:$sport+$count -> $dip/$dprefix:$dport $src_subnet"
+if [ "$UNDO" = 1 ]; then
+    echo remove >> calls
+    [ ! -f block-remove ] || exit 1
+    if [ -f rule ]; then
+        [ "$(cat rule)" = "$identity" ] || exit 2
+        rm rule
+    fi
+else
+    echo add >> calls
+    [ ! -f rule ] || exit 3
+    printf '%s' "$identity" > rule
+    case "$(cat mode)" in
+        fail) exit 1 ;;
+        hang) sleep 60 ;;
+    esac
+fi
+"#,
+            )
+            .unwrap();
+            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let fixture = Self { dir };
+            fixture.mode(mode);
+            fixture.block_removal(true);
+            fixture
+        }
+
+        fn mode(&self, mode: &str) {
+            std::fs::write(self.dir.join("mode"), mode).unwrap();
+        }
+
+        fn block_removal(&self, block: bool) {
+            if block {
+                std::fs::write(self.dir.join("block-remove"), "").unwrap();
+            } else {
+                std::fs::remove_file(self.dir.join("block-remove")).unwrap();
+            }
+        }
+
+        fn calls(&self) -> String {
+            std::fs::read_to_string(self.dir.join("calls")).unwrap()
+        }
+
+        fn program(&self) -> (std::path::PathBuf, Duration) {
+            (self.dir.join("forward"), Duration::from_secs(3))
+        }
+    }
+
+    impl Drop for ForwardScriptFixture {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.dir).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn uncertain_ipv4_add_blocks_reuse_and_overlap_until_removed() {
+        for mode in ["fail", "hang"] {
+            let fixture = ForwardScriptFixture::new(mode);
+            FORWARD_TEST_PROGRAM
+                .scope(fixture.program(), async {
+                    let mut state = PortForwardState::default();
+                    let source = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 40000);
+                    let target = SocketAddrV4::new(Ipv4Addr::new(10, 0, 3, 2), 50000);
+                    let error = state
+                        .add_forward(source, target, 10, 24, None)
+                        .await
+                        .unwrap_err();
+                    let mapping = &state.mappings[&source];
+                    assert!(!mapping.confirmed);
+                    assert_eq!(mapping.rc.strong_count(), 0);
+                    assert!(state.dump().is_empty());
+                    assert!(fixture.dir.join("rule").exists(), "mode={mode}: {error:?}");
+                    fixture.mode("success");
+                    assert!(
+                        state
+                            .add_forward(source, target, 10, 24, None)
+                            .await
+                            .is_err()
+                    );
+                    let overlap = SocketAddrV4::new(*source.ip(), 40009);
+                    assert!(
+                        state
+                            .add_forward(overlap, target, 2, 24, None)
+                            .await
+                            .is_err()
+                    );
+                    assert!(state.gc().await.is_err());
+                    assert_eq!(fixture.calls(), "add\nremove\nremove\nremove\n");
+                    assert_eq!(state.mappings.len(), 1);
+                    fixture.block_removal(false);
+                    let lease = state
+                        .add_forward(overlap, target, 2, 24, None)
+                        .await
+                        .unwrap();
+                    let shared = state
+                        .add_forward(overlap, target, 2, 24, None)
+                        .await
+                        .unwrap();
+                    assert!(Arc::ptr_eq(&lease, &shared));
+                    assert!(state.mappings[&overlap].confirmed);
+                    assert_eq!(
+                        fixture.calls(),
+                        "add\nremove\nremove\nremove\nremove\nadd\n"
+                    );
+                    state.drain().await.unwrap();
+                    assert!(state.mappings.is_empty());
+                    assert!(!fixture.dir.join("rule").exists());
+
+                    fixture.mode(mode);
+                    assert!(
+                        state
+                            .add_forward(source, target, 10, 24, None)
+                            .await
+                            .is_err()
+                    );
+                    assert!(fixture.dir.join("rule").exists());
+                    state.drain().await.unwrap();
+                    assert!(state.mappings.is_empty());
+                    assert!(!fixture.dir.join("rule").exists());
+                })
+                .await;
+        }
+    }
+
+    #[tokio::test]
+    async fn invalid_ipv4_ranges_reserve_no_cleanup_identity() {
+        FORWARD_TEST_CALLS
+            .scope(std::cell::RefCell::new((Vec::new(), false)), async {
+                let mut state = PortForwardState::default();
+                let source = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 65535);
+                let target = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 40000);
+                for (source, target, count) in [
+                    (source, target, 0),
+                    (source, target, 2),
+                    (target, source, 2),
+                ] {
+                    assert!(
+                        state
+                            .add_forward(source, target, count, 24, None)
+                            .await
+                            .is_err()
+                    );
+                }
+                assert!(state.mappings.is_empty());
+                state.drain().await.unwrap();
+                FORWARD_TEST_CALLS.with(|calls| assert!(calls.borrow().0.is_empty()));
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn uncertain_ipv6_add_retains_identity_across_drop_replacement_and_drain() {
+        for mode in ["fail", "hang"] {
+            let fixture = ForwardScriptFixture::new(mode);
+            FORWARD_TEST_PROGRAM
+                .scope(fixture.program(), async {
+                    let mut state = InterfaceForwardState::new(
+                        PortForwardController::spawn(|| async { Ok(()) }),
+                        PortMapController::new(Watch::new(OrdMap::new())),
+                    );
+                    let source = SocketAddrV6::new("2001:db8::2".parse().unwrap(), 40000, 0, 0);
+                    let spec = Ipv6ForwardSpec {
+                        src_filter: Some("2001:db8::/64".parse().unwrap()),
+                        ..ipv6_spec()
+                    };
+                    let lease = state.add_forward6(source, spec.clone());
+                    assert!(
+                        state
+                            .reconcile_forward6(source, &OrdMap::new())
+                            .await
+                            .is_err()
+                    );
+                    assert!(!state.ipv6[&source].confirmed);
+                    assert_eq!(state.ipv6[&source].applied, Some(spec.clone()));
+                    assert!(fixture.dir.join("rule").exists());
+                    fixture.mode("success");
+                    assert!(
+                        state
+                            .reconcile_forward6(source, &OrdMap::new())
+                            .await
+                            .is_err()
+                    );
+                    drop(lease);
+                    assert!(state.reconcile_forwards6(&OrdMap::new()).await.is_err());
+                    let replacement = Ipv6ForwardSpec {
+                        target_prefix: 80,
+                        ..spec.clone()
+                    };
+                    let lease = state.add_forward6(source, replacement.clone());
+                    assert!(
+                        state
+                            .reconcile_forward6(source, &OrdMap::new())
+                            .await
+                            .is_err()
+                    );
+                    assert_eq!(state.ipv6[&source].desired, replacement.clone());
+                    assert_eq!(state.ipv6[&source].applied, Some(spec.clone()));
+                    assert_eq!(fixture.calls(), "add\nremove\nremove\nremove\n");
+                    fixture.block_removal(false);
+                    state
+                        .reconcile_forward6(source, &OrdMap::new())
+                        .await
+                        .unwrap();
+                    assert!(state.ipv6[&source].confirmed);
+                    assert_eq!(state.ipv6[&source].applied, Some(replacement));
+                    assert_eq!(
+                        fixture.calls(),
+                        "add\nremove\nremove\nremove\nremove\nadd\n"
+                    );
+                    state.drain().await.unwrap();
+                    assert!(state.ipv6.is_empty());
+                    assert!(!fixture.dir.join("rule").exists());
+                    drop(lease);
+
+                    fixture.mode(mode);
+                    let _lease = state.add_forward6(source, spec);
+                    assert!(
+                        state
+                            .reconcile_forward6(source, &OrdMap::new())
+                            .await
+                            .is_err()
+                    );
+                    state.drain().await.unwrap();
+                    assert!(state.ipv6.is_empty());
+                    assert!(!fixture.dir.join("rule").exists());
+                    state.port_forward.drain().await.unwrap();
+                    state.pmap.drain().await.unwrap();
+                })
+                .await;
+        }
+    }
+
+    #[test]
+    fn interface_drain_preserves_both_contextual_errors() {
+        let error = combine_drain_results(
+            Err(Error::new(eyre!("outer failed"), ErrorKind::Network)),
+            Err(Error::new(eyre!("inner failed"), ErrorKind::Network)),
+            "interface forwarding",
+            "IPv4 forwarding",
+        )
+        .unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains(&format!(
+            "interface forwarding: {}: outer failed",
+            ErrorKind::Network
+        )));
+        assert!(message.contains(&format!(
+            "IPv4 forwarding: {}: inner failed",
+            ErrorKind::Network
+        )));
+        assert!(!message.contains("port mapping"));
+    }
 
     #[tokio::test]
     async fn overlapping_ranges_retire_dead_rules_before_installing() {
@@ -2389,6 +2704,7 @@ mod tests {
         let mut mapping = Ipv6ForwardMapping {
             desired: original.clone(),
             applied: None,
+            confirmed: false,
             rc: Arc::downgrade(&lease),
         };
 
@@ -2411,20 +2727,24 @@ mod tests {
     }
 
     #[test]
-    fn failed_ipv6_add_clears_provisional_applied_state() {
+    fn failed_ipv6_add_retains_unconfirmed_identity_until_removed() {
         let lease = Arc::new(());
         let spec = ipv6_spec();
         let mut mapping = Ipv6ForwardMapping {
             desired: spec.clone(),
             applied: None,
+            confirmed: false,
             rc: Arc::downgrade(&lease),
         };
         let operation = Ipv6ForwardOperation::Add(spec.clone());
 
         mapping.operation_started(&operation);
         assert_eq!(mapping.applied, Some(spec.clone()));
-        mapping.operation_failed(&operation);
-
+        assert!(!mapping.confirmed);
+        let remove = Ipv6ForwardOperation::Remove(spec.clone());
+        assert_eq!(mapping.next_operation(), Some(remove.clone()));
+        mapping.operation_started(&remove);
+        mapping.operation_succeeded(remove);
         assert_eq!(mapping.applied, None);
         assert_eq!(
             mapping.next_operation(),
@@ -2459,6 +2779,7 @@ mod tests {
         let mapping = Ipv6ForwardMapping {
             desired: spec.clone(),
             applied: Some(spec),
+            confirmed: true,
             rc: Arc::downgrade(&lease),
         };
 
@@ -2504,6 +2825,7 @@ mod tests {
                 count: 1,
                 target_prefix: 24,
                 src_filter: None,
+                confirmed: true,
                 rc: Arc::downgrade(&lease),
             },
         )]);
@@ -2520,6 +2842,7 @@ mod tests {
         let mut mapping = Ipv6ForwardMapping {
             desired: spec.clone(),
             applied: Some(spec.clone()),
+            confirmed: true,
             rc: Arc::downgrade(&lease),
         };
         assert_eq!(mapping.next_operation(), None);
@@ -2542,6 +2865,7 @@ mod tests {
             count: 1,
             target_prefix: 24,
             src_filter: None,
+            confirmed: true,
             rc: Weak::new(),
         };
 
@@ -2697,12 +3021,14 @@ mod tests {
         let mut mapping = Ipv6ForwardMapping {
             desired: spec.clone(),
             applied: Some(spec.clone()),
+            confirmed: true,
             rc: Weak::new(),
         };
         let operation = Ipv6ForwardOperation::Remove(spec.clone());
 
-        mapping.operation_failed(&operation);
+        mapping.operation_started(&operation);
 
+        assert!(!mapping.confirmed);
         assert_eq!(mapping.applied, Some(spec));
         assert_eq!(mapping.next_operation(), Some(operation.clone()));
         mapping.operation_succeeded(operation);

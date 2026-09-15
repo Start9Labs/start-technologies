@@ -45,8 +45,8 @@ Disabling and re-enabling a port range preserves its full count and the offset
 between external and internal ports. Repeating the same toggle applies the same
 configuration.
 
-If removing an IPv6 pinhole reports an error, its entry and lease remain available
-for retry. Check the daemon logs, correct the reported firewall problem, and retry
+If removing an IPv4 forward or IPv6 pinhole reports an error, its entry and lease
+remain available for retry. Check the daemon logs, correct the reported firewall problem, and retry
 the removal. Treat the port as potentially reachable until removal succeeds.
 
 Graceful shutdown stops forwarding requests and waits for the cleanup workers to
