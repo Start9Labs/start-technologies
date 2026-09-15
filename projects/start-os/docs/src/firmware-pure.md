@@ -15,12 +15,10 @@ Generally, you do not need to manually flash your device using this guide, as th
 
 1. Connect a monitor and keyboard to your server using two of the USB3 (blue) ports.
 
-1. Download the right firmware:
-   - Models without WiFi - [Download Standard](https://source.puri.sm/firmware/releases/-/blob/75631ad6dcf7e6ee73e06a517ac7dc4e017518b7/librem_mini_v2/custom/pureboot-librem_mini_v2-basic_usb_autoboot-Release-29.zip)
-   - Models with WiFi - [Download Standard](https://source.puri.sm/firmware/releases/-/blob/75631ad6dcf7e6ee73e06a517ac7dc4e017518b7/librem_mini_v2/custom/pureboot-librem_mini_v2-basic_usb_autoboot-Release-29.zip) | [Download Jailed WiFi](https://source.puri.sm/firmware/releases/-/blob/75631ad6dcf7e6ee73e06a517ac7dc4e017518b7/librem_mini_v2/custom/pureboot-librem_mini_v2-basic_usb_autoboot_blob_jail-Release-29.zip)
+1. Download the firmware: [pureboot-librem_mini_v2-basic_usb_autoboot-start9-30.1.2.zip](https://github.com/Start9Labs/pureboot/releases/download/start9-30.1.2/pureboot-librem_mini_v2-basic_usb_autoboot-start9-30.1.2.zip), from the [Start9 PureBoot releases](https://github.com/Start9Labs/pureboot/releases).
 
    > [!NOTE]
-   > The Jailed WiFi variation deactivates WiFi at the firmware level so it can never be turned on
+   > This is the same image StartOS installs automatically. It boots without a display or keyboard, boots a StartOS installer from USB when one is present, powers the server back on after a power loss, sets the processor to favor efficiency over peak speed, and on models with an Intel AX200 WiFi card supplies that card's firmware in a jail so the card works with the WiFi-free StartOS image.
 
 1. Copy or move the zip file to the USB stick.
 
