@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
-use std::net::{IpAddr, Ipv4Addr, SocketAddrV4, SocketAddrV6};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
@@ -1134,6 +1134,10 @@ async fn unforward(
 /// The lxcbr0 IPv6 bridge subnet (a ULA), assigned by lxc-net (see
 /// `debian/postinst`). Containers get a SLAAC address in it.
 pub(crate) const START9_BRIDGE_V6_SUBNET: &str = "fd00:3::/64";
+
+/// The host's own address on the lxcbr0 bridge, pinned in `debian/postinst`
+/// beside the subnet above. The IPv6 counterpart of [`crate::HOST_IP`].
+pub(crate) const START9_BRIDGE_V6_ADDR: Ipv6Addr = Ipv6Addr::new(0xfd00, 3, 0, 0, 0, 0, 0, 1);
 
 /// IPv6 counterpart of [`forward`]: DNAT `source` (a host GUA:port) to `target`
 /// (the container's ULA:port) via the `forward-port6` script. `src_filter`
