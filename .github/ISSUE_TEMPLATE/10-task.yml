@@ -1,0 +1,64 @@
+name: 🧰 Task
+description: A specific piece of work that is neither a defect nor a feature request — a chore, a cleanup, a follow-up deferred from a review.
+type: Task
+body:
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites
+      options:
+        - label: I searched [existing issues](https://github.com/Start9Labs/start-technologies/issues?q=is%3Aissue) and this is not already tracked.
+          required: true
+
+  - type: dropdown
+    id: project
+    attributes:
+      label: Project
+      description: |
+        Applied as the label automatically.
+
+        - `StartOS` — the OS, its web UI, and the service runtime
+        - `start-cli` — the command-line client
+        - `StartSDK` — the service-packaging SDK
+        - `StartWRT` — the OpenWrt-based router OS
+        - `StartTunnel` — the VPS-hosted virtual private router
+        - `start-registry` — the registry server
+        - `start-docs` — docs.start9.com
+        - `brochure` — marketplace.start9.com
+        - `repo` — build, CI, and release tooling
+
+        The shared Rust and TypeScript libraries (`start-core`, `patch-db`, `exver`) have no label of their own — pick the product the work is most visible in.
+      options:
+        - StartOS
+        - start-cli
+        - StartSDK
+        - StartWRT
+        - StartTunnel
+        - start-registry
+        - start-docs
+        - brochure
+        - repo
+    validations:
+      required: true
+
+  - type: textarea
+    id: work
+    attributes:
+      label: What needs doing
+      description: The work itself, concretely enough that someone else could pick it up. Link the review, PR, or issue it was deferred from.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Affected areas
+      description: If you know the code, name the files or subsystems this touches, and anything it would break or need migrating.
+      placeholder: |
+        `<path/to/file>` — <what would need to change>
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?
+      description: Links, prior art, related issues.
