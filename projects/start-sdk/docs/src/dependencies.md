@@ -164,6 +164,8 @@ const mounts = sdk.Mounts.of().mountVolume({ volumeId: 'main', subpath: null, mo
 })
 ```
 
+The volume has to exist when the container starts: if the dependency is not installed, the mount fails, `main` throws, and the service shows the error alongside its dependency warning. A `subpath` that does not exist yet inside the volume is created for a read-write mount.
+
 ## Init Order
 
 Dependencies are resolved during initialization in this order:

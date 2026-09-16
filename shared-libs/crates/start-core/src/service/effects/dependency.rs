@@ -174,11 +174,21 @@ pub async fn mount(
     }: MountParams,
 ) -> Result<(), Error> {
     let context = context.deref()?;
-    let source = confined_join(
-        &data_dir(DATA_DIR, &package_id, &volume_id),
-        subpath.as_deref().unwrap_or(Path::new("")),
-    )
-    .await?;
+    let volume = data_dir(DATA_DIR, &package_id, &volume_id);
+    if tokio::fs::metadata(&volume).await.is_err() {
+        return Err(Error::new(
+            eyre!(
+                "{}",
+                t!(
+                    "service.effects.dependency.volume-missing",
+                    package = package_id,
+                    volume = volume_id
+                )
+            ),
+            ErrorKind::NotFound,
+        ));
+    }
+    let source = confined_join(&volume, subpath.as_deref().unwrap_or(Path::new(""))).await?;
     let rootfs = context
         .seed
         .persistent_container

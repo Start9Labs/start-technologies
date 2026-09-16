@@ -19,8 +19,9 @@ use crate::prelude::*;
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(4);
 /// Bounds IGD SOAP calls that otherwise have no timeout.
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(5);
-/// `0` requests an indefinite lease; the controller re-asserts periodically.
-const LEASE_DURATION: u32 = 0;
+/// Outlives the controller's refresh interval; a router that grants only
+/// permanent leases gets `0`.
+const LEASE_SECONDS: u32 = 3600;
 const DESCRIPTION: &str = "StartOS";
 
 fn search_options(local_ip: Ipv4Addr) -> SearchOptions {
@@ -50,14 +51,15 @@ pub async fn add_port(
     local_ip: Ipv4Addr,
     internal_port: u16,
 ) -> Result<(), Error> {
-    let call = gateway.add_port(
-        protocol,
-        external_port,
-        SocketAddr::new(IpAddr::V4(local_ip), internal_port),
-        LEASE_DURATION,
-        DESCRIPTION,
-    );
-    match tokio::time::timeout(CONTROL_TIMEOUT, call).await {
+    let local_addr = SocketAddr::new(IpAddr::V4(local_ip), internal_port);
+    let add = |lease| gateway.add_port(protocol, external_port, local_addr, lease, DESCRIPTION);
+    let result = match tokio::time::timeout(CONTROL_TIMEOUT, add(LEASE_SECONDS)).await {
+        Ok(Err(igd_next::AddPortError::OnlyPermanentLeasesSupported)) => {
+            tokio::time::timeout(CONTROL_TIMEOUT, add(0)).await
+        }
+        other => other,
+    };
+    match result {
         Ok(r) => {
             r.map_err(|e| Error::new(eyre!("UPnP AddPortMapping failed: {e}"), ErrorKind::Network))
         }
@@ -89,8 +91,6 @@ pub async fn remove_port(
     }
 }
 
-const HOSTNAME_LEASE_SECONDS: u32 = 3600;
-
 /// Whether `gateway` advertises both Start9 hostname vendor actions.
 pub fn supports_hostname(gateway: &Gateway<Tokio>) -> bool {
     gateway.control_schema.contains_key(ADD_HOSTNAME_ACTION)
@@ -116,7 +116,7 @@ pub(crate) fn add_hostname_body(
 <NewInternalClient>{local_ip}</NewInternalClient>
 <NewEnabled>1</NewEnabled>
 <NewPortMappingDescription>{DESCRIPTION}</NewPortMappingDescription>
-<NewLeaseDuration>{HOSTNAME_LEASE_SECONDS}</NewLeaseDuration>
+<NewLeaseDuration>{LEASE_SECONDS}</NewLeaseDuration>
 <NewHostname>{hostname}</NewHostname>
 </u:{ADD_HOSTNAME_ACTION}>
 </s:Body>

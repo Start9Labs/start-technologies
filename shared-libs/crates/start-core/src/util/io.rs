@@ -749,12 +749,14 @@ fn dir_copy_inner<'a>(
                 let m = e.metadata().await?;
                 let dst_path = dst_path.join(e.file_name());
                 if m.is_file() {
-                    let mut dst_file = create_file(&dst_path).await.with_ctx(|_| {
-                        (
-                            crate::ErrorKind::Filesystem,
-                            format!("create {}", dst_path.display()),
-                        )
-                    })?;
+                    let mut dst_file = create_file_mod(&dst_path, m.mode() & 0o7777)
+                        .await
+                        .with_ctx(|_| {
+                            (
+                                crate::ErrorKind::Filesystem,
+                                format!("create {}", dst_path.display()),
+                            )
+                        })?;
                     let mut rdr = open_file(&src_path).await.with_ctx(|_| {
                         (
                             crate::ErrorKind::Filesystem,
@@ -776,6 +778,7 @@ fn dir_copy_inner<'a>(
                     dst_file.shutdown().await?;
                     dst_file.sync_all().await?;
                     drop(dst_file);
+                    let permissions = m.permissions();
                     let tmp_dst_path = dst_path.clone();
                     tokio::task::spawn_blocking(move || {
                         nix::unistd::chown(
@@ -792,6 +795,15 @@ fn dir_copy_inner<'a>(
                             format!("chown {}", dst_path.display()),
                         )
                     })?;
+                    // Creation and chown can clear source mode bits.
+                    tokio::fs::set_permissions(&dst_path, permissions)
+                        .await
+                        .with_ctx(|_| {
+                            (
+                                crate::ErrorKind::Filesystem,
+                                format!("chmod {}", dst_path.display()),
+                            )
+                        })?;
                 } else if m.is_dir() {
                     dir_copy_inner(src_path, dst_path, excluded, ctr).await?;
                 } else if m.file_type().is_symlink() {
@@ -1922,6 +1934,43 @@ mod test {
                 .kind(),
             std::io::ErrorKind::NotFound
         );
+
+        tokio::fs::remove_dir_all(root).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn dir_copy_preserves_file_modes() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = PathBuf::from(format!(
+            "/tmp/dir-copy-mode-test-{}-{}",
+            std::process::id(),
+            rand::random::<u64>()
+        ));
+        let src = root.join("src");
+        let dst = root.join("dst");
+        let modes = [
+            ("secret", 0o600),
+            ("script", 0o755),
+            ("plain", 0o644),
+            ("umask", 0o666),
+            ("special", 0o6755),
+        ];
+        tokio::fs::create_dir_all(&src).await.unwrap();
+        for (name, mode) in modes {
+            let path = src.join(name);
+            tokio::fs::write(&path, name).await.unwrap();
+            tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode))
+                .await
+                .unwrap();
+        }
+
+        dir_copy(&src, &dst, None).await.unwrap();
+
+        for (name, mode) in modes {
+            let copied = tokio::fs::metadata(dst.join(name)).await.unwrap();
+            assert_eq!(copied.permissions().mode() & 0o7777, mode, "{name}");
+        }
 
         tokio::fs::remove_dir_all(root).await.unwrap();
     }

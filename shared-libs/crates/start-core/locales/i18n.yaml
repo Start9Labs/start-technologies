@@ -2582,6 +2582,12 @@ service.effects.dependency.unknown-dependency-kind:
   es_ES: "tipo de dependencia desconocido %{kind}"
   fr_FR: "type de dépendance inconnu %{kind}"
   pl_PL: "nieznany rodzaj zależności %{kind}"
+service.effects.dependency.volume-missing:
+  en_US: "volume %{volume} of %{package} does not exist — is %{package} installed?"
+  de_DE: "Volume %{volume} von %{package} existiert nicht — ist %{package} installiert?"
+  es_ES: "el volumen %{volume} de %{package} no existe — ¿está instalado %{package}?"
+  fr_FR: "le volume %{volume} de %{package} n'existe pas — %{package} est-il installé ?"
+  pl_PL: "wolumin %{volume} pakietu %{package} nie istnieje — czy %{package} jest zainstalowany?"
 
 # service/service_actor.rs
 service.service-actor.error-synchronizing-state:

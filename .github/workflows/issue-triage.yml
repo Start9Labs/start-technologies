@@ -2,7 +2,7 @@ name: Issue triage
 
 on:
   issues:
-    types: [opened, edited, labeled]
+    types: [opened, edited, labeled, unlabeled, typed, untyped]
 
 permissions:
   issues: write
@@ -15,7 +15,7 @@ jobs:
         with:
           script: |
             // Keys mirror the Project dropdown in .github/ISSUE_TEMPLATE/9-feature-request.yml
-            // and the static `labels:` on each bug form.
+            // and 10-task.yml, and the static `labels:` on each bug form.
             const OWNERS = {
               StartOS: 'dr-bonez',
               'start-cli': 'dr-bonez',
@@ -28,7 +28,10 @@ jobs:
               repo: 'dr-bonez',
             }
             const FEATURE_OWNER = 'MattDHill'
-            const DEFAULT_OWNER = 'dr-bonez'
+            const TRIAGE_OWNER = 'MattDHill'
+            const TYPES = ['Bug', 'Feature', 'Task']
+            const GATE = 'needs-triage'
+            const MARKER = '<!-- issue-triage: needs-triage -->'
 
             const issue = context.payload.issue
             const api = { owner: context.repo.owner, repo: context.repo.repo, issue_number: issue.number }
@@ -48,15 +51,55 @@ jobs:
               core.info(`Labelled ${picked}`)
             }
 
-            if (issue.assignees.length) return
-
             const project = [...labels].find((l) => l in OWNERS)
-            const owner = issue.type?.name === 'Feature' ? FEATURE_OWNER : project && OWNERS[project]
-            const assignee = owner || DEFAULT_OWNER
+            const type = issue.type?.name
+            const assignees = issue.assignees.map((a) => a.login)
 
-            await github.rest.issues.addAssignees({ ...api, assignees: [assignee] })
-            core.info(
-              owner
-                ? `Assigned ${assignee}`
-                : `No owner for labels [${[...labels]}], type ${issue.type?.name} — assigned fallback ${assignee}`,
-            )
+            if (!type || !project) {
+              const missing = [!type && 'an issue type', !project && 'a project label'].filter(Boolean).join(' and ')
+              if (!labels.has(GATE)) {
+                await github.rest.issues.addLabels({ ...api, labels: [GATE] })
+              }
+              const comments = await github.paginate(github.rest.issues.listComments, { ...api, per_page: 100 })
+              if (!comments.some((c) => c.body?.includes(MARKER))) {
+                const fix = [
+                  `gh issue edit ${issue.number} --repo ${api.owner}/${api.repo}`,
+                  !type && `--type <${TYPES.join('|')}>`,
+                  !project && `--add-label <${Object.keys(OWNERS).join('|')}>`,
+                ]
+                  .filter(Boolean)
+                  .join(' ')
+                await github.rest.issues.createComment({
+                  ...api,
+                  body: [
+                    MARKER,
+                    `This issue is missing ${missing}, so it is outside every triage view and cannot be routed to its owner. Set it and \`${GATE}\` lifts itself:`,
+                    '',
+                    '```',
+                    fix,
+                    '```',
+                    '',
+                    'Filing rules, including the body layout: [`AGENTS.md` § Filing issues](https://github.com/' +
+                      `${api.owner}/${api.repo}/blob/master/AGENTS.md#filing-issues).`,
+                  ].join('\n'),
+                })
+              }
+              if (!assignees.length) {
+                await github.rest.issues.addAssignees({ ...api, assignees: [TRIAGE_OWNER] })
+                core.info(`Missing ${missing}; assigned ${TRIAGE_OWNER} for triage`)
+              }
+              return
+            }
+
+            const owner = type === 'Feature' ? FEATURE_OWNER : OWNERS[project]
+            if (labels.has(GATE)) {
+              await github.rest.issues.removeLabel({ ...api, name: GATE })
+              if (assignees.length === 1 && assignees[0] === TRIAGE_OWNER && owner !== TRIAGE_OWNER) {
+                await github.rest.issues.removeAssignees({ ...api, assignees: [TRIAGE_OWNER] })
+                assignees.length = 0
+              }
+            }
+            if (assignees.length) return
+
+            await github.rest.issues.addAssignees({ ...api, assignees: [owner] })
+            core.info(`Assigned ${owner}`)

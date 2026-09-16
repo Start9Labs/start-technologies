@@ -5,6 +5,15 @@ All notable changes to StartTunnel are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1]
+
+### Fixed
+
+- **Port forwards left behind by an earlier run of the daemon are cleared at
+  startup.** After a crash, or a restart during which the tunnel's WAN address
+  changed, a stale forward could keep sending a port to an old address until
+  the next reboot.
+
 ## [1.3.0]
 
 ### Added
