@@ -110,40 +110,6 @@ async fn partition(
     }
 }
 
-async fn get_block_device_size(path: impl AsRef<Path>) -> Result<u64, Error> {
-    let path = path.as_ref();
-    let canonical = tokio::fs::canonicalize(path)
-        .await
-        .with_ctx(|_| (ErrorKind::BlockDevice, path.display().to_string()))?;
-    let device_name = canonical
-        .file_name()
-        .and_then(|s| s.to_str())
-        .ok_or_else(|| {
-            Error::new(
-                eyre!("Invalid block device path: {}", path.display()),
-                ErrorKind::BlockDevice,
-            )
-        })?;
-    let size_path = Path::new("/sys/block").join(device_name).join("size");
-    let sectors: u64 = tokio::fs::read_to_string(&size_path)
-        .await
-        .with_ctx(|_| {
-            (
-                ErrorKind::BlockDevice,
-                format!("reading {}", size_path.display()),
-            )
-        })?
-        .trim()
-        .parse()
-        .map_err(|e| {
-            Error::new(
-                eyre!("Failed to parse block device size: {}", e),
-                ErrorKind::BlockDevice,
-            )
-        })?;
-    Ok(sectors * 512)
-}
-
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
@@ -855,7 +821,7 @@ pub async fn cli_install_os(
         efi,
     }: CliInstallOsParams,
 ) -> Result<OsPartitionInfo, Error> {
-    let capacity = get_block_device_size(&disk).await?;
+    let capacity = crate::disk::util::get_capacity(&disk).await?;
     let partition_table = crate::disk::util::get_partition_table(&disk).await?;
 
     let arch = probe_squashfs_arch(&squashfs).await?;

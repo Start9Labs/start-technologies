@@ -188,15 +188,29 @@ pub async fn get_model<P: AsRef<Path>>(path: P) -> Result<Option<String>, Error>
 
 #[instrument(skip_all)]
 pub async fn get_capacity<P: AsRef<Path>>(path: P) -> Result<u64, Error> {
-    Ok(String::from_utf8(
-        Command::new("blockdev")
-            .arg("--getsize64")
-            .arg(path.as_ref())
-            .invoke(crate::ErrorKind::BlockDevice)
-            .await?,
-    )?
-    .trim()
-    .parse::<u64>()?)
+    let path = path.as_ref();
+    let canonical = tokio::fs::canonicalize(path)
+        .await
+        .with_ctx(|_| (crate::ErrorKind::BlockDevice, path.display().to_string()))?;
+    let name = canonical.file_name().ok_or_else(|| {
+        Error::new(
+            eyre!("invalid block device path: {}", path.display()),
+            crate::ErrorKind::BlockDevice,
+        )
+    })?;
+    let size_path = Path::new("/sys/class/block").join(name).join("size");
+    // Sysfs counts 512-byte sectors whatever the device's logical block size.
+    let sectors: u64 = tokio::fs::read_to_string(&size_path)
+        .await
+        .with_ctx(|_| {
+            (
+                crate::ErrorKind::BlockDevice,
+                size_path.display().to_string(),
+            )
+        })?
+        .trim()
+        .parse()?;
+    Ok(sectors * 512)
 }
 
 #[instrument(skip_all)]
