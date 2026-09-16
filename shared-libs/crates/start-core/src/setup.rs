@@ -577,7 +577,7 @@ async fn cli_install_os(
     let body = if let Some(data_drive) = data_drive {
         imbl_value::json!({
             "osDrive": os_drive,
-            "dataDrive": { "logicalname": data_drive, "wipe": wipe },
+            "dataDrive": { "stablePath": data_drive, "wipe": wipe },
         })
     } else {
         imbl_value::json!({ "osDrive": os_drive })

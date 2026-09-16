@@ -66,7 +66,7 @@ Each service has one or more named volumes for persistent data. Volumes survive 
 
 ### OS Partitions
 
-During setup, StartOS carries each selected drive's `/dev/disk/by-path` handle through installation. This assumes selected drives remain connected until installation completes. Installed systems identify their boot and system partitions by stable partition IDs, so adding, removing, or reordering another disk does not change which partitions StartOS mounts.
+During setup, StartOS carries each selected drive's `/dev/disk/by-path` handle through installation. This assumes selected drives remain connected until installation completes. An installed system's `/etc/fstab` names its boot partitions by partition UUID, so adding, removing, or reordering another disk does not change which partitions StartOS mounts.
 
 ## Networking
 

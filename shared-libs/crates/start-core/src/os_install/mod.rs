@@ -64,55 +64,26 @@ pub fn partition_for(disk: impl AsRef<Path>, idx: u32) -> PathBuf {
 }
 
 fn parse_partuuid(output: &[u8]) -> Option<&str> {
-    let output = std::str::from_utf8(output).ok()?;
-    let partuuid = output
-        .strip_suffix("\r\n")
-        .or_else(|| output.strip_suffix('\n'))
-        .unwrap_or(output);
-    (!partuuid.is_empty() && !partuuid.chars().any(char::is_whitespace)).then_some(partuuid)
-}
-
-fn invalid_partuuid(partition: &Path) -> Error {
-    Error::new(
-        eyre!(t!(
-            "os-install.invalid-partuuid",
-            partition = partition.display()
-        )),
-        ErrorKind::BlockDevice,
-    )
-}
-
-fn fstab_source_from_blkid(
-    partition: &Path,
-    output: Result<Vec<u8>, Error>,
-) -> Result<String, Error> {
-    let output = output.map_err(|cause| {
-        let mut error = invalid_partuuid(partition);
-        error.debug = Some(cause.debug.unwrap_or(cause.source));
-        error
-    })?;
-    let partuuid = parse_partuuid(&output).ok_or_else(|| invalid_partuuid(partition))?;
-    Ok(format!("PARTUUID={partuuid}"))
+    let partuuid = std::str::from_utf8(output).ok()?.trim();
+    (!partuuid.is_empty() && !partuuid.contains(char::is_whitespace)).then_some(partuuid)
 }
 
 async fn fstab_source(partition: &Path) -> Result<String, Error> {
-    fstab_source_from_blkid(
-        partition,
-        Command::new("blkid")
-            .args(["-p", "-s", "PART_ENTRY_UUID", "-o", "value"])
-            .arg(partition)
-            .invoke(ErrorKind::BlockDevice)
-            .await,
-    )
-}
-
-fn render_fstab(boot: &str, efi: Option<&str>, root: &str) -> String {
-    format!(
-        include_str!("fstab.template"),
-        boot = boot,
-        efi = efi.unwrap_or("# N/A"),
-        root = root,
-    )
+    let output = Command::new("blkid")
+        .args(["-p", "-s", "PART_ENTRY_UUID", "-o", "value"])
+        .arg(partition)
+        .invoke(ErrorKind::BlockDevice)
+        .await?;
+    let partuuid = parse_partuuid(&output).ok_or_else(|| {
+        Error::new(
+            eyre!(t!(
+                "os-install.invalid-partuuid",
+                partition = partition.display()
+            )),
+            ErrorKind::BlockDevice,
+        )
+    })?;
+    Ok(format!("PARTUUID={partuuid}"))
 }
 
 async fn partition(
@@ -182,7 +153,6 @@ pub struct InstallOsParams {
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 struct DataDrive {
-    #[serde(alias = "logicalname")]
     #[arg(long = "data-drive", help = "help.arg.data-drive-path")]
     stable_path: PathBuf,
     #[arg(long, help = "help.arg.wipe-drive")]
@@ -203,20 +173,21 @@ enum DataDrivePlan {
     Attach(InternedString),
 }
 
-fn resolve_install_disk<'a>(disks: &'a [DiskInfo], requested: &Path) -> Option<&'a DiskInfo> {
-    disks.iter().find(|disk| disk.stable_path == requested)
+fn unknown_disk(requested: &Path) -> Error {
+    Error::new(
+        eyre!(t!("os-install.unknown-disk", disk = requested.display())),
+        ErrorKind::DiskManagement,
+    )
 }
 
-fn resolve_install_path(disks: &[DiskInfo], requested: &Path) -> Option<PathBuf> {
-    resolve_install_disk(disks, requested)
-        .map(|disk| disk.stable_path.clone())
-        .or_else(|| {
-            disks
+fn is_listed(disks: &[DiskInfo], requested: &Path) -> bool {
+    disks.iter().any(|disk| {
+        disk.stable_path == requested
+            || disk
+                .partitions
                 .iter()
-                .flat_map(|disk| &disk.partitions)
-                .find(|partition| partition.stable_path == requested)
-                .map(|partition| partition.stable_path.clone())
-        })
+                .any(|partition| partition.stable_path == requested)
+    })
 }
 
 /// Resolves preservation before installation mutates disks.
@@ -590,13 +561,16 @@ pub async fn install_os_to(
 
     let boot_source = fstab_source(&part_info.boot).await?;
     let efi_source = match part_info.extra_boot.get("efi") {
-        Some(efi) => Some(fstab_source(efi).await?),
-        None => None,
+        Some(efi) => fstab_source(efi).await?,
+        None => "# N/A".to_owned(),
     };
-    let root_source = fstab_source(&part_info.root).await?;
     tokio::fs::write(
         overlay.path().join("etc/fstab"),
-        render_fstab(&boot_source, efi_source.as_deref(), &root_source),
+        format!(
+            include_str!("fstab.template"),
+            boot = boot_source,
+            efi = efi_source,
+        ),
     )
     .await?;
 
@@ -725,30 +699,17 @@ async fn install_os_inner(
     let os_disk = os_drive
         .as_deref()
         .map(|requested| {
-            resolve_install_disk(&disks, requested).ok_or_else(|| {
-                Error::new(
-                    eyre!(t!("os-install.unknown-disk", disk = requested.display())),
-                    ErrorKind::DiskManagement,
-                )
-            })
+            disks
+                .iter()
+                .find(|disk| disk.stable_path == requested)
+                .ok_or_else(|| unknown_disk(requested))
         })
         .transpose()?;
-    let os_drive = os_disk.map(|disk| disk.stable_path.clone());
-    let data_drive = data_drive
-        .map(|mut data_drive| {
-            data_drive.stable_path = resolve_install_path(&disks, &data_drive.stable_path)
-                .ok_or_else(|| {
-                    Error::new(
-                        eyre!(t!(
-                            "os-install.unknown-disk",
-                            disk = data_drive.stable_path.display()
-                        )),
-                        ErrorKind::DiskManagement,
-                    )
-                })?;
-            Ok::<_, Error>(data_drive)
-        })
-        .transpose()?;
+    if let Some(dd) = &data_drive {
+        if !is_listed(&disks, &dd.stable_path) {
+            return Err(unknown_disk(&dd.stable_path));
+        }
+    }
 
     // Decide the data-drive plan before any disk is written: if "Preserve"
     // can't resolve to an existing pool, fail here — never fall through to
@@ -990,20 +951,6 @@ mod tests {
     }
 
     #[test]
-    fn data_drive_request_uses_stable_path() {
-        let request = serde_json::to_value(preserve("/dev/disk/by-path/test")).unwrap();
-        assert_eq!(request["stablePath"], "/dev/disk/by-path/test");
-        assert!(request.get("logicalname").is_none());
-
-        let legacy: DataDrive = serde_json::from_value(serde_json::json!({
-            "logicalname": "/dev/disk/by-path/legacy",
-            "wipe": false,
-        }))
-        .unwrap();
-        assert_eq!(legacy.stable_path, Path::new("/dev/disk/by-path/legacy"));
-    }
-
-    #[test]
     fn partition_paths_follow_device_namespace() {
         assert_eq!(partition_for("/dev/sda", 2), PathBuf::from("/dev/sda2"));
         assert_eq!(
@@ -1030,24 +977,16 @@ mod tests {
         );
         let disks = [disk];
 
-        assert_eq!(resolve_install_path(&disks, Path::new("/dev/sda")), None);
-        assert_eq!(
-            resolve_install_path(
-                &disks,
-                Path::new("/dev/disk/by-path/pci-0000:00:17.0-ata-2")
-            ),
-            Some(PathBuf::from("/dev/disk/by-path/pci-0000:00:17.0-ata-2"))
-        );
-        assert_eq!(resolve_install_path(&disks, Path::new("/dev/sda4")), None);
-        assert_eq!(
-            resolve_install_path(
-                &disks,
-                Path::new("/dev/disk/by-path/pci-0000:00:17.0-ata-2-part4")
-            ),
-            Some(PathBuf::from(
-                "/dev/disk/by-path/pci-0000:00:17.0-ata-2-part4"
-            ))
-        );
+        assert!(!is_listed(&disks, Path::new("/dev/sda")));
+        assert!(is_listed(
+            &disks,
+            Path::new("/dev/disk/by-path/pci-0000:00:17.0-ata-2")
+        ));
+        assert!(!is_listed(&disks, Path::new("/dev/sda4")));
+        assert!(is_listed(
+            &disks,
+            Path::new("/dev/disk/by-path/pci-0000:00:17.0-ata-2-part4")
+        ));
     }
 
     #[test]
@@ -1070,47 +1009,6 @@ mod tests {
         ] {
             assert!(parse_partuuid(output).is_none());
         }
-    }
-
-    #[test]
-    fn fstab_source_localizes_blkid_failure() {
-        let error = fstab_source_from_blkid(
-            Path::new("/dev/test-partition"),
-            Err(Error::new(
-                std::io::Error::other("blkid failed"),
-                ErrorKind::DiskManagement,
-            )),
-        )
-        .unwrap_err();
-
-        assert_eq!(error.kind, ErrorKind::BlockDevice);
-        assert_eq!(
-            error.display_src().to_string(),
-            t!(
-                "os-install.invalid-partuuid",
-                partition = "/dev/test-partition"
-            )
-        );
-        assert!(format!("{:?}", error.debug.as_ref().unwrap()).contains("blkid failed"));
-    }
-
-    #[test]
-    fn fstab_uses_stable_partition_ids() {
-        assert_eq!(
-            render_fstab(
-                "PARTUUID=boot-id",
-                Some("PARTUUID=efi-id"),
-                "PARTUUID=root-id",
-            ),
-            "PARTUUID=boot-id  /boot       vfat    umask=0077  0   2\n\
-             PARTUUID=efi-id   /boot/efi   vfat    umask=0077  0   1\n\
-             PARTUUID=root-id  /           btrfs   defaults    0   1",
-        );
-    }
-
-    #[test]
-    fn fstab_without_efi_comments_out_mount() {
-        assert!(render_fstab("PARTUUID=boot", None, "PARTUUID=root").contains("# N/A"));
     }
 
     #[test]

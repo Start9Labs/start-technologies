@@ -8,7 +8,7 @@ TMP=$(mktemp -d)
 trap 'rm -rf -- "$TMP"' EXIT
 mkdir -p "$TMP/bin"
 
-cat > "$TMP/bin/findmnt" <<'EOF'
+cat > "$TMP/bin/findmnt" <<'EOF2'
 #!/bin/bash
 set -eu
 [ "${IDENTITY_FAIL:-0}" -ne 1 ] || exit 2
@@ -23,18 +23,12 @@ case "$target" in
             printf '/dev/sdb%s\n' "$((root_number - 1))"
         fi
         ;;
-    /boot/efi)
-        if [ "$root_number" -eq 4 ]; then
-            printf '/dev/sdb2\n'
-        else
-            printf '/dev/sdb1\n'
-        fi
-        ;;
+    /boot/efi) printf '/dev/sdb1\n' ;;
     *) exit 1 ;;
 esac
-EOF
+EOF2
 
-cat > "$TMP/bin/lsblk" <<'EOF'
+cat > "$TMP/bin/lsblk" <<'EOF2'
 #!/bin/bash
 set -eu
 root_number=${ROOT_NUMBER:-3}
@@ -49,9 +43,9 @@ case "$2" in
         ;;
     *) exit 1 ;;
 esac
-EOF
+EOF2
 
-cat > "$TMP/bin/blkid" <<'EOF'
+cat > "$TMP/bin/blkid" <<'EOF2'
 #!/bin/bash
 set -eu
 root_number=${ROOT_NUMBER:-3}
@@ -59,14 +53,9 @@ if [ "$1" = -p ]; then
     device=${!#}
     [ "${FAIL_DEVICE:-}" != "$device" ] || exit 2
     case "$root_number:$device" in
-        4:/dev/sdb2) printf 'efi-id\n' ;;
-        4:/dev/sdb3) printf 'boot-id\n' ;;
-        4:/dev/sdb4) printf 'root-id\n' ;;
         3:/dev/sdb1) printf 'efi-id\n' ;;
         3:/dev/sdb2) printf 'boot-id\n' ;;
-        3:/dev/sdb3) printf 'root-id\n' ;;
         2:/dev/sdb1) printf 'boot-id\n' ;;
-        2:/dev/sdb2) printf 'root-id\n' ;;
         *) exit 2 ;;
     esac
     exit
@@ -74,11 +63,8 @@ fi
 
 id=${2#PARTUUID=}
 case "$id" in
-    efi-id)
-        if [ "$root_number" -eq 4 ]; then device=/dev/sdb2; else device=/dev/sdb1; fi
-        ;;
+    efi-id) device=/dev/sdb1 ;;
     boot-id) device="/dev/sdb$((root_number - 1))" ;;
-    root-id) device="/dev/sdb$root_number" ;;
     *) exit 2 ;;
 esac
 if [ "${DUPLICATE_ID:-0}" -eq 1 ]; then
@@ -88,17 +74,17 @@ elif [ "${WRONG_ID_TARGET:-0}" -eq 1 ]; then
 else
     printf '%s\n' "$device"
 fi
-EOF
+EOF2
 
-cat > "$TMP/bin/readlink" <<'EOF'
+cat > "$TMP/bin/readlink" <<'EOF2'
 #!/bin/bash
 printf '%s\n' "${!#}"
-EOF
+EOF2
 
-cat > "$TMP/bin/sync" <<'EOF'
+cat > "$TMP/bin/sync" <<'EOF2'
 #!/bin/bash
 exit 0
-EOF
+EOF2
 
 chmod +x "$TMP/bin/"*
 export PATH="$TMP/bin:$PATH"
@@ -129,12 +115,12 @@ expected=$TMP/expected
 printf '%s' '# keep comment
 /dev/sda2	/boot	vfat	umask=0077	0	2
 /dev/sda1 /boot/efi vfat defaults 0 1
-/dev/sda3 / ext4 defaults 0 1
+/dev/sda3 / btrfs defaults 0 1
 /dev/sdz1 /srv ext4 defaults 0 2' > "$fstab"
 printf '%s' '# keep comment
 PARTUUID=boot-id	/boot	vfat	umask=0077	0	2
 PARTUUID=efi-id /boot/efi vfat defaults 0 1
-PARTUUID=root-id / ext4 defaults 0 1
+/dev/sda3 / btrfs defaults 0 1
 /dev/sdz1 /srv ext4 defaults 0 2' > "$expected"
 chmod 0640 "$fstab"
 "$NORMALIZER" "$fstab"
@@ -147,37 +133,30 @@ cp -- "$fstab" "$TMP/normalized"
 assert_same "$TMP/normalized" "$fstab" 'second run changed fstab'
 
 printf '/dev/sda1 /boot vfat defaults 0 2\n/dev/sda2 / ext4 defaults 0 1\n' > "$fstab"
-printf 'PARTUUID=boot-id /boot vfat defaults 0 2\nPARTUUID=root-id / ext4 defaults 0 1\n' > "$expected"
+printf 'PARTUUID=boot-id /boot vfat defaults 0 2\n/dev/sda2 / ext4 defaults 0 1\n' > "$expected"
 ROOT_NUMBER=2 "$NORMALIZER" --legacy "$fstab"
 assert_same "$expected" "$fstab" 'legacy MBR normalization mismatch'
 
 printf '/dev/sda2 /boot vfat defaults 0 2\n/dev/sda1 /boot/efi vfat defaults 0 1\n/dev/sda3 / ext4 defaults 0 1\n' > "$fstab"
-printf 'PARTUUID=boot-id /boot vfat defaults 0 2\nPARTUUID=efi-id /boot/efi vfat defaults 0 1\nPARTUUID=root-id / ext4 defaults 0 1\n' > "$expected"
+printf 'PARTUUID=boot-id /boot vfat defaults 0 2\nPARTUUID=efi-id /boot/efi vfat defaults 0 1\n/dev/sda3 / ext4 defaults 0 1\n' > "$expected"
 "$NORMALIZER" --legacy "$fstab"
 assert_same "$expected" "$fstab" 'legacy GPT normalization mismatch'
 
-printf '/dev/sda3 /boot vfat defaults 0 2\n/dev/sda2 /boot/efi vfat defaults 0 1\n/dev/sda4 / ext4 defaults 0 1\n' > "$fstab"
-printf 'PARTUUID=boot-id /boot vfat defaults 0 2\nPARTUUID=efi-id /boot/efi vfat defaults 0 1\nPARTUUID=root-id / ext4 defaults 0 1\n' > "$expected"
-ROOT_NUMBER=4 "$NORMALIZER" "$fstab"
-assert_same "$expected" "$fstab" 'Raspberry Pi normalization mismatch'
-
-printf '/dev/sda3 /boot vfat defaults 0 2\n/dev/sda4 / ext4 defaults 0 1\n' > "$fstab"
-ROOT_NUMBER=4 FAIL_DEVICE=/dev/sdb3 assert_fails_unchanged "$fstab" 'Raspberry Pi missing PARTUUID'
-
 mkdir "$TMP/real"
-printf '/dev/sda3 / ext4 defaults 0 1\n' > "$TMP/real/fstab"
+printf '/dev/sda2 /boot vfat defaults 0 2\n' > "$TMP/real/fstab"
 ln -s real/fstab "$TMP/fstab-link"
 "$NORMALIZER" "$TMP/fstab-link"
 [ -L "$TMP/fstab-link" ] || fail 'fstab symlink replaced'
-grep -q '^PARTUUID=root-id ' "$TMP/real/fstab" || fail 'symlink target not normalized'
+grep -q '^PARTUUID=boot-id ' "$TMP/real/fstab" || fail 'symlink target not normalized'
 
 printf '/dev/sda2 /boot vfat defaults 0 2\n/dev/sda3 / ext4 defaults 0 1\n' > "$fstab"
 FAIL_DEVICE=/dev/sdb2 assert_fails_unchanged "$fstab" 'missing PARTUUID'
 BOOT_MISMATCH=1 assert_fails_unchanged "$fstab" 'boot mount mismatch'
 DUPLICATE_ID=1 assert_fails_unchanged "$fstab" 'duplicate PARTUUID'
 WRONG_ID_TARGET=1 assert_fails_unchanged "$fstab" 'mismatched PARTUUID'
+ROOT_NUMBER=4 assert_fails_unchanged "$fstab" 'unknown layout'
 
-printf 'PARTUUID=boot-id /boot vfat defaults 0 2\nPARTUUID=root-id / ext4 defaults 0 1\n' > "$fstab"
+printf 'PARTUUID=boot-id /boot vfat defaults 0 2\n/dev/sda3 / ext4 defaults 0 1\n' > "$fstab"
 IDENTITY_FAIL=1 "$NORMALIZER" "$fstab"
 
 printf 'normalize-fstab tests passed\n'

@@ -1250,11 +1250,11 @@ os-install.invalid-partuuid:
   pl_PL: "Nie udało się ustalić prawidłowego UUID partycji dla %{partition}"
 
 os-install.unknown-disk:
-  en_US: "The selected disk %{disk} is no longer available"
-  de_DE: "Der ausgewählte Datenträger %{disk} ist nicht mehr verfügbar"
-  es_ES: "El disco seleccionado %{disk} ya no está disponible"
-  fr_FR: "Le disque sélectionné %{disk} n’est plus disponible"
-  pl_PL: "Wybrany dysk %{disk} nie jest już dostępny"
+  en_US: "No connected drive has the stable path %{disk}"
+  de_DE: "Kein angeschlossenes Laufwerk hat den stabilen Pfad %{disk}"
+  es_ES: "Ninguna unidad conectada tiene la ruta estable %{disk}"
+  fr_FR: "Aucun disque connecté n’a le chemin stable %{disk}"
+  pl_PL: "Żaden podłączony dysk nie ma stabilnej ścieżki %{disk}"
 
 # os_install/gpt.rs
 os-install.no-free-space-for-os-root:

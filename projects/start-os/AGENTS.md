@@ -36,7 +36,7 @@ monorepo-wide rules and [ARCHITECTURE.md](ARCHITECTURE.md) for how this product 
 - Type-check web apps: `npm run check:ui && npm run check:setup`.
 - Type-check the runtime: `cd projects/start-os/container-runtime && npm run check`.
 - Build the UI: `make start-os-ui` (or `make start-os-uis` for ui + setup-wizard).
-- Tests: `make test` (Rust + SDK + container-runtime), `make start-core-test`, or `make backup-fs-test` for all backup-fs library tests except the mount-based `/dev/fuse` suite.
+- Tests: `make test` (Rust + SDK + container-runtime + shell), `make start-core-test`, `make backup-fs-test` for all backup-fs library tests except the mount-based `/dev/fuse` suite, or `make start-os-scripts-test` for the shell suite under `build/tests/`.
 - Format: `make start-os-format` / `make start-os-format-check` (Rust only);
   TS/web/container-runtime formatting runs through `make web-format` (root
   prettier config).
