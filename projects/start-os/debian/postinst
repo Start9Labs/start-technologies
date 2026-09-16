@@ -46,6 +46,7 @@ if [ -f /etc/default/grub ]; then
 	grub_set GRUB_CMDLINE_LINUX "$CMDLINE"
 	grub_set GRUB_CMDLINE_LINUX_DEFAULT ''
 	grub_set GRUB_DISTRIBUTOR "StartOS v$(cat /usr/lib/startos/VERSION.txt)"
+	grub_set GRUB_TOP_LEVEL "$(ls -1 /boot/vmlinuz-* | sort -V | tail -n1)"
 	# Graphical terminal (serial added conditionally via /etc/grub.d/01_serial)
 	grub_set GRUB_TERMINAL_INPUT 'console'
 	grub_set GRUB_TERMINAL_OUTPUT 'gfxterm'

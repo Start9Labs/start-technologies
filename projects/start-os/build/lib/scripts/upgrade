@@ -30,32 +30,7 @@ if [ -f /media/startos/config/overlay/etc/fstab ]; then
         >&2 echo 'fstab left unchanged'
 fi
 
-boot_stage=$(mktemp -d /media/startos/images/.boot.XXXXXX)
-trap 'rm -rf -- "$boot_stage"' EXIT
-unsquashfs -f -d "$boot_stage" "$1" boot
-target=
-for kernel in "$boot_stage"/boot/vmlinuz-*; do
-    [ -e "$kernel" ] || continue
-    version=${kernel##*/vmlinuz-}
-    if [ -z "$target" ] || dpkg --compare-versions "$version" gt "$target"; then
-        target=$version
-    fi
-done
-# update-grub boots the newest kernel in /boot.
-for kernel in /boot/vmlinuz-*; do
-    [ -e "$kernel" ] || continue
-    version=${kernel#/boot/vmlinuz-}
-    if [ -n "$target" ] && dpkg --compare-versions "$version" gt "$target"; then
-        rm -f \
-            "/boot/vmlinuz-$version" \
-            "/boot/initrd.img-$version" \
-            "/boot/System.map-$version" \
-            "/boot/config-$version"
-    fi
-done
-cp -a "$boot_stage/boot/." /boot/
-rm -rf -- "$boot_stage"
-trap - EXIT
+unsquashfs -f -d / "$1" boot
 
 umount -l /media/startos/next 2> /dev/null || true
 umount /media/startos/upper 2> /dev/null || true
