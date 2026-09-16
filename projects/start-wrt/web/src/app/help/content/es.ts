@@ -497,7 +497,7 @@ Cuando se usan ambas bandas de frecuencia, esta opción crea SSID separados para
 
 ### Canales
 
-Canales específicos dentro de cada banda de frecuencia. Selecciona «Auto» para que el router elija el mejor canal, o elige un canal específico para evitar interferencias de redes vecinas.`,
+Canales específicos dentro de cada banda de frecuencia. Selecciona «Auto» para que el router elija el mejor canal, o elige un canal específico para evitar interferencias de redes vecinas. «Auto» omite los canales con detección de radar (DFS). Puedes elegir uno manualmente, pero entonces la red de 5 GHz tarda un minuto o más en aparecer cada vez que el router se inicia, mientras escucha en busca de radares.`,
 }
 
 export default HELP_ES

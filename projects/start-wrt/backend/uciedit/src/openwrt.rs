@@ -319,6 +319,8 @@ pub struct WifiDevice {
     #[uci(inpt)]
     pub channel: WifiChannel,
     pub country: Option<String>,
+    /// Keeps automatic channel selection off radar-detection channels.
+    pub acs_exclude_dfs: Option<bool>,
 }
 
 #[derive(Clone, Debug, TypedSection)]

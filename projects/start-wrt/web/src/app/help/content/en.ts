@@ -495,7 +495,7 @@ When using both frequency bands, this option creates separate SSIDs for 2.4 GHz 
 
 ### Channels
 
-Specific channels within each frequency band. Select "Auto" for the router to choose the best channel, or pick a specific channel to avoid interference from neighboring networks.`,
+Specific channels within each frequency band. Select "Auto" for the router to choose the best channel, or pick a specific channel to avoid interference from neighboring networks. "Auto" skips radar-detection (DFS) channels. You can pick one by hand, but the 5 GHz network then takes a minute or more to appear each time the router starts while it listens for radar.`,
 }
 
 export default HELP_EN

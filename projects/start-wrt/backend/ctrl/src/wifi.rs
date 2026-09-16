@@ -499,6 +499,7 @@ fn set_config(
                         || device.channel != new_channel
                         || device.band != rel_radio.band
                         || device.country != wifi.country
+                        || device.acs_exclude_dfs != Some(true)
                     {
                         iface_config_changed = true;
                     }
@@ -506,6 +507,7 @@ fn set_config(
                     device.band = rel_radio.band.clone();
                     device.channel = new_channel;
                     device.country = wifi.country.clone();
+                    device.acs_exclude_dfs = Some(true);
                     s.set(&device)?;
                     break;
                 }
@@ -2851,6 +2853,79 @@ config wifi-iface 'default_radio1'
             windows_to_minutes(&[good, bad]),
             vec![(9 * 60, 17 * 60, mask(&[1]))]
         );
+    }
+
+    #[tokio::test]
+    async fn test_set_config_writes_and_clears_country() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_test_configs(dir.path());
+        write_wireless_config_dual_radio(dir.path(), "TestNet", "TestNet", "");
+
+        let mut passwords = BTreeSet::new();
+        passwords.insert(Password {
+            label: "Main Admin".into(),
+            profile: None,
+            password: "adminpass1".into(),
+        });
+        let mut wifi = Wifi {
+            ssid: "TestNet".into(),
+            broadcast_separately: false,
+            country: Some("US".into()),
+            radios: make_dual_radios(),
+            passwords,
+        };
+
+        async fn apply(ctx: &TestContext, wifi: &Wifi) -> WifiRestart {
+            let arena = Arena::new();
+            let mut cfgs = parse_all(
+                ctx.uci_root(),
+                &arena,
+                &["wireless", "startwrt", "network", "firewall"],
+            )
+            .await
+            .unwrap();
+            let lookup = profiles::Lookup::parse(ctx.clone(), &cfgs).unwrap();
+            let restart = set_config(ctx, &mut cfgs, wifi, &lookup).unwrap();
+            dump_all(ctx.uci_root(), cfgs).await.unwrap();
+            restart
+        }
+
+        async fn devices(ctx: &TestContext) -> Vec<(Option<String>, Option<bool>)> {
+            let arena = Arena::new();
+            let cfgs = parse_all(ctx.uci_root(), &arena, &["wireless"])
+                .await
+                .unwrap();
+            let mut out = Vec::new();
+            cfgs["wireless"]
+                .try_each(|_, device: WifiDevice| {
+                    out.push((device.country, device.acs_exclude_dfs));
+                    Ok::<_, Error>(())
+                })
+                .unwrap();
+            out
+        }
+
+        assert_eq!(apply(&ctx, &wifi).await, WifiRestart::Full);
+        assert_eq!(
+            devices(&ctx).await,
+            vec![
+                (Some("US".into()), Some(true)),
+                (Some("US".into()), Some(true))
+            ]
+        );
+
+        assert_eq!(apply(&ctx, &wifi).await, WifiRestart::PskOnly);
+
+        wifi.country = None;
+        assert_eq!(apply(&ctx, &wifi).await, WifiRestart::Full);
+        assert_eq!(
+            devices(&ctx).await,
+            vec![(None, Some(true)), (None, Some(true))]
+        );
+        assert!(!std::fs::read_to_string(dir.path().join("wireless"))
+            .unwrap()
+            .contains("country"));
     }
 
     #[test]

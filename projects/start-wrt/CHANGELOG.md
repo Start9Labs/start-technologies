@@ -12,7 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Wi-Fi regulatory country.** `Points of Entry > Wi-Fi > Settings` gains a
   Country selector. The selected country sets the channels each band may use
   and the maximum transmit power; the channel dropdowns list only what that
-  country permits. With no country selected the router runs on a conservative
+  country permits, and automatic channel selection skips radar-detection
+  (DFS) channels, which take a minute or more to come up. With no country selected the router runs on a conservative
   worldwide subset (2.4 GHz channels 1–11, 5 GHz channels 36–48, 20 dBm), so
   select yours after setup.
 

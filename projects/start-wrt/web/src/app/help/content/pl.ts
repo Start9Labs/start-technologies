@@ -497,7 +497,7 @@ Podczas korzystania z obu pasm częstotliwości ta opcja tworzy osobne SSID dla 
 
 ### Kanały
 
-Konkretne kanały w obrębie każdego pasma częstotliwości. Wybierz „Auto”, aby router wybrał najlepszy kanał, lub wybierz konkretny kanał, aby uniknąć zakłóceń od sąsiednich sieci.`,
+Konkretne kanały w obrębie każdego pasma częstotliwości. Wybierz „Auto”, aby router wybrał najlepszy kanał, lub wybierz konkretny kanał, aby uniknąć zakłóceń od sąsiednich sieci. „Auto” pomija kanały z wykrywaniem radaru (DFS). Możesz wybrać taki kanał ręcznie, ale wtedy sieć 5 GHz pojawia się dopiero po minucie lub dłużej przy każdym uruchomieniu routera, gdy nasłuchuje on radaru.`,
 }
 
 export default HELP_PL

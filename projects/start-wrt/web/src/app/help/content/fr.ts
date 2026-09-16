@@ -497,7 +497,7 @@ Lors de l’utilisation des deux bandes de fréquence, cette option crée des SS
 
 ### Canaux
 
-Canaux spécifiques au sein de chaque bande de fréquence. Sélectionnez « Auto » pour que le routeur choisisse le meilleur canal, ou choisissez un canal spécifique pour éviter les interférences des réseaux voisins.`,
+Canaux spécifiques au sein de chaque bande de fréquence. Sélectionnez « Auto » pour que le routeur choisisse le meilleur canal, ou choisissez un canal spécifique pour éviter les interférences des réseaux voisins. « Auto » ignore les canaux à détection radar (DFS). Vous pouvez en choisir un manuellement, mais le réseau 5 GHz met alors une minute ou plus à apparaître à chaque démarrage du routeur, le temps qu’il écoute les radars.`,
 }
 
 export default HELP_FR

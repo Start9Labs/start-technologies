@@ -497,7 +497,7 @@ Bei Verwendung beider Frequenzbänder erstellt diese Option separate SSIDs für 
 
 ### Kanäle
 
-Bestimmte Kanäle innerhalb jedes Frequenzbands. Wählen Sie „Auto“, damit der Router den besten Kanal auswählt, oder wählen Sie einen bestimmten Kanal, um Störungen durch benachbarte Netzwerke zu vermeiden.`,
+Bestimmte Kanäle innerhalb jedes Frequenzbands. Wählen Sie „Auto“, damit der Router den besten Kanal auswählt, oder wählen Sie einen bestimmten Kanal, um Störungen durch benachbarte Netzwerke zu vermeiden. „Auto“ überspringt Kanäle mit Radarerkennung (DFS). Sie können einen solchen Kanal manuell wählen, doch das 5-GHz-Netz erscheint dann bei jedem Start des Routers erst nach einer Minute oder länger, während er auf Radar horcht.`,
 }
 
 export default HELP_DE

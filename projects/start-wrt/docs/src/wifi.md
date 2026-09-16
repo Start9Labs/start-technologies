@@ -59,7 +59,7 @@ Configure the Wi-Fi radio hardware under `Points of Entry > Wi-Fi > Settings`:
 
 - **Broadcast Separately** — Shown only when Band is "Both". When enabled, the 5 GHz band gets a separate SSID with a `-5G` suffix (e.g. `StartWRT` and `StartWRT-5G`). Useful if you want to control which band a device connects to.
 
-- **Channel** — Separate dropdowns for each band. **Auto** (recommended) lets the router select a channel automatically. You can also select a specific channel; the dropdowns list the channels the selected country permits.
+- **Channel** — Separate dropdowns for each band. **Auto** (recommended) lets the router select a channel automatically. You can also select a specific channel; the dropdowns list the channels the selected country permits. **Auto** skips radar-detection (DFS) channels. You can pick one by hand, but the 5 GHz network then takes a minute or more to appear each time the router starts while it listens for radar.
 
 > [!WARNING]
 > Changing the SSID disconnects all Wi-Fi clients. You will be prompted to confirm before the change is applied.
