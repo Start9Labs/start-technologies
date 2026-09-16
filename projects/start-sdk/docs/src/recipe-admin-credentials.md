@@ -6,6 +6,25 @@ Most services need admin credentials before the user can sign in. The standard p
 
 In `setupOnInit`, read the file model where the admin password lives. When it is unset, call `sdk.action.createOwnTask()` with severity `'critical'` pointing to the `setAdminPassword` action. The action is `sdk.Action.withoutInput`, `visibility: 'enabled'` so users can reach it for rotation, and its handler generates the password, writes it to the store, and returns it as a group result (username unmasked + copyable, password masked + copyable).
 
+## Confirm before rotating
+
+The UI runs a no-input action the moment it is clicked unless its metadata carries a `warning`; with one, it shows the text and asks for confirmation first. Once a password exists, running this action replaces it, so the metadata reads the store and sets a `warning` whenever a password is stored, and leaves it `null` on the first run:
+
+```typescript
+async ({ effects }) => ({
+  name: i18n('Set Admin Password'),
+  description: i18n('Generate a new random password for the admin account. Replaces any existing password.'),
+  warning: (await storeJson.read((s) => s.adminPassword).const(effects))
+    ? i18n('Replaces the current admin password.')
+    : null,
+  allowedStatuses: 'any',
+  group: null,
+  visibility: 'enabled',
+}),
+```
+
+The text is a confirmation, not a prediction: it states what the package does — replace the stored password — and nothing about sessions or upstream behavior you have not verified.
+
 ## Never roll your own password RNG
 
 The random string comes from the SDK, always. It is not a top-level export — it lives under the `utils` namespace, and it takes a spec:

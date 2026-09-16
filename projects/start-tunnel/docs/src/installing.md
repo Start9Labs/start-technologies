@@ -163,6 +163,9 @@ Enter the password when prompted.
 {{#endtab }}
 {{#endtabs }}
 
+> [!IMPORTANT]
+> Run the commands on your VPS as `root`. If your provider logs you in as a regular user, switch to root first with `sudo -i`. `start-tunnel` authenticates to the StartTunnel service with a token only root can read, so as any other user it fails with `` `--tunnel` required ``.
+
 ## Run the installer
 
 Run:
@@ -176,6 +179,9 @@ curl -sSL https://start9.com/start-tunnel/install.sh | sh
 
 > [!NOTE]
 > If DNS resolution is not working on your VPS, the installer will configure public DNS resolvers (Google, Cloudflare, Quad9) and back up your existing `/etc/resolv.conf`.
+
+> [!TIP]
+> The installer sets StartTunnel up as the `start-tunneld` systemd service. Check it with `systemctl status start-tunneld`, and read its logs with `journalctl -u start-tunneld`.
 
 ## Initialize the web interface
 
@@ -207,13 +213,13 @@ If you already have a StartOS server and have [trusted its Root CA](/start-os/tr
    start-cli net ssl generate-certificate <VPS_IP>
    ```
 
-   This outputs a private key and certificate chain in PEM format.
+   This prints a private key, then a certificate chain of three certificates: one for your VPS, the intermediate, and the Root CA.
 
 1. During `start-tunnel web init`, when prompted for a certificate, select **Provide**.
 
 1. Paste the **private key** first and press Enter. You may need to press Enter an extra time for it to be accepted.
 
-1. Paste the **certificate chain** next and press Enter. Again, you may need to press Enter an extra time.
+1. Paste the **certificate chain** next — all three certificates, together and in the order shown — and press Enter. The prompt finishes once it has received all three; if it hasn't moved on, press Enter again until it does.
 
 {{#endtab }}
 {{#tab name="Generate a new Root CA" }}

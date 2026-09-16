@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Port forwards left behind by an earlier run of the daemon are cleared at
+  startup.** After a crash, or a restart during which the tunnel's WAN address
+  changed, a stale forward could keep sending a port to an old address until
+  the next reboot.
+
 - **Open pages can load the current web interface after future updates.** Pages
   opened on this release revalidate the interface when they reload.
 

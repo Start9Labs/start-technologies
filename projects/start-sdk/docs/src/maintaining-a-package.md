@@ -63,13 +63,21 @@ GitHub's "Latest" badge is unreliable in both directions: it can sit on a prerel
 
 ### Scale scrutiny to the size of the jump
 
-| Jump                      | What it needs                                                                                            |
-| ------------------------- | -------------------------------------------------------------------------------------------------------- |
-| **Patch** (1.2.3 → 1.2.4) | Low risk. Bump, verify the build, move on.                                                               |
-| **Minor** (1.2.x → 1.3.0) | Read the full changelog. Look for deprecations and behavior changes; note new features worth surfacing.  |
-| **Major** (1.x → 2.0)     | Read the changelog, release notes, and any migration guide. Inspect code diffs where the notes are thin. |
+Classify the jump first; the tier decides how much of upstream you read. A project still on `0.x` has no major position — its minor **is** its major — and upstream's own notes outrank the number: a release that says reindex, migrate, or "requires <dependency> N+" is a major whatever its version string says.
 
-A major bump is also where you ask whether the package needs a [data migration](./recipe-version-migrations.md) — and whether the version currently in `current.ts` carries one that has to be spun off first. See [Versions — When to Create a New Version File](./versions.md#when-to-create-a-new-version-file).
+| Jump                      | What it needs                                                                                                                                                                                                                                                 |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Patch** (1.2.3 → 1.2.4) | Bump the pin and verify the artifact. Nothing else — no changelog survey, no source reading.                                                                                                                                                                  |
+| **Minor** (1.2.x → 1.3.0) | Read the changelog and release notes for what is worth exposing: a setting a user would want (an action), a new precondition (a task), a readiness or progress signal (a health check), a config option. Wire in what is high-value and leave the rest alone. |
+| **Major** (1.x → 2.0)     | Everything Minor needs, plus the breaking-change pass below and a decision on a [data migration](./recipe-version-migrations.md).                                                                                                                             |
+
+**The breaking-change pass re-verifies every assumption the package encodes about upstream — against the new source, not the old comment.** Each is a place a bump breaks the package without breaking the build:
+
+- **Every key the file model writes** still exists and still does what the package says. An option upstream removed is rejected or ignored; one it stopped reading is a dead knob the action still sells.
+- **Every health-check probe** — the request it sends and the reply it treats as success. A readiness gate upstream dropped turns a positive confirmation into a false one.
+- **Every log line the package parses**, and every path it reads or mounts.
+- **The data on disk** — whether the new version opens what the old one wrote. Data it cannot read is a migration, and one that rebuilds puts its disk and time cost in the release notes.
+- **What the dependency now has to provide** — a version floor in `dependencies.ts`, or a setting the dependency package must enable. A requirement the dependency's current release does not meet is an issue on that package's repo, linked from the pull request, and the pull request says it is blocked on it.
 
 ### When the packaging repo is itself a fork
 

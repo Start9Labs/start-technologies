@@ -69,10 +69,11 @@ for the detail behind its highlights.
   server: every installed service's non-SSL addresses — the server's LAN IP
   addresses, its `.local` name and its private domains — are offered on that
   network at once and enabled immediately. An address unlocked this way reaches
-  only devices on that gateway's own network segment; it is never opened to the
-  public internet. Mark a gateway secure only when you control every device on
-  the network it reaches: anything on it can read and alter traffic to a
-  plaintext address, including the passwords typed into it. See
+  devices on that gateway's own network and, over IPv4, on any private network
+  routed to it; it is never opened to the public internet. Mark a gateway
+  secure only when you control every device on those networks: anything on
+  them can read and alter traffic to a plaintext address, including the
+  passwords typed into it. See
   [Gateways](https://docs.start9.com/start-os/gateways.html).
 
 - **An action result that hands you a link can be opened in a new tab.** Where a
@@ -132,8 +133,13 @@ for the detail behind its highlights.
 
 ### Fixed
 
-- **The Refresh Needed dialog offers a Refresh button in browser tabs.** Select
-  it to open the updated interface.
+- **A service's plain (non-SSL) port accepts connections from other private
+  networks routed to the server.** From a second VLAN, a wired/wireless split
+  or a routed IoT network, a service's web interface opened but a plain port
+  such as a mining pool's stratum port refused the connection, so the service
+  looked down from that network. A private IPv4 address now admits every
+  private (RFC 1918) source on its plain ports, as it already did on its web
+  interfaces.
 
 - **The port-forwarding test reports a port as open to the Internet only where
   it is reachable from the Internet.** Where StartOS's port-forward request was
@@ -143,13 +149,27 @@ for the detail behind its highlights.
   StartOS now measures the port from the Internet in that case and reports
   what it finds.
 
+- **Port forwards left behind by an earlier run of the server are cleared at
+  startup.** After a crash, or a restart during which the server's address
+  changed, a stale forward could keep sending a port to an old address until
+  the next reboot.
+
 - **Client connections through StartOS's TLS-terminating reverse proxy now fail
   within 15 seconds if StartOS cannot connect to the service or complete a
   required TLS handshake with it.**
 
+- **A port mapping StartOS opens on a UPnP router closes on its own within an
+  hour of the server going away.** It was requested as a permanent mapping, so
+  it stayed on the router after the server was powered off or moved to another
+  network. A router that grants only permanent mappings still gets one.
+
 - **Transfers preserve the source filesystem format.** StartOS mounts source
   filesystems read-only while copying persistent data, repairing ext4 only when
   needed to mount it. This leaves the source drive available as a fallback.
+
+- **Transfers preserve file permissions.** Files copied from the previous drive
+  lost their modes, which left a WireGuard gateway such as StartTunnel
+  disconnected after a transfer until its profile was made private again by hand.
 
 - **An app that remembers your server's certificate sees the same certificate
   across every route to that name.** Wallets and other apps that pin the first
@@ -455,6 +475,12 @@ for the detail behind its highlights.
 
 - **The OS log stays focused on actionable errors on a network whose router
   advertises a route with more than one next hop.**
+
+- **A service that mounts a dependency's files read-write fails to start when
+  that dependency is not installed**, naming the missing volume.
+
+- **The Refresh Needed dialog offers a Refresh button in browser tabs.** Select
+  it to open the updated interface.
 
 ### Security
 

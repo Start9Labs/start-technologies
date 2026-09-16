@@ -1,6 +1,6 @@
 # Updating
 
-Keep StartTunnel up to date using the web UI, CLI, or install script.
+Keep StartTunnel up to date using the web UI, CLI, or install script. Run the CLI and install script on your VPS as `root`.
 
 ## Web UI
 

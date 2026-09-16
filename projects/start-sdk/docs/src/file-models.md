@@ -178,7 +178,7 @@ const syncedStore = await storeJson.read(s => s.fullySynced).waitFor(effects, sy
 
 Use `merge()` for almost all writes. It has two major advantages:
 
-1. **Preserves unknown keys**: `merge()` only updates the fields you specify, leaving everything else intact — including keys that the upstream service uses but your file model doesn't define. `write()` replaces the entire file, destroying any keys not in your schema. See [Unknown Key Preservation](#unknown-key-preservation) for details and migration implications.
+1. **Preserves unknown keys**: `merge()` only updates the fields you specify, leaving everything else intact — including keys that the upstream service uses but your file model doesn't define. `write()` replaces the entire file with exactly the data you pass: a key you leave out is gone, and a key you pass survives whether or not your schema names it — so reading a file with `read()` and writing the result back strips nothing. See [Unknown Key Preservation](#unknown-key-preservation) for details, and for how to delete a stale key.
 2. **Defaults come from the schema**: When every key in your zod schema has a `.catch()`, the schema _is_ the default. You can seed a file on first install with `merge(effects, {})` — the `.catch()` values fill in every missing field. No need to define a separate defaults object and pass it to `write()`.
 
 ```typescript

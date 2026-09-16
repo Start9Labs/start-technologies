@@ -19,7 +19,7 @@ if [ -z "$sip" ] || [ -z "$dip" ] || [ -z "$dprefix" ] || [ -z "$sport" ] || [ -
     exit 1
 fi
 
-TAG="F6$(echo "$sip:$sport -> $dip/$dprefix:$dport ${src_subnet:-any}" | sha256sum | head -c 15)"
+TAG="F6-$(echo "$sip:$sport -> $dip/$dprefix:$dport ${src_subnet:-any}" | sha256sum | head -c 16)"
 PROTO='meta l4proto { tcp, udp }'
 # Bracketed for IPv6 dnat target.
 dnat="th dport $sport dnat to [$dip]:$dport"
