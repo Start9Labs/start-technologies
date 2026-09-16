@@ -133,6 +133,10 @@ for the detail behind its highlights.
 
 ### Fixed
 
+- **Service interfaces show addresses only for gateways that accept inbound
+  connections.** Commercial VPNs remain available for system-wide and
+  per-service outbound routing.
+
 - **A service's plain (non-SSL) port accepts connections from other private
   networks routed to the server.** From a second VLAN, a wired/wireless split
   or a routed IoT network, a service's web interface opened but a plain port

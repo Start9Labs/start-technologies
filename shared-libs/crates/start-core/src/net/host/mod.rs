@@ -157,6 +157,9 @@ impl Model<Host> {
             available.retain(|h| matches!(h.metadata, HostnameMetadata::Plugin { .. }));
             let gua_wan = bind.as_addresses().as_gua_wan().de()?;
             for (gid, g) in gateways {
+                if g.gateway_type == GatewayType::OutboundOnly {
+                    continue;
+                }
                 let Some(ip_info) = &g.ip_info else {
                     continue;
                 };
@@ -365,8 +368,6 @@ impl Model<Host> {
             available.retain(|h| matches!(h.metadata, HostnameMetadata::Plugin { .. }));
 
             for (gid, g) in gateways {
-                // Never expose a range on an outbound-only gateway (e.g. a VPN
-                // egress) — they don't receive inbound forwards.
                 if g.gateway_type == GatewayType::OutboundOnly {
                     continue;
                 }
@@ -894,18 +895,22 @@ pub async fn list_hosts(
 
 #[cfg(test)]
 mod tests {
+    use std::net::Ipv4Addr;
     use std::sync::Arc;
 
     use imbl::OrdMap;
     use imbl_value::InternedString;
+    use ipnet::IpNet;
 
     use super::{Host, Model, mdns_gateways, secure_gateways};
     use crate::GatewayId;
     use crate::db::model::public::{
-        CapabilityVerdict, IpInfo, NetworkInterfaceInfo, NetworkInterfaceType,
+        CapabilityVerdict, GatewayType, IpInfo, NetworkInterfaceInfo, NetworkInterfaceType,
     };
+    use crate::hostname::ServerHostname;
     use crate::net::forward::AvailablePorts;
     use crate::net::host::binding::BindOptions;
+    use crate::net::service_interface::HostnameMetadata;
     use crate::prelude::*;
 
     fn iface(
@@ -959,12 +964,65 @@ mod tests {
         Model::<Host>::new(&Host::default()).unwrap()
     }
 
+    fn wireguard(gateway_type: GatewayType) -> NetworkInterfaceInfo {
+        NetworkInterfaceInfo {
+            ip_info: Some(Arc::new(IpInfo {
+                device_type: Some(NetworkInterfaceType::Wireguard),
+                subnets: ["192.0.2.2/24".parse::<IpNet>().unwrap()]
+                    .into_iter()
+                    .collect(),
+                wan_ip: Some(Ipv4Addr::new(198, 51, 100, 2)),
+                ..Default::default()
+            })),
+            gateway_type,
+            ..Default::default()
+        }
+    }
+
     fn plain(preferred_external_port: u16) -> BindOptions {
         BindOptions {
             preferred_external_port,
             add_ssl: None,
             secure: Some(crate::net::host::binding::Security { ssl: false }),
         }
+    }
+
+    #[test]
+    fn single_port_addresses_are_offered_only_on_inbound_gateways() {
+        let gateways = [
+            (gw("wg-in"), wireguard(GatewayType::InboundOutbound)),
+            (gw("wg-out"), wireguard(GatewayType::OutboundOnly)),
+        ]
+        .into_iter()
+        .collect();
+        let mut ports = AvailablePorts::new();
+        let mut host = host();
+        host.add_binding(&mut ports, 9735, plain(9735), false)
+            .unwrap();
+
+        host.update_addresses(
+            &ServerHostname::new(InternedString::intern("server")).unwrap(),
+            &gateways,
+            &ports,
+        )
+        .unwrap();
+
+        let host = host.de().unwrap();
+        let available = &host.bindings[&9735].addresses.available;
+        assert_eq!(
+            available
+                .iter()
+                .filter(|address| matches!(
+                    &address.metadata,
+                    HostnameMetadata::Ipv4 { gateway } if gateway == &gw("wg-in")
+                ))
+                .count(),
+            2
+        );
+        assert!(!available.iter().any(|address| matches!(
+            &address.metadata,
+            HostnameMetadata::Ipv4 { gateway } if gateway == &gw("wg-out")
+        )));
     }
 
     #[test]
