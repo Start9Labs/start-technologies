@@ -28,7 +28,8 @@ fi
 
 unsquashfs -n -f -d / "$1" /usr/lib/startos/scripts/normalize-fstab
 if [ -f /media/startos/config/overlay/etc/fstab ]; then
-    /usr/lib/startos/scripts/normalize-fstab /media/startos/config/overlay/etc/fstab
+    /usr/lib/startos/scripts/normalize-fstab /media/startos/config/overlay/etc/fstab ||
+        >&2 echo 'fstab left unchanged'
 fi
 
 unsquashfs -f -d / $1 boot
