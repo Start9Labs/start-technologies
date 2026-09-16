@@ -21,9 +21,7 @@ export const setAdminPassword = sdk.Action.withoutInput(
     name: i18n('Set Admin Password'),
     description: i18n('Generate a new random password for the admin account. Replaces any existing password.'),
     // A no-input action runs on click unless `warning` is set; then the UI confirms first.
-    warning: (await storeJson.read((s) => s.adminPassword).const(effects))
-      ? i18n('Replaces the current admin password.')
-      : null,
+    warning: (await storeJson.read(s => s.adminPassword).const(effects)) ? i18n('Replaces the current admin password.') : null,
     allowedStatuses: 'any', // 'any', 'only-running', 'only-stopped'
     group: null,
     visibility: 'enabled', // 'enabled', 'disabled', 'hidden'
