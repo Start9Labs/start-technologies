@@ -546,4 +546,5 @@ export default {
   554: 'Tipo',
   555: 'País',
   556: 'Seleccione el país en el que funciona este router para habilitar los canales Wi-Fi y la potencia de transmisión permitidos allí. Hasta entonces se usa un subconjunto conservador válido en todo el mundo.',
+  557: 'Sin establecer',
 } satisfies i18n

@@ -546,4 +546,5 @@ export default {
   554: 'Art',
   555: 'Land',
   556: 'Wählen Sie das Land, in dem dieser Router betrieben wird, um die dort zulässigen WLAN-Kanäle und Sendeleistungen freizuschalten. Bis dahin wird eine konservative weltweite Teilmenge verwendet.',
+  557: 'Nicht festgelegt',
 } satisfies i18n

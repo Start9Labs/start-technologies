@@ -27,7 +27,7 @@ import {
 } from '@taiga-ui/kit'
 import { TuiElasticContainer } from '@taiga-ui/layout'
 import { PolymorpheusComponent } from '@taiga-ui/polymorpheus'
-import { filter, startWith } from 'rxjs'
+import { filter, map, startWith } from 'rxjs'
 import { Footer } from 'src/app/components/footer'
 import { Form } from 'src/app/components/form'
 import {
@@ -39,6 +39,9 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { i18nService } from 'src/app/i18n/i18n.service'
 import { WifiService } from '../../service'
 import { ReconnectDialog } from './reconnect-dialog'
+
+// The kernel's world regulatory domain; null on the wire.
+const WORLD = '00'
 
 @Component({
   template: `
@@ -61,7 +64,7 @@ import { ReconnectDialog } from './reconnect-dialog'
         />
       </tui-textfield>
       <tui-elastic-container>
-        @if (!form.value.country) {
+        @if (unset()) {
           <div tuiAnimated tuiNotification appearance="warning">
             {{
               'Select the country this router operates in to unlock the Wi-Fi channels and transmit power permitted there. Until then it uses a conservative worldwide subset.'
@@ -180,7 +183,7 @@ export default class WifiSettings {
   )
   protected readonly regulatory = signal<WifiRegulatory | null>(null)
   protected readonly form = inject(NonNullableFormBuilder).group({
-    country: [null as string | null],
+    country: [WORLD],
     enabled: [true],
     ssid: ['StartOS'],
     broadcast: [true],
@@ -199,14 +202,26 @@ export default class WifiSettings {
 
   protected readonly bands = ['2.4 GHz', '5 GHz', 'Both']
 
-  protected readonly stringifyCountry = (code: string): string =>
-    `${this.regionNames.of(code)} (${code})`
+  // Typing over a selection empties the control until an item is picked.
+  protected readonly unset = toSignal(
+    this.form.controls.country.valueChanges.pipe(
+      startWith(this.form.controls.country.value),
+      map(country => !country || country === WORLD),
+    ),
+    { requireSync: true },
+  )
 
-  protected readonly countries = computed(() =>
-    [...(this.regulatory()?.countries ?? [])].sort((a, b) =>
+  protected readonly stringifyCountry = (code: string): string =>
+    code === WORLD
+      ? this.i18n.transform('Not set')
+      : `${this.regionNames.of(code)} (${code})`
+
+  protected readonly countries = computed(() => [
+    WORLD,
+    ...[...(this.regulatory()?.countries ?? [])].sort((a, b) =>
       this.stringifyCountry(a).localeCompare(this.stringifyCountry(b)),
     ),
-  )
+  ])
 
   // Translates the 'Auto' option; numeric channels pass through unchanged.
   protected readonly stringifyChannel = (c: string): string =>
@@ -227,7 +242,7 @@ export default class WifiSettings {
 
   // A channel permitted under the old country may not be under the new one.
   protected onCountry(country: string | null): void {
-    if (country !== this.service.data()?.country) {
+    if ((country || WORLD) !== (this.service.data()?.country ?? WORLD)) {
       this.form.patchValue({ channel24: 'Auto', channel5: 'Auto' })
     }
   }
@@ -305,7 +320,7 @@ export default class WifiSettings {
     const channelToOption = (ch: string) => (ch === 'auto' ? 'Auto' : ch)
 
     return {
-      country: config.country,
+      country: config.country ?? WORLD,
       enabled: anyEnabled,
       ssid: config.ssid,
       broadcast: anyBroadcast,
@@ -347,7 +362,7 @@ export default class WifiSettings {
     return {
       ssid: form.ssid,
       broadcastSeparately: form.band === 'Both' && form.broadcastSeparately,
-      country: form.country,
+      country: form.country && form.country !== WORLD ? form.country : null,
       radios,
       passwords: data.passwords,
     }

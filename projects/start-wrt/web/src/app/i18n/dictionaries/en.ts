@@ -551,4 +551,5 @@ export const ENGLISH: Record<string, number> = {
   'Kind': 554,
   'Country': 555,
   'Select the country this router operates in to unlock the Wi-Fi channels and transmit power permitted there. Until then it uses a conservative worldwide subset.': 556,
+  'Not set': 557,
 }
