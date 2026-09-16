@@ -795,8 +795,7 @@ fn dir_copy_inner<'a>(
                             format!("chown {}", dst_path.display()),
                         )
                     })?;
-                    // chown can clear setuid/setgid and the umask can narrow the
-                    // creation mode, so the mode is applied last to match the source exactly.
+                    // Creation and chown can clear source mode bits.
                     tokio::fs::set_permissions(&dst_path, permissions)
                         .await
                         .with_ctx(|_| {
@@ -1950,7 +1949,13 @@ mod test {
         ));
         let src = root.join("src");
         let dst = root.join("dst");
-        let modes = [("secret", 0o600), ("script", 0o755), ("plain", 0o644)];
+        let modes = [
+            ("secret", 0o600),
+            ("script", 0o755),
+            ("plain", 0o644),
+            ("umask", 0o666),
+            ("special", 0o6755),
+        ];
         tokio::fs::create_dir_all(&src).await.unwrap();
         for (name, mode) in modes {
             let path = src.join(name);
