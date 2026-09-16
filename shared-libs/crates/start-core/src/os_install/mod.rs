@@ -54,7 +54,7 @@ pub fn partition_for(disk: impl AsRef<Path>, idx: u32) -> PathBuf {
     } else {
         return Default::default();
     };
-    if disk_path.parent() == Some(Path::new("/dev/disk/by-path")) {
+    if root.parent() == Some(Path::new("/dev/disk")) {
         root.join(format!("{}-part{}", leaf, idx))
     } else if leaf.ends_with(|c: char| c.is_ascii_digit()) {
         root.join(format!("{}p{}", leaf, idx))
@@ -967,6 +967,10 @@ mod tests {
         assert_eq!(
             partition_for("/dev/disk/by-path/pci-0000:00:17.0-ata-2", 2),
             PathBuf::from("/dev/disk/by-path/pci-0000:00:17.0-ata-2-part2")
+        );
+        assert_eq!(
+            partition_for("/dev/disk/by-id/nvme-eui.0025385b21b0e6a1", 2),
+            PathBuf::from("/dev/disk/by-id/nvme-eui.0025385b21b0e6a1-part2")
         );
     }
 
