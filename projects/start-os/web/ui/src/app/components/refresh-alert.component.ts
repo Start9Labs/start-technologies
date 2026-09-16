@@ -32,7 +32,7 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
       } @else {
         <p>
           {{
-            'StartOS has been updated, but this page is still running the previous interface. Reload the page to get the latest version.'
+            'StartOS has been updated, but this page is still running the previous interface. Refresh the page to get the latest version.'
               | i18n
           }}
         </p>
@@ -44,7 +44,7 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
         [tuiAppearanceFocus]="false"
         (click)="reload()"
       >
-        {{ (isPwa ? 'Refresh' : 'Reload') | i18n }}
+        {{ 'Refresh' | i18n }}
       </button>
     </ng-template>
   `,
@@ -82,13 +82,10 @@ export class RefreshAlertComponent {
         this.updates.isEnabled &&
         this.win.navigator.serviceWorker.controller !== null
       ) {
-        await this.tasks.run(
-          async () => {
-            await this.updates.checkForUpdate()
-            await this.updates.activateUpdate()
-          },
-          this.isPwa ? 'Reloading PWA' : 'Reload',
-        )
+        await this.tasks.run(async () => {
+          await this.updates.checkForUpdate()
+          await this.updates.activateUpdate()
+        }, 'Loading')
       }
     } finally {
       this.win.location.reload()

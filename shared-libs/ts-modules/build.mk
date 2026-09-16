@@ -20,10 +20,6 @@ node_modules/.package-lock.json: package-lock.json
 	npm --prefix . ci
 	touch node_modules/.package-lock.json
 
-.PHONY: immutable-assets-test
-immutable-assets-test:
-	npm --prefix . run test:immutable-assets
-
 .angular/.updated: shared-libs/crates/patch-db/client/dist/index.js shared-libs/ts-modules/start-core/dist/package.json node_modules/.package-lock.json
 	rm -rf .angular
 	mkdir -p .angular

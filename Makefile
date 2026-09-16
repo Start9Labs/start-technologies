@@ -47,4 +47,4 @@ format-check:
 	npm --prefix . run format:check
 	npm --prefix . run format:toml:check
 
-test: | start-core-test start-sdk-test backup-fs-test container-runtime-test start-wrt-test immutable-assets-test
+test: | start-core-test start-sdk-test backup-fs-test container-runtime-test start-wrt-test

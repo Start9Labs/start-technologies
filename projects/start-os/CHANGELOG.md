@@ -132,8 +132,8 @@ for the detail behind its highlights.
 
 ### Fixed
 
-- **Browser tabs now offer Reload in the Refresh Needed dialog.** Select
-  **Reload** to open the updated interface.
+- **The Refresh Needed dialog offers a Refresh button in browser tabs.** Select
+  it to open the updated interface.
 
 - **The port-forwarding test reports a port as open to the Internet only where
   it is reachable from the Internet.** Where StartOS's port-forward request was
