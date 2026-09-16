@@ -70,16 +70,16 @@ cp "$NEW_SQUASHFS" "$WORK/payload/images/$B3SUM.rootfs"
 #    version happens to sort highest once /boot holds both.
 rm -rf "$WORK/payload/boot"
 unsquashfs -n -f -d "$WORK/payload" "$NEW_SQUASHFS" boot
-mkdir -p "$WORK/payload/usr/lib/startos/scripts"
+mkdir -p "$WORK/payload/usr/lib/startos"
 printf '%s\n%s\n' \
     "$(cd "$WORK/payload/boot" && ls -1 vmlinuz-* | head -n1)" \
     "$(cd "$WORK/payload/boot" && ls -1 initrd.img-* | head -n1)" \
     > "$WORK/payload/usr/lib/startos/migration-boot"
 
-# 4. 0.3.5.1 invokes the bootloader helper as /usr/sbin/update-grub2.
+# 4. Sentinel the 0.4.0 initramfs keys on, plus our bootloader updater (0.3.5.1
+#    execs /usr/sbin/update-grub2 in the payload chroot at apply time).
 touch "$WORK/payload/.startos-migration"
 install -m0755 "$SOURCE_DIR/lib/scripts/migration-update-grub" "$WORK/payload/usr/sbin/update-grub2"
-install -m0755 "$SOURCE_DIR/lib/scripts/normalize-fstab" "$WORK/payload/usr/lib/startos/scripts/normalize-fstab"
 
 # 5. Re-squash into the OTA payload the registry loop-mounts and serves.
 rm -f "$OUT"
