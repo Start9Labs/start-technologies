@@ -63,7 +63,7 @@ GitHub's "Latest" badge is unreliable in both directions: it can sit on a prerel
 
 ### Scale scrutiny to the size of the jump
 
-Classify the jump first; the tier decides how much of upstream you read. A project still on `0.x` has no major position — its minor **is** its major — and upstream's own notes outrank the number: a release that says reindex, migrate, or "requires <dependency> N+" is a major whatever its version string says.
+Classify the jump first; the tier decides how much of upstream you read. A project still on `0.x` has no major position — its minor **is** its major — and upstream's own notes outrank the number: a release that says reindex, migrate, or "requires `<dependency>` N+" is a major whatever its version string says.
 
 | Jump                      | What it needs                                                                                                                                                                                                                                                 |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
