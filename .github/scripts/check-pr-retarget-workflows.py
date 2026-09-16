@@ -94,6 +94,9 @@ for filename in TARGETS:
     assert re.search(r'^  workflow_call:\s*$', trigger, re.MULTILINE), filename
     pull_request = block(trigger, 'pull_request', 2)
     assert 'edited' not in pull_request, filename
+    if filename == 'test.yaml':
+        branches = block(pull_request, 'branches', 4)
+        assert re.search(r'^      - live-docs$', branches, re.MULTILINE), filename
     job = filename.removesuffix('.yml').removesuffix('.yaml')
     body = block(listener.split('\njobs:', 1)[1], job, 2)
     assert re.search(r'^    if: github\.event\.changes\.base$', body, re.MULTILINE), filename

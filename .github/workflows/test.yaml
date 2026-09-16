@@ -18,6 +18,7 @@ on:
     branches:
       - master
       - integration/*
+      - live-docs
 
 concurrency:
   group: automated-tests-${{ github.head_ref || github.ref }}
