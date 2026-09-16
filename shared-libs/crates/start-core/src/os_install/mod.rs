@@ -63,6 +63,13 @@ pub fn partition_for(disk: impl AsRef<Path>, idx: u32) -> PathBuf {
     }
 }
 
+pub fn same_device(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
 fn parse_partuuid(output: &[u8]) -> Option<&str> {
     let partuuid = std::str::from_utf8(output).ok()?.trim();
     (!partuuid.is_empty() && !partuuid.contains(char::is_whitespace)).then_some(partuuid)
