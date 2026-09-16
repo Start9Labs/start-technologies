@@ -8,7 +8,7 @@ use crate::disk::util::pvscan;
 use crate::prelude::*;
 use crate::util::Invoke;
 
-/// Partition paths for kernel nodes and `/dev/disk/by-path` aliases.
+/// `/dev/<part>` paths for every partition currently exposed on `disk_path`.
 pub async fn list_partitions(disk_path: &Path) -> Result<Vec<PathBuf>, Error> {
     let canonical = tokio::fs::canonicalize(disk_path)
         .await
@@ -31,13 +31,12 @@ pub async fn list_partitions(disk_path: &Path) -> Result<Vec<PathBuf>, Error> {
             ErrorKind::Filesystem,
         )
     })? {
-        let Ok(number) = tokio::fs::read_to_string(entry.path().join("partition")).await else {
-            continue;
-        };
-        let Ok(number) = number.trim().parse() else {
-            continue;
-        };
-        out.push(super::partition_for(disk_path, number));
+        if tokio::fs::metadata(entry.path().join("partition"))
+            .await
+            .is_ok()
+        {
+            out.push(Path::new("/dev").join(entry.file_name()));
+        }
     }
     Ok(out)
 }
