@@ -158,6 +158,27 @@ To recover:
 2. Make sure your device is on the same network as the server. If you use a VPN, disconnect it to test.
 3. Reload the page. If a plain reload still shows the saved copy, do a hard refresh — the key combinations for each browser are listed [above](#i-am-unable-to-connect-to-my-servers-server-namelocal-url). If you were using an IP address, use `https://server-name.local` instead: it follows the server even when its IP changes.
 
+## My server becomes unreachable after hours or days
+
+A server that runs normally for hours or days, then drops off the network all at once — no web interface, no SSH, no services, while the power light and the Ethernet link light stay on — and comes straight back after a forced restart is almost always its OS drive going to sleep and not waking up. Mini PCs ship with aggressive power saving enabled, and some NVMe drives never return from their deepest idle state. The installation itself is fine.
+
+The tell is on a monitor plugged into the server while it is in this state: `SQUASHFS error: Unable to read metadata cache entry` and similar lines, repeating. That is StartOS failing to read its own files from the drive. A server that shows nothing on the monitor and does not answer `ping` has locked up entirely; the same steps apply.
+
+1. In the BIOS, turn off PCIe power saving (**ASPM** or **Native ASPM**) and any NVMe or storage power-saving option, and limit CPU C-states to C1 or C3, or turn C-states off where that is the only switch.
+
+1. If it still happens, the drive's own idle power management (NVMe APST) is the usual remaining cause. Turn it off with a kernel setting: [connect via SSH](ssh.md) and run
+
+   ```
+   sudo mkdir -p /etc/default/grub.d
+   echo 'GRUB_CMDLINE_LINUX="$GRUB_CMDLINE_LINUX nvme_core.default_ps_max_latency_us=0"' | sudo tee /etc/default/grub.d/zz-nvme.cfg
+   sudo update-grub
+   sudo reboot
+   ```
+
+   After the restart, `cat /proc/cmdline` should end in `nvme_core.default_ps_max_latency_us=0`. A StartOS update regenerates the boot configuration; check `/proc/cmdline` again after updating and repeat these commands if the setting is gone.
+
+If the server still freezes with both in place, the hardware itself is the next suspect — a power supply that sags under load, or memory — and the [Community Hub](https://community.start9.com) is the place to compare notes with others on the same model.
+
 ## Can I add a second drive to give a service more storage?
 
 Not yet. StartOS keeps every service's data on a single data drive, the one chosen at the Select Drives step when [installing StartOS](installing-startos.md). There is no way to attach an additional drive to one service, and a drive plugged in after setup is only recognized as a [backup](backup-create.md) target.
