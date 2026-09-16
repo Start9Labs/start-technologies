@@ -128,6 +128,8 @@ ip -br link                                      # NICs
 ip -br addr                                      # IPs
 ip route | grep default                          # gateway
 lspci -nn | grep -Ei 'network|ethernet|wireless' # PCI NICs
+journalctl -b _PID=1 | grep -i watchdog          # hardware watchdog
+grep -o 'nvme_core[^ ]*' /proc/cmdline           # NVMe power saving
 ```
 
 - [ ] Every physical disk the SKU ships with is listed in `lsblk` with correct size
@@ -135,6 +137,8 @@ lspci -nn | grep -Ei 'network|ethernet|wireless' # PCI NICs
 - [ ] `ip -br addr` shows a DHCP-assigned LAN address on the Ethernet interface
 - [ ] `ip route` shows exactly one default route through the expected interface
 - [ ] On Wi-Fi SKUs: `lspci` lists the Wi-Fi controller
+- [ ] PID 1 logs the hardware watchdog it opened and a running timeout of 1min, and the device stays up for the rest of this plan (a driver that drops pets reboots it every minute)
+- [ ] `/proc/cmdline` carries `nvme_core.default_ps_max_latency_us=0`
 
 ---
 

@@ -64,6 +64,13 @@ run_command "cat /proc/meminfo" "Detailed memory information"
 run_command "lsblk" "List of block devices"
 run_command "df -h" "Disk space usage"
 run_command "fdisk -l" "Detailed disk partition information"
+run_command "nvme list; for d in /dev/nvme[0-9]; do [ -e \"\$d\" ] || continue; echo \"\$d\"; nvme get-feature \"\$d\" -f 0x0c -H | head -n 2; done" "NVMe drives and whether each drive's autonomous power state transitions (APST) are enabled"
+
+# Kernel log, previous boot, and crash records
+run_command "cat /proc/cmdline" "Kernel command line"
+run_command "dmesg -T | tail -n 300" "Kernel log (last 300 lines)"
+run_command "journalctl -b -1 -n 300 --no-pager" "Previous boot's journal (last 300 lines)"
+run_command "ls -la /sys/fs/pstore/ /var/lib/systemd/pstore/ /media/startos/data/main/logs/pstore/; cat /var/lib/systemd/pstore/*/dmesg.txt /media/startos/data/main/logs/pstore/*/dmesg.txt" "Kernel crash records preserved across reboots (pstore)"
 
 # Collecting network information
 run_command "ip a" "Network interfaces and IP addresses"

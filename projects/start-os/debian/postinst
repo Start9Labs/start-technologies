@@ -36,7 +36,7 @@ if [ -f /etc/default/grub ]; then
 	grub_set() {
 		set_config /etc/default/grub "$1" "\"$2\""
 	}
-	CMDLINE='boot=startos console=ttyS0,115200n8 console=tty0'
+	CMDLINE='boot=startos console=ttyS0,115200n8 console=tty0 nvme_core.default_ps_max_latency_us=0'
 	# tegra234-cbb ACPI-matches NVDA1070 and reads a firewalled fabric register
 	# before masking SError, which hangs a GB10 (DGX Spark) during ACPI scan —
 	# before any console exists. NVIDIA blacklists this same initcall on Spark.
@@ -255,6 +255,16 @@ fs.inotify.max_user_watches=1048576
 # Headroom for nested user namespaces (rootless OCI engines inside service LXCs).
 user.max_user_namespaces=28633
 kernel.unprivileged_userns_clone=1
+kernel.panic=10
+-kernel.hardlockup_panic=1
+# startd crashes the kernel through /proc/sysrq-trigger when the OS drive stops answering.
+kernel.sysrq=1
+EOF
+
+mkdir -p /etc/systemd/system.conf.d
+cat > /etc/systemd/system.conf.d/10-startos-watchdog.conf << 'EOF'
+[Manager]
+RuntimeWatchdogSec=60
 EOF
 
 # Ensure /dev/fuse and /dev/net/tun are available on the host so service LXCs

@@ -93,7 +93,15 @@ for the detail behind its highlights.
   monospace box that keeps its line breaks, and, where the service asks for it,
   can be copied, shown as a QR code, or saved to a file.
 
+- **Your server restarts itself when it hangs.** A kernel lockup, or an OS
+  drive that stops answering, ends in an automatic restart within a few minutes.
+  Where the firmware can record a kernel crash, the record is kept on the data
+  drive and included in `gather-debug-info`. See
+  [FAQ](https://docs.start9.com/start-os/faq.html#my-server-restarted-on-its-own).
+
 ### Changed
+
+- **NVMe drives no longer enter their deep idle power states.**
 
 - **Your server's name is now its `.local` address, without the `.local` on the
   end.** A server previously carried two names: a display label shown in the
