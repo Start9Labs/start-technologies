@@ -142,6 +142,7 @@ make start-core-test               # Rust (shared-libs/crates/start-core)
 make start-sdk-test                # SDK
 make backup-fs-test                # backup-fs library tests except the /dev/fuse suite
 make container-runtime-test  # container runtime
+make start-os-scripts-test   # StartOS shell scripts (projects/start-os/build/tests)
 make start-wrt-test           # StartWRT Rust crates
 
 # Run a specific Rust test

@@ -18,7 +18,8 @@ monorepo-wide rules and [ARCHITECTURE.md](ARCHITECTURE.md) for how this product 
   read `container-runtime/AGENTS.md` before touching it.
 - `docs/` — the end-user mdbook (book "StartOS"), served at `/start-os/`.
 - `build/` — OS image assembly (image-recipe, dpkg-deps, firmware) plus the
-  `startbox`/`start-container` build scripts; `debian/` — Debian control;
+  `startbox`/`start-container` build scripts and the shell test suite in
+  `build/tests/`; `debian/` — Debian control;
   `backup-fs/` carries its own build script. Systemd units + `services.slice`
   and `assets/` live directly in this dir; the shared build infra (root
   `build/`) and `apt/` are at the repo root.
@@ -211,9 +212,10 @@ Then follow the screenshot walkthrough in [`assets/create-vm/`](assets/create-vm
 ### Testing
 
 ```sh
-make test                      # Rust + SDK + container-runtime
+make test                      # Rust + SDK + container-runtime + shell
 make start-core-test                 # backend only
 make backup-fs-test                  # backup-fs library tests except the /dev/fuse suite
+make start-os-scripts-test           # shell scripts under build/lib/scripts (suite in build/tests/)
 ```
 
 The container-runtime has its own test suite — see [container-runtime/CONTRIBUTING.md](container-runtime/CONTRIBUTING.md). Note CI builds a multi-platform matrix (apple-darwin + aarch64/x86_64/riscv64 musl); local `cargo check` is linux-only, so consider platform-specific impact.
