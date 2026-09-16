@@ -33,10 +33,19 @@ fi
 boot_stage=$(mktemp -d /media/startos/images/.boot.XXXXXX)
 trap 'rm -rf -- "$boot_stage"' EXIT
 unsquashfs -f -d "$boot_stage" "$1" boot
+target=
+for kernel in "$boot_stage"/boot/vmlinuz-*; do
+    [ -e "$kernel" ] || continue
+    version=${kernel##*/vmlinuz-}
+    if [ -z "$target" ] || dpkg --compare-versions "$version" gt "$target"; then
+        target=$version
+    fi
+done
+# update-grub boots the newest kernel in /boot.
 for kernel in /boot/vmlinuz-*; do
     [ -e "$kernel" ] || continue
     version=${kernel#/boot/vmlinuz-}
-    if [ ! -e "$boot_stage/boot/vmlinuz-$version" ]; then
+    if [ -n "$target" ] && dpkg --compare-versions "$version" gt "$target"; then
         rm -f \
             "/boot/vmlinuz-$version" \
             "/boot/initrd.img-$version" \
