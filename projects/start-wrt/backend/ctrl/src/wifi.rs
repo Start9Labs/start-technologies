@@ -198,6 +198,7 @@ async fn await_regdomain(country: &str) {
         }
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
     }
+    tracing::warn!("regulatory domain {country} not applied within 5 s");
 }
 
 /// Country records follow the 8-byte header until an all-zero one.

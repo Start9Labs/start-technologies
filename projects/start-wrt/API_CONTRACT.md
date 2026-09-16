@@ -1461,6 +1461,10 @@ struct WifiSetResult {
 // that subnet. Without confirmation it applies nothing and returns the published
 // ports that would break; with confirmation it deletes them (firewall rules +
 // stale DHCP reservations) atomically with the WiFi update, then reloads firewall.
+// A `country` the regulatory database does not define is rejected with
+// `InvalidValue` before anything is written; codes are upper-case, as in the
+// database, so `us` is rejected. `null` clears it and returns the radios to the
+// world domain.
 ```
 
 ### `wifi.blackout-get`

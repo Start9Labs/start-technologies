@@ -113,7 +113,6 @@ const WORLD = '00'
       </tui-elastic-container>
       <fieldset>
         <legend>{{ 'Frequency Range' | i18n }}</legend>
-        <!-- @TODO: Implement channel optimization (requires backend channel scan endpoint) -->
         <tui-textfield tuiChevron [stringify]="stringifyChannel">
           <label tuiLabel>{{ '2.4 GHz Channel' | i18n }}</label>
           <input tuiSelect formControlName="channel24" />
