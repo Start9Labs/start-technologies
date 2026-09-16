@@ -64,7 +64,10 @@ where
         .invoke(crate::ErrorKind::DiskManagement)
         .await?;
     for disk in disks {
-        if pvscan.contains_key(disk.as_ref()) {
+        let device = tokio::fs::canonicalize(disk.as_ref())
+            .await
+            .with_ctx(|_| (ErrorKind::BlockDevice, disk.as_ref().display().to_string()))?;
+        if pvscan.contains_key(&device) {
             Command::new("pvremove")
                 .arg("-yff")
                 .arg(disk.as_ref())
