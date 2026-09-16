@@ -29,6 +29,7 @@ docs/USER.md
 /projects/start-os/build/lib/depends
 /projects/start-os/build/lib/conflicts
 .claude/*
+!.claude/.claude-plugin/
 !.claude/settings.json
 !.claude/skills/
 

@@ -70,6 +70,11 @@ const AGENTS_SYMLINK_TARGET: &str =
 const LEGACY_AGENTS_SYMLINK_TARGET: &str = "start-technologies/projects/start-sdk/docs/AGENTS.md";
 /// Path to the package template inside the cloned guide (joined onto MONOREPO_DIR).
 const TEMPLATE_SUBPATH: &str = "projects/start-sdk/docs/package-template";
+/// The fleet's agent skills inside the cloned guide (joined onto MONOREPO_DIR).
+const SKILLS_SUBPATH: &str = ".claude/skills";
+/// Workspace directories whose `skills` entry is linked at the guide's skills, one per
+/// agent that discovers skills there: `.claude` for Claude Code, `.agents` for Codex.
+const SKILL_LINK_DIRS: &[&str] = &[".claude", ".agents"];
 /// Manifest naming the published `start-cli` (joined onto MONOREPO_DIR). The checkout
 /// tracks releases, so this is the version a packager should be running.
 const CLI_MANIFEST_SUBPATH: &str = "projects/start-cli/Cargo.toml";
@@ -172,6 +177,7 @@ pub async fn init_workspace(
     }
     write_if_absent(&root.join("AGENTS.local.md"), AGENTS_LOCAL_STUB).await?;
     write_if_absent(&root.join("CLAUDE.md"), CLAUDE_MD_CONTENTS).await?;
+    link_guide_skills(&root).await?;
     // .startos/ marks the workspace and holds its signing key + target config. Written
     // last, so only a fully provisioned directory counts as a workspace.
     let startos = root.join(STARTOS_DIR);
@@ -586,6 +592,24 @@ fn interpolate(content: &str, id: &str, name: &str, escape_for_ts: bool) -> Stri
     content.replace("{{id}}", id).replace("{{name}}", &name)
 }
 
+/// Leaves an existing `skills` entry alone, a packager's own directory included.
+async fn link_guide_skills(root: &Path) -> Result<(), Error> {
+    let target = Path::new("..").join(MONOREPO_DIR).join(SKILLS_SUBPATH);
+    for dir in SKILL_LINK_DIRS {
+        let dir = root.join(dir);
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .with_ctx(|_| (ErrorKind::Filesystem, dir.display().to_string()))?;
+        let link = dir.join("skills");
+        if tokio::fs::symlink_metadata(&link).await.is_err() {
+            tokio::fs::symlink(&target, &link)
+                .await
+                .with_ctx(|_| (ErrorKind::Filesystem, link.display().to_string()))?;
+        }
+    }
+    Ok(())
+}
+
 /// Write `contents` to `path` only if nothing is there yet (a broken symlink
 /// counts as present, so a re-run never clobbers).
 async fn write_if_absent(path: &Path, contents: &str) -> Result<(), Error> {
@@ -657,6 +681,26 @@ mod test {
 
         std::fs::write(docs.join(".git"), "gitdir: ../elsewhere/.git/worktrees/x\n").unwrap();
         assert_eq!(guide_branch(&ws).as_deref(), Some("feature/x"));
+    }
+
+    #[tokio::test]
+    async fn guide_skills_are_linked_for_every_agent_and_never_clobbered() {
+        let ws = tmp();
+        let skills = ws.join(MONOREPO_DIR).join(SKILLS_SUBPATH);
+        std::fs::create_dir_all(skills.join("package-service")).unwrap();
+        std::fs::create_dir_all(ws.join(".claude/skills/mine")).unwrap();
+
+        link_guide_skills(&ws).await.unwrap();
+        link_guide_skills(&ws).await.unwrap();
+
+        assert_eq!(
+            std::fs::read_link(ws.join(".agents/skills")).unwrap(),
+            Path::new("../start-technologies/.claude/skills")
+        );
+        assert!(ws.join(".agents/skills/package-service").is_dir());
+        // a packager's own skills directory is kept, not replaced by the link
+        assert!(ws.join(".claude/skills/mine").is_dir());
+        assert!(std::fs::read_link(ws.join(".claude/skills")).is_err());
     }
 
     #[test]

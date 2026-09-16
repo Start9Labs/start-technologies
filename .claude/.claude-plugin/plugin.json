@@ -1,0 +1,11 @@
+{
+  "name": "start9",
+  "description": "Start9's agent skills: package a service for StartOS, and the house style for Start9 web UIs.",
+  "author": {
+    "name": "Start9 Labs",
+    "url": "https://github.com/Start9Labs"
+  },
+  "homepage": "https://docs.start9.com/packaging",
+  "repository": "https://github.com/Start9Labs/start-technologies",
+  "license": "MIT"
+}
