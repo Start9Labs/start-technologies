@@ -97,6 +97,15 @@ for filename in TARGETS:
     if filename == 'test.yaml':
         branches = block(pull_request, 'branches', 4)
         assert re.search(r'^      - live-docs$', branches, re.MULTILINE), filename
+        jobs = source.split('\njobs:', 1)[1]
+        changes = block(jobs, 'changes', 2)
+        assert "github.base_ref != 'live-docs'" in changes
+        for test_job in set(re.findall(r'^  ([\w-]+):$', jobs, re.MULTILINE)) - {
+            'prettier',
+            'changes',
+        }:
+            test_body = block(jobs, test_job, 2)
+            assert re.search(r'^    needs: \[[^]]*\bchanges\b[^]]*\]$', test_body, re.MULTILINE)
     job = filename.removesuffix('.yml').removesuffix('.yaml')
     body = block(listener.split('\njobs:', 1)[1], job, 2)
     assert re.search(r'^    if: github\.event\.changes\.base$', body, re.MULTILINE), filename

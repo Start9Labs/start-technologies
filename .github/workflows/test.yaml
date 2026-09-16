@@ -51,11 +51,13 @@ jobs:
 
   # On pull requests, the expensive jobs below only run when a non-docs file
   # changed. A docs-only PR is fully covered by the `prettier` job above, so it
-  # skips make test / the rustfmt container / the artifact regen here. On
-  # push/dispatch this guard is bypassed and they always run.
+  # skips make test / the rustfmt container / the artifact regen here. Every
+  # live-docs PR is limited to the published books by its separate guard and
+  # only needs the prettier gate. On push/dispatch this guard is bypassed and
+  # the expensive jobs always run.
   changes:
     name: Detect non-docs changes
-    if: github.event_name == 'pull_request' && github.event.pull_request.draft != true
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft != true && github.base_ref != 'live-docs'
     runs-on: ubuntu-latest
     permissions:
       pull-requests: read
