@@ -59,7 +59,7 @@ Read pages from your local checkout (`start-technologies/projects/start-sdk/docs
 
 ## Skills
 
-`start-technologies/projects/start-sdk/docs/skills/` holds the packaging skills — each a `SKILL.md` that drives one whole job end to end, with its own references beside it. They are part of the guide, so a sync updates them like any page. The workspace links that directory at `.claude/skills` and `.agents/skills`, so a session opened at the workspace root has them loaded. Invoke one by name — `/package-service <name>` in Claude Code, `$package-service` in Codex — or read its `SKILL.md` at the path below and follow it.
+`start-technologies/projects/start-sdk/docs/skills/` holds the packaging skills — each a `SKILL.md` that drives one whole job end to end, with its own references beside it. They are part of the guide, so a sync updates them like any page. A session opened at the workspace root lists them when `.claude/skills` (Claude Code) or `.agents/skills` (Codex) links to that directory, and can then invoke one by name — `/package-service <name>` in Claude Code, `$package-service` in Codex. Without the links, open a skill's `SKILL.md` at the path below and follow it.
 
 | Skill                                                                        | Use when                                                                                                                                                                   |
 | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
