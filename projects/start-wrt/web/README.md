@@ -18,6 +18,8 @@ npm run check:wrt    # Type-check without emitting
 
 The dev server uses mock data by default (`config.json` → `useMocks: true`), so no router or running backend is needed.
 
+The same mock build is published to router-demo.start9.com on every `master` push that touches the UI (`.github/workflows/deploy-startwrt-demo.yml`).
+
 ## Feature Areas
 
 | Section               | Routes                                       | Description                                                   |

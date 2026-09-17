@@ -1,0 +1,31 @@
+name: Publish to NextExplorer
+description: Publish a directory as a folder in the NextExplorer volume assigned to the account, replacing the folder's previous contents in one rename.
+
+inputs:
+  url:
+    description: Base URL of the NextExplorer instance
+    required: true
+  email:
+    description: Login email of the publishing account
+    required: true
+  password:
+    description: Password of the publishing account
+    required: true
+  dir:
+    description: Directory whose contents become the folder's contents
+    required: true
+  folder:
+    description: Folder name inside the account's assigned volume
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        NEXTEXPLORER_URL: ${{ inputs.url }}
+        NEXTEXPLORER_EMAIL: ${{ inputs.email }}
+        NEXTEXPLORER_PASSWORD: ${{ inputs.password }}
+        DIR: ${{ inputs.dir }}
+        FOLDER: ${{ inputs.folder }}
+      run: '"$GITHUB_ACTION_PATH/publish.sh" "$DIR" "$FOLDER"'
