@@ -37,11 +37,7 @@ Only the **Bitcoin Guides** book (`bitcoin-guides/`), the landing page, the them
    cargo install mdbook-tabs --version 0.3.4
    ```
 
-3. Install [Node.js](https://nodejs.org/) (v22+) and the script dependencies (only needed to regenerate `llms.txt`):
-
-   ```
-   cd scripts && npm install && cd ..
-   ```
+3. Install [Node.js](https://nodejs.org/) (v22+). `build.sh` installs the script dependencies itself on first use.
 
 4. From the `docs/` project, build and serve:
 
