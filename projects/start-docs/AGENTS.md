@@ -40,12 +40,12 @@ The StartOS, StartTunnel, Packaging, and StartWRT books are NOT here — they mo
 
 ## Adding or moving a book
 
-1. Add `book-name=version` to `versions.conf` (build, deploy, and nginx routing all derive from it — no other config to touch).
+1. Add `book-name=version` to `versions.conf` (build, deploy, and the site's routing all derive from it — no other config to touch).
 2. If the book lives outside this project, add a `book_dir()` case in `build.sh` pointing at its source dir. Books with no mapping default to `<book-name>/` (relative to this project).
 
 ## Deployment
 
-**The site serves the `live-docs` branch, not `master`.** GitHub Actions `.github/workflows/docs-deploy.yml` (at the monorepo root) builds and rsyncs to the VPS on push to `live-docs` touching `projects/start-docs/**`, `projects/start-os/docs/**`, `projects/start-tunnel/docs/**`, `projects/start-sdk/docs/**`, or `projects/start-wrt/docs/**` — keep that `paths:` list in step with the set of books. It regenerates nginx routing from `versions.conf`. Don't hardcode book names in nginx — the generated `book_versions.conf` handles that. The same tree then goes to Start9 Pages on evelyn through `.github/workflows/deploy-docs-pages.yml` (a `workflow_run` on `master` that rebuilds `live-docs` itself), where no nginx rules exist: every redirect the site needs is built into the tree by `build.sh` — the stubs for unversioned URLs and the script in `landing/404.html`. A routing change goes there, never into a server config.
+**The site serves the `live-docs` branch, not `master`.** GitHub Actions `.github/workflows/docs-deploy.yml` (at the monorepo root) builds and publishes to Start9 Pages on evelyn on push to `live-docs` touching `projects/start-docs/**`, `projects/start-os/docs/**`, `projects/start-tunnel/docs/**`, `projects/start-sdk/docs/**`, or `projects/start-wrt/docs/**` — keep that `paths:` list in step with the set of books. Pages has no server rules: every redirect the site needs is built into the tree by `build.sh` — the stubs for unversioned URLs and the script in `landing/404.html`. A routing change goes there, never into a server config. (`.github/workflows/deploy-docs-pages.yml` on `master` publishes on `live-docs`'s behalf until a tag carries the publish step over, then stands down.)
 
 Content reaches `live-docs` two ways:
 

@@ -1,8 +1,8 @@
 name: Deploy brochure (marketplace.start9.com)
 
-# Builds projects/brochure and deploys it to marketplace.start9.com on the
-# shared VPS (same box as start9.com and docs.start9.com), mirroring those
-# repos' deploy.yml. Triggers only when brochure's build inputs change.
+# Builds projects/brochure-marketplace and publishes it to the NextExplorer
+# folder Start9 Pages serves as marketplace.start9.com. Triggers only when
+# brochure's build inputs change.
 
 on:
   push:
@@ -68,23 +68,6 @@ jobs:
         run: |
           npm run build:brochure
           test -f projects/brochure-marketplace/dist/raw/brochure-marketplace/404.html
-
-      - name: Configure SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.WEBSITE_DEPLOY_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H start9.com >> ~/.ssh/known_hosts
-          cat >> ~/.ssh/config <<EOF
-          Host marketplace-vps
-            HostName start9.com
-            User root
-            IdentityFile ~/.ssh/deploy_key
-            IdentitiesOnly yes
-          EOF
-
-      - name: Deploy to VPS
-        run: rsync -az --delete projects/brochure-marketplace/dist/raw/brochure-marketplace/ marketplace-vps:/var/www/html/marketplace.start9.com/
 
       - name: Publish to NextExplorer
         uses: ./.github/actions/nextexplorer-publish
