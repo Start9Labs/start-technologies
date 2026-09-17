@@ -1687,6 +1687,21 @@ net.host.private-domain-is-server-mdns:
   fr_FR: '« %{domain} » est le nom mDNS du serveur et ne peut pas être attribué comme domaine privé'
   pl_PL: '„%{domain}” jest nazwą mDNS serwera i nie może zostać przypisana jako domena prywatna'
 
+# net/host/binding.rs
+net.host.binding.address-not-found:
+  en_US: "%{address} is not an address of binding %{port}. Its addresses are:"
+  de_DE: "%{address} ist keine Adresse der Bindung %{port}. Ihre Adressen sind:"
+  es_ES: "%{address} no es una dirección del vínculo %{port}. Sus direcciones son:"
+  fr_FR: "%{address} n'est pas une adresse de la liaison %{port}. Ses adresses sont :"
+  pl_PL: "%{address} nie jest adresem powiązania %{port}. Jego adresy to:"
+
+net.host.binding.choose-address:
+  en_US: "%{address} matches several addresses of binding %{port}; choose one:"
+  de_DE: "%{address} passt auf mehrere Adressen der Bindung %{port}; wählen Sie eine aus:"
+  es_ES: "%{address} coincide con varias direcciones del vínculo %{port}; elija una:"
+  fr_FR: "%{address} correspond à plusieurs adresses de la liaison %{port} ; choisissez-en une :"
+  pl_PL: "%{address} pasuje do kilku adresów powiązania %{port}; wybierz jeden:"
+
 # net/ssl.rs
 net.ssl.unreachable:
   en_US: "unreachable"
@@ -3286,11 +3301,11 @@ help.arg.add-signer-key:
   pl_PL: "Dodaj klucz publiczny do sygnatariusza"
 
 help.arg.address:
-  en_US: "Network address"
-  de_DE: "Netzwerkadresse"
-  es_ES: "Dirección de red"
-  fr_FR: "Adresse réseau"
-  pl_PL: "Adres sieciowy"
+  en_US: "One of the binding's addresses (IP, <name>.local or domain), with :port when it serves several ports; a JSON HostnameInfo also works"
+  de_DE: "Eine Adresse der Bindung (IP, <name>.local oder Domain), mit :port, wenn sie mehrere Ports bedient; auch ein JSON-HostnameInfo wird akzeptiert"
+  es_ES: "Una dirección del vínculo (IP, <nombre>.local o dominio), con :puerto si sirve varios puertos; también se acepta un HostnameInfo en JSON"
+  fr_FR: "Une adresse de la liaison (IP, <nom>.local ou domaine), avec :port si elle dessert plusieurs ports ; un HostnameInfo en JSON est aussi accepté"
+  pl_PL: "Jeden z adresów powiązania (IP, <nazwa>.local lub domena), z :port, gdy obsługuje kilka portów; przyjmowany jest też HostnameInfo w JSON"
 
 
 help.arg.gua-wan:

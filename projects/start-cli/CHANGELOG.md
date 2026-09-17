@@ -24,6 +24,12 @@ or the CLI's externally observable behavior.
 - **The notice that `start-cli` is behind the published release is given only when the workspace's
   `start-technologies` checkout is on `live-docs`.**
 
+- **`--address` on `binding set-address-enabled`, `set-range-address-enabled` and `set-gua-wan`
+  takes the address as the UI shows it** — an IP, `<name>.local` or a domain, with `:port` where
+  one address serves several ports — under `package host` and `server host` alike. An address the
+  binding doesn't have is refused with the list of those it has; a JSON `HostnameInfo` is still
+  accepted.
+
 ## [2.0.0]
 
 ### Added
