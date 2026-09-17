@@ -13,7 +13,7 @@ or the CLI's externally observable behavior.
 
 ### Added
 
-- **`s9pk init-workspace` links the guide's packaging skills into the workspace**, at `.claude/skills` for Claude Code and `.agents/skills` for Codex, so a session opened at the workspace root can run `package-service` and the guide sync keeps the skills current. An existing entry at either path is left alone.
+- **`s9pk init-workspace` links the guide's packaging skills into the workspace**, at `.claude/skills` for Claude Code and `.agents/skills` for Codex, so a session opened at the workspace root can run `package-service` and the guide sync keeps the skills current. An existing entry at either path is left alone. A workspace made by an earlier release gets the links the first time any `start-cli` command runs inside it after the update, so nothing needs re-running; `init-workspace` does the same on demand.
 
 - **`s9pk init-workspace` and `s9pk init-package` say when the workspace's `start-technologies`
   checkout is on a branch other than `live-docs`.** The notice names the checkout and the branch
