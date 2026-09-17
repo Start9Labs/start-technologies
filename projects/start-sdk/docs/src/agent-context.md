@@ -51,6 +51,16 @@ Workflow for any objective:
 
 Read pages from your local checkout (`start-technologies/projects/start-sdk/docs/src/<page>.md`). Only if `start-technologies/` is missing, fall back to the web (`https://docs.start9.com/packaging/<page>.html`).
 
+## Skills
+
+`start-technologies/projects/start-sdk/docs/skills/` holds the packaging skills — each a `SKILL.md` that drives one whole job end to end, with its own references beside it. They are part of the guide, so a sync updates them like any page. A session opened at the workspace root lists them when `.claude/skills` (Claude Code) or `.agents/skills` (Codex) links to that directory, and can then invoke one by name — `/package-service <name>` in Claude Code, `$package-service` in Codex. Without the links, open a skill's `SKILL.md` at the path below and follow it.
+
+| Skill                                                                        | Use when                                                                                                                                                                   |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `start-technologies/projects/start-sdk/docs/skills/package-service/SKILL.md` | asked to package a new service: it researches the upstream, settles the shape in one round of questions, then scaffolds, builds, verifies on a StartOS box, and hands back |
+
+`AGENTS.local.md` records how this workspace departs from the scaffold — which box to install to, where packages live, how finished work is handed back. Where it and a skill differ, follow `AGENTS.local.md`.
+
 ## Where to read for X
 
 | Need                                                  | Read                                                                      |
