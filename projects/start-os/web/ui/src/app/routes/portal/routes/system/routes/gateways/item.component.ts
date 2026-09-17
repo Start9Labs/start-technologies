@@ -1,13 +1,15 @@
-import { Component, inject, input } from '@angular/core'
+import { Component, inject, Injector, input } from '@angular/core'
 import { DialogService, i18nPipe, TaskService } from '@start9labs/shared'
 import { ISB } from '@start9labs/start-core'
 import {
   TuiButton,
   TuiDataList,
   TuiDropdown,
+  TuiHint,
   TuiIcon,
   TuiInput,
 } from '@taiga-ui/core'
+import { PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { filter } from 'rxjs'
 import { FormComponent } from 'src/app/routes/portal/components/form.component'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
@@ -15,6 +17,7 @@ import { FormDialogService } from 'src/app/services/form-dialog.service'
 import { GatewayPlus } from 'src/app/services/gateway.service'
 import { configBuilderToSpec } from 'src/app/utils/configBuilderToSpec'
 import { PORT_FORWARDS_MODAL } from './port-forwards.component'
+import { WanIpDialog } from './wan-ip.dialog'
 
 @Component({
   selector: 'tr[gateway]',
@@ -45,10 +48,13 @@ import { PORT_FORWARDS_MODAL } from './port-forwards.component'
       <td
         class="wan"
         [style.color]="
-          gateway.ipInfo.wanIp ? undefined : 'var(--tui-text-warning)'
+          gateway.effectiveWanIp ? undefined : 'var(--tui-text-warning)'
         "
       >
-        {{ gateway.ipInfo.wanIp || ('Error' | i18n) }}
+        {{ gateway.effectiveWanIp || ('Error' | i18n) }}
+        @if (gateway.wanIpOverride) {
+          <tui-icon icon="@tui.pencil" [tuiHint]="'Set manually' | i18n" />
+        }
       </td>
       <td>
         <button
@@ -66,6 +72,9 @@ import { PORT_FORWARDS_MODAL } from './port-forwards.component'
               {{ 'Rename' | i18n }}
             </button>
             @if (gateway.type !== 'outbound-only') {
+              <button tuiOption (click)="editWanIp()">
+                {{ 'Edit WAN IP' | i18n }}
+              </button>
               <button tuiOption (click)="viewPortForwards()">
                 {{ 'View port forwards' | i18n }}
               </button>
@@ -87,6 +96,12 @@ import { PORT_FORWARDS_MODAL } from './port-forwards.component'
     tui-icon {
       font-size: 1.3rem;
       margin-right: 0.7rem;
+    }
+
+    .wan tui-icon {
+      font-size: 1rem;
+      margin: 0 0 0 0.25rem;
+      color: var(--tui-text-secondary);
     }
 
     td:first-child {
@@ -135,7 +150,15 @@ import { PORT_FORWARDS_MODAL } from './port-forwards.component'
       }
     }
   `,
-  imports: [TuiButton, TuiDropdown, TuiDataList, TuiIcon, TuiInput, i18nPipe],
+  imports: [
+    TuiButton,
+    TuiDropdown,
+    TuiDataList,
+    TuiHint,
+    TuiIcon,
+    TuiInput,
+    i18nPipe,
+  ],
 })
 export class GatewaysItemComponent {
   private readonly dialog = inject(DialogService)
@@ -143,10 +166,34 @@ export class GatewaysItemComponent {
   private readonly api = inject(ApiService)
   private readonly formDialog = inject(FormDialogService)
   private readonly i18n = inject(i18nPipe)
+  private readonly injector = inject(Injector)
 
   readonly gateway = input.required<GatewayPlus>()
 
   open = false
+
+  editWanIp() {
+    const { id, wanIpOverride, ipInfo } = this.gateway()
+
+    this.dialog
+      .openComponent<string | null>(
+        new PolymorpheusComponent(WanIpDialog, this.injector),
+        {
+          label: 'Edit WAN IP',
+          size: 's',
+          data: { detected: ipInfo.wanIp, override: wanIpOverride },
+        },
+      )
+      .subscribe(ip =>
+        this.tasks.run(
+          async () =>
+            ip === null
+              ? await this.api.unsetGatewayWanIp({ gateway: id })
+              : await this.api.setGatewayWanIp({ gateway: id, ip }),
+          'Saving',
+        ),
+      )
+  }
 
   viewPortForwards() {
     const { id, name } = this.gateway()

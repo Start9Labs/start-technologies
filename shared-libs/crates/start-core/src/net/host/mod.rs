@@ -208,7 +208,7 @@ impl Model<Host> {
                         available.insert(hi);
                     }
                 }
-                if let Some(wan_ip) = &ip_info.wan_ip {
+                if let Some(wan_ip) = g.wan_ip() {
                     let host = InternedString::from_display(&wan_ip);
                     let metadata = HostnameMetadata::Ipv4 {
                         gateway: gid.clone(),
@@ -390,7 +390,7 @@ impl Model<Host> {
                         },
                     });
                 }
-                if let Some(wan_ip) = &ip_info.wan_ip {
+                if let Some(wan_ip) = g.wan_ip() {
                     available.insert(HostnameInfo {
                         ssl: false,
                         public: true,
@@ -470,7 +470,7 @@ impl Model<Host> {
                 let Some(ip_info) = &gw_info.ip_info else {
                     continue;
                 };
-                let Some(wan_ip) = ip_info.wan_ip else {
+                let Some(wan_ip) = gw_info.wan_ip() else {
                     continue;
                 };
                 // A certificate authority validates at `ACME_CHALLENGE_PORT`,
@@ -532,7 +532,7 @@ impl Model<Host> {
                 let Some(ip_info) = &gw_info.ip_info else {
                     continue;
                 };
-                let Some(wan_ip) = ip_info.wan_ip else {
+                let Some(wan_ip) = gw_info.wan_ip() else {
                     continue;
                 };
                 for subnet in &ip_info.subnets {

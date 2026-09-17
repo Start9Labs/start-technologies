@@ -77,11 +77,8 @@ pub async fn add_tunnel(
                     iface.clone(),
                     NetworkInterfaceInfo {
                         name: Some(name),
-                        secure: None,
-                        ip_info: None,
                         gateway_type,
-                        port_map: Default::default(),
-                        dns_update: Default::default(),
+                        ..Default::default()
                     },
                 );
                 return true;

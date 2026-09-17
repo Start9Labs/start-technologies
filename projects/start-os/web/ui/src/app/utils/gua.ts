@@ -16,6 +16,15 @@ export function getGua(ipInfo: T.IpInfo): string | null {
 }
 
 /**
+ * The public IPv4 the Internet reaches the server at through this gateway: the
+ * address the operator pinned, else the one StartOS detected. Mirrors the
+ * backend, which derives every public address and port forward from it.
+ */
+export function getWanIp(gateway: T.NetworkInterfaceInfo): string | null {
+  return gateway.wanIpOverride ?? gateway.ipInfo?.wanIp ?? null
+}
+
+/**
  * Whether the domain's DNS resolves correctly for every family the gateway
  * offers: the `A` record must match the WAN IPv4 (if any) and the `AAAA` must
  * match the GUA (if any).

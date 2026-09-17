@@ -2108,6 +2108,13 @@ net.gateway.cannot-delete-without-connection:
   fr_FR: "Impossible de supprimer l'appareil sans connexion active"
   pl_PL: "Nie można usunąć urządzenia bez aktywnego połączenia"
 
+net.gateway.wan-ip-override-not-public:
+  en_US: "%{ip} is not a public address; inbound traffic from the internet reaches this server at a globally routable IPv4"
+  de_DE: "%{ip} ist keine öffentliche Adresse; eingehender Datenverkehr aus dem Internet erreicht diesen Server über eine global routbare IPv4"
+  es_ES: "%{ip} no es una dirección pública; el tráfico entrante de internet llega a este servidor por una IPv4 enrutable globalmente"
+  fr_FR: "%{ip} n'est pas une adresse publique ; le trafic entrant d'internet atteint ce serveur par une IPv4 routable globalement"
+  pl_PL: "%{ip} nie jest adresem publicznym; ruch przychodzący z internetu dociera do tego serwera przez globalnie routowalny adres IPv4"
+
 net.gateway.no-configured-echoip-urls:
   en_US: "No configured echoip URLs"
   de_DE: "Keine konfigurierten EchoIP-URLs"
@@ -4247,6 +4254,13 @@ help.arg.version-range:
   fr_FR: "Contrainte de plage de version"
   pl_PL: "Ograniczenie zakresu wersji"
 
+help.arg.wan-ip:
+  en_US: "Public IPv4 address inbound traffic reaches this gateway at"
+  de_DE: "Öffentliche IPv4-Adresse, unter der eingehender Datenverkehr dieses Gateway erreicht"
+  es_ES: "Dirección IPv4 pública por la que el tráfico entrante llega a esta puerta de enlace"
+  fr_FR: "Adresse IPv4 publique par laquelle le trafic entrant atteint cette passerelle"
+  pl_PL: "Publiczny adres IPv4, pod którym ruch przychodzący dociera do tej bramy"
+
 help.arg.wifi-country-code:
   en_US: "ISO 3166-1 alpha-2 WiFi country code"
   de_DE: "ISO 3166-1 Alpha-2 WLAN-Ländercode"
@@ -5005,6 +5019,13 @@ about.add-wifi-ssid-password:
   fr_FR: "Ajouter un ssid et mot de passe wifi"
   pl_PL: "Dodaj ssid i hasło wifi"
 
+
+about.allow-gateway-detect-wan-ip:
+  en_US: "Clear a gateway's pinned public IP and use the one StartOS detects"
+  de_DE: "Die festgelegte öffentliche IP eines Gateways löschen und die von StartOS erkannte verwenden"
+  es_ES: "Borrar la IP pública fijada de una puerta de enlace y usar la que StartOS detecta"
+  fr_FR: "Effacer l'IP publique fixée d'une passerelle et utiliser celle que StartOS détecte"
+  pl_PL: "Wyczyść przypiętą publiczną IP bramy i użyj tej wykrytej przez StartOS"
 
 about.allow-gateway-infer-network-security:
   en_US: "Let StartOS decide whether a gateway's network is trusted with unencrypted traffic"
@@ -6616,6 +6637,13 @@ about.set-gateway-enabled-for-binding:
   es_ES: "Establecer gateway habilitado para enlace"
   fr_FR: "Définir la passerelle activée pour la liaison"
   pl_PL: "Ustaw bramę jako włączoną dla powiązania"
+
+about.set-gateway-wan-ip:
+  en_US: "Pin the public IP address inbound traffic reaches a gateway at"
+  de_DE: "Die öffentliche IP-Adresse festlegen, unter der eingehender Datenverkehr ein Gateway erreicht"
+  es_ES: "Fijar la dirección IP pública por la que el tráfico entrante llega a una puerta de enlace"
+  fr_FR: "Fixer l'adresse IP publique par laquelle le trafic entrant atteint une passerelle"
+  pl_PL: "Przypnij publiczny adres IP, pod którym ruch przychodzący dociera do bramy"
 
 about.set-keyboard:
   en_US: "Set the keyboard layout"

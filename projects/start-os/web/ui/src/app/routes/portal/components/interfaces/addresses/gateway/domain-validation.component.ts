@@ -18,6 +18,7 @@ import {
   dnsAllPass,
   externalAllPass,
   getGua,
+  getWanIp,
   portAllPass,
 } from 'src/app/utils/gua'
 import { parse } from 'tldts'
@@ -57,7 +58,7 @@ export type DomainValidationData = {
 @Component({
   selector: 'domain-validation',
   template: `
-    @let wanIp = context.data.gateway.ipInfo.wanIp || ('Error' | i18n);
+    @let wanIp = wanIpTarget || ('Error' | i18n);
     @let gatewayName =
       context.data.gateway.name || context.data.gateway.ipInfo.name;
 
@@ -311,7 +312,7 @@ export class DomainValidationComponent {
   readonly domain =
     parse(this.context.data.fqdn).domain || this.context.data.fqdn
 
-  private readonly wanIp = this.context.data.gateway.ipInfo.wanIp
+  protected readonly wanIpTarget = getWanIp(this.context.data.gateway)
   // The gateway's IPv6 GUA (the AAAA target), if it has one. When present the
   // domain is DualStack and the modal verifies both families.
   readonly gua = getGua(this.context.data.gateway.ipInfo)
@@ -375,7 +376,7 @@ export class DomainValidationComponent {
 
   readonly dnsV4Pass = computed(() => {
     const dns = this.dnsResult()
-    return dns ? dns.ipv4 === this.wanIp : undefined
+    return dns ? dns.ipv4 === this.wanIpTarget : undefined
   })
   readonly dnsV6Pass = computed(() => {
     const dns = this.dnsResult()
@@ -384,7 +385,7 @@ export class DomainValidationComponent {
 
   readonly allPass = computed(
     () =>
-      dnsAllPass(this.dnsResult(), this.wanIp, this.gua) &&
+      dnsAllPass(this.dnsResult(), this.wanIpTarget, this.gua) &&
       (this.isRange ||
         portAllPass(this.portResult(), this.portV6Result(), this.gua)) &&
       (!this.challengeOutstanding ||

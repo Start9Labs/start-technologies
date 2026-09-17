@@ -12,6 +12,16 @@ for the detail behind its highlights.
 
 ### Added
 
+- **A gateway's WAN IP can be set by hand.** StartOS infers it from outbound
+  traffic, which names the wrong address when inbound and outbound traffic take
+  different paths — a router sending all outbound traffic through a commercial
+  VPN while inbound connections still arrive on the real WAN address. "Edit WAN
+  IP" in the gateway's `⋮` menu pins the right one, and "Reset to detected"
+  hands the decision back. Every address derived from the gateway follows,
+  including the port-forwarding rules StartOS asks you to add. Also
+  `start-cli net gateway set-wan-ip` / `unset-wan-ip`. See
+  [Gateways](https://docs.start9.com/start-os/gateways.html).
+
 - **Typing a service's domain without `https://` opens its web interface over
   HTTPS.** This works on each network where the domain is assigned. Server IP
   addresses and domains assigned to the StartOS UI retain their existing

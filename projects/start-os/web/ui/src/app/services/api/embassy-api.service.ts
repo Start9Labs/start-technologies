@@ -204,6 +204,10 @@ export abstract class ApiService {
 
   abstract removeTunnel(params: T.RemoveTunnelParams): Promise<null>
 
+  abstract setGatewayWanIp(params: T.SetGatewayWanIpParams): Promise<null>
+
+  abstract unsetGatewayWanIp(params: T.UnsetGatewayWanIpParams): Promise<null>
+
   abstract setDefaultOutbound(params: { gateway: string | null }): Promise<null>
 
   abstract setServiceOutbound(params: T.SetOutboundGatewayParams): Promise<null>

@@ -8,7 +8,7 @@ import { GatewayService } from 'src/app/services/gateway.service'
 @Component({
   selector: 'gateways-table',
   template: `
-    <table [appTable]="['Name', 'Type', $any('LAN IP'), $any('WAN IP'), null]">
+    <table [appTable]="['Name', 'Type', $any('LAN IP'), 'WAN IP', null]">
       @for (gateway of gatewayService.gateways(); track $index) {
         <tr [gateway]="gateway"></tr>
       } @empty {

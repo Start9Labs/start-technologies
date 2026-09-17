@@ -820,4 +820,11 @@ export default {
   928: 'Ascendente',
   929: 'Descendente',
   930: 'Los servicios de este registro están mantenidos por la comunidad Start9 y están en fase de prueba beta. Se esperan errores. Instálalos bajo tu propio riesgo.',
+  931: 'Editar IP WAN',
+  932: 'IP WAN',
+  933: 'Establecida manualmente',
+  934: 'Detectada por StartOS:',
+  935: 'Restablecer a la detectada',
+  936: 'Debe ser una dirección IPv4 pública',
+  937: 'StartOS la obtiene del tráfico saliente. Establécela a mano cuando el tráfico entrante llegue por otra dirección, por ejemplo cuando tu router envía el tráfico saliente por una VPN.',
 } satisfies i18n

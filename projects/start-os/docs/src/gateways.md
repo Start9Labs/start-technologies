@@ -40,6 +40,25 @@ Service interface address tables list inbound/outbound gateways, where you can e
 
 To re-import a gateway's WireGuard config — for example, a StartTunnel config re-issued with new settings — open the gateway's `⋮` menu, choose "Update config", and paste or upload the new file. The config is replaced **in place**: the gateway keeps its identity, so its port forwards and private/public domains are preserved. (Re-adding via "Add" would instead create a separate gateway.)
 
+## WAN IP
+
+A gateway's WAN IP is the public address the Internet reaches your server at through it. StartOS discovers it by asking your router over UPnP, and otherwise by making an outbound request to an echo service and reading back the address it appears to come from. That address is what [public IP access](public-ip.md), [clearnet](clearnet.md) domains, and the port-forwarding rules StartOS shows you are all built on.
+
+Discovery answers "where does my outbound traffic come from", which is the wrong question whenever outbound and inbound traffic take different paths. The usual case is a router that sends all outbound traffic through a commercial VPN while inbound connections still arrive on your real WAN address through port forwards. StartOS then reports the VPN exit address, and every address derived from it points somewhere your server is not.
+
+To correct it, open the gateway's `⋮` menu under `System > Gateways` and choose "Edit WAN IP". The dialog shows the address StartOS detected and takes the one you enter instead; "Reset to detected" clears it again. The address must be a public IPv4 — a private, [CGNAT](cgnat.md), or otherwise unroutable address is rejected, because inbound connections from the Internet cannot arrive on one.
+
+Setting it changes every address derived from the gateway at once: the public addresses offered for each service interface, and the port-forwarding rules StartOS tells you to add. Discovery keeps running while the override is set, so the detected address stays visible in the dialog and clearing the override restores it.
+
+The same setting is on the command line:
+
+```bash
+start-cli net gateway set-wan-ip <GATEWAY> <IP>
+start-cli net gateway unset-wan-ip <GATEWAY>
+```
+
+`start-cli net gateway list` marks an address you set as `(manual)`.
+
 ## Secure Gateways
 
 Some service interfaces are served without SSL — plain HTTP, or another protocol carrying no encryption of its own. StartOS offers those addresses only on a network it treats as secure. Loopback and the container bridge are secure, because they never leave your server. Every other gateway — your router, WiFi, a WireGuard tunnel — is not, so a service interface bound without SSL is neither listed nor reachable through it.

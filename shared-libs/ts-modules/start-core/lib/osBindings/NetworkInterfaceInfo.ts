@@ -8,6 +8,14 @@ export type NetworkInterfaceInfo = {
   name: string | null
   secure: boolean | null
   ipInfo: IpInfo | null
+  /**
+   * The public IPv4 the operator pinned for this gateway, taking precedence
+   * over the discovered `ipInfo.wanIp`. Discovery infers the WAN address from
+   * outbound traffic, which names the wrong address whenever egress and
+   * ingress differ — a router-wide outbound VPN with inbound port forwards on
+   * the real WAN address. Clearing it restores the discovered address.
+   */
+  wanIpOverride: string | null
   type: GatewayType
   portMap: GatewayPortMapCapabilities
   /**
