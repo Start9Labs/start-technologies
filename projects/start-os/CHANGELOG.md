@@ -418,6 +418,14 @@ for the detail behind its highlights.
   by that interface. IPv4, and traffic forwarded to a service container, were
   unaffected.
 
+- **A tunnel's IPv6 address now loads from a device on the server's own
+  network.** A phone or computer sharing the server's network connected to an
+  IPv6 address delegated through a tunnel — directly, or through a public domain
+  pointing at it — and then hung until the request timed out, while devices
+  everywhere else loaded it normally. The connection itself appeared to succeed,
+  so a domain that also had an IPv4 address never fell back to it. IPv4 was
+  unaffected.
+
 - **Notification selection checkboxes no longer cover text on phones.** When
   notification selection is active, each checkbox replaces its notification
   icon while preserving the title's spacing.

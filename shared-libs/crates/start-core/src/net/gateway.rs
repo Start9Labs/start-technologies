@@ -1598,9 +1598,9 @@ async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
             .ok();
     }
 
-    // For each stale table, remove the priority-51 fwmark rule and flush its
-    // routing table in both families, so a removed interface leaves no stale
-    // reply-routing rule, v4 default, or v6 default/blackhole behind.
+    // For each stale table, remove its fwmark rules and flush its routing table
+    // in both families, so a removed interface leaves no stale reply-routing
+    // rule, v4 default, or v6 default/blackhole behind.
     for table_id in stale {
         let table_str = table_id.to_string();
         tracing::debug!("gc_policy_routing: removing stale table {table_id}");
@@ -1620,6 +1620,21 @@ async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
                 .invoke(ErrorKind::Network)
                 .await
                 .ok();
+            if v6 {
+                Command::new("ip")
+                    .arg("-6")
+                    .arg("rule")
+                    .arg("del")
+                    .arg("fwmark")
+                    .arg(&table_str)
+                    .arg("lookup")
+                    .arg(&table_str)
+                    .arg("priority")
+                    .arg("48")
+                    .invoke(ErrorKind::Network)
+                    .await
+                    .ok();
+            }
             let mut flush = Command::new("ip");
             if v6 {
                 flush.arg("-6");
@@ -2023,7 +2038,24 @@ async fn ensure_main_suppress_rule(v6: bool) -> Result<(), Error> {
     Ok(())
 }
 
-async fn ensure_table_rules(v6: bool, table_id: u32, rules_output: &str) {
+const GLOBAL_UNICAST_V6: &str = "2000::/3";
+
+/// The priority-48 rule that routes a table's marked replies ahead of `main`.
+fn outranking_reply_rule(line: &str, table_id: u32) -> bool {
+    line.starts_with("48:")
+        && rule_has(line, "to", GLOBAL_UNICAST_V6)
+        && rule_has(line, "fwmark", &format!("0x{table_id:x}"))
+        && rule_has(line, "lookup", &table_id.to_string())
+}
+
+/// With `replies_outrank_main`, a marked reply to a global destination takes
+/// the table before `main`; the table must then reach every client by itself.
+async fn ensure_table_rules(
+    v6: bool,
+    table_id: u32,
+    replies_outrank_main: bool,
+    rules_output: &str,
+) {
     let ip = || {
         let mut c = Command::new("ip");
         if v6 {
@@ -2033,10 +2065,15 @@ async fn ensure_table_rules(v6: bool, table_id: u32, rules_output: &str) {
     };
     let table_str = table_id.to_string();
     let mut reply_rule = false;
+    let mut outranking_reply_rule_present = false;
     for line in rules_output.lines().map(str::trim) {
         if !(rule_has(line, "fwmark", &format!("0x{table_id:x}"))
             && rule_has(line, "lookup", &table_str))
         {
+            continue;
+        }
+        if replies_outrank_main && outranking_reply_rule(line, table_id) {
+            outranking_reply_rule_present = true;
             continue;
         }
         match line.split(':').next() {
@@ -2066,6 +2103,22 @@ async fn ensure_table_rules(v6: bool, table_id: u32, rules_output: &str) {
             .arg(&table_str)
             .arg("priority")
             .arg("51")
+            .invoke(ErrorKind::Network)
+            .await
+            .log_err();
+    }
+    if replies_outrank_main && !outranking_reply_rule_present {
+        // Without `to`, the rule returns container-bound packets to the tunnel.
+        ip().arg("rule")
+            .arg("add")
+            .arg("fwmark")
+            .arg(&table_str)
+            .arg("to")
+            .arg(GLOBAL_UNICAST_V6)
+            .arg("lookup")
+            .arg(&table_str)
+            .arg("priority")
+            .arg("48")
             .invoke(ErrorKind::Network)
             .await
             .log_err();
@@ -2113,7 +2166,7 @@ async fn apply_policy_routing(
             .invoke(ErrorKind::Network)
             .await?,
     )?;
-    ensure_table_rules(false, table_id, &rules_output).await;
+    ensure_table_rules(false, table_id, false, &rules_output).await;
 
     Ok(())
 }
@@ -2138,18 +2191,15 @@ fn carries_v6(gateway: Option<Ipv6Addr>, addrs: impl IntoIterator<Item = Ipv6Add
 /// the default outbound (the priority-75 catch-all) then drops v6 rather than
 /// letting it fall through to some other interface's default.
 ///
-/// The table backs three rule layers: the priority-75 default-outbound catch-all
+/// The table backs four rule layers: the priority-75 default-outbound catch-all
 /// ([`apply_default_outbound`]), the priority-51 CONNMARK reply-routing rule
-/// installed at the end here (IPv4 parity; marks set by
-/// [`reconcile_mangle_rules`]), and — v6-only — a priority-60 source rule per
-/// global address on the interface. IPv6 has no NAT/SNI-demux reply layer to
-/// build: restoring the mark reroutes a reply once there is a packet to
-/// reroute, but the reply that opens a connection is routed before the output
-/// hook runs, so the source rule is what lets a v6 service reached through a
-/// tunnel answer.
+/// (IPv4 parity; marks set by [`reconcile_mangle_rules`]), a priority-60 source
+/// rule per global address on the interface, and on a WireGuard interface a
+/// priority-48 reply rule for global destinations, ahead of `main`.
 async fn apply_policy_routing_v6(
     guard: &PolicyRoutingGuard,
     iface: &GatewayId,
+    device_type: Option<NetworkInterfaceType>,
     lan_ip: &OrdSet<IpAddr>,
     subnets: &OrdSet<IpNet>,
 ) -> Result<(), Error> {
@@ -2209,7 +2259,9 @@ async fn apply_policy_routing_v6(
             .invoke(ErrorKind::Network)
             .await?,
     )?;
-    ensure_table_rules(true, table_id, &rules_output).await;
+    // A tunnel has no on-link neighbours; its default alone reaches every client.
+    let replies_outrank_main = v6_capable && device_type == Some(NetworkInterfaceType::Wireguard);
+    ensure_table_rules(true, table_id, replies_outrank_main, &rules_output).await;
 
     // Ensure a priority-60 source rule per global v6 address on this interface.
     // The CONNMARK rule above cannot catch the reply that opens a connection:
@@ -2338,7 +2390,7 @@ async fn poll_ip_info(
         // `reconcile_mangle_rules`) alongside readying the interface's v6 table
         // for the default-outbound catch-all and the per-gateway leak-guard
         // blackhole (when the interface can't carry v6).
-        apply_policy_routing_v6(guard, iface, &lan_ip, &subnets).await?;
+        apply_policy_routing_v6(guard, iface, device_type, &lan_ip, &subnets).await?;
     }
 
     // Write IP info to the watch immediately so the gateway appears in the
@@ -3271,6 +3323,26 @@ mod policy_rule_tests {
         ));
         assert!(!main_suppress_rule(
             "50: from all fwmark 0x3e9 lookup main suppress_prefixlength 0"
+        ));
+    }
+
+    #[test]
+    fn outranking_reply_rule_requires_the_global_destination() {
+        assert!(outranking_reply_rule(
+            "48:\tfrom all to 2000::/3 fwmark 0x3eb lookup 1003",
+            1003
+        ));
+        assert!(!outranking_reply_rule(
+            "48:\tfrom all fwmark 0x3eb lookup 1003",
+            1003
+        ));
+        assert!(!outranking_reply_rule(
+            "51:\tfrom all to 2000::/3 fwmark 0x3eb lookup 1003",
+            1003
+        ));
+        assert!(!outranking_reply_rule(
+            "48:\tfrom all to 2000::/3 fwmark 0x3ec lookup 1004",
+            1003
         ));
     }
 }
