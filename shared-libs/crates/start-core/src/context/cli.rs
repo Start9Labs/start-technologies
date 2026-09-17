@@ -28,7 +28,9 @@ use crate::middleware::auth::local::{is_loopback, local_auth_header};
 use crate::net::mdns::pin_mdns_host;
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
-use crate::s9pk::init::{BUILD_KEY_FILE, LEGACY_BUILD_KEY_FILE, STARTOS_DIR};
+use crate::s9pk::init::{
+    BUILD_KEY_FILE, STARTOS_DIR, complete_signing_workspace, find_signing_workspace,
+};
 
 /// A configured target whose `.local` host is resolved on first use, so an
 /// unreachable one never fails a command that doesn't contact it.
@@ -94,6 +96,9 @@ impl CliContext {
     /// BLOCKING
     #[instrument(skip_all)]
     pub fn init(config: ClientConfig) -> Result<Self, Error> {
+        if let Ok(cwd) = std::env::current_dir() {
+            complete_signing_workspace(&cwd);
+        }
         // Follow each namespace's `default` profile to a URL (`load` already seeded
         // -H/-r as `default` and layered every config file in), then localhost / no
         // registry when unset.
@@ -212,30 +217,10 @@ impl CliContext {
     /// from [`Self::id_key`], which stays the global identity for
     /// registry/server auth.
     pub fn build_key(&self) -> Result<ed25519_dalek::SigningKey, Error> {
-        let mut dir = std::env::current_dir().with_kind(ErrorKind::Filesystem)?;
-        loop {
-            let candidate = dir.join(STARTOS_DIR).join(BUILD_KEY_FILE);
-            migrate_legacy_key_file(
-                &candidate,
-                &dir.join(STARTOS_DIR).join(LEGACY_BUILD_KEY_FILE),
-            );
-            // EACCES on an inaccessible ancestor (or any other IO error) is treated
-            // as "no accessible workspace here" — stop walking rather than either
-            // silently stepping past it (`exists()`) or surfacing the error
-            // (`try_exists()?`).
-            match candidate.try_exists() {
-                Ok(true) => {
-                    crate::s9pk::init::warn_if_start_cli_outdated(&dir);
-                    return load_signing_key(candidate);
-                }
-                Ok(false) => {}
-                Err(_) => break,
-            }
-            if !dir.pop() {
-                break;
-            }
-        }
-        Err(crate::s9pk::init::no_workspace_error())
+        let cwd = std::env::current_dir().with_kind(ErrorKind::Filesystem)?;
+        let root =
+            find_signing_workspace(&cwd).ok_or_else(crate::s9pk::init::no_workspace_error)?;
+        load_signing_key(root.join(STARTOS_DIR).join(BUILD_KEY_FILE))
     }
 
     /// BLOCKING

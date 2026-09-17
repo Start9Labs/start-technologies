@@ -8,6 +8,7 @@ export type BackupTarget =
       vendor: string | null
       model: string | null
       logicalname: string
+      stablePath: string
       label: string | null
       capacity: number
       used: number | null

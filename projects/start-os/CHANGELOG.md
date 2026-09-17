@@ -141,6 +141,10 @@ for the detail behind its highlights.
   private (RFC 1918) source on its plain ports, as it already did on its web
   interfaces.
 
+- **StartOS keeps using the selected drive when Linux enumerates disks in a
+  different order.** Fresh installs and updated servers also keep mounting
+  their OS partitions when device names change.
+
 - **The port-forwarding test reports a port as open to the Internet only where
   it is reachable from the Internet.** Where StartOS's port-forward request was
   granted by a router that sits behind another router, the test could pass a

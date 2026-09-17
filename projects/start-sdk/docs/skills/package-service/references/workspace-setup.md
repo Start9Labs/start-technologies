@@ -75,8 +75,9 @@ start-cli s9pk init-workspace <path>     # path optional; defaults to the curren
 
 It clones the monorepo into `start-technologies/` on `live-docs`, symlinks `AGENTS.md`
 at the guide's Agent Context page, writes an `AGENTS.local.md` stub and a `CLAUDE.md`
-that loads both, links the fleet's skills at `.claude/skills` and `.agents/skills`, and
-provisions `.startos/` with `config.yaml` and a freshly generated `build.key.pem`.
+that loads both, links the guide's packaging skills at `.claude/skills` and
+`.agents/skills`, and provisions `.startos/` with `config.yaml` and a freshly generated
+`build.key.pem`.
 
 **It is idempotent** — a re-run fills in only what is missing, never overwrites
 `AGENTS.local.md`, and never regenerates the build key. So a workspace that is missing a

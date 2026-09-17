@@ -2,6 +2,7 @@ export type DiskListResponse = DiskInfo[]
 
 export interface DiskInfo {
   logicalname: string
+  stablePath: string
   vendor: string | null
   model: string | null
   partitions: PartitionInfo[]
@@ -12,6 +13,7 @@ export interface DiskInfo {
 
 export interface PartitionInfo {
   logicalname: string
+  stablePath: string
   label: string | null
   capacity: number
   used: number | null
