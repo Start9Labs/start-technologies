@@ -8,6 +8,7 @@ use clap::builder::ValueParserFactory;
 use imbl_value::json;
 use itertools::Itertools;
 use patch_db::Dump;
+use patch_db::json_ptr::JsonPointer;
 use rpc_toolkit::{
     Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async, from_fn_async_local,
 };
@@ -15,12 +16,10 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::context::{CliContext, RpcContext};
-use crate::db::PUBLIC;
-use crate::db::model::DatabaseModel;
 use crate::db::prelude::Map;
 use crate::hostname::ServerHostname;
 use crate::net::forward::AvailablePorts;
-use crate::net::host::{Host, HostApiKind};
+use crate::net::host::HostApiKind;
 use crate::net::service_interface::{
     HostnameInfo, HostnameMetadata, RangeServiceInterface, ServiceInterface,
 };
@@ -1183,22 +1182,14 @@ async fn cli_set_address_enabled<Kind: HostApiKind>(
         raw_params,
     }: HandlerArgs<CliContext, CliBindingSetAddressEnabledParams, Kind::Inheritance>,
 ) -> Result<(), Error> {
-    let port = params.internal_port;
     call_with_address::<Kind>(
         &context,
         parent_method.into_iter().chain(method).join("."),
         raw_params,
         &inherited_params,
-        port,
+        params.internal_port,
+        "bindings",
         &params.address,
-        |host| {
-            host.as_bindings()
-                .as_idx(&port)
-                .or_not_found(port)?
-                .as_addresses()
-                .as_available()
-                .de()
-        },
     )
     .await
 }
@@ -1213,22 +1204,14 @@ async fn cli_set_range_address_enabled<Kind: HostApiKind>(
         raw_params,
     }: HandlerArgs<CliContext, CliBindingSetAddressEnabledParams, Kind::Inheritance>,
 ) -> Result<(), Error> {
-    let port = params.internal_port;
     call_with_address::<Kind>(
         &context,
         parent_method.into_iter().chain(method).join("."),
         raw_params,
         &inherited_params,
-        port,
+        params.internal_port,
+        "bindingRanges",
         &params.address,
-        |host| {
-            host.as_binding_ranges()
-                .as_idx(&port)
-                .or_not_found(port)?
-                .as_addresses()
-                .as_available()
-                .de()
-        },
     )
     .await
 }
@@ -1243,22 +1226,14 @@ async fn cli_set_gua_wan<Kind: HostApiKind>(
         raw_params,
     }: HandlerArgs<CliContext, CliBindingSetGuaWanParams, Kind::Inheritance>,
 ) -> Result<(), Error> {
-    let port = params.internal_port;
     call_with_address::<Kind>(
         &context,
         parent_method.into_iter().chain(method).join("."),
         raw_params,
         &inherited_params,
-        port,
+        params.internal_port,
+        "bindings",
         &params.address,
-        |host| {
-            host.as_bindings()
-                .as_idx(&port)
-                .or_not_found(port)?
-                .as_addresses()
-                .as_available()
-                .de()
-        },
     )
     .await
 }
@@ -1269,21 +1244,26 @@ async fn call_with_address<Kind: HostApiKind>(
     mut params: Value,
     inheritance: &Kind::Inheritance,
     internal_port: u16,
+    binding_collection: &'static str,
     address: &str,
-    available: impl FnOnce(&mut Model<Host>) -> Result<BTreeSet<HostnameInfo>, Error>,
 ) -> Result<(), Error> {
     let resolved = if address.trim_start().starts_with('{') {
         serde_json::from_str(address).with_kind(ErrorKind::Deserialization)?
     } else {
+        let mut pointer: JsonPointer = Kind::host_pointer(inheritance)?;
+        pointer.push_end(binding_collection);
+        pointer.push_end(&internal_port.to_string());
+        pointer.push_end("addresses");
+        pointer.push_end("available");
         let dump: Dump = from_value(
             ctx.call_remote::<RpcContext>(
                 "db.dump",
-                json!({ "pointer": AsRef::<str>::as_ref(&*PUBLIC) }),
+                json!({ "pointer": AsRef::<str>::as_ref(&pointer) }),
             )
             .await?,
         )?;
-        let mut db = DatabaseModel::from(json!({ "public": dump.value }));
-        let available = available(Kind::host_for(inheritance, &mut db)?)?;
+        let available: BTreeSet<HostnameInfo> =
+            from_value::<Option<_>>(dump.value)?.or_not_found(internal_port)?;
         let (hostname, port) = parse_address(address);
         let candidates = available
             .iter()

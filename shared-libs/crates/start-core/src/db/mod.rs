@@ -25,7 +25,7 @@ use crate::rpc_continuations::{Guid, RpcContinuation};
 use crate::util::serde::{HandlerExtSerde, apply_expr};
 
 lazy_static::lazy_static! {
-    pub(crate) static ref PUBLIC: JsonPointer = "/public".parse().unwrap();
+    static ref PUBLIC: JsonPointer = "/public".parse().unwrap();
 }
 
 pub trait DbAccess<T>: Sized {

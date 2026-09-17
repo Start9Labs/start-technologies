@@ -7,6 +7,7 @@ use imbl::OrdMap;
 use imbl_value::InternedString;
 use itertools::Itertools;
 use patch_db::DestructureMut;
+use patch_db::json_ptr::JsonPointer;
 use rpc_toolkit::{Context, Empty, HandlerExt, OrEmpty, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -785,6 +786,7 @@ pub trait HostApiKind: 'static {
         inheritance: &Self::Inheritance,
         db: &'a mut DatabaseModel,
     ) -> Result<&'a mut Model<Host>, Error>;
+    fn host_pointer(inheritance: &Self::Inheritance) -> Result<JsonPointer, Error>;
     fn host_for_existing<'a>(
         inheritance: &Self::Inheritance,
         db: &'a mut DatabaseModel,
@@ -807,6 +809,22 @@ impl HostApiKind for ForPackage {
     ) -> Result<&'a mut Model<Host>, Error> {
         host_for(db, package, host)
     }
+    fn host_pointer((package, host): &Self::Inheritance) -> Result<JsonPointer, Error> {
+        if package.is_start_os() {
+            if *host != HostId::admin() {
+                return Err(Error::new(
+                    eyre!("the server has no host {host}"),
+                    ErrorKind::NotFound,
+                ));
+            }
+            return Ok("/public/serverInfo/network/host".parse().unwrap());
+        }
+        let mut pointer: JsonPointer = "/public/packageData".parse().unwrap();
+        pointer.push_end(package);
+        pointer.push_end("hosts");
+        pointer.push_end(host);
+        Ok(pointer)
+    }
     fn host_for_existing<'a>(
         (package, host): &Self::Inheritance,
         db: &'a mut DatabaseModel,
@@ -827,6 +845,9 @@ impl HostApiKind for ForServer {
         db: &'a mut DatabaseModel,
     ) -> Result<&'a mut Model<Host>, Error> {
         host_for(db, &PackageId::start_os(), &HostId::admin())
+    }
+    fn host_pointer(_: &Self::Inheritance) -> Result<JsonPointer, Error> {
+        Ok("/public/serverInfo/network/host".parse().unwrap())
     }
     fn host_for_existing<'a>(
         _: &Self::Inheritance,
