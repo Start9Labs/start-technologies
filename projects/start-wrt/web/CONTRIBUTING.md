@@ -45,7 +45,7 @@ npm run check:wrt                     # Type-check without emitting
 
 - **Local dev:** `cp config-sample.json config.json`, then edit freely. `npm run start:wrt` runs `build-config.js` first, which stamps the current git hash into `gitHash`.
 - **Production / CI:** `make start-wrt` triggers `web/update-config.sh`, which flips `useMocks` to `false` and stamps `gitHash` from `build/env/GIT_HASH.txt`.
-- **Demo site:** `.github/workflows/deploy-startwrt-demo.yml` builds from `config-sample.json` (`useMocks` stays `true`) on every `master` push that touches the UI and publishes the bundle through the `.github/actions/nextexplorer-publish` action to the NextExplorer folder Start9 Pages serves as router-demo.start9.com.
+- **Demo site:** `npm run build:wrt:demo` stamps `config.json` from `config-sample.json` (`useMocks` stays `true`), builds, and adds `404.html` so a static host boots the app on deep links; `.github/workflows/deploy-startwrt-demo.yml` runs it on every `master` push that touches the UI and publishes the bundle through the `.github/actions/nextexplorer-publish` action to the NextExplorer folder Start9 Pages serves as router-demo.start9.com.
 
 Schema:
 

@@ -15,8 +15,12 @@ inputs:
     description: Directory whose contents become the folder's contents
     required: true
   folder:
-    description: Folder name inside the account's assigned volume
+    description: Folder path inside the account's assigned volume
     required: true
+  keep:
+    description: Whitespace-separated entries of the folder's previous contents to carry over
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -28,4 +32,5 @@ runs:
         NEXTEXPLORER_PASSWORD: ${{ inputs.password }}
         DIR: ${{ inputs.dir }}
         FOLDER: ${{ inputs.folder }}
-      run: '"$GITHUB_ACTION_PATH/publish.sh" "$DIR" "$FOLDER"'
+        KEEP: ${{ inputs.keep }}
+      run: '"$GITHUB_ACTION_PATH/publish.sh" "$DIR" "$FOLDER" $KEEP'
