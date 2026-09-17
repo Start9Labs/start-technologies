@@ -15,7 +15,7 @@ It is tempting to treat `instructions.md` as a copy of the README. Resist this. 
 | **Tone**                  | Technical, structured, scannable for parsing                                                     | Practical, instructional, written in second person              |
 | **Versions / image tags** | Avoided (manifest is source of truth)                                                            | Avoided for the same reason                                     |
 | **Upstream behavior**     | "Anything not listed here behaves as upstream documents"                                         | Linked from the Documentation section; never duplicated         |
-| **Surfaced where**        | The package repository on GitHub                                                                 | Inside the StartOS UI, post-install                             |
+| **Surfaced where**        | The package repository, and packed into the `.s9pk`                                              | Inside the StartOS UI, post-install                             |
 
 If your README is a reference manual, your instructions are a quick-start guide for a non-developer who just clicked Install.
 
@@ -27,7 +27,7 @@ A good `instructions.md` covers, roughly in this order:
 
 1. **A brief orientation — usually skip it.** The reader already saw the marketplace short and long description before clicking Install, so don't restate them. The default is to omit this section and go straight to **Documentation**. Add a line only if there is genuinely new context the listing did not cover — a hard ordering constraint, a permanent decision the user is about to make, or similar. "You've installed X" framing is _not_ useful; the reader knows. Don't pad.
 
-2. **Documentation links.** A `## Documentation` section. List the upstream documentation URLs, each with a few words on what it is ("the upstream admin guide", "the official Foo configuration reference"). Do not add marketing, donation, project-home, or support-channel links — those live elsewhere. Link to canonical, stable URLs the upstream maintains — not specific commits, not your own README.
+2. **Documentation links.** A `## Documentation` section. List the upstream documentation URLs, each with a few words on what it is ("the upstream admin guide", "the official Foo configuration reference"). Do not add marketing, donation, project-home, or support-channel links — those live elsewhere. Link to canonical, stable URLs the upstream maintains — not specific commits, not your own README. These bullets are also machine-read; see [Choosing documentation URLs](#choosing-documentation-urls) before writing them.
 
 3. **What it gives you on StartOS** — the practical answer to "why did I just install this?" Keep it concrete: the interfaces it exposes, the data it manages, the experience the StartOS package adds on top of upstream.
 
@@ -36,6 +36,34 @@ A good `instructions.md` covers, roughly in this order:
 5. **Using the available features** — once the service is running, what can the user actually do with it? Describe the interfaces (web UI, RPC, etc.) and the **user-visible** actions. Hidden actions (`visibility: 'hidden'` in the package source — typically those invoked by the platform or by another service rather than by a human) do not belong here; the user never sees them. Likewise, do not parrot `allowedStatuses` from action source code ("the service must be running", "the service must be stopped"): describe what the user actually encounters in the UI, and omit the qualifier when it's noise.
 
 6. **Important limitations — usually omit.** The default is no Limitations section at all. Add one only if there is a specific, consequential thing the user will be surprised by: a deliberately disabled feature they may go looking for, a hard data caveat, an incompatibility worth flagging up front. Generic caveats ("performance depends on your hardware", "encryption keys are sensitive") are not limitations and do not belong here.
+
+### Choosing documentation URLs
+
+The `## Documentation` bullets have a second reader: Start9's support indexer parses them and crawls each URL into the package's upstream-documentation index, and it looks nowhere else. What you list decides what a support agent can answer about the service — and a URL that classifies badly costs a wasted crawl on every indexing run, silently.
+
+**The bullet must parse.** Exactly `- [Title](URL)`, optionally followed by ` — a few words` (em-dash, en-dash, or hyphen), and nothing else on the line. A bullet that opens with prose and puts the link mid-sentence is skipped. The heading is matched as `Documentation` at any depth, and the section ends at the next heading of equal or shallower depth. A package with no parseable bullet gets **no** upstream docs and no instructions indexed at all.
+
+**How a URL is treated:**
+
+| URL                                                                                                                                   | Treated as | What is fetched                                                                                                                                                      |
+| ------------------------------------------------------------------------------------------------------------------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GitHub `/blob/` or `/tree/` ending in a file extension; Gitea/Forgejo `/src/branch/…/file.ext`; anything ending `.md`, `.txt`, `.rst` | a file     | that one page                                                                                                                                                        |
+| A bare repo URL, or `/tree/<ref>/<subdir>`                                                                                            | a repo     | every `.md` in the tree, scoped to the subdir (`CONTRIBUTING`, `CHANGELOG`, `LICENSE`, `SECURITY`, `CODE_OF_CONDUCT`, and dot- or underscore-prefixed paths skipped) |
+| Anything else, GitHub wikis included                                                                                                  | a site     | `llms-full.txt`, probed at the URL and then at each parent path; failing that, a breadth-first crawl of the site, bounded only by time                               |
+
+Append `/*` to a site URL — `https://example.org/docs/*` — to confine the crawl to that path.
+
+**Choose accordingly:**
+
+- **A repo docs tree is the best link when the tree _is_ the doc set** — one bounded, canonical fetch. List what it would pull first: a `docs/` folder is often mostly developer documentation, and a hundred pages on internals bury the three on email and admin. When that is the case, link the pages a self-hoster needs instead.
+- **Leave out docs that don't apply to the package.** Upstream install guides describe a deployment the package deliberately does not use, and indexing them teaches support to recommend steps that break a StartOS install.
+- **A dedicated docs site is fine when it publishes `llms-full.txt`** — `curl -sI https://docs.example.org/llms-full.txt` returns 200. Without it the site is crawled, which is acceptable for a small static site and bad for anything large or dynamic. `llms.txt` alone does not help.
+- **Never link a forum, a wiki-as-community, or anything with unbounded user content.** It crawls topic pages, user profiles, and category listings for as long as the crawler runs.
+- **Never link a JS-rendered page.** The crawler is a plain fetch: a ReDoc, Swagger, or single-page-app docs site returns an empty shell. `curl` it and look for prose.
+- **One bullet per distinct source**, aimed at the root the crawler should walk — two bullets into the same site index the same pages twice. A specific page worth citing goes in the prose of the step that needs it.
+- **Avoid commit-pinned URLs.** A `blob/<sha>/` link freezes the index at that commit forever.
+
+One good link beats three that muddy the index.
 
 ## What does not belong in instructions
 
@@ -123,5 +151,5 @@ Use the sections that apply — a trivial service might be two paragraphs and a 
 - [ ] Every sentence is something the user could act on — no "this is typically triggered automatically by …" plumbing notes.
 - [ ] No hard-coded version numbers, image tags, or secrets.
 - [ ] Limitations section is omitted unless there is a specific, consequential surprise to flag.
-- [ ] A `## Documentation` section lists the upstream documentation URLs, each with a few words of context. No added marketing / donation / project-home / support links.
+- [ ] A `## Documentation` section lists the upstream documentation URLs, each with a few words of context, one `- [Title](URL) — context` bullet per line, each URL checked against [Choosing documentation URLs](#choosing-documentation-urls). No added marketing / donation / project-home / support links.
 - [ ] Renders cleanly in the StartOS Instructions tab on a real install.
