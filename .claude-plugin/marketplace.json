@@ -1,6 +1,6 @@
 {
   "name": "start9",
-  "description": "Start9 Labs' agent skills for StartOS packaging and Start9 web UIs.",
+  "description": "Start9 Labs' packaging skills for StartOS.",
   "owner": {
     "name": "Start9 Labs",
     "url": "https://github.com/Start9Labs"
@@ -8,8 +8,8 @@
   "plugins": [
     {
       "name": "start9",
-      "source": "./",
-      "description": "Start9's agent skills: package a service for StartOS, and the house style for Start9 web UIs."
+      "source": "./projects/start-sdk/docs/skills",
+      "description": "Start9's packaging skills for StartOS: package a service end to end."
     }
   ]
 }
