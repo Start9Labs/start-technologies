@@ -1172,6 +1172,8 @@ pub async fn set<C: CtrlContext>(
                     _apf_label: None,
                     _apf_mac: None,
                     _pp_wan_override: (port.enabled && port.override_wan_ports).then(|| "1".into()),
+                    family: None,
+                    _startwrt_http_redirect: None,
                 };
                 let section_name = format!("pp_{}", safe_id);
                 cfgs["firewall"].append(&redirect, Some(&section_name))?;
@@ -1245,8 +1247,9 @@ pub async fn set<C: CtrlContext>(
                     port_control
                         .displace_sni_routes(&sni_displacement_ranges)
                         .await;
-                    // A manual 443 forward decides the WAN:80 redirect.
-                    port_control.sync_http_redirect().await;
+                    // A manual 443 forward decides the WAN:80 redirect; the
+                    // reload below covers its DNAT.
+                    port_control.sync_http_redirect_before_reload().await;
                 }
                 if !displaced_auto.is_empty() {
                     tracing::info!(

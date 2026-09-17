@@ -130,7 +130,7 @@ const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 const CLIENT_CACHE_TTL: Duration = Duration::from_secs(10);
 const WAN_CACHE_TTL: Duration = Duration::from_secs(30);
 const LAN_CACHE_TTL: Duration = Duration::from_secs(30);
-const UCI_RETRIES: usize = 4;
+pub(crate) const UCI_RETRIES: usize = 4;
 
 pub const KIND_PCP: &str = "PCP";
 pub const KIND_UPNP: &str = "UPnP";
@@ -159,7 +159,7 @@ pub struct PortControl {
     /// Requesting IP → resolved+authorized device (None = unauthorized).
     client_cache: Mutex<HashMap<Ipv4Addr, (Instant, Option<Client>)>>,
     sni: Arc<SniDemux>,
-    /// The WAN-address port-80 HTTP→HTTPS redirect, bound while WAN 443 is
+    /// The port-80 HTTP→HTTPS redirect sockets, bound while WAN 443 is
     /// published; see [`crate::http_redirect`].
     http_redirect: Mutex<Option<crate::http_redirect::Redirect>>,
 }
@@ -775,7 +775,7 @@ impl PortControl {
              (lease {lifetime:?}s)"
         );
         self.sync_sni_fallback(*source.ip()).await;
-        self.sync_http_redirect().await;
+        self.sync_http_redirect_serialized(true).await;
         Ok(())
     }
 
@@ -808,7 +808,7 @@ impl PortControl {
             tracing::warn!("port-control: reconciling SNI admission failed: {e}");
         }
         self.sync_sni_fallback(*source.ip()).await;
-        self.sync_http_redirect().await;
+        self.sync_http_redirect_serialized(true).await;
     }
 
     async fn remove_sni_routes_for_ips(&self, ips: &[String]) {
@@ -841,7 +841,7 @@ impl PortControl {
         for wan in wans {
             self.sync_sni_fallback(wan).await;
         }
-        self.sync_http_redirect().await;
+        self.sync_http_redirect_serialized(true).await;
     }
 
     pub(crate) async fn displace_sni_routes(&self, ranges: &[(u16, u16)]) {
@@ -875,7 +875,7 @@ impl PortControl {
         for wan in wans {
             self.sync_sni_fallback(wan).await;
         }
-        self.sync_http_redirect().await;
+        self.sync_http_redirect_serialized(true).await;
     }
 
     /// Mirrors Remote Access source policy for unknown SNI on port 443.
@@ -948,13 +948,18 @@ impl PortControl {
         if let Some(ip) = wan {
             self.sync_sni_fallback(ip).await;
         }
-        self.sync_http_redirect().await;
+        self.sync_http_redirect_serialized(true).await;
     }
 
-    /// Binds or drops the WAN-address port-80 HTTP→HTTPS redirect per
-    /// [`crate::http_redirect::desired`]. Touches no firewall rule. A failed
-    /// bind is logged and retried by the next sweep.
-    pub(crate) async fn sync_http_redirect(&self) {
+    /// Reconciles the port-80 HTTP→HTTPS redirect — its sockets and the WAN
+    /// tcp/80 DNAT — per [`crate::http_redirect::desired`]. Assumes
+    /// `write_serial` is held. Returns whether UCI changed and a retired
+    /// redirect the caller drops once the firewall no longer sends to it. A
+    /// failed bind leaves the DNAT in place (a closed port, never the UI) and
+    /// is retried by the next sweep.
+    async fn reconcile_http_redirect(
+        &self,
+    ) -> Result<(bool, Option<crate::http_redirect::Redirect>), Error> {
         let wan = self.wan_ipv4().await;
         let routes = self.sni.snapshot();
         let uci_root = self.uci_root.clone();
@@ -967,48 +972,85 @@ impl PortControl {
                 wan,
             ))
         })
-        .await;
-        let want = match want {
-            Ok(want) => want,
-            Err(e) => {
-                tracing::warn!("port-control: HTTP redirect scan failed: {e}");
-                return;
+        .await?;
+        let retired = {
+            let mut active = self.http_redirect.lock().unwrap();
+            if !want.section {
+                active.take()
+            } else {
+                match active.as_mut() {
+                    Some(redirect) => {
+                        if let Err(e) = redirect.rebind_hairpin(want.hairpin) {
+                            tracing::warn!(
+                                "port-control: HTTP redirect bind on {:?}:80 failed: {e}",
+                                want.hairpin
+                            );
+                        }
+                    }
+                    None => match crate::http_redirect::Redirect::bind(want.hairpin) {
+                        Ok(redirect) => {
+                            tracing::info!(
+                                "port-control: HTTP→HTTPS redirect listening on :{} (hairpin {:?})",
+                                crate::http_redirect::REDIRECT_PORT,
+                                want.hairpin
+                            );
+                            *active = Some(redirect);
+                        }
+                        Err(e) => tracing::warn!("port-control: HTTP redirect bind failed: {e}"),
+                    },
+                }
+                None
             }
         };
-        let mut active = self.http_redirect.lock().unwrap();
-        match want {
-            Some(ip) if active.as_ref().is_some_and(|r| r.ip() == ip) => {}
-            Some(ip) => match crate::http_redirect::Redirect::bind(ip) {
-                Ok(redirect) => {
-                    tracing::info!(
-                        "port-control: HTTP→HTTPS redirect listening on {}",
-                        redirect.addr()
-                    );
-                    *active = Some(redirect);
+        let uci_root = self.uci_root.clone();
+        let changed = uci_task(move || async move {
+            crate::http_redirect::reconcile_section_uci(&uci_root, want.section).await
+        })
+        .await?;
+        Ok((changed, retired))
+    }
+
+    /// Applies [`Self::reconcile_http_redirect`] with `write_serial` held by
+    /// the caller. `reload` is false for a caller about to reload the
+    /// firewall itself.
+    async fn sync_http_redirect_serialized(&self, reload: bool) {
+        match self.reconcile_http_redirect().await {
+            Ok((changed, retired)) => {
+                if changed && reload {
+                    if let Err(e) = self.reload_firewall_wait().await {
+                        tracing::warn!(
+                            "port-control: reloading firewall for the HTTP redirect failed: {e}"
+                        );
+                    }
                 }
-                Err(e) => {
-                    tracing::warn!("port-control: HTTP redirect bind on {ip}:80 failed: {e}");
-                    *active = None;
-                }
-            },
-            None => {
-                if let Some(redirect) = active.take() {
-                    tracing::info!(
-                        "port-control: HTTP→HTTPS redirect on {} closed",
-                        redirect.addr()
-                    );
+                if let Some(redirect) = retired {
+                    tracing::info!("port-control: HTTP→HTTPS redirect closed");
+                    drop(redirect);
                 }
             }
+            Err(e) => tracing::warn!("port-control: reconciling the HTTP redirect failed: {e}"),
         }
     }
 
+    pub(crate) async fn sync_http_redirect(&self) {
+        let _serial = self.write_serial.lock().await;
+        self.sync_http_redirect_serialized(true).await;
+    }
+
+    /// For a caller that reloads the firewall itself afterwards.
+    pub(crate) async fn sync_http_redirect_before_reload(&self) {
+        let _serial = self.write_serial.lock().await;
+        self.sync_http_redirect_serialized(false).await;
+    }
+
+    /// `None` when no redirect is bound; otherwise its hairpin address.
     #[cfg(test)]
-    fn http_redirect_addr(&self) -> Option<SocketAddrV4> {
+    fn http_redirect_state(&self) -> Option<Option<Ipv4Addr>> {
         self.http_redirect
             .lock()
             .unwrap()
             .as_ref()
-            .map(|r| r.addr())
+            .map(|r| r.hairpin_ip())
     }
 }
 
@@ -1022,7 +1064,7 @@ async fn on_sni_change(pc: Arc<PortControl>, port: u16, active: bool) {
     if let Err(e) = pc.sync_sni_rules().await {
         tracing::warn!("port-control: reconciling SNI admission failed: {e}");
     }
-    pc.sync_http_redirect().await;
+    pc.sync_http_redirect_serialized(true).await;
 }
 
 /// Which interface a request physically arrived on, for the arrival-interface
@@ -1238,6 +1280,7 @@ fn desired_redirect(
         dest_ip: Some(target.ip().to_string()),
         dest_port: Some(range_string(target.port(), count)),
         enabled: Some("1".into()),
+        family: None,
         reflection: None,
         reflection_zone: Vec::new(),
         _pp_id: None,
@@ -1245,6 +1288,7 @@ fn desired_redirect(
         _apf_label: Some(kind.into()),
         _apf_mac: Some(mac.into()),
         _pp_wan_override: None,
+        _startwrt_http_redirect: None,
     }
 }
 
@@ -1482,7 +1526,8 @@ fn protocols_include_tcp(protocols: &[String]) -> bool {
 }
 
 /// Whether an enabled WAN DNAT redirect whose protocol includes TCP covers
-/// `port` on its external side.
+/// `port` on its external side. The router's own HTTP-redirect DNAT does not
+/// count.
 pub(crate) fn wan_dnat_covers(firewall: &uciedit::Config<'_>, port: u16) -> bool {
     let want = (port, port);
     firewall
@@ -1493,6 +1538,7 @@ pub(crate) fn wan_dnat_covers(firewall: &uciedit::Config<'_>, port: u16) -> bool
             r.target == "DNAT"
                 && r.enabled.as_deref() != Some("0")
                 && r.src == "wan"
+                && r._startwrt_http_redirect.is_none()
                 && protocols_include_tcp(&r.proto)
                 && r.src_dport
                     .as_deref()
@@ -1503,7 +1549,8 @@ pub(crate) fn wan_dnat_covers(firewall: &uciedit::Config<'_>, port: u16) -> bool
 
 /// Whether the TCP port is held by a DNAT or incompatible router service.
 fn sni_port_conflicts(firewall: &uciedit::Config<'_>, port: u16) -> bool {
-    if wan_dnat_covers(firewall, port) {
+    // A route on the HTTP redirect's port would out-rank its wildcard socket.
+    if port == crate::http_redirect::REDIRECT_PORT || wan_dnat_covers(firewall, port) {
         return true;
     }
     let want = (port, port);
@@ -2219,33 +2266,146 @@ pub(crate) async fn close_device_forwards(mac: &str, known_ips: &[String]) {
 mod tests {
     use super::*;
 
+    const REDIRECT_SECTION: &str = "config redirect startwrt_http_redirect";
+
+    /// The router's own WAN tcp/80 DNAT, as `http_redirect::section` writes it.
+    const REDIRECT_FW: &str = "\
+config redirect startwrt_http_redirect
+\toption name 'HTTP to HTTPS redirect'
+\toption src 'wan'
+\tlist proto 'tcp'
+\toption src_dport '80'
+\toption dest_port '8880'
+\toption target 'DNAT'
+\toption enabled '1'
+\toption family 'ipv4'
+\toption reflection '0'
+\toption _startwrt_http_redirect '1'
+";
+
     #[tokio::test]
     async fn http_redirect_follows_wan_443() {
         let dir = temp_root("");
         let pc = PortControl::new(dir.path().to_path_buf());
         let wan = Ipv4Addr::new(203, 0, 113, 7);
         *pc.wan_cache.lock().unwrap() = Some((Instant::now(), Some(wan)));
-        let expected = Some(SocketAddrV4::new(wan, 80));
+        let firewall = || std::fs::read_to_string(dir.path().join("firewall")).unwrap();
 
         pc.sync_http_redirect().await;
-        assert_eq!(pc.http_redirect_addr(), None, "nothing published on 443");
+        assert_eq!(pc.http_redirect_state(), None, "nothing published on 443");
+        assert!(!firewall().contains(REDIRECT_SECTION));
 
         std::fs::write(dir.path().join("firewall"), MANUAL_FW).unwrap();
         pc.sync_http_redirect().await;
-        assert_eq!(pc.http_redirect_addr(), expected, "manual 443 forward");
+        assert_eq!(
+            pc.http_redirect_state(),
+            Some(Some(wan)),
+            "manual 443 forward"
+        );
+        let written = firewall();
+        assert!(
+            written.contains(REDIRECT_SECTION)
+                && written.contains("option _startwrt_http_redirect '1'")
+                && written.contains("config redirect 'pp_a'"),
+            "{written}"
+        );
         pc.sync_http_redirect().await;
-        assert_eq!(pc.http_redirect_addr(), expected, "idempotent");
+        assert_eq!(pc.http_redirect_state(), Some(Some(wan)), "idempotent");
+        assert_eq!(firewall(), written, "a settled redirect rewrites nothing");
 
-        std::fs::write(dir.path().join("firewall"), "").unwrap();
+        // 443 unpublished, the section still on disk.
+        std::fs::write(
+            dir.path().join("firewall"),
+            written.replace("option src_dport '443'", "option src_dport '8443'"),
+        )
+        .unwrap();
         pc.sync_http_redirect().await;
         assert_eq!(
-            pc.http_redirect_addr(),
+            pc.http_redirect_state(),
             None,
             "closed once 443 returns to the router"
         );
+        let cleared = firewall();
+        assert!(!cleared.contains(REDIRECT_SECTION), "{cleared}");
+        assert!(cleared.contains("config redirect 'pp_a'"), "{cleared}");
         // The hostname-route half of the gate is covered by
         // `http_redirect::tests`: exercising it here would need the demux to
         // bind WAN:443, a privileged port, in the test process.
+    }
+
+    #[tokio::test]
+    async fn http_redirect_survives_a_missing_wan_address() {
+        let dir = temp_root(MANUAL_FW);
+        let pc = PortControl::new(dir.path().to_path_buf());
+        *pc.wan_cache.lock().unwrap() = Some((Instant::now(), None));
+        pc.sync_http_redirect().await;
+        assert_eq!(pc.http_redirect_state(), Some(None));
+        let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        assert!(written.contains(REDIRECT_SECTION), "{written}");
+    }
+
+    #[tokio::test]
+    async fn http_redirect_yields_to_a_manual_80_rule() {
+        let on_80 = MANUAL_FW.replace("pp_a", "pp_b").replace("'443'", "'80'");
+        let dir = temp_root(&format!("{MANUAL_FW}\n{REDIRECT_FW}\n{on_80}"));
+        let pc = PortControl::new(dir.path().to_path_buf());
+        *pc.wan_cache.lock().unwrap() = Some((Instant::now(), Some(Ipv4Addr::new(203, 0, 113, 7))));
+        pc.sync_http_redirect().await;
+        assert_eq!(pc.http_redirect_state(), None);
+        let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        assert!(!written.contains(REDIRECT_SECTION), "{written}");
+        assert!(written.contains("'pp_b'"), "{written}");
+    }
+
+    #[tokio::test]
+    async fn sni_maintain_leaves_a_settled_redirect_alone() {
+        let dir = temp_root(MANUAL_FW);
+        let pc = PortControl::new(dir.path().to_path_buf());
+        *pc.wan_cache.lock().unwrap() = Some((Instant::now(), Some(Ipv4Addr::new(203, 0, 113, 7))));
+        pc.sni_maintain().await;
+        let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        assert_eq!(written.matches(REDIRECT_SECTION).count(), 1, "{written}");
+        pc.sni_maintain().await;
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("firewall")).unwrap(),
+            written,
+            "maintenance must not rewrite a settled section"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_redirect_section_is_not_a_published_port() {
+        let arena = Arena::new();
+        let dir = temp_root(REDIRECT_FW);
+        let cfgs = parse_all(dir.path(), &arena, &["firewall"]).await.unwrap();
+        assert!(!wan_dnat_covers(&cfgs["firewall"], 80));
+        assert!(!sni_port_conflicts(&cfgs["firewall"], 80));
+        assert!(sni_port_conflicts(
+            &cfgs["firewall"],
+            crate::http_redirect::REDIRECT_PORT
+        ));
+    }
+
+    #[tokio::test]
+    async fn auto_forward_on_80_conflicts_while_the_redirect_is_active() {
+        let dir = temp_root(REDIRECT_FW);
+        let source = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), 80);
+        let target = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 60), 80);
+        let outcome = apply_forward_uci(
+            dir.path(),
+            "apf_112233445566_80",
+            KIND_UPNP,
+            "11:22:33:44:55:66",
+            Some("br-lan"),
+            source,
+            target,
+            1,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(outcome, ApplyOutcome::Conflict));
+        let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        assert!(!written.contains("apf_"));
     }
 
     fn temp_root(firewall: &str) -> tempfile::TempDir {
