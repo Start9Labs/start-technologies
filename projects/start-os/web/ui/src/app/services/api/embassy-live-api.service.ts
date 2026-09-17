@@ -806,9 +806,8 @@ export class LiveApiService extends ApiService {
       }
     }
     const res = await this.http.httpRequest<T>(opts)
-    if (res.headers.get('Repr-Digest')) {
-      // verify
-      const digest = res.headers.get('Repr-Digest')!
+    if (res.headers.get('File-Digest')) {
+      const digest = res.headers.get('File-Digest')!
       let data: Uint8Array
       if (opts.responseType === 'arrayBuffer') {
         data = Buffer.from(res.body as ArrayBuffer)
@@ -818,7 +817,7 @@ export class LiveApiService extends ApiService {
         data = Buffer.from(await (res.body as Blob).arrayBuffer())
       } else {
         console.warn(
-          `could not verify Repr-Digest for responseType ${
+          `could not verify File-Digest for responseType ${
             opts.responseType || 'json'
           }`,
         )
@@ -834,7 +833,7 @@ export class LiveApiService extends ApiService {
           throw new Error('File digest mismatch.')
         }
       } else {
-        console.warn(`Unknown Repr-Digest algorithm ${alg}`)
+        console.warn(`Unknown File-Digest algorithm ${alg}`)
       }
     }
     return res.body

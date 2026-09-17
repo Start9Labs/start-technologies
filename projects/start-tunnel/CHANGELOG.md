@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   changed, a stale forward could keep sending a port to an old address until
   the next reboot.
 
+- **Open pages can load the current web interface after future updates.** Pages
+  opened on this release revalidate the interface when they reload.
+
 ## [1.3.0]
 
 ### Added

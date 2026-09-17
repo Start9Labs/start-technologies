@@ -535,7 +535,7 @@ export default {
   579: 'muss ein gültiger SSH-Öffentlicher Schlüssel sein',
   580: 'Aktualisierung erforderlich',
   581: 'Ihre Benutzeroberfläche ist zwischengespeichert und veraltet. Versuchen Sie, die PWA mit der Schaltfläche unten neu zu laden. Wenn Sie diese Nachricht weiterhin sehen, deinstallieren und installieren Sie die PWA erneut.',
-  582: 'Ihre Benutzeroberfläche ist zwischengespeichert und veraltet. Führen Sie einen Hard-Refresh der Seite durch, um die neueste Benutzeroberfläche zu erhalten.',
+  582: 'StartOS wurde aktualisiert, aber auf dieser Seite wird noch die vorherige Benutzeroberfläche ausgeführt. Aktualisieren Sie die Seite, um die neueste Version zu erhalten.',
   606: 'Host',
   607: 'Wert',
   610: 'Dynamisches DNS',

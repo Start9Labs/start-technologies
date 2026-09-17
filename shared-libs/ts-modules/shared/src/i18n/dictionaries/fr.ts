@@ -535,7 +535,7 @@ export default {
   579: 'doit être une clé publique SSH valide',
   580: 'Actualisation nécessaire',
   581: 'Votre interface utilisateur est mise en cache et obsolète. Essayez de recharger le PWA à l’aide du bouton ci-dessous. Si vous continuez à voir ce message, désinstallez puis réinstallez le PWA.',
-  582: 'Votre interface utilisateur est mise en cache et obsolète. Faites un rafraîchissement forcé de la page pour obtenir la dernière interface.',
+  582: 'StartOS a été mis à jour, mais cette page utilise encore l’interface précédente. Actualisez la page pour obtenir la dernière version.',
   606: 'Hôte',
   607: 'Valeur',
   610: 'DNS dynamique',

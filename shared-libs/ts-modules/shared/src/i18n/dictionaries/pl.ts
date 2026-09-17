@@ -535,7 +535,7 @@ export default {
   579: 'musi być prawidłowym kluczem publicznym SSH',
   580: 'Wymagane odświeżenie',
   581: 'Twój interfejs użytkownika jest w pamięci podręcznej i jest nieaktualny. Spróbuj ponownie załadować PWA za pomocą przycisku poniżej. Jeśli nadal widzisz ten komunikat, odinstaluj i ponownie zainstaluj PWA.',
-  582: 'Twój interfejs użytkownika jest w pamięci podręcznej i jest nieaktualny. Wykonaj twarde odświeżenie strony, aby uzyskać najnowszy interfejs.',
+  582: 'StartOS został zaktualizowany, ale ta strona nadal korzysta z poprzedniego interfejsu. Odśwież stronę, aby uzyskać najnowszą wersję.',
   606: 'Host',
   607: 'Wartość',
   610: 'Dynamiczny DNS',

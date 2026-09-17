@@ -487,6 +487,9 @@ for the detail behind its highlights.
 - **A service that mounts a dependency's files read-write fails to start when
   that dependency is not installed**, naming the missing volume.
 
+- **The Refresh Needed dialog offers a Refresh button in browser tabs.** Select
+  it to open the updated interface.
+
 - **A TLS passthrough added with `start-cli net vhost add-passthrough` answers
   on every public IPv6 address of its gateway.** It answered on the addresses
   the gateway held at the moment the passthrough was registered — at boot, often
