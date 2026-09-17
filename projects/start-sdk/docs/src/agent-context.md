@@ -13,7 +13,7 @@ You are an AI assistant working in a **StartOS packaging workspace**. You help c
 ├── AGENTS.md              ← this file (symlink → start-technologies/projects/start-sdk/docs/src/agent-context.md)
 ├── AGENTS.local.md        ← your workspace-specific notes (never overwritten by a sync)
 ├── CLAUDE.md              ← loads AGENTS.md + AGENTS.local.md (Claude Code bridge)
-├── .claude/skills         ← the fleet's skills (symlink → start-technologies/.claude/skills), where Claude Code looks
+├── .claude/skills         ← the packaging skills (symlink → start-technologies/projects/start-sdk/docs/skills), where Claude Code looks
 ├── .agents/skills         ← the same skills, where Codex looks
 ├── start-technologies/    ← checkout of the Start9 monorepo on `live-docs` (what is published): the packaging guide, plus the SDK and OS source
 └── <id>-startos/ …        ← one or more package repos
@@ -59,11 +59,11 @@ Read pages from your local checkout (`start-technologies/projects/start-sdk/docs
 
 ## Skills
 
-`start-technologies/.claude/skills/` holds the fleet's agent skills — each a `SKILL.md` that drives one whole job end to end, with its own references beside it. The workspace links that directory at `.claude/skills` and `.agents/skills`, so a session opened at the workspace root has them loaded and the guide sync keeps them current. Invoke one by name — `/package-service <name>` in Claude Code, `$package-service` in Codex — or read its `SKILL.md` at the path below and follow it.
+`start-technologies/projects/start-sdk/docs/skills/` holds the packaging skills — each a `SKILL.md` that drives one whole job end to end, with its own references beside it. They are part of the guide, so a sync updates them like any page. The workspace links that directory at `.claude/skills` and `.agents/skills`, so a session opened at the workspace root has them loaded. Invoke one by name — `/package-service <name>` in Claude Code, `$package-service` in Codex — or read its `SKILL.md` at the path below and follow it.
 
-| Skill                                                        | Use when                                                                                                                                                                   |
-| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `start-technologies/.claude/skills/package-service/SKILL.md` | asked to package a new service: it researches the upstream, settles the shape in one round of questions, then scaffolds, builds, verifies on a StartOS box, and hands back |
+| Skill                                                                        | Use when                                                                                                                                                                   |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `start-technologies/projects/start-sdk/docs/skills/package-service/SKILL.md` | asked to package a new service: it researches the upstream, settles the shape in one round of questions, then scaffolds, builds, verifies on a StartOS box, and hands back |
 
 `AGENTS.local.md` records how this workspace departs from the scaffold — which box to install to, where packages live, how finished work is handed back. Where it and a skill differ, follow `AGENTS.local.md`.
 

@@ -70,8 +70,9 @@ const AGENTS_SYMLINK_TARGET: &str =
 const LEGACY_AGENTS_SYMLINK_TARGET: &str = "start-technologies/projects/start-sdk/docs/AGENTS.md";
 /// Path to the package template inside the cloned guide (joined onto MONOREPO_DIR).
 const TEMPLATE_SUBPATH: &str = "projects/start-sdk/docs/package-template";
-/// The fleet's agent skills inside the cloned guide (joined onto MONOREPO_DIR).
-const SKILLS_SUBPATH: &str = ".claude/skills";
+/// The packaging skills inside the cloned guide (joined onto MONOREPO_DIR). They live
+/// in the book's tree so a change to one reaches `live-docs` the way a page does.
+const SKILLS_SUBPATH: &str = "projects/start-sdk/docs/skills";
 /// Workspace directories whose `skills` entry is linked at the guide's skills, one per
 /// agent that discovers skills there: `.claude` for Claude Code, `.agents` for Codex.
 const SKILL_LINK_DIRS: &[&str] = &[".claude", ".agents"];
@@ -695,7 +696,7 @@ mod test {
 
         assert_eq!(
             std::fs::read_link(ws.join(".agents/skills")).unwrap(),
-            Path::new("../start-technologies/.claude/skills")
+            Path::new("../start-technologies/projects/start-sdk/docs/skills")
         );
         assert!(ws.join(".agents/skills/package-service").is_dir());
         // a packager's own skills directory is kept, not replaced by the link

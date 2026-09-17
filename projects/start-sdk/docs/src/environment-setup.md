@@ -230,7 +230,7 @@ start9-workspace/
 ├── AGENTS.md              ← agent context (symlink to the guide's Agent Context page), read by AI assistants
 ├── AGENTS.local.md        ← your own notes, kept across guide updates
 ├── CLAUDE.md              ← loads AGENTS.md + AGENTS.local.md (Claude Code)
-├── .claude/skills         ← the fleet's skills (symlink into start-technologies/), for Claude Code
+├── .claude/skills         ← the packaging skills (symlink into the guide), for Claude Code
 ├── .agents/skills         ← the same skills, for Codex
 └── start-technologies/    ← the monorepo: the guide, the SDK source, the OS source
 ```
@@ -243,9 +243,9 @@ The context lives once, at the workspace root — it is never copied into your p
 
 ### Skills
 
-Beyond the always-on context, the monorepo ships **skills** — procedures an agent loads on demand to drive a whole job end to end, in the [Agent Skills](https://agentskills.io) format both Claude Code and Codex read. The one you want first is `package-service`: given a project name or an upstream URL, it researches the upstream and how people self-host it, settles the package's shape with you in one round of questions, then scaffolds, builds, and verifies the package on your StartOS device and hands it back for review.
+Beyond the always-on context, the guide ships **skills** — procedures an agent loads on demand to drive a whole job end to end, in the [Agent Skills](https://agentskills.io) format both Claude Code and Codex read. The one you want first is `package-service`: given a project name or an upstream URL, it researches the upstream and how people self-host it, settles the package's shape with you in one round of questions, then scaffolds, builds, and verifies the package on your StartOS device and hands it back for review.
 
-The workspace links them for you — `.claude/skills` and `.agents/skills` both point into `start-technologies/.claude/skills`, so a session opened at the workspace root has them, and syncing the guide updates them. Invoke one by name:
+They live in the guide itself (`start-technologies/projects/start-sdk/docs/skills/`), so syncing the guide updates them like any page, and the workspace links them for you — `.claude/skills` and `.agents/skills` both point there, so a session opened at the workspace root has them. Invoke one by name:
 
 - **Claude Code:** `/package-service Vaultwarden`
 - **Codex:** `$package-service Vaultwarden`
@@ -253,7 +253,7 @@ The workspace links them for you — `.claude/skills` and `.agents/skills` both 
 Without a workspace, or to have them in every project, install them once instead:
 
 - **Claude Code** — the monorepo doubles as a plugin marketplace: `/plugin marketplace add Start9Labs/start-technologies@live-docs`, then `/plugin install start9@start9`. The skills load as `/start9:package-service` and update with `/plugin marketplace update`. (This clones the whole monorepo into Claude Code's plugin cache.)
-- **Codex** — `$skill-installer` fetches one skill at a time: `$skill-installer install https://github.com/Start9Labs/start-technologies/tree/live-docs/.claude/skills/package-service`. That copy does not update itself; to pick up changes, delete it (`~/.codex/skills/package-service`) and run the installer again.
+- **Codex** — `$skill-installer` fetches one skill at a time: `$skill-installer install https://github.com/Start9Labs/start-technologies/tree/live-docs/projects/start-sdk/docs/skills/package-service`. That copy does not update itself; to pick up changes, delete it (`~/.codex/skills/package-service`) and run the installer again.
 
 ### Already have the monorepo?
 
