@@ -45,16 +45,6 @@ for the detail behind its highlights.
   `balance_power` when available. Without a saved preference, all other systems
   retain their current value.
 
-- **`start-cli completions <shell>` prints a completion script** for bash, zsh,
-  fish, elvish or PowerShell.
-
-- **A `start-cli` command refused because its key is not logged in prompts for
-  the server password, logs in, and runs.** Only at a terminal; a script still
-  gets the error.
-
-- **`start-cli … binding list` shows each binding's bridge address**
-  (`10.0.3.1:<port>`, plain and TLS), under `package host` and `server host`.
-
 - **A service can permanently retire a network host or a port it no longer
   uses, and the port numbers it held become available again.** A service that
   reorganizes its interfaces across an update — renaming a host, dropping a

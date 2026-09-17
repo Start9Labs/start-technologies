@@ -99,7 +99,8 @@ The full command tree comes from `start-core::main_api()`. Top-level groups incl
 Run `start-cli <group> --help` for any group. Tab completion, in the shell's profile:
 
 ```sh
-eval "$(start-cli completions bash)"                          # bash, zsh
+eval "$(start-cli completions bash)"                          # bash
+eval "$(start-cli completions zsh)"                           # zsh
 start-cli completions fish | source                           # fish
 eval (start-cli completions elvish | slurp)                   # elvish
 start-cli completions powershell | Out-String | Invoke-Expression   # PowerShell
