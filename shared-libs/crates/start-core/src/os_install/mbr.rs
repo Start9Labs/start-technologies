@@ -4,8 +4,8 @@ use color_eyre::eyre::eyre;
 use mbrman::{CHS, MBR, MBRPartitionEntry};
 
 use crate::disk::OsPartitionInfo;
-use crate::os_install::partition_for;
 use crate::os_install::quiesce::{quiesce_disk, update_partition_table};
+use crate::os_install::{partition_for, same_device};
 use crate::prelude::*;
 
 /// Boot end (exclusive). 2 GiB at 512-byte sectors.
@@ -49,7 +49,7 @@ pub async fn partition(
                 let existing_mbr = MBR::read_from(&mut file, 512)?;
                 // Find the partition matching the protected path (check partitions 1-4)
                 let info = (1..=4u32)
-                    .find(|&idx| partition_for(&disk_path, idx) == *protect_path)
+                    .find(|&idx| same_device(&partition_for(&disk_path, idx), protect_path))
                     .and_then(|idx| {
                         let entry = &existing_mbr[idx as usize];
                         if entry.sectors > 0 {

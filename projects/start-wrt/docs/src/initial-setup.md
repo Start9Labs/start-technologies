@@ -48,5 +48,6 @@ The StartWRT web interface is organized into five sections:
 ## Next Steps
 
 - [Security Profiles](security-profiles.md) — Understand the core concept behind StartWRT
+- [Wi-Fi Settings](wifi.md#settings) — Select your country so the router uses the Wi-Fi channels and transmit power permitted there
 - [Wi-Fi](wifi.md) — Set up additional Wi-Fi passwords for different profiles
 - [Settings](settings.md) — Configure timezone, language, and other preferences

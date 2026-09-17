@@ -1,0 +1,62 @@
+name: Publish docs to Start9 Pages
+
+# Follows every successful "Build and deploy docs" run and publishes the same
+# live-docs tree to the NextExplorer folder Start9 Pages serves as
+# docs.start9.com. A pull request to live-docs may not carry workflow files, so
+# this one lives on master and checks live-docs out itself.
+
+on:
+  workflow_run:
+    workflows: ['Build and deploy docs']
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: 'deploy-docs-pages'
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: projects/start-docs
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: live-docs
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Install mdBook
+        run: |
+          MDBOOK_VERSION='v0.5.2'
+          curl -sSL https://github.com/rust-lang/mdBook/releases/download/${MDBOOK_VERSION}/mdbook-${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz | tar -xz
+          sudo mv mdbook /usr/local/bin/mdbook
+
+      - name: Install mdbook-tabs
+        run: |
+          cargo install mdbook-tabs --version 0.3.4
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Build the site
+        run: ./build.sh
+
+      # The checkout is live-docs, so the action is taken from master by reference.
+      # 0.3.5.x is the retired Sphinx site, seeded by hand and built by nothing.
+      - name: Publish to NextExplorer
+        uses: Start9Labs/start-technologies/.github/actions/nextexplorer-publish@master
+        with:
+          url: https://${{ vars.NEXT_EXPLORER_EVELYN_URL }}
+          email: ${{ vars.NEXT_EXPLORER_EVELYN_USER }}
+          password: ${{ secrets.NEXT_EXPLORER_EVELYN_PASS }}
+          dir: projects/start-docs/docs
+          folder: docs.start9.com
+          keep: 0.3.5.x

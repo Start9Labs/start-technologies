@@ -13,6 +13,8 @@ You are an AI assistant working in a **StartOS packaging workspace**. You help c
 ├── AGENTS.md              ← this file (symlink → start-technologies/projects/start-sdk/docs/src/agent-context.md)
 ├── AGENTS.local.md        ← your workspace-specific notes (never overwritten by a sync)
 ├── CLAUDE.md              ← loads AGENTS.md + AGENTS.local.md (Claude Code bridge)
+├── .claude/skills         ← the packaging skills (symlink → start-technologies/projects/start-sdk/docs/skills), where Claude Code looks
+├── .agents/skills         ← the same skills, where Codex looks
 ├── start-technologies/    ← checkout of the Start9 monorepo on `live-docs` (what is published): the packaging guide, plus the SDK and OS source
 └── <id>-startos/ …        ← one or more package repos
 ```
@@ -54,6 +56,16 @@ Workflow for any objective:
 4. **Read only what the objective needs.**
 
 Read pages from your local checkout (`start-technologies/projects/start-sdk/docs/src/<page>.md`). Only if `start-technologies/` is missing, fall back to the web (`https://docs.start9.com/packaging/<page>.html`).
+
+## Skills
+
+`start-technologies/projects/start-sdk/docs/skills/` holds the packaging skills — each a `SKILL.md` that drives one whole job end to end, with its own references beside it. They are part of the guide, so a sync updates them like any page. A session opened at the workspace root lists them when `.claude/skills` (Claude Code) or `.agents/skills` (Codex) links to that directory, and can then invoke one by name — `/package-service <name>` in Claude Code, `$package-service` in Codex. Without the links, open a skill's `SKILL.md` at the path below and follow it.
+
+| Skill                                                                        | Use when                                                                                                                                                                   |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `start-technologies/projects/start-sdk/docs/skills/package-service/SKILL.md` | asked to package a new service: it researches the upstream, settles the shape in one round of questions, then scaffolds, builds, verifies on a StartOS box, and hands back |
+
+`AGENTS.local.md` records how this workspace departs from the scaffold — which box to install to, where packages live, how finished work is handed back. Where it and a skill differ, follow `AGENTS.local.md`.
 
 ## Where to read for X
 
@@ -123,4 +135,4 @@ The full rules are in `start-technologies/projects/start-sdk/docs/src/workflow.m
 
 ## Starting a new package
 
-**Scaffold first — run `start-cli s9pk init-package "<Name>"`. Do not hand-assemble a package by copying files out of another one.** Scaffolding produces a barebones hello-world clone. **Then work `new-package-checklist.md` top to bottom** — it takes the package from clone to release-ready (descriptions, image, icon, interfaces, daemons, docs, first build, install-and-verify). The checklist is a guide page, not a file in the package: read it, don't copy it in. Wrapping an existing upstream Docker image? Read `recipe-prebuilt-image.md` first.
+**Scaffold first — run `start-cli s9pk init-package "<Name>"`. Do not hand-assemble a package by copying files out of another one.** Scaffolding produces a barebones hello-world clone. **Then work `new-package-checklist.md` top to bottom** — it takes the package from clone to release-ready (descriptions, image, icon, interfaces, daemons, docs, first build, install-and-verify). The checklist is a guide page, not a file in the package: read it, don't copy it in. Wrapping an existing upstream Docker image? Read `recipe-prebuilt-image.md` first. Asked to package a named project end to end? That is the `package-service` skill (see [Skills](#skills)): it does the upstream research and the install-and-verify pass around this sequence.

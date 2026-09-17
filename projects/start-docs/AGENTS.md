@@ -45,7 +45,7 @@ The StartOS, StartTunnel, Packaging, and StartWRT books are NOT here — they mo
 
 ## Deployment
 
-**The site serves the `live-docs` branch, not `master`.** GitHub Actions `.github/workflows/docs-deploy.yml` (at the monorepo root) builds and rsyncs to the VPS on push to `live-docs` touching `projects/start-docs/**`, `projects/start-os/docs/**`, `projects/start-tunnel/docs/**`, `projects/start-sdk/docs/**`, or `projects/start-wrt/docs/**` — keep that `paths:` list in step with the set of books. It regenerates nginx routing from `versions.conf`. Don't hardcode book names in nginx — the generated `book_versions.conf` handles that.
+**The site serves the `live-docs` branch, not `master`.** GitHub Actions `.github/workflows/docs-deploy.yml` (at the monorepo root) builds and rsyncs to the VPS on push to `live-docs` touching `projects/start-docs/**`, `projects/start-os/docs/**`, `projects/start-tunnel/docs/**`, `projects/start-sdk/docs/**`, or `projects/start-wrt/docs/**` — keep that `paths:` list in step with the set of books. It regenerates nginx routing from `versions.conf`. Don't hardcode book names in nginx — the generated `book_versions.conf` handles that. The same tree then goes to Start9 Pages on evelyn through `.github/workflows/deploy-docs-pages.yml` (a `workflow_run` on `master` that rebuilds `live-docs` itself), where no nginx rules exist: every redirect the site needs is built into the tree by `build.sh` — the stubs for unversioned URLs and the script in `landing/404.html`. A routing change goes there, never into a server config.
 
 Content reaches `live-docs` two ways:
 

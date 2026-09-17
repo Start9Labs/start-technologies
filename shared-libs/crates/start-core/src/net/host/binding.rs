@@ -1,18 +1,24 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::net::{SocketAddr, SocketAddrV6};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::ops::RangeInclusive;
 use std::str::FromStr;
 
 use clap::Parser;
 use clap::builder::ValueParserFactory;
-use rpc_toolkit::{Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
+use imbl_value::json;
+use itertools::Itertools;
+use patch_db::Dump;
+use patch_db::json_ptr::JsonPointer;
+use rpc_toolkit::{
+    Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async, from_fn_async_local,
+};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::context::{CliContext, RpcContext};
 use crate::db::prelude::Map;
 use crate::hostname::ServerHostname;
-use crate::net::forward::AvailablePorts;
+use crate::net::forward::{AvailablePorts, START9_BRIDGE_IFACE};
 use crate::net::host::HostApiKind;
 use crate::net::service_interface::{
     HostnameInfo, HostnameMetadata, RangeServiceInterface, ServiceInterface,
@@ -20,7 +26,8 @@ use crate::net::service_interface::{
 use crate::net::vhost::AlpnInfo;
 use crate::prelude::*;
 use crate::util::FromStrParser;
-use crate::util::serde::{CliFromJsonString, HandlerExtSerde, display_serializable};
+use crate::util::serde::{HandlerExtSerde, display_serializable};
+use crate::util::tui::choose_custom_display;
 use crate::{GatewayId, HostId, ServiceInterfaceId};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
@@ -615,8 +622,19 @@ pub fn binding<C: Context, Kind: HostApiKind>()
                     }
 
                     let mut table = Table::new();
-                    table.add_row(row![bc => "INTERNAL PORT", "ENABLED", "EXTERNAL PORT", "EXTERNAL SSL PORT"]);
+                    table.add_row(row![bc =>
+                        "INTERNAL PORT",
+                        "ENABLED",
+                        "EXTERNAL PORT",
+                        "EXTERNAL SSL PORT",
+                        "BRIDGE",
+                        "BRIDGE SSL",
+                    ]);
                     for (internal, info) in res.iter() {
+                        let bridge = |ssl: bool| {
+                            bridge_address(&info.addresses, ssl)
+                                .map_or_else(|| "N/A".to_owned(), |a| a.to_string())
+                        };
                         table.add_row(row![
                             internal,
                             info.enabled,
@@ -630,6 +648,8 @@ pub fn binding<C: Context, Kind: HostApiKind>()
                             } else {
                                 "N/A".to_owned()
                             },
+                            bridge(false),
+                            bridge(true),
                         ]);
                     }
 
@@ -645,28 +665,55 @@ pub fn binding<C: Context, Kind: HostApiKind>()
             from_fn_async(set_address_enabled::<Kind>)
                 .with_metadata("sync_db", Value::Bool(true))
                 .with_inherited(Kind::inheritance)
+                .no_cli(),
+        )
+        .subcommand(
+            "set-address-enabled",
+            from_fn_async_local(cli_set_address_enabled::<Kind>)
+                .with_inherited(Kind::inheritance)
                 .no_display()
-                .with_about("about.set-address-enabled-for-binding")
-                .with_call_remote::<CliContext>(),
+                .with_about("about.set-address-enabled-for-binding"),
         )
         .subcommand(
             "set-range-address-enabled",
             from_fn_async(set_range_address_enabled::<Kind>)
                 .with_metadata("sync_db", Value::Bool(true))
                 .with_inherited(Kind::inheritance)
+                .no_cli(),
+        )
+        .subcommand(
+            "set-range-address-enabled",
+            from_fn_async_local(cli_set_range_address_enabled::<Kind>)
+                .with_inherited(Kind::inheritance)
                 .no_display()
-                .with_about("about.set-range-address-enabled-for-binding")
-                .with_call_remote::<CliContext>(),
+                .with_about("about.set-range-address-enabled-for-binding"),
         )
         .subcommand(
             "set-gua-wan",
             from_fn_async(set_gua_wan::<Kind>)
                 .with_metadata("sync_db", Value::Bool(true))
                 .with_inherited(Kind::inheritance)
-                .no_display()
-                .with_about("about.set-gua-wan-for-binding")
-                .with_call_remote::<CliContext>(),
+                .no_cli(),
         )
+        .subcommand(
+            "set-gua-wan",
+            from_fn_async_local(cli_set_gua_wan::<Kind>)
+                .with_inherited(Kind::inheritance)
+                .no_display()
+                .with_about("about.set-gua-wan-for-binding"),
+        )
+}
+
+/// The row `sdk.host.getBridgeAddress` resolves: IPv4 on the `lxcbr0` gateway.
+fn bridge_address(addresses: &DerivedAddressInfo, ssl: bool) -> Option<SocketAddr> {
+    addresses
+        .available
+        .iter()
+        .find(|a| {
+            a.ssl == ssl
+                && matches!(&a.metadata, HostnameMetadata::Ipv4 { gateway } if gateway.as_str() == START9_BRIDGE_IFACE)
+        })
+        .and_then(HostnameInfo::to_socket_addr)
 }
 
 pub async fn list_bindings<Kind: HostApiKind>(
@@ -679,16 +726,23 @@ pub async fn list_bindings<Kind: HostApiKind>(
         .de()
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
-#[group(skip)]
+#[derive(Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct BindingSetAddressEnabledParams {
+    internal_port: u16,
+    address: HostnameInfo,
+    enabled: Option<bool>,
+}
+
+#[derive(Deserialize, Serialize, Parser)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+pub struct CliBindingSetAddressEnabledParams {
     #[arg(help = "help.arg.internal-port")]
     internal_port: u16,
     #[arg(long, help = "help.arg.address")]
-    #[ts(as = "HostnameInfo")]
-    address: CliFromJsonString<HostnameInfo>,
+    address: String,
     #[arg(long, help = "help.arg.binding-enabled")]
     enabled: Option<bool>,
 }
@@ -971,7 +1025,6 @@ pub async fn set_address_enabled<Kind: HostApiKind>(
     inheritance: Kind::Inheritance,
 ) -> Result<(), Error> {
     let enabled = enabled.unwrap_or(true);
-    let address = address.0;
     if !enabled && address.is_internal() {
         return Err(Error::new(
             eyre!("loopback / bridge (internal) addresses cannot be disabled"),
@@ -1014,7 +1067,6 @@ pub async fn set_range_address_enabled<Kind: HostApiKind>(
     inheritance: Kind::Inheritance,
 ) -> Result<(), Error> {
     let enabled = enabled.unwrap_or(true);
-    let address = address.0;
     if !enabled && address.is_internal() {
         return Err(Error::new(
             eyre!("loopback / bridge (internal) addresses cannot be disabled"),
@@ -1044,16 +1096,23 @@ pub async fn set_range_address_enabled<Kind: HostApiKind>(
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
-#[group(skip)]
+#[derive(Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct BindingSetGuaWanParams {
+    internal_port: u16,
+    address: HostnameInfo,
+    wan: bool,
+}
+
+#[derive(Deserialize, Serialize, Parser)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+pub struct CliBindingSetGuaWanParams {
     #[arg(help = "help.arg.internal-port")]
     internal_port: u16,
     #[arg(long, help = "help.arg.address")]
-    #[ts(as = "HostnameInfo")]
-    address: CliFromJsonString<HostnameInfo>,
+    address: String,
     #[arg(long, help = "help.arg.gua-wan")]
     wan: bool,
 }
@@ -1072,7 +1131,6 @@ pub async fn set_gua_wan<Kind: HostApiKind>(
     }: BindingSetGuaWanParams,
     inheritance: Kind::Inheritance,
 ) -> Result<(), Error> {
-    let address = address.0;
     let gua = address.gua().ok_or_else(|| {
         Error::new(
             eyre!("address is not an IPv6 global-unicast address"),
@@ -1139,6 +1197,208 @@ pub async fn set_gua_wan<Kind: HostApiKind>(
     Ok(())
 }
 
+async fn cli_set_address_enabled<Kind: HostApiKind>(
+    HandlerArgs {
+        context,
+        parent_method,
+        method,
+        params,
+        inherited_params,
+        raw_params,
+    }: HandlerArgs<CliContext, CliBindingSetAddressEnabledParams, Kind::Inheritance>,
+) -> Result<(), Error> {
+    call_with_address::<Kind>(
+        &context,
+        parent_method.into_iter().chain(method).join("."),
+        raw_params,
+        &inherited_params,
+        params.internal_port,
+        "bindings",
+        &params.address,
+    )
+    .await
+}
+
+async fn cli_set_range_address_enabled<Kind: HostApiKind>(
+    HandlerArgs {
+        context,
+        parent_method,
+        method,
+        params,
+        inherited_params,
+        raw_params,
+    }: HandlerArgs<CliContext, CliBindingSetAddressEnabledParams, Kind::Inheritance>,
+) -> Result<(), Error> {
+    call_with_address::<Kind>(
+        &context,
+        parent_method.into_iter().chain(method).join("."),
+        raw_params,
+        &inherited_params,
+        params.internal_port,
+        "bindingRanges",
+        &params.address,
+    )
+    .await
+}
+
+async fn cli_set_gua_wan<Kind: HostApiKind>(
+    HandlerArgs {
+        context,
+        parent_method,
+        method,
+        params,
+        inherited_params,
+        raw_params,
+    }: HandlerArgs<CliContext, CliBindingSetGuaWanParams, Kind::Inheritance>,
+) -> Result<(), Error> {
+    call_with_address::<Kind>(
+        &context,
+        parent_method.into_iter().chain(method).join("."),
+        raw_params,
+        &inherited_params,
+        params.internal_port,
+        "bindings",
+        &params.address,
+    )
+    .await
+}
+
+async fn call_with_address<Kind: HostApiKind>(
+    ctx: &CliContext,
+    method: String,
+    mut params: Value,
+    inheritance: &Kind::Inheritance,
+    internal_port: u16,
+    binding_collection: &'static str,
+    address: &str,
+) -> Result<(), Error> {
+    let resolved = if address.trim_start().starts_with('{') {
+        serde_json::from_str(address).with_kind(ErrorKind::Deserialization)?
+    } else {
+        let mut pointer: JsonPointer = Kind::host_pointer(inheritance)?;
+        pointer.push_end(binding_collection);
+        pointer.push_end(&internal_port.to_string());
+        pointer.push_end("addresses");
+        pointer.push_end("available");
+        let dump: Dump = from_value(
+            ctx.call_remote::<RpcContext>(
+                "db.dump",
+                json!({ "pointer": AsRef::<str>::as_ref(&pointer) }),
+            )
+            .await?,
+        )?;
+        let available: BTreeSet<HostnameInfo> =
+            from_value::<Option<_>>(dump.value)?.or_not_found(internal_port)?;
+        let (hostname, port) = parse_address(address);
+        let candidates = available
+            .iter()
+            .filter(|a| a.hostname == hostname && port.is_none_or(|p| served_port(a) == p))
+            .collect::<Vec<_>>();
+        match &candidates[..] {
+            [] => {
+                return Err(Error::new(
+                    eyre!(
+                        "{}\n{}",
+                        t!(
+                            "net.host.binding.address-not-found",
+                            address = address,
+                            port = internal_port
+                        ),
+                        available
+                            .iter()
+                            .map(|a| format!("  {}", describe(a)))
+                            .join("\n"),
+                    ),
+                    ErrorKind::NotFound,
+                ));
+            }
+            [one] => HostnameInfo::clone(one),
+            _ => HostnameInfo::clone(
+                choose_custom_display(
+                    &t!(
+                        "net.host.binding.choose-address",
+                        address = address,
+                        port = internal_port
+                    ),
+                    &candidates,
+                    |a| describe(a),
+                )
+                .await?,
+            ),
+        }
+    };
+    params["address"] = to_value(&resolved)?;
+    ctx.call_remote::<RpcContext>(&method, params).await?;
+    Ok(())
+}
+
+fn parse_address(address: &str) -> (InternedString, Option<u16>) {
+    if let Ok(ip) = address.parse::<IpAddr>() {
+        return (InternedString::from_display(&ip), None);
+    }
+    if let Ok(addr) = address.parse::<SocketAddr>() {
+        return (InternedString::from_display(&addr.ip()), Some(addr.port()));
+    }
+    if let Some(Ok(ip)) = address
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .map(str::parse::<Ipv6Addr>)
+    {
+        return (InternedString::from_display(&ip), None);
+    }
+    match address
+        .rsplit_once(':')
+        .map(|(host, port)| (host, port.parse()))
+    {
+        Some((host, Ok(port))) => (InternedString::intern(host), Some(port)),
+        _ => (InternedString::intern(address), None),
+    }
+}
+
+/// The port a `None` stands for, as [`set_address_enabled_on`] keys it.
+fn served_port(address: &HostnameInfo) -> u16 {
+    address.port.unwrap_or(if address.ssl { 443 } else { 80 })
+}
+
+fn describe(address: &HostnameInfo) -> String {
+    let host = if address.hostname.parse::<Ipv6Addr>().is_ok() {
+        format!("[{}]", address.hostname)
+    } else {
+        address.hostname.to_string()
+    };
+    let kind = t!(match &address.metadata {
+        HostnameMetadata::Ipv4 { .. } => "net.host.binding.address-kind-ipv4",
+        HostnameMetadata::Ipv6 { .. } => "net.host.binding.address-kind-ipv6",
+        HostnameMetadata::Mdns { .. } => "net.host.binding.address-kind-mdns",
+        HostnameMetadata::PrivateDomain { .. } => "net.host.binding.address-kind-private-domain",
+        HostnameMetadata::PublicDomain { .. } => "net.host.binding.address-kind-public-domain",
+        HostnameMetadata::Plugin { .. } => "net.host.binding.address-kind-plugin",
+    });
+    let gateways = address.metadata.gateways().join(", ");
+    format!(
+        "{host}:{}  {kind}{}, {}{}",
+        served_port(address),
+        if gateways.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " {}",
+                t!("net.host.binding.address-via", gateways = gateways)
+            )
+        },
+        t!(if address.public {
+            "net.host.binding.address-public"
+        } else {
+            "net.host.binding.address-private"
+        }),
+        if address.ssl {
+            format!(", {}", t!("net.host.binding.address-ssl"))
+        } else {
+            String::new()
+        },
+    )
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -1179,6 +1439,51 @@ mod test {
             "alpn": alpn,
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn bridge_address_is_the_lxcbr0_row_not_a_lookalike() {
+        let row = |ssl, hostname: &str, port, metadata| HostnameInfo {
+            ssl,
+            public: false,
+            hostname: InternedString::intern(hostname),
+            port: Some(port),
+            metadata,
+        };
+        let bridge = || HostnameMetadata::Ipv4 {
+            gateway: START9_BRIDGE_IFACE.parse().unwrap(),
+        };
+        let addresses = DerivedAddressInfo {
+            available: [
+                row(
+                    false,
+                    "10.0.3.1",
+                    1,
+                    HostnameMetadata::Plugin {
+                        package_id: "decoy".parse().unwrap(),
+                        remove_action: None,
+                        overflow_actions: vec![],
+                        info: Value::Null,
+                    },
+                ),
+                row(
+                    false,
+                    "192.168.1.5",
+                    8080,
+                    HostnameMetadata::Ipv4 {
+                        gateway: "eth0".parse().unwrap(),
+                    },
+                ),
+                row(false, "10.0.3.1", 8080, bridge()),
+                row(true, "10.0.3.1", 8443, bridge()),
+            ]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        };
+        let addr = |ssl| bridge_address(&addresses, ssl).map(|a| a.to_string());
+        assert_eq!(addr(false).as_deref(), Some("10.0.3.1:8080"));
+        assert_eq!(addr(true).as_deref(), Some("10.0.3.1:8443"));
     }
 
     #[test]

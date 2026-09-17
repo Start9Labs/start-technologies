@@ -14,6 +14,8 @@ Every gateway routes outbound traffic from your server to the Internet. Some gat
 
 - **Outbound only** — routes outbound traffic but does not accept inbound connections. Commercial VPN providers (Mullvad, ProtonVPN, etc.) are outbound-only gateways. These are used as [outbound VPNs](outbound-vpn.md).
 
+Service interface address tables list inbound/outbound gateways, where you can enable addresses for incoming connections. Outbound-only gateways remain available in the system-wide and per-service outbound gateway selectors.
+
 > [!NOTE]
 > A StartTunnel gateway can also carry IPv6. If the tunnel subnet your server belongs to has an [IPv6 prefix delegated](/start-tunnel/ipv6.html), your server receives its own global IPv6 address (GUA) through the gateway — usable for [DualStack public domains](clearnet.md) and controlled from each interface's address list (see [Interfaces](interfaces.md)).
 

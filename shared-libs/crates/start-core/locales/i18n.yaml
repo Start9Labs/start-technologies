@@ -1241,6 +1241,21 @@ disk.mount.binding:
   fr_FR: "Liaison de %{src} à %{dst}"
   pl_PL: "Wiązanie %{src} do %{dst}"
 
+# os_install/mod.rs
+os-install.invalid-partuuid:
+  en_US: "Unable to resolve a valid partition UUID for %{partition}"
+  de_DE: "Für %{partition} konnte keine gültige Partitions-UUID ermittelt werden"
+  es_ES: "No se pudo resolver un UUID de partición válido para %{partition}"
+  fr_FR: "Impossible de résoudre un UUID de partition valide pour %{partition}"
+  pl_PL: "Nie udało się ustalić prawidłowego UUID partycji dla %{partition}"
+
+os-install.unknown-disk:
+  en_US: "No connected drive has the stable path %{disk}"
+  de_DE: "Kein angeschlossenes Laufwerk hat den stabilen Pfad %{disk}"
+  es_ES: "Ninguna unidad conectada tiene la ruta estable %{disk}"
+  fr_FR: "Aucun disque connecté n’a le chemin stable %{disk}"
+  pl_PL: "Żaden podłączony dysk nie ma stabilnej ścieżki %{disk}"
+
 # os_install/gpt.rs
 os-install.no-free-space-for-os-root:
   en_US: "No free space left on device for OS root partition"
@@ -1686,6 +1701,91 @@ net.host.private-domain-is-server-mdns:
   es_ES: '«%{domain}» es el nombre mDNS del servidor y no se puede asignar como dominio privado'
   fr_FR: '« %{domain} » est le nom mDNS du serveur et ne peut pas être attribué comme domaine privé'
   pl_PL: '„%{domain}” jest nazwą mDNS serwera i nie może zostać przypisana jako domena prywatna'
+
+# net/host/binding.rs
+net.host.binding.address-not-found:
+  en_US: "%{address} is not an address of binding %{port}. Its addresses are:"
+  de_DE: "%{address} ist keine Adresse der Bindung %{port}. Ihre Adressen sind:"
+  es_ES: "%{address} no es una dirección del vínculo %{port}. Sus direcciones son:"
+  fr_FR: "%{address} n'est pas une adresse de la liaison %{port}. Ses adresses sont :"
+  pl_PL: "%{address} nie jest adresem powiązania %{port}. Jego adresy to:"
+
+net.host.binding.choose-address:
+  en_US: "%{address} matches several addresses of binding %{port}; choose one:"
+  de_DE: "%{address} passt auf mehrere Adressen der Bindung %{port}; wählen Sie eine aus:"
+  es_ES: "%{address} coincide con varias direcciones del vínculo %{port}; elija una:"
+  fr_FR: "%{address} correspond à plusieurs adresses de la liaison %{port} ; choisissez-en une :"
+  pl_PL: "%{address} pasuje do kilku adresów powiązania %{port}; wybierz jeden:"
+
+net.host.binding.address-kind-ipv4:
+  en_US: "IPv4"
+  de_DE: "IPv4"
+  es_ES: "IPv4"
+  fr_FR: "IPv4"
+  pl_PL: "IPv4"
+
+net.host.binding.address-kind-ipv6:
+  en_US: "IPv6"
+  de_DE: "IPv6"
+  es_ES: "IPv6"
+  fr_FR: "IPv6"
+  pl_PL: "IPv6"
+
+net.host.binding.address-kind-mdns:
+  en_US: "mDNS"
+  de_DE: "mDNS"
+  es_ES: "mDNS"
+  fr_FR: "mDNS"
+  pl_PL: "mDNS"
+
+net.host.binding.address-kind-private-domain:
+  en_US: "private domain"
+  de_DE: "private Domain"
+  es_ES: "dominio privado"
+  fr_FR: "domaine privé"
+  pl_PL: "domena prywatna"
+
+net.host.binding.address-kind-public-domain:
+  en_US: "public domain"
+  de_DE: "öffentliche Domain"
+  es_ES: "dominio público"
+  fr_FR: "domaine public"
+  pl_PL: "domena publiczna"
+
+net.host.binding.address-kind-plugin:
+  en_US: "plugin"
+  de_DE: "Plugin"
+  es_ES: "plugin"
+  fr_FR: "plugin"
+  pl_PL: "wtyczka"
+
+net.host.binding.address-via:
+  en_US: "via %{gateways}"
+  de_DE: "über %{gateways}"
+  es_ES: "a través de %{gateways}"
+  fr_FR: "via %{gateways}"
+  pl_PL: "przez %{gateways}"
+
+net.host.binding.address-public:
+  en_US: "public"
+  de_DE: "öffentlich"
+  es_ES: "pública"
+  fr_FR: "publique"
+  pl_PL: "publiczny"
+
+net.host.binding.address-private:
+  en_US: "private"
+  de_DE: "privat"
+  es_ES: "privada"
+  fr_FR: "privée"
+  pl_PL: "prywatny"
+
+net.host.binding.address-ssl:
+  en_US: "SSL"
+  de_DE: "SSL"
+  es_ES: "SSL"
+  fr_FR: "SSL"
+  pl_PL: "SSL"
 
 # net/ssl.rs
 net.ssl.unreachable:
@@ -2790,6 +2890,12 @@ context.cli.profile-cycle:
   es_ES: "«%{value}» forma parte de un ciclo de referencias de perfil"
   fr_FR: "« %{value} » fait partie d'un cycle de références de profil"
   pl_PL: "„%{value}” jest częścią cyklu odwołań profili"
+context.cli.not-logged-in:
+  en_US: "Not logged in to %{host}; enter the server password to log in."
+  de_DE: "Nicht bei %{host} angemeldet; geben Sie das Server-Passwort ein, um sich anzumelden."
+  es_ES: "No ha iniciado sesión en %{host}; introduzca la contraseña del servidor para iniciar sesión."
+  fr_FR: "Non connecté à %{host} ; saisissez le mot de passe du serveur pour vous connecter."
+  pl_PL: "Nie zalogowano do %{host}; wprowadź hasło serwera, aby się zalogować."
 
 # context/rpc.rs
 context.rpc.rpc-context-dropped:
@@ -3286,11 +3392,11 @@ help.arg.add-signer-key:
   pl_PL: "Dodaj klucz publiczny do sygnatariusza"
 
 help.arg.address:
-  en_US: "Network address"
-  de_DE: "Netzwerkadresse"
-  es_ES: "Dirección de red"
-  fr_FR: "Adresse réseau"
-  pl_PL: "Adres sieciowy"
+  en_US: "One of the binding's addresses (IP, <name>.local or domain), with :port when it serves several ports; a JSON HostnameInfo also works"
+  de_DE: "Eine Adresse der Bindung (IP, <name>.local oder Domain), mit :port, wenn sie mehrere Ports bedient; auch ein JSON-HostnameInfo wird akzeptiert"
+  es_ES: "Una dirección del vínculo (IP, <nombre>.local o dominio), con :puerto si sirve varios puertos; también se acepta un HostnameInfo en JSON"
+  fr_FR: "Une adresse de la liaison (IP, <nom>.local ou domaine), avec :port si elle dessert plusieurs ports ; un HostnameInfo en JSON est aussi accepté"
+  pl_PL: "Jeden z adresów powiązania (IP, <nazwa>.local lub domena), z :port, gdy obsługuje kilka portów; przyjmowany jest też HostnameInfo w JSON"
 
 
 help.arg.gua-wan:
@@ -3356,6 +3462,13 @@ help.arg.command-to-execute:
   fr_FR: "Commande à exécuter dans le conteneur"
   pl_PL: "Polecenie do wykonania w kontenerze"
 
+help.arg.completions-shell:
+  en_US: "Shell to generate the completion script for"
+  de_DE: "Shell, für die das Vervollständigungsskript erzeugt wird"
+  es_ES: "Shell para la que generar el script de autocompletado"
+  fr_FR: "Shell pour lequel générer le script de complétion"
+  pl_PL: "Powłoka, dla której ma zostać wygenerowany skrypt uzupełniania"
+
 help.arg.config-file-path:
   en_US: "Path to configuration file"
   de_DE: "Pfad zur Konfigurationsdatei"
@@ -3378,11 +3491,11 @@ help.arg.data-directory:
   pl_PL: "Ścieżka do katalogu danych"
 
 help.arg.data-drive-path:
-  en_US: "Path to the data drive"
-  de_DE: "Pfad zum Datenlaufwerk"
-  es_ES: "Ruta a la unidad de datos"
-  fr_FR: "Chemin vers le disque de données"
-  pl_PL: "Ścieżka do dysku danych"
+  en_US: "Stable path to the data drive; may match the OS drive"
+  de_DE: "Stabiler Pfad zum Datenlaufwerk; kann dem Betriebssystemlaufwerk entsprechen"
+  es_ES: "Ruta estable a la unidad de datos; puede coincidir con la unidad del sistema operativo"
+  fr_FR: "Chemin stable vers le disque de données ; peut être identique au disque du système d’exploitation"
+  pl_PL: "Stabilna ścieżka do dysku danych; może być taka sama jak ścieżka dysku systemowego"
 
 help.arg.db-pointer:
   en_US: "JSON pointer to object in database to dump"
@@ -4493,11 +4606,11 @@ help.arg.onion-secret-key:
   pl_PL: "Tajny klucz onion Tor"
 
 help.arg.os-drive-path:
-  en_US: "Path to OS drive"
-  de_DE: "Pfad zum Betriebssystemlaufwerk"
-  es_ES: "Ruta a la unidad del sistema operativo"
-  fr_FR: "Chemin vers le disque du système d'exploitation"
-  pl_PL: "Ścieżka do dysku systemu operacyjnego"
+  en_US: "Stable path to the OS drive"
+  de_DE: "Stabiler Pfad zum Betriebssystemlaufwerk"
+  es_ES: "Ruta estable a la unidad del sistema operativo"
+  fr_FR: "Chemin stable vers le disque du système d’exploitation"
+  pl_PL: "Stabilna ścieżka do dysku systemu operacyjnego"
 
 help.arg.package-display-name:
   en_US: "Human-readable package name (e.g. \"Hello World\")"
@@ -5718,6 +5831,13 @@ about.get-id-pubkey:
   es_ES: "Obtener la clave pública de identidad"
   fr_FR: "Obtenir la clé publique d'identité"
   pl_PL: "Pobierz klucz publiczny tożsamości"
+
+about.print-shell-completions:
+  en_US: "Print a shell completion script"
+  de_DE: "Ein Shell-Vervollständigungsskript ausgeben"
+  es_ES: "Imprimir un script de autocompletado para el shell"
+  fr_FR: "Afficher un script de complétion pour le shell"
+  pl_PL: "Wyświetl skrypt uzupełniania dla powłoki"
 
 about.get-initialization-progress:
   en_US: "Get initialization progress"

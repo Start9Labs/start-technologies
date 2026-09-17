@@ -11,7 +11,11 @@ const gitHash = String(
   childProcess.execSync('git describe --always --abbrev=40 --dirty=-modified'),
 ).trim()
 
-const origConfig = require(configPath)
+const origConfig = require(
+  process.argv.includes('--mocks')
+    ? path.join(__dirname, 'config-sample.json')
+    : configPath,
+)
 
 origConfig['gitHash'] = gitHash
 fs.writeFileSync(configPath, JSON.stringify(origConfig, null, 2))

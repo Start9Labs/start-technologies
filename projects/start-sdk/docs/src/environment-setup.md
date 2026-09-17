@@ -222,7 +222,7 @@ start-cli s9pk init-workspace start9-workspace
 cd start9-workspace
 ```
 
-This clones the Start9 monorepo into `start-technologies/`, sets up the agent-context files (`AGENTS.md`, your own `AGENTS.local.md`, and a `CLAUDE.md` that loads both), and creates a `.startos/` directory that marks the workspace and holds your package-signing key and host/registry config:
+This clones the Start9 monorepo into `start-technologies/`, sets up the agent-context files (`AGENTS.md`, your own `AGENTS.local.md`, and a `CLAUDE.md` that loads both), links the fleet's [agent skills](#skills) where Claude Code and Codex look for them, and creates a `.startos/` directory that marks the workspace and holds your package-signing key and host/registry config:
 
 ```
 start9-workspace/
@@ -230,6 +230,8 @@ start9-workspace/
 ├── AGENTS.md              ← agent context (symlink to the guide's Agent Context page), read by AI assistants
 ├── AGENTS.local.md        ← your own notes, kept across guide updates
 ├── CLAUDE.md              ← loads AGENTS.md + AGENTS.local.md (Claude Code)
+├── .claude/skills         ← the packaging skills (symlink → start-technologies/projects/start-sdk/docs/skills), for Claude Code
+├── .agents/skills         ← the same skills, for Codex
 └── start-technologies/    ← the monorepo: the guide, the SDK source, the OS source
 ```
 
@@ -238,6 +240,17 @@ You get the **whole** monorepo, not just the guide. That's deliberate: when the 
 The checkout tracks **`live-docs`**, not `master`. That branch is what every product has published: each release moves it to the tagged tree for the product being released, so the guide you read, the template `init-package` scaffolds from, and the SDK source all describe the `@start9labs/start-sdk` that `npm install` resolves. `master` carries what hasn't shipped, where a page can document a call your package cannot import. It is also the branch docs.start9.com serves, and corrections to published pages land there first — so your local copy and the site are the same thing, and you get a fix the moment it goes live.
 
 The context lives once, at the workspace root — it is never copied into your package repos. Open the workspace in your AI tool and it picks up `AGENTS.md` / `CLAUDE.md` automatically. You can read exactly what it contains on the [Agent Context](./agent-context.md) page.
+
+### Skills
+
+Beyond the always-on context, the guide ships **skills** — procedures an agent loads on demand to drive a whole job end to end, in the [Agent Skills](https://agentskills.io) format both Claude Code and Codex read. The one you want first is `package-service`: given a project name or an upstream URL, it researches the upstream and how people self-host it, settles the package's shape with you in one round of questions, then scaffolds, builds, and verifies the package on your StartOS device and hands it back for review.
+
+They live in the guide itself (`start-technologies/projects/start-sdk/docs/skills/`), so syncing the guide updates them like any page, and the workspace links them for you — `.claude/skills` and `.agents/skills` both point there, so a session opened at the workspace root has them. Invoke one by name:
+
+- **Claude Code:** `/package-service Vaultwarden`
+- **Codex:** `$package-service Vaultwarden`
+
+There is nothing to install anywhere else: the skills need the workspace as much as you do — `make`, `s9pk pack` and `init-package` all refuse to run outside one — so a workspace is where they live.
 
 ### Already have the monorepo?
 
@@ -307,6 +320,6 @@ git -C start-technologies pull --ff-only
 
 `live-docs` only ever moves forward, so this is always a fast-forward. It brings in two things: corrections to already-published pages, as soon as they go live on docs.start9.com, and — when a product is released — that product's whole tree at the release.
 
-There's no separate update command — re-running `init-workspace` on an existing workspace just fills in anything missing, and your `AGENTS.local.md` is never touched. If `start-technologies` has ended up on another branch, `init-workspace` and `init-package` say so; move it out of the workspace and rerun `init-workspace` to get a fresh checkout on `live-docs`.
+There's no separate update command. Anything a newer `start-cli` adds to a workspace is filled in the first time any `start-cli` command runs inside it after updating, and re-running `init-workspace` on an existing workspace does the same on demand — it fills in only what's missing, and your `AGENTS.local.md` is never touched. If `start-technologies` has ended up on another branch, `init-workspace` and `init-package` say so; move it out of the workspace and rerun `init-workspace` to get a fresh checkout on `live-docs`.
 
 Your environment is ready. Continue to [Quick Start](./quick-start.md) to scaffold and build your first package inside the workspace.

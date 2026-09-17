@@ -133,6 +133,10 @@ for the detail behind its highlights.
 
 ### Fixed
 
+- **Service interfaces show addresses only for gateways that accept inbound
+  connections.** Commercial VPNs remain available for system-wide and
+  per-service outbound routing.
+
 - **A service's plain (non-SSL) port accepts connections from other private
   networks routed to the server.** From a second VLAN, a wired/wireless split
   or a routed IoT network, a service's web interface opened but a plain port
@@ -140,6 +144,10 @@ for the detail behind its highlights.
   looked down from that network. A private IPv4 address now admits every
   private (RFC 1918) source on its plain ports, as it already did on its web
   interfaces.
+
+- **StartOS keeps using the selected drive when Linux enumerates disks in a
+  different order.** Fresh installs and updated servers also keep mounting
+  their OS partitions when device names change.
 
 - **The port-forwarding test reports a port as open to the Internet only where
   it is reachable from the Internet.** Where StartOS's port-forward request was

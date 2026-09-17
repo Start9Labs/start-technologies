@@ -544,4 +544,7 @@ export default {
   552: 'Opublikować mimo to?',
   553: 'Port używany przez trasy po nazwie hosta',
   554: 'Rodzaj',
+  555: 'Kraj',
+  556: 'Wybierz kraj, w którym działa ten router, aby odblokować dozwolone tam kanały Wi-Fi i moc nadawania. Do tego czasu używany jest ostrożny podzbiór obowiązujący na całym świecie.',
+  557: 'Nie ustawiono',
 } satisfies i18n

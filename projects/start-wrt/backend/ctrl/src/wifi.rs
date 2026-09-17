@@ -23,6 +23,8 @@ pub const DEFAULT_LAN_BRIDGE: &str = "br-lan";
 const MIN_PSK_LEN: usize = 8;
 const MAX_PSK_LEN: usize = 63;
 
+const REGULATORY_DB: &str = "/lib/firmware/regulatory.db";
+
 /// Whether wifi needs a full restart or just a PSK hot-reload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WifiRestart {
@@ -72,6 +74,8 @@ pub struct WifiRadio {
 pub struct Wifi<Id: Ord = ProfileId> {
     pub ssid: String,
     pub broadcast_separately: bool,
+    /// Unset runs the world regulatory domain.
+    pub country: Option<String>,
     pub radios: BTreeMap<String, WifiRadio>,
     pub passwords: BTreeSet<Password<Id>>,
 }
@@ -98,6 +102,15 @@ pub struct WifiSetResult {
     /// Non-empty (and nothing applied) when published ports would be deleted and
     /// the caller hasn't confirmed yet. Empty once the change is applied.
     pub pending_published_port_deletions: Vec<crate::published_ports::AffectedPublishedPort>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WifiRegulatory {
+    /// ISO 3166-1 alpha-2 codes the regulatory database defines.
+    pub countries: Vec<String>,
+    /// Channels an access point may use under the current country, by band.
+    pub channels: BTreeMap<String, Vec<u32>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -151,6 +164,91 @@ pub fn wifi<C: CtrlContext + Clone>() -> ParentHandler<C> {
             "generate-password",
             from_fn(generate_password::<C>).with_display_serializable(),
         )
+        .subcommand(
+            "regulatory",
+            from_fn_async_local(regulatory::<C>).with_display_serializable(),
+        )
+}
+
+#[instrument(skip_all)]
+pub async fn regulatory<C: CtrlContext>(_ctx: C) -> Result<WifiRegulatory, Error> {
+    let db = tokio::fs::read(REGULATORY_DB).await?;
+    let phys = tokio::process::Command::new("iw")
+        .arg("phy")
+        .output()
+        .await?;
+    Ok(WifiRegulatory {
+        countries: regdb_countries(&db)?,
+        channels: ap_channels(&String::from_utf8_lossy(&phys.stdout)),
+    })
+}
+
+/// netifd applies the domain asynchronously.
+async fn await_regdomain(country: &str) {
+    let wanted = format!("country {country}:");
+    for _ in 0..20 {
+        if let Ok(out) = tokio::process::Command::new("iw")
+            .args(["reg", "get"])
+            .output()
+            .await
+        {
+            if String::from_utf8_lossy(&out.stdout).contains(&wanted) {
+                return;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+    tracing::warn!("regulatory domain {country} not applied within 5 s");
+}
+
+/// Country records follow the 8-byte header until an all-zero one.
+fn regdb_countries(db: &[u8]) -> Result<Vec<String>, Error> {
+    if db.len() < 8 || &db[..4] != b"RGDB" {
+        return Err(Error::new(
+            eyre!("{REGULATORY_DB} is not a regulatory database"),
+            ErrorKind::Deserialization,
+        ));
+    }
+    Ok(db[8..]
+        .chunks_exact(4)
+        .take_while(|record| record[2..] != [0, 0])
+        .map(|record| String::from_utf8_lossy(&record[..2]).into_owned())
+        .filter(|code| code != "00")
+        .collect())
+}
+
+/// Reads the `* <MHz> MHz [<channel>] (<flags>)` lines of `iw phy`.
+fn ap_channels(iw_phy: &str) -> BTreeMap<String, Vec<u32>> {
+    let mut bands: BTreeMap<String, BTreeSet<u32>> = BTreeMap::new();
+    for line in iw_phy.lines() {
+        let Some(rest) = line.trim_start().strip_prefix("* ") else {
+            continue;
+        };
+        let Some((mhz, rest)) = rest.split_once(" MHz [") else {
+            continue;
+        };
+        let Some((channel, flags)) = rest.split_once(']') else {
+            continue;
+        };
+        if flags.contains("disabled") || flags.contains("no IR") {
+            continue;
+        }
+        let mhz = mhz.split_once('.').map_or(mhz, |(whole, _)| whole);
+        let (Ok(mhz), Ok(channel)) = (mhz.parse::<u32>(), channel.parse::<u32>()) else {
+            continue;
+        };
+        let band = match mhz {
+            2400..=2499 => "2g",
+            5000..=5924 => "5g",
+            5925..=7199 => "6g",
+            _ => continue,
+        };
+        bands.entry(band.to_string()).or_default().insert(channel);
+    }
+    bands
+        .into_iter()
+        .map(|(band, channels)| (band, channels.into_iter().collect()))
+        .collect()
 }
 
 fn generate_password<C: CtrlContext>(_ctx: C) -> Result<String, Error> {
@@ -320,6 +418,9 @@ fn get_config(ctx: impl CtrlContext, cfgs: &Configs) -> Result<Wifi, Error> {
     Ok(Wifi {
         ssid,
         broadcast_separately,
+        country: relevant_interfaces
+            .iter()
+            .find_map(|(_, _, dev)| dev.country.clone()),
         radios,
         passwords,
     })
@@ -398,12 +499,16 @@ fn set_config(
                     if device.disabled != new_disabled
                         || device.channel != new_channel
                         || device.band != rel_radio.band
+                        || device.country != wifi.country
+                        || device.acs_exclude_dfs != Some(true)
                     {
                         iface_config_changed = true;
                     }
                     device.disabled = new_disabled;
                     device.band = rel_radio.band.clone();
                     device.channel = new_channel;
+                    device.country = wifi.country.clone();
+                    device.acs_exclude_dfs = Some(true);
                     s.set(&device)?;
                     break;
                 }
@@ -551,6 +656,27 @@ pub async fn set<C: CtrlContext>(
         confirm_published_port_deletion: confirm,
     } = req;
 
+    if let Some(country) = &wifi.country {
+        let known = if ctx.effectful() {
+            regdb_countries(&tokio::fs::read(REGULATORY_DB).await?)?.contains(country)
+        } else {
+            country.len() == 2 && country.bytes().all(|b| b.is_ascii_uppercase())
+        };
+        if !known {
+            crate::activity::log(
+                "wifi",
+                "updated",
+                false,
+                "Failed to update WiFi: unknown country code",
+                Some("InvalidValue"),
+            );
+            return Err(Error::new(
+                eyre!("unknown regulatory country: {country}"),
+                ErrorKind::InvalidValue,
+            ));
+        }
+    }
+
     // A profile that loses its last WiFi password is "vacated": its WiFi devices
     // can no longer reach that subnet — disconnected if the password was removed,
     // or moved to another profile if it was reassigned — breaking their published
@@ -650,9 +776,13 @@ pub async fn set<C: CtrlContext>(
         )
         .await?;
         let lookup = profiles::Lookup::parse(ctx.clone(), &cfgs)?;
+        let country_changed = find_relevant(&cfgs)?
+            .iter()
+            .any(|(_, _, dev)| dev.country != wifi.country);
         let mut wifi = Wifi {
             ssid: wifi.ssid.clone(),
             broadcast_separately: wifi.broadcast_separately,
+            country: wifi.country.clone(),
             radios: wifi.radios.clone(),
             passwords: wifi
                 .passwords
@@ -792,6 +922,13 @@ pub async fn set<C: CtrlContext>(
             }
             Ok(()) => {
                 if ctx.effectful() {
+                    if country_changed && wifi.country.is_none() {
+                        crate::run_quiet_async(
+                            tokio::process::Command::new("iw").args(["reg", "set", "00"]),
+                        )
+                        .await
+                        .map_err(|e| Error::new(eyre!("iw reg set: {e}"), ErrorKind::Network))?;
+                    }
                     match restart {
                         WifiRestart::Full => {
                             // SSID/channel/enabled/hidden changed or new VLANs — full restart
@@ -811,6 +948,9 @@ pub async fn set<C: CtrlContext>(
                                 Error::new(eyre!("wifi reload: {e}"), ErrorKind::Network)
                             })?;
                         }
+                    }
+                    if country_changed {
+                        await_regdomain(wifi.country.as_deref().unwrap_or("00")).await;
                     }
                     // Removing published-port firewall sections needs a firewall
                     // reload (the wifi restart above doesn't touch fw4), and
@@ -859,6 +999,7 @@ pub async fn edit<C: CtrlContext + Clone>(ctx: C) -> Result<(), Error> {
     let current_wifi = Wifi {
         ssid: current_wifi.ssid,
         broadcast_separately: current_wifi.broadcast_separately,
+        country: current_wifi.country,
         radios: current_wifi.radios.clone(),
         passwords: current_wifi
             .passwords
@@ -1744,6 +1885,7 @@ config wifi-station
         let wifi = Wifi {
             ssid: "TestNet".into(),
             broadcast_separately: false,
+            country: None,
             radios: make_radios(),
             passwords,
         };
@@ -1964,6 +2106,7 @@ config wifi-station
         let wifi = Wifi {
             ssid: "TestNet".into(),
             broadcast_separately: true,
+            country: None,
             radios: make_dual_radios(),
             passwords,
         };
@@ -2008,6 +2151,7 @@ config wifi-station
         let wifi3 = Wifi {
             ssid: "TestNet".into(),
             broadcast_separately: false,
+            country: None,
             radios: make_dual_radios(),
             passwords: passwords3,
         };
@@ -2057,6 +2201,7 @@ config wifi-station
         let wifi = Wifi {
             ssid: "TestNet".into(),
             broadcast_separately: true,
+            country: None,
             radios: make_dual_radios(),
             passwords,
         };
@@ -2111,6 +2256,7 @@ config wifi-station
         let wifi = Wifi {
             ssid: "TestNet".into(),
             broadcast_separately: false,
+            country: None,
             radios: make_radios(),
             passwords,
         };
@@ -2144,6 +2290,7 @@ config wifi-station
         let wifi2 = Wifi {
             ssid: "TestNet".into(),
             broadcast_separately: false,
+            country: None,
             radios: make_radios(),
             passwords: passwords2,
         };
@@ -2227,6 +2374,7 @@ config wifi-iface 'default_radio1'
         let mut wifi = Wifi {
             ssid: "TestNet".into(),
             broadcast_separately: false,
+            country: None,
             radios: make_dual_radios_disabled(),
             passwords,
         };
@@ -2270,6 +2418,7 @@ config wifi-iface 'default_radio1'
         let mut wifi = Wifi {
             ssid: "TestNet".into(),
             broadcast_separately: false,
+            country: None,
             radios: make_dual_radios_disabled(),
             passwords,
         };
@@ -2319,6 +2468,7 @@ config wifi-iface 'default_radio1'
         let mut wifi = Wifi {
             ssid: "TestNet".into(),
             broadcast_separately: false,
+            country: None,
             radios,
             passwords,
         };
@@ -2361,6 +2511,7 @@ config wifi-iface 'default_radio1'
         let mut wifi = Wifi {
             ssid: "TestNet".into(),
             broadcast_separately: false,
+            country: None,
             radios: make_dual_radios_disabled(),
             passwords,
         };
@@ -2388,6 +2539,7 @@ config wifi-iface 'default_radio1'
         let wifi = Wifi {
             ssid: "TestNet".into(),
             broadcast_separately: false,
+            country: None,
             radios: make_dual_radios(),
             passwords,
         };
@@ -2413,6 +2565,7 @@ config wifi-iface 'default_radio1'
         let wifi = Wifi {
             ssid: "TestNet".into(),
             broadcast_separately: false,
+            country: None,
             radios: make_dual_radios(),
             passwords,
         };
@@ -2701,5 +2854,120 @@ config wifi-iface 'default_radio1'
             windows_to_minutes(&[good, bad]),
             vec![(9 * 60, 17 * 60, mask(&[1]))]
         );
+    }
+
+    #[tokio::test]
+    async fn test_set_config_writes_and_clears_country() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_test_configs(dir.path());
+        write_wireless_config_dual_radio(dir.path(), "TestNet", "TestNet", "");
+
+        let mut passwords = BTreeSet::new();
+        passwords.insert(Password {
+            label: "Main Admin".into(),
+            profile: None,
+            password: "adminpass1".into(),
+        });
+        let mut wifi = Wifi {
+            ssid: "TestNet".into(),
+            broadcast_separately: false,
+            country: Some("US".into()),
+            radios: make_dual_radios(),
+            passwords,
+        };
+
+        async fn apply(ctx: &TestContext, wifi: &Wifi) -> WifiRestart {
+            let arena = Arena::new();
+            let mut cfgs = parse_all(
+                ctx.uci_root(),
+                &arena,
+                &["wireless", "startwrt", "network", "firewall"],
+            )
+            .await
+            .unwrap();
+            let lookup = profiles::Lookup::parse(ctx.clone(), &cfgs).unwrap();
+            let restart = set_config(ctx, &mut cfgs, wifi, &lookup).unwrap();
+            dump_all(ctx.uci_root(), cfgs).await.unwrap();
+            restart
+        }
+
+        async fn devices(ctx: &TestContext) -> Vec<(Option<String>, Option<bool>)> {
+            let arena = Arena::new();
+            let cfgs = parse_all(ctx.uci_root(), &arena, &["wireless"])
+                .await
+                .unwrap();
+            let mut out = Vec::new();
+            cfgs["wireless"]
+                .try_each(|_, device: WifiDevice| {
+                    out.push((device.country, device.acs_exclude_dfs));
+                    Ok::<_, Error>(())
+                })
+                .unwrap();
+            out
+        }
+
+        assert_eq!(apply(&ctx, &wifi).await, WifiRestart::Full);
+        assert_eq!(
+            devices(&ctx).await,
+            vec![
+                (Some("US".into()), Some(true)),
+                (Some("US".into()), Some(true))
+            ]
+        );
+
+        assert_eq!(apply(&ctx, &wifi).await, WifiRestart::PskOnly);
+
+        wifi.country = None;
+        assert_eq!(apply(&ctx, &wifi).await, WifiRestart::Full);
+        assert_eq!(
+            devices(&ctx).await,
+            vec![(None, Some(true)), (None, Some(true))]
+        );
+        assert!(!std::fs::read_to_string(dir.path().join("wireless"))
+            .unwrap()
+            .contains("country"));
+    }
+
+    #[test]
+    fn test_regdb_countries_skips_world_and_stops_at_terminator() {
+        let mut db = b"RGDB\x00\x00\x00\x14".to_vec();
+        for (code, ptr) in [(b"00", 0x10u16), (b"CR", 0x18), (b"US", 0x20)] {
+            db.extend_from_slice(code);
+            db.extend_from_slice(&ptr.to_be_bytes());
+        }
+        db.extend_from_slice(&[0, 0, 0, 0]);
+        db.extend_from_slice(b"ZZ\x00\x09");
+        assert_eq!(regdb_countries(&db).unwrap(), ["CR", "US"]);
+        assert!(regdb_countries(b"not a db").is_err());
+    }
+
+    #[test]
+    fn test_ap_channels_drops_disabled_and_no_ir() {
+        let iw = "\
+Wiphy phy0
+\tBand 1:
+\t\tFrequencies:
+\t\t\t* 2412 MHz [1] (20.0 dBm)
+\t\t\t* 2467 MHz [12] (20.0 dBm) (no IR)
+\t\t\t* 2484 MHz [14] (disabled)
+\t\tBitrates (non-HT):
+\t\t\t* 1.0 Mbps
+Wiphy phy1
+\tBand 2:
+\t\tFrequencies:
+\t\t\t* 5180 MHz [36] (20.0 dBm)
+\t\t\t* 5260 MHz [52] (20.0 dBm) (no IR, radar detection)
+\t\t\t* 5500 MHz [100] (24.0 dBm) (radar detection)
+\t\t\t  DFS state: usable (for 1234 sec)
+\t\t\t* 5745 MHz [149] (30.0 dBm)
+\tBand 4:
+\t\tFrequencies:
+\t\t\t* 5955 MHz [1] (20.0 dBm)
+";
+        let channels = ap_channels(iw);
+        assert_eq!(channels["2g"], [1]);
+        assert_eq!(channels["5g"], [36, 100, 149]);
+        assert_eq!(channels["6g"], [1]);
     }
 }

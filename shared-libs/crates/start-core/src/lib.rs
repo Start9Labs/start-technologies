@@ -234,6 +234,12 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
             from_fn_blocking(developer::pubkey).with_about("about.get-id-pubkey"),
         )
         .subcommand(
+            "completions",
+            from_fn(bins::start_cli::completions)
+                .no_display()
+                .with_about("about.print-shell-completions"),
+        )
+        .subcommand(
             "diagnostic",
             diagnostic::diagnostic::<C>().with_about("about.commands-diagnostic"),
         )

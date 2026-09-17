@@ -7,29 +7,15 @@ if [ "$UID" -ne 0 ]; then
     exit 1
 fi
 
-# Get the current kernel version
 current_kernel=$(uname -r)
-
-echo "Current kernel: $current_kernel"
-echo "Searching for old kernel files in /boot..."
-
-# Extract base kernel version (without possible suffixes)
-current_base=$(echo "$current_kernel" | sed 's/-.*//')
 
 cd /boot || { echo "/boot directory not found!"; exit 1; }
 
 for file in vmlinuz-* initrd.img-* System.map-* config-*; do
-    # Extract version from filename
-    version=$(echo "$file" | sed -E 's/^[^0-9]*([0-9][^ ]*).*/\1/')
-    # Skip if file matches current kernel version
+    [ -e "$file" ] || continue
     if [[ "$file" == *"$current_kernel"* ]]; then
         continue
     fi
-    # Compare versions, delete if less than current
-    if dpkg --compare-versions "$version" lt "$current_kernel"; then
-        echo "Deleting $file (version $version is older than $current_kernel)"
-        sudo rm -f "$file"
-    fi
+    echo "Deleting $file"
+    rm -f "$file"
 done
-
-echo "Old kernel files deleted."

@@ -471,6 +471,10 @@ Das Passwort, das Geräte zum Verbinden verwenden. Muss mindestens 8 Zeichen lan
 Steuert, worauf das verbundene Gerät im Netzwerk zugreifen kann. Weisen Sie ein Sicherheitsprofil zu, um den Zugriff auf bestimmte Ressourcen einzuschränken oder zu gewähren.`,
   '/wifi/settings': `## Wi-Fi – Einstellungen
 
+### Land
+
+Das Land, dessen WLAN-Vorschriften der Router befolgt. Es bestimmt, welche Kanäle jedes Band nutzen darf und wie viel Sendeleistung erlaubt ist. Solange kein Land ausgewählt ist, verwendet der Router eine konservative weltweite Teilmenge: die 2,4-GHz-Kanäle 1–11 und die 5-GHz-Kanäle 36–48 mit reduzierter Leistung. Ein Wechsel des Landes setzt die Kanalauswahl auf Auto zurück. Wählen Sie das Land, in dem sich der Router physisch befindet.
+
 ### Wi-Fi aktivieren
 
 Schalten Sie das Funkmodul ein oder aus. Wenn deaktiviert, können sich keine Geräte über Wi-Fi verbinden.
@@ -493,7 +497,7 @@ Bei Verwendung beider Frequenzbänder erstellt diese Option separate SSIDs für 
 
 ### Kanäle
 
-Bestimmte Kanäle innerhalb jedes Frequenzbands. Wählen Sie „Auto“, damit der Router den besten Kanal auswählt, oder wählen Sie einen bestimmten Kanal, um Störungen durch benachbarte Netzwerke zu vermeiden.`,
+Bestimmte Kanäle innerhalb jedes Frequenzbands. Wählen Sie „Auto“, damit der Router den besten Kanal auswählt, oder wählen Sie einen bestimmten Kanal, um Störungen durch benachbarte Netzwerke zu vermeiden. „Auto“ überspringt Kanäle mit Radarerkennung (DFS). Sie können einen solchen Kanal manuell wählen, doch das 5-GHz-Netz erscheint dann bei jedem Start des Routers erst nach einer Minute oder länger, während er auf Radar horcht.`,
 }
 
 export default HELP_DE

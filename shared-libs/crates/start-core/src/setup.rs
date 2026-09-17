@@ -548,13 +548,11 @@ pub struct SetupExecuteCliParams {
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct SetupInstallOsCliParams {
-    /// Path to the OS drive
-    #[arg(value_name = "OS_DRIVE")]
+    /// Stable path to the OS drive
+    #[arg(value_name = "OS_DRIVE", help = "help.arg.os-drive-path")]
     pub os_drive: PathBuf,
-    /// Path to the data drive (omit for an OS-only install). May be the
-    /// same logical name as <OS_DRIVE>; the installer will carve a data
-    /// partition out of the same disk.
-    #[arg(long)]
+    /// Stable path to the data drive; may match <OS_DRIVE>.
+    #[arg(long, help = "help.arg.data-drive-path")]
     pub data_drive: Option<PathBuf>,
     /// Wipe the data drive before use
     #[arg(long)]
@@ -579,7 +577,7 @@ async fn cli_install_os(
     let body = if let Some(data_drive) = data_drive {
         imbl_value::json!({
             "osDrive": os_drive,
-            "dataDrive": { "logicalname": data_drive, "wipe": wipe },
+            "dataDrive": { "stablePath": data_drive, "wipe": wipe },
         })
     } else {
         imbl_value::json!({ "osDrive": os_drive })

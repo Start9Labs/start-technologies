@@ -64,6 +64,10 @@ The container runtime communicates with the StartOS host via JSON-RPC over a Uni
 
 Each service has one or more named volumes for persistent data. Volumes survive container restarts, updates, and restores. They are id-mapped to the container's user namespace for security. Packages declare which volumes to include in backups.
 
+### OS Partitions
+
+During setup, StartOS carries each selected drive's `/dev/disk/by-path` handle through installation. This assumes selected drives remain connected until installation completes. An installed system's `/etc/fstab` names its boot partitions by partition UUID, so adding, removing, or reordering another disk does not change which partitions StartOS mounts.
+
 ## Networking
 
 StartOS provides multiple ways to access services, all managed through the UI.
