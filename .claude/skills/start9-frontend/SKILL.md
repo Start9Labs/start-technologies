@@ -44,7 +44,7 @@ exactly what this skill exists to eliminate. Never guess a Taiga API: verify aga
 | `brochure-marketplace` | `projects/brochure-marketplace`                 | 22      | 5.11  | zone.js (legacy)           | dark                                 | yes (shared)       | registry RPC direct                                              |
 | `start9-store`         | `ops/start9-store/web`                          | 22      | 5.22  | **zoneless**               | light                                | no                 | REST + Zod via `/api` BFF, **SSR**                               |
 | `ops-server`           | `ops/ops-server/web`                            | 22      | 5.14  | **zoneless**               | dark, `#07a4ff`, Montserrat          | no                 | REST `/_api`, same-origin Express                                |
-| `support-server`       | `ops/support-server/web`                        | 22      | 5.22  | **zoneless**               | dual (OS preference), StartOS tokens | yes (local dicts)  | Frappe `/api/method` + socket.io, same-origin; `web/mock` in dev |
+| `support-server`       | `ops/support-server/web`                        | 22      | 5.22  | **zoneless**               | dual (theme setting), StartOS tokens | yes (local dicts)  | Frappe `/api/method` + socket.io, same-origin; `web/mock` in dev |
 
 TypeScript ~6.0, rxjs ~7.8 everywhere. Taiga is **pinned exact** — bump only with the
 maintainer's blessing. Monorepo apps share **one Angular workspace rooted at the repo root**;
@@ -75,9 +75,12 @@ it with every Angular/Taiga bump (other repos' docs deliberately carry no versio
    style bindings, `hostDirectives` for composition. `@HostBinding`/`@HostListener` are dead.
 8. **English strings are i18n keys** (monorepo apps): every user-facing string goes through
    `| i18n` and exists in all five dictionaries; `tsc` enforces via the `i18nKey` type.
-9. **Verification is `tsc` + Prettier, not tests.** No unit-test runner is wired up anywhere.
-   `npm run check` (strict + `strictTemplates`), the i18n check, a prod build, and manual
-   verification are the bar. Don't claim "tests pass"; don't add a test framework unasked.
+9. **Verification is `npm run check` + a manual pass; a test only where logic earns it.**
+   `check` (strict + `strictTemplates`), the i18n check, a prod build and clicking through the
+   app are the bar. A test is for state machinery a manual pass can't drive deterministically
+   — request sequencing, a store's transitions, merge order — written with `node:test` against
+   the plain class and wired into `check`; never for a template, a style or what a component
+   renders. No test framework; don't claim "tests pass" in a repo that has none.
 10. **The docs ship with the change — this skill first.** This skill is the fleet-wide
     frontend source of truth: the ops repos reach it through committed symlinks, and stack
     versions live only in its fleet table. When frontend conventions, versions, or idioms
@@ -104,6 +107,10 @@ it with every Angular/Taiga bump (other repos' docs deliberately carry no versio
   `TuiNotificationMiddleService`.
 - **No `FormBuilder`.** `inject(NonNullableFormBuilder).group({...})` with array shorthand;
   `[(ngModel)]="signal"` for single ad-hoc fields.
+- **No icons inside switches.** `tuiSwitchOptionsProvider({ showIcons: false })` in the
+  app config; a toggle is a track and a thumb.
+- **No cleaner on a select.** `[tuiTextfieldCleaner]="false"` on every `tui-textfield` holding
+  an `input[tuiSelect]`; the default is on, and it also lets Backspace clear the choice.
 - **No route-level `providers`,** no resolvers, few guards (inline `canMatch` arrows).
   Providers go on components — lazy-route providers spin up confusing semi-root injectors.
 - **No `@media` queries** for the app-standard mobile swap: `tui-root._mobile &` CSS,
@@ -112,8 +119,8 @@ it with every Angular/Taiga bump (other repos' docs deliberately carry no versio
   shared `g-*` utilities; deep relative or `src/`-absolute imports.
 - **No semicolons.** Prettier: `singleQuote`, `semi: false`, `arrowParens: "avoid"`,
   `trailingComma: "all"`, `htmlWhitespaceSensitivity: "ignore"`, `tabWidth: 2`.
-- **No ESLint, no unit tests.** Prettier runs via husky/lint-staged — never
-  `git commit --no-verify`; fix the formatting.
+- **No ESLint, no test framework.** Logic tests are `node:test` (doctrine 9). Prettier runs
+  via husky/lint-staged — never `git commit --no-verify`; fix the formatting.
 - **Suffixless files and classes** in new code: `routes/devices/index.ts` exporting
   `export default class Devices`, plus `dialog.ts`, `table.ts`, `service.ts` —
   not `devices-page.component.ts` / `DevicesPageComponent`.

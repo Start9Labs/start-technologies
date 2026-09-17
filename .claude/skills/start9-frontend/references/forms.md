@@ -29,7 +29,10 @@ protected readonly form = inject(NonNullableFormBuilder).group({
 </form>
 ```
 
-Password reveal: `<tui-icon tuiPassword />` inside the textfield. Selects:
+Password reveal: `<tui-icon tuiPassword />` inside the textfield — **import `TuiIcon`
+alongside `TuiPassword`**, or `TuiPassword` matches the bare element name, `TuiIcons`
+never applies, and the page dies at runtime with `NG0201: No provider for TuiIcons`
+that `strictTemplates` cannot see. Selects:
 `<tui-textfield tuiChevron [stringify]="fn"><input tuiSelect /><tui-data-list *tuiDropdown>…`
 (or `<tui-data-list-wrapper *tuiDropdown [items]="…" />`).
 

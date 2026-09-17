@@ -9,6 +9,43 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
+## [2.1.0]
+
+### Added
+
+- **`s9pk init-workspace` links the guide's packaging skills into the workspace**, at `.claude/skills` for Claude Code and `.agents/skills` for Codex, so a session opened at the workspace root can run `package-service` and the guide sync keeps the skills current. An existing entry at either path is left alone. A workspace made by an earlier release gets the links the first time any `start-cli` command runs inside it after the update, so nothing needs re-running; `init-workspace` does the same on demand.
+
+- **`s9pk init-workspace` and `s9pk init-package` say when the workspace's `start-technologies`
+  checkout is on a branch other than `live-docs`.** The notice names the checkout and the branch
+  and says how to replace it.
+
+- **`completions <shell>` prints a completion script** for bash, zsh, fish, elvish or PowerShell;
+  `eval "$(start-cli completions bash)"` in a shell profile enables tab completion.
+
+- **A command the server refuses because this key is not logged in prompts for the server
+  password, logs in, and runs.** Only at a terminal; a script still gets the error, and
+  `auth login` still works on its own.
+
+- **`binding list` shows each binding's bridge address** (`10.0.3.1:<port>`, plain and TLS) under
+  `package host` and `server host`.
+
+### Changed
+
+- **`setup install-os` takes the stable disk paths that `setup disk list` reports as `stablePath`.**
+  A kernel device name such as `/dev/sda` is rejected, so the selected drive stays the installation
+  target when Linux reorders disk names.
+
+### Fixed
+
+- **The notice that `start-cli` is behind the published release is given only when the workspace's
+  `start-technologies` checkout is on `live-docs`.**
+
+- **`--address` on `binding set-address-enabled`, `set-range-address-enabled` and `set-gua-wan`
+  takes the address as the UI shows it** — an IP, `<name>.local` or a domain, with `:port` where
+  one address serves several ports — under `package host` and `server host` alike. An address the
+  binding doesn't have is refused with the list of those it has; a JSON `HostnameInfo` is still
+  accepted.
+
 ## [2.0.0]
 
 ### Added

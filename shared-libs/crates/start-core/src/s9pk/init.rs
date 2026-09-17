@@ -9,7 +9,7 @@ use tokio::process::Command;
 
 use crate::PackageId;
 use crate::context::CliContext;
-use crate::developer::write_signing_key;
+use crate::developer::{migrate_legacy_key_file, write_signing_key};
 use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::serde::IoFormat;
@@ -70,6 +70,12 @@ const AGENTS_SYMLINK_TARGET: &str =
 const LEGACY_AGENTS_SYMLINK_TARGET: &str = "start-technologies/projects/start-sdk/docs/AGENTS.md";
 /// Path to the package template inside the cloned guide (joined onto MONOREPO_DIR).
 const TEMPLATE_SUBPATH: &str = "projects/start-sdk/docs/package-template";
+/// The packaging skills inside the cloned guide (joined onto MONOREPO_DIR). They live
+/// in the book's tree so a change to one reaches `live-docs` the way a page does.
+const SKILLS_SUBPATH: &str = "projects/start-sdk/docs/skills";
+/// Workspace directories whose `skills` entry is linked at the guide's skills, one per
+/// agent that discovers skills there: `.claude` for Claude Code, `.agents` for Codex.
+const SKILL_LINK_DIRS: &[&str] = &[".claude", ".agents"];
 /// Manifest naming the published `start-cli` (joined onto MONOREPO_DIR). The checkout
 /// tracks releases, so this is the version a packager should be running.
 const CLI_MANIFEST_SUBPATH: &str = "projects/start-cli/Cargo.toml";
@@ -150,6 +156,8 @@ pub async fn init_workspace(
             .capture(false)
             .invoke(ErrorKind::Git)
             .await?;
+    } else {
+        warn_if_guide_off_branch(&root);
     }
 
     // Symlink (not a copy) so a guide sync keeps the workspace AGENTS.md current.
@@ -170,6 +178,7 @@ pub async fn init_workspace(
     }
     write_if_absent(&root.join("AGENTS.local.md"), AGENTS_LOCAL_STUB).await?;
     write_if_absent(&root.join("CLAUDE.md"), CLAUDE_MD_CONTENTS).await?;
+    link_guide_skills(&root)?;
     // .startos/ marks the workspace and holds its signing key + target config. Written
     // last, so only a fully provisioned directory counts as a workspace.
     let startos = root.join(STARTOS_DIR);
@@ -216,6 +225,8 @@ pub async fn init_package(
             ErrorKind::InvalidRequest,
         )
     })?;
+    warn_if_start_cli_outdated(&root);
+    warn_if_guide_off_branch(&root);
 
     // Normalize to a candidate ID, then validate it through the manifest's own
     // rules rather than re-implementing them.
@@ -240,8 +251,6 @@ pub async fn init_package(
             ErrorKind::InvalidRequest,
         ));
     }
-
-    warn_if_start_cli_outdated(&root);
 
     let template = root.join(MONOREPO_DIR).join(TEMPLATE_SUBPATH);
     if !template.exists() {
@@ -296,6 +305,10 @@ pub async fn init_package(
 pub fn warn_if_start_cli_outdated(workspace: &Path) {
     static WARNED: std::sync::Once = std::sync::Once::new();
     WARNED.call_once(|| {
+        // Off `live-docs` the manifest names a version that has not shipped.
+        if guide_branch(workspace).as_deref() != Some(MONOREPO_BRANCH) {
+            return;
+        }
         let Ok(manifest) =
             std::fs::read_to_string(workspace.join(MONOREPO_DIR).join(CLI_MANIFEST_SUBPATH))
         else {
@@ -330,6 +343,61 @@ pub fn warn_if_start_cli_outdated(workspace: &Path) {
             );
         }
     });
+}
+
+fn guide_branch(workspace: &Path) -> Option<String> {
+    let dot_git = workspace.join(MONOREPO_DIR).join(".git");
+    let git_dir = match std::fs::read_to_string(&dot_git) {
+        Ok(gitfile) => dot_git
+            .parent()?
+            .join(gitfile.strip_prefix("gitdir:")?.trim()),
+        Err(_) => dot_git,
+    };
+    let head = std::fs::read_to_string(git_dir.join("HEAD")).ok()?;
+    Some(head.trim().strip_prefix("ref: refs/heads/")?.to_owned())
+}
+
+fn init_workspace_command(workspace: &Path) -> Option<String> {
+    Some(format!(
+        "start-cli s9pk init-workspace '{}'",
+        workspace.to_str()?.replace('\'', "'\\''")
+    ))
+}
+
+fn warn_if_guide_off_branch(workspace: &Path) {
+    let Some(branch) = guide_branch(workspace).filter(|branch| branch != MONOREPO_BRANCH) else {
+        return;
+    };
+    let docs = workspace.join(MONOREPO_DIR);
+    let next = match init_workspace_command(workspace) {
+        Some(command) => t!("s9pk.init.run-init-workspace", command = command).to_string(),
+        None => t!("s9pk.init.run-init-workspace-in-root").to_string(),
+    };
+    if std::fs::symlink_metadata(&docs).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        let target = std::fs::canonicalize(&docs).unwrap_or_else(|_| docs.clone());
+        eprintln!(
+            "{}",
+            t!(
+                "s9pk.init.guide-linked-off-branch",
+                path = docs.display().to_string(),
+                target = target.display().to_string(),
+                branch = branch,
+                expected = MONOREPO_BRANCH,
+                next = next
+            )
+        );
+    } else {
+        eprintln!(
+            "{}",
+            t!(
+                "s9pk.init.guide-off-branch",
+                path = docs.display().to_string(),
+                branch = branch,
+                expected = MONOREPO_BRANCH,
+                next = next
+            )
+        );
+    }
 }
 
 /// Walk up from `start` (inclusive) for the nearest workspace — a directory whose
@@ -525,6 +593,55 @@ fn interpolate(content: &str, id: &str, name: &str, escape_for_ts: bool) -> Stri
     content.replace("{{id}}", id).replace("{{name}}", &name)
 }
 
+/// Walk up from `start` (inclusive) for the nearest signing workspace: a directory whose
+/// `.startos` holds the build key, renaming a legacy-named key on the way. A config-only
+/// workspace is passed over, and an inaccessible ancestor ends the walk.
+pub fn find_signing_workspace(start: &Path) -> Option<PathBuf> {
+    let mut dir = start.to_path_buf();
+    loop {
+        let startos = dir.join(STARTOS_DIR);
+        let key = startos.join(BUILD_KEY_FILE);
+        migrate_legacy_key_file(&key, &startos.join(LEGACY_BUILD_KEY_FILE));
+        match key.try_exists() {
+            Ok(true) => return Some(dir),
+            Ok(false) => {}
+            Err(_) => return None,
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
+
+/// Every command's pass over the signing workspace it runs in: say when start-cli is
+/// behind, and fill in what an older start-cli left out. Nothing here fails a command.
+pub fn complete_signing_workspace(start: &Path) -> Option<PathBuf> {
+    let root = find_signing_workspace(start)?;
+    warn_if_start_cli_outdated(&root);
+    let _ = link_guide_skills(&root);
+    Some(root)
+}
+
+/// Leaves an existing `skills` entry alone, a packager's own directory included, and
+/// links nothing while the guide checkout lacks the target: the sync brings it first.
+pub fn link_guide_skills(root: &Path) -> Result<(), Error> {
+    if !root.join(MONOREPO_DIR).join(SKILLS_SUBPATH).is_dir() {
+        return Ok(());
+    }
+    let target = Path::new("..").join(MONOREPO_DIR).join(SKILLS_SUBPATH);
+    for dir in SKILL_LINK_DIRS {
+        let dir = root.join(dir);
+        std::fs::create_dir_all(&dir)
+            .with_ctx(|_| (ErrorKind::Filesystem, dir.display().to_string()))?;
+        let link = dir.join("skills");
+        if std::fs::symlink_metadata(&link).is_err() {
+            std::os::unix::fs::symlink(&target, &link)
+                .with_ctx(|_| (ErrorKind::Filesystem, link.display().to_string()))?;
+        }
+    }
+    Ok(())
+}
+
 /// Write `contents` to `path` only if nothing is there yet (a broken symlink
 /// counts as present, so a re-run never clobbers).
 async fn write_if_absent(path: &Path, contents: &str) -> Result<(), Error> {
@@ -553,6 +670,135 @@ mod test {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn guide_branch_reads_the_checkouts_own_head() {
+        let ws = tmp();
+        assert_eq!(guide_branch(&ws), None);
+
+        let git = ws.join(MONOREPO_DIR).join(".git");
+        std::fs::create_dir_all(&git).unwrap();
+        std::fs::write(git.join("HEAD"), "ref: refs/heads/master\n").unwrap();
+        assert_eq!(guide_branch(&ws).as_deref(), Some("master"));
+
+        std::fs::write(git.join("HEAD"), "ref: refs/heads/live-docs\n").unwrap();
+        assert_eq!(guide_branch(&ws).as_deref(), Some(MONOREPO_BRANCH));
+
+        // detached
+        std::fs::write(
+            git.join("HEAD"),
+            "0123456789abcdef0123456789abcdef01234567\n",
+        )
+        .unwrap();
+        assert_eq!(guide_branch(&ws), None);
+    }
+
+    #[test]
+    fn guide_branch_follows_a_gitfile() {
+        // a linked worktree or submodule keeps HEAD where its `.git` file points
+        let ws = tmp();
+        let docs = ws.join(MONOREPO_DIR);
+        std::fs::create_dir_all(&docs).unwrap();
+        let git_dir = ws.join("elsewhere/.git/worktrees/x");
+        std::fs::create_dir_all(&git_dir).unwrap();
+        std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/feature/x\n").unwrap();
+
+        std::fs::write(
+            docs.join(".git"),
+            format!("gitdir: {}\n", git_dir.display()),
+        )
+        .unwrap();
+        assert_eq!(guide_branch(&ws).as_deref(), Some("feature/x"));
+
+        std::fs::write(docs.join(".git"), "gitdir: ../elsewhere/.git/worktrees/x\n").unwrap();
+        assert_eq!(guide_branch(&ws).as_deref(), Some("feature/x"));
+    }
+
+    #[test]
+    fn guide_skills_are_linked_for_every_agent_and_never_clobbered() {
+        let ws = tmp();
+        let skills = ws.join(MONOREPO_DIR).join(SKILLS_SUBPATH);
+        std::fs::create_dir_all(skills.join("package-service")).unwrap();
+        std::fs::create_dir_all(ws.join(".claude/skills/mine")).unwrap();
+
+        link_guide_skills(&ws).unwrap();
+        link_guide_skills(&ws).unwrap();
+
+        assert_eq!(
+            std::fs::read_link(ws.join(".agents/skills")).unwrap(),
+            Path::new("../start-technologies/projects/start-sdk/docs/skills")
+        );
+        assert!(ws.join(".agents/skills/package-service").is_dir());
+        // a packager's own skills directory is kept, not replaced by the link
+        assert!(ws.join(".claude/skills/mine").is_dir());
+        assert!(std::fs::read_link(ws.join(".claude/skills")).is_err());
+    }
+
+    // The links belong beside the key init-workspace provisioned, not in whichever
+    // config layer resolves first; nested cwd, an outer config-only workspace, and a
+    // legacy-named key all have to land in the same place.
+    #[test]
+    fn completion_lands_on_the_nearest_signing_workspace() {
+        let outer = tmp();
+        std::fs::create_dir_all(outer.join(STARTOS_DIR)).unwrap();
+        std::fs::write(
+            outer.join(STARTOS_DIR).join(CONFIG_FILE),
+            WORKSPACE_CONFIG_CONTENTS,
+        )
+        .unwrap();
+        std::fs::create_dir_all(outer.join(MONOREPO_DIR).join(SKILLS_SUBPATH)).unwrap();
+        let inner = outer.join("services");
+        std::fs::create_dir_all(inner.join(STARTOS_DIR)).unwrap();
+        std::fs::write(inner.join(STARTOS_DIR).join(LEGACY_BUILD_KEY_FILE), "key").unwrap();
+        std::fs::create_dir_all(inner.join(MONOREPO_DIR).join(SKILLS_SUBPATH)).unwrap();
+        let cwd = inner.join("registry/foo-startos/startos");
+        std::fs::create_dir_all(&cwd).unwrap();
+
+        assert_eq!(
+            complete_signing_workspace(&cwd).as_deref(),
+            Some(inner.as_path())
+        );
+
+        assert!(inner.join(STARTOS_DIR).join(BUILD_KEY_FILE).is_file());
+        assert!(inner.join(".claude/skills").is_dir());
+        assert!(inner.join(".agents/skills").is_dir());
+        assert!(!outer.join(".claude").exists());
+        assert!(!outer.join(".agents").exists());
+        assert!(!cwd.join(".claude").exists());
+
+        assert_eq!(find_signing_workspace(&outer), None);
+        assert_eq!(complete_signing_workspace(&tmp()), None);
+    }
+
+    #[test]
+    fn guide_skills_are_not_linked_before_the_checkout_carries_them() {
+        // a guide checkout from before the skills shipped: the sync brings them, and the
+        // next command links them
+        let ws = tmp();
+        std::fs::create_dir_all(ws.join(MONOREPO_DIR)).unwrap();
+        link_guide_skills(&ws).unwrap();
+        assert!(!ws.join(".claude").exists());
+        assert!(!ws.join(".agents").exists());
+
+        std::fs::create_dir_all(ws.join(MONOREPO_DIR).join(SKILLS_SUBPATH)).unwrap();
+        link_guide_skills(&ws).unwrap();
+        assert!(ws.join(".claude/skills").is_dir());
+        assert!(ws.join(".agents/skills").is_dir());
+    }
+
+    #[test]
+    fn init_workspace_command_quotes_the_path() {
+        assert_eq!(
+            init_workspace_command(Path::new("/w s/it's")).as_deref(),
+            Some("start-cli s9pk init-workspace '/w s/it'\\''s'")
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let bad = Path::new(std::ffi::OsStr::from_bytes(b"/ws/\xff"));
+            assert_eq!(init_workspace_command(bad), None);
+        }
     }
 
     #[test]

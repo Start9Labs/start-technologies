@@ -181,19 +181,26 @@ async fn resolve_fstab_source(source: &str) -> Result<PathBuf, Error> {
             .await
             .unwrap_or_else(|_| PathBuf::from(source)));
     }
-    // Only TAG=value specs (PARTUUID=, UUID=, LABEL=) are resolvable via blkid;
-    // pseudo sources (overlay, tmpfs, none, ...) are not block devices.
-    if !source.contains('=') {
-        return Err(Error::new(
-            eyre!("not a block device spec"),
+    let not_a_block_device = || {
+        Error::new(
+            eyre!("not a block device spec: {source}"),
             ErrorKind::DiskManagement,
-        ));
-    }
-    let output = Command::new("blkid")
-        .args(["-o", "device", "-t", source])
-        .invoke(ErrorKind::DiskManagement)
-        .await?;
-    Ok(PathBuf::from(String::from_utf8(output)?.trim()))
+        )
+    };
+    let Some((tag, value)) = source.split_once('=') else {
+        return Err(not_a_block_device());
+    };
+    let dir = match tag {
+        "PARTUUID" => "by-partuuid",
+        "UUID" => "by-uuid",
+        "PARTLABEL" => "by-partlabel",
+        "LABEL" => "by-label",
+        _ => return Err(not_a_block_device()),
+    };
+    // The link systemd mounts the entry through.
+    tokio::fs::canonicalize(Path::new("/dev/disk").join(dir).join(value))
+        .await
+        .with_ctx(|_| (ErrorKind::DiskManagement, source.to_string()))
 }
 
 pub fn disk<C: Context>() -> ParentHandler<C> {

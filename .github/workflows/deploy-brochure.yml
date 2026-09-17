@@ -19,6 +19,7 @@ on:
       - 'tsconfig.lib.json'
       - 'shared-libs/crates/patch-db'
       - '.github/workflows/deploy-brochure.yml'
+      - '.github/actions/nextexplorer-publish/**'
       # Doc-only edits under the allowlisted paths (e.g. start-core/**) shouldn't redeploy.
       - '!**/*.md'
   workflow_dispatch:
@@ -66,7 +67,7 @@ jobs:
       - name: Build brochure
         run: |
           npm run build:brochure
-          test -f projects/brochure-marketplace/dist/raw/brochure-marketplace/index.html
+          test -f projects/brochure-marketplace/dist/raw/brochure-marketplace/404.html
 
       - name: Configure SSH
         run: |
@@ -84,3 +85,12 @@ jobs:
 
       - name: Deploy to VPS
         run: rsync -az --delete projects/brochure-marketplace/dist/raw/brochure-marketplace/ marketplace-vps:/var/www/html/marketplace.start9.com/
+
+      - name: Publish to NextExplorer
+        uses: ./.github/actions/nextexplorer-publish
+        with:
+          url: https://${{ vars.NEXT_EXPLORER_EVELYN_URL }}
+          email: ${{ vars.NEXT_EXPLORER_EVELYN_USER }}
+          password: ${{ secrets.NEXT_EXPLORER_EVELYN_PASS }}
+          dir: projects/brochure-marketplace/dist/raw/brochure-marketplace
+          folder: marketplace.start9.com

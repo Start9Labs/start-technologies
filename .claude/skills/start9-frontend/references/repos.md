@@ -20,13 +20,16 @@
   `adminService.isAdmin()`; all HTTP through `AdminService` (authed) / `ApiService` (public).
   Husky+lint-staged Prettier on commit — fix formatting, never `--no-verify`. Never commit
   `.env`.
-- **support-server** (`web/`) — the customer support portal over Frappe Helpdesk, not a
-  dashboard: same-origin `/api/method/start9_support.api.*` (Frappe's `{ message }` envelope,
+- **support-server** (`web/`) — the support portal over Frappe Helpdesk, not a dashboard: one
+  app with the customer chat at `/` and the staff inbox at `/staff`, sharing components and a
+  store base and never branching on the role outside the shell and the route guards.
+  Same-origin `/api/method/start9_support.api.*` (Frappe's `{ message }` envelope,
   `X-Frappe-CSRF-Token` on every POST) plus Frappe's socket.io for live updates; no
   environments — `ng serve` proxies to `web/mock`, an Express + socket.io server that is the
   dev backend (there is no `MockApiService`; extend the mock). Frappe session in the frontend:
-  inline `canMatch` guards on `SessionService.user()`. Both themes follow the OS preference
-  (`provideTaiga()` with no `mode`, StartOS tokens for dark, no in-app toggle). Local i18n
-  machinery with `en.ts` only. No commit hook: `npm run check` runs the compiler,
-  `check-i18n`, the mock's type-check, and `prettier --check`. Its `web/AGENTS.md` carries the
-  portal-specific rules.
+  inline `canMatch` guards on `SessionService.user()` and its `role`. Both themes: the account's
+  appearance setting drives `TUI_DARK_MODE` (`provideTaiga()` with no `mode` seeds from the OS,
+  StartOS tokens for dark). Local i18n machinery with `en.ts` only. No commit hook:
+  `npm run check` runs the compiler, `check-i18n`, the logic tests in `scripts/*.test.ts`
+  (`tsx --test`), the mock's type-check, and `prettier --check`. Its `web/AGENTS.md` carries
+  the portal-specific rules.

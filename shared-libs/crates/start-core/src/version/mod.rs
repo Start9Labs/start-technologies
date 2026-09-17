@@ -14,6 +14,7 @@ use crate::db::model::Database;
 use crate::prelude::*;
 use crate::progress::PhaseProgressTrackerHandle;
 
+mod release_notes;
 mod v0_3_5;
 mod v0_3_5_1;
 mod v0_3_5_2;
@@ -166,6 +167,7 @@ pub async fn post_init(
                 .await
                 .result?;
         }
+        release_notes::welcome(ctx).await?;
     }
     progress.complete();
     Ok(())

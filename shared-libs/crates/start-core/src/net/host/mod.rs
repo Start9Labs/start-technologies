@@ -7,6 +7,7 @@ use imbl::OrdMap;
 use imbl_value::InternedString;
 use itertools::Itertools;
 use patch_db::DestructureMut;
+use patch_db::json_ptr::JsonPointer;
 use rpc_toolkit::{Context, Empty, HandlerExt, OrEmpty, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -157,6 +158,9 @@ impl Model<Host> {
             available.retain(|h| matches!(h.metadata, HostnameMetadata::Plugin { .. }));
             let gua_wan = bind.as_addresses().as_gua_wan().de()?;
             for (gid, g) in gateways {
+                if g.gateway_type == GatewayType::OutboundOnly {
+                    continue;
+                }
                 let Some(ip_info) = &g.ip_info else {
                     continue;
                 };
@@ -365,8 +369,6 @@ impl Model<Host> {
             available.retain(|h| matches!(h.metadata, HostnameMetadata::Plugin { .. }));
 
             for (gid, g) in gateways {
-                // Never expose a range on an outbound-only gateway (e.g. a VPN
-                // egress) — they don't receive inbound forwards.
                 if g.gateway_type == GatewayType::OutboundOnly {
                     continue;
                 }
@@ -785,6 +787,7 @@ pub trait HostApiKind: 'static {
         inheritance: &Self::Inheritance,
         db: &'a mut DatabaseModel,
     ) -> Result<&'a mut Model<Host>, Error>;
+    fn host_pointer(inheritance: &Self::Inheritance) -> Result<JsonPointer, Error>;
     fn host_for_existing<'a>(
         inheritance: &Self::Inheritance,
         db: &'a mut DatabaseModel,
@@ -807,6 +810,22 @@ impl HostApiKind for ForPackage {
     ) -> Result<&'a mut Model<Host>, Error> {
         host_for(db, package, host)
     }
+    fn host_pointer((package, host): &Self::Inheritance) -> Result<JsonPointer, Error> {
+        if package.is_start_os() {
+            if *host != HostId::admin() {
+                return Err(Error::new(
+                    eyre!("the server has no host {host}"),
+                    ErrorKind::NotFound,
+                ));
+            }
+            return Ok("/public/serverInfo/network/host".parse().unwrap());
+        }
+        let mut pointer: JsonPointer = "/public/packageData".parse().unwrap();
+        pointer.push_end(package);
+        pointer.push_end("hosts");
+        pointer.push_end(host);
+        Ok(pointer)
+    }
     fn host_for_existing<'a>(
         (package, host): &Self::Inheritance,
         db: &'a mut DatabaseModel,
@@ -827,6 +846,9 @@ impl HostApiKind for ForServer {
         db: &'a mut DatabaseModel,
     ) -> Result<&'a mut Model<Host>, Error> {
         host_for(db, &PackageId::start_os(), &HostId::admin())
+    }
+    fn host_pointer(_: &Self::Inheritance) -> Result<JsonPointer, Error> {
+        Ok("/public/serverInfo/network/host".parse().unwrap())
     }
     fn host_for_existing<'a>(
         _: &Self::Inheritance,
@@ -894,18 +916,22 @@ pub async fn list_hosts(
 
 #[cfg(test)]
 mod tests {
+    use std::net::Ipv4Addr;
     use std::sync::Arc;
 
     use imbl::OrdMap;
     use imbl_value::InternedString;
+    use ipnet::IpNet;
 
     use super::{Host, Model, mdns_gateways, secure_gateways};
     use crate::GatewayId;
     use crate::db::model::public::{
-        CapabilityVerdict, IpInfo, NetworkInterfaceInfo, NetworkInterfaceType,
+        CapabilityVerdict, GatewayType, IpInfo, NetworkInterfaceInfo, NetworkInterfaceType,
     };
+    use crate::hostname::ServerHostname;
     use crate::net::forward::AvailablePorts;
     use crate::net::host::binding::BindOptions;
+    use crate::net::service_interface::HostnameMetadata;
     use crate::prelude::*;
 
     fn iface(
@@ -959,12 +985,65 @@ mod tests {
         Model::<Host>::new(&Host::default()).unwrap()
     }
 
+    fn wireguard(gateway_type: GatewayType) -> NetworkInterfaceInfo {
+        NetworkInterfaceInfo {
+            ip_info: Some(Arc::new(IpInfo {
+                device_type: Some(NetworkInterfaceType::Wireguard),
+                subnets: ["192.0.2.2/24".parse::<IpNet>().unwrap()]
+                    .into_iter()
+                    .collect(),
+                wan_ip: Some(Ipv4Addr::new(198, 51, 100, 2)),
+                ..Default::default()
+            })),
+            gateway_type,
+            ..Default::default()
+        }
+    }
+
     fn plain(preferred_external_port: u16) -> BindOptions {
         BindOptions {
             preferred_external_port,
             add_ssl: None,
             secure: Some(crate::net::host::binding::Security { ssl: false }),
         }
+    }
+
+    #[test]
+    fn single_port_addresses_are_offered_only_on_inbound_gateways() {
+        let gateways = [
+            (gw("wg-in"), wireguard(GatewayType::InboundOutbound)),
+            (gw("wg-out"), wireguard(GatewayType::OutboundOnly)),
+        ]
+        .into_iter()
+        .collect();
+        let mut ports = AvailablePorts::new();
+        let mut host = host();
+        host.add_binding(&mut ports, 9735, plain(9735), false)
+            .unwrap();
+
+        host.update_addresses(
+            &ServerHostname::new(InternedString::intern("server")).unwrap(),
+            &gateways,
+            &ports,
+        )
+        .unwrap();
+
+        let host = host.de().unwrap();
+        let available = &host.bindings[&9735].addresses.available;
+        assert_eq!(
+            available
+                .iter()
+                .filter(|address| matches!(
+                    &address.metadata,
+                    HostnameMetadata::Ipv4 { gateway } if gateway == &gw("wg-in")
+                ))
+                .count(),
+            2
+        );
+        assert!(!available.iter().any(|address| matches!(
+            &address.metadata,
+            HostnameMetadata::Ipv4 { gateway } if gateway == &gw("wg-out")
+        )));
     }
 
     #[test]

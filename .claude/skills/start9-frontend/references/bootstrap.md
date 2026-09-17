@@ -108,7 +108,10 @@ The failure mode: a **hand-curated partial registry** breaks the icons Taiga com
 _internally_ (select chevrons, dropdown arrows) — exactly such a registry was deleted from
 start9-store for this reason. If you inline-register (wrt style), you own keeping the set complete; everywhere
 else, serve the whole directory and stop thinking about it. Non-Taiga SVGs ship as plain assets
-and are referenced by path, including in icon slots (`iconStart="/x-logo.svg"`).
+and are referenced by path, including in icon slots (`iconStart="/x-logo.svg"`) — that renders
+the file as a `currentColor` mask, so it suits a monochrome logo only. A full-colour raster or
+SVG (a package icon from `icon_url`) goes through the same slot as `iconStart="@img.<url>"`,
+which draws it as a background at the slot's icon size instead of masking it.
 
 ### Theming and branding
 
