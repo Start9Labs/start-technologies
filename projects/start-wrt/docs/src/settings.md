@@ -34,6 +34,9 @@ The options control direct WAN-side access only:
 > [!NOTE]
 > The ports Remote Access uses are protected from [Published Ports](published-ports.md): publishing 80, 443, or 22 to a device asks for confirmation first, and a device's [automatic port forwarding](published-ports.md#automatic-port-forwarding) request for them is refused. [Hostname routes](published-ports.md#hostname-routes-shared-ports) are the exception — they share port 443 with Remote Access, each connection going to the device whose hostname it names and everything else to the router.
 
+> [!NOTE]
+> While port 443 is published to a device — by a [Published Port](published-ports.md) or a device's [hostname routes](published-ports.md#hostname-routes-shared-ports) — a plain `http://` connection to the router's WAN address is answered with a redirect to `https://` instead of the web interface, so a published domain works when typed without `https://`. This changes only what port 80 answers with; which sources may connect to it from the WAN side is still decided by the option above. See [Reaching a Published Port from Your Own Network](published-ports.md#reaching-a-published-port-from-your-own-network).
+
 ### Security
 
 - **Download Root CA** — Download the router's Root CA certificate, saved as `startwrt-ca.crt`. See [Trusting Your Root CA](trust-ca.md) for installation instructions.

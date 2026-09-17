@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.2.0]
 
+### Fixed
+
+- **A published domain typed without `https://` now reaches the published
+  service, not the router.** While port 443 is published to a device — by a
+  Published Port or a device's hostname routes — a plain `http://` connection
+  to the router's public address answers with a redirect to `https://`
+  instead of the router's own web interface. StartOS publishes only 443 and
+  leaves this redirect to its gateway, so from inside the network
+  `http://sub.example.com` previously landed on the router. Which sources may
+  reach port 80 from the WAN side is unchanged: the redirect only changes what
+  answers there, and Remote Access still decides who may connect. With nothing
+  published on 443, port 80 behaves as before.
+
 ### Added
 
 - **Wi-Fi regulatory country.** `Points of Entry > Wi-Fi > Settings` gains a

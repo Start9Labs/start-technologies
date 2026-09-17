@@ -1245,6 +1245,8 @@ pub async fn set<C: CtrlContext>(
                     port_control
                         .displace_sni_routes(&sni_displacement_ranges)
                         .await;
+                    // A manual 443 forward decides the WAN:80 redirect.
+                    port_control.sync_http_redirect().await;
                 }
                 if !displaced_auto.is_empty() {
                     tracing::info!(

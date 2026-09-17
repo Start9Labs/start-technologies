@@ -159,6 +159,9 @@ pub struct PortControl {
     /// Requesting IP → resolved+authorized device (None = unauthorized).
     client_cache: Mutex<HashMap<Ipv4Addr, (Instant, Option<Client>)>>,
     sni: Arc<SniDemux>,
+    /// The WAN-address port-80 HTTP→HTTPS redirect, bound while WAN 443 is
+    /// published; see [`crate::http_redirect`].
+    http_redirect: Mutex<Option<crate::http_redirect::Redirect>>,
 }
 
 #[derive(Clone, Debug)]
@@ -201,6 +204,7 @@ impl PortControl {
                         Box::pin(async move { weak.upgrade()?.lan_prefix_for(ip).await })
                     })),
                 ),
+                http_redirect: Mutex::new(None),
             }
         })
     }
@@ -367,6 +371,7 @@ impl PortControl {
         for wan in wans {
             self.sync_sni_fallback(wan).await;
         }
+        self.sync_http_redirect().await;
     }
 
     /// The router's WAN IPv4 (via ubus), cached briefly.
@@ -770,6 +775,7 @@ impl PortControl {
              (lease {lifetime:?}s)"
         );
         self.sync_sni_fallback(*source.ip()).await;
+        self.sync_http_redirect().await;
         Ok(())
     }
 
@@ -802,6 +808,7 @@ impl PortControl {
             tracing::warn!("port-control: reconciling SNI admission failed: {e}");
         }
         self.sync_sni_fallback(*source.ip()).await;
+        self.sync_http_redirect().await;
     }
 
     async fn remove_sni_routes_for_ips(&self, ips: &[String]) {
@@ -834,6 +841,7 @@ impl PortControl {
         for wan in wans {
             self.sync_sni_fallback(wan).await;
         }
+        self.sync_http_redirect().await;
     }
 
     pub(crate) async fn displace_sni_routes(&self, ranges: &[(u16, u16)]) {
@@ -867,6 +875,7 @@ impl PortControl {
         for wan in wans {
             self.sync_sni_fallback(wan).await;
         }
+        self.sync_http_redirect().await;
     }
 
     /// Mirrors Remote Access source policy for unknown SNI on port 443.
@@ -939,6 +948,67 @@ impl PortControl {
         if let Some(ip) = wan {
             self.sync_sni_fallback(ip).await;
         }
+        self.sync_http_redirect().await;
+    }
+
+    /// Binds or drops the WAN-address port-80 HTTP→HTTPS redirect per
+    /// [`crate::http_redirect::desired`]. Touches no firewall rule. A failed
+    /// bind is logged and retried by the next sweep.
+    pub(crate) async fn sync_http_redirect(&self) {
+        let wan = self.wan_ipv4().await;
+        let routes = self.sni.snapshot();
+        let uci_root = self.uci_root.clone();
+        let want = uci_task(move || async move {
+            let arena = Arena::new();
+            let cfgs = parse_all(&uci_root, &arena, &["firewall"]).await?;
+            Ok(crate::http_redirect::desired(
+                &cfgs["firewall"],
+                &routes,
+                wan,
+            ))
+        })
+        .await;
+        let want = match want {
+            Ok(want) => want,
+            Err(e) => {
+                tracing::warn!("port-control: HTTP redirect scan failed: {e}");
+                return;
+            }
+        };
+        let mut active = self.http_redirect.lock().unwrap();
+        match want {
+            Some(ip) if active.as_ref().is_some_and(|r| r.ip() == ip) => {}
+            Some(ip) => match crate::http_redirect::Redirect::bind(ip) {
+                Ok(redirect) => {
+                    tracing::info!(
+                        "port-control: HTTP→HTTPS redirect listening on {}",
+                        redirect.addr()
+                    );
+                    *active = Some(redirect);
+                }
+                Err(e) => {
+                    tracing::warn!("port-control: HTTP redirect bind on {ip}:80 failed: {e}");
+                    *active = None;
+                }
+            },
+            None => {
+                if let Some(redirect) = active.take() {
+                    tracing::info!(
+                        "port-control: HTTP→HTTPS redirect on {} closed",
+                        redirect.addr()
+                    );
+                }
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn http_redirect_addr(&self) -> Option<SocketAddrV4> {
+        self.http_redirect
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|r| r.addr())
     }
 }
 
@@ -952,6 +1022,7 @@ async fn on_sni_change(pc: Arc<PortControl>, port: u16, active: bool) {
     if let Err(e) = pc.sync_sni_rules().await {
         tracing::warn!("port-control: reconciling SNI admission failed: {e}");
     }
+    pc.sync_http_redirect().await;
 }
 
 /// Which interface a request physically arrived on, for the arrival-interface
@@ -1410,12 +1481,16 @@ fn protocols_include_tcp(protocols: &[String]) -> bool {
         })
 }
 
-/// Whether the TCP port is held by a DNAT or incompatible router service.
-fn sni_port_conflicts(firewall: &uciedit::Config<'_>, port: u16) -> bool {
+/// Whether an enabled WAN DNAT redirect whose protocol includes TCP covers
+/// `port` on its external side.
+pub(crate) fn wan_dnat_covers(firewall: &uciedit::Config<'_>, port: u16) -> bool {
     let want = (port, port);
-    for sec in &firewall.sections {
-        if let Ok(r) = sec.get::<FirewallRedirect>() {
-            if r.target == "DNAT"
+    firewall
+        .sections
+        .iter()
+        .filter_map(|sec| sec.get::<FirewallRedirect>().ok())
+        .any(|r| {
+            r.target == "DNAT"
                 && r.enabled.as_deref() != Some("0")
                 && r.src == "wan"
                 && protocols_include_tcp(&r.proto)
@@ -1423,9 +1498,17 @@ fn sni_port_conflicts(firewall: &uciedit::Config<'_>, port: u16) -> bool {
                     .as_deref()
                     .and_then(parse_port_range)
                     .is_some_and(|range| ranges_overlap(want, range))
-            {
-                return true;
-            }
+        })
+}
+
+/// Whether the TCP port is held by a DNAT or incompatible router service.
+fn sni_port_conflicts(firewall: &uciedit::Config<'_>, port: u16) -> bool {
+    if wan_dnat_covers(firewall, port) {
+        return true;
+    }
+    let want = (port, port);
+    for sec in &firewall.sections {
+        if sec.get::<FirewallRedirect>().is_ok() {
             continue;
         }
         let Ok(rule) = sec.get::<FirewallRule>() else {
@@ -1640,6 +1723,7 @@ pub async fn run(pc: Arc<PortControl>) {
             tracing::warn!("port-control: purging SNI admission failed: {e}");
         }
     }
+    pc.sync_http_redirect().await;
     tokio::join!(
         supervise("PCP", pc.clone(), run_pcp),
         supervise("IGD", pc.clone(), run_igd),
@@ -2134,6 +2218,35 @@ pub(crate) async fn close_device_forwards(mac: &str, known_ips: &[String]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn http_redirect_follows_wan_443() {
+        let dir = temp_root("");
+        let pc = PortControl::new(dir.path().to_path_buf());
+        let wan = Ipv4Addr::new(203, 0, 113, 7);
+        *pc.wan_cache.lock().unwrap() = Some((Instant::now(), Some(wan)));
+        let expected = Some(SocketAddrV4::new(wan, 80));
+
+        pc.sync_http_redirect().await;
+        assert_eq!(pc.http_redirect_addr(), None, "nothing published on 443");
+
+        std::fs::write(dir.path().join("firewall"), MANUAL_FW).unwrap();
+        pc.sync_http_redirect().await;
+        assert_eq!(pc.http_redirect_addr(), expected, "manual 443 forward");
+        pc.sync_http_redirect().await;
+        assert_eq!(pc.http_redirect_addr(), expected, "idempotent");
+
+        std::fs::write(dir.path().join("firewall"), "").unwrap();
+        pc.sync_http_redirect().await;
+        assert_eq!(
+            pc.http_redirect_addr(),
+            None,
+            "closed once 443 returns to the router"
+        );
+        // The hostname-route half of the gate is covered by
+        // `http_redirect::tests`: exercising it here would need the demux to
+        // bind WAN:443, a privileged port, in the test process.
+    }
 
     fn temp_root(firewall: &str) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
