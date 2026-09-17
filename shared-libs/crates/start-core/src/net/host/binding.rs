@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::net::{IpAddr, SocketAddr, SocketAddrV6};
+use std::net::{SocketAddr, SocketAddrV6};
 use std::ops::RangeInclusive;
 use std::str::FromStr;
 
@@ -12,7 +12,7 @@ use ts_rs::TS;
 use crate::context::{CliContext, RpcContext};
 use crate::db::prelude::Map;
 use crate::hostname::ServerHostname;
-use crate::net::forward::AvailablePorts;
+use crate::net::forward::{AvailablePorts, START9_BRIDGE_IFACE};
 use crate::net::host::HostApiKind;
 use crate::net::service_interface::{
     HostnameInfo, HostnameMetadata, RangeServiceInterface, ServiceInterface,
@@ -625,12 +625,7 @@ pub fn binding<C: Context, Kind: HostApiKind>()
                     ]);
                     for (internal, info) in res.iter() {
                         let bridge = |ssl: bool| {
-                            info.addresses
-                                .available
-                                .iter()
-                                .filter(|a| a.ssl == ssl)
-                                .filter_map(HostnameInfo::to_socket_addr)
-                                .find(|a| a.ip() == IpAddr::from(crate::HOST_IP))
+                            bridge_address(&info.addresses, ssl)
                                 .map_or_else(|| "N/A".to_owned(), |a| a.to_string())
                         };
                         table.add_row(row![
@@ -685,6 +680,18 @@ pub fn binding<C: Context, Kind: HostApiKind>()
                 .with_about("about.set-gua-wan-for-binding")
                 .with_call_remote::<CliContext>(),
         )
+}
+
+/// The row `sdk.host.getBridgeAddress` resolves: IPv4 on the `lxcbr0` gateway.
+fn bridge_address(addresses: &DerivedAddressInfo, ssl: bool) -> Option<SocketAddr> {
+    addresses
+        .available
+        .iter()
+        .find(|a| {
+            a.ssl == ssl
+                && matches!(&a.metadata, HostnameMetadata::Ipv4 { gateway } if gateway.as_str() == START9_BRIDGE_IFACE)
+        })
+        .and_then(HostnameInfo::to_socket_addr)
 }
 
 pub async fn list_bindings<Kind: HostApiKind>(
@@ -1197,6 +1204,51 @@ mod test {
             "alpn": alpn,
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn bridge_address_is_the_lxcbr0_row_not_a_lookalike() {
+        let row = |ssl, hostname: &str, port, metadata| HostnameInfo {
+            ssl,
+            public: false,
+            hostname: InternedString::intern(hostname),
+            port: Some(port),
+            metadata,
+        };
+        let bridge = || HostnameMetadata::Ipv4 {
+            gateway: START9_BRIDGE_IFACE.parse().unwrap(),
+        };
+        let addresses = DerivedAddressInfo {
+            available: [
+                row(
+                    false,
+                    "10.0.3.1",
+                    1,
+                    HostnameMetadata::Plugin {
+                        package_id: "decoy".parse().unwrap(),
+                        remove_action: None,
+                        overflow_actions: vec![],
+                        info: Value::Null,
+                    },
+                ),
+                row(
+                    false,
+                    "192.168.1.5",
+                    8080,
+                    HostnameMetadata::Ipv4 {
+                        gateway: "eth0".parse().unwrap(),
+                    },
+                ),
+                row(false, "10.0.3.1", 8080, bridge()),
+                row(true, "10.0.3.1", 8443, bridge()),
+            ]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        };
+        let addr = |ssl| bridge_address(&addresses, ssl).map(|a| a.to_string());
+        assert_eq!(addr(false).as_deref(), Some("10.0.3.1:8080"));
+        assert_eq!(addr(true).as_deref(), Some("10.0.3.1:8443"));
     }
 
     #[test]
