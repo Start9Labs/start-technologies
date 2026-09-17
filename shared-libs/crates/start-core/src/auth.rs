@@ -234,6 +234,15 @@ async fn cli_login<C: LoginContext>(
 where
     CliContext: CallRemote<C>,
 {
+    login::<C>(&ctx, &parent_method.into_iter().chain(method).join(".")).await?;
+    Ok(())
+}
+
+/// Enrolls the identity key, generating one first if there is none.
+pub async fn login<C: LoginContext>(ctx: &CliContext, method: &str) -> Result<(), Error>
+where
+    CliContext: CallRemote<C>,
+{
     let password = if let Ok(password) = std::env::var("PASSWORD") {
         password
     } else {
@@ -249,7 +258,7 @@ where
         .map(|k| AnyVerifyingKey::Ed25519(k.into()).to_string())?;
 
     ctx.call_remote::<C>(
-        &parent_method.into_iter().chain(method).join("."),
+        method,
         json!({
             "password": password,
             "pubkey": pubkey,

@@ -24,7 +24,7 @@ Log in, log out, manage enrolled device keys, and reset the master password.
 
 ### `start-cli auth login`
 
-Log in and enroll this device's signing key. Required before running any commands against a remote server.
+Log in and enroll this device's signing key. A command run at a terminal before that prompts for the password itself; a script runs this first.
 
 ### `start-cli auth logout <SESSION>`
 
@@ -1111,6 +1111,10 @@ Display initialization kernel logs. Same log options as `server logs`.
 Create a new developer signing key.
 
 ## Utilities
+
+### `start-cli completions <SHELL>`
+
+Print a completion script for `bash`, `zsh`, `fish`, `elvish` or `powershell`. `eval "$(start-cli completions bash)"` in a shell profile enables tab completion.
 
 ### `start-cli echo <MESSAGE>`
 

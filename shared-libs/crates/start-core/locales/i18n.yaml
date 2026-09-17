@@ -2790,6 +2790,12 @@ context.cli.profile-cycle:
   es_ES: "«%{value}» forma parte de un ciclo de referencias de perfil"
   fr_FR: "« %{value} » fait partie d'un cycle de références de profil"
   pl_PL: "„%{value}” jest częścią cyklu odwołań profili"
+context.cli.not-logged-in:
+  en_US: "Not logged in to %{host}; enter the server password to log in."
+  de_DE: "Nicht bei %{host} angemeldet; geben Sie das Server-Passwort ein, um sich anzumelden."
+  es_ES: "No ha iniciado sesión en %{host}; introduzca la contraseña del servidor para iniciar sesión."
+  fr_FR: "Non connecté à %{host} ; saisissez le mot de passe du serveur pour vous connecter."
+  pl_PL: "Nie zalogowano do %{host}; wprowadź hasło serwera, aby się zalogować."
 
 # context/rpc.rs
 context.rpc.rpc-context-dropped:
@@ -3355,6 +3361,13 @@ help.arg.command-to-execute:
   es_ES: "Comando a ejecutar en el contenedor"
   fr_FR: "Commande à exécuter dans le conteneur"
   pl_PL: "Polecenie do wykonania w kontenerze"
+
+help.arg.completions-shell:
+  en_US: "Shell to generate the completion script for"
+  de_DE: "Shell, für die das Vervollständigungsskript erzeugt wird"
+  es_ES: "Shell para la que generar el script de autocompletado"
+  fr_FR: "Shell pour lequel générer le script de complétion"
+  pl_PL: "Powłoka, dla której ma zostać wygenerowany skrypt uzupełniania"
 
 help.arg.config-file-path:
   en_US: "Path to configuration file"
@@ -5718,6 +5731,13 @@ about.get-id-pubkey:
   es_ES: "Obtener la clave pública de identidad"
   fr_FR: "Obtenir la clé publique d'identité"
   pl_PL: "Pobierz klucz publiczny tożsamości"
+
+about.print-shell-completions:
+  en_US: "Print a shell completion script"
+  de_DE: "Ein Shell-Vervollständigungsskript ausgeben"
+  es_ES: "Imprimir un script de autocompletado para el shell"
+  fr_FR: "Afficher un script de complétion pour le shell"
+  pl_PL: "Wyświetl skrypt uzupełniania dla powłoki"
 
 about.get-initialization-progress:
   en_US: "Get initialization progress"

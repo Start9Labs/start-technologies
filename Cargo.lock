@@ -1117,6 +1117,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "clap_complete"
+version = "4.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "406e68b4de5c59cfb8f750a7cbd4d31ae153788b8352167c1e5f4fc26e8c91e9"
+dependencies = [
+ "clap 4.6.1",
+]
+
+[[package]]
 name = "clap_derive"
 version = "4.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7729,6 +7738,7 @@ dependencies = [
  "chrono",
  "ciborium",
  "clap 4.6.1",
+ "clap_complete",
  "clap_mangen",
  "color-eyre",
  "console 0.16.3",

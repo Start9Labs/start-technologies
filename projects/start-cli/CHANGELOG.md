@@ -19,6 +19,16 @@ or the CLI's externally observable behavior.
   checkout is on a branch other than `live-docs`.** The notice names the checkout and the branch
   and says how to replace it.
 
+- **`completions <shell>` prints a completion script** for bash, zsh, fish, elvish or PowerShell;
+  `eval "$(start-cli completions bash)"` in a shell profile enables tab completion.
+
+- **A command the server refuses because this key is not logged in prompts for the server
+  password, logs in, and runs.** Only at a terminal; a script still gets the error, and
+  `auth login` still works on its own.
+
+- **`binding list` shows each binding's bridge address** (`10.0.3.1:<port>`, plain and TLS) under
+  `package host` and `server host`.
+
 ### Fixed
 
 - **The notice that `start-cli` is behind the published release is given only when the workspace's

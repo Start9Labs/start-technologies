@@ -1,3 +1,4 @@
+use std::io::IsTerminal;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -394,15 +395,38 @@ impl CallRemote<RpcContext> for CliContext {
                 headers.insert(AUTHORIZATION, auth);
             }
         }
-        crate::middleware::auth::signature::call_remote(
-            self,
-            rpc_url,
-            headers,
-            self.host_identity.as_deref(),
-            method,
-            params,
-        )
-        .await
+        let call = || {
+            crate::middleware::auth::signature::call_remote(
+                self,
+                rpc_url.clone(),
+                headers.clone(),
+                self.host_identity.as_deref(),
+                method,
+                params.clone(),
+            )
+        };
+        match call().await {
+            Err(e)
+                if e.code == ErrorKind::Authorization as i32
+                    && method != "auth.login"
+                    && std::io::stdin().is_terminal() =>
+            {
+                eprintln!(
+                    "{}",
+                    t!(
+                        "context.cli.not-logged-in",
+                        host = self
+                            .host_identity
+                            .as_deref()
+                            .or_else(|| rpc_url.host_str())
+                            .unwrap_or_default()
+                    )
+                );
+                Box::pin(crate::auth::login::<RpcContext>(self, "auth.login")).await?;
+                call().await
+            }
+            res => res,
+        }
     }
 }
 impl CallRemote<DiagnosticContext> for CliContext {

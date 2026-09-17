@@ -94,8 +94,13 @@ The full command tree comes from `start-core::main_api()`. Top-level groups incl
 - `registry`, `tunnel` — operate against a registry / StartTunnel server.
 - `s9pk`, `init-key`, `pubkey`, `util` — local packaging/dev tooling.
 - `echo`, `state`, `git-info` — diagnostics.
+- `completions` — a completion script for bash, zsh, fish, elvish or PowerShell.
 
-Run `start-cli <group> --help` for any group.
+Run `start-cli <group> --help` for any group. Tab completion:
+
+```sh
+eval "$(start-cli completions bash)"      # or zsh / fish / elvish / powershell
+```
 
 ## Features
 

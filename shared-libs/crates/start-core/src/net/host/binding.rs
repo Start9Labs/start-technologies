@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::net::{SocketAddr, SocketAddrV6};
+use std::net::{IpAddr, SocketAddr, SocketAddrV6};
 use std::ops::RangeInclusive;
 use std::str::FromStr;
 
@@ -615,8 +615,24 @@ pub fn binding<C: Context, Kind: HostApiKind>()
                     }
 
                     let mut table = Table::new();
-                    table.add_row(row![bc => "INTERNAL PORT", "ENABLED", "EXTERNAL PORT", "EXTERNAL SSL PORT"]);
+                    table.add_row(row![bc =>
+                        "INTERNAL PORT",
+                        "ENABLED",
+                        "EXTERNAL PORT",
+                        "EXTERNAL SSL PORT",
+                        "BRIDGE",
+                        "BRIDGE SSL",
+                    ]);
                     for (internal, info) in res.iter() {
+                        let bridge = |ssl: bool| {
+                            info.addresses
+                                .available
+                                .iter()
+                                .filter(|a| a.ssl == ssl)
+                                .filter_map(HostnameInfo::to_socket_addr)
+                                .find(|a| a.ip() == IpAddr::from(crate::HOST_IP))
+                                .map_or_else(|| "N/A".to_owned(), |a| a.to_string())
+                        };
                         table.add_row(row![
                             internal,
                             info.enabled,
@@ -630,6 +646,8 @@ pub fn binding<C: Context, Kind: HostApiKind>()
                             } else {
                                 "N/A".to_owned()
                             },
+                            bridge(false),
+                            bridge(true),
                         ]);
                     }
 
