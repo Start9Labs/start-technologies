@@ -7,5 +7,6 @@
   },
   "homepage": "https://docs.start9.com/packaging",
   "repository": "https://github.com/Start9Labs/start-technologies",
-  "license": "MIT"
+  "license": "MIT",
+  "skills": ["./.claude/skills", "./projects/start-sdk/docs/skills"]
 }

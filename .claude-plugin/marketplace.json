@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "start9",
-      "source": "./.claude",
+      "source": "./",
       "description": "Start9's agent skills: package a service for StartOS, and the house style for Start9 web UIs."
     }
   ]

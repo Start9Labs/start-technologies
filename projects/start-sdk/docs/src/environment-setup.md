@@ -230,7 +230,7 @@ start9-workspace/
 ├── AGENTS.md              ← agent context (symlink to the guide's Agent Context page), read by AI assistants
 ├── AGENTS.local.md        ← your own notes, kept across guide updates
 ├── CLAUDE.md              ← loads AGENTS.md + AGENTS.local.md (Claude Code)
-├── .claude/skills         ← the packaging skills (symlink into the guide), for Claude Code
+├── .claude/skills         ← the packaging skills (symlink → start-technologies/projects/start-sdk/docs/skills), for Claude Code
 ├── .agents/skills         ← the same skills, for Codex
 └── start-technologies/    ← the monorepo: the guide, the SDK source, the OS source
 ```
