@@ -252,7 +252,7 @@ They live in the guide itself (`start-technologies/projects/start-sdk/docs/skill
 
 Without a workspace, or to have them in every project, install them once instead:
 
-- **Claude Code** — the monorepo doubles as a plugin marketplace: `/plugin marketplace add Start9Labs/start-technologies`, then `/plugin install start9@start9`. The plugin is the published guide's skills directory, fetched from `live-docs` whichever branch the marketplace was added from, so the skills load as `/start9:package-service` and update with `/plugin marketplace update` as the guide does. (Adding the marketplace clones the monorepo once; the plugin itself is a few files.)
+- **Claude Code** — the monorepo doubles as a plugin marketplace: `/plugin marketplace add Start9Labs/start-technologies`, then `/plugin install start9@start9`. The plugin is the published guide's skills directory, fetched from `live-docs` whichever branch the marketplace was added from. The skills load as `/start9:package-service` and update with `/plugin update start9@start9`. (Adding the marketplace clones the monorepo once; the plugin itself is a few files.)
 - **Codex** — `$skill-installer` fetches one skill at a time: `$skill-installer install https://github.com/Start9Labs/start-technologies/tree/live-docs/projects/start-sdk/docs/skills/package-service`. That copy does not update itself; to pick up changes, delete it (`~/.codex/skills/package-service`) and run the installer again.
 
 ### Already have the monorepo?
