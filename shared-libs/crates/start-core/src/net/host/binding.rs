@@ -1361,14 +1361,14 @@ fn describe(address: &HostnameInfo) -> String {
     } else {
         address.hostname.to_string()
     };
-    let kind = match &address.metadata {
-        HostnameMetadata::Ipv4 { .. } => "ipv4",
-        HostnameMetadata::Ipv6 { .. } => "ipv6",
-        HostnameMetadata::Mdns { .. } => "mdns",
-        HostnameMetadata::PrivateDomain { .. } => "private domain",
-        HostnameMetadata::PublicDomain { .. } => "public domain",
-        HostnameMetadata::Plugin { .. } => "plugin",
-    };
+    let kind = t!(match &address.metadata {
+        HostnameMetadata::Ipv4 { .. } => "net.host.binding.address-kind-ipv4",
+        HostnameMetadata::Ipv6 { .. } => "net.host.binding.address-kind-ipv6",
+        HostnameMetadata::Mdns { .. } => "net.host.binding.address-kind-mdns",
+        HostnameMetadata::PrivateDomain { .. } => "net.host.binding.address-kind-private-domain",
+        HostnameMetadata::PublicDomain { .. } => "net.host.binding.address-kind-public-domain",
+        HostnameMetadata::Plugin { .. } => "net.host.binding.address-kind-plugin",
+    });
     let gateways = address.metadata.gateways().join(", ");
     format!(
         "{host}:{}  {kind}{}, {}{}",
@@ -1376,10 +1376,21 @@ fn describe(address: &HostnameInfo) -> String {
         if gateways.is_empty() {
             String::new()
         } else {
-            format!(" via {gateways}")
+            format!(
+                " {}",
+                t!("net.host.binding.address-via", gateways = gateways)
+            )
         },
-        if address.public { "public" } else { "private" },
-        if address.ssl { ", ssl" } else { "" },
+        t!(if address.public {
+            "net.host.binding.address-public"
+        } else {
+            "net.host.binding.address-private"
+        }),
+        if address.ssl {
+            format!(", {}", t!("net.host.binding.address-ssl"))
+        } else {
+            String::new()
+        },
     )
 }
 

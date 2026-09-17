@@ -1702,6 +1702,76 @@ net.host.binding.choose-address:
   fr_FR: "%{address} correspond à plusieurs adresses de la liaison %{port} ; choisissez-en une :"
   pl_PL: "%{address} pasuje do kilku adresów powiązania %{port}; wybierz jeden:"
 
+net.host.binding.address-kind-ipv4:
+  en_US: "IPv4"
+  de_DE: "IPv4"
+  es_ES: "IPv4"
+  fr_FR: "IPv4"
+  pl_PL: "IPv4"
+
+net.host.binding.address-kind-ipv6:
+  en_US: "IPv6"
+  de_DE: "IPv6"
+  es_ES: "IPv6"
+  fr_FR: "IPv6"
+  pl_PL: "IPv6"
+
+net.host.binding.address-kind-mdns:
+  en_US: "mDNS"
+  de_DE: "mDNS"
+  es_ES: "mDNS"
+  fr_FR: "mDNS"
+  pl_PL: "mDNS"
+
+net.host.binding.address-kind-private-domain:
+  en_US: "private domain"
+  de_DE: "private Domain"
+  es_ES: "dominio privado"
+  fr_FR: "domaine privé"
+  pl_PL: "domena prywatna"
+
+net.host.binding.address-kind-public-domain:
+  en_US: "public domain"
+  de_DE: "öffentliche Domain"
+  es_ES: "dominio público"
+  fr_FR: "domaine public"
+  pl_PL: "domena publiczna"
+
+net.host.binding.address-kind-plugin:
+  en_US: "plugin"
+  de_DE: "Plugin"
+  es_ES: "plugin"
+  fr_FR: "plugin"
+  pl_PL: "wtyczka"
+
+net.host.binding.address-via:
+  en_US: "via %{gateways}"
+  de_DE: "über %{gateways}"
+  es_ES: "a través de %{gateways}"
+  fr_FR: "via %{gateways}"
+  pl_PL: "przez %{gateways}"
+
+net.host.binding.address-public:
+  en_US: "public"
+  de_DE: "öffentlich"
+  es_ES: "pública"
+  fr_FR: "publique"
+  pl_PL: "publiczny"
+
+net.host.binding.address-private:
+  en_US: "private"
+  de_DE: "privat"
+  es_ES: "privada"
+  fr_FR: "privée"
+  pl_PL: "prywatny"
+
+net.host.binding.address-ssl:
+  en_US: "SSL"
+  de_DE: "SSL"
+  es_ES: "SSL"
+  fr_FR: "SSL"
+  pl_PL: "SSL"
+
 # net/ssl.rs
 net.ssl.unreachable:
   en_US: "unreachable"
