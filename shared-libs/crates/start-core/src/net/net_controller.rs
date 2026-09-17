@@ -460,6 +460,7 @@ impl NetServiceData {
                         ProxyTarget {
                             public_v4: server_public_v4,
                             public_v6: server_public_v6,
+                            public_v6_gateways: BTreeSet::new(),
                             private: server_private_ips,
                             acme: None,
                             addr,
@@ -509,6 +510,7 @@ impl NetServiceData {
                     let target = vhosts.entry(key).or_insert_with(|| ProxyTarget {
                         public_v4: BTreeSet::new(),
                         public_v6: BTreeSet::new(),
+                        public_v6_gateways: BTreeSet::new(),
                         private: BTreeSet::new(),
                         // The public leg's alone, so a name served both ways
                         // keeps its LAN side. A passthrough never intermediates

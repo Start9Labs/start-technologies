@@ -487,6 +487,12 @@ for the detail behind its highlights.
 - **A service that mounts a dependency's files read-write fails to start when
   that dependency is not installed**, naming the missing volume.
 
+- **A TLS passthrough added with `start-cli net vhost add-passthrough` answers
+  on every public IPv6 address of its gateway.** It answered on the addresses
+  the gateway held at the moment the passthrough was registered — at boot, often
+  not all of them — and refused the rest with a TLS `unrecognized name` error
+  while IPv4 kept working.
+
 ### Security
 
 - **Service mount paths are validated and confined to their intended
