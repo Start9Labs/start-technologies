@@ -68,7 +68,7 @@ jobs:
       - name: Publish to NextExplorer
         uses: ./.github/actions/nextexplorer-publish
         with:
-          url: https://nextexplorer.evelyn.start9labs.com
+          url: https://${{ vars.NEXT_EXPLORER_EVELYN_URL }}
           email: ${{ vars.NEXT_EXPLORER_EVELYN_USER }}
           password: ${{ secrets.NEXT_EXPLORER_EVELYN_PASS }}
           dir: projects/start-wrt/web/dist/startwrt/browser
