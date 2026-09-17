@@ -8,10 +8,10 @@ don't restate it here.
 
 Two actions in this file need the user's agreement before you take them, every time:
 
-- **Creating a workspace.** It writes `AGENTS.md`, `AGENTS.local.md`, `CLAUDE.md` and
-  `.startos/` into a directory the user picked for something else, clones ~75 MB, and
-  generates a signing key that becomes that workspace's permanent identity. Ask, and say
-  where you propose to put it.
+- **Creating a workspace.** It writes `AGENTS.md`, `AGENTS.local.md`, `CLAUDE.md`,
+  `.claude/`, `.agents/` and `.startos/` into a directory the user picked for something
+  else, clones ~75 MB, and generates a signing key that becomes that workspace's
+  permanent identity. Ask, and say where you propose to put it.
 - **Installing anything.** Report what is missing and the command that fixes it; let the
   user run it.
 
@@ -75,7 +75,8 @@ start-cli s9pk init-workspace <path>     # path optional; defaults to the curren
 
 It clones the monorepo into `start-technologies/` on `live-docs`, symlinks `AGENTS.md`
 at the guide's Agent Context page, writes an `AGENTS.local.md` stub and a `CLAUDE.md`
-that loads both, and provisions `.startos/` with `config.yaml` and a freshly generated
+that loads both, links the guide's packaging skills at `.claude/skills` and
+`.agents/skills`, and provisions `.startos/` with `config.yaml` and a freshly generated
 `build.key.pem`.
 
 **It is idempotent** — a re-run fills in only what is missing, never overwrites
