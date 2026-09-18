@@ -4,11 +4,11 @@ Flavors are different services that share the same package ID. They are differen
 
 ## Version Format
 
-Flavor versions are designated by their exver prefix: `#flavor:upstream-semver:downstream-semver`. For more details on version formatting, see [Versions](/packaging/src/versions.md).
+Flavor versions are designated by their exver prefix: `#flavor:upstream-semver:downstream-semver`. For more details on version formatting, see [Versions](/packaging/versions.html).
 
 ## Limitations
 
-It is not supported to install multiple flavors of the same service simultaneously. However, you can switch between them.
+It is not supported to install multiple flavors of the same service simultaneously. However, you can switch between them. Running two side by side means maintaining your own fork of one under a different package ID — see [the FAQ](faq.md#can-i-run-two-copies-of-the-same-service).
 
 ## Switching Flavors
 
