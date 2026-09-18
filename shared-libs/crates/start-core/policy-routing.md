@@ -78,15 +78,32 @@ Both families carry every rule unless noted.
 
 ### Why this order
 
-The order is the tiers below, and each boundary is forced by an invariant.
+Two rules need an order only when some packet can match both and they would send it different ways. A packet carries one mark — a gateway's, the divert mark, a tunnel's fwmark, or none — and one kind of source — a gateway's address, a container's, or neither — so most pairs never meet. The numbers above are one layout that satisfies the table below; `src/net/mod.rs` asserts exactly these relations at compile time and nothing else, and the model breaks when any one of them is reversed.
 
-1. **Exceptions to `main`** (48, 49). Both must precede 50, since `main` would otherwise route a diverted reply to an on-link client, or a tunnel reply over the LAN. Their marks are disjoint, so their order relative to each other is free. Nothing unqualified may share 49: equal priorities evaluate in insertion order.
-2. **Specific routes** (50). Ahead of every table lookup, because a gateway table holds only a default and would send a container-bound or LAN-bound packet out the gateway.
-3. **Connection affinity** (51, 60). After 50, so a marked packet bound for a container still reaches it. Ahead of every selection and rejection, so neither can capture or kill a reply. 51 and 60 agree whenever both match, so their order is free.
-4. **Selections, each closed by its rejection** (70–71, then 74–76). A rejection directly follows its lookup with the same selector, so nothing can catch the traffic in between. The service tier precedes the system tier, which is `service-over-system`. 74 precedes 75 and 76, which is `wg-transport`; it may follow the service tier only because a container's packets never carry a host fwmark.
-5. **Auto** (1000, 1100). Last of the StartOS rules, above NetworkManager's.
+| Rule                 | Must precede           | Because                                                                                                                              |
+| -------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| 48 tunnel reply      | 50, 70–71, 75–76, 1000 | `tunnel-reply`: `main`'s on-link route, a selection, or Auto would each take the reply off the tunnel.                               |
+| 49 divert            | 50, 70–71, 75–76, 1000 | `divert`: a diverted reply has a container's source and any destination, so every one of these matches it.                           |
+| 50 main              | 51, 60, 70–71, 75–76   | `specific`: each of these looks up a table that holds only a default, or rejects.                                                    |
+| 51 reply mark        | 70–71, 75–76, 1000     | Connection affinity: a container's marked reply also matches its service rules, and every marked reply matches the system-wide ones. |
+| 60 source address    | 75–76, 1000            | `reply-unmarked`, `reverse-path`. It never meets 70–71: their sources are containers'.                                               |
+| 70 service lookup    | 71, 75–76, 1000        | `service-selection`, `service-over-system`.                                                                                          |
+| 71 service rejection | 75, 1000               | `service-kill-switch`: a service whose gateway is gone must not fall to the system-wide selection or to `main`.                      |
+| 74 WireGuard fwmark  | 75–76                  | `wg-transport`.                                                                                                                      |
+| 75 system lookup     | 76, 1000               | `system-selection`.                                                                                                                  |
+| 76 system rejection  | 1000                   | `system-kill-switch`.                                                                                                                |
 
-A rejection must never be added ahead of tier 3. A terminal blackhole at priority 1200 was tried and removed in #3388 for killing replies to inbound tunnel connections; the kill switch in #4006 met the same two failures, `reply-unmarked` and `reverse-path`, before tier 3 was completed.
+Every other pair is free, and the model holds with each of them swapped:
+
+- 48 and 49 carry different marks.
+- 51 and 60 send a packet that matches both to the same table.
+- 60 and 70–71 match different sources.
+- 74 matches the host's own packets carrying a tunnel's fwmark, so it never meets 48, 49, 51 or 70–71, and 50, 74 and 1000 all read `main`. Against 60, either answer keeps a tunnel's transport on the underlay.
+- 1100 reads a table StartOS leaves empty, so it bears on nothing.
+
+Nothing unqualified may share 49, since equal priorities evaluate in insertion order. Reconciliation also identifies some rules by priority alone, and would misread or delete a neighbour that shared one: 60 must differ from 48, 49, 51 and 70; 51 from 49; and 74 from 48, 49 and 51. Those are asserted as inequalities, not as orders.
+
+A rejection must never precede 51 or 60. A terminal blackhole at priority 1200 was tried and removed in #3388 for killing replies to inbound tunnel connections; the kill switch in #4006 met the same two failures, `reply-unmarked` and `reverse-path`, before those two rules were completed.
 
 ### Installing and removing
 

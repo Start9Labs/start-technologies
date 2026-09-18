@@ -24,7 +24,7 @@ pub mod vhost;
 pub mod web_server;
 pub mod wifi;
 
-/// The `ip rule` ladder in evaluation order; policy-routing.md derives it.
+/// `ip rule` priorities; policy-routing.md derives every order asserted below.
 const TUNNEL_REPLY_RULE_PRIORITY: u32 = 48;
 const DIVERT_RULE_PRIORITY: u32 = 49;
 const MAIN_RULE_PRIORITY: u32 = 50;
@@ -39,25 +39,124 @@ const AUTO_MAIN_RULE_PRIORITY: u32 = 1000;
 const AUTO_DEFAULT_RULE_PRIORITY: u32 = 1100;
 
 const _: () = {
-    let evaluation_order = [
-        TUNNEL_REPLY_RULE_PRIORITY,
-        DIVERT_RULE_PRIORITY,
-        MAIN_RULE_PRIORITY,
-        REPLY_RULE_PRIORITY,
-        SOURCE_RULE_PRIORITY,
-        SERVICE_OUTBOUND_RULE_PRIORITY,
-        SERVICE_OUTBOUND_REJECT_RULE_PRIORITY,
-        WG_ENCAP_RULE_PRIORITY,
-        DEFAULT_OUTBOUND_RULE_PRIORITY,
-        DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY,
-        AUTO_MAIN_RULE_PRIORITY,
-        AUTO_DEFAULT_RULE_PRIORITY,
-    ];
-    let mut i = 1;
-    while i < evaluation_order.len() {
-        assert!(evaluation_order[i - 1] < evaluation_order[i]);
-        i += 1;
+    const fn before(rule: u32, others: &[u32]) {
+        let mut i = 0;
+        while i < others.len() {
+            assert!(rule < others[i]);
+            i += 1;
+        }
     }
+    const fn apart(rule: u32, others: &[u32]) {
+        let mut i = 0;
+        while i < others.len() {
+            assert!(rule != others[i]);
+            i += 1;
+        }
+    }
+
+    // A rule precedes those that match some of its packets and route them elsewhere.
+    before(
+        TUNNEL_REPLY_RULE_PRIORITY,
+        &[
+            MAIN_RULE_PRIORITY,
+            SERVICE_OUTBOUND_RULE_PRIORITY,
+            SERVICE_OUTBOUND_REJECT_RULE_PRIORITY,
+            DEFAULT_OUTBOUND_RULE_PRIORITY,
+            DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY,
+            AUTO_MAIN_RULE_PRIORITY,
+        ],
+    );
+    before(
+        DIVERT_RULE_PRIORITY,
+        &[
+            MAIN_RULE_PRIORITY,
+            SERVICE_OUTBOUND_RULE_PRIORITY,
+            SERVICE_OUTBOUND_REJECT_RULE_PRIORITY,
+            DEFAULT_OUTBOUND_RULE_PRIORITY,
+            DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY,
+            AUTO_MAIN_RULE_PRIORITY,
+        ],
+    );
+    before(
+        MAIN_RULE_PRIORITY,
+        &[
+            REPLY_RULE_PRIORITY,
+            SOURCE_RULE_PRIORITY,
+            SERVICE_OUTBOUND_RULE_PRIORITY,
+            SERVICE_OUTBOUND_REJECT_RULE_PRIORITY,
+            DEFAULT_OUTBOUND_RULE_PRIORITY,
+            DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY,
+        ],
+    );
+    before(
+        REPLY_RULE_PRIORITY,
+        &[
+            SERVICE_OUTBOUND_RULE_PRIORITY,
+            SERVICE_OUTBOUND_REJECT_RULE_PRIORITY,
+            DEFAULT_OUTBOUND_RULE_PRIORITY,
+            DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY,
+            AUTO_MAIN_RULE_PRIORITY,
+        ],
+    );
+    before(
+        SOURCE_RULE_PRIORITY,
+        &[
+            DEFAULT_OUTBOUND_RULE_PRIORITY,
+            DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY,
+            AUTO_MAIN_RULE_PRIORITY,
+        ],
+    );
+    before(
+        SERVICE_OUTBOUND_RULE_PRIORITY,
+        &[
+            SERVICE_OUTBOUND_REJECT_RULE_PRIORITY,
+            DEFAULT_OUTBOUND_RULE_PRIORITY,
+            DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY,
+            AUTO_MAIN_RULE_PRIORITY,
+        ],
+    );
+    before(
+        SERVICE_OUTBOUND_REJECT_RULE_PRIORITY,
+        &[DEFAULT_OUTBOUND_RULE_PRIORITY, AUTO_MAIN_RULE_PRIORITY],
+    );
+    before(
+        WG_ENCAP_RULE_PRIORITY,
+        &[
+            DEFAULT_OUTBOUND_RULE_PRIORITY,
+            DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY,
+        ],
+    );
+    before(
+        DEFAULT_OUTBOUND_RULE_PRIORITY,
+        &[
+            DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY,
+            AUTO_MAIN_RULE_PRIORITY,
+        ],
+    );
+    before(
+        DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY,
+        &[AUTO_MAIN_RULE_PRIORITY],
+    );
+
+    // Reconciliation tells these apart by priority alone.
+    apart(
+        SOURCE_RULE_PRIORITY,
+        &[
+            TUNNEL_REPLY_RULE_PRIORITY,
+            DIVERT_RULE_PRIORITY,
+            REPLY_RULE_PRIORITY,
+            SERVICE_OUTBOUND_RULE_PRIORITY,
+        ],
+    );
+    apart(REPLY_RULE_PRIORITY, &[DIVERT_RULE_PRIORITY]);
+    apart(
+        WG_ENCAP_RULE_PRIORITY,
+        &[
+            TUNNEL_REPLY_RULE_PRIORITY,
+            DIVERT_RULE_PRIORITY,
+            REPLY_RULE_PRIORITY,
+        ],
+    );
 };
 
 /// The rest of an `ip rule show` line at this priority.

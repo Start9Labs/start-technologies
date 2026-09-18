@@ -114,6 +114,8 @@ every_state() {
   expect divert LOCAL 192.168.1.77 mark $DIVERT_MARK $from_container
   expect specific eth0 192.168.1.77
   expect specific eth0 192.168.1.77 $from_container
+  expect specific lxcbr0 10.0.3.5 from 10.59.0.2
+  expect specific lxcbr0 fd00:3::5 from 2001:db8:59::2
   expect specific lxcbr0 10.0.3.5 mark $T_WG0 from 203.0.113.9 iif wg0
   expect specific lxcbr0 fd00:3::5 mark $T_WG0 from 2001:db8:99::9 iif wg0
   expect reverse-path lxcbr0 10.0.3.5 mark $T_ETH from 203.0.113.9 iif eth0
@@ -175,6 +177,16 @@ expect service-kill-switch REJECT 203.0.113.9 $from_container
 expect service-kill-switch REJECT 2001:db8:99::9 $from_container_v6
 expect auto eth0 203.0.113.9
 unpin_service
+
+state="service pinned, gateway gone, system pinned to wg0"
+pin_service 1999
+pin_system $T_WG0
+every_state
+expect service-kill-switch REJECT 203.0.113.9 $from_container
+expect service-kill-switch REJECT 2001:db8:99::9 $from_container_v6
+expect system-selection wg0 203.0.113.9
+unpin_service
+unpin_system
 
 state="service pinned to wg1, system pinned to wg0"
 pin_service $T_WG1
