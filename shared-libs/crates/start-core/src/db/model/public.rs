@@ -263,10 +263,12 @@ pub struct NetworkInterfaceInfo {
     pub secure: Option<bool>,
     pub ip_info: Option<Arc<IpInfo>>,
     /// The public IPv4 the operator pinned for this gateway, taking precedence
-    /// over the discovered `ipInfo.wanIp`. Discovery infers the WAN address from
-    /// outbound traffic, which names the wrong address whenever egress and
-    /// ingress differ — a router-wide outbound VPN with inbound port forwards on
-    /// the real WAN address. Clearing it restores the discovered address.
+    /// over the discovered `ipInfo.wanIp`. Discovery asks the router over UPnP
+    /// and otherwise infers the address from outbound traffic, which names the
+    /// wrong one wherever ingress and egress take different paths — multi-WAN
+    /// routing, an ISP translating egress from a pool separate from the mapped
+    /// inbound address, a floating ingress address with a separate egress
+    /// gateway. Clearing it restores the discovered address.
     #[serde(default)]
     pub wan_ip_override: Option<Ipv4Addr>,
     // Pre-release dev DBs persisted this as `null` for auto-discovered gateways;
@@ -540,8 +542,8 @@ mod test {
         let detected: Ipv4Addr = "198.51.100.4".parse().unwrap();
         let pinned: Ipv4Addr = "203.0.113.7".parse().unwrap();
 
-        let vpn_egress = wan_iface(Some("198.51.100.4"), None);
-        assert_eq!(vpn_egress.wan_ip(), Some(detected));
+        let detected_only = wan_iface(Some("198.51.100.4"), None);
+        assert_eq!(detected_only.wan_ip(), Some(detected));
 
         let corrected = wan_iface(Some("198.51.100.4"), Some("203.0.113.7"));
         assert_eq!(corrected.wan_ip(), Some(pinned));
