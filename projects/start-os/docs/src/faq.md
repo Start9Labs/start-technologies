@@ -170,6 +170,20 @@ If a service is running low on space, you have two options today:
 
 Support for multiple drives is planned for StartOS 0.4.1. There is no release date yet.
 
+## My server restarted on its own
+
+StartOS restarts the server itself when it can no longer run: when the kernel locks up, or when the OS drive stops answering for more than two minutes. Either points at the hardware — most often an OS drive dropping off its bus in a power-saving state, a failing power supply, or bad memory.
+
+To see what preceded the restart, [connect via SSH](ssh.md) and run:
+
+```
+sudo journalctl -b -1 -n 200
+```
+
+`-b -1` selects the previous boot. Where the firmware could record the kernel crash, the record is kept under `/media/startos/data/main/logs/pstore/`. `sudo gather-debug-info` collects both, along with the kernel log and each NVMe drive's power-saving state, into a file you can send to [support](https://start9.com/contact).
+
+If it happens again, start with the BIOS: turn off PCIe power saving (**ASPM** or **Native ASPM**) and any NVMe or storage power-saving option, and limit CPU C-states to C1 or C3, or turn C-states off where that is the only switch. StartOS already keeps NVMe drives out of their deep idle states. If the restarts continue with those in place, the hardware itself is the next suspect — a power supply that sags under load, or memory — and the [Community Hub](https://community.start9.com) is the place to compare notes with others on the same model.
+
 ## Issue with a particular service
 
 If a service is misbehaving or crashing, check the [logs](logs.md) for that service — open the service and select its **Logs** tab. Look for any errors that might explain the problem. Often, the solution is to restart the service by clicking "Restart". If the issue persist, [contact support](https://start9.com/contact).

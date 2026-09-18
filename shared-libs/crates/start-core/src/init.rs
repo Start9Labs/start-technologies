@@ -32,13 +32,15 @@ use crate::rpc_continuations::{Guid, RpcContinuation};
 use crate::s9pk::v2::pack::{CONTAINER_DATADIR, CONTAINER_TOOL};
 use crate::ssh::SSH_DIR;
 use crate::system::{get_mem_info, sync_kiosk};
-use crate::util::io::{IOHook, open_file};
+use crate::util::io::{IOHook, dir_copy, open_file};
 use crate::util::lshw::lshw;
 use crate::util::{Invoke, cpupower};
 use crate::{Error, MAIN_DATA, PACKAGE_DATA, ResultExt};
 
 pub const SYSTEM_REBUILD_PATH: &str = "/media/startos/config/system-rebuild";
 pub const STANDBY_MODE_PATH: &str = "/media/startos/config/standby";
+/// systemd-pstore's archive, on the root overlay's tmpfs.
+const PSTORE_ARCHIVE: &str = "/var/lib/systemd/pstore";
 
 pub async fn check_time_is_synchronized() -> Result<bool, Error> {
     Ok(String::from_utf8(
@@ -263,6 +265,11 @@ pub async fn init(
         .invoke(crate::ErrorKind::Journald)
         .await
         .ok();
+    if tokio::fs::metadata(PSTORE_ARCHIVE).await.is_ok() {
+        if let Err(e) = dir_copy(PSTORE_ARCHIVE, log_dir.join("pstore"), None).await {
+            tracing::warn!("could not preserve kernel crash records: {e}");
+        }
+    }
     mount_logs.complete();
     tokio::io::copy(
         &mut open_file("/run/startos/init.log").await?,

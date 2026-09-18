@@ -157,6 +157,8 @@ pub fn main(args: impl IntoIterator<Item = OsString>) {
                     rt_handle.spawn(async {});
                 }
             });
+            #[cfg(target_os = "linux")]
+            tokio::spawn(crate::system::os_root_watch::watch_os_root());
 
             let mut server = WebServer::new(Acceptor::new(WildcardListener::new(80)?), refresher());
             match inner_main(&mut server, &config).await {

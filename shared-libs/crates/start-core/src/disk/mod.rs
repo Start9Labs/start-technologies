@@ -116,7 +116,7 @@ impl OsPartitionInfo {
 /// The initramfs bind-mounts the installed OS root partition here on every
 /// StartOS boot. It exists only on a running installed system — not in the live
 /// installer — so it names the OS root exactly when there is one.
-const OS_ROOT_MOUNT: &str = "/media/startos/root";
+pub const OS_ROOT_MOUNT: &str = "/media/startos/root";
 
 /// Resolve the installed OS root block device from its live mount.
 ///
