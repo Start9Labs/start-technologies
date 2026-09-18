@@ -1500,19 +1500,17 @@ struct PolicyRoutingGuard {
     table_id: u32,
 }
 
-/// Remove stale per-interface policy-routing state (fwmark ip rules, v6 source
-/// rules, and their routing tables) for interfaces that no longer exist. The nft
-/// mark rules are owned declaratively by [`reconcile_mangle_rules`], so they need
-/// no GC here.
+/// Removes the reply rules, source rules, and tables of interfaces that no
+/// longer exist.
 async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
     let active_tables: BTreeSet<u32> = active_ifaces
         .iter()
         .filter_map(|iface| if_nametoindex(iface.as_str()).ok().map(|idx| 1000 + idx))
         .collect();
 
-    // Collect stale per-interface table ids from the priority-51 fwmark rules in
-    // both families (IPv4 and IPv6 install the same `1000 + ifindex` rule).
+    // A source rule is deleted by the selector it was added with.
     let mut stale = BTreeSet::<u32>::new();
+    let mut stale_src = Vec::<(bool, u32, String)>::new();
     for v6 in [false, true] {
         let mut cmd = Command::new("ip");
         if v6 {
@@ -1528,14 +1526,15 @@ async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
             continue;
         };
         for line in rules.lines() {
-            let line = line.trim();
-            if rule_at_priority(line, REPLY_RULE_PRIORITY).is_none() {
-                continue;
-            }
-            let Some(pos) = line.find("lookup ") else {
+            let reply = rule_at_priority(line, REPLY_RULE_PRIORITY);
+            let source = rule_at_priority(line, SOURCE_RULE_PRIORITY);
+            let Some(rest) = reply.or(source) else {
                 continue;
             };
-            let token = line[pos + 7..].split_whitespace().next().unwrap_or("");
+            let Some(pos) = rest.find("lookup ") else {
+                continue;
+            };
+            let token = rest[pos + 7..].split_whitespace().next().unwrap_or("");
             let Ok(table_id) = token.parse::<u32>() else {
                 continue;
             };
@@ -1543,54 +1542,21 @@ async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
                 continue;
             }
             stale.insert(table_id);
+            if source.is_some() {
+                let mut toks = rest.split_whitespace();
+                if let Some(addr) = toks.find(|t| *t == "from").and_then(|_| toks.next()) {
+                    stale_src.push((v6, table_id, addr.to_owned()));
+                }
+            }
         }
     }
 
-    // Stale priority-60 v6 source rules, which must be deleted carrying the
-    // selector they were added with.
-    let mut stale_v6_src = Vec::<(u32, String)>::new();
-    if let Ok(rules) = Command::new("ip")
-        .arg("-6")
-        .arg("rule")
-        .arg("show")
-        .invoke(ErrorKind::Network)
-        .await
-        .and_then(|b| String::from_utf8(b).with_kind(ErrorKind::Utf8))
-    {
-        for line in rules.lines() {
-            let Some(rest) = rule_at_priority(line, SOURCE_RULE_PRIORITY) else {
-                continue;
-            };
-            let Some(pos) = rest.find("lookup ") else {
-                continue;
-            };
-            let Ok(table_id) = rest[pos + 7..]
-                .split_whitespace()
-                .next()
-                .unwrap_or("")
-                .parse::<u32>()
-            else {
-                continue;
-            };
-            if table_id < 1000 || active_tables.contains(&table_id) {
-                continue;
-            }
-            let mut toks = rest.split_whitespace();
-            if toks.find(|t| *t == "from").is_none() {
-                continue;
-            }
-            let Some(addr) = toks.next() else {
-                continue;
-            };
-            stale.insert(table_id);
-            stale_v6_src.push((table_id, addr.to_owned()));
+    for (v6, table_id, addr) in stale_src {
+        let mut cmd = Command::new("ip");
+        if v6 {
+            cmd.arg("-6");
         }
-    }
-
-    for (table_id, addr) in stale_v6_src {
-        Command::new("ip")
-            .arg("-6")
-            .arg("rule")
+        cmd.arg("rule")
             .arg("del")
             .arg("from")
             .arg(&addr)
@@ -1721,18 +1687,6 @@ async fn reconcile_outbound_rules(v6: bool, existing: &OutboundRules, desired: &
         }
         c
     };
-    if desired.reject && !existing.reject {
-        ip().arg("rule")
-            .arg("add")
-            .arg("from")
-            .arg("all")
-            .arg("unreachable")
-            .arg("priority")
-            .arg(DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY.to_string())
-            .invoke(ErrorKind::Network)
-            .await
-            .log_err();
-    }
     for fwmark in desired
         .wireguard_fwmarks
         .difference(&existing.wireguard_fwmarks)
@@ -1760,6 +1714,19 @@ async fn reconcile_outbound_rules(v6: bool, existing: &OutboundRules, desired: &
             .await
             .log_err();
     }
+    // Installed after the lookup it backs and removed before it.
+    if desired.reject != existing.reject {
+        ip().arg("rule")
+            .arg(if desired.reject { "add" } else { "del" })
+            .arg("from")
+            .arg("all")
+            .arg("unreachable")
+            .arg("priority")
+            .arg(DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY.to_string())
+            .invoke(ErrorKind::Network)
+            .await
+            .log_err();
+    }
     for fwmark in existing
         .wireguard_fwmarks
         .difference(&desired.wireguard_fwmarks)
@@ -1783,18 +1750,6 @@ async fn reconcile_outbound_rules(v6: bool, existing: &OutboundRules, desired: &
             .arg(table.to_string())
             .arg("priority")
             .arg(DEFAULT_OUTBOUND_RULE_PRIORITY.to_string())
-            .invoke(ErrorKind::Network)
-            .await
-            .log_err();
-    }
-    if existing.reject && !desired.reject {
-        ip().arg("rule")
-            .arg("del")
-            .arg("from")
-            .arg("all")
-            .arg("unreachable")
-            .arg("priority")
-            .arg(DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY.to_string())
             .invoke(ErrorKind::Network)
             .await
             .log_err();
@@ -1829,19 +1784,8 @@ fn policy_table_for(device_type: Option<NetworkInterfaceType>, iface: &GatewayId
         .log_err()
 }
 
-/// Declaratively reconcile the StartOS-owned mangle policy-routing rules.
-///
-/// Single-writer (only the gateway coordinator calls this) and applied as one
-/// atomic nft transaction: the mangle chains are flushed and rebuilt from the
-/// active interface set, so there is no multi-writer race and defunct
-/// `mark-<iface>` rules are removed for free by the flush. `restore-mark` is
-/// emitted first so it runs before the per-interface set-mark rules (a new
-/// packet then leaves with mark 0 and routes via the main table).
-///
-/// IPv4 and IPv6 carry the same CONNMARK reply-routing layer, rebuilt together
-/// so a reply to a v6 connection that arrived on a tunnel (host-terminated or
-/// DNAT'd to a container) routes back out it via the priority-51 fwmark rule,
-/// exactly like v4. `sni-divert` is emitted for both families.
+/// Rebuilds the mangle chains in one transaction. The gateway coordinator is
+/// their only writer.
 async fn reconcile_mangle_rules(policy_ifaces: &BTreeMap<GatewayId, u32>) -> Result<(), Error> {
     nft_ensure_base().await?;
     let mut script = String::new();
@@ -1864,13 +1808,14 @@ async fn reconcile_mangle_rules(policy_ifaces: &BTreeMap<GatewayId, u32>) -> Res
     script.push_str(
         "add rule ip6 startos mangle_output meta mark 0x00000000 meta mark set ct mark comment \"restore-mark\"\n",
     );
+    // The reverse-path check reads the packet mark, not the connection mark.
     for (iface, table_id) in policy_ifaces {
         script.push_str(&format!(
-            "add rule ip startos mangle_prerouting iifname \"{iface}\" ct state new ct mark set {table_id} comment \"mark-{iface}\"\n",
+            "add rule ip startos mangle_prerouting iifname \"{iface}\" ct state new ct mark set {table_id} meta mark set {table_id} comment \"mark-{iface}\"\n",
             iface = iface.as_str(),
         ));
         script.push_str(&format!(
-            "add rule ip6 startos mangle_prerouting iifname \"{iface}\" ct state new ct mark set {table_id} comment \"mark-{iface}\"\n",
+            "add rule ip6 startos mangle_prerouting iifname \"{iface}\" ct state new ct mark set {table_id} meta mark set {table_id} comment \"mark-{iface}\"\n",
             iface = iface.as_str(),
         ));
     }
@@ -2160,6 +2105,7 @@ async fn apply_policy_routing(
     guard: &PolicyRoutingGuard,
     iface: &GatewayId,
     lan_ip: &OrdSet<IpAddr>,
+    subnets: &OrdSet<IpNet>,
 ) -> Result<(), Error> {
     let table_id = guard.table_id;
     let table_str = table_id.to_string();
@@ -2186,9 +2132,13 @@ async fn apply_policy_routing(
     }
     cmd.invoke(ErrorKind::Network).await.log_err();
 
-    // The mangle CONNMARK rules — the global `restore-mark` (mangle PREROUTING +
-    // OUTPUT) and this interface's `mark-<iface>` — are reconciled centrally and
-    // atomically by `reconcile_mangle_rules`, so they are not touched here.
+    // Set on `all`, it would validate a diverted reply against its local route.
+    Command::new("sysctl")
+        .arg("-qw")
+        .arg(format!("net/ipv4/conf/{}/src_valid_mark=1", iface.as_str()))
+        .invoke(ErrorKind::Network)
+        .await
+        .log_err();
 
     let rules_output = String::from_utf8(
         Command::new("ip")
@@ -2198,6 +2148,15 @@ async fn apply_policy_routing(
             .await?,
     )?;
     ensure_table_rules(false, table_id, false, &rules_output).await;
+
+    let own_v4: BTreeSet<String> = subnets
+        .iter()
+        .filter_map(|n| match n {
+            IpNet::V4(v4n) => Some(v4n.addr().to_string()),
+            _ => None,
+        })
+        .collect();
+    reconcile_source_rules(false, table_id, &own_v4, &rules_output).await;
 
     Ok(())
 }
@@ -2213,20 +2172,8 @@ fn carries_v6(gateway: Option<Ipv6Addr>, addrs: impl IntoIterator<Item = Ipv6Add
     own && (gateway.is_some() || global)
 }
 
-/// IPv6 counterpart of [`apply_policy_routing`]'s per-interface table work.
-///
-/// The table `1000 + ifindex` holds one route: `default [via gw] dev iface`
-/// when the interface can carry v6, otherwise `blackhole default`; specific
-/// routes are `main`'s, consulted first by the priority-50 rule. That
-/// per-gateway blackhole is the leak guard — a gateway with no IPv6 selected as
-/// the default outbound (the priority-75 catch-all) then drops v6 rather than
-/// letting it fall through to some other interface's default.
-///
-/// The table backs four rule layers: the priority-75 default-outbound catch-all
-/// ([`apply_default_outbound`]), the priority-51 CONNMARK reply-routing rule
-/// (IPv4 parity; marks set by [`reconcile_mangle_rules`]), a priority-60 source
-/// rule per global address on the interface, and on a WireGuard interface a
-/// priority-48 reply rule for global destinations, ahead of `main`.
+/// The table's one route is a default, or `blackhole default` on an interface
+/// that cannot carry v6.
 async fn apply_policy_routing_v6(
     guard: &PolicyRoutingGuard,
     iface: &GatewayId,
@@ -2241,13 +2188,10 @@ async fn apply_policy_routing_v6(
         IpAddr::V6(v6) => Some(*v6),
         _ => None,
     });
-    // Global (non-link-local, non-ULA) v6 addresses of the interface's own — the
-    // delegated-GUA case, where a point-to-point wg tunnel has no gateway but
-    // still routes v6.
-    let global_v6: BTreeSet<String> = subnets
+    let own_v6: BTreeSet<String> = subnets
         .iter()
         .filter_map(|n| match n {
-            IpNet::V6(v6n) if !ipv6_is_local(v6n.addr()) => Some(v6n.addr().to_string()),
+            IpNet::V6(v6n) if !ipv6_is_link_local(v6n.addr()) => Some(v6n.addr().to_string()),
             _ => None,
         })
         .collect();
@@ -2294,15 +2238,20 @@ async fn apply_policy_routing_v6(
     let replies_outrank_main = v6_capable && device_type == Some(NetworkInterfaceType::Wireguard);
     ensure_table_rules(true, table_id, replies_outrank_main, &rules_output).await;
 
-    // Ensure a priority-60 source rule per global v6 address on this interface.
-    // The CONNMARK rule above cannot catch the reply that opens a connection:
-    // the kernel routes a SYN-ACK before the output hook restores its mark, so
-    // it falls to the priority-75 catch-all — and when the default outbound has
-    // no v6, that table's leak-guard `blackhole default` fails the lookup
-    // outright and the reply is dropped before it is ever built. Keyed on
-    // source address, which *is* known that early, this routes it out the
-    // interface that owns it.
-    let existing_src: BTreeSet<String> = rules_output
+    reconcile_source_rules(true, table_id, &own_v6, &rules_output).await;
+
+    Ok(())
+}
+
+/// A reply is first routed unmarked, by its source address alone.
+async fn reconcile_source_rules(
+    v6: bool,
+    table_id: u32,
+    addrs: &BTreeSet<String>,
+    rules_output: &str,
+) {
+    let table_str = table_id.to_string();
+    let existing: BTreeSet<String> = rules_output
         .lines()
         .filter_map(|l| {
             let toks: Vec<&str> = rule_at_priority(l, SOURCE_RULE_PRIORITY)?
@@ -2315,38 +2264,28 @@ async fn apply_policy_routing_v6(
                 .map(|addr| addr.to_owned())
         })
         .collect();
-    for addr in global_v6.difference(&existing_src) {
-        Command::new("ip")
-            .arg("-6")
-            .arg("rule")
-            .arg("add")
-            .arg("from")
-            .arg(addr)
-            .arg("lookup")
-            .arg(&table_str)
-            .arg("priority")
-            .arg(SOURCE_RULE_PRIORITY.to_string())
-            .invoke(ErrorKind::Network)
-            .await
-            .log_err();
+    for (action, addrs) in [
+        ("add", addrs.difference(&existing)),
+        ("del", existing.difference(addrs)),
+    ] {
+        for addr in addrs {
+            let mut cmd = Command::new("ip");
+            if v6 {
+                cmd.arg("-6");
+            }
+            cmd.arg("rule")
+                .arg(action)
+                .arg("from")
+                .arg(addr)
+                .arg("lookup")
+                .arg(&table_str)
+                .arg("priority")
+                .arg(SOURCE_RULE_PRIORITY.to_string())
+                .invoke(ErrorKind::Network)
+                .await
+                .log_err();
+        }
     }
-    for addr in existing_src.difference(&global_v6) {
-        Command::new("ip")
-            .arg("-6")
-            .arg("rule")
-            .arg("del")
-            .arg("from")
-            .arg(addr)
-            .arg("lookup")
-            .arg(&table_str)
-            .arg("priority")
-            .arg(SOURCE_RULE_PRIORITY.to_string())
-            .invoke(ErrorKind::Network)
-            .await
-            .log_err();
-    }
-
-    Ok(())
 }
 
 async fn poll_ip_info(
@@ -2417,7 +2356,7 @@ async fn poll_ip_info(
     // Policy routing: ensure replies exit the same interface they arrived on,
     // eliminating the need for MASQUERADE.
     if let Some(guard) = policy_guard {
-        apply_policy_routing(guard, iface, &lan_ip).await?;
+        apply_policy_routing(guard, iface, &lan_ip, &subnets).await?;
         // v6 has no NAT/SNI-demux reply layer, but this now installs the v6
         // CONNMARK reply-routing rule (priority 51, IPv4 parity — marks set by
         // `reconcile_mangle_rules`) alongside readying the interface's v6 table
@@ -2865,15 +2804,10 @@ impl NetworkInterfaceController {
 
         if let Some(gw_id) = default_outbound {
             desired.reject = true;
-            let connected = ip_info
-                .get(gw_id)
-                .map_or(false, |info| info.ip_info.is_some());
-            if !connected {
-                if ip_info.contains_key(gw_id) {
-                    tracing::warn!("default outbound gateway {gw_id} is not connected");
-                } else {
-                    tracing::warn!("default outbound gateway {gw_id} not found in ip_info");
-                }
+            match ip_info.get(gw_id) {
+                Some(info) if info.ip_info.is_some() => {}
+                Some(_) => tracing::warn!("default outbound gateway {gw_id} is not connected"),
+                None => tracing::warn!("default outbound gateway {gw_id} not found in ip_info"),
             }
 
             match if_nametoindex(gw_id.as_str()) {

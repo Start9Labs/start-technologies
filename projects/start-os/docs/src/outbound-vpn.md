@@ -26,7 +26,7 @@ By default, StartOS dynamically selects which gateway to use for outbound traffi
 
 ## Leak prevention
 
-A selected gateway acts as a kill switch. If it disconnects, StartOS rejects the traffic assigned to it instead of rerouting that traffic through another gateway. A system-wide selection protects the OS and every service that follows it; a per-service selection protects that service. Choose **Auto** system-wide when you want StartOS to use an available fallback. Choose **System default** for a service when it should follow the system-wide policy. Marketplace access, package downloads, and OS updates remain offline while their selected system-wide gateway is unavailable.
+A selected gateway acts as a kill switch. If it disconnects, StartOS rejects the traffic assigned to it instead of rerouting that traffic through another gateway. A system-wide selection protects the OS and every service that follows it; a per-service selection protects that service. Choose **Auto** system-wide when you want StartOS to use an available fallback. Choose **System default** for a service when it should follow the system-wide policy. Marketplace access, package downloads, and OS updates remain offline while their selected system-wide gateway is unavailable. Your LAN, and connections that reach the server through any other gateway, keep working.
 
 StartOS treats IPv6 outbound routing the same way as IPv4: the default gateway is chosen by route metric, and you can set the system-wide default under `System > Gateways > Outbound Traffic`.
 

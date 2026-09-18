@@ -24,6 +24,7 @@ pub mod vhost;
 pub mod web_server;
 pub mod wifi;
 
+/// The `ip rule` ladder in evaluation order; policy-routing.md derives it.
 const TUNNEL_REPLY_RULE_PRIORITY: u32 = 48;
 const DIVERT_RULE_PRIORITY: u32 = 49;
 const MAIN_RULE_PRIORITY: u32 = 50;
@@ -34,6 +35,8 @@ const SERVICE_OUTBOUND_REJECT_RULE_PRIORITY: u32 = 71;
 const WG_ENCAP_RULE_PRIORITY: u32 = 74;
 const DEFAULT_OUTBOUND_RULE_PRIORITY: u32 = 75;
 const DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY: u32 = 76;
+const AUTO_MAIN_RULE_PRIORITY: u32 = 1000;
+const AUTO_DEFAULT_RULE_PRIORITY: u32 = 1100;
 
 const _: () = {
     let evaluation_order = [
@@ -47,6 +50,8 @@ const _: () = {
         WG_ENCAP_RULE_PRIORITY,
         DEFAULT_OUTBOUND_RULE_PRIORITY,
         DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY,
+        AUTO_MAIN_RULE_PRIORITY,
+        AUTO_DEFAULT_RULE_PRIORITY,
     ];
     let mut i = 1;
     while i < evaluation_order.len() {
@@ -95,7 +100,62 @@ pub fn net_api<C: Context>() -> ParentHandler<C> {
 
 #[cfg(test)]
 mod tests {
-    use super::rule_at_priority;
+    use std::process::Command;
+
+    use super::*;
+
+    #[test]
+    fn ladder_satisfies_the_routing_invariants() {
+        let unshare = |args: &[&str]| {
+            let mut cmd = Command::new("unshare");
+            cmd.arg("-rn").args(args);
+            cmd
+        };
+        if !unshare(&[
+            "bash",
+            "-c",
+            "ip link show lo && sysctl -n net.ipv4.ip_forward",
+        ])
+        .output()
+        .is_ok_and(|o| o.status.success())
+        {
+            eprintln!("skipped: needs unprivileged user namespaces, iproute2, and sysctl");
+            return;
+        }
+        let output = unshare(&["bash", "-c", include_str!("policy_routing_model.sh")])
+            .env("TUNNEL_REPLY", TUNNEL_REPLY_RULE_PRIORITY.to_string())
+            .env("DIVERT", DIVERT_RULE_PRIORITY.to_string())
+            .env("MAIN", MAIN_RULE_PRIORITY.to_string())
+            .env("REPLY", REPLY_RULE_PRIORITY.to_string())
+            .env("SOURCE", SOURCE_RULE_PRIORITY.to_string())
+            .env(
+                "SERVICE_OUTBOUND",
+                SERVICE_OUTBOUND_RULE_PRIORITY.to_string(),
+            )
+            .env(
+                "SERVICE_OUTBOUND_REJECT",
+                SERVICE_OUTBOUND_REJECT_RULE_PRIORITY.to_string(),
+            )
+            .env("WG_ENCAP", WG_ENCAP_RULE_PRIORITY.to_string())
+            .env(
+                "DEFAULT_OUTBOUND",
+                DEFAULT_OUTBOUND_RULE_PRIORITY.to_string(),
+            )
+            .env(
+                "DEFAULT_OUTBOUND_REJECT",
+                DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY.to_string(),
+            )
+            .env("AUTO_MAIN", AUTO_MAIN_RULE_PRIORITY.to_string())
+            .env("AUTO_DEFAULT", AUTO_DEFAULT_RULE_PRIORITY.to_string())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
 
     #[test]
     fn rule_at_priority_matches_the_whole_priority_column() {
