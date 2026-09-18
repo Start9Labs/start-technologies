@@ -17,7 +17,7 @@ jest.mock('@start9labs/start-sdk/lib/util/SubContainer', () => ({
 }))
 
 describe('DockerProcedureContainer', () => {
-  test('requests a legacy certificate only for SSL addresses', async () => {
+  test('retains legacy onion certificate names while excluding plaintext addresses', async () => {
     const getSslCertificate = jest.fn().mockResolvedValue(['certificate'])
     const getSslKey = jest.fn().mockResolvedValue('key')
     const effects = {
@@ -28,6 +28,7 @@ describe('DockerProcedureContainer', () => {
               available: [
                 { hostname: 'server.local', ssl: false },
                 { hostname: '198.51.100.12', ssl: false },
+                { hostname: 'legacy-service.onion', ssl: false },
                 { hostname: 'server.local', ssl: true },
               ],
             },
@@ -74,6 +75,7 @@ describe('DockerProcedureContainer', () => {
 
     const hostnames = [
       'legacy-service.embassy',
+      'legacy-service.onion',
       'server.local',
       'service.example.com',
     ]

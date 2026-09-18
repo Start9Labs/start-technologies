@@ -92,7 +92,7 @@ export class DockerProcedureContainer extends Drop {
             ...new Set(
               Object.values(hostInfo?.bindings || {})
                 .flatMap(b => b.addresses.available)
-                .filter(h => h.ssl)
+                .filter(h => h.ssl || h.hostname.endsWith('.onion'))
                 .map(h => h.hostname),
             ).values(),
           ]
