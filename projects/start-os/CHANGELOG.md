@@ -527,6 +527,12 @@ for the detail behind its highlights.
   through a gateway that has an IPv6 router but no IPv6 address of its own
   fails immediately.
 
+- **A service's outbound gateway carries its IPv6 as well as its IPv4.** A
+  service sent through its own gateway with **Set Outbound Gateway** kept using
+  the system-wide default for IPv6, so those connections left under a different
+  address than the one you chose. When the service's gateway can't carry IPv6,
+  the service's IPv6 is dropped.
+
 ## [0.4.0.1]
 
 ### Changed
