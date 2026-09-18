@@ -96,6 +96,12 @@ for the detail behind its highlights.
 
 ### Changed
 
+- **ZRAM compressed swap is now off by default, and updating turns it off on
+  your server.** With it on, services under heavy memory load could take the RAM
+  StartOS reserves for itself and leave the server unreachable. A server that
+  leaned on ZRAM to fit its services has less memory to work with after the
+  update. `start-cli server experimental zram --enable` turns it back on.
+
 - **Your server's name is now its `.local` address, without the `.local` on the
   end.** A server previously carried two names: a display label shown in the
   browser tab, and the `.local` address derived from it by lowercasing and
@@ -132,6 +138,10 @@ for the detail behind its highlights.
   driver still provides display output without GPU compute.
 
 ### Fixed
+
+- **Nextcloud (Legacy) and other migrated 0.3.5.1 services with a
+  package-managed certificate start when the server has a public IP or uses
+  StartTunnel.**
 
 - **Service interfaces show addresses only for gateways that accept inbound
   connections.** Commercial VPNs remain available for system-wide and
@@ -407,6 +417,13 @@ for the detail behind its highlights.
 - **The copy taken before an update is now made with the service stopped**, so it can
   no longer capture a database mid-write.
 
+- **A service's outbound gateway takes precedence over the system-wide
+  default.** You can keep one gateway pinned under **System > Gateways >
+  Outbound Traffic** while sending selected services through another gateway
+  with **Set Outbound Gateway**. A service given its own gateway while a
+  system-wide gateway was pinned has been following the system-wide one, and
+  switches to its own when you update.
+
 - **A service reached over IPv6 through a tunnel now answers.** StartOS sends a
   reply back out the interface its connection arrived on by restoring a
   connection mark, but the kernel routes the reply that _opens_ a connection
@@ -416,6 +433,14 @@ for the detail behind its highlights.
   sent, so an inbound IPv6 connection to a tunnel-delegated address hung until
   it timed out. A reply from an interface's own global IPv6 address now leaves
   by that interface. IPv4, and traffic forwarded to a service container, were
+  unaffected.
+
+- **A tunnel's IPv6 address now loads from a device on the server's own
+  network.** A phone or computer sharing the server's network connected to an
+  IPv6 address delegated through a tunnel — directly, or through a public domain
+  pointing at it — and then hung until the request timed out, while devices
+  everywhere else loaded it normally. The connection itself appeared to succeed,
+  so a domain that also had an IPv4 address never fell back to it. IPv4 was
   unaffected.
 
 - **Notification selection checkboxes no longer cover text on phones.** When
@@ -519,6 +544,16 @@ for the detail behind its highlights.
 - **Outbound IPv6 uses an address assigned to the selected gateway.** Traffic
   through a gateway that has an IPv6 router but no IPv6 address of its own
   fails immediately.
+
+- **A service's outbound gateway carries its IPv6 as well as its IPv4.** A
+  service sent through its own gateway with **Set Outbound Gateway** kept using
+  the system-wide default for IPv6, so those connections left under a different
+  address than the one you chose. When the service's gateway can't carry IPv6,
+  the service's IPv6 is dropped.
+
+- **A service's outbound gateway applies from the moment the service starts.**
+  A service that had just started or restarted used the system-wide default
+  until a gateway next changed.
 
 ## [0.4.0.1]
 

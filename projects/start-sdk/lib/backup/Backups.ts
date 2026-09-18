@@ -1122,11 +1122,7 @@ async function runRsync(rsyncOptions: {
   args.push('--inplace')
   args.push('--timeout=300')
   args.push('--info=progress2')
-  // --no-inc-recursive would give accurate progress percentages (since rsync
-  // knows the full file list up front), but it forces a full pre-scan that
-  // causes timeouts on large backups. If we start surfacing progress to users,
-  // do a raw file count up front and compute percentage from bytes/files seen
-  // instead of relying on rsync's own percentage.
+  // --no-inc-recursive's full pre-scan times out large backups.
   args.push(srcPath)
   args.push(dstPath)
   const spawned = child_process.spawn(command, args, { detached: true })
@@ -1139,7 +1135,8 @@ async function runRsync(rsyncOptions: {
         if (line) console.log(line)
         continue
       }
-      percentage = Number.parseFloat(parsed)
+      // rsync's percentage falls as incremental recursion finds more files.
+      percentage = Math.max(percentage, Number.parseFloat(parsed))
     }
   })
 

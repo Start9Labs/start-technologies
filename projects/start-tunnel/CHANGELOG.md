@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Published-port controls remain authoritative during device refreshes.** A
+  device renewing or deleting an automatic mapping leaves manual mappings
+  intact, and a disabled mapping stays disabled while its lease is renewed.
+  This applies to IPv4 forwards, SNI routes and fallbacks, and IPv6 pinholes.
+
+- **A device can repoint an automatic mapping it already holds.** A request for
+  the same external port or SNI hostname with a different internal port
+  updates the mapping, as does a different range size on an IPv4 forward.
+  Previously IPv4 forwards, SNI routes and SNI fallbacks refused it until the
+  old lease expired.
+
 - **Port forwards left behind by an earlier run of the daemon are cleared at
   startup.** After a crash, or a restart during which the tunnel's WAN address
   changed, a stale forward could keep sending a port to an old address until

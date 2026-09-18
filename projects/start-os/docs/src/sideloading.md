@@ -1,6 +1,6 @@
 # Sideloading
 
-Sideloading lets you install a service from a `.s9pk` file without using any registry. This is useful when testing a service in development, installing a service that is not listed on any registry, or if you prefer to eliminate the Marketplace as a point of trust.
+Sideloading lets you install a service from a `.s9pk` file without using any registry. This is useful when testing a service in development, installing a service that is not listed on any registry, running a [second copy of a service](faq.md#can-i-run-two-copies-of-the-same-service), or if you prefer to eliminate the Marketplace as a point of trust.
 
 ## How to Sideload
 

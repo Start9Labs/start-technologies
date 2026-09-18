@@ -162,7 +162,7 @@ on Librem Mini v2 systems when no preference is saved and the setting is availab
 
 ### `start-cli server experimental zram`
 
-Enable or disable ZRAM compressed swap.
+Enable or disable ZRAM compressed swap. ZRAM is disabled by default.
 
 - `--enable` — Enable zram
 

@@ -186,7 +186,7 @@ impl SniDemux {
     }
 
     /// Registers all hostnames atomically and starts their shared listener.
-    /// Returns `RESULT_HOSTNAME_TAKEN` for an occupied name or
+    /// Returns `RESULT_HOSTNAME_TAKEN` for a name another device holds or
     /// `RESULT_NO_RESOURCES` when the listener cannot bind.
     pub fn register(
         self: &Arc<Self>,
@@ -196,6 +196,9 @@ impl SniDemux {
         target: SocketAddrV4,
         lifetime_secs: Option<u32>,
     ) -> Result<(), u8> {
+        if hostnames.is_empty() {
+            return Ok(());
+        }
         self.register_transaction(ext_ip, ext_port, hostnames, target, lifetime_secs)
             .map(|_| ())
     }
@@ -220,7 +223,7 @@ impl SniDemux {
             entry.prune(now);
             for name in hostnames {
                 if let Some(b) = entry.hostnames.get(name) {
-                    if b.target != target {
+                    if b.target.ip() != target.ip() {
                         return Err(RESULT_HOSTNAME_TAKEN);
                     }
                 }
@@ -345,7 +348,10 @@ impl SniDemux {
         let key = (ext_ip, ext_port);
         let previous = self.ports.mutate(|ports| {
             let entry = ports.entry(key).or_default();
-            if entry.fallback.is_some_and(|f| f.target != fallback.target) {
+            if entry
+                .fallback
+                .is_some_and(|f| f.target.ip() != fallback.target.ip())
+            {
                 return Err(RESULT_HOSTNAME_TAKEN);
             }
             let previous = entry.fallback;
@@ -948,6 +954,53 @@ mod tests {
         let remaining = snap[0].remaining_secs.unwrap();
         assert!(remaining > 3590 && remaining <= 3600, "got {remaining}");
         assert_eq!(snap[1].remaining_secs, None);
+    }
+
+    #[tokio::test]
+    async fn a_device_repoints_its_own_bindings() {
+        let demux = SniDemux::new();
+        let ip = Ipv4Addr::LOCALHOST;
+        let port = 44301u16;
+        let hostname = ["a.example.com".to_string()];
+        let mine = |port| SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), port);
+        let theirs = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 2), 9443);
+        let anywhere = Ipv4Addr::new(203, 0, 113, 50);
+
+        demux
+            .register(ip, port, &hostname, mine(8443), None)
+            .unwrap();
+        demux.register_fallback(ip, port, mine(8443)).unwrap();
+        assert_eq!(
+            demux.register(ip, port, &hostname, theirs, None),
+            Err(RESULT_HOSTNAME_TAKEN)
+        );
+        assert_eq!(
+            demux.register_fallback(ip, port, theirs),
+            Err(RESULT_HOSTNAME_TAKEN)
+        );
+        demux
+            .register(ip, port, &hostname, mine(9443), None)
+            .unwrap();
+        demux.register_fallback(ip, port, mine(9443)).unwrap();
+        demux.ports.peek(|p| {
+            let pb = p.get(&(ip, port)).unwrap();
+            assert_eq!(
+                pb.select(Some("a.example.com"), anywhere),
+                Some((mine(9443), true))
+            );
+            assert_eq!(pb.select(None, anywhere), Some((mine(9443), true)));
+        });
+    }
+
+    #[tokio::test]
+    async fn registering_no_hostnames_starts_no_listener() {
+        let demux = SniDemux::new();
+        let target = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 443);
+        demux
+            .register(Ipv4Addr::LOCALHOST, 0, &[], target, None)
+            .unwrap();
+        assert!(demux.ports.peek(|p| p.is_empty()));
+        assert!(demux.listeners.peek(|l| l.is_empty()));
     }
 
     #[tokio::test]

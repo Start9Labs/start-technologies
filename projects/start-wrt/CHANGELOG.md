@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   choosing **Keep settings** is the way to get there without losing anything —
   that path preserves the settings the name is stored in.
 
+- **A device can move a hostname route it holds to another of its own ports.**
+  Previously the request was refused as taken until the old lease expired.
+
 ## [1.1.1]
 
 ### Fixed

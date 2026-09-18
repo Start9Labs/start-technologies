@@ -16,6 +16,7 @@ use tracing::instrument;
 
 use crate::db::model::Database;
 use crate::hostname::ServerHostname;
+use crate::net::SERVICE_OUTBOUND_RULE_PRIORITY;
 use crate::net::dns::DnsController;
 use crate::net::dns_update::{DnsUpdateController, spawn_server_mdns_injection};
 use crate::net::forward::{
@@ -919,6 +920,99 @@ impl NetServiceData {
         self.binds.remove(&id);
         Ok(())
     }
+
+    fn outbound_sources(&self) -> Vec<IpAddr> {
+        std::iter::once(IpAddr::V4(self.ip))
+            .chain(self.ipv6.map(IpAddr::V6))
+            .collect()
+    }
+}
+
+fn ip_rule(source: IpAddr) -> Command {
+    let mut cmd = Command::new("ip");
+    if source.is_ipv6() {
+        cmd.arg("-6");
+    }
+    cmd.arg("rule");
+    cmd
+}
+
+async fn outbound_rule(action: &str, source: IpAddr, table: u32) -> Result<(), Error> {
+    ip_rule(source)
+        .arg(action)
+        .arg("from")
+        .arg(source.to_string())
+        .arg("lookup")
+        .arg(table.to_string())
+        .arg("priority")
+        .arg(SERVICE_OUTBOUND_RULE_PRIORITY.to_string())
+        .invoke(ErrorKind::Network)
+        .await?;
+    Ok(())
+}
+
+async fn purge_outbound_rules(sources: &[IpAddr]) {
+    for source in sources {
+        while ip_rule(*source)
+            .arg("del")
+            .arg("from")
+            .arg(source.to_string())
+            .arg("priority")
+            .arg(SERVICE_OUTBOUND_RULE_PRIORITY.to_string())
+            .invoke(ErrorKind::Network)
+            .await
+            .is_ok()
+        {}
+    }
+}
+
+async fn sync_outbound_rules(
+    db: &TypedPatchDb<Database>,
+    id: &PackageId,
+    sources: &[IpAddr],
+    current_table: &mut Option<u32>,
+) {
+    if let Err(e) = async {
+        let gateway: Option<GatewayId> = db
+            .peek()
+            .await
+            .as_public()
+            .as_package_data()
+            .as_idx(id)
+            .and_then(|p| p.as_outbound_gateway().de().ok())
+            .flatten();
+        let table = gateway.and_then(|gateway| {
+            if_nametoindex(gateway.as_str())
+                .map(|idx| 1000 + idx)
+                .log_err()
+        });
+        if table == *current_table {
+            return Ok(());
+        }
+        // The rule being replaced keeps routing until it is deleted.
+        if let Some(table) = table {
+            for source in sources {
+                if let Err(e) = outbound_rule("add", *source, table).await {
+                    for source in sources {
+                        let _ = outbound_rule("del", *source, table).await;
+                    }
+                    return Err(e);
+                }
+            }
+        }
+        if let Some(old_table) = *current_table {
+            for source in sources {
+                let _ = outbound_rule("del", *source, old_table).await;
+            }
+        }
+        *current_table = table;
+        Ok::<_, Error>(())
+    }
+    .await
+    {
+        tracing::error!("Failed to update outbound gateway for {id}: {e}");
+        tracing::debug!("{e:?}");
+    }
 }
 
 pub struct NetService {
@@ -953,7 +1047,7 @@ impl NetService {
         let synced = Watch::new(0u64);
         let synced_writer = synced.clone();
 
-        let ip = data.ip;
+        let outbound_sources = data.outbound_sources();
         let data = Arc::new(Mutex::new(data));
         let thread_data = data.clone();
         let sync_task = tokio::spawn(async move {
@@ -961,24 +1055,7 @@ impl NetService {
                 let ptr: JsonPointer = format!("/public/packageData/{}/hosts", id).parse().unwrap();
                 let mut watch = db.watch(ptr).await.typed::<Hosts>();
 
-                // Outbound gateway enforcement
-                let service_ip = ip.to_string();
-                // Purge any stale rules from a previous instance
-                loop {
-                    if Command::new("ip")
-                        .arg("rule")
-                        .arg("del")
-                        .arg("from")
-                        .arg(&service_ip)
-                        .arg("priority")
-                        .arg("100")
-                        .invoke(ErrorKind::Network)
-                        .await
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
+                purge_outbound_rules(&outbound_sources).await;
                 let mut outbound_sub = db
                     .subscribe(
                         format!("/public/packageData/{}/outboundGateway", id)
@@ -995,6 +1072,7 @@ impl NetService {
                 }
                 drop(ctrl_for_ip);
                 let mut current_outbound_table: Option<u32> = None;
+                sync_outbound_rules(&db, id, &outbound_sources, &mut current_outbound_table).await;
 
                 loop {
                     let (hosts_changed, outbound_changed) = tokio::select! {
@@ -1049,82 +1127,23 @@ impl NetService {
                         }
                     }
 
-                    // Handle outbound gateway changes
                     if outbound_changed {
-                        if let Err(e) = async {
-                            // Remove old rule if any
-                            if let Some(old_table) = current_outbound_table.take() {
-                                let old_table_str = old_table.to_string();
-                                let _ = Command::new("ip")
-                                    .arg("rule")
-                                    .arg("del")
-                                    .arg("from")
-                                    .arg(&service_ip)
-                                    .arg("lookup")
-                                    .arg(&old_table_str)
-                                    .arg("priority")
-                                    .arg("100")
-                                    .invoke(ErrorKind::Network)
-                                    .await;
-                            }
-                            // Read current outbound gateway from DB
-                            let outbound_gw: Option<GatewayId> = db
-                                .peek()
-                                .await
-                                .as_public()
-                                .as_package_data()
-                                .as_idx(id)
-                                .map(|p| p.as_outbound_gateway().de().ok())
-                                .flatten()
-                                .flatten();
-                            if let Some(gw_id) = outbound_gw {
-                                // Look up table ID for this gateway
-                                if let Some(table_id) = if_nametoindex(gw_id.as_str())
-                                    .map(|idx| 1000 + idx)
-                                    .log_err()
-                                {
-                                    let table_str = table_id.to_string();
-                                    Command::new("ip")
-                                        .arg("rule")
-                                        .arg("add")
-                                        .arg("from")
-                                        .arg(&service_ip)
-                                        .arg("lookup")
-                                        .arg(&table_str)
-                                        .arg("priority")
-                                        .arg("100")
-                                        .invoke(ErrorKind::Network)
-                                        .await
-                                        .log_err();
-                                    current_outbound_table = Some(table_id);
-                                }
-                            }
-                            Ok::<_, Error>(())
-                        }
-                        .await
-                        {
-                            tracing::error!("Failed to update outbound gateway for {id}: {e}");
-                            tracing::debug!("{e:?}");
-                        }
+                        sync_outbound_rules(
+                            &db,
+                            id,
+                            &outbound_sources,
+                            &mut current_outbound_table,
+                        )
+                        .await;
                     }
 
                     synced_writer.send_modify(|v| *v += 1);
                 }
 
-                // Cleanup outbound rule on task exit
                 if let Some(table_id) = current_outbound_table {
-                    let table_str = table_id.to_string();
-                    let _ = Command::new("ip")
-                        .arg("rule")
-                        .arg("del")
-                        .arg("from")
-                        .arg(&service_ip)
-                        .arg("lookup")
-                        .arg(&table_str)
-                        .arg("priority")
-                        .arg("100")
-                        .invoke(ErrorKind::Network)
-                        .await;
+                    for source in &outbound_sources {
+                        let _ = outbound_rule("del", *source, table_id).await;
+                    }
                 }
             } else {
                 let ptr: JsonPointer = "/public/serverInfo/network/host".parse().unwrap();
@@ -1459,23 +1478,8 @@ impl NetService {
             }
         }
         self.sync_task.abort();
-        // Clean up any outbound gateway ip rules for this service
-        let service_ip = self.data.lock().await.ip.to_string();
-        loop {
-            if Command::new("ip")
-                .arg("rule")
-                .arg("del")
-                .arg("from")
-                .arg(&service_ip)
-                .arg("priority")
-                .arg("100")
-                .invoke(ErrorKind::Network)
-                .await
-                .is_err()
-            {
-                break;
-            }
-        }
+        let outbound_sources = self.data.lock().await.outbound_sources();
+        purge_outbound_rules(&outbound_sources).await;
         // Set last: an earlier failure leaves shutdown false so Drop's fallback re-runs.
         self.shutdown = true;
         Ok(())
@@ -1642,5 +1646,41 @@ mod tests {
         assert!(vhosts.is_empty());
         assert!(private_dns.is_empty());
         assert!(gua_forwards.is_empty());
+    }
+
+    fn args(cmd: &Command) -> Vec<&str> {
+        cmd.as_std()
+            .get_args()
+            .map(|a| a.to_str().unwrap())
+            .collect()
+    }
+
+    /// `ip rule` rejects an IPv6 source without `-6`.
+    #[test]
+    fn outbound_rule_family_follows_its_source() {
+        assert_eq!(args(&ip_rule("10.0.3.5".parse().unwrap())), ["rule"]);
+        assert_eq!(args(&ip_rule("fd00:3::5".parse().unwrap())), ["-6", "rule"]);
+    }
+
+    #[test]
+    fn outbound_sources_cover_every_address_the_container_holds() {
+        let mut data = NetServiceData {
+            id: None,
+            ip: Ipv4Addr::new(10, 0, 3, 5),
+            ipv6: None,
+            _dns: Default::default(),
+            controller: Default::default(),
+            binds: BTreeMap::new(),
+        };
+        assert_eq!(
+            data.outbound_sources(),
+            ["10.0.3.5".parse::<IpAddr>().unwrap()]
+        );
+
+        data.ipv6 = Some("fd00:3::5".parse().unwrap());
+        assert_eq!(
+            data.outbound_sources(),
+            ["10.0.3.5", "fd00:3::5"].map(|a| a.parse::<IpAddr>().unwrap())
+        );
     }
 }

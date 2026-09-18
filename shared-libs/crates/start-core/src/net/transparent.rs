@@ -38,7 +38,7 @@ impl Default for DivertConfig {
     fn default() -> Self {
         DivertConfig {
             route_table: DIVERT_TABLE,
-            rule_priority: 49,
+            rule_priority: crate::net::DIVERT_RULE_PRIORITY,
             masked_fwmark: false,
             manage_nft: true,
         }

@@ -308,7 +308,7 @@ export const mockPatchData: DataModel = {
     ntpSynced: false,
     smtp: null,
     echoipUrls: ['https://ipconfig.me', 'https://ifconfig.co'],
-    zram: true,
+    zram: false,
     governor: 'performance',
     epp: 'balance_power',
     ram: 8 * 1024 * 1024 * 1024,

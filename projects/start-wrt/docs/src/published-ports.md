@@ -88,7 +88,7 @@ Ports the router answers on itself are protected the same way. If you have [Remo
 
 ### Hostname routes (shared ports)
 
-A device can also ask for a **hostname route** instead of a whole port: the router inspects each incoming TLS connection's requested hostname (SNI) and delivers it to whichever device registered that hostname, so several devices — or several services on one StartOS server — can share a single external port such as 443. StartOS servers use this automatically when you give services on a shared port their own domains.
+A device can also ask for a **hostname route** instead of a whole port: the router inspects each incoming TLS connection's requested hostname (SNI) and delivers it to whichever device registered that hostname, so several devices — or several services on one StartOS server — can share a single external port such as 443. StartOS servers use this automatically when you give services on a shared port their own domains. A hostname stays with the device that registered it: that device can move it to another of its own ports, and no other device can claim it meanwhile.
 
 Hostname routes appear in the same **Automatic** section with `SNI` in the Kind column and the hostname shown alongside. They follow the same rules as other automatic forwards — per-device permission, the device renews them, they expire on their own — with two differences: a shared port is claimed whole (an ordinary forward on that port is refused while hostname routes hold it, and publishing it manually asks you to confirm), and hostname routes do not survive a router restart — the device simply re-registers them within a few minutes, so no action is needed.
 

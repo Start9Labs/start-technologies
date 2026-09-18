@@ -34,6 +34,8 @@ For its own connections — marketplace, service-package and OS-update downloads
 
 ## Route Individual Services Through VPN
 
-A service's own setting always takes precedence over the system-wide default — whether that default is Auto or a pinned gateway. To set one, navigate to a service and go to **Actions > Set Outbound Gateway**. This lets you route individual services through different VPNs while leaving others on the default; choose "System default" in that dialog to clear the override and follow the system-wide setting again.
+A service's own setting always takes precedence over the system-wide default — whether that default is Auto or a pinned gateway. To set one, navigate to a service and go to **Actions > Set Outbound Gateway**. You can keep one gateway pinned system-wide while routing selected services through another; choose "System default" in that dialog to clear the override and follow the system-wide setting again.
 
 For example, you could route your Bitcoin node through Mullvad for privacy while leaving Nextcloud on the default gateway for better performance — even with Mullvad also pinned as the system-wide default.
+
+A service's gateway carries its IPv6 as well as its IPv4, with the same [leak prevention](#ipv6-leak-prevention) as the system-wide default: if the gateway you choose for a service can't carry IPv6, StartOS drops that service's IPv6.

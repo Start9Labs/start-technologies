@@ -220,6 +220,8 @@
   numeric segment with a leading zero is rejected, as it already was on the OS
   side
 
+- **Backup and restore progress no longer falls back mid-sync**
+
 ### Security
 
 - **ESLint and typescript-eslint carry patched `brace-expansion` and
