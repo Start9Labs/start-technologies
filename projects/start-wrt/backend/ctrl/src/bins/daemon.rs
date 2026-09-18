@@ -361,7 +361,7 @@ async fn inner_main() -> Result<(), Error> {
         // The IGD UUID derives from the initialized root CA.
         // Configure reply diversion before constructing the SNI demux.
         startos::net::transparent::set_divert_config(startos::net::transparent::DivertConfig {
-            route_table: 5344,
+            route_table: startos::net::transparent::DIVERT_TABLE,
             rule_priority: 49,
             masked_fwmark: true,
             manage_nft: false,
