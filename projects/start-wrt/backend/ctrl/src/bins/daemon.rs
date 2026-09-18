@@ -450,7 +450,8 @@ async fn inner_main() -> Result<(), Error> {
         .layer(Extension(proxy_client))
         .layer(Extension(app_state));
 
-    // WAN-specific demux listeners require every wildcard listener to use SO_REUSEPORT.
+    // WAN-specific listeners (the SNI demux on 443, the HTTP→HTTPS redirect on
+    // 80; see `http_redirect.rs`) require every wildcard listener to use SO_REUSEPORT.
     let http_addr = SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], 80));
     let http_listener = startos::net::utils::bind_tokio_listener_reuse_port(http_addr)
         .with_kind(ErrorKind::Network)?;

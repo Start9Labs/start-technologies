@@ -108,6 +108,8 @@ pub struct FirewallRedirect {
     pub target: String,
     #[uci(default)]
     pub enabled: Option<String>,
+    #[uci(default)]
+    pub family: Option<String>,
     /// NAT reflection (hairpin). Unset is fw4's default of enabled.
     #[uci(default)]
     pub reflection: Option<bool>,
@@ -133,6 +135,10 @@ pub struct FirewallRedirect {
     /// VPN), so later saves don't re-prompt for the same collision.
     #[uci(default)]
     pub _pp_wan_override: Option<String>,
+    /// "1" on the router's own WAN tcp/80 → HTTP-redirect DNAT. Nothing else
+    /// may hold that section.
+    #[uci(default)]
+    pub _startwrt_http_redirect: Option<String>,
 }
 
 #[derive(Debug, TypedSection)]
