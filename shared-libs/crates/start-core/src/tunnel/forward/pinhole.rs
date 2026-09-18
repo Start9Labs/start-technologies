@@ -131,6 +131,7 @@ pub async fn add_pinhole(
     label: Option<String>,
     auto: bool,
 ) -> Result<bool, Error> {
+    let _guard = ctx.forward_write_lock.lock().await;
     let key = SocketAddrV6::new(gua, external_port, 0, 0);
     let internal = (internal_port != external_port).then_some(internal_port);
     let refresh = ctx
@@ -181,6 +182,7 @@ pub async fn set_pinhole_enabled(
     external_port: u16,
     enabled: bool,
 ) -> Result<(), Error> {
+    let _guard = ctx.forward_write_lock.lock().await;
     let key = SocketAddrV6::new(gua, external_port, 0, 0);
     ctx.db
         .mutate(|db| {
@@ -236,6 +238,7 @@ async fn remove_pinhole_matching(
     external_port: u16,
     auto_only: bool,
 ) -> bool {
+    let _guard = ctx.forward_write_lock.lock().await;
     let key = SocketAddrV6::new(gua, external_port, 0, 0);
     let removed = ctx
         .db
