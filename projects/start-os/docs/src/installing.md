@@ -21,3 +21,7 @@ If a service listing shows an older version than what you have installed, the Ma
 ## Switching Flavors
 
 If multiple [flavors](flavors.md) of a service exist, the Marketplace will display a **Switch** button when viewing a different flavor than the one currently installed.
+
+## Running a Second Copy
+
+A service can be installed once per server. Running a second copy means maintaining your own fork of the package under a different ID — see [the FAQ](faq.md#can-i-run-two-copies-of-the-same-service).

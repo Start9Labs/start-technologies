@@ -22,6 +22,8 @@ StartOS makes this practical. Install a Bitcoin node from the StartOS Marketplac
 
 - **[Lightning Wallets](lightning-wallets.md)** — How LND and Core Lightning hand a wallet its connection, and the apps and dashboards that take it — Zeus, BitBanana, RTL, LNbits, Alby Hub, and more.
 
+- **[Continuous Backups](continuous-backups.md)** — Why a StartOS backup is not enough for LND or Bark Wallet, and how to keep a current, encrypted copy on Google Drive, Dropbox, Nextcloud or an SFTP server.
+
 - **[Migrating LND to StartOS](lnd-migration.md)** — How to transfer your LND node from Umbrel, myNode, or another StartOS server without closing channels.
 
 ## Supported Implementations
