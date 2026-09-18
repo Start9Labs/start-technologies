@@ -250,6 +250,31 @@ async fn control(
     handle_control(&ctx, peer, &headers, &body).await
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DnatRefresh {
+    install: bool,
+    lease: bool,
+}
+
+fn dnat_refresh(
+    entry: Option<&PortForward>,
+    target: SocketAddrV4,
+    count: u16,
+) -> Result<Option<DnatRefresh>, u16> {
+    match entry {
+        Some(PortForward::Dnat {
+            target: existing,
+            count: existing_count,
+            ..
+        }) if *existing != target || *existing_count != count => Err(718),
+        Some(PortForward::Dnat { enabled, auto, .. }) => Ok(Some(DnatRefresh {
+            install: *enabled,
+            lease: *auto,
+        })),
+        _ => Ok(None),
+    }
+}
+
 /// Installs (or re-asserts) a forward of `count` contiguous ports (a PCP
 /// PORT_SET range) from `source` to `target`. `protocol_label` is the DB label
 /// (e.g. "UPnP", "PCP"); the requesting device is already shown by the forward's
@@ -269,30 +294,9 @@ pub(super) async fn apply_peer_forward_range(
     if lo <= 80 && 80 <= lo.saturating_add(count.saturating_sub(1)) {
         return Err(718); // ConflictInMappingEntry — port 80 owned by the redirect
     }
-    match current_forward(ctx, source).await {
-        Some(PortForward::Dnat {
-            target: t,
-            count: c,
-            ..
-        }) if t != target || c != count => {
-            return Err(718); // ConflictInMappingEntry
-        }
-        // The external port is SNI-demuxed. A single hostname-less MAP becomes the
-        // port's fallback (a bare public IP sharing the port with named domains);
-        // `persist_fallback_forward` stamps its own SniFallback lease. A range
-        // can't be a single-port fallback, so it still conflicts.
-        Some(PortForward::Sni { .. }) => {
-            if count != 1 {
-                return Err(718); // ConflictInMappingEntry
-            }
-            return ctx
-                .persist_fallback_forward_locked(source, target, lifetime, true, None)
-                .await
-                .map_err(|_| 718u16);
-        }
-        Some(PortForward::Dnat { .. }) => {
-            // Idempotent re-assert from the client's periodic refresh: ensure the
-            // nft forward is actually installed.
+    let current = current_forward(ctx, source).await;
+    if let Some(refresh) = dnat_refresh(current.as_ref(), target, count)? {
+        if refresh.install {
             let active = ctx.active_forwards.mutate(|m| m.contains_key(&source));
             if !active {
                 let prefix = prefix_for(ctx, target.ip()).await;
@@ -305,12 +309,22 @@ pub(super) async fn apply_peer_forward_range(
                     m.insert(source, rc);
                 });
             }
+        }
+        if refresh.lease {
             if let Some(lt) = lifetime {
                 lease::stamp(ctx, LeaseKey::Dnat(source), lt);
             }
-            return Ok(());
         }
-        None => {}
+        return Ok(());
+    }
+    if matches!(current, Some(PortForward::Sni { .. })) {
+        if count != 1 {
+            return Err(718); // ConflictInMappingEntry
+        }
+        return ctx
+            .persist_fallback_forward_locked(source, target, lifetime, true, None)
+            .await
+            .map_err(|_| 718u16);
     }
 
     // A new range must not overlap a different existing forward's ports on this
@@ -462,4 +476,56 @@ pub(in crate::tunnel) async fn prefix_for(ctx: &TunnelContext, target_ip: &Ipv4A
             })
         })
         .unwrap_or(32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dnat(target: &str, count: u16, enabled: bool, auto: bool) -> PortForward {
+        PortForward::Dnat {
+            target: target.parse().unwrap(),
+            label: None,
+            enabled,
+            count,
+            auto,
+        }
+    }
+
+    #[test]
+    fn disabled_automatic_dnat_renews_without_installing() {
+        let target = "10.59.0.2:443".parse().unwrap();
+        assert_eq!(
+            dnat_refresh(Some(&dnat("10.59.0.2:443", 1, false, true)), target, 1),
+            Ok(Some(DnatRefresh {
+                install: false,
+                lease: true,
+            }))
+        );
+    }
+
+    #[test]
+    fn manual_dnat_reasserts_without_taking_a_lease() {
+        let target = "10.59.0.2:443".parse().unwrap();
+        assert_eq!(
+            dnat_refresh(Some(&dnat("10.59.0.2:443", 1, true, false)), target, 1),
+            Ok(Some(DnatRefresh {
+                install: true,
+                lease: false,
+            }))
+        );
+    }
+
+    #[test]
+    fn dnat_refresh_rejects_a_different_mapping() {
+        let entry = dnat("10.59.0.2:443", 2, true, true);
+        assert_eq!(
+            dnat_refresh(Some(&entry), "10.59.0.2:443".parse().unwrap(), 1),
+            Err(718)
+        );
+        assert_eq!(
+            dnat_refresh(Some(&entry), "10.59.0.3:443".parse().unwrap(), 2),
+            Err(718)
+        );
+    }
 }

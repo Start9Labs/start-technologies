@@ -1409,7 +1409,8 @@ pub async fn remove_forward(
                 None => routes.iter().map(|(h, r)| (h.clone(), r.target)).collect(),
             };
             for (h, route_target) in to_remove {
-                ctx.remove_sni_forward(source, route_target, &[h]).await;
+                ctx.remove_sni_routes(source, route_target, &[h], false)
+                    .await;
             }
             // Removing the whole forward (no hostname) also drops its fallback.
             if hostname.is_none() {
@@ -1669,7 +1670,9 @@ pub async fn add_pinhole(
             ErrorKind::InvalidRequest,
         ));
     }
-    pinhole::add_pinhole(&ctx, gua, external_port, internal, count, label, false).await
+    pinhole::add_pinhole(&ctx, gua, external_port, internal, count, label, false)
+        .await
+        .map(|_| ())
 }
 
 #[derive(Deserialize, Serialize, Parser, TS)]

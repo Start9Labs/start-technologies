@@ -238,8 +238,9 @@ async fn reap_pinhole(ctx: &TunnelContext, key: SocketAddrV6) {
     if !auto {
         return;
     }
-    crate::tunnel::forward::pinhole::remove_pinhole(ctx, *key.ip(), key.port()).await;
-    tracing::info!("PCP lease lapsed: removed auto pinhole {key}");
+    if crate::tunnel::forward::pinhole::remove_auto_pinhole(ctx, *key.ip(), key.port()).await {
+        tracing::info!("PCP lease lapsed: removed auto pinhole {key}");
+    }
 }
 
 #[cfg(test)]

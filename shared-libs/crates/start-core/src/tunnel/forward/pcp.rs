@@ -16,9 +16,9 @@ use tokio::net::UdpSocket;
 use crate::net::port_map::server::{GatewayBackend, MappingEntry, PCP_PORT, handle, handle6};
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
-use crate::tunnel::db::{PortForward, PortForwards};
+use crate::tunnel::db::{PortForward, PortForwards, SniRoute};
 use crate::tunnel::forward::igd::{
-    apply_peer_forward_range, bind_to_wireguard, external_ipv4, is_known_client,
+    apply_peer_forward_range, bind_to_wireguard, current_forward, external_ipv4, is_known_client,
 };
 use crate::tunnel::forward::lease::{self, LeaseKey};
 use crate::tunnel::forward::sni::SniDemux;
@@ -153,36 +153,7 @@ impl GatewayBackend for TunnelContext {
     }
 
     async fn remove_forward_by_source(&self, source: SocketAddrV4, peer: Ipv4Addr) -> bool {
-        let _guard = self.forward_write_lock.lock().await;
-        match crate::tunnel::forward::igd::current_forward(self, source).await {
-            Some(PortForward::Dnat { target, .. }) if *target.ip() == peer => {
-                if self
-                    .db
-                    .mutate(|db| db.as_port_forwards_mut().remove(&source).map(|_| ()))
-                    .await
-                    .result
-                    .is_err()
-                {
-                    return false;
-                }
-                if let Some(rc) = self.active_forwards.mutate(|m| m.remove(&source)) {
-                    drop(rc);
-                    self.forward.gc().await.log_err();
-                }
-                lease::forget(self, &LeaseKey::Dnat(source));
-                true
-            }
-            // Plain mappings on SNI ports own only the fallback.
-            Some(PortForward::Sni {
-                fallback: Some(fallback),
-                ..
-            }) if *fallback.target.ip() == peer => {
-                self.remove_sni_fallback_locked(source, fallback.target)
-                    .await;
-                true
-            }
-            _ => false,
-        }
+        self.remove_peer_forward_by_source(source, peer, true).await
     }
 
     async fn external_ipv4(&self, peer: Ipv4Addr) -> Option<Ipv4Addr> {
@@ -205,7 +176,7 @@ impl GatewayBackend for TunnelContext {
         count: u16,
         lifetime: Option<u32>,
     ) -> Result<(), u16> {
-        crate::tunnel::forward::pinhole::add_pinhole(
+        let leased = crate::tunnel::forward::pinhole::add_pinhole(
             self,
             gua,
             external_port,
@@ -219,22 +190,25 @@ impl GatewayBackend for TunnelContext {
             tracing::warn!("PCP v6 pinhole {gua}:{external_port} failed: {e}");
             0u16
         })?;
-        if let Some(lt) = lifetime {
-            lease::stamp(
-                self,
-                LeaseKey::Pinhole(SocketAddrV6::new(gua, external_port, 0, 0)),
-                lt,
-            );
+        if leased {
+            if let Some(lt) = lifetime {
+                lease::stamp(
+                    self,
+                    LeaseKey::Pinhole(SocketAddrV6::new(gua, external_port, 0, 0)),
+                    lt,
+                );
+            }
         }
         Ok(())
     }
 
     async fn remove_pinhole(&self, gua: Ipv6Addr, external_port: u16) {
-        crate::tunnel::forward::pinhole::remove_pinhole(self, gua, external_port).await;
-        lease::forget(
-            self,
-            &LeaseKey::Pinhole(SocketAddrV6::new(gua, external_port, 0, 0)),
-        );
+        if crate::tunnel::forward::pinhole::remove_auto_pinhole(self, gua, external_port).await {
+            lease::forget(
+                self,
+                &LeaseKey::Pinhole(SocketAddrV6::new(gua, external_port, 0, 0)),
+            );
+        }
     }
 
     async fn list_forwards(&self, peer: Ipv4Addr) -> Vec<MappingEntry> {
@@ -268,41 +242,97 @@ impl GatewayBackend for TunnelContext {
         target: SocketAddrV4,
         hostnames: &[String],
     ) {
+        self.remove_sni_routes(source, target, hostnames, true)
+            .await;
+    }
+}
+
+impl TunnelContext {
+    pub(super) async fn remove_peer_forward_by_source(
+        &self,
+        source: SocketAddrV4,
+        peer: Ipv4Addr,
+        auto_only: bool,
+    ) -> bool {
         let _guard = self.forward_write_lock.lock().await;
-        self.sni
-            .unregister(*source.ip(), source.port(), hostnames, target);
-        for h in hostnames {
-            lease::forget(
-                self,
-                &LeaseKey::Sni {
-                    source,
-                    hostname: h.clone(),
-                },
-            );
+        match current_forward(self, source).await {
+            Some(PortForward::Dnat { target, auto, .. })
+                if *target.ip() == peer && (!auto_only || auto) =>
+            {
+                if self
+                    .db
+                    .mutate(|db| db.as_port_forwards_mut().remove(&source).map(|_| ()))
+                    .await
+                    .result
+                    .is_err()
+                {
+                    return false;
+                }
+                if let Some(rc) = self.active_forwards.mutate(|m| m.remove(&source)) {
+                    drop(rc);
+                    self.forward.gc().await.log_err();
+                }
+                lease::forget(self, &LeaseKey::Dnat(source));
+                true
+            }
+            Some(PortForward::Sni {
+                fallback: Some(fallback),
+                ..
+            }) if *fallback.target.ip() == peer && (!auto_only || fallback.auto) => {
+                self.remove_sni_fallback_locked(source, fallback.target)
+                    .await;
+                true
+            }
+            _ => false,
         }
-        let hostnames = hostnames.to_vec();
-        self.db
+    }
+
+    pub(in crate::tunnel) async fn remove_sni_routes(
+        &self,
+        source: SocketAddrV4,
+        target: SocketAddrV4,
+        hostnames: &[String],
+        auto_only: bool,
+    ) {
+        let _guard = self.forward_write_lock.lock().await;
+        let requested = hostnames.to_vec();
+        let removed = self
+            .db
             .mutate(|db| {
                 db.as_port_forwards_mut().mutate(|pf| {
-                    use crate::tunnel::db::PortForward;
+                    let mut removed = Vec::new();
                     let mut now_empty = false;
                     if let Some(PortForward::Sni { routes, fallback }) = pf.0.get_mut(&source) {
-                        routes.retain(|h, r| !(r.target == target && hostnames.contains(h)));
+                        routes.retain(|hostname, route| {
+                            let remove = route.target == target
+                                && requested.contains(hostname)
+                                && (!auto_only || route.auto);
+                            if remove {
+                                removed.push(hostname.clone());
+                            }
+                            !remove
+                        });
                         now_empty = routes.is_empty() && fallback.is_none();
                     }
                     if now_empty {
                         pf.0.remove(&source);
                     }
-                    Ok(())
+                    Ok(removed)
                 })
             })
             .await
-            .result
-            .log_err();
+            .result;
+        let Ok(removed) = removed else {
+            removed.log_err();
+            return;
+        };
+        self.sni
+            .unregister(*source.ip(), source.port(), &removed, target);
+        for hostname in removed {
+            lease::forget(self, &LeaseKey::Sni { source, hostname });
+        }
     }
-}
 
-impl TunnelContext {
     /// Persists and registers SNI-demuxed hostname routes.
     pub async fn persist_sni_forward(
         &self,
@@ -314,7 +344,10 @@ impl TunnelContext {
         label: Option<String>,
     ) -> Result<(), u8> {
         let _guard = self.forward_write_lock.lock().await;
-        self.sni.prepare().await?;
+        let existing = current_forward(self, source).await;
+        if sni_routes_need_registration(existing.as_ref(), hostnames) {
+            self.sni.prepare().await?;
+        }
         let default_label = if auto {
             Some("Automatic".to_string())
         } else {
@@ -326,7 +359,7 @@ impl TunnelContext {
             .db
             .mutate(|db| {
                 db.as_port_forwards_mut().mutate(|pf| {
-                    use crate::tunnel::db::{PortForward, SniRoute};
+                    use crate::tunnel::db::PortForward;
                     let previous = pf.0.get(&source).cloned();
                     if let Some(conflict) = pf.overlapping(source, 1) {
                         return Err(Error::new(
@@ -378,20 +411,27 @@ impl TunnelContext {
                                     ));
                                 }
                             }
+                            let mut register_hostnames = Vec::new();
+                            let mut lease_hostnames = Vec::new();
                             for h in &hostnames_owned {
                                 let (label, enabled, auto) =
                                     sni_route_fields(routes.get(h), auto, &default_label);
-                                routes.insert(
-                                    h.clone(),
-                                    SniRoute {
-                                        target,
-                                        label,
-                                        enabled,
-                                        auto,
-                                    },
-                                );
+                                let route = SniRoute {
+                                    target,
+                                    label,
+                                    enabled,
+                                    auto,
+                                };
+                                let actions = route_actions(&route);
+                                if actions.register {
+                                    register_hostnames.push(h.clone());
+                                }
+                                if actions.lease {
+                                    lease_hostnames.push(h.clone());
+                                }
+                                routes.insert(h.clone(), route);
                             }
-                            Ok((converted, previous))
+                            Ok((converted, previous, register_hostnames, lease_hostnames))
                         }
                         PortForward::Dnat { .. } => Err(Error::new(
                             eyre!("{source} is already a DNAT forward"),
@@ -402,49 +442,59 @@ impl TunnelContext {
             })
             .await
             .result;
-        let (converted, previous) = match persisted {
+        let (mut converted, previous, register_hostnames, lease_hostnames) = match persisted {
             Ok(c) => c,
             Err(_) => return Err(crate::net::port_map::pcp::hostname::RESULT_HOSTNAME_TAKEN),
         };
-        let converted_target = converted.as_ref().and_then(|forward| match forward {
-            PortForward::Dnat { target, .. } => Some(*target),
+        let converted_info = converted.as_ref().and_then(|forward| match forward {
+            PortForward::Dnat {
+                target,
+                enabled,
+                auto,
+                ..
+            } => Some((*target, RouteActions::new(*enabled, *auto))),
             PortForward::Sni { .. } => None,
         });
-        if let Some(dnat_target) = converted_target {
-            let dnat = converted.unwrap();
-            register_converted_sni(&self.sni, source, target, hostnames, dnat_target, || {
-                self.restore_persisted_forward(source, Some(dnat))
-            })
+        if let Some((dnat_target, actions)) = converted_info {
+            let dnat = converted.take().unwrap();
+            register_converted_sni(
+                &self.sni,
+                source,
+                target,
+                &register_hostnames,
+                actions.register.then_some(dnat_target),
+                || self.restore_persisted_forward(source, Some(dnat)),
+            )
             .await?;
-        } else if let Err(code) =
-            self.sni
-                .register(*source.ip(), source.port(), hostnames, target, None)
-        {
-            self.restore_persisted_forward(source, previous).await;
-            return Err(code);
+        } else if !register_hostnames.is_empty() {
+            if let Err(code) = self.sni.register(
+                *source.ip(),
+                source.port(),
+                &register_hostnames,
+                target,
+                None,
+            ) {
+                self.restore_persisted_forward(source, previous).await;
+                return Err(code);
+            }
         }
-        if converted_target.is_some() {
+        if let Some((_, actions)) = converted_info {
             if let Some(rc) = self.active_forwards.mutate(|m| m.remove(&source)) {
                 drop(rc);
                 self.forward.gc().await.log_err();
             }
             let carried = self.leases.mutate(|l| l.remove(&LeaseKey::Dnat(source)));
-            if let Some(exp) = carried {
-                self.leases.mutate(|l| {
-                    l.insert(LeaseKey::SniFallback(source), exp);
-                });
+            if actions.lease {
+                if let Some(exp) = carried {
+                    self.leases.mutate(|l| {
+                        l.insert(LeaseKey::SniFallback(source), exp);
+                    });
+                }
             }
         }
         if let Some(lt) = lifetime {
-            for h in hostnames {
-                lease::stamp(
-                    self,
-                    LeaseKey::Sni {
-                        source,
-                        hostname: h.clone(),
-                    },
-                    lt,
-                );
+            for hostname in lease_hostnames {
+                lease::stamp(self, LeaseKey::Sni { source, hostname }, lt);
             }
         }
         Ok(())
@@ -491,7 +541,10 @@ impl TunnelContext {
         auto: bool,
         label: Option<String>,
     ) -> Result<(), u8> {
-        self.sni.prepare().await?;
+        let existing = current_forward(self, source).await;
+        if sni_fallback_needs_registration(existing.as_ref()) {
+            self.sni.prepare().await?;
+        }
         let default_label = if auto {
             Some("Automatic".to_string())
         } else {
@@ -501,7 +554,7 @@ impl TunnelContext {
             .db
             .mutate(|db| {
                 db.as_port_forwards_mut().mutate(|pf| {
-                    use crate::tunnel::db::{PortForward, SniRoute};
+                    use crate::tunnel::db::PortForward;
                     match pf.0.get_mut(&source) {
                         Some(PortForward::Sni { fallback, .. }) => {
                             if fallback.as_ref().is_some_and(|f| f.target != target) {
@@ -512,13 +565,15 @@ impl TunnelContext {
                             }
                             let (label, enabled, auto) =
                                 sni_route_fields(fallback.as_ref(), auto, &default_label);
-                            *fallback = Some(SniRoute {
+                            let route = SniRoute {
                                 target,
                                 label,
                                 enabled,
                                 auto,
-                            });
-                            Ok(())
+                            };
+                            let actions = route_actions(&route);
+                            *fallback = Some(route);
+                            Ok(actions)
                         }
                         _ => Err(Error::new(
                             eyre!("{source} is not an SNI-demuxed port"),
@@ -529,19 +584,23 @@ impl TunnelContext {
             })
             .await
             .result;
-        if persisted.is_err() {
-            return Err(crate::net::port_map::pcp::hostname::RESULT_HOSTNAME_TAKEN);
-        }
-        if self
-            .sni
-            .register_fallback(*source.ip(), source.port(), target)
-            .is_err()
+        let actions = match persisted {
+            Ok(actions) => actions,
+            Err(_) => return Err(crate::net::port_map::pcp::hostname::RESULT_HOSTNAME_TAKEN),
+        };
+        if actions.register
+            && self
+                .sni
+                .register_fallback(*source.ip(), source.port(), target)
+                .is_err()
         {
             self.remove_sni_fallback_locked(source, target).await;
             return Err(crate::net::port_map::pcp::hostname::RESULT_HOSTNAME_TAKEN);
         }
-        if let Some(lt) = lifetime {
-            lease::stamp(self, LeaseKey::SniFallback(source), lt);
+        if actions.lease {
+            if let Some(lt) = lifetime {
+                lease::stamp(self, LeaseKey::SniFallback(source), lt);
+            }
         }
         Ok(())
     }
@@ -589,21 +648,27 @@ async fn register_converted_sni<F, Fut>(
     source: SocketAddrV4,
     target: SocketAddrV4,
     hostnames: &[String],
-    dnat_target: SocketAddrV4,
+    fallback_target: Option<SocketAddrV4>,
     restore: F,
 ) -> Result<(), u8>
 where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
-    if let Err(code) = sni.register_fallback(*source.ip(), source.port(), dnat_target) {
-        restore().await;
-        return Err(code);
+    if let Some(fallback_target) = fallback_target {
+        if let Err(code) = sni.register_fallback(*source.ip(), source.port(), fallback_target) {
+            restore().await;
+            return Err(code);
+        }
     }
-    if let Err(code) = sni.register(*source.ip(), source.port(), hostnames, target, None) {
-        sni.unregister_fallback(*source.ip(), source.port(), dnat_target);
-        restore().await;
-        return Err(code);
+    if !hostnames.is_empty() {
+        if let Err(code) = sni.register(*source.ip(), source.port(), hostnames, target, None) {
+            if let Some(fallback_target) = fallback_target {
+                sni.unregister_fallback(*source.ip(), source.port(), fallback_target);
+            }
+            restore().await;
+            return Err(code);
+        }
     }
     Ok(())
 }
@@ -637,10 +702,44 @@ fn plan_dnat_conversion(
     }
 }
 
-/// The stored `(label, enabled, auto)` for an upserted SNI route. A brand-new
-/// route takes the caller's `auto` and `default_label`; an existing one keeps
-/// its owner (`auto`), enabled state, and any user label — so a PCP renewal
-/// can't hijack a manual route, nor a manual re-add flip an automatic one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RouteActions {
+    register: bool,
+    lease: bool,
+}
+
+impl RouteActions {
+    fn new(enabled: bool, auto: bool) -> Self {
+        Self {
+            register: enabled,
+            lease: auto,
+        }
+    }
+}
+
+fn route_actions(route: &SniRoute) -> RouteActions {
+    RouteActions::new(route.enabled, route.auto)
+}
+
+fn sni_routes_need_registration(entry: Option<&PortForward>, hostnames: &[String]) -> bool {
+    match entry {
+        Some(PortForward::Sni { routes, .. }) => hostnames
+            .iter()
+            .any(|hostname| routes.get(hostname).is_none_or(|route| route.enabled)),
+        _ => true,
+    }
+}
+
+fn sni_fallback_needs_registration(entry: Option<&PortForward>) -> bool {
+    match entry {
+        Some(PortForward::Sni { fallback, .. }) => {
+            fallback.as_ref().is_none_or(|route| route.enabled)
+        }
+        _ => false,
+    }
+}
+
+/// Preserves an existing SNI route's ownership and enabled state.
 fn sni_route_fields(
     existing: Option<&crate::tunnel::db::SniRoute>,
     auto: bool,
@@ -656,15 +755,30 @@ fn sni_route_fields(
     }
 }
 
-/// What a peer's lifetime-0 delete targets: the DNAT to `(peer, internal_port)`,
-/// or the SNI fallback to it — that's what the peer's bare MAP created, so the
-/// delete must clear it too (previously a delete of a fallback was a SUCCESS
-/// no-op, leaving the exposure up until lease lapse).
+/// Matches the automatic mapping a peer's lifetime-0 request owns.
 fn peer_forward_matches(entry: &PortForward, target: &SocketAddrV4) -> bool {
     match entry {
-        PortForward::Dnat { target: t, .. } => t == target,
-        PortForward::Sni { fallback, .. } => fallback.as_ref().is_some_and(|f| &f.target == target),
+        PortForward::Dnat {
+            target: existing,
+            auto: true,
+            ..
+        } => existing == target,
+        PortForward::Sni { fallback, .. } => fallback
+            .as_ref()
+            .is_some_and(|route| route.auto && &route.target == target),
+        _ => false,
     }
+}
+
+fn peer_forward_source(
+    forwards: &PortForwards,
+    target: &SocketAddrV4,
+) -> Option<(SocketAddrV4, bool)> {
+    forwards
+        .0
+        .iter()
+        .find(|(_, entry)| peer_forward_matches(entry, target))
+        .map(|(source, entry)| (*source, matches!(entry, PortForward::Sni { .. })))
 }
 
 /// Remove the peer's forward to `(peer, internal_port)`, if any. We forward both
@@ -679,11 +793,7 @@ async fn remove_peer_forward(ctx: &TunnelContext, peer: Ipv4Addr, internal_port:
         .as_port_forwards()
         .de()
         .ok()
-        .and_then(|pf| {
-            pf.0.iter()
-                .find(|(_, entry)| peer_forward_matches(entry, &target))
-                .map(|(source, entry)| (*source, matches!(entry, PortForward::Sni { .. })))
-        });
+        .and_then(|forwards| peer_forward_source(&forwards, &target));
     let Some((source, is_sni)) = source else {
         return;
     };
@@ -762,8 +872,9 @@ mod tests {
     use std::net::SocketAddrV4;
 
     use super::{
-        mapping_entries, peer_forward_matches, plan_dnat_conversion, register_converted_sni,
-        restore_forward_entry, sni_route_fields,
+        RouteActions, mapping_entries, peer_forward_matches, peer_forward_source,
+        plan_dnat_conversion, register_converted_sni, restore_forward_entry, route_actions,
+        sni_fallback_needs_registration, sni_route_fields, sni_routes_need_registration,
     };
     use crate::tunnel::db::{PortForward, PortForwards, SniRoute};
 
@@ -792,18 +903,19 @@ mod tests {
     #[test]
     fn peer_delete_matches_dnat_and_own_fallback() {
         let mine: SocketAddrV4 = "10.59.217.2:5349".parse().unwrap();
-        let sni = |target: SocketAddrV4| PortForward::Sni {
+        let sni = |target: SocketAddrV4, auto| PortForward::Sni {
             routes: Default::default(),
             fallback: Some(SniRoute {
                 target,
                 label: None,
                 enabled: true,
-                auto: true,
+                auto,
             }),
         };
-        assert!(peer_forward_matches(&sni(mine), &mine));
+        assert!(peer_forward_matches(&sni(mine, true), &mine));
+        assert!(!peer_forward_matches(&sni(mine, false), &mine));
         assert!(
-            !peer_forward_matches(&sni("10.59.217.9:5349".parse().unwrap()), &mine),
+            !peer_forward_matches(&sni("10.59.217.9:5349".parse().unwrap(), true), &mine),
             "another client's fallback must not match"
         );
         assert!(
@@ -817,7 +929,31 @@ mod tests {
             "a route-only SNI port has nothing for a bare delete"
         );
         assert!(peer_forward_matches(&dnat("10.59.217.2:5349", 1), &mine));
+        assert!(!peer_forward_matches(
+            &owned_dnat("10.59.217.2:5349", 1, true, false),
+            &mine
+        ));
         assert!(!peer_forward_matches(&dnat("10.59.217.9:5349", 1), &mine));
+    }
+
+    #[test]
+    fn peer_delete_skips_an_earlier_manual_forward() {
+        let target: SocketAddrV4 = "10.59.217.2:2525".parse().unwrap();
+        let manual_source: SocketAddrV4 = "203.0.113.1:25".parse().unwrap();
+        let auto_source: SocketAddrV4 = "203.0.113.1:2525".parse().unwrap();
+        let mut forwards = PortForwards(Default::default());
+        forwards.0.insert(
+            manual_source,
+            owned_dnat("10.59.217.2:2525", 1, true, false),
+        );
+        forwards
+            .0
+            .insert(auto_source, owned_dnat("10.59.217.2:2525", 1, true, true));
+
+        assert_eq!(
+            peer_forward_source(&forwards, &target),
+            Some((auto_source, false))
+        );
     }
 
     // A hostname MAP may promote *its own* client's lone DNAT to the port's
@@ -875,7 +1011,7 @@ mod tests {
             source,
             target,
             &["blocked.example.com".to_string()],
-            target,
+            Some(target),
             move || async move {
                 restore_forward_entry(&mut restore_forwards.lock().unwrap(), source, dnat);
             },
@@ -916,8 +1052,38 @@ mod tests {
         let (label, enabled, auto) =
             sni_route_fields(Some(&existing), true, &Some("PCP".to_string()));
         assert_eq!(label.as_deref(), Some("mine"));
-        assert!(!enabled);
-        assert!(!auto);
+        assert_eq!(
+            RouteActions::new(enabled, auto),
+            RouteActions {
+                register: false,
+                lease: false,
+            }
+        );
+    }
+
+    #[test]
+    fn disabled_automatic_sni_routes_renew_without_registration() {
+        let hostname = "disabled.example.com".to_string();
+        let disabled = route(None, false, true);
+        let mut routes = std::collections::BTreeMap::new();
+        routes.insert(hostname.clone(), disabled.clone());
+        let forward = PortForward::Sni {
+            routes,
+            fallback: Some(disabled.clone()),
+        };
+
+        assert!(!sni_routes_need_registration(
+            Some(&forward),
+            std::slice::from_ref(&hostname)
+        ));
+        assert!(!sni_fallback_needs_registration(Some(&forward)));
+        assert_eq!(
+            route_actions(&disabled),
+            RouteActions {
+                register: false,
+                lease: true,
+            }
+        );
     }
 
     // Symmetrically, a manual re-add over an existing automatic route leaves it
