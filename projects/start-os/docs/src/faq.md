@@ -166,7 +166,7 @@ If a service is running low on space, you have two options today:
 
 - **Move to a larger data drive.** Install StartOS with the new drive as the data drive, then choose **Transfer** at [initial setup](initial-setup.md) and select your old data drive to move everything across. Keep the old drive connected until the transfer completes, and never boot from it as a StartOS server again.
 
-- **Keep large files on storage the service can reach over the network.** Some services can use storage outside your server on their own. Nextcloud, for example, can attach an SMB share, a WebDAV server or an S3 bucket through its built-in External Storage app, so a large library can live on a NAS or another computer. Check the service's own instructions for what it supports. Linking one service's files into another, such as File Browser into Nextcloud or Immich, does not add space, since those files are on the same data drive.
+- **Keep large files on storage the service can reach over the network.** Some services can use storage outside your server on their own. Nextcloud, for example, can attach an SMB share, a WebDAV server or an S3 bucket through its built-in External Storage app, so a large library can live on a NAS or another computer. Check the service's own instructions for what it supports. Linking one service's files into another, such as NextExplorer into Nextcloud or Immich, does not add space, since those files are on the same data drive.
 
 Support for multiple drives is planned for StartOS 0.4.1. There is no release date yet.
 
