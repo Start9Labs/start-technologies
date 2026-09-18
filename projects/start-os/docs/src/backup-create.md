@@ -46,6 +46,7 @@ Even with proper backups the risk of data corruption is always non-zero. Therefo
 - High quality SSDs should be favored over HDDs as a backup target.
 - Backup to multiple targets.
 - If backing up to multiple targets make sure all backups are up to date.
+- Set up [continuous backups](/bitcoin-guides/continuous-backups.html) where a service offers them. A StartOS backup holds LND's channel backup only as of the moment it was taken, and leaves Bark Wallet's database out entirely; a continuous backup keeps a current, encrypted copy on storage you choose.
 
 ## Physical Drive
 
