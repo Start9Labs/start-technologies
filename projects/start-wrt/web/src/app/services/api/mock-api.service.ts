@@ -962,6 +962,7 @@ export class MockApiService extends ApiService {
       return {
         mac,
         name,
+        custom_name: device.name || null,
         hostname: def.hostname,
         status: def.status,
         connection: def.status === 'online' ? def.connection : null,
@@ -983,7 +984,9 @@ export class MockApiService extends ApiService {
       h => h.options.mac?.toUpperCase() === macUpper,
     )
     if (existing) {
-      existing.options.name = params.name
+      if (params.name !== undefined) {
+        existing.options.name = params.name || undefined
+      }
       existing.options.ip = params.ipv4_static ? params.ipv4 : undefined
       // hostid untouched — backend bookkeeping, pinned by published-ports
     } else {
@@ -992,14 +995,18 @@ export class MockApiService extends ApiService {
         name: `host_${params.mac.replace(/:/g, '').toLowerCase()}`,
         options: {
           mac: params.mac,
-          name: params.name,
+          name: params.name || undefined,
           ip: params.ipv4_static ? params.ipv4 : undefined,
           dns: '1',
         },
         lists: {},
       })
     }
-    this.logActivity('device', 'updated', `Updated device '${params.name}'`)
+    this.logActivity(
+      'device',
+      'updated',
+      `Updated device '${params.name || params.mac}'`,
+    )
     return null
   }
 

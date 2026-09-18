@@ -2523,6 +2523,7 @@ config rule 'pp_a_v6'
         Device {
             mac: Some("AA:AA:AA:AA:AA:AA".into()),
             name: "Dev".into(),
+            custom_name: None,
             hostname: None,
             status: DeviceStatus::Online,
             connection: None,

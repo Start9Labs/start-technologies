@@ -23,6 +23,8 @@ export interface DeviceTableItem {
 // Full device data for detail view
 export interface Device extends DeviceTableItem {
   ipv4Static: boolean
+  /** The name assigned in the router; `name` is resolved from elsewhere when unset. */
+  customName?: string
   /** May auto-create port forwards via PCP/UPnP (default off). */
   allowAutoPortForward: boolean
 }
@@ -44,7 +46,8 @@ export type DeviceForm = FormRawValue<ReturnType<typeof getDeviceForm>>
 
 // Flat data structure for service update
 export interface DeviceUpdateData {
-  name: string
+  /** Omitted leaves the assigned name untouched; empty clears it. */
+  name?: string
   ipv4Static: boolean
   ipv4: string
 }

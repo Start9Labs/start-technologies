@@ -779,7 +779,10 @@ struct Device {
     /// vendor from the MAC's OUI, e.g. `Apple device (b2c3d4)`) →
     /// `device-<mac>` placeholder. Always set.
     name: String,
-    /// Raw DHCP lease hostname ("*" when unset); a hint for the rename form.
+    /// The name assigned in the router (the UCI static name); `None` when
+    /// `name` is resolved from elsewhere. What the rename form edits.
+    custom_name: Option<String>,
+    /// Raw DHCP lease hostname ("*" when unset).
     hostname: Option<String>,
     status: DeviceStatus,
     /// "Ethernet", "Wi-Fi 2.4GHz", "Wi-Fi 5GHz", etc.
@@ -821,7 +824,12 @@ struct SpeedData {
 #[derive(Deserialize)]
 struct DeviceUpdateRequest {
     mac: String,
-    name: String,
+    /// Absent leaves the assigned name untouched; empty clears it. Otherwise
+    /// a hostname label — letters, digits, and hyphens, no leading or
+    /// trailing hyphen, at most 63 characters — since dnsmasq serves it and
+    /// refuses to start on anything else. Rejected with `InvalidRequest`.
+    #[serde(default)]
+    name: Option<String>,
     ipv4_static: bool,
     ipv4: String,
 }
