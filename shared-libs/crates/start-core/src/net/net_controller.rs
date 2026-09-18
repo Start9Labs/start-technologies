@@ -16,6 +16,7 @@ use tracing::instrument;
 
 use crate::db::model::Database;
 use crate::hostname::ServerHostname;
+use crate::net::SERVICE_OUTBOUND_RULE_PRIORITY;
 use crate::net::dns::DnsController;
 use crate::net::dns_update::{DnsUpdateController, spawn_server_mdns_injection};
 use crate::net::forward::{
@@ -969,7 +970,7 @@ impl NetService {
                         .arg("from")
                         .arg(&service_ip)
                         .arg("priority")
-                        .arg("100")
+                        .arg(SERVICE_OUTBOUND_RULE_PRIORITY.to_string())
                         .invoke(ErrorKind::Network)
                         .await
                         .is_err()
@@ -1061,7 +1062,7 @@ impl NetService {
                                     .arg("lookup")
                                     .arg(&old_table_str)
                                     .arg("priority")
-                                    .arg("100")
+                                    .arg(SERVICE_OUTBOUND_RULE_PRIORITY.to_string())
                                     .invoke(ErrorKind::Network)
                                     .await;
                             }
@@ -1090,7 +1091,7 @@ impl NetService {
                                         .arg("lookup")
                                         .arg(&table_str)
                                         .arg("priority")
-                                        .arg("100")
+                                        .arg(SERVICE_OUTBOUND_RULE_PRIORITY.to_string())
                                         .invoke(ErrorKind::Network)
                                         .await
                                         .log_err();
@@ -1120,7 +1121,7 @@ impl NetService {
                         .arg("lookup")
                         .arg(&table_str)
                         .arg("priority")
-                        .arg("100")
+                        .arg(SERVICE_OUTBOUND_RULE_PRIORITY.to_string())
                         .invoke(ErrorKind::Network)
                         .await;
                 }
@@ -1466,7 +1467,7 @@ impl NetService {
                 .arg("from")
                 .arg(&service_ip)
                 .arg("priority")
-                .arg("100")
+                .arg(SERVICE_OUTBOUND_RULE_PRIORITY.to_string())
                 .invoke(ErrorKind::Network)
                 .await
                 .is_err()

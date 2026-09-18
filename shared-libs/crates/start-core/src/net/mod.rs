@@ -24,6 +24,9 @@ pub mod vhost;
 pub mod web_server;
 pub mod wifi;
 
+const SERVICE_OUTBOUND_RULE_PRIORITY: u32 = 70;
+const DEFAULT_OUTBOUND_RULE_PRIORITY: u32 = 75;
+
 pub fn net_api<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
         .subcommand(
@@ -54,4 +57,12 @@ pub fn net_api<C: Context>() -> ParentHandler<C> {
             "vhost",
             vhost::vhost_api::<C>().with_about("about.manage-ssl-vhost-proxy"),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn service_outbound_rule_precedes_default_outbound_rule() {
+        assert!(super::SERVICE_OUTBOUND_RULE_PRIORITY < super::DEFAULT_OUTBOUND_RULE_PRIORITY);
+    }
 }

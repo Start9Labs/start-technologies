@@ -35,6 +35,7 @@ use crate::db::model::public::{
     CapabilityVerdict, GatewayPortMapCapabilities, IpInfo, NetworkInterfaceInfo,
     NetworkInterfaceType,
 };
+use crate::net::DEFAULT_OUTBOUND_RULE_PRIORITY;
 use crate::net::forward::{START9_BRIDGE_IFACE, nft_ensure_base};
 use crate::net::gateway::device::DeviceProxy;
 use crate::net::host::all_hosts;
@@ -1669,6 +1670,7 @@ async fn snapshot_outbound_rules(v6: bool) -> (BTreeSet<u32>, BTreeSet<u32>) {
         )?;
         let mut fwmarks_74 = BTreeSet::<u32>::new();
         let mut tables_75 = BTreeSet::<u32>::new();
+        let default_priority_prefix = format!("{DEFAULT_OUTBOUND_RULE_PRIORITY}:");
         for line in output.lines() {
             let line = line.trim();
             if let Some(rest) = line.strip_prefix("74:") {
@@ -1681,7 +1683,7 @@ async fn snapshot_outbound_rules(v6: bool) -> (BTreeSet<u32>, BTreeSet<u32>) {
                         fwmarks_74.insert(v);
                     }
                 }
-            } else if let Some(rest) = line.strip_prefix("75:") {
+            } else if let Some(rest) = line.strip_prefix(&default_priority_prefix) {
                 if let Some(pos) = rest.find("lookup ") {
                     let after = &rest[pos + 7..];
                     let token = after.split_whitespace().next().unwrap_or("");
@@ -1740,7 +1742,7 @@ async fn reconcile_outbound_rules(
             .arg("table")
             .arg(table.to_string())
             .arg("priority")
-            .arg("75")
+            .arg(DEFAULT_OUTBOUND_RULE_PRIORITY.to_string())
             .invoke(ErrorKind::Network)
             .await
             .log_err();
@@ -1764,7 +1766,7 @@ async fn reconcile_outbound_rules(
             .arg("table")
             .arg(table.to_string())
             .arg("priority")
-            .arg("75")
+            .arg(DEFAULT_OUTBOUND_RULE_PRIORITY.to_string())
             .invoke(ErrorKind::Network)
             .await
             .log_err();

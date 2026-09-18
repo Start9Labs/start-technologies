@@ -407,6 +407,11 @@ for the detail behind its highlights.
 - **The copy taken before an update is now made with the service stopped**, so it can
   no longer capture a database mid-write.
 
+- **A service's outbound gateway takes precedence over the system-wide
+  default.** You can keep one gateway pinned under **System > Gateways >
+  Outbound Traffic** while sending selected services through another gateway
+  with **Set Outbound Gateway**.
+
 - **A service reached over IPv6 through a tunnel now answers.** StartOS sends a
   reply back out the interface its connection arrived on by restoring a
   connection mark, but the kernel routes the reply that _opens_ a connection
