@@ -966,6 +966,55 @@ async fn purge_outbound_rules(sources: &[IpAddr]) {
     }
 }
 
+async fn sync_outbound_rules(
+    db: &TypedPatchDb<Database>,
+    id: &PackageId,
+    sources: &[IpAddr],
+    current_table: &mut Option<u32>,
+) {
+    if let Err(e) = async {
+        let gateway: Option<GatewayId> = db
+            .peek()
+            .await
+            .as_public()
+            .as_package_data()
+            .as_idx(id)
+            .and_then(|p| p.as_outbound_gateway().de().ok())
+            .flatten();
+        let table = gateway.and_then(|gateway| {
+            if_nametoindex(gateway.as_str())
+                .map(|idx| 1000 + idx)
+                .log_err()
+        });
+        if table == *current_table {
+            return Ok(());
+        }
+        // The rule being replaced keeps routing until it is deleted.
+        if let Some(table) = table {
+            for source in sources {
+                if let Err(e) = outbound_rule("add", *source, table).await {
+                    for source in sources {
+                        let _ = outbound_rule("del", *source, table).await;
+                    }
+                    return Err(e);
+                }
+            }
+        }
+        if let Some(old_table) = *current_table {
+            for source in sources {
+                let _ = outbound_rule("del", *source, old_table).await;
+            }
+        }
+        *current_table = table;
+        Ok::<_, Error>(())
+    }
+    .await
+    {
+        tracing::error!("Failed to update outbound gateway for {id}: {e}");
+        tracing::debug!("{e:?}");
+    }
+}
+
 pub struct NetService {
     shutdown: bool,
     data: Arc<Mutex<NetServiceData>>,
@@ -1023,6 +1072,7 @@ impl NetService {
                 }
                 drop(ctrl_for_ip);
                 let mut current_outbound_table: Option<u32> = None;
+                sync_outbound_rules(&db, id, &outbound_sources, &mut current_outbound_table).await;
 
                 loop {
                     let (hosts_changed, outbound_changed) = tokio::select! {
@@ -1077,44 +1127,14 @@ impl NetService {
                         }
                     }
 
-                    // Handle outbound gateway changes
                     if outbound_changed {
-                        if let Err(e) = async {
-                            // Remove old rule if any
-                            if let Some(old_table) = current_outbound_table.take() {
-                                for source in &outbound_sources {
-                                    let _ = outbound_rule("del", *source, old_table).await;
-                                }
-                            }
-                            // Read current outbound gateway from DB
-                            let outbound_gw: Option<GatewayId> = db
-                                .peek()
-                                .await
-                                .as_public()
-                                .as_package_data()
-                                .as_idx(id)
-                                .map(|p| p.as_outbound_gateway().de().ok())
-                                .flatten()
-                                .flatten();
-                            if let Some(gw_id) = outbound_gw {
-                                // Look up table ID for this gateway
-                                if let Some(table_id) = if_nametoindex(gw_id.as_str())
-                                    .map(|idx| 1000 + idx)
-                                    .log_err()
-                                {
-                                    for source in &outbound_sources {
-                                        outbound_rule("add", *source, table_id).await.log_err();
-                                    }
-                                    current_outbound_table = Some(table_id);
-                                }
-                            }
-                            Ok::<_, Error>(())
-                        }
-                        .await
-                        {
-                            tracing::error!("Failed to update outbound gateway for {id}: {e}");
-                            tracing::debug!("{e:?}");
-                        }
+                        sync_outbound_rules(
+                            &db,
+                            id,
+                            &outbound_sources,
+                            &mut current_outbound_table,
+                        )
+                        .await;
                     }
 
                     synced_writer.send_modify(|v| *v += 1);

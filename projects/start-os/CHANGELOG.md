@@ -414,7 +414,9 @@ for the detail behind its highlights.
 - **A service's outbound gateway takes precedence over the system-wide
   default.** You can keep one gateway pinned under **System > Gateways >
   Outbound Traffic** while sending selected services through another gateway
-  with **Set Outbound Gateway**.
+  with **Set Outbound Gateway**. A service given its own gateway while a
+  system-wide gateway was pinned has been following the system-wide one, and
+  switches to its own when you update.
 
 - **A service reached over IPv6 through a tunnel now answers.** StartOS sends a
   reply back out the interface its connection arrived on by restoring a
@@ -542,6 +544,10 @@ for the detail behind its highlights.
   the system-wide default for IPv6, so those connections left under a different
   address than the one you chose. When the service's gateway can't carry IPv6,
   the service's IPv6 is dropped.
+
+- **A service's outbound gateway applies from the moment the service starts.**
+  A service that had just started or restarted used the system-wide default
+  until a gateway next changed.
 
 ## [0.4.0.1]
 
