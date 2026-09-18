@@ -133,6 +133,10 @@ for the detail behind its highlights.
 
 ### Fixed
 
+- **Nextcloud (Legacy) and other migrated 0.3.5.1 services with a
+  package-managed certificate start when the server has a public IP or uses
+  StartTunnel.**
+
 - **Service interfaces show addresses only for gateways that accept inbound
   connections.** Commercial VPNs remain available for system-wide and
   per-service outbound routing.

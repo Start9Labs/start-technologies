@@ -190,6 +190,10 @@ Check your notifications. A service that fails to migrate raises a notification 
 
 Your data is safe — it stays on disk where the service left it. Install the service again from the marketplace and it will pick that data back up.
 
+### Legacy Services
+
+Services that remain marked **Legacy** after migration run on servers that have a public IP or use StartTunnel. Their package-managed certificate covers the service's secure addresses.
+
 ### Tor Cleanup
 
 During migration, the **Tor** service is automatically installed and started, with all your existing onion addresses intact and reachable as soon as the update finishes. However, Tor is rarely needed in StartOS 0.4.0 — most users will be better served by other networking options.
