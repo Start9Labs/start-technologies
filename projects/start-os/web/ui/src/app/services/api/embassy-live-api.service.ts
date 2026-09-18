@@ -405,14 +405,6 @@ export class LiveApiService extends ApiService {
     return this.rpcRequest({ method: 'net.tunnel.remove', params })
   }
 
-  async setGatewayWanIp(params: T.SetGatewayWanIpParams): Promise<null> {
-    return this.rpcRequest({ method: 'net.gateway.set-wan-ip', params })
-  }
-
-  async unsetGatewayWanIp(params: T.UnsetGatewayWanIpParams): Promise<null> {
-    return this.rpcRequest({ method: 'net.gateway.unset-wan-ip', params })
-  }
-
   async setDefaultOutbound(params: T.SetDefaultOutboundParams): Promise<null> {
     return this.rpcRequest({
       method: 'net.gateway.set-default-outbound',

@@ -820,11 +820,5 @@ export default {
   928: 'Aufsteigend',
   929: 'Absteigend',
   930: 'Dienste in diesem Register werden von der Start9-Community gepflegt und befinden sich in der Betaphase. Fehler sind zu erwarten. Die Installation erfolgt auf eigenes Risiko.',
-  931: 'WAN-IP bearbeiten',
-  932: 'WAN-IP',
   933: 'Manuell festgelegt',
-  934: 'Von StartOS erkannt:',
-  935: 'Auf erkannten Wert zurücksetzen',
-  936: 'Muss eine öffentliche IPv4-Adresse sein',
-  937: 'StartOS liest dies aus ausgehendem Datenverkehr. Lege es von Hand fest, wenn eingehender Datenverkehr an einer anderen Adresse ankommt, etwa wenn dein Router ausgehenden Datenverkehr durch ein VPN sendet.',
 } satisfies i18n

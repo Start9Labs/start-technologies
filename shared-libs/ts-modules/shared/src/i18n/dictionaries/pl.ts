@@ -820,11 +820,5 @@ export default {
   928: 'Rosnąco',
   929: 'Malejąco',
   930: 'Serwisy z tego katalogu są utrzymywane przez społeczność Start9 i są w fazie testów beta. Należy spodziewać się błędów. Instalujesz je na własne ryzyko.',
-  931: 'Edytuj IP WAN',
-  932: 'IP WAN',
   933: 'Ustawione ręcznie',
-  934: 'Wykryte przez StartOS:',
-  935: 'Przywróć wykryty adres',
-  936: 'Musi być publicznym adresem IPv4',
-  937: 'StartOS odczytuje to z ruchu wychodzącego. Ustaw ręcznie, gdy ruch przychodzący dociera pod innym adresem, na przykład gdy router wysyła ruch wychodzący przez VPN.',
 } satisfies i18n

@@ -762,32 +762,6 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async setGatewayWanIp(params: T.SetGatewayWanIpParams): Promise<null> {
-    await pauseFor(2000)
-    this.mockRevision([
-      {
-        op: PatchOp.REPLACE,
-        path: `/serverInfo/network/gateways/${params.gateway}/wanIpOverride`,
-        value: params.ip,
-      },
-    ])
-
-    return null
-  }
-
-  async unsetGatewayWanIp(params: T.UnsetGatewayWanIpParams): Promise<null> {
-    await pauseFor(2000)
-    this.mockRevision([
-      {
-        op: PatchOp.REPLACE,
-        path: `/serverInfo/network/gateways/${params.gateway}/wanIpOverride`,
-        value: null,
-      },
-    ])
-
-    return null
-  }
-
   async setDefaultOutbound(params: { gateway: string | null }): Promise<null> {
     await pauseFor(2000)
     const patch = [

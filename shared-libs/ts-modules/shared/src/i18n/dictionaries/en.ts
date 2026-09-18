@@ -821,11 +821,5 @@ export const ENGLISH: Record<string, number> = {
   'Ascending': 928,
   'Descending': 929,
   'Services from this registry are maintained by the Start9 community and are undergoing beta testing. Bugs are expected. Install at your own risk.': 930,
-  'Edit WAN IP': 931,
-  'WAN IP': 932,
   'Set manually': 933,
-  'Detected by StartOS:': 934,
-  'Reset to detected': 935,
-  'Must be a public IPv4 address': 936,
-  'StartOS reads this from outbound traffic. Set it by hand when inbound traffic arrives on a different address, such as when your router sends outbound traffic through a VPN.': 937,
 }
