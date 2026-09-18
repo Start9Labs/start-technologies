@@ -226,19 +226,7 @@ async fn reap_sni_fallback(ctx: &TunnelContext, source: SocketAddrV4) {
 }
 
 async fn reap_pinhole(ctx: &TunnelContext, key: SocketAddrV6) {
-    let auto = ctx
-        .db
-        .peek()
-        .await
-        .as_pinholes6()
-        .de()
-        .ok()
-        .and_then(|ph| ph.0.get(&key).cloned())
-        .is_some_and(|p| p.auto);
-    if !auto {
-        return;
-    }
-    if crate::tunnel::forward::pinhole::remove_auto_pinhole(ctx, *key.ip(), key.port()).await {
+    if crate::tunnel::forward::pinhole::remove_pinhole(ctx, *key.ip(), key.port(), true).await {
         tracing::info!("PCP lease lapsed: removed auto pinhole {key}");
     }
 }

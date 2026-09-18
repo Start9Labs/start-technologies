@@ -1670,9 +1670,7 @@ pub async fn add_pinhole(
             ErrorKind::InvalidRequest,
         ));
     }
-    pinhole::add_pinhole(&ctx, gua, external_port, internal, count, label, false)
-        .await
-        .map(|_| ())
+    pinhole::add_pinhole(&ctx, gua, external_port, internal, count, label, false).await
 }
 
 #[derive(Deserialize, Serialize, Parser, TS)]
@@ -1688,7 +1686,7 @@ pub async fn remove_pinhole(
     ctx: TunnelContext,
     RemovePinholeParams { gua, external_port }: RemovePinholeParams,
 ) -> Result<(), Error> {
-    pinhole::remove_pinhole(&ctx, gua, external_port).await;
+    pinhole::remove_pinhole(&ctx, gua, external_port, false).await;
     Ok(())
 }
 

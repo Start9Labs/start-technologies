@@ -69,7 +69,7 @@ pub async fn clear_for_peer(
             .map(|(key, _)| *key)
             .collect();
         for key in keys {
-            pinhole::remove_pinhole(ctx, *key.ip(), key.port()).await;
+            pinhole::remove_pinhole(ctx, *key.ip(), key.port(), false).await;
         }
     }
     Ok(())

@@ -10,7 +10,7 @@ use std::net::{Ipv6Addr, SocketAddrV6};
 use crate::net::forward::nft_rule_v6;
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
-use crate::tunnel::db::Pinhole;
+use crate::tunnel::db::{Pinhole, Pinholes6};
 use crate::tunnel::wg6::host_v6;
 
 /// nft dport token for `count` ports counting up from `base`: `8443` or `8000-8009`.
@@ -96,32 +96,46 @@ pub async fn is_known_gua(ctx: &TunnelContext, gua: Ipv6Addr) -> bool {
     false
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct PinholeRefresh {
-    install: bool,
-    lease: bool,
-}
-
-fn pinhole_refresh(
-    existing: &Pinhole,
-    external_port: u16,
+/// Returns whether the pinhole is enabled. An existing entry keeps its owner
+/// and enabled state.
+fn upsert_pinhole(
+    pinholes: &mut Pinholes6,
+    key: SocketAddrV6,
     internal_port: u16,
     count: u16,
-) -> Result<PinholeRefresh, Error> {
-    if existing.internal_port(external_port) != internal_port || existing.count != count {
+    label: Option<String>,
+    auto: bool,
+) -> Result<bool, Error> {
+    if let Some(conflict) = pinholes.overlapping(key, count) {
         return Err(Error::new(
-            eyre!("the pinhole is already held by a different mapping"),
+            eyre!("{key} overlaps an existing pinhole at {conflict}"),
             ErrorKind::InvalidRequest,
         ));
     }
-    Ok(PinholeRefresh {
-        install: existing.enabled,
-        lease: existing.auto,
-    })
+    let pinhole = pinholes.0.entry(key).or_insert_with(|| Pinhole {
+        label: auto.then(|| "PCP".to_string()),
+        enabled: true,
+        count,
+        internal_port: None,
+        auto,
+    });
+    if pinhole.auto != auto
+        && (pinhole.internal_port(key.port()) != internal_port || pinhole.count != count)
+    {
+        return Err(Error::new(
+            eyre!("{key} is held by a different mapping"),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    pinhole.internal_port = (internal_port != key.port()).then_some(internal_port);
+    pinhole.count = count;
+    if label.is_some() {
+        pinhole.label = label;
+    }
+    Ok(pinhole.enabled)
 }
 
-/// Persists and applies a pinhole, preserving an existing mapping's state.
-/// Returns whether the entry carries an automatic lease.
+/// Persists a pinhole and installs its rules if it is enabled.
 pub async fn add_pinhole(
     ctx: &TunnelContext,
     gua: Ipv6Addr,
@@ -130,49 +144,21 @@ pub async fn add_pinhole(
     count: u16,
     label: Option<String>,
     auto: bool,
-) -> Result<bool, Error> {
+) -> Result<(), Error> {
     let _guard = ctx.forward_write_lock.lock().await;
     let key = SocketAddrV6::new(gua, external_port, 0, 0);
-    let internal = (internal_port != external_port).then_some(internal_port);
-    let refresh = ctx
+    let enabled = ctx
         .db
         .mutate(|db| {
-            db.as_pinholes6_mut().mutate(|ph| {
-                if let Some(conflict) = ph.overlapping(key, count) {
-                    return Err(Error::new(
-                        eyre!("{key} overlaps an existing pinhole at {conflict}"),
-                        ErrorKind::InvalidRequest,
-                    ));
-                }
-                if let Some(existing) = ph.0.get_mut(&key) {
-                    let refresh = pinhole_refresh(existing, external_port, internal_port, count)?;
-                    if label.is_some() {
-                        existing.label = label.clone();
-                    }
-                    return Ok(refresh);
-                }
-                ph.0.insert(
-                    key,
-                    Pinhole {
-                        label: label.clone().or_else(|| auto.then(|| "PCP".to_string())),
-                        enabled: true,
-                        count,
-                        internal_port: internal,
-                        auto,
-                    },
-                );
-                Ok(PinholeRefresh {
-                    install: true,
-                    lease: auto,
-                })
-            })
+            db.as_pinholes6_mut()
+                .mutate(|ph| upsert_pinhole(ph, key, internal_port, count, label, auto))
         })
         .await
         .result?;
-    if refresh.install {
+    if enabled {
         apply_pinhole(gua, external_port, internal_port, count).await?;
     }
-    Ok(refresh.lease)
+    Ok(())
 }
 
 /// Enable or disable a pinhole, installing or tearing down its nft rules to match.
@@ -232,7 +218,8 @@ pub async fn set_pinhole_label(
     Ok(())
 }
 
-async fn remove_pinhole_matching(
+/// Returns whether a pinhole was removed.
+pub async fn remove_pinhole(
     ctx: &TunnelContext,
     gua: Ipv6Addr,
     external_port: u16,
@@ -243,39 +230,22 @@ async fn remove_pinhole_matching(
     let removed = ctx
         .db
         .mutate(|db| {
-            db.as_pinholes6_mut().mutate(|pinholes| {
-                if pinholes
-                    .0
-                    .get(&key)
-                    .is_some_and(|pinhole| !auto_only || pinhole.auto)
-                {
-                    pinholes.0.remove(&key);
-                    Ok(true)
-                } else {
-                    Ok(false)
+            db.as_pinholes6_mut().mutate(|ph| {
+                let matches = ph.0.get(&key).is_some_and(|p| !auto_only || p.auto);
+                if matches {
+                    ph.0.remove(&key);
                 }
+                Ok(matches)
             })
         })
         .await
-        .result;
-    let Ok(removed) = removed else {
-        removed.log_err();
-        return false;
-    };
+        .result
+        .log_err()
+        .unwrap_or(false);
     if removed {
         remove_pinhole_rules(gua, external_port).await.log_err();
     }
     removed
-}
-
-/// Removes a pinhole regardless of its owner.
-pub async fn remove_pinhole(ctx: &TunnelContext, gua: Ipv6Addr, external_port: u16) {
-    remove_pinhole_matching(ctx, gua, external_port, false).await;
-}
-
-/// Removes a pinhole created by the port-control client.
-pub async fn remove_auto_pinhole(ctx: &TunnelContext, gua: Ipv6Addr, external_port: u16) -> bool {
-    remove_pinhole_matching(ctx, gua, external_port, true).await
 }
 
 /// Reinstall every enabled pinhole's nft rules from the db (startup / resync).
@@ -299,42 +269,52 @@ pub async fn seed_pinholes(ctx: &TunnelContext) -> Result<(), Error> {
 mod tests {
     use super::*;
 
-    fn pinhole(enabled: bool, auto: bool) -> Pinhole {
-        Pinhole {
-            label: None,
-            enabled,
-            count: 1,
-            internal_port: Some(8443),
-            auto,
-        }
-    }
+    const KEY: &str = "[2001:db8::2]:443";
 
-    #[test]
-    fn disabled_automatic_pinhole_renews_without_installing() {
-        assert_eq!(
-            pinhole_refresh(&pinhole(false, true), 443, 8443, 1).unwrap(),
-            PinholeRefresh {
-                install: false,
-                lease: true,
-            }
+    fn pinholes(enabled: bool, auto: bool) -> Pinholes6 {
+        let mut pinholes = Pinholes6::default();
+        pinholes.0.insert(
+            KEY.parse().unwrap(),
+            Pinhole {
+                label: None,
+                enabled,
+                count: 1,
+                internal_port: Some(8443),
+                auto,
+            },
         );
+        pinholes
+    }
+
+    fn upsert(pinholes: &mut Pinholes6, internal_port: u16, auto: bool) -> Result<bool, Error> {
+        upsert_pinhole(pinholes, KEY.parse().unwrap(), internal_port, 1, None, auto)
     }
 
     #[test]
-    fn manual_pinhole_reasserts_without_taking_a_lease() {
-        assert_eq!(
-            pinhole_refresh(&pinhole(true, false), 443, 8443, 1).unwrap(),
-            PinholeRefresh {
-                install: true,
-                lease: false,
-            }
-        );
+    fn a_renewal_leaves_a_disabled_pinhole_disabled() {
+        let mut pinholes = pinholes(false, true);
+        assert!(!upsert(&mut pinholes, 8443, true).unwrap());
+        assert!(!pinholes.0[&KEY.parse().unwrap()].enabled);
     }
 
     #[test]
-    fn pinhole_refresh_rejects_a_different_mapping() {
-        let existing = pinhole(true, true);
-        assert!(pinhole_refresh(&existing, 443, 9443, 1).is_err());
-        assert!(pinhole_refresh(&existing, 443, 8443, 2).is_err());
+    fn a_device_changes_its_own_internal_port() {
+        let mut pinholes = pinholes(true, true);
+        assert!(upsert(&mut pinholes, 9443, true).unwrap());
+        assert_eq!(pinholes.0[&KEY.parse().unwrap()].internal_port, Some(9443));
+    }
+
+    #[test]
+    fn a_device_renews_a_manual_pinhole_without_owning_it() {
+        let mut pinholes = pinholes(true, false);
+        assert!(upsert(&mut pinholes, 8443, true).unwrap());
+        assert!(!pinholes.0[&KEY.parse().unwrap()].auto);
+    }
+
+    #[test]
+    fn a_device_cannot_change_a_manual_pinhole() {
+        let mut pinholes = pinholes(true, false);
+        assert!(upsert(&mut pinholes, 9443, true).is_err());
+        assert_eq!(pinholes.0[&KEY.parse().unwrap()].internal_port, Some(8443));
     }
 }

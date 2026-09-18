@@ -196,6 +196,9 @@ impl SniDemux {
         target: SocketAddrV4,
         lifetime_secs: Option<u32>,
     ) -> Result<(), u8> {
+        if hostnames.is_empty() {
+            return Ok(());
+        }
         self.register_transaction(ext_ip, ext_port, hostnames, target, lifetime_secs)
             .map(|_| ())
     }
@@ -948,6 +951,17 @@ mod tests {
         let remaining = snap[0].remaining_secs.unwrap();
         assert!(remaining > 3590 && remaining <= 3600, "got {remaining}");
         assert_eq!(snap[1].remaining_secs, None);
+    }
+
+    #[tokio::test]
+    async fn registering_no_hostnames_starts_no_listener() {
+        let demux = SniDemux::new();
+        let target = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 443);
+        demux
+            .register(Ipv4Addr::LOCALHOST, 0, &[], target, None)
+            .unwrap();
+        assert!(demux.ports.peek(|p| p.is_empty()));
+        assert!(demux.listeners.peek(|l| l.is_empty()));
     }
 
     #[tokio::test]
