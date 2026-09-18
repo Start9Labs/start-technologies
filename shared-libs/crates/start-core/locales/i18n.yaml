@@ -2108,6 +2108,13 @@ net.gateway.cannot-delete-without-connection:
   fr_FR: "Impossible de supprimer l'appareil sans connexion active"
   pl_PL: "Nie można usunąć urządzenia bez aktywnego połączenia"
 
+net.gateway.cannot-pin-wan-ip-outbound-only:
+  en_US: "An outbound-only gateway carries no inbound traffic, so it has no WAN IP to pin"
+  de_DE: "Ein reines Ausgangs-Gateway trägt keinen eingehenden Datenverkehr und hat daher keine WAN-IP, die festgelegt werden könnte"
+  es_ES: "Una puerta de enlace de solo salida no recibe tráfico entrante, por lo que no tiene IP WAN que fijar"
+  fr_FR: "Une passerelle sortante uniquement ne reçoit aucun trafic entrant ; elle n'a donc pas d'IP WAN à fixer"
+  pl_PL: "Brama tylko wychodząca nie przenosi ruchu przychodzącego, więc nie ma IP WAN do przypięcia"
+
 net.gateway.wan-ip-override-not-public:
   en_US: "%{ip} is not a public address; inbound traffic from the internet reaches this server at a globally routable IPv4"
   de_DE: "%{ip} ist keine öffentliche Adresse; eingehender Datenverkehr aus dem Internet erreicht diesen Server über eine global routbare IPv4"

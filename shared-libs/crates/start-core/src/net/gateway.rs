@@ -32,7 +32,7 @@ use zbus::{Connection, proxy};
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::Database;
 use crate::db::model::public::{
-    CapabilityVerdict, GatewayPortMapCapabilities, IpInfo, NetworkInterfaceInfo,
+    CapabilityVerdict, GatewayPortMapCapabilities, GatewayType, IpInfo, NetworkInterfaceInfo,
     NetworkInterfaceType,
 };
 use crate::net::forward::{START9_BRIDGE_IFACE, nft_ensure_base};
@@ -3210,6 +3210,12 @@ impl NetworkInterfaceController {
                     return false;
                 }
             };
+            if wan_ip.is_some() {
+                if let Err(e) = check_wan_ip_override_target(info) {
+                    err = Some(e);
+                    return false;
+                }
+            }
             std::mem::replace(&mut info.wan_ip_override, wan_ip) != wan_ip
         });
         if let Some(e) = err {
@@ -3221,11 +3227,33 @@ impl NetworkInterfaceController {
     }
 }
 
+/// An outbound-only gateway carries no inbound traffic, so there is no address
+/// the internet reaches this server at through it to pin. Clearing a pin is
+/// always allowed.
+fn check_wan_ip_override_target(info: &NetworkInterfaceInfo) -> Result<(), Error> {
+    if info.gateway_type == GatewayType::OutboundOnly {
+        return Err(Error::new(
+            eyre!("{}", t!("net.gateway.cannot-pin-wan-ip-outbound-only")),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    Ok(())
+}
+
 /// Reject an override discovery would itself have thrown away — a private,
 /// CGNAT, loopback or otherwise unroutable address is never what the internet
-/// reaches this server at.
+/// reaches this server at — plus the blocks discovery never meets because no
+/// router hands them out: 192.0.0.0/24 (IETF protocol assignments),
+/// 198.18.0.0/15 (benchmarking), 224.0.0.0/4 (multicast) and 240.0.0.0/4
+/// (reserved). The dialog's reserved list mirrors this set.
 fn check_wan_ip_override(ip: Ipv4Addr) -> Result<(), Error> {
-    if crate::net::port_map::upnp::is_wan_candidate(ip) && is_global_ip(IpAddr::V4(ip)) {
+    let [a, b, c, _] = ip.octets();
+    let never_routed_to_a_host =
+        (a == 192 && b == 0 && c == 0) || (a == 198 && (b == 18 || b == 19)) || a >= 224;
+    if !never_routed_to_a_host
+        && crate::net::port_map::upnp::is_wan_candidate(ip)
+        && is_global_ip(IpAddr::V4(ip))
+    {
         return Ok(());
     }
     Err(Error::new(
@@ -3376,12 +3404,35 @@ mod wan_ip_override_tests {
             "203.0.113.7",
             "0.0.0.0",
             "255.255.255.255",
+            // And the blocks no router hands out: protocol assignments,
+            // benchmarking, multicast, reserved.
+            "192.0.0.9",
+            "198.18.0.5",
+            "198.19.255.1",
+            "224.0.0.1",
+            "239.255.255.250",
+            "240.0.0.1",
         ] {
             assert!(
                 check_wan_ip_override(bad.parse().unwrap()).is_err(),
                 "accepted {bad}"
             );
         }
+    }
+
+    #[test]
+    fn an_outbound_only_gateway_has_no_wan_ip_to_pin() {
+        let outbound_only = NetworkInterfaceInfo {
+            gateway_type: GatewayType::OutboundOnly,
+            ..Default::default()
+        };
+        assert!(check_wan_ip_override_target(&outbound_only).is_err());
+
+        let inbound = NetworkInterfaceInfo {
+            gateway_type: GatewayType::InboundOutbound,
+            ..Default::default()
+        };
+        assert!(check_wan_ip_override_target(&inbound).is_ok());
     }
 }
 

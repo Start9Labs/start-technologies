@@ -46,7 +46,7 @@ A gateway's WAN IP is the public address the Internet reaches your server at thr
 
 Discovery answers "where does my outbound traffic come from", which is the wrong question whenever outbound and inbound traffic take different paths. The usual case is a router that sends all outbound traffic through a commercial VPN while inbound connections still arrive on your real WAN address through port forwards. StartOS then reports the VPN exit address, and every address derived from it points somewhere your server is not.
 
-To correct it, open the gateway's `⋮` menu under `System > Gateways` and choose "Edit WAN IP". The dialog shows the address StartOS detected and takes the one you enter instead; "Reset to detected" clears it again. The address must be a public IPv4 — a private, [CGNAT](cgnat.md), or otherwise unroutable address is rejected, because inbound connections from the Internet cannot arrive on one.
+To correct it, open the gateway's `⋮` menu under `System > Gateways` and choose "Edit WAN IP". The dialog shows the address StartOS detected and takes the one you enter instead; "Reset to detected" clears it again. The address must be a public IPv4 — a private, [CGNAT](cgnat.md), or otherwise unroutable address is rejected, because inbound connections from the Internet cannot arrive on one. An outbound-only gateway has no WAN IP to pin, since nothing arrives through it.
 
 Setting it changes every address derived from the gateway at once: the public addresses offered for each service interface, and the port-forwarding rules StartOS tells you to add. Discovery keeps running while the override is set, so the detected address stays visible in the dialog and clearing the override restores it.
 
