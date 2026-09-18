@@ -35,7 +35,6 @@ use crate::db::model::public::{
     CapabilityVerdict, GatewayPortMapCapabilities, IpInfo, NetworkInterfaceInfo,
     NetworkInterfaceType,
 };
-use crate::net::DEFAULT_OUTBOUND_RULE_PRIORITY;
 use crate::net::forward::{START9_BRIDGE_IFACE, nft_ensure_base};
 use crate::net::gateway::device::DeviceProxy;
 use crate::net::host::all_hosts;
@@ -44,6 +43,10 @@ use crate::net::utils::{
     bind_mio_listener, find_wifi_iface, ipv6_is_link_local, ipv6_is_local, is_global_ip,
 };
 use crate::net::web_server::{Accept, AcceptStream, MetadataVisitor, TcpMetadata};
+use crate::net::{
+    DEFAULT_OUTBOUND_RULE_PRIORITY, MAIN_RULE_PRIORITY, REPLY_RULE_PRIORITY, SOURCE_RULE_PRIORITY,
+    TUNNEL_REPLY_RULE_PRIORITY, WG_ENCAP_RULE_PRIORITY, rule_at_priority,
+};
 use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::collections::OrdMapIterMut;
@@ -1525,7 +1528,7 @@ async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
         };
         for line in rules.lines() {
             let line = line.trim();
-            if !line.starts_with("51:") {
+            if rule_at_priority(line, REPLY_RULE_PRIORITY).is_none() {
                 continue;
             }
             let Some(pos) = line.find("lookup ") else {
@@ -1554,7 +1557,7 @@ async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
         .and_then(|b| String::from_utf8(b).with_kind(ErrorKind::Utf8))
     {
         for line in rules.lines() {
-            let Some(rest) = line.trim().strip_prefix("60:") else {
+            let Some(rest) = rule_at_priority(line, SOURCE_RULE_PRIORITY) else {
                 continue;
             };
             let Some(pos) = rest.find("lookup ") else {
@@ -1593,7 +1596,7 @@ async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
             .arg("lookup")
             .arg(table_id.to_string())
             .arg("priority")
-            .arg("60")
+            .arg(SOURCE_RULE_PRIORITY.to_string())
             .invoke(ErrorKind::Network)
             .await
             .ok();
@@ -1617,7 +1620,7 @@ async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
                 .arg("lookup")
                 .arg(&table_str)
                 .arg("priority")
-                .arg("51")
+                .arg(REPLY_RULE_PRIORITY.to_string())
                 .invoke(ErrorKind::Network)
                 .await
                 .ok();
@@ -1631,7 +1634,7 @@ async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
                     .arg("lookup")
                     .arg(&table_str)
                     .arg("priority")
-                    .arg("48")
+                    .arg(TUNNEL_REPLY_RULE_PRIORITY.to_string())
                     .invoke(ErrorKind::Network)
                     .await
                     .ok();
@@ -1670,10 +1673,9 @@ async fn snapshot_outbound_rules(v6: bool) -> (BTreeSet<u32>, BTreeSet<u32>) {
         )?;
         let mut fwmarks_74 = BTreeSet::<u32>::new();
         let mut tables_75 = BTreeSet::<u32>::new();
-        let default_priority_prefix = format!("{DEFAULT_OUTBOUND_RULE_PRIORITY}:");
         for line in output.lines() {
             let line = line.trim();
-            if let Some(rest) = line.strip_prefix("74:") {
+            if let Some(rest) = rule_at_priority(line, WG_ENCAP_RULE_PRIORITY) {
                 if let Some(pos) = rest.find("fwmark ") {
                     let after = &rest[pos + 7..];
                     let token = after.split_whitespace().next().unwrap_or("");
@@ -1683,7 +1685,7 @@ async fn snapshot_outbound_rules(v6: bool) -> (BTreeSet<u32>, BTreeSet<u32>) {
                         fwmarks_74.insert(v);
                     }
                 }
-            } else if let Some(rest) = line.strip_prefix(&default_priority_prefix) {
+            } else if let Some(rest) = rule_at_priority(line, DEFAULT_OUTBOUND_RULE_PRIORITY) {
                 if let Some(pos) = rest.find("lookup ") {
                     let after = &rest[pos + 7..];
                     let token = after.split_whitespace().next().unwrap_or("");
@@ -1731,7 +1733,7 @@ async fn reconcile_outbound_rules(
             .arg("lookup")
             .arg("main")
             .arg("priority")
-            .arg("74")
+            .arg(WG_ENCAP_RULE_PRIORITY.to_string())
             .invoke(ErrorKind::Network)
             .await
             .log_err();
@@ -1755,7 +1757,7 @@ async fn reconcile_outbound_rules(
             .arg("lookup")
             .arg("main")
             .arg("priority")
-            .arg("74")
+            .arg(WG_ENCAP_RULE_PRIORITY.to_string())
             .invoke(ErrorKind::Network)
             .await
             .log_err();
@@ -1997,15 +1999,16 @@ fn rule_has(line: &str, key: &str, value: &str) -> bool {
 }
 
 fn main_suppress_rule(line: &str) -> bool {
-    line.split_whitespace().eq([
-        "50:",
-        "from",
-        "all",
-        "lookup",
-        "main",
-        "suppress_prefixlength",
-        "0",
-    ])
+    rule_at_priority(line, MAIN_RULE_PRIORITY).is_some_and(|rule| {
+        rule.split_whitespace().eq([
+            "from",
+            "all",
+            "lookup",
+            "main",
+            "suppress_prefixlength",
+            "0",
+        ])
+    })
 }
 
 /// Specific routes are `main`'s; per-interface tables hold only defaults.
@@ -2033,7 +2036,7 @@ async fn ensure_main_suppress_rule(v6: bool) -> Result<(), Error> {
             .arg("suppress_prefixlength")
             .arg("0")
             .arg("priority")
-            .arg("50")
+            .arg(MAIN_RULE_PRIORITY.to_string())
             .invoke(ErrorKind::Network)
             .await?;
     }
@@ -2044,7 +2047,7 @@ const GLOBAL_UNICAST_V6: &str = "2000::/3";
 
 /// The priority-48 rule that routes a table's marked replies ahead of `main`.
 fn outranking_reply_rule(line: &str, table_id: u32) -> bool {
-    line.starts_with("48:")
+    rule_at_priority(line, TUNNEL_REPLY_RULE_PRIORITY).is_some()
         && rule_has(line, "to", GLOBAL_UNICAST_V6)
         && rule_has(line, "fwmark", &format!("0x{table_id:x}"))
         && rule_has(line, "lookup", &table_id.to_string())
@@ -2079,7 +2082,7 @@ async fn ensure_table_rules(
             continue;
         }
         match line.split(':').next() {
-            Some("51") => reply_rule = true,
+            Some(priority) if priority.parse() == Ok(REPLY_RULE_PRIORITY) => reply_rule = true,
             Some(priority) => {
                 ip().arg("rule")
                     .arg("del")
@@ -2104,7 +2107,7 @@ async fn ensure_table_rules(
             .arg("lookup")
             .arg(&table_str)
             .arg("priority")
-            .arg("51")
+            .arg(REPLY_RULE_PRIORITY.to_string())
             .invoke(ErrorKind::Network)
             .await
             .log_err();
@@ -2120,7 +2123,7 @@ async fn ensure_table_rules(
             .arg("lookup")
             .arg(&table_str)
             .arg("priority")
-            .arg("48")
+            .arg(TUNNEL_REPLY_RULE_PRIORITY.to_string())
             .invoke(ErrorKind::Network)
             .await
             .log_err();
@@ -2276,7 +2279,9 @@ async fn apply_policy_routing_v6(
     let existing_src: BTreeSet<String> = rules_output
         .lines()
         .filter_map(|l| {
-            let toks: Vec<&str> = l.trim().strip_prefix("60:")?.split_whitespace().collect();
+            let toks: Vec<&str> = rule_at_priority(l, SOURCE_RULE_PRIORITY)?
+                .split_whitespace()
+                .collect();
             toks.windows(2)
                 .any(|w| w[0] == "lookup" && w[1].parse::<u32>().ok() == Some(table_id))
                 .then(|| toks.windows(2).find(|w| w[0] == "from").map(|w| w[1]))
@@ -2294,7 +2299,7 @@ async fn apply_policy_routing_v6(
             .arg("lookup")
             .arg(&table_str)
             .arg("priority")
-            .arg("60")
+            .arg(SOURCE_RULE_PRIORITY.to_string())
             .invoke(ErrorKind::Network)
             .await
             .log_err();
@@ -2309,7 +2314,7 @@ async fn apply_policy_routing_v6(
             .arg("lookup")
             .arg(&table_str)
             .arg("priority")
-            .arg("60")
+            .arg(SOURCE_RULE_PRIORITY.to_string())
             .invoke(ErrorKind::Network)
             .await
             .log_err();
