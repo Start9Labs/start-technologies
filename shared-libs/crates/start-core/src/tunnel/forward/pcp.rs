@@ -397,7 +397,10 @@ impl TunnelContext {
                     match entry {
                         PortForward::Sni { routes, .. } => {
                             for h in &hostnames_owned {
-                                if routes.get(h).is_some_and(|r| r.target != target) {
+                                if routes
+                                    .get(h)
+                                    .is_some_and(|r| route_conflicts(r, target, auto))
+                                {
                                     return Err(Error::new(
                                         eyre!(
                                             "SNI hostname {h} on {source} is held by another client"
@@ -546,7 +549,10 @@ impl TunnelContext {
                     use crate::tunnel::db::{PortForward, SniRoute};
                     match pf.0.get_mut(&source) {
                         Some(PortForward::Sni { fallback, .. }) => {
-                            if fallback.as_ref().is_some_and(|f| f.target != target) {
+                            if fallback
+                                .as_ref()
+                                .is_some_and(|f| route_conflicts(f, target, auto))
+                            {
                                 return Err(Error::new(
                                     eyre!("fallback on {source} is held by another client"),
                                     ErrorKind::InvalidRequest,
@@ -684,10 +690,12 @@ fn plan_dnat_conversion(
     }
 }
 
-/// The stored `(label, enabled, auto)` for an upserted SNI route. A brand-new
-/// route takes the caller's `auto` and `default_label`; an existing one keeps
-/// its owner (`auto`), enabled state, and any user label — so a PCP renewal
-/// can't hijack a manual route, nor a manual re-add flip an automatic one.
+/// A route's owner repoints it within its own device. Any other change conflicts.
+fn route_conflicts(route: &crate::tunnel::db::SniRoute, target: SocketAddrV4, auto: bool) -> bool {
+    route.target != target && (route.auto != auto || route.target.ip() != target.ip())
+}
+
+/// Preserves an existing SNI route's owner, enabled state, and label.
 fn sni_route_fields(
     existing: Option<&crate::tunnel::db::SniRoute>,
     auto: bool,
@@ -818,7 +826,7 @@ mod tests {
 
     use super::{
         mapping_entries, peer_forward_matches, peer_forward_source, plan_dnat_conversion,
-        register_converted_sni, restore_forward_entry, sni_route_fields,
+        register_converted_sni, restore_forward_entry, route_conflicts, sni_route_fields,
     };
     use crate::tunnel::db::{PortForward, PortForwards, SniRoute};
 
@@ -998,6 +1006,20 @@ mod tests {
         assert_eq!(label.as_deref(), Some("mine"));
         assert!(!enabled);
         assert!(!auto);
+    }
+
+    #[test]
+    fn a_route_is_repointed_only_by_its_owner_within_its_device() {
+        let auto_route = route(None, true, true);
+        let same = "10.59.0.2:443".parse().unwrap();
+        let new_port = "10.59.0.2:8443".parse().unwrap();
+        let other_device = "10.59.0.3:443".parse().unwrap();
+        assert!(!route_conflicts(&auto_route, same, true));
+        assert!(!route_conflicts(&auto_route, same, false));
+        assert!(!route_conflicts(&auto_route, new_port, true));
+        assert!(route_conflicts(&auto_route, new_port, false));
+        assert!(route_conflicts(&auto_route, other_device, true));
+        assert!(route_conflicts(&route(None, true, false), new_port, true));
     }
 
     // Symmetrically, a manual re-add over an existing automatic route leaves it

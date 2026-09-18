@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   worldwide subset (2.4 GHz channels 1–11, 5 GHz channels 36–48, 20 dBm), so
   select yours after setup.
 
+### Fixed
+
+- **A device can move a hostname route it holds to another of its own ports.**
+  Previously the request was refused as taken until the old lease expired.
+
 ## [1.1.1]
 
 ### Fixed

@@ -14,9 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   intact, and a disabled mapping stays disabled while its lease is renewed.
   This applies to IPv4 forwards, SNI routes and fallbacks, and IPv6 pinholes.
 
-- **A device can repoint an automatic IPv4 port it already holds.** A request
-  for the same external port with a different internal port or range size
-  updates the mapping. Previously it was refused until the old lease expired.
+- **A device can repoint an automatic mapping it already holds.** A request for
+  the same external port or SNI hostname with a different internal port
+  updates the mapping, as does a different range size on an IPv4 forward.
+  Previously IPv4 forwards, SNI routes and SNI fallbacks refused it until the
+  old lease expired.
 
 - **Port forwards left behind by an earlier run of the daemon are cleared at
   startup.** After a crash, or a restart during which the tunnel's WAN address
