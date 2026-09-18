@@ -9,16 +9,12 @@ Before=startd.service
 # total RAM minus a fixed reservation for the host management plane — so the
 # *aggregate* footprint of all service containers is bounded.
 #
-# Delegate=yes hands the slice's cgroup subtree to lxc so systemd won't fight
-# the per-container cgroups lxc creates underneath it.
-#
 # ManagedOOM* opts the slice into systemd-oomd: under sustained memory PSI
 # pressure (or swap exhaustion) oomd kills the heaviest *container* cgroup in
 # this slice, turning what used to be a whole-host swap-death wedge into a
 # single failed install. The host plane is spared — system.slice / user.slice
 # carry MemoryMin reservations (projects/start-os/debian/postinst) and startd.service
 # sets ManagedOOMPreference=avoid.
-Delegate=yes
 MemoryAccounting=yes
 ManagedOOMMemoryPressure=kill
 ManagedOOMMemoryPressureLimit=60%

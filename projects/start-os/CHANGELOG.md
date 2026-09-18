@@ -96,10 +96,11 @@ for the detail behind its highlights.
 
 ### Changed
 
-- **The service-container memory cap now preserves the host reservation under
-  load.** StartOS starts with ZRAM compressed swap disabled and applies that
-  setting on update, keeping swapped service pages from allocating uncharged
-  RAM beyond the cgroup's hard limit.
+- **ZRAM compressed swap is now off by default, and updating turns it off on
+  your server.** With it on, services under heavy memory load could take the RAM
+  StartOS reserves for itself and leave the server unreachable. A server that
+  leaned on ZRAM to fit its services has less memory to work with after the
+  update. `start-cli server experimental zram --enable` turns it back on.
 
 - **Your server's name is now its `.local` address, without the `.local` on the
   end.** A server previously carried two names: a display label shown in the

@@ -76,9 +76,9 @@ erasure-coded FUSE filesystem used for StartOS backups. It builds to the
 - `startd.service` — the main daemon (`Restart=always`, OOM-protected with
   `ManagedOOMPreference=avoid`).
 - `services.slice` — the cgroup slice every service container lives under;
-  `Delegate=yes` hands the subtree to LXC, and systemd-oomd kills the heaviest
-  container under memory pressure rather than wedging the host. `startd` applies
-  a RAM-dependent `MemoryMax`/`MemoryHigh` to this slice at boot.
+  systemd-oomd kills the heaviest container under memory pressure rather than
+  wedging the host. `startd` applies a RAM-dependent `MemoryMax`/`MemoryHigh` to
+  this slice at boot.
 - `startos-shutdown.service` — graceful teardown on power-off only (ties to
   `poweroff.target`/`halt.target`, not reboot); its `ExecStop` calls
   `start-cli server shutdown`.
