@@ -326,41 +326,62 @@ function isPublicIp(h: HostnameInfo): boolean {
 }
 
 /**
- * mDNS (.local) names resolve only via LAN IPs on a shared gateway, so an mDNS
- * address is reachable only when one of its gateways has an enabled LAN IP among
- * `enabled`. Non-mDNS addresses are always resolvable here.
+ * mDNS (.local) names resolve through enabled LAN IPs on the same gateway,
+ * port, and TLS leg. Non-mDNS addresses are always resolvable here.
  */
 export function mdnsResolvable(
   h: HostnameInfo,
   enabled: HostnameInfo[],
+  gateway?: string,
 ): boolean {
   if (h.metadata.kind !== 'mdns') return true
   const lanGateways = new Set(
     enabled.flatMap(a =>
-      !a.public && (a.metadata.kind === 'ipv4' || a.metadata.kind === 'ipv6')
+      !a.public &&
+      a.ssl === h.ssl &&
+      a.port === h.port &&
+      (a.metadata.kind === 'ipv4' || a.metadata.kind === 'ipv6')
         ? [a.metadata.gateway]
         : [],
     ),
   )
-  return h.metadata.gateways.some(g => lanGateways.has(g))
+  return gateway
+    ? h.metadata.gateways.includes(gateway) && lanGateways.has(gateway)
+    : h.metadata.gateways.some(g => lanGateways.has(g))
+}
+
+function addressEnabled(addr: DerivedAddressInfo, h: HostnameInfo): boolean {
+  if (isPublicIp(h)) {
+    if (h.port === null) return true
+    const sa =
+      h.metadata.kind === 'ipv6'
+        ? `[${h.hostname}]:${h.port}`
+        : `${h.hostname}:${h.port}`
+    return addr.enabled.includes(sa)
+  }
+  return !addr.disabled.some(
+    ([hostname, port]) => hostname === h.hostname && port === (h.port ?? 0),
+  )
+}
+
+export function addressDisplayEnabled(
+  addr: DerivedAddressInfo,
+  h: HostnameInfo,
+  gateway?: string,
+): boolean {
+  return (
+    addressEnabled(addr, h) &&
+    mdnsResolvable(
+      h,
+      addr.available.filter(candidate => addressEnabled(addr, candidate)),
+      gateway,
+    )
+  )
 }
 
 function enabledAddresses(addr: DerivedAddressInfo): HostnameInfo[] {
   const enabled = addr.available.filter(h => {
-    if (isPublicIp(h)) {
-      // Public IPs: disabled by default, explicitly enabled via SocketAddr string
-      if (h.port === null) return true
-      const sa =
-        h.metadata.kind === 'ipv6'
-          ? `[${h.hostname}]:${h.port}`
-          : `${h.hostname}:${h.port}`
-      return addr.enabled.includes(sa)
-    } else {
-      // Everything else: enabled by default, explicitly disabled via [hostname, port] tuple
-      return !addr.disabled.some(
-        ([hostname, port]) => hostname === h.hostname && port === (h.port ?? 0),
-      )
-    }
+    return addressEnabled(addr, h)
   })
 
   return enabled.filter(h => mdnsResolvable(h, enabled))
