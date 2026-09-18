@@ -44,8 +44,9 @@ use crate::net::utils::{
 };
 use crate::net::web_server::{Accept, AcceptStream, MetadataVisitor, TcpMetadata};
 use crate::net::{
-    DEFAULT_OUTBOUND_RULE_PRIORITY, MAIN_RULE_PRIORITY, REPLY_RULE_PRIORITY, SOURCE_RULE_PRIORITY,
-    TUNNEL_REPLY_RULE_PRIORITY, WG_ENCAP_RULE_PRIORITY, rule_at_priority,
+    DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY, DEFAULT_OUTBOUND_RULE_PRIORITY, MAIN_RULE_PRIORITY,
+    REPLY_RULE_PRIORITY, SOURCE_RULE_PRIORITY, TUNNEL_REPLY_RULE_PRIORITY, WG_ENCAP_RULE_PRIORITY,
+    rule_at_priority,
 };
 use crate::prelude::*;
 use crate::util::Invoke;
@@ -1655,11 +1656,40 @@ async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
     }
 }
 
-/// Snapshot the fwmarks at priority 74 and table ids at priority 75 already
-/// present in one family's rule table (`v6` selects `ip -6`). Both families are
-/// reconciled from the same desired set, so `apply_default_outbound` snapshots
-/// each separately.
-async fn snapshot_outbound_rules(v6: bool) -> (BTreeSet<u32>, BTreeSet<u32>) {
+#[derive(Debug, Default, PartialEq, Eq)]
+struct OutboundRules {
+    wireguard_fwmarks: BTreeSet<u32>,
+    gateway_tables: BTreeSet<u32>,
+    reject: bool,
+}
+
+fn parse_outbound_rules(output: &str) -> OutboundRules {
+    let mut rules = OutboundRules::default();
+    for line in output.lines() {
+        if let Some(rest) = rule_at_priority(line, WG_ENCAP_RULE_PRIORITY) {
+            let Some(pos) = rest.find("fwmark ") else {
+                continue;
+            };
+            let token = rest[pos + 7..].split_whitespace().next().unwrap_or("");
+            if let Ok(fwmark) = u32::from_str_radix(token.strip_prefix("0x").unwrap_or(token), 16) {
+                rules.wireguard_fwmarks.insert(fwmark);
+            }
+        } else if let Some(rest) = rule_at_priority(line, DEFAULT_OUTBOUND_RULE_PRIORITY) {
+            let Some(pos) = rest.find("lookup ") else {
+                continue;
+            };
+            let token = rest[pos + 7..].split_whitespace().next().unwrap_or("");
+            if let Ok(table) = token.parse::<u32>() {
+                rules.gateway_tables.insert(table);
+            }
+        } else if let Some(rest) = rule_at_priority(line, DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY) {
+            rules.reject |= rest.split_whitespace().eq(["from", "all", "unreachable"]);
+        }
+    }
+    rules
+}
+
+async fn snapshot_outbound_rules(v6: bool) -> OutboundRules {
     match async {
         let mut cmd = Command::new("ip");
         if v6 {
@@ -1671,53 +1701,19 @@ async fn snapshot_outbound_rules(v6: bool) -> (BTreeSet<u32>, BTreeSet<u32>) {
                 .invoke(ErrorKind::Network)
                 .await?,
         )?;
-        let mut fwmarks_74 = BTreeSet::<u32>::new();
-        let mut tables_75 = BTreeSet::<u32>::new();
-        for line in output.lines() {
-            let line = line.trim();
-            if let Some(rest) = rule_at_priority(line, WG_ENCAP_RULE_PRIORITY) {
-                if let Some(pos) = rest.find("fwmark ") {
-                    let after = &rest[pos + 7..];
-                    let token = after.split_whitespace().next().unwrap_or("");
-                    if let Ok(v) =
-                        u32::from_str_radix(token.strip_prefix("0x").unwrap_or(token), 16)
-                    {
-                        fwmarks_74.insert(v);
-                    }
-                }
-            } else if let Some(rest) = rule_at_priority(line, DEFAULT_OUTBOUND_RULE_PRIORITY) {
-                if let Some(pos) = rest.find("lookup ") {
-                    let after = &rest[pos + 7..];
-                    let token = after.split_whitespace().next().unwrap_or("");
-                    if let Ok(v) = token.parse::<u32>() {
-                        tables_75.insert(v);
-                    }
-                }
-            }
-        }
-        Ok::<_, Error>((fwmarks_74, tables_75))
+        Ok::<_, Error>(parse_outbound_rules(&output))
     }
     .await
     {
         Ok(v) => v,
         Err(e) => {
             tracing::error!("failed to snapshot outbound rules: {e}");
-            (BTreeSet::new(), BTreeSet::new())
+            OutboundRules::default()
         }
     }
 }
 
-/// Reconcile one family's priority-74 (wg-encap fwmark → main) and priority-75
-/// (catch-all → chosen gateway's table) outbound rules from `existing` toward
-/// `desired`. The desired sets are family-agnostic — the same wg fwmarks and
-/// gateway table id — so only the rule table (`v6` selects `ip -6`) differs.
-async fn reconcile_outbound_rules(
-    v6: bool,
-    existing_74: &BTreeSet<u32>,
-    desired_74: &BTreeSet<u32>,
-    existing_75: &BTreeSet<u32>,
-    desired_75: &BTreeSet<u32>,
-) {
+async fn reconcile_outbound_rules(v6: bool, existing: &OutboundRules, desired: &OutboundRules) {
     let ip = || {
         let mut c = Command::new("ip");
         if v6 {
@@ -1725,7 +1721,22 @@ async fn reconcile_outbound_rules(
         }
         c
     };
-    for fwmark in desired_74.difference(existing_74) {
+    if desired.reject && !existing.reject {
+        ip().arg("rule")
+            .arg("add")
+            .arg("from")
+            .arg("all")
+            .arg("unreachable")
+            .arg("priority")
+            .arg(DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY.to_string())
+            .invoke(ErrorKind::Network)
+            .await
+            .log_err();
+    }
+    for fwmark in desired
+        .wireguard_fwmarks
+        .difference(&existing.wireguard_fwmarks)
+    {
         ip().arg("rule")
             .arg("add")
             .arg("fwmark")
@@ -1738,7 +1749,7 @@ async fn reconcile_outbound_rules(
             .await
             .log_err();
     }
-    for table in desired_75.difference(existing_75) {
+    for table in desired.gateway_tables.difference(&existing.gateway_tables) {
         ip().arg("rule")
             .arg("add")
             .arg("table")
@@ -1749,7 +1760,10 @@ async fn reconcile_outbound_rules(
             .await
             .log_err();
     }
-    for fwmark in existing_74.difference(desired_74) {
+    for fwmark in existing
+        .wireguard_fwmarks
+        .difference(&desired.wireguard_fwmarks)
+    {
         ip().arg("rule")
             .arg("del")
             .arg("fwmark")
@@ -1762,13 +1776,25 @@ async fn reconcile_outbound_rules(
             .await
             .log_err();
     }
-    for table in existing_75.difference(desired_75) {
+    for table in existing.gateway_tables.difference(&desired.gateway_tables) {
         ip().arg("rule")
             .arg("del")
             .arg("table")
             .arg(table.to_string())
             .arg("priority")
             .arg(DEFAULT_OUTBOUND_RULE_PRIORITY.to_string())
+            .invoke(ErrorKind::Network)
+            .await
+            .log_err();
+    }
+    if existing.reject && !desired.reject {
+        ip().arg("rule")
+            .arg("del")
+            .arg("from")
+            .arg("all")
+            .arg("unreachable")
+            .arg("priority")
+            .arg(DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY.to_string())
             .invoke(ErrorKind::Network)
             .await
             .log_err();
@@ -2833,18 +2859,12 @@ impl NetworkInterfaceController {
         default_outbound: &Option<GatewayId>,
         ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
     ) {
-        // 1. Snapshot existing priority-74/75 rules in both families. The desired
-        //    set computed below is family-agnostic (the same wg-encap fwmarks and
-        //    gateway table id), so v4 and v6 differ only in the rule table they
-        //    are reconciled against.
-        let (existing_74, existing_75) = snapshot_outbound_rules(false).await;
-        let (existing_74_v6, existing_75_v6) = snapshot_outbound_rules(true).await;
-
-        // 2. Compute desired rules
-        let mut desired_74 = BTreeSet::<u32>::new();
-        let mut desired_75 = BTreeSet::<u32>::new();
+        let existing = snapshot_outbound_rules(false).await;
+        let existing_v6 = snapshot_outbound_rules(true).await;
+        let mut desired = OutboundRules::default();
 
         if let Some(gw_id) = default_outbound {
+            desired.reject = true;
             let connected = ip_info
                 .get(gw_id)
                 .map_or(false, |info| info.ip_info.is_some());
@@ -2854,80 +2874,60 @@ impl NetworkInterfaceController {
                 } else {
                     tracing::warn!("default outbound gateway {gw_id} not found in ip_info");
                 }
-            } else {
-                match if_nametoindex(gw_id.as_str()) {
-                    Ok(idx) => {
-                        let table_id = 1000 + idx;
-                        desired_75.insert(table_id);
+            }
 
-                        // Exempt ALL active WireGuard interfaces' encapsulation packets.
-                        // Our priority-75 catch-all would otherwise swallow their encap
-                        // traffic before NM's fwmark rules at priority 31610 can route
-                        // it correctly.
-                        for (iface_id, iface_info) in ip_info {
-                            let Some(ref ip) = iface_info.ip_info else {
-                                continue;
-                            };
-                            if ip.device_type != Some(NetworkInterfaceType::Wireguard) {
-                                continue;
+            match if_nametoindex(gw_id.as_str()) {
+                Ok(idx) => {
+                    desired.gateway_tables.insert(1000 + idx);
+                }
+                Err(e) => {
+                    tracing::error!("failed to get ifindex for {gw_id}: {e}");
+                }
+            }
+
+            // WireGuard transport packets must reach `main` to restore a tunnel.
+            for (iface_id, iface_info) in ip_info {
+                let Some(ref ip) = iface_info.ip_info else {
+                    continue;
+                };
+                if ip.device_type != Some(NetworkInterfaceType::Wireguard) {
+                    continue;
+                }
+                match Command::new("wg")
+                    .arg("show")
+                    .arg(iface_id.as_str())
+                    .arg("fwmark")
+                    .invoke(ErrorKind::Network)
+                    .await
+                {
+                    Ok(output) => {
+                        let fwmark_hex = String::from_utf8_lossy(&output).trim().to_owned();
+                        if fwmark_hex.is_empty() || fwmark_hex == "off" {
+                            continue;
+                        }
+                        match u32::from_str_radix(
+                            fwmark_hex.strip_prefix("0x").unwrap_or(&fwmark_hex),
+                            16,
+                        ) {
+                            Ok(fwmark) => {
+                                desired.wireguard_fwmarks.insert(fwmark);
                             }
-                            match Command::new("wg")
-                                .arg("show")
-                                .arg(iface_id.as_str())
-                                .arg("fwmark")
-                                .invoke(ErrorKind::Network)
-                                .await
-                            {
-                                Ok(output) => {
-                                    let fwmark_hex =
-                                        String::from_utf8_lossy(&output).trim().to_owned();
-                                    if fwmark_hex.is_empty() || fwmark_hex == "off" {
-                                        continue;
-                                    }
-                                    match u32::from_str_radix(
-                                        fwmark_hex.strip_prefix("0x").unwrap_or(&fwmark_hex),
-                                        16,
-                                    ) {
-                                        Ok(v) => {
-                                            desired_74.insert(v);
-                                        }
-                                        Err(e) => {
-                                            tracing::error!(
-                                                "failed to parse WireGuard fwmark '{fwmark_hex}' for {iface_id}: {e}"
-                                            );
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    tracing::error!(
-                                        "failed to read WireGuard fwmark for {iface_id}: {e}"
-                                    );
-                                }
+                            Err(e) => {
+                                tracing::error!(
+                                    "failed to parse WireGuard fwmark '{fwmark_hex}' for {iface_id}: {e}"
+                                );
                             }
                         }
                     }
                     Err(e) => {
-                        tracing::error!("failed to get ifindex for {gw_id}: {e}");
+                        tracing::error!("failed to read WireGuard fwmark for {iface_id}: {e}");
                     }
                 }
             }
         }
 
-        // 3. Reconcile each family toward the desired set. Both use the same
-        //    desired fwmarks/tables but separate rule tables; v6 carries no NAT,
-        //    so this is the only v6 default-outbound machinery — the per-gateway
-        //    v6 table it points at is populated by `apply_policy_routing_v6`
-        //    (a real default when the gateway carries v6, else a blackhole so a
-        //    non-v6 default outbound drops v6 instead of leaking it).
-        reconcile_outbound_rules(false, &existing_74, &desired_74, &existing_75, &desired_75).await;
-        reconcile_outbound_rules(
-            true,
-            &existing_74_v6,
-            &desired_74,
-            &existing_75_v6,
-            &desired_75,
-        )
-        .await;
+        reconcile_outbound_rules(false, &existing, &desired).await;
+        reconcile_outbound_rules(true, &existing_v6, &desired).await;
     }
 
     pub fn new(db: TypedPatchDb<Database>) -> Self {
@@ -3331,6 +3331,20 @@ mod policy_rule_tests {
         assert!(!main_suppress_rule(
             "50: from all fwmark 0x3e9 lookup main suppress_prefixlength 0"
         ));
+    }
+
+    #[test]
+    fn outbound_snapshot_includes_the_fail_closed_rule() {
+        let rules = parse_outbound_rules(
+            "74: from all fwmark 0xca6c lookup main\n\
+             75: from all lookup 1004\n\
+             76: from all unreachable\n\
+             32766: from all lookup main\n",
+        );
+        assert_eq!(rules.wireguard_fwmarks, [0xca6c].into_iter().collect());
+        assert_eq!(rules.gateway_tables, [1004].into_iter().collect());
+        assert!(rules.reject);
+        assert!(!parse_outbound_rules("76: from 10.0.3.5 unreachable\n").reject);
     }
 
     #[test]

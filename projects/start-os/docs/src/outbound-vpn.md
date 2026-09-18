@@ -24,7 +24,9 @@ Both options hide your home IP address, and in both cases the provider knows who
 
 By default, StartOS dynamically selects which gateway to use for outbound traffic for optimal performance ("Auto" mode). You can override this under `System > Gateways > Outbound Traffic` by switching from "Auto" to a specific gateway. This sets the system-wide default: it covers everything on the server — every service, and the OS itself (registry connections, package downloads) — except services with their own [per-service override](#route-individual-services-through-vpn), which keep their own gateway.
 
-## IPv6 leak prevention
+## Leak prevention
+
+A selected gateway acts as a kill switch. If it disconnects, StartOS rejects the traffic assigned to it instead of rerouting that traffic through another gateway. A system-wide selection protects the OS and every service that follows it; a per-service selection protects that service. Choose **Auto** system-wide when you want StartOS to use an available fallback. Choose **System default** for a service when it should follow the system-wide policy. Marketplace access, package downloads, and OS updates remain offline while their selected system-wide gateway is unavailable.
 
 StartOS treats IPv6 outbound routing the same way as IPv4: the default gateway is chosen by route metric, and you can set the system-wide default under `System > Gateways > Outbound Traffic`.
 
@@ -38,4 +40,4 @@ A service's own setting always takes precedence over the system-wide default —
 
 For example, you could route your Bitcoin node through Mullvad for privacy while leaving Nextcloud on the default gateway for better performance — even with Mullvad also pinned as the system-wide default.
 
-A service's gateway carries its IPv6 as well as its IPv4, with the same [leak prevention](#ipv6-leak-prevention) as the system-wide default: if the gateway you choose for a service can't carry IPv6, StartOS drops that service's IPv6.
+A service's gateway carries its IPv6 as well as its IPv4, with the same [leak prevention](#leak-prevention) as the system-wide default: if the gateway you choose for a service can't carry IPv6, StartOS drops that service's IPv6.

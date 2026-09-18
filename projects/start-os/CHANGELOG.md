@@ -523,6 +523,11 @@ for the detail behind its highlights.
 
 ### Security
 
+- **A selected outbound gateway acts as a kill switch if it disconnects.**
+  StartOS rejects the system-wide or per-service traffic assigned to that
+  gateway until it reconnects, protecting the server's ISP address from
+  fallback traffic.
+
 - **Service mount paths are validated and confined to their intended
   directories.**
 

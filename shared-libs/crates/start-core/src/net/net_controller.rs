@@ -16,7 +16,6 @@ use tracing::instrument;
 
 use crate::db::model::Database;
 use crate::hostname::ServerHostname;
-use crate::net::SERVICE_OUTBOUND_RULE_PRIORITY;
 use crate::net::dns::DnsController;
 use crate::net::dns_update::{DnsUpdateController, spawn_server_mdns_injection};
 use crate::net::forward::{
@@ -31,6 +30,7 @@ use crate::net::service_interface::{
 };
 use crate::net::socks::SocksController;
 use crate::net::vhost::{AlpnInfo, DynVHostTarget, ProxyTarget, VHostController, VHostKey};
+use crate::net::{SERVICE_OUTBOUND_REJECT_RULE_PRIORITY, SERVICE_OUTBOUND_RULE_PRIORITY};
 use crate::prelude::*;
 use crate::service::effects::callbacks::ServiceCallbacks;
 use crate::util::Invoke;
@@ -937,15 +937,39 @@ fn ip_rule(source: IpAddr) -> Command {
     cmd
 }
 
-async fn outbound_rule(action: &str, source: IpAddr, table: u32) -> Result<(), Error> {
-    ip_rule(source)
-        .arg(action)
-        .arg("from")
-        .arg(source.to_string())
-        .arg("lookup")
-        .arg(table.to_string())
-        .arg("priority")
-        .arg(SERVICE_OUTBOUND_RULE_PRIORITY.to_string())
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ServiceOutboundRule {
+    Gateway(u32),
+    Reject,
+}
+
+fn outbound_rule_command(action: &str, source: IpAddr, rule: ServiceOutboundRule) -> Command {
+    let mut command = ip_rule(source);
+    command.arg(action).arg("from").arg(source.to_string());
+    match rule {
+        ServiceOutboundRule::Gateway(table) => {
+            command
+                .arg("lookup")
+                .arg(table.to_string())
+                .arg("priority")
+                .arg(SERVICE_OUTBOUND_RULE_PRIORITY.to_string());
+        }
+        ServiceOutboundRule::Reject => {
+            command
+                .arg("unreachable")
+                .arg("priority")
+                .arg(SERVICE_OUTBOUND_REJECT_RULE_PRIORITY.to_string());
+        }
+    }
+    command
+}
+
+async fn outbound_rule(
+    action: &str,
+    source: IpAddr,
+    rule: ServiceOutboundRule,
+) -> Result<(), Error> {
+    outbound_rule_command(action, source, rule)
         .invoke(ErrorKind::Network)
         .await?;
     Ok(())
@@ -953,16 +977,47 @@ async fn outbound_rule(action: &str, source: IpAddr, table: u32) -> Result<(), E
 
 async fn purge_outbound_rules(sources: &[IpAddr]) {
     for source in sources {
-        while ip_rule(*source)
-            .arg("del")
-            .arg("from")
-            .arg(source.to_string())
-            .arg("priority")
-            .arg(SERVICE_OUTBOUND_RULE_PRIORITY.to_string())
-            .invoke(ErrorKind::Network)
-            .await
-            .is_ok()
-        {}
+        for priority in [
+            SERVICE_OUTBOUND_RULE_PRIORITY,
+            SERVICE_OUTBOUND_REJECT_RULE_PRIORITY,
+        ] {
+            while ip_rule(*source)
+                .arg("del")
+                .arg("from")
+                .arg(source.to_string())
+                .arg("priority")
+                .arg(priority.to_string())
+                .invoke(ErrorKind::Network)
+                .await
+                .is_ok()
+            {}
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ServiceOutboundState {
+    selected: bool,
+    table: Option<u32>,
+}
+
+async fn add_outbound_rules(sources: &[IpAddr], rule: ServiceOutboundRule) -> Result<(), Error> {
+    let mut added = Vec::new();
+    for source in sources {
+        if let Err(e) = outbound_rule("add", *source, rule).await {
+            for source in added {
+                let _ = outbound_rule("del", source, rule).await;
+            }
+            return Err(e);
+        }
+        added.push(*source);
+    }
+    Ok(())
+}
+
+async fn delete_outbound_rules(sources: &[IpAddr], rule: ServiceOutboundRule) {
+    for source in sources {
+        let _ = outbound_rule("del", *source, rule).await;
     }
 }
 
@@ -970,7 +1025,7 @@ async fn sync_outbound_rules(
     db: &TypedPatchDb<Database>,
     id: &PackageId,
     sources: &[IpAddr],
-    current_table: &mut Option<u32>,
+    current: &mut ServiceOutboundState,
 ) {
     if let Err(e) = async {
         let gateway: Option<GatewayId> = db
@@ -981,31 +1036,35 @@ async fn sync_outbound_rules(
             .as_idx(id)
             .and_then(|p| p.as_outbound_gateway().de().ok())
             .flatten();
-        let table = gateway.and_then(|gateway| {
-            if_nametoindex(gateway.as_str())
-                .map(|idx| 1000 + idx)
-                .log_err()
-        });
-        if table == *current_table {
+        let desired = ServiceOutboundState {
+            selected: gateway.is_some(),
+            table: gateway.as_ref().and_then(|gateway| {
+                if_nametoindex(gateway.as_str())
+                    .map(|idx| 1000 + idx)
+                    .log_err()
+            }),
+        };
+        if desired == *current {
             return Ok(());
         }
-        // The rule being replaced keeps routing until it is deleted.
-        if let Some(table) = table {
-            for source in sources {
-                if let Err(e) = outbound_rule("add", *source, table).await {
-                    for source in sources {
-                        let _ = outbound_rule("del", *source, table).await;
-                    }
-                    return Err(e);
-                }
-            }
+
+        if desired.selected && !current.selected {
+            add_outbound_rules(sources, ServiceOutboundRule::Reject).await?;
+            current.selected = true;
         }
-        if let Some(old_table) = *current_table {
-            for source in sources {
-                let _ = outbound_rule("del", *source, old_table).await;
+        if desired.table != current.table {
+            if let Some(table) = desired.table {
+                add_outbound_rules(sources, ServiceOutboundRule::Gateway(table)).await?;
             }
+            if let Some(table) = current.table {
+                delete_outbound_rules(sources, ServiceOutboundRule::Gateway(table)).await;
+            }
+            current.table = desired.table;
         }
-        *current_table = table;
+        if current.selected && !desired.selected {
+            delete_outbound_rules(sources, ServiceOutboundRule::Reject).await;
+            current.selected = false;
+        }
         Ok::<_, Error>(())
     }
     .await
@@ -1071,8 +1130,8 @@ impl NetService {
                     w.mark_seen();
                 }
                 drop(ctrl_for_ip);
-                let mut current_outbound_table: Option<u32> = None;
-                sync_outbound_rules(&db, id, &outbound_sources, &mut current_outbound_table).await;
+                let mut current_outbound = ServiceOutboundState::default();
+                sync_outbound_rules(&db, id, &outbound_sources, &mut current_outbound).await;
 
                 loop {
                     let (hosts_changed, outbound_changed) = tokio::select! {
@@ -1128,22 +1187,19 @@ impl NetService {
                     }
 
                     if outbound_changed {
-                        sync_outbound_rules(
-                            &db,
-                            id,
-                            &outbound_sources,
-                            &mut current_outbound_table,
-                        )
-                        .await;
+                        sync_outbound_rules(&db, id, &outbound_sources, &mut current_outbound)
+                            .await;
                     }
 
                     synced_writer.send_modify(|v| *v += 1);
                 }
 
-                if let Some(table_id) = current_outbound_table {
-                    for source in &outbound_sources {
-                        let _ = outbound_rule("del", *source, table_id).await;
-                    }
+                if let Some(table) = current_outbound.table {
+                    delete_outbound_rules(&outbound_sources, ServiceOutboundRule::Gateway(table))
+                        .await;
+                }
+                if current_outbound.selected {
+                    delete_outbound_rules(&outbound_sources, ServiceOutboundRule::Reject).await;
                 }
             } else {
                 let ptr: JsonPointer = "/public/serverInfo/network/host".parse().unwrap();
@@ -1660,6 +1716,37 @@ mod tests {
     fn outbound_rule_family_follows_its_source() {
         assert_eq!(args(&ip_rule("10.0.3.5".parse().unwrap())), ["rule"]);
         assert_eq!(args(&ip_rule("fd00:3::5".parse().unwrap())), ["-6", "rule"]);
+    }
+
+    #[test]
+    fn service_outbound_rules_are_source_scoped_in_each_family() {
+        assert_eq!(
+            args(&outbound_rule_command(
+                "add",
+                "10.0.3.5".parse().unwrap(),
+                ServiceOutboundRule::Gateway(1004),
+            )),
+            [
+                "rule", "add", "from", "10.0.3.5", "lookup", "1004", "priority", "70"
+            ]
+        );
+        assert_eq!(
+            args(&outbound_rule_command(
+                "add",
+                "fd00:3::5".parse().unwrap(),
+                ServiceOutboundRule::Reject,
+            )),
+            [
+                "-6",
+                "rule",
+                "add",
+                "from",
+                "fd00:3::5",
+                "unreachable",
+                "priority",
+                "71"
+            ]
+        );
     }
 
     #[test]
