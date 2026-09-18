@@ -27,9 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failed to start on its next reload or reboot, leaving devices on the network
   without addresses. Reserving an address now leaves the device's name alone,
   the device page edits only the name you assigned rather than whatever was
-  shown, and the router rejects a name that is not a valid hostname (letters,
-  digits, and hyphens; up to 63 characters). A router already affected is
-  repaired by clearing the device's name on its page.
+  shown, and the router rejects a reservation it could not serve — a name must
+  be a valid hostname (letters, digits, and hyphens; up to 63 characters).
+  Updating repairs a router that already holds such a name: it is cleared on
+  the first boot after the update, the DHCP server starts again, and the
+  cleared name is recorded in Activity.
 
 ## [1.1.1]
 

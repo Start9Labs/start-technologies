@@ -1775,7 +1775,7 @@ pub(crate) fn validate_device_name(name: &str) -> Result<(), Error> {
             "device name {name:?} is not a valid hostname: use letters, digits, and hyphens \
              (not first or last), at most 63 characters"
         ),
-        ErrorKind::InvalidRequest,
+        ErrorKind::InvalidValue,
     ))
 }
 
@@ -1796,33 +1796,64 @@ fn apply_update(host: &mut DhcpHost, req: &DeviceUpdateReq) {
     };
 }
 
+/// Every field dnsmasq parses, checked before it reaches the config it reads:
+/// a malformed reservation is one it refuses to start on, taking the LAN's DHCP
+/// with it.
 #[instrument(skip_all)]
 pub async fn update<C: CtrlContext>(
     ctx: C,
     DeserializeStdin(req): DeserializeStdin<DeviceUpdateReq>,
 ) -> Result<(), Error> {
+    if !crate::published_ports::validate_mac(&req.mac) {
+        return Err(Error::new(
+            eyre!("invalid mac: {}", req.mac),
+            ErrorKind::InvalidValue,
+        ));
+    }
     let name = req.name.as_deref().filter(|name| !name.is_empty());
     if let Some(name) = name {
         validate_device_name(name)?;
     }
+    let pinned = req.ipv4_static && !req.ipv4.is_empty();
+    if pinned && req.ipv4.parse::<std::net::Ipv4Addr>().is_err() {
+        return Err(Error::new(
+            eyre!("invalid static IPv4 address: {}", req.ipv4),
+            ErrorKind::InvalidValue,
+        ));
+    }
     let mac_upper = req.mac.to_uppercase();
-    let subject = match name {
-        Some(name) => format!("'{name}' ({mac_upper})"),
-        None => mac_upper.clone(),
-    };
-    let suffix = if req.ipv4_static && !req.ipv4.is_empty() {
+    let suffix = if pinned {
         format!(" — static IPv4: {}", req.ipv4)
     } else {
         String::new()
     };
 
+    // The reservation's name before the write, so an update that leaves the
+    // name alone still names the device it touched.
+    let prior_name: Mutex<Option<String>> = Mutex::new(None);
+    let prior_ref = &prior_name;
     let req_ref = &req;
-    match upsert_dhcp_host(&ctx.uci_root(), &req.mac, move |host, _existed| {
+    let result = upsert_dhcp_host(&ctx.uci_root(), &req.mac, move |host, _existed| {
+        *prior_ref.lock().unwrap() = host.name.clone();
         apply_update(host, req_ref);
         true
     })
-    .await
-    {
+    .await;
+
+    let label = match req.name.as_deref() {
+        Some("") => None,
+        Some(name) => Some(name.to_string()),
+        None => prior_name
+            .into_inner()
+            .unwrap_or_default()
+            .filter(|name| !name.is_empty()),
+    };
+    let subject = match label {
+        Some(label) => format!("'{label}' ({mac_upper})"),
+        None => mac_upper,
+    };
+
+    match result {
         Err(err) => {
             let summary = format!("Failed to update device {subject}{suffix}");
             crate::activity::log("device", "updated", false, &summary, Some(&err.to_string()));
@@ -1837,6 +1868,64 @@ pub async fn update<C: CtrlContext>(
             Ok(())
         }
     }
+}
+
+/// Clear any DHCP reservation name dnsmasq will not serve, so a router that
+/// already holds one can start it again.
+///
+/// Releases before 1.2.0 let a device's generated label reach its reservation
+/// (see [`validate_device_name`]); dnsmasq refuses the config outright, and the
+/// LAN it stops serving is how the router is reached to repair it by hand. An
+/// update carries this, so the repair rides in with the firmware that prevents
+/// it. Nothing a user chose is lost that was ever in service: dnsmasq never
+/// started on the name, so it resolved for nobody, and the cleared value goes
+/// to the activity log. Idempotent: a no-op, with no reload, on a clean config.
+pub async fn heal_dhcp_host_names(uci_root: impl AsRef<std::path::Path>) -> Result<(), Error> {
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root.as_ref(), &arena, &["dhcp"]).await?;
+    let cleared = clear_unservable_host_names(&mut cfgs)?;
+
+    if cleared.is_empty() {
+        return Ok(());
+    }
+
+    dump_all(uci_root.as_ref(), cfgs).await?;
+    drop(arena);
+
+    crate::activity::log(
+        "device",
+        "name-repaired",
+        true,
+        &format!(
+            "Cleared {} — the router's DHCP server refuses a name that is not a hostname, and would not start",
+            cleared.join(", ")
+        ),
+        None,
+    );
+    reload_dnsmasq();
+
+    Ok(())
+}
+
+/// The config half of [`heal_dhcp_host_names`]. Returns what it cleared, as
+/// `'name' (MAC)` per reservation.
+fn clear_unservable_host_names(cfgs: &mut Configs) -> Result<Vec<String>, Error> {
+    let mut cleared = Vec::new();
+    for section in &mut cfgs["dhcp"].sections {
+        let Ok(mut host) = section.get::<DhcpHost>() else {
+            continue;
+        };
+        let Some(name) = host.name.clone().filter(|name| !name.is_empty()) else {
+            continue;
+        };
+        if validate_device_name(&name).is_ok() {
+            continue;
+        }
+        cleared.push(format!("'{name}' ({})", host.mac.to_uppercase()));
+        host.name = None;
+        section.set(&host)?;
+    }
+    Ok(cleared)
 }
 
 fn static_ips_for_mac(dhcp: &uciedit::Config<'_>, mac: &str) -> Vec<String> {
@@ -2141,7 +2230,7 @@ mod tests {
             too_long.as_str(),
         ] {
             let err = validate_device_name(bad).unwrap_err();
-            assert_eq!(err.kind, ErrorKind::InvalidRequest, "{bad:?}");
+            assert_eq!(err.kind, ErrorKind::InvalidValue, "{bad:?}");
         }
     }
 
@@ -2183,6 +2272,52 @@ mod tests {
             serde_json::from_str(r#"{"mac":"AA:BB:CC:DD:EE:FF","ipv4_static":false,"ipv4":""}"#)
                 .unwrap();
         assert_eq!(req.name, None);
+    }
+
+    #[tokio::test]
+    async fn heal_clears_only_the_names_dnsmasq_refuses() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("dhcp"),
+            "\
+config host 'host_aaaaaaaaaaaa'
+\toption mac 'AA:AA:AA:AA:AA:AA'
+\toption name 'Android device (4c8f63)'
+\toption ip '192.168.1.50'
+\toption dns '1'
+
+config host 'host_bbbbbbbbbbbb'
+\toption mac 'BB:BB:BB:BB:BB:BB'
+\toption name 'nas'
+\toption dns '1'
+
+config host 'host_cccccccccccc'
+\toption mac 'CC:CC:CC:CC:CC:CC'
+\toption ip '192.168.1.60'
+\toption dns '1'
+",
+        )
+        .unwrap();
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(dir.path(), &arena, &["dhcp"]).await.unwrap();
+        let cleared = clear_unservable_host_names(&mut cfgs).unwrap();
+        assert_eq!(
+            cleared,
+            vec!["'Android device (4c8f63)' (AA:AA:AA:AA:AA:AA)".to_string()]
+        );
+        dump_all(dir.path(), cfgs).await.unwrap();
+        drop(arena);
+
+        let dhcp = std::fs::read_to_string(dir.path().join("dhcp")).unwrap();
+        assert!(!dhcp.contains("Android device"), "unservable name cleared");
+        assert!(dhcp.contains("192.168.1.50"), "reservation itself kept");
+        assert!(dhcp.contains("option name 'nas'"), "valid name kept");
+
+        // Idempotent: a second pass over the repaired config changes nothing.
+        let arena = Arena::new();
+        let mut cfgs = parse_all(dir.path(), &arena, &["dhcp"]).await.unwrap();
+        assert!(clear_unservable_host_names(&mut cfgs).unwrap().is_empty());
     }
 
     #[tokio::test]

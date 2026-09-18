@@ -286,6 +286,12 @@ async fn inner_main() -> Result<(), Error> {
         if let Err(e) = crate::system::apply_remote_access(ServerContext::default()).await {
             tracing::error!("Remote access rule apply failed: {e}");
         }
+        // Repairs a reservation name from a release that let one through, which
+        // dnsmasq refuses to start on. Must precede the fingerprint hook: both
+        // reload dnsmasq, and this one decides whether it can come up at all.
+        if let Err(e) = crate::devices::heal_dhcp_host_names("/etc/config").await {
+            tracing::error!("DHCP reservation name repair failed: {e}");
+        }
         // Install the DHCP-fingerprint hook (script + `dhcpscript` on every
         // dnsmasq section) — daemon-side so OTA-updated routers converge on
         // first boot. Reloads dnsmasq only when something actually changed.
