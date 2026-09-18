@@ -144,7 +144,7 @@ impl Public {
                     .map(|x| format!("{x:02X}"))
                     .join(":"),
                 ntp_synced: false,
-                zram: true,
+                zram: false,
                 governor: None,
                 epp: None,
                 smtp: None,

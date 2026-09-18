@@ -96,6 +96,11 @@ for the detail behind its highlights.
 
 ### Changed
 
+- **The service-container memory cap now preserves the host reservation under
+  load.** StartOS starts with ZRAM compressed swap disabled and applies that
+  setting on update, keeping swapped service pages from allocating uncharged
+  RAM beyond the cgroup's hard limit.
+
 - **Your server's name is now its `.local` address, without the `.local` on the
   end.** A server previously carried two names: a display label shown in the
   browser tab, and the `.local` address derived from it by lowercasing and
