@@ -465,6 +465,12 @@ impl Service {
         match state {
             PackageStateMatchModelRef::Installing(_) => {
                 if disposition == LoadDisposition::Retry {
+                    report_failed_rollback(
+                        ctx,
+                        id,
+                        crate::volume::InstallBackup::of(id).restore().await,
+                    )
+                    .await?;
                     if let Ok(s9pk) = S9pk::open(&s9pk_path, Some(id)).await.map_err(|e| {
                         tracing::error!("Error opening s9pk for install: {e}");
                         tracing::debug!("{e:?}")
