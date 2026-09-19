@@ -82,9 +82,6 @@ pub async fn sync_directory<P: AsRef<Path>>(path: P) -> Result<(), Error> {
 pub async fn unmount<P: AsRef<Path>>(mountpoint: P, lazy: bool) -> Result<(), Error> {
     let mountpoint = mountpoint.as_ref();
     tracing::debug!("Unmounting {}.", mountpoint.display());
-    if matches!(tokio::fs::try_exists(mountpoint).await, Ok(false)) {
-        return Ok(());
-    }
     let mut cmd = tokio::process::Command::new("umount");
     cmd.env("LANG", "C.UTF-8");
     if lazy {
