@@ -95,6 +95,10 @@ impl InstallBackup {
         // The backup being replaced may be the only complete copy of the package's data.
         self.resolve_pending().await?;
         if !btrfs::is_subvolume(&self.live).await {
+            tracing::warn!(
+                "Could not create install backup for {}: volume root is not a btrfs subvolume",
+                self.pkg_id
+            );
             return Ok(false);
         }
         btrfs::delete_tree(&self.backup_tmp).await.log_err();
@@ -329,6 +333,23 @@ async fn recover_and_sweep(
     Ok(())
 }
 
+async fn needs_subvolume_conversion(path: &Path) -> bool {
+    tokio::fs::metadata(path)
+        .await
+        .map(|m| m.is_dir())
+        .unwrap_or(false)
+        && !btrfs::is_subvolume(path).await
+        && btrfs::is_btrfs(path).await
+}
+
+pub(crate) async fn convert_package_to_subvolume(id: &PackageId) -> Result<(), Error> {
+    let src = pkg_volume_dir(id);
+    if needs_subvolume_conversion(&src).await {
+        convert_one(id, &src, None).await?;
+    }
+    Ok(())
+}
+
 async fn convert_to_subvolumes(
     volumes: &Path,
     installed: &BTreeSet<PackageId>,
@@ -337,13 +358,7 @@ async fn convert_to_subvolumes(
     let mut pending = Vec::new();
     for id in installed {
         let src = volumes.join(id);
-        if tokio::fs::metadata(&src)
-            .await
-            .map(|m| m.is_dir())
-            .unwrap_or(false)
-            && !btrfs::is_subvolume(&src).await
-            && btrfs::is_btrfs(&src).await
-        {
+        if needs_subvolume_conversion(&src).await {
             pending.push((id, src));
         }
     }
@@ -365,7 +380,7 @@ async fn convert_to_subvolumes(
     phase.set_total(total);
     let mut done = 0;
     for (id, src, size) in sized {
-        if let Err(e) = convert_one(id, &src, phase, done).await {
+        if let Err(e) = convert_one(id, &src, Some((&mut *phase, done))).await {
             tracing::warn!("Could not convert volumes of {id} to a subvolume: {e}");
         }
         done += size;
@@ -377,8 +392,7 @@ async fn convert_to_subvolumes(
 async fn convert_one(
     id: &PackageId,
     src: &Path,
-    phase: &mut PhaseProgressTrackerHandle,
-    base: u64,
+    progress: Option<(&mut PhaseProgressTrackerHandle, u64)>,
 ) -> Result<(), Error> {
     let start = std::time::Instant::now();
     let tmp = src.with_file_name(format!("{id}{CONVERT_TMP_SUFFIX}"));
@@ -386,8 +400,13 @@ async fn convert_one(
     btrfs::delete_tree(&tmp).await?;
     btrfs::create_subvolume(&tmp).await?;
     let ctr = Arc::new(Counter::new(0, std::sync::atomic::Ordering::Relaxed));
-    if let Err(e) = with_byte_progress(phase, base, &ctr, clone_tree(src, &tmp, ctr.clone())).await
-    {
+    let clone = clone_tree(src, &tmp, ctr.clone());
+    let cloned = if let Some((phase, base)) = progress {
+        with_byte_progress(phase, base, &ctr, clone).await
+    } else {
+        clone.await
+    };
+    if let Err(e) = cloned {
         btrfs::delete_tree(&tmp).await.log_err();
         return Err(e);
     }
@@ -434,6 +453,20 @@ mod tests {
         "testpkg".parse().unwrap()
     }
 
+    #[derive(Clone)]
+    struct LogWriter(Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for LogWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
     struct Case {
         _tmp: TmpDir,
         volumes: PathBuf,
@@ -462,6 +495,32 @@ mod tests {
         assert_eq!(read_marker(&c.ib.live).await.as_deref(), Some("pre-update"));
         assert!(!c.ib.exists().await);
         assert!(tokio::fs::metadata(&c.ib.restore_old).await.is_err());
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn snapshot_warns_and_leaves_a_plain_directory_untouched() -> Result<(), Error> {
+        let c = case().await?;
+        seed_tree(&c.ib.live, "live").await?;
+        let logs = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let make_writer = {
+            let logs = logs.clone();
+            move || LogWriter(logs.clone())
+        };
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .without_time()
+            .with_max_level(tracing::Level::WARN)
+            .with_writer(make_writer)
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        assert!(!c.ib.snapshot().await?);
+
+        assert_eq!(read_marker(&c.ib.live).await.as_deref(), Some("live"));
+        assert!(!c.ib.exists().await);
+        let logs = String::from_utf8(logs.lock().unwrap().clone()).unwrap();
+        assert!(logs.contains("volume root is not a btrfs subvolume"));
         Ok(())
     }
 

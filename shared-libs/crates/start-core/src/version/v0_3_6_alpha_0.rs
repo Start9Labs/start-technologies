@@ -580,6 +580,13 @@ impl VersionT for Version {
                         }
                     };
 
+                    if let Err(e) = crate::volume::convert_package_to_subvolume(&new_id).await {
+                        tracing::error!("Error preparing volumes for {id}: {e}");
+                        tracing::debug!("{e:?}");
+                        failures.insert(new_id.clone(), (title, Some(e.to_string())));
+                        continue;
+                    }
+
                     if let Err(e) = async {
                         ctx.services
                             .install(

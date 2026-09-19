@@ -496,12 +496,10 @@ impl Service {
                         }
                     }
                 }
-                // A failed install over pre-existing data (e.g. a 0.3.x conversion) has a
-                // rollback point to put back; don't delete the volumes out from under it.
+                // An Installing state can own migrated data even when no snapshot exists.
                 let backup = crate::volume::InstallBackup::of(id);
                 backup.resolve_pending().await.log_err();
-                let keep_volumes = backup.exists().await;
-                cleanup(ctx, id, keep_volumes).await.log_err();
+                cleanup(ctx, id, true).await.log_err();
                 report_failed_rollback(ctx, id, backup.restore().await).await?;
                 ctx.db
                     .mutate(|v| v.as_public_mut().as_package_data_mut().remove(id))
