@@ -139,6 +139,9 @@ for the detail behind its highlights.
 
 ### Fixed
 
+- **The Raspberry Pi 4 image includes the Broadcom firmware needed for its
+  built-in WiFi interface.**
+
 - **Nextcloud (Legacy) and other migrated 0.3.5.1 services with a
   package-managed certificate start when the server has a public IP or uses
   StartTunnel.**

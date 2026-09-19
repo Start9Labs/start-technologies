@@ -7,7 +7,7 @@ StartOS supports connecting your server to a wireless network when a wired Ether
 
 ## Requirements
 
-Your server must have a compatible wireless interface. If no wireless hardware is detected, the WiFi page will display "No wireless interface detected" and no controls will be available.
+Your server must have a compatible wireless interface. The Raspberry Pi 4 image supports the board's built-in wireless interface. If no wireless hardware is detected, the WiFi page will display "No wireless interface detected" and no controls will be available.
 
 > [!NOTE]
 > Servers sold by Start9 do not come with wireless networking cards, but a wireless card can be added to any of the servers we sell.
