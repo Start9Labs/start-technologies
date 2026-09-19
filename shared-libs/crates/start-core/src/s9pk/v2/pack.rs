@@ -401,23 +401,12 @@ struct CliImageConfig {
     arch: Vec<InternedString>,
     #[arg(long, help = "help.arg.emulate-missing")]
     emulate_missing: bool,
-    #[arg(long, hide = true)]
-    emulate_missing_as: Option<InternedString>,
     #[arg(long, help = "help.arg.nvidia-container")]
     nvidia_container: bool,
 }
 impl TryFrom<CliImageConfig> for ImageConfig {
     type Error = clap::Error;
     fn try_from(value: CliImageConfig) -> Result<Self, Self::Error> {
-        if let Some(arch) = &value.emulate_missing_as {
-            if !value.arch.contains(arch) {
-                return Err(clap::Error::raw(
-                    clap::error::ErrorKind::InvalidValue,
-                    "`emulate-missing-as` must match one of the provided `arch`es",
-                ));
-            }
-        }
-        let legacy_emulate_missing_as = value.emulate_missing_as;
         Ok(Self {
             source: if value.docker_build {
                 ImageSource::DockerBuild {
@@ -431,8 +420,8 @@ impl TryFrom<CliImageConfig> for ImageConfig {
                 ImageSource::Packed
             },
             arch: value.arch.into_iter().collect(),
-            emulate_missing: value.emulate_missing || legacy_emulate_missing_as.is_some(),
-            legacy_emulate_missing_as,
+            emulate_missing: value.emulate_missing,
+            legacy_emulate_missing_as: None,
             nvidia_container: value.nvidia_container,
         })
     }
@@ -845,20 +834,32 @@ pub async fn pack(ctx: CliContext, params: PackParams) -> Result<(), Error> {
                 if c.emulate_missing {
                     if let Some(arch) = c.emulation_arch(|_| true).cloned() {
                         tracing::warn!(
-                            "ImageId {} is not available for {}, emulating as {}",
-                            id,
-                            arches.iter().join("/"),
-                            arch
+                            "{}",
+                            t!(
+                                "s9pk.pack.image-unavailable-emulating",
+                                image = id.to_string(),
+                                requested = arches.iter().join("/"),
+                                emulated = arch.to_string(),
+                            )
                         );
                         c.arch = [arch].into_iter().collect();
                     } else {
-                        tracing::error!("ImageId {} has no architecture available to emulate", id,);
+                        tracing::error!(
+                            "{}",
+                            t!(
+                                "s9pk.pack.image-no-architecture-to-emulate",
+                                image = id.to_string(),
+                            )
+                        );
                     }
                 } else {
                     tracing::error!(
-                        "ImageId {} is not available for {}",
-                        id,
-                        arches.iter().join("/"),
+                        "{}",
+                        t!(
+                            "s9pk.pack.image-unavailable",
+                            image = id.to_string(),
+                            requested = arches.iter().join("/"),
+                        )
                     );
                 }
             } else {
@@ -1053,45 +1054,40 @@ mod test {
     use super::*;
 
     #[test]
-    fn current_and_legacy_cli_flags_enable_emulation() {
-        let cases: &[(&[&str], Option<&str>)] = &[
-            (&["image", "--arch", "x86_64", "--emulate-missing"], None),
-            (
-                &[
-                    "image",
-                    "--arch",
-                    "x86_64",
-                    "--emulate-missing-as",
-                    "x86_64",
-                ],
-                Some("x86_64"),
-            ),
-        ];
+    fn current_cli_flag_enables_emulation() {
+        let config =
+            CliImageConfig::try_parse_from(["image", "--arch", "x86_64", "--emulate-missing"])
+                .unwrap();
+        let config = ImageConfig::try_from(config).unwrap();
 
-        for (args, legacy_fallback) in cases {
-            let config = CliImageConfig::try_parse_from(*args).unwrap();
-            let config = ImageConfig::try_from(config).unwrap();
-            assert!(config.emulate_missing);
-            assert_eq!(
-                serde_json::to_value(config).unwrap()["emulateMissingAs"].as_str(),
-                *legacy_fallback,
-            );
-        }
+        assert!(config.emulate_missing);
+        let serialized = serde_json::to_value(config).unwrap();
+        assert!(serialized.get("emulateMissingAs").is_none());
     }
 
     #[test]
-    fn legacy_cli_fallback_remains_the_preferred_emulation_architecture() {
-        let config = CliImageConfig::try_parse_from([
-            "image",
-            "--arch",
-            "aarch64",
-            "--arch",
-            "x86_64",
-            "--emulate-missing-as",
-            "x86_64",
-        ])
+    fn old_cli_flag_is_rejected() {
+        assert!(
+            CliImageConfig::try_parse_from([
+                "image",
+                "--arch",
+                "x86_64",
+                "--emulate-missing-as",
+                "x86_64",
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn legacy_manifest_fallback_remains_the_preferred_emulation_architecture() {
+        let config: ImageConfig = serde_json::from_value(serde_json::json!({
+            "source": "packed",
+            "arch": ["aarch64", "x86_64"],
+            "emulateMissingAs": "x86_64",
+            "nvidiaContainer": false
+        }))
         .unwrap();
-        let config = ImageConfig::try_from(config).unwrap();
 
         assert_eq!(
             config.emulation_arch(|_| true).map(|arch| &**arch),
