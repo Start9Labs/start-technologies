@@ -4,7 +4,7 @@
 .SH NAME
 start\-cli\-s9pk\-edit\-add\-image \- Add image to s9pk
 .SH SYNOPSIS
-\fBstart\-cli s9pk edit add\-image\fR [\fB\-\-docker\-build\fR] [\fB\-\-dockerfile\fR] [\fB\-\-workdir\fR] [\fB\-\-docker\-tag\fR] [\fB\-\-arch\fR] [\fB\-\-emulate\-missing\fR] [\fB\-\-nvidia\-container\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIID\fR>
+\fBstart\-cli s9pk edit add\-image\fR [\fB\-\-docker\-build\fR] [\fB\-\-dockerfile\fR] [\fB\-\-workdir\fR] [\fB\-\-docker\-tag\fR] [\fB\-\-arch\fR] [\fB\-\-no\-emulation\fR] [\fB\-\-nvidia\-container\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIID\fR>
 .SH DESCRIPTION
 Add image to s9pk
 .SH OPTIONS
@@ -24,8 +24,8 @@ Docker image tag to use
 \fB\-\-arch\fR \fI<ARCH>\fR
 Filter by CPU architecture
 .TP
-\fB\-\-emulate\-missing\fR
-Emulate the image when the requested architecture is unavailable
+\fB\-\-no\-emulation\fR
+Require a native image for the requested architecture
 .TP
 \fB\-\-nvidia\-container\fR
 Enable NVIDIA container support

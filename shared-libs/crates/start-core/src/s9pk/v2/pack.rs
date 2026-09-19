@@ -399,8 +399,8 @@ struct CliImageConfig {
     docker_tag: Option<String>,
     #[arg(long, help = "help.arg.architecture-mask")]
     arch: Vec<InternedString>,
-    #[arg(long, help = "help.arg.emulate-missing")]
-    emulate_missing: bool,
+    #[arg(long, help = "help.arg.no-emulation")]
+    no_emulation: bool,
     #[arg(long, help = "help.arg.nvidia-container")]
     nvidia_container: bool,
 }
@@ -420,7 +420,7 @@ impl TryFrom<CliImageConfig> for ImageConfig {
                 ImageSource::Packed
             },
             arch: value.arch.into_iter().collect(),
-            emulate_missing: value.emulate_missing,
+            emulate_missing: !value.no_emulation,
             legacy_emulate_missing_as: None,
             nvidia_container: value.nvidia_container,
         })
@@ -1054,10 +1054,8 @@ mod test {
     use super::*;
 
     #[test]
-    fn current_cli_flag_enables_emulation() {
-        let config =
-            CliImageConfig::try_parse_from(["image", "--arch", "x86_64", "--emulate-missing"])
-                .unwrap();
+    fn cli_enables_emulation_by_default() {
+        let config = CliImageConfig::try_parse_from(["image", "--arch", "x86_64"]).unwrap();
         let config = ImageConfig::try_from(config).unwrap();
 
         assert!(config.emulate_missing);
@@ -1066,17 +1064,29 @@ mod test {
     }
 
     #[test]
-    fn old_cli_flag_is_rejected() {
-        assert!(
-            CliImageConfig::try_parse_from([
+    fn no_emulation_cli_flag_disables_emulation() {
+        let config =
+            CliImageConfig::try_parse_from(["image", "--arch", "x86_64", "--no-emulation"])
+                .unwrap();
+        let config = ImageConfig::try_from(config).unwrap();
+
+        assert!(!config.emulate_missing);
+    }
+
+    #[test]
+    fn old_cli_flags_are_rejected() {
+        for args in [
+            vec!["image", "--arch", "x86_64", "--emulate-missing"],
+            vec![
                 "image",
                 "--arch",
                 "x86_64",
                 "--emulate-missing-as",
                 "x86_64",
-            ])
-            .is_err()
-        );
+            ],
+        ] {
+            assert!(CliImageConfig::try_parse_from(args).is_err());
+        }
     }
 
     #[test]

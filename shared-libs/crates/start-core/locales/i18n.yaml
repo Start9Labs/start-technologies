@@ -3588,13 +3588,6 @@ help.arg.ed25519:
   fr_FR: "Utiliser Ed25519 au lieu de NIST P-256"
   pl_PL: "Użyj Ed25519 zamiast NIST P-256"
 
-help.arg.emulate-missing:
-  en_US: "Emulate the image when the requested architecture is unavailable"
-  de_DE: "Image emulieren, wenn die angeforderte Architektur nicht verfügbar ist"
-  es_ES: "Emular la imagen cuando la arquitectura solicitada no esté disponible"
-  fr_FR: "Émuler l’image lorsque l’architecture demandée n’est pas disponible"
-  pl_PL: "Emuluj obraz, gdy żądana architektura jest niedostępna"
-
 help.arg.env-file-path:
   en_US: "Path to environment file"
   de_DE: "Pfad zur Umgebungsdatei"
@@ -3874,6 +3867,13 @@ help.arg.no-assets:
   es_ES: "Construir sin directorio de recursos"
   fr_FR: "Construire sans répertoire de ressources"
   pl_PL: "Zbuduj bez katalogu zasobów"
+
+help.arg.no-emulation:
+  en_US: "Require a native image for the requested architecture"
+  de_DE: "Ein natives Image für die angeforderte Architektur voraussetzen"
+  es_ES: "Requerir una imagen nativa para la arquitectura solicitada"
+  fr_FR: "Exiger une image native pour l’architecture demandée"
+  pl_PL: "Wymagaj natywnego obrazu dla żądanej architektury"
 
 help.arg.no-mmap:
   en_US: "Disable memory-mapped file I/O"

@@ -13,8 +13,8 @@ or the CLI's externally observable behavior.
 
 ### Added
 
-- **`s9pk edit add-image --emulate-missing` lets StartOS run an available image
-  under CPU emulation** when the server uses another architecture.
+- **`s9pk edit add-image` enables CPU emulation by default** when the server uses
+  another architecture. Use `--no-emulation` for images that require a native architecture.
 
 ## [2.1.0]
 

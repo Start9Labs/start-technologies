@@ -805,7 +805,7 @@ Add a container image to the s9pk.
 - `--workdir <PATH>` — Build context directory
 - `--docker-tag <TAG>` — Docker image tag
 - `--arch <ARCH>` — CPU architecture filter
-- `--emulate-missing` — Emulate the image when the requested architecture is unavailable
+- `--no-emulation` — Require a native image for the requested architecture
 - `--nvidia-container` — Enable NVIDIA support
 
 ## Registry
