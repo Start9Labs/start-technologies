@@ -344,13 +344,8 @@ async fn needs_subvolume_conversion(path: &Path) -> bool {
         && btrfs::is_btrfs(path).await
 }
 
-pub(crate) async fn prepare_migrated_package_for_install(id: &PackageId) -> Result<(), Error> {
-    prepare_migrated_package_at(&volumes_dir(), id).await
-}
-
-async fn prepare_migrated_package_at(volumes: &Path, id: &PackageId) -> Result<(), Error> {
-    InstallBackup::new(volumes, id).restore().await?;
-    let src = volumes.join(id);
+pub(crate) async fn convert_package_to_subvolume(id: &PackageId) -> Result<(), Error> {
+    let src = pkg_volume_dir(id);
     if needs_subvolume_conversion(&src).await {
         convert_one(id, &src, None).await?;
     }
@@ -542,22 +537,6 @@ mod tests {
         c.ib.restore().await?;
 
         assert_eq!(read_marker(&c.ib.live).await.as_deref(), Some("live"));
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn retried_migration_restores_the_previous_install_backup() -> Result<(), Error> {
-        let c = case().await?;
-        seed_tree(&c.ib.live, "partial-install").await?;
-        seed_tree(&c.ib.backup, "migrated-data").await?;
-
-        prepare_migrated_package_at(&c.volumes, &pkg()).await?;
-
-        assert_eq!(
-            read_marker(&c.ib.live).await.as_deref(),
-            Some("migrated-data")
-        );
-        assert!(!c.ib.exists().await);
         Ok(())
     }
 
