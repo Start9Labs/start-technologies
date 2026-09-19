@@ -9,13 +9,7 @@ export type NetworkInterfaceInfo = {
   secure: boolean | null
   ipInfo: IpInfo | null
   /**
-   * The public IPv4 the operator pinned for this gateway, taking precedence
-   * over the discovered `ipInfo.wanIp`. Discovery asks the router over UPnP
-   * and otherwise infers the address from outbound traffic, which names the
-   * wrong one wherever ingress and egress take different paths — multi-WAN
-   * routing, an ISP translating egress from a pool separate from the mapped
-   * inbound address, a floating ingress address with a separate egress
-   * gateway. Clearing it restores the discovered address.
+   * Operator-set public IPv4. Outranks `ipInfo.wanIp`.
    */
   wanIpOverride: string | null
   type: GatewayType

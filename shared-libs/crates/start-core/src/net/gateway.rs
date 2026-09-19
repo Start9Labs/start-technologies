@@ -2416,8 +2416,7 @@ async fn poll_ip_info(
     };
 
     write_to.send_if_modified(|m: &mut OrdMap<GatewayId, NetworkInterfaceInfo>| {
-        // Everything the operator set — name, trust, gateway type, WAN IP override —
-        // survives a poll; only `ip_info` is rediscovered.
+        // A poll rediscovers `ip_info` alone.
         let mut entry = m.get(iface).cloned().unwrap_or_default();
         ip_info.wan_ip = entry.ip_info.as_ref().and_then(|i| i.wan_ip);
         let ip_info = Arc::new(ip_info);
@@ -3178,10 +3177,7 @@ impl NetworkInterfaceController {
         Ok(())
     }
 
-    /// Pin the public IPv4 of `interface`, or clear the pin with `None` and fall
-    /// back to what discovery finds. Returns once the db has the new value, so
-    /// the caller knows the host addresses and port forwards derived from it have
-    /// been recomputed.
+    /// `None` restores the detected address. Returns once the db holds the value.
     pub async fn set_wan_ip_override(
         &self,
         interface: &GatewayId,
@@ -3227,9 +3223,6 @@ impl NetworkInterfaceController {
     }
 }
 
-/// An outbound-only gateway carries no inbound traffic, so there is no address
-/// the internet reaches this server at through it to pin. Clearing a pin is
-/// always allowed.
 fn check_wan_ip_override_target(info: &NetworkInterfaceInfo) -> Result<(), Error> {
     if info.gateway_type == GatewayType::OutboundOnly {
         return Err(Error::new(
@@ -3240,12 +3233,7 @@ fn check_wan_ip_override_target(info: &NetworkInterfaceInfo) -> Result<(), Error
     Ok(())
 }
 
-/// Reject an override discovery would itself have thrown away — a private,
-/// CGNAT, loopback or otherwise unroutable address is never what the internet
-/// reaches this server at — plus the blocks discovery never meets because no
-/// router hands them out: 192.0.0.0/24 (IETF protocol assignments),
-/// 198.18.0.0/15 (benchmarking), 224.0.0.0/4 (multicast) and 240.0.0.0/4
-/// (reserved). The dialog's reserved list mirrors this set.
+/// Accepts a globally routable unicast IPv4.
 fn check_wan_ip_override(ip: Ipv4Addr) -> Result<(), Error> {
     let [a, b, c, _] = ip.octets();
     let never_routed_to_a_host =
@@ -3390,8 +3378,6 @@ mod wan_ip_override_tests {
                 "rejected {ok}"
             );
         }
-        // The same addresses `parse_echoip` throws away: RFC 1918, CGNAT,
-        // loopback, link-local, documentation, unspecified, broadcast.
         for bad in [
             "192.168.1.1",
             "10.0.0.1",
@@ -3404,8 +3390,6 @@ mod wan_ip_override_tests {
             "203.0.113.7",
             "0.0.0.0",
             "255.255.255.255",
-            // And the blocks no router hands out: protocol assignments,
-            // benchmarking, multicast, reserved.
             "192.0.0.9",
             "198.18.0.5",
             "198.19.255.1",

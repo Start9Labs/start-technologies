@@ -262,13 +262,7 @@ pub struct NetworkInterfaceInfo {
     pub name: Option<InternedString>,
     pub secure: Option<bool>,
     pub ip_info: Option<Arc<IpInfo>>,
-    /// The public IPv4 the operator pinned for this gateway, taking precedence
-    /// over the discovered `ipInfo.wanIp`. Discovery asks the router over UPnP
-    /// and otherwise infers the address from outbound traffic, which names the
-    /// wrong one wherever ingress and egress take different paths — multi-WAN
-    /// routing, an ISP translating egress from a pool separate from the mapped
-    /// inbound address, a floating ingress address with a separate egress
-    /// gateway. Clearing it restores the discovered address.
+    /// Operator-set public IPv4. Outranks `ipInfo.wanIp`.
     #[serde(default)]
     pub wan_ip_override: Option<Ipv4Addr>,
     // Pre-release dev DBs persisted this as `null` for auto-discovered gateways;
@@ -351,13 +345,11 @@ impl NetworkInterfaceInfo {
             .unwrap_or_else(|| self.is_intrinsically_secure())
     }
 
-    /// The public IPv4 inbound traffic arrives on: the operator's override when
-    /// set, else what discovery found.
+    /// The override, else the detected address.
     pub fn wan_ip(&self) -> Option<Ipv4Addr> {
         self.wan_ip_override.or_else(|| self.detected_wan_ip())
     }
 
-    /// The public IPv4 discovery last inferred, whatever the override says.
     pub fn detected_wan_ip(&self) -> Option<Ipv4Addr> {
         self.ip_info.as_ref().and_then(|i| i.wan_ip)
     }

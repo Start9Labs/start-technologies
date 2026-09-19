@@ -12,7 +12,6 @@ export type GatewayPlus = T.NetworkInterfaceInfo & {
   ipInfo: T.IpInfo
   subnets: utils.IpNet[]
   lanIpv4: string[]
-  /** The pinned override when set, else what StartOS detected. */
   effectiveWanIp: string | null
 }
 

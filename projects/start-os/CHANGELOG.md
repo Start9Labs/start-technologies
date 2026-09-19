@@ -12,14 +12,11 @@ for the detail behind its highlights.
 
 ### Added
 
-- **A gateway's WAN IP can be corrected from the command line.** StartOS asks
-  your router over UPnP and otherwise infers the address from outbound traffic,
-  which can name the wrong one where inbound and outbound traffic take
-  different paths — multi-WAN routing, an ISP that translates egress from a
-  separate pool, a cloud floating address, a router with UPnP off.
-  `start-cli net gateway set-wan-ip` pins the right one and `unset-wan-ip`
-  hands the decision back to detection. Every address derived from the gateway
-  follows, including the port-forwarding rules StartOS asks you to add. See
+- **A gateway's WAN IP can be set from the command line.** Where inbound and
+  outbound traffic take different paths, StartOS could detect an address the
+  server is not reachable at, and every public address and port-forwarding rule
+  it showed pointed there. `start-cli net gateway set-wan-ip` sets it and
+  `unset-wan-ip` returns to the detected one. See
   [Gateways](https://docs.start9.com/start-os/gateways.html).
 
 - **Typing a service's domain without `https://` opens its web interface over

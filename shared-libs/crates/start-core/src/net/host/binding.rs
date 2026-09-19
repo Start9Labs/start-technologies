@@ -133,32 +133,17 @@ impl DerivedAddressInfo {
             .collect();
     }
 
-    /// Carry the operator's public-IP opt-ins from the addresses they were
-    /// granted on to the addresses that replaced them.
+    /// Moves each public-IP opt-in to the address that replaced it on the same
+    /// gateway, port and family. A slot offering several public addresses on
+    /// either side moves nothing.
     ///
-    /// `enabled` and `gua_wan` key on the literal socket address that was turned
-    /// on, and nothing rewrites them when a gateway renumbers — an ISP lease that
-    /// rolls, a delegated IPv6 prefix that changes, an operator pinning the WAN
-    /// IP by hand. The replacement address arrives as a stranger, defaults to
-    /// off, and the service loses its public address and its port forward with no
-    /// operator action.
-    ///
-    /// An opt-in moves only where the exposure decision is the same one: the same
-    /// gateway, the same port, the same address family, with `previous` and
-    /// `available` each offering exactly one public address there. A new gateway,
-    /// a new port, or several candidates on either side leaves it opt-in.
-    ///
-    /// `available` must already hold the freshly computed set and `previous` the
-    /// set it replaced. A GUA's `public` flag is re-projected from the migrated
-    /// `gua_wan` so a migrated address is public in the same pass.
+    /// `available` must hold the new set.
     pub fn migrate_renumbered_ips(&mut self, previous: &BTreeSet<HostnameInfo>) {
         let before = sole_public_ips(previous);
         if before.is_empty() {
             return;
         }
         let after = sole_public_ips(&self.available);
-        // Every public IP the new set offers, ambiguous slots included — an
-        // address still on offer anywhere has not been renumbered away.
         let still_offered: BTreeSet<SocketAddr> = self
             .available
             .iter()
@@ -174,9 +159,7 @@ impl DerivedAddressInfo {
             .into_iter()
             .filter_map(|(slot, old)| {
                 let new = *after.get(&slot)?;
-                // A slot whose address is unchanged has nothing to move, and an
-                // address the new set still offers elsewhere is still the one the
-                // operator turned on.
+                // An address still on offer was not renumbered.
                 (new != old && !still_offered.contains(&old)).then_some((old, new))
             })
             .collect();
@@ -208,13 +191,8 @@ impl DerivedAddressInfo {
     }
 }
 
-/// The public IP address each gateway offers at each port, for the slots where
-/// it offers exactly one — the slots an opt-in can be moved between without
-/// guessing which address inherits it.
-///
-/// An IPv4 WAN row is marked `public` by discovery, so that flag identifies it. A
-/// GUA's `public` flag is the operator's own opt-in, so it identifies itself by
-/// being a GUA instead.
+/// The public IP per gateway, port and family, where there is exactly one.
+/// `public` marks an IPv4 WAN row; on a GUA it is the opt-in itself.
 fn sole_public_ips(
     addresses: &BTreeSet<HostnameInfo>,
 ) -> BTreeMap<(&GatewayId, u16, bool), SocketAddr> {
@@ -2203,8 +2181,6 @@ mod test {
 
     #[test]
     fn a_renumber_on_another_gateway_or_port_leaves_the_opt_in_alone() {
-        // Same address, but the new one belongs to a different gateway: a new
-        // exposure, still opt-in.
         let previous: BTreeSet<HostnameInfo> = [public_v4("198.51.100.2", 443, "eth0")]
             .into_iter()
             .collect();
@@ -2237,7 +2213,6 @@ mod test {
 
     #[test]
     fn an_address_the_gateway_still_offers_keeps_its_own_opt_in() {
-        // eth0 renumbered; wg0 did not. Only eth0's entry moves.
         let previous: BTreeSet<HostnameInfo> = [
             public_v4("198.51.100.2", 443, "eth0"),
             public_v4("192.0.2.7", 443, "wg0"),
@@ -2267,8 +2242,6 @@ mod test {
         );
     }
 
-    // A gateway carrying several GUAs gives no way to tell which one inherits an
-    // opt-in, so nothing moves and the operator opts in again.
     #[test]
     fn a_gua_opt_in_moves_only_while_the_gateway_offers_one() {
         let old_gua: SocketAddrV6 = "[2001:db8:1::5]:443".parse().unwrap();

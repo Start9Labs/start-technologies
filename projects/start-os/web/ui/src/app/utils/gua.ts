@@ -15,11 +15,7 @@ export function getGua(ipInfo: T.IpInfo): string | null {
   return null
 }
 
-/**
- * The public IPv4 the Internet reaches the server at through this gateway: the
- * address the operator pinned, else the one StartOS detected. Mirrors the
- * backend, which derives every public address and port forward from it.
- */
+/** The operator's override, else the detected address. */
 export function getWanIp(gateway: T.NetworkInterfaceInfo): string | null {
   return gateway.wanIpOverride ?? gateway.ipInfo?.wanIp ?? null
 }

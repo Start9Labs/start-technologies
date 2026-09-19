@@ -42,20 +42,16 @@ To re-import a gateway's WireGuard config — for example, a StartTunnel config 
 
 ## WAN IP
 
-A gateway's WAN IP is the public address the Internet reaches your server at through it. It is what [public IP access](public-ip.md), [clearnet](clearnet.md) domains, and the port-forwarding rules StartOS shows you are all built on.
+A gateway's WAN IP is the public IPv4 address your server is reached at through that gateway. [Public IP access](public-ip.md), [clearnet](clearnet.md) domains, and the port-forwarding rules StartOS shows you all use it.
 
-StartOS discovers it in two steps. First it asks your router over UPnP, which answers with the address the router holds on its WAN connection — where inbound connections actually arrive. If UPnP is unavailable, or answers with a private or [CGNAT](cgnat.md) address, StartOS falls back to an outbound request to an echo service and reads back the address that request appeared to come from.
+StartOS asks your router for it over UPnP. If UPnP is unavailable, or answers with a private or [CGNAT](cgnat.md) address, StartOS uses the address an outbound request appears to come from. That is the wrong address where inbound and outbound traffic take different paths:
 
-Those two steps answer different questions. Your router is authoritative about where inbound traffic arrives; an echo service can only report where outbound traffic left. On most networks these are the same address and the difference never shows. Where they differ, and UPnP is not available to settle it, detection can name an address your server is not reachable at — and every address derived from it points somewhere wrong.
-
-This is uncommon, and the cause is almost always upstream of your server:
-
-- **Multi-WAN routing**, where inbound port forwards live on one uplink while the default route egresses another.
-- **An ISP that translates outbound traffic from a pool** separate from the address your inbound traffic is mapped to.
-- **A cloud or colocation network** with a floating ingress address and a separate gateway for egress.
+- **Multi-WAN routing**, where port forwards are on one uplink and outbound traffic leaves by another.
+- **An ISP that sends your outbound traffic from a different address** than the one inbound traffic arrives on.
+- **A cloud or colocation network** with a floating inbound address and a separate outbound gateway.
 - **A router with UPnP disabled**, or reporting a stale external address.
 
-Correcting the address is a command-line operation:
+Set the correct address from the command line:
 
 ```bash
 start-cli net gateway set-wan-ip <GATEWAY> <IP>
@@ -64,12 +60,12 @@ start-cli net gateway unset-wan-ip <GATEWAY>
 
 `start-cli net gateway list` marks an address you set as `(manual)`.
 
-The address must be a public IPv4. A private, CGNAT, or otherwise unroutable address is refused, because inbound connections from the Internet cannot arrive on one. An outbound-only gateway is refused as well, since nothing arrives through it.
+The address must be a public IPv4, and the gateway must not be outbound-only.
 
-Setting it moves every address derived from that gateway at once: the public addresses offered for each service interface, and the port-forwarding rules StartOS tells you to add. Detection keeps running while your address is set, so clearing it restores whatever StartOS finds.
+Setting it updates every public address and port-forwarding rule for that gateway. `unset-wan-ip` returns to the detected address.
 
 > [!WARNING]
-> Pinning the correct address is what makes your server publicly reachable at it. That address is then published — in the DNS records for any clearnet domain on this gateway, in the addresses your services advertise to peers, and to anyone who scans the ports you forward. Set it only when you intend your server to be reached there.
+> The address you set is published in the DNS records of any clearnet domain on this gateway and in the addresses your services advertise to peers.
 
 ## Secure Gateways
 

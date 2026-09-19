@@ -110,20 +110,7 @@ impl Host {
             )
     }
 }
-/// Gateways over which `<hostname>.local` is resolvable: a LAN interface
-/// serves it by mDNS multicast; a WireGuard interface only once its resolver
-/// has accepted the injected record (`net::dns_update`), tracked as its
-/// `dns_update` capability.
-/// Keep the IP rows `gateway` offered the last time it was up.
-///
-/// A gateway whose device NetworkManager dropped, or that discovery has not
-/// reached since boot, has no `ip_info` to recompute from. Recomputing it as
-/// nothing would strip its rows from `available` and, with them, the record
-/// `migrate_renumbered_ips` needs to carry the operator's opt-in to whatever
-/// address it comes back on: a PPPoE reconnect, a router reboot, or a lease
-/// that rolled while the server was off. Its addresses stay on offer until it
-/// is deleted, as its name and trust setting do; port forwards, which need the
-/// live `ip_info`, lapse while it is down and return with it.
+/// Keeps the previous IP rows of a gateway that has no `ip_info`.
 fn carry_forward(
     available: &mut BTreeSet<HostnameInfo>,
     previous: &BTreeSet<HostnameInfo>,
@@ -141,6 +128,10 @@ fn carry_forward(
     );
 }
 
+/// Gateways over which `<hostname>.local` is resolvable: a LAN interface
+/// serves it by mDNS multicast; a WireGuard interface only once its resolver
+/// has accepted the injected record (`net::dns_update`), tracked as its
+/// `dns_update` capability.
 fn mdns_gateways(gateways: &OrdMap<GatewayId, NetworkInterfaceInfo>) -> BTreeSet<GatewayId> {
     gateways
         .iter()
@@ -1082,8 +1073,6 @@ mod tests {
         )));
     }
 
-    /// A host with one exported plain binding on `port`, so its public addresses
-    /// reach `enabled_addresses` and contribute port forwards.
     fn exported_host(ports: &mut AvailablePorts, port: u16) -> Model<Host> {
         use crate::net::service_interface::{AddressInfo, ServiceInterface, ServiceInterfaceType};
 
@@ -1148,8 +1137,6 @@ mod tests {
             .collect()
     }
 
-    /// Enable the WAN IPv4 the way an operator does, then renumber `gateway` and
-    /// converge again.
     fn renumber(
         host: &mut Model<Host>,
         gateways: &mut OrdMap<GatewayId, NetworkInterfaceInfo>,
@@ -1189,7 +1176,6 @@ mod tests {
         converge(&mut host, &gateways, &ports);
         assert_eq!(forward_srcs(&host), ["198.51.100.2:9735"]);
 
-        // The ISP hands the gateway a new lease.
         renumber(&mut host, &mut gateways, &ports, |info| {
             let mut ip_info = (**info.ip_info.as_ref().unwrap()).clone();
             ip_info.wan_ip = Some(Ipv4Addr::new(203, 0, 113, 9));
@@ -1217,14 +1203,12 @@ mod tests {
         enable_wan(&mut host, 9735, "198.51.100.2:9735");
         converge(&mut host, &gateways, &ports);
 
-        // The operator pins the address inbound traffic actually arrives on.
         renumber(&mut host, &mut gateways, &ports, |info| {
             info.wan_ip_override = Some(Ipv4Addr::new(203, 0, 113, 9));
         });
         assert_eq!(wan_of(&host, 9735), ["203.0.113.9:9735"]);
         assert_eq!(forward_srcs(&host), ["203.0.113.9:9735"]);
 
-        // Clearing it returns to the detected address, opt-in intact.
         renumber(&mut host, &mut gateways, &ports, |info| {
             info.wan_ip_override = None;
         });
@@ -1312,7 +1296,6 @@ mod tests {
         enable_wan(&mut host, 9735, "198.51.100.2:9735");
         converge(&mut host, &gateways, &ports);
 
-        // NetworkManager drops the device: discovery has nothing for it.
         renumber(&mut host, &mut gateways, &ports, |info| info.ip_info = None);
         assert_eq!(
             wan_of(&host, 9735),
@@ -1324,7 +1307,6 @@ mod tests {
             "a port forward needs the live gateway"
         );
 
-        // It comes back on a new lease.
         renumber(&mut host, &mut gateways, &ports, |info| {
             let mut ip_info = (**wireguard(GatewayType::InboundOutbound)
                 .ip_info
@@ -1358,7 +1340,6 @@ mod tests {
         gateways.remove(&gw("wg-in"));
         converge(&mut host, &gateways, &ports);
 
-        // Only a downed gateway is carried forward; a deleted one is gone.
         let available = host.de().unwrap().bindings[&9735]
             .addresses
             .available
