@@ -8,7 +8,7 @@ This page covers how StartOS resolves domain names and when you might need to ch
 
 ## DHCP
 
-By default, StartOS obtains its DNS servers from your router via [DHCP](https://en.wikipedia.org/wiki/Dynamic_Host_Configuration_Protocol). For most users, the default settings require no changes.
+By default, StartOS obtains its DNS servers from your router via [DHCP](https://en.wikipedia.org/wiki/Dynamic_Host_Configuration_Protocol). For most users, the default settings require no changes. If the network provides no usable DNS server, StartOS keeps service name resolution available through its built-in Cloudflare fallback at `1.1.1.1`.
 
 ## Static DNS Servers
 
