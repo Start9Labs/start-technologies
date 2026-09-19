@@ -44,7 +44,8 @@ use crate::net::utils::{
 };
 use crate::net::web_server::{Accept, AcceptStream, MetadataVisitor, TcpMetadata};
 use crate::net::{
-    DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY, DEFAULT_OUTBOUND_RULE_PRIORITY, MAIN_RULE_PRIORITY,
+    DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY, DEFAULT_OUTBOUND_RULE_PRIORITY,
+    LOCAL_OUTBOUND_REJECT_MARK, LOCAL_OUTBOUND_REJECT_RULE_PRIORITY, MAIN_RULE_PRIORITY,
     REPLY_RULE_PRIORITY, SOURCE_RULE_PRIORITY, TUNNEL_REPLY_RULE_PRIORITY, WG_ENCAP_RULE_PRIORITY,
     rule_at_priority,
 };
@@ -1426,7 +1427,9 @@ async fn watcher(
                             changed
                         });
                         gc_policy_routing(&ifaces).await;
-                        reconcile_mangle_rules(&policy_ifaces).await.log_err();
+                        reconcile_mangle_prerouting_rules(&policy_ifaces)
+                            .await
+                            .log_err();
                         if !policy_ifaces.is_empty() {
                             for v6 in [false, true] {
                                 ensure_main_suppress_rule(v6).await.log_err();
@@ -1784,15 +1787,13 @@ fn policy_table_for(device_type: Option<NetworkInterfaceType>, iface: &GatewayId
         .log_err()
 }
 
-/// Rebuilds the mangle chains in one transaction. The gateway coordinator is
-/// their only writer.
-async fn reconcile_mangle_rules(policy_ifaces: &BTreeMap<GatewayId, u32>) -> Result<(), Error> {
+async fn reconcile_mangle_prerouting_rules(
+    policy_ifaces: &BTreeMap<GatewayId, u32>,
+) -> Result<(), Error> {
     nft_ensure_base().await?;
     let mut script = String::new();
     script.push_str("flush chain ip startos mangle_prerouting\n");
-    script.push_str("flush chain ip startos mangle_output\n");
     script.push_str("flush chain ip6 startos mangle_prerouting\n");
-    script.push_str("flush chain ip6 startos mangle_output\n");
     script.push_str(
         "add rule ip startos mangle_prerouting meta mark 0x00000000 meta mark set ct mark comment \"restore-mark\"\n",
     );
@@ -1800,13 +1801,7 @@ async fn reconcile_mangle_rules(policy_ifaces: &BTreeMap<GatewayId, u32>) -> Res
     // it: mark them so the priority-49 ip rule routes them to the local table.
     script.push_str(&crate::net::transparent::divert_mark_rule());
     script.push_str(
-        "add rule ip startos mangle_output meta mark 0x00000000 meta mark set ct mark comment \"restore-mark\"\n",
-    );
-    script.push_str(
         "add rule ip6 startos mangle_prerouting meta mark 0x00000000 meta mark set ct mark comment \"restore-mark\"\n",
-    );
-    script.push_str(
-        "add rule ip6 startos mangle_output meta mark 0x00000000 meta mark set ct mark comment \"restore-mark\"\n",
     );
     // The reverse-path check reads the packet mark, not the connection mark.
     for (iface, table_id) in policy_ifaces {
@@ -1818,6 +1813,77 @@ async fn reconcile_mangle_rules(policy_ifaces: &BTreeMap<GatewayId, u32>) -> Res
             "add rule ip6 startos mangle_prerouting iifname \"{iface}\" ct state new ct mark set {table_id} meta mark set {table_id} comment \"mark-{iface}\"\n",
             iface = iface.as_str(),
         ));
+    }
+    Command::new("nft")
+        .arg(&script)
+        .invoke(ErrorKind::Network)
+        .await?;
+    Ok(())
+}
+
+fn local_outbound_reject_rule(line: &str) -> bool {
+    let Some(rest) = rule_at_priority(line, LOCAL_OUTBOUND_REJECT_RULE_PRIORITY) else {
+        return false;
+    };
+    let tokens: Vec<&str> = rest.split_whitespace().collect();
+    let mark = tokens
+        .windows(2)
+        .find(|w| w[0] == "fwmark")
+        .and_then(|w| u32::from_str_radix(w[1].strip_prefix("0x").unwrap_or(w[1]), 16).ok());
+    mark == Some(LOCAL_OUTBOUND_REJECT_MARK) && tokens.contains(&"unreachable")
+}
+
+async fn ensure_local_outbound_reject_rule(v6: bool) -> Result<(), Error> {
+    let mut cmd = Command::new("ip");
+    if v6 {
+        cmd.arg("-6");
+    }
+    let output = String::from_utf8(
+        cmd.arg("rule")
+            .arg("show")
+            .invoke(ErrorKind::Network)
+            .await?,
+    )?;
+    if output.lines().any(local_outbound_reject_rule) {
+        return Ok(());
+    }
+
+    let mut cmd = Command::new("ip");
+    if v6 {
+        cmd.arg("-6");
+    }
+    cmd.arg("rule")
+        .arg("add")
+        .arg("fwmark")
+        .arg(format!("{LOCAL_OUTBOUND_REJECT_MARK:#x}"))
+        .arg("unreachable")
+        .arg("priority")
+        .arg(LOCAL_OUTBOUND_REJECT_RULE_PRIORITY.to_string())
+        .invoke(ErrorKind::Network)
+        .await?;
+    Ok(())
+}
+
+async fn reconcile_mangle_output_rules(
+    ipv4_mark: Option<u32>,
+    ipv6_mark: Option<u32>,
+) -> Result<(), Error> {
+    ensure_local_outbound_reject_rule(false).await?;
+    ensure_local_outbound_reject_rule(true).await?;
+    nft_ensure_base().await?;
+
+    let mut script = String::new();
+    for (family, mark) in [("ip", ipv4_mark), ("ip6", ipv6_mark)] {
+        script.push_str(&format!("flush chain {family} startos mangle_output\n"));
+        script.push_str(&format!(
+            "add rule {family} startos mangle_output meta mark 0x00000000 meta mark set ct mark comment \"restore-mark\"\n"
+        ));
+        if let Some(mark) = mark {
+            // The route hook repeats lookup after marking a new local connection.
+            script.push_str(&format!(
+                "add rule {family} startos mangle_output meta mark 0x00000000 meta mark set {mark:#010x} comment \"mark-default-outbound\"\n"
+            ));
+        }
     }
     Command::new("nft")
         .arg(&script)
@@ -2251,19 +2317,55 @@ async fn reconcile_source_rules(
     rules_output: &str,
 ) {
     let table_str = table_id.to_string();
-    let existing: BTreeSet<String> = rules_output
-        .lines()
-        .filter_map(|l| {
-            let toks: Vec<&str> = rule_at_priority(l, SOURCE_RULE_PRIORITY)?
-                .split_whitespace()
-                .collect();
-            toks.windows(2)
-                .any(|w| w[0] == "lookup" && w[1].parse::<u32>().ok() == Some(table_id))
-                .then(|| toks.windows(2).find(|w| w[0] == "from").map(|w| w[1]))
-                .flatten()
-                .map(|addr| addr.to_owned())
-        })
-        .collect();
+    let mut existing = BTreeSet::new();
+    let mut unmasked = BTreeSet::new();
+    for line in rules_output.lines() {
+        let Some(rest) = rule_at_priority(line, SOURCE_RULE_PRIORITY) else {
+            continue;
+        };
+        let tokens: Vec<&str> = rest.split_whitespace().collect();
+        if !tokens
+            .windows(2)
+            .any(|w| w[0] == "lookup" && w[1].parse::<u32>().ok() == Some(table_id))
+        {
+            continue;
+        }
+        let Some(addr) = tokens
+            .windows(2)
+            .find(|w| w[0] == "from")
+            .map(|w| w[1].to_owned())
+        else {
+            continue;
+        };
+        let unmarked = tokens.windows(2).any(|w| {
+            w[0] == "fwmark"
+                && u32::from_str_radix(w[1].strip_prefix("0x").unwrap_or(w[1]), 16) == Ok(0)
+        });
+        if unmarked {
+            existing.insert(addr);
+        } else {
+            unmasked.insert(addr);
+        }
+    }
+
+    for addr in unmasked {
+        let mut cmd = Command::new("ip");
+        if v6 {
+            cmd.arg("-6");
+        }
+        cmd.arg("rule")
+            .arg("del")
+            .arg("from")
+            .arg(&addr)
+            .arg("lookup")
+            .arg(&table_str)
+            .arg("priority")
+            .arg(SOURCE_RULE_PRIORITY.to_string())
+            .invoke(ErrorKind::Network)
+            .await
+            .log_err();
+    }
+
     for (action, addrs) in [
         ("add", addrs.difference(&existing)),
         ("del", existing.difference(addrs)),
@@ -2277,6 +2379,8 @@ async fn reconcile_source_rules(
                 .arg(action)
                 .arg("from")
                 .arg(addr)
+                .arg("fwmark")
+                .arg("0/0xffffffff")
                 .arg("lookup")
                 .arg(&table_str)
                 .arg("priority")
@@ -2801,18 +2905,46 @@ impl NetworkInterfaceController {
         let existing = snapshot_outbound_rules(false).await;
         let existing_v6 = snapshot_outbound_rules(true).await;
         let mut desired = OutboundRules::default();
+        let mut local_outbound_marks = (None, None);
 
         if let Some(gw_id) = default_outbound {
             desired.reject = true;
-            match ip_info.get(gw_id) {
-                Some(info) if info.ip_info.is_some() => {}
-                Some(_) => tracing::warn!("default outbound gateway {gw_id} is not connected"),
-                None => tracing::warn!("default outbound gateway {gw_id} not found in ip_info"),
-            }
+            local_outbound_marks = (
+                Some(LOCAL_OUTBOUND_REJECT_MARK),
+                Some(LOCAL_OUTBOUND_REJECT_MARK),
+            );
+            let selected = match ip_info.get(gw_id) {
+                Some(info) if info.ip_info.is_some() => info.ip_info.as_deref(),
+                Some(_) => {
+                    tracing::warn!("default outbound gateway {gw_id} is not connected");
+                    None
+                }
+                None => {
+                    tracing::warn!("default outbound gateway {gw_id} not found in ip_info");
+                    None
+                }
+            };
 
             match if_nametoindex(gw_id.as_str()) {
                 Ok(idx) => {
-                    desired.gateway_tables.insert(1000 + idx);
+                    let table_id = 1000 + idx;
+                    desired.gateway_tables.insert(table_id);
+                    if let Some(selected) = selected {
+                        local_outbound_marks.0 = Some(table_id);
+                        let ipv6_gateway = selected.lan_ip.iter().find_map(|ip| match ip {
+                            IpAddr::V6(v6) => Some(*v6),
+                            _ => None,
+                        });
+                        if carries_v6(
+                            ipv6_gateway,
+                            selected.subnets.iter().filter_map(|n| match n {
+                                IpNet::V6(v6) => Some(v6.addr()),
+                                _ => None,
+                            }),
+                        ) {
+                            local_outbound_marks.1 = Some(table_id);
+                        }
+                    }
                 }
                 Err(e) => {
                     tracing::error!("failed to get ifindex for {gw_id}: {e}");
@@ -2860,6 +2992,9 @@ impl NetworkInterfaceController {
             }
         }
 
+        reconcile_mangle_output_rules(local_outbound_marks.0, local_outbound_marks.1)
+            .await
+            .log_err();
         reconcile_outbound_rules(false, &existing, &desired).await;
         reconcile_outbound_rules(true, &existing_v6, &desired).await;
     }
@@ -3279,6 +3414,19 @@ mod policy_rule_tests {
         assert_eq!(rules.gateway_tables, [1004].into_iter().collect());
         assert!(rules.reject);
         assert!(!parse_outbound_rules("76: from 10.0.3.5 unreachable\n").reject);
+    }
+
+    #[test]
+    fn local_outbound_rejection_requires_its_mark() {
+        assert!(local_outbound_reject_rule(
+            "52: from all fwmark 0x540002 unreachable"
+        ));
+        assert!(!local_outbound_reject_rule(
+            "52: from all fwmark 0x540003 unreachable"
+        ));
+        assert!(!local_outbound_reject_rule(
+            "52: from all fwmark 0x540002 lookup main"
+        ));
     }
 
     #[test]
