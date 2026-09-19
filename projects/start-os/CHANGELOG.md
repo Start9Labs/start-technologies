@@ -149,6 +149,10 @@ for the detail behind its highlights.
   runtime.** StartOS bounds the fallback shutdown waits so it can release the
   container's network routes and continue teardown.
 
+- **Reactive service setup remains active through bursts of changes.** Repeated
+  changes continue to re-run a package's init handler, keeping generated files,
+  tasks, and registrations synchronized.
+
 - **Nextcloud (Legacy) and other migrated 0.3.5.1 services with a
   package-managed certificate start when the server has a public IP or uses
   StartTunnel.**
