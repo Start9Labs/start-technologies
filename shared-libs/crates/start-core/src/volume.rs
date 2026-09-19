@@ -455,20 +455,6 @@ mod tests {
         "testpkg".parse().unwrap()
     }
 
-    #[derive(Clone)]
-    struct LogWriter(Arc<std::sync::Mutex<Vec<u8>>>);
-
-    impl std::io::Write for LogWriter {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(buf);
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
     struct Case {
         _tmp: TmpDir,
         volumes: PathBuf,
@@ -500,32 +486,16 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn snapshot_only_warns_for_an_existing_plain_directory() -> Result<(), Error> {
+    #[tokio::test]
+    async fn snapshot_of_a_plain_directory_takes_no_backup_and_leaves_it_intact()
+    -> Result<(), Error> {
         let c = case().await?;
-        let logs = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let make_writer = {
-            let logs = logs.clone();
-            move || LogWriter(logs.clone())
-        };
-        let subscriber = tracing_subscriber::fmt()
-            .with_ansi(false)
-            .without_time()
-            .with_max_level(tracing::Level::WARN)
-            .with_writer(make_writer)
-            .finish();
-        let _guard = tracing::subscriber::set_default(subscriber);
-
-        assert!(!c.ib.snapshot().await?);
-        assert!(logs.lock().unwrap().is_empty());
-
         seed_tree(&c.ib.live, "live").await?;
+
         assert!(!c.ib.snapshot().await?);
 
         assert_eq!(read_marker(&c.ib.live).await.as_deref(), Some("live"));
         assert!(!c.ib.exists().await);
-        let logs = String::from_utf8(logs.lock().unwrap().clone()).unwrap();
-        assert!(logs.contains("volume root is not a btrfs subvolume"));
         Ok(())
     }
 

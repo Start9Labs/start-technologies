@@ -496,9 +496,9 @@ impl Service {
                         }
                     }
                 }
-                // An Installing state can own migrated data even when no snapshot exists.
                 let backup = crate::volume::InstallBackup::of(id);
                 backup.resolve_pending().await.log_err();
+                // Data that predates the install can lack a backup.
                 cleanup(ctx, id, true).await.log_err();
                 report_failed_rollback(ctx, id, backup.restore().await).await?;
                 ctx.db
