@@ -246,28 +246,13 @@ impl PersistentContainer {
         let image_path = lxc_container.rootfs_dir().join("media/startos/images");
         tokio::fs::create_dir_all(&image_path).await?;
         for (image, config) in &s9pk.as_manifest().images {
-            let mut arch = ARCH;
-            let mut sqfs_path = Path::new("images")
+            let Some(arch) = config.resolve_arch(ARCH, image, s9pk.as_archive().contents()) else {
+                continue;
+            };
+            let sqfs_path = Path::new("images")
                 .join(arch)
                 .join(image)
                 .with_extension("squashfs");
-            if !s9pk
-                .as_archive()
-                .contents()
-                .get_path(&sqfs_path)
-                .and_then(|e| e.as_file())
-                .is_some()
-            {
-                arch = if let Some(arch) = config.emulate_missing_as.as_deref() {
-                    arch
-                } else {
-                    continue;
-                };
-                sqfs_path = Path::new("images")
-                    .join(arch)
-                    .join(image)
-                    .with_extension("squashfs");
-            }
             let sqfs = s9pk
                 .as_archive()
                 .contents()

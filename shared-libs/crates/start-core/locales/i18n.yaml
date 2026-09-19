@@ -3567,12 +3567,12 @@ help.arg.ed25519:
   fr_FR: "Utiliser Ed25519 au lieu de NIST P-256"
   pl_PL: "Użyj Ed25519 zamiast NIST P-256"
 
-help.arg.emulate-missing-arch:
-  en_US: "Emulate missing architecture using this one"
-  de_DE: "Fehlende Architektur mit dieser emulieren"
-  es_ES: "Emular arquitectura faltante usando esta"
-  fr_FR: "Émuler l'architecture manquante avec celle-ci"
-  pl_PL: "Emuluj brakującą architekturę używając tej"
+help.arg.emulate-missing:
+  en_US: "Emulate the image when the requested architecture is unavailable"
+  de_DE: "Image emulieren, wenn die angeforderte Architektur nicht verfügbar ist"
+  es_ES: "Emular la imagen cuando la arquitectura solicitada no esté disponible"
+  fr_FR: "Émuler l’image lorsque l’architecture demandée n’est pas disponible"
+  pl_PL: "Emuluj obraz, gdy żądana architektura jest niedostępna"
 
 help.arg.env-file-path:
   en_US: "Path to environment file"
