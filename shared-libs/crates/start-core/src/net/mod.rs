@@ -29,7 +29,6 @@ const TUNNEL_REPLY_RULE_PRIORITY: u32 = 48;
 const DIVERT_RULE_PRIORITY: u32 = 49;
 const MAIN_RULE_PRIORITY: u32 = 50;
 const REPLY_RULE_PRIORITY: u32 = 51;
-const LOCAL_OUTBOUND_REJECT_RULE_PRIORITY: u32 = 52;
 const SOURCE_RULE_PRIORITY: u32 = 60;
 const SERVICE_OUTBOUND_RULE_PRIORITY: u32 = 70;
 const SERVICE_OUTBOUND_REJECT_RULE_PRIORITY: u32 = 71;
@@ -39,7 +38,8 @@ const DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY: u32 = 76;
 const AUTO_MAIN_RULE_PRIORITY: u32 = 1000;
 const AUTO_DEFAULT_RULE_PRIORITY: u32 = 1100;
 
-const LOCAL_OUTBOUND_REJECT_MARK: u32 = 0x00540002;
+/// Carried by a connection the server opens while an outbound gateway is selected.
+const LOCAL_OUTBOUND_MARK: u32 = 0x0054_0002;
 
 const _: () = {
     const fn before(rule: u32, others: &[u32]) {
@@ -102,15 +102,6 @@ const _: () = {
         ],
     );
     before(
-        LOCAL_OUTBOUND_REJECT_RULE_PRIORITY,
-        &[
-            SOURCE_RULE_PRIORITY,
-            DEFAULT_OUTBOUND_RULE_PRIORITY,
-            DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY,
-            AUTO_MAIN_RULE_PRIORITY,
-        ],
-    );
-    before(
         SOURCE_RULE_PRIORITY,
         &[
             DEFAULT_OUTBOUND_RULE_PRIORITY,
@@ -161,15 +152,6 @@ const _: () = {
         ],
     );
     apart(REPLY_RULE_PRIORITY, &[DIVERT_RULE_PRIORITY]);
-    apart(
-        LOCAL_OUTBOUND_REJECT_RULE_PRIORITY,
-        &[
-            TUNNEL_REPLY_RULE_PRIORITY,
-            DIVERT_RULE_PRIORITY,
-            REPLY_RULE_PRIORITY,
-            SOURCE_RULE_PRIORITY,
-        ],
-    );
     apart(
         WG_ENCAP_RULE_PRIORITY,
         &[
@@ -248,14 +230,7 @@ mod tests {
             .env("MAIN", MAIN_RULE_PRIORITY.to_string())
             .env("REPLY", REPLY_RULE_PRIORITY.to_string())
             .env("SOURCE", SOURCE_RULE_PRIORITY.to_string())
-            .env(
-                "LOCAL_OUTBOUND_REJECT",
-                LOCAL_OUTBOUND_REJECT_RULE_PRIORITY.to_string(),
-            )
-            .env(
-                "LOCAL_OUTBOUND_REJECT_MARK",
-                LOCAL_OUTBOUND_REJECT_MARK.to_string(),
-            )
+            .env("LOCAL_OUTBOUND_MARK", LOCAL_OUTBOUND_MARK.to_string())
             .env(
                 "SERVICE_OUTBOUND",
                 SERVICE_OUTBOUND_RULE_PRIORITY.to_string(),

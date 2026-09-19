@@ -49,7 +49,6 @@ for family in -4 -6; do
   for t in $T_ETH $T_WG0 $T_WG1; do
     ip $family rule add fwmark $t lookup $t priority $REPLY
   done
-  ip $family rule add fwmark $LOCAL_OUTBOUND_REJECT_MARK unreachable priority $LOCAL_OUTBOUND_REJECT
   ip $family rule add lookup main priority $AUTO_MAIN
   ip $family rule add lookup default priority $AUTO_DEFAULT
 done
@@ -143,8 +142,11 @@ every_state
 expect system-selection wg0 203.0.113.9
 expect system-selection wg0 2001:db8:99::9
 expect system-selection wg0 203.0.113.9 $from_container
-expect system-selection wg0 203.0.113.9 from 192.168.1.5 mark $T_WG0
-expect system-selection wg0 2001:db8:99::9 from 2001:db8:1::5 mark $T_WG0
+expect local-outbound wg0 203.0.113.9 from 192.168.1.5 mark $LOCAL_OUTBOUND_MARK
+expect local-outbound wg0 2001:db8:99::9 from 2001:db8:1::5 mark $LOCAL_OUTBOUND_MARK
+expect local-outbound eth0 192.168.1.77 mark $LOCAL_OUTBOUND_MARK
+expect local-outbound eth0 2001:db8:1::77 from 2001:db8:1::5 mark $LOCAL_OUTBOUND_MARK
+expect local-outbound lxcbr0 10.0.3.5 mark $LOCAL_OUTBOUND_MARK
 expect wg-transport eth0 198.51.100.1 mark $WG_FWMARK
 unpin_system
 
@@ -154,9 +156,9 @@ every_state
 expect system-kill-switch REJECT 203.0.113.9
 expect system-kill-switch REJECT 2001:db8:99::9
 expect system-kill-switch REJECT 203.0.113.9 $from_container
-expect system-kill-switch REJECT 203.0.113.9 from 192.168.1.5 mark $LOCAL_OUTBOUND_REJECT_MARK
-expect system-kill-switch REJECT 2001:db8:99::9 from 2001:db8:1::5 mark $LOCAL_OUTBOUND_REJECT_MARK
-expect system-kill-switch REJECT 2001:db8:99::9 from 2001:db8:1::5 mark 0x540003
+expect local-outbound REJECT 203.0.113.9 from 192.168.1.5 mark $LOCAL_OUTBOUND_MARK
+expect local-outbound REJECT 2001:db8:99::9 from 2001:db8:1::5 mark $LOCAL_OUTBOUND_MARK
+expect local-outbound eth0 2001:db8:1::77 from 2001:db8:1::5 mark $LOCAL_OUTBOUND_MARK
 expect wg-transport eth0 198.51.100.1 mark $WG_FWMARK
 unpin_system
 
@@ -166,7 +168,7 @@ every_state
 expect system-selection wg1 203.0.113.9
 expect v6-leak-guard REJECT 2001:db8:99::9
 expect v6-leak-guard REJECT 2001:db8:99::9 $from_container_v6
-expect v6-leak-guard REJECT 2001:db8:99::9 from 2001:db8:1::5 mark $LOCAL_OUTBOUND_REJECT_MARK
+expect local-outbound REJECT 2001:db8:99::9 from 2001:db8:1::5 mark $LOCAL_OUTBOUND_MARK
 unpin_system
 
 state="service pinned to wg0"
