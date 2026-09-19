@@ -142,9 +142,9 @@ for the detail behind its highlights.
 - **The Raspberry Pi 4 image includes the Broadcom firmware needed for its
   built-in WiFi interface.**
 
-- **Service-container cleanup finishes after an unresponsive runtime.** StartOS
-  bounds the runtime shutdown wait so it can release the container's network
-  routes and continue teardown.
+- **Fallback service-container cleanup finishes after an unresponsive
+  runtime.** StartOS bounds the fallback shutdown waits so it can release the
+  container's network routes and continue teardown.
 
 - **Nextcloud (Legacy) and other migrated 0.3.5.1 services with a
   package-managed certificate start when the server has a public IP or uses
