@@ -139,6 +139,8 @@ for the detail behind its highlights.
 
 ### Fixed
 
+- **Requested restarts and shutdowns complete when concurrent service teardown has already removed a mountpoint.**
+
 - **Nextcloud (Legacy) and other migrated 0.3.5.1 services with a
   package-managed certificate start when the server has a public IP or uses
   StartTunnel.**
