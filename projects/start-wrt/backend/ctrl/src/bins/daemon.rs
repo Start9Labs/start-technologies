@@ -187,7 +187,7 @@ async fn init_ssl() -> bool {
 /// connection. Plumbed through `WebServer`'s metadata pipeline so request
 /// extensions can inspect it if needed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum WebserverListener {
+pub enum WebserverListener {
     Http,
     Https,
 }
@@ -450,8 +450,17 @@ async fn inner_main() -> Result<(), Error> {
         .layer(Extension(proxy_client))
         .layer(Extension(app_state));
 
-    // WAN-specific listeners (the SNI demux on 443, the HTTP→HTTPS redirect on
-    // 80; see `http_redirect.rs`) require every wildcard listener to use SO_REUSEPORT.
+    // Outermost, so no route above answers plain HTTP at the public address.
+    let app = crate::http_redirect::redirect_public_http(app);
+
+    // Before the bind: an admission rule fw4 loaded at boot outlives the
+    // daemon, so the first connection must already meet the decision.
+    if !setup_mode {
+        crate::http_redirect::seed_from_uci("/etc/config".into()).await;
+    }
+
+    // The SNI demux binds per WAN address on 443, so the wildcard listener
+    // beside it uses SO_REUSEPORT.
     let http_addr = SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], 80));
     let http_listener = startos::net::utils::bind_tokio_listener_reuse_port(http_addr)
         .with_kind(ErrorKind::Network)?;
