@@ -64,6 +64,18 @@ check_variables () {
   fi
 }
 
+grow_root_filesystem () {
+  log "remounting root rw and growing btrfs"
+  if ! mount / -o remount,rw; then
+    FAIL_REASON="Root remount failed"
+    return 1
+  fi
+  if ! btrfs filesystem resize max /media/startos/config; then
+    FAIL_REASON="Root filesystem resize failed"
+    return 1
+  fi
+}
+
 main () {
   log "reading partition layout"
   get_variables
@@ -99,9 +111,9 @@ main () {
 
   partx -u "$ROOT_DEV" || true
 
-  log "remounting root rw and growing btrfs"
-  mount / -o remount,rw
-  btrfs filesystem resize max /media/startos/root
+  if ! grow_root_filesystem; then
+    return 1
+  fi
 
   log "generating machine-id"
   if ! systemd-machine-id-setup --root=/media/startos/config/overlay/; then

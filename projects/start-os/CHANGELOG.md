@@ -142,6 +142,9 @@ for the detail behind its highlights.
 - **The Raspberry Pi 4 image includes the Broadcom firmware needed for its
   built-in WiFi interface.**
 
+- **Raspberry Pi images use all space allocated to the StartOS filesystem.**
+  First boot expands the filesystem to fill its partition before setup begins.
+
 - **Fallback service-container cleanup finishes after an unresponsive
   runtime.** StartOS bounds the fallback shutdown waits so it can release the
   container's network routes and continue teardown.
