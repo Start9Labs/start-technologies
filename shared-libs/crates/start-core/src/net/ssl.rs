@@ -36,7 +36,7 @@ use crate::SOURCE_DATE;
 use crate::account::AccountInfo;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::Database;
-use crate::db::model::public::IpInfo;
+use crate::db::model::public::NetworkInterfaceInfo;
 use crate::db::{DbAccess, DbAccessMut};
 use crate::init::check_time_is_synchronized;
 use crate::net::gateway::GatewayInfo;
@@ -729,7 +729,7 @@ pub async fn generate_certificate(
 fn served_name(
     server_name: Option<&str>,
     tcp: Option<TcpMetadata>,
-    gateway: Option<&IpInfo>,
+    gateway: Option<&NetworkInterfaceInfo>,
 ) -> Option<InternedString> {
     if let Some(host) = server_name {
         return Some(InternedString::from(host));
@@ -739,9 +739,13 @@ fn served_name(
     let src = tcp.peer_addr.ip().to_canonical();
     let translated = !is_global_ip(dst)
         && is_global_ip(src)
-        && !gateway.is_some_and(|gw| gw.subnets.iter().any(|s| s.contains(&src)));
+        && !gateway.is_some_and(|gw| {
+            gw.ip_info
+                .as_ref()
+                .is_some_and(|i| i.subnets.iter().any(|s| s.contains(&src)))
+        });
     let wan = gateway
-        .and_then(|gw| gw.wan_ip)
+        .and_then(|gw| gw.wan_ip())
         .filter(|wan| is_global_ip(IpAddr::V4(*wan)));
     let dialed = match (dst, wan) {
         (IpAddr::V4(_), Some(wan)) if translated => IpAddr::V4(wan),
@@ -781,11 +785,11 @@ where
         hello: &ClientHello<'_>,
         metadata: &<A as Accept>::Metadata,
     ) -> Option<TlsHandlerAction> {
-        let gateway = extract::<GatewayInfo, _>(metadata).and_then(|i| i.info.ip_info);
+        let gateway = extract::<GatewayInfo, _>(metadata).map(|i| i.info);
         let hostnames = [served_name(
             hello.server_name(),
             extract::<TcpMetadata, _>(metadata),
-            gateway.as_deref(),
+            gateway.as_ref(),
         )?]
         .into_iter()
         .collect();
@@ -888,6 +892,7 @@ mod served_name_tests {
     use ipnet::IpNet;
 
     use super::*;
+    use crate::db::model::public::IpInfo;
 
     const LAN: &str = "192.168.0.5:443";
     const LAN_V6: &str = "[2001:db8::5]:443";
@@ -901,18 +906,25 @@ mod served_name_tests {
         })
     }
 
-    fn gateway(subnets: &[&str], wan_ip: Option<Ipv4Addr>) -> IpInfo {
-        IpInfo {
-            subnets: subnets
-                .iter()
-                .map(|s| s.parse::<IpNet>().unwrap())
-                .collect(),
-            wan_ip,
+    fn gateway(subnets: &[&str], wan_ip: Option<Ipv4Addr>) -> NetworkInterfaceInfo {
+        NetworkInterfaceInfo {
+            ip_info: Some(std::sync::Arc::new(IpInfo {
+                subnets: subnets
+                    .iter()
+                    .map(|s| s.parse::<IpNet>().unwrap())
+                    .collect(),
+                wan_ip,
+                ..Default::default()
+            })),
             ..Default::default()
         }
     }
 
-    fn name(sni: Option<&str>, tcp: Option<TcpMetadata>, gw: Option<&IpInfo>) -> Option<String> {
+    fn name(
+        sni: Option<&str>,
+        tcp: Option<TcpMetadata>,
+        gw: Option<&NetworkInterfaceInfo>,
+    ) -> Option<String> {
         served_name(sni, tcp, gw).map(|n| n.to_string())
     }
 
@@ -951,6 +963,16 @@ mod served_name_tests {
         assert_eq!(
             name(None, from("198.51.100.9:51000", LAN), Some(&gw)).as_deref(),
             Some("203.0.113.7")
+        );
+    }
+
+    #[test]
+    fn a_pinned_wan_address_certifies_an_ipv4_dialed_from_the_internet() {
+        let mut gw = gateway(&["192.168.0.5/24"], Some(WAN));
+        gw.wan_ip_override = Some(Ipv4Addr::new(198, 51, 100, 200));
+        assert_eq!(
+            name(None, from("203.0.113.99:51000", LAN), Some(&gw)).as_deref(),
+            Some("198.51.100.200")
         );
     }
 

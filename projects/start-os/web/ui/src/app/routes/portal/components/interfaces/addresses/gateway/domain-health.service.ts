@@ -13,6 +13,7 @@ import {
   dnsAllPass,
   externalAllPass,
   getGua,
+  getWanIp,
   portAllPass,
 } from 'src/app/utils/gua'
 import { GatewayAddress, MappedServiceInterface } from '../../interface.service'
@@ -230,7 +231,7 @@ export class DomainHealthService {
         if (portV6Result && !portV6Result.openExternally) portV6Result = null
       }
 
-      const dnsPass = dnsAllPass(dns, gateway.ipInfo.wanIp, gua)
+      const dnsPass = dnsAllPass(dns, getWanIp(gateway), gua)
       const portOk = isRange || portAllPass(portResult, portV6Result, gua)
       const challengeOk =
         !challenge || externalAllPass(challenge.port, challenge.portV6, gua)

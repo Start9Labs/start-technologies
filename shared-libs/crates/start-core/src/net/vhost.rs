@@ -2251,8 +2251,6 @@ mod port_map_tests {
         info.insert(
             GatewayId::from(InternedString::intern(GATEWAY)),
             NetworkInterfaceInfo {
-                name: None,
-                secure: None,
                 ip_info: Some(Arc::new(IpInfo {
                     name: InternedString::intern(GATEWAY),
                     scope_id: 0,
@@ -2267,8 +2265,7 @@ mod port_map_tests {
                     dns_servers: Default::default(),
                 })),
                 gateway_type: GatewayType::InboundOutbound,
-                port_map: Default::default(),
-                dns_update: Default::default(),
+                ..Default::default()
             },
         );
         info

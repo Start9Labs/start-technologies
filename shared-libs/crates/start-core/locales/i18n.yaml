@@ -2108,6 +2108,20 @@ net.gateway.cannot-delete-without-connection:
   fr_FR: "Impossible de supprimer l'appareil sans connexion active"
   pl_PL: "Nie można usunąć urządzenia bez aktywnego połączenia"
 
+net.gateway.cannot-pin-wan-ip-outbound-only:
+  en_US: "An outbound-only gateway has no WAN IP"
+  de_DE: "Ein reines Ausgangs-Gateway hat keine WAN-IP"
+  es_ES: "Una puerta de enlace de solo salida no tiene IP WAN"
+  fr_FR: "Une passerelle sortante uniquement n'a pas d'IP WAN"
+  pl_PL: "Brama tylko wychodząca nie ma IP WAN"
+
+net.gateway.wan-ip-override-not-public:
+  en_US: "%{ip} is not a public IPv4 address"
+  de_DE: "%{ip} ist keine öffentliche IPv4-Adresse"
+  es_ES: "%{ip} no es una dirección IPv4 pública"
+  fr_FR: "%{ip} n'est pas une adresse IPv4 publique"
+  pl_PL: "%{ip} nie jest publicznym adresem IPv4"
+
 net.gateway.no-configured-echoip-urls:
   en_US: "No configured echoip URLs"
   de_DE: "Keine konfigurierten EchoIP-URLs"
@@ -4247,6 +4261,13 @@ help.arg.version-range:
   fr_FR: "Contrainte de plage de version"
   pl_PL: "Ograniczenie zakresu wersji"
 
+help.arg.wan-ip:
+  en_US: "Public IPv4 address"
+  de_DE: "Öffentliche IPv4-Adresse"
+  es_ES: "Dirección IPv4 pública"
+  fr_FR: "Adresse IPv4 publique"
+  pl_PL: "Publiczny adres IPv4"
+
 help.arg.wifi-country-code:
   en_US: "ISO 3166-1 alpha-2 WiFi country code"
   de_DE: "ISO 3166-1 Alpha-2 WLAN-Ländercode"
@@ -5005,6 +5026,13 @@ about.add-wifi-ssid-password:
   fr_FR: "Ajouter un ssid et mot de passe wifi"
   pl_PL: "Dodaj ssid i hasło wifi"
 
+
+about.allow-gateway-detect-wan-ip:
+  en_US: "Use a gateway's detected WAN IP"
+  de_DE: "Die erkannte WAN-IP eines Gateways verwenden"
+  es_ES: "Usar la IP WAN detectada de una puerta de enlace"
+  fr_FR: "Utiliser l'IP WAN détectée d'une passerelle"
+  pl_PL: "Użyj wykrytego IP WAN bramy"
 
 about.allow-gateway-infer-network-security:
   en_US: "Let StartOS decide whether a gateway's network is trusted with unencrypted traffic"
@@ -6616,6 +6644,13 @@ about.set-gateway-enabled-for-binding:
   es_ES: "Establecer gateway habilitado para enlace"
   fr_FR: "Définir la passerelle activée pour la liaison"
   pl_PL: "Ustaw bramę jako włączoną dla powiązania"
+
+about.set-gateway-wan-ip:
+  en_US: "Set a gateway's WAN IP"
+  de_DE: "Die WAN-IP eines Gateways festlegen"
+  es_ES: "Establecer la IP WAN de una puerta de enlace"
+  fr_FR: "Définir l'IP WAN d'une passerelle"
+  pl_PL: "Ustaw IP WAN bramy"
 
 about.set-keyboard:
   en_US: "Set the keyboard layout"

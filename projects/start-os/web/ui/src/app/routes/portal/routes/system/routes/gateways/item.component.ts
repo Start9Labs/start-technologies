@@ -5,6 +5,7 @@ import {
   TuiButton,
   TuiDataList,
   TuiDropdown,
+  TuiHint,
   TuiIcon,
   TuiInput,
 } from '@taiga-ui/core'
@@ -45,10 +46,13 @@ import { PORT_FORWARDS_MODAL } from './port-forwards.component'
       <td
         class="wan"
         [style.color]="
-          gateway.ipInfo.wanIp ? undefined : 'var(--tui-text-warning)'
+          gateway.effectiveWanIp ? undefined : 'var(--tui-text-warning)'
         "
       >
-        {{ gateway.ipInfo.wanIp || ('Error' | i18n) }}
+        {{ gateway.effectiveWanIp || ('Error' | i18n) }}
+        @if (gateway.wanIpOverride) {
+          <tui-icon icon="@tui.pencil" [tuiHint]="'Set manually' | i18n" />
+        }
       </td>
       <td>
         <button
@@ -87,6 +91,12 @@ import { PORT_FORWARDS_MODAL } from './port-forwards.component'
     tui-icon {
       font-size: 1.3rem;
       margin-right: 0.7rem;
+    }
+
+    .wan tui-icon {
+      font-size: 1rem;
+      margin: 0 0 0 0.25rem;
+      color: var(--tui-text-secondary);
     }
 
     td:first-child {
@@ -135,7 +145,15 @@ import { PORT_FORWARDS_MODAL } from './port-forwards.component'
       }
     }
   `,
-  imports: [TuiButton, TuiDropdown, TuiDataList, TuiIcon, TuiInput, i18nPipe],
+  imports: [
+    TuiButton,
+    TuiDropdown,
+    TuiDataList,
+    TuiHint,
+    TuiIcon,
+    TuiInput,
+    i18nPipe,
+  ],
 })
 export class GatewaysItemComponent {
   private readonly dialog = inject(DialogService)

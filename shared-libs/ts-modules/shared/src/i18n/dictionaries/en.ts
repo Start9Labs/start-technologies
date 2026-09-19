@@ -821,4 +821,5 @@ export const ENGLISH: Record<string, number> = {
   'Ascending': 928,
   'Descending': 929,
   'Services from this registry are maintained by the Start9 community and are undergoing beta testing. Bugs are expected. Install at your own risk.': 930,
+  'Set manually': 933,
 }

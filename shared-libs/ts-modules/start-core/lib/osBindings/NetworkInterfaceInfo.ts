@@ -8,6 +8,10 @@ export type NetworkInterfaceInfo = {
   name: string | null
   secure: boolean | null
   ipInfo: IpInfo | null
+  /**
+   * Operator-set public IPv4. Outranks `ipInfo.wanIp`.
+   */
+  wanIpOverride: string | null
   type: GatewayType
   portMap: GatewayPortMapCapabilities
   /**

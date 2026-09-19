@@ -820,4 +820,5 @@ export default {
   928: 'Rosnąco',
   929: 'Malejąco',
   930: 'Serwisy z tego katalogu są utrzymywane przez społeczność Start9 i są w fazie testów beta. Należy spodziewać się błędów. Instalujesz je na własne ryzyko.',
+  933: 'Ustawione ręcznie',
 } satisfies i18n

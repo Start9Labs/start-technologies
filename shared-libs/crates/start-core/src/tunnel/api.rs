@@ -1181,12 +1181,8 @@ pub async fn show_config(
     } else {
         ctx.net_iface
             .peek(|i| {
-                i.iter().find_map(|(_, info)| {
-                    info.ip_info
-                        .as_ref()
-                        .and_then(|ip_info| ip_info.wan_ip)
-                        .map(IpAddr::from)
-                })
+                i.iter()
+                    .find_map(|(_, info)| info.wan_ip().map(IpAddr::from))
             })
             .or_not_found("a public IP address")?
     };

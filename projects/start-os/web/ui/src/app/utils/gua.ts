@@ -15,6 +15,11 @@ export function getGua(ipInfo: T.IpInfo): string | null {
   return null
 }
 
+/** The operator's override, else the detected address. */
+export function getWanIp(gateway: T.NetworkInterfaceInfo): string | null {
+  return gateway.wanIpOverride ?? gateway.ipInfo?.wanIp ?? null
+}
+
 /**
  * Whether the domain's DNS resolves correctly for every family the gateway
  * offers: the `A` record must match the WAN IPv4 (if any) and the `AAAA` must

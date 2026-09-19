@@ -32,7 +32,7 @@ use zbus::{Connection, proxy};
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::Database;
 use crate::db::model::public::{
-    CapabilityVerdict, GatewayPortMapCapabilities, IpInfo, NetworkInterfaceInfo,
+    CapabilityVerdict, GatewayPortMapCapabilities, GatewayType, IpInfo, NetworkInterfaceInfo,
     NetworkInterfaceType,
 };
 use crate::net::forward::{START9_BRIDGE_IFACE, nft_ensure_base};
@@ -99,10 +99,11 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
                                     })
                                     .join(", ")
                             ),
-                            info.ip_info
-                                .as_ref()
-                                .and_then(|ip_info| ip_info.wan_ip)
-                                .map_or_else(|| "N/A".to_owned(), |ip| ip.to_string())
+                            match (info.wan_ip(), info.wan_ip_override.is_some()) {
+                                (Some(ip), true) => format!("{ip} (manual)"),
+                                (Some(ip), false) => ip.to_string(),
+                                (None, _) => "N/A".to_owned(),
+                            }
                         ]);
                     }
 
@@ -143,6 +144,22 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.allow-gateway-infer-network-security")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "set-wan-ip",
+            from_fn_async(set_wan_ip)
+                .with_metadata("sync_db", Value::Bool(true))
+                .no_display()
+                .with_about("about.set-gateway-wan-ip")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "unset-wan-ip",
+            from_fn_async(unset_wan_ip)
+                .with_metadata("sync_db", Value::Bool(true))
+                .no_display()
+                .with_about("about.allow-gateway-detect-wan-ip")
                 .with_call_remote::<CliContext>(),
         )
         .subcommand(
@@ -621,6 +638,47 @@ async fn unset_secure(
     ctx.net_controller
         .net_iface
         .set_secure(&gateway, None)
+        .await
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+struct SetGatewayWanIpParams {
+    #[arg(help = "help.arg.gateway-id")]
+    gateway: GatewayId,
+    #[arg(help = "help.arg.wan-ip")]
+    #[ts(type = "string")]
+    ip: Ipv4Addr,
+}
+
+async fn set_wan_ip(
+    ctx: RpcContext,
+    SetGatewayWanIpParams { gateway, ip }: SetGatewayWanIpParams,
+) -> Result<(), Error> {
+    ctx.net_controller
+        .net_iface
+        .set_wan_ip_override(&gateway, Some(ip))
+        .await
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+struct UnsetGatewayWanIpParams {
+    #[arg(help = "help.arg.gateway-id")]
+    gateway: GatewayId,
+}
+
+async fn unset_wan_ip(
+    ctx: RpcContext,
+    UnsetGatewayWanIpParams { gateway }: UnsetGatewayWanIpParams,
+) -> Result<(), Error> {
+    ctx.net_controller
+        .net_iface
+        .set_wan_ip_override(&gateway, None)
         .await
 }
 
@@ -2417,41 +2475,14 @@ async fn poll_ip_info(
     };
 
     write_to.send_if_modified(|m: &mut OrdMap<GatewayId, NetworkInterfaceInfo>| {
-        let (name, secure, gateway_type, prev_wan_ip, port_map, dns_update) = m.get(iface).map_or(
-            (
-                None,
-                None,
-                Default::default(),
-                None,
-                Default::default(),
-                Default::default(),
-            ),
-            |i| {
-                (
-                    i.name.clone(),
-                    i.secure,
-                    i.gateway_type,
-                    i.ip_info.as_ref().and_then(|i| i.wan_ip),
-                    i.port_map,
-                    i.dns_update,
-                )
-            },
-        );
-        ip_info.wan_ip = prev_wan_ip;
+        // A poll rediscovers `ip_info` alone.
+        let mut entry = m.get(iface).cloned().unwrap_or_default();
+        ip_info.wan_ip = entry.ip_info.as_ref().and_then(|i| i.wan_ip);
         let ip_info = Arc::new(ip_info);
-        m.insert(
-            iface.clone(),
-            NetworkInterfaceInfo {
-                name,
-                secure,
-                ip_info: Some(ip_info.clone()),
-                gateway_type,
-                port_map,
-                dns_update,
-            },
-        )
-        .filter(|old| &old.ip_info == &Some(ip_info))
-        .is_none()
+        entry.ip_info = Some(ip_info.clone());
+        m.insert(iface.clone(), entry)
+            .filter(|old| &old.ip_info == &Some(ip_info))
+            .is_none()
     });
 
     // Now fetch the WAN IP in a second pass.  Even if this is slow or
@@ -3204,6 +3235,84 @@ impl NetworkInterfaceController {
 
         Ok(())
     }
+
+    /// `None` restores the detected address. Returns once the db holds the value.
+    pub async fn set_wan_ip_override(
+        &self,
+        interface: &GatewayId,
+        wan_ip: Option<Ipv4Addr>,
+    ) -> Result<(), Error> {
+        if let Some(ip) = wan_ip {
+            check_wan_ip_override(ip)?;
+        }
+        let mut watch = self
+            .db
+            .watch(
+                "/public/serverInfo/network/gateways"
+                    .parse::<JsonPointer>()
+                    .with_kind(ErrorKind::Database)?
+                    .join_end(interface.as_str())
+                    .join_end("wanIpOverride"),
+            )
+            .await
+            .typed::<Option<Ipv4Addr>>();
+        let mut err = None;
+        self.watcher.ip_info.send_if_modified(|ip_info| {
+            let info = match ip_info.get_mut(interface).or_not_found(interface) {
+                Ok(info) => info,
+                Err(e) => {
+                    err = Some(e);
+                    return false;
+                }
+            };
+            if wan_ip.is_some() {
+                if let Err(e) = check_wan_ip_override_target(info) {
+                    err = Some(e);
+                    return false;
+                }
+            }
+            std::mem::replace(&mut info.wan_ip_override, wan_ip) != wan_ip
+        });
+        if let Some(e) = err {
+            return Err(e);
+        }
+        watch.wait_for(|persisted| *persisted == wan_ip).await?;
+
+        Ok(())
+    }
+}
+
+fn check_wan_ip_override_target(info: &NetworkInterfaceInfo) -> Result<(), Error> {
+    if info.gateway_type == GatewayType::OutboundOnly {
+        return Err(Error::new(
+            eyre!("{}", t!("net.gateway.cannot-pin-wan-ip-outbound-only")),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    Ok(())
+}
+
+/// Accepts a globally routable unicast IPv4.
+fn check_wan_ip_override(ip: Ipv4Addr) -> Result<(), Error> {
+    let [a, b, c, _] = ip.octets();
+    let never_routed_to_a_host =
+        (a == 192 && b == 0 && c == 0) || (a == 198 && (b == 18 || b == 19)) || a >= 224;
+    if !never_routed_to_a_host
+        && crate::net::port_map::upnp::is_wan_candidate(ip)
+        && is_global_ip(IpAddr::V4(ip))
+    {
+        return Ok(());
+    }
+    Err(Error::new(
+        eyre!(
+            "{}",
+            t!(
+                "net.gateway.wan-ip-override-not-public",
+                ip = ip.to_string()
+            )
+        ),
+        ErrorKind::InvalidRequest,
+    ))
 }
 
 pub fn lookup_info_by_addr(
@@ -3313,6 +3422,60 @@ impl Accept for WildcardListener {
             )));
         }
         Poll::Pending
+    }
+}
+
+#[cfg(test)]
+mod wan_ip_override_tests {
+    use super::*;
+
+    #[test]
+    fn only_a_globally_routable_address_may_be_pinned() {
+        for ok in ["8.8.8.8", "1.1.1.1", "93.184.216.34"] {
+            assert!(
+                check_wan_ip_override(ok.parse().unwrap()).is_ok(),
+                "rejected {ok}"
+            );
+        }
+        for bad in [
+            "192.168.1.1",
+            "10.0.0.1",
+            "172.16.4.9",
+            "100.64.0.1",
+            "127.0.0.1",
+            "169.254.3.4",
+            "192.0.2.1",
+            "198.51.100.200",
+            "203.0.113.7",
+            "0.0.0.0",
+            "255.255.255.255",
+            "192.0.0.9",
+            "198.18.0.5",
+            "198.19.255.1",
+            "224.0.0.1",
+            "239.255.255.250",
+            "240.0.0.1",
+        ] {
+            assert!(
+                check_wan_ip_override(bad.parse().unwrap()).is_err(),
+                "accepted {bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_outbound_only_gateway_has_no_wan_ip_to_pin() {
+        let outbound_only = NetworkInterfaceInfo {
+            gateway_type: GatewayType::OutboundOnly,
+            ..Default::default()
+        };
+        assert!(check_wan_ip_override_target(&outbound_only).is_err());
+
+        let inbound = NetworkInterfaceInfo {
+            gateway_type: GatewayType::InboundOutbound,
+            ..Default::default()
+        };
+        assert!(check_wan_ip_override_target(&inbound).is_ok());
     }
 }
 

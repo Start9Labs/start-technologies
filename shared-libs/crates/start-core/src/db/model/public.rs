@@ -262,6 +262,9 @@ pub struct NetworkInterfaceInfo {
     pub name: Option<InternedString>,
     pub secure: Option<bool>,
     pub ip_info: Option<Arc<IpInfo>>,
+    /// Operator-set public IPv4. Outranks `ipInfo.wanIp`.
+    #[serde(default)]
+    pub wan_ip_override: Option<Ipv4Addr>,
     // Pre-release dev DBs persisted this as `null` for auto-discovered gateways;
     // coerce absent/null to the default so those nodes still load.
     #[serde(default, rename = "type")]
@@ -340,6 +343,15 @@ impl NetworkInterfaceInfo {
     pub fn secure(&self) -> bool {
         self.secure
             .unwrap_or_else(|| self.is_intrinsically_secure())
+    }
+
+    /// The override, else the detected address.
+    pub fn wan_ip(&self) -> Option<Ipv4Addr> {
+        self.wan_ip_override.or_else(|| self.detected_wan_ip())
+    }
+
+    pub fn detected_wan_ip(&self) -> Option<Ipv4Addr> {
+        self.ip_info.as_ref().and_then(|i| i.wan_ip)
     }
 
     /// A WireGuard tunnel interface (e.g. a StartTunnel or StartWRT gateway).
@@ -504,6 +516,41 @@ mod test {
 
         assert!(iface(Ethernet, Some(true)).secure());
         assert!(!iface(Bridge, Some(false)).secure());
+    }
+
+    fn wan_iface(detected: Option<&str>, override_: Option<&str>) -> NetworkInterfaceInfo {
+        NetworkInterfaceInfo {
+            ip_info: Some(std::sync::Arc::new(IpInfo {
+                wan_ip: detected.map(|ip| ip.parse().unwrap()),
+                ..Default::default()
+            })),
+            wan_ip_override: override_.map(|ip| ip.parse().unwrap()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn an_override_outranks_the_detected_wan_ip_and_clearing_it_restores_that() {
+        let detected: Ipv4Addr = "198.51.100.4".parse().unwrap();
+        let pinned: Ipv4Addr = "203.0.113.7".parse().unwrap();
+
+        let detected_only = wan_iface(Some("198.51.100.4"), None);
+        assert_eq!(detected_only.wan_ip(), Some(detected));
+
+        let corrected = wan_iface(Some("198.51.100.4"), Some("203.0.113.7"));
+        assert_eq!(corrected.wan_ip(), Some(pinned));
+        assert_eq!(corrected.detected_wan_ip(), Some(detected));
+
+        assert_eq!(wan_iface(None, Some("203.0.113.7")).wan_ip(), Some(pinned));
+        assert_eq!(wan_iface(None, None).wan_ip(), None);
+    }
+
+    #[test]
+    fn a_gateway_without_a_wan_ip_override_field_still_loads() {
+        let legacy: NetworkInterfaceInfo =
+            serde_json::from_value(serde_json::json!({ "name": null, "secure": null })).unwrap();
+
+        assert_eq!(legacy.wan_ip_override, None);
     }
 
     // `set_secure` refuses `Some(false)` on an intrinsically secure gateway, and

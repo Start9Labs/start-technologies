@@ -125,6 +125,7 @@ export const mockTunnelData: TunnelData = {
     eth0: {
       name: null,
       secure: null,
+      wanIpOverride: null,
       type: 'inbound-outbound',
       portMap: {
         pcp: { supported: null, at: null },

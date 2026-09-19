@@ -40,6 +40,33 @@ Service interface address tables list inbound/outbound gateways, where you can e
 
 To re-import a gateway's WireGuard config — for example, a StartTunnel config re-issued with new settings — open the gateway's `⋮` menu, choose "Update config", and paste or upload the new file. The config is replaced **in place**: the gateway keeps its identity, so its port forwards and private/public domains are preserved. (Re-adding via "Add" would instead create a separate gateway.)
 
+## WAN IP
+
+A gateway's WAN IP is the public IPv4 address your server is reached at through that gateway. [Public IP access](public-ip.md), [clearnet](clearnet.md) domains, and the port-forwarding rules StartOS shows you all use it.
+
+StartOS asks your router for it over UPnP. If UPnP is unavailable, or answers with a private or [CGNAT](cgnat.md) address, StartOS uses the address an outbound request appears to come from. That is the wrong address where inbound and outbound traffic take different paths:
+
+- **Multi-WAN routing**, where port forwards are on one uplink and outbound traffic leaves by another.
+- **An ISP that sends your outbound traffic from a different address** than the one inbound traffic arrives on.
+- **A cloud or colocation network** with a floating inbound address and a separate outbound gateway.
+- **A router with UPnP disabled**, or reporting a stale external address.
+
+Set the correct address from the command line:
+
+```bash
+start-cli net gateway set-wan-ip <GATEWAY> <IP>
+start-cli net gateway unset-wan-ip <GATEWAY>
+```
+
+`start-cli net gateway list` marks an address you set as `(manual)`.
+
+The address must be a public IPv4, and the gateway must not be outbound-only.
+
+Setting it updates every public address and port-forwarding rule for that gateway. `unset-wan-ip` returns to the detected address.
+
+> [!WARNING]
+> The address you set is published in the DNS records of any clearnet domain on this gateway and in the addresses your services advertise to peers.
+
 ## Secure Gateways
 
 Some service interfaces are served without SSL — plain HTTP, or another protocol carrying no encryption of its own. StartOS offers those addresses only on a network it treats as secure. Loopback and the container bridge are secure, because they never leave your server. Every other gateway — your router, WiFi, a WireGuard tunnel — is not, so a service interface bound without SSL is neither listed nor reachable through it.
