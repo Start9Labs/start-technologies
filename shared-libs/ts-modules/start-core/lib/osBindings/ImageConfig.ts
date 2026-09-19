@@ -4,6 +4,6 @@ import type { ImageSource } from './ImageSource'
 export type ImageConfig = {
   source: ImageSource
   arch: string[]
-  emulateMissingAs: string | null
+  emulateMissing: boolean
   nvidiaContainer: boolean
 }

@@ -91,26 +91,16 @@ impl Manifest {
             }
         }
         for (image_id, config) in &self.images {
-            let mut check_arch = |arch: &str| {
-                let mut arch = arch;
-                if let Err(e) = expected.check_file(
+            let mut check_arch = |requested: &str| {
+                let arch = config
+                    .resolve_arch(requested, image_id, archive)
+                    .unwrap_or(requested);
+                expected.check_file(
                     Path::new("images")
                         .join(arch)
                         .join(image_id)
                         .with_extension("squashfs"),
-                ) {
-                    if let Some(emulate_as) = &config.emulate_missing_as {
-                        expected.check_file(
-                            Path::new("images")
-                                .join(emulate_as)
-                                .join(image_id)
-                                .with_extension("squashfs"),
-                        )?;
-                        arch = &**emulate_as;
-                    } else {
-                        return Err(e);
-                    }
-                }
+                )?;
                 expected.check_file(
                     Path::new("images")
                         .join(arch)
@@ -123,7 +113,7 @@ impl Manifest {
                         .join(image_id)
                         .with_extension("env"),
                 )?;
-                Ok(())
+                Ok::<(), Error>(())
             };
             if let Some(arch) = arch {
                 check_arch(arch)?;
@@ -131,20 +121,14 @@ impl Manifest {
                 for arch in arches {
                     check_arch(arch)?;
                 }
-            } else if let Some(arch) = config.emulate_missing_as.as_deref() {
-                if !config.arch.contains(arch) {
-                    return Err(Error::new(
-                        eyre!("`emulateMissingAs` must match an included `arch`"),
-                        ErrorKind::ParseS9pk,
-                    ));
-                }
+            } else if config.emulate_missing && !config.arch.is_empty() {
                 for arch in &config.arch {
-                    check_arch(&arch)?;
+                    check_arch(arch)?;
                 }
             } else {
                 return Err(Error::new(
                     eyre!(
-                        "`emulateMissingAs` required for all images if no `arch` specified in `hardwareRequirements`"
+                        "`emulateMissing` required for all images if no `arch` specified in `hardwareRequirements`"
                     ),
                     ErrorKind::ParseS9pk,
                 ));
@@ -462,4 +446,103 @@ impl Description {
         }
         Ok(())
     }
+}
+
+#[test]
+fn legacy_emulation_uses_the_image_kept_in_a_cross_arch_backup() {
+    let manifest: Manifest = serde_json::from_value(serde_json::json!({
+        "id": "test",
+        "version": "1.0.0:0",
+        "canMigrateTo": "*",
+        "canMigrateFrom": "*",
+        "title": "Test",
+        "description": { "short": "Test", "long": "Test" },
+        "releaseNotes": "Test",
+        "gitHash": null,
+        "license": "MIT",
+        "packageRepo": "https://example.com",
+        "upstreamRepo": "https://example.com",
+        "marketingUrl": null,
+        "donationUrl": null,
+        "osVersion": "0.4.0",
+        "sdkVersion": "2.0.9",
+        "hardwareAcceleration": false,
+        "userspaceFilesystems": false,
+        "virtualNetworking": false,
+        "hardwareVirtualization": false,
+        "plugins": [],
+        "satisfies": [],
+        "images": {
+            "main": {
+                "source": "packed",
+                "arch": ["aarch64"],
+                "emulateMissingAs": "x86_64",
+                "nvidiaContainer": false
+            }
+        },
+        "volumes": [],
+        "dependencies": {},
+        "hardwareRequirements": {
+            "device": [],
+            "ram": null,
+            "arch": ["aarch64"]
+        }
+    }))
+    .unwrap();
+    let image = manifest.images.values().next().unwrap();
+    assert!(image.emulate_missing);
+    let serialized = serde_json::to_value(image).unwrap();
+    assert_eq!(serialized["emulateMissing"], true);
+    assert_eq!(serialized["emulateMissingAs"], "x86_64");
+
+    let mut archive = DirectoryContents::new();
+    for path in [
+        "manifest.json",
+        "icon.png",
+        "LICENSE.md",
+        "instructions.md",
+        "javascript.squashfs",
+        "assets.squashfs",
+        "images/aarch64/main.squashfs",
+        "images/aarch64/main.json",
+        "images/aarch64/main.env",
+    ] {
+        archive
+            .insert_path(path, crate::s9pk::merkle_archive::Entry::file(()))
+            .unwrap();
+    }
+
+    manifest.validate_for(Some("x86_64"), &archive).unwrap();
+}
+
+#[test]
+fn current_emulation_flag_uses_only_the_boolean_field() {
+    let image: ImageConfig = serde_json::from_value(serde_json::json!({
+        "source": "packed",
+        "arch": ["x86_64"],
+        "emulateMissing": true,
+        "nvidiaContainer": false
+    }))
+    .unwrap();
+
+    assert!(image.emulate_missing);
+    let serialized = serde_json::to_value(image).unwrap();
+    assert_eq!(serialized["emulateMissing"], true);
+    assert!(serialized.get("emulateMissingAs").is_none());
+}
+
+#[test]
+fn legacy_null_emulation_fallback_migrates_to_false() {
+    let image: ImageConfig = serde_json::from_value(serde_json::json!({
+        "source": "packed",
+        "arch": ["x86_64"],
+        "emulateMissingAs": null,
+        "nvidiaContainer": false
+    }))
+    .unwrap();
+
+    assert!(!image.emulate_missing);
+    let serialized = serde_json::to_value(image).unwrap();
+    assert_eq!(serialized["emulateMissing"], false);
+    assert!(serialized.get("emulateMissingAs").is_none());
 }

@@ -282,6 +282,27 @@ s9pk.pack.git-hash-omitted:
   fr_FR: "Aucun commit git trouvé dans %{path} — la construction n'inclut pas de hash de commit dans le manifeste. Faites un commit de votre travail (ou vérifiez que git est configuré) pour l'inclure."
   pl_PL: "Nie znaleziono commita git w %{path} — kompilacja nie zawiera hasha commita w manifeście. Zatwierdź swoją pracę (lub sprawdź, czy git jest skonfigurowany), aby go dołączyć."
 
+s9pk.pack.image-unavailable-emulating:
+  en_US: "Image %{image} is not available for %{requested}, emulating as %{emulated}"
+  de_DE: "Image %{image} ist für %{requested} nicht verfügbar; Emulation als %{emulated}"
+  es_ES: "La imagen %{image} no está disponible para %{requested}; se emula como %{emulated}"
+  fr_FR: "L'image %{image} n'est pas disponible pour %{requested} ; émulation en tant que %{emulated}"
+  pl_PL: "Obraz %{image} nie jest dostępny dla %{requested}; emulowanie jako %{emulated}"
+
+s9pk.pack.image-no-architecture-to-emulate:
+  en_US: "Image %{image} has no architecture available to emulate"
+  de_DE: "Für Image %{image} ist keine Architektur zum Emulieren verfügbar"
+  es_ES: "La imagen %{image} no tiene ninguna arquitectura disponible para emular"
+  fr_FR: "Aucune architecture n'est disponible pour émuler l'image %{image}"
+  pl_PL: "Obraz %{image} nie ma architektury dostępnej do emulacji"
+
+s9pk.pack.image-unavailable:
+  en_US: "Image %{image} is not available for %{requested}"
+  de_DE: "Image %{image} ist für %{requested} nicht verfügbar"
+  es_ES: "La imagen %{image} no está disponible para %{requested}"
+  fr_FR: "L'image %{image} n'est pas disponible pour %{requested}"
+  pl_PL: "Obraz %{image} nie jest dostępny dla %{requested}"
+
 # setup.rs
 setup.opening-data-drive:
   en_US: "Opening data drive"
@@ -3567,12 +3588,12 @@ help.arg.ed25519:
   fr_FR: "Utiliser Ed25519 au lieu de NIST P-256"
   pl_PL: "Użyj Ed25519 zamiast NIST P-256"
 
-help.arg.emulate-missing-arch:
-  en_US: "Emulate missing architecture using this one"
-  de_DE: "Fehlende Architektur mit dieser emulieren"
-  es_ES: "Emular arquitectura faltante usando esta"
-  fr_FR: "Émuler l'architecture manquante avec celle-ci"
-  pl_PL: "Emuluj brakującą architekturę używając tej"
+help.arg.emulate-missing:
+  en_US: "Emulate the image when the requested architecture is unavailable"
+  de_DE: "Image emulieren, wenn die angeforderte Architektur nicht verfügbar ist"
+  es_ES: "Emular la imagen cuando la arquitectura solicitada no esté disponible"
+  fr_FR: "Émuler l’image lorsque l’architecture demandée n’est pas disponible"
+  pl_PL: "Emuluj obraz, gdy żądana architektura jest niedostępna"
 
 help.arg.env-file-path:
   en_US: "Path to environment file"
