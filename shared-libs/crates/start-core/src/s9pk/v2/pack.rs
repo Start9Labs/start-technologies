@@ -313,6 +313,18 @@ pub struct ImageConfig {
     pub nvidia_container: bool,
 }
 impl ImageConfig {
+    fn legacy_emulation_arch(&self) -> Option<&InternedString> {
+        self.legacy_emulate_missing_as
+            .as_ref()
+            .filter(|arch| self.arch.contains(*arch))
+    }
+
+    fn emulation_arch(&self, is_available: impl Fn(&str) -> bool) -> Option<&InternedString> {
+        self.legacy_emulation_arch()
+            .filter(|arch| is_available(arch))
+            .or_else(|| self.arch.iter().find(|arch| is_available(arch)))
+    }
+
     pub(crate) fn resolve_arch<'a, T>(
         &'a self,
         requested: &'a str,
@@ -333,10 +345,7 @@ impl ImageConfig {
         if is_available(requested) {
             Some(requested)
         } else if self.emulate_missing {
-            self.arch
-                .iter()
-                .find(|arch| is_available(arch))
-                .map(|arch| &**arch)
+            self.emulation_arch(is_available).map(|arch| &**arch)
         } else {
             None
         }
@@ -826,14 +835,15 @@ pub async fn pack(ctx: CliContext, params: PackParams) -> Result<(), Error> {
             ));
         }
         manifest.images.iter_mut().for_each(|(id, c)| {
-            let filtered = c
+            let has_missing_native_arch = arches.iter().any(|arch| !c.arch.contains(arch));
+            let mut filtered = c
                 .arch
                 .intersection(&arches)
                 .cloned()
                 .collect::<BTreeSet<_>>();
             if filtered.is_empty() {
                 if c.emulate_missing {
-                    if let Some(arch) = c.arch.first().cloned() {
+                    if let Some(arch) = c.emulation_arch(|_| true).cloned() {
                         tracing::warn!(
                             "ImageId {} is not available for {}, emulating as {}",
                             id,
@@ -852,6 +862,9 @@ pub async fn pack(ctx: CliContext, params: PackParams) -> Result<(), Error> {
                     );
                 }
             } else {
+                if has_missing_native_arch {
+                    filtered.extend(c.legacy_emulation_arch().cloned());
+                }
                 c.arch = filtered;
             }
         });
@@ -1064,5 +1077,25 @@ mod test {
                 *legacy_fallback,
             );
         }
+    }
+
+    #[test]
+    fn legacy_cli_fallback_remains_the_preferred_emulation_architecture() {
+        let config = CliImageConfig::try_parse_from([
+            "image",
+            "--arch",
+            "aarch64",
+            "--arch",
+            "x86_64",
+            "--emulate-missing-as",
+            "x86_64",
+        ])
+        .unwrap();
+        let config = ImageConfig::try_from(config).unwrap();
+
+        assert_eq!(
+            config.emulation_arch(|_| true).map(|arch| &**arch),
+            Some("x86_64"),
+        );
     }
 }
