@@ -24,6 +24,7 @@ chmod +x "$TMP/bin/"*
 export PATH="$TMP/bin:$PATH"
 export MOUNT_LOG="$TMP/mount.log"
 export BTRFS_LOG="$TMP/btrfs.log"
+export SFDISK_LOG="$TMP/sfdisk.log"
 
 fail() {
     printf 'FAIL: %s\n' "$*" >&2
@@ -68,12 +69,15 @@ get_variables() {
     ROOT_PART_END=100
     TARGET_END=200
     ROOT_PART_START=1
-    DATA_PART_START=
+    DATA_PART_START=201
 }
 check_variables() { return 0; }
-sfdisk() { return 0; }
+sfdisk() {
+    printf '%s\n' "$*" >> "$SFDISK_LOG"
+}
 partx() { return 0; }
 grow_root_filesystem() {
+    printf '%s\n' grow >> "$SFDISK_LOG"
     FAIL_REASON='Root filesystem resize failed'
     return 1
 }
@@ -87,5 +91,19 @@ if main >/dev/null; then
     fail 'main accepted a root filesystem resize failure'
 fi
 [ "$FAIL_REASON" = 'Root filesystem resize failed' ] || fail "$FAIL_REASON"
+[ "$(cat "$SFDISK_LOG")" = $'--no-reread -N 1 /dev/root\ngrow' ] ||
+    fail 'data partition was appended before the filesystem resize succeeded'
+
+: > "$SFDISK_LOG"
+grow_root_filesystem() {
+    printf '%s\n' grow >> "$SFDISK_LOG"
+}
+FAIL_REASON=
+if main >/dev/null; then
+    fail 'main continued after machine-id failure'
+fi
+[ "$FAIL_REASON" = 'systemd-machine-id-setup failed' ] || fail "$FAIL_REASON"
+[ "$(cat "$SFDISK_LOG")" = $'--no-reread -N 1 /dev/root\ngrow\n--no-reread --append /dev/root' ] ||
+    fail 'data partition was not appended after the filesystem resize succeeded'
 
 printf 'init-resize tests passed\n'

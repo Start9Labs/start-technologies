@@ -92,13 +92,9 @@ main () {
   # then partx -u to update the mounted partitions' sizes live via BLKPG, so
   # btrfs can grow without a reboot.
   if [ -n "$DATA_PART_START" ]; then
-    log "resizing root $ROOT_PART_NUM to ${TARGET_END}s + appending data partition"
+    log "resizing root $ROOT_PART_NUM to ${TARGET_END}s"
     if ! echo ", $((TARGET_END - ROOT_PART_START + 1))" | sfdisk --no-reread -N "$ROOT_PART_NUM" "$ROOT_DEV"; then
       FAIL_REASON="Root partition resize failed"
-      return 1
-    fi
-    if ! echo "${DATA_PART_START}, +" | sfdisk --no-reread --append "$ROOT_DEV"; then
-      FAIL_REASON="Data partition creation failed"
       return 1
     fi
   else
@@ -113,6 +109,14 @@ main () {
 
   if ! grow_root_filesystem; then
     return 1
+  fi
+
+  if [ -n "$DATA_PART_START" ]; then
+    log "appending data partition"
+    if ! echo "${DATA_PART_START}, +" | sfdisk --no-reread --append "$ROOT_DEV"; then
+      FAIL_REASON="Data partition creation failed"
+      return 1
+    fi
   fi
 
   log "generating machine-id"
