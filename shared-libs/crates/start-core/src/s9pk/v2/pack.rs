@@ -305,10 +305,64 @@ pub struct ImageConfig {
     pub source: ImageSource,
     #[ts(type = "string[]")]
     pub arch: BTreeSet<InternedString>,
-    #[ts(type = "string | null")]
-    pub emulate_missing_as: Option<InternedString>,
+    #[serde(
+        default,
+        alias = "emulateMissingAs",
+        deserialize_with = "deserialize_emulate_missing"
+    )]
+    pub emulate_missing: bool,
     #[serde(default)]
     pub nvidia_container: bool,
+}
+impl ImageConfig {
+    pub(crate) fn resolve_arch<'a, T>(
+        &'a self,
+        requested: &'a str,
+        image_id: &ImageId,
+        archive: &DirectoryContents<T>,
+    ) -> Option<&'a str> {
+        let is_available = |arch: &str| {
+            archive
+                .get_path(
+                    Path::new("images")
+                        .join(arch)
+                        .join(image_id)
+                        .with_extension("squashfs"),
+                )
+                .and_then(|entry| entry.as_file())
+                .is_some()
+        };
+        if is_available(requested) {
+            Some(requested)
+        } else if self.emulate_missing {
+            self.arch
+                .iter()
+                .find(|arch| is_available(arch))
+                .map(|arch| &**arch)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum EmulateMissingValue {
+    Boolean(bool),
+    LegacyArchitecture(String),
+}
+
+fn deserialize_emulate_missing<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(
+        match Option::<EmulateMissingValue>::deserialize(deserializer)? {
+            Some(EmulateMissingValue::Boolean(value)) => value,
+            Some(EmulateMissingValue::LegacyArchitecture(value)) => !value.is_empty(),
+            None => false,
+        },
+    )
 }
 
 #[derive(Parser)]
@@ -324,7 +378,9 @@ struct CliImageConfig {
     docker_tag: Option<String>,
     #[arg(long, help = "help.arg.architecture-mask")]
     arch: Vec<InternedString>,
-    #[arg(long, help = "help.arg.emulate-missing-arch")]
+    #[arg(long, help = "help.arg.emulate-missing")]
+    emulate_missing: bool,
+    #[arg(long, hide = true)]
     emulate_missing_as: Option<InternedString>,
     #[arg(long, help = "help.arg.nvidia-container")]
     nvidia_container: bool,
@@ -332,7 +388,15 @@ struct CliImageConfig {
 impl TryFrom<CliImageConfig> for ImageConfig {
     type Error = clap::Error;
     fn try_from(value: CliImageConfig) -> Result<Self, Self::Error> {
-        let res = Self {
+        if let Some(arch) = &value.emulate_missing_as {
+            if !value.arch.contains(arch) {
+                return Err(clap::Error::raw(
+                    clap::error::ErrorKind::InvalidValue,
+                    "`emulate-missing-as` must match one of the provided `arch`es",
+                ));
+            }
+        }
+        Ok(Self {
             source: if value.docker_build {
                 ImageSource::DockerBuild {
                     dockerfile: value.dockerfile,
@@ -345,23 +409,9 @@ impl TryFrom<CliImageConfig> for ImageConfig {
                 ImageSource::Packed
             },
             arch: value.arch.into_iter().collect(),
-            emulate_missing_as: value.emulate_missing_as,
+            emulate_missing: value.emulate_missing || value.emulate_missing_as.is_some(),
             nvidia_container: value.nvidia_container,
-        };
-        res.emulate_missing_as
-            .as_ref()
-            .map(|a| {
-                if !res.arch.contains(a) {
-                    Err(clap::Error::raw(
-                        clap::error::ErrorKind::InvalidValue,
-                        "`emulate-missing-as` must match one of the provided `arch`es",
-                    ))
-                } else {
-                    Ok(())
-                }
-            })
-            .transpose()?;
-        Ok(res)
+        })
     }
 }
 impl clap::Args for ImageConfig {
@@ -768,14 +818,18 @@ pub async fn pack(ctx: CliContext, params: PackParams) -> Result<(), Error> {
                 .cloned()
                 .collect::<BTreeSet<_>>();
             if filtered.is_empty() {
-                if let Some(arch) = &c.emulate_missing_as {
-                    tracing::warn!(
-                        "ImageId {} is not available for {}, emulating as {}",
-                        id,
-                        arches.iter().join("/"),
-                        arch
-                    );
-                    c.arch = [arch.clone()].into_iter().collect();
+                if c.emulate_missing {
+                    if let Some(arch) = c.arch.first().cloned() {
+                        tracing::warn!(
+                            "ImageId {} is not available for {}, emulating as {}",
+                            id,
+                            arches.iter().join("/"),
+                            arch
+                        );
+                        c.arch = [arch].into_iter().collect();
+                    } else {
+                        tracing::error!("ImageId {} has no architecture available to emulate", id,);
+                    }
                 } else {
                     tracing::error!(
                         "ImageId {} is not available for {}",
@@ -965,4 +1019,28 @@ pub async fn list_ingredients(_: CliContext, params: PackParams) -> Result<Vec<P
     }
 
     Ok(ingredients)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn current_and_legacy_cli_flags_enable_emulation() {
+        let cases: &[&[&str]] = &[
+            &["image", "--arch", "x86_64", "--emulate-missing"],
+            &[
+                "image",
+                "--arch",
+                "x86_64",
+                "--emulate-missing-as",
+                "x86_64",
+            ],
+        ];
+
+        for args in cases {
+            let config = CliImageConfig::try_parse_from(*args).unwrap();
+            assert!(ImageConfig::try_from(config).unwrap().emulate_missing);
+        }
+    }
 }

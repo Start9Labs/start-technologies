@@ -9,6 +9,14 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
+## [2.2.0]
+
+### Added
+
+- **`s9pk edit add-image --emulate-missing` lets StartOS run an available image
+  under CPU emulation** when the server uses another architecture. The previous
+  `--emulate-missing-as <ARCH>` spelling remains accepted for existing scripts.
+
 ## [2.1.0]
 
 ### Added
