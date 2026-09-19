@@ -216,6 +216,10 @@ for the detail behind its highlights.
   away.** The notification naming what went wrong was held back until StartOS had
   finished cleaning up after the attempt, which can take several minutes. It now
   arrives as soon as the operation fails, while that cleanup is still running.
+
+- **Sideloading reports long service installation errors in its progress output.**
+  Very long messages are shortened safely to fit the progress stream.
+
 - **Restoring from a backup, or transferring to a new drive, keeps your server's
   name.** Both flows renamed the server to `start9`, so the restored server
   answered at `start9.local` rather than the address it had before — and two
