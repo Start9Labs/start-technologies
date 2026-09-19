@@ -298,19 +298,17 @@ impl PackParams {
     }
 }
 
-#[derive(Debug, Default, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Default, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct ImageConfig {
     pub source: ImageSource,
     #[ts(type = "string[]")]
     pub arch: BTreeSet<InternedString>,
-    #[serde(
-        default,
-        alias = "emulateMissingAs",
-        deserialize_with = "deserialize_emulate_missing"
-    )]
     pub emulate_missing: bool,
+    #[serde(rename = "emulateMissingAs", skip_serializing_if = "Option::is_none")]
+    #[ts(skip)]
+    legacy_emulate_missing_as: Option<InternedString>,
     #[serde(default)]
     pub nvidia_container: bool,
 }
@@ -346,23 +344,37 @@ impl ImageConfig {
 }
 
 #[derive(Deserialize)]
-#[serde(untagged)]
-enum EmulateMissingValue {
-    Boolean(bool),
-    LegacyArchitecture(String),
+#[serde(rename_all = "camelCase")]
+struct ImageConfigInput {
+    source: ImageSource,
+    arch: BTreeSet<InternedString>,
+    #[serde(default)]
+    emulate_missing: Option<bool>,
+    #[serde(default)]
+    emulate_missing_as: Option<InternedString>,
+    #[serde(default)]
+    nvidia_container: bool,
 }
 
-fn deserialize_emulate_missing<'de, D>(deserializer: D) -> Result<bool, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Ok(
-        match Option::<EmulateMissingValue>::deserialize(deserializer)? {
-            Some(EmulateMissingValue::Boolean(value)) => value,
-            Some(EmulateMissingValue::LegacyArchitecture(value)) => !value.is_empty(),
-            None => false,
-        },
-    )
+impl<'de> Deserialize<'de> for ImageConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let input = ImageConfigInput::deserialize(deserializer)?;
+        let legacy_emulate_missing_as = input
+            .emulate_missing_as
+            .filter(|arch| !arch.is_empty() && input.emulate_missing != Some(false));
+        Ok(Self {
+            source: input.source,
+            arch: input.arch,
+            emulate_missing: input
+                .emulate_missing
+                .unwrap_or(legacy_emulate_missing_as.is_some()),
+            legacy_emulate_missing_as,
+            nvidia_container: input.nvidia_container,
+        })
+    }
 }
 
 #[derive(Parser)]
@@ -396,6 +408,7 @@ impl TryFrom<CliImageConfig> for ImageConfig {
                 ));
             }
         }
+        let legacy_emulate_missing_as = value.emulate_missing_as;
         Ok(Self {
             source: if value.docker_build {
                 ImageSource::DockerBuild {
@@ -409,7 +422,8 @@ impl TryFrom<CliImageConfig> for ImageConfig {
                 ImageSource::Packed
             },
             arch: value.arch.into_iter().collect(),
-            emulate_missing: value.emulate_missing || value.emulate_missing_as.is_some(),
+            emulate_missing: value.emulate_missing || legacy_emulate_missing_as.is_some(),
+            legacy_emulate_missing_as,
             nvidia_container: value.nvidia_container,
         })
     }
@@ -1027,20 +1041,28 @@ mod test {
 
     #[test]
     fn current_and_legacy_cli_flags_enable_emulation() {
-        let cases: &[&[&str]] = &[
-            &["image", "--arch", "x86_64", "--emulate-missing"],
-            &[
-                "image",
-                "--arch",
-                "x86_64",
-                "--emulate-missing-as",
-                "x86_64",
-            ],
+        let cases: &[(&[&str], Option<&str>)] = &[
+            (&["image", "--arch", "x86_64", "--emulate-missing"], None),
+            (
+                &[
+                    "image",
+                    "--arch",
+                    "x86_64",
+                    "--emulate-missing-as",
+                    "x86_64",
+                ],
+                Some("x86_64"),
+            ),
         ];
 
-        for args in cases {
+        for (args, legacy_fallback) in cases {
             let config = CliImageConfig::try_parse_from(*args).unwrap();
-            assert!(ImageConfig::try_from(config).unwrap().emulate_missing);
+            let config = ImageConfig::try_from(config).unwrap();
+            assert!(config.emulate_missing);
+            assert_eq!(
+                serde_json::to_value(config).unwrap()["emulateMissingAs"].as_str(),
+                *legacy_fallback,
+            );
         }
     }
 }

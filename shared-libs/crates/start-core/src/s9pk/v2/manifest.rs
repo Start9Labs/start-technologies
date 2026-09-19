@@ -493,7 +493,7 @@ fn legacy_emulation_uses_the_image_kept_in_a_cross_arch_backup() {
     assert!(image.emulate_missing);
     let serialized = serde_json::to_value(image).unwrap();
     assert_eq!(serialized["emulateMissing"], true);
-    assert!(serialized.get("emulateMissingAs").is_none());
+    assert_eq!(serialized["emulateMissingAs"], "x86_64");
 
     let mut archive = DirectoryContents::new();
     for path in [
@@ -516,6 +516,22 @@ fn legacy_emulation_uses_the_image_kept_in_a_cross_arch_backup() {
 }
 
 #[test]
+fn current_emulation_flag_uses_only_the_boolean_field() {
+    let image: ImageConfig = serde_json::from_value(serde_json::json!({
+        "source": "packed",
+        "arch": ["x86_64"],
+        "emulateMissing": true,
+        "nvidiaContainer": false
+    }))
+    .unwrap();
+
+    assert!(image.emulate_missing);
+    let serialized = serde_json::to_value(image).unwrap();
+    assert_eq!(serialized["emulateMissing"], true);
+    assert!(serialized.get("emulateMissingAs").is_none());
+}
+
+#[test]
 fn legacy_null_emulation_fallback_migrates_to_false() {
     let image: ImageConfig = serde_json::from_value(serde_json::json!({
         "source": "packed",
@@ -526,4 +542,7 @@ fn legacy_null_emulation_fallback_migrates_to_false() {
     .unwrap();
 
     assert!(!image.emulate_missing);
+    let serialized = serde_json::to_value(image).unwrap();
+    assert_eq!(serialized["emulateMissing"], false);
+    assert!(serialized.get("emulateMissingAs").is_none());
 }
