@@ -139,6 +139,24 @@ for the detail behind its highlights.
 
 ### Fixed
 
+- **The Raspberry Pi 4 image includes the Broadcom firmware needed for its
+  built-in WiFi interface.**
+
+- **Raspberry Pi images use all space allocated to the StartOS filesystem.**
+  First boot expands the filesystem to fill its partition before setup begins.
+
+- **Fallback service-container cleanup finishes after an unresponsive
+  runtime.** StartOS bounds the fallback shutdown waits so it can release the
+  container's network routes and continue teardown.
+
+- **Services keep resolving domain names when the network provides no separate
+  DNS server.** StartOS uses its built-in Cloudflare fallback instead of leaving
+  service containers without a working resolver.
+
+- **A backup made on one CPU architecture restores on another.** StartOS runs
+  backed-up service images under emulation. Reinstalling or updating a service
+  lets StartOS select its marketplace package for the server architecture.
+
 - **A service migrated from 0.3.5.1 keeps its data when an install or update
   fails.** A failed update rolls back to the data it started with, which
   previously took a reboot after the upgrade, and a failed install leaves
@@ -221,6 +239,11 @@ for the detail behind its highlights.
   away.** The notification naming what went wrong was held back until StartOS had
   finished cleaning up after the attempt, which can take several minutes. It now
   arrives as soon as the operation fails, while that cleanup is still running.
+
+- **`start-cli package install --sideload` reports long service installation
+  errors in its progress output.** Very long messages are shortened safely to
+  fit the progress stream.
+
 - **Restoring from a backup, or transferring to a new drive, keeps your server's
   name.** Both flows renamed the server to `start9`, so the restored server
   answered at `start9.local` rather than the address it had before — and two
@@ -427,7 +450,9 @@ for the detail behind its highlights.
   Outbound Traffic** while sending selected services through another gateway
   with **Set Outbound Gateway**. A service given its own gateway while a
   system-wide gateway was pinned has been following the system-wide one, and
-  switches to its own when you update.
+  switches to its own when you update. Changing or clearing the service's
+  selection also drops its established outbound connections, so new connections
+  use the newly selected gateway.
 
 - **A service reached over IPv6 through a tunnel now answers.** StartOS sends a
   reply back out the interface its connection arrived on by restoring a
@@ -527,6 +552,11 @@ for the detail behind its highlights.
   while IPv4 kept working.
 
 ### Security
+
+- **A selected outbound gateway acts as a kill switch if it disconnects.**
+  StartOS rejects the system-wide or per-service traffic assigned to that
+  gateway until it reconnects, protecting the server's ISP address from
+  fallback traffic.
 
 - **Service mount paths are validated and confined to their intended
   directories.**

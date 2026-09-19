@@ -14,4 +14,5 @@ add chain ip6 startos forward { type filter hook forward priority filter; policy
 add chain ip6 startos mangle_prerouting { type filter hook prerouting priority mangle; policy accept; }
 # 'route' (not filter) so restore-mark reroutes locally-generated replies (iptables mangle-OUTPUT parity)
 add chain ip6 startos mangle_output { type route hook output priority mangle; policy accept; }
+add chain ip6 startos mangle_local_outbound
 add chain ip6 startos mangle_forward { type filter hook forward priority mangle; policy accept; }

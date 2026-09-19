@@ -23,7 +23,7 @@ export const sdk = StartSdk.of()
             dockerTag: 'start9/hello-world',
           },
           arch: ['aarch64', 'x86_64'],
-          emulateMissingAs: 'aarch64',
+          emulateMissing: true,
         },
       },
       volumes: [],

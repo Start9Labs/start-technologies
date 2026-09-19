@@ -104,3 +104,4 @@ Until both steps run, a changed `#[ts(export)]` type is out of sync with everyth
 - [i18n-patterns.md](i18n-patterns.md) — Internationalization conventions
 - [core-rust-patterns.md](core-rust-patterns.md) — Common Rust utilities
 - [s9pk-structure.md](s9pk-structure.md) — S9PK package format
+- [policy-routing.md](policy-routing.md) — the `ip rule` ladder: its invariants, order, and history

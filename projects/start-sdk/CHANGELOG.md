@@ -7,6 +7,13 @@
 - **Minimum StartOS version is now `0.4.0.2`**, which is what a package built
   with this SDK writes as its manifest `osVersion`
 
+- **Breaking — image architecture fallback is now `emulateMissing: boolean`.**
+  Remove `emulateMissingAs`; StartOS selects the image available in the s9pk,
+  so a cross-architecture restore runs the backed-up image under emulation. The
+  new field defaults to `true`; set it to
+  `false` when an image cannot run under emulation. Existing s9pks retain their
+  fallback behavior when read
+
 - **Breaking — `z.object` strips unknown keys.** Every file-model shape must use
   `z.looseObject`, at every nesting level, or the next `merge()` discards
   whatever the user's config file holds that the shape doesn't declare. Replace

@@ -12,6 +12,20 @@ use crate::prelude::*;
 
 const PING_INTERVAL: Duration = Duration::from_secs(30);
 const PING_TIMEOUT: Duration = Duration::from_secs(300);
+const MAX_CLOSE_REASON_BYTES: usize = 125 - std::mem::size_of::<u16>();
+
+fn truncate_close_reason(reason: impl Into<Utf8Bytes>) -> Utf8Bytes {
+    let reason = reason.into();
+    if reason.len() <= MAX_CLOSE_REASON_BYTES {
+        return reason;
+    }
+
+    let mut end = MAX_CLOSE_REASON_BYTES;
+    while !reason.is_char_boundary(end) {
+        end -= 1;
+    }
+    reason[..end].to_owned().into()
+}
 
 /// A wrapper around axum's WebSocket that automatically sends ping frames
 /// to keep the connection alive during HTTP/2.
@@ -121,7 +135,7 @@ impl WebSocket {
         self.inner
             .send(Message::Close(Some(CloseFrame {
                 code: 1000,
-                reason: msg.into(),
+                reason: truncate_close_reason(msg),
             })))
             .await
             .with_kind(ErrorKind::Network)?;
@@ -146,7 +160,7 @@ impl WebSocket {
                 .inner
                 .send(Message::Close(Some(CloseFrame {
                     code: 1000,
-                    reason: msg.into(),
+                    reason: truncate_close_reason(msg),
                 })))
                 .await
                 .with_kind(ErrorKind::Network)?,
@@ -154,7 +168,7 @@ impl WebSocket {
                 .inner
                 .send(Message::Close(Some(CloseFrame {
                     code: 1011,
-                    reason: e.to_string().into(),
+                    reason: truncate_close_reason(e.to_string()),
                 })))
                 .await
                 .with_kind(ErrorKind::Network)?,
@@ -227,5 +241,32 @@ impl Stream for SyncBody {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
         self.0.lock().unwrap().poll_next_unpin(cx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn close_reason_at_limit_is_unchanged() {
+        let reason = "x".repeat(MAX_CLOSE_REASON_BYTES);
+
+        assert_eq!(truncate_close_reason(&reason).as_str(), reason);
+    }
+
+    #[test]
+    fn close_reason_is_limited_to_control_frame_capacity() {
+        let reason = "x".repeat(MAX_CLOSE_REASON_BYTES + 1);
+
+        assert_eq!(truncate_close_reason(reason).len(), MAX_CLOSE_REASON_BYTES);
+    }
+
+    #[test]
+    fn close_reason_ends_at_a_utf8_boundary() {
+        let prefix = "x".repeat(MAX_CLOSE_REASON_BYTES - 1);
+        let reason = format!("{prefix}é");
+
+        assert_eq!(truncate_close_reason(reason).as_str(), prefix);
     }
 }

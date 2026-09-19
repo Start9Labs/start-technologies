@@ -8,6 +8,8 @@ Sideloading lets you install a service from a `.s9pk` file without using any reg
 
 1. Click the drop area to select a `.s9pk` file from your file system, or simply drag and drop the file into the drop area.
 
+When you sideload from the command line with `start-cli package install --sideload`, installation errors appear in the command's progress output. Very long messages are shortened safely to fit the progress stream.
+
 ## Obtaining `.s9pk` Files
 
 A `.s9pk` file can be obtained in several ways:

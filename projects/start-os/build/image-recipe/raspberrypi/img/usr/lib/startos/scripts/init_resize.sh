@@ -64,6 +64,18 @@ check_variables () {
   fi
 }
 
+grow_root_filesystem () {
+  log "remounting root rw and growing btrfs"
+  if ! mount / -o remount,rw; then
+    FAIL_REASON="Root remount failed"
+    return 1
+  fi
+  if ! btrfs filesystem resize max /media/startos/config; then
+    FAIL_REASON="Root filesystem resize failed"
+    return 1
+  fi
+}
+
 main () {
   log "reading partition layout"
   get_variables
@@ -80,13 +92,9 @@ main () {
   # then partx -u to update the mounted partitions' sizes live via BLKPG, so
   # btrfs can grow without a reboot.
   if [ -n "$DATA_PART_START" ]; then
-    log "resizing root $ROOT_PART_NUM to ${TARGET_END}s + appending data partition"
+    log "resizing root $ROOT_PART_NUM to ${TARGET_END}s"
     if ! echo ", $((TARGET_END - ROOT_PART_START + 1))" | sfdisk --no-reread -N "$ROOT_PART_NUM" "$ROOT_DEV"; then
       FAIL_REASON="Root partition resize failed"
-      return 1
-    fi
-    if ! echo "${DATA_PART_START}, +" | sfdisk --no-reread --append "$ROOT_DEV"; then
-      FAIL_REASON="Data partition creation failed"
       return 1
     fi
   else
@@ -99,9 +107,17 @@ main () {
 
   partx -u "$ROOT_DEV" || true
 
-  log "remounting root rw and growing btrfs"
-  mount / -o remount,rw
-  btrfs filesystem resize max /media/startos/root
+  if ! grow_root_filesystem; then
+    return 1
+  fi
+
+  if [ -n "$DATA_PART_START" ]; then
+    log "appending data partition"
+    if ! echo "${DATA_PART_START}, +" | sfdisk --no-reread --append "$ROOT_DEV"; then
+      FAIL_REASON="Data partition creation failed"
+      return 1
+    fi
+  fi
 
   log "generating machine-id"
   if ! systemd-machine-id-setup --root=/media/startos/config/overlay/; then

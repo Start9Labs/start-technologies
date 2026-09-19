@@ -205,6 +205,6 @@ A Raspberry Pi does not use the USB installer above. Instead, you flash the Star
    > [!WARNING]
    > BE ABSOLUTELY CERTAIN you have selected the correct target microSD card. Whatever target you select will be **COMPLETELY ERASED**!!
 
-1. Click "Flash!". When flashing completes, re-insert the microSD card into your Raspberry Pi and power it on.
+1. Click "Flash!". When flashing completes, re-insert the microSD card into your Raspberry Pi and power it on. StartOS prepares the card's storage and restarts once before setup becomes available.
 
 1. From a computer on the same network, visit [http://start.local](http://start.local) and continue with [Initial Setup](initial-setup.md).
