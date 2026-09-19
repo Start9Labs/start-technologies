@@ -139,6 +139,11 @@ for the detail behind its highlights.
 
 ### Fixed
 
+- **Service data migrated from 0.3.5.1 is preserved when package initialization
+  fails.** StartOS prepares each migrated volume for update snapshots before
+  installing its package; install recovery restores that snapshot or leaves the
+  existing volume intact.
+
 - **Nextcloud (Legacy) and other migrated 0.3.5.1 services with a
   package-managed certificate start when the server has a public IP or uses
   StartTunnel.**
