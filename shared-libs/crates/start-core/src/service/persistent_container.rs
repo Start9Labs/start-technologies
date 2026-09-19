@@ -40,6 +40,33 @@ use crate::volume::data_dir;
 use crate::{ARCH, DATA_DIR, ImageId, PACKAGE_DATA, VolumeId};
 
 const RPC_CONNECT_TIMEOUT: Duration = Duration::from_secs(120);
+const RPC_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
+
+async fn shutdown_rpc_server<ExitFuture, ExitError, Shutdown, ServerFuture>(
+    exit: ExitFuture,
+    shutdown: Shutdown,
+    server: ServerFuture,
+    errs: &mut ErrorCollection,
+) where
+    ExitFuture: Future<Output = Result<(), ExitError>>,
+    ExitError: Into<Error>,
+    Shutdown: FnOnce(),
+    ServerFuture: Future<Output = Result<(), tokio::task::JoinError>>,
+{
+    errs.handle(
+        tokio::time::timeout(RPC_SHUTDOWN_TIMEOUT, exit)
+            .await
+            .with_kind(ErrorKind::Timeout)
+            .and_then(|result| result.map_err(Into::into)),
+    );
+    shutdown();
+    errs.handle(
+        tokio::time::timeout(RPC_SHUTDOWN_TIMEOUT, server)
+            .await
+            .with_kind(ErrorKind::Timeout)
+            .and_then(|result| result.with_kind(ErrorKind::Cancelled)),
+    );
+}
 
 #[derive(Debug)]
 pub struct ServiceState {
@@ -453,16 +480,16 @@ impl PersistentContainer {
         Some(async move {
             let mut errs = ErrorCollection::new();
             if let Some((hdl, shutdown)) = rpc_server {
-                errs.handle(
-                    rpc_client
-                        .request(
-                            rpc::Exit,
-                            uninit.unwrap_or_else(|| ExitParams::target_version(&*version)),
-                        )
-                        .await,
-                );
-                shutdown.shutdown();
-                errs.handle(hdl.await.with_kind(ErrorKind::Cancelled));
+                shutdown_rpc_server(
+                    rpc_client.request(
+                        rpc::Exit,
+                        uninit.unwrap_or_else(|| ExitParams::target_version(&*version)),
+                    ),
+                    || shutdown.shutdown(),
+                    hdl,
+                    &mut errs,
+                )
+                .await;
             }
             net_service.remove_all().await.log_err();
             for (_, volume) in volumes {
@@ -614,5 +641,34 @@ impl Drop for PersistentContainer {
         if let Some(destroy) = self.destroy(None) {
             tokio::spawn(async move { destroy.await.log_err() });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn rpc_shutdown_bounds_exit_and_server_waits() {
+        let shutdown_called = Arc::new(AtomicBool::new(false));
+        let shutdown_observer = shutdown_called.clone();
+        let mut errs = ErrorCollection::new();
+
+        tokio::time::timeout(
+            RPC_SHUTDOWN_TIMEOUT * 2 + Duration::from_secs(1),
+            shutdown_rpc_server(
+                futures::future::pending::<Result<(), Error>>(),
+                move || shutdown_observer.store(true, Ordering::SeqCst),
+                futures::future::pending::<Result<(), tokio::task::JoinError>>(),
+                &mut errs,
+            ),
+        )
+        .await
+        .expect("RPC shutdown exceeded both bounds");
+
+        assert!(shutdown_called.load(Ordering::SeqCst));
+        assert!(errs.into_result().is_err());
     }
 }
