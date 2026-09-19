@@ -149,8 +149,8 @@ for the detail behind its highlights.
   runtime.** StartOS bounds the fallback shutdown waits so it can release the
   container's network routes and continue teardown.
 
-- **Services keep resolving domain names when the network provides no DNS
-  server.** StartOS uses its built-in Cloudflare fallback instead of leaving
+- **Services keep resolving domain names when the network provides no separate
+  DNS server.** StartOS uses its built-in Cloudflare fallback instead of leaving
   service containers without a working resolver.
 
 - **Nextcloud (Legacy) and other migrated 0.3.5.1 services with a
