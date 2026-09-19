@@ -95,10 +95,12 @@ impl InstallBackup {
         // The backup being replaced may be the only complete copy of the package's data.
         self.resolve_pending().await?;
         if !btrfs::is_subvolume(&self.live).await {
-            tracing::warn!(
-                "Could not create install backup for {}: volume root is not a btrfs subvolume",
-                self.pkg_id
-            );
+            if tokio::fs::metadata(&self.live).await.is_ok() {
+                tracing::warn!(
+                    "Could not create install backup for {}: volume root is not a btrfs subvolume",
+                    self.pkg_id
+                );
+            }
             return Ok(false);
         }
         btrfs::delete_tree(&self.backup_tmp).await.log_err();
@@ -499,9 +501,8 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn snapshot_warns_and_leaves_a_plain_directory_untouched() -> Result<(), Error> {
+    async fn snapshot_only_warns_for_an_existing_plain_directory() -> Result<(), Error> {
         let c = case().await?;
-        seed_tree(&c.ib.live, "live").await?;
         let logs = Arc::new(std::sync::Mutex::new(Vec::new()));
         let make_writer = {
             let logs = logs.clone();
@@ -515,6 +516,10 @@ mod tests {
             .finish();
         let _guard = tracing::subscriber::set_default(subscriber);
 
+        assert!(!c.ib.snapshot().await?);
+        assert!(logs.lock().unwrap().is_empty());
+
+        seed_tree(&c.ib.live, "live").await?;
         assert!(!c.ib.snapshot().await?);
 
         assert_eq!(read_marker(&c.ib.live).await.as_deref(), Some("live"));
