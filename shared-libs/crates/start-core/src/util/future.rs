@@ -13,35 +13,48 @@ use tokio::task::{JoinError, JoinHandle, LocalSet};
 use crate::prelude::*;
 
 #[pin_project::pin_project(PinnedDrop)]
-pub struct NonDetachingJoinHandle<T>(#[pin] JoinHandle<T>);
+pub struct NonDetachingJoinHandle<T> {
+    #[pin]
+    handle: JoinHandle<T>,
+    abort_on_drop: bool,
+}
 impl<T> NonDetachingJoinHandle<T> {
     pub async fn wait_for_abort(self) -> Result<T, JoinError> {
         self.abort();
         self.await
     }
+
+    pub(crate) fn detach(mut self) {
+        self.abort_on_drop = false;
+    }
 }
 impl<T> From<JoinHandle<T>> for NonDetachingJoinHandle<T> {
-    fn from(t: JoinHandle<T>) -> Self {
-        NonDetachingJoinHandle(t)
+    fn from(handle: JoinHandle<T>) -> Self {
+        Self {
+            handle,
+            abort_on_drop: true,
+        }
     }
 }
 
 impl<T> Deref for NonDetachingJoinHandle<T> {
     type Target = JoinHandle<T>;
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.handle
     }
 }
 impl<T> DerefMut for NonDetachingJoinHandle<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        &mut self.handle
     }
 }
 #[pin_project::pinned_drop]
 impl<T> PinnedDrop for NonDetachingJoinHandle<T> {
     fn drop(self: std::pin::Pin<&mut Self>) {
         let this = self.project();
-        this.0.into_ref().get_ref().abort()
+        if *this.abort_on_drop {
+            this.handle.into_ref().get_ref().abort();
+        }
     }
 }
 impl<T> Future for NonDetachingJoinHandle<T> {
@@ -50,8 +63,7 @@ impl<T> Future for NonDetachingJoinHandle<T> {
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
-        let this = self.project();
-        this.0.poll(cx)
+        self.project().handle.poll(cx)
     }
 }
 

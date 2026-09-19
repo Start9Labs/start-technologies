@@ -46,6 +46,17 @@ impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
         }
     }
 
+    fn take(&self, key: &K) -> Option<CallbackHandlers> {
+        self.inner.mutate(|map| {
+            map.remove(key)
+                .map(|(task, handlers)| {
+                    task.detach();
+                    CallbackHandlers(handlers)
+                })
+                .filter(|callbacks| !callbacks.0.is_empty())
+        })
+    }
+
     pub fn add<T: Send + 'static>(
         self: &Arc<Self>,
         key: K,
@@ -61,17 +72,16 @@ impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
                     (
                         tokio::spawn(async move {
                             let mut watch = watch.untyped();
-                            if watch.changed().await.is_ok() {
-                                if let Some(cbs) = this.inner.mutate(|map| {
-                                    map.remove(&k)
-                                        .map(|(_, handlers)| CallbackHandlers(handlers))
-                                        .filter(|cb| !cb.0.is_empty())
-                                }) {
-                                    let value = watch.peek_and_mark_seen().unwrap_or_default();
-                                    if let Err(e) = cbs.call(vector![value]).await {
-                                        tracing::error!("Error in {label} callback: {e}");
-                                        tracing::debug!("{e:?}");
-                                    }
+                            if let Err(e) = watch.changed().await {
+                                tracing::error!("Error in {label} watch: {e}");
+                                tracing::debug!("{e:?}");
+                                return;
+                            }
+                            if let Some(cbs) = this.take(&k) {
+                                let value = watch.peek_and_mark_seen().unwrap_or_default();
+                                if let Err(e) = cbs.call(vector![value]).await {
+                                    tracing::error!("Error in {label} callback: {e}");
+                                    tracing::debug!("{e:?}");
                                 }
                             }
                         })
@@ -408,4 +418,34 @@ pub(super) fn clear_callbacks(
     });
     context.seed.ctx.callbacks.gc();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio::sync::oneshot;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn taking_callbacks_does_not_abort_the_callback_task() {
+        let callbacks = Arc::new(DbWatchedCallbacks::new("test"));
+        let (start_send, start_recv) = oneshot::channel();
+        let (finished_send, finished_recv) = oneshot::channel();
+        let task_callbacks = Arc::clone(&callbacks);
+        let task = tokio::spawn(async move {
+            start_recv.await.unwrap();
+            assert!(task_callbacks.take(&()).is_none());
+            tokio::task::yield_now().await;
+            finished_send.send(()).unwrap();
+        });
+        callbacks
+            .inner
+            .mutate(|map| map.insert((), (task.into(), Vec::new())));
+
+        start_send.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), finished_recv)
+            .await
+            .unwrap()
+            .unwrap();
+    }
 }
