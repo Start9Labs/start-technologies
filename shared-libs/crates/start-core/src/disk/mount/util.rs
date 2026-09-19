@@ -80,19 +80,28 @@ pub async fn sync_directory<P: AsRef<Path>>(path: P) -> Result<(), Error> {
 
 #[instrument(skip_all)]
 pub async fn unmount<P: AsRef<Path>>(mountpoint: P, lazy: bool) -> Result<(), Error> {
-    tracing::debug!("Unmounting {}.", mountpoint.as_ref().display());
+    let mountpoint = mountpoint.as_ref();
+    tracing::debug!("Unmounting {}.", mountpoint.display());
+    if matches!(tokio::fs::try_exists(mountpoint).await, Ok(false)) {
+        return Ok(());
+    }
     let mut cmd = tokio::process::Command::new("umount");
     cmd.env("LANG", "C.UTF-8");
     if lazy {
         cmd.arg("-l");
     }
     match cmd
-        .arg(mountpoint.as_ref())
+        .arg(mountpoint)
         .invoke(crate::ErrorKind::Filesystem)
         .await
     {
         Ok(_) => Ok(()),
-        Err(e) if e.to_string().contains("not mounted") => Ok(()),
+        Err(e)
+            if e.to_string().contains("not mounted")
+                || matches!(tokio::fs::try_exists(mountpoint).await, Ok(false)) =>
+        {
+            Ok(())
+        }
         Err(e) => Err(e),
     }
 }
