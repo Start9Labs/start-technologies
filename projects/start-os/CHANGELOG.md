@@ -437,7 +437,9 @@ for the detail behind its highlights.
   Outbound Traffic** while sending selected services through another gateway
   with **Set Outbound Gateway**. A service given its own gateway while a
   system-wide gateway was pinned has been following the system-wide one, and
-  switches to its own when you update.
+  switches to its own when you update. Changing or clearing the service's
+  selection also drops its established outbound connections, so new connections
+  use the newly selected gateway.
 
 - **A service reached over IPv6 through a tunnel now answers.** StartOS sends a
   reply back out the interface its connection arrived on by restoring a
