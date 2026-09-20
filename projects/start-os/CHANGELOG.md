@@ -157,6 +157,8 @@ for the detail behind its highlights.
   backed-up service images under emulation. Reinstalling or updating a service
   lets StartOS select its marketplace package for the server architecture.
 
+- **Requested restarts and shutdowns complete when concurrent service teardown has already removed a mountpoint.**
+
 - **A service migrated from 0.3.5.1 keeps its data when an install or update
   fails.** A failed update rolls back to the data it started with, which
   previously took a reboot after the upgrade, and a failed install leaves
