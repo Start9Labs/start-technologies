@@ -67,6 +67,29 @@ impl<T> Future for NonDetachingJoinHandle<T> {
     }
 }
 
+#[tokio::test]
+async fn test_detach_inside_own_task() {
+    async fn survives(detach: bool) -> bool {
+        let (handle_send, handle_recv) = oneshot::channel::<NonDetachingJoinHandle<()>>();
+        let (done_send, done_recv) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            let handle = handle_recv.await.unwrap();
+            if detach {
+                handle.detach();
+            } else {
+                drop(handle);
+            }
+            tokio::task::yield_now().await;
+            let _ = done_send.send(());
+        });
+        assert!(handle_send.send(task.into()).is_ok());
+        done_recv.await.is_ok()
+    }
+
+    assert!(survives(true).await);
+    assert!(!survives(false).await);
+}
+
 #[pin_project::pin_project(PinnedDrop)]
 pub struct DropSignaling<F> {
     #[pin]

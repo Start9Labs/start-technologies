@@ -13,7 +13,7 @@
 
 ## Init Handlers Are Reactive
 
-`setupInit` gives each handler its own effects context and points that context's retry at the handler. A `.const()` read subscribes to its value and **re-invokes the whole handler** when it changes, for as long as the container lives. Each re-run's next `.const()` read replaces the consumed subscription, keeping the context live for later changes.
+`setupInit` gives each handler its own effects context and points that context's retry at the handler. A `.const()` read subscribes to its value and **re-invokes the whole handler** when it changes, for as long as the container lives.
 
 The reactivity is opt-in, and `.const()` is the opt-in: a handler that reads nothing reactively runs once per container init and is done. Once one is present, three consequences follow:
 
