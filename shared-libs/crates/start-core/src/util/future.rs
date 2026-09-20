@@ -1,3 +1,4 @@
+use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::sync::Weak;
@@ -13,48 +14,41 @@ use tokio::task::{JoinError, JoinHandle, LocalSet};
 use crate::prelude::*;
 
 #[pin_project::pin_project(PinnedDrop)]
-pub struct NonDetachingJoinHandle<T> {
-    #[pin]
-    handle: JoinHandle<T>,
-    abort_on_drop: bool,
-}
+pub struct NonDetachingJoinHandle<T>(#[pin] JoinHandle<T>);
 impl<T> NonDetachingJoinHandle<T> {
     pub async fn wait_for_abort(self) -> Result<T, JoinError> {
         self.abort();
         self.await
     }
 
-    pub(crate) fn detach(mut self) {
-        self.abort_on_drop = false;
+    pub fn detach(self) -> JoinHandle<T> {
+        let this = ManuallyDrop::new(self);
+        // SAFETY: `this` is never dropped, so the handle is moved out exactly once.
+        unsafe { std::ptr::read(&this.0) }
     }
 }
 impl<T> From<JoinHandle<T>> for NonDetachingJoinHandle<T> {
-    fn from(handle: JoinHandle<T>) -> Self {
-        Self {
-            handle,
-            abort_on_drop: true,
-        }
+    fn from(t: JoinHandle<T>) -> Self {
+        NonDetachingJoinHandle(t)
     }
 }
 
 impl<T> Deref for NonDetachingJoinHandle<T> {
     type Target = JoinHandle<T>;
     fn deref(&self) -> &Self::Target {
-        &self.handle
+        &self.0
     }
 }
 impl<T> DerefMut for NonDetachingJoinHandle<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.handle
+        &mut self.0
     }
 }
 #[pin_project::pinned_drop]
 impl<T> PinnedDrop for NonDetachingJoinHandle<T> {
     fn drop(self: std::pin::Pin<&mut Self>) {
         let this = self.project();
-        if *this.abort_on_drop {
-            this.handle.into_ref().get_ref().abort();
-        }
+        this.0.into_ref().get_ref().abort()
     }
 }
 impl<T> Future for NonDetachingJoinHandle<T> {
@@ -63,7 +57,8 @@ impl<T> Future for NonDetachingJoinHandle<T> {
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
-        self.project().handle.poll(cx)
+        let this = self.project();
+        this.0.poll(cx)
     }
 }
 
@@ -75,7 +70,7 @@ async fn test_detach_inside_own_task() {
         let task = tokio::spawn(async move {
             let handle = handle_recv.await.unwrap();
             if detach {
-                handle.detach();
+                drop(handle.detach());
             } else {
                 drop(handle);
             }
