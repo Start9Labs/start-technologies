@@ -373,6 +373,8 @@ impl CallbackHandlers {
     fn detach_watcher(
         (watcher, handlers): (NonDetachingJoinHandle<()>, Vec<CallbackHandler>),
     ) -> Option<Self> {
+        // The map held the only handle. All the watcher has left is `call`,
+        // a notify per handler that awaits no reply.
         watcher.detach();
         Some(Self(handlers)).filter(|cbs| !cbs.0.is_empty())
     }
