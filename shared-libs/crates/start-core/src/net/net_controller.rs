@@ -1016,6 +1016,25 @@ async fn delete_outbound_rules(sources: &[IpAddr], rule: ServiceOutboundRule) {
     }
 }
 
+fn delete_conntrack_command(source: IpAddr) -> Command {
+    let mut command = Command::new("conntrack");
+    command.arg("-D");
+    if source.is_ipv6() {
+        command.arg("-f").arg("ipv6");
+    }
+    command.arg("-s").arg(source.to_string());
+    command
+}
+
+async fn flush_outbound_connections(sources: &[IpAddr]) {
+    for source in sources {
+        // `conntrack -D` exits one when no flows match.
+        let _ = delete_conntrack_command(*source)
+            .invoke(ErrorKind::Network)
+            .await;
+    }
+}
+
 async fn sync_outbound_rules(
     db: &TypedPatchDb<Database>,
     id: &PackageId,
@@ -1039,6 +1058,7 @@ async fn sync_outbound_rules(
             }
         }
         // A lookup that fails to install still gets its rejection.
+        let previous = current.clone();
         let mut res = Ok::<_, Error>(());
         for rule in &desired - &*current {
             match add_outbound_rules(sources, rule).await {
@@ -1052,6 +1072,9 @@ async fn sync_outbound_rules(
         for rule in (&*current - &desired).into_iter().rev() {
             delete_outbound_rules(sources, rule).await;
             current.remove(&rule);
+        }
+        if *current != previous {
+            flush_outbound_connections(sources).await;
         }
         res
     }
@@ -1736,6 +1759,18 @@ mod tests {
                 "priority",
                 "71"
             ]
+        );
+    }
+
+    #[test]
+    fn conntrack_filter_family_follows_its_source() {
+        assert_eq!(
+            args(&delete_conntrack_command("10.0.3.5".parse().unwrap())),
+            ["-D", "-s", "10.0.3.5"]
+        );
+        assert_eq!(
+            args(&delete_conntrack_command("fd00:3::5".parse().unwrap())),
+            ["-D", "-f", "ipv6", "-s", "fd00:3::5"]
         );
     }
 

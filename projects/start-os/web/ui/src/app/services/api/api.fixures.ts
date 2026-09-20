@@ -250,7 +250,7 @@ export namespace Mock {
       main: {
         source: 'packed',
         arch: ['x86_64', 'aarch64'],
-        emulateMissingAs: 'aarch64',
+        emulateMissing: true,
         nvidiaContainer: false,
       },
     },
@@ -304,7 +304,7 @@ export namespace Mock {
       main: {
         source: 'packed',
         arch: ['x86_64', 'aarch64'],
-        emulateMissingAs: 'aarch64',
+        emulateMissing: true,
         nvidiaContainer: false,
       },
     },
@@ -346,7 +346,7 @@ export namespace Mock {
       main: {
         source: 'packed',
         arch: ['x86_64', 'aarch64'],
-        emulateMissingAs: 'aarch64',
+        emulateMissing: true,
         nvidiaContainer: false,
       },
     },
@@ -394,7 +394,7 @@ export namespace Mock {
       main: {
         source: 'packed',
         arch: ['x86_64', 'aarch64'],
-        emulateMissingAs: 'aarch64',
+        emulateMissing: true,
         nvidiaContainer: false,
       },
     },

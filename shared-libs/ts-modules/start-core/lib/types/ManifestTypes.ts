@@ -162,7 +162,6 @@ export type SDKManifest = {
   readonly plugins?: T.PluginId[]
 }
 
-// this is hacky but idk a more elegant way
 type ArchOptions = {
   0: ['x86_64', 'aarch64', 'riscv64']
   1: ['aarch64', 'x86_64', 'riscv64']
@@ -184,7 +183,8 @@ export type SDKImageInputSpec = {
   [A in keyof ArchOptions]: {
     source: Exclude<ImageSource, 'packed'>
     arch?: ArchOptions[A]
-    emulateMissingAs?: ArchOptions[A][number] | null
+    /** Run an available image under CPU emulation on other architectures. Defaults to true. */
+    emulateMissing?: boolean
     nvidiaContainer?: boolean
   }
 }[keyof ArchOptions]

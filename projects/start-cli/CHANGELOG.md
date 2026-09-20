@@ -9,6 +9,13 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
+## [2.2.0]
+
+### Added
+
+- **`s9pk edit add-image` enables CPU emulation by default** when the server uses
+  another architecture. Use `--no-emulation` for images that require a native architecture.
+
 ## [2.1.0]
 
 ### Added

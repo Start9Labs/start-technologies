@@ -254,6 +254,9 @@ impl ServiceMap {
         };
         let mut finalization_progress = progress.add_phase(op_name.into(), Some(50));
         let restoring = recovery_source.is_some();
+        if !restoring {
+            crate::volume::InstallBackup::of(&id).begin().await?;
+        }
 
         let (cancel_send, cancel_recv) = oneshot::channel();
         ctx.cancellable_installs

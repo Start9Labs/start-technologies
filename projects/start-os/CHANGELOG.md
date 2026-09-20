@@ -149,9 +149,26 @@ for the detail behind its highlights.
   runtime.** StartOS bounds the fallback shutdown waits so it can release the
   container's network routes and continue teardown.
 
-- **Reactive service setup remains active through bursts of changes.** Repeated
-  changes continue to re-run a package's init handler, keeping generated files,
-  tasks, and registrations synchronized.
+- **A service keeps reacting to changes after several land at once.** A burst of
+  changes to a value a service watches, such as its addresses, a dependency's
+  status, or its outbound gateway, could permanently stop StartOS from notifying
+  it. Its generated files, certificates, and registrations then stayed stale
+  until the container was rebuilt.
+
+- **Services keep resolving domain names when the network provides no separate
+  DNS server.** StartOS uses its built-in Cloudflare fallback instead of leaving
+  service containers without a working resolver.
+
+- **A backup made on one CPU architecture restores on another.** StartOS runs
+  backed-up service images under emulation. Reinstalling or updating a service
+  lets StartOS select its marketplace package for the server architecture.
+
+- **Requested restarts and shutdowns complete when concurrent service teardown has already removed a mountpoint.**
+
+- **A service migrated from 0.3.5.1 keeps its data when an install or update
+  fails.** A failed update rolls back to the data it started with, which
+  previously took a reboot after the upgrade, and a failed install leaves
+  existing data in place.
 
 - **Nextcloud (Legacy) and other migrated 0.3.5.1 services with a
   package-managed certificate start when the server has a public IP or uses
@@ -441,7 +458,9 @@ for the detail behind its highlights.
   Outbound Traffic** while sending selected services through another gateway
   with **Set Outbound Gateway**. A service given its own gateway while a
   system-wide gateway was pinned has been following the system-wide one, and
-  switches to its own when you update.
+  switches to its own when you update. Changing or clearing the service's
+  selection also drops its established outbound connections, so new connections
+  use the newly selected gateway.
 
 - **A service reached over IPv6 through a tunnel now answers.** StartOS sends a
   reply back out the interface its connection arrived on by restoring a

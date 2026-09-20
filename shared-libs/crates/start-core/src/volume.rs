@@ -15,6 +15,7 @@ pub const BACKUP_DIR: &str = "/media/startos/backups";
 
 const INSTALL_BACKUP_SUFFIX: &str = ".install-backup";
 const INSTALL_BACKUP_TMP_SUFFIX: &str = ".install-backup-tmp";
+const INSTALL_FRESH_SUFFIX: &str = ".install-fresh";
 const RESTORE_OLD_SUFFIX: &str = ".restore-old";
 
 pub fn data_dir<P: AsRef<Path>>(datadir: P, pkg_id: &PackageId, volume_id: &VolumeId) -> PathBuf {
@@ -65,6 +66,7 @@ pub struct InstallBackup {
     live: PathBuf,
     backup: PathBuf,
     backup_tmp: PathBuf,
+    fresh: PathBuf,
     restore_old: PathBuf,
 }
 
@@ -79,6 +81,7 @@ impl InstallBackup {
             pkg_id: pkg_id.clone(),
             backup: with_suffix(&live, INSTALL_BACKUP_SUFFIX),
             backup_tmp: with_suffix(&live, INSTALL_BACKUP_TMP_SUFFIX),
+            fresh: with_suffix(&live, INSTALL_FRESH_SUFFIX),
             restore_old: with_suffix(&live, RESTORE_OLD_SUFFIX),
             live,
         }
@@ -88,6 +91,26 @@ impl InstallBackup {
         tokio::fs::metadata(&self.backup).await.is_ok()
     }
 
+    /// Marks an install that begins with no live root. Runs before the package entry exists.
+    pub async fn begin(&self) -> Result<(), Error> {
+        // A pending restore can hold the only copy of a root that reads as absent.
+        self.resolve_pending().await?;
+        // An unreadable root is not absent.
+        if matches!(
+            tokio::fs::metadata(&self.live).await,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound
+        ) {
+            crate::util::io::create_file(&self.fresh).await?;
+        } else {
+            crate::util::io::delete_file(&self.fresh).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn is_fresh(&self) -> bool {
+        tokio::fs::metadata(&self.fresh).await.is_ok()
+    }
+
     /// Snapshots the live root as the new rollback point, staged at `backup_tmp` so the
     /// previous backup is discarded only once its replacement exists. Returns false for a
     /// non-subvolume root, where no constant-time backup is possible.
@@ -95,6 +118,12 @@ impl InstallBackup {
         // The backup being replaced may be the only complete copy of the package's data.
         self.resolve_pending().await?;
         if !btrfs::is_subvolume(&self.live).await {
+            if tokio::fs::metadata(&self.live).await.is_ok() {
+                tracing::warn!(
+                    "Could not create install backup for {}: volume root is not a btrfs subvolume",
+                    self.pkg_id
+                );
+            }
             return Ok(false);
         }
         btrfs::delete_tree(&self.backup_tmp).await.log_err();
@@ -165,10 +194,10 @@ impl InstallBackup {
         Ok(())
     }
 
-    /// Discards the backup after a successful install.
+    /// Discards the backup and the marker once the install is over.
     pub async fn remove(&self) -> Result<(), Error> {
-        // Never discard the backup while a restore is in flight: it can be the only
-        // complete copy, and every caller here believes the install succeeded.
+        crate::util::io::delete_file(&self.fresh).await?;
+        // While a restore is in flight the backup can be the only complete copy.
         self.resolve_pending().await?;
         btrfs::delete_tree(&self.backup).await
     }
@@ -324,7 +353,32 @@ async fn recover_and_sweep(
             }
             // No restore-old marker: the live tree is authoritative, so leave the backup
             // as a rollback point.
+        } else if let Some(owner) = name.strip_suffix(INSTALL_FRESH_SUFFIX) {
+            let Ok(owner) = owner.parse::<PackageId>() else {
+                continue;
+            };
+            // A marker beside a mid-install package belongs to service load recovery.
+            if installed.contains(&owner) || !all.contains(&owner) {
+                crate::util::io::delete_file(&entry_path).await.log_err();
+            }
         }
+    }
+    Ok(())
+}
+
+async fn needs_subvolume_conversion(path: &Path) -> bool {
+    tokio::fs::metadata(path)
+        .await
+        .map(|m| m.is_dir())
+        .unwrap_or(false)
+        && !btrfs::is_subvolume(path).await
+        && btrfs::is_btrfs(path).await
+}
+
+pub(crate) async fn convert_package_to_subvolume(id: &PackageId) -> Result<(), Error> {
+    let src = pkg_volume_dir(id);
+    if needs_subvolume_conversion(&src).await {
+        convert_one(id, &src, None).await?;
     }
     Ok(())
 }
@@ -337,13 +391,7 @@ async fn convert_to_subvolumes(
     let mut pending = Vec::new();
     for id in installed {
         let src = volumes.join(id);
-        if tokio::fs::metadata(&src)
-            .await
-            .map(|m| m.is_dir())
-            .unwrap_or(false)
-            && !btrfs::is_subvolume(&src).await
-            && btrfs::is_btrfs(&src).await
-        {
+        if needs_subvolume_conversion(&src).await {
             pending.push((id, src));
         }
     }
@@ -365,7 +413,7 @@ async fn convert_to_subvolumes(
     phase.set_total(total);
     let mut done = 0;
     for (id, src, size) in sized {
-        if let Err(e) = convert_one(id, &src, phase, done).await {
+        if let Err(e) = convert_one(id, &src, Some((&mut *phase, done))).await {
             tracing::warn!("Could not convert volumes of {id} to a subvolume: {e}");
         }
         done += size;
@@ -377,8 +425,7 @@ async fn convert_to_subvolumes(
 async fn convert_one(
     id: &PackageId,
     src: &Path,
-    phase: &mut PhaseProgressTrackerHandle,
-    base: u64,
+    progress: Option<(&mut PhaseProgressTrackerHandle, u64)>,
 ) -> Result<(), Error> {
     let start = std::time::Instant::now();
     let tmp = src.with_file_name(format!("{id}{CONVERT_TMP_SUFFIX}"));
@@ -386,8 +433,13 @@ async fn convert_one(
     btrfs::delete_tree(&tmp).await?;
     btrfs::create_subvolume(&tmp).await?;
     let ctr = Arc::new(Counter::new(0, std::sync::atomic::Ordering::Relaxed));
-    if let Err(e) = with_byte_progress(phase, base, &ctr, clone_tree(src, &tmp, ctr.clone())).await
-    {
+    let clone = clone_tree(src, &tmp, ctr.clone());
+    let cloned = if let Some((phase, base)) = progress {
+        with_byte_progress(phase, base, &ctr, clone).await
+    } else {
+        clone.await
+    };
+    if let Err(e) = cloned {
         btrfs::delete_tree(&tmp).await.log_err();
         return Err(e);
     }
@@ -462,6 +514,80 @@ mod tests {
         assert_eq!(read_marker(&c.ib.live).await.as_deref(), Some("pre-update"));
         assert!(!c.ib.exists().await);
         assert!(tokio::fs::metadata(&c.ib.restore_old).await.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn snapshot_of_a_plain_directory_takes_no_backup_and_leaves_it_intact()
+    -> Result<(), Error> {
+        let c = case().await?;
+        seed_tree(&c.ib.live, "live").await?;
+
+        assert!(!c.ib.snapshot().await?);
+
+        assert_eq!(read_marker(&c.ib.live).await.as_deref(), Some("live"));
+        assert!(!c.ib.exists().await);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn begin_marks_a_rootless_install_until_it_is_removed() -> Result<(), Error> {
+        let c = case().await?;
+
+        c.ib.begin().await?;
+        assert!(c.ib.is_fresh().await);
+
+        c.ib.remove().await?;
+        assert!(!c.ib.is_fresh().await);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn begin_clears_a_stale_marker_beside_existing_data() -> Result<(), Error> {
+        let c = case().await?;
+        seed_tree(&c.ib.live, "kept").await?;
+        write(&c.ib.fresh, "").await?;
+
+        c.ib.begin().await?;
+
+        assert!(!c.ib.is_fresh().await);
+        assert_eq!(read_marker(&c.ib.live).await.as_deref(), Some("kept"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn begin_settles_a_pending_restore_before_judging_the_root() -> Result<(), Error> {
+        let c = case().await?;
+        seed_tree(&c.ib.restore_old, "only-copy").await?;
+
+        c.ib.begin().await?;
+
+        assert!(!c.ib.is_fresh().await);
+        assert_eq!(read_marker(&c.ib.live).await.as_deref(), Some("only-copy"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sweep_drops_a_finished_installs_marker_and_keeps_its_data() -> Result<(), Error> {
+        let c = case().await?;
+        seed_tree(&c.ib.live, "kept").await?;
+        write(&c.ib.fresh, "").await?;
+
+        recover_and_sweep(&c.volumes, &BTreeSet::new(), &BTreeSet::new()).await?;
+
+        assert!(!c.ib.is_fresh().await);
+        assert_eq!(read_marker(&c.ib.live).await.as_deref(), Some("kept"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sweep_leaves_the_marker_of_an_install_in_flight() -> Result<(), Error> {
+        let c = case().await?;
+        write(&c.ib.fresh, "").await?;
+
+        recover_and_sweep(&c.volumes, &BTreeSet::new(), &BTreeSet::from([pkg()])).await?;
+
+        assert!(c.ib.is_fresh().await);
         Ok(())
     }
 

@@ -80,7 +80,7 @@ Container images organized by architecture:
 Images are built from Docker/Podman and converted to squashfs. The `ImageConfig` in manifest specifies:
 
 - `arch` - Supported architectures
-- `emulateMissingAs` - Fallback architecture for emulation
+- `emulateMissing` - Whether an available image may run under CPU emulation
 - `nvidiaContainer` - Whether to enable NVIDIA container support
 
 ### assets.squashfs

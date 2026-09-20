@@ -36,7 +36,7 @@ For its own connections — marketplace, service-package and OS-update downloads
 
 ## Route Individual Services Through VPN
 
-A service's own setting always takes precedence over the system-wide default — whether that default is Auto or a pinned gateway. To set one, navigate to a service and go to **Actions > Set Outbound Gateway**. You can keep one gateway pinned system-wide while routing selected services through another; choose "System default" in that dialog to clear the override and follow the system-wide setting again.
+A service's own setting always takes precedence over the system-wide default — whether that default is Auto or a pinned gateway. To set one, navigate to a service and go to **Actions > Set Outbound Gateway**. You can keep one gateway pinned system-wide while routing selected services through another; choose "System default" in that dialog to clear the override and follow the system-wide setting again. Changing or clearing the override drops the service's established outbound connections. The service reconnects as needed through the newly selected gateway.
 
 For example, you could route your Bitcoin node through Mullvad for privacy while leaving Nextcloud on the default gateway for better performance — even with Mullvad also pinned as the system-wide default.
 
