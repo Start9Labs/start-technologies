@@ -493,6 +493,8 @@ const origin = await multi.bindPort(10009, {
 
 StartOS still fronts the port with one of its TLS listeners, but that listener pipes the raw TLS stream through instead of terminating it, so nothing about the handshake is rewritten. The container sees the client's real source address rather than the proxy's — except for a client on the box itself, which appears as the bridge IP.
 
+On a passthrough port the name the client asks for (its TLS SNI) selects nothing, so a connection the port admits by address is piped through whatever the name: one StartOS has never heard of reaches your container like any other, and whether the client verifies is decided by your certificate alone. So a daemon whose certificate names something fixed works behind a passthrough — cln-grpc's names only `cln`, and every client of it asks for `cln`. On the LAN, any enabled address of the binding admits the connection — an IP, the `.local` name, a private domain. From the internet, only an enabled public IP address does: a public domain admits a client by name, so a client that reaches the port through the domain and asks for another name gets through only where the binding's public IP address is enabled as well.
+
 ### When to use it
 
 Reach for passthrough only when the rewrap genuinely cannot serve, which is one of two cases:

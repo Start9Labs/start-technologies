@@ -1693,17 +1693,34 @@ fn cancel_dead<A: Accept + 'static>(targets: &mut InOMap<DynVHostTarget<A>, Targ
 
 type Mapping<A> = BTreeMap<Option<InternedString>, InOMap<DynVHostTarget<A>, TargetEntry>>;
 
-/// The [`Mapping`] key for a connection's SNI.
-///
-/// `None` is a connection that named no host — no SNI, or an SNI carrying an IP
-/// literal, which RFC 6066 forbids but clients send anyway — and is served by
-/// the bare-IP entry. A name is served only if it has an entry of its own: the
-/// lookup has no fallback, so a host answers to the names it was given and
-/// nothing else.
+/// The [`Mapping`] key for a connection's SNI: `None` for one that named no
+/// host — no SNI, or an SNI carrying an IP literal, which RFC 6066 forbids but
+/// clients send anyway.
 fn host_key(server_name: Option<&str>) -> Option<InternedString> {
     server_name
         .filter(|name| name.parse::<IpAddr>().is_err())
         .map(InternedString::from)
+}
+
+/// A terminating target never answers for a name it was not given.
+fn route<A: Accept + 'static>(
+    m: &Mapping<A>,
+    sni: &Option<InternedString>,
+    metadata: &<A as Accept>::Metadata,
+) -> Option<(DynVHostTarget<A>, ProxyContext)> {
+    let lookup = |key: &Option<InternedString>, admits: fn(&DynVHostTarget<A>) -> bool| {
+        let alive = || {
+            m.get(key)
+                .into_iter()
+                .flatten()
+                .filter(|(t, e)| e.alive() && admits(t))
+        };
+        alive()
+            .find(|(t, _)| t.0.filter_private(metadata))
+            .or_else(|| alive().find(|(t, _)| t.0.filter(metadata)))
+            .map(|(t, e)| (t.clone(), e.ctx.clone()))
+    };
+    lookup(sni, |_| true).or_else(|| lookup(&None, |t| t.0.is_passthrough()))
 }
 
 /// A challenge names the host it validates. One that names nothing is an
@@ -1823,14 +1840,7 @@ where
         metadata: &'a <A as Accept>::Metadata,
     ) -> Option<TlsHandlerAction> {
         let sni = host_key(hello.server_name());
-
-        let routed = self.mapping.peek(|m| {
-            let alive = || m.get(&sni).into_iter().flatten().filter(|(_, e)| e.alive());
-            alive()
-                .find(|(t, _)| t.0.filter_private(metadata))
-                .or_else(|| alive().find(|(t, _)| t.0.filter(metadata)))
-                .map(|(t, e)| (t.clone(), e.ctx.clone()))
-        });
+        let routed = self.mapping.peek(|m| route(m, &sni, metadata));
 
         let acme_challenge =
             is_acme_challenge(hello.server_name(), hello.alpn().into_iter().flatten());
@@ -2225,12 +2235,154 @@ mod host_key_tests {
             host_key(Some("example.com")),
             Some(InternedString::intern("example.com"))
         );
-        // Not an IP, so it keys like any other name — and nothing registers it,
-        // so the lookup misses and the connection is refused.
+        // Not an IP, so it keys like any other name, which nothing registers.
         assert_eq!(
             host_key(Some("server-name")),
             Some(InternedString::intern("server-name"))
         );
+    }
+}
+
+#[cfg(test)]
+mod route_tests {
+    use std::net::Ipv4Addr;
+
+    use super::*;
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct Stub {
+        name: &'static str,
+        private: bool,
+        public: bool,
+        passthrough: bool,
+    }
+    impl VHostTarget<TcpListener> for Stub {
+        type PreprocessRes = ();
+        fn filter(&self, _: &TcpMetadata) -> bool {
+            self.public
+        }
+        fn filter_private(&self, _: &TcpMetadata) -> bool {
+            self.private
+        }
+        fn is_passthrough(&self) -> bool {
+            self.passthrough
+        }
+        async fn preprocess<'a>(
+            &'a self,
+            _: ServerConfig,
+            _: &'a ClientHello<'a>,
+            _: &'a TcpMetadata,
+        ) -> Option<(ServerConfig, ())> {
+            None
+        }
+        fn handle_stream(
+            &self,
+            _: AcceptStream,
+            _: TlsMetadata<TcpMetadata>,
+            _: (),
+            _: ProxyContext,
+        ) {
+        }
+    }
+
+    fn passthrough(name: &'static str) -> Stub {
+        Stub {
+            name,
+            private: true,
+            public: true,
+            passthrough: true,
+        }
+    }
+
+    fn terminating(name: &'static str) -> Stub {
+        Stub {
+            passthrough: false,
+            ..passthrough(name)
+        }
+    }
+
+    /// Every entry stays alive for as long as the returned handles do.
+    fn mapping(entries: Vec<(Option<&str>, Stub)>) -> (Mapping<TcpListener>, Vec<Arc<()>>) {
+        let mut m = Mapping::<TcpListener>::new();
+        let mut alive = Vec::new();
+        for (key, stub) in entries {
+            let rc = Arc::new(());
+            m.entry(key.map(InternedString::intern))
+                .or_default()
+                .insert(
+                    DynVHostTarget::new(stub),
+                    TargetEntry::new(Arc::downgrade(&rc), 1),
+                );
+            alive.push(rc);
+        }
+        (m, alive)
+    }
+
+    fn routed(m: &Mapping<TcpListener>, sni: Option<&str>) -> Option<&'static str> {
+        let metadata = TcpMetadata {
+            peer_addr: (Ipv4Addr::new(192, 168, 1, 20), 50000).into(),
+            local_addr: (Ipv4Addr::new(192, 168, 1, 5), 2106).into(),
+        };
+        route(m, &host_key(sni), &metadata)
+            .map(|(t, _)| (&*t.0 as &dyn Any).downcast_ref::<Stub>().unwrap().name)
+    }
+
+    #[test]
+    fn a_name_is_served_by_its_own_entry() {
+        let (m, _alive) = mapping(vec![
+            (None, passthrough("bare")),
+            (Some("node.example.com"), passthrough("named")),
+        ]);
+        assert_eq!(routed(&m, Some("node.example.com")), Some("named"));
+    }
+
+    /// The container, not the port, decides which names it answers for.
+    #[test]
+    fn an_unregistered_name_reaches_a_passthrough() {
+        let (m, _alive) = mapping(vec![(None, passthrough("bare"))]);
+        assert_eq!(routed(&m, Some("cln")), Some("bare"));
+    }
+
+    /// The OS's own 443 terminates. A package's passthrough domain beside it
+    /// opens the port to no other name.
+    #[test]
+    fn an_unregistered_name_is_refused_where_the_bare_ip_entry_terminates() {
+        let (m, _alive) = mapping(vec![
+            (None, terminating("ui")),
+            (Some("mail.example.com"), passthrough("mail")),
+        ]);
+        assert_eq!(routed(&m, Some("other.example.com")), None);
+        assert_eq!(routed(&m, Some("mail.example.com")), Some("mail"));
+    }
+
+    #[test]
+    fn a_dial_naming_no_host_is_served_by_the_bare_ip_entry() {
+        let (m, _alive) = mapping(vec![(None, terminating("ui"))]);
+        assert_eq!(routed(&m, None), Some("ui"));
+        assert_eq!(routed(&m, Some("192.168.1.5")), Some("ui"));
+    }
+
+    #[test]
+    fn a_private_match_outranks_a_public_one() {
+        let (m, _alive) = mapping(vec![
+            (
+                Some("node.example.com"),
+                Stub {
+                    private: false,
+                    ..passthrough("public")
+                },
+            ),
+            (Some("node.example.com"), passthrough("private")),
+        ]);
+        assert_eq!(routed(&m, Some("node.example.com")), Some("private"));
+    }
+
+    #[test]
+    fn a_dead_entry_is_not_a_route() {
+        let (m, alive) = mapping(vec![(None, passthrough("bare"))]);
+        drop(alive);
+        assert_eq!(routed(&m, Some("cln")), None);
+        assert_eq!(routed(&m, None), None);
     }
 }
 
