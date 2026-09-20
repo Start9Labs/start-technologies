@@ -1851,6 +1851,16 @@ async fn reconcile_local_outbound_mark(selected: bool) -> Result<(), Error> {
     Ok(())
 }
 
+/// Marks an interface disconnected only if the table already knows it.
+fn disconnected(write_to: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>, iface: &GatewayId) {
+    write_to.send_if_modified(|m| {
+        m.get_mut(iface)
+            .filter(|i| i.ip_info.is_some())
+            .map(|i| i.ip_info = None)
+            .is_some()
+    });
+}
+
 #[instrument(skip(connection, device_proxy, write_to, db))]
 async fn watch_ip(
     connection: &Connection,
@@ -1893,10 +1903,12 @@ async fn watch_ip(
 
                 let managed = device_proxy.managed().await?;
                 if !managed {
+                    disconnected(write_to, &iface);
                     return Ok(());
                 }
                 let dac = device_proxy.active_connection().await?;
                 if &*dac == "/" {
+                    disconnected(write_to, &iface);
                     return Ok(());
                 }
 
@@ -2914,12 +2926,7 @@ impl NetworkInterfaceController {
                         .as_gateways()
                         .de()
                     {
-                        Ok(mut info) => {
-                            for (_, info) in OrdMapIterMut::from(&mut info) {
-                                info.ip_info = None;
-                            }
-                            info
-                        }
+                        Ok(info) => info,
                         Err(e) => {
                             tracing::error!(
                                 "{}",
