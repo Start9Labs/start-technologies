@@ -269,8 +269,10 @@ Nominate on the interface the user opens, which is the one carrying the control:
 Read the user's choice reactively, so re-running the action re-runs `setupInterfaces` and re-nominates:
 
 ```typescript
+import { primaryUrl } from './primaryUrl'
+
 export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
-  const primaryUrl = await storeJson.read(s => s.primaryUrl).const(effects)
+  const url = await primaryUrl.read().const(effects)
 
   const uiMulti = sdk.MultiHost.of(effects, 'ui-multi')
   const uiOrigin = await uiMulti.bindPort(uiPort, { protocol: 'http' })
@@ -285,7 +287,7 @@ export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
     username: null,
     path: '',
     query: {},
-    preferredLauncherAddress: primaryUrl,
+    preferredLauncherAddress: url,
   })
 
   return [await uiOrigin.export([ui])]
@@ -306,7 +308,36 @@ Some addresses are left out of the comparison, in the cases where StartOS can te
 > Nominate an address the people who use the service can actually reach, because StartOS opens it rather than second-guessing them. A public domain nominated on a home network needs the router to loop LAN traffic back to it, and a `.local` name nominated for a service reached from outside resolves for nobody who is away.
 
 > [!NOTE]
-> Only the origin has to match. The path and query of the opened URL come from this interface's own `path` and `query`, so changing either leaves the nomination standing — what pins it is the scheme, hostname and port, which is the part an origin-sensitive app checks. That also means reassigning the interface's external port unseats the nomination, which is correct: the origin the app was configured for changed too. Give the user a way back to a working choice — the reactive variant of [Set a Primary URL](./recipe-primary-url.md) raises a task when the stored URL goes missing, and a service whose URL is permanent has no watcher to do that.
+> Only the origin has to match. The path and query of the opened URL come from this interface's own `path` and `query`, so changing either leaves the nomination standing — what pins it is the scheme, hostname and port, which is the part an origin-sensitive app checks. That also means reassigning the interface's external port unseats the nomination, which is correct: the origin the app was configured for changed too. `setupPrimaryUrl`'s hook follows the chosen hostname to its new port, so the nomination moves with it; a service whose URL is permanent has no hook to do that.
+
+## Choosing a Primary URL
+
+A service that builds links, invites or callbacks from one URL asks the user which of its addresses that is. `sdk.setupPrimaryUrl()` supplies the whole exchange — the "Set Primary URL" action, the init hook that seeds and guards the choice, and a reactive reader for it — against a field of one of the package's file models:
+
+```typescript
+// primaryUrl.ts
+import { sdk } from './sdk'
+import { i18n } from './i18n'
+import { storeJson } from './fileModels/store.json'
+
+export const primaryUrl = sdk.setupPrimaryUrl({
+  hostId: 'ui-multi',
+  interfaceId: 'ui',
+  store: {
+    file: storeJson,
+    get: s => s.primaryUrl,
+    set: url => ({ primaryUrl: url }),
+  },
+  name: i18n('Set Primary URL'),
+  description: i18n('Choose the URL Ghost puts in the links it generates. Ghost restarts to apply the change.'),
+  fieldName: i18n('URL'),
+  reason: i18n('The primary URL is no longer one of Ghost’s addresses. Choose a new one.'),
+})
+```
+
+Register `primaryUrl.action` with `sdk.Actions.of()`, add `primaryUrl.init` to `sdk.setupInit()`, and read the choice wherever the service needs it — `await primaryUrl.read().const(effects)` in `setupMain` restarts the service when it changes, and the same read nominates it for **Open UI** above.
+
+The action lists the interface's addresses whether or not they are reachable from where the admin sits — every address the user has not disabled, loopback, link-local and the container bridge excluded. The hook stores the `.local` address when nothing is chosen yet (`defaultUrl` picks otherwise), follows the chosen hostname through a port or scheme change, and when that hostname is no longer among its addresses stores `defaultUrl`'s pick in its place, or with `onRemoved: 'task'` raises a task. A `.local` choice is judged only while some LAN interface is up, an IP choice only while the interface it came from is up, and a domain or Tor choice at once, so a link that is down leaves it standing. The hook keeps which interface a chosen IP came from in a file beside the store file, named after it and the action id (`store.json.set-primary-url.json`). The task, raised on `onRemoved: 'task'` or when nothing is left to fall back to, is `important` unless `severity` says otherwise; a critical one stops the service, which a stale link is rarely worth. `actionId` defaults to `set-primary-url`; keep it when adopting the helper in a package that already ships an action of that id, so the task's replay key survives (see [Retiring a replay key](tasks.md#retiring-a-replay-key)).
 
 ## Port Ranges
 

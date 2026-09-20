@@ -213,6 +213,7 @@ The `.build()` method returns an object containing the entire SDK surface area, 
 | **Health**       | `healthCheck.checkPortListening`, `.checkWebUrl`, `.runHealthScript`                                                                | Built-in health checks                            |
 | **Interfaces**   | `createInterface`, `MultiHost.of`, `setupInterfaces`, `serviceInterface.*`                                                          | Network endpoint management                       |
 | **Backups**      | `setupBackups`, `Backups.ofVolumes`, `Backups.ofSyncs`, `Backups.withOptions`                                                       | Backup configuration                              |
+| **Primary URL**  | `setupPrimaryUrl`                                                                                                                   | The URL a service advertises as its own           |
 | **Dependencies** | `setupDependencies`, `checkDependencies`                                                                                            | Dependency declaration and verification           |
 | **Init/Uninit**  | `setupInit`, `setupUninit`, `setupOnInit`, `setupOnUninit`                                                                          | Lifecycle hooks                                   |
 | **Containers**   | `SubContainer.of`, `SubContainer.withTemp`, `Mounts.of`                                                                             | Container execution with mounts                   |
@@ -311,6 +312,10 @@ Health checks are paired with **triggers** that control polling behavior:
 - `defaultTrigger` — 1 s while pending (`starting`/`waiting`/`failure`), 30 s otherwise
 - `cooldownTrigger` — Fixed interval between checks
 - `statusTrigger` — Per-status polling intervals with a default fallback
+
+### Primary URL (`lib/primaryUrl/`)
+
+`setupPrimaryUrl.ts` builds the action, init hook and reactive reader behind `sdk.setupPrimaryUrl`. The hook judges the stored choice against the interface's configured addresses (`addressInfo.configured`), not the reachable ones, and judges a `.local` choice only while some LAN interface is up and an IP choice only while the interface it came from is up, which it records beside the store file in a file named after it and the action id. A choice judged gone is replaced by `defaultUrl`'s pick, or reported as a task under `onRemoved: 'task'`.
 
 ### Backup System (`lib/backup/`)
 

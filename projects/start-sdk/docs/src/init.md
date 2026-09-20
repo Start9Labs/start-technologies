@@ -81,7 +81,7 @@ Put install-only work in a handler of its own when you can. A handler with no `.
 
 ## Watch State and Prompt (the admin-credentials pattern)
 
-For state the user owns — admin passwords, API tokens, primary URL — pair a `setupOnInit` watcher with an action. The watcher reads the store and, when the field is unset, surfaces a critical task pointing to the action. The action handles generation, storage, and display, so first-set and later rotation share one code path.
+For state the user owns — admin passwords, API tokens — pair a `setupOnInit` watcher with an action. The watcher reads the store and, when the field is unset, surfaces a critical task pointing to the action. The action handles generation, storage, and display, so first-set and later rotation share one code path. The primary URL comes with this pair built in: [Set a Primary URL](recipe-primary-url.md).
 
 ```typescript
 // init/watchCredentials.ts

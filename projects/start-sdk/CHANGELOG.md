@@ -129,6 +129,26 @@
   so handle its absence. See
   [Hardware Virtualization (KVM)](https://docs.start9.com/packaging/manifest.html#hardware-virtualization-kvm)
 
+- **`sdk.setupPrimaryUrl()` replaces the hand-rolled "Set Primary URL" action
+  and watcher.** Point it at the interface the URL belongs to and at the
+  file-model field holding the choice; it returns the action to register, the
+  init hook to add to `setupInit`, and `read()`, a reactive reader for the
+  choice. The hook stores the `.local` address when nothing is chosen, follows
+  the chosen hostname through a port or scheme change, and when that
+  hostname is no longer among its configured addresses stores `defaultUrl`'s
+  pick in its place, or with `onRemoved: 'task'` raises a task (`important`
+  by default). A `.local` choice is judged only while some LAN
+  interface is up, an IP choice only while the interface it came from is up
+  (recorded beside the store file, as `<store>.<action id>.json`), and a
+  domain or Tor choice at once, so a link that is down keeps the choice. See
+  [Set a Primary URL](https://docs.start9.com/packaging/recipe-primary-url.html)
+
+- **`addressInfo.configured` lists an interface's addresses whether or not they
+  are reachable right now.** `hostnames`, `nonLocal` and the other filters drop
+  an mDNS (`.local`) name while no LAN IP is up on its interface; `configured`
+  keeps every address the user has not disabled, and chains the same filters
+  (`addressInfo.configured.nonLocal.format()`)
+
 - **`createInterface` accepts `preferredLauncherAddress`.** A UI interface can
   nominate the absolute URL that StartOS should open when a service depends on
   one canonical origin. See

@@ -50,6 +50,10 @@ import { GetStatus } from '@start9labs/start-core/util/GetStatus'
 import * as patterns from '@start9labs/start-core/util/patterns'
 import { Backups } from './backup/Backups'
 import { SetupBackupsParams, setupBackups } from './backup/setupBackups'
+import {
+  SetupPrimaryUrlParams,
+  setupPrimaryUrl,
+} from './primaryUrl/setupPrimaryUrl'
 import { checkWebUrl, runHealthScript } from './health/checkFns'
 import { checkPortListening } from './health/checkFns/checkPortListening'
 import { setupMain } from './mainFn'
@@ -693,6 +697,41 @@ export class StartSdk<Manifest extends T.SDKManifest> {
        */
       setupBackups: (options: SetupBackupsParams<Manifest>) =>
         setupBackups<Manifest>(options),
+      /**
+       * @description Let the user choose which of an interface's URLs the service advertises as its own — the one it puts in the links, invites and callbacks it generates.
+       *
+       *    Returns `action` (add it to `sdk.Actions.of()`), `init` (add it to `sdk.setupInit()`) and `read()`, a reactive reader for the choice.
+       *
+       *    `init` stores the `.local` address when nothing is chosen yet, follows a port or scheme change of the chosen hostname, and when that hostname is no longer one of the interface's addresses stores `defaultUrl`'s pick in its place, or with `onRemoved: 'task'` raises a task. A `.local` choice is judged only while some LAN interface is up, an IP choice only while the interface it came from is up, and a domain or Tor choice at once, so a link that is down keeps the choice.
+       * @example
+       * ```
+        import { sdk } from './sdk'
+        import { i18n } from './i18n'
+        import { storeJson } from './fileModels/store.json'
+
+        export const primaryUrl = sdk.setupPrimaryUrl({
+          hostId: 'ui-multi',
+          interfaceId: 'ui',
+          store: {
+            file: storeJson,
+            get: s => s.primaryUrl,
+            set: url => ({ primaryUrl: url }),
+          },
+          name: i18n('Set Primary URL'),
+          description: i18n('Choose the URL Immich puts in the share links it generates. Immich restarts to apply the change.'),
+          fieldName: i18n('URL'),
+          reason: i18n('The primary URL is no longer one of Immich’s addresses. Choose a new one.'),
+        })
+
+        // main.ts
+        const url = await primaryUrl.read().const(effects)
+
+        // interfaces.ts — so Open UI opens the chosen address
+        preferredLauncherAddress: await primaryUrl.read().const(effects),
+       * ```
+       */
+      setupPrimaryUrl: <A>(params: SetupPrimaryUrlParams<A>) =>
+        setupPrimaryUrl<A>(this.manifest.id, params),
       /**
        * @description Use this function to set dependency information.
        * @example
