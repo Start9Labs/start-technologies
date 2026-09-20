@@ -499,8 +499,10 @@ impl Service {
                 let backup = crate::volume::InstallBackup::of(id);
                 backup.resolve_pending().await.log_err();
                 // Data that predates the install can lack a backup.
-                cleanup(ctx, id, true).await.log_err();
+                let keep_volumes = !backup.is_fresh().await;
+                cleanup(ctx, id, keep_volumes).await.log_err();
                 report_failed_rollback(ctx, id, backup.restore().await).await?;
+                backup.remove().await.log_err();
                 ctx.db
                     .mutate(|v| v.as_public_mut().as_package_data_mut().remove(id))
                     .await
