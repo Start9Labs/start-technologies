@@ -305,7 +305,11 @@ export class InterfaceService {
         const addresses = groupMap.get(g.id)!.sort(sortDomainsFirst)
 
         for (const mdns of addresses) {
-          if (mdns.enabled && mdns.hostnameInfo.metadata.kind === 'mdns') {
+          if (
+            mdns.enabled &&
+            !mdns.hostnameInfo.ssl &&
+            mdns.hostnameInfo.metadata.kind === 'mdns'
+          ) {
             const ips = addresses.filter(
               a =>
                 a.hostnameInfo.port === mdns.hostnameInfo.port &&
@@ -411,7 +415,7 @@ export class InterfaceService {
 
 export type GatewayAddress = {
   enabled: boolean
-  // An enabled mDNS address whose gateway has IPs, none of them enabled.
+  // An enabled non-SSL mDNS address whose gateway has IPs, none of them enabled.
   allIpsDisabled: boolean
   // An IPv6 GUA gets a Local/Public dropdown in the access column (its WAN
   // opt-in, carried by `hostnameInfo.public`); other addresses are read-only.
