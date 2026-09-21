@@ -113,15 +113,26 @@ impl Host {
 /// Gateways over which `<hostname>.local` is resolvable: a LAN interface
 /// serves it by mDNS multicast; a WireGuard interface only once its resolver
 /// has accepted the injected record (`net::dns_update`), tracked as its
-/// `dns_update` capability.
-fn mdns_gateways(gateways: &OrdMap<GatewayId, NetworkInterfaceInfo>) -> BTreeSet<GatewayId> {
+/// `dns_update` capability. A disconnected gateway keeps its place in `previous`.
+fn mdns_gateways(
+    gateways: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+    previous: &BTreeSet<HostnameInfo>,
+) -> BTreeSet<GatewayId> {
     gateways
         .iter()
-        .filter(|(_, g)| {
-            matches!(
-                g.ip_info.as_ref().and_then(|i| i.device_type),
-                Some(NetworkInterfaceType::Ethernet | NetworkInterfaceType::Wireless)
-            ) || (g.is_wireguard() && g.dns_update.supported == Some(true))
+        .filter(|(id, g)| match &g.ip_info {
+            Some(ip_info) => {
+                matches!(
+                    ip_info.device_type,
+                    Some(NetworkInterfaceType::Ethernet | NetworkInterfaceType::Wireless)
+                ) || (g.is_wireguard() && g.dns_update.supported == Some(true))
+            }
+            None => previous.iter().any(|h| {
+                matches!(
+                    &h.metadata,
+                    HostnameMetadata::Mdns { gateways } if gateways.contains(*id)
+                )
+            }),
         })
         .map(|(id, _)| id.clone())
         .collect()
@@ -155,6 +166,7 @@ impl Model<Host> {
 
             // Preserve existing plugin-provided addresses across recomputation
             let mut available = bind.as_addresses().as_available().de()?;
+            let mdns_gateways = mdns_gateways(gateways, &available);
             available.retain(|h| matches!(h.metadata, HostnameMetadata::Plugin { .. }));
             let gua_wan = bind.as_addresses().as_gua_wan().de()?;
             for (gid, g) in gateways {
@@ -241,7 +253,6 @@ impl Model<Host> {
 
             // mdns
             let mdns_host = mdns.local_domain_name();
-            let mdns_gateways = mdns_gateways(gateways);
             if let Some(port) = net
                 .assigned_port
                 .filter(|_| opt.secure.map_or(true, |_| opt.wants_plain_port()))
@@ -360,12 +371,12 @@ impl Model<Host> {
         // `external_start_port` as its port so the single-port
         // enabled/disabled + forward machinery applies unchanged.
         let mdns_host = mdns.local_domain_name();
-        let mdns_gateways = mdns_gateways(gateways);
         for (_, range) in this.binding_ranges.as_entries_mut()? {
             let port = range.as_external_start_port().de()?;
 
             // Preserve any plugin-provided addresses across recomputation.
             let mut available = range.as_addresses().as_available().de()?;
+            let mdns_gateways = mdns_gateways(gateways, &available);
             available.retain(|h| matches!(h.metadata, HostnameMetadata::Plugin { .. }));
 
             for (gid, g) in gateways {
@@ -410,7 +421,7 @@ impl Model<Host> {
                     hostname: mdns_host.clone(),
                     port: Some(port),
                     metadata: HostnameMetadata::Mdns {
-                        gateways: mdns_gateways.clone(),
+                        gateways: mdns_gateways,
                     },
                 });
             }
@@ -916,6 +927,7 @@ pub async fn list_hosts(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::net::Ipv4Addr;
     use std::sync::Arc;
 
@@ -976,7 +988,7 @@ mod tests {
         .collect();
 
         assert_eq!(
-            mdns_gateways(&ifaces),
+            mdns_gateways(&ifaces, &BTreeSet::new()),
             [gw("eth0"), gw("wlan0"), gw("wg-ok")].into_iter().collect()
         );
     }
@@ -1044,6 +1056,52 @@ mod tests {
             &address.metadata,
             HostnameMetadata::Ipv4 { gateway } if gateway == &gw("wg-out")
         )));
+    }
+
+    fn mdns_rows(host: &Model<Host>, port: u16) -> Vec<BTreeSet<GatewayId>> {
+        host.de().unwrap().bindings[&port]
+            .addresses
+            .available
+            .iter()
+            .filter_map(|address| match &address.metadata {
+                HostnameMetadata::Mdns { gateways } => Some(gateways.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn mdns_address_outlives_its_gateways_addresses() {
+        let server = ServerHostname::new(InternedString::intern("server")).unwrap();
+        let mut eth0 = iface(NetworkInterfaceType::Ethernet, None);
+        Arc::make_mut(eth0.ip_info.as_mut().unwrap()).subnets =
+            ["192.0.2.10/24".parse::<IpNet>().unwrap()]
+                .into_iter()
+                .collect();
+        let mut gateways: OrdMap<GatewayId, NetworkInterfaceInfo> =
+            [(gw("eth0"), eth0)].into_iter().collect();
+        let mut ports = AvailablePorts::new();
+        let mut host = host();
+        host.add_binding(&mut ports, 9735, plain(9735), false)
+            .unwrap();
+        host.update_addresses(&server, &gateways, &ports).unwrap();
+        assert_eq!(mdns_rows(&host, 9735), [[gw("eth0")].into_iter().collect()]);
+
+        gateways[&gw("eth0")].ip_info = None;
+        host.update_addresses(&server, &gateways, &ports).unwrap();
+        assert_eq!(mdns_rows(&host, 9735), [[gw("eth0")].into_iter().collect()]);
+        let bind = &host.de().unwrap().bindings[&9735];
+        assert!(!bind.addresses.available.iter().any(|a| a.metadata.is_ip()));
+        assert!(
+            bind.addresses
+                .enabled()
+                .iter()
+                .any(|a| matches!(a.metadata, HostnameMetadata::Mdns { .. }))
+        );
+
+        gateways.remove(&gw("eth0"));
+        host.update_addresses(&server, &gateways, &ports).unwrap();
+        assert!(mdns_rows(&host, 9735).is_empty());
     }
 
     #[test]

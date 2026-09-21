@@ -80,6 +80,7 @@ export const mockPatchData: DataModel = {
               enabled: [],
               disabled: [],
               guaWan: [],
+              lanEnabled: [],
               available: [
                 {
                   ssl: true,
@@ -577,6 +578,7 @@ export const mockPatchData: DataModel = {
                 enabled: ['203.0.113.45:42443', '[2001:db8:abcd::a3b:2]:1234'],
                 disabled: [],
                 guaWan: ['[2001:db8:abcd::a3b:2]:1234'],
+                lanEnabled: [],
                 available: [
                   {
                     ssl: true,
@@ -752,6 +754,7 @@ export const mockPatchData: DataModel = {
                 enabled: ['203.0.113.45:49152'],
                 disabled: [],
                 guaWan: [],
+                lanEnabled: [],
                 available: [
                   {
                     ssl: false,
@@ -850,6 +853,7 @@ export const mockPatchData: DataModel = {
                 enabled: [],
                 disabled: [],
                 guaWan: [],
+                lanEnabled: [],
                 available: [
                   {
                     ssl: false,
@@ -926,6 +930,7 @@ export const mockPatchData: DataModel = {
                 enabled: [],
                 disabled: [],
                 guaWan: [],
+                lanEnabled: [],
                 available: [],
               },
               options: {

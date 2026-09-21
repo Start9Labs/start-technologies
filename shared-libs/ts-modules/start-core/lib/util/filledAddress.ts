@@ -325,6 +325,60 @@ function isPublicIp(h: HostnameInfo): boolean {
   return h.public && (h.metadata.kind === 'ipv4' || h.metadata.kind === 'ipv6')
 }
 
+function overridden(
+  overrides: DerivedAddressInfo['disabled'],
+  h: HostnameInfo,
+): boolean {
+  return overrides.some(
+    ([hostname, port]) => hostname === h.hostname && port === (h.port ?? 0),
+  )
+}
+
+function mdnsCovers(mdns: HostnameInfo, ip: HostnameInfo): boolean {
+  return (
+    mdns.metadata.kind === 'mdns' &&
+    (ip.metadata.kind === 'ipv4' || ip.metadata.kind === 'ipv6') &&
+    mdns.port === ip.port &&
+    mdns.metadata.gateways.includes(ip.metadata.gateway)
+  )
+}
+
+/**
+ * Whether the user's overrides leave this address on. A LAN IP without an
+ * override follows the mDNS address resolving to it.
+ */
+export function isAddressEnabled(
+  addr: DerivedAddressInfo,
+  h: HostnameInfo,
+): boolean {
+  if (isPublicIp(h)) {
+    if (h.port === null) return true
+    const sa =
+      h.metadata.kind === 'ipv6'
+        ? `[${h.hostname}]:${h.port}`
+        : `${h.hostname}:${h.port}`
+    return addr.enabled.includes(sa)
+  }
+  if (h.metadata.kind === 'ipv4' || h.metadata.kind === 'ipv6') {
+    if (overridden(addr.lanEnabled, h)) return true
+    if (overridden(addr.disabled, h)) return false
+    return addr.available
+      .filter(mdns => mdnsCovers(mdns, h))
+      .every(mdns => !overridden(addr.disabled, mdns))
+  }
+  if (!overridden(addr.disabled, h)) return true
+  return (
+    h.metadata.kind === 'mdns' &&
+    !h.ssl &&
+    addr.available.some(
+      ip =>
+        mdnsCovers(h, ip) &&
+        (!ip.public || ip.metadata.kind === 'ipv6') &&
+        isAddressEnabled(addr, ip),
+    )
+  )
+}
+
 /**
  * mDNS (.local) names resolve only via LAN IPs on a shared gateway, so an mDNS
  * address is reachable only when one of its gateways has an enabled LAN IP among
@@ -345,25 +399,12 @@ export function mdnsResolvable(
   return h.metadata.gateways.some(g => lanGateways.has(g))
 }
 
+// An mDNS address whose gateways hold no LAN IP at all is kept.
 function enabledAddresses(addr: DerivedAddressInfo): HostnameInfo[] {
-  const enabled = addr.available.filter(h => {
-    if (isPublicIp(h)) {
-      // Public IPs: disabled by default, explicitly enabled via SocketAddr string
-      if (h.port === null) return true
-      const sa =
-        h.metadata.kind === 'ipv6'
-          ? `[${h.hostname}]:${h.port}`
-          : `${h.hostname}:${h.port}`
-      return addr.enabled.includes(sa)
-    } else {
-      // Everything else: enabled by default, explicitly disabled via [hostname, port] tuple
-      return !addr.disabled.some(
-        ([hostname, port]) => hostname === h.hostname && port === (h.port ?? 0),
-      )
-    }
-  })
-
-  return enabled.filter(h => mdnsResolvable(h, enabled))
+  const enabled = addr.available.filter(h => isAddressEnabled(addr, h))
+  return enabled.filter(
+    h => mdnsResolvable(h, enabled) || !mdnsResolvable(h, addr.available),
+  )
 }
 
 /**

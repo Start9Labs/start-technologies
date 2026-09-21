@@ -1,6 +1,6 @@
-import { Host } from '../osBindings'
+import { Host, HostnameInfo } from '../osBindings'
 import { deepEqual } from '../util'
-import { fillHost } from '../util/filledAddress'
+import { fillHost, isAddressEnabled } from '../util/filledAddress'
 
 const host = (fingerprint: string): Host => ({
   bindings: {
@@ -12,6 +12,7 @@ const host = (fingerprint: string): Host => ({
         enabled: [],
         disabled: [],
         guaWan: [],
+        lanEnabled: [],
         available: [
           {
             ssl: true,
@@ -31,7 +32,7 @@ const host = (fingerprint: string): Host => ({
             public: false,
             hostname: 'relay.local',
             port: 5223,
-            metadata: { kind: 'mdns', gateways: [] },
+            metadata: { kind: 'mdns', gateways: ['eth0', 'wlan0'] },
           },
         ],
       },
@@ -100,6 +101,66 @@ describe('fillHost', () => {
     ])
     expect(address.nonLocal.hostnames.map(h => h.hostname)).toEqual([
       'relay.onion',
+      'relay.local',
     ])
+  })
+})
+
+describe('LAN address overrides', () => {
+  const lanIp = (hostname: string, gateway: string): HostnameInfo => ({
+    ssl: true,
+    public: false,
+    hostname,
+    port: 5223,
+    metadata: { kind: 'ipv4', gateway },
+  })
+  const eth = lanIp('192.0.2.10', 'eth0')
+  const wifi = lanIp('198.51.100.10', 'wlan0')
+
+  const lan = (...ips: HostnameInfo[]) => {
+    const h = host('AAAA=')
+    const addresses = h.bindings[5223].addresses
+    addresses.available.push(...ips)
+    return { h, addresses }
+  }
+  const hostnames = (h: Host) => addressOf(h).hostnames.map(a => a.hostname)
+
+  test('an mDNS address stays while its gateways hold no LAN IP', () => {
+    expect(hostnames(lan().h)).toContain('relay.local')
+  })
+
+  test('a LAN IP is disabled on its own', () => {
+    const { h, addresses } = lan(eth, wifi)
+    addresses.disabled = [[eth.hostname, 5223]]
+
+    expect(hostnames(h)).toEqual(['relay.onion', 'relay.local', wifi.hostname])
+  })
+
+  test('an mDNS address with every LAN IP disabled is left out', () => {
+    const { h, addresses } = lan(eth)
+    addresses.disabled = [[eth.hostname, 5223]]
+    const mdns = addresses.available.find(a => a.metadata.kind === 'mdns')!
+
+    expect(isAddressEnabled(addresses, mdns)).toBe(true)
+    expect(hostnames(h)).toEqual(['relay.onion'])
+  })
+
+  test('a LAN IP without an override follows its mDNS address', () => {
+    const { h, addresses } = lan(eth, wifi)
+    addresses.disabled = [['relay.local', 5223]]
+    addresses.lanEnabled = [[eth.hostname, 5223]]
+
+    expect(hostnames(h)).toEqual(['relay.onion', eth.hostname])
+  })
+
+  test('an enabled LAN IP serves its mDNS address on a non-SSL port', () => {
+    const { addresses } = lan(eth)
+    addresses.available = addresses.available.map(a => ({ ...a, ssl: false }))
+    addresses.disabled = [['relay.local', 5223]]
+    const mdns = addresses.available.find(a => a.metadata.kind === 'mdns')!
+
+    expect(isAddressEnabled(addresses, mdns)).toBe(false)
+    addresses.lanEnabled = [[eth.hostname, 5223]]
+    expect(isAddressEnabled(addresses, mdns)).toBe(true)
   })
 })

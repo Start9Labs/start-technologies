@@ -89,6 +89,9 @@
 
 ### Added
 
+- **`utils.isAddressEnabled(addresses, hostname)`** reports whether the user's
+  overrides leave one of a binding's addresses on
+
 - **Scaffolded packages get a fourth workflow, `syncNext.yml`**, which keeps the
   `next` iteration branch in step with the base branch it stacks on. A repo with
   no `next` gets one created at the base tip on the first run
@@ -136,6 +139,11 @@
   See [Result Types](https://docs.start9.com/packaging/actions.html#result-types)
 
 ### Fixed
+
+- **A filled address keeps the server's `.local` name while its gateways hold no
+  LAN IP address.** It left `hostnames` whenever the network dropped, which made
+  a stored URL compare as removed. It is still left out when every LAN IP
+  address it resolves to is disabled.
 
 - **`Backups.withMariadbDump` works against MariaDB 11 images**, official or
   packaged from a distribution

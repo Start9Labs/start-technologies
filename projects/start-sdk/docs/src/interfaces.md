@@ -4,7 +4,7 @@
 
 ## Network Reachability
 
-Your package declares _what_ it exposes. The **user** decides _where_ it is reachable. An interface is bound to the server's [gateways](/start-os/gateways.html), and the user enables or disables each resulting address individually from the service's **Interfaces** tab. LAN addresses (the `.local` hostname, the LAN IP) are enabled by default; public IPv4 addresses are **off** by default.
+Your package declares _what_ it exposes. The **user** decides _where_ it is reachable. An interface is bound to the server's [gateways](/start-os/gateways.html), and the user enables or disables each resulting address individually from the service's **Interfaces** tab. LAN addresses (the `.local` hostname, the LAN IP) are enabled by default; public IPv4 addresses are **off** by default. A LAN IP the user has not switched follows the `.local` hostname, and on an interface served without TLS `.local` is on while one of its LAN IPs is. A filled address keeps an enabled `.local` hostname while the server has no LAN IP for it to resolve to, and leaves it out when every LAN IP it resolves to is disabled.
 
 **A public domain belongs to the host, but is enabled per binding.** The user adds it naming one internal port, and its addresses — the plain one and, where the binding has `addSsl`, the TLS one — are enabled on **that** binding straight away. Every other binding on the same `MultiHost` also gains the domain, but **off by default**, to be switched on individually like any other address. So a host that binds two ports needs the domain enabled twice, and a package that starts binding a second port later does not inherit the user's earlier choice for it.
 

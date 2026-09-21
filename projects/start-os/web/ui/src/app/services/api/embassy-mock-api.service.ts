@@ -2253,17 +2253,28 @@ export class MockApiService extends ApiService {
       ])
     } else {
       const port = h.port ?? 0
-      const arr = current.disabled.filter(
-        ([dHost, dPort]) => !(dHost === h.hostname && dPort === port),
-      )
+      const without = (overrides: [string, number][]) =>
+        overrides.filter(
+          ([dHost, dPort]) => !(dHost === h.hostname && dPort === port),
+        )
+      const disabled = without(current.disabled)
+      const lanEnabled = without(current.lanEnabled)
 
       if (!enabled) {
-        arr.push([h.hostname, port])
+        disabled.push([h.hostname, port])
+      } else if (h.metadata.kind === 'ipv4' || h.metadata.kind === 'ipv6') {
+        lanEnabled.push([h.hostname, port])
       }
 
-      current.disabled = arr
+      current.disabled = disabled
+      current.lanEnabled = lanEnabled
       this.mockRevision([
-        { op: PatchOp.REPLACE, path: `${basePath}/disabled`, value: arr },
+        { op: PatchOp.REPLACE, path: `${basePath}/disabled`, value: disabled },
+        {
+          op: PatchOp.REPLACE,
+          path: `${basePath}/lanEnabled`,
+          value: lanEnabled,
+        },
       ])
     }
   }

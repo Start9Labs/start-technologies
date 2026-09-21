@@ -42,6 +42,7 @@ function hostWith(
     enabled: [],
     disabled: options.disabled ?? [],
     guaWan: [],
+    lanEnabled: [],
     available,
   }
   const bindInfo = {

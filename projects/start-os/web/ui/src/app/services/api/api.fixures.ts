@@ -2455,6 +2455,7 @@ PersistentKeepalive = 25`
               enabled: ['[2001:db8:abcd::a3b:2]:1234'],
               disabled: [],
               guaWan: ['[2001:db8:abcd::a3b:2]:1234'],
+              lanEnabled: [],
               available: [
                 {
                   ssl: true,
@@ -2545,6 +2546,7 @@ PersistentKeepalive = 25`
               enabled: [],
               disabled: [],
               guaWan: [],
+              lanEnabled: [],
               available: [],
             },
             options: {
@@ -2589,6 +2591,7 @@ PersistentKeepalive = 25`
               enabled: [],
               disabled: [],
               guaWan: [],
+              lanEnabled: [],
               available: [],
             },
             options: {

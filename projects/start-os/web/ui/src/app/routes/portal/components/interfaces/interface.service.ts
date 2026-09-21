@@ -12,10 +12,6 @@ import {
 import { toAuthorityName } from 'src/app/utils/acme'
 import { getManifest } from 'src/app/utils/get-package-data'
 
-function isPublicIp(h: T.HostnameInfo): boolean {
-  return h.public && (h.metadata.kind === 'ipv4' || h.metadata.kind === 'ipv6')
-}
-
 // An IPv6 global-unicast address (GUA) — not loopback / ULA (fc00::/7) /
 // link-local (fe80::/10). Mirrors the backend's `ipv6_is_local` complement, so
 // the UI offers the Local/Public dropdown for exactly the addresses the
@@ -30,21 +26,6 @@ function isGua(h: T.HostnameInfo): boolean {
   const isUla = (hextet & 0xfe00) === 0xfc00
   const isLinkLocal = (hextet & 0xffc0) === 0xfe80
   return !isUla && !isLinkLocal
-}
-
-function isEnabled(addr: T.DerivedAddressInfo, h: T.HostnameInfo): boolean {
-  if (isPublicIp(h)) {
-    if (h.port === null) return true
-    const sa =
-      h.metadata.kind === 'ipv6'
-        ? `[${h.hostname}]:${h.port}`
-        : `${h.hostname}:${h.port}`
-    return addr.enabled.includes(sa)
-  } else {
-    return !addr.disabled.some(
-      ([hostname, port]) => hostname === h.hostname && port === (h.port ?? 0),
-    )
-  }
 }
 
 function getGatewayIds(h: T.HostnameInfo): string[] {
@@ -287,8 +268,15 @@ export class InterfaceService {
       for (const gid of gatewayIds) {
         const list = groupMap.get(gid)
         if (!list) continue
+        const enabled = utils.isAddressEnabled(addr, h)
         list.push({
-          enabled: isEnabled(addr, h),
+          enabled,
+          locked:
+            enabled &&
+            addr.disabled.some(
+              ([hostname, port]) =>
+                hostname === h.hostname && port === (h.port ?? 0),
+            ),
           gua: isGua(h),
           type: getAddressType(h),
           access: h.public ? 'public' : 'private',
@@ -316,16 +304,6 @@ export class InterfaceService {
       .filter(g => (groupMap.get(g.id)?.length ?? 0) > 0)
       .map(g => {
         const addresses = groupMap.get(g.id)!.sort(sortDomainsFirst)
-
-        // mDNS resolves only via enabled LAN IPs on this gateway
-        const enabledHostnames = addresses
-          .filter(a => a.enabled)
-          .map(a => a.hostnameInfo)
-        for (const a of addresses) {
-          if (a.hostnameInfo.metadata.kind === 'mdns') {
-            a.enabled = utils.mdnsResolvable(a.hostnameInfo, enabledHostnames)
-          }
-        }
 
         return {
           gatewayId: g.id,
@@ -423,6 +401,8 @@ export class InterfaceService {
 
 export type GatewayAddress = {
   enabled: boolean
+  // An enabled LAN IP on a non-SSL port serves the mDNS address regardless.
+  locked: boolean
   // An IPv6 GUA gets a Local/Public dropdown in the access column (its WAN
   // opt-in, carried by `hostnameInfo.public`); other addresses are read-only.
   gua: boolean
