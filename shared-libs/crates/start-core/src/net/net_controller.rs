@@ -315,6 +315,17 @@ fn ssl_vhost_public_v4<'a>(
         .collect()
 }
 
+/// LAN addresses a binding's SSL `*` vhost answers on: its enabled SSL-port IPs.
+fn ssl_vhost_private_ips<'a>(
+    enabled_addresses: impl IntoIterator<Item = &'a HostnameInfo>,
+) -> BTreeSet<IpAddr> {
+    enabled_addresses
+        .into_iter()
+        .filter(|a| !a.public && a.ssl && a.metadata.is_ip())
+        .filter_map(|a| a.hostname.parse().ok())
+        .collect()
+}
+
 /// LAN addresses a forwarded port answers on. An IP admits itself; a private
 /// domain, every address of its gateways.
 fn forwarded_lan_ips<'a>(
@@ -448,15 +459,8 @@ impl NetServiceData {
             // ours — terminating (add_ssl), or an SNI-agnostic passthrough when
             // the container serves its own TLS.
             if let Some(assigned_ssl_port) = bind.net.assigned_ssl_port {
-                // Collect private IPs from enabled LAN-only addresses' gateways
-                // (a GUA set to LAN+WAN is WAN, so it lands in the public set).
-                let server_private_ips: BTreeSet<IpAddr> = enabled_addresses
-                    .iter()
-                    .filter(|a| !a.public)
-                    .flat_map(|a| a.metadata.gateways())
-                    .filter_map(|gw| net_ifaces.get(gw).and_then(|info| info.ip_info.as_ref()))
-                    .flat_map(|ip_info| ip_info.subnets.iter().map(|s| s.addr()))
-                    .collect();
+                // A GUA set to LAN+WAN is WAN, so it lands in the public set.
+                let server_private_ips = ssl_vhost_private_ips(enabled_addresses.iter().copied());
 
                 // Public gateways, split by family: a bare public IPv4 (WAN IP)
                 // and a LAN+WAN GUA are independently toggleable, and the vhost
@@ -1607,6 +1611,38 @@ mod tests {
             }),
             secure: secure_ssl.map(|ssl| Security { ssl }),
         }
+    }
+
+    #[test]
+    fn the_bare_ip_vhost_answers_on_its_enabled_ssl_ips_alone() {
+        let eth = GatewayId::from(InternedString::intern("eth0"));
+        let row = |host: &str, ssl, public, metadata| HostnameInfo {
+            ssl,
+            public,
+            hostname: InternedString::intern(host),
+            port: Some(if ssl { 8443 } else { 8080 }),
+            metadata,
+        };
+        let ipv4 = || HostnameMetadata::Ipv4 {
+            gateway: eth.clone(),
+        };
+        let mdns = row(
+            "server.local",
+            true,
+            false,
+            HostnameMetadata::Mdns {
+                gateways: BTreeSet::from([eth.clone()]),
+            },
+        );
+        let plain = row("192.0.2.10", false, false, ipv4());
+        let wan = row("198.51.100.2", true, true, ipv4());
+        let ssl = row("192.0.2.10", true, false, ipv4());
+
+        assert!(ssl_vhost_private_ips([&mdns, &plain, &wan]).is_empty());
+        assert_eq!(
+            ssl_vhost_private_ips([&mdns, &plain, &wan, &ssl]),
+            BTreeSet::from(["192.0.2.10".parse::<IpAddr>().unwrap()])
+        );
     }
 
     #[test]
