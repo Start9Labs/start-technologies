@@ -116,6 +116,13 @@ describe('LAN address overrides', () => {
   })
   const eth = lanIp('192.0.2.10', 'eth0')
   const wifi = lanIp('198.51.100.10', 'wlan0')
+  const gua: HostnameInfo = {
+    ssl: false,
+    public: true,
+    hostname: '2001:db8::10',
+    port: 5223,
+    metadata: { kind: 'ipv6', gateway: 'eth0', scopeId: 0 },
+  }
 
   const lan = (...ips: HostnameInfo[]) => {
     const h = host('AAAA=')
@@ -162,5 +169,23 @@ describe('LAN address overrides', () => {
     expect(isAddressEnabled(addresses, mdns)).toBe(false)
     addresses.lanEnabled = [[eth.hostname, 5223]]
     expect(isAddressEnabled(addresses, mdns)).toBe(true)
+  })
+
+  test('an enabled public GUA keeps mDNS reachable on a non-SSL port', () => {
+    const { h, addresses } = lan(eth, gua)
+    addresses.available = addresses.available.map(a => ({ ...a, ssl: false }))
+    addresses.disabled = [
+      ['relay.local', 5223],
+      [eth.hostname, 5223],
+    ]
+    addresses.enabled = [`[${gua.hostname}]:5223`]
+
+    expect(hostnames(h)).toEqual(['relay.onion', 'relay.local', gua.hostname])
+  })
+
+  test('a disabled public GUA does not look like a disconnected gateway', () => {
+    const { h } = lan(gua)
+
+    expect(hostnames(h)).toEqual(['relay.onion'])
   })
 })

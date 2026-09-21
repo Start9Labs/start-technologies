@@ -390,11 +390,17 @@ export function mdnsResolvable(
 ): boolean {
   if (h.metadata.kind !== 'mdns') return true
   const lanGateways = new Set(
-    enabled.flatMap(a =>
-      !a.public && (a.metadata.kind === 'ipv4' || a.metadata.kind === 'ipv6')
-        ? [a.metadata.gateway]
-        : [],
-    ),
+    enabled.flatMap(a => {
+      if (a.metadata.kind === 'ipv4') {
+        return a.public ? [] : [a.metadata.gateway]
+      }
+      if (a.metadata.kind === 'ipv6') {
+        return !a.public || IpAddress.parse(a.hostname).isGua()
+          ? [a.metadata.gateway]
+          : []
+      }
+      return []
+    }),
   )
   return h.metadata.gateways.some(g => lanGateways.has(g))
 }
