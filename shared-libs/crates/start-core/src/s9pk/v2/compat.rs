@@ -3,7 +3,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use exver::{ExtendedVersion, VersionRange};
+use exver::{ExtendedVersion, Version, VersionRange};
 use tokio::io::{AsyncRead, AsyncSeek, AsyncWriteExt};
 use tokio::process::Command;
 
@@ -20,7 +20,7 @@ use crate::s9pk::v2::pack::{CONTAINER_TOOL, ImageSource, PackSource};
 use crate::s9pk::v2::{S9pk, SIG_CONTEXT};
 use crate::util::Invoke;
 use crate::util::io::{TmpDir, create_file};
-use crate::{ImageId, VolumeId};
+use crate::{ImageId, PackageId, VolumeId};
 
 pub const MAGIC_AND_VERSION: &[u8] = &[0x3b, 0x3b, 0x01];
 
@@ -202,22 +202,43 @@ impl S9pk<TmpSource<PackSource>> {
     }
 }
 
+/// The 0.4 version a 0.3.5.1 package's data continues under.
+pub fn migrated_version(
+    id: &PackageId,
+    title: &str,
+    version: exver::emver::Version,
+) -> ExtendedVersion {
+    let version = ExtendedVersion::from(version);
+    match &**id {
+        "bitcoind" if title.to_ascii_lowercase().contains("knots") => {
+            // 29.3.0 is the Community Registry's 29.3.knots20260210, the last Knots before RDTS.
+            let flavor = if *version.upstream() <= Version::new([29, 3, 0], []) {
+                "knotsprerdts"
+            } else {
+                "knots"
+            };
+            version.with_flavor(flavor)
+        }
+        "lnd" | "ride-the-lightning" | "datum" => {
+            version.map_upstream(|v| v.with_prerelease(["beta".into()]))
+        }
+        "lightning-terminal" | "robosats" => {
+            version.map_upstream(|v| v.with_prerelease(["alpha".into()]))
+        }
+        _ => version,
+    }
+}
+
 impl TryFrom<ManifestV1> for Manifest {
     type Error = Error;
     fn try_from(mut value: ManifestV1) -> Result<Self, Self::Error> {
         let default_url = value.upstream_repo.clone();
-        let mut version = ExtendedVersion::from(
+        let version = migrated_version(
+            &value.id,
+            &value.title,
             exver::emver::Version::from_str(&value.version)
                 .with_kind(ErrorKind::Deserialization)?,
         );
-        if &*value.id == "bitcoind" && value.title.to_ascii_lowercase().contains("knots") {
-            version = version.with_flavor("knots");
-        } else if &*value.id == "lnd" || &*value.id == "ride-the-lightning" || &*value.id == "datum"
-        {
-            version = version.map_upstream(|v| v.with_prerelease(["beta".into()]));
-        } else if &*value.id == "lightning-terminal" || &*value.id == "robosats" {
-            version = version.map_upstream(|v| v.with_prerelease(["alpha".into()]));
-        }
         if &*value.id == "nostr" {
             value.id = "nostr-rs-relay".parse()?;
         }
@@ -303,5 +324,58 @@ impl TryFrom<ManifestV1> for Manifest {
                     .collect(),
             },
         })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn migrated(id: &str, title: &str, version: &str) -> String {
+        migrated_version(
+            &id.parse().unwrap(),
+            title,
+            exver::emver::Version::from_str(version).unwrap(),
+        )
+        .to_string()
+    }
+
+    #[test]
+    fn knots_before_rdts_continues_as_pre_rdts() {
+        assert_eq!(
+            migrated("bitcoind", "Bitcoin Knots", "29.3.0"),
+            "#knotsprerdts:29.3.0:0"
+        );
+        assert_eq!(
+            migrated("bitcoind", "Bitcoin Knots", "29.2.0.1"),
+            "#knotsprerdts:29.2.0:1"
+        );
+        assert_eq!(
+            migrated("bitcoind", "Bitcoin Knots", "27.1.0"),
+            "#knotsprerdts:27.1.0:0"
+        );
+    }
+
+    #[test]
+    fn knots_from_rdts_on_keeps_the_knots_flavor() {
+        assert_eq!(
+            migrated("bitcoind", "Bitcoin Knots", "29.3.1"),
+            "#knots:29.3.1:0"
+        );
+        assert_eq!(
+            migrated("bitcoind", "Bitcoin Knots", "29.4.0"),
+            "#knots:29.4.0:0"
+        );
+    }
+
+    #[test]
+    fn other_packages_keep_their_rewrites() {
+        assert_eq!(migrated("bitcoind", "Bitcoin Core", "29.3.1"), "29.3.1:0");
+        assert_eq!(migrated("lnd", "LND", "0.19.2.1"), "0.19.2-beta:1");
+        assert_eq!(
+            migrated("lightning-terminal", "Lightning Terminal", "0.15.0"),
+            "0.15.0-alpha:0"
+        );
+        assert_eq!(migrated("nextcloud", "Nextcloud", "31.0.5"), "31.0.5:0");
     }
 }

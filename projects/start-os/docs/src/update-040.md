@@ -165,6 +165,9 @@ When you can sign in, continue below.
 
 Every installed service will have an update available for the 0.4.0 marketplace. Update **all** of them — including Bitcoin (again, to the latest **minor** of your selected **major** version) — before doing anything else. The 0.4.0 versions are repackaged for the new system, even if the underlying software version is the same.
 
+> [!NOTE]
+> Bitcoin Knots updates to **Bitcoin Knots (pre-RDTS)** from the Community Registry. The update keeps your blockchain, and you can switch it to Bitcoin Core afterwards if you prefer.
+
 ### Step 10: Start All Services
 
 Once all services are updated, you can start them. Wait for all services to fully start and confirm they are running correctly.

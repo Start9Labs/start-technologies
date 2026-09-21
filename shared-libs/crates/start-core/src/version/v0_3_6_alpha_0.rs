@@ -28,6 +28,7 @@ use crate::net::keys::KeyStore;
 use crate::notifications::{NotificationLevel, Notifications, notify};
 use crate::prelude::*;
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
+use crate::s9pk::v2::compat::migrated_version;
 use crate::s9pk::v2::pack::CONTAINER_TOOL;
 use crate::ssh::{SshKeys, SshPubKey};
 use crate::util::Invoke;
@@ -510,11 +511,7 @@ impl VersionT for Version {
                     // InitKind::Update instead of InitKind::Install. The old
                     // DB stores versions in emver format (e.g. `0.21.1.0`),
                     // but callers parse `.version` as `exver::ExtendedVersion`
-                    // (e.g. `0.21.1:0`), so convert before writing — and also
-                    // apply the same package-specific flavor/prerelease
-                    // rewrites that the v1→v2 s9pk conversion in
-                    // `s9pk::v2::compat` applies, so the on-disk version and
-                    // volume path match what the install will look up.
+                    // (e.g. `0.21.1:0`), so convert before writing.
                     let installed_manifest = input
                         .get(&*id)
                         .and_then(|pde| pde.get("installed"))
@@ -528,19 +525,7 @@ impl VersionT for Version {
                                 .and_then(|m| m.get("title"))
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("");
-                            let mut version = exver::ExtendedVersion::from(emver);
-                            if &*id == "bitcoind" && title.to_ascii_lowercase().contains("knots") {
-                                version = version.with_flavor("knots");
-                            } else if &*id == "lnd"
-                                || &*id == "ride-the-lightning"
-                                || &*id == "datum"
-                            {
-                                version =
-                                    version.map_upstream(|v| v.with_prerelease(["beta".into()]));
-                            } else if &*id == "lightning-terminal" || &*id == "robosats" {
-                                version =
-                                    version.map_upstream(|v| v.with_prerelease(["alpha".into()]));
-                            }
+                            let version = migrated_version(&id, title, emver);
                             // The rename pass at the top of post_up has
                             // already moved the volume dirs to their new
                             // names, so we must write under the new id.
