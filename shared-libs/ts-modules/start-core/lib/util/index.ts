@@ -1,6 +1,5 @@
 export {
   addressHostToUrl,
-  mdnsResolvable,
   isAddressEnabled,
   filledAddress,
   filterNonLocal,

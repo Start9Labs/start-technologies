@@ -376,38 +376,8 @@ export function isAddressEnabled(
   )
 }
 
-/**
- * mDNS (.local) names resolve only via LAN IPs on a shared gateway, so an mDNS
- * address is reachable only when one of its gateways has an enabled LAN IP among
- * `enabled`. Non-mDNS addresses are always resolvable here.
- */
-export function mdnsResolvable(
-  h: HostnameInfo,
-  enabled: HostnameInfo[],
-): boolean {
-  if (h.metadata.kind !== 'mdns') return true
-  const lanGateways = new Set(
-    enabled.flatMap(a => {
-      if (a.metadata.kind === 'ipv4') {
-        return a.public ? [] : [a.metadata.gateway]
-      }
-      if (a.metadata.kind === 'ipv6') {
-        return !a.public || IpAddress.parse(a.hostname).isGua()
-          ? [a.metadata.gateway]
-          : []
-      }
-      return []
-    }),
-  )
-  return h.metadata.gateways.some(g => lanGateways.has(g))
-}
-
-// An mDNS address whose gateways hold no LAN IP at all is kept.
 function enabledAddresses(addr: DerivedAddressInfo): HostnameInfo[] {
-  const enabled = addr.available.filter(h => isAddressEnabled(addr, h))
-  return enabled.filter(
-    h => mdnsResolvable(h, enabled) || !mdnsResolvable(h, addr.available),
-  )
+  return addr.available.filter(h => isAddressEnabled(addr, h))
 }
 
 /**

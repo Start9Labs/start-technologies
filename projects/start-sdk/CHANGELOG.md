@@ -4,6 +4,12 @@
 
 ### Changed
 
+- **Breaking — a filled address lists the server's `.local` name whenever the
+  user has it enabled, and `utils.mdnsResolvable` is removed.** `.local` was
+  left out while no LAN IP on its gateways was enabled, which dropped it
+  whenever the network did and made a stored URL compare as removed. The
+  Interfaces tab and a filled address now agree on every address.
+
 - **Minimum StartOS version is now `0.4.0.2`**, which is what a package built
   with this SDK writes as its manifest `osVersion`
 
@@ -139,11 +145,6 @@
   See [Result Types](https://docs.start9.com/packaging/actions.html#result-types)
 
 ### Fixed
-
-- **A filled address keeps the server's `.local` name while its gateways hold no
-  LAN IP address.** It left `hostnames` whenever the network dropped, which made
-  a stored URL compare as removed. It is still left out when every LAN IP
-  address it resolves to is disabled.
 
 - **`Backups.withMariadbDump` works against MariaDB 11 images**, official or
   packaged from a distribution

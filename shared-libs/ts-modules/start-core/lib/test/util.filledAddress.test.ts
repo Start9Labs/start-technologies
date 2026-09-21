@@ -143,13 +143,11 @@ describe('LAN address overrides', () => {
     expect(hostnames(h)).toEqual(['relay.onion', 'relay.local', wifi.hostname])
   })
 
-  test('an mDNS address with every LAN IP disabled is left out', () => {
+  test('an enabled mDNS address is listed beside disabled LAN IPs', () => {
     const { h, addresses } = lan(eth)
     addresses.disabled = [[eth.hostname, 5223]]
-    const mdns = addresses.available.find(a => a.metadata.kind === 'mdns')!
 
-    expect(isAddressEnabled(addresses, mdns)).toBe(true)
-    expect(hostnames(h)).toEqual(['relay.onion'])
+    expect(hostnames(h)).toEqual(['relay.onion', 'relay.local'])
   })
 
   test('a LAN IP without an override follows its mDNS address', () => {
@@ -180,20 +178,5 @@ describe('LAN address overrides', () => {
 
     expect(isAddressEnabled(addresses, gua)).toBe(true)
     expect(isAddressEnabled(addresses, mdns)).toBe(false)
-  })
-
-  test('an enabled public GUA keeps mDNS reachable on a non-SSL port', () => {
-    const { h, addresses } = lan(eth, gua)
-    addresses.available = addresses.available.map(a => ({ ...a, ssl: false }))
-    addresses.disabled = [[eth.hostname, 5223]]
-    addresses.enabled = [`[${gua.hostname}]:5223`]
-
-    expect(hostnames(h)).toEqual(['relay.onion', 'relay.local', gua.hostname])
-  })
-
-  test('a disabled public GUA does not look like a disconnected gateway', () => {
-    const { h } = lan(gua)
-
-    expect(hostnames(h)).toEqual(['relay.onion'])
   })
 })
