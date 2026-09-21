@@ -171,13 +171,21 @@ describe('LAN address overrides', () => {
     expect(isAddressEnabled(addresses, mdns)).toBe(true)
   })
 
+  test('an enabled public GUA leaves a disabled mDNS address off', () => {
+    const { addresses } = lan(gua)
+    addresses.available = addresses.available.map(a => ({ ...a, ssl: false }))
+    addresses.enabled = ['[2001:db8::10]:5223']
+    addresses.disabled = [['relay.local', 5223]]
+    const mdns = addresses.available.find(a => a.metadata.kind === 'mdns')!
+
+    expect(isAddressEnabled(addresses, gua)).toBe(true)
+    expect(isAddressEnabled(addresses, mdns)).toBe(false)
+  })
+
   test('an enabled public GUA keeps mDNS reachable on a non-SSL port', () => {
     const { h, addresses } = lan(eth, gua)
     addresses.available = addresses.available.map(a => ({ ...a, ssl: false }))
-    addresses.disabled = [
-      ['relay.local', 5223],
-      [eth.hostname, 5223],
-    ]
+    addresses.disabled = [[eth.hostname, 5223]]
     addresses.enabled = [`[${gua.hostname}]:5223`]
 
     expect(hostnames(h)).toEqual(['relay.onion', 'relay.local', gua.hostname])

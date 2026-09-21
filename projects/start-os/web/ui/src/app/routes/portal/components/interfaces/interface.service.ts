@@ -268,15 +268,8 @@ export class InterfaceService {
       for (const gid of gatewayIds) {
         const list = groupMap.get(gid)
         if (!list) continue
-        const enabled = utils.isAddressEnabled(addr, h)
         list.push({
-          enabled,
-          locked:
-            enabled &&
-            addr.disabled.some(
-              ([hostname, port]) =>
-                hostname === h.hostname && port === (h.port ?? 0),
-            ),
+          enabled: utils.isAddressEnabled(addr, h),
           gua: isGua(h),
           type: getAddressType(h),
           access: h.public ? 'public' : 'private',
@@ -401,8 +394,6 @@ export class InterfaceService {
 
 export type GatewayAddress = {
   enabled: boolean
-  // An enabled LAN IP on a non-SSL port serves the mDNS address regardless.
-  locked: boolean
   // An IPv6 GUA gets a Local/Public dropdown in the access column (its WAN
   // opt-in, carried by `hostnameInfo.public`); other addresses are read-only.
   gua: boolean

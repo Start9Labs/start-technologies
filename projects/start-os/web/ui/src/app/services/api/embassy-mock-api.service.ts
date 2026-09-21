@@ -2258,10 +2258,26 @@ export class MockApiService extends ApiService {
           ([dHost, dPort]) => !(dHost === h.hostname && dPort === port),
         )
       const disabled = without(current.disabled)
-      const lanEnabled = without(current.lanEnabled)
+      let lanEnabled = without(current.lanEnabled)
 
       if (!enabled) {
         disabled.push([h.hostname, port])
+        // On a non-SSL port, off takes the LAN IPs it resolves to with it.
+        if (h.metadata.kind === 'mdns' && !h.ssl) {
+          const gateways = h.metadata.gateways
+          lanEnabled = lanEnabled.filter(
+            ([host, p]) =>
+              !current.available.some(
+                ip =>
+                  !ip.public &&
+                  (ip.metadata.kind === 'ipv4' ||
+                    ip.metadata.kind === 'ipv6') &&
+                  gateways.includes(ip.metadata.gateway) &&
+                  ip.hostname === host &&
+                  (ip.port ?? 0) === p,
+              ),
+          )
+        }
       } else if (h.metadata.kind === 'ipv4' || h.metadata.kind === 'ipv6') {
         lanEnabled.push([h.hostname, port])
       }

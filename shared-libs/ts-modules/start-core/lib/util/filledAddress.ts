@@ -371,10 +371,7 @@ export function isAddressEnabled(
     h.metadata.kind === 'mdns' &&
     !h.ssl &&
     addr.available.some(
-      ip =>
-        mdnsCovers(h, ip) &&
-        (!ip.public || ip.metadata.kind === 'ipv6') &&
-        isAddressEnabled(addr, ip),
+      ip => !ip.public && mdnsCovers(h, ip) && isAddressEnabled(addr, ip),
     )
   )
 }

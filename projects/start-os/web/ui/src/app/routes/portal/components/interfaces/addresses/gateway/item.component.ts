@@ -23,7 +23,7 @@ import { DomainHealthService } from './domain-health.service'
           tuiSwitch
           size="s"
           [showIcons]="false"
-          [disabled]="toggling() || address.locked"
+          [disabled]="toggling()"
           [ngModel]="address.enabled"
           (ngModelChange)="onToggleEnabled()"
         />

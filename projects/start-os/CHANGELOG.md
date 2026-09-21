@@ -99,8 +99,9 @@ for the detail behind its highlights.
 - **A service's `.local` address has its own switch, and its LAN IP addresses
   follow it.** A LAN IP you switch yourself keeps that setting. Every other one,
   including an address your server is assigned later, is on while `.local` is on
-  and off while it is off. On an interface served without TLS, `.local` stays on
-  while one of its LAN IP addresses is on.
+  and off while it is off. On an interface served without TLS, switching on a
+  LAN IP switches `.local` on, and switching `.local` off switches its LAN IPs
+  off.
 
 - **ZRAM compressed swap is now off by default, and updating turns it off on
   your server.** With it on, services under heavy memory load could take the RAM

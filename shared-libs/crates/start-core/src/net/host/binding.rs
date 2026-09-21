@@ -119,21 +119,14 @@ impl DerivedAddressInfo {
             .all(|mdns| !self.disabled.contains(&override_key(mdns)))
     }
 
-    /// On a non-SSL port an enabled IP serves the name.
+    /// On a non-SSL port an enabled LAN IP serves the name.
     fn mdns_on(&self, mdns: &HostnameInfo) -> bool {
         !self.disabled.contains(&override_key(mdns))
             || (!mdns.ssl
                 && self
                     .available
                     .iter()
-                    .filter(|ip| mdns_covers(mdns, ip))
-                    .any(|ip| {
-                        if ip.public {
-                            ip.gua().is_some() && self.public_ip_on(ip)
-                        } else {
-                            self.lan_ip_on(ip)
-                        }
-                    }))
+                    .any(|ip| !ip.public && mdns_covers(mdns, ip) && self.lan_ip_on(ip)))
     }
 
     fn set_lan_ip(&mut self, key: (InternedString, u16), enabled: bool) {
@@ -857,30 +850,23 @@ pub(crate) fn has_nonssl_private_domain(
     })
 }
 
-fn nonssl_private_domain_on(
-    addresses: &DerivedAddressInfo,
-    gateway: &GatewayId,
-    port: u16,
-) -> bool {
-    addresses.available.iter().any(|a| {
-        !a.ssl
-            && a.port == Some(port)
-            && matches!(&a.metadata, HostnameMetadata::PrivateDomain { gateways } if gateways.contains(gateway))
-            && !addresses.disabled.contains(&override_key(a))
-    })
-}
-
 /// Is the LAN level (private domain or bare LAN IPv4) currently on at
 /// `gateway`+`port`? Excludes the GUA.
 fn nonssl_lan_on(addresses: &DerivedAddressInfo, gateway: &GatewayId, port: u16) -> bool {
-    nonssl_private_domain_on(addresses, gateway, port)
-        || addresses.available.iter().any(|a| {
-            !a.ssl
-                && !a.public
-                && a.port == Some(port)
-                && matches!(&a.metadata, HostnameMetadata::Ipv4 { gateway: gw } if gw == gateway)
-                && addresses.lan_ip_on(a)
-        })
+    addresses.available.iter().any(|a| {
+        if a.ssl || a.port != Some(port) {
+            return false;
+        }
+        match &a.metadata {
+            HostnameMetadata::PrivateDomain { gateways } if gateways.contains(gateway) => {
+                !addresses.disabled.contains(&override_key(a))
+            }
+            HostnameMetadata::Ipv4 { gateway: gw } if !a.public && gw == gateway => {
+                addresses.lan_ip_on(a)
+            }
+            _ => false,
+        }
+    })
 }
 
 /// Re-derive every GUA's reachability at `gateway`+`port` from its stored WAN
@@ -1088,13 +1074,21 @@ fn set_address_enabled_on(
                         set_nonssl_lan_group(addresses, gateway, port, enabled);
                     }
                 }
-                // A linked LAN IPv4 follows its private domain.
-                HostnameMetadata::Mdns { gateways } => {
+                // Off takes every LAN IP it resolves to off with it.
+                HostnameMetadata::Mdns { gateways } if !enabled => {
                     for gateway in gateways {
                         if has_nonssl_private_domain(addresses, gateway, port) {
-                            let on = nonssl_private_domain_on(addresses, gateway, port);
-                            set_nonssl_lan_group(addresses, gateway, port, on);
+                            set_nonssl_lan_group(addresses, gateway, port, false);
                         }
+                    }
+                    let held: Vec<_> = addresses
+                        .available
+                        .iter()
+                        .filter(|ip| !ip.public && mdns_covers(address, ip))
+                        .map(override_key)
+                        .collect();
+                    for key in held {
+                        addresses.lan_enabled.remove(&key);
                     }
                 }
                 _ => {}
@@ -2182,6 +2176,7 @@ mod test {
         assert!(info.enabled().is_empty());
 
         set_address_enabled_on(&mut info, &eth, true).unwrap();
+        set_address_enabled_on(&mut info, &mdns, false).unwrap();
         assert!(!info.enabled().contains(&mdns));
         assert!(info.enabled().contains(&eth));
         assert!(!info.enabled().contains(&wifi));
@@ -2215,12 +2210,17 @@ mod test {
         assert!(info.enabled().contains(&eth));
         assert!(!info.enabled().contains(&wifi));
 
-        set_address_enabled_on(&mut info, &eth, false).unwrap();
+        set_address_enabled_on(&mut info, &mdns, false).unwrap();
         assert!(info.enabled().is_empty());
+
+        set_address_enabled_on(&mut info, &mdns, true).unwrap();
+        assert!(info.enabled().contains(&mdns));
+        assert!(info.enabled().contains(&eth));
+        assert!(info.enabled().contains(&wifi));
     }
 
     #[test]
-    fn a_linked_lan_ipv4_follows_its_private_domain_not_the_mdns_address() {
+    fn disabling_mdns_on_a_nonssl_port_takes_a_linked_lan_group_with_it() {
         let (mut info, mdns, [eth, wifi]) = lan_fixture(false);
         let domain = HostnameInfo {
             hostname: InternedString::intern("priv.lan"),
@@ -2232,11 +2232,34 @@ mod test {
         info.available.insert(domain.clone());
 
         set_address_enabled_on(&mut info, &mdns, false).unwrap();
+        assert!(info.enabled().is_empty());
 
-        assert!(info.enabled().contains(&domain));
-        assert!(info.enabled().contains(&eth));
-        assert!(!info.enabled().contains(&wifi));
+        set_address_enabled_on(&mut info, &mdns, true).unwrap();
         assert!(info.enabled().contains(&mdns));
+        assert!(info.enabled().contains(&wifi));
+        assert!(!info.enabled().contains(&eth));
+        assert!(!info.enabled().contains(&domain));
+    }
+
+    #[test]
+    fn an_enabled_public_gua_leaves_mdns_disabled() {
+        let (mut info, mdns, _) = lan_fixture(false);
+        let gua = HostnameInfo {
+            public: true,
+            hostname: InternedString::intern("2001:db8::10"),
+            metadata: HostnameMetadata::Ipv6 {
+                gateway: GatewayId::from(InternedString::intern("eth0")),
+                scope_id: 0,
+            },
+            ..mdns.clone()
+        };
+        info.available.insert(gua.clone());
+        info.enabled.insert(gua.to_socket_addr().unwrap());
+
+        set_address_enabled_on(&mut info, &mdns, false).unwrap();
+
+        assert!(!info.enabled().contains(&mdns));
+        assert!(info.enabled().contains(&gua));
     }
 
     #[test]
