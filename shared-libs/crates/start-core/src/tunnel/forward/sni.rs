@@ -212,6 +212,7 @@ impl SniDemux {
         target: SocketAddrV4,
         lifetime_secs: Option<u32>,
     ) -> Result<SniRegistration, u8> {
+        let hostnames = &lowercased(hostnames);
         let now = Instant::now();
         let applied = Binding {
             target,
@@ -285,6 +286,7 @@ impl SniDemux {
         hostnames: &[String],
         target: SocketAddrV4,
     ) {
+        let hostnames = &lowercased(hostnames);
         let key = (ext_ip, ext_port);
         self.ports.mutate(|ports| {
             if let Some(entry) = ports.get_mut(&key) {
@@ -651,6 +653,10 @@ fn record_complete(buf: &[u8]) -> bool {
     buf.len() >= 5 && buf.len() >= 5 + u16::from_be_bytes([buf[3], buf[4]]) as usize
 }
 
+fn lowercased(hostnames: &[String]) -> Vec<String> {
+    hostnames.iter().map(|h| h.to_ascii_lowercase()).collect()
+}
+
 /// Extract the (lowercased) SNI host_name from a buffered TLS ClientHello via
 /// rustls, or `None` if absent / not yet complete / not TLS. The ClientHello is
 /// only parsed, never answered — `buf` is still forwarded verbatim to the peer.
@@ -849,6 +855,34 @@ mod tests {
             .unwrap();
         assert_eq!(demux.snapshot().len(), 1);
         assert_eq!(events.peek(|e| e.clone()), vec![(port, true)]);
+    }
+
+    #[tokio::test]
+    async fn hostnames_match_in_any_case() {
+        let wildcard =
+            crate::net::utils::bind_tokio_listener_reuse_port((Ipv4Addr::UNSPECIFIED, 0).into())
+                .unwrap();
+        let port = wildcard.local_addr().unwrap().port();
+        let key = (Ipv4Addr::LOCALHOST, port);
+        let target = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 443);
+        let demux = SniDemux::new();
+        demux
+            .register(
+                key.0,
+                port,
+                &["Cloud.Example.com".to_string()],
+                target,
+                None,
+            )
+            .unwrap();
+        demux.ports.peek(|p| {
+            assert_eq!(
+                p[&key].select(Some("cloud.example.com"), Ipv4Addr::LOCALHOST),
+                Some((target, true))
+            );
+        });
+        demux.unregister(key.0, port, &["CLOUD.example.com".to_string()], target);
+        assert!(demux.snapshot().is_empty());
     }
 
     #[tokio::test]

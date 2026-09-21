@@ -28,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Open pages can load the current web interface after future updates.** Pages
   opened on this release revalidate the interface when they reload.
 
+- **An SNI hostname entered with capital letters receives its traffic.** A
+  route added by hand as `Cloud.Example.com` was listed as enabled while every
+  connection to it was closed. Hostnames match in any case, and a route saved
+  that way starts working once the update is installed.
+
 ## [1.3.0]
 
 ### Added
