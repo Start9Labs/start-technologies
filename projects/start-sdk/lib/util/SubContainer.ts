@@ -978,6 +978,9 @@ export class SubContainerLazy<
     null
   private destroyPending = false
   private detachPending = false
+  private holds = new Set<{
+    release: (() => Promise<void>) | null
+  }>()
 
   constructor(
     readonly effects: Effects,
@@ -996,24 +999,35 @@ export class SubContainerLazy<
   }
 
   /**
-   * Materialize the underlying eager subcontainer (idempotent) and return
-   * it. Subsequent calls return the same instance. Useful when you need
-   * the synchronous `SubContainerEager` interface (e.g. sync `rootfs` /
+   * Materialize the underlying eager subcontainer and return it. Concurrent
+   * calls share one attempt; successful materialization is cached, while a
+   * failed attempt is retried by the next call. Useful when you need the
+   * synchronous `SubContainerEager` interface (e.g. sync `rootfs` /
    * `subpath()`) — for ordinary command execution, just call `.exec()` /
    * `.writeFile()` directly and the lazy handle materializes internally.
    */
   eager(): Promise<SubContainerEager<Manifest, Effects>> {
-    return (this.materialized ??= SubContainerEager._of<Manifest, Effects>(
+    if (this.materialized) return this.materialized
+
+    const materialized = SubContainerEager._of<Manifest, Effects>(
       this.effects,
       { imageId: this.imageId, sharedRun: this.sharedRun },
       this.mounts,
       this.name,
       this.identity,
     ).then(async eager => {
+      for (const hold of this.holds) {
+        if (!hold.release) hold.release = eager.hold()
+      }
       if (this.destroyPending) await eager.destroy()
       else if (this.detachPending) eager.detach()
       return eager
-    }))
+    })
+    this.materialized = materialized
+    materialized.catch(() => {
+      if (this.materialized === materialized) this.materialized = null
+    })
+    return materialized
   }
 
   /** Absolute path to the materialized subcontainer's rootfs. Triggers materialization on first access. */
@@ -1054,37 +1068,24 @@ export class SubContainerLazy<
    * eager subcontainer asynchronously and places the hold on it.
    *
    * The returned release function is safe to call before materialization
-   * completes — it cancels the pending hold so a never-materialized lazy
-   * (the canonical "left alone" case in `Daemons.dynamic`) stays cheap.
+   * completes; it cancels the pending hold. Failed materializations keep the
+   * hold pending for the next attempt.
    *
    * @returns A release function — call it to drop this hold
    */
   hold(): () => Promise<void> {
-    // Acquire the hold on the eager once materialized. Until then we record
-    // a "pending" intent so destroy() honors any outstanding holds even on
-    // a never-materialized handle.
-    let released = false
-    let underlyingRelease: (() => Promise<void>) | null = null
-    const eagerPromise = this.eager()
-    const acquired = eagerPromise
+    const hold = { release: null as (() => Promise<void>) | null }
+    this.holds.add(hold)
+    this.eager()
       .then(eager => {
-        if (released) return
-        underlyingRelease = eager.hold()
+        if (this.holds.has(hold) && !hold.release) {
+          hold.release = eager.hold()
+        }
       })
-      .catch(e => {
-        released = true
-        throw e
-      })
+      .catch(() => {})
     return async () => {
-      if (released) return
-      released = true
-      try {
-        await acquired
-      } catch (_) {
-        // materialization failed; nothing to release
-        return
-      }
-      if (underlyingRelease) await underlyingRelease()
+      if (!this.holds.delete(hold)) return
+      if (hold.release) await hold.release()
     }
   }
 

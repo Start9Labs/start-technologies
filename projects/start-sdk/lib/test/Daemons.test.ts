@@ -3,7 +3,7 @@ import { cooldownTrigger } from '../trigger'
 import { Daemon } from '../mainFn/Daemon'
 import { Mounts } from '../mainFn/Mounts'
 import { setupMain } from '../mainFn'
-import { SubContainer } from '../util/SubContainer'
+import { SubContainer, SubContainerEager } from '../util/SubContainer'
 import * as T from '@start9labs/start-core/types'
 
 type Manifest = {
@@ -515,6 +515,63 @@ describe('SubContainerLazy.detach', () => {
       sub.detach()
       sub.detach()
     }).not.toThrow()
+  })
+})
+
+describe('SubContainerLazy.eager', () => {
+  afterEach(() => jest.restoreAllMocks())
+
+  it('retries after a failed materialization and caches the success', async () => {
+    const failure = new Error('transient mount failure')
+    const eager = {} as SubContainerEager<T.SDKManifest>
+    const materialize = jest
+      .spyOn(SubContainerEager, '_of')
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValue(eager)
+    const sub = SubContainer.of<Manifest>(
+      fakeEffects(),
+      { imageId: 'reg' },
+      null,
+      'name',
+    )
+
+    const failed = sub.eager()
+    expect(sub.eager()).toBe(failed)
+    await expect(failed).rejects.toBe(failure)
+
+    const succeeded = sub.eager()
+    expect(succeeded).not.toBe(failed)
+    await expect(succeeded).resolves.toBe(eager)
+    expect(sub.eager()).toBe(succeeded)
+    expect(materialize).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps unreleased holds pending across a failed materialization', async () => {
+    const failure = new Error('transient mount failure')
+    const underlyingRelease = jest.fn(async () => {})
+    const eager = {
+      hold: jest.fn(() => underlyingRelease),
+    } as unknown as SubContainerEager<T.SDKManifest>
+    jest
+      .spyOn(SubContainerEager, '_of')
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValue(eager)
+    const sub = SubContainer.of<Manifest>(
+      fakeEffects(),
+      { imageId: 'reg' },
+      null,
+      'name',
+    )
+
+    const release = sub.hold()
+    const cancel = sub.hold()
+    await expect(sub.eager()).rejects.toBe(failure)
+    await cancel()
+    await expect(sub.eager()).resolves.toBe(eager)
+    expect(eager.hold).toHaveBeenCalledTimes(1)
+
+    await release()
+    expect(underlyingRelease).toHaveBeenCalledTimes(1)
   })
 })
 

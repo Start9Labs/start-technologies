@@ -76,7 +76,7 @@ const appSub = sdk.SubContainer.of(
 ```
 
 > [!NOTE]
-> `SubContainer.of()` is **lazy** — it returns immediately and only materializes the filesystem on first use, so you pass it straight to `addDaemon()` with no `await`. If you need a synchronous `.rootfs`, `.guid`, or `.subpath()` before running anything, `await` the accessor or create it eagerly with `sdk.SubContainer.eager(...)`.
+> `SubContainer.of()` is **lazy** — it returns immediately and only materializes the filesystem on first use, so you pass it straight to `addDaemon()` with no `await`. If materialization fails, the next use retries it. If you need a synchronous `.rootfs`, `.guid`, or `.subpath()` before running anything, `await` the accessor or create it eagerly with `sdk.SubContainer.eager(...)`.
 
 **`SubContainer.withTemp()`** -- creates a temporary subcontainer that is automatically destroyed after the callback completes. Use this for one-off commands in actions, init functions, or migrations:
 

@@ -137,6 +137,9 @@
 
 ### Fixed
 
+- **Lazy subcontainers retry filesystem materialization after a transient
+  failure**, allowing daemons to recover without a service restart
+
 - **`Backups.withMariadbDump` works against MariaDB 11 images**, official or
   packaged from a distribution
 
