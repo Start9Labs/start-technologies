@@ -35,7 +35,7 @@ If a freshly flashed drive still does not boot, connect a monitor and keyboard a
 
 - **Server One (2024)** — Press `Del` repeatedly from the moment you power on to enter the BIOS. Under **Boot**, open **Boot Option Priorities** and set **Boot Option #1** to the USB drive, then press `F4` to save and restart.
 
-For other hardware, see the [install guide](installing-startos.md#install) and the [Community Hub](https://community.start9.com).
+For other hardware, see the [install guide](installing-startos.md#install) and the [Community Hub](https://community.start9.com). When firmware starts the installed disk first, StartOS searches for a plugged-in installer and boots it automatically. This works through both the normal and fallback UEFI loaders, so a correctly flashed plugged-in installer always takes priority over installed StartOS.
 
 ## During initial setup, I am unable to connect to "start.local".
 

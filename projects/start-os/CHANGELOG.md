@@ -12,6 +12,10 @@ for the detail behind its highlights.
 
 ### Added
 
+- **UEFI installations carry a standard fallback bootloader.** StartOS remains
+  bootable if firmware loses its saved boot entry while retaining the normal
+  entry and StartOS's automatic priority for a plugged-in installer.
+
 - **Typing a service's domain without `https://` opens its web interface over
   HTTPS.** This works on each network where the domain is assigned. Server IP
   addresses and domains assigned to the StartOS UI retain their existing
