@@ -95,6 +95,12 @@
 
 ### Added
 
+- **An action learns who is running it.** The `run` handler, the prefill
+  function and a function-valued input spec each receive `caller`: the id of
+  the service that reached the action through `effects.action`, or `null` when
+  the user did. An action with `access: 'dependent'` or `'public'` can act on
+  the caller's own resources instead of trusting a package id in its input
+
 - **`utils.isAddressEnabled(addresses, hostname)`** reports whether the user's
   overrides leave one of a binding's addresses on
 

@@ -48,21 +48,23 @@ export class SystemForStartOs implements System {
     effects: Effects,
     id: string,
     prefill: Record<string, unknown> | null,
+    caller: T.PackageId | null,
     timeoutMs: number | null,
   ): Promise<T.ActionInput | null> {
     const action = this.abi.actions.get(id)
     if (!action) throw new Error(`Action ${id} not found`)
-    return action.getInput({ effects, prefill })
+    return action.getInput({ effects, prefill, caller })
   }
   runAction(
     effects: Effects,
     id: string,
     input: unknown,
+    caller: T.PackageId | null,
     timeoutMs: number | null,
   ): Promise<T.ActionResult | null> {
     const action = this.abi.actions.get(id)
     if (!action) throw new Error(`Action ${id} not found`)
-    return action.run({ effects, input })
+    return action.run({ effects, input, caller })
   }
 
   async start(effects: Effects): Promise<void> {

@@ -80,6 +80,37 @@ The optional **`access`** field on the metadata controls who may invoke the acti
 
 `access` is independent of `visibility` (whether the action is shown/enabled) and `allowedStatuses` (which run states permit it); a direct cross-package run is rejected if `access` denies the caller.
 
+### Knowing Who Is Calling
+
+`access` decides _whether_ another service may run the action. **`caller`** tells the action _which_ service is running it, so it can decide what that service is allowed to touch. The `run` handler, the prefill function, and an input spec written as a function each receive it:
+
+- a package id — the service that reached the action through `effects.action.run` or `effects.action.getInput`. A service that runs one of its own actions that way sees its own id.
+- `null` — the user ran it, or StartOS is reading the form to evaluate a task.
+
+StartOS supplies `caller`; the calling service cannot set or forge it. **Take identity from `caller`, never from the input.** An action that lets a service register something against "its own" host must not accept a package id as a field — any service allowed to call it could name another:
+
+```typescript
+export const registerEndpoint = sdk.Action.withInput(
+  'register-endpoint',
+  async () => ({
+    name: i18n('Register Endpoint'),
+    description: i18n('Register a host of the calling service'),
+    warning: null,
+    allowedStatuses: 'any',
+    group: null,
+    visibility: 'hidden',
+    access: 'dependent',
+  }),
+  InputSpec.of({ hostId: Value.text({ name: 'Host', required: true, default: null }) }),
+  async () => null,
+  async ({ effects, input, caller }) => {
+    if (caller === null) throw new Error('Only a service can register an endpoint')
+    // `caller` is who asked; `input.hostId` is which of its hosts.
+    await register(effects, { packageId: caller, hostId: input.hostId })
+  },
+)
+```
+
 ## Registering Actions
 
 All actions must be registered in `actions/index.ts`:

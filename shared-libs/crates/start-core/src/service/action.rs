@@ -18,6 +18,7 @@ use crate::{ActionId, PackageId, ReplayId};
 pub(super) struct GetActionInput {
     id: ActionId,
     prefill: Value,
+    caller: Option<PackageId>,
 }
 impl Handler<GetActionInput> for ServiceActor {
     type Response = Result<Option<ActionInput>, Error>;
@@ -30,6 +31,7 @@ impl Handler<GetActionInput> for ServiceActor {
         GetActionInput {
             id: action_id,
             prefill,
+            caller,
         }: GetActionInput,
         _: &BackgroundJobQueue,
     ) -> Self::Response {
@@ -38,7 +40,7 @@ impl Handler<GetActionInput> for ServiceActor {
             .execute::<Option<ActionInput>>(
                 id,
                 ProcedureName::GetActionInput(action_id),
-                json!({ "prefill": prefill }),
+                json!({ "prefill": prefill, "caller": caller }),
                 Some(Duration::from_secs(30)),
             )
             .await
@@ -47,11 +49,14 @@ impl Handler<GetActionInput> for ServiceActor {
 }
 
 impl Service {
+    /// `caller` is the service asking through its effects, or `None` for the
+    /// user and for the OS evaluating a task.
     pub async fn get_action_input(
         &self,
         id: Guid,
         action_id: ActionId,
         prefill: Value,
+        caller: Option<PackageId>,
     ) -> Result<Option<ActionInput>, Error> {
         if !self
             .seed
@@ -77,6 +82,7 @@ impl Service {
                 GetActionInput {
                     id: action_id,
                     prefill,
+                    caller,
                 },
             )
             .await?
@@ -150,6 +156,7 @@ pub fn update_tasks(
 pub(super) struct RunAction {
     action_id: ActionId,
     input: Value,
+    caller: Option<PackageId>,
 }
 impl Handler<RunAction> for ServiceActor {
     type Response = Result<Option<ActionResult>, Error>;
@@ -162,6 +169,7 @@ impl Handler<RunAction> for ServiceActor {
         RunAction {
             ref action_id,
             input,
+            caller,
         }: RunAction,
         _: &BackgroundJobQueue,
     ) -> Self::Response {
@@ -214,6 +222,7 @@ impl Handler<RunAction> for ServiceActor {
                 ProcedureName::RunAction(action_id.clone()),
                 json!({
                     "input": input,
+                    "caller": caller,
                 }),
                 Some(Duration::from_secs(120)),
             )
@@ -240,12 +249,24 @@ impl Handler<RunAction> for ServiceActor {
 }
 
 impl Service {
+    /// `caller` is the service running the action through its effects, or
+    /// `None` for the user.
     pub async fn run_action(
         &self,
         id: Guid,
         action_id: ActionId,
         input: Value,
+        caller: Option<PackageId>,
     ) -> Result<Option<ActionResult>, Error> {
-        self.actor.send(id, RunAction { action_id, input }).await?
+        self.actor
+            .send(
+                id,
+                RunAction {
+                    action_id,
+                    input,
+                    caller,
+                },
+            )
+            .await?
     }
 }

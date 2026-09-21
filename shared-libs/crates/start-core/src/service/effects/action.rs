@@ -141,6 +141,7 @@ async fn get_action_input(
 ) -> Result<Option<ActionInput>, Error> {
     let context = context.deref()?;
     let prefill = prefill.unwrap_or(Value::Null);
+    let caller = Some(context.seed.id.clone());
 
     if let Some(package_id) = package_id {
         context
@@ -151,11 +152,11 @@ async fn get_action_input(
             .await
             .as_ref()
             .or_not_found(&package_id)?
-            .get_action_input(procedure_id, action_id, prefill)
+            .get_action_input(procedure_id, action_id, prefill, caller)
             .await
     } else {
         context
-            .get_action_input(procedure_id, action_id, prefill)
+            .get_action_input(procedure_id, action_id, prefill, caller)
             .await
     }
 }
@@ -188,6 +189,7 @@ async fn run_action(
     }: RunActionParams,
 ) -> Result<Option<ActionResult>, Error> {
     let context = context.deref()?;
+    let caller = Some(context.seed.id.clone());
 
     let package_id = package_id.as_ref().unwrap_or(&context.seed.id);
 
@@ -252,10 +254,12 @@ async fn run_action(
             .await
             .as_ref()
             .or_not_found(package_id)?
-            .run_action(procedure_id, action_id, input)
+            .run_action(procedure_id, action_id, input, caller)
             .await
     } else {
-        context.run_action(procedure_id, action_id, input).await
+        context
+            .run_action(procedure_id, action_id, input, caller)
+            .await
     }
 }
 
@@ -301,7 +305,12 @@ async fn create_task(
                     .filter(|s| s.is_initialized())
                 {
                     service
-                        .get_action_input(procedure_id.clone(), task.action_id.clone(), Value::Null)
+                        .get_action_input(
+                            procedure_id.clone(),
+                            task.action_id.clone(),
+                            Value::Null,
+                            None,
+                        )
                         .await
                         .log_err()
                         .flatten()

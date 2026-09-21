@@ -331,7 +331,7 @@ impl Service {
         let procedure_id = Guid::new();
         for action_id in tasks {
             if let Some(input) = self
-                .get_action_input(procedure_id.clone(), action_id.clone(), Value::Null)
+                .get_action_input(procedure_id.clone(), action_id.clone(), Value::Null, None)
                 .await
                 .log_err()
                 .flatten()
