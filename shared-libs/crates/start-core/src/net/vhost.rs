@@ -186,6 +186,7 @@ async fn add_passthrough(
         private_ip,
     }: AddPassthroughParams,
 ) -> Result<(), Error> {
+    let hostname = InternedString::intern(hostname.to_ascii_lowercase());
     let public_gateways: BTreeSet<GatewayId> = public_gateway.into_iter().collect();
     let private_ips: BTreeSet<IpAddr> = private_ip.into_iter().collect();
     ctx.net_controller.vhost.add_passthrough(
@@ -203,7 +204,9 @@ async fn add_passthrough(
                 .as_network_mut()
                 .as_passthroughs_mut();
             let mut vec: Vec<PassthroughInfo> = pts.de()?;
-            vec.retain(|p| !(p.hostname == hostname && p.listen_port == listen_port));
+            vec.retain(|p| {
+                !(p.hostname.eq_ignore_ascii_case(&hostname) && p.listen_port == listen_port)
+            });
             vec.push(PassthroughInfo {
                 hostname,
                 listen_port,
@@ -236,7 +239,9 @@ async fn remove_passthrough(
                 .as_network_mut()
                 .as_passthroughs_mut();
             let mut vec: Vec<PassthroughInfo> = pts.de()?;
-            vec.retain(|p| !(p.hostname == hostname && p.listen_port == listen_port));
+            vec.retain(|p| {
+                !(p.hostname.eq_ignore_ascii_case(&hostname) && p.listen_port == listen_port)
+            });
             pts.ser(&vec)
         })
         .await
@@ -383,6 +388,7 @@ impl VHostController {
         public: BTreeSet<GatewayId>,
         private: BTreeSet<IpAddr>,
     ) -> Result<(), Error> {
+        let hostname = InternedString::intern(hostname.to_ascii_lowercase());
         let target = ProxyTarget {
             // A TLS passthrough is domain (SNI) based, i.e. dual-stack public: it is
             // public on its gateways' bare IPv4 and on each of their GUAs.
@@ -419,6 +425,7 @@ impl VHostController {
     }
 
     pub fn remove_passthrough(&self, hostname: &InternedString, port: u16) {
+        let hostname = &InternedString::intern(hostname.to_ascii_lowercase());
         self.passthrough_handles
             .mutate(|h| h.remove(&(hostname.clone(), port)));
         self.gc(Some(hostname.clone()), port);

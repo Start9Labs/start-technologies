@@ -564,6 +564,11 @@ for the detail behind its highlights.
   not all of them — and refused the rest with a TLS `unrecognized name` error
   while IPv4 kept working.
 
+- **A TLS passthrough whose hostname was entered with capital letters receives
+  its traffic.** One added as `Cloud.Example.com` was listed while every
+  connection to it was dropped. Hostnames match in any case, and a passthrough
+  saved that way starts working once the update is installed.
+
 ### Security
 
 - **A selected outbound gateway acts as a kill switch if it disconnects.**
