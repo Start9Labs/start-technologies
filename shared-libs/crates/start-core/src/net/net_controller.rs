@@ -1466,10 +1466,17 @@ impl NetService {
     /// Permanently remove one binding — or the port range at the same key,
     /// which `bindings` and `binding_ranges` share — and its exported service
     /// interfaces, returning its external ports to the pool. `false` if nothing
-    /// was bound at `internal_port`.
+    /// was bound at `internal_port`. What was retired is recorded on the host
+    /// with `successor`, the port the service moved it to, so a plugin holding
+    /// an address for the old port can follow it.
     ///
     /// The host survives, so the ordinary reconcile tears the datapath down.
-    pub async fn retire_binding(&self, id: HostId, internal_port: u16) -> Result<bool, Error> {
+    pub async fn retire_binding(
+        &self,
+        id: HostId,
+        internal_port: u16,
+        successor: Option<u16>,
+    ) -> Result<bool, Error> {
         let (ctrl, pkg_id) = {
             let data = self.data.lock().await;
             (data.net_controller()?, data.id.clone())
@@ -1506,6 +1513,10 @@ impl NetService {
                 if !retired {
                     return Ok(false);
                 }
+                host.as_retired_bindings_mut().mutate(|r| {
+                    r.insert(internal_port, successor);
+                    Ok(())
+                })?;
                 // `port_forwards` is computed from the bindings, so it still
                 // advertises the retired one until this re-derives it.
                 host.update_addresses(&hostname, &gateways, &ports)?;

@@ -205,7 +205,8 @@ export type Effects = {
    * Permanently removes whichever of the single-port binding and the port range
    * is bound at `internalPort` — and both, if both are — along with their
    * exported service interfaces. The external ports return to the server's
-   * pool. The host survives, keeping its domains.
+   * pool. The host survives, keeping its domains, and records the retired
+   * port with its `successor` in `retiredBindings`.
    *
    * Resolves `false` if nothing was bound at `internalPort`.
    */

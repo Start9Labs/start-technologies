@@ -371,9 +371,12 @@ The cost is that a binding you stop declaring **for good** stays behind. It keep
 ```typescript
 await sdk.MultiHost.of(effects, 'ui-multi').retire() // the whole host
 await sdk.MultiHost.of(effects, 'api').retirePort(9090) // one port, or one range
+await sdk.MultiHost.of(effects, 'peer').retirePort(8333, { successor: 58333 }) // moved to 58333
 ```
 
 `retire()` removes the host and everything under it: its bindings and port ranges, their exported service interfaces, the user's public and private domains for that host, and their per-address enable/disable and WAN opt-in choices. `retirePort()` removes whichever of the single port and the port range is bound at that `internalPort` — and both, if both are — leaving the host and its domains in place. Both return the external ports to the server's pool. Both are irreversible: after `retire()`, binding the id again starts a fresh host with none of the user's setup.
+
+A port that moved rather than disappeared takes its `successor`: `retirePort(8333, { successor: 58333 })` records on the host, in `retiredBindings`, that 8333 is now served at 58333. StartOS itself acts on nothing there, but a URL plugin holding an address for the old port does — Tor moves a `.onion` attached to 8333 onto 58333, where without the record it parks the address until the user moves it by hand. Omit `successor` when nothing replaces the port; a `.onion` attached to it then parks. The record is dropped if the port is ever bound again.
 
 Note what that last part means: `retire()` discards configuration the **user** created, not just your package's. A domain they attached to the host goes with it, and nothing tells them. Name the host in your release notes whenever a release retires one, so they know to reattach the domain to a current interface.
 
@@ -412,7 +415,7 @@ This is the same shape as [retiring a replay key](tasks.md#retiring-a-replay-key
 ### Failure modes
 
 - **Retiring an id you still bind.** Migrations run before `setupInterfaces`, so the port is normally reclaimed on the same pass and nothing looks wrong. The symptom is the user's setup silently reset — a custom domain and WAN toggle back to defaults after an update.
-- **A port that moved rather than disappeared.** Retiring the old binding and adding the new one in the same release keeps the host's domains, but StartOS isolates a **public** domain from a binding added after it, so the user has to re-enable that domain on the new binding. Private domains carry over on their own. Say so in your release notes.
+- **A port that moved rather than disappeared.** Retiring the old binding and adding the new one in the same release keeps the host's domains, but StartOS isolates a **public** domain from a binding added after it, so the user has to re-enable that domain on the new binding. Private domains carry over on their own. Say so in your release notes, and pass the new port as `successor` so a Tor address follows it.
 - **Treating `false` as failure.** Both calls resolve `false` when there was nothing to remove — the normal result on a re-run, and on a server that skipped the version. Not an error.
 - **Retiring the last binding on a host.** That does not retire the host. Its domains stay, now addressing nothing. Use `retire()` when the host itself is going away.
 

@@ -44,6 +44,9 @@ pub struct Host {
     /// COMPUTED: port forwarding rules needed on gateways for public addresses to work.
     #[serde(default)]
     pub port_forwards: BTreeSet<PortForward>,
+    /// Internal ports the service retired, each with the port it named as its successor.
+    #[serde(default)]
+    pub retired_bindings: BTreeMap<u16, Option<u16>>,
 }
 
 fn default_port_forward_count() -> u16 {
@@ -666,6 +669,10 @@ impl Model<Host> {
         {
             return Err(overlap_error(&claim, &existing));
         }
+        self.as_retired_bindings_mut().mutate(|r| {
+            r.remove(&internal_port);
+            Ok(())
+        })?;
         self.as_bindings_mut().mutate(|b| {
             let info = if let Some(info) = b.remove(&internal_port) {
                 info.update(available_ports, options, privileged)?
@@ -707,6 +714,10 @@ impl Model<Host> {
         {
             return Err(overlap_error(&claim, &existing));
         }
+        self.as_retired_bindings_mut().mutate(|r| {
+            r.remove(&internal_start_port);
+            Ok(())
+        })?;
         self.as_binding_ranges_mut().mutate(|ranges| {
             let existing = ranges.get(&internal_start_port);
             // Idempotent re-bind: a package may call bindPortRange on every
@@ -1059,6 +1070,26 @@ mod tests {
         assert_eq!(err.kind, ErrorKind::InvalidRequest);
         assert!(host.as_binding_ranges().de().unwrap().is_empty());
         assert!(ports.try_alloc(40000, false, false).is_some());
+    }
+
+    #[test]
+    fn binding_a_retired_port_again_drops_its_tombstone() {
+        let mut ports = AvailablePorts::new();
+        let mut host = host();
+        host.as_retired_bindings_mut()
+            .mutate(|r| {
+                r.insert(8333, Some(58333));
+                r.insert(28332, None);
+                Ok(())
+            })
+            .unwrap();
+
+        host.add_binding(&mut ports, 8333, plain(8333), false)
+            .unwrap();
+        host.add_binding_range(&mut ports, 28332, 40000, 2, false)
+            .unwrap();
+
+        assert!(host.as_retired_bindings().de().unwrap().is_empty());
     }
 
     #[test]

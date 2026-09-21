@@ -98,6 +98,7 @@ impl Public {
                         public_domains: BTreeMap::new(),
                         private_domains: BTreeMap::new(),
                         port_forwards: BTreeSet::new(),
+                        retired_bindings: BTreeMap::new(),
                     },
                     wifi: WifiInfo {
                         enabled: false,

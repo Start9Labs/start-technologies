@@ -279,6 +279,10 @@ export class MultiHost {
    * @param internalPort - the container-side port passed to
    * {@link MultiHost.bindPort}, or the `internalStartPort` passed to
    * {@link MultiHost.bindPortRange}
+   * @param options.successor - the port on this host the service now serves
+   * in its place. Recorded on the host, so a URL plugin such as Tor moves an
+   * address it holds for the old port instead of parking it. Omit it when
+   * nothing replaces the port.
    * @returns `true` if something was removed, `false` if nothing was bound
    * there — the normal result on a re-run, not an error.
    *
@@ -286,12 +290,18 @@ export class MultiHost {
    * ```
    * // upstream dropped the bundled metrics listener in 3.0
    * await sdk.MultiHost.of(effects, 'api').retirePort(9090)
+   * // the P2P listener moved from 8333 to 58333
+   * await sdk.MultiHost.of(effects, 'peer').retirePort(8333, { successor: 58333 })
    * ```
    */
-  async retirePort(internalPort: number): Promise<boolean> {
+  async retirePort(
+    internalPort: number,
+    options?: { successor?: number },
+  ): Promise<boolean> {
     return this.options.effects.retireBinding({
       id: this.options.id,
       internalPort,
+      successor: options?.successor,
     })
   }
 

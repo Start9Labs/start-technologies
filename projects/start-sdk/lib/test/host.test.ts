@@ -133,6 +133,22 @@ describe('host', () => {
         internalPort: 9090,
       })
     })
+
+    test('retirePort forwards the successor it was given', async () => {
+      const retireBinding = jest.fn(async () => true)
+      const host = sdk.MultiHost.of(
+        { retireBinding } as unknown as Effects,
+        'peer',
+      )
+      await expect(host.retirePort(8333, { successor: 58333 })).resolves.toBe(
+        true,
+      )
+      expect(retireBinding).toHaveBeenCalledWith({
+        id: 'peer',
+        internalPort: 8333,
+        successor: 58333,
+      })
+    })
   })
 
   describe('MultiHost.bindPortRange', () => {

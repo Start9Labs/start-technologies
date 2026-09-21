@@ -128,18 +128,24 @@ pub async fn retire_host(
 pub struct RetireBindingParams {
     pub id: HostId,
     pub internal_port: u16,
+    #[ts(optional)]
+    pub successor: Option<u16>,
 }
 
 pub async fn retire_binding(
     context: EffectContext,
-    RetireBindingParams { id, internal_port }: RetireBindingParams,
+    RetireBindingParams {
+        id,
+        internal_port,
+        successor,
+    }: RetireBindingParams,
 ) -> Result<bool, Error> {
     let context = context.deref()?;
     context
         .seed
         .persistent_container
         .net_service
-        .retire_binding(id, internal_port)
+        .retire_binding(id, internal_port, successor)
         .await
 }
 

@@ -101,7 +101,10 @@
 - **`MultiHost.retire()` and `MultiHost.retirePort()` permanently remove a host
   or a binding**, returning its external ports to the server's pool — where
   `setupInterfaces` otherwise only _disables_ what it did not declare. Call it
-  from the `up()` of the version that stops binding; re-running is safe. See
+  from the `up()` of the version that stops binding; re-running is safe.
+  `retirePort(old, { successor })` records the port the binding moved to in
+  the host's `retiredBindings`, which a URL plugin reads to move an address it
+  holds for the old port rather than park it. See
   [Retiring a Host or Binding](https://docs.start9.com/packaging/interfaces.html#retiring-a-host-or-binding)
 
 - **`sdk.getRootCa(effects)` returns this server's root CA certificate**, for a
