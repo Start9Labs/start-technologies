@@ -483,6 +483,8 @@ export interface SetupFlashEvent {
 export interface DeviceFromApi {
   mac: string | null
   name: string
+  /** The name assigned in the router; null when `name` is resolved from elsewhere. */
+  custom_name: string | null
   hostname: string | null
   status: 'online' | 'offline'
   connection: string | null
@@ -498,7 +500,8 @@ export interface DeviceFromApi {
 
 export interface DeviceUpdateReq {
   mac: string
-  name: string
+  /** Omitted leaves the assigned name untouched; empty clears it. */
+  name?: string
   ipv4_static: boolean
   ipv4: string
 }

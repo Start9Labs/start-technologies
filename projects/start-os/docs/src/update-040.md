@@ -188,7 +188,11 @@ Depending on the speed of your drive, plan on 3-5 minutes per GB of backup data.
 
 Check your notifications. A service that fails to migrate raises a notification naming the service and the reason it failed, and a summary notification lists everything that needs re-installing.
 
-Your data is safe — it stays on disk where the service left it. Install the service again from the marketplace and it will pick that data back up.
+StartOS keeps the service's volume on disk if migration fails. Install the service again from the marketplace and it will pick that data back up.
+
+### Legacy Services
+
+Services that remain marked **Legacy** after migration run on servers that have a public IP or use StartTunnel. Their package-managed certificate covers the service's secure addresses.
 
 ### Tor Cleanup
 

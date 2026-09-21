@@ -591,6 +591,7 @@ pub async fn install_os_to(
             _ => &mut install,
         };
     } else {
+        install.arg("--force-extra-removable");
         match arch {
             "x86_64" => install.arg("--target=x86_64-efi"),
             "aarch64" => install.arg("--target=arm64-efi"),

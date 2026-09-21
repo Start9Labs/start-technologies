@@ -81,8 +81,8 @@ function bookDir(name: string): string {
 }
 
 /**
- * Discover books from versions.conf — the source of truth shared with build.sh,
- * docs-deploy.yml, and nginx routing — resolving each to its source dir.
+ * Discover books from versions.conf — the source of truth shared with build.sh
+ * and the routing it writes into the tree — resolving each to its source dir.
  * Throws if a listed book has no SUMMARY.md so CI fails loudly instead of
  * silently shipping a docs site missing a product's llms.txt (which is what
  * starved the support bot when the books moved into the monorepo).

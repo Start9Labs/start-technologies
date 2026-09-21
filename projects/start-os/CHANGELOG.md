@@ -12,6 +12,10 @@ for the detail behind its highlights.
 
 ### Added
 
+- **UEFI installations carry a standard fallback bootloader.** StartOS remains
+  bootable if firmware loses its saved boot entry while retaining the normal
+  entry and StartOS's automatic priority for a plugged-in installer.
+
 - **Typing a service's domain without `https://` opens its web interface over
   HTTPS.** This works on each network where the domain is assigned. Server IP
   addresses and domains assigned to the StartOS UI retain their existing
@@ -96,6 +100,20 @@ for the detail behind its highlights.
 
 ### Changed
 
+- **A service's `.local` address has its own switch, and its LAN IP addresses
+  follow it.** A LAN IP you switch yourself keeps that setting. Every other one,
+  including an address your server is assigned later, is on while `.local` is on
+  and off while it is off. On an interface served without TLS, switching on a
+  LAN IP switches `.local` on, and switching `.local` off switches its LAN IPs
+  off. There, a `.local` address left on beside a gateway's IP addresses, all
+  of them off, shows a warning.
+
+- **ZRAM compressed swap is now off by default, and updating turns it off on
+  your server.** With it on, services under heavy memory load could take the RAM
+  StartOS reserves for itself and leave the server unreachable. A server that
+  leaned on ZRAM to fit its services has less memory to work with after the
+  update. `start-cli server experimental zram --enable` turns it back on.
+
 - **Your server's name is now its `.local` address, without the `.local` on the
   end.** A server previously carried two names: a display label shown in the
   browser tab, and the `.local` address derived from it by lowercasing and
@@ -132,6 +150,59 @@ for the detail behind its highlights.
   driver still provides display output without GPU compute.
 
 ### Fixed
+
+- **Switching off a service's LAN IP address closes it.** The address kept
+  answering for as long as the service's `.local` address was on. On an
+  interface served over TLS, `.local` and the service's domains still answer
+  there by name.
+
+- **A service keeps its `.local` address while your server has no LAN address.**
+  The address left the service's list whenever the network dropped, and a
+  service that checks the URL you chose for it could stop and ask for it again.
+
+- **Services start once StartOS has detected the network, and an interface
+  that loses its connection drops its addresses right away.** A service
+  reading its own addresses as it starts sees the server's LAN addresses.
+  Startup waits up to 30 seconds for NetworkManager to finish connecting.
+
+- **The Raspberry Pi 4 image includes the Broadcom firmware needed for its
+  built-in WiFi interface.**
+
+- **Raspberry Pi images use all space allocated to the StartOS filesystem.**
+  First boot expands the filesystem to fill its partition before setup begins.
+
+- **Fallback service-container cleanup finishes after an unresponsive
+  runtime.** StartOS bounds the fallback shutdown waits so it can release the
+  container's network routes and continue teardown.
+
+- **A service keeps reacting to changes after several land at once.** A burst of
+  changes to a value a service watches, such as its addresses, a dependency's
+  status, or its outbound gateway, could permanently stop StartOS from notifying
+  it. Its generated files, certificates, and registrations then stayed stale
+  until the container was rebuilt.
+
+- **Services keep resolving domain names when the network provides no separate
+  DNS server.** StartOS uses its built-in Cloudflare fallback instead of leaving
+  service containers without a working resolver.
+
+- **A backup made on one CPU architecture restores on another.** StartOS runs
+  backed-up service images under emulation. Reinstalling or updating a service
+  lets StartOS select its marketplace package for the server architecture.
+
+- **Requested restarts and shutdowns complete when concurrent service teardown has already removed a mountpoint.**
+
+- **A service migrated from 0.3.5.1 keeps its data when an install or update
+  fails.** A failed update rolls back to the data it started with, which
+  previously took a reboot after the upgrade, and a failed install leaves
+  existing data in place.
+
+- **Nextcloud (Legacy) and other migrated 0.3.5.1 services with a
+  package-managed certificate start when the server has a public IP or uses
+  StartTunnel.**
+
+- **Service interfaces show addresses only for gateways that accept inbound
+  connections.** Commercial VPNs remain available for system-wide and
+  per-service outbound routing.
 
 - **A service's plain (non-SSL) port accepts connections from other private
   networks routed to the server.** From a second VLAN, a wired/wireless split
@@ -202,6 +273,11 @@ for the detail behind its highlights.
   away.** The notification naming what went wrong was held back until StartOS had
   finished cleaning up after the attempt, which can take several minutes. It now
   arrives as soon as the operation fails, while that cleanup is still running.
+
+- **`start-cli package install --sideload` reports long service installation
+  errors in its progress output.** Very long messages are shortened safely to
+  fit the progress stream.
+
 - **Restoring from a backup, or transferring to a new drive, keeps your server's
   name.** Both flows renamed the server to `start9`, so the restored server
   answered at `start9.local` rather than the address it had before — and two
@@ -403,6 +479,15 @@ for the detail behind its highlights.
 - **The copy taken before an update is now made with the service stopped**, so it can
   no longer capture a database mid-write.
 
+- **A service's outbound gateway takes precedence over the system-wide
+  default.** You can keep one gateway pinned under **System > Gateways >
+  Outbound Traffic** while sending selected services through another gateway
+  with **Set Outbound Gateway**. A service given its own gateway while a
+  system-wide gateway was pinned has been following the system-wide one, and
+  switches to its own when you update. Changing or clearing the service's
+  selection also drops its established outbound connections, so new connections
+  use the newly selected gateway.
+
 - **A service reached over IPv6 through a tunnel now answers.** StartOS sends a
   reply back out the interface its connection arrived on by restoring a
   connection mark, but the kernel routes the reply that _opens_ a connection
@@ -412,6 +497,14 @@ for the detail behind its highlights.
   sent, so an inbound IPv6 connection to a tunnel-delegated address hung until
   it timed out. A reply from an interface's own global IPv6 address now leaves
   by that interface. IPv4, and traffic forwarded to a service container, were
+  unaffected.
+
+- **A tunnel's IPv6 address now loads from a device on the server's own
+  network.** A phone or computer sharing the server's network connected to an
+  IPv6 address delegated through a tunnel — directly, or through a public domain
+  pointing at it — and then hung until the request timed out, while devices
+  everywhere else loaded it normally. The connection itself appeared to succeed,
+  so a domain that also had an IPv4 address never fell back to it. IPv4 was
   unaffected.
 
 - **Notification selection checkboxes no longer cover text on phones.** When
@@ -483,7 +576,26 @@ for the detail behind its highlights.
 - **A service that mounts a dependency's files read-write fails to start when
   that dependency is not installed**, naming the missing volume.
 
+- **The Refresh Needed dialog offers a Refresh button in browser tabs.** Select
+  it to open the updated interface.
+
+- **A TLS passthrough added with `start-cli net vhost add-passthrough` answers
+  on every public IPv6 address of its gateway.** It answered on the addresses
+  the gateway held at the moment the passthrough was registered — at boot, often
+  not all of them — and refused the rest with a TLS `unrecognized name` error
+  while IPv4 kept working.
+
+- **A TLS passthrough whose hostname was entered with capital letters receives
+  its traffic.** One added as `Cloud.Example.com` was listed while every
+  connection to it was dropped. Hostnames match in any case, and a passthrough
+  saved that way starts working once the update is installed.
+
 ### Security
+
+- **A selected outbound gateway acts as a kill switch if it disconnects.**
+  StartOS rejects the system-wide or per-service traffic assigned to that
+  gateway until it reconnects, protecting the server's ISP address from
+  fallback traffic.
 
 - **Service mount paths are validated and confined to their intended
   directories.**
@@ -506,6 +618,16 @@ for the detail behind its highlights.
 - **Outbound IPv6 uses an address assigned to the selected gateway.** Traffic
   through a gateway that has an IPv6 router but no IPv6 address of its own
   fails immediately.
+
+- **A service's outbound gateway carries its IPv6 as well as its IPv4.** A
+  service sent through its own gateway with **Set Outbound Gateway** kept using
+  the system-wide default for IPv6, so those connections left under a different
+  address than the one you chose. When the service's gateway can't carry IPv6,
+  the service's IPv6 is dropped.
+
+- **A service's outbound gateway applies from the moment the service starts.**
+  A service that had just started or restarted used the system-wide default
+  until a gateway next changed.
 
 ## [0.4.0.1]
 

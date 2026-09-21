@@ -30,7 +30,7 @@ use crate::net::port_map::server::igd::{
 };
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
-use crate::tunnel::db::PortForward;
+use crate::tunnel::db::{PortForward, PortForwards};
 use crate::tunnel::forward::lease::{self, LeaseKey};
 use crate::tunnel::wg::WIREGUARD_INTERFACE_NAME;
 
@@ -250,6 +250,32 @@ async fn control(
     handle_control(&ctx, peer, &headers, &body).await
 }
 
+/// Repoints the automatic mapping at `source` within its own device. Returns
+/// whether it did.
+fn remap_auto_dnat(
+    forwards: &mut PortForwards,
+    source: SocketAddrV4,
+    target: SocketAddrV4,
+    count: u16,
+) -> bool {
+    if forwards.overlapping(source, count).is_some() {
+        return false;
+    }
+    match forwards.0.get_mut(&source) {
+        Some(PortForward::Dnat {
+            target: existing,
+            count: existing_count,
+            auto: true,
+            ..
+        }) if existing.ip() == target.ip() => {
+            *existing = target;
+            *existing_count = count;
+            true
+        }
+        _ => false,
+    }
+}
+
 /// Installs (or re-asserts) a forward of `count` contiguous ports (a PCP
 /// PORT_SET range) from `source` to `target`. `protocol_label` is the DB label
 /// (e.g. "UPnP", "PCP"); the requesting device is already shown by the forward's
@@ -270,13 +296,6 @@ pub(super) async fn apply_peer_forward_range(
         return Err(718); // ConflictInMappingEntry — port 80 owned by the redirect
     }
     match current_forward(ctx, source).await {
-        Some(PortForward::Dnat {
-            target: t,
-            count: c,
-            ..
-        }) if t != target || c != count => {
-            return Err(718); // ConflictInMappingEntry
-        }
         // The external port is SNI-demuxed. A single hostname-less MAP becomes the
         // port's fallback (a bare public IP sharing the port with named domains);
         // `persist_fallback_forward` stamps its own SniFallback lease. A range
@@ -290,11 +309,32 @@ pub(super) async fn apply_peer_forward_range(
                 .await
                 .map_err(|_| 718u16);
         }
-        Some(PortForward::Dnat { .. }) => {
-            // Idempotent re-assert from the client's periodic refresh: ensure the
-            // nft forward is actually installed.
+        Some(PortForward::Dnat {
+            target: existing,
+            count: existing_count,
+            enabled,
+            ..
+        }) => {
+            if existing != target || existing_count != count {
+                let remapped = ctx
+                    .db
+                    .mutate(|db| {
+                        db.as_port_forwards_mut()
+                            .mutate(|pf| Ok(remap_auto_dnat(pf, source, target, count)))
+                    })
+                    .await
+                    .result
+                    .map_err(|_| 501u16)?;
+                if !remapped {
+                    return Err(718); // ConflictInMappingEntry
+                }
+                if let Some(rc) = ctx.active_forwards.mutate(|m| m.remove(&source)) {
+                    drop(rc);
+                    ctx.forward.gc().await.log_err();
+                }
+            }
             let active = ctx.active_forwards.mutate(|m| m.contains_key(&source));
-            if !active {
+            if enabled && !active {
                 let prefix = prefix_for(ctx, target.ip()).await;
                 let rc = ctx
                     .forward
@@ -462,4 +502,58 @@ pub(in crate::tunnel) async fn prefix_for(ctx: &TunnelContext, target_ip: &Ipv4A
             })
         })
         .unwrap_or(32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn forwards(entries: &[(&str, &str, bool)]) -> PortForwards {
+        let mut forwards = PortForwards(Default::default());
+        for (source, target, auto) in entries {
+            forwards.0.insert(
+                source.parse().unwrap(),
+                PortForward::Dnat {
+                    target: target.parse().unwrap(),
+                    label: None,
+                    enabled: true,
+                    count: 1,
+                    auto: *auto,
+                },
+            );
+        }
+        forwards
+    }
+
+    fn remap(forwards: &mut PortForwards, target: &str, count: u16) -> bool {
+        let source = "203.0.113.1:443".parse().unwrap();
+        remap_auto_dnat(forwards, source, target.parse().unwrap(), count)
+    }
+
+    #[test]
+    fn a_device_changes_its_own_internal_port() {
+        let mut forwards = forwards(&[("203.0.113.1:443", "10.59.0.2:8443", true)]);
+        assert!(remap(&mut forwards, "10.59.0.2:9443", 1));
+        assert!(matches!(
+            forwards.0[&"203.0.113.1:443".parse().unwrap()],
+            PortForward::Dnat { target, .. } if target == "10.59.0.2:9443".parse().unwrap()
+        ));
+    }
+
+    #[test]
+    fn a_device_cannot_remap_a_mapping_it_does_not_own() {
+        let mut manual = forwards(&[("203.0.113.1:443", "10.59.0.2:8443", false)]);
+        assert!(!remap(&mut manual, "10.59.0.2:9443", 1));
+        let mut other_device = forwards(&[("203.0.113.1:443", "10.59.0.3:8443", true)]);
+        assert!(!remap(&mut other_device, "10.59.0.2:8443", 1));
+    }
+
+    #[test]
+    fn a_remap_cannot_grow_into_a_neighbouring_forward() {
+        let mut forwards = forwards(&[
+            ("203.0.113.1:443", "10.59.0.2:8443", true),
+            ("203.0.113.1:444", "10.59.0.3:444", true),
+        ]);
+        assert!(!remap(&mut forwards, "10.59.0.2:8443", 2));
+    }
 }

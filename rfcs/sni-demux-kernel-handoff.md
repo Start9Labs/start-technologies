@@ -10,7 +10,7 @@ SNI. Because SNI only exists after the TCP handshake, the daemon must accept
 the connection, sniff the hello, open the internal leg from the client's own
 source address (`crate::net::transparent::transparent_connect`, IP_TRANSPARENT
 
-- the fwmark-`0x540001`/table-1344 reply divert), replay the buffered bytes,
+- the fwmark-`0x540001`/table-5344 reply divert), replay the buffered bytes,
   and then splice both sockets in userspace (`copy_bidirectional`) for the
   connection's entire lifetime.
 

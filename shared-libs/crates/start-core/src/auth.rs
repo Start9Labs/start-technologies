@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 use clap::Parser;
 use color_eyre::eyre::eyre;
+use futures::future::BoxFuture;
 use imbl_value::{InternedString, json};
 use itertools::Itertools;
 use josekit::jwk::Jwk;
@@ -234,33 +235,48 @@ async fn cli_login<C: LoginContext>(
 where
     CliContext: CallRemote<C>,
 {
-    let password = if let Ok(password) = std::env::var("PASSWORD") {
-        password
-    } else {
-        rpassword::prompt_password("Password: ")?
-    };
-
-    if ctx.id_key().is_err() {
-        let secret = ed25519_dalek::SigningKey::generate(&mut crate::util::crypto::os_rng());
-        crate::developer::write_signing_key(&secret, &ctx.id_key_path).await?;
-    }
-    let pubkey = ctx
-        .id_key()
-        .map(|k| AnyVerifyingKey::Ed25519(k.into()).to_string())?;
-
-    ctx.call_remote::<C>(
-        &parent_method.into_iter().chain(method).join("."),
-        json!({
-            "password": password,
-            "pubkey": pubkey,
-            "metadata": {
-                "platforms": ["cli"],
-            },
-        }),
-    )
-    .await?;
-
+    login::<C>(&ctx, &parent_method.into_iter().chain(method).join(".")).await?;
     Ok(())
+}
+
+/// Enrolls the identity key, generating one first if there is none. Boxed so
+/// `CallRemote<RpcContext>` can await it without its future containing itself.
+pub fn login<'a, C: LoginContext>(
+    ctx: &'a CliContext,
+    method: &'a str,
+) -> BoxFuture<'a, Result<(), Error>>
+where
+    CliContext: CallRemote<C>,
+{
+    Box::pin(async move {
+        let password = if let Ok(password) = std::env::var("PASSWORD") {
+            password
+        } else {
+            rpassword::prompt_password("Password: ")?
+        };
+
+        if ctx.id_key().is_err() {
+            let secret = ed25519_dalek::SigningKey::generate(&mut crate::util::crypto::os_rng());
+            crate::developer::write_signing_key(&secret, &ctx.id_key_path).await?;
+        }
+        let pubkey = ctx
+            .id_key()
+            .map(|k| AnyVerifyingKey::Ed25519(k.into()).to_string())?;
+
+        ctx.call_remote::<C>(
+            method,
+            json!({
+                "password": password,
+                "pubkey": pubkey,
+                "metadata": {
+                    "platforms": ["cli"],
+                },
+            }),
+        )
+        .await?;
+
+        Ok(())
+    })
 }
 
 pub fn check_password(hash: &str, password: &str) -> Result<(), Error> {

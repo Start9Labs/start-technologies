@@ -78,7 +78,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
             <input
               tuiInput
               formControlName="name"
-              [placeholder]="data()?.hostname ?? ''"
+              [placeholder]="data()?.name ?? ''"
             />
           </tui-textfield>
           <tui-error formControlName="name" />
@@ -193,7 +193,7 @@ export default class DeviceDetail {
       const data = this.data()
       if (data && this.form.pristine) {
         this.form.reset({
-          name: data.name,
+          name: data.customName ?? '',
           allowAutoPortForward: data.allowAutoPortForward,
           ip: {
             ipv4Static: data.ipv4Static,

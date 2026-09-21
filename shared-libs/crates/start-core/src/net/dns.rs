@@ -266,6 +266,31 @@ pub(crate) fn name_server_socket_addr(ns: &NameServerConfig) -> SocketAddr {
     SocketAddr::new(ns.ip, ns.connections.first().map_or(53, |c| c.port))
 }
 
+const BUILTIN_DNS_FALLBACK: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), 53);
+
+/// The network-provided entries after StartOS's resolver and built-in fallback.
+fn network_name_servers(config: &ResolverConfig) -> impl Iterator<Item = &NameServerConfig> {
+    config.name_servers().iter().skip(2)
+}
+
+fn forward_servers(
+    config: &ResolverConfig,
+    static_servers: Option<&std::collections::VecDeque<SocketAddr>>,
+) -> Vec<NameServerConfig> {
+    let mut servers: Vec<NameServerConfig> = if let Some(servers) = static_servers {
+        servers
+            .iter()
+            .map(|addr| forward_name_server(*addr))
+            .collect()
+    } else {
+        network_name_servers(config).cloned().collect()
+    };
+    if servers.is_empty() {
+        servers.push(forward_name_server(BUILTIN_DNS_FALLBACK));
+    }
+    servers
+}
+
 /// Parse systemd-resolved's resolv.conf. hickory 0.26 only exposes
 /// `system_conf::parse_resolv_conf` on non-apple unix; this path only runs on
 /// the (Linux) server, so non-Linux targets just need a stub to compile.
@@ -381,27 +406,16 @@ fn spawn_forwarder(
                                 .as_dns_mut()
                                 .as_dhcp_servers_mut()
                                 .ser(
-                                    &config
-                                        .name_servers()
-                                        .iter()
+                                    &network_name_servers(config)
                                         .map(name_server_socket_addr)
                                         .dedup()
-                                        .skip(2)
                                         .collect(),
                                 )
                         })
                         .await
                         .result?;
                     }
-                    let forward_servers: Vec<NameServerConfig> =
-                        if let Some(servers) = &static_servers {
-                            servers
-                                .iter()
-                                .map(|addr| forward_name_server(*addr))
-                                .collect()
-                        } else {
-                            config.name_servers().iter().skip(2).cloned().collect()
-                        };
+                    let forward_servers = forward_servers(config, static_servers.as_ref());
                     let auth: Vec<Arc<dyn ZoneHandler>> = vec![Arc::new(
                         ForwardZoneHandler::builder_tokio(ForwardConfig {
                             name_servers: forward_servers,
@@ -905,5 +919,62 @@ impl DnsController {
                 crate::ErrorKind::Network,
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+
+    use super::*;
+
+    fn resolver_config(servers: impl IntoIterator<Item = SocketAddr>) -> ResolverConfig {
+        ResolverConfig::from_parts(
+            None,
+            Vec::new(),
+            servers.into_iter().map(forward_name_server).collect(),
+        )
+    }
+
+    fn addresses(servers: Vec<NameServerConfig>) -> Vec<SocketAddr> {
+        servers.iter().map(name_server_socket_addr).collect()
+    }
+
+    #[test]
+    fn forwards_to_network_name_servers() {
+        let network = "192.0.2.53:5353".parse().unwrap();
+        let config = resolver_config([
+            "127.0.0.1:53".parse().unwrap(),
+            BUILTIN_DNS_FALLBACK,
+            network,
+        ]);
+
+        assert_eq!(addresses(forward_servers(&config, None)), vec![network]);
+    }
+
+    #[test]
+    fn falls_back_when_no_network_name_servers_exist() {
+        let config = resolver_config(["127.0.0.1:53".parse().unwrap(), BUILTIN_DNS_FALLBACK]);
+
+        assert_eq!(
+            addresses(forward_servers(&config, None)),
+            vec![BUILTIN_DNS_FALLBACK]
+        );
+    }
+
+    #[test]
+    fn falls_back_when_the_static_list_is_empty() {
+        let network = "192.0.2.53:53".parse().unwrap();
+        let config = resolver_config([
+            "127.0.0.1:53".parse().unwrap(),
+            BUILTIN_DNS_FALLBACK,
+            network,
+        ]);
+        let static_servers = VecDeque::new();
+
+        assert_eq!(
+            addresses(forward_servers(&config, Some(&static_servers))),
+            vec![BUILTIN_DNS_FALLBACK]
+        );
     }
 }

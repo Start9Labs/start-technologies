@@ -3,7 +3,7 @@ import { FormsModule } from '@angular/forms'
 import { i18nPipe, TaskService } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { TuiButton, TuiDataList, TuiDropdown, TuiIcon } from '@taiga-ui/core'
-import { TuiBadge, TuiChevron, TuiSwitch } from '@taiga-ui/kit'
+import { TuiBadge, TuiChevron, TuiSwitch, TuiTooltip } from '@taiga-ui/kit'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { GatewayAddress, MappedServiceInterface } from '../../interface.service'
 import { GatewayActionsComponent } from './actions.component'
@@ -23,9 +23,7 @@ import { DomainHealthService } from './domain-health.service'
           tuiSwitch
           size="s"
           [showIcons]="false"
-          [disabled]="
-            toggling() || address.hostnameInfo.metadata.kind === 'mdns'
-          "
+          [disabled]="toggling()"
           [ngModel]="address.enabled"
           (ngModelChange)="onToggleEnabled()"
         />
@@ -117,6 +115,16 @@ import { DomainHealthService } from './domain-health.service'
                 {{ address.url }}
               }
             </span>
+          }
+          @if (address.allIpsDisabled) {
+            <tui-icon
+              class="g-warning"
+              icon="@tui.triangle-alert"
+              [tuiTooltip]="
+                'Every IP address this name resolves to on this gateway is disabled'
+                  | i18n
+              "
+            />
           }
           @if (address.masked) {
             <button
@@ -267,6 +275,7 @@ import { DomainHealthService } from './domain-health.service'
     TuiDropdown,
     TuiIcon,
     TuiSwitch,
+    TuiTooltip,
     FormsModule,
   ],
 })

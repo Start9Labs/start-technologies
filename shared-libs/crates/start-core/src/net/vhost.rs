@@ -46,7 +46,9 @@ use crate::net::gateway::{
 use crate::net::port_map::{PortMapController, candidate_gateways};
 use crate::net::ssl::{CertBranding, CertStore, RootCaTlsHandler};
 use crate::net::tls::{TlsHandler, TlsHandlerAction, TlsListener, TlsMetadata};
-use crate::net::utils::{bind_mio_listener, ipv6_is_link_local, is_private_ip};
+use crate::net::utils::{
+    bind_mio_listener, gua_ips, ipv6_is_link_local, ipv6_is_local, is_private_ip,
+};
 use crate::net::web_server::{Accept, AcceptStream, ExtractVisitor, TcpMetadata, extract};
 use crate::notifications::NotificationLevel;
 use crate::prelude::*;
@@ -184,6 +186,7 @@ async fn add_passthrough(
         private_ip,
     }: AddPassthroughParams,
 ) -> Result<(), Error> {
+    let hostname = InternedString::intern(hostname.to_ascii_lowercase());
     let public_gateways: BTreeSet<GatewayId> = public_gateway.into_iter().collect();
     let private_ips: BTreeSet<IpAddr> = private_ip.into_iter().collect();
     ctx.net_controller.vhost.add_passthrough(
@@ -201,7 +204,9 @@ async fn add_passthrough(
                 .as_network_mut()
                 .as_passthroughs_mut();
             let mut vec: Vec<PassthroughInfo> = pts.de()?;
-            vec.retain(|p| !(p.hostname == hostname && p.listen_port == listen_port));
+            vec.retain(|p| {
+                !(p.hostname.eq_ignore_ascii_case(&hostname) && p.listen_port == listen_port)
+            });
             vec.push(PassthroughInfo {
                 hostname,
                 listen_port,
@@ -234,7 +239,9 @@ async fn remove_passthrough(
                 .as_network_mut()
                 .as_passthroughs_mut();
             let mut vec: Vec<PassthroughInfo> = pts.de()?;
-            vec.retain(|p| !(p.hostname == hostname && p.listen_port == listen_port));
+            vec.retain(|p| {
+                !(p.hostname.eq_ignore_ascii_case(&hostname) && p.listen_port == listen_port)
+            });
             pts.ser(&vec)
         })
         .await
@@ -381,11 +388,13 @@ impl VHostController {
         public: BTreeSet<GatewayId>,
         private: BTreeSet<IpAddr>,
     ) -> Result<(), Error> {
+        let hostname = InternedString::intern(hostname.to_ascii_lowercase());
         let target = ProxyTarget {
             // A TLS passthrough is domain (SNI) based, i.e. dual-stack public: it is
             // public on its gateways' bare IPv4 and on each of their GUAs.
             public_v4: public.clone(),
-            public_v6: crate::net::utils::gua_ips(&self.interfaces.watcher.ip_info(), &public),
+            public_v6: BTreeSet::new(),
+            public_v6_gateways: public.clone(),
             private: private.clone(),
             acme: None,
             addr: backend,
@@ -416,6 +425,7 @@ impl VHostController {
     }
 
     pub fn remove_passthrough(&self, hostname: &InternedString, port: u16) {
+        let hostname = &InternedString::intern(hostname.to_ascii_lowercase());
         self.passthrough_handles
             .mutate(|h| h.remove(&(hostname.clone(), port)));
         self.gc(Some(hostname.clone()), port);
@@ -634,7 +644,9 @@ fn desired_port_maps(
             }
         }
         // IPv6 has no NAT and no SNI demux: pinholes, keyed hostname-less.
-        for gua in &target.public_v6 {
+        let mut guas = target.public_v6.clone();
+        guas.extend(gua_ips(ip_info, &target.public_v6_gateways));
+        for gua in &guas {
             let Some(info) = ip_info.iter().map(|(_, i)| i).find(|info| {
                 info.ip_info.as_ref().map_or(false, |i| {
                     i.subnets.iter().any(|s| s.addr() == IpAddr::V6(*gua))
@@ -715,6 +727,8 @@ fn challenge_bind_reqs(targets: &BTreeMap<VHostKey, ProxyTarget>) -> VHostBindRe
         }
         reqs.public_gateways
             .extend(target.public_v4.iter().cloned());
+        reqs.public_gateways
+            .extend(target.public_v6_gateways.iter().cloned());
         reqs.private_ips
             .extend(target.public_v6.iter().map(|v6| IpAddr::V6(*v6)));
     }
@@ -1047,6 +1061,8 @@ pub struct ProxyTarget {
     /// one gateway can carry several GUAs (SLAAC / multiple prefixes) that are
     /// independently Local vs Public.
     pub public_v6: BTreeSet<Ipv6Addr>,
+    /// Gateways WAN-public on every GUA they carry.
+    pub public_v6_gateways: BTreeSet<GatewayId>,
     pub private: BTreeSet<IpAddr>,
     pub acme: Option<AcmeProvider>,
     pub addr: SocketAddr,
@@ -1075,6 +1091,7 @@ impl PartialEq for ProxyTarget {
     fn eq(&self, other: &Self) -> bool {
         self.public_v4 == other.public_v4
             && self.public_v6 == other.public_v6
+            && self.public_v6_gateways == other.public_v6_gateways
             && self.private == other.private
             && self.acme == other.acme
             && self.addr == other.addr
@@ -1094,6 +1111,7 @@ impl fmt::Debug for ProxyTarget {
         f.debug_struct("ProxyTarget")
             .field("public_v4", &self.public_v4)
             .field("public_v6", &self.public_v6)
+            .field("public_v6_gateways", &self.public_v6_gateways)
             .field("private", &self.private)
             .field("acme", &self.acme)
             .field("addr", &self.addr)
@@ -1141,7 +1159,10 @@ impl ProxyTarget {
         // arrived on, since one gateway can carry several independently-public GUAs.
         let wan = match dst {
             IpAddr::V4(_) => self.public_v4.contains(gw_id),
-            IpAddr::V6(v6) => self.public_v6.contains(&v6),
+            IpAddr::V6(v6) => {
+                self.public_v6.contains(&v6)
+                    || (!ipv6_is_local(v6) && self.public_v6_gateways.contains(gw_id))
+            }
         };
         wan || self.accepts_as_private(subnets, src, dst)
     }
@@ -1236,13 +1257,15 @@ where
         self.acme.as_ref()
     }
     fn bind_requirements(&self) -> (BTreeSet<GatewayId>, BTreeSet<IpAddr>) {
-        // Bind every IP of an IPv4-public gateway (the box's LAN IPv4 is the DNAT
+        // Bind every IP of a public gateway (the box's LAN IPv4 is the DNAT
         // target; `filter` gates WAN acceptance per gateway) plus each public GUA
         // and private IP explicitly. `filter` still gates acceptance per address,
         // so binding a not-actually-public address is harmless.
         let mut bind_ips = self.private.clone();
         bind_ips.extend(self.public_v6.iter().map(|v6| IpAddr::V6(*v6)));
-        (self.public_v4.clone(), bind_ips)
+        let mut gateways = self.public_v4.clone();
+        gateways.extend(self.public_v6_gateways.iter().cloned());
+        (gateways, bind_ips)
     }
     fn is_passthrough(&self) -> bool {
         self.passthrough
@@ -2268,6 +2291,7 @@ mod port_map_tests {
             } else {
                 BTreeSet::new()
             },
+            public_v6_gateways: BTreeSet::new(),
             private: BTreeSet::new(),
             acme: acme.then(|| AcmeProvider::from_str("letsencrypt").unwrap()),
             addr: "10.0.3.2:443".parse().unwrap(),
@@ -2381,6 +2405,19 @@ mod port_map_tests {
     }
 
     #[test]
+    fn a_v6_public_gateway_pinholes_the_guas_it_carries() {
+        let target = ProxyTarget {
+            public_v6_gateways: [GatewayId::from(InternedString::intern(GATEWAY))]
+                .into_iter()
+                .collect(),
+            ..target(false, false)
+        };
+        let desired = desired_port_maps(&targets([(Some("example.com"), 443, target)]), &ip_info());
+
+        assert_eq!(routes(&desired, GUA, 443), [("*".to_string(), 443)]);
+    }
+
+    #[test]
     fn an_acme_domain_off_443_pinholes_the_challenge_port_over_ipv6() {
         let desired = desired_port_maps(
             &targets([(Some("electrum.example.com"), 50002, target(true, true))]),
@@ -2473,6 +2510,7 @@ mod accept_filter_tests {
         ProxyTarget {
             public_v4: public_v4.iter().map(|s| gw(s)).collect(),
             public_v6: public_v6.iter().map(|s| s.parse().unwrap()).collect(),
+            public_v6_gateways: BTreeSet::new(),
             private: private.iter().map(|s| s.parse().unwrap()).collect(),
             acme: None,
             addr: "10.0.0.1:443".parse().unwrap(),
@@ -2548,6 +2586,33 @@ mod accept_filter_tests {
 
         // A different gateway is never WAN-accepted on IPv4.
         assert!(!t.accepts(&gw("other"), &no_subnets, src, v4));
+    }
+
+    #[test]
+    fn a_v6_public_gateway_accepts_on_every_gua_it_carries() {
+        let g = gw("eth0");
+        let no_subnets = OrdSet::new();
+        let src = ip("2001:db8:ffff::9");
+        let t = ProxyTarget {
+            public_v6_gateways: [g.clone()].into_iter().collect(),
+            ..target(&[], &[], &[])
+        };
+
+        assert!(t.accepts(&g, &no_subnets, src, ip("2001:db8::1")));
+        assert!(t.accepts(&g, &no_subnets, src, ip("2001:db8::2")));
+        assert!(
+            !t.accepts(&gw("other"), &no_subnets, src, ip("2001:db8::1")),
+            "a GUA on another gateway"
+        );
+        assert!(!t.accepts(&g, &no_subnets, src, ip("fd00::1")), "a ULA");
+        assert!(
+            !t.accepts(&g, &no_subnets, src, ip("fe80::1")),
+            "a link-local address"
+        );
+        assert!(
+            !t.accepts(&g, &no_subnets, ip("198.51.100.9"), ip("203.0.113.5")),
+            "IPv4 WAN"
+        );
     }
 
     /// IPv4 hands a forwarded dial and a local one the same gateway, so the
@@ -2835,6 +2900,7 @@ mod upstream_alpn_tests {
         ProxyTarget {
             public_v4: BTreeSet::new(),
             public_v6: BTreeSet::new(),
+            public_v6_gateways: BTreeSet::new(),
             private: BTreeSet::new(),
             acme: None,
             addr: backend,

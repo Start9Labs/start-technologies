@@ -1,10 +1,15 @@
 use std::ffi::OsString;
 
+use clap::builder::PossibleValuesParser;
+use clap::{Parser, ValueEnum};
+use clap_complete::Shell;
 use rpc_toolkit::CliApp;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::context::CliContext;
 use crate::context::config::ClientConfig;
+use crate::prelude::{Error, ErrorKind, eyre};
 use crate::util::logger::LOGGER;
 
 fn app() -> CliApp<CliContext, ClientConfig> {
@@ -14,6 +19,37 @@ fn app() -> CliApp<CliContext, ClientConfig> {
     )
     .mutate_command(super::translate_cli)
     .mutate_command(|cmd| cmd.name("start-cli").version(super::cli_version()))
+}
+
+#[derive(Deserialize, Serialize, Parser)]
+#[group(skip)]
+pub struct CompletionsParams {
+    #[arg(help = "help.arg.completions-shell", value_parser = shells())]
+    shell: String,
+}
+
+fn shells() -> PossibleValuesParser {
+    PossibleValuesParser::new(
+        Shell::value_variants()
+            .iter()
+            .filter_map(ValueEnum::to_possible_value),
+    )
+}
+
+pub fn completions(
+    _: CliContext,
+    CompletionsParams { shell }: CompletionsParams,
+) -> Result<(), Error> {
+    let shell = shell
+        .parse::<Shell>()
+        .map_err(|e| Error::new(eyre!("{e}"), ErrorKind::InvalidRequest))?;
+    clap_complete::generate(
+        shell,
+        &mut app().into_command(),
+        "start-cli",
+        &mut std::io::stdout(),
+    );
+    Ok(())
 }
 
 pub fn main(args: impl IntoIterator<Item = OsString>) {

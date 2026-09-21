@@ -1,6 +1,6 @@
 # FAQ
 
-Common issues encountered during setup and daily use of StartOS, including a USB installer that will not boot, network connectivity problems, diagnostic mode, clock sync failures, domains that do not resolve, running out of storage, and service-specific troubleshooting.
+Common issues encountered during setup and daily use of StartOS, including a USB installer that will not boot, network connectivity problems, diagnostic mode, clock sync failures, domains that do not resolve, running out of storage, running two copies of a service, and service-specific troubleshooting.
 
 ## Do I need a surge protector for my server?
 
@@ -35,7 +35,7 @@ If a freshly flashed drive still does not boot, connect a monitor and keyboard a
 
 - **Server One (2024)** — Press `Del` repeatedly from the moment you power on to enter the BIOS. Under **Boot**, open **Boot Option Priorities** and set **Boot Option #1** to the USB drive, then press `F4` to save and restart.
 
-For other hardware, see the [install guide](installing-startos.md#install) and the [Community Hub](https://community.start9.com).
+For other hardware, see the [install guide](installing-startos.md#install) and the [Community Hub](https://community.start9.com). When firmware starts the installed disk first, StartOS searches for a plugged-in installer and boots it automatically. This works through both the normal and fallback UEFI loaders, so a correctly flashed plugged-in installer always takes priority over installed StartOS.
 
 ## During initial setup, I am unable to connect to "start.local".
 
@@ -166,9 +166,23 @@ If a service is running low on space, you have two options today:
 
 - **Move to a larger data drive.** Install StartOS with the new drive as the data drive, then choose **Transfer** at [initial setup](initial-setup.md) and select your old data drive to move everything across. Keep the old drive connected until the transfer completes, and never boot from it as a StartOS server again.
 
-- **Keep large files on storage the service can reach over the network.** Some services can use storage outside your server on their own. Nextcloud, for example, can attach an SMB share, a WebDAV server or an S3 bucket through its built-in External Storage app, so a large library can live on a NAS or another computer. Check the service's own instructions for what it supports. Linking one service's files into another, such as File Browser into Nextcloud or Immich, does not add space, since those files are on the same data drive.
+- **Keep large files on storage the service can reach over the network.** Some services can use storage outside your server on their own. Nextcloud, for example, can attach an SMB share, a WebDAV server or an S3 bucket through its built-in External Storage app, so a large library can live on a NAS or another computer. Check the service's own instructions for what it supports. Linking one service's files into another, such as NextExplorer into Nextcloud or Immich, does not add space, since those files are on the same data drive.
 
 Support for multiple drives is planned for StartOS 0.4.1. There is no release date yet.
+
+## Can I run two copies of the same service?
+
+Yes, but it is not officially supported. StartOS identifies a service by its package ID and installs each ID once, so a second copy means maintaining your own fork of the package under a unique ID, including its updates. It also won't work with dependent services: a service that depends on the original looks for it by ID and cannot be pointed at the fork.
+
+1. Set up the [packaging environment](/packaging/environment-setup.html).
+
+1. Clone the package repository, linked from the service's Marketplace listing under **Source Code**.
+
+1. In `startos/manifest/index.ts`, change `id` (lowercase letters, digits and hyphens) and `title`.
+
+1. Build with `make x86` or `make arm` (see the [build guide](/packaging/makefile.html)), then [sideload](sideloading.md) the `.s9pk` or publish it to a [registry of your own](/packaging/host-registry.html). Repeat for each new release, keeping your ID.
+
+The fork is a separate service with its own settings, addresses, data and [backups](backup-create.md), and starts empty.
 
 ## Issue with a particular service
 

@@ -1,12 +1,14 @@
 # Sideloading
 
-Sideloading lets you install a service from a `.s9pk` file without using any registry. This is useful when testing a service in development, installing a service that is not listed on any registry, or if you prefer to eliminate the Marketplace as a point of trust.
+Sideloading lets you install a service from a `.s9pk` file without using any registry. This is useful when testing a service in development, installing a service that is not listed on any registry, running a [second copy of a service](faq.md#can-i-run-two-copies-of-the-same-service), or if you prefer to eliminate the Marketplace as a point of trust.
 
 ## How to Sideload
 
 1. Click **Sideload** in the top navigation bar.
 
 1. Click the drop area to select a `.s9pk` file from your file system, or simply drag and drop the file into the drop area.
+
+When you sideload from the command line with `start-cli package install --sideload`, installation errors appear in the command's progress output. Very long messages are shortened safely to fit the progress stream.
 
 ## Obtaining `.s9pk` Files
 

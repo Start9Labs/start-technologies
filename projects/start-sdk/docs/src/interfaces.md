@@ -4,7 +4,7 @@
 
 ## Network Reachability
 
-Your package declares _what_ it exposes. The **user** decides _where_ it is reachable. An interface is bound to the server's [gateways](/start-os/gateways.html), and the user enables or disables each resulting address individually from the service's **Interfaces** tab. LAN addresses (the `.local` hostname, the LAN IP) are enabled by default; public IPv4 addresses are **off** by default.
+Your package declares _what_ it exposes. The **user** decides _where_ it is reachable. An interface is bound to the server's [gateways](/start-os/gateways.html), and the user enables or disables each resulting address individually from the service's **Interfaces** tab. LAN addresses (the `.local` hostname, the LAN IP) are enabled by default; public IPv4 addresses are **off** by default. A LAN IP the user has not switched follows the `.local` hostname, and on an interface served without TLS `.local` is on while one of its LAN IPs is, so switching it off switches them off. A filled address lists every address the user has enabled, the `.local` hostname included while the server has no LAN IP for it to resolve to.
 
 **A public domain belongs to the host, but is enabled per binding.** The user adds it naming one internal port, and its addresses — the plain one and, where the binding has `addSsl`, the TLS one — are enabled on **that** binding straight away. Every other binding on the same `MultiHost` also gains the domain, but **off by default**, to be switched on individually like any other address. So a host that binds two ports needs the domain enabled twice, and a package that starts binding a second port later does not inherit the user's earlier choice for it.
 
@@ -492,6 +492,8 @@ const origin = await multi.bindPort(10009, {
 ```
 
 StartOS still fronts the port with one of its TLS listeners, but that listener pipes the raw TLS stream through instead of terminating it, so nothing about the handshake is rewritten. The container sees the client's real source address rather than the proxy's — except for a client on the box itself, which appears as the bridge IP.
+
+The listener routes by the name the client asks for (its TLS SNI). It answers for the names enabled on the binding — its domains and the server's `.local` — and for a client that asks for no name or an IP address. It refuses every other name before the connection reaches your container. A daemon whose certificate carries a fixed name that its clients ask for binds the port `secure: { ssl: false }` instead: StartOS forwards the TCP stream untouched, whatever the name, and the daemon's TLS still runs end to end.
 
 ### When to use it
 

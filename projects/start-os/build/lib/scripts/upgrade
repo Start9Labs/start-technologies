@@ -65,7 +65,11 @@ fi
 chroot /media/startos/next bash -e << "EOF"
 
 if [ -f /boot/grub/grub.cfg ]; then
-    grub-install /dev/$(eval $(lsblk -o MOUNTPOINT,PKNAME -P | grep 'MOUNTPOINT="/media/startos/root"') && echo $PKNAME)
+    GRUB_INSTALL_ARGS=()
+    if [ -d /sys/firmware/efi ]; then
+        GRUB_INSTALL_ARGS+=(--force-extra-removable)
+    fi
+    grub-install "${GRUB_INSTALL_ARGS[@]}" /dev/$(eval $(lsblk -o MOUNTPOINT,PKNAME -P | grep 'MOUNTPOINT="/media/startos/root"') && echo $PKNAME)
     update-grub
 fi
 

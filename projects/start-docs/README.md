@@ -45,8 +45,7 @@ Built with [mdBook](https://rust-lang.github.io/mdBook/). Each book is an indepe
 
 1. Builds all books into versioned `docs/<book>/<version>/` directories
 2. Generates `llms.txt` and `llms-full.txt` for LLM consumption
-3. rsyncs to the VPS and regenerates nginx routing from `versions.conf`
-4. is followed by `deploy-docs-pages.yml`, which rebuilds the same tree and publishes it to Start9 Pages on evelyn
+3. publishes the tree to the NextExplorer folder Start9 Pages serves as docs.start9.com
 
 ## Documentation
 

@@ -18,8 +18,9 @@ use crate::util::Invoke;
 
 /// Firewall mark for transparent reply diversion.
 pub const DIVERT_MARK: u32 = 0x0054_0001;
-/// Default policy-routing table for diverted replies.
-pub const DIVERT_TABLE: u32 = 1344;
+/// Default policy-routing table for diverted replies. Above StartWRT's
+/// VLAN-tag table range.
+pub const DIVERT_TABLE: u32 = 5344;
 
 /// Host-specific reply-diversion policy.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,7 +39,7 @@ impl Default for DivertConfig {
     fn default() -> Self {
         DivertConfig {
             route_table: DIVERT_TABLE,
-            rule_priority: 49,
+            rule_priority: crate::net::DIVERT_RULE_PRIORITY,
             masked_fwmark: false,
             manage_nft: true,
         }

@@ -17,6 +17,7 @@ use ts_rs::TS;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::Database;
 use crate::db::model::public::{NetworkInterfaceType, WifiInfo};
+use crate::net::{AUTO_DEFAULT_RULE_PRIORITY, AUTO_MAIN_RULE_PRIORITY};
 use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
@@ -1071,68 +1072,28 @@ pub async fn synchronize_network_manager<P: AsRef<Path>>(
             .await?;
     }
 
-    Command::new("ip")
-        .arg("rule")
-        .arg("add")
-        .arg("pref")
-        .arg("1000")
-        .arg("from")
-        .arg("all")
-        .arg("lookup")
-        .arg("main")
-        .invoke(ErrorKind::Network)
-        .await
-        .log_err();
-    Command::new("ip")
-        .arg("rule")
-        .arg("add")
-        .arg("pref")
-        .arg("1100")
-        .arg("from")
-        .arg("all")
-        .arg("lookup")
-        .arg("default")
-        .invoke(ErrorKind::Network)
-        .await
-        .log_err();
-
-    // IPv6 twins of the two fallbacks above. StartOS owns v6 routing the way it
-    // owns v4: `from all lookup main`/`default` sit above NetworkManager's
-    // per-tunnel `::/0` full-tunnel rules (~pref 30786), so importing a tunnel
-    // that carries an IPv6 address no longer lets NM capture the host's entire
-    // IPv6 default route — the v6 default is decided by `main` (by metric),
-    // exactly like v4. There is no terminal blackhole: leak prevention is
-    // per-gateway instead. A gateway with no IPv6 that is selected as the default
-    // outbound points its priority-75 catch-all at a `blackhole default` table
-    // (see `apply_policy_routing_v6`), dropping the host's v6 egress without also
-    // blackholing replies to inbound tunnel connections — those are pinned to
-    // their arrival interface by the priority-51 CONNMARK rule.
-    Command::new("ip")
-        .arg("-6")
-        .arg("rule")
-        .arg("add")
-        .arg("pref")
-        .arg("1000")
-        .arg("from")
-        .arg("all")
-        .arg("lookup")
-        .arg("main")
-        .invoke(ErrorKind::Network)
-        .await
-        .log_err();
-    Command::new("ip")
-        .arg("-6")
-        .arg("rule")
-        .arg("add")
-        .arg("pref")
-        .arg("1100")
-        .arg("from")
-        .arg("all")
-        .arg("lookup")
-        .arg("default")
-        .invoke(ErrorKind::Network)
-        .await
-        .log_err();
+    // `main` decides each family's default by metric, ahead of NetworkManager's
+    // per-tunnel full-tunnel rules.
+    for family in ["-4", "-6"] {
+        for (priority, table) in [
+            (AUTO_MAIN_RULE_PRIORITY, "main"),
+            (AUTO_DEFAULT_RULE_PRIORITY, "default"),
+        ] {
+            Command::new("ip")
+                .arg(family)
+                .arg("rule")
+                .arg("add")
+                .arg("pref")
+                .arg(priority.to_string())
+                .arg("from")
+                .arg("all")
+                .arg("lookup")
+                .arg(table)
+                .invoke(ErrorKind::Network)
+                .await
+                .log_err();
+        }
+    }
 
     force_ipv6_addr_gen_eui64().await;
 

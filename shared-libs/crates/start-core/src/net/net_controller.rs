@@ -3,6 +3,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV
 use std::sync::{Arc, Weak};
 
 use color_eyre::eyre::eyre;
+use imbl::OrdMap;
 use imbl_value::InternedString;
 use ipnet::IpNet;
 use nix::net::if_::if_nametoindex;
@@ -15,6 +16,7 @@ use tokio_rustls::rustls::crypto::CryptoProvider;
 use tracing::instrument;
 
 use crate::db::model::Database;
+use crate::db::model::public::NetworkInterfaceInfo;
 use crate::hostname::ServerHostname;
 use crate::net::dns::DnsController;
 use crate::net::dns_update::{DnsUpdateController, spawn_server_mdns_injection};
@@ -30,6 +32,7 @@ use crate::net::service_interface::{
 };
 use crate::net::socks::SocksController;
 use crate::net::vhost::{AlpnInfo, DynVHostTarget, ProxyTarget, VHostController, VHostKey};
+use crate::net::{SERVICE_OUTBOUND_REJECT_RULE_PRIORITY, SERVICE_OUTBOUND_RULE_PRIORITY};
 use crate::prelude::*;
 use crate::service::effects::callbacks::ServiceCallbacks;
 use crate::util::Invoke;
@@ -312,6 +315,41 @@ fn ssl_vhost_public_v4<'a>(
         .collect()
 }
 
+/// LAN addresses a binding's SSL `*` vhost answers on: its enabled SSL-port IPs.
+fn ssl_vhost_private_ips<'a>(
+    enabled_addresses: impl IntoIterator<Item = &'a HostnameInfo>,
+) -> BTreeSet<IpAddr> {
+    enabled_addresses
+        .into_iter()
+        .filter(|a| !a.public && a.ssl && a.metadata.is_ip())
+        .filter_map(|a| a.hostname.parse().ok())
+        .collect()
+}
+
+/// LAN addresses a forwarded port answers on. An IP admits itself; a private
+/// domain, every address of its gateways.
+fn forwarded_lan_ips<'a>(
+    enabled_addresses: impl IntoIterator<Item = &'a HostnameInfo>,
+    net_ifaces: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+) -> BTreeSet<IpAddr> {
+    let mut ips = BTreeSet::new();
+    for address in enabled_addresses.into_iter().filter(|a| !a.public) {
+        match &address.metadata {
+            HostnameMetadata::Ipv4 { .. } | HostnameMetadata::Ipv6 { .. } => {
+                ips.extend(address.hostname.parse::<IpAddr>().ok());
+            }
+            HostnameMetadata::PrivateDomain { gateways } => ips.extend(
+                gateways
+                    .iter()
+                    .filter_map(|gw| net_ifaces.get(gw).and_then(|i| i.ip_info.as_ref()))
+                    .flat_map(|ip| ip.subnets.iter().map(|s| s.addr())),
+            ),
+            _ => {}
+        }
+    }
+    ips
+}
+
 /// Hosts the datapath still holds that the database no longer has. Collected
 /// before the update loop so a port handed from a retired host to a surviving
 /// one in the same pass comes down before it is rebuilt.
@@ -421,15 +459,8 @@ impl NetServiceData {
             // ours — terminating (add_ssl), or an SNI-agnostic passthrough when
             // the container serves its own TLS.
             if let Some(assigned_ssl_port) = bind.net.assigned_ssl_port {
-                // Collect private IPs from enabled LAN-only addresses' gateways
-                // (a GUA set to LAN+WAN is WAN, so it lands in the public set).
-                let server_private_ips: BTreeSet<IpAddr> = enabled_addresses
-                    .iter()
-                    .filter(|a| !a.public)
-                    .flat_map(|a| a.metadata.gateways())
-                    .filter_map(|gw| net_ifaces.get(gw).and_then(|info| info.ip_info.as_ref()))
-                    .flat_map(|ip_info| ip_info.subnets.iter().map(|s| s.addr()))
-                    .collect();
+                // A GUA set to LAN+WAN is WAN, so it lands in the public set.
+                let server_private_ips = ssl_vhost_private_ips(enabled_addresses.iter().copied());
 
                 // Public gateways, split by family: a bare public IPv4 (WAN IP)
                 // and a LAN+WAN GUA are independently toggleable, and the vhost
@@ -460,6 +491,7 @@ impl NetServiceData {
                         ProxyTarget {
                             public_v4: server_public_v4,
                             public_v6: server_public_v6,
+                            public_v6_gateways: BTreeSet::new(),
                             private: server_private_ips,
                             acme: None,
                             addr,
@@ -509,6 +541,7 @@ impl NetServiceData {
                     let target = vhosts.entry(key).or_insert_with(|| ProxyTarget {
                         public_v4: BTreeSet::new(),
                         public_v6: BTreeSet::new(),
+                        public_v6_gateways: BTreeSet::new(),
                         private: BTreeSet::new(),
                         // The public leg's alone, so a name served both ways
                         // keeps its LAN side. A passthrough never intermediates
@@ -581,13 +614,13 @@ impl NetServiceData {
                         a.metadata.gateways().collect::<Vec<_>>(),
                     );
                 }
-                let fwd_private: BTreeSet<IpAddr> = enabled_addresses
-                    .iter()
-                    .filter(|a| !a.public && a.port == Some(external))
-                    .flat_map(|a| a.metadata.gateways())
-                    .filter_map(|gw| net_ifaces.get(gw).and_then(|i| i.ip_info.as_ref()))
-                    .flat_map(|ip| ip.subnets.iter().map(|s| s.addr()))
-                    .collect();
+                let fwd_private = forwarded_lan_ips(
+                    enabled_addresses
+                        .iter()
+                        .copied()
+                        .filter(|a| a.port == Some(external)),
+                    &net_ifaces,
+                );
                 // StartOS answers these addresses itself, and a loopback DNAT is martian-dropped on ingress.
                 if !self.ip.is_loopback() {
                     forwards.insert(
@@ -702,13 +735,7 @@ impl NetServiceData {
                 .flat_map(|a| a.metadata.gateways())
                 .cloned()
                 .collect();
-            let private_ips: BTreeSet<IpAddr> = enabled_addresses
-                .iter()
-                .filter(|a| !a.public)
-                .flat_map(|a| a.metadata.gateways())
-                .filter_map(|gw| net_ifaces.get(gw).and_then(|i| i.ip_info.as_ref()))
-                .flat_map(|ip| ip.subnets.iter().map(|s| s.addr()))
-                .collect();
+            let private_ips = forwarded_lan_ips(enabled_addresses.iter().copied(), &net_ifaces);
             if public_gateways.is_empty() && private_ips.is_empty() {
                 continue;
             }
@@ -917,6 +944,169 @@ impl NetServiceData {
         self.binds.remove(&id);
         Ok(())
     }
+
+    fn outbound_sources(&self) -> Vec<IpAddr> {
+        std::iter::once(IpAddr::V4(self.ip))
+            .chain(self.ipv6.map(IpAddr::V6))
+            .collect()
+    }
+}
+
+fn ip_rule(source: IpAddr) -> Command {
+    let mut cmd = Command::new("ip");
+    if source.is_ipv6() {
+        cmd.arg("-6");
+    }
+    cmd.arg("rule");
+    cmd
+}
+
+/// Variants order by rule priority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum ServiceOutboundRule {
+    Gateway(u32),
+    Reject,
+}
+
+fn outbound_rule_command(action: &str, source: IpAddr, rule: ServiceOutboundRule) -> Command {
+    let mut command = ip_rule(source);
+    command.arg(action).arg("from").arg(source.to_string());
+    match rule {
+        ServiceOutboundRule::Gateway(table) => {
+            command
+                .arg("lookup")
+                .arg(table.to_string())
+                .arg("priority")
+                .arg(SERVICE_OUTBOUND_RULE_PRIORITY.to_string());
+        }
+        ServiceOutboundRule::Reject => {
+            command
+                .arg("unreachable")
+                .arg("priority")
+                .arg(SERVICE_OUTBOUND_REJECT_RULE_PRIORITY.to_string());
+        }
+    }
+    command
+}
+
+async fn outbound_rule(
+    action: &str,
+    source: IpAddr,
+    rule: ServiceOutboundRule,
+) -> Result<(), Error> {
+    outbound_rule_command(action, source, rule)
+        .invoke(ErrorKind::Network)
+        .await?;
+    Ok(())
+}
+
+async fn purge_outbound_rules(sources: &[IpAddr]) {
+    for source in sources {
+        for priority in [
+            SERVICE_OUTBOUND_RULE_PRIORITY,
+            SERVICE_OUTBOUND_REJECT_RULE_PRIORITY,
+        ] {
+            while ip_rule(*source)
+                .arg("del")
+                .arg("from")
+                .arg(source.to_string())
+                .arg("priority")
+                .arg(priority.to_string())
+                .invoke(ErrorKind::Network)
+                .await
+                .is_ok()
+            {}
+        }
+    }
+}
+
+async fn add_outbound_rules(sources: &[IpAddr], rule: ServiceOutboundRule) -> Result<(), Error> {
+    let mut added = Vec::new();
+    for source in sources {
+        if let Err(e) = outbound_rule("add", *source, rule).await {
+            for source in added {
+                let _ = outbound_rule("del", source, rule).await;
+            }
+            return Err(e);
+        }
+        added.push(*source);
+    }
+    Ok(())
+}
+
+async fn delete_outbound_rules(sources: &[IpAddr], rule: ServiceOutboundRule) {
+    for source in sources {
+        let _ = outbound_rule("del", *source, rule).await;
+    }
+}
+
+fn delete_conntrack_command(source: IpAddr) -> Command {
+    let mut command = Command::new("conntrack");
+    command.arg("-D");
+    if source.is_ipv6() {
+        command.arg("-f").arg("ipv6");
+    }
+    command.arg("-s").arg(source.to_string());
+    command
+}
+
+async fn flush_outbound_connections(sources: &[IpAddr]) {
+    for source in sources {
+        // `conntrack -D` exits one when no flows match.
+        let _ = delete_conntrack_command(*source)
+            .invoke(ErrorKind::Network)
+            .await;
+    }
+}
+
+async fn sync_outbound_rules(
+    db: &TypedPatchDb<Database>,
+    id: &PackageId,
+    sources: &[IpAddr],
+    current: &mut BTreeSet<ServiceOutboundRule>,
+) {
+    if let Err(e) = async {
+        let gateway: Option<GatewayId> = db
+            .peek()
+            .await
+            .as_public()
+            .as_package_data()
+            .as_idx(id)
+            .and_then(|p| p.as_outbound_gateway().de().ok())
+            .flatten();
+        let mut desired = BTreeSet::new();
+        if let Some(gateway) = &gateway {
+            desired.insert(ServiceOutboundRule::Reject);
+            if let Some(idx) = if_nametoindex(gateway.as_str()).log_err() {
+                desired.insert(ServiceOutboundRule::Gateway(1000 + idx));
+            }
+        }
+        // A lookup that fails to install still gets its rejection.
+        let previous = current.clone();
+        let mut res = Ok::<_, Error>(());
+        for rule in &desired - &*current {
+            match add_outbound_rules(sources, rule).await {
+                Ok(()) => {
+                    current.insert(rule);
+                }
+                Err(e) => res = Err(e),
+            }
+        }
+        // The rule being replaced keeps routing until it is deleted.
+        for rule in (&*current - &desired).into_iter().rev() {
+            delete_outbound_rules(sources, rule).await;
+            current.remove(&rule);
+        }
+        if *current != previous {
+            flush_outbound_connections(sources).await;
+        }
+        res
+    }
+    .await
+    {
+        tracing::error!("Failed to update outbound gateway for {id}: {e}");
+        tracing::debug!("{e:?}");
+    }
 }
 
 pub struct NetService {
@@ -951,7 +1141,7 @@ impl NetService {
         let synced = Watch::new(0u64);
         let synced_writer = synced.clone();
 
-        let ip = data.ip;
+        let outbound_sources = data.outbound_sources();
         let data = Arc::new(Mutex::new(data));
         let thread_data = data.clone();
         let sync_task = tokio::spawn(async move {
@@ -959,24 +1149,7 @@ impl NetService {
                 let ptr: JsonPointer = format!("/public/packageData/{}/hosts", id).parse().unwrap();
                 let mut watch = db.watch(ptr).await.typed::<Hosts>();
 
-                // Outbound gateway enforcement
-                let service_ip = ip.to_string();
-                // Purge any stale rules from a previous instance
-                loop {
-                    if Command::new("ip")
-                        .arg("rule")
-                        .arg("del")
-                        .arg("from")
-                        .arg(&service_ip)
-                        .arg("priority")
-                        .arg("100")
-                        .invoke(ErrorKind::Network)
-                        .await
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
+                purge_outbound_rules(&outbound_sources).await;
                 let mut outbound_sub = db
                     .subscribe(
                         format!("/public/packageData/{}/outboundGateway", id)
@@ -992,7 +1165,8 @@ impl NetService {
                     w.mark_seen();
                 }
                 drop(ctrl_for_ip);
-                let mut current_outbound_table: Option<u32> = None;
+                let mut current_outbound = BTreeSet::new();
+                sync_outbound_rules(&db, id, &outbound_sources, &mut current_outbound).await;
 
                 loop {
                     let (hosts_changed, outbound_changed) = tokio::select! {
@@ -1047,82 +1221,16 @@ impl NetService {
                         }
                     }
 
-                    // Handle outbound gateway changes
                     if outbound_changed {
-                        if let Err(e) = async {
-                            // Remove old rule if any
-                            if let Some(old_table) = current_outbound_table.take() {
-                                let old_table_str = old_table.to_string();
-                                let _ = Command::new("ip")
-                                    .arg("rule")
-                                    .arg("del")
-                                    .arg("from")
-                                    .arg(&service_ip)
-                                    .arg("lookup")
-                                    .arg(&old_table_str)
-                                    .arg("priority")
-                                    .arg("100")
-                                    .invoke(ErrorKind::Network)
-                                    .await;
-                            }
-                            // Read current outbound gateway from DB
-                            let outbound_gw: Option<GatewayId> = db
-                                .peek()
-                                .await
-                                .as_public()
-                                .as_package_data()
-                                .as_idx(id)
-                                .map(|p| p.as_outbound_gateway().de().ok())
-                                .flatten()
-                                .flatten();
-                            if let Some(gw_id) = outbound_gw {
-                                // Look up table ID for this gateway
-                                if let Some(table_id) = if_nametoindex(gw_id.as_str())
-                                    .map(|idx| 1000 + idx)
-                                    .log_err()
-                                {
-                                    let table_str = table_id.to_string();
-                                    Command::new("ip")
-                                        .arg("rule")
-                                        .arg("add")
-                                        .arg("from")
-                                        .arg(&service_ip)
-                                        .arg("lookup")
-                                        .arg(&table_str)
-                                        .arg("priority")
-                                        .arg("100")
-                                        .invoke(ErrorKind::Network)
-                                        .await
-                                        .log_err();
-                                    current_outbound_table = Some(table_id);
-                                }
-                            }
-                            Ok::<_, Error>(())
-                        }
-                        .await
-                        {
-                            tracing::error!("Failed to update outbound gateway for {id}: {e}");
-                            tracing::debug!("{e:?}");
-                        }
+                        sync_outbound_rules(&db, id, &outbound_sources, &mut current_outbound)
+                            .await;
                     }
 
                     synced_writer.send_modify(|v| *v += 1);
                 }
 
-                // Cleanup outbound rule on task exit
-                if let Some(table_id) = current_outbound_table {
-                    let table_str = table_id.to_string();
-                    let _ = Command::new("ip")
-                        .arg("rule")
-                        .arg("del")
-                        .arg("from")
-                        .arg(&service_ip)
-                        .arg("lookup")
-                        .arg(&table_str)
-                        .arg("priority")
-                        .arg("100")
-                        .invoke(ErrorKind::Network)
-                        .await;
+                for rule in current_outbound.into_iter().rev() {
+                    delete_outbound_rules(&outbound_sources, rule).await;
                 }
             } else {
                 let ptr: JsonPointer = "/public/serverInfo/network/host".parse().unwrap();
@@ -1457,23 +1565,8 @@ impl NetService {
             }
         }
         self.sync_task.abort();
-        // Clean up any outbound gateway ip rules for this service
-        let service_ip = self.data.lock().await.ip.to_string();
-        loop {
-            if Command::new("ip")
-                .arg("rule")
-                .arg("del")
-                .arg("from")
-                .arg(&service_ip)
-                .arg("priority")
-                .arg("100")
-                .invoke(ErrorKind::Network)
-                .await
-                .is_err()
-            {
-                break;
-            }
-        }
+        let outbound_sources = self.data.lock().await.outbound_sources();
+        purge_outbound_rules(&outbound_sources).await;
         // Set last: an earlier failure leaves shutdown false so Drop's fallback re-runs.
         self.shutdown = true;
         Ok(())
@@ -1499,6 +1592,7 @@ mod tests {
     use imbl_value::InternedString;
 
     use super::*;
+    use crate::db::model::public::IpInfo;
     use crate::net::host::binding::Security;
 
     fn bind_options(
@@ -1517,6 +1611,87 @@ mod tests {
             }),
             secure: secure_ssl.map(|ssl| Security { ssl }),
         }
+    }
+
+    #[test]
+    fn the_bare_ip_vhost_answers_on_its_enabled_ssl_ips_alone() {
+        let eth = GatewayId::from(InternedString::intern("eth0"));
+        let row = |host: &str, ssl, public, metadata| HostnameInfo {
+            ssl,
+            public,
+            hostname: InternedString::intern(host),
+            port: Some(if ssl { 8443 } else { 8080 }),
+            metadata,
+        };
+        let ipv4 = || HostnameMetadata::Ipv4 {
+            gateway: eth.clone(),
+        };
+        let mdns = row(
+            "server.local",
+            true,
+            false,
+            HostnameMetadata::Mdns {
+                gateways: BTreeSet::from([eth.clone()]),
+            },
+        );
+        let plain = row("192.0.2.10", false, false, ipv4());
+        let wan = row("198.51.100.2", true, true, ipv4());
+        let ssl = row("192.0.2.10", true, false, ipv4());
+
+        assert!(ssl_vhost_private_ips([&mdns, &plain, &wan]).is_empty());
+        assert_eq!(
+            ssl_vhost_private_ips([&mdns, &plain, &wan, &ssl]),
+            BTreeSet::from(["192.0.2.10".parse::<IpAddr>().unwrap()])
+        );
+    }
+
+    #[test]
+    fn a_forwarded_port_admits_its_enabled_lan_ips_alone() {
+        let eth = GatewayId::from(InternedString::intern("eth0"));
+        let ifaces: OrdMap<GatewayId, NetworkInterfaceInfo> = [(
+            eth.clone(),
+            NetworkInterfaceInfo {
+                ip_info: Some(Arc::new(IpInfo {
+                    subnets: ["192.0.2.10/24", "192.0.2.11/24"]
+                        .into_iter()
+                        .map(|s| s.parse::<IpNet>().unwrap())
+                        .collect(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+        )]
+        .into_iter()
+        .collect();
+        let row = |host: &str, metadata| HostnameInfo {
+            ssl: false,
+            public: false,
+            hostname: InternedString::intern(host),
+            port: Some(8080),
+            metadata,
+        };
+        let gateways = BTreeSet::from([eth.clone()]);
+        let mdns = row(
+            "server.local",
+            HostnameMetadata::Mdns {
+                gateways: gateways.clone(),
+            },
+        );
+        let ip = row("192.0.2.10", HostnameMetadata::Ipv4 { gateway: eth });
+        let domain = row("priv.lan", HostnameMetadata::PrivateDomain { gateways });
+        let ips = |hosts: &[&str]| -> BTreeSet<IpAddr> {
+            hosts.iter().map(|h| h.parse().unwrap()).collect()
+        };
+
+        assert_eq!(forwarded_lan_ips([&mdns], &ifaces), ips(&[]));
+        assert_eq!(
+            forwarded_lan_ips([&mdns, &ip], &ifaces),
+            ips(&["192.0.2.10"])
+        );
+        assert_eq!(
+            forwarded_lan_ips([&domain], &ifaces),
+            ips(&["192.0.2.10", "192.0.2.11"])
+        );
     }
 
     /// `alpn` names protocols, not a transport, so it has no say in whether the
@@ -1640,5 +1815,90 @@ mod tests {
         assert!(vhosts.is_empty());
         assert!(private_dns.is_empty());
         assert!(gua_forwards.is_empty());
+    }
+
+    fn args(cmd: &Command) -> Vec<&str> {
+        cmd.as_std()
+            .get_args()
+            .map(|a| a.to_str().unwrap())
+            .collect()
+    }
+
+    /// `ip rule` rejects an IPv6 source without `-6`.
+    #[test]
+    fn outbound_rule_family_follows_its_source() {
+        assert_eq!(args(&ip_rule("10.0.3.5".parse().unwrap())), ["rule"]);
+        assert_eq!(args(&ip_rule("fd00:3::5".parse().unwrap())), ["-6", "rule"]);
+    }
+
+    #[test]
+    fn service_outbound_rules_order_by_priority() {
+        assert!(ServiceOutboundRule::Gateway(u32::MAX) < ServiceOutboundRule::Reject);
+        assert!(SERVICE_OUTBOUND_RULE_PRIORITY < SERVICE_OUTBOUND_REJECT_RULE_PRIORITY);
+    }
+
+    #[test]
+    fn service_outbound_rules_are_source_scoped_in_each_family() {
+        assert_eq!(
+            args(&outbound_rule_command(
+                "add",
+                "10.0.3.5".parse().unwrap(),
+                ServiceOutboundRule::Gateway(1004),
+            )),
+            [
+                "rule", "add", "from", "10.0.3.5", "lookup", "1004", "priority", "70"
+            ]
+        );
+        assert_eq!(
+            args(&outbound_rule_command(
+                "add",
+                "fd00:3::5".parse().unwrap(),
+                ServiceOutboundRule::Reject,
+            )),
+            [
+                "-6",
+                "rule",
+                "add",
+                "from",
+                "fd00:3::5",
+                "unreachable",
+                "priority",
+                "71"
+            ]
+        );
+    }
+
+    #[test]
+    fn conntrack_filter_family_follows_its_source() {
+        assert_eq!(
+            args(&delete_conntrack_command("10.0.3.5".parse().unwrap())),
+            ["-D", "-s", "10.0.3.5"]
+        );
+        assert_eq!(
+            args(&delete_conntrack_command("fd00:3::5".parse().unwrap())),
+            ["-D", "-f", "ipv6", "-s", "fd00:3::5"]
+        );
+    }
+
+    #[test]
+    fn outbound_sources_cover_every_address_the_container_holds() {
+        let mut data = NetServiceData {
+            id: None,
+            ip: Ipv4Addr::new(10, 0, 3, 5),
+            ipv6: None,
+            _dns: Default::default(),
+            controller: Default::default(),
+            binds: BTreeMap::new(),
+        };
+        assert_eq!(
+            data.outbound_sources(),
+            ["10.0.3.5".parse::<IpAddr>().unwrap()]
+        );
+
+        data.ipv6 = Some("fd00:3::5".parse().unwrap());
+        assert_eq!(
+            data.outbound_sources(),
+            ["10.0.3.5", "fd00:3::5"].map(|a| a.parse::<IpAddr>().unwrap())
+        );
     }
 }

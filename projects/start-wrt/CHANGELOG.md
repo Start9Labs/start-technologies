@@ -27,6 +27,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every Remote Access setting. A Published Port or a hostname route on 80
   takes precedence.
 
+- **Publishing a port no longer names the device after its generated label,
+  which could stop the router's DHCP server.** Publishing a port to a device
+  with no reserved address reserves one; for a device without a name of its
+  own, that reservation was saved under the label shown for it, such as
+  `Android device (4c8f63)`. The router's DHCP server refuses such a name and
+  failed to start on its next reload or reboot, leaving devices on the network
+  without addresses. Reserving an address now leaves the device's name alone,
+  the device page edits only the name you assigned rather than whatever was
+  shown, and the router rejects a reservation it could not serve — a name must
+  be a valid hostname (letters, digits, and hyphens; up to 63 characters).
+  A router that already holds such a name clears it on its first boot on this
+  version and serves DHCP again, recording the cleared name in Activity. Since
+  a router in that state is hard to reach, reflashing from a microSD card and
+  choosing **Keep settings** is the way to get there without losing anything —
+  that path preserves the settings the name is stored in.
+
+- **A device can move a hostname route it holds to another of its own ports.**
+  Previously the request was refused as taken until the old lease expired.
+
 ## [1.1.1]
 
 ### Fixed

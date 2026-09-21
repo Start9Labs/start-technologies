@@ -4,8 +4,21 @@
 
 ### Changed
 
+- **Breaking — a filled address lists the server's `.local` name whenever the
+  user has it enabled, and `utils.mdnsResolvable` is removed.** `.local` was
+  left out while no LAN IP on its gateways was enabled, which dropped it
+  whenever the network did and made a stored URL compare as removed. The
+  Interfaces tab and a filled address now agree on every address.
+
 - **Minimum StartOS version is now `0.4.0.2`**, which is what a package built
   with this SDK writes as its manifest `osVersion`
+
+- **Breaking — image architecture fallback is now `emulateMissing: boolean`.**
+  Remove `emulateMissingAs`; StartOS selects the image available in the s9pk,
+  so a cross-architecture restore runs the backed-up image under emulation. The
+  new field defaults to `true`; set it to
+  `false` when an image cannot run under emulation. Existing s9pks retain their
+  fallback behavior when read
 
 - **Breaking — `z.object` strips unknown keys.** Every file-model shape must use
   `z.looseObject`, at every nesting level, or the next `merge()` discards
@@ -81,6 +94,9 @@
   than a `README.md`
 
 ### Added
+
+- **`utils.isAddressEnabled(addresses, hostname)`** reports whether the user's
+  overrides leave one of a binding's addresses on
 
 - **Scaffolded packages get a fourth workflow, `syncNext.yml`**, which keeps the
   `next` iteration branch in step with the base branch it stacks on. A repo with
@@ -219,6 +235,8 @@
   published on such a version crashed a dependent's `checkDependencies`. A
   numeric segment with a leading zero is rejected, as it already was on the OS
   side
+
+- **Backup and restore progress no longer falls back mid-sync**
 
 ### Security
 

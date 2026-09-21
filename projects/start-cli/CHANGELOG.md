@@ -9,7 +9,14 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
-## [2.0.1]
+## [2.2.0]
+
+### Added
+
+- **`s9pk edit add-image` enables CPU emulation by default** when the server uses
+  another architecture. Use `--no-emulation` for images that require a native architecture.
+
+## [2.1.0]
 
 ### Added
 
@@ -18,6 +25,16 @@ or the CLI's externally observable behavior.
 - **`s9pk init-workspace` and `s9pk init-package` say when the workspace's `start-technologies`
   checkout is on a branch other than `live-docs`.** The notice names the checkout and the branch
   and says how to replace it.
+
+- **`completions <shell>` prints a completion script** for bash, zsh, fish, elvish or PowerShell;
+  `eval "$(start-cli completions bash)"` in a shell profile enables tab completion.
+
+- **A command the server refuses because this key is not logged in prompts for the server
+  password, logs in, and runs.** Only at a terminal; a script still gets the error, and
+  `auth login` still works on its own.
+
+- **`binding list` shows each binding's bridge address** (`10.0.3.1:<port>`, plain and TLS) under
+  `package host` and `server host`.
 
 ### Changed
 
@@ -29,6 +46,12 @@ or the CLI's externally observable behavior.
 
 - **The notice that `start-cli` is behind the published release is given only when the workspace's
   `start-technologies` checkout is on `live-docs`.**
+
+- **`--address` on `binding set-address-enabled`, `set-range-address-enabled` and `set-gua-wan`
+  takes the address as the UI shows it** — an IP, `<name>.local` or a domain, with `:port` where
+  one address serves several ports — under `package host` and `server host` alike. An address the
+  binding doesn't have is refused with the list of those it has; a JSON `HostnameInfo` is still
+  accepted.
 
 ## [2.0.0]
 

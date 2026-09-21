@@ -6,6 +6,7 @@ add chain ip startos forward { type filter hook forward priority filter; policy 
 add chain ip startos mangle_prerouting { type filter hook prerouting priority mangle; policy accept; }
 # 'route' (not filter) so restore-mark reroutes locally-generated replies (iptables mangle-OUTPUT parity)
 add chain ip startos mangle_output { type route hook output priority mangle; policy accept; }
+add chain ip startos mangle_local_outbound
 add chain ip startos mangle_forward { type filter hook forward priority mangle; policy accept; }
 
 # Traffic a package container must never send straight at the network — it has to

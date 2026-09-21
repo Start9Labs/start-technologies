@@ -512,6 +512,7 @@ impl RpcContext {
         optimize_storage.complete();
 
         init_services.start();
+        self.net_controller.net_iface.settle().await;
         self.services.init(&self).await?;
         init_services.complete();
 

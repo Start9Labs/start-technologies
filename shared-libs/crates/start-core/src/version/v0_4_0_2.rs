@@ -28,12 +28,13 @@ impl VersionT for Version {
         &V0_3_0_COMPAT
     }
     fn migration_revision(self) -> usize {
-        1
+        3
     }
     #[instrument(skip_all)]
     fn up(self, db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
         rehome_admin_ui_port(db);
         drop_server_name(db);
+        disable_zram(db);
         for_each_alpn(db, |alpn| {
             if alpn.as_array().is_some() {
                 return;
@@ -46,6 +47,7 @@ impl VersionT for Version {
                 .unwrap_or(Value::Null);
         });
         repair_unusable_hostname(db);
+        default_lan_enabled(db);
         Ok(Value::Null)
     }
     fn down(self, db: &mut Value) -> Result<(), Error> {
@@ -62,23 +64,7 @@ impl VersionT for Version {
     }
 }
 
-fn for_each_alpn(db: &mut Value, mut f: impl FnMut(&mut Value)) {
-    let mut visit = |host: &mut Value| {
-        let Some(bindings) = host.get_mut("bindings").and_then(|b| b.as_object_mut()) else {
-            return;
-        };
-        for (_, binding) in bindings.iter_mut() {
-            let Some(alpn) = binding
-                .get_mut("options")
-                .and_then(|o| o.get_mut("addSsl"))
-                .and_then(|s| s.get_mut("alpn"))
-                .filter(|a| !a.is_null())
-            else {
-                continue;
-            };
-            f(alpn);
-        }
-    };
+fn for_each_host(db: &mut Value, mut visit: impl FnMut(&mut Value)) {
     if let Some(host) = db
         .get_mut("public")
         .and_then(|p| p.get_mut("serverInfo"))
@@ -102,10 +88,52 @@ fn for_each_alpn(db: &mut Value, mut f: impl FnMut(&mut Value)) {
     }
 }
 
+fn for_each_alpn(db: &mut Value, mut f: impl FnMut(&mut Value)) {
+    for_each_host(db, |host| {
+        let Some(bindings) = host.get_mut("bindings").and_then(|b| b.as_object_mut()) else {
+            return;
+        };
+        for (_, binding) in bindings.iter_mut() {
+            let Some(alpn) = binding
+                .get_mut("options")
+                .and_then(|o| o.get_mut("addSsl"))
+                .and_then(|s| s.get_mut("alpn"))
+                .filter(|a| !a.is_null())
+            else {
+                continue;
+            };
+            f(alpn);
+        }
+    });
+}
+
+fn default_lan_enabled(db: &mut Value) {
+    for_each_host(db, |host| {
+        for binds in ["bindings", "bindingRanges"] {
+            let Some(binds) = host.get_mut(binds).and_then(|b| b.as_object_mut()) else {
+                continue;
+            };
+            for (_, bind) in binds.iter_mut() {
+                if let Some(addresses) = bind.get_mut("addresses").and_then(|a| a.as_object_mut()) {
+                    if !addresses.contains_key("lanEnabled") {
+                        addresses.insert("lanEnabled".into(), Value::Array(Default::default()));
+                    }
+                }
+            }
+        }
+    });
+}
+
 fn server_info_mut(db: &mut Value) -> Option<&mut imbl_value::InOMap<InternedString, Value>> {
     db.get_mut("public")
         .and_then(|p| p.get_mut("serverInfo"))
         .and_then(|s| s.as_object_mut())
+}
+
+fn disable_zram(db: &mut Value) {
+    if let Some(server_info) = server_info_mut(db) {
+        server_info.insert("zram".into(), Value::Bool(false));
+    }
 }
 
 fn repair_unusable_hostname(db: &mut Value) {
@@ -325,10 +353,11 @@ mod test {
         assert_eq!(db, before);
     }
     #[test]
-    fn migrates_port_alpn_and_hostname_together() {
+    fn migrates_port_alpn_hostname_and_zram_together() {
         let mut db = db_with_alpn(json!({ "specified": ["h2"] }), json!("reflect"));
         db["public"]["serverInfo"]["name"] = json!("Old Name");
         db["public"]["serverInfo"]["hostname"] = json!("a".repeat(70));
+        db["public"]["serverInfo"]["zram"] = json!(true);
         db["public"]["serverInfo"]["network"]["host"]["bindings"]["80"] =
             json!({ "net": { "assignedPort": 55543, "assignedSslPort": 443 } });
         db["private"]["availablePorts"] = json!({ "80": false, "443": true, "55543": false });
@@ -336,6 +365,7 @@ mod test {
         Version.up(&mut db, ()).unwrap();
 
         assert_eq!(db["public"]["serverInfo"].get("name"), None);
+        assert_eq!(db["public"]["serverInfo"]["zram"], json!(false));
         assert_eq!(
             db["public"]["serverInfo"]["hostname"],
             json!("a".repeat(32))
@@ -417,5 +447,27 @@ mod test {
         let mut db = json!({ "public": { "serverInfo": {} } });
         restore_server_name(&mut db);
         assert_eq!(db["public"]["serverInfo"]["name"], json!("StartOS"));
+    }
+
+    #[test]
+    fn lan_enabled_defaults_empty_and_keeps_a_stored_value() {
+        let kept = json!([["192.0.2.10", 8443]]);
+        let mut db = json!({ "public": { "packageData": { "pkg": { "hosts": { "main": {
+            "bindings": {
+                "80": { "addresses": {} },
+                "443": { "addresses": { "lanEnabled": kept.clone() } },
+            },
+            "bindingRanges": { "5000": { "addresses": {} } },
+        } } } } } });
+
+        default_lan_enabled(&mut db);
+
+        let host = &db["public"]["packageData"]["pkg"]["hosts"]["main"];
+        assert_eq!(host["bindings"]["80"]["addresses"]["lanEnabled"], json!([]));
+        assert_eq!(host["bindings"]["443"]["addresses"]["lanEnabled"], kept);
+        assert_eq!(
+            host["bindingRanges"]["5000"]["addresses"]["lanEnabled"],
+            json!([])
+        );
     }
 }

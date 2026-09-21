@@ -69,10 +69,7 @@ export function buildManifest<
   const images = Object.entries(manifest.images).reduce(
     (images, [k, v]) => {
       v.arch = v.arch ?? ['aarch64', 'x86_64', 'riscv64']
-      if (v.emulateMissingAs === undefined)
-        v.emulateMissingAs = (v.arch as string[]).includes('x86_64')
-          ? 'x86_64'
-          : (v.arch[0] ?? null)
+      v.emulateMissing = v.emulateMissing ?? true
       v.nvidiaContainer = !!v.nvidiaContainer
       images[k] = v as ImageConfig
       return images
@@ -95,7 +92,7 @@ export function buildManifest<
       ram: manifest.hardwareRequirements?.ram || null,
       arch: Object.values(images).reduce(
         (arch, inputSpec) => {
-          if (inputSpec.emulateMissingAs) {
+          if (inputSpec.emulateMissing) {
             return arch
           }
           if (arch === null) {

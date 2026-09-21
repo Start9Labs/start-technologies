@@ -155,8 +155,9 @@ export class PublishedPortsService extends FormService<PublishedPortDisplay[]> {
     const device = this.getDevice(mac)
     if (!device) return
 
+    // No name: the resolved display name may be a learned hostname or a
+    // generated label, neither of which is the device's to keep.
     const updates: DeviceUpdateData = {
-      name: device.name,
       ipv4Static: true,
       ipv4: device.ipv4 || '',
     }

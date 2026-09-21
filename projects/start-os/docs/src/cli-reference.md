@@ -24,7 +24,7 @@ Log in, log out, manage enrolled device keys, and reset the master password.
 
 ### `start-cli auth login`
 
-Log in and enroll this device's signing key. Required before running any commands against a remote server.
+Log in and enroll this device's signing key. A command run at a terminal before that prompts for the password itself; a script runs this first.
 
 ### `start-cli auth logout <SESSION>`
 
@@ -162,7 +162,7 @@ on Librem Mini v2 systems when no preference is saved and the setting is availab
 
 ### `start-cli server experimental zram`
 
-Enable or disable ZRAM compressed swap.
+Enable or disable ZRAM compressed swap. ZRAM is disabled by default.
 
 - `--enable` — Enable zram
 
@@ -805,7 +805,7 @@ Add a container image to the s9pk.
 - `--workdir <PATH>` — Build context directory
 - `--docker-tag <TAG>` — Docker image tag
 - `--arch <ARCH>` — CPU architecture filter
-- `--emulate-missing-as <ARCH>` — Emulate missing arch
+- `--no-emulation` — Require a native image for the requested architecture
 - `--nvidia-container` — Enable NVIDIA support
 
 ## Registry
@@ -1111,6 +1111,10 @@ Display initialization kernel logs. Same log options as `server logs`.
 Create a new developer signing key.
 
 ## Utilities
+
+### `start-cli completions <SHELL>`
+
+Print a completion script for `bash`, `zsh`, `fish`, `elvish` or `powershell`. `eval "$(start-cli completions bash)"` in a shell profile enables tab completion.
 
 ### `start-cli echo <MESSAGE>`
 

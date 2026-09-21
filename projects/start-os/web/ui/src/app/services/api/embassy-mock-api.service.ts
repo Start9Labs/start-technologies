@@ -901,7 +901,7 @@ export class MockApiService extends ApiService {
       latfgvwdbhjsndmk: {
         type: 'cifs',
         hostname,
-        path: path.replace(/\\/g, '/'),
+        path,
         username,
         mountable: true,
         available: 50000000000,
@@ -2253,17 +2253,44 @@ export class MockApiService extends ApiService {
       ])
     } else {
       const port = h.port ?? 0
-      const arr = current.disabled.filter(
-        ([dHost, dPort]) => !(dHost === h.hostname && dPort === port),
-      )
+      const without = (overrides: [string, number][]) =>
+        overrides.filter(
+          ([dHost, dPort]) => !(dHost === h.hostname && dPort === port),
+        )
+      const disabled = without(current.disabled)
+      let lanEnabled = without(current.lanEnabled)
 
       if (!enabled) {
-        arr.push([h.hostname, port])
+        disabled.push([h.hostname, port])
+        // On a non-SSL port, off takes the LAN IPs it resolves to with it.
+        if (h.metadata.kind === 'mdns' && !h.ssl) {
+          const gateways = h.metadata.gateways
+          lanEnabled = lanEnabled.filter(
+            ([host, p]) =>
+              !current.available.some(
+                ip =>
+                  !ip.public &&
+                  (ip.metadata.kind === 'ipv4' ||
+                    ip.metadata.kind === 'ipv6') &&
+                  gateways.includes(ip.metadata.gateway) &&
+                  ip.hostname === host &&
+                  (ip.port ?? 0) === p,
+              ),
+          )
+        }
+      } else if (h.metadata.kind === 'ipv4' || h.metadata.kind === 'ipv6') {
+        lanEnabled.push([h.hostname, port])
       }
 
-      current.disabled = arr
+      current.disabled = disabled
+      current.lanEnabled = lanEnabled
       this.mockRevision([
-        { op: PatchOp.REPLACE, path: `${basePath}/disabled`, value: arr },
+        { op: PatchOp.REPLACE, path: `${basePath}/disabled`, value: disabled },
+        {
+          op: PatchOp.REPLACE,
+          path: `${basePath}/lanEnabled`,
+          value: lanEnabled,
+        },
       ])
     }
   }

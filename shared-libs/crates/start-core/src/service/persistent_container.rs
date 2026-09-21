@@ -40,6 +40,38 @@ use crate::volume::data_dir;
 use crate::{ARCH, DATA_DIR, ImageId, PACKAGE_DATA, VolumeId};
 
 const RPC_CONNECT_TIMEOUT: Duration = Duration::from_secs(120);
+const DROP_RPC_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
+
+async fn shutdown_rpc_server<ExitFuture, ExitError, Shutdown, ServerFuture>(
+    exit: ExitFuture,
+    shutdown: Shutdown,
+    server: ServerFuture,
+    timeout: Option<Duration>,
+    errs: &mut ErrorCollection,
+) where
+    ExitFuture: Future<Output = Result<(), ExitError>>,
+    ExitError: Into<Error>,
+    Shutdown: FnOnce(),
+    ServerFuture: Future<Output = Result<(), tokio::task::JoinError>>,
+{
+    let exit = match timeout {
+        Some(timeout) => tokio::time::timeout(timeout, exit)
+            .await
+            .with_kind(ErrorKind::Timeout)
+            .and_then(|result| result.map_err(Into::into)),
+        None => exit.await.map_err(Into::into),
+    };
+    errs.handle(exit);
+    shutdown();
+    let server = match timeout {
+        Some(timeout) => tokio::time::timeout(timeout, server)
+            .await
+            .with_kind(ErrorKind::Timeout)
+            .and_then(|result| result.with_kind(ErrorKind::Cancelled)),
+        None => server.await.with_kind(ErrorKind::Cancelled),
+    };
+    errs.handle(server);
+}
 
 #[derive(Debug)]
 pub struct ServiceState {
@@ -214,28 +246,13 @@ impl PersistentContainer {
         let image_path = lxc_container.rootfs_dir().join("media/startos/images");
         tokio::fs::create_dir_all(&image_path).await?;
         for (image, config) in &s9pk.as_manifest().images {
-            let mut arch = ARCH;
-            let mut sqfs_path = Path::new("images")
+            let Some(arch) = config.resolve_arch(ARCH, image, s9pk.as_archive().contents()) else {
+                continue;
+            };
+            let sqfs_path = Path::new("images")
                 .join(arch)
                 .join(image)
                 .with_extension("squashfs");
-            if !s9pk
-                .as_archive()
-                .contents()
-                .get_path(&sqfs_path)
-                .and_then(|e| e.as_file())
-                .is_some()
-            {
-                arch = if let Some(arch) = config.emulate_missing_as.as_deref() {
-                    arch
-                } else {
-                    continue;
-                };
-                sqfs_path = Path::new("images")
-                    .join(arch)
-                    .join(image)
-                    .with_extension("squashfs");
-            }
             let sqfs = s9pk
                 .as_archive()
                 .contents()
@@ -435,6 +452,7 @@ impl PersistentContainer {
     fn destroy(
         &mut self,
         uninit: Option<ExitParams>,
+        rpc_shutdown_timeout: Option<Duration>,
     ) -> Option<impl Future<Output = Result<(), Error>> + 'static> {
         if self.destroyed {
             return None;
@@ -453,16 +471,17 @@ impl PersistentContainer {
         Some(async move {
             let mut errs = ErrorCollection::new();
             if let Some((hdl, shutdown)) = rpc_server {
-                errs.handle(
-                    rpc_client
-                        .request(
-                            rpc::Exit,
-                            uninit.unwrap_or_else(|| ExitParams::target_version(&*version)),
-                        )
-                        .await,
-                );
-                shutdown.shutdown();
-                errs.handle(hdl.await.with_kind(ErrorKind::Cancelled));
+                shutdown_rpc_server(
+                    rpc_client.request(
+                        rpc::Exit,
+                        uninit.unwrap_or_else(|| ExitParams::target_version(&*version)),
+                    ),
+                    || shutdown.shutdown(),
+                    hdl,
+                    rpc_shutdown_timeout,
+                    &mut errs,
+                )
+                .await;
             }
             net_service.remove_all().await.log_err();
             for (_, volume) in volumes {
@@ -487,7 +506,7 @@ impl PersistentContainer {
 
     #[instrument(skip_all)]
     pub async fn exit(mut self, uninit: Option<ExitParams>) -> Result<(), Error> {
-        if let Some(destroy) = self.destroy(uninit) {
+        if let Some(destroy) = self.destroy(uninit, None) {
             destroy.await?;
         }
         tracing::info!(
@@ -611,8 +630,66 @@ impl PersistentContainer {
 
 impl Drop for PersistentContainer {
     fn drop(&mut self) {
-        if let Some(destroy) = self.destroy(None) {
+        if let Some(destroy) = self.destroy(None, Some(DROP_RPC_SHUTDOWN_TIMEOUT)) {
             tokio::spawn(async move { destroy.await.log_err() });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn drop_rpc_shutdown_bounds_exit_and_server_waits() {
+        let shutdown_called = Arc::new(AtomicBool::new(false));
+        let shutdown_observer = shutdown_called.clone();
+        let mut errs = ErrorCollection::new();
+
+        tokio::time::timeout(
+            DROP_RPC_SHUTDOWN_TIMEOUT * 2 + Duration::from_secs(1),
+            shutdown_rpc_server(
+                futures::future::pending::<Result<(), Error>>(),
+                move || shutdown_observer.store(true, Ordering::SeqCst),
+                futures::future::pending::<Result<(), tokio::task::JoinError>>(),
+                Some(DROP_RPC_SHUTDOWN_TIMEOUT),
+                &mut errs,
+            ),
+        )
+        .await
+        .expect("RPC shutdown exceeded both bounds");
+
+        assert!(shutdown_called.load(Ordering::SeqCst));
+        assert!(errs.into_result().is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn explicit_rpc_shutdown_exceeds_drop_bounds() {
+        let shutdown_called = Arc::new(AtomicBool::new(false));
+        let shutdown_observer = shutdown_called.clone();
+        let wait = DROP_RPC_SHUTDOWN_TIMEOUT + Duration::from_secs(1);
+        let start = tokio::time::Instant::now();
+        let mut errs = ErrorCollection::new();
+
+        shutdown_rpc_server(
+            async {
+                tokio::time::sleep(wait).await;
+                Ok::<_, Error>(())
+            },
+            move || shutdown_observer.store(true, Ordering::SeqCst),
+            async {
+                tokio::time::sleep(wait).await;
+                Ok::<_, tokio::task::JoinError>(())
+            },
+            None,
+            &mut errs,
+        )
+        .await;
+
+        assert_eq!(start.elapsed(), wait * 2);
+        assert!(shutdown_called.load(Ordering::SeqCst));
+        assert!(errs.into_result().is_ok());
     }
 }

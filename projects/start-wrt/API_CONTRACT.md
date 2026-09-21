@@ -779,7 +779,10 @@ struct Device {
     /// vendor from the MAC's OUI, e.g. `Apple device (b2c3d4)`) →
     /// `device-<mac>` placeholder. Always set.
     name: String,
-    /// Raw DHCP lease hostname ("*" when unset); a hint for the rename form.
+    /// The name assigned in the router (the UCI static name); `None` when
+    /// `name` is resolved from elsewhere. What the rename form edits.
+    custom_name: Option<String>,
+    /// Raw DHCP lease hostname ("*" when unset).
     hostname: Option<String>,
     status: DeviceStatus,
     /// "Ethernet", "Wi-Fi 2.4GHz", "Wi-Fi 5GHz", etc.
@@ -820,11 +823,20 @@ struct SpeedData {
 ```rust
 #[derive(Deserialize)]
 struct DeviceUpdateRequest {
+    /// `AA:BB:CC:DD:EE:FF`.
     mac: String,
-    name: String,
+    /// Absent leaves the assigned name untouched; empty clears it. Otherwise
+    /// a hostname label — letters, digits, and hyphens, no leading or
+    /// trailing hyphen, at most 63 characters — since dnsmasq serves it.
+    #[serde(default)]
+    name: Option<String>,
     ipv4_static: bool,
+    /// Dotted-quad, or empty for no reservation.
     ipv4: String,
 }
+// Every field lands in the config dnsmasq reads, which it refuses to start on
+// if malformed, so each is validated: a bad one is rejected with
+// `InvalidValue` and nothing is written.
 // Response: null
 // Backend: creates/updates DHCP host section, restarts dnsmasq.
 // No IPv6 fields: devices choose their own IPv6 addresses (SLAAC), so there is

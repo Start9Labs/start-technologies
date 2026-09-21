@@ -200,6 +200,18 @@ The `arch` field accepts these values:
 
 Most services support `['x86_64', 'aarch64']`. Only add `riscv64` if the upstream image actually supports it. The `ARCHES` variable in the Makefile must align (see [Makefile](./makefile.md)).
 
+`emulateMissing` defaults to `true`. When a package or backup carries an image for another architecture, StartOS runs that available image under CPU emulation. Set it to `false` for an image that cannot run correctly under emulation; the package is then offered on architectures represented by a native image.
+
+```typescript
+images: {
+  main: {
+    source: { dockerTag: 'example/service:1.0.0' },
+    arch: ['x86_64'],
+    emulateMissing: false,
+  },
+},
+```
+
 ### GPU/Hardware Acceleration
 
 For services requiring GPU access:
