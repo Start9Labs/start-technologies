@@ -33,7 +33,7 @@ const fakeEffects = (): T.Effects =>
 const bareEager = (destroyFs: () => Promise<null>) =>
   Object.assign(Object.create(SubContainerEager.prototype), {
     destroyed: false,
-    destroyPending: false,
+    destroyRequested: false,
     holdCount: 0,
     teardown: null,
     leaderExited: true,

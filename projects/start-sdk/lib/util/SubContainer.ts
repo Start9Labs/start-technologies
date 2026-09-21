@@ -419,7 +419,7 @@ export class SubContainerEager<
   implements SubContainer<Manifest, Effects>
 {
   private destroyed = false
-  private destroyPending = false
+  private destroyRequested = false
   private holdCount = 0
   private teardown: Promise<void> | null = null
 
@@ -609,7 +609,7 @@ export class SubContainerEager<
       if (released) return
       released = true
       this.holdCount--
-      if (this.holdCount === 0 && this.destroyPending) {
+      if (this.holdCount === 0 && this.destroyRequested) {
         await this._destroyImmediate()
       }
     }
@@ -621,7 +621,7 @@ export class SubContainerEager<
    * it. Idempotent.
    */
   async destroy(): Promise<void> {
-    this.destroyPending = true
+    this.destroyRequested = true
     if (this.holdCount === 0) await this._destroyImmediate()
   }
 
@@ -979,8 +979,8 @@ export class SubContainerLazy<
 
   private materialized: Promise<SubContainerEager<Manifest, Effects>> | null =
     null
-  private destroyPending = false
-  private detachPending = false
+  private destroyRequested = false
+  private detachRequested = false
   private holds = new Set<{
     release: (() => Promise<void>) | null
   }>()
@@ -1026,8 +1026,8 @@ export class SubContainerLazy<
         for (const hold of this.holds) {
           if (!hold.release) hold.release = eager.hold()
         }
-        if (this.destroyPending) eager.destroy().catch(logErrorOnce)
-        else if (this.detachPending) eager.detach()
+        if (this.destroyRequested) eager.destroy().catch(logErrorOnce)
+        else if (this.detachRequested) eager.detach()
         return eager
       }))
   }
@@ -1094,11 +1094,11 @@ export class SubContainerLazy<
   /**
    * Mark this subcontainer for destruction. If already materialized, the
    * underlying eager's destroy is invoked (which respects outstanding
-   * holds). If never materialized, the destroy pending flag is set so
-   * that any future materialization fires destroy immediately.
+   * holds), after any materialization in flight. Otherwise the request is
+   * recorded and applied on materialization.
    */
   async destroy(): Promise<void> {
-    this.destroyPending = true
+    this.destroyRequested = true
     const eager = await this.materialized?.catch(logErrorOnce)
     await eager?.destroy()
   }
@@ -1109,7 +1109,7 @@ export class SubContainerLazy<
    * so materialization detaches immediately. Idempotent.
    */
   detach(): void {
-    this.detachPending = true
+    this.detachRequested = true
     this.materialized?.then(e => e.detach()).catch(logErrorOnce)
   }
 
