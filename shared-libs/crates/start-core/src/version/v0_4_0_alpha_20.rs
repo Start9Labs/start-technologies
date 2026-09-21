@@ -5,6 +5,7 @@ use imbl_value::json;
 use reqwest::Url;
 
 use super::v0_3_5::V0_3_0_COMPAT;
+use super::v0_3_6_alpha_0::migrated_package_id;
 use super::{VersionT, v0_4_0_alpha_19};
 use crate::context::RpcContext;
 use crate::prelude::*;
@@ -46,7 +47,7 @@ impl VersionT for Version {
         {
             let mut addresses = tor_migration.clone();
             for entry in addresses.iter_mut() {
-                normalize_legacy_service_identity(entry);
+                normalize_migrated_service_identity(entry);
             }
             json!({
                 "addresses": addresses,
@@ -311,14 +312,19 @@ impl VersionT for Version {
     }
 }
 
-/// The server UI's onion entries were keyed by the legacy `STARTOS` sentinel
-/// (with host id `STARTOS` or `startos-ui`) before the StartOS UI became an
-/// ordinary service interface (`start-os`/`admin`). Dev builds that already ran
-/// v0_3_6_alpha_0 have the legacy form persisted in `private.torMigration`.
-fn normalize_legacy_service_identity(entry: &mut Value) {
-    if entry.get("packageId").and_then(|p| p.as_str()) == Some("STARTOS") {
+fn normalize_migrated_service_identity(entry: &mut Value) {
+    let Some(package_id) = entry
+        .get("packageId")
+        .and_then(|p| p.as_str())
+        .map(str::to_owned)
+    else {
+        return;
+    };
+    if package_id == "STARTOS" {
         entry["packageId"] = json!("start-os");
         entry["hostId"] = json!("admin");
+    } else {
+        entry["packageId"] = json!(migrated_package_id(&package_id));
     }
 }
 
@@ -478,20 +484,32 @@ mod test {
             "hostId": "STARTOS",
             "key": "a2V5",
         });
-        normalize_legacy_service_identity(&mut legacy);
+        normalize_migrated_service_identity(&mut legacy);
         assert_eq!(legacy["packageId"].as_str(), Some("start-os"));
         assert_eq!(legacy["hostId"].as_str(), Some("admin"));
         assert_eq!(legacy["hostname"].as_str(), Some("abcdef"));
         assert_eq!(legacy["key"].as_str(), Some("a2V5"));
+    }
 
-        let mut package_entry = json!({
-            "hostname": "abcdef",
-            "packageId": "bitcoind",
-            "hostId": "main",
-            "key": "a2V5",
-        });
-        normalize_legacy_service_identity(&mut package_entry);
-        assert_eq!(package_entry["packageId"].as_str(), Some("bitcoind"));
-        assert_eq!(package_entry["hostId"].as_str(), Some("main"));
+    #[test]
+    fn normalizes_package_ids_without_changing_hosts() {
+        for (legacy, migrated) in [
+            ("nostr", "nostr-rs-relay"),
+            ("ghost", "ghost-legacy"),
+            ("synapse", "synapse-legacy"),
+            ("monerod", "monerod-legacy"),
+            ("fedimintd", "fedimint-guardian"),
+            ("bitcoind", "bitcoind"),
+        ] {
+            let mut entry = json!({
+                "hostname": "abcdef",
+                "packageId": legacy,
+                "hostId": "main",
+                "key": "a2V5",
+            });
+            normalize_migrated_service_identity(&mut entry);
+            assert_eq!(entry["packageId"].as_str(), Some(migrated));
+            assert_eq!(entry["hostId"].as_str(), Some("main"));
+        }
     }
 }

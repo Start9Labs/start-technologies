@@ -307,7 +307,7 @@ impl VersionT for Version {
                     );
                     tor_migration.push_back(json!({
                         "hostname": &onion_addr,
-                        "packageId": package_id,
+                        "packageId": migrated_package_id(package_id),
                         "hostId": host_id,
                         "key": &encoded_key,
                     }));
@@ -675,18 +675,19 @@ impl VersionT for Version {
     }
 }
 
-/// Mirrors the id rewrites `s9pk::v2::compat` applies during the v1→v2
-/// conversion — the installed package lands under the new id, not the one the
-/// 0.3.5.1 archive directory is named after.
 fn migrated_id(id: &PackageId) -> Result<PackageId, Error> {
-    Ok(match &**id {
-        "nostr" => "nostr-rs-relay".parse()?,
-        "ghost" => "ghost-legacy".parse()?,
-        "synapse" => "synapse-legacy".parse()?,
-        "monerod" => "monerod-legacy".parse()?,
-        "fedimintd" => "fedimint-guardian".parse()?,
-        _ => id.clone(),
-    })
+    Ok(migrated_package_id(id).parse()?)
+}
+
+pub(super) fn migrated_package_id(id: &str) -> &str {
+    match id {
+        "nostr" => "nostr-rs-relay",
+        "ghost" => "ghost-legacy",
+        "synapse" => "synapse-legacy",
+        "monerod" => "monerod-legacy",
+        "fedimintd" => "fedimint-guardian",
+        _ => id,
+    }
 }
 
 #[tracing::instrument(skip_all)]
@@ -916,4 +917,23 @@ fn onion_address_from_key(expanded_key: &[u8; 64]) -> String {
     raw[34] = 0x03; // version
 
     base32::encode(base32::Alphabet::Rfc4648 { padding: false }, &raw).to_ascii_lowercase()
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn onion_handoff_uses_converted_package_ids() {
+        for (legacy, migrated) in [
+            ("nostr", "nostr-rs-relay"),
+            ("ghost", "ghost-legacy"),
+            ("synapse", "synapse-legacy"),
+            ("monerod", "monerod-legacy"),
+            ("fedimintd", "fedimint-guardian"),
+        ] {
+            assert_eq!(migrated_package_id(legacy), migrated);
+        }
+        assert_eq!(migrated_package_id("bitcoind"), "bitcoind");
+    }
 }
