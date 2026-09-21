@@ -427,8 +427,9 @@ for the detail behind its highlights.
   your dashboard, along with a certificate for that name signed by your server's
   Root CA. Logging in was never possible under those names, so the page could
   not be used for anything, but it should not have been reachable. Your server
-  now serves its `.local` address, the domains you have assigned to it, and
-  direct connections to its IP address.
+  now serves its `.local` address, the domains you have assigned to it, the
+  addresses a service such as Tor has added for it, and direct connections to
+  its IP address.
 
 - **Image upgrades verify their checksum again.** `upgrade` compared the image's
   blake3 hash only when it was given a second positional argument, which no
