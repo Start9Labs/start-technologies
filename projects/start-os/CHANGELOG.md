@@ -147,6 +147,10 @@ for the detail behind its highlights.
 
 ### Fixed
 
+- **Switching off a service's LAN IP address closes it on an interface served
+  without TLS.** The address kept answering for as long as the service's
+  `.local` address was on.
+
 - **A service keeps its `.local` address while your server has no LAN address.**
   The address left the service's list whenever the network dropped, and a
   service that checks the URL you chose for it could stop and ask for it again.

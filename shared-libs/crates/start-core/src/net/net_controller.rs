@@ -3,6 +3,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV
 use std::sync::{Arc, Weak};
 
 use color_eyre::eyre::eyre;
+use imbl::OrdMap;
 use imbl_value::InternedString;
 use ipnet::IpNet;
 use nix::net::if_::if_nametoindex;
@@ -15,6 +16,7 @@ use tokio_rustls::rustls::crypto::CryptoProvider;
 use tracing::instrument;
 
 use crate::db::model::Database;
+use crate::db::model::public::NetworkInterfaceInfo;
 use crate::hostname::ServerHostname;
 use crate::net::dns::DnsController;
 use crate::net::dns_update::{DnsUpdateController, spawn_server_mdns_injection};
@@ -313,6 +315,30 @@ fn ssl_vhost_public_v4<'a>(
         .collect()
 }
 
+/// LAN addresses a forwarded port answers on. An IP admits itself; a private
+/// domain, every address of its gateways.
+fn forwarded_lan_ips<'a>(
+    enabled_addresses: impl IntoIterator<Item = &'a HostnameInfo>,
+    net_ifaces: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+) -> BTreeSet<IpAddr> {
+    let mut ips = BTreeSet::new();
+    for address in enabled_addresses.into_iter().filter(|a| !a.public) {
+        match &address.metadata {
+            HostnameMetadata::Ipv4 { .. } | HostnameMetadata::Ipv6 { .. } => {
+                ips.extend(address.hostname.parse::<IpAddr>().ok());
+            }
+            HostnameMetadata::PrivateDomain { gateways } => ips.extend(
+                gateways
+                    .iter()
+                    .filter_map(|gw| net_ifaces.get(gw).and_then(|i| i.ip_info.as_ref()))
+                    .flat_map(|ip| ip.subnets.iter().map(|s| s.addr())),
+            ),
+            _ => {}
+        }
+    }
+    ips
+}
+
 /// Hosts the datapath still holds that the database no longer has. Collected
 /// before the update loop so a port handed from a retired host to a surviving
 /// one in the same pass comes down before it is rebuilt.
@@ -584,13 +610,13 @@ impl NetServiceData {
                         a.metadata.gateways().collect::<Vec<_>>(),
                     );
                 }
-                let fwd_private: BTreeSet<IpAddr> = enabled_addresses
-                    .iter()
-                    .filter(|a| !a.public && a.port == Some(external))
-                    .flat_map(|a| a.metadata.gateways())
-                    .filter_map(|gw| net_ifaces.get(gw).and_then(|i| i.ip_info.as_ref()))
-                    .flat_map(|ip| ip.subnets.iter().map(|s| s.addr()))
-                    .collect();
+                let fwd_private = forwarded_lan_ips(
+                    enabled_addresses
+                        .iter()
+                        .copied()
+                        .filter(|a| a.port == Some(external)),
+                    &net_ifaces,
+                );
                 // StartOS answers these addresses itself, and a loopback DNAT is martian-dropped on ingress.
                 if !self.ip.is_loopback() {
                     forwards.insert(
@@ -705,13 +731,7 @@ impl NetServiceData {
                 .flat_map(|a| a.metadata.gateways())
                 .cloned()
                 .collect();
-            let private_ips: BTreeSet<IpAddr> = enabled_addresses
-                .iter()
-                .filter(|a| !a.public)
-                .flat_map(|a| a.metadata.gateways())
-                .filter_map(|gw| net_ifaces.get(gw).and_then(|i| i.ip_info.as_ref()))
-                .flat_map(|ip| ip.subnets.iter().map(|s| s.addr()))
-                .collect();
+            let private_ips = forwarded_lan_ips(enabled_addresses.iter().copied(), &net_ifaces);
             if public_gateways.is_empty() && private_ips.is_empty() {
                 continue;
             }
@@ -1568,6 +1588,7 @@ mod tests {
     use imbl_value::InternedString;
 
     use super::*;
+    use crate::db::model::public::IpInfo;
     use crate::net::host::binding::Security;
 
     fn bind_options(
@@ -1586,6 +1607,55 @@ mod tests {
             }),
             secure: secure_ssl.map(|ssl| Security { ssl }),
         }
+    }
+
+    #[test]
+    fn a_forwarded_port_admits_its_enabled_lan_ips_alone() {
+        let eth = GatewayId::from(InternedString::intern("eth0"));
+        let ifaces: OrdMap<GatewayId, NetworkInterfaceInfo> = [(
+            eth.clone(),
+            NetworkInterfaceInfo {
+                ip_info: Some(Arc::new(IpInfo {
+                    subnets: ["192.0.2.10/24", "192.0.2.11/24"]
+                        .into_iter()
+                        .map(|s| s.parse::<IpNet>().unwrap())
+                        .collect(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+        )]
+        .into_iter()
+        .collect();
+        let row = |host: &str, metadata| HostnameInfo {
+            ssl: false,
+            public: false,
+            hostname: InternedString::intern(host),
+            port: Some(8080),
+            metadata,
+        };
+        let gateways = BTreeSet::from([eth.clone()]);
+        let mdns = row(
+            "server.local",
+            HostnameMetadata::Mdns {
+                gateways: gateways.clone(),
+            },
+        );
+        let ip = row("192.0.2.10", HostnameMetadata::Ipv4 { gateway: eth });
+        let domain = row("priv.lan", HostnameMetadata::PrivateDomain { gateways });
+        let ips = |hosts: &[&str]| -> BTreeSet<IpAddr> {
+            hosts.iter().map(|h| h.parse().unwrap()).collect()
+        };
+
+        assert_eq!(forwarded_lan_ips([&mdns], &ifaces), ips(&[]));
+        assert_eq!(
+            forwarded_lan_ips([&mdns, &ip], &ifaces),
+            ips(&["192.0.2.10"])
+        );
+        assert_eq!(
+            forwarded_lan_ips([&domain], &ifaces),
+            ips(&["192.0.2.10", "192.0.2.11"])
+        );
     }
 
     /// `alpn` names protocols, not a transport, so it has no say in whether the
