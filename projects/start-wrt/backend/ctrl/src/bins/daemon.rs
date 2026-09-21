@@ -450,11 +450,10 @@ async fn inner_main() -> Result<(), Error> {
         .layer(Extension(proxy_client))
         .layer(Extension(app_state));
 
-    // Outermost, so no route above answers plain HTTP at the public address.
+    // Must stay outermost.
     let app = crate::http_redirect::redirect_public_http(app);
 
-    // Before the bind: an admission rule fw4 loaded at boot outlives the
-    // daemon, so the first connection must already meet the decision.
+    // Seeded before the bind: the admission rule outlives the daemon.
     if !setup_mode {
         crate::http_redirect::seed("/etc/config".into()).await;
     }

@@ -21,17 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A published domain typed without `https://` now reaches the published
   service, not the router.** While port 443 is published to a device — by a
-  Published Port or a device's hostname routes — a plain `http://` connection
-  to the router's public address answers with a redirect to `https://`
-  instead of the router's own web interface, from inside the network and from
-  the Internet under every Remote Access setting. StartOS publishes only 443
-  and leaves this redirect to its gateway, so `http://sub.example.com`
-  previously landed on the router from inside the network and was refused
-  from outside with Remote Access off. The redirect is all that answers port
-  80 at the public address while 443 is published: the router's web interface
-  is never reachable there over plain HTTP. A Published Port or a hostname route
-  on 80 takes precedence over the redirect. With nothing published on 443, port 80
-  behaves as before.
+  Published Port or a device's hostname routes — plain HTTP at the router's
+  public address is answered with a redirect to `https://` instead of the
+  router's web interface, from inside the network and from the Internet under
+  every Remote Access setting. A Published Port or a hostname route on 80
+  takes precedence.
 
 ## [1.1.1]
 

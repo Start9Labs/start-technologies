@@ -903,15 +903,13 @@ impl PortControl {
         }
     }
 
-    /// Reconciles WAN admission against the demux's live ports, plus the
-    /// HTTP→HTTPS redirect's own port, and republishes the gate the redirect
-    /// reads per request.
+    /// Reconciles WAN admission against the demux's live ports and the
+    /// HTTP→HTTPS redirect's port.
     async fn sync_sni_rules(&self) -> Result<(), Error> {
         self.sync_sni_rules_inner(true).await
     }
 
-    /// Assumes `write_serial` is held. `reload` is false for a caller about to
-    /// reload the firewall itself.
+    /// Assumes `write_serial` is held.
     async fn sync_sni_rules_inner(&self, reload: bool) -> Result<(), Error> {
         let routes = self.sni.snapshot();
         let mut want: std::collections::BTreeSet<u16> =
@@ -928,16 +926,14 @@ impl PortControl {
             crate::http_redirect::set_admitted(true);
         }
         self.sync_sni_rules_to(want, redirect, reload).await?;
-        // Shut only once the rule has left the running firewall; a caller
-        // that reloads later leaves the gate to the next reconcile.
+        // The gate shuts after the reload that removes the rule.
         if !redirect && reload {
             crate::http_redirect::set_admitted(false);
         }
         Ok(())
     }
 
-    /// Reconciles WAN admission for a caller that reloads the firewall itself
-    /// afterwards.
+    /// The caller reloads the firewall.
     pub(crate) async fn sync_sni_rules_before_reload(&self) {
         let _serial = self.write_serial.lock().await;
         if let Err(e) = self.sync_sni_rules_inner(false).await {
@@ -1265,8 +1261,7 @@ pub(crate) fn wan_reserved_overlaps(
         let Some(spec) = rule.dest_port.as_deref() else {
             continue;
         };
-        // The redirect shares the label but is the router answering, not a
-        // hostname route.
+        // The redirect shares the label and is a router service.
         let held_by_sni = rule._apf_label.as_deref() == Some(KIND_SNI)
             && rule.name != crate::http_redirect::RULE_NAME;
         if parse_port_range(spec).is_some_and(|range| ranges_overlap(want, range))
@@ -1421,8 +1416,7 @@ fn sni_section_name(port: u16) -> String {
     format!("apf_sni_{port}")
 }
 
-/// Labelled `SNI` whoever holds the port, so a build that predates the
-/// redirect still purges the rule it left behind.
+/// A build without the redirect purges the redirect's rule by its `SNI` label.
 fn desired_sni_rule(port: u16, redirect: bool) -> FirewallRule {
     FirewallRule {
         name: if redirect && port == crate::http_redirect::HTTP_PORT {
@@ -1459,8 +1453,7 @@ fn protocols_include_tcp(protocols: &[String]) -> bool {
         })
 }
 
-/// Whether an enabled WAN DNAT redirect whose protocol includes TCP covers
-/// `port` on its external side.
+/// An enabled WAN DNAT covering the external TCP port.
 pub(crate) fn wan_dnat_covers(firewall: &uciedit::Config<'_>, port: u16) -> bool {
     let want = (port, port);
     firewall
@@ -1530,8 +1523,8 @@ fn sni_port_conflicts(firewall: &uciedit::Config<'_>, port: u16) -> bool {
     false
 }
 
-/// Replaces SNI admission rules with one per requested port. `redirect` says
-/// the HTTP→HTTPS redirect, not a hostname route, holds port 80.
+/// Replaces SNI admission rules with one per requested port. Port 80 belongs
+/// to the HTTP→HTTPS redirect or to a hostname route.
 /// Returns whether UCI changed.
 async fn reconcile_sni_rules_uci(
     uci_root: &Path,
@@ -2211,7 +2204,6 @@ pub(crate) async fn close_device_forwards(mac: &str, known_ips: &[String]) {
 mod tests {
     use super::*;
 
-    /// The admission rule the redirect rides on.
     const ADMISSION_80: &str = "option _apf_label 'SNI'";
 
     fn admitted(firewall: &str) -> bool {
@@ -2251,9 +2243,6 @@ mod tests {
             "withdrawn once 443 returns to the router"
         );
         assert!(cleared.contains("config redirect 'pp_a'"), "{cleared}");
-        // The hostname-route half of the gate is covered by
-        // `http_redirect::tests`: exercising it here would need the demux to
-        // bind WAN:443, a privileged port, in the test process.
     }
 
     #[tokio::test]
@@ -2283,9 +2272,6 @@ mod tests {
         );
     }
 
-    /// An older build knows the `SNI` label and no longer wants port 80, so
-    /// the rule a rollback leaves behind is purged rather than left admitting
-    /// plain HTTP to a daemon with no redirect in it.
     #[tokio::test]
     async fn a_build_without_the_redirect_purges_its_rule() {
         let dir = temp_root(MANUAL_FW);
@@ -2311,9 +2297,8 @@ mod tests {
         pc.sync_sni_rules().await.unwrap();
         let arena = Arena::new();
         let cfgs = parse_all(dir.path(), &arena, &["firewall"]).await.unwrap();
-        // No hostname route may out-rank the redirect at the WAN address.
         assert!(sni_port_conflicts(&cfgs["firewall"], 80));
-        // Nor is it reported to the user as one.
+        // Reported as a router service.
         assert!(
             wan_reserved_overlaps(&cfgs["firewall"], (80, 80), true, false)
                 .iter()
@@ -2321,7 +2306,6 @@ mod tests {
         );
     }
 
-    /// Both rules carry the `SNI` label; only the demux's is a hostname route.
     #[tokio::test]
     async fn the_redirects_rule_is_a_router_service() {
         let dir = temp_root("");
@@ -2346,8 +2330,6 @@ mod tests {
         );
     }
 
-    /// A hostname route's own rule on 80 must not read as the redirect's, or
-    /// the route could never be renewed or displaced.
     #[tokio::test]
     async fn a_hostname_route_on_80_keeps_its_port() {
         let dir = temp_root("");

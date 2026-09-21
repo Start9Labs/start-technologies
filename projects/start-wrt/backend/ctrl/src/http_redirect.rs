@@ -1,26 +1,13 @@
-//! HTTP→HTTPS redirect for the router's public IPv4 address, port 80.
+//! HTTP→HTTPS redirect on port 80 while WAN 443 is published.
 //!
-//! StartOS asks its IPv4 gateway for no port-80 mapping: it publishes only
-//! 443 and expects the gateway to answer plain HTTP at the public address with
-//! a redirect to HTTPS (start-core `net/vhost.rs`; StartTunnel implements its
-//! half in `tunnel/redirect.rs`). Without it, a LAN client opening
-//! `http://sub.example.com` for a domain that points at the WAN address
-//! hairpins to the router's own port 80 and gets the router UI, and a client
-//! on the Internet is refused unless Remote Access admits it.
+//! StartOS publishes only 443 and expects its gateway to redirect plain HTTP
+//! at the public address (start-core `net/vhost.rs`).
 //!
-//! [`redirect_public_http`] decides this per request on the daemon's wildcard
-//! `:80` listener. The UI is served to a client on a subnet the router is
-//! connected to off the WAN, at an address that is not the WAN's; every other
-//! IPv4 request is answered with a 307 to the same authority over HTTPS. The
-//! Internet side is admitted by a WAN ACCEPT rule on tcp/80, which port
-//! control keeps in the SNI admission set ([`HTTP_PORT`]) while the redirect
-//! is wanted. That rule matches the zone, not the destination, so the client's
-//! address decides alongside the address it dialed.
-//!
-//! Wanted only while WAN 443 leaves the router — an enabled WAN DNAT covering
-//! tcp/443, or a live hostname route on 443 — and it yields to a DNAT or a
-//! hostname route holding tcp/80. With nothing published on 443 the gate is
-//! shut and port 80 behaves exactly as before.
+//! [`redirect_public_http`] serves the UI to a client on a connected subnet
+//! off the WAN, at an address that is not the WAN's. Every other IPv4 request
+//! gets a 307 to the same authority over HTTPS. Port control admits WAN-side
+//! tcp/80 with an ACCEPT rule in the SNI admission set. That rule matches the
+//! zone, not the destination.
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
@@ -47,18 +34,15 @@ use crate::port_control::{parse_port_range, uci_task, wan_dnat_covers, KIND_SNI}
 pub const HTTP_PORT: u16 = 80;
 pub const HTTPS_PORT: u16 = 443;
 
-/// The admission rule's `name`, which tells it from a hostname route's rule on
-/// the same port under the same label.
+/// Distinguishes the redirect's admission rule from a hostname route's.
 pub(crate) const RULE_NAME: &str = "HTTP to HTTPS redirect";
 
-/// Read per request by [`redirect_public_http`]; written by port control and
-/// seeded before the listener binds.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Gate {
     /// The firewall may be admitting WAN-side [`HTTP_PORT`].
     pub admitted: bool,
     pub wan: Vec<Ipv4Addr>,
-    /// Connected IPv4 subnets off the WAN, loopback among them.
+    /// Connected IPv4 subnets off the WAN, loopback included.
     pub local: Vec<Ipv4Net>,
 }
 
@@ -68,7 +52,6 @@ static GATE: RwLock<Gate> = RwLock::new(Gate {
     local: Vec::new(),
 });
 
-/// When the addresses were last read.
 static REFRESHED: tokio::sync::Mutex<Option<Instant>> = tokio::sync::Mutex::const_new(None);
 const REFRESH_FLOOR: Duration = Duration::from_secs(5);
 
@@ -80,15 +63,14 @@ pub(crate) fn set_admitted(admitted: bool) {
     GATE.write().unwrap_or_else(|e| e.into_inner()).admitted = admitted;
 }
 
-/// Rereads the router's addresses. Unreadable addresses leave no client
-/// trusted.
+/// Unreadable addresses leave no client trusted.
 pub(crate) async fn refresh_addrs() {
     let mut refreshed = REFRESHED.lock().await;
     read_addrs().await;
     *refreshed = Some(Instant::now());
 }
 
-/// Rereads addresses older than [`REFRESH_FLOOR`]. Returns whether it did.
+/// Returns whether it reread.
 async fn refresh_stale_addrs() -> bool {
     let mut refreshed = REFRESHED.lock().await;
     if refreshed.is_some_and(|at| at.elapsed() < REFRESH_FLOOR) {
@@ -100,8 +82,7 @@ async fn refresh_stale_addrs() -> bool {
 }
 
 async fn read_addrs() {
-    // Subnets first: a WAN address that comes up between the two reads is
-    // then missing from the subnets rather than trusted among them.
+    // Subnets first: a WAN address appearing between the reads stays untrusted.
     let connected = tokio::process::Command::new("ip")
         .args(["-j", "-4", "addr", "show"])
         .invoke(ErrorKind::Network.into())
@@ -144,10 +125,7 @@ fn off_wan(connected: Vec<Ipv4Net>, wan: &[Ipv4Addr]) -> Vec<Ipv4Net> {
         .collect()
 }
 
-/// Seeds the gate from the firewall fw4 has already loaded and the addresses
-/// the router already holds, so the decision is live from the first accepted
-/// connection rather than from the first reconcile. A firewall that cannot be
-/// read redirects, since it may be admitting port 80.
+/// An unreadable firewall counts as admitting.
 pub async fn seed(uci_root: PathBuf) {
     refresh_addrs().await;
     match uci_task(move || async move {
@@ -182,20 +160,16 @@ fn sni_rules_on_http_port<'a>(
         })
 }
 
-/// Whether any SNI-labelled rule admits [`HTTP_PORT`]. A hostname route's rule
-/// outlives the daemon and its route, and admits the same traffic.
+/// Any SNI-labelled rule on [`HTTP_PORT`], a hostname route's included.
 fn port_admitted(firewall: &uciedit::Config<'_>) -> bool {
     sni_rules_on_http_port(firewall).next().is_some()
 }
 
-/// Whether the redirect's own admission rule is in the firewall.
 pub(crate) fn admission_present(firewall: &uciedit::Config<'_>) -> bool {
     sni_rules_on_http_port(firewall).any(|rule| rule.name == RULE_NAME)
 }
 
-/// Whether the redirect is wanted: WAN 443 leaves the router and neither a
-/// DNAT nor a hostname route holds tcp/80. A Remote Access ACCEPT on 443 does
-/// not count — there the router itself answers 443.
+/// A DNAT or a hostname route forwards WAN tcp/443, and neither holds tcp/80.
 pub(crate) fn desired(firewall: &uciedit::Config<'_>, routes: &[SniRoute]) -> bool {
     !wan_dnat_covers(firewall, HTTP_PORT)
         && !routes.iter().any(|route| route.ext_port == HTTP_PORT)
@@ -203,8 +177,7 @@ pub(crate) fn desired(firewall: &uciedit::Config<'_>, routes: &[SniRoute]) -> bo
             || routes.iter().any(|route| route.ext_port == HTTPS_PORT))
 }
 
-/// Whether a request on the plain-HTTP listener is answered with the redirect.
-/// An unreadable address redirects. IPv6 is outside the admission rule.
+/// An unreadable address redirects. IPv6 never does.
 pub(crate) fn redirects(gate: &Gate, peer: Option<IpAddr>, dst: Option<IpAddr>) -> bool {
     if !gate.admitted {
         return false;
@@ -220,8 +193,7 @@ pub(crate) fn redirects(gate: &Gate, peer: Option<IpAddr>, dst: Option<IpAddr>) 
     }
 }
 
-/// Answers plain HTTP at the public address with a 307 to HTTPS. Outermost on
-/// the router, so no route can be reached at that address.
+/// Must be the outermost layer.
 pub fn redirect_public_http(router: Router) -> Router {
     router.layer(axum::middleware::from_fn(
         |req: Request, next: Next| async move {
@@ -252,8 +224,7 @@ fn respond(gate: &Gate, req: &Request) -> Option<Response> {
     .flatten()
 }
 
-/// Mirrors start-core's `handle_http_on_https`: the client's own authority,
-/// the same path, and no body.
+/// Mirrors start-core's `handle_http_on_https`.
 fn redirect(req: &Request) -> Option<Response> {
     let authority = request_authority(req)?;
     let target = https_redirect_uri(req.uri(), authority).ok()?;
@@ -300,7 +271,6 @@ mod tests {
         \toption dest_port '443'\n\
         \toption target 'ACCEPT'\n\n";
 
-    /// The admission rule port control writes for the redirect.
     const ADMISSION_80: &str = "config rule 'apf_sni_80'\n\
         \toption name 'HTTP to HTTPS redirect'\n\
         \toption src 'wan'\n\
@@ -348,7 +318,7 @@ mod tests {
     #[tokio::test]
     async fn nothing_published_means_no_redirect() {
         assert!(!desired_for("", &[]).await);
-        // The router answering 443 itself (Remote Access) is not "published".
+        // Remote Access: the router answers 443 itself.
         assert!(!desired_for(REMOTE_443, &[]).await);
     }
 
@@ -371,8 +341,7 @@ mod tests {
     async fn hostname_route_on_443_activates() {
         assert!(desired_for("", &[route(WAN, 443)]).await);
         assert!(!desired_for("", &[route(WAN, 8443)]).await);
-        // A route keyed to a stale WAN address is re-keyed by maintenance;
-        // its 443 is still published.
+        // A route keyed to a stale WAN address still counts.
         assert!(desired_for("", &[route(Ipv4Addr::new(198, 51, 100, 9), 443)]).await);
     }
 
@@ -388,7 +357,6 @@ mod tests {
         assert!(!desired_for(&dnat("443", TCP, "1"), &[route(WAN, 80)]).await);
     }
 
-    /// A hostname route's rule on 80: the same section, under the demux's name.
     fn route_rule_80() -> String {
         ADMISSION_80.replace(RULE_NAME, "SNI demux (hostname routes)")
     }
@@ -405,8 +373,6 @@ mod tests {
     #[tokio::test]
     async fn the_gate_seeds_from_any_rule_admitting_80() {
         assert!(with_firewall(ADMISSION_80, port_admitted).await);
-        // A route's rule survives a restart while its route does not, and
-        // admits WAN-side HTTP all the same.
         assert!(with_firewall(&route_rule_80(), port_admitted).await);
         assert!(!with_firewall(ADMISSION_443, port_admitted).await);
         assert!(!with_firewall(REMOTE_443, port_admitted).await);
@@ -417,7 +383,7 @@ mod tests {
     const CLIENT: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 50));
     const INTERNET: IpAddr = IpAddr::V4(Ipv4Addr::new(198, 51, 100, 9));
 
-    /// A double-NAT router: the WAN sits on someone else's private LAN.
+    /// Double NAT: the WAN address is private.
     fn open_gate() -> Gate {
         let wan = Ipv4Addr::new(192, 168, 0, 2);
         Gate {
@@ -476,8 +442,7 @@ mod tests {
         ));
     }
 
-    /// The admission rule matches the zone, so a WAN-side host that routes the
-    /// LAN subnet through the router arrives at the LAN address.
+    /// A WAN-side host can route the LAN subnet through the router.
     #[test]
     fn a_wan_side_client_never_reaches_the_ui() {
         let gate = open_gate();
@@ -499,7 +464,7 @@ mod tests {
         };
         assert!(redirects(&unread, Some(CLIENT), Some(LAN)));
         assert!(redirects(&open_gate(), None, None));
-        // The WAN is down: nothing to exclude, and the LAN still gets the UI.
+        // WAN down.
         let wan_down = Gate {
             admitted: true,
             wan: Vec::new(),
