@@ -29,8 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   previously landed on the router from inside the network and was refused
   from outside with Remote Access off. The redirect is all that answers port
   80 at the public address while 443 is published: the router's web interface
-  is never reachable there over plain HTTP. A Published Port on 80 takes
-  precedence over the redirect. With nothing published on 443, port 80
+  is never reachable there over plain HTTP. A Published Port or a hostname route
+  on 80 takes precedence over the redirect. With nothing published on 443, port 80
   behaves as before.
 
 ## [1.1.1]

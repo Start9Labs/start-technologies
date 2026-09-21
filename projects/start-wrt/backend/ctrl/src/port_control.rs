@@ -381,7 +381,6 @@ impl PortControl {
         }
         let ip = crate::system::get_wan_ipv4().await.ok().flatten();
         *self.wan_cache.lock().unwrap() = Some((Instant::now(), ip));
-        crate::http_redirect::set_wan(ip);
         ip
     }
 
@@ -926,9 +925,15 @@ impl PortControl {
         .await?;
         if redirect {
             want.insert(crate::http_redirect::HTTP_PORT);
+            crate::http_redirect::set_admitted(true);
         }
-        crate::http_redirect::set_admitted(redirect);
-        self.sync_sni_rules_to(want, reload).await
+        self.sync_sni_rules_to(want, redirect, reload).await?;
+        // Shut only once the rule has left the running firewall; a caller
+        // that reloads later leaves the gate to the next reconcile.
+        if !redirect && reload {
+            crate::http_redirect::set_admitted(false);
+        }
+        Ok(())
     }
 
     /// Reconciles WAN admission for a caller that reloads the firewall itself
@@ -943,10 +948,12 @@ impl PortControl {
     async fn sync_sni_rules_to(
         &self,
         want: std::collections::BTreeSet<u16>,
+        redirect: bool,
         reload: bool,
     ) -> Result<(), Error> {
         let uci_root = self.uci_root.clone();
-        if uci_task(move || async move { reconcile_sni_rules_uci(&uci_root, want).await }).await?
+        if uci_task(move || async move { reconcile_sni_rules_uci(&uci_root, want, redirect).await })
+            .await?
             && reload
         {
             self.reload_firewall_wait().await?;
@@ -956,6 +963,7 @@ impl PortControl {
 
     /// Re-keys routes and reconciles WAN admission.
     async fn sni_maintain(&self) {
+        crate::http_redirect::refresh_addrs().await;
         self.reap_unauthorized_sni_routes().await;
         let wan = self.wan_ipv4().await;
         let _serial = self.write_serial.lock().await;
@@ -1260,11 +1268,7 @@ pub(crate) fn wan_reserved_overlaps(
         // The redirect shares the label but is the router answering, not a
         // hostname route.
         let held_by_sni = rule._apf_label.as_deref() == Some(KIND_SNI)
-            && rule
-                .dest_port
-                .as_deref()
-                .and_then(parse_port_range)
-                .is_none_or(|(lo, _)| lo != crate::http_redirect::HTTP_PORT);
+            && rule.name != crate::http_redirect::RULE_NAME;
         if parse_port_range(spec).is_some_and(|range| ranges_overlap(want, range))
             && !overlaps
                 .iter()
@@ -1417,12 +1421,12 @@ fn sni_section_name(port: u16) -> String {
     format!("apf_sni_{port}")
 }
 
-/// Labelled `SNI` whatever the port, so a build that predates a port's
-/// admission still purges the rule it left behind.
-fn desired_sni_rule(port: u16) -> FirewallRule {
+/// Labelled `SNI` whoever holds the port, so a build that predates the
+/// redirect still purges the rule it left behind.
+fn desired_sni_rule(port: u16, redirect: bool) -> FirewallRule {
     FirewallRule {
-        name: if port == crate::http_redirect::HTTP_PORT {
-            "HTTP to HTTPS redirect".into()
+        name: if redirect && port == crate::http_redirect::HTTP_PORT {
+            crate::http_redirect::RULE_NAME.into()
         } else {
             "SNI demux (hostname routes)".into()
         },
@@ -1456,8 +1460,7 @@ fn protocols_include_tcp(protocols: &[String]) -> bool {
 }
 
 /// Whether an enabled WAN DNAT redirect whose protocol includes TCP covers
-/// `port` on its external side. The router's own HTTP-redirect DNAT does not
-/// count.
+/// `port` on its external side.
 pub(crate) fn wan_dnat_covers(firewall: &uciedit::Config<'_>, port: u16) -> bool {
     let want = (port, port);
     firewall
@@ -1527,11 +1530,13 @@ fn sni_port_conflicts(firewall: &uciedit::Config<'_>, port: u16) -> bool {
     false
 }
 
-/// Replaces SNI admission rules with one per requested port.
+/// Replaces SNI admission rules with one per requested port. `redirect` says
+/// the HTTP→HTTPS redirect, not a hostname route, holds port 80.
 /// Returns whether UCI changed.
 async fn reconcile_sni_rules_uci(
     uci_root: &Path,
     want: std::collections::BTreeSet<u16>,
+    redirect: bool,
 ) -> Result<bool, Error> {
     let mut retries = UCI_RETRIES;
     loop {
@@ -1551,14 +1556,21 @@ async fn reconcile_sni_rules_uci(
                 .as_deref()
                 .and_then(parse_port_range)
                 .map(|r| r.0);
-            let keep = port.is_some_and(|p| want.contains(&p) && seen.insert(p));
+            let keep = port.is_some_and(|p| {
+                want.contains(&p)
+                    && rule.name == desired_sni_rule(p, redirect).name
+                    && seen.insert(p)
+            });
             if !keep {
                 changed = true;
             }
             keep
         });
         for port in want.iter().filter(|p| !seen.contains(p)) {
-            cfgs["firewall"].append(&desired_sni_rule(*port), Some(&sni_section_name(*port)))?;
+            cfgs["firewall"].append(
+                &desired_sni_rule(*port, redirect),
+                Some(&sni_section_name(*port)),
+            )?;
             changed = true;
         }
         if !changed {
@@ -1696,6 +1708,7 @@ fn device_uuid() -> String {
 /// Run all port-control servers for the life of the daemon. Each half
 /// self-restarts on error, and each runs in its own supervised task.
 pub async fn run(pc: Arc<PortControl>) {
+    crate::http_redirect::refresh_addrs().await;
     // In-memory routes do not survive restart.
     {
         let _serial = pc.write_serial.lock().await;
@@ -2284,7 +2297,7 @@ mod tests {
 
         // What an older `sync_sni_rules` asks for: the demux's ports alone.
         let _serial = pc.write_serial.lock().await;
-        pc.sync_sni_rules_to(Default::default(), false)
+        pc.sync_sni_rules_to(Default::default(), false, false)
             .await
             .unwrap();
         let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
@@ -2315,6 +2328,7 @@ mod tests {
         reconcile_sni_rules_uci(
             dir.path(),
             [crate::http_redirect::HTTP_PORT, 443].into_iter().collect(),
+            true,
         )
         .await
         .unwrap();
@@ -2330,6 +2344,49 @@ mod tests {
                 .iter()
                 .any(|overlap| overlap.held_by_sni)
         );
+    }
+
+    /// A hostname route's own rule on 80 must not read as the redirect's, or
+    /// the route could never be renewed or displaced.
+    #[tokio::test]
+    async fn a_hostname_route_on_80_keeps_its_port() {
+        let dir = temp_root("");
+        reconcile_sni_rules_uci(
+            dir.path(),
+            [crate::http_redirect::HTTP_PORT].into_iter().collect(),
+            false,
+        )
+        .await
+        .unwrap();
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["firewall"]).await.unwrap();
+        assert!(!sni_port_conflicts(&cfgs["firewall"], 80));
+        assert!(
+            wan_reserved_overlaps(&cfgs["firewall"], (80, 80), true, false)
+                .iter()
+                .all(|overlap| overlap.held_by_sni)
+        );
+    }
+
+    #[tokio::test]
+    async fn port_80_changing_hands_rewrites_its_rule() {
+        let dir = temp_root("");
+        let want: std::collections::BTreeSet<u16> =
+            [crate::http_redirect::HTTP_PORT].into_iter().collect();
+        let firewall = || std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+
+        assert!(reconcile_sni_rules_uci(dir.path(), want.clone(), false)
+            .await
+            .unwrap());
+        assert!(!firewall().contains(crate::http_redirect::RULE_NAME));
+        assert!(reconcile_sni_rules_uci(dir.path(), want.clone(), true)
+            .await
+            .unwrap());
+        assert!(firewall().contains(crate::http_redirect::RULE_NAME));
+        assert_eq!(firewall().matches("apf_sni_80").count(), 1);
+        assert!(!reconcile_sni_rules_uci(dir.path(), want, true)
+            .await
+            .unwrap());
     }
 
     #[tokio::test]

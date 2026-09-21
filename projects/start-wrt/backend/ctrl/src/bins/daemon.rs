@@ -456,11 +456,10 @@ async fn inner_main() -> Result<(), Error> {
     // Before the bind: an admission rule fw4 loaded at boot outlives the
     // daemon, so the first connection must already meet the decision.
     if !setup_mode {
-        crate::http_redirect::seed_from_uci("/etc/config".into()).await;
+        crate::http_redirect::seed("/etc/config".into()).await;
     }
 
-    // The SNI demux binds per WAN address on 443, so the wildcard listener
-    // beside it uses SO_REUSEPORT.
+    // WAN-specific demux listeners require every wildcard listener to use SO_REUSEPORT.
     let http_addr = SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], 80));
     let http_listener = startos::net::utils::bind_tokio_listener_reuse_port(http_addr)
         .with_kind(ErrorKind::Network)?;
